@@ -194,15 +194,53 @@ secret_envelope
 
 ### Key rotation
 
-`miployees admin rotate-root-key --new <base64>` decrypts every
-envelope with the old key and re-encrypts with the new. Bounded
-progress reporter. **Host-CLI only** — there is no HTTP endpoint for
-this operation, and therefore no agent path (see §11 "Host-CLI-only
-administrative commands"). The operator authorises the rotation by
-virtue of having shell access to the deployment host and supplying
-the new key material on the command line. The command writes its
-own `audit_log` rows directly as `system` actor with
-`via = 'cli'`.
+`miployees admin rotate-root-key` decrypts every envelope with the
+old key and re-encrypts with the new. Bounded progress reporter.
+**Host-CLI only** — there is no HTTP endpoint for this operation,
+and therefore no agent path (see §11 "Host-CLI-only administrative
+commands"). The command writes its own `audit_log` rows directly
+as `system` actor with `via = 'cli'`.
+
+The new key material **never appears in argv**. The only accepted
+sources are:
+
+- `--new-key-file <path>`: reads 32 bytes (base64 or raw) from the
+  file. The command refuses to run if the file is not regular, is
+  world- or group-readable (mode must be `0600`), or is owned by a
+  user other than the one running the command.
+- `--new-key-stdin`: reads the key from stdin. Must be attached to
+  a pipe or redirected file (not a TTY). The command refuses to run
+  if stdin is a TTY — an operator typing the key into an interactive
+  prompt would end up echoed to the terminal.
+
+If the legacy `--new <value>` form is passed, the command exits
+immediately with a non-zero status and a message explaining that
+argv-delivered keys leak into shell history, `ps aux`, journald,
+and `docker exec` command tracking, and pointing at the two safe
+forms above. The CLI argv itself is never logged by the command
+(the argv parser redacts any positional after `--new` to
+`<withheld>` in its own diagnostics, on the off chance the flag
+got through an outer wrapper).
+
+On success the command zero-fills the in-memory copy of the new key
+before exiting. It does **not** write the key anywhere on disk; the
+operator is responsible for storing it in their secret manager and,
+on the next service start, supplying it via `MIPLOYEES_ROOT_KEY`
+(single-container) or the Docker secret at `/run/secrets/...`
+(compose) — the same mechanisms used for the initial key (§16).
+
+Example safe invocations:
+
+```
+# Key file produced by a secret manager, never on a shell line:
+install -m 0600 /dev/null /tmp/newkey        # create the file with correct mode first
+<your secret manager writes to /tmp/newkey>  # e.g., op read "op://prod/miployees/root"
+miployees admin rotate-root-key --new-key-file /tmp/newkey
+shred -u /tmp/newkey
+
+# Piped from a secret manager, no shell history:
+op read "op://prod/miployees/root" | miployees admin rotate-root-key --new-key-stdin
+```
 
 ### Token hashing
 
