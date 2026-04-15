@@ -10,7 +10,21 @@ $5/mo 1 vCPU / 1 GB RAM VPS.
 ### Image
 
 - Base: `python:3.12-slim-bookworm` with digest pin.
-- Non-root user `miployees:10001`.
+- **Runs as a non-root user.** The Dockerfile creates
+  `miployees:10001` (fixed uid/gid, no shell, no login) and ends
+  with `USER miployees` so every process in the image — server,
+  worker, `admin` subcommands — starts unprivileged. The image
+  must **never** contain a `USER 0`, `USER root`, or an unset
+  `USER` at the final stage; the release build fails CI if the
+  resolved runtime user is `0` (see §17 image smoke test).
+- No `setuid` / `setgid` binaries are installed. Filesystem under
+  `/app` is owned by `miployees:miployees` and `/data` is writable
+  only by `miployees`.
+- At process start the server and worker verify `os.geteuid() != 0`
+  and refuse to run otherwise, with a clear error pointing to this
+  section. This catches the case where an operator overrode the
+  image's `USER` via `docker run --user 0` or an orchestrator's
+  `securityContext.runAsUser: 0`.
 - Single `ENTRYPOINT ["miployees-server"]` binary-like wrapper that
   switches on subcommand (`serve`, `worker`, `admin`).
 - Worker runs **in-process** by default; no separate container needed.
@@ -164,6 +178,7 @@ services:
   worker:
     image: ghcr.io/<org>/miployees:<tag>
     command: ["miployees-server", "worker"]
+    user: "10001:10001"
     environment: *app-env
     depends_on: [db, minio]
     networks: [miployees]
