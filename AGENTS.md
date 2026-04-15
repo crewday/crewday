@@ -210,6 +210,16 @@ Plain text to the user. CLI handles styling.
 - **HTMX is the primary interaction model.** Do not reach for React,
   Alpine, or Vue. If you find yourself wanting SPA behavior, re-read the
   frontend spec.
+- **Semantic CSS classes only in HTML.** Keep the markup decoupled from
+  the presentation layer. Name classes after the thing they represent
+  (`task-card`, `shift-timeline`, `payroll-summary`), never after how it
+  looks (`mt-4`, `text-red`, `flex-row`). No utility/atomic classes
+  (Tailwind-style), no inline `style=""`, no presentational attributes
+  (`bgcolor`, `align`). Styling lives in CSS keyed off semantic class
+  names; reuse an existing class before inventing a new one, and promote
+  variants via modifiers (`task-card--overdue`) rather than ad-hoc
+  wrappers. If a one-off style is genuinely unavoidable, justify it in
+  the PR.
 - **Do not bind to the public interface.** See `docs/specs/16`.
   Development and production bind to `127.0.0.1` or the `tailscale0`
   interface only. A misbound port is a blocker bug.
