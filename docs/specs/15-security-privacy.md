@@ -165,12 +165,17 @@ Every secret (OpenRouter API key, SMTP password, iCal feed URL
 containing tokens, property wifi password, property access codes,
 **full payout account numbers** — see §09) is stored as
 `secret_envelope` with per-row nonce. Full payout numbers decrypt
-only in two paths, both manager-authenticated and short-lived:
+only in two paths, both **manager-session authenticated** (passkey,
+not a bearer token) and short-lived:
 
 1. Rendering a payslip's **payout manifest** (§09) — streamed, not
-   stored.
+   stored; on the never-agent list (§11).
 2. Administrative envelope-key rotation (no plaintext leaves the
    server).
+
+Agent tokens cannot reach either path, even with approval, because
+the approval pipeline would persist the decrypted response in
+`agent_action.result_json`. See §11 "Never-agent endpoints".
 
 The stored payslip PDF and all API responses use only `display_stub`.
 

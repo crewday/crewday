@@ -79,10 +79,18 @@ fix the offender.
   the PDF is always safe to keep long-term.
 - **Payout manifest.** A streaming, not-stored JSON artifact from
   `POST /payslips/{id}/payout_manifest` that decrypts full account
-  numbers at the moment the operator pushes funds. Every fetch is
-  audit-logged; no blob is persisted; a second fetch within 5
-  minutes raises a digest alert. Once the payout secrets are GDPR-
-  erased, the endpoint returns 410 Gone (§09, §15).
+  numbers at the moment the operator pushes funds. **Manager-
+  session only** (never an agent token, even via approval — see
+  "Never-agent endpoint" below). Every fetch is audit-logged; no
+  blob is persisted; the idempotency cache does not retain the
+  response; a second fetch within 5 minutes raises a digest alert.
+  Once the payout secrets are GDPR-erased, the endpoint returns 410
+  Gone (§09, §15).
+- **Never-agent endpoint.** An endpoint that refuses agent tokens
+  unconditionally and is not reachable through the approval flow,
+  because approving would persist decrypted secret material in
+  `agent_action.result_json`. v1 list (§11): payout manifest,
+  envelope-key rotation, offline recovery magic-link.
 - **Payslip.** A computed pay document for one (employee, pay_period).
 - **Pending (task).** A task whose `scheduled_for_utc` is within the
   next hour (or already past for a one-off). Distinct from

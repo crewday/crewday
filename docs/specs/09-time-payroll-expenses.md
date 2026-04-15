@@ -422,14 +422,19 @@ one-off read, not a stored artifact. miployees exposes it as:
 POST /payslips/{id}/payout_manifest
 ```
 
-- Manager-only; agent calls are always approval-gated (no household
-  toggle disables the gate).
+- **Manager-session only** (passkey-authenticated human). Agent
+  tokens are refused unconditionally — this endpoint is on the
+  "never-agent" list in §11. Approval-gating would itself leak,
+  because the approval pipeline persists `agent_action.result_json`;
+  so agents cannot reach this endpoint even with a manager's
+  approval.
 - Response streams a short-TTL artifact (`application/json`) with
   the decrypted account numbers for each destination referenced in
   `payout_snapshot_json`, the corresponding amounts, currency, and
   the `display_stub` for cross-check. The artifact is **not**
   persisted by the server — no `file` row, no blob on disk, no
-  webhook payload.
+  webhook payload carrying the plaintext, no entry in the
+  idempotency cache (§12).
 - Every call writes an `audit_log` row with the caller, IP, and a
   list of destination ids decrypted. Two calls in a 5-minute window
   for the same payslip raise a digest alert ("payout manifest

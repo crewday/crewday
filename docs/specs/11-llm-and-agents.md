@@ -168,8 +168,29 @@ routing; the approval requirement cannot be disabled in
 - `employee.set_default_reimbursement_destination`
 - `expense_claim.set_destination_override` (agent path; the manager
   selecting a destination in the approval UI is itself the approval)
-- `payslip.payout_manifest` — decrypts full account numbers for
-  treasury use (§09)
+
+### Never-agent endpoints
+
+A separate, stricter class of endpoints is **not approvable** — they
+are refused for agent tokens unconditionally and return
+`403 forbidden` with `WWW-Authenticate: error="agent_not_permitted"`.
+The approval middleware does **not** write an `agent_action` row
+for these, because doing so would itself be the leak: the
+middleware persists `resolved_payload_json` and (on execution)
+`result_json`, and for these endpoints the response contains
+decrypted secret material that must never land in a persisted row.
+
+- `POST /payslips/{id}/payout_manifest` — full decrypted account
+  numbers for treasury use (§09).
+- `POST /admin/rotate-root-key` — envelope key rotation (§15).
+- `POST /admin/recover` — offline lockout magic-link issuance (§03,
+  host CLI only in v1).
+
+These endpoints are **manager-session only**: they require a logged-
+in manager passkey session, not any bearer token. The idempotency
+cache (§12) explicitly does **not** persist their responses — a
+replay re-executes against the current secret store and re-audits,
+rather than serving a cached body.
 
 ### Flow
 

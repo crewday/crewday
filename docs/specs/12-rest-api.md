@@ -98,6 +98,11 @@ Canonical error `type` URIs:
   for 24h. Replays return the stored response.
 - Different body hash with the same key → 409
   `idempotency_conflict`.
+- **Exempt endpoints** (never-agent, §11): `POST /payslips/{id}/
+  payout_manifest`, `POST /admin/rotate-root-key`, `POST /admin/
+  recover`. These do not record into the idempotency cache; the
+  header is accepted but ignored. A replay re-executes, re-audits,
+  and re-decrypts from the current secret store.
 
 ### Rate limiting
 
@@ -330,7 +335,7 @@ GET    /payslips/{id}.pdf                 # rendered from payout_snapshot_json; 
 POST   /payslips/{id}/issue
 POST   /payslips/{id}/mark_paid
 POST   /payslips/{id}/void
-POST   /payslips/{id}/payout_manifest     # streaming, not stored; decrypts account numbers JIT; manager-only, agent path always approval-gated; 410 if secrets purged
+POST   /payslips/{id}/payout_manifest     # MANAGER-SESSION ONLY (never-agent, §11). Streams decrypted account numbers JIT; not cached in the idempotency store; returns 410 once secrets are purged.
 
 GET    /expenses
 POST   /expenses                   # multipart for receipts
