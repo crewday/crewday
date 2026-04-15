@@ -168,6 +168,8 @@ routing; the approval requirement cannot be disabled in
 - `employee.set_default_reimbursement_destination`
 - `expense_claim.set_destination_override` (agent path; the manager
   selecting a destination in the approval UI is itself the approval)
+- `payslip.payout_manifest` — decrypts full account numbers for
+  treasury use (§09)
 
 ### Flow
 

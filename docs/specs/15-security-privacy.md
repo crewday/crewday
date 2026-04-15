@@ -164,7 +164,15 @@ A per-household AES-256-GCM key, itself encrypted by the host's
 Every secret (OpenRouter API key, SMTP password, iCal feed URL
 containing tokens, property wifi password, property access codes,
 **full payout account numbers** — see §09) is stored as
-`secret_envelope` with per-row nonce:
+`secret_envelope` with per-row nonce. Full payout numbers decrypt
+only in two paths, both manager-authenticated and short-lived:
+
+1. Rendering a payslip's **payout manifest** (§09) — streamed, not
+   stored.
+2. Administrative envelope-key rotation (no plaintext leaves the
+   server).
+
+The stored payslip PDF and all API responses use only `display_stub`.
 
 ```
 secret_envelope
@@ -261,12 +269,25 @@ much of the data is personal.
   --person <id>` anonymizes the person row (name/email/phone nulled)
   and scrubs free-text fields in their tasks, comments, shifts,
   expenses. Financial rows retain amounts and dates (legal retention
-  trumps erasure for payroll). Purge also deletes `secret_envelope`
-  rows referenced by the person's `payout_destination` rows and
-  zeroes the `display_stub` / `secret_ref_id` on those rows;
-  `payslip.payout_snapshot_json` is scrubbed to retain only label and
-  currency (display_stub cleared), preserving the accounting trail
-  without the account identifier.
+  trumps erasure for payroll).
+
+  Payout-specific erasure steps (§09):
+
+  - Delete the `secret_envelope` rows referenced by the person's
+    `payout_destination` rows.
+  - Clear `display_stub`, `secret_ref_id`, `country`, `label` on
+    those rows (keep `id`, `kind`, `currency`, timestamps so FK
+    references in historical payslip snapshots do not break).
+  - Scrub `payslip.payout_snapshot_json`: retain `destination_id`,
+    `kind`, `currency`, and `amount_cents`; blank out `label` and
+    `display_stub`. The accounting trail (who was paid how much)
+    survives; routing identifiers do not.
+  - **Payslip PDFs (`payslip.pdf_file_id`) are already safe**: they
+    are rendered from the snapshot at issue time and never contain
+    full account numbers. No rewrite needed.
+  - Subsequent calls to `POST /payslips/{id}/payout_manifest` for
+    any affected payslip return 410 Gone: the routing data is gone
+    on purpose.
 - **Data portability**: CSV exports of timesheets, payslips, and
   expenses (§09).
 - **Retention defaults** (see §02 for the canonical table):

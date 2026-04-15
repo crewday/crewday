@@ -73,9 +73,16 @@ fix the offender.
   accordingly.
 - **Payout snapshot.** The immutable `payout_snapshot_json` captured
   on a payslip at the `draft → issued` transition. Records where pay
-  and each reimbursement went, independent of later destination
-  edits or archives. The payslip PDF is rendered from the snapshot,
-  not from the live pointers.
+  and each reimbursement went (`display_stub` only — never full
+  account numbers), independent of later destination edits or
+  archives. The stored payslip PDF is rendered from the snapshot, so
+  the PDF is always safe to keep long-term.
+- **Payout manifest.** A streaming, not-stored JSON artifact from
+  `POST /payslips/{id}/payout_manifest` that decrypts full account
+  numbers at the moment the operator pushes funds. Every fetch is
+  audit-logged; no blob is persisted; a second fetch within 5
+  minutes raises a digest alert. Once the payout secrets are GDPR-
+  erased, the endpoint returns 410 Gone (§09, §15).
 - **Payslip.** A computed pay document for one (employee, pay_period).
 - **Pending (task).** A task whose `scheduled_for_utc` is within the
   next hour (or already past for a one-off). Distinct from

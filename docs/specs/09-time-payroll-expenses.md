@@ -265,7 +265,7 @@ someone's pay. The rules below are written with that threat in mind.
 | kind           | enum     | `bank_account | card_reload | wallet | cash | other`          |
 | currency       | text     | ISO 4217; required for all non-`cash` kinds                   |
 | display_stub   | text     | public-safe short form: IBAN last-4 + country (`•• FR-12`), card last-4, wallet handle. Never the full number. NULL for `cash`. |
-| secret_ref_id  | ULID FK? | pointer to the `secret_envelope` row holding the full account number. Required for `bank_account` and `card_reload`; NULL for `cash`. The full number is **only** ever decrypted to render the payslip PDF, never returned over the API. |
+| secret_ref_id  | ULID FK? | pointer to the `secret_envelope` row holding the full account number. Required for `bank_account` and `card_reload`; NULL for `cash`. The full number is never returned by any standard API endpoint — it decrypts only to render a **payout manifest** (§ below), which is streamed and not stored. |
 | country        | text?    | ISO-3166; required for `bank_account`                         |
 | verified_at    | tstz?    | set when a manager hand-verifies the full number against a paper/photo artifact; `null` means unverified |
 | verified_by    | ULID FK? | manager id                                                    |
@@ -293,12 +293,13 @@ someone's pay. The rules below are written with that threat in mind.
 - The plaintext is **never** echoed back in the response, listed in
   `GET`, returned in webhook payloads, or written to any log. API
   clients never see it again.
-- The payslip PDF is the only place the full number is rendered, and
-  only when the PDF is generated server-side by the WeasyPrint worker.
-  The PDF is stored as a regular `file` blob (§15); that blob carries
-  the sensitivity: it is served over an authenticated signed URL with
-  short TTL, inherits CSP, and is subject to the same retention as
-  other `payslip.pdf_file_id` references.
+- The **stored payslip PDF never contains the full account number**
+  — it is rendered from `payslip.payout_snapshot_json`, which holds
+  only the `display_stub`. This is deliberate: a stored PDF blob
+  outlives most cleanup paths (retention, GDPR purge, S3 backfills)
+  and must be safe to keep forever. See "Payout manifest" below for
+  how the operator retrieves the full numbers when they actually push
+  money.
 
 ### Who can mutate destinations
 
@@ -336,7 +337,7 @@ employee's destination is a 422.
 
 Archiving a destination that is currently referenced as a default
 nulls the relevant pointer(s) in the same transaction and emits an
-`employee.default_destination_cleared` audit event + webhook. The
+`employee_default_destination.cleared` audit event + webhook. The
 next payslip for that employee renders "Payout: arranged manually"
 unless a new default is set first.
 
@@ -351,16 +352,25 @@ An `expense_claim` carries an optional
 the server validates that the referenced destination:
 
 - has `employee_id = claim.employee_id`,
-- is not archived,
-- has `currency = claim.currency` (or the manager has acknowledged
-  an explicit FX conversion note on the claim, similar to the rate
-  snapshot in the approval flow above),
-- is one of: the employee's defaults, or a destination the
-  **approving manager** selected in the approval dialog.
+- has `household_id = claim.household_id`,
+- is not archived.
 
-An agent cannot approve a claim with a new `reimbursement_destination_id`
-— that field on the approval payload forces the approvable-action
-gate even if the agent also holds `expenses:approve`.
+The approval UI lets the manager pick any destination satisfying
+those rules; there is no separate "blessed" subset. If null, the
+employee's default reimbursement destination applies (which itself
+falls back to `pay_destination_id`).
+
+**Currency.** If `destination.currency != claim.currency`, approval
+reuses the exchange rate already snapped on the claim at approval
+time (ECB daily fix, see "Approval (manager)"). No second
+acknowledgement is required — the snapped rate is the acknowledgement.
+The payslip PDF and the payout manifest both show the converted
+amount and the rate source for transparency.
+
+An agent cannot approve a claim with a non-null
+`reimbursement_destination_id` in the approval payload — that field
+forces the `expense_claim.set_destination_override` approvable-action
+gate (§11) even if the agent also holds `expenses:approve`.
 
 ### Snapshot on the payslip
 
@@ -396,9 +406,41 @@ The snapshot is written when the payslip transitions from `draft` to
 snapshot. If the destinations referenced in the snapshot are later
 archived, the snapshot remains as-is (it is historical evidence).
 
-The PDF is rendered from the snapshot, never from the live pointers.
-Reimbursements on the payslip group by snapshot `destination_id` so
-the employee and operator both see what is going where.
+The PDF is rendered from the snapshot, never from the live pointers,
+and contains only `display_stub` for each destination (never the
+full account number). Reimbursements on the payslip group by snapshot
+`destination_id` so the employee and operator both see what is going
+where.
+
+### Payout manifest
+
+The operator needs the full account numbers only at the moment they
+actually push funds from their bank/treasury tool. That's a
+one-off read, not a stored artifact. miployees exposes it as:
+
+```
+POST /payslips/{id}/payout_manifest
+```
+
+- Manager-only; agent calls are always approval-gated (no household
+  toggle disables the gate).
+- Response streams a short-TTL artifact (`application/json`) with
+  the decrypted account numbers for each destination referenced in
+  `payout_snapshot_json`, the corresponding amounts, currency, and
+  the `display_stub` for cross-check. The artifact is **not**
+  persisted by the server — no `file` row, no blob on disk, no
+  webhook payload.
+- Every call writes an `audit_log` row with the caller, IP, and a
+  list of destination ids decrypted. Two calls in a 5-minute window
+  for the same payslip raise a digest alert ("payout manifest
+  fetched twice — confirm the first fetch was legitimate").
+- If the underlying `secret_envelope` rows have been erased
+  (GDPR purge, see §15), the manifest endpoint returns 410 Gone for
+  that payslip with a clear message that routing data is no longer
+  available; the operator must arrange payment manually.
+
+The employee-facing payslip (PDF and in-app view) never calls this
+endpoint. Only treasury workflows do.
 
 ### Currency mismatch
 
@@ -415,11 +457,12 @@ conversion acknowledgement recorded on the claim.
 
 ### Audit, approval, and webhook events
 
-- `payout_destination.*` events: `created`, `updated`, `archived`,
-  `verified`.
-- `employee.default_destination_set`, `.default_destination_cleared`.
+- `payout_destination.*`: `created`, `updated`, `archived`, `verified`.
+- `employee_default_destination.*`: `set`, `cleared`.
 - `payroll.payslip_destination_snapshotted` (fires at issue time).
-- All of the above are added to §10's webhook catalog.
+- `payroll.payout_manifest_accessed` (fires on every manifest fetch).
+- All of the above are in §10's webhook catalog; the approval gate
+  is in §11.
 
 ## Expense claims
 

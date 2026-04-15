@@ -326,10 +326,11 @@ POST   /pay_periods/{id}/reopen
 
 GET    /payslips
 GET    /payslips/{id}
-GET    /payslips/{id}.pdf
+GET    /payslips/{id}.pdf                 # rendered from payout_snapshot_json; never contains full account numbers
 POST   /payslips/{id}/issue
 POST   /payslips/{id}/mark_paid
 POST   /payslips/{id}/void
+POST   /payslips/{id}/payout_manifest     # streaming, not stored; decrypts account numbers JIT; manager-only, agent path always approval-gated; 410 if secrets purged
 
 GET    /expenses
 POST   /expenses                   # multipart for receipts
