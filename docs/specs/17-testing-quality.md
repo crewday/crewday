@@ -1,0 +1,119 @@
+# 17 — Testing and quality gates
+
+## Test pyramid
+
+| layer                | tool                      | runs on               | budget per run |
+|----------------------|---------------------------|-----------------------|----------------|
+| static (type/lint)   | `ruff`, `mypy --strict`   | every commit          | < 15s          |
+| unit                 | `pytest`                  | every PR              | < 60s          |
+| integration (DB)     | `pytest` + testcontainers | every PR              | < 5min         |
+| API contract         | `schemathesis` against `/openapi.json` | every PR | < 5min     |
+| browser e2e          | `playwright` (headless)   | every PR              | < 10min        |
+| load                 | `locust`                  | nightly               | 30min          |
+| LLM regression       | `pytest` + fixtures       | on-demand + nightly   | varies         |
+| security             | `osv-scanner`, `bandit`   | every PR              | < 2min         |
+
+## Unit
+
+- Pure domain, no network, no real DB. Fakes for `Clock`, `Storage`,
+  `Mailer`, `LLMClient`.
+- Every schedule / RRULE edge case has a parametrized test.
+- Money math has property-based tests (`hypothesis`).
+- Policy helpers (capability resolution, assignment algorithm, approval
+  detection) get exhaustive truth-table tests.
+
+## Integration
+
+- Real SQLite file and a spun-up Postgres via `testcontainers`. Test
+  matrix runs everything on both.
+- A single `conftest.py` fixture gives each test its own DB.
+- Migrations run once per worker; snapshots + truncate between tests
+  for speed.
+- Real filesystem Storage in `tmp_path`.
+- Real Jinja template render tests for every email template.
+
+## API contract
+
+- `schemathesis run --checks all ./openapi.json` against a live dev
+  server seeded with fixture data.
+- Custom hooks enforce: `Authorization` present on non-public paths,
+  idempotency honored, `ETag` round-trip.
+- Breaking-change detection: `openapi-diff` between the current branch
+  and `main` runs in CI; a breaking diff fails unless PR body contains
+  `ALLOW-BREAKING-API`.
+
+## End-to-end
+
+- Playwright, Python bindings. Headed only locally; headless in CI.
+- Covered journeys (minimum for GA):
+  1. Install + first-boot manager enrollment.
+  2. Add property, area, role, employee; invite employee; employee
+     enrolls passkey and completes first task.
+  3. iCal feed imports stays; turnover tasks auto-generate; employee
+     completes with photo evidence; guest opens welcome link.
+  4. Expense submission with receipt; autofill population; approval;
+     payslip issuance with reimbursement.
+  5. Agent drives a task lifecycle via the CLI; action requiring
+     approval is queued and approved.
+- Passkey ceremonies are exercised via
+  [WebAuthn virtual authenticator](https://playwright.dev/docs/api/
+  class-cdpsession) in both Chromium and WebKit.
+
+## Load
+
+- Locust scenarios:
+  - "10 employees clocking in at 08:00"
+  - "Task list render for a property with 100k tasks history"
+  - "Turnover day: 5 simultaneous completions with photo uploads"
+- Pass criteria in §00 (success metrics) drive the budgets.
+
+## LLM regression
+
+- Fixture set per capability: receipts (good, bad, multi-page, non-
+  English), intake strings, digests (happy, quiet day, anomalies).
+- Expected shapes asserted via Pydantic; numeric fields allowed to
+  drift within configured tolerance.
+- `pytest -k llm` with `--replay` uses recorded cassettes; `--live`
+  calls OpenRouter. Cassettes regenerated on demand.
+
+## Quality gates (PR required)
+
+- `ruff check`
+- `ruff format --check`
+- `mypy --strict`
+- `pytest unit`
+- `pytest integration` (SQLite + PG)
+- `schemathesis`
+- `playwright` smoke (the two shortest journeys above)
+- `osv-scanner` (blocker on any unresolved high/critical)
+- `bandit -ll`
+- OpenAPI diff
+- Coverage threshold: 85% domain, 70% overall; tracked via codecov.
+
+## Release gates
+
+In addition to PR gates:
+
+- Full Playwright journey suite.
+- Full Locust load.
+- Migration replay against a sanitized prod-like snapshot.
+- SBOM generation (CycloneDX).
+- Image signed with cosign.
+
+## Reproducibility
+
+- `uv.lock` is the source of truth for Python deps.
+- Dockerfile uses `--mount=type=cache` for `pip`/`uv` and `apt`.
+- CI builds on Linux amd64 and arm64.
+- Release notes include the exact image digest.
+
+## Test data
+
+- `miployees admin demo` seeds a realistic household for dev and e2e:
+  - Main residence (Villa Sud, FR), vacation home (Chalet Alpe),
+    one STR (Apt 3B Barcelona).
+  - 5 employees across roles.
+  - 30 task templates, 12 schedules.
+  - 20 stays imported (synthetic iCal).
+- Seeded deterministically from a single `--seed` integer so tests
+  can reproduce.
