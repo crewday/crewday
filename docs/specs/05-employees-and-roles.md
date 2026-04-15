@@ -21,8 +21,8 @@ A person who performs tasks for the household.
 | archived_on        | date?     | set when archived (off-boarded); cleared on reinstate |
 | notes_md           | text      | manager-visible                  |
 | emergency_contact  | jsonb     | `{name, phone_e164, relation}`   |
-| pay_destination_id | ULID FK?  | default payout for payslips (§09) |
-| reimbursement_destination_id | ULID FK? | default for expense reimbursements; null → falls back to pay_destination_id |
+| pay_destination_id | ULID FK?  | default payout for payslips (§09). Must reference a non-archived `payout_destination` whose `employee_id = employee.id`; enforced via trigger/constraint. |
+| reimbursement_destination_id | ULID FK? | default for expense reimbursements; null → falls back to pay_destination_id. Same FK guard as above. |
 | deleted_at         | tstz?     |                                  |
 
 An employee without any role is invalid; creation requires at least
@@ -139,6 +139,7 @@ itself may be unset, meaning "feature off".
 | `voice.assistant`             | off            | Chat assistant accepts voice input              |
 | `pwa.offline_queue`           | on             | Offline completion queue enabled on their PWA   |
 | `notifications.email_digest`  | on             | Receives their own daily digest email           |
+| `payroll.self_manage_destinations` | off       | Can self-create/edit their own `payout_destination` rows (§09). Off by default so only managers can route their pay. |
 
 ### Resolution order
 

@@ -163,7 +163,10 @@ inventory.*          low_stock, movement, stock_drift
 shift.*              opened, closed, adjusted, disputed
 expense.*            submitted, approved, rejected, reimbursed
 payroll.*            period_opened, period_locked, period_paid,
-                     payslip_issued, payslip_paid
+                     payslip_issued, payslip_paid,
+                     payslip_destination_snapshotted
+payout_destination.* created, updated, archived, verified
+employee_default_destination.* set, cleared
 issue.*              reported, updated, resolved
 approval.*           pending, decided
 ical.*               polled, error

@@ -156,6 +156,19 @@ The canonical list, configurable per household:
 - Sending a broadcast email to more than one recipient.
 - Bulk schedule changes affecting > 50 future tasks.
 
+**Always-gated (not configurable)** — these actions touch money
+routing; the approval requirement cannot be disabled in
+`/settings/approvals`:
+
+- `payout_destination.create`
+- `payout_destination.update`
+- `payout_destination.archive` (when the row is currently referenced
+  as a default)
+- `employee.set_default_pay_destination`
+- `employee.set_default_reimbursement_destination`
+- `expense_claim.set_destination_override` (agent path; the manager
+  selecting a destination in the approval UI is itself the approval)
+
 ### Flow
 
 1. Agent calls the endpoint normally.

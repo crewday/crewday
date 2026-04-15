@@ -62,10 +62,20 @@ fix the offender.
   payslip. `open → locked → paid`; `paid` is set automatically when
   every contained payslip reaches `paid`.
 - **Payout destination.** A per-employee record naming where money
-  lands: a bank account, reloadable card, cash, or other. Employees
-  may hold more than one; the employee row carries default pointers
-  for pay and for reimbursements separately (§09). v1 does not
-  execute payments — destinations are metadata for the operator.
+  lands: bank account, reloadable card, wallet, cash, or other.
+  Employees may hold more than one; the employee row carries default
+  pointers for pay and for reimbursements separately (§09). Full
+  account numbers live in `secret_envelope`; only a `display_stub`
+  (IBAN last-4 + country, card last-4, wallet handle) is returned
+  over the API. Creating, editing, or changing a default is always
+  approval-gated for agent tokens — miployees does not execute
+  payments, but routing decisions are security-critical and treated
+  accordingly.
+- **Payout snapshot.** The immutable `payout_snapshot_json` captured
+  on a payslip at the `draft → issued` transition. Records where pay
+  and each reimbursement went, independent of later destination
+  edits or archives. The payslip PDF is rendered from the snapshot,
+  not from the live pointers.
 - **Payslip.** A computed pay document for one (employee, pay_period).
 - **Pending (task).** A task whose `scheduled_for_utc` is within the
   next hour (or already past for a one-off). Distinct from

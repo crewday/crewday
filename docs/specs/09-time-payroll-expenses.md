@@ -218,6 +218,7 @@ A computed pay document for one (employee, pay_period).
 | status                  | enum    | `draft | issued | paid | voided` |
 | issued_at / paid_at     | tstz?   |
 | email_delivery_id       | ULID FK?|
+| payout_snapshot_json    | jsonb?  | immutable snapshot of destinations used; null on `draft`, populated at `draft → issued` transition, never modified thereafter. See "Snapshot on the payslip" below. |
 
 ### PDF
 
@@ -246,52 +247,179 @@ pre-funded account in the employee's name for operational expenses
 so they don't have to front cash; reimbursements land there while
 their main paycheque lands in their personal account.
 
+**Payout execution is out of scope for v1** — miployees does not move
+money. Destinations are metadata rendered on the payslip PDF and
+returned in API responses so the operator knows where to push funds
+from their bank or treasury tool. Even so, routing is
+**security-critical**: a tampered destination silently redirects
+someone's pay. The rules below are written with that threat in mind.
+
 ### `payout_destination`
 
-| field         | type     | notes                                  |
-|---------------|----------|----------------------------------------|
-| id            | ULID PK  |                                        |
-| household_id  | ULID FK  |                                        |
-| employee_id   | ULID FK  |                                        |
-| label         | text     | "Personal BNP", "Expense float — Revolut" |
-| kind          | enum     | `bank_account | card_reload | cash | other` |
-| account_ref   | text     | IBAN / last4 / wallet handle; validated per `kind` |
-| account_ref_encrypted | bool | set `true` for full IBAN / account number; stored via `secret_envelope` (§15) |
-| currency      | text     | ISO 4217                               |
-| notes_md      | text?    |                                        |
-| archived_at   | tstz?    |                                        |
+| field          | type     | notes                                                         |
+|----------------|----------|---------------------------------------------------------------|
+| id             | ULID PK  |                                                               |
+| household_id   | ULID FK  | scoping                                                       |
+| employee_id    | ULID FK  | **row belongs to exactly one employee**; every read/write validates the caller has rights to that employee |
+| label          | text     | "Personal BNP", "Expense float — Revolut" — display only      |
+| kind           | enum     | `bank_account | card_reload | wallet | cash | other`          |
+| currency       | text     | ISO 4217; required for all non-`cash` kinds                   |
+| display_stub   | text     | public-safe short form: IBAN last-4 + country (`•• FR-12`), card last-4, wallet handle. Never the full number. NULL for `cash`. |
+| secret_ref_id  | ULID FK? | pointer to the `secret_envelope` row holding the full account number. Required for `bank_account` and `card_reload`; NULL for `cash`. The full number is **only** ever decrypted to render the payslip PDF, never returned over the API. |
+| country        | text?    | ISO-3166; required for `bank_account`                         |
+| verified_at    | tstz?    | set when a manager hand-verifies the full number against a paper/photo artifact; `null` means unverified |
+| verified_by    | ULID FK? | manager id                                                    |
+| notes_md       | text?    | manager-visible, not rendered on PDF                          |
+| created_at / updated_at | tstz |                                                         |
+| archived_at    | tstz?    | non-null → cannot be selected as a new default; see below     |
 
-The employee can hold multiple destinations; each one is a separate
-row. Archiving preserves history.
+**Validation per `kind`** (server-side, at write time):
 
-### `employee.pay_destination_id` and `employee.reimbursement_destination_id`
+- `bank_account`: `country` required; `display_stub` must match the
+  country's IBAN format rules; full number is IBAN-checksummed before
+  being stored in `secret_envelope`.
+- `card_reload`: `display_stub` must be 4 digits; full PAN is Luhn-
+  checked before being stored; PAN is **write-only** (never returned).
+- `wallet`: `display_stub` is the handle or masked id.
+- `cash`: `display_stub` and `secret_ref_id` must be NULL.
+- `other`: `display_stub` free-form; `secret_ref_id` optional.
 
-Two nullable pointers on the employee row name the **defaults**:
+### Where the full number is allowed
+
+- It is supplied only via `POST/PATCH /payout_destinations` body
+  field `account_number_plaintext`, which the server encrypts into a
+  new `secret_envelope` row in the same transaction and then discards
+  from memory.
+- The plaintext is **never** echoed back in the response, listed in
+  `GET`, returned in webhook payloads, or written to any log. API
+  clients never see it again.
+- The payslip PDF is the only place the full number is rendered, and
+  only when the PDF is generated server-side by the WeasyPrint worker.
+  The PDF is stored as a regular `file` blob (§15); that blob carries
+  the sensitivity: it is served over an authenticated signed URL with
+  short TTL, inherits CSP, and is subject to the same retention as
+  other `payslip.pdf_file_id` references.
+
+### Who can mutate destinations
+
+All mutations (`POST`, `PATCH`, archive) write an audit_log row and
+fire the `payout_destination.{created,updated,archived,verified}`
+webhook. In addition:
+
+- An **employee** can create/edit their own destinations only if the
+  capability `payroll.self_manage_destinations` is on (default
+  **off**). When off, only managers can write.
+- **Agent tokens** cannot mutate destinations without manager
+  approval. `payout_destination.create`, `.update`,
+  `.set_default_pay`, `.set_default_reimbursement`, and
+  `expense_claim.set_destination_override` are added to §11's
+  approvable-action list unconditionally — no household setting
+  disables the gate.
+- Setting or changing an `employee.pay_destination_id` or
+  `employee.reimbursement_destination_id` to a row that does not yet
+  have `verified_at` raises a non-fatal warning in the manager UI
+  and daily digest until verification is recorded. The PDF still
+  renders unverified destinations; the warning is about operator
+  hygiene, not a system block.
+
+### Default pointers on `employee`
 
 - `pay_destination_id` — where payslips land.
 - `reimbursement_destination_id` — where approved expense
   reimbursements land. If null, falls back to `pay_destination_id`.
 
+Both must reference a non-archived destination whose
+`employee_id = employee.id` and whose `household_id` matches — the
+FK is enforced with a `CHECK` trigger in SQLite and a constraint
+function in Postgres. Attempting to set a pointer to another
+employee's destination is a 422.
+
+Archiving a destination that is currently referenced as a default
+nulls the relevant pointer(s) in the same transaction and emits an
+`employee.default_destination_cleared` audit event + webhook. The
+next payslip for that employee renders "Payout: arranged manually"
+unless a new default is set first.
+
 Either pointer may be null (cash-in-hand, or not yet configured);
 the payslip PDF then renders "Payout: arranged manually" on the
-corresponding line.
+corresponding line — explicit, not silently defaulted to zero.
 
 ### Per-claim override
 
 An `expense_claim` carries an optional
-`reimbursement_destination_id` that overrides the employee default
-when the manager wants to send a specific claim elsewhere (e.g. an
-unusually large fuel claim reimbursed directly to a card). The
-payslip PDF groups reimbursements by destination so the employee
-sees what is going where.
+`reimbursement_destination_id`. When a manager approves the claim,
+the server validates that the referenced destination:
 
-### Out of scope (v1)
+- has `employee_id = claim.employee_id`,
+- is not archived,
+- has `currency = claim.currency` (or the manager has acknowledged
+  an explicit FX conversion note on the claim, similar to the rate
+  snapshot in the approval flow above),
+- is one of: the employee's defaults, or a destination the
+  **approving manager** selected in the approval dialog.
 
-Payout execution itself is still out of scope — miployees does not
-move money. Destinations are metadata on the payslip PDF and the
-reimbursement record so operators know where to push funds from
-their bank or treasury tool. Integrations with Wise, Revolut
-Business, bank APIs, etc., are post-v1 (see §19).
+An agent cannot approve a claim with a new `reimbursement_destination_id`
+— that field on the approval payload forces the approvable-action
+gate even if the agent also holds `expenses:approve`.
+
+### Snapshot on the payslip
+
+Destinations can change after a period is locked but before a
+payslip is issued, or between issue and payment. To keep the pay
+record honest, the payslip captures an **immutable snapshot** of the
+destinations in use:
+
+```
+payslip.payout_snapshot_json = {
+  "pay": {
+    "destination_id": "pd_…",
+    "label": "Personal BNP",
+    "kind": "bank_account",
+    "display_stub": "•• FR-12",
+    "currency": "EUR",
+    "verified": true
+  },
+  "reimbursements": [
+    { "claim_id": "exp_…",
+      "destination_id": "pd_…",
+      "label": "Expense float — Revolut",
+      "display_stub": "•• 4499",
+      "currency": "EUR",
+      "amount_cents": 3412 }
+  ]
+}
+```
+
+The snapshot is written when the payslip transitions from `draft` to
+`issued` (see `payslip_status` §02). Changes to the underlying
+`payout_destination` rows after that point do **not** modify the
+snapshot. If the destinations referenced in the snapshot are later
+archived, the snapshot remains as-is (it is historical evidence).
+
+The PDF is rendered from the snapshot, never from the live pointers.
+Reimbursements on the payslip group by snapshot `destination_id` so
+the employee and operator both see what is going where.
+
+### Currency mismatch
+
+Issuing a payslip whose computed gross is in currency `X` with a
+`pay_destination` whose currency is `Y` is blocked at the
+`draft → issued` transition with a 422 `currency_mismatch` error.
+Managers resolve by choosing a same-currency destination or by
+explicitly marking the payslip "pay by cash" (clears the pointer
+for this payslip only via the snapshot).
+
+Same rule for reimbursements: a claim in currency `X` cannot be
+attached to a destination in currency `Y` without an explicit
+conversion acknowledgement recorded on the claim.
+
+### Audit, approval, and webhook events
+
+- `payout_destination.*` events: `created`, `updated`, `archived`,
+  `verified`.
+- `employee.default_destination_set`, `.default_destination_cleared`.
+- `payroll.payslip_destination_snapshotted` (fires at issue time).
+- All of the above are added to §10's webhook catalog.
 
 ## Expense claims
 

@@ -310,9 +310,14 @@ POST   /pay_rules
 PATCH  /pay_rules/{id}
 
 GET    /employees/{id}/payout_destinations
-POST   /employees/{id}/payout_destinations
-PATCH  /payout_destinations/{id}
+POST   /employees/{id}/payout_destinations   # body includes write-only `account_number_plaintext`
+PATCH  /payout_destinations/{id}             # scoped to one employee; cross-employee writes → 422
+POST   /payout_destinations/{id}/verify      # manager records that full number matches a paper/photo artifact
 POST   /payout_destinations/{id}/archive
+POST   /employees/{id}/pay_destination       # body: {destination_id}; sets employee.pay_destination_id; always approval-gated for agents
+POST   /employees/{id}/reimbursement_destination  # same for reimbursement_destination_id
+DELETE /employees/{id}/pay_destination       # clears the pointer
+DELETE /employees/{id}/reimbursement_destination
 
 GET    /pay_periods
 POST   /pay_periods

@@ -11,6 +11,7 @@
 | API tokens (agent auth)                        | Critical    |
 | Property access data (door codes, wifi)        | High        |
 | Employee personal info (legal name, pay rate)  | High        |
+| Employee payout details (IBAN, PAN, wallet)    | Critical    |
 | Payroll / expense amounts                      | High        |
 | Guest names and stay dates                     | Medium      |
 | Task history / completion evidence             | Medium      |
@@ -161,8 +162,9 @@ A per-household AES-256-GCM key, itself encrypted by the host's
 - **Compose:** read from a docker secret (`/run/secrets/…`).
 
 Every secret (OpenRouter API key, SMTP password, iCal feed URL
-containing tokens, property wifi password, property access codes) is
-stored as `secret_envelope` with per-row nonce:
+containing tokens, property wifi password, property access codes,
+**full payout account numbers** — see §09) is stored as
+`secret_envelope` with per-row nonce:
 
 ```
 secret_envelope
@@ -227,10 +229,11 @@ See §03 for ceremonies. Additional hardening:
 - Logs JSON-structured via `structlog`.
 - A **redaction filter** runs on the root logger:
   - `Authorization`, `Cookie`, `Set-Cookie` headers → `<redacted>`.
-  - Anything matching `password|token|secret|cookie` at any depth of a
-    log dict → `<redacted>`.
-  - Regex-match-redact common PII (email, phone, IBAN) in free-text
-    fields.
+  - Anything matching `password|token|secret|cookie|account_number|
+    account_number_plaintext|pan|iban` at any depth of a log dict →
+    `<redacted>`.
+  - Regex-match-redact common PII (email, phone, IBAN, PAN Luhn-like
+    16-digit sequences) in free-text fields.
 - Request logging: method, path, status, duration, actor id, token
   id, correlation id. **Never the body.**
 
@@ -258,7 +261,12 @@ much of the data is personal.
   --person <id>` anonymizes the person row (name/email/phone nulled)
   and scrubs free-text fields in their tasks, comments, shifts,
   expenses. Financial rows retain amounts and dates (legal retention
-  trumps erasure for payroll).
+  trumps erasure for payroll). Purge also deletes `secret_envelope`
+  rows referenced by the person's `payout_destination` rows and
+  zeroes the `display_stub` / `secret_ref_id` on those rows;
+  `payslip.payout_snapshot_json` is scrubbed to retain only label and
+  currency (display_stub cleared), preserving the accounting trail
+  without the account identifier.
 - **Data portability**: CSV exports of timesheets, payslips, and
   expenses (§09).
 - **Retention defaults** (see §02 for the canonical table):
