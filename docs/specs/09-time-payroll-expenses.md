@@ -240,9 +240,19 @@ earlier `hourly` rule and vice versa — the rank is on
 }
 ```
 
-The UI can suggest public holidays from a bundled data file per
-country, but the manager copies them into the rule — nothing is
-auto-picked, to avoid surprise.
+**Integration with `public_holidays` (§06).** At period close, the
+payroll worker queries `public_holidays` for dates in the period range
+and applies each holiday's `payroll_multiplier` to hours worked on
+those dates. The pay-rule-level `multiplier` in `holiday_rule_json`
+overrides the holiday-table multiplier if both exist for the same
+date (pay-rule wins). The `dates` array in `holiday_rule_json` is
+optional/deprecated — if present, its dates are merged with
+`public_holidays` (union). The `country_codes_for_suggestions` field
+remains for the UI suggestion feature.
+
+The UI can suggest public holidays from the `public_holidays` table
+(filtered by workspace and country) when the manager configures pay
+rules, replacing the older bundled data file approach.
 
 ## Pay period
 
@@ -263,6 +273,10 @@ A manager closes a period ("Lock"):
 1. Validate: no open shifts remain in the period.
 2. Compute `pay_period_entry` rows: per employee, per day, regular
    hours / overtime / holiday / per-task counts / piecework totals.
+   Holiday hours are identified by querying `public_holidays` (§06)
+   for dates in the period, applying `payroll_multiplier` from the
+   holiday row (overridden by pay-rule-level multiplier if both
+   exist).
 3. Generate `payslip` rows (`status = draft`).
 4. Emit `payroll.period_locked` webhook.
 
@@ -654,6 +668,7 @@ expense_line
 ├── quantity
 ├── unit_price_cents
 ├── line_total_cents           # derived
+├── asset_id                   # ULID FK?; links to asset for TCO tracking (§21)
 ├── source                     # ocr | manual (§02)
 └── edited_by_user             # bool; set when a user mutates an ocr row
 ```

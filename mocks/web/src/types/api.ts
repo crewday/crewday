@@ -72,10 +72,93 @@ export interface Task {
   template_id: string | null;
   schedule_id: string | null;
   turnover_bundle_id: string | null;
+  asset_id: string | null;
   settings_override: Record<string, unknown>;
 }
 
+// ── Time / payroll ────────────────────────────────────────────────
+
+export type ShiftStatus = "open" | "closed" | "disputed";
+
+export interface Shift {
+  id: string;
+  employee_id: string;
+  property_id: string;
+  started_at: string;
+  ended_at: string | null;
+  status: ShiftStatus;
+  duration_seconds: number | null;
+  break_seconds: number;
+  method_in: "manual" | "auto" | "geo";
+  method_out: "manual" | "auto" | "geo" | null;
+}
+
+export type PayRuleKind = "hourly" | "monthly_salary" | "per_task" | "piecework";
+
+export interface PayRule {
+  id: string;
+  employee_id: string;
+  property_id: string | null;
+  kind: PayRuleKind;
+  rate_cents: number;
+  currency: string;
+  effective_from: string;
+  effective_until: string | null;
+}
+
+export type PayPeriodStatus = "open" | "locked" | "paid";
+
+export interface PayPeriod {
+  id: string;
+  starts_on: string;
+  ends_on: string;
+  status: PayPeriodStatus;
+  locked_at: string | null;
+}
+
+// ── Inventory movement ────────────────────────────────────────────
+
+export type InventoryMovementReason = "restock" | "consume" | "adjust" | "waste" | "transfer_in" | "transfer_out" | "audit_correction";
+
+export interface InventoryMovement {
+  id: string;
+  item_id: string;
+  delta: number;
+  reason: InventoryMovementReason;
+  actor_kind: "manager" | "employee" | "agent" | "system";
+  actor_id: string;
+  note: string | null;
+  occurred_at: string;
+}
+
+// ── Stay lifecycle ────────────────────────────────────────────────
+
+export type LifecycleTrigger = "before_checkin" | "after_checkout" | "during_stay";
+
+export interface StayLifecycleRule {
+  id: string;
+  property_id: string;
+  trigger: LifecycleTrigger;
+  template_id: string;
+  offset_hours: number;
+  enabled: boolean;
+}
+
+// ── Task comments ─────────────────────────────────────────────────
+
+export interface TaskComment {
+  id: string;
+  task_id: string;
+  author_kind: "employee" | "manager" | "agent" | "system";
+  author_id: string;
+  body_md: string;
+  created_at: string;
+}
+
+// ── Expenses ──────────────────────────────────────────────────────
+
 export type ExpenseStatus = "draft" | "submitted" | "approved" | "rejected" | "reimbursed";
+export type ExpenseCategory = "supplies" | "fuel" | "food" | "transport" | "maintenance" | "other";
 
 export interface Expense {
   id: string;
@@ -87,17 +170,35 @@ export interface Expense {
   status: ExpenseStatus;
   note: string;
   ocr_confidence: number | null;
+  category: ExpenseCategory | null;
 }
+
+export interface AutofillField<T> {
+  value: T;
+  confidence: number;
+}
+
+export interface ExpenseScanResult {
+  vendor: AutofillField<string>;
+  purchased_at: AutofillField<string>;
+  currency: AutofillField<string>;
+  total_amount_cents: AutofillField<number>;
+  category: AutofillField<ExpenseCategory>;
+  note_md: AutofillField<string>;
+  agent_question: string | null;
+}
+
+export type StayStatus = "tentative" | "confirmed" | "in_house" | "checked_out" | "cancelled";
 
 export interface Stay {
   id: string;
   property_id: string;
-  guest: string;
+  guest_name: string;
   source: "manual" | "airbnb" | "vrbo" | "booking" | "google_calendar" | "ical";
   check_in: string;
   check_out: string;
   guests: number;
-  status: "booked" | "in_house" | "checked_out" | "cancelled";
+  status: StayStatus;
 }
 
 export interface ApprovalRequest {
@@ -187,7 +288,7 @@ export interface Issue {
   title: string;
   body: string;
   reported_at: string;
-  status: "open" | "in_progress" | "resolved";
+  status: "open" | "in_progress" | "resolved" | "wont_fix";
 }
 
 export interface PaySlip {
@@ -302,21 +403,6 @@ export interface EntitySettingsPayload {
   resolved: Record<string, ResolvedSetting>;
 }
 
-/** @deprecated Use WorkspaceSettings instead. */
-export interface HouseholdSettings {
-  name: string;
-  timezone: string;
-  currency: string;
-  week_start: string;
-  pay_frequency: string;
-  default_photo_evidence: PhotoEvidence;
-  geofence_radius_m: number;
-  retention_days: Record<string, number>;
-  approvals: { always_gated: string[]; configurable: string[] };
-  danger_zone: string[];
-  country: string;
-  default_locale: string;
-}
 
 export interface Me {
   role: Role;
@@ -348,6 +434,89 @@ export interface DashboardPayload {
   employees: Employee[];
 }
 
+// ── Asset types ────────────────────────────────────────────────────
+
+export type AssetCondition = "new" | "good" | "fair" | "poor" | "needs_replacement";
+export type AssetStatus = "active" | "in_repair" | "decommissioned" | "disposed";
+export type AssetCategory = "climate" | "appliance" | "plumbing" | "pool" | "heating" | "outdoor" | "safety" | "security" | "vehicle" | "other";
+export type DocumentKind = "manual" | "warranty" | "invoice" | "receipt" | "photo" | "certificate" | "contract" | "permit" | "insurance" | "other";
+
+export interface AssetType {
+  id: string;
+  key: string;
+  name: string;
+  category: AssetCategory;
+  icon: string;
+  default_actions: {
+    key: string;
+    label: string;
+    interval_days?: number;
+    estimated_duration_minutes?: number;
+  }[];
+  default_lifespan_years: number | null;
+}
+
+export interface Asset {
+  id: string;
+  property_id: string;
+  asset_type_id: string | null;
+  name: string;
+  area: string | null;
+  condition: AssetCondition;
+  status: AssetStatus;
+  make: string | null;
+  model: string | null;
+  serial_number: string | null;
+  installed_on: string | null;
+  purchased_on: string | null;
+  purchase_price_cents: number | null;
+  purchase_currency: string | null;
+  purchase_vendor: string | null;
+  warranty_expires_on: string | null;
+  expected_lifespan_years: number | null;
+  guest_visible: boolean;
+  guest_instructions: string | null;
+  notes: string | null;
+  qr_token: string;
+}
+
+export interface AssetAction {
+  id: string;
+  asset_id: string;
+  key: string | null;
+  label: string;
+  interval_days: number | null;
+  last_performed_at: string | null;
+  next_due_on: string | null;
+  linked_task_id: string | null;
+  linked_schedule_id: string | null;
+  description: string | null;
+  estimated_duration_minutes: number | null;
+}
+
+export interface AssetDocument {
+  id: string;
+  asset_id: string | null;
+  property_id: string;
+  kind: DocumentKind;
+  title: string;
+  filename: string;
+  size_kb: number;
+  uploaded_at: string;
+  expires_on: string | null;
+  amount_cents: number | null;
+  amount_currency: string | null;
+}
+
+export interface AssetDetailPayload {
+  asset: Asset;
+  asset_type: AssetType | null;
+  property: Property;
+  actions: AssetAction[];
+  documents: AssetDocument[];
+  linked_tasks: Task[];
+}
+
 // SSE event shapes. The server emits JSON-serialised payloads under
 // different event names; the SseContext dispatches on `event` and
 // feeds `data` into TanStack Query invalidations.
@@ -356,4 +525,5 @@ export type SseEvent =
   | { event: "agent.message.appended"; data: { scope: "employee" | "manager"; message: AgentMessage } }
   | { event: "task.updated"; data: { task: Task } }
   | { event: "approval.decided"; data: { id: string; decision: "approve" | "reject" } }
-  | { event: "expense.decided"; data: { id: string; status: ExpenseStatus } };
+  | { event: "expense.decided"; data: { id: string; status: ExpenseStatus } }
+  | { event: "asset.action.completed"; data: { asset_id: string; action: AssetAction } };

@@ -3,7 +3,7 @@
 // invalidations or optimistic cache updates, and tears down on unmount.
 
 import type { QueryClient } from "@tanstack/react-query";
-import type { AgentMessage, SseEvent, Task, ExpenseStatus } from "@/types/api";
+import type { AgentMessage, AssetAction, SseEvent, Task, ExpenseStatus } from "@/types/api";
 import { qk } from "./queryKeys";
 
 type TypedEvent = { type: SseEvent["event"]; data: string };
@@ -22,6 +22,7 @@ export function startEventStream(client: QueryClient): () => void {
     "task.updated",
     "approval.decided",
     "expense.decided",
+    "asset.action.completed",
   ];
   for (const ev of events) {
     es.addEventListener(ev, handler as EventListener);
@@ -72,6 +73,12 @@ function dispatch(client: QueryClient, evt: TypedEvent): void {
       client.invalidateQueries({ queryKey: qk.expenses("all") });
       client.invalidateQueries({ queryKey: qk.expenses("mine") });
       client.invalidateQueries({ queryKey: qk.dashboard() });
+      return;
+    }
+    case "asset.action.completed": {
+      const payload = data as { asset_id: string; action: AssetAction };
+      client.invalidateQueries({ queryKey: qk.asset(payload.asset_id) });
+      client.invalidateQueries({ queryKey: qk.assets() });
       return;
     }
   }

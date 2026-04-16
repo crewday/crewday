@@ -14,8 +14,8 @@ const PRIORITY_TONE: Record<TaskPriority, "ghost" | "sand" | "rust"> = {
 
 export default function TemplatesPage() {
   const tplQ = useQuery({
-    queryKey: qk.templates(),
-    queryFn: () => fetchJson<TaskTemplate[]>("/api/v1/templates"),
+    queryKey: qk.taskTemplates(),
+    queryFn: () => fetchJson<TaskTemplate[]>("/api/v1/task_templates"),
   });
 
   if (tplQ.isPending) {

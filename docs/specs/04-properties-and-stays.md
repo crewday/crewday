@@ -2,15 +2,18 @@
 
 ## Property
 
-A property is a physical place the household operates in. The primary
-residence, a vacation home, an STR unit, or a yacht all count.
+A property is a physical place the workspace operates in. The primary
+residence, a vacation home, an STR unit, or a yacht all count. Every
+property contains one or more **units** (§"Unit" below); stays, iCal
+feeds, and lifecycle bundles are scoped to units, not directly to the
+property.
 
 ### Fields
 
 | field                 | type        | notes                          |
 |-----------------------|-------------|--------------------------------|
 | id                    | ULID PK     |                                |
-| household_id          | ULID FK     |                                |
+| workspace_id          | ULID FK     |                                |
 | name                  | text        | "Villa Sud", "Apt 3B"          |
 | kind                  | enum        | `residence | vacation | str | mixed` (behavior below) |
 | address_json          | jsonb/text  | structured address             |
@@ -23,8 +26,9 @@ residence, a vacation home, an STR unit, or a yacht all count.
 | created_at/updated_at | tstz        |                                |
 | deleted_at            | tstz null   | soft delete                    |
 
-A property has many **areas** and many **stays**. It may have one or
-more **iCal feeds** (multiple platforms for the same unit).
+A property has one or more **units**, many **areas** (shared or
+unit-scoped), and many **stays** (via units). It may have one or more
+**iCal feeds** per unit (multiple platforms for the same listing).
 
 ### `address_json` canonical shape
 
@@ -45,19 +49,19 @@ set, `address_json.country` is back-filled.
 
 ### `kind` semantics
 
-`kind` drives defaults for turnover generation and area seeding;
-managers can always override per-stay or per-task.
+`kind` drives defaults for stay lifecycle rule seeding and area
+seeding; managers can always override per-stay or per-task.
 
-| kind       | auto-seed areas | turnover generation                                         |
+| kind       | auto-seed areas | default lifecycle rules                                     |
 |------------|-----------------|-------------------------------------------------------------|
-| `residence`| no              | none — a residence does not turn over on guest checkout     |
-| `vacation` | yes             | every stay generates a turnover bundle                      |
-| `str`      | yes             | every stay generates a turnover bundle                      |
-| `mixed`    | yes             | turnover only for stays where `guest_kind != owner`         |
+| `residence`| no              | none — no lifecycle rules auto-created                      |
+| `vacation` | yes (per unit)  | one `after_checkout` rule linked to default turnover template |
+| `str`      | yes (per unit)  | one `after_checkout` rule linked to default turnover template |
+| `mixed`    | yes (per unit)  | same rules but with `guest_kind_filter = ['guest', 'staff', 'other']` |
 
 Stays carry an optional `guest_kind` (`owner | guest | staff | other`;
-default `guest`). The turnover decision is made by §06 at stay-create
-time.
+default `guest`). Lifecycle rule evaluation is gated by the rule's
+`guest_kind_filter` (§06).
 
 ### Welcome defaults
 
@@ -82,6 +86,51 @@ If `wifi.rotates == "per_stay"`, the system expects a per-stay password
 override; the welcome page falls back to the property default only if
 no override is set.
 
+## Unit
+
+A bookable subdivision of a property. Every property has at least one
+unit; single-unit properties auto-create a default unit with the unit
+layer hidden in the UI. Stays, lifecycle bundles, and iCal feeds are
+unit-scoped.
+
+### Fields
+
+| field                   | type      | notes                              |
+|-------------------------|-----------|-------------------------------------|
+| id                      | ULID PK   |                                    |
+| workspace_id            | ULID FK   |                                    |
+| property_id             | ULID FK   |                                    |
+| name                    | text      | "Room 1", "Apt 3B", "Main house". For single-unit properties: property name (hidden in UI) |
+| ordinal                 | int       | display order among siblings       |
+| default_checkin_time    | time?     | nullable = inherit from property; e.g. `16:00` |
+| default_checkout_time   | time?     | nullable = inherit from property; e.g. `10:00` |
+| max_guests              | int?      | nullable = no limit                |
+| welcome_overrides_json  | jsonb?    | per-unit overrides for wifi, access codes, etc. Merges with property `welcome_defaults_json` |
+| settings_override_json  | jsonb?    | per-unit cascade layer (between property and employee); see §02 "Settings cascade" |
+| notes_md                | text?     |                                    |
+| created_at / updated_at | tstz      |                                    |
+| deleted_at              | tstz?     | soft delete                        |
+
+### Invariants
+
+- Every property has >= 1 unit (enforced by application, not DB
+  constraint).
+- When a property is created, a **default unit** is auto-created with
+  `name = property.name` and `ordinal = 0`.
+- Single-unit properties: UI hides the unit layer entirely (unit
+  selector, unit management). The unit exists in the data model but
+  is invisible.
+- `UNIQUE(workspace_id, property_id, name)` — no two units in the
+  same property share a name.
+
+### Welcome overrides merge
+
+The guest welcome page (§"Guest welcome link") merges unit-level
+`welcome_overrides_json` over the property-level
+`welcome_defaults_json`. Fields present in the unit override win;
+absent fields fall through to the property default. For single-unit
+properties this is a no-op (no overrides set).
+
 ## Area
 
 An area is a subdivision of a property — kitchen, master bath, pool,
@@ -94,6 +143,7 @@ inventory can be scoped tightly.
 |--------------|-----------|------------------------------------|
 | id           | ULID PK   |                                    |
 | property_id  | ULID FK   |                                    |
+| unit_id      | ULID FK?  | null = shared/property-level area (pool, lobby, laundry). Non-null = unit-specific area (bedroom in Room 3) |
 | name         | text      |                                    |
 | kind         | enum      | `indoor_room | outdoor | service | ` ... |
 | order_hint   | int       | for ordered UIs (walk order)       |
@@ -106,26 +156,27 @@ tested and deeper trees hurt the UI. Move operations enforce this.
 ### Auto-seeded areas
 
 When a property is created with `kind = str`, we auto-seed a sensible
-area set (Entry, Kitchen, Living, Bedroom 1, Bathroom 1, Outdoor,
-Trash & Laundry). Managers can rename or delete.
+area set per unit (Entry, Kitchen, Living, Bedroom 1, Bathroom 1,
+Outdoor, Trash & Laundry). Managers can rename or delete.
 
 ## Stay (reservation)
 
-A reservation of a property by a guest for a range of dates.
+A reservation of a unit for a range of dates.
 
 ### Fields
 
 | field              | type    | notes                                    |
 |--------------------|---------|------------------------------------------|
 | id                 | ULID PK |                                          |
-| property_id        | ULID FK |                                          |
+| property_id        | ULID FK | denormalized from `unit.property_id` for query efficiency; enforced by trigger/application constraint |
+| unit_id            | ULID FK | the unit this stay occupies              |
 | source             | enum    | §02 `stay_source`                        |
 | external_id        | text    | provider reservation id (nullable)       |
 | check_in_at        | tstz    | local rendered in property tz            |
 | check_out_at       | tstz    |                                          |
 | guest_name         | text    | best-effort (iCal often redacts)         |
 | guest_count        | int     |                                          |
-| guest_kind         | enum    | `owner | guest | staff | other` (default `guest`); gates turnover for `property.kind = mixed` |
+| guest_kind         | enum    | `owner | guest | staff | other` (default `guest`); gates lifecycle rules via `guest_kind_filter` |
 | nightly_rate_cents | int     | optional, only for owner stays           |
 | status             | enum    | `tentative | confirmed | in_house | checked_out | cancelled` |
 | notes_md           | text    |                                          |
@@ -136,30 +187,47 @@ Status transitions are the natural order. `in_house` is triggered at
 `check_in_at` by the worker; `checked_out` at `check_out_at` or on
 manager action.
 
-### Turnover bundles
+### Stay task bundles
 
-When a stay's `check_out_at` lands in the future **and** the property's
-`kind` permits turnover (see table above), the worker creates a
-**turnover bundle** — one `TURNOVER_BUNDLE` row and 1..N `task` rows
-generated from the household's turnover template for that property
-(see §06). Tasks in a bundle share `turnover_bundle_id`.
+When a stay has `status IN (tentative, confirmed)` and its check-in
+or check-out falls within the scheduling horizon, the worker
+evaluates the property's (and unit's) **stay lifecycle rules** (§06)
+and creates **stay task bundles** — one `STAY_TASK_BUNDLE` row per
+matching rule, each containing 1..N `task` rows generated from the
+rule's template. Tasks in a bundle share `stay_task_bundle_id`.
 
-Turnover is created once per stay, lives across stay edits, and shows
-in the UI as a coherent group. **Edit semantics:**
+Three trigger types drive bundle generation:
 
-- If `|new.check_out_at - old.check_out_at| < 4h` **and** the stay is
+- **`after_checkout`** — tasks to perform after the guest leaves
+  (turnover cleaning, linen change, inventory restock). Same logic as
+  the former turnover bundle.
+- **`before_checkin`** — tasks to perform before the guest arrives
+  (welcome prep, fresh flowers, pre-arrival inspection). Subject to
+  pull-back scheduling (§06) when the ideal date falls on an
+  unavailable day.
+- **`during_stay`** — recurring tasks within the stay bounds (weekly
+  linen change for long stays). Driven by an RRULE on the rule.
+
+Bundles are created once per (stay, rule) pair, live across stay
+edits, and show in the UI as coherent groups. **Edit semantics:**
+
+- For `after_checkout` bundles: if
+  `|new.check_out_at - old.check_out_at| < 4h` **and** the stay is
   not yet in `checked_out` state: patch `scheduled_for_local`,
-  `scheduled_for_utc`, `due_by_utc`, and `assigned_employee_id` on the
-  existing bundle's tasks in place (state-gated to
+  `scheduled_for_utc`, `due_by_utc`, and `assigned_employee_id` on
+  the existing bundle's tasks in place (state-gated to
   `scheduled | pending`).
+- For `before_checkin` bundles: same logic keyed on
+  `check_in_at` shift.
 - Otherwise: cancel the existing bundle's `scheduled | pending` tasks
-  with `cancellation_reason = 'stay rescheduled'` and generate a new
-  bundle from the template.
+  with `cancellation_reason = 'stay rescheduled'` and regenerate from
+  the rule's template.
 
 ### Overlap detection
 
-Two stays for the same property whose `[check_in_at, check_out_at)`
-overlap raise a **conflict**. Conflicts are visible in the UI, are
+Two stays for the same **unit** whose `[check_in_at, check_out_at)`
+overlap raise a **conflict**. Stays at different units in the same
+property do not conflict. Conflicts are visible in the UI, are
 delivered in the daily digest (§10), and do **not** prevent the second
 insert. Rationale: iCal feeds frequently double-book for a few minutes
 while a cancellation propagates; we flag and let a human decide.
@@ -167,7 +235,10 @@ while a cancellation propagates; we flag and let a human decide.
 ## iCal feed
 
 Each feed is a URL the worker polls on schedule. Stays are upserted by
-`(property_id, source, external_id)`.
+`(unit_id, source, external_id)` when `unit_id` is set, or by
+`(property_id, source, external_id)` when null (existing behavior for
+single-unit properties where the manager has not mapped feeds to
+units).
 
 ### Fields
 
@@ -175,6 +246,7 @@ Each feed is a URL the worker polls on schedule. Stays are upserted by
 |---------------|-----------|
 | id            | ULID PK   |
 | property_id   | ULID FK   |
+| unit_id       | ULID FK?  | when set, stays from this feed are created for that unit. When null, stays go to the default unit (or manager maps manually) |
 | source        | enum      |
 | url           | text (secret — envelope-encrypted, §15) |
 | poll_cadence  | text      | default `*/15 * * * *` |
@@ -195,7 +267,7 @@ Each feed is a URL the worker polls on schedule. Stays are upserted by
   VEVENT reappears upstream).
 - Diff ordinary VEVENTs against existing stays: create, update, or
   cancel.
-- Surface parse errors as `issue_report` against the feed.
+- Surface parse errors as `issue` against the feed.
 - Rate-limit per host; respect provider 429s.
 
 ### Supported providers
@@ -226,18 +298,27 @@ A tokenized URL shared with each guest. No login. Read-only.
 
 ### What the page shows
 
-- Property name + cover photo (optional upload per property).
+- Property name (and unit name for multi-unit properties) + cover
+  photo (optional upload per property).
 - Dates of stay, local time.
-- Wifi SSID + password (stay override wins over property default).
-- Access info (door codes, lockbox, parking).
+- Wifi SSID + password (stay override wins over unit override wins
+  over property default).
+- Access info (door codes, lockbox, parking — unit
+  `welcome_overrides_json` merged over property `welcome_defaults_json`).
 - House rules.
 - Trash/recycling schedule.
 - Local tips (markdown from property or manager-overridden per stay).
-- **Check-out checklist** — a subset of the turnover task's checklist
-  flagged `guest_visible = true`, rendered as a simple
+- **Check-out checklist** — a subset of the stay task bundle's
+  checklist flagged `guest_visible = true`, rendered as a simple
   "Before you leave:" list.
 - Emergency contacts.
 - A "Report an issue" button that opens a mailto link to the manager.
+- **Equipment** — when `assets.show_guest_assets` is `true` for the
+  property (§02 settings cascade, §21), lists assets where
+  `guest_visible = true`. Each entry shows the asset name,
+  `guest_instructions_md` (rendered markdown), and cover photo if set.
+  Omitted entirely when no visible assets exist or the setting is
+  `false`.
 
 ### Privacy
 
@@ -255,25 +336,33 @@ A tokenized URL shared with each guest. No login. Read-only.
 
 ## Airbnb-style edge cases
 
-- **Same-day turnovers.** When `prev.check_out_at` equals
-  `next.check_in_at`, turnover is time-boxed to the gap between
-  providers' defaults (usually 11:00 → 16:00); template default
-  overrides apply.
+- **Same-day turnovers (same unit).** When `prev.check_out_at` equals
+  `next.check_in_at` on the same unit, `after_checkout` bundles are
+  time-boxed to the gap between check-out and check-in;
+  `before_checkin` rules with `suppress_if_turnaround_under_hours`
+  matching the gap are suppressed (the turnover covers pre-arrival).
 - **Long stays / owner stays.** `source = manual` can carry
   `status = in_house` for months; inventory and schedules still run
-  but turnover templates do not fire.
+  but lifecycle rules with `guest_kind_filter` excluding `owner`
+  do not fire.
 - **Back-to-back with no cleaning window.** System surfaces a warning
   in the daily digest and creates a lower-severity issue. Managers
   can override.
 - **Cancellations after check-in.** Rare; handled by `status =
   cancelled` + preservation of any shifts already logged.
+- **Multiple units, same-day turnovers.** Each unit generates its own
+  bundles independently. The assignment algorithm's "fewest tasks in
+  7-day window" tiebreaker naturally distributes work across staff.
 
 ## CLI (examples, see §13)
 
 ```
 miployees properties add "Villa Sud" --tz Europe/Paris --kind str
+miployees units add <prop> "Room 1" --checkin-time 16:00 --checkout-time 10:00
+miployees units list <prop>
 miployees areas add <prop> "Pool" --kind outdoor
-miployees ical add --property <prop> --source airbnb --url https://...
+miployees areas add <prop> "Bedroom 1" --kind indoor_room --unit <unit>
+miployees ical add --property <prop> --unit <unit> --source airbnb --url https://...
 miployees stays list --property <prop> --upcoming 14d
 miployees stays welcome-link <stay-id>   # emits the guest URL
 ```

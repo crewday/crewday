@@ -83,17 +83,20 @@ Motion:
 /task/<id>                → task detail + complete/skip/comment/evidence
 /chat                     → full agent conversation (inbox for all task
                             notes, issue reports, expense photos, Q&A)
-/expenses                 → submit + list own
+/my/expenses              → submit + list own
 /me                       → profile + language + passkeys
 /history                  → Tasks / Chats / Expenses / Leaves tabs
 /issues/new               → fallback issue form (still reachable from
                             chat attach flow; no footer entry)
+/asset/<id>               → asset detail (read-only; action history,
+                            report issue, log one-off action)
+/asset/scan               → QR scan → redirect to asset detail
 /shifts                   → clock in/out + history (manual mode only;
                             hidden when `time.clock_mode = auto | disabled`)
 ```
 
 **Footer (bottom nav):** exactly five items —
-`Today · Week · Chat · Expenses · Me`. The `Issues` tab from v0 is
+`Today · Week · Chat · My Expenses · Me`. The `Issues` tab from v0 is
 **removed**; issues are filed through the chat page's attach flow
 (which emits to `/issues/new` under the hood). There is **no
 floating chat FAB**; chat is a first-class footer tab.
@@ -104,16 +107,23 @@ Everything above plus:
 
 ```
 /properties               → property list
-/property/<id>            → property hub (areas, stays, tasks, inventory, instructions, closures, settings)
+/property/<id>            → property hub (units, areas, stays, tasks, inventory, instructions, closures, lifecycle rules, settings)
 /property/<id>/closures   → property closure calendar (incl. iCal unavailable markers)
 /stays                    → stays list & calendar
 /employees                → staff list
-/employee/<id>            → profile, roles, capabilities, settings, shifts, payslips, leaves
+/employee/<id>            → profile, roles, capabilities, settings, shifts, payslips, leaves, availability overrides
 /employee/<id>/leaves     → leave ledger (approve/reject)
+/employee/<id>/availability → availability override calendar (weekly pattern + date overrides)
 /leaves                   → cross-employee leave inbox (pending approvals)
+/availability-overrides   → cross-employee availability override inbox (pending approvals)
+/holidays                 → public holiday calendar management (CRUD, scheduling effects, payroll multipliers)
 /templates                → task templates
 /schedules                → schedule list & previews
 /instructions             → knowledge base
+/assets                   → asset list (filter by property, status, type)
+/asset/<id>               → asset hub (details, actions, documents, TCO, QR)
+/asset_types              → asset type catalog (system + workspace-custom)
+/documents                → document list (filter by asset, property, kind, expiry)
 /inventory                → per-property stock
 /pay                      → periods, payslips, rules
 /expenses                 → approvals queue
@@ -161,11 +171,14 @@ also be requested of the agent in `.desk__agent`.
 
 ### Calendar surfaces
 
-- The `/stays` calendar overlays four layers: stays (coloured by
-  source), turnover bundles (neutral pattern), property closures
-  (greyed), and employee leave (narrow strip per employee, toggle-
-  able). The same component is reused on `/property/<id>/closures`
-  with the stay/turnover layers hidden.
+- The `/stays` calendar overlays five layers: stays (coloured by
+  source, grouped by unit for multi-unit properties), stay task
+  bundles (neutral pattern, with trigger-type indicator), property
+  closures (greyed, unit-specific or property-wide), employee leave
+  (narrow strip per employee, toggle-able), and public holidays
+  (full-width marker with scheduling effect badge). The same
+  component is reused on `/property/<id>/closures` with the
+  stay/bundle layers hidden.
 - Closure rows with `reason = ical_unavailable` render read-only
   (the source is the upstream iCal feed); editing them surfaces an
   inline "Edit in Airbnb / VRBO" hint linked to the feed.
@@ -340,8 +353,8 @@ Explicitly **not** on the Me page:
 - **Chats** — archived chat topics (post-compaction; full-text
   searchable, see §11 "Conversation compaction").
 - **Expenses** — all submitted claims, with states.
-- **Leaves** — one-off `employee_leave` rows and upcoming weekly-
-  availability exceptions.
+- **Leaves** — one-off `employee_leave` rows, availability overrides,
+  and upcoming weekly-availability exceptions.
 
 History is read-only.
 

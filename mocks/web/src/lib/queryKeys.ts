@@ -19,7 +19,7 @@ export const qk = {
   expenses: (scope: "all" | "mine") => ["expenses", scope] as const,
   issues: () => ["issues"] as const,
   stays: () => ["stays"] as const,
-  templates: () => ["templates"] as const,
+  taskTemplates: () => ["task_templates"] as const,
   schedules: () => ["schedules"] as const,
   instructions: () => ["instructions"] as const,
   instruction: (iid: string) => ["instruction", iid] as const,
@@ -42,4 +42,8 @@ export const qk = {
   agentManagerActions: () => ["agent", "manager", "actions"] as const,
   shifts: () => ["shifts"] as const,
   guest: () => ["guest"] as const,
+  assetTypes: () => ["asset_types"] as const,
+  assets: () => ["assets"] as const,
+  asset: (aid: string) => ["asset", aid] as const,
+  documents: () => ["documents"] as const,
 } as const;

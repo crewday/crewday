@@ -3,12 +3,13 @@ import { useQuery } from "@tanstack/react-query";
 import { fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
 import { Loading } from "@/components/common";
-import type { ChecklistItem, Property, Stay } from "@/types/api";
+import type { Asset, ChecklistItem, Property, Stay } from "@/types/api";
 
 interface GuestPayload {
   stay: Stay | null;
   property: Property | null;
   guest_checklist: ChecklistItem[];
+  guest_assets: Asset[];
 }
 
 // "Mon 18 Apr" — matches the Jinja `%a %d %b` formatting used by the
@@ -51,7 +52,7 @@ export default function GuestPage() {
     );
   }
 
-  const { stay, property, guest_checklist } = q.data;
+  const { stay, property, guest_checklist, guest_assets } = q.data;
 
   return (
     <div className="surface surface--guest">
@@ -88,6 +89,25 @@ export default function GuestPage() {
               <li>Pets welcome, please keep them off the sofas.</li>
             </ul>
           </article>
+
+          {guest_assets.length > 0 && (
+            <article className="guest-card guest-card--wide">
+              <h2 className="guest-card__title">Equipment</h2>
+              <div className="guest-equipment">
+                {guest_assets.map((a) => (
+                  <div key={a.id} className="guest-asset-card">
+                    <div className="guest-asset-card__name">{a.name}</div>
+                    <div className="guest-asset-card__meta">
+                      {[a.make, a.model].filter(Boolean).join(" ")}
+                    </div>
+                    {a.guest_instructions && (
+                      <div className="guest-asset-card__instructions">{a.guest_instructions}</div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </article>
+          )}
 
           <article className="guest-card">
             <h2 className="guest-card__title">Trash &amp; recycling</h2>

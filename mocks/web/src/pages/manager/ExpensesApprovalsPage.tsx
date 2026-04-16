@@ -15,14 +15,6 @@ const STATUS_TONE: Record<Exclude<ExpenseStatus, "draft" | "submitted">, "moss" 
   reimbursed: "sky",
 };
 
-const CATEGORY_BY_ID: Record<string, string> = {
-  "x-1": "supplies",
-  "x-2": "fuel",
-  "x-3": "maintenance",
-  "x-4": "food",
-  "x-5": "maintenance",
-};
-
 function sumCents(xs: Expense[]): number {
   return xs.reduce((acc, x) => acc + x.amount_cents, 0);
 }
@@ -122,7 +114,7 @@ export default function ExpensesApprovalsPage() {
             const emp = empById.get(x.employee_id);
             const lowConf = x.ocr_confidence !== null && x.ocr_confidence < 0.95;
             const cls = "approval" + (x.amount_cents >= 10000 ? " approval--medium" : "");
-            const category = CATEGORY_BY_ID[x.id] ?? "other";
+            const category = x.category ?? "other";
             return (
               <li key={x.id} className={cls}>
                 <div className="approval__head">

@@ -25,7 +25,7 @@ from __future__ import annotations
 import asyncio
 import json
 from dataclasses import asdict, is_dataclass
-from datetime import date, datetime, time
+from datetime import date, datetime, time, timedelta
 from pathlib import Path
 from typing import Any, AsyncIterator, Iterable
 
@@ -73,7 +73,7 @@ def _encode(obj: Any) -> Any:
     """Recursively serialise dataclasses + datetimes for JSONResponse.
 
     FastAPI's default encoder handles dataclasses but chokes on datetime
-    values inside `dict` fields (e.g. `HOUSEHOLD_SETTINGS`); this keeps
+    values inside `dict` fields (e.g. `WORKSPACE_SETTINGS`); this keeps
     the output predictable for the SPA.
     """
     if is_dataclass(obj) and not isinstance(obj, type):
@@ -220,6 +220,9 @@ def api_property(pid: str) -> Response:
         "inventory": md.inventory_for_property(pid),
         "instructions": [i for i in md.INSTRUCTIONS if i.property_id == pid or i.scope == "global"],
         "closures": md.closures_for_property(pid),
+        "lifecycle_rules": md.lifecycle_rules_for_property(pid),
+        "assets": md.assets_for_property(pid),
+        "asset_documents": md.documents_for_property(pid),
     })
 
 
@@ -237,6 +240,7 @@ def api_employee(eid: str) -> Response:
         "subject_expenses": md.expenses_for_employee(eid),
         "subject_leaves": md.leaves_for_employee(eid),
         "subject_payslips": md.payslips_for_employee(eid),
+        "subject_shifts": md.shifts_for_employee(eid),
     })
 
 
@@ -259,6 +263,7 @@ def api_task(tid: str) -> Response:
         "task": task,
         "property": md.property_by_id(task.property_id),
         "instructions": md.instructions_for_task(task),
+        "comments": md.comments_for_task(tid),
     })
 
 
@@ -336,7 +341,7 @@ def api_property_closures(property_id: str) -> Response:
     })
 
 
-@app.get("/api/v1/templates")
+@app.get("/api/v1/task_templates")
 def api_templates() -> Response:
     return ok(md.TEMPLATES)
 
@@ -372,6 +377,28 @@ def api_payslips() -> Response:
     current = [p for p in md.PAYSLIPS if p.period_starts.month == 4]
     previous = [p for p in md.PAYSLIPS if p.period_starts.month == 3]
     return ok({"current": current, "previous": previous})
+
+
+@app.get("/api/v1/shifts")
+def api_shifts() -> Response:
+    return ok(md.SHIFTS)
+
+
+@app.get("/api/v1/pay_rules")
+def api_pay_rules() -> Response:
+    return ok(md.PAY_RULES)
+
+
+@app.get("/api/v1/pay_periods")
+def api_pay_periods() -> Response:
+    return ok(md.PAY_PERIODS)
+
+
+@app.get("/api/v1/lifecycle_rules")
+def api_lifecycle_rules(property_id: str = "") -> Response:
+    if property_id:
+        return ok(md.lifecycle_rules_for_property(property_id))
+    return ok(md.LIFECYCLE_RULES)
 
 
 @app.get("/api/v1/leaves")
@@ -495,6 +522,69 @@ def api_employee_settings(eid: str) -> Response:
     return ok({"overrides": emp.settings_override, "resolved": resolved})
 
 
+# ── Assets & documents ───────────────────────────────────────────────
+
+@app.get("/api/v1/asset_types")
+def api_asset_types() -> Response:
+    return ok(md.ASSET_TYPES)
+
+
+@app.get("/api/v1/assets")
+def api_assets(property_id: str = "", category: str = "", condition: str = "") -> Response:
+    result = list(md.ASSETS)
+    if property_id:
+        result = [a for a in result if a.property_id == property_id]
+    if category:
+        type_ids = {t.id for t in md.ASSET_TYPES if t.category == category}
+        result = [a for a in result if a.asset_type_id in type_ids]
+    if condition:
+        result = [a for a in result if a.condition == condition]
+    return ok(result)
+
+
+@app.get("/api/v1/assets/{aid}")
+def api_asset(aid: str) -> Response:
+    asset = md.asset_by_id(aid)
+    if asset is None:
+        return JSONResponse({"detail": "not found"}, status_code=404)
+    asset_type = md.asset_type_by_id(asset.asset_type_id) if asset.asset_type_id else None
+    actions = md.actions_for_asset(aid)
+    docs = md.documents_for_asset(aid)
+    linked_tasks = [t for t in md.TASKS if t.asset_id == aid]
+    return ok({
+        "asset": asset,
+        "asset_type": asset_type,
+        "property": md.property_by_id(asset.property_id),
+        "actions": actions,
+        "documents": docs,
+        "linked_tasks": linked_tasks,
+    })
+
+
+@app.get("/api/v1/documents")
+def api_documents(property_id: str = "", asset_id: str = "", kind: str = "") -> Response:
+    result = list(md.ASSET_DOCUMENTS)
+    if property_id:
+        result = [d for d in result if d.property_id == property_id]
+    if asset_id:
+        result = [d for d in result if d.asset_id == asset_id]
+    if kind:
+        result = [d for d in result if d.kind == kind]
+    return ok(result)
+
+
+@app.post("/api/v1/assets/{aid}/actions/{action_id}/complete")
+def api_asset_action_complete(aid: str, action_id: str) -> Response:
+    action = next((a for a in md.ASSET_ACTIONS if a.id == action_id and a.asset_id == aid), None)
+    if action is None:
+        return JSONResponse({"detail": "not found"}, status_code=404)
+    action.last_performed_at = md.TODAY
+    if action.interval_days:
+        action.next_due_on = md.TODAY + timedelta(days=action.interval_days)
+    hub.publish("asset.action.completed", {"asset_id": aid, "action": action})
+    return ok(action)
+
+
 @app.get("/api/v1/agent/employee/log")
 def api_agent_employee_log() -> Response:
     return ok(md.EMPLOYEE_CHAT_LOG)
@@ -515,10 +605,14 @@ def api_guest() -> Response:
     stay = md.stay_by_id(md.GUEST_STAY_ID)
     turnover_task = next((t for t in md.TASKS if t.turnover_bundle_id == "tb-apt-3b-18"), None)
     guest_checklist = [c for c in (turnover_task.checklist if turnover_task else []) if c.get("guest_visible")]
+    guest_assets: list[md.Asset] = []
+    if stay:
+        guest_assets = [a for a in md.assets_for_property(stay.property_id) if a.guest_visible]
     return ok({
         "stay": stay,
         "property": md.property_by_id(stay.property_id) if stay else None,
         "guest_checklist": guest_checklist,
+        "guest_assets": guest_assets,
     })
 
 
@@ -578,22 +672,66 @@ def api_task_skip(tid: str, payload: dict[str, Any] = Body(default_factory=dict)
     return ok(task)
 
 
+_scan_counter = 0
+
+_SCAN_SCENARIOS: list[dict[str, Any]] = [
+    {
+        "vendor":            {"value": "Carrefour Market", "confidence": 0.97},
+        "purchased_at":      {"value": "2026-04-15T14:32:00", "confidence": 0.95},
+        "currency":          {"value": "EUR", "confidence": 0.99},
+        "total_amount_cents": {"value": 2340, "confidence": 0.96},
+        "category":          {"value": "supplies", "confidence": 0.92},
+        "note_md":           {"value": "Cleaning products — 2x bleach, sponge pack, bin bags", "confidence": 0.91},
+        "agent_question":    None,
+    },
+    {
+        "vendor":            {"value": "", "confidence": 0.35},
+        "purchased_at":      {"value": "2026-04-14T09:00:00", "confidence": 0.72},
+        "currency":          {"value": "EUR", "confidence": 0.98},
+        "total_amount_cents": {"value": 4500, "confidence": 0.88},
+        "category":          {"value": "other", "confidence": 0.40},
+        "note_md":           {"value": "Bank transfer — details unclear", "confidence": 0.55},
+        "agent_question":    "Who was this sent to, and what was it for?",
+    },
+    {
+        "vendor":            {"value": "Brico Depot", "confidence": 0.78},
+        "purchased_at":      {"value": "2026-04-13T16:45:00", "confidence": 0.65},
+        "currency":          {"value": "EUR", "confidence": 0.99},
+        "total_amount_cents": {"value": 8950, "confidence": 0.68},
+        "category":          {"value": "maintenance", "confidence": 0.82},
+        "note_md":           {"value": "Assorted hardware — partially illegible", "confidence": 0.62},
+        "agent_question":    "Does the total of \u20ac89.50 look right? The receipt is faded at the bottom.",
+    },
+]
+
+
+@app.post("/api/v1/expenses/scan")
+def api_expenses_scan() -> Response:
+    global _scan_counter
+    scenario = _SCAN_SCENARIOS[_scan_counter % len(_SCAN_SCENARIOS)]
+    _scan_counter += 1
+    return ok(scenario)
+
+
 @app.post("/api/v1/expenses")
 def api_expenses_create(payload: dict[str, Any] = Body(...)) -> Response:
     try:
         cents = int(round(float(payload.get("amount", 0)) * 100))
     except (TypeError, ValueError):
         cents = 0
+    cat = payload.get("category")
+    ocr = payload.get("ocr_confidence")
     x = md.Expense(
         id=f"x-{len(md.EXPENSES) + 1}",
         employee_id=md.DEFAULT_EMPLOYEE_ID,
         amount_cents=cents,
-        currency="EUR",
+        currency=str(payload.get("currency") or "EUR"),
         merchant=str(payload.get("merchant") or "Unknown"),
         submitted_at=datetime.now(),
         status="submitted",
         note=str(payload.get("note") or ""),
-        ocr_confidence=None,
+        ocr_confidence=float(ocr) if ocr is not None else None,
+        category=str(cat) if cat else None,
     )
     md.EXPENSES.insert(0, x)
     return ok(x, status_code=201)
@@ -791,7 +929,6 @@ _SPA_PASSTHROUGH: Iterable[str] = (
     "/healthz",
     "/readyz",
     "/metrics",
-    "/assets",
 )
 
 

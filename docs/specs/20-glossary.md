@@ -28,11 +28,31 @@ fix the offender.
 - **Archive / reinstate.** The canonical verbs for off-boarding and
   bringing back an employee (§05). Replaces "end", "terminate", "rehire".
 - **Area.** A subdivision of a property (kitchen, pool, Room 3).
+  Optionally scoped to a specific unit (`area.unit_id`); null means
+  shared/property-level.
+- **Asset.** A tracked physical item installed at a property — an
+  appliance, piece of equipment, or vehicle. Carries condition, status,
+  warranty, and QR token. See §21.
+- **Asset action.** A maintenance operation defined on an asset
+  (e.g. "clean filter every 30 days"). Can be linked to the task
+  scheduling system; completion updates `last_performed_at`. See §21.
+- **Asset document.** A file attached to an asset or a property —
+  manual, warranty, invoice, certificate, etc. Carries optional
+  `expires_on` and `amount_cents` for TCO tracking. See §21.
+- **Asset type.** A catalog entry describing a category of equipment
+  (e.g. "Air conditioner", "Pool pump"). System-seeded types ship
+  with default maintenance actions; managers add workspace-custom
+  types. See §21.
 - **Assignment.** The linkage of an employee to a role+property
   (`property_role_assignment`) and, per task, the pointer
   `task.assigned_employee_id`. There is no separate `task_assignment`
   entity — task assignment is just a column.
 - **Audit log.** Append-only ledger of all state-changing actions.
+- **Availability override.** A date-specific override of an
+  employee's weekly availability pattern. Adding work is self-service
+  (auto-approved); reducing availability requires manager approval.
+  Only approved overrides affect the assignment algorithm. See §06
+  `employee_availability_overrides`.
 - **Break-glass code.** Manager-only single-use recovery code that
   generates exactly one magic link on redemption (§03).
 - **Capability.** A per-employee, per-property-role feature flag,
@@ -40,6 +60,9 @@ fix the offender.
   assignment → employee_role → role → catalog default). Explicit
   `false` blocks inheritance; absent keys inherit. Canonical catalog
   in §05.
+- **Condition (asset).** The physical state of an asset: `new | good |
+  fair | poor | needs_replacement`. Changes are audit-logged as
+  `asset.condition_changed`. See §21.
 - **Checklist item.** A row in `task_checklist_item` — one tickable
   line on a task, seeded from the template's
   `checklist_template_json`. Per-item tick state is authoritative.
@@ -49,33 +72,50 @@ fix the offender.
 - **Correlation ID.** Per-request identifier (or caller-supplied
   `X-Correlation-Id`) that groups audit rows. Not a workflow-lifetime
   concept.
+- **Digest run.** A single execution of the daily summary
+  email/notification pipeline (§10). Records the digest template,
+  recipients, send time, and delivery outcomes.
 - **Employee leave.** Approved absence window (§06). Unapproved
   requests do not affect assignment.
 - **Evidence.** Artifact attached to a completion — photo, note, or
   checklist snapshot.
 - **Evidence policy.** Photo-evidence requirement resolved by
-  walking a four-layer stack workspace → villa → employee → task
-  (§05 "Evidence-policy stack", §06 "Evidence policy inheritance").
-  Values are `inherit | require | optional | forbid`; the workspace
-  root is always concrete. First concrete value, root-first, wins.
-  `forbid` at any layer is absolute.
+  walking a five-layer stack workspace → villa → unit → employee →
+  task (§05 "Evidence-policy stack", §06 "Evidence policy
+  inheritance"). Values are `inherit | require | optional | forbid`;
+  the workspace root is always concrete. First concrete value,
+  root-first, wins. `forbid` at any layer is absolute.
 - **File.** Shared blob-reference row (§02 `file`). Pluggable backend;
   local disk in v1.
+- **Guest link.** A tokenized URL sent to a stay guest that opens a
+  welcome page showing property info, wifi, house rules, and a
+  guest-visible checklist. See §04.
 - **Handle.** Optional user-friendly slug (`maid-maria`) stored in a
   per-entity `handle` column where useful. Unique per parent scope.
 - **Household.** **v0 term; replaced by Workspace in v1.** Retained
   here so historical references in migrations, ADRs, and older code
   remain resolvable. New code and new docs use Workspace.
+- **iCal feed.** An external calendar subscription (Airbnb, VRBO,
+  Booking, generic) polled periodically to import stays into a unit.
+  Feed URLs are stored in `secret_envelope` (§15). See §04.
 - **Instruction.** A standing SOP attached at global / property /
   area / link scope (§07). `instruction_link` is canonical;
   `task.linked_instruction_ids` is a denormalized cache.
-- **Issue.** An employee-reported problem tracked with state and
-  possibly converted to a task.
+- **Inventory movement.** An append-only ledger row recording a change
+  to `inventory_item.on_hand`. Reason enum: `restock | consume |
+  adjust | waste | transfer_in | transfer_out | audit_correction`.
+  See §08.
+- **Issue.** An employee-reported problem tracked with state
+  (`open | in_progress | resolved | wont_fix`) and possibly converted
+  to a task.
 - **Magic link.** Single-use, signed URL used to enroll or recover a
   passkey. Consumes a break-glass code (if that's the source)
   regardless of whether the link is later clicked.
 - **Manager.** Human with elevated scope. All managers are peers in v1.
 - **Model assignment.** The capability → model mapping (§11).
+- **Off-app reach-out.** Agent-initiated WhatsApp or SMS message to an
+  employee for low-stakes checks. Requires the employee's
+  `preferred_offapp_channel` to be set. See §10.
 - **Passkey.** WebAuthn platform or roaming authenticator credential.
 - **Pay period.** A date-bucket inside which shifts roll up into a
   payslip. `open → locked → paid`; `paid` is set automatically when
@@ -126,28 +166,68 @@ fix the offender.
 - **Pending (task).** A task whose `scheduled_for_utc` is within the
   next hour (or already past for a one-off). Distinct from
   `scheduled`; used to populate the employee "today" list (§06).
-- **Property.** A managed physical place. `kind` (§04) gates
-  turnover-bundle generation: `residence` never, `str`/`vacation`
-  always, `mixed` only for non-owner stays.
-- **Property closure.** A dated blackout on a property that prevents
-  schedule generation (§06). iCal "Not available" VEVENTs become
-  rows of this kind automatically.
+- **Property.** A managed physical place containing one or more
+  units. `kind` (§04) gates stay lifecycle rule seeding: `residence`
+  none, `str`/`vacation` default `after_checkout` rule, `mixed` same
+  with `guest_kind_filter`.
+- **QR token.** A unique 12-character Crockford base32 identifier
+  assigned to every asset at creation. Encodes into a QR code for
+  phone scanning; the URL pattern is
+  `https://<host>/asset/scan/<qr_token>`. See §21.
+- **Property closure.** A dated blackout on a property (or a specific
+  unit) that prevents schedule generation (§06). iCal "Not available"
+  VEVENTs become rows of this kind automatically.
+- **Property kind.** Classification of a property: `residence |
+  vacation | str | mixed`. Drives default area seeding, lifecycle rule
+  templates, and scheduling behaviour. See §04.
+- **Public holiday.** A workspace-managed holiday date with
+  configurable scheduling effect (`block | allow | reduced`) and
+  optional payroll multiplier. Manager-configured per holiday. See
+  §06 `public_holidays`.
+- **Pull-back (scheduling).** The process of moving a pre-arrival task
+  to an earlier date when the ideal date falls on an unavailable day
+  (leave, holiday, day off). Bounded by `max_advance_days` on the
+  lifecycle rule. See §06 "Pull-back logic for before_checkin tasks".
 - **Role.** A named capability bundle (maid, cook, …). `role.key` is a
   stable slug but editable; external integrations should prefer the
   ULID.
 - **Schedule.** Description of when tasks materialize (RRULE).
   `paused_at` wins over `active_from/active_until`.
+- **Scope (instruction).** The visibility level of an instruction:
+  `global` (all properties), `property` (one property), `area` (one
+  area within a property), or linked via `instruction_link`. See §07.
 - **Session.** Browser-bound server-side record tied to a passkey.
 - **Shift.** A clocked-in interval for an employee. `status` is
   `open | closed | disputed`.
 - **SKU / item.** An inventory entry per property.
-- **Stay.** A reservation of a property (guest, owner, staff, other —
-  see `guest_kind`) for a date range.
+- **Stay.** A reservation of a unit within a property (guest, owner,
+  staff, other — see `guest_kind`) for a date range. Overlap
+  detection is per-unit. Lifecycle rules generate task bundles around
+  stay events.
+- **Stay lifecycle rule.** A trigger-based configuration that
+  generates task bundles around stay events: `before_checkin`,
+  `after_checkout`, or `during_stay`. Replaces the simpler
+  turnover-template pointer. See §06.
+- **Stay status.** Lifecycle state of a guest stay: `tentative |
+  confirmed | in_house | checked_out | cancelled`. See §04.
+- **Stay task bundle.** A set of tasks generated by a stay lifecycle
+  rule for a specific stay. Replaces `turnover_bundle`. Tasks in a
+  bundle share `stay_task_bundle_id`. See §06.
+- **TCO (total cost of ownership).** The all-in cost of an asset:
+  purchase price + expense lines + document invoices, divided by years
+  owned for an annual figure. Reported per asset and aggregated per
+  property. See §21.
 - **Template (task template).** Reusable task definition.
 - **Token.** API token; `mip_<keyid>_<secret>` on the wire.
-- **Turnover.** The set of tasks generated on stay check-out — a
-  `turnover_bundle` parent with its child tasks. Gating depends on
-  `property.kind` and the stay's `guest_kind`.
+- **Turnover.** The set of tasks generated around a stay — now
+  modeled as `stay_task_bundle` rows generated by `stay_lifecycle_rule`
+  entries. The `after_checkout` trigger is the direct successor of the
+  former `turnover_bundle`. Gating depends on the rule's
+  `guest_kind_filter` and the property's `kind`.
+- **Unit.** A bookable subdivision of a property. Every property has
+  at least one unit; single-unit properties auto-create a default
+  unit with the unit layer hidden in the UI. Stays, lifecycle bundles,
+  and iCal feeds are unit-scoped. See §04.
 - **Unavailable marker.** Historical name for iCal blocks that are
   not stays; these are now modeled as `property_closure` rows with
   `reason = ical_unavailable`.

@@ -77,12 +77,12 @@ class Employee:
 class Stay:
     id: str
     property_id: str
-    guest: str
+    guest_name: str
     source: Literal["manual", "airbnb", "vrbo", "booking", "google_calendar", "ical"]
     check_in: date
     check_out: date
     guests: int
-    status: Literal["booked", "in_house", "checked_out", "cancelled"] = "booked"
+    status: Literal["tentative", "confirmed", "in_house", "checked_out", "cancelled"] = "confirmed"
 
 
 @dataclass
@@ -105,6 +105,7 @@ class Task:
     template_id: str | None = None
     schedule_id: str | None = None
     turnover_bundle_id: str | None = None
+    asset_id: str | None = None
     settings_override: dict[str, Any] = field(default_factory=dict)
 
 
@@ -119,6 +120,7 @@ class Expense:
     status: Literal["draft", "submitted", "approved", "rejected", "reimbursed"]
     note: str
     ocr_confidence: float | None = None
+    category: str | None = None
 
 
 @dataclass
@@ -216,7 +218,7 @@ class Issue:
     title: str
     body: str
     reported_at: datetime
-    status: Literal["open", "in_progress", "resolved"]
+    status: Literal["open", "in_progress", "resolved", "wont_fix"]
 
 
 @dataclass
@@ -287,6 +289,155 @@ class Message:
     from_: str
     body: str
     at: datetime
+
+
+# ── Time / payroll entities ─────────────────────────────────────────
+
+@dataclass
+class Shift:
+    id: str
+    employee_id: str
+    property_id: str
+    started_at: datetime
+    ended_at: datetime | None
+    status: Literal["open", "closed", "disputed"]
+    duration_seconds: int | None = None
+    break_seconds: int = 0
+    method_in: Literal["manual", "auto", "geo"] = "manual"
+    method_out: Literal["manual", "auto", "geo"] | None = None
+
+
+@dataclass
+class PayRule:
+    id: str
+    employee_id: str
+    property_id: str | None
+    kind: Literal["hourly", "monthly_salary", "per_task", "piecework"]
+    rate_cents: int
+    currency: str
+    effective_from: date
+    effective_until: date | None = None
+
+
+@dataclass
+class PayPeriod:
+    id: str
+    starts_on: date
+    ends_on: date
+    status: Literal["open", "locked", "paid"]
+    locked_at: datetime | None = None
+
+
+# ── Inventory movement ─────────────────────────────────────────────
+
+@dataclass
+class InventoryMovement:
+    id: str
+    item_id: str
+    delta: int
+    reason: Literal["restock", "consume", "adjust", "waste", "transfer_in", "transfer_out", "audit_correction"]
+    actor_kind: Literal["manager", "employee", "agent", "system"]
+    actor_id: str
+    occurred_at: datetime
+    note: str | None = None
+
+
+# ── Stay lifecycle ─────────────────────────────────────────────────
+
+@dataclass
+class StayLifecycleRule:
+    id: str
+    property_id: str
+    trigger: Literal["before_checkin", "after_checkout", "during_stay"]
+    template_id: str
+    offset_hours: int = 0
+    enabled: bool = True
+
+
+# ── Task comments ──────────────────────────────────────────────────
+
+@dataclass
+class TaskComment:
+    id: str
+    task_id: str
+    author_kind: Literal["employee", "manager", "agent", "system"]
+    author_id: str
+    body_md: str
+    created_at: datetime
+
+
+# ── Asset entities ──────────────────────────────────────────────────
+
+@dataclass
+class AssetType:
+    id: str
+    key: str
+    name: str
+    category: Literal[
+        "climate", "appliance", "plumbing", "pool", "heating",
+        "outdoor", "safety", "security", "vehicle", "other",
+    ]
+    icon: str
+    default_actions: list[dict[str, Any]]
+    default_lifespan_years: int | None = None
+
+
+@dataclass
+class Asset:
+    id: str
+    property_id: str
+    asset_type_id: str | None
+    name: str
+    area: str | None
+    condition: Literal["new", "good", "fair", "poor", "needs_replacement"]
+    status: Literal["active", "in_repair", "decommissioned", "disposed"]
+    make: str | None = None
+    model: str | None = None
+    serial_number: str | None = None
+    installed_on: date | None = None
+    purchased_on: date | None = None
+    purchase_price_cents: int | None = None
+    purchase_currency: str | None = None
+    purchase_vendor: str | None = None
+    warranty_expires_on: date | None = None
+    expected_lifespan_years: int | None = None
+    guest_visible: bool = False
+    guest_instructions: str | None = None
+    notes: str | None = None
+    qr_token: str = ""
+
+
+@dataclass
+class AssetAction:
+    id: str
+    asset_id: str
+    key: str | None
+    label: str
+    interval_days: int | None = None
+    last_performed_at: date | None = None
+    next_due_on: date | None = None
+    linked_task_id: str | None = None
+    linked_schedule_id: str | None = None
+    description: str | None = None
+    estimated_duration_minutes: int | None = None
+
+
+@dataclass
+class AssetDocument:
+    id: str
+    asset_id: str | None
+    property_id: str
+    kind: Literal[
+        "manual", "warranty", "invoice", "receipt", "photo",
+        "certificate", "contract", "permit", "insurance", "other",
+    ]
+    title: str
+    filename: str
+    size_kb: int
+    uploaded_at: datetime
+    expires_on: date | None = None
+    amount_cents: int | None = None
+    amount_currency: str | None = None
 
 
 # ── Canonical starter data ───────────────────────────────────────────
@@ -416,7 +567,7 @@ STAYS: list[Stay] = [
     Stay("s-2", "p-villa-sud", "Park couple",      "vrbo",         date(2026, 4, 17), date(2026, 4, 22), 2),
     Stay("s-3", "p-apt-3b",    "Nakamura",         "airbnb",       date(2026, 4, 15), date(2026, 4, 18), 2, "in_house"),
     Stay("s-4", "p-chalet",    "Müller family",    "manual",       date(2026, 4, 19), date(2026, 4, 26), 6),
-    Stay("s-5", "p-apt-3b",    "Svensson",         "booking",      date(2026, 4, 24), date(2026, 4, 28), 3),
+    Stay("s-5", "p-apt-3b",    "Svensson",         "booking",      date(2026, 4, 24), date(2026, 4, 28), 3, "tentative"),
 ]
 
 
@@ -431,6 +582,7 @@ TASKS: list[Task] = [
         photo_evidence="optional",
         instructions_ids=["i-pool-chem"],
         schedule_id="sch-pool-sat",
+        asset_id="a-villa-pool-pump",
         checklist=[
             {"label": "Skim surface", "done": True},
             {"label": "Check pH (7.2–7.6)", "done": True},
@@ -456,6 +608,7 @@ TASKS: list[Task] = [
         "e-maria", _t(11, 30), 45, "normal", "pending",
         photo_evidence="disabled",
         instructions_ids=["i-kitchen-deep"],
+        asset_id="a-villa-oven",
         checklist=[
             {"label": "Wipe surfaces", "done": False},
             {"label": "Degrease hood filter", "done": False},
@@ -518,11 +671,11 @@ TASKS: list[Task] = [
 
 
 EXPENSES: list[Expense] = [
-    Expense("x-1", "e-maria", 4280, "EUR", "Carrefour",   datetime(2026, 4, 14, 17, 32), "submitted", "Cleaning supplies — bleach, sponges, 2× fresh towels", ocr_confidence=0.96),
-    Expense("x-2", "e-arun",  1890, "EUR", "Total Energies", datetime(2026, 4, 13, 19, 5), "approved", "Fuel — Johnson airport run", ocr_confidence=0.99),
-    Expense("x-3", "e-ben",  12500, "EUR", "Pool Pro",    datetime(2026, 4, 10, 11, 22), "submitted", "Chlorine tablets (3 month supply) + replacement skimmer basket", ocr_confidence=0.94),
-    Expense("x-4", "e-ana",   2210, "EUR", "Marché Provence", datetime(2026, 4, 11, 9, 40), "approved", "Welcome-basket groceries — Apt 3B"),
-    Expense("x-5", "e-sam",   5780, "EUR", "Brico Dépôt", datetime(2026, 4, 9, 14, 58), "reimbursed", "Door handles, screws, wood filler"),
+    Expense("x-1", "e-maria", 4280, "EUR", "Carrefour",   datetime(2026, 4, 14, 17, 32), "submitted", "Cleaning supplies — bleach, sponges, 2× fresh towels", ocr_confidence=0.96, category="supplies"),
+    Expense("x-2", "e-arun",  1890, "EUR", "Total Energies", datetime(2026, 4, 13, 19, 5), "approved", "Fuel — Johnson airport run", ocr_confidence=0.99, category="fuel"),
+    Expense("x-3", "e-ben",  12500, "EUR", "Pool Pro",    datetime(2026, 4, 10, 11, 22), "submitted", "Chlorine tablets (3 month supply) + replacement skimmer basket", ocr_confidence=0.94, category="maintenance"),
+    Expense("x-4", "e-ana",   2210, "EUR", "Marché Provence", datetime(2026, 4, 11, 9, 40), "approved", "Welcome-basket groceries — Apt 3B", category="food"),
+    Expense("x-5", "e-sam",   5780, "EUR", "Brico Dépôt", datetime(2026, 4, 9, 14, 58), "reimbursed", "Door handles, screws, wood filler", category="maintenance"),
 ]
 
 
@@ -740,6 +893,320 @@ WEBHOOKS: list[Webhook] = [
 ]
 
 
+# ── Asset type catalog (18 pre-seeded) ──────────────────────────────
+
+ASSET_TYPES: list[AssetType] = [
+    AssetType("at-air-conditioner", "air_conditioner", "Air conditioner", "climate", "❄️", [
+        {"key": "clean_filters", "label": "Clean filters", "interval_days": 90, "estimated_duration_minutes": 30},
+        {"key": "service_unit", "label": "Annual service", "interval_days": 365, "estimated_duration_minutes": 120},
+    ], default_lifespan_years=12),
+    AssetType("at-oven-range", "oven_range", "Oven / range", "appliance", "🍳", [
+        {"key": "deep_clean", "label": "Deep clean", "interval_days": 90, "estimated_duration_minutes": 45},
+        {"key": "check_burners", "label": "Check burners", "interval_days": 365, "estimated_duration_minutes": 30},
+    ], default_lifespan_years=15),
+    AssetType("at-refrigerator", "refrigerator", "Refrigerator", "appliance", "🧊", [
+        {"key": "clean_coils", "label": "Clean coils", "interval_days": 180, "estimated_duration_minutes": 30},
+        {"key": "replace_water_filter", "label": "Replace water filter", "interval_days": 180, "estimated_duration_minutes": 15},
+        {"key": "check_seals", "label": "Check door seals", "interval_days": 365, "estimated_duration_minutes": 15},
+    ], default_lifespan_years=15),
+    AssetType("at-dishwasher", "dishwasher", "Dishwasher", "appliance", "🍽️", [
+        {"key": "clean_filter", "label": "Clean filter", "interval_days": 30, "estimated_duration_minutes": 15},
+        {"key": "descale", "label": "Descale", "interval_days": 90, "estimated_duration_minutes": 20},
+    ], default_lifespan_years=10),
+    AssetType("at-washing-machine", "washing_machine", "Washing machine", "appliance", "👕", [
+        {"key": "clean_drum", "label": "Clean drum", "interval_days": 30, "estimated_duration_minutes": 15},
+        {"key": "check_hoses", "label": "Check hoses", "interval_days": 365, "estimated_duration_minutes": 20},
+    ], default_lifespan_years=10),
+    AssetType("at-dryer", "dryer", "Dryer", "appliance", "🌀", [
+        {"key": "clean_vent", "label": "Clean vent", "interval_days": 90, "estimated_duration_minutes": 30},
+        {"key": "inspect_duct", "label": "Inspect duct", "interval_days": 365, "estimated_duration_minutes": 30},
+    ], default_lifespan_years=12),
+    AssetType("at-water-heater", "water_heater", "Water heater", "climate", "🔥", [
+        {"key": "flush_tank", "label": "Flush tank", "interval_days": 365, "estimated_duration_minutes": 60},
+        {"key": "check_anode", "label": "Check anode rod", "interval_days": 730, "estimated_duration_minutes": 45},
+    ], default_lifespan_years=12),
+    AssetType("at-boiler", "boiler", "Boiler / furnace", "heating", "🏠", [
+        {"key": "annual_service", "label": "Annual service", "interval_days": 365, "estimated_duration_minutes": 90},
+        {"key": "bleed_radiators", "label": "Bleed radiators", "interval_days": 180, "estimated_duration_minutes": 45},
+    ], default_lifespan_years=15),
+    AssetType("at-pool-pump", "pool_pump", "Pool pump", "pool", "🏊", [
+        {"key": "clean_basket", "label": "Clean basket", "interval_days": 7, "estimated_duration_minutes": 10},
+        {"key": "inspect_seals", "label": "Inspect seals", "interval_days": 180, "estimated_duration_minutes": 20},
+        {"key": "service_pump", "label": "Full service", "interval_days": 365, "estimated_duration_minutes": 120},
+    ], default_lifespan_years=8),
+    AssetType("at-pool-heater", "pool_heater", "Pool heater", "pool", "♨️", [
+        {"key": "check_thermostat", "label": "Check thermostat", "interval_days": 30, "estimated_duration_minutes": 10},
+        {"key": "annual_service", "label": "Annual service", "interval_days": 365, "estimated_duration_minutes": 90},
+    ], default_lifespan_years=10),
+    AssetType("at-smoke-detector", "smoke_detector", "Smoke detector", "safety", "🔔", [
+        {"key": "test", "label": "Test alarm", "interval_days": 30, "estimated_duration_minutes": 5},
+        {"key": "replace_battery", "label": "Replace battery", "interval_days": 365, "estimated_duration_minutes": 10},
+    ], default_lifespan_years=10),
+    AssetType("at-fire-extinguisher", "fire_extinguisher", "Fire extinguisher", "safety", "🧯", [
+        {"key": "check_pressure", "label": "Check pressure", "interval_days": 30, "estimated_duration_minutes": 5},
+        {"key": "annual_inspection", "label": "Annual inspection", "interval_days": 365, "estimated_duration_minutes": 15},
+    ], default_lifespan_years=12),
+    AssetType("at-generator", "generator", "Generator", "outdoor", "⚡", [
+        {"key": "test_run", "label": "Test run", "interval_days": 30, "estimated_duration_minutes": 15},
+        {"key": "oil_change", "label": "Oil change", "interval_days": 180, "estimated_duration_minutes": 30},
+        {"key": "annual_service", "label": "Annual service", "interval_days": 365, "estimated_duration_minutes": 120},
+    ], default_lifespan_years=20),
+    AssetType("at-solar-panel", "solar_panel", "Solar panels", "outdoor", "☀️", [
+        {"key": "clean_panels", "label": "Clean panels", "interval_days": 90, "estimated_duration_minutes": 60},
+        {"key": "check_inverter", "label": "Check inverter", "interval_days": 30, "estimated_duration_minutes": 10},
+    ], default_lifespan_years=25),
+    AssetType("at-septic-tank", "septic_tank", "Septic tank", "plumbing", "🪠", [
+        {"key": "pump_tank", "label": "Pump tank", "interval_days": 1095, "estimated_duration_minutes": 120},
+        {"key": "inspection", "label": "Inspection", "interval_days": 365, "estimated_duration_minutes": 30},
+    ], default_lifespan_years=30),
+    AssetType("at-irrigation", "irrigation", "Irrigation system", "outdoor", "💧", [
+        {"key": "winterize", "label": "Winterize", "interval_days": 365, "estimated_duration_minutes": 60},
+        {"key": "inspect_heads", "label": "Inspect heads", "interval_days": 90, "estimated_duration_minutes": 30},
+    ], default_lifespan_years=15),
+    AssetType("at-alarm-system", "alarm_system", "Alarm / security", "security", "🔒", [
+        {"key": "test_sensors", "label": "Test sensors", "interval_days": 90, "estimated_duration_minutes": 30},
+        {"key": "replace_batteries", "label": "Replace batteries", "interval_days": 365, "estimated_duration_minutes": 20},
+    ], default_lifespan_years=10),
+    AssetType("at-vehicle", "vehicle", "Vehicle", "vehicle", "🚗", [
+        {"key": "oil_change", "label": "Oil change", "interval_days": 180, "estimated_duration_minutes": 30},
+        {"key": "tire_rotation", "label": "Tire rotation", "interval_days": 180, "estimated_duration_minutes": 30},
+        {"key": "annual_inspection", "label": "Annual inspection", "interval_days": 365, "estimated_duration_minutes": 60},
+    ], default_lifespan_years=10),
+]
+
+
+# ── Assets (11 across 3 properties) ────────────────────────────────
+
+ASSETS: list[Asset] = [
+    # Villa Sud (5)
+    Asset("a-villa-ac-bed", "p-villa-sud", "at-air-conditioner", "Bedroom 2 AC", "Master bedroom",
+          "good", "active", make="Mitsubishi", model="MSZ-AP25VGK", serial_number="MZ25-2024-7841",
+          installed_on=date(2024, 6, 15), purchased_on=date(2024, 5, 20),
+          purchase_price_cents=189900, purchase_currency="EUR", purchase_vendor="Leroy Merlin",
+          warranty_expires_on=date(2028, 6, 15), expected_lifespan_years=12,
+          guest_visible=True, guest_instructions="Remote is on the nightstand. Set to 22-24 C for comfortable sleep.",
+          qr_token="ac1bed2villa"),
+    Asset("a-villa-pool-pump", "p-villa-sud", "at-pool-pump", "Main pool pump", "Pool",
+          "good", "active", make="Hayward", model="Max-Flo XL", serial_number="HW-MF-2022-3319",
+          installed_on=date(2022, 3, 10), purchased_on=date(2022, 2, 28),
+          purchase_price_cents=85000, purchase_currency="EUR", purchase_vendor="Pool Pro",
+          warranty_expires_on=date(2025, 3, 10), expected_lifespan_years=8,
+          qr_token="poolpmp1vsud"),
+    Asset("a-villa-oven", "p-villa-sud", "at-oven-range", "Kitchen oven", "Kitchen",
+          "good", "active", make="De'Longhi", model="DEFX9P", serial_number="DL-FX9-21-4456",
+          installed_on=date(2021, 9, 1), purchased_on=date(2021, 8, 15),
+          purchase_price_cents=129900, purchase_currency="EUR", purchase_vendor="Darty",
+          warranty_expires_on=date(2024, 9, 1), expected_lifespan_years=15,
+          guest_visible=True, guest_instructions="Fan-forced is the middle knob setting. Grill is top element only.",
+          qr_token="oven1kitchen"),
+    Asset("a-villa-smoke-1", "p-villa-sud", "at-smoke-detector", "Hallway smoke detector", "Entryway",
+          "new", "active", make="Kidde", model="10SCO",
+          installed_on=date(2026, 1, 10), purchased_on=date(2025, 12, 20),
+          purchase_price_cents=3490, purchase_currency="EUR", purchase_vendor="Amazon",
+          warranty_expires_on=date(2036, 1, 10), expected_lifespan_years=10,
+          qr_token="smk1hallvsud"),
+    Asset("a-villa-water-heater", "p-villa-sud", "at-water-heater", "Main water heater", "Kitchen",
+          "fair", "active", make="Atlantic", model="O'Pro 200L", serial_number="ATL-OP200-19-1128",
+          installed_on=date(2019, 11, 1), purchased_on=date(2019, 10, 15),
+          purchase_price_cents=62000, purchase_currency="EUR", purchase_vendor="Brico Depot",
+          warranty_expires_on=date(2024, 11, 1), expected_lifespan_years=12,
+          notes="Getting old. Consider replacement in 2027.",
+          qr_token="wh200lvillsd"),
+    # Apt 3B (3)
+    Asset("a-apt-dishwasher", "p-apt-3b", "at-dishwasher", "Kitchen dishwasher", "Kitchen",
+          "good", "active", make="Bosch", model="Serie 4 SMS4HVW33E",
+          installed_on=date(2023, 7, 1), purchased_on=date(2023, 6, 15),
+          purchase_price_cents=54900, purchase_currency="EUR", purchase_vendor="Darty",
+          warranty_expires_on=date(2025, 7, 1), expected_lifespan_years=10,
+          guest_visible=True, guest_instructions="Tablets are under the sink. Use the Eco cycle for daily loads.",
+          qr_token="dw1kitapt3b"),
+    Asset("a-apt-washing", "p-apt-3b", "at-washing-machine", "Bathroom washing machine", "Bathroom 1",
+          "good", "active", make="LG", model="F4WV509S0E", serial_number="LG-WM-23-8812",
+          installed_on=date(2023, 7, 1), purchased_on=date(2023, 6, 15),
+          purchase_price_cents=64900, purchase_currency="EUR", purchase_vendor="Boulanger",
+          warranty_expires_on=date(2026, 7, 1), expected_lifespan_years=10,
+          guest_visible=True, guest_instructions="Detergent pods in the cupboard above. 40 C for most loads.",
+          qr_token="wm1bthapt3b"),
+    Asset("a-apt-oven", "p-apt-3b", "at-oven-range", "Kitchen oven", "Kitchen",
+          "good", "active", make="SMEG", model="SF6101TVN",
+          installed_on=date(2022, 1, 15), purchased_on=date(2021, 12, 20),
+          purchase_price_cents=79900, purchase_currency="EUR", purchase_vendor="Darty",
+          warranty_expires_on=date(2025, 1, 15), expected_lifespan_years=15,
+          guest_visible=True, guest_instructions="Turn the knob right for conventional, left for fan.",
+          qr_token="oven1apt3bkn"),
+    # Chalet (3)
+    Asset("a-chalet-boiler", "p-chalet", "at-boiler", "Main boiler", "Kitchen",
+          "good", "active", make="Vaillant", model="ecoFIT pure 425", serial_number="VAI-425-20-6678",
+          installed_on=date(2020, 10, 1), purchased_on=date(2020, 9, 15),
+          purchase_price_cents=320000, purchase_currency="EUR", purchase_vendor="Plombier Megeve",
+          warranty_expires_on=date(2025, 10, 1), expected_lifespan_years=15,
+          qr_token="boil1chalet1"),
+    Asset("a-chalet-fireplace", "p-chalet", "at-boiler", "Living room fireplace", "Fireplace room",
+          "good", "active", make="Morso", model="6148",
+          installed_on=date(2018, 11, 1), purchased_on=date(2018, 10, 1),
+          purchase_price_cents=245000, purchase_currency="EUR", purchase_vendor="Cheminee Savoyarde",
+          expected_lifespan_years=30,
+          guest_visible=True, guest_instructions="Firewood in the ski room. Open the damper fully before lighting.",
+          qr_token="fire1chaletf"),
+    Asset("a-chalet-snowblower", "p-chalet", "at-vehicle", "Honda snowblower", "Ski room",
+          "good", "active", make="Honda", model="HSS760E", serial_number="HON-SB-22-1144",
+          installed_on=date(2022, 11, 15), purchased_on=date(2022, 10, 30),
+          purchase_price_cents=189000, purchase_currency="EUR", purchase_vendor="Honda Megeve",
+          warranty_expires_on=date(2025, 11, 15), expected_lifespan_years=10,
+          qr_token="snow1chalet1"),
+]
+
+
+# ── Asset actions (15 across assets) ───────────────────────────────
+
+ASSET_ACTIONS: list[AssetAction] = [
+    # Villa AC
+    AssetAction("aa-1", "a-villa-ac-bed", "clean_filters", "Clean filters",
+                interval_days=90, last_performed_at=date(2026, 2, 10), next_due_on=date(2026, 5, 11),
+                estimated_duration_minutes=30),
+    AssetAction("aa-2", "a-villa-ac-bed", "service_unit", "Annual service",
+                interval_days=365, last_performed_at=date(2025, 6, 20), next_due_on=date(2026, 6, 20),
+                estimated_duration_minutes=120),
+    # Villa pool pump
+    AssetAction("aa-3", "a-villa-pool-pump", "clean_basket", "Clean basket",
+                interval_days=7, last_performed_at=date(2026, 4, 12), next_due_on=date(2026, 4, 19),
+                linked_task_id="t-1", estimated_duration_minutes=10),
+    AssetAction("aa-4", "a-villa-pool-pump", "inspect_seals", "Inspect seals",
+                interval_days=180, last_performed_at=date(2025, 11, 1), next_due_on=date(2026, 4, 30),
+                estimated_duration_minutes=20),
+    AssetAction("aa-5", "a-villa-pool-pump", "service_pump", "Full service",
+                interval_days=365, last_performed_at=date(2025, 4, 10), next_due_on=date(2026, 4, 10),
+                description="Overdue by 5 days", estimated_duration_minutes=120),
+    # Villa oven
+    AssetAction("aa-6", "a-villa-oven", "deep_clean", "Deep clean",
+                interval_days=90, last_performed_at=date(2026, 1, 20), next_due_on=date(2026, 4, 20),
+                estimated_duration_minutes=45),
+    # Villa smoke detector
+    AssetAction("aa-7", "a-villa-smoke-1", "test", "Test alarm",
+                interval_days=30, last_performed_at=date(2026, 3, 15), next_due_on=date(2026, 4, 14),
+                description="Overdue by 1 day", estimated_duration_minutes=5),
+    # Villa water heater
+    AssetAction("aa-8", "a-villa-water-heater", "flush_tank", "Flush tank",
+                interval_days=365, last_performed_at=date(2025, 5, 1), next_due_on=date(2026, 5, 1),
+                estimated_duration_minutes=60),
+    # Apt dishwasher
+    AssetAction("aa-9", "a-apt-dishwasher", "clean_filter", "Clean filter",
+                interval_days=30, last_performed_at=date(2026, 4, 1), next_due_on=date(2026, 5, 1),
+                estimated_duration_minutes=15),
+    AssetAction("aa-10", "a-apt-dishwasher", "descale", "Descale",
+                interval_days=90, last_performed_at=date(2026, 1, 15), next_due_on=date(2026, 4, 15),
+                description="Due today", estimated_duration_minutes=20),
+    # Apt washing machine
+    AssetAction("aa-11", "a-apt-washing", "clean_drum", "Clean drum",
+                interval_days=30, last_performed_at=date(2026, 3, 20), next_due_on=date(2026, 4, 19),
+                estimated_duration_minutes=15),
+    # Chalet boiler
+    AssetAction("aa-12", "a-chalet-boiler", "annual_service", "Annual service",
+                interval_days=365, last_performed_at=date(2025, 10, 5), next_due_on=date(2026, 10, 5),
+                estimated_duration_minutes=90),
+    AssetAction("aa-13", "a-chalet-boiler", "bleed_radiators", "Bleed radiators",
+                interval_days=180, last_performed_at=date(2025, 11, 1), next_due_on=date(2026, 4, 30),
+                estimated_duration_minutes=45),
+    # Chalet snowblower
+    AssetAction("aa-14", "a-chalet-snowblower", "oil_change", "Oil change",
+                interval_days=180, last_performed_at=date(2025, 10, 15), next_due_on=date(2026, 4, 13),
+                description="Overdue by 2 days", estimated_duration_minutes=30),
+    AssetAction("aa-15", "a-chalet-snowblower", "annual_inspection", "Annual inspection",
+                interval_days=365, last_performed_at=date(2025, 11, 20), next_due_on=date(2026, 11, 20),
+                estimated_duration_minutes=60),
+]
+
+
+# ── Asset documents (8 + 2 property-level) ─────────────────────────
+
+ASSET_DOCUMENTS: list[AssetDocument] = [
+    AssetDocument("ad-1", "a-villa-ac-bed", "p-villa-sud", "manual", "Mitsubishi MSZ-AP25VGK manual",
+                  "msz-ap25vgk-manual.pdf", 4200, datetime(2024, 6, 15, 10, 0)),
+    AssetDocument("ad-2", "a-villa-ac-bed", "p-villa-sud", "warranty", "AC warranty certificate",
+                  "ac-warranty-2024.pdf", 180, datetime(2024, 6, 15, 10, 5),
+                  expires_on=date(2028, 6, 15)),
+    AssetDocument("ad-3", "a-villa-pool-pump", "p-villa-sud", "invoice", "Pool pump purchase invoice",
+                  "hayward-invoice-2022.pdf", 320, datetime(2022, 3, 10, 14, 0),
+                  amount_cents=85000, amount_currency="EUR"),
+    AssetDocument("ad-4", "a-villa-water-heater", "p-villa-sud", "manual", "Atlantic O'Pro 200L manual",
+                  "atlantic-opro-manual.pdf", 3800, datetime(2019, 11, 5, 9, 0)),
+    AssetDocument("ad-5", "a-apt-dishwasher", "p-apt-3b", "warranty", "Bosch Serie 4 warranty",
+                  "bosch-warranty-2023.pdf", 150, datetime(2023, 7, 1, 12, 0),
+                  expires_on=date(2025, 7, 1)),
+    AssetDocument("ad-6", "a-chalet-boiler", "p-chalet", "invoice", "Boiler installation invoice",
+                  "vaillant-install-invoice.pdf", 280, datetime(2020, 10, 5, 15, 0),
+                  amount_cents=320000, amount_currency="EUR"),
+    # Property-level documents (asset_id = None)
+    AssetDocument("ad-7", None, "p-villa-sud", "insurance", "Villa Sud insurance policy 2026",
+                  "villa-sud-insurance-2026.pdf", 1200, datetime(2026, 1, 5, 9, 30),
+                  expires_on=date(2027, 1, 5), amount_cents=285000, amount_currency="EUR"),
+    AssetDocument("ad-8", None, "p-villa-sud", "permit", "Pool safety compliance certificate",
+                  "pool-safety-cert-2025.pdf", 450, datetime(2025, 6, 20, 11, 0),
+                  expires_on=date(2026, 6, 20)),
+]
+
+
+SHIFTS: list[Shift] = [
+    Shift("sh-1", "e-maria", "p-villa-sud", datetime(2026, 4, 15, 8, 12), None, "open",
+          method_in="auto"),
+    Shift("sh-2", "e-ben", "p-villa-sud", datetime(2026, 4, 15, 8, 45),
+          datetime(2026, 4, 15, 12, 30), "closed", duration_seconds=13500,
+          method_in="auto", method_out="auto"),
+    Shift("sh-3", "e-arun", "p-villa-sud", datetime(2026, 4, 14, 13, 0),
+          datetime(2026, 4, 14, 18, 30), "closed", duration_seconds=19800,
+          method_in="manual", method_out="manual"),
+    Shift("sh-4", "e-ana", "p-apt-3b", datetime(2026, 4, 14, 9, 0),
+          datetime(2026, 4, 14, 14, 0), "closed", duration_seconds=18000,
+          method_in="auto", method_out="auto"),
+    Shift("sh-5", "e-sam", "p-villa-sud", datetime(2026, 4, 14, 10, 0),
+          datetime(2026, 4, 14, 12, 30), "disputed", duration_seconds=9000,
+          method_in="manual", method_out="auto"),
+]
+
+PAY_RULES: list[PayRule] = [
+    PayRule("pr-1", "e-maria", None, "monthly_salary", 240000, "EUR", date(2024, 3, 1)),
+    PayRule("pr-2", "e-arun", None, "hourly", 1429, "EUR", date(2024, 9, 14)),
+    PayRule("pr-3", "e-ben", None, "monthly_salary", 180000, "EUR", date(2023, 5, 20)),
+    PayRule("pr-4", "e-ana", None, "monthly_salary", 210000, "EUR", date(2024, 11, 2)),
+    PayRule("pr-5", "e-sam", None, "hourly", 1667, "EUR", date(2025, 1, 9)),
+]
+
+PAY_PERIODS: list[PayPeriod] = [
+    PayPeriod("pp-mar-26", date(2026, 3, 1), date(2026, 3, 31), "paid",
+              locked_at=datetime(2026, 3, 31, 22, 0)),
+    PayPeriod("pp-apr-26", date(2026, 4, 1), date(2026, 4, 30), "open"),
+]
+
+INVENTORY_MOVEMENTS: list[InventoryMovement] = [
+    InventoryMovement("im-1", "inv-3", -1, "consume", "employee", "e-ben",
+                      datetime(2026, 4, 12, 9, 30), "Used for weekly pool service"),
+    InventoryMovement("im-2", "inv-6", -4, "consume", "employee", "e-ana",
+                      datetime(2026, 4, 14, 8, 0), "Turnover prep — Apt 3B"),
+    InventoryMovement("im-3", "inv-4", 6, "restock", "employee", "e-maria",
+                      datetime(2026, 4, 13, 17, 0), "Carrefour run"),
+    InventoryMovement("im-4", "inv-8", -2, "consume", "employee", "e-sam",
+                      datetime(2026, 4, 10, 16, 0)),
+]
+
+LIFECYCLE_RULES: list[StayLifecycleRule] = [
+    StayLifecycleRule("lr-1", "p-villa-sud", "after_checkout", "tpl-turnover", offset_hours=2),
+    StayLifecycleRule("lr-2", "p-apt-3b", "after_checkout", "tpl-turnover", offset_hours=1),
+    StayLifecycleRule("lr-3", "p-villa-sud", "before_checkin", "tpl-linen-change", offset_hours=-4),
+]
+
+TASK_COMMENTS: list[TaskComment] = [
+    TaskComment("tc-1", "t-1", "employee", "e-ben", "pH was 7.4 — in range. Skimmer baskets clean.",
+                datetime(2026, 4, 15, 9, 25)),
+    TaskComment("tc-2", "t-2", "employee", "e-maria", "Bed stripped, starting fresh sheets.",
+                datetime(2026, 4, 15, 10, 35)),
+    TaskComment("tc-3", "t-2", "agent", "digest-agent",
+                "Lavender sheets are on shelf 2 of linen cupboard A.",
+                datetime(2026, 4, 15, 10, 36)),
+    TaskComment("tc-4", "t-3", "system", "system", "Task auto-assigned to Maria (housekeeper, available).",
+                datetime(2026, 4, 15, 6, 0)),
+]
+
+
 WORKSPACE_SETTINGS: dict[str, Any] = {
     "evidence.policy": "optional",
     "time.clock_mode": "manual",
@@ -765,7 +1232,7 @@ WORKSPACE_POLICY: dict[str, Any] = {
 }
 
 WORKSPACE_META: dict[str, str] = {
-    "name": "Bernard household",
+    "name": "Bernard workspace",
     "timezone": "Europe/Paris",
     "currency": "EUR",
     "country": "FR",
@@ -827,6 +1294,14 @@ SETTINGS_CATALOG: list[SettingDefinition] = [
                       override_scope="W/P/E",
                       description="Whether employees can skip tasks by providing a reason.",
                       spec="05"),
+    SettingDefinition("assets.warranty_alert_days", "Warranty alert window (days)", "int", 30,
+                      override_scope="W/P",
+                      description="Days before warranty expiry to surface an alert.",
+                      spec="21"),
+    SettingDefinition("assets.show_guest_assets", "Show assets to guests", "bool", False,
+                      override_scope="W/P/U",
+                      description="Whether guest-visible assets appear on the guest welcome page.",
+                      spec="21"),
 ]
 
 def resolve_settings(
@@ -859,26 +1334,6 @@ def resolve_settings(
     return result
 
 
-# Legacy alias kept so existing references don't break during the
-# migration.  New code should use WORKSPACE_SETTINGS + WORKSPACE_POLICY.
-HOUSEHOLD_SETTINGS: dict[str, Any] = {
-    "name": WORKSPACE_META["name"],
-    "timezone": WORKSPACE_META["timezone"],
-    "currency": WORKSPACE_META["currency"],
-    "country": WORKSPACE_META["country"],
-    "default_locale": WORKSPACE_META["default_locale"],
-    "week_start": WORKSPACE_SETTINGS["pay.week_start"],
-    "pay_frequency": WORKSPACE_SETTINGS["pay.frequency"],
-    "default_photo_evidence": WORKSPACE_SETTINGS["evidence.policy"],
-    "geofence_radius_m": WORKSPACE_SETTINGS["time.geofence_radius_m"],
-    "retention_days": {
-        "llm_calls": WORKSPACE_SETTINGS["retention.llm_calls_days"],
-        "audit": WORKSPACE_SETTINGS["retention.audit_days"],
-        "task_photos": WORKSPACE_SETTINGS["retention.task_photos_days"],
-    },
-    "approvals": WORKSPACE_POLICY["approvals"],
-    "danger_zone": WORKSPACE_POLICY["danger_zone"],
-}
 
 
 GUEST_STAY_ID = "s-3"  # the preview guest page renders this stay
@@ -1023,6 +1478,48 @@ def inventory_for_property(pid: str) -> list[InventoryItem]:
 
 def stay_by_id(sid: str) -> Stay | None:
     return next((s for s in STAYS if s.id == sid), None)
+
+
+# ── Asset helpers ──────────────────────────────────────────────────
+
+def asset_type_by_id(atid: str) -> AssetType | None:
+    return next((t for t in ASSET_TYPES if t.id == atid), None)
+
+
+def asset_by_id(aid: str) -> Asset | None:
+    return next((a for a in ASSETS if a.id == aid), None)
+
+
+def assets_for_property(pid: str) -> list[Asset]:
+    return [a for a in ASSETS if a.property_id == pid]
+
+
+def actions_for_asset(aid: str) -> list[AssetAction]:
+    return [a for a in ASSET_ACTIONS if a.asset_id == aid]
+
+
+def documents_for_asset(aid: str) -> list[AssetDocument]:
+    return [d for d in ASSET_DOCUMENTS if d.asset_id == aid]
+
+
+def documents_for_property(pid: str) -> list[AssetDocument]:
+    return [d for d in ASSET_DOCUMENTS if d.property_id == pid]
+
+
+def shifts_for_employee(eid: str) -> list[Shift]:
+    return [s for s in SHIFTS if s.employee_id == eid]
+
+
+def comments_for_task(tid: str) -> list[TaskComment]:
+    return [c for c in TASK_COMMENTS if c.task_id == tid]
+
+
+def movements_for_item(iid: str) -> list[InventoryMovement]:
+    return [m for m in INVENTORY_MOVEMENTS if m.item_id == iid]
+
+
+def lifecycle_rules_for_property(pid: str) -> list[StayLifecycleRule]:
+    return [r for r in LIFECYCLE_RULES if r.property_id == pid]
 
 
 # The "signed-in" user for each role.

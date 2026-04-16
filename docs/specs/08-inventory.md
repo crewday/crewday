@@ -66,6 +66,14 @@ Task templates carry `inventory_consumption_json`, a map of
 This is a soft coupling: completing the task never fails because
 consumption disagrees with reality.
 
+**Asset action consumption.** Asset actions (§21) can reference
+inventory items via `inventory_consumption_json` on the
+`asset_action` row. When an action is activated as a recurring
+schedule, the consumption map is copied to the generated task
+template's `inventory_consumption_json`. Consumption then flows
+through the existing task-completion mechanism above -- no separate
+inventory path is needed.
+
 ## Reorder logic
 
 Periodic worker job `check_reorder_points` (hourly):

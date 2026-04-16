@@ -25,7 +25,7 @@
 
 ### Soft delete policy
 
-- All user-editable entities (Property, Employee, Role, Task,
+- All user-editable entities (Property, Unit, Employee, Role, Task,
   TaskTemplate, Instruction, InventoryItem, Stay) are **soft-deletable**.
 - Children with a soft-deleted parent are **hidden** but their rows
   remain, so timesheets and audit log stay whole.
@@ -66,7 +66,7 @@ A `property` (informally "villa") is **not** owned by a single
 workspace. The same physical place can appear in more than one
 workspace simultaneously — for example a rental manager's workspace
 and the owning family's workspace both see the same house. The link
-is carried by the junction table `villa_workspace` below. Every
+is carried by the junction table `property_workspace` below. Every
 property still has a "primary" workspace (the one that created it),
 but authorisation is expressed against the junction, not the primary.
 
@@ -87,24 +87,31 @@ prose list below).
 
 ```mermaid
 erDiagram
-    WORKSPACE ||--o{ VILLA_WORKSPACE : includes
+    WORKSPACE ||--o{ PROPERTY_WORKSPACE : includes
     WORKSPACE ||--o{ EMPLOYEE_WORKSPACE : includes
     WORKSPACE ||--o{ MANAGER : employs
     WORKSPACE ||--o{ API_TOKEN : issues
 
-    VILLA_WORKSPACE }o--|| PROPERTY : links
+    PROPERTY_WORKSPACE }o--|| PROPERTY : links
     EMPLOYEE_WORKSPACE }o--|| EMPLOYEE : links
 
+    PROPERTY ||--o{ UNIT : contains
     PROPERTY ||--o{ AREA : has
-    PROPERTY ||--o{ STAY : hosts
     PROPERTY ||--o{ INVENTORY_ITEM : stocks
     PROPERTY ||--o{ PROPERTY_ROLE_ASSIGNMENT : scopes
     PROPERTY ||--o{ PROPERTY_CLOSURE : blacks_out
+
+    UNIT ||--o{ AREA : has
+    UNIT ||--o{ STAY : hosts
+    UNIT ||--o{ STAY_LIFECYCLE_RULE : configured_by
 
     EMPLOYEE ||--o{ EMPLOYEE_ROLE : fills
     ROLE ||--o{ EMPLOYEE_ROLE : defines
     EMPLOYEE_ROLE ||--o{ PROPERTY_ROLE_ASSIGNMENT : at
     EMPLOYEE ||--o{ EMPLOYEE_LEAVE : takes
+    EMPLOYEE ||--o{ EMPLOYEE_AVAILABILITY_OVERRIDE : adjusts
+
+    WORKSPACE ||--o{ PUBLIC_HOLIDAY : observes
 
     TASK_TEMPLATE ||--o{ TASK : generates
     TASK_TEMPLATE ||--o{ SCHEDULE : described_by
@@ -114,8 +121,8 @@ erDiagram
     TASK ||--o{ TASK_EVIDENCE : proves
     TASK }o--o{ INSTRUCTION : linked_to
 
-    STAY ||--o{ TURNOVER_BUNDLE : triggers
-    TURNOVER_BUNDLE ||--o{ TASK : materializes
+    STAY ||--o{ STAY_TASK_BUNDLE : triggers
+    STAY_TASK_BUNDLE ||--o{ TASK : materializes
 
     EMPLOYEE ||--o{ SHIFT : clocks
     SHIFT ||--o{ TASK_COMPLETION : groups
@@ -133,7 +140,7 @@ erDiagram
 
     FILE ||--o{ TASK_EVIDENCE : backs
     FILE ||--o{ EXPENSE_ATTACHMENT : backs
-    FILE ||--o{ ISSUE_REPORT : backs
+    FILE ||--o{ ISSUE : backs
 
     WEBHOOK_SUBSCRIPTION ||--o{ WEBHOOK_DELIVERY : records
 
@@ -151,14 +158,15 @@ entity either — capabilities are sparse JSON blobs on `role` and
 
 - **Auth / identity** (§03): `manager`, `employee`, `passkey_credential`,
   `magic_link`, `break_glass_code`, `api_token`, `session`.
-- **Places** (§04): `property`, `area`, `stay`, `guest_link`,
+- **Places** (§04): `property`, `unit`, `area`, `stay`, `guest_link`,
   `ical_feed`.
 - **People & roles** (§05): `role`, `employee_role`,
   `property_role_assignment`.
 - **Work** (§06): `task_template`, `schedule`, `task`,
   `task_checklist_item`, `task_completion`, `task_evidence`,
-  `task_comment`, `turnover_bundle`, `employee_leave`,
-  `property_closure`.
+  `task_comment`, `stay_lifecycle_rule`, `stay_task_bundle`,
+  `employee_leave`, `employee_availability_override`,
+  `public_holiday`, `property_closure`.
 - **Instructions / SOPs** (§07): `instruction`, `instruction_revision`,
   `instruction_link`.
 - **Inventory** (§08): `inventory_item`, `inventory_movement`.
@@ -166,12 +174,14 @@ entity either — capabilities are sparse JSON blobs on `role` and
   `pay_period_entry`, `payslip`, `payout_destination`, `expense_claim`,
   `expense_line`, `expense_attachment`.
 - **Comms** (§10): `digest_run`, `email_delivery`, `email_opt_out`,
-  `webhook_subscription`, `webhook_delivery`, `issue_report`.
+  `webhook_subscription`, `webhook_delivery`, `issue`.
+- **Assets** (§21): `asset_type`, `asset`, `asset_action`,
+  `asset_document`.
 - **LLM** (§11): `model_assignment`, `llm_call`, `agent_action`,
   `anomaly_suppression`.
 - **Files** (§02 "Shared tables", storage backend in §15): `file` —
   shared blob-reference table used by `task_evidence`,
-  `expense_attachment`, `issue_report.attachment_file_ids`,
+  `expense_attachment`, `issue.attachment_file_ids`,
   `instruction_revision.attachment_file_ids`, and
   `employee.avatar_file_id`.
 - **Cross-cutting** (§15): `audit_log`, `secret_envelope`.
@@ -201,22 +211,22 @@ introduces `workspace_id` on every user-editable table.)
 | created_at    | tstz        |                                    |
 | settings_json | jsonb/text  | flat map of `dotted.key → value`; holds concrete workspace defaults for every registered setting (see "Settings cascade" below) |
 
-### `villa_workspace`
+### `property_workspace`
 
-Junction table. A villa (`property`) can belong to more than one
-workspace. One row per `(villa_id, workspace_id)` pair.
+Junction table. A property can belong to more than one workspace.
+One row per `(property_id, workspace_id)` pair.
 
 | column        | type    | notes                              |
 |---------------|---------|------------------------------------|
-| villa_id      | ULID FK | references `property.id`           |
+| property_id   | ULID FK | references `property.id`           |
 | workspace_id  | ULID FK | references `workspace.id`          |
 | added_at      | tstz    |                                    |
 | added_by_kind | text    | `manager | agent | system`         |
 | added_by_id   | ULID?   | nullable for system seeds          |
 
-Primary key `(villa_id, workspace_id)`. On soft-delete of a villa
-the junction rows remain (history is preserved); on workspace delete
-the rows are hard-dropped.
+Primary key `(property_id, workspace_id)`. On soft-delete of a
+property the junction rows remain (history is preserved); on
+workspace delete the rows are hard-dropped.
 
 ### `employee_workspace`
 
@@ -291,7 +301,7 @@ Shared blob reference row. The backend storage driver is pluggable
 | deleted_at       | tstz?   |                                        |
 
 Local driver writes to `$DATA_DIR/files/{workspace_id}/{sha256[0:2]}/
-{sha256}`. See §15 for MIME sniffing, EXIF stripping, and PDF script
+{sha256[2:4]}/{sha256}`. See §15 for MIME sniffing, EXIF stripping, and PDF script
 rejection.
 
 ### `secret_envelope`
@@ -341,6 +351,8 @@ read is too expensive:
 - `expense_claim.total_amount_cents` — recomputed on line add/remove.
 - `inventory_item.on_hand` — recomputed on every movement, in the same
   transaction.
+- `asset_action.last_performed_at` — updated when a task with
+  `asset_action_id` is completed (§21).
 
 A `--recompute` CLI command recomputes all derived fields; a periodic
 CI job asserts no drift in test fixtures.
@@ -359,35 +371,39 @@ existing capability key convention in §05.
 
 ### Resolution order
 
-The cascade has four layers, from broadest to most specific:
+The cascade has five layers, from broadest to most specific:
 
 1. **Workspace** — `workspaces.settings_json`. Always concrete
    (never `inherit`); this is the catalog default merged with
    manager overrides.
 2. **Property** — `properties.settings_override_json`.
-3. **Employee** — `employees.settings_override_json`.
-4. **Task** — `tasks.settings_override_json`.
+3. **Unit** — `units.settings_override_json`.
+4. **Employee** — `employees.settings_override_json`.
+5. **Task** — `tasks.settings_override_json`.
 
 **Most specific wins.** Resolution walks from the task inward:
-task → employee → property → workspace, stopping at the first
+task → employee → unit → property → workspace, stopping at the first
 concrete (non-`inherit`) value. An absent key means "inherit".
 An explicit `null` value means "inherit" (delete override at this
 layer). Non-root layers default to `inherit`, so the common case
-is "follow the workspace default unless a property, an employee,
-or a specific task deliberately narrows or widens the rule."
+is "follow the workspace default unless a property, a unit, an
+employee, or a specific task deliberately narrows or widens the
+rule." Single-unit properties see no behavioral change (the unit
+inherits everything from the property).
 
 ### Schema
 
 Each entity gets a sparse `settings_override_json JSONB` column
-(nullable, default `{}`). Workspace defaults live in
-`workspaces.settings_json` — a flat map of `dotted.key → value`
-holding concrete workspace defaults for every registered setting.
+(nullable, default `{}`). The unit layer uses the same column name
+on `units`. Workspace defaults live in `workspaces.settings_json` —
+a flat map of `dotted.key → value` holding concrete workspace
+defaults for every registered setting.
 
 ### Override scope
 
 Each key declares which layers may override it (e.g.
-`evidence.policy` = W/P/E/T; `pay.frequency` = W only). The code
-allows all four layers; scope is a UI/validation concern that
+`evidence.policy` = W/P/U/E/T; `pay.frequency` = W only). The code
+allows all five layers; scope is a UI/validation concern that
 prevents surprising overrides from reaching the resolver.
 
 ### Catalog
@@ -397,19 +413,21 @@ scope, and the spec that defines the feature:
 
 | key | type | default | scope | spec |
 |-----|------|---------|-------|------|
-| `evidence.policy` | enum | `optional` | W/P/E/T | §05, §06 |
-| `time.clock_mode` | enum | `manual` | W/P/E | §09 |
-| `time.auto_clock_idle_minutes` | int | `30` | W/P/E | §05 |
-| `time.geofence_radius_m` | int | `150` | W/P | §09 |
-| `time.geofence_required` | bool | `false` | W/P/E | §05 |
+| `evidence.policy` | enum | `optional` | W/P/U/E/T | §05, §06 |
+| `time.clock_mode` | enum | `manual` | W/P/U/E | §09 |
+| `time.auto_clock_idle_minutes` | int | `30` | W/P/U/E | §05 |
+| `time.geofence_radius_m` | int | `150` | W/P/U | §09 |
+| `time.geofence_required` | bool | `false` | W/P/U/E | §05 |
 | `pay.frequency` | enum | `monthly` | W | §09 |
 | `pay.week_start` | enum | `monday` | W | — |
 | `retention.audit_days` | int | `730` | W | §02 |
 | `retention.llm_calls_days` | int | `90` | W | §02, §11 |
 | `retention.task_photos_days` | int | `365` | W | — |
 | `scheduling.horizon_days` | int | `30` | W/P | §06 |
-| `tasks.checklist_required` | bool | `false` | W/P/E/T | §05 |
-| `tasks.allow_skip_with_reason` | bool | `true` | W/P/E | §05 |
+| `tasks.checklist_required` | bool | `false` | W/P/U/E/T | §05 |
+| `tasks.allow_skip_with_reason` | bool | `true` | W/P/U/E | §05 |
+| `assets.warranty_alert_days` | int | `30` | W/P | §21 |
+| `assets.show_guest_assets` | bool | `false` | W/P/U | §21 |
 
 ### Relationship to capabilities
 
@@ -422,13 +440,13 @@ whether it is available.
 Where keys overlap (e.g. `time.clock_mode` appears in both the
 capability catalog and the settings catalog), the settings cascade
 takes precedence. Full resolution for overlapping keys:
-task → employee → property → (capability chain) → workspace →
+task → employee → unit → property → (capability chain) → workspace →
 catalog default.
 
 ### Resolved settings function
 
 ```
-resolve_setting(key, workspace_id, property_id?, employee_id?, task_id?)
+resolve_setting(key, workspace_id, property_id?, unit_id?, employee_id?, task_id?)
   → {value, source_layer, source_entity_id}
 ```
 
@@ -468,6 +486,7 @@ Defined once per document where the enum lives; summarized here.
 
 - `actor_kind`: `manager | employee | agent | system` (`agent` for standalone scoped-token callers only; delegated tokens use the human's kind — see §03)
 - `task_state`: `scheduled | pending | in_progress | completed | skipped | cancelled | overdue`
+- `stay_status`: `tentative | confirmed | in_house | checked_out | cancelled`
 - `stay_source`: `manual | airbnb | vrbo | booking | google_calendar | ical`
 - `pay_rule_kind`: `hourly | monthly_salary | per_task | piecework`
 - `pay_period_status`: `open | locked | paid`
@@ -475,10 +494,19 @@ Defined once per document where the enum lives; summarized here.
 - `shift_status`: `open | closed | disputed`
 - `expense_state`: `draft | submitted | approved | rejected | reimbursed`
 - `expense_line_source`: `ocr | manual` (see §09 for interaction with `edited_by_user`)
+- `asset_condition`: `new | good | fair | poor | needs_replacement`
+- `asset_status`: `active | in_repair | decommissioned | disposed`
+- `asset_document_kind`: `manual | warranty | invoice | receipt | photo | certificate | contract | permit | insurance | other`
+- `asset_type_category`: `climate | appliance | plumbing | pool | heating | outdoor | safety | security | vehicle | other`
 - `inventory_movement_reason`: `restock | consume | adjust | waste | transfer_in | transfer_out | audit_correction`
 - `delivery_state`: `queued | sent | delivered | bounced | failed`
 - `property_kind`: `residence | vacation | str | mixed` (semantics in §04)
+- `lifecycle_trigger`: `before_checkin | after_checkout | during_stay`
+- `stay_bundle_state`: `scheduled | in_progress | completed | cancelled`
+- `scheduling_effect`: `block | allow | reduced`
+- `holiday_recurrence`: `annual` (nullable enum — null = one-off)
 - `leave_category`: `vacation | sick | personal | bereavement | other`
+- `issue_status`: `open | in_progress | resolved | wont_fix`
 - `capability`: see §05.
 
 ## Full-text search ranking
@@ -516,7 +544,7 @@ across the entire schema, API, and UI. Concretely:
 
 - The `households` table becomes `workspaces`.
 - Every `household_id` column becomes `workspace_id`.
-- The two new junction tables `villa_workspace` and
+- The two new junction tables `property_workspace` and
   `employee_workspace` are introduced; the seeded v1 deployment
   back-fills one row per existing `(property, workspace)` and one row
   per `(employee, workspace)` with `source = 'villa'` where
@@ -532,3 +560,6 @@ across the entire schema, API, and UI. Concretely:
   migration notes, §20 glossary) still say "household" when they are
   explicitly describing v0 behaviour. New code and new docs must use
   "workspace".
+- The junction table originally named `villa_workspace` was renamed to
+  `property_workspace` (and its `villa_id` column to `property_id`)
+  to align with the canonical `property` entity name.

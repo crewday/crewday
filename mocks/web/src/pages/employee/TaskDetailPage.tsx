@@ -16,7 +16,10 @@ const STATUS_TONE: Record<Task["status"], "moss" | "sky" | "ghost" | "rust"> = {
   completed: "moss",
   in_progress: "sky",
   pending: "ghost",
+  scheduled: "ghost",
   skipped: "rust",
+  cancelled: "rust",
+  overdue: "rust",
 };
 
 function hhmm(iso: string): string {

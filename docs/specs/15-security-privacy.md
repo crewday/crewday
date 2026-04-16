@@ -15,6 +15,7 @@
 | Payroll / expense amounts                      | High        |
 | Guest names and stay dates                     | Medium      |
 | Task history / completion evidence             | Medium      |
+| Asset documents (invoices, warranties)         | Medium      |
 | Instructions content                           | Medium      |
 | Photos of interiors / guest areas              | High        |
 

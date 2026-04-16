@@ -14,6 +14,8 @@ import MePage from "@/pages/employee/MePage";
 import ShiftsPage from "@/pages/employee/ShiftsPage";
 import HistoryPage from "@/pages/employee/HistoryPage";
 import IssueNewPage from "@/pages/employee/IssueNewPage";
+import EmployeeAssetPage from "@/pages/employee/EmployeeAssetPage";
+import AssetScanPage from "@/pages/employee/AssetScanPage";
 
 import DashboardPage from "@/pages/manager/DashboardPage";
 import PropertiesPage from "@/pages/manager/PropertiesPage";
@@ -31,6 +33,10 @@ import SchedulesPage from "@/pages/manager/SchedulesPage";
 import InstructionsPage from "@/pages/manager/InstructionsPage";
 import InstructionDetailPage from "@/pages/manager/InstructionDetailPage";
 import InventoryPage from "@/pages/manager/InventoryPage";
+import AssetsPage from "@/pages/manager/AssetsPage";
+import AssetDetailPage from "@/pages/manager/AssetDetailPage";
+import AssetTypesPage from "@/pages/manager/AssetTypesPage";
+import DocumentsPage from "@/pages/manager/DocumentsPage";
 import PayPage from "@/pages/manager/PayPage";
 import AuditPage from "@/pages/manager/AuditPage";
 import WebhooksPage from "@/pages/manager/WebhooksPage";
@@ -72,6 +78,7 @@ export default function App() {
           <Route path="/shifts" element={<ShiftsPage />} />
           <Route path="/history" element={<HistoryPage />} />
           <Route path="/issues/new" element={<IssueNewPage />} />
+          <Route path="/asset/scan" element={<AssetScanPage />} />
         </Route>
 
         <Route element={<ManagerLayout />}>
@@ -96,6 +103,13 @@ export default function App() {
           <Route path="/instructions" element={<InstructionsPage />} />
           <Route path="/instructions/:iid" element={<InstructionDetailPage />} />
           <Route path="/inventory" element={<InventoryPage />} />
+          <Route path="/assets" element={<AssetsPage />} />
+          <Route
+            path="/asset/:aid"
+            element={role === "manager" ? <AssetDetailPage /> : <EmployeeAssetPage />}
+          />
+          <Route path="/asset_types" element={<AssetTypesPage />} />
+          <Route path="/documents" element={<DocumentsPage />} />
           <Route path="/pay" element={<PayPage />} />
           <Route path="/audit" element={<AuditPage />} />
           <Route path="/webhooks" element={<WebhooksPage />} />

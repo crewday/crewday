@@ -33,6 +33,10 @@ export default function ManagerLayout() {
           <NavItem to="/schedules">Schedules</NavItem>
           <NavItem to="/instructions" matchPrefix="/instructions">Instructions</NavItem>
           <NavItem to="/inventory">Inventory</NavItem>
+          <div className="nav-section">ASSETS</div>
+          <NavItem to="/assets" matchPrefix="/asset">Assets</NavItem>
+          <NavItem to="/asset_types">Catalog</NavItem>
+          <NavItem to="/documents">Documents</NavItem>
           <div className="nav-section">DECIDE</div>
           <NavItem to="/approvals">Approvals</NavItem>
           <NavItem to="/leaves">Leaves</NavItem>

@@ -61,6 +61,9 @@ receive `locale` in their Jinja context. Formatting helpers
 | payslip issued                 | employee                | yes           |
 | iCal feed error                | managers                | yes           |
 | anomaly detected (§11)         | managers                | opt-out       |
+| availability override pending  | managers                | yes           |
+| pre-arrival task unassigned    | managers                | yes           |
+| holiday schedule impact        | affected employees      | opt-out       |
 | agent approval pending         | managers                | yes           |
 
 Opt-outs are per-person, per-category, via a signed unsubscribe link
@@ -108,8 +111,12 @@ Sent at 07:00 local time per recipient (their timezone), by the
 worker. Retries if SMTP fails; skipped if no noteworthy content.
 
 - **Manager digest** — today's upcoming tasks, stays arriving/leaving,
-  overdue tasks, open issues, pending approvals, low-stock items,
-  iCal errors, anomalies, expenses awaiting review.
+  overdue tasks, open issues, pending approvals (incl. availability
+  override requests), low-stock items, warranties/certificates
+  expiring soon (within `assets.warranty_alert_days`, §21), iCal
+  errors, anomalies, expenses awaiting review, **unassigned
+  pre-arrival tasks** (pull-back failed), **upcoming public holidays
+  with scheduling impact**.
 - **Employee digest** — "Today you have X tasks", grouped by property,
   with a quick link to the PWA.
 
@@ -211,7 +218,7 @@ Employee taps **"Report an issue"** from a property/area context or
 from a task:
 
 ```
-issue_report
+issue
 ├── id
 ├── workspace_id
 ├── reported_by_employee_id
@@ -259,10 +266,13 @@ An agent or external system subscribes to events.
 manager.*            created, updated, archived, reinstated
 employee.*           created, updated, archived, reinstated
 task.*               created, assigned, started, completed,
-                     complete_superseded, skipped, cancelled, overdue
+                     complete_superseded, skipped, cancelled, overdue,
+                     unassigned_pre_arrival
 task_comment.*       created
 stay.*               created, updated, upcoming, in_house, checked_out,
                      cancelled, conflict
+stay_lifecycle_rule.* created, updated, deleted
+stay_task_bundle.*   created, completed, cancelled
 instruction.*        created, published, archived
 inventory.*          low_stock, movement, stock_drift
 shift.*              opened, closed, adjusted, disputed
@@ -276,7 +286,14 @@ employee_default_destination.* set, cleared
 issue.*              reported, updated, resolved
 approval.*           pending, decided
 ical.*               polled, error
+asset.*              created, updated, condition_changed,
+                     status_changed, deleted, restored
+asset_action.*       created, updated, performed,
+                     schedule_linked, deleted
+asset_document.*     created, updated, deleted, expiring
 leave.*              requested, approved, rejected
+availability_override.* created, approved, rejected
+public_holiday.*     created, updated, deleted
 property_closure.*   created, updated, deleted
 ```
 

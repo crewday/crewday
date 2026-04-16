@@ -18,8 +18,9 @@ interface StaysPayload {
   leaves: Leave[];
 }
 
-const STAY_TONE: Record<Stay["status"], "sky" | "moss" | "ghost" | "rust"> = {
-  booked: "sky",
+const STAY_TONE: Record<Stay["status"], "sky" | "moss" | "ghost" | "rust" | "sand"> = {
+  tentative: "sand",
+  confirmed: "sky",
   in_house: "moss",
   checked_out: "ghost",
   cancelled: "rust",
@@ -99,12 +100,12 @@ export default function StaysPage() {
               const p = propsById.get(s.property_id);
               return (
                 <tr key={s.id}>
-                  <td><strong>{s.guest}</strong></td>
+                  <td><strong>{s.guest_name}</strong></td>
                   <td>{p && <Chip tone={p.color} size="sm">{p.name}</Chip>}</td>
                   <td><Chip tone="ghost" size="sm">{s.source}</Chip></td>
                   <td className="mono">{fmtAbbrevDate(s.check_in)}</td>
                   <td className="mono">{fmtAbbrevDate(s.check_out)}</td>
-                  <td>{s.guests}</td>
+                  <td>{s.guest_names}</td>
                   <td><Chip tone={STAY_TONE[s.status]} size="sm">{s.status.replace("_", " ")}</Chip></td>
                 </tr>
               );
@@ -171,9 +172,9 @@ export default function StaysPage() {
                         <span
                           key={s.id + "-bar"}
                           className={"cal-bar cal-bar--" + p.color}
-                          title={s.guest + " (" + s.source + ")"}
+                          title={s.guest_name + " (" + s.source + ")"}
                         >
-                          {d === ci ? s.guest.split(" ")[0] : ""}
+                          {d === ci ? s.guest_name.split(" ")[0] : ""}
                         </span>,
                       );
                     }
@@ -182,7 +183,7 @@ export default function StaysPage() {
                         <span
                           key={s.id + "-turn"}
                           className="cal-bar cal-bar--turnover"
-                          title={"Turnover — " + s.guest}
+                          title={"Turnover — " + s.guest_name}
                         />,
                       );
                     }

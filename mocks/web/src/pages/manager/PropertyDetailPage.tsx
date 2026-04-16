@@ -6,6 +6,8 @@ import { qk } from "@/lib/queryKeys";
 import DeskPage from "@/components/DeskPage";
 import { Avatar, Chip, Loading } from "@/components/common";
 import type {
+  Asset,
+  AssetDocument,
   Employee,
   EntitySettingsPayload,
   Instruction,
@@ -25,13 +27,18 @@ interface PropertyDetail {
   inventory: InventoryItem[];
   instructions: Instruction[];
   closures: PropertyClosure[];
+  assets: Asset[];
+  asset_documents: AssetDocument[];
 }
 
 const STATUS_TONE: Record<TaskStatus, "moss" | "sky" | "ghost" | "rust"> = {
   completed: "moss",
   in_progress: "sky",
   pending: "ghost",
+  scheduled: "ghost",
   skipped: "rust",
+  cancelled: "rust",
+  overdue: "rust",
 };
 
 function fmtDayMon(iso: string): string {
@@ -110,7 +117,7 @@ function SettingsOverridePanel({
   );
 }
 
-type Tab = "overview" | "settings";
+type Tab = "overview" | "assets" | "settings";
 
 export default function PropertyDetailPage() {
   const { pid = "" } = useParams<{ pid: string }>();
@@ -143,7 +150,8 @@ export default function PropertyDetailPage() {
     return <DeskPage title="Property">Failed to load.</DeskPage>;
   }
 
-  const { property, property_tasks, stays } = detailQ.data;
+  const { property, property_tasks, stays, assets, asset_documents: _asset_documents } = detailQ.data;
+  void _asset_documents;
   const empsById = new Map(empsQ.data.map((e) => [e.id, e]));
 
   return (
@@ -166,7 +174,12 @@ export default function PropertyDetailPage() {
         </a>
         <a className="tab-link">Areas</a>
         <a className="tab-link">Stays</a>
-        <a className="tab-link">Inventory</a>
+        <a
+          className={"tab-link" + (activeTab === "assets" ? " tab-link--active" : "")}
+          onClick={() => setActiveTab("assets")}
+        >
+          Assets
+        </a>
         <a className="tab-link">Instructions</a>
         <a className="tab-link">Closures</a>
         <a
@@ -190,11 +203,11 @@ export default function PropertyDetailPage() {
               <tbody>
                 {stays.map((s) => (
                   <tr key={s.id}>
-                    <td><strong>{s.guest}</strong></td>
+                    <td><strong>{s.guest_name}</strong></td>
                     <td>{s.source}</td>
                     <td className="table__mono">{fmtDayMon(s.check_in)}</td>
                     <td className="table__mono">{fmtDayMon(s.check_out)}</td>
-                    <td>{s.guests}</td>
+                    <td>{s.guest_names}</td>
                   </tr>
                 ))}
               </tbody>
@@ -246,6 +259,34 @@ export default function PropertyDetailPage() {
             <p>Failed to load settings.</p>
           )}
         </>
+      )}
+
+      {activeTab === "assets" && (
+        <div className="panel">
+          <header className="panel__head">
+            <h2>Assets</h2>
+            <span className="muted mono">{assets.length} tracked</span>
+          </header>
+          {assets.length === 0 ? (
+            <p className="muted">No assets tracked for this property.</p>
+          ) : (
+            <table className="table">
+              <thead>
+                <tr><th>Asset</th><th>Area</th><th>Condition</th><th>Status</th></tr>
+              </thead>
+              <tbody>
+                {assets.map((a) => (
+                  <tr key={a.id}>
+                    <td><strong>{a.name}</strong>{a.make && <span className="table__sub"> {a.make} {a.model}</span>}</td>
+                    <td>{a.area ?? "\u2014"}</td>
+                    <td><Chip tone={a.condition === "fair" ? "sand" : (a.condition === "poor" || a.condition === "needs_replacement") ? "rust" : "moss"} size="sm">{a.condition}</Chip></td>
+                    <td><Chip tone={a.status === "active" ? "moss" : a.status === "in_repair" ? "sand" : "rust"} size="sm">{a.status}</Chip></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
       )}
     </DeskPage>
   );

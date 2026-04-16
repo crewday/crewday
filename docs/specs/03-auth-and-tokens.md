@@ -35,7 +35,7 @@
 
 1. First-boot wizard runs once when the DB has no `manager` rows. The
    CLI `miployees admin init --email owner@example.com` creates the
-   household and emails the owner a **bootstrap magic link** valid for
+   workspace and emails the owner a **bootstrap magic link** valid for
    15 minutes.
 2. Owner clicks the link, chooses a display name and timezone,
    registers a passkey on their current device.
@@ -195,7 +195,7 @@ access.
 - `instructions:{read,write}`
 - `messaging:{read,write}`
 - `llm:{read,call}` — `call` required to execute model calls chargeable
-  to the household
+  to the workspace
 - `admin:{impersonate,rotate,purge}` — rare; requires approval of
   another manager before first use (see §11 approval workflow)
 
@@ -249,7 +249,7 @@ narrow escape hatch.
 ```
 break_glass_code
 ├── id                   ULID PK
-├── household_id         ULID FK
+├── workspace_id         ULID FK
 ├── manager_id           ULID FK
 ├── hash                 argon2id digest of the code
 ├── hash_params          argon2id parameters (for upgrade)
@@ -268,7 +268,7 @@ if the resulting magic link expires unused.
 
 - URL: `https://<host>/auth/magic/{token}`
 - `token` is an `itsdangerous` signed blob: `{ purpose, subject_id,
-  jti, exp }` signed with the household's magic-link key.
+  jti, exp }` signed with the workspace's magic-link key.
 - Single use (`jti` recorded on successful consumption).
 - Open attempts after consumption or expiry show a polite re-request
   page, and rate-limit the offending IP (§15).

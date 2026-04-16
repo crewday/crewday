@@ -138,7 +138,7 @@ export default function PropertyClosuresPage() {
                       <span
                         key={s.id}
                         className={"mini-cal__bar mini-cal__bar--" + property.color}
-                        title={s.guest + " (" + s.source + ")"}
+                        title={s.guest_name + " (" + s.source + ")"}
                       />
                     );
                   }

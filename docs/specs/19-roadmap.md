@@ -30,8 +30,10 @@ log.
 
 ## Phase 2 — Places and people
 
-- Properties, areas, employees, roles, capabilities.
-- Property detail manager UI.
+- Properties, **units within properties**, areas, employees, roles,
+  capabilities.
+- Property detail manager UI (incl. unit management for multi-unit
+  properties).
 - Employee profile and capability management.
 - CLI covers all of the above.
 
@@ -45,12 +47,18 @@ CLI generation pipeline produces commands for all Phase 2 endpoints;
   generation worker.
 - Task detail and today view for employees.
 - Completion, evidence, comments, skip/cancel.
-- Assignment algorithm.
+- Assignment algorithm with **availability precedence stack** (leave,
+  overrides, holidays, weekly pattern).
 - Blackout dates (property closures, employee leave).
+- **Employee availability overrides** (self-service add, manager-
+  approval reduce).
+- **Public holidays with scheduling effects** (`block | allow |
+  reduced`).
 
 **Exit:** a weekly recurring task is created by the manager, the
 worker generates occurrences, the assigned employee completes them
-with evidence, audit trail is complete.
+with evidence, audit trail is complete. Availability overrides and
+holidays correctly affect assignment.
 
 ## Phase 4 — Instructions
 
@@ -63,13 +71,20 @@ all surface on the right tasks with the right badges.
 
 ## Phase 5 — Stays and iCal
 
-- iCal feed polling per provider (Airbnb, VRBO, Booking, generic).
-- Stay model + manager UI + calendar.
-- Turnover templates + auto-generated turnover bundles.
-- Guest welcome page with tokenized URL and check-out checklist.
+- iCal feed polling per provider (Airbnb, VRBO, Booking, generic),
+  with per-unit feed mapping.
+- Stay model (unit-scoped) + manager UI + calendar.
+- **Stay lifecycle rules** (`before_checkin`, `after_checkout`,
+  `during_stay`) + auto-generated **stay task bundles** with
+  pull-back scheduling.
+- Guest welcome page with tokenized URL, unit-aware info merge, and
+  check-out checklist.
 
-**Exit:** an imported Airbnb calendar yields correct turnover bundles
-with check-out-checklist visible to the guest via the welcome link.
+**Exit:** an imported Airbnb calendar yields correct stay task bundles
+(including pre-arrival prep via `before_checkin` rules) with check-out
+checklist visible to the guest via the welcome link; pull-back
+scheduling correctly moves pre-arrival tasks when the ideal date is
+unavailable.
 
 ## Phase 6 — Inventory
 
@@ -77,8 +92,23 @@ with check-out-checklist visible to the guest via the welcome link.
   barcode scanner UI.
 - Reports (low stock, burn rate).
 
-**Exit:** a turnover bundle consumes inventory; threshold breaches
+**Exit:** a stay task bundle consumes inventory; threshold breaches
 produce restock tasks; burn-rate report looks right.
+
+## Phase 6b — Assets, actions & documents
+
+- Asset types catalog (system-seeded + workspace-custom).
+- Asset CRUD with condition/status tracking, QR tokens.
+- Asset actions with scheduling integration (§06).
+- Asset documents (manuals, warranties, invoices) with expiry alerts.
+- TCO reporting and replacement forecasts.
+- Guest-visible assets on the welcome page (§04).
+
+**Exit:** a manager registers a pool pump from the pre-seeded catalog;
+recurring maintenance actions generate tasks via the schedule worker;
+completing a filter-clean task updates `last_performed_at`; the daily
+digest surfaces an expiring warranty; TCO report sums purchase price,
+expenses, and document invoices correctly.
 
 ## Phase 7 — Time, payroll, expenses
 
@@ -141,7 +171,7 @@ Items explicitly deferred, in rough priority order:
 3. **True multi-tenancy** — more than one workspace per deployment,
    with a workspace-switcher UI and workspace-admin roles. The
    **schema is already ready** (every user-editable row carries
-   `workspace_id`; junction tables `villa_workspace` and
+   `workspace_id`; junction tables `property_workspace` and
    `employee_workspace` exist; RLS seam is `workspace_id` per §15),
    so lifting the single-workspace lock is a policy + auth change,
    not a data migration. Bundled with SaaS lockout recovery that

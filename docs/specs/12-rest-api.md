@@ -214,24 +214,42 @@ GET    /properties/{id}
 PATCH  /properties/{id}
 DELETE /properties/{id}
 
+GET    /properties/{id}/units
+POST   /properties/{id}/units
+GET    /units/{id}
+PATCH  /units/{id}
+DELETE /units/{id}
+PUT    /units/{id}/restore
+GET    /units/{id}/settings            # sparse overrides
+PATCH  /units/{id}/settings
+
 GET    /properties/{id}/areas
 POST   /properties/{id}/areas
 PATCH  /areas/{id}
 DELETE /areas/{id}
 
-GET    /stays
-POST   /stays
+GET    /stays                          # filter: ?unit_id=…&property_id=…
+POST   /stays                          # body must include unit_id
 PATCH  /stays/{id}
 DELETE /stays/{id}
 POST   /stays/{id}/welcome_link        # create/rotate
 DELETE /stays/{id}/welcome_link
 
-GET    /ical_feeds
-POST   /ical_feeds
+GET    /ical_feeds                     # filter: ?unit_id=…&property_id=…
+POST   /ical_feeds                     # body may include unit_id
 POST   /ical_feeds/{id}/poll           # manual poll trigger
 
-GET    /property_closures              # filter: ?property_id=…&from=…&to=…
-POST   /property_closures
+GET    /stay_lifecycle_rules           # filter: ?property_id=…&unit_id=…
+POST   /stay_lifecycle_rules
+GET    /stay_lifecycle_rules/{id}
+PATCH  /stay_lifecycle_rules/{id}
+DELETE /stay_lifecycle_rules/{id}
+
+GET    /stay_task_bundles              # filter: ?stay_id=…&unit_id=…&lifecycle_rule_id=…&state=…
+GET    /stay_task_bundles/{id}
+
+GET    /property_closures              # filter: ?property_id=…&unit_id=…&from=…&to=…
+POST   /property_closures              # body may include unit_id
 PATCH  /property_closures/{id}
 DELETE /property_closures/{id}
 ```
@@ -265,6 +283,19 @@ PATCH  /employee_leaves/{id}
 POST   /employee_leaves/{id}/approve
 POST   /employee_leaves/{id}/reject
 DELETE /employee_leaves/{id}
+
+GET    /employee_availability_overrides   # ?employee_id=…&from=…&to=…&approved=true|false
+POST   /employee_availability_overrides
+PATCH  /employee_availability_overrides/{id}
+POST   /employee_availability_overrides/{id}/approve
+POST   /employee_availability_overrides/{id}/reject
+DELETE /employee_availability_overrides/{id}
+
+GET    /public_holidays                   # ?from=…&to=…&country=…
+POST   /public_holidays
+GET    /public_holidays/{id}
+PATCH  /public_holidays/{id}
+DELETE /public_holidays/{id}
 ```
 
 **`GET /capabilities` response shape** — resolved map per (employee,
@@ -320,7 +351,7 @@ GET    /schedules/{id}/preview?for=30d   # upcoming occurrences
 POST   /schedules/{id}/pause
 POST   /schedules/{id}/resume
 
-POST   /turnover_templates/{property_id}/apply_to_upcoming
+POST   /stay_lifecycle_rules/{property_id}/apply_to_upcoming
        # body: {"from": "2026-04-15", "to": "2026-07-15",
        #        "rebuild_patched": false}
        # default window: [today, today+90d]. `rebuild_patched=true`
@@ -412,6 +443,47 @@ the body must include a non-empty `adjustment_reason`; the server sets
 `adjusted = true`. Otherwise `adjustment_reason` is optional and
 `adjusted` is unchanged. See §09.
 
+### Assets / documents
+
+```
+GET    /asset_types                   # list; ?category=…&workspace_only=bool
+POST   /asset_types
+GET    /asset_types/{id}
+PATCH  /asset_types/{id}
+DELETE /asset_types/{id}              # workspace-custom only; system → 403
+
+GET    /assets                        # ?property_id=…&status=…&condition=…&asset_type_id=…&area_id=…&q=…
+POST   /assets
+GET    /assets/{id}                   # includes computed TCO, next_due per action
+PATCH  /assets/{id}
+DELETE /assets/{id}
+PUT    /assets/{id}/restore
+
+GET    /assets/{id}/actions
+POST   /assets/{id}/actions
+PATCH  /asset_actions/{id}
+DELETE /asset_actions/{id}
+POST   /asset_actions/{id}/activate   # create template + schedule from action metadata
+POST   /asset_actions/{id}/perform    # log one-off performance (creates + completes task)
+
+GET    /assets/{id}/documents         # documents for this asset
+POST   /assets/{id}/documents         # multipart; file + metadata
+
+GET    /documents                     # ?asset_id=…&property_id=…&kind=…&expires_before=…
+GET    /documents/{id}
+PATCH  /documents/{id}
+DELETE /documents/{id}
+
+GET    /properties/{id}/documents     # documents for this property
+POST   /properties/{id}/documents     # multipart; file + metadata
+
+GET    /asset/scan/{qr_token}         # redirect or error (§21 QR)
+
+GET    /assets/reports/tco?property_id=…
+GET    /assets/reports/replacements?within_days=…
+GET    /assets/reports/maintenance_due
+```
+
 ### Settings
 
 ```
@@ -477,7 +549,7 @@ GET    /files/{id}/blob            # signed redirect or stream
 
 Files are stored through a pluggable backend driver (§02 `file`
 entity). v1 ships the `local` driver only, writing under
-`$MIPLOYEES_DATA_DIR/files/{household_id}/{sha256[0:2]}/{sha256}`.
+`$MIPLOYEES_DATA_DIR/files/{workspace_id}/{sha256[0:2]}/{sha256[2:4]}/{sha256}`.
 Setting `MIPLOYEES_STORAGE=s3` (recipe B) routes to the S3/MinIO
 driver. API callers never see the storage path — only the ULID.
 
