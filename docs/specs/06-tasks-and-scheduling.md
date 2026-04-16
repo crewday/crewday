@@ -559,39 +559,46 @@ instructions, workspace defaults); it does not silently moderate.
 ## Evidence policy inheritance
 
 Evidence policy is an instance of the **settings cascade** (§02
-"Settings cascade"), canonical key `evidence.policy`. The generic
-resolution order (workspace → property → unit → employee → task,
-first concrete value wins) applies here.
+"Settings cascade"), canonical key `evidence.policy`, scope
+`W/P/U/E/T`. The generic "most specific wins" resolution (§02) applies,
+with one domain-specific rule layered on top: **`forbid` is absolute**.
 
-The effective photo-evidence policy for a given task is computed by
-walking the evidence-policy stack defined in §05 from the workspace
-root outward, with each layer set to one of
+The effective photo-evidence policy for a given task is computed from
+five layers, each set to one of
 `inherit | require | optional | forbid`:
 
 1. **Workspace default** (always concrete).
-2. **Villa (property) override.**
+2. **Property override.**
 3. **Unit override.**
 4. **Employee override.**
 5. **Task override.**
 
-The first concrete (non-`inherit`) value encountered, walking root
-first and outward, is the effective policy. In practice:
+Resolution:
+
+1. **Forbid first.** If any layer is concrete `forbid`, the effective
+   policy is `forbid`, regardless of how specific the other layers'
+   values are. The UI hides the camera picker and any attached photo
+   on a completion payload is rejected.
+2. **Otherwise, most specific wins.** Walk from task inward
+   (task → employee → unit → property → workspace) and return the
+   first concrete (non-`inherit`) value. `inherit` layers pass through.
+
+In practice:
 
 - A workspace that sets `require` at the root and leaves everything
   else as `inherit` gets photo evidence on every task.
-- A villa whose owner disables photos for privacy sets
-  `property.evidence_policy = forbid`; tasks at that villa cannot
+- A property whose owner disables photos for privacy sets
+  `property.evidence_policy = forbid`; tasks at that property cannot
   attach photos even if the task template requires them.
-- An employee working under `time.manager_edit_only` might carry
-  `require` regardless of workspace — the employee layer overrides
-  the root.
+- An employee working under a stricter evidence rule carries
+  `require` via their per-employee override; the employee layer is
+  more specific than the workspace, so it wins over `optional` at the
+  root.
 - A task may tighten (`inherit → require`) or loosen
   (`inherit → optional`) the inherited value.
 
-`forbid` is the strongest value: if any layer on the walk sets
-`forbid`, the task cannot accept a photo and the UI hides the
-camera picker. Evidence policy is surfaced on the task detail screen
-as "Photo: required / optional / forbidden (from <layer>)".
+Evidence policy is surfaced on the task detail screen as "Photo:
+required / optional / forbidden (from <layer>)".
 
 ## Comments
 

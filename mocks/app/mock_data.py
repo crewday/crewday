@@ -213,7 +213,7 @@ class Issue:
     reported_by: str
     property_id: str
     area: str
-    severity: Literal["low", "medium", "high"]
+    severity: Literal["low", "normal", "high", "urgent"]
     category: Literal["damage", "broken", "supplies", "safety", "other"]
     title: str
     body: str
@@ -415,7 +415,6 @@ class AssetAction:
     label: str
     interval_days: int | None = None
     last_performed_at: date | None = None
-    next_due_on: date | None = None
     linked_task_id: str | None = None
     linked_schedule_id: str | None = None
     description: str | None = None
@@ -814,7 +813,7 @@ INVENTORY: list[InventoryItem] = [
 
 ISSUES: list[Issue] = [
     Issue("iss-1", "e-maria", "p-villa-sud", "Master bedroom",
-          "medium", "broken", "Bedside lamp flickers",
+          "normal", "broken", "Bedside lamp flickers",
           "The one on the left side. Bulb is fine — I swapped it. Wiring in the base, I think.",
           datetime(2026, 4, 14, 11, 32), "open"),
     Issue("iss-2", "e-arun", "p-villa-sud", "Transport",
@@ -1062,57 +1061,57 @@ ASSETS: list[Asset] = [
 ASSET_ACTIONS: list[AssetAction] = [
     # Villa AC
     AssetAction("aa-1", "a-villa-ac-bed", "clean_filters", "Clean filters",
-                interval_days=90, last_performed_at=date(2026, 2, 10), next_due_on=date(2026, 5, 11),
+                interval_days=90, last_performed_at=date(2026, 2, 10),
                 estimated_duration_minutes=30),
     AssetAction("aa-2", "a-villa-ac-bed", "service_unit", "Annual service",
-                interval_days=365, last_performed_at=date(2025, 6, 20), next_due_on=date(2026, 6, 20),
+                interval_days=365, last_performed_at=date(2025, 6, 20),
                 estimated_duration_minutes=120),
     # Villa pool pump
     AssetAction("aa-3", "a-villa-pool-pump", "clean_basket", "Clean basket",
-                interval_days=7, last_performed_at=date(2026, 4, 12), next_due_on=date(2026, 4, 19),
+                interval_days=7, last_performed_at=date(2026, 4, 12),
                 linked_task_id="t-1", estimated_duration_minutes=10),
     AssetAction("aa-4", "a-villa-pool-pump", "inspect_seals", "Inspect seals",
-                interval_days=180, last_performed_at=date(2025, 11, 1), next_due_on=date(2026, 4, 30),
+                interval_days=180, last_performed_at=date(2025, 11, 1),
                 estimated_duration_minutes=20),
     AssetAction("aa-5", "a-villa-pool-pump", "service_pump", "Full service",
-                interval_days=365, last_performed_at=date(2025, 4, 10), next_due_on=date(2026, 4, 10),
+                interval_days=365, last_performed_at=date(2025, 4, 10),
                 description="Overdue by 5 days", estimated_duration_minutes=120),
     # Villa oven
     AssetAction("aa-6", "a-villa-oven", "deep_clean", "Deep clean",
-                interval_days=90, last_performed_at=date(2026, 1, 20), next_due_on=date(2026, 4, 20),
+                interval_days=90, last_performed_at=date(2026, 1, 20),
                 estimated_duration_minutes=45),
     # Villa smoke detector
     AssetAction("aa-7", "a-villa-smoke-1", "test", "Test alarm",
-                interval_days=30, last_performed_at=date(2026, 3, 15), next_due_on=date(2026, 4, 14),
+                interval_days=30, last_performed_at=date(2026, 3, 15),
                 description="Overdue by 1 day", estimated_duration_minutes=5),
     # Villa water heater
     AssetAction("aa-8", "a-villa-water-heater", "flush_tank", "Flush tank",
-                interval_days=365, last_performed_at=date(2025, 5, 1), next_due_on=date(2026, 5, 1),
+                interval_days=365, last_performed_at=date(2025, 5, 1),
                 estimated_duration_minutes=60),
     # Apt dishwasher
     AssetAction("aa-9", "a-apt-dishwasher", "clean_filter", "Clean filter",
-                interval_days=30, last_performed_at=date(2026, 4, 1), next_due_on=date(2026, 5, 1),
+                interval_days=30, last_performed_at=date(2026, 4, 1),
                 estimated_duration_minutes=15),
     AssetAction("aa-10", "a-apt-dishwasher", "descale", "Descale",
-                interval_days=90, last_performed_at=date(2026, 1, 15), next_due_on=date(2026, 4, 15),
+                interval_days=90, last_performed_at=date(2026, 1, 15),
                 description="Due today", estimated_duration_minutes=20),
     # Apt washing machine
     AssetAction("aa-11", "a-apt-washing", "clean_drum", "Clean drum",
-                interval_days=30, last_performed_at=date(2026, 3, 20), next_due_on=date(2026, 4, 19),
+                interval_days=30, last_performed_at=date(2026, 3, 20),
                 estimated_duration_minutes=15),
     # Chalet boiler
     AssetAction("aa-12", "a-chalet-boiler", "annual_service", "Annual service",
-                interval_days=365, last_performed_at=date(2025, 10, 5), next_due_on=date(2026, 10, 5),
+                interval_days=365, last_performed_at=date(2025, 10, 5),
                 estimated_duration_minutes=90),
     AssetAction("aa-13", "a-chalet-boiler", "bleed_radiators", "Bleed radiators",
-                interval_days=180, last_performed_at=date(2025, 11, 1), next_due_on=date(2026, 4, 30),
+                interval_days=180, last_performed_at=date(2025, 11, 1),
                 estimated_duration_minutes=45),
     # Chalet snowblower
     AssetAction("aa-14", "a-chalet-snowblower", "oil_change", "Oil change",
-                interval_days=180, last_performed_at=date(2025, 10, 15), next_due_on=date(2026, 4, 13),
+                interval_days=180, last_performed_at=date(2025, 10, 15),
                 description="Overdue by 2 days", estimated_duration_minutes=30),
     AssetAction("aa-15", "a-chalet-snowblower", "annual_inspection", "Annual inspection",
-                interval_days=365, last_performed_at=date(2025, 11, 20), next_due_on=date(2026, 11, 20),
+                interval_days=365, last_performed_at=date(2025, 11, 20),
                 estimated_duration_minutes=60),
 ]
 

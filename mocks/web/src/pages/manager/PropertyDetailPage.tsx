@@ -207,7 +207,7 @@ export default function PropertyDetailPage() {
                     <td>{s.source}</td>
                     <td className="table__mono">{fmtDayMon(s.check_in)}</td>
                     <td className="table__mono">{fmtDayMon(s.check_out)}</td>
-                    <td>{s.guest_names}</td>
+                    <td>{s.guest_name}</td>
                   </tr>
                 ))}
               </tbody>

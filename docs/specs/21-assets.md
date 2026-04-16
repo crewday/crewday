@@ -292,7 +292,7 @@ Two new keys added to the settings catalog (§02):
 | key                           | type | default | scope | spec |
 |-------------------------------|------|---------|-------|------|
 | `assets.warranty_alert_days`  | int  | `30`    | W/P   | §21  |
-| `assets.show_guest_assets`    | bool | `false` | W/P   | §21  |
+| `assets.show_guest_assets`    | bool | `false` | W/P/U | §21  |
 
 - `assets.warranty_alert_days`: number of days before
   `warranty_expires_on` to surface a warranty-expiring alert in the

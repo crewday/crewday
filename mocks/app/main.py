@@ -76,6 +76,11 @@ def _encode(obj: Any) -> Any:
     values inside `dict` fields (e.g. `WORKSPACE_SETTINGS`); this keeps
     the output predictable for the SPA.
     """
+    if isinstance(obj, md.AssetAction):
+        # `next_due` is computed on read, not stored (§21).
+        out = {k: _encode(v) for k, v in asdict(obj).items()}
+        out["next_due_on"] = _encode(_asset_action_next_due(obj))
+        return out
     if is_dataclass(obj) and not isinstance(obj, type):
         return {k: _encode(v) for k, v in asdict(obj).items()}
     if isinstance(obj, (list, tuple)):
@@ -89,6 +94,25 @@ def _encode(obj: Any) -> Any:
     if isinstance(obj, time):
         return obj.isoformat(timespec="minutes")
     return obj
+
+
+def _asset_action_next_due(action: "md.AssetAction") -> date | None:
+    """Per §21: next_due = COALESCE(last_performed_at, asset.installed_on,
+    asset.created_at) + interval_days. Computed on read, not stored.
+
+    The anchor must be a stable persisted timestamp — never `TODAY` —
+    so the due date doesn't drift forward on every read. If the chain
+    is exhausted, return None (the action isn't due yet).
+    """
+    if action.interval_days is None:
+        return None
+    asset = md.asset_by_id(action.asset_id)
+    anchor = action.last_performed_at
+    if anchor is None and asset is not None:
+        anchor = asset.installed_on or asset.purchased_on
+    if anchor is None:
+        return None
+    return anchor + timedelta(days=action.interval_days)
 
 
 def ok(payload: Any, status_code: int = 200) -> JSONResponse:
@@ -579,9 +603,7 @@ def api_asset_action_complete(aid: str, action_id: str) -> Response:
     if action is None:
         return JSONResponse({"detail": "not found"}, status_code=404)
     action.last_performed_at = md.TODAY
-    if action.interval_days:
-        action.next_due_on = md.TODAY + timedelta(days=action.interval_days)
-    hub.publish("asset.action.completed", {"asset_id": aid, "action": action})
+    hub.publish("asset_action.performed", {"asset_id": aid, "action": action})
     return ok(action)
 
 
@@ -657,7 +679,7 @@ def api_task_complete(tid: str) -> Response:
     if task is None:
         return JSONResponse({"detail": "not found"}, status_code=404)
     task.status = "completed"
-    hub.publish("task.updated", {"task": task})
+    hub.publish("task.completed", {"task": task})
     return ok(task)
 
 
@@ -667,8 +689,8 @@ def api_task_skip(tid: str, payload: dict[str, Any] = Body(default_factory=dict)
     if task is None:
         return JSONResponse({"detail": "not found"}, status_code=404)
     task.status = "skipped"
-    _ = payload.get("reason")  # preserved in a real system; ignored here
-    hub.publish("task.updated", {"task": task})
+    reason = payload.get("reason")
+    hub.publish("task.skipped", {"task": task, "reason": reason})
     return ok(task)
 
 
@@ -739,14 +761,20 @@ def api_expenses_create(payload: dict[str, Any] = Body(...)) -> Response:
 
 @app.post("/api/v1/expenses/{xid}/{decision}")
 def api_expenses_decide(xid: str, decision: str) -> Response:
-    mapping = {"approve": "approved", "reject": "rejected", "reimburse": "reimbursed"}
-    new_status = mapping.get(decision)
-    if new_status is None:
+    # decision → new status → matching §10 webhook event name
+    mapping = {
+        "approve":   ("approved",   "expense.approved"),
+        "reject":    ("rejected",   "expense.rejected"),
+        "reimburse": ("reimbursed", "expense.reimbursed"),
+    }
+    pair = mapping.get(decision)
+    if pair is None:
         return JSONResponse({"detail": "bad decision"}, status_code=400)
+    new_status, event = pair
     for x in md.EXPENSES:
         if x.id == xid:
             x.status = new_status  # type: ignore[assignment]
-            hub.publish("expense.decided", {"id": xid, "status": new_status})
+            hub.publish(event, {"id": xid, "status": new_status})
             return ok(x)
     return JSONResponse({"detail": "not found"}, status_code=404)
 
@@ -758,7 +786,7 @@ def api_issues_create(payload: dict[str, Any] = Body(...)) -> Response:
         reported_by=md.DEFAULT_EMPLOYEE_ID,
         property_id=str(payload.get("property_id") or md.PROPERTIES[0].id),
         area=str(payload.get("area") or "—"),
-        severity=str(payload.get("severity") or "medium"),  # type: ignore[arg-type]
+        severity=str(payload.get("severity") or "normal"),  # type: ignore[arg-type]
         category=str(payload.get("category") or "other"),   # type: ignore[arg-type]
         title=str(payload.get("title") or "Untitled"),
         body=str(payload.get("body") or ""),

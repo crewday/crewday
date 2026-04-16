@@ -193,7 +193,7 @@ export default function MyExpensesPage() {
                 Photo, payment confirmation, or bank transfer
               </span>
             </label>
-            <div style={{ textAlign: "center", marginTop: 12 }}>
+            <div className="form__manual-entry">
               <button
                 type="button"
                 className="link link--muted"
@@ -247,7 +247,7 @@ export default function MyExpensesPage() {
               <label className={`field ${confidenceClass(conf.merchant ?? null)}`}>
                 <span>
                   Merchant
-                  {isScanned && conf.merchant !== null && conf.merchant >= 0.6 && conf.merchant < 0.9 && (
+                  {isScanned && conf.merchant != null && conf.merchant >= 0.6 && conf.merchant < 0.9 && (
                     <Chip tone="sand" size="sm">{Math.round(conf.merchant * 100)}%</Chip>
                   )}
                 </span>
@@ -262,12 +262,11 @@ export default function MyExpensesPage() {
 
               <div className="form__row">
                 <label
-                  className={`field ${confidenceClass(conf.amount ?? null)}`}
-                  style={{ flex: 1 }}
+                  className={`field field--grow ${confidenceClass(conf.amount ?? null)}`}
                 >
                   <span>
                     Amount
-                    {isScanned && conf.amount !== null && conf.amount >= 0.6 && conf.amount < 0.9 && (
+                    {isScanned && conf.amount != null && conf.amount >= 0.6 && conf.amount < 0.9 && (
                       <Chip tone="sand" size="sm">{Math.round(conf.amount * 100)}%</Chip>
                     )}
                   </span>
@@ -281,7 +280,7 @@ export default function MyExpensesPage() {
                     onChange={(e) => setAmount(e.target.value)}
                   />
                 </label>
-                <label className="field" style={{ width: 80, flex: "none" }}>
+                <label className="field field--currency">
                   <span>Currency</span>
                   <input
                     name="currency"
@@ -294,7 +293,7 @@ export default function MyExpensesPage() {
               <div className={`field ${confidenceClass(conf.category ?? null)}`}>
                 <span>
                   Category
-                  {isScanned && conf.category !== null && conf.category >= 0.6 && conf.category < 0.9 && (
+                  {isScanned && conf.category != null && conf.category >= 0.6 && conf.category < 0.9 && (
                     <Chip tone="sand" size="sm">{Math.round(conf.category * 100)}%</Chip>
                   )}
                 </span>
@@ -317,7 +316,7 @@ export default function MyExpensesPage() {
               <label className={`field ${confidenceClass(conf.note ?? null)}`}>
                 <span>
                   Note
-                  {isScanned && conf.note !== null && conf.note >= 0.6 && conf.note < 0.9 && (
+                  {isScanned && conf.note != null && conf.note >= 0.6 && conf.note < 0.9 && (
                     <Chip tone="sand" size="sm">{Math.round(conf.note * 100)}%</Chip>
                   )}
                 </span>

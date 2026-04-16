@@ -7,13 +7,14 @@ import { Loading } from "@/components/common";
 import type { Issue, Property } from "@/types/api";
 
 type Category = "damage" | "broken" | "supplies" | "safety" | "other";
-type Severity = "low" | "medium" | "high";
+type Severity = "low" | "normal" | "high" | "urgent";
 
 const CATEGORIES: Category[] = ["damage", "broken", "supplies", "safety", "other"];
 const SEVERITIES: [Severity, string][] = [
   ["low", "Low"],
-  ["medium", "Medium"],
+  ["normal", "Normal"],
   ["high", "High — unsafe or guest-facing"],
+  ["urgent", "Urgent — needs action today"],
 ];
 
 function cap(s: string): string {
@@ -40,7 +41,7 @@ export default function IssueNewPage() {
   const [propertyId, setPropertyId] = useState("");
   const [area, setArea] = useState("");
   const [category, setCategory] = useState<Category>("broken");
-  const [severity, setSeverity] = useState<Severity>("medium");
+  const [severity, setSeverity] = useState<Severity>("normal");
   const [body, setBody] = useState("");
 
   const create = useMutation({

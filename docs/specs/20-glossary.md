@@ -16,7 +16,7 @@ fix the offender.
   (no filtered catalog). Voice input is capability-gated.
 - **Auto-clock.** The `auto` value of `time.clock_mode` (§05, §09).
   First checklist tick or task action of the day opens a shift;
-  `time.auto_clock_idle_minutes` of inactivity closes it. Per-villa
+  `time.auto_clock_idle_minutes` of inactivity closes it. Per-property
   override can force `manual` or `disabled`. See §09 "Disputed
   auto-close" for the re-open semantics.
 - **Anomaly suppression.** A manager-recorded rule that silences a
@@ -80,11 +80,14 @@ fix the offender.
 - **Evidence.** Artifact attached to a completion — photo, note, or
   checklist snapshot.
 - **Evidence policy.** Photo-evidence requirement resolved by
-  walking a five-layer stack workspace → villa → unit → employee →
+  walking a five-layer stack workspace → property → unit → employee →
   task (§05 "Evidence-policy stack", §06 "Evidence policy
   inheritance"). Values are `inherit | require | optional | forbid`;
-  the workspace root is always concrete. First concrete value,
-  root-first, wins. `forbid` at any layer is absolute.
+  the workspace root is always concrete. **Most specific wins** — the
+  walk goes from task inward, stopping at the first concrete
+  (non-`inherit`) value — with one domain-specific rule: `forbid` at
+  any layer is absolute (camera picker hidden regardless of more
+  specific layers).
 - **File.** Shared blob-reference row (§02 `file`). Pluggable backend;
   local disk in v1.
 - **Guest link.** A tokenized URL sent to a stay guest that opens a

@@ -303,10 +303,50 @@ miployees expenses
 
 miployees issues
   report --property <id> [--area <id>] "<title>" --body @issue.md \
-         [--severity minor|major|urgent]
-  list [--state] [--property]
+         [--severity low|normal|high|urgent] \
+         [--category damage|broken|supplies|safety|other]
+  list [--state] [--property] [--severity] [--category]
   resolve <id> --note "..."
   convert-to-task <id> --role handyman
+
+miployees asset-types
+  list [--workspace <id>]
+  add "<name>" [--icon <slug>] [--default-condition <enum>] \
+      [--default-action-interval <days>]
+  update <id> ...
+  archive <id>
+
+miployees assets
+  list [--property] [--type] [--status] [--condition] [--custodian]
+  add "<label>" --type <id> --property <id> \
+      [--unit <id>] [--area <id>] [--serial <s>] [--purchased-on <date>] \
+      [--purchase-price <amount> --currency EUR] \
+      [--warranty-expires-on <date>] [--guest-visible]
+  show <id>
+  update <id> ...
+  assign <id> --to <employee-id>
+  unassign <id>
+  transfer <id> --to-property <id> [--note "..."]
+  condition <id> --set <new|good|fair|poor|needs_replacement> [--note "..."]
+  status <id> --set <active|in_repair|decommissioned|disposed> [--note "..."]
+  qr-print <id> [--size <label>]
+
+miployees asset-actions
+  list --asset <id>
+  add --asset <id> --kind <maintenance|inspection|replacement> \
+      "<label>" [--interval-days <int>] [--template <tpl-id>]
+  activate <action-id>
+  perform <action-id> [--note "..."] [--photo <path>]
+  schedule-link <action-id> --schedule <sched-id>
+
+miployees documents
+  list [--asset] [--property] [--kind] [--expiring-within 30d]
+  add --kind <manual|warranty|receipt|insurance|certificate|other> \
+      --file <path> [--asset <id>] [--property <id>] \
+      [--expires-on <date>] [--issuer "..."]
+  show <id>
+  download <id> [-o <path>]
+  archive <id>
 
 miployees webhooks
   list

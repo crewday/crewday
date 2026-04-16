@@ -231,18 +231,18 @@ workspace delete the rows are hard-dropped.
 ### `employee_workspace`
 
 Junction table. An employee is materialised in every workspace they
-belong to; membership is derived from their assigned villas via
-`employee_villa` (§05) plus any direct membership a manager adds.
+belong to; membership is derived from their assigned properties via
+`employee_property` (§05) plus any direct membership a manager adds.
 
 | column        | type    | notes                              |
 |---------------|---------|------------------------------------|
 | employee_id   | ULID FK |                                    |
 | workspace_id  | ULID FK |                                    |
-| source        | text    | `villa` (derived) \| `direct` (manager-added) |
+| source        | text    | `property` (derived) \| `direct` (manager-added) |
 | added_at      | tstz    |                                    |
 
 Primary key `(employee_id, workspace_id)`. A worker job refreshes
-`source = 'villa'` rows whenever an `employee_villa` row is
+`source = 'property'` rows whenever an `employee_property` row is
 inserted/removed, in the same transaction.
 
 ### `audit_log`
@@ -547,8 +547,8 @@ across the entire schema, API, and UI. Concretely:
 - The two new junction tables `property_workspace` and
   `employee_workspace` are introduced; the seeded v1 deployment
   back-fills one row per existing `(property, workspace)` and one row
-  per `(employee, workspace)` with `source = 'villa'` where
-  applicable, plus `'direct'` for any employee with no villa
+  per `(employee, workspace)` with `source = 'property'` where
+  applicable, plus `'direct'` for any employee with no property
   assignment.
 - v1 still ships **single-workspace**: a fresh install seeds exactly
   one `workspaces` row at first boot and all tooling assumes that
@@ -560,6 +560,7 @@ across the entire schema, API, and UI. Concretely:
   migration notes, §20 glossary) still say "household" when they are
   explicitly describing v0 behaviour. New code and new docs must use
   "workspace".
-- The junction table originally named `villa_workspace` was renamed to
-  `property_workspace` (and its `villa_id` column to `property_id`)
-  to align with the canonical `property` entity name.
+- The junction tables originally named `villa_workspace` and
+  `employee_villa` were renamed to `property_workspace` and
+  `employee_property` respectively (and their `villa_id` columns to
+  `property_id`) to align with the canonical `property` entity name.

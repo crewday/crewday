@@ -227,6 +227,7 @@ issue
 ├── title
 ├── description_md
 ├── severity                   # low | normal | high | urgent
+├── category                   # damage | broken | supplies | safety | other
 ├── state                      # open | in_progress | resolved | wont_fix
 ├── attachment_file_ids        # ULID[]; each id references `file` (§02)
 ├── converted_to_task_id       # when a manager escalates
@@ -265,7 +266,7 @@ An agent or external system subscribes to events.
 ```
 manager.*            created, updated, archived, reinstated
 employee.*           created, updated, archived, reinstated
-task.*               created, assigned, started, completed,
+task.*               created, assigned, updated, started, completed,
                      complete_superseded, skipped, cancelled, overdue,
                      unassigned_pre_arrival
 task_comment.*       created

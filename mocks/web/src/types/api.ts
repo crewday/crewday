@@ -283,7 +283,7 @@ export interface Issue {
   reported_by: string;
   property_id: string;
   area: string;
-  severity: "low" | "medium" | "high";
+  severity: "low" | "normal" | "high" | "urgent";
   category: "damage" | "broken" | "supplies" | "safety" | "other";
   title: string;
   body: string;
@@ -524,6 +524,10 @@ export type SseEvent =
   | { event: "tick"; data: { now: string } }
   | { event: "agent.message.appended"; data: { scope: "employee" | "manager"; message: AgentMessage } }
   | { event: "task.updated"; data: { task: Task } }
+  | { event: "task.completed"; data: { task: Task } }
+  | { event: "task.skipped"; data: { task: Task; reason: string | null } }
   | { event: "approval.decided"; data: { id: string; decision: "approve" | "reject" } }
-  | { event: "expense.decided"; data: { id: string; status: ExpenseStatus } }
-  | { event: "asset.action.completed"; data: { asset_id: string; action: AssetAction } };
+  | { event: "expense.approved"; data: { id: string; status: ExpenseStatus } }
+  | { event: "expense.rejected"; data: { id: string; status: ExpenseStatus } }
+  | { event: "expense.reimbursed"; data: { id: string; status: ExpenseStatus } }
+  | { event: "asset_action.performed"; data: { asset_id: string; action: AssetAction } };

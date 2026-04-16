@@ -303,6 +303,10 @@
   outline-color: var(--sand);
 }
 .form__row { display: flex; gap: 8px; justify-content: space-between; align-items: center; }
+.form__row .field--grow { flex: 1; }
+.form__row .field--currency { flex: none; width: 80px; }
+
+.form__manual-entry { text-align: center; margin-top: 12px; }
 
 .chip-group { display: flex; flex-wrap: wrap; gap: 6px; }
 .chip-radio { display: inline-block; cursor: pointer; }

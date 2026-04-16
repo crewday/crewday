@@ -5,30 +5,18 @@ import { qk } from "@/lib/queryKeys";
 import DeskPage from "@/components/DeskPage";
 import { Avatar, Chip, Loading, Panel, StatCard } from "@/components/common";
 import type {
-  ApprovalRequest, Employee, Expense, Issue, Leave, Me, Property, Stay, Task,
+  DashboardPayload as Dashboard, Issue, Me, Task,
 } from "@/types/api";
-
-interface Dashboard {
-  on_shift: Employee[];
-  by_status: { completed: Task[]; in_progress: Task[]; pending: Task[] };
-  pending_approvals: ApprovalRequest[];
-  pending_expenses: Expense[];
-  pending_leaves: Leave[];
-  open_issues: Issue[];
-  stays_today: Stay[];
-  properties: Property[];
-  employees: Employee[];
-}
 
 const STATUS_TONE: Record<Task["status"], "moss" | "sky" | "ghost" | "rust" | "sand"> = {
   scheduled: "ghost", pending: "ghost", in_progress: "sky", completed: "moss",
   skipped: "rust", cancelled: "rust", overdue: "sand",
 };
 const ISSUE_TONE: Record<Issue["severity"], "ghost" | "sand" | "rust"> = {
-  low: "ghost", medium: "sand", high: "rust",
+  low: "ghost", normal: "sand", high: "rust", urgent: "rust",
 };
-const ISSUE_STATUS: Record<Issue["status"], "sand" | "sky" | "moss"> = {
-  open: "sand", in_progress: "sky", resolved: "moss",
+const ISSUE_STATUS: Record<Issue["status"], "sand" | "sky" | "moss" | "ghost"> = {
+  open: "sand", in_progress: "sky", resolved: "moss", wont_fix: "ghost",
 };
 const APPROVAL_RISK: Record<"low" | "medium" | "high", "sky" | "sand" | "rust"> = {
   low: "sky", medium: "sand", high: "rust",

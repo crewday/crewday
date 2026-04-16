@@ -20,9 +20,13 @@ export function startEventStream(client: QueryClient): () => void {
     "tick",
     "agent.message.appended",
     "task.updated",
+    "task.completed",
+    "task.skipped",
     "approval.decided",
-    "expense.decided",
-    "asset.action.completed",
+    "expense.approved",
+    "expense.rejected",
+    "expense.reimbursed",
+    "asset_action.performed",
   ];
   for (const ev of events) {
     es.addEventListener(ev, handler as EventListener);
@@ -55,7 +59,9 @@ function dispatch(client: QueryClient, evt: TypedEvent): void {
       );
       return;
     }
-    case "task.updated": {
+    case "task.updated":
+    case "task.completed":
+    case "task.skipped": {
       const payload = data as { task: Task };
       client.setQueryData(qk.task(payload.task.id), payload.task);
       client.invalidateQueries({ queryKey: qk.tasks() });
@@ -67,7 +73,9 @@ function dispatch(client: QueryClient, evt: TypedEvent): void {
       client.invalidateQueries({ queryKey: qk.approvals() });
       client.invalidateQueries({ queryKey: qk.dashboard() });
       return;
-    case "expense.decided": {
+    case "expense.approved":
+    case "expense.rejected":
+    case "expense.reimbursed": {
       const _payload = data as { id: string; status: ExpenseStatus };
       void _payload;
       client.invalidateQueries({ queryKey: qk.expenses("all") });
@@ -75,7 +83,7 @@ function dispatch(client: QueryClient, evt: TypedEvent): void {
       client.invalidateQueries({ queryKey: qk.dashboard() });
       return;
     }
-    case "asset.action.completed": {
+    case "asset_action.performed": {
       const payload = data as { asset_id: string; action: AssetAction };
       client.invalidateQueries({ queryKey: qk.asset(payload.asset_id) });
       client.invalidateQueries({ queryKey: qk.assets() });

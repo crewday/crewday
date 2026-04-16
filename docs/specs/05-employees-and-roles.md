@@ -5,9 +5,9 @@
 A person who performs tasks for one or more workspaces.
 
 Employees can belong to **many properties** (across one or more
-workspaces) **and many workspaces (via villas)**. The explicit
-membership rows live in `employee_villa(employee_id, villa_id)` and
-`employee_workspace(employee_id, workspace_id)` — see §02. The
+workspaces) **and many workspaces (via properties)**. The explicit
+membership rows live in `employee_property(employee_id, property_id)`
+and `employee_workspace(employee_id, workspace_id)` — see §02. The
 `employee` row itself carries a "primary workspace" (the one that
 created it), but authorisation, listing, and RLS all key off the
 junction tables.
@@ -191,30 +191,36 @@ same blob drives both manager UI and API.
 ### Evidence-policy stack
 
 The evidence-policy stack is an instance of the **settings cascade**
-(§02 "Settings cascade"), canonical key `evidence.policy`. The
-cascade's generic resolution (workspace → property → employee → task,
-first concrete value wins) applies; the description below documents
-the domain-specific semantics.
+(§02 "Settings cascade"), canonical key `evidence.policy`, scope
+`W/P/U/E/T`. The description below documents the domain-specific
+semantics; the cascade mechanics (layer columns, override shape,
+resolution order) are canonical in §02.
 
 A separate resolution stack, parallel to the capability stack above,
-computes whether a task needs photo evidence. Four layers, evaluated
-root-first:
+computes whether a task needs photo evidence. Five layers, in order
+from broadest to most specific:
 
 1. **Workspace default** — always concrete (`require | optional |
    forbid`), seeded at first boot; never `inherit`.
-2. **Villa** (`property`) — `inherit | require | optional | forbid`.
-3. **Employee** (`employee_role` or a per-employee override) —
+2. **Property** — `inherit | require | optional | forbid`.
+3. **Unit** — `inherit | require | optional | forbid`. Single-unit
+   properties see no behavioural change; the unit inherits from the
+   property.
+4. **Employee** (`employee_role` or a per-employee override) —
    `inherit | require | optional | forbid`.
-4. **Task** (template-derived, with per-task override) —
+5. **Task** (template-derived, with per-task override) —
    `inherit | require | optional | forbid`.
 
-Walking from the workspace root outward, the first **concrete**
-(non-`inherit`) value wins; layers set to `inherit` pass through.
-Non-root layers default to `inherit`, so the common case is "follow
-the workspace default unless a villa, an employee, or a specific
-task deliberately narrows or widens the rule." See §06 "Evidence
-policy inheritance" for the per-task resolution and §09 for how
-`require | optional | forbid` interact with completion.
+**Most specific wins.** Resolution walks from the task inward:
+task → employee → unit → property → workspace, stopping at the first
+**concrete** (non-`inherit`) value; layers set to `inherit` (the
+non-root default) pass through. The common case is "follow the
+workspace default unless a property, a unit, an employee, or a
+specific task deliberately narrows or widens the rule." `forbid` at
+any layer is absolute — even a later `require` on a more specific
+layer cannot override it (see §06 "Evidence policy inheritance" for
+the override-vs-forbid interaction and §09 for how
+`require | optional | forbid` interact with completion).
 
 ## Permissions (web UI)
 

@@ -105,7 +105,7 @@ export default function StaysPage() {
                   <td><Chip tone="ghost" size="sm">{s.source}</Chip></td>
                   <td className="mono">{fmtAbbrevDate(s.check_in)}</td>
                   <td className="mono">{fmtAbbrevDate(s.check_out)}</td>
-                  <td>{s.guest_names}</td>
+                  <td>{s.guest_name}</td>
                   <td><Chip tone={STAY_TONE[s.status]} size="sm">{s.status.replace("_", " ")}</Chip></td>
                 </tr>
               );
