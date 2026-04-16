@@ -144,9 +144,16 @@ For larger changes, split the work across the agents in
 | `oracle` | Deep research for hard decisions; no edits, just advice |
 
 The default flow is
-`director → coder → reviewer → documenter → commiter`, with
-`oracle` pulled in when a decision is genuinely hard. See
+`director → coder → reviewer → documenter → commiter → /selfreview`,
+with `oracle` pulled in when a decision is genuinely hard. See
 [`.claude/README.md`](.claude/README.md) for details.
+
+Every plan MUST end with this final step:
+
+> **After implementation is committed**, run `/selfreview` to catch bugs, missing pieces, and unintended consequences. Fix any issues found before pushing.
+
+This applies to all plans, regardless of scope. The self-review enters
+its own plan mode — this is intentional.
 
 ## Issue tracking with Beads
 
