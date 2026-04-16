@@ -45,7 +45,7 @@ export interface Employee {
   settings_override: Record<string, unknown>;
 }
 
-export type TaskStatus = "pending" | "in_progress" | "completed" | "skipped";
+export type TaskStatus = "scheduled" | "pending" | "in_progress" | "completed" | "skipped" | "cancelled" | "overdue";
 export type TaskPriority = "low" | "normal" | "high" | "urgent";
 export type PhotoEvidence = "disabled" | "optional" | "required";
 
@@ -75,7 +75,7 @@ export interface Task {
   settings_override: Record<string, unknown>;
 }
 
-export type ExpenseStatus = "pending" | "approved" | "rejected" | "reimbursed";
+export type ExpenseStatus = "draft" | "submitted" | "approved" | "rejected" | "reimbursed";
 
 export interface Expense {
   id: string;
@@ -93,7 +93,7 @@ export interface Stay {
   id: string;
   property_id: string;
   guest: string;
-  source: "Airbnb" | "VRBO" | "Booking.com" | "Direct";
+  source: "manual" | "airbnb" | "vrbo" | "booking" | "google_calendar" | "ical";
   check_in: string;
   check_out: string;
   guests: number;
@@ -230,11 +230,11 @@ export interface LLMCall {
 
 export interface AuditEntry {
   at: string;
-  actor_kind: "human" | "agent" | "system";
+  actor_kind: "manager" | "employee" | "agent" | "system";
   actor: string;
   action: string;
   target: string;
-  via: "web" | "api" | "cli" | "system";
+  via: "web" | "api" | "cli" | "worker";
   reason: string | null;
 }
 
@@ -344,6 +344,8 @@ export interface DashboardPayload {
   pending_leaves: Leave[];
   open_issues: Issue[];
   stays_today: Stay[];
+  properties: Property[];
+  employees: Employee[];
 }
 
 // SSE event shapes. The server emits JSON-serialised payloads under
@@ -353,5 +355,5 @@ export type SseEvent =
   | { event: "tick"; data: { now: string } }
   | { event: "agent.message.appended"; data: { scope: "employee" | "manager"; message: AgentMessage } }
   | { event: "task.updated"; data: { task: Task } }
-  | { event: "approval.resolved"; data: { id: string; decision: "approve" | "reject" } }
+  | { event: "approval.decided"; data: { id: string; decision: "approve" | "reject" } }
   | { event: "expense.decided"; data: { id: string; status: ExpenseStatus } };

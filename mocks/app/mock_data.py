@@ -78,7 +78,7 @@ class Stay:
     id: str
     property_id: str
     guest: str
-    source: Literal["Airbnb", "VRBO", "Booking.com", "Direct"]
+    source: Literal["manual", "airbnb", "vrbo", "booking", "google_calendar", "ical"]
     check_in: date
     check_out: date
     guests: int
@@ -95,7 +95,7 @@ class Task:
     scheduled_start: datetime
     estimated_minutes: int
     priority: Literal["low", "normal", "high", "urgent"]
-    status: Literal["pending", "in_progress", "completed", "skipped"]
+    status: Literal["scheduled", "pending", "in_progress", "completed", "skipped", "cancelled", "overdue"]
     checklist: list[dict] = field(default_factory=list)
     photo_evidence: Literal["disabled", "optional", "required"] = "disabled"
     # Forward-looking policy used by the agent-first model; kept parallel to
@@ -116,7 +116,7 @@ class Expense:
     currency: str
     merchant: str
     submitted_at: datetime
-    status: Literal["pending", "approved", "rejected", "reimbursed"]
+    status: Literal["draft", "submitted", "approved", "rejected", "reimbursed"]
     note: str
     ocr_confidence: float | None = None
 
@@ -263,11 +263,11 @@ class LLMCall:
 @dataclass
 class AuditEntry:
     at: datetime
-    actor_kind: Literal["human", "agent", "system"]
+    actor_kind: Literal["manager", "employee", "agent", "system"]
     actor: str
     action: str
     target: str
-    via: Literal["web", "api", "cli", "system"]
+    via: Literal["web", "api", "cli", "worker"]
     reason: str | None = None
 
 
@@ -412,11 +412,11 @@ EMPLOYEES: list[Employee] = [
 ]
 
 STAYS: list[Stay] = [
-    Stay("s-1", "p-villa-sud", "Johnson family",   "Airbnb",       date(2026, 4, 13), date(2026, 4, 16), 4, "in_house"),
-    Stay("s-2", "p-villa-sud", "Park couple",      "VRBO",         date(2026, 4, 17), date(2026, 4, 22), 2),
-    Stay("s-3", "p-apt-3b",    "Nakamura",         "Airbnb",       date(2026, 4, 15), date(2026, 4, 18), 2, "in_house"),
-    Stay("s-4", "p-chalet",    "Müller family",    "Direct",       date(2026, 4, 19), date(2026, 4, 26), 6),
-    Stay("s-5", "p-apt-3b",    "Svensson",         "Booking.com",  date(2026, 4, 24), date(2026, 4, 28), 3),
+    Stay("s-1", "p-villa-sud", "Johnson family",   "airbnb",       date(2026, 4, 13), date(2026, 4, 16), 4, "in_house"),
+    Stay("s-2", "p-villa-sud", "Park couple",      "vrbo",         date(2026, 4, 17), date(2026, 4, 22), 2),
+    Stay("s-3", "p-apt-3b",    "Nakamura",         "airbnb",       date(2026, 4, 15), date(2026, 4, 18), 2, "in_house"),
+    Stay("s-4", "p-chalet",    "Müller family",    "manual",       date(2026, 4, 19), date(2026, 4, 26), 6),
+    Stay("s-5", "p-apt-3b",    "Svensson",         "booking",      date(2026, 4, 24), date(2026, 4, 28), 3),
 ]
 
 
@@ -497,13 +497,30 @@ TASKS: list[Task] = [
         "e-sam", _t(15, 0, day=16), 20, "normal", "pending",
         photo_evidence="optional",
     ),
+    Task(
+        "t-8", "Restock welcome basket — Apt 3B", "p-apt-3b", "Kitchen",
+        "e-ana", _t(10, 0, day=23), 30, "normal", "scheduled",
+        photo_evidence="optional",
+        instructions_ids=["i-apt-welcome"],
+        template_id="tpl-turnover",
+    ),
+    Task(
+        "t-9", "Garden hedge trimming", "p-villa-sud", "Garden",
+        "e-ben", _t(9, 0, day=12), 60, "low", "cancelled",
+        photo_evidence="disabled",
+    ),
+    Task(
+        "t-10", "Replace entryway light bulb", "p-villa-sud", "Entryway",
+        "e-sam", _t(11, 0, day=14), 15, "normal", "overdue",
+        photo_evidence="disabled",
+    ),
 ]
 
 
 EXPENSES: list[Expense] = [
-    Expense("x-1", "e-maria", 4280, "EUR", "Carrefour",   datetime(2026, 4, 14, 17, 32), "pending", "Cleaning supplies — bleach, sponges, 2× fresh towels", ocr_confidence=0.96),
+    Expense("x-1", "e-maria", 4280, "EUR", "Carrefour",   datetime(2026, 4, 14, 17, 32), "submitted", "Cleaning supplies — bleach, sponges, 2× fresh towels", ocr_confidence=0.96),
     Expense("x-2", "e-arun",  1890, "EUR", "Total Energies", datetime(2026, 4, 13, 19, 5), "approved", "Fuel — Johnson airport run", ocr_confidence=0.99),
-    Expense("x-3", "e-ben",  12500, "EUR", "Pool Pro",    datetime(2026, 4, 10, 11, 22), "pending", "Chlorine tablets (3 month supply) + replacement skimmer basket", ocr_confidence=0.94),
+    Expense("x-3", "e-ben",  12500, "EUR", "Pool Pro",    datetime(2026, 4, 10, 11, 22), "submitted", "Chlorine tablets (3 month supply) + replacement skimmer basket", ocr_confidence=0.94),
     Expense("x-4", "e-ana",   2210, "EUR", "Marché Provence", datetime(2026, 4, 11, 9, 40), "approved", "Welcome-basket groceries — Apt 3B"),
     Expense("x-5", "e-sam",   5780, "EUR", "Brico Dépôt", datetime(2026, 4, 9, 14, 58), "reimbursed", "Door handles, screws, wood filler"),
 ]
@@ -683,6 +700,11 @@ LLM_ASSIGNMENTS: list[ModelAssignment] = [
     ModelAssignment("issue.triage",       "Classify severity/category of a reported issue",          "openrouter", "google/gemma-4-31b-it", True,  0.25, 0.01,  3),
     ModelAssignment("stay.summarize",     "Summarize a stay for a guest welcome blurb",              "openrouter", "google/gemma-4-31b-it", True,  0.25, 0.00,  0),
     ModelAssignment("voice.transcribe",   "Turn a voice note into text",                             "—",          "(unassigned)",           False, 0.00, 0.00,  0),
+    ModelAssignment("chat.manager",      "Manager-side embedded agent (full manager tool surface)",  "openrouter", "google/gemma-4-31b-it", True,  3.00, 0.55,  14),
+    ModelAssignment("chat.employee",     "Employee-side embedded agent (full employee tool surface)","openrouter", "google/gemma-4-31b-it", True,  2.00, 0.38,  28),
+    ModelAssignment("chat.compact",      "Summarize resolved chat topics (hourly compaction)",       "openrouter", "google/gemma-4-31b-it", True,  0.50, 0.04,  2),
+    ModelAssignment("chat.detect_language","Detect message language for auto-translation",           "openrouter", "google/gemma-4-31b-it", True,  0.25, 0.02,  8),
+    ModelAssignment("chat.translate",    "Translate message to workspace default language",          "openrouter", "google/gemma-4-31b-it", True,  0.50, 0.06,  6),
 ]
 
 
@@ -697,23 +719,23 @@ LLM_CALLS: list[LLMCall] = [
 
 
 AUDIT: list[AuditEntry] = [
-    AuditEntry(datetime(2026, 4, 15, 10, 8, 12), "human", "Élodie Bernard", "task.complete",          "t-1",  "web", None),
-    AuditEntry(datetime(2026, 4, 15, 9, 47, 2),  "agent", "digest-agent",   "agent_action.requested", "a-1",  "api", "Auto-reassign pool coverage (Ben on leave)"),
-    AuditEntry(datetime(2026, 4, 15, 9, 41, 0),  "human", "Maria Alvarez",  "shift.clock_in",         "sh-…", "web", None),
-    AuditEntry(datetime(2026, 4, 15, 9, 12, 18), "agent", "digest-agent",   "digest.sent",            "—",    "api", "Morning manager digest"),
-    AuditEntry(datetime(2026, 4, 15, 8, 54, 1),  "agent", "procurement-agent", "expense.autofill",    "x-1",  "api", None),
-    AuditEntry(datetime(2026, 4, 15, 8, 41, 12), "system", "redaction-layer", "llm.call.blocked",    "—",    "system", "IBAN-like string in receipt text"),
-    AuditEntry(datetime(2026, 4, 15, 8, 12, 0),  "human", "Maria Alvarez",  "shift.clock_in",         "sh-…", "web", None),
-    AuditEntry(datetime(2026, 4, 14, 17, 32, 0), "human", "Maria Alvarez",  "expense.submit",         "x-1",  "web", None),
-    AuditEntry(datetime(2026, 4, 14, 16, 18, 0), "agent", "procurement-agent", "agent_action.requested", "a-3","api", "Vacuum replacement"),
-    AuditEntry(datetime(2026, 4, 14, 11, 32, 0), "human", "Maria Alvarez",  "issue.open",             "iss-1","web", None),
+    AuditEntry(datetime(2026, 4, 15, 10, 8, 12), "manager", "Élodie Bernard", "task.complete",          "t-1",  "web", None),
+    AuditEntry(datetime(2026, 4, 15, 9, 47, 2),  "agent",   "digest-agent",   "agent_action.requested", "a-1",  "api", "Auto-reassign pool coverage (Ben on leave)"),
+    AuditEntry(datetime(2026, 4, 15, 9, 41, 0),  "employee","Maria Alvarez",  "shift.clock_in",         "sh-…", "web", None),
+    AuditEntry(datetime(2026, 4, 15, 9, 12, 18), "agent",   "digest-agent",   "digest.sent",            "—",    "api", "Morning manager digest"),
+    AuditEntry(datetime(2026, 4, 15, 8, 54, 1),  "agent",   "procurement-agent", "expense.autofill",    "x-1",  "api", None),
+    AuditEntry(datetime(2026, 4, 15, 8, 41, 12), "system",  "redaction-layer", "llm.call.blocked",      "—",    "worker", "IBAN-like string in receipt text"),
+    AuditEntry(datetime(2026, 4, 15, 8, 12, 0),  "employee","Maria Alvarez",  "shift.clock_in",         "sh-…", "web", None),
+    AuditEntry(datetime(2026, 4, 14, 17, 32, 0), "employee","Maria Alvarez",  "expense.submit",         "x-1",  "web", None),
+    AuditEntry(datetime(2026, 4, 14, 16, 18, 0), "agent",   "procurement-agent", "agent_action.requested", "a-3","api", "Vacuum replacement"),
+    AuditEntry(datetime(2026, 4, 14, 11, 32, 0), "employee","Maria Alvarez",  "issue.open",             "iss-1","web", None),
 ]
 
 
 WEBHOOKS: list[Webhook] = [
     Webhook("wh-1", "https://hooks.example.com/miployees/digest", ["digest.manager", "digest.employee"], True, 200, datetime(2026, 4, 15, 9, 12, 22)),
     Webhook("wh-2", "https://n8n.local/webhook/miployees-payroll", ["payroll.period_locked", "payroll.period_paid"], True, 200, datetime(2026, 3, 31, 22, 1, 0)),
-    Webhook("wh-3", "https://slack.internal/hooks/T042/.../B08/...", ["approval.requested", "approval.resolved"], True, 200, datetime(2026, 4, 15, 9, 47, 3)),
+    Webhook("wh-3", "https://slack.internal/hooks/T042/.../B08/...", ["approval.pending", "approval.decided"], True, 200, datetime(2026, 4, 15, 9, 47, 3)),
     Webhook("wh-4", "https://legacy.host/webhooks/tasks", ["task.completed"], False, 502, datetime(2026, 3, 20, 14, 55, 0)),
 ]
 
@@ -774,7 +796,7 @@ SETTINGS_CATALOG: list[SettingDefinition] = [
                       description="Whether clock-in requires being within the property geofence.",
                       spec="05"),
     SettingDefinition("pay.frequency", "Pay frequency", "enum", "monthly",
-                      enum_values=["weekly", "biweekly", "monthly"],
+                      enum_values=["monthly", "bi_weekly"],
                       override_scope="W",
                       description="How often pay periods close.",
                       spec="09"),

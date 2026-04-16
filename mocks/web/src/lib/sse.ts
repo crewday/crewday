@@ -20,7 +20,7 @@ export function startEventStream(client: QueryClient): () => void {
     "tick",
     "agent.message.appended",
     "task.updated",
-    "approval.resolved",
+    "approval.decided",
     "expense.decided",
   ];
   for (const ev of events) {
@@ -62,7 +62,7 @@ function dispatch(client: QueryClient, evt: TypedEvent): void {
       client.invalidateQueries({ queryKey: qk.dashboard() });
       return;
     }
-    case "approval.resolved":
+    case "approval.decided":
       client.invalidateQueries({ queryKey: qk.approvals() });
       client.invalidateQueries({ queryKey: qk.dashboard() });
       return;

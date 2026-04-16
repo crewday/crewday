@@ -28,15 +28,19 @@ interface EmployeeDetail {
   subject_payslips: PaySlip[];
 }
 
-const STATUS_TONE: Record<TaskStatus, "moss" | "sky" | "ghost" | "rust"> = {
-  completed: "moss",
-  in_progress: "sky",
+const STATUS_TONE: Record<TaskStatus, "moss" | "sky" | "ghost" | "rust" | "sand"> = {
+  scheduled: "ghost",
   pending: "ghost",
+  in_progress: "sky",
+  completed: "moss",
   skipped: "rust",
+  cancelled: "rust",
+  overdue: "sand",
 };
 
-const EXPENSE_TONE: Record<ExpenseStatus, "sand" | "moss" | "rust" | "sky"> = {
-  pending: "sand",
+const EXPENSE_TONE: Record<ExpenseStatus, "sand" | "moss" | "rust" | "sky" | "ghost"> = {
+  draft: "ghost",
+  submitted: "sand",
   approved: "moss",
   rejected: "rust",
   reimbursed: "sky",

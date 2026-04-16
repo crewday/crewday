@@ -297,7 +297,7 @@ def api_dashboard() -> Response:
         "on_shift": on_shift,
         "by_status": by_status,
         "pending_approvals": md.APPROVALS,
-        "pending_expenses": [x for x in md.EXPENSES if x.status == "pending"],
+        "pending_expenses": [x for x in md.EXPENSES if x.status == "submitted"],
         "pending_leaves": [lv for lv in md.LEAVES if lv.approved_at is None],
         "open_issues": [i for i in md.ISSUES if i.status != "resolved"],
         "stays_today": [s for s in md.STAYS if s.check_in <= md.TODAY <= s.check_out],
@@ -591,7 +591,7 @@ def api_expenses_create(payload: dict[str, Any] = Body(...)) -> Response:
         currency="EUR",
         merchant=str(payload.get("merchant") or "Unknown"),
         submitted_at=datetime.now(),
-        status="pending",
+        status="submitted",
         note=str(payload.get("note") or ""),
         ocr_confidence=None,
     )
@@ -650,7 +650,7 @@ def api_approvals_decide(aid: str, decision: str) -> Response:
     if decision not in {"approve", "reject"}:
         return JSONResponse({"detail": "bad decision"}, status_code=400)
     md.APPROVALS[:] = [a for a in md.APPROVALS if a.id != aid]
-    hub.publish("approval.resolved", {"id": aid, "decision": decision})
+    hub.publish("approval.decided", {"id": aid, "decision": decision})
     return ok({"ok": True, "id": aid, "decision": decision})
 
 

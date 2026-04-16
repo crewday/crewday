@@ -20,8 +20,9 @@ interface Dashboard {
   employees: Employee[];
 }
 
-const STATUS_TONE: Record<Task["status"], "moss" | "sky" | "ghost" | "rust"> = {
-  completed: "moss", in_progress: "sky", pending: "ghost", skipped: "rust",
+const STATUS_TONE: Record<Task["status"], "moss" | "sky" | "ghost" | "rust" | "sand"> = {
+  scheduled: "ghost", pending: "ghost", in_progress: "sky", completed: "moss",
+  skipped: "rust", cancelled: "rust", overdue: "sand",
 };
 const ISSUE_TONE: Record<Issue["severity"], "ghost" | "sand" | "rust"> = {
   low: "ghost", medium: "sand", high: "rust",

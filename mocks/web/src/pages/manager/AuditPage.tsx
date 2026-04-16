@@ -5,8 +5,9 @@ import DeskPage from "@/components/DeskPage";
 import { Chip, Loading } from "@/components/common";
 import type { AuditEntry } from "@/types/api";
 
-const ACTOR_TONE: Record<AuditEntry["actor_kind"], "moss" | "sky" | "ghost"> = {
-  human: "moss",
+const ACTOR_TONE: Record<AuditEntry["actor_kind"], "moss" | "sky" | "ghost" | "sand"> = {
+  manager: "moss",
+  employee: "sand",
   agent: "sky",
   system: "ghost",
 };
@@ -26,7 +27,7 @@ export default function AuditPage() {
     queryFn: () => fetchJson<AuditEntry[]>("/api/v1/audit"),
   });
 
-  const sub = "Append-only. Every mutation by a human, agent, or system process.";
+  const sub = "Append-only. Every mutation by a manager, employee, agent, or system process.";
   const actions = <button className="btn btn--ghost">Export JSONL</button>;
 
   if (q.isPending) return <DeskPage title="Audit log" sub={sub} actions={actions}><Loading /></DeskPage>;
@@ -41,7 +42,8 @@ export default function AuditPage() {
       <section className="panel">
         <div className="desk-filters">
           <span className="chip chip--ghost chip--sm chip--active">All</span>
-          <span className="chip chip--ghost chip--sm">Human · {countBy("human")}</span>
+          <span className="chip chip--ghost chip--sm">Manager · {countBy("manager")}</span>
+          <span className="chip chip--ghost chip--sm">Employee · {countBy("employee")}</span>
           <span className="chip chip--ghost chip--sm">Agent · {countBy("agent")}</span>
           <span className="chip chip--ghost chip--sm">System · {countBy("system")}</span>
         </div>

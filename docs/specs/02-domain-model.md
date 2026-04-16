@@ -478,6 +478,7 @@ Defined once per document where the enum lives; summarized here.
 - `inventory_movement_reason`: `restock | consume | adjust | waste | transfer_in | transfer_out | audit_correction`
 - `delivery_state`: `queued | sent | delivered | bounced | failed`
 - `property_kind`: `residence | vacation | str | mixed` (semantics in §04)
+- `leave_category`: `vacation | sick | personal | bereavement | other`
 - `capability`: see §05.
 
 ## Full-text search ranking

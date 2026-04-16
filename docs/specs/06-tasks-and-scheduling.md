@@ -239,7 +239,7 @@ Both are first-class v1 entities; CRUD via §12.
 | employee_id   | ULID FK   |                                       |
 | starts_on     | date      | inclusive                             |
 | ends_on       | date      | inclusive                             |
-| reason        | text      | free-form; default categories: `vacation | sick | personal | bereavement | other` |
+| category      | enum      | `vacation | sick | personal | bereavement | other` |
 | approved_at   | tstz?     | null = pending                        |
 | approved_by   | ULID FK?  | manager id                            |
 | note_md       | text?     |                                       |

@@ -9,7 +9,7 @@ import type { Employee, Expense, ExpenseStatus } from "@/types/api";
 
 type Decision = "approve" | "reject" | "reimburse";
 
-const STATUS_TONE: Record<Exclude<ExpenseStatus, "pending">, "moss" | "rust" | "sky"> = {
+const STATUS_TONE: Record<Exclude<ExpenseStatus, "draft" | "submitted">, "moss" | "rust" | "sky"> = {
   approved: "moss",
   rejected: "rust",
   reimbursed: "sky",
@@ -81,7 +81,7 @@ export default function ExpensesApprovalsPage() {
 
   const empById = new Map(employeesQ.data.map((e) => [e.id, e]));
   const all = expensesQ.data;
-  const pending = all.filter((x) => x.status === "pending");
+  const pending = all.filter((x) => x.status === "submitted");
   const approved = all.filter((x) => x.status === "approved");
   const rejected = all.filter((x) => x.status === "rejected");
   const reimbursed = all.filter((x) => x.status === "reimbursed");
@@ -196,7 +196,7 @@ export default function ExpensesApprovalsPage() {
             )}
             {[...approved, ...reimbursed, ...rejected].map((x) => {
               const emp = empById.get(x.employee_id);
-              const status = x.status as Exclude<ExpenseStatus, "pending">;
+              const status = x.status as Exclude<ExpenseStatus, "draft" | "submitted">;
               return (
                 <tr key={x.id}>
                   <td>

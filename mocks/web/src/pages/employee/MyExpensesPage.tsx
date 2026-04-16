@@ -7,8 +7,9 @@ import { fmtDate } from "@/lib/dates";
 import { Loading } from "@/components/common";
 import type { Expense, ExpenseStatus } from "@/types/api";
 
-const STATUS_TONE: Record<ExpenseStatus, "moss" | "rust" | "sand" | "sky"> = {
-  pending: "sand",
+const STATUS_TONE: Record<ExpenseStatus, "moss" | "rust" | "sand" | "sky" | "ghost"> = {
+  draft: "ghost",
+  submitted: "sand",
   approved: "moss",
   rejected: "rust",
   reimbursed: "sky",
