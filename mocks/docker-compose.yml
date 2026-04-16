@@ -20,11 +20,11 @@ services:
     restart: unless-stopped
     user: "10001:10001"
     volumes:
-      # Bind-mount keeps the container in sync with the host on every save.
-      # Paired with `uvicorn --reload` + Jinja auto_reload + StaticFiles,
-      # every .py / .html / .css / static change is picked up with zero
-      # `docker compose restart`. Read-only is fine: PYTHONDONTWRITEBYTECODE=1
-      # in the image keeps uvicorn from trying to write bytecode back.
+      # Bind-mount keeps the Python layer in sync on every save. Paired
+      # with `uvicorn --reload`, every .py change is picked up with
+      # zero `docker compose restart`. The SPA bundle is baked into the
+      # image; front-end hot reload runs under the `dev` profile via
+      # the separate `web-dev` service on :5173.
       - ./app:/app/app:ro
     ports:
       - "127.0.0.1:8100:8000"
@@ -34,17 +34,36 @@ services:
     labels:
       - "traefik.enable=true"
       - "traefik.docker.network=traefik-proxy"
-      # Public (badger-gated) router
       - "traefik.http.routers.miployees-dev.rule=Host(`dev.miployees.com`)"
       - "traefik.http.routers.miployees-dev.entrypoints=websecure"
       - "traefik.http.routers.miployees-dev.tls.certresolver=letsencrypt"
       - "traefik.http.routers.miployees-dev.middlewares=badger@file"
       - "traefik.http.routers.miployees-dev.service=miployees-dev"
-      # Service
       - "traefik.http.services.miployees-dev.loadbalancer.server.port=8000"
       - "traefik.http.services.miployees-dev.loadbalancer.healthcheck.path=/healthz"
       - "traefik.http.services.miployees-dev.loadbalancer.healthcheck.interval=5s"
       - "traefik.http.services.miployees-dev.loadbalancer.healthcheck.hostname=dev.miployees.com"
+
+  # Front-end HMR for local development:
+  #   docker compose --profile dev up web-dev
+  # Vite runs on 127.0.0.1:5173 and proxies /api, /events, /switch,
+  # /theme, /agent to the `mocks` service over the compose network.
+  web-dev:
+    image: node:22-alpine
+    container_name: miployees-web-dev
+    profiles: ["dev"]
+    working_dir: /web
+    command: sh -lc "npm install --no-audit --no-fund && npm run dev -- --host 0.0.0.0"
+    environment:
+      VITE_BACKEND_URL: "http://mocks:8000"
+    volumes:
+      - ./web:/web
+    ports:
+      - "127.0.0.1:5173:5173"
+    depends_on:
+      - mocks
+    networks:
+      - default
 
 networks:
   traefik-proxy:

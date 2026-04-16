@@ -37,8 +37,11 @@ owner, a REST API for the agent.
 - **Self-hosted, single-household, multi-property.** One deployment manages
   one owner's portfolio of properties (home, vacation home, rentals). No
   multi-tenant plumbing.
-- **Python** — FastAPI on the server, HTMX + Tailwind on the client, with
-  SQLite by default and Postgres for larger deployments.
+- **FastAPI + React SPA + SQLite/Postgres.** FastAPI on the server, a
+  Vite + React + TypeScript strict SPA on the client (served by the
+  same FastAPI process from `dist/`), with SQLite by default and
+  Postgres for larger deployments. The mocks app is split as
+  `mocks/app/` (JSON API + SPA fallback) and `mocks/web/` (SPA).
 - **LLM-native.** Receipt OCR, natural-language task intake, daily digests,
   and a staff chat assistant all ship in v1. Default model is
   `google/gemma-4-31b-it` via OpenRouter, with a per-capability model
@@ -67,7 +70,7 @@ The spec is split across focused documents. Start at
 | 11 | [`llm-and-agents.md`](docs/specs/11-llm-and-agents.md) | OpenRouter, model assignment, audit |
 | 12 | [`rest-api.md`](docs/specs/12-rest-api.md) | OpenAPI surface, conventions |
 | 13 | [`cli.md`](docs/specs/13-cli.md) | `miployees` CLI for agents |
-| 14 | [`web-frontend.md`](docs/specs/14-web-frontend.md) | HTMX, PWA, offline, a11y |
+| 14 | [`web-frontend.md`](docs/specs/14-web-frontend.md) | React SPA, PWA, offline, a11y |
 | 15 | [`security-privacy.md`](docs/specs/15-security-privacy.md) | Threat model, secrets, GDPR |
 | 16 | [`deployment-operations.md`](docs/specs/16-deployment-operations.md) | Packaging, backups, observability |
 | 17 | [`testing-quality.md`](docs/specs/17-testing-quality.md) | Test strategy, CI gates |

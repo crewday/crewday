@@ -5,7 +5,7 @@
 ```
 +-------------------+         +---------------------------+
 |  Manager browser  |         |  Employee phone (PWA)     |
-|  (HTMX + Tailwind)|         |  (HTMX + Tailwind + SW)   |
+|  (React SPA + SW) |         |  (React SPA + SW)         |
 +---------+---------+         +-------------+-------------+
           |                                 |
           |   HTTPS, passkey session        |   HTTPS, passkey session
@@ -15,7 +15,7 @@
 |                                                             |
 |  +-----------+  +-----------+  +-----------+  +-----------+ |
 |  | web.*    |  | api.v1.* |  | webhooks |  | admin     | |
-|  | (HTMX)   |  | (OpenAPI)|  | (in/out) |  | (CLI/API) | |
+|  | (SPA/SSE)|  | (OpenAPI)|  | (in/out) |  | (CLI/API) | |
 |  +-----+----+  +-----+----+  +-----+----+  +-----+-----+ |
 |        \            |              |             /        |
 |         \           v              v            /         |
@@ -45,10 +45,16 @@ clients** to `api.v1.*` using a long-lived API token (§03). The CLI
 
 ## Component responsibilities
 
-### `web.*` (HTMX server-rendered)
+### `web.*` (React SPA + FastAPI backend)
 
-- Serves Jinja2 partials rendered server-side, hydrated in place by
-  HTMX (`hx-get`, `hx-post`, `hx-swap=outerHTML`). See §14.
+- `mocks/app/` — FastAPI JSON API (`/api/v1/*`), SSE endpoint
+  (`/events`), and an SPA catch-all (`GET *`) that serves the compiled
+  `index.html` for any non-API path. No Jinja templates. See §14.
+- `mocks/web/` — React SPA (Vite + TypeScript strict). Built into
+  `mocks/web/dist/` at compile time; FastAPI serves the `dist/`
+  tree as static files in production. In development, a `web-dev`
+  service runs Vite HMR on `127.0.0.1:5173` and proxies API calls to
+  the FastAPI container.
 - Owns the session cookie (passkey-authenticated; §03).
 - Hands the same underlying service functions to both web and API
   handlers. **No business logic lives in the handler layer.**
@@ -134,7 +140,7 @@ miployees/
 │   │       ├── instructions.py
 │   │       ├── llm.py
 │   │       └── webhooks.py
-│   ├── web/               # HTMX handlers + Jinja templates
+│   ├── web/               # SPA catch-all + SSE handler (no Jinja)
 │   ├── domain/            # service functions, policies, schedulers
 │   ├── adapters/
 │   │   ├── db/
@@ -144,6 +150,22 @@ miployees/
 │   ├── auth/              # WebAuthn + magic link + tokens
 │   ├── worker/            # APScheduler jobs
 │   └── util/              # clock, ulid, hashids, etc.
+├── mocks/
+│   ├── app/               # FastAPI JSON API + SSE + SPA catch-all
+│   └── web/               # Vite + React + TypeScript SPA
+│       ├── src/
+│       │   ├── main.tsx
+│       │   ├── App.tsx
+│       │   ├── routes.tsx
+│       │   ├── layouts/
+│       │   ├── components/
+│       │   ├── pages/
+│       │   ├── lib/       # fetchJson, queryClient, etc.
+│       │   ├── context/   # SseContext, AuthContext, etc.
+│       │   ├── styles/    # BEM globals + per-component CSS modules
+│       │   └── types/
+│       ├── vite.config.ts
+│       └── tsconfig.json
 ├── cli/
 │   └── miployees/         # click-based CLI (thin over REST)
 ├── migrations/            # alembic
@@ -186,7 +208,7 @@ Rationale:
 - `uvicorn[standard]`
 - `sqlalchemy >= 2.0`, `alembic`
 - `pydantic >= 2.6`, `pydantic-settings`
-- `jinja2`, `htmx` static assets (vendored, not from CDN)
+- `python-multipart` (file upload handling)
 - `webauthn` (Duo Labs / py_webauthn) for passkeys
 - `python-ulid`
 - `apscheduler`
@@ -199,9 +221,12 @@ Rationale:
 - Dev: `pytest`, `pytest-asyncio`, `schemathesis`, `playwright`,
   `ruff`, `mypy`, `locust`.
 
-No NPM runtime. Tailwind is compiled at build time via
-`tailwindcss` standalone binary and committed CSS; no Node on the
-server. HTMX is a single vendored JS file.
+The frontend (`mocks/web/`) is built with Node 22 (Vite) in a
+multi-stage Docker build. The runtime image (`python:3.12-slim`) has
+no Node; only the compiled `dist/` artefacts are copied into it.
+The `docker-compose` `dev` profile adds a `web-dev` service that
+runs Vite HMR on `127.0.0.1:5173` and proxies API calls to the
+FastAPI container.
 
 ## Key runtime invariants
 

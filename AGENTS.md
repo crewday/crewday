@@ -206,9 +206,12 @@ Plain text to the user. CLI handles styling.
 - **Python is required.** All server code is Python 3.12+.
 - **SQLite is the default store.** Code must also work on Postgres 15+ —
   CI runs both. Use only portable SQL or SQLAlchemy idioms.
-- **HTMX is the primary interaction model.** Do not reach for React,
-  Alpine, or Vue. If you find yourself wanting SPA behavior, re-read the
-  frontend spec.
+- **React is the interaction model.** The mocks — and, shortly, the
+  production frontend — are a Vite + React + TypeScript strict SPA
+  served by FastAPI from `mocks/web/dist`. Data goes through TanStack
+  Query with optimistic mutations; cross-client coherence is SSE-driven
+  (one `EventSource('/events')` feeds `queryClient.invalidateQueries`).
+  No Alpine, no Vue, no Tailwind, no HTMX. See `docs/specs/14`.
 - **Semantic CSS classes only in HTML.** Keep the markup decoupled from
   the presentation layer. Name classes after the thing they represent
   (`task-card`, `shift-timeline`, `payroll-summary`), never after how it

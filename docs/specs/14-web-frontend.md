@@ -1,29 +1,32 @@
 # 14 — Web frontend
 
-Two audiences, one codebase, same patterns: HTMX-powered server-
-rendered HTML, Tailwind CSS, progressive enhancement. Employees get a
-mobile-first PWA; managers get the same components with a wider
-information architecture.
+Two audiences, one codebase, same patterns: React SPA with a
+client-side router, hand-rolled semantic CSS, progressive enhancement.
+Employees get a mobile-first PWA; managers get the same components
+with a wider information architecture.
 
 ## Design pillars
 
 - **Mobile-first by default.** Breakpoints stack up, not down.
-- **Server-rendered HTML + HTMX** for interactivity. No SPA.
-- **Tailwind 3.x with a custom design system** (tokens below). Not the
-  default purple-on-white look — see the "Design language" section.
-- **Progressive enhancement.** Nothing critical requires JavaScript
-  except passkey ceremonies; task ticking, clock-in, expense
-  submission all have graceful no-JS fallbacks.
+- **React SPA (client-side router).** FastAPI serves `index.html` for
+  any non-API GET; React Router owns client-side navigation. See §01
+  for the `mocks/app/` + `mocks/web/` split.
+- **Hand-rolled semantic CSS design system** (BEM globals + optional
+  per-component CSS modules). Not the default purple-on-white look —
+  see the "Design language" section. No Tailwind, no utility classes,
+  no Alpine, no Vue.
+- **Manual dark-mode toggle** via `[data-theme="dark"]` on `<html>`.
+  Light theme is the primary; dark state is persisted per user.
+- **Progressive enhancement.** Passkey ceremonies and camera capture
+  require JavaScript; core task reading degrades gracefully without it.
 - **Accessibility.** WCAG 2.2 AA: focus-visible, color contrast,
   semantic HTML, ARIA where HTML semantics are insufficient.
 - **Offline-first PWA** for employees: today's tasks and a completion
   queue survive loss of connection.
-- **No purple bias, no dark-mode default.** Light theme is the
-  primary; dark is a manual toggle persisted per user.
 
 ## Design language
 
-Palette (Tailwind extension):
+Palette (CSS custom properties):
 
 - **Paper** — warm neutral base (`#FAF7F2` light, `#151310` dark).
 - **Ink** — high-contrast text (`#1F1A14`).
@@ -166,68 +169,81 @@ also be requested of the agent in `.desk__agent`.
   (the source is the upstream iCal feed); editing them surfaces an
   inline "Edit in Airbnb / VRBO" hint linked to the feed.
 
-## HTMX patterns
+## Interaction patterns
 
-- Every form `hx-post`s to its canonical REST endpoint with
-  `hx-target` and `hx-swap`. No manual fetch in JS.
-- **Optimistic UI** on task completion: the DOM swaps to "Completed"
-  first; server confirms with `hx-swap-oob` correcting if rejected.
-  If a second actor completed the same task between the optimistic
-  swap and the server response (see §06 last-write-wins), the server
-  returns the winning completion record and the UI shows a subtle
-  "Completed by <name> · your note was kept in the audit log" toast —
-  no data is silently lost.
-- **Inline validation**: `hx-post` a small validator endpoint with
-  `hx-trigger="blur changed delay:200ms"`; server returns an OOB
-  error fragment.
-- **Polling-free freshness**: the app subscribes to a
-  **server-sent-events** feed (`/events`) scoped to the current user
-  (and their properties for managers). Task state changes, new
-  comments, and approvals are delivered as events; HTMX's
-  `hx-trigger` listens for custom events and re-swaps affected
-  fragments.
-- **No hx-boost everywhere** — only where it meaningfully improves
-  navigation continuity (inside property detail tabs, for example).
+- **Data layer:** TanStack Query (`@tanstack/react-query`) manages all
+  server state. A typed `fetchJson<T>` wrapper handles auth headers,
+  CSRF token injection, and JSON parsing.
+- **Optimistic mutations:** `onMutate` snapshots the current cache and
+  applies an optimistic update; `onError` rolls back the snapshot;
+  `onSettled` invalidates the affected queries to reconcile with the
+  server. If a second actor completed the same task concurrently (see
+  §06 last-write-wins), the invalidation fetch brings in the winning
+  record and the UI shows a "Completed by <name> · your note was kept
+  in the audit log" toast — no data is silently lost.
+- **SSE-driven cache invalidation:** one shared `EventSource('/events')`
+  lives in `SseContext`, mounted once at the root. On receiving
+  `task.updated`, `approval.resolved`, `expense.decided`, or
+  `agent.message.appended`, the handler calls
+  `queryClient.invalidateQueries(...)` so all affected components
+  re-render without polling.
+- **Client-side navigation:** React Router handles all route changes.
+  FastAPI's SPA catch-all serves `index.html` for every non-API GET,
+  so direct URL access and browser refresh always work.
+- **Inline validation:** debounced mutations post to the validator
+  endpoint (200ms after blur) and update a field-level error state;
+  no full-page reload.
 
 ## JavaScript inventory
 
-Strictly bounded. The full JS payload on an employee phone is under
-**40 KB gzipped**:
+Bundles are route-split: employee and manager code are separate
+entry points so manager-only modules never land on the employee
+phone. `React.lazy` loads manager-only components out of the employee
+bundle.
 
-- `htmx.min.js` (≈15 KB).
-- `htmx-ext-sse.js` (≈1 KB).
-- `passkeys.js` — our own, WebAuthn ceremonies only.
-- `camera.js` — our own, opens `<input type="file" capture>` with a
+Runtime dependencies:
+
+- `react`, `react-dom` — UI rendering.
+- `react-router-dom` — client-side routing.
+- `@tanstack/react-query` — server state, caching, optimistic updates.
+- `camera.ts` — our own, opens `<input type="file" capture>` with a
   light preview and compresses via `<canvas>` before upload.
-- `offline.js` — service worker registration + queue UI.
-- `barcode.js` — dynamic import, only loaded when the user taps
-  "Scan".
+- `offline.ts` — service worker registration + queue UI.
+- `barcode.ts` — `React.lazy` dynamic import, only loaded when the
+  user taps "Scan".
+- `passkeys.ts` — our own, WebAuthn ceremonies only.
 
-No framework, no React, no Alpine, no HTMX extensions beyond SSE.
+No Alpine, no Vue, no utility/atomic CSS classes.
 
 ## PWA
 
+The service worker is generated by the **Vite PWA plugin** (Workbox)
+from `mocks/web/vite.config.ts`. Workbox strategies used:
+
+- **Cache-first shell** — app shell (JS chunks, CSS, logo) is
+  pre-cached at install time; updates via Workbox's versioned manifest.
+- **Stale-while-revalidate (SWR)** for today's tasks — the cached
+  response is served immediately while a background fetch updates the
+  cache; the UI reflects the fresh data when it arrives via TanStack
+  Query invalidation.
+- **Background Sync outbox** for write-behind while offline — if
+  `/api/v1/tasks/<id>/complete` fails due to network, the request
+  (with body, idempotency key, captured timestamp) is stored in an
+  IndexedDB outbox. Background Sync API retries; on success the stored
+  entry is purged. The UI shows a small "queued" pip.
+
 ### Manifest
 
-`/static/manifest.webmanifest`:
+Injected by Vite PWA plugin:
 - `display: standalone`, `theme_color: #3F6E3B`, `background_color:
   #FAF7F2`.
 - Icons: 192, 512, maskable.
 - `shortcuts`: "Today", "Clock in", "New expense".
 
-### Service worker
+### Service worker — additional responsibilities
 
-Under `/sw.js`. Responsibilities:
-
-- Pre-cache the shell: CSS, JS, logo, `/offline.html`.
-- **Today's tasks cache**: on every `/today` visit, cache the most
-  recent response (ETag-aware). Stale-while-revalidate.
 - **Instruction content cache**: any `/instructions/<id>` loaded is
-  cached indefinitely, with background revalidation.
-- **Completion queue**: if `/api/v1/tasks/<id>/complete` fails due to
-  network, store the request (with body, idempotency key, captured
-  timestamp) in IndexedDB. Background Sync API retries; on success
-  the stored entry is purged. The UI shows a small "queued" pip.
+  cached indefinitely (cache-first), with background revalidation.
 - Queue ordering is FIFO; idempotency keys ensure server-side safety
   on replays.
 - Evidence photos are uploaded when online only — offline taps can
@@ -268,7 +284,7 @@ Each task card shows:
 
 - Header with status pill.
 - Big primary CTA sticky to the top on scroll.
-- Checklist as tappable rows; each tap saves via HTMX.
+- Checklist as tappable rows; each tap fires an optimistic mutation.
 - Instructions accordion (area → property → global).
 - Task-scoped chat (§06 "Task notes are the agent inbox") embedded
   inline; the same conversation lives on `/chat` filtered to this
@@ -331,16 +347,17 @@ History is read-only.
 ## Manager screens
 
 - Lists default to table mode on desktop, card mode on mobile.
-- Filter bar is a single HTMX form that refreshes the list on change.
-- Bulk actions on tables: select rows + action menu → all done via
-  HTMX posts, with `hx-confirm` for destructive ones.
-- Stay calendar uses a compact month/week view rendered server-side;
+- Filter bar is a controlled React form; changes trigger a debounced
+  TanStack Query refetch.
+- Bulk actions on tables: select rows + action menu → optimistic
+  mutations with a confirmation dialog for destructive ones.
+- Stay calendar uses a compact month/week view rendered client-side;
   no FullCalendar dependency.
 
 ## Internationalization readiness
 
-- All user-facing strings flow through Jinja2 `{% trans %}` tags
-  backed by Babel, even though v1 ships English only. See §18.
+- All user-facing strings are keyed through an i18n helper backed by
+  a JSON message catalog, even though v1 ships English only. See §18.
 
 ## Accessibility checklist (v1 gate)
 
@@ -370,7 +387,10 @@ History is read-only.
 
 - Today screen LCP < 1.5s on a 2019 mid-range Android over 4G from a
   nearby region.
-- JS bundle on /today: < 40 KB gzipped.
+- JS bundle on `/today`: < 170 KB gzipped (employee bundle).
+- JS bundle on `/dashboard`: < 220 KB gzipped (manager bundle).
+- Employee and manager code are route-split; `React.lazy` ensures
+  manager-only modules never load on the employee route.
 - Service worker install: < 1s on first visit.
 - Offline → online reconciliation: < 60s for 50 queued actions.
 

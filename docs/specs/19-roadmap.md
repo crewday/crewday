@@ -10,7 +10,8 @@ sprints. A phase ships when its goals are met and its quality gates
   `playwright`, Alembic, Caddy compose).
 - `AGENTS.md`, `CLAUDE.md`, skill files, CI pipeline.
 - Empty FastAPI app with `/healthz`, `/readyz`, `/version`.
-- Tailwind + HTMX pipeline; styleguide page.
+- Vite + React + TS strict pipeline; styleguide page; all 35 mock
+  routes at parity; SPA served by FastAPI at `127.0.0.1:8100`.
 - Docker images; single + compose recipes baseline.
 
 **Exit:** CI green on empty build; `miployees admin init` creates a

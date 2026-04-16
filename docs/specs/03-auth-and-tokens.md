@@ -102,7 +102,7 @@ All three events land in the audit log under `auth.reenroll`.
 - Value: opaque random 192-bit token → hashed row in `sessions` table.
 - Lifetime: 30 days for employees, 7 days for managers (configurable).
   Refreshed on each request after half its lifetime has elapsed.
-- CSRF: HTMX requests carry a double-submit token
+- CSRF: Authenticated SPA requests carry a double-submit token
   (`miployees_csrf` cookie + `X-CSRF` header) for every non-GET. Same
   origin is enforced by `SameSite=Lax` for initial navigation.
 

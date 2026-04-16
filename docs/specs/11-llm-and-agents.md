@@ -38,8 +38,14 @@ audit, approval) but differ in what they are allowed to do.
 ### Manager-side agent
 
 Lives in the right sidebar (`.desk__agent`) of the manager desktop
-shell (§14). Its tool surface is **the full CLI + REST surface**,
-including but not limited to:
+shell (§14). The sidebar is mounted once at the `ManagerLayout` level
+as a sibling of `<Outlet />`, so it survives client-side route
+changes — the chat log scroll position, the composer draft, and the
+`EventSource` subscription all persist across navigation. New agent
+messages are delivered via the SSE event `agent.message.appended`,
+so every connected manager tab sees them without polling. Its tool
+surface is **the full CLI + REST surface**, including but not limited
+to:
 
 - **Review / plan / gap-find** — thread-local introspection tools
   that summarise the current manager view, list upcoming work,

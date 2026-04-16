@@ -1,0 +1,114 @@
+import type { ReactNode } from "react";
+
+// Small presentational helpers. Each one is ~10 lines — trivial at
+// the markup level but standardises class spelling so future refactors
+// don't have to grep 35 files for `.chip--moss`.
+
+export function Chip({
+  tone = "ghost",
+  size,
+  children,
+  title,
+}: {
+  tone?: "moss" | "rust" | "sand" | "sky" | "ghost" | "active";
+  size?: "sm" | "lg";
+  children: ReactNode;
+  title?: string;
+}) {
+  const cls = ["chip", "chip--" + tone, size ? "chip--" + size : ""].filter(Boolean).join(" ");
+  return <span className={cls} title={title}>{children}</span>;
+}
+
+export function Dot({ tone }: { tone: "moss" | "rust" | "sand" }) {
+  return <span className={"dot dot--" + tone} aria-hidden="true" />;
+}
+
+export function Avatar({
+  initials,
+  size = "md",
+}: {
+  initials: string;
+  size?: "xs" | "sm" | "md" | "xl";
+}) {
+  return <span className={"avatar avatar--" + size}>{initials}</span>;
+}
+
+export function Panel({
+  title,
+  right,
+  children,
+  className = "",
+}: {
+  title?: ReactNode;
+  right?: ReactNode;
+  children: ReactNode;
+  className?: string;
+}) {
+  return (
+    <div className={"panel " + className}>
+      {(title || right) && (
+        <header className="panel__head">
+          {title ? <h2>{title}</h2> : <span />}
+          {right}
+        </header>
+      )}
+      {children}
+    </div>
+  );
+}
+
+export function StatCard({
+  label,
+  value,
+  sub,
+  warn,
+}: {
+  label: string;
+  value: ReactNode;
+  sub?: ReactNode;
+  warn?: boolean;
+}) {
+  return (
+    <div className={"stat-card" + (warn ? " stat-card--warn" : "")}>
+      <div className="stat-card__label">{label}</div>
+      <div className="stat-card__value">{value}</div>
+      {sub ? <div className="stat-card__sub">{sub}</div> : null}
+    </div>
+  );
+}
+
+export function ProgressBar({ value, slim }: { value: number; slim?: boolean }) {
+  return (
+    <span className={"progress-bar" + (slim ? " progress-bar--slim" : "")}>
+      <span style={{ width: Math.max(0, Math.min(100, value)) + "%" }} />
+    </span>
+  );
+}
+
+export function EmptyState({
+  glyph,
+  children,
+  variant,
+}: {
+  glyph?: string;
+  children: ReactNode;
+  variant?: "celebrate" | "quiet";
+}) {
+  const cls = ["empty-state", variant ? "empty-state--" + variant : ""].filter(Boolean).join(" ");
+  return (
+    <div className={cls}>
+      {glyph ? <span className="empty-state__glyph" aria-hidden="true">{glyph}</span> : null}
+      {typeof children === "string" ? <p>{children}</p> : children}
+    </div>
+  );
+}
+
+export function BackLink({ to, label = "← Back" }: { to: string; label?: string }) {
+  return (
+    <a href={to} className="back-link">{label}</a>
+  );
+}
+
+export function Loading() {
+  return <div className="empty-state empty-state--quiet">Loading…</div>;
+}

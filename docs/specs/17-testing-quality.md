@@ -6,9 +6,11 @@
 |----------------------|---------------------------|-----------------------|----------------|
 | static (type/lint)   | `ruff`, `mypy --strict`   | every commit          | < 15s          |
 | unit                 | `pytest`                  | every PR              | < 60s          |
+| frontend unit        | `vitest` + `@testing-library/react` + `msw` | every PR | < 60s |
 | integration (DB)     | `pytest` + testcontainers | every PR              | < 5min         |
 | API contract         | `schemathesis` against `/openapi.json` | every PR | < 5min     |
 | browser e2e          | `playwright` (headless)   | every PR              | < 10min        |
+| visual regression    | `playwright` + `pixelmatch` | every PR            | < 5min         |
 | load                 | `locust`                  | nightly               | 30min          |
 | LLM regression       | `pytest` + fixtures       | on-demand + nightly   | varies         |
 | security             | `osv-scanner`, `bandit`   | every PR              | < 2min         |
@@ -58,6 +60,24 @@
 - Passkey ceremonies are exercised via
   [WebAuthn virtual authenticator](https://playwright.dev/docs/api/
   class-cdpsession) in both Chromium and WebKit.
+
+## Frontend
+
+### Unit
+
+- **vitest** + **@testing-library/react** for component and hook tests.
+- **msw** (Mock Service Worker) intercepts `fetch` at the network level
+  for request-level mocking in unit and integration tests — no actual
+  HTTP traffic, no stubs in application code.
+
+### Visual regression
+
+- **Playwright** + **pixelmatch** for pixel-level comparison.
+- `/styleguide` (dev + staging only) is the visual-regression baseline.
+  A screenshot diff > **0.1%** on `/styleguide` fails the check.
+  All other routes fail on > **0.5%** diff.
+- Baselines are committed and updated intentionally; CI fails on any
+  unreviewed diff.
 
 ## Load
 
