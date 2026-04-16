@@ -104,11 +104,11 @@ Everything above plus:
 
 ```
 /properties               → property list
-/property/<id>            → property hub (areas, stays, tasks, inventory, instructions, closures)
+/property/<id>            → property hub (areas, stays, tasks, inventory, instructions, closures, settings)
 /property/<id>/closures   → property closure calendar (incl. iCal unavailable markers)
 /stays                    → stays list & calendar
 /employees                → staff list
-/employee/<id>            → profile, roles, capabilities, shifts, payslips, leaves
+/employee/<id>            → profile, roles, capabilities, settings, shifts, payslips, leaves
 /employee/<id>/leaves     → leave ledger (approve/reject)
 /leaves                   → cross-employee leave inbox (pending approvals)
 /templates                → task templates
@@ -121,7 +121,8 @@ Everything above plus:
 /audit                    → audit log viewer
 /webhooks                 → subscriptions
 /llm                      → model assignments, call log, budget
-/settings                 → workspace settings
+/settings                 → workspace settings (defaults grouped by namespace,
+                            override summary, policy & danger zone)
 ```
 
 ### Manager desktop shell

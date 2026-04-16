@@ -396,6 +396,11 @@ instructions, workspace defaults); it does not silently moderate.
 
 ## Evidence policy inheritance
 
+Evidence policy is an instance of the **settings cascade** (§02
+"Settings cascade"), canonical key `evidence.policy`. The generic
+resolution order (workspace → property → employee → task, first
+concrete value wins) applies here.
+
 The effective photo-evidence policy for a given task is computed by
 walking the evidence-policy stack defined in §05 from the workspace
 root outward, with each layer set to one of

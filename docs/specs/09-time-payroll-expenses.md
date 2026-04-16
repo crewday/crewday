@@ -112,6 +112,11 @@ resumed action as **disputed**:
 
 #### Per-villa `clock_mode` override
 
+Clock mode is an instance of the **settings cascade** (§02 "Settings
+cascade"), canonical key `time.clock_mode`. The cascade's generic
+resolution (workspace → property → employee → task, first concrete
+value wins) applies.
+
 A villa can override the employee's default mode. The resolution
 order is: **villa override → employee capability → workspace
 default**. A villa that sets `clock_mode = manual` forces manual

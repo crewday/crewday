@@ -199,7 +199,7 @@ introduces `workspace_id` on every user-editable table.)
 | default_country | text     | ISO-3166-1 alpha-2. Workspace-level fallback for properties. |
 | default_locale | text?     | BCP-47 locale tag (e.g. `fr-FR`). Nullable; when null, derived from `default_language` + `default_country`. Drives number/date/currency formatting on workspace-scoped documents. |
 | created_at    | tstz        |                                    |
-| settings_json | jsonb/text  | global instruction bank anchor, etc|
+| settings_json | jsonb/text  | flat map of `dotted.key → value`; holds concrete workspace defaults for every registered setting (see "Settings cascade" below) |
 
 ### `villa_workspace`
 
@@ -344,6 +344,97 @@ read is too expensive:
 
 A `--recompute` CLI command recomputes all derived fields; a periodic
 CI job asserts no drift in test fixtures.
+
+## Settings cascade
+
+Many configuration values need to vary by entity level. Rather than
+ad-hoc resolution logic per feature, the codebase uses a **single
+unified cascade** that applies to all entity-level settings.
+
+### Key naming
+
+Canonical keys use **dotted namespaces**: `evidence.policy`,
+`time.clock_mode`, `time.geofence_radius_m`. This matches the
+existing capability key convention in §05.
+
+### Resolution order
+
+The cascade has four layers, from broadest to most specific:
+
+1. **Workspace** — `workspaces.settings_json`. Always concrete
+   (never `inherit`); this is the catalog default merged with
+   manager overrides.
+2. **Property** — `properties.settings_override_json`.
+3. **Employee** — `employees.settings_override_json`.
+4. **Task** — `tasks.settings_override_json`.
+
+**Most specific wins.** Resolution walks from the task inward:
+task → employee → property → workspace, stopping at the first
+concrete (non-`inherit`) value. An absent key means "inherit".
+An explicit `null` value means "inherit" (delete override at this
+layer). Non-root layers default to `inherit`, so the common case
+is "follow the workspace default unless a property, an employee,
+or a specific task deliberately narrows or widens the rule."
+
+### Schema
+
+Each entity gets a sparse `settings_override_json JSONB` column
+(nullable, default `{}`). Workspace defaults live in
+`workspaces.settings_json` — a flat map of `dotted.key → value`
+holding concrete workspace defaults for every registered setting.
+
+### Override scope
+
+Each key declares which layers may override it (e.g.
+`evidence.policy` = W/P/E/T; `pay.frequency` = W only). The code
+allows all four layers; scope is a UI/validation concern that
+prevents surprising overrides from reaching the resolver.
+
+### Catalog
+
+All registered setting keys, their type, catalog default, override
+scope, and the spec that defines the feature:
+
+| key | type | default | scope | spec |
+|-----|------|---------|-------|------|
+| `evidence.policy` | enum | `optional` | W/P/E/T | §05, §06 |
+| `time.clock_mode` | enum | `manual` | W/P/E | §09 |
+| `time.auto_clock_idle_minutes` | int | `30` | W/P/E | §05 |
+| `time.geofence_radius_m` | int | `150` | W/P | §09 |
+| `time.geofence_required` | bool | `false` | W/P/E | §05 |
+| `pay.frequency` | enum | `monthly` | W | §09 |
+| `pay.week_start` | enum | `monday` | W | — |
+| `retention.audit_days` | int | `730` | W | §02 |
+| `retention.llm_calls_days` | int | `90` | W | §02, §11 |
+| `retention.task_photos_days` | int | `365` | W | — |
+| `scheduling.horizon_days` | int | `30` | W/P | §06 |
+| `tasks.checklist_required` | bool | `false` | W/P/E/T | §05 |
+| `tasks.allow_skip_with_reason` | bool | `true` | W/P/E | §05 |
+
+### Relationship to capabilities
+
+Capabilities (§05) remain a parallel system for per-(employee, role,
+property) feature toggles — they gate UI affordances and scheduling
+behaviour. The settings cascade handles **entity-level
+configuration**: values that shape how a feature works rather than
+whether it is available.
+
+Where keys overlap (e.g. `time.clock_mode` appears in both the
+capability catalog and the settings catalog), the settings cascade
+takes precedence. Full resolution for overlapping keys:
+task → employee → property → (capability chain) → workspace →
+catalog default.
+
+### Resolved settings function
+
+```
+resolve_setting(key, workspace_id, property_id?, employee_id?, task_id?)
+  → {value, source_layer, source_entity_id}
+```
+
+The function walks the cascade and returns both the effective value
+and provenance (which layer provided it and the entity id at that
+layer). The API exposes this as `GET /settings/resolved` (§12).
 
 ## Money
 

@@ -158,6 +158,16 @@ itself may be unset, meaning "feature off".
 
 ### Resolution order
 
+**Capabilities vs settings cascade.** Capabilities are per-employee
+feature toggles resolved through the role/assignment hierarchy (below).
+The **settings cascade** (§02 "Settings cascade") is a separate,
+unified framework for entity-level configuration (values like
+`evidence.policy`, `time.clock_mode`, `scheduling.horizon_days`) that
+resolves workspace → property → employee → task. Where a key appears
+in both systems (e.g. `time.clock_mode`), the settings cascade takes
+precedence; its resolution is: task → employee → property →
+(capability chain) → workspace → catalog default.
+
 For a given (employee, task) pair, resolve a capability as:
 
 1. Per-`property_role_assignment.capability_override`
@@ -179,6 +189,12 @@ Inherit**, with a live preview of the resolved value underneath. The
 same blob drives both manager UI and API.
 
 ### Evidence-policy stack
+
+The evidence-policy stack is an instance of the **settings cascade**
+(§02 "Settings cascade"), canonical key `evidence.policy`. The
+cascade's generic resolution (workspace → property → employee → task,
+first concrete value wins) applies; the description below documents
+the domain-specific semantics.
 
 A separate resolution stack, parallel to the capability stack above,
 computes whether a task needs photo evidence. Four layers, evaluated

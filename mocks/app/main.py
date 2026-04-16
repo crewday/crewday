@@ -417,7 +417,82 @@ def api_llm_calls() -> Response:
 
 @app.get("/api/v1/settings")
 def api_settings() -> Response:
-    return ok(md.HOUSEHOLD_SETTINGS)
+    return ok({
+        "meta": md.WORKSPACE_META,
+        "defaults": md.WORKSPACE_SETTINGS,
+        "policy": md.WORKSPACE_POLICY,
+    })
+
+
+@app.get("/api/v1/settings/catalog")
+def api_settings_catalog() -> Response:
+    return ok(md.SETTINGS_CATALOG)
+
+
+@app.get("/api/v1/settings/resolved")
+def api_settings_resolved(entity_kind: str = "", entity_id: str = "") -> Response:
+    prop_override: dict[str, Any] | None = None
+    emp_override: dict[str, Any] | None = None
+    task_override: dict[str, Any] | None = None
+    if entity_kind == "property":
+        prop = md.property_by_id(entity_id)
+        prop_override = prop.settings_override
+    elif entity_kind == "employee":
+        emp = md.employee_by_id(entity_id)
+        emp_override = emp.settings_override
+        # Also pick the first property for context.
+        if emp.properties:
+            try:
+                prop = md.property_by_id(emp.properties[0])
+                prop_override = prop.settings_override
+            except StopIteration:
+                pass
+    elif entity_kind == "task":
+        task = md.task_by_id(entity_id)
+        if task:
+            task_override = task.settings_override
+            try:
+                prop = md.property_by_id(task.property_id)
+                prop_override = prop.settings_override
+            except StopIteration:
+                pass
+            try:
+                emp = md.employee_by_id(task.assignee_id)
+                emp_override = emp.settings_override
+            except StopIteration:
+                pass
+    resolved = md.resolve_settings(
+        md.WORKSPACE_SETTINGS,
+        property_override=prop_override,
+        employee_override=emp_override,
+        task_override=task_override,
+    )
+    return ok({"entity_kind": entity_kind, "entity_id": entity_id, "settings": resolved})
+
+
+@app.get("/api/v1/properties/{pid}/settings")
+def api_property_settings(pid: str) -> Response:
+    prop = md.property_by_id(pid)
+    resolved = md.resolve_settings(md.WORKSPACE_SETTINGS, property_override=prop.settings_override)
+    return ok({"overrides": prop.settings_override, "resolved": resolved})
+
+
+@app.get("/api/v1/employees/{eid}/settings")
+def api_employee_settings(eid: str) -> Response:
+    emp = md.employee_by_id(eid)
+    prop_override: dict[str, Any] | None = None
+    if emp.properties:
+        try:
+            prop = md.property_by_id(emp.properties[0])
+            prop_override = prop.settings_override
+        except StopIteration:
+            pass
+    resolved = md.resolve_settings(
+        md.WORKSPACE_SETTINGS,
+        property_override=prop_override,
+        employee_override=emp.settings_override,
+    )
+    return ok({"overrides": emp.settings_override, "resolved": resolved})
 
 
 @app.get("/api/v1/agent/employee/log")

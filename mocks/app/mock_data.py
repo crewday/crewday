@@ -11,6 +11,18 @@ from datetime import date, datetime, time
 from typing import Any, Literal
 
 
+@dataclass
+class SettingDefinition:
+    key: str
+    label: str
+    type: Literal["enum", "int", "bool"]
+    catalog_default: Any
+    enum_values: list[str] | None = None
+    override_scope: str = "W"
+    description: str = ""
+    spec: str = ""
+
+
 TODAY: date = date(2026, 4, 15)
 NOW: datetime = datetime(2026, 4, 15, 10, 12)
 
@@ -29,6 +41,7 @@ class Property:
     evidence_policy: Literal["inherit", "require", "optional", "forbid"] = "inherit"
     country: str = "FR"
     locale: str = "fr-FR"
+    settings_override: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -57,6 +70,7 @@ class Employee:
     weekly_availability: dict[str, tuple[str, str] | None] = field(default_factory=dict)
     evidence_policy: Literal["inherit", "require", "optional", "forbid"] = "inherit"
     preferred_locale: str | None = None
+    settings_override: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -91,6 +105,7 @@ class Task:
     template_id: str | None = None
     schedule_id: str | None = None
     turnover_bundle_id: str | None = None
+    settings_override: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -278,11 +293,24 @@ class Message:
 
 PROPERTIES: list[Property] = [
     Property("p-villa-sud", "Villa Sud", "Antibes", "Europe/Paris", "moss", "str",
-             areas=["Master bedroom", "Kitchen", "Pool", "Garden", "Entryway", "Living room"]),
+             areas=["Master bedroom", "Kitchen", "Pool", "Garden", "Entryway", "Living room"],
+             settings_override={
+                 "evidence.policy": "require",
+                 "time.geofence_radius_m": 200,
+                 "tasks.checklist_required": True,
+             }),
     Property("p-apt-3b", "Apt 3B", "Paris", "Europe/Paris", "sky", "str",
-             areas=["Full unit", "Kitchen", "Bathroom 1", "Bathroom 2"]),
+             areas=["Full unit", "Kitchen", "Bathroom 1", "Bathroom 2"],
+             settings_override={
+                 "evidence.policy": "optional",
+             }),
     Property("p-chalet", "Chalet Cœur", "Megève", "Europe/Paris", "rust", "vacation",
-             areas=["Kitchen", "Fireplace room", "Master bedroom", "Ski room"]),
+             areas=["Kitchen", "Fireplace room", "Master bedroom", "Ski room"],
+             settings_override={
+                 "evidence.policy": "forbid",
+                 "time.geofence_required": False,
+                 "scheduling.horizon_days": 14,
+             }),
 ]
 
 ROLES: list[Role] = [
@@ -333,6 +361,10 @@ EMPLOYEES: list[Employee] = [
             "sat": None,
             "sun": None,
         },
+        settings_override={
+            "time.clock_mode": "auto",
+            "time.auto_clock_idle_minutes": 30,
+        },
     ),
     Employee(
         "e-arun", "Arun Patel", ["Driver"], ["p-villa-sud"],
@@ -341,6 +373,9 @@ EMPLOYEES: list[Employee] = [
         workspaces=["ws-bernard"],
         villas=["p-villa-sud"],
         clock_mode="manual", language="en",
+        settings_override={
+            "time.geofence_required": True,
+        },
     ),
     Employee(
         "e-ben", "Ben Traoré", ["Gardener", "Pool care"], ["p-villa-sud"],
@@ -349,6 +384,10 @@ EMPLOYEES: list[Employee] = [
         workspaces=["ws-bernard"],
         villas=["p-villa-sud"],
         clock_mode="auto", auto_clock_idle_minutes=20, language="fr",
+        settings_override={
+            "time.clock_mode": "auto",
+            "time.auto_clock_idle_minutes": 20,
+        },
     ),
     Employee(
         "e-ana", "Ana Rossi", ["Housekeeper", "Cook"], ["p-apt-3b", "p-chalet"],
@@ -357,6 +396,10 @@ EMPLOYEES: list[Employee] = [
         workspaces=["ws-bernard"],
         villas=["p-apt-3b", "p-chalet"],
         clock_mode="auto", auto_clock_idle_minutes=30, language="fr",
+        settings_override={
+            "time.clock_mode": "auto",
+            "tasks.allow_skip_with_reason": False,
+        },
     ),
     Employee(
         "e-sam", "Sam Leclerc", ["Handyman"], ["p-villa-sud", "p-chalet"],
@@ -675,22 +718,144 @@ WEBHOOKS: list[Webhook] = [
 ]
 
 
-HOUSEHOLD_SETTINGS: dict[str, Any] = {
+WORKSPACE_SETTINGS: dict[str, Any] = {
+    "evidence.policy": "optional",
+    "time.clock_mode": "manual",
+    "time.auto_clock_idle_minutes": 30,
+    "time.geofence_radius_m": 150,
+    "time.geofence_required": False,
+    "pay.frequency": "monthly",
+    "pay.week_start": "monday",
+    "retention.audit_days": 730,
+    "retention.llm_calls_days": 90,
+    "retention.task_photos_days": 365,
+    "scheduling.horizon_days": 30,
+    "tasks.checklist_required": False,
+    "tasks.allow_skip_with_reason": True,
+}
+
+WORKSPACE_POLICY: dict[str, Any] = {
+    "approvals": {
+        "always_gated": ["payout_destination.*", "employee.set_default_pay_destination"],
+        "configurable": ["tasks.bulk_reassign>50", "broadcast.email_many"],
+    },
+    "danger_zone": ["Rotate envelope key (host CLI only)", "Purge employee (host CLI only)", "Export workspace backup"],
+}
+
+WORKSPACE_META: dict[str, str] = {
     "name": "Bernard household",
     "timezone": "Europe/Paris",
     "currency": "EUR",
     "country": "FR",
     "default_locale": "fr-FR",
-    "week_start": "Monday",
-    "pay_frequency": "monthly",
-    "default_photo_evidence": "optional",
-    "geofence_radius_m": 150,
-    "retention_days": {"llm_calls": 90, "audit": 730, "task_photos": 365},
-    "approvals": {
-        "always_gated": ["payout_destination.*", "employee.set_default_pay_destination"],
-        "configurable": ["tasks.bulk_reassign>50", "broadcast.email_many"],
+}
+
+SETTINGS_CATALOG: list[SettingDefinition] = [
+    SettingDefinition("evidence.policy", "Evidence policy", "enum", "optional",
+                      enum_values=["require", "optional", "forbid"],
+                      override_scope="W/P/E/T",
+                      description="Whether photo evidence is required, optional, or forbidden on task completions.",
+                      spec="05, 06"),
+    SettingDefinition("time.clock_mode", "Clock mode", "enum", "manual",
+                      enum_values=["manual", "auto", "disabled"],
+                      override_scope="W/P/E",
+                      description="How shift tracking works: manual button, auto from activity, or disabled.",
+                      spec="09"),
+    SettingDefinition("time.auto_clock_idle_minutes", "Auto-clock idle timeout", "int", 30,
+                      override_scope="W/P/E",
+                      description="Minutes of inactivity before an auto-clock shift closes.",
+                      spec="05"),
+    SettingDefinition("time.geofence_radius_m", "Geofence radius (m)", "int", 150,
+                      override_scope="W/P",
+                      description="Radius in metres for property geofence checks.",
+                      spec="09"),
+    SettingDefinition("time.geofence_required", "Geofence required", "bool", False,
+                      override_scope="W/P/E",
+                      description="Whether clock-in requires being within the property geofence.",
+                      spec="05"),
+    SettingDefinition("pay.frequency", "Pay frequency", "enum", "monthly",
+                      enum_values=["weekly", "biweekly", "monthly"],
+                      override_scope="W",
+                      description="How often pay periods close.",
+                      spec="09"),
+    SettingDefinition("pay.week_start", "Week start day", "enum", "monday",
+                      enum_values=["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"],
+                      override_scope="W",
+                      description="First day of the work week for scheduling and pay period calculations."),
+    SettingDefinition("retention.audit_days", "Audit log retention (days)", "int", 730,
+                      override_scope="W",
+                      description="How many days audit log entries are kept before archival.",
+                      spec="02"),
+    SettingDefinition("retention.llm_calls_days", "LLM call retention (days)", "int", 90,
+                      override_scope="W",
+                      description="How many days LLM call records are kept.",
+                      spec="02, 11"),
+    SettingDefinition("retention.task_photos_days", "Task photo retention (days)", "int", 365,
+                      override_scope="W",
+                      description="How many days task evidence photos are kept."),
+    SettingDefinition("scheduling.horizon_days", "Scheduling horizon (days)", "int", 30,
+                      override_scope="W/P",
+                      description="How far ahead the scheduler materializes task occurrences.",
+                      spec="06"),
+    SettingDefinition("tasks.checklist_required", "Checklist completion required", "bool", False,
+                      override_scope="W/P/E/T",
+                      description="All required checklist items must be ticked to complete a task.",
+                      spec="05"),
+    SettingDefinition("tasks.allow_skip_with_reason", "Allow skip with reason", "bool", True,
+                      override_scope="W/P/E",
+                      description="Whether employees can skip tasks by providing a reason.",
+                      spec="05"),
+]
+
+def resolve_settings(
+    workspace_defaults: dict[str, Any],
+    property_override: dict[str, Any] | None = None,
+    employee_override: dict[str, Any] | None = None,
+    task_override: dict[str, Any] | None = None,
+) -> dict[str, dict[str, Any]]:
+    """Walk task -> employee -> property -> workspace; most specific concrete value wins.
+
+    Returns ``{key: {"value": ..., "source": "workspace"|"property"|"employee"|"task"|"catalog"}}``.
+    """
+    result: dict[str, dict[str, Any]] = {}
+    for defn in SETTINGS_CATALOG:
+        key = defn.key
+        # Walk from most specific to least specific; first non-inherit value wins.
+        for layer_name, layer_map in [
+            ("task", task_override or {}),
+            ("employee", employee_override or {}),
+            ("property", property_override or {}),
+            ("workspace", workspace_defaults),
+        ]:
+            val = layer_map.get(key)
+            if val is not None and val != "inherit":
+                result[key] = {"value": val, "source": layer_name}
+                break
+        else:
+            # Nothing set anywhere; use catalog default.
+            result[key] = {"value": defn.catalog_default, "source": "catalog"}
+    return result
+
+
+# Legacy alias kept so existing references don't break during the
+# migration.  New code should use WORKSPACE_SETTINGS + WORKSPACE_POLICY.
+HOUSEHOLD_SETTINGS: dict[str, Any] = {
+    "name": WORKSPACE_META["name"],
+    "timezone": WORKSPACE_META["timezone"],
+    "currency": WORKSPACE_META["currency"],
+    "country": WORKSPACE_META["country"],
+    "default_locale": WORKSPACE_META["default_locale"],
+    "week_start": WORKSPACE_SETTINGS["pay.week_start"],
+    "pay_frequency": WORKSPACE_SETTINGS["pay.frequency"],
+    "default_photo_evidence": WORKSPACE_SETTINGS["evidence.policy"],
+    "geofence_radius_m": WORKSPACE_SETTINGS["time.geofence_radius_m"],
+    "retention_days": {
+        "llm_calls": WORKSPACE_SETTINGS["retention.llm_calls_days"],
+        "audit": WORKSPACE_SETTINGS["retention.audit_days"],
+        "task_photos": WORKSPACE_SETTINGS["retention.task_photos_days"],
     },
-    "danger_zone": ["Rotate envelope key (host CLI only)", "Purge employee (host CLI only)", "Export household backup"],
+    "approvals": WORKSPACE_POLICY["approvals"],
+    "danger_zone": WORKSPACE_POLICY["danger_zone"],
 }
 
 

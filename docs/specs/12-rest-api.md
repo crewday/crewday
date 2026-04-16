@@ -412,6 +412,35 @@ the body must include a non-empty `adjustment_reason`; the server sets
 `adjusted = true`. Otherwise `adjustment_reason` is optional and
 `adjusted` is unchanged. See §09.
 
+### Settings
+
+```
+GET    /settings                         # workspace defaults (full map)
+PATCH  /settings                         # update workspace defaults
+GET    /settings/catalog                 # all registered keys + metadata
+GET    /settings/resolved                # ?entity_kind=...&entity_id=...
+GET    /properties/{id}/settings         # sparse overrides
+PATCH  /properties/{id}/settings         # set/clear overrides (null = inherit)
+GET    /employees/{id}/settings          # sparse overrides
+PATCH  /employees/{id}/settings
+GET    /tasks/{id}/settings              # sparse overrides
+PATCH  /tasks/{id}/settings
+```
+
+`GET /settings` returns the workspace defaults as a flat
+`dotted.key → value` map plus the workspace policy (approvals,
+danger zone). `GET /settings/catalog` returns all registered keys
+with their type, catalog default, override scope, and description.
+
+`GET /settings/resolved?entity_kind=property&entity_id=prop_…`
+walks the cascade and returns `{key: {value, source, source_id}}`
+for every registered key. See §02 "Settings cascade" for
+resolution rules.
+
+Entity-level `GET` returns the sparse override map only (keys the
+entity has explicitly set). `PATCH` accepts a partial map; setting
+a key to `null` deletes the override (restores inheritance).
+
 ### LLM and approvals
 
 ```
