@@ -14,6 +14,7 @@
 | load                 | `locust`                  | nightly               | 30min          |
 | LLM regression       | `pytest` + fixtures       | on-demand + nightly   | varies         |
 | security             | `osv-scanner`, `bandit`   | every PR              | < 2min         |
+| CLI parity           | `scripts/check_cli_parity.py` | every PR         | < 10s          |
 
 ## Unit
 
@@ -108,6 +109,19 @@
 - `osv-scanner` (blocker on any unresolved high/critical)
 - `bandit -ll`
 - OpenAPI diff
+- `cli-parity` (surface freshness + completeness + reverse check +
+  operationId lint) — four checks:
+  1. **Surface freshness** — regenerate `_surface.json` from current
+     app, diff against committed version. Fail if stale.
+  2. **Parity completeness** — every `operationId` in `openapi.json`
+     must appear in `_surface.json` commands, exclusions, or override
+     `covers=` declarations. Fail if any uncovered.
+  3. **Reverse parity** — every `operationId` referenced in
+     `_surface.json` must exist in `openapi.json`. Fail if a CLI
+     command points at a removed endpoint.
+  4. **operationId lint** — format must be
+     `^[a-z][a-z0-9]*(\.[a-z][a-z0-9_]*)+$`, first segment must be a
+     known CLI group.
 - Coverage threshold: 85% domain, 70% overall; tracked via codecov.
 
 ## Release gates

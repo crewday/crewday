@@ -167,7 +167,17 @@ miployees/
 │       ├── vite.config.ts
 │       └── tsconfig.json
 ├── cli/
-│   └── miployees/         # click-based CLI (thin over REST)
+│   └── miployees/
+│       ├── __main__.py        # entry point
+│       ├── _surface.json      # generated CLI descriptor (committed, CI-verified)
+│       ├── _codegen.py        # build-time: openapi.json -> _surface.json
+│       ├── _runtime.py        # dynamic click command builder
+│       ├── _client.py         # httpx HTTP client (auth, retries, streaming)
+│       ├── _output.py         # json/yaml/table/ndjson formatters
+│       ├── _config.py         # profile loading
+│       ├── _globals.py        # global flags
+│       ├── _exclusions.yaml   # endpoints excluded from generation (with reasons)
+│       └── _overrides/        # hand-written composite commands
 ├── migrations/            # alembic
 ├── tests/
 │   ├── unit/
@@ -185,8 +195,11 @@ miployees/
 
 Rationale:
 
-- **`app/` vs `cli/` separation.** The CLI can be shipped as an
-  independent wheel (`miployees-cli`) without pulling in FastAPI.
+- **`app/` vs `cli/` separation.** The CLI is shipped as an independent
+  wheel (`miployees-cli`). Its command tree is **generated from the
+  API's OpenAPI schema** at build time — the committed `_surface.json`
+  descriptor is the join between the two packages. A CI parity gate
+  (§17) prevents drift.
 - **`domain/` is HTTP-unaware.** Tests at the domain level use fakes for
   all adapters; integration tests exercise real DB + real filesystem.
 - **`adapters/` depends on `domain/`, not the other way round.** Makes

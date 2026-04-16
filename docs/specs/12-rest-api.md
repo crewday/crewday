@@ -31,6 +31,41 @@ unless explicitly noted.
   must match the live output).
 - Swagger UI at `/docs` (dev + staging only), ReDoc at `/redoc`.
 
+### `operationId` convention
+
+Every route must set `operation_id` in its FastAPI decorator. Format:
+`{group}.{verb}` dot-separated (e.g. `tasks.complete`,
+`pay.periods.lock`). The first segment must match a known CLI group;
+CI enforces uniqueness across the entire schema.
+
+Nested groups use dots: `auth.tokens.create`, `pay.rules.set`.
+
+### CLI surface extensions (`x-cli`)
+
+Every non-hidden route must carry
+`openapi_extra={"x-cli": {...}}` in its FastAPI decorator. This
+extension is the single source of truth for CLI command generation
+(see §13 "CLI generation from OpenAPI").
+
+Extension schema:
+
+| field       | required | description                                                  |
+|-------------|----------|--------------------------------------------------------------|
+| `group`     | yes      | CLI group name (e.g. `tasks`, `pay`)                         |
+| `verb`      | yes      | CLI verb name (e.g. `complete`, `list`)                      |
+| `summary`   | yes      | One-line help text (overrides OpenAPI `summary` when it is too API-centric) |
+| `aliases`   | no       | List of verb aliases (e.g. `["ls"]` for `list`)              |
+| `params`    | no       | Per-param overrides: flag names, short aliases (`-p` for `--property`), file-upload hints, help text beyond what OpenAPI infers |
+| `hidden`    | no       | `true` excludes browser-only endpoints (WebAuthn ceremonies, file blob redirect) from CLI generation; requires a reason in the exclusions list |
+| `composite` | no       | Names a hand-written override module that replaces the generated command |
+| `streaming` | no       | `true` for endpoints that stream ndjson (audit tail, calls list) |
+| `never_agent` | no     | `true` for endpoints that agents should never call (informational only) |
+
+CI fails any route that lacks an `operation_id` or an `x-cli`
+extension, unless the route is explicitly listed in
+`cli/miployees/_exclusions.yaml` (see §13). The parity gate in §17
+enforces each independently.
+
 ## Common conventions
 
 ### Dates and times

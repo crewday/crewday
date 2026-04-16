@@ -17,7 +17,11 @@ button, that cannot also be driven by the CLI (§13) or by an agent
 holding a delegated token from the calling user. Concretely:
 
 - Every form in §14 posts to an endpoint documented in §12.
-- Every endpoint in §12 has a matching CLI command in §13.
+- Every endpoint in §12 has a matching CLI command in §13. This
+  mapping is enforced structurally: each API route carries an `x-cli`
+  OpenAPI extension that defines its CLI command, and a CI parity gate
+  (§17) fails the build if any endpoint lacks a CLI mapping. See §13
+  "CLI generation from OpenAPI" for the mechanism.
 - Every action in §13 is reachable as a tool call from one of the
   two embedded chat agents described below, using a delegated token
   that inherits the calling user's full permissions (§03).

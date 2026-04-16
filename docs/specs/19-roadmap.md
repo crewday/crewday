@@ -35,7 +35,9 @@ log.
 - Employee profile and capability management.
 - CLI covers all of the above.
 
-**Exit:** full CRUD for the identity+places core; seed demo passes.
+**Exit:** full CRUD for the identity+places core; seed demo passes;
+CLI generation pipeline produces commands for all Phase 2 endpoints;
+`cli-parity` gate green.
 
 ## Phase 3 — Tasks and schedules
 

@@ -61,6 +61,88 @@ token = "env:MIPLOYEES_TOKEN_DEV"
 - `miployees login` writes a new profile: walks through base URL,
   pastes token, pings `/healthz`.
 
+## CLI generation from OpenAPI
+
+### Single source of truth
+
+The FastAPI route definition — its `operation_id`, Pydantic
+request/response models, and `x-cli` extension (§12) — is the
+canonical CLI definition. The CLI does not maintain a parallel command
+list. Adding an endpoint with its `x-cli` metadata is sufficient to
+make it appear in the CLI; no hand-written click command is needed for
+standard CRUD.
+
+### Surface descriptor (`_surface.json`)
+
+A build step (`python -m cli.codegen`) imports the FastAPI app, calls
+`app.openapi()`, walks every operation, merges `x-cli` metadata with
+inferred OpenAPI params, and writes `cli/miployees/_surface.json`.
+This file is committed and CI-verified (same pattern as
+`docs/api/openapi.json`). If the committed copy diverges from a fresh
+generation, the `cli-parity` gate (§17) fails the build.
+
+### Runtime command construction
+
+At import time, the CLI loads `_surface.json` and dynamically builds
+click groups and commands. Each generated command:
+
+- Constructs the URL from the path template + path params.
+- Assembles query/body params from CLI flags.
+- Calls `_client.request()`.
+- Pipes the response through `_output.format()`.
+
+No per-endpoint Python code is needed for standard CRUD.
+
+### Overrides (`cli/miployees/_overrides/`)
+
+Hand-written click commands for cases the generic path cannot handle:
+
+- `admin.py` — host-CLI-only commands (no HTTP surface): `init`,
+  `recover`, `rotate-root-key`, `backup`, `restore`, `purge`,
+  `version`.
+- `expenses.py` — `expenses submit` composite (autofill + create +
+  submit in one flow).
+- `tasks.py` — `tasks complete` with multipart photo upload.
+- `auth.py` — `auth login` interactive flow.
+
+Each override uses
+`@cli_override("group", "verb", covers=["op.id1", "op.id2"])` to
+register which `operationId`s it handles, so the parity gate still
+sees them as covered.
+
+### Exclusions (`cli/miployees/_exclusions.yaml`)
+
+Endpoints intentionally omitted from CLI generation, each with a
+mandatory reason. Canonical list:
+
+- `auth.webauthn.begin_registration`, `auth.webauthn.finish_registration`,
+  `auth.webauthn.begin_login`, `auth.webauthn.finish_login` — browser-only
+  passkey ceremony.
+- `files.blob` — returns a 302 redirect or binary stream, not JSON;
+  file metadata is available via the generated `files show` command.
+- `healthz`, `readyz`, `version.get` — no-auth infrastructure probes;
+  `miployees admin version` covers the operational use case.
+
+Adding an exclusion without a reason fails CI lint.
+
+### `--help` generation
+
+Help text is assembled from the OpenAPI `summary` (one-line) +
+parameter descriptions. The `x-cli.summary` field overrides when the
+OpenAPI summary is too API-centric. Budget: each command's `--help`
+fits in ~200 lines. Global flags are on `miployees --help` only, not
+repeated per command.
+
+### Discoverability for agents
+
+An agent can explore the full CLI surface with:
+
+- `miployees --help` — lists all groups.
+- `miployees <group> --help` — lists all verbs in a group.
+- `miployees <group> <verb> --help` — full param list and examples.
+- `miployees surface --json` — dumps the entire `_surface.json` for
+  programmatic discovery (one command to learn everything).
+
 ## Global flags
 
 | flag                | meaning                                            |
@@ -98,6 +180,11 @@ human line otherwise; `--verbose` adds the request id.
 ## Command tree
 
 Grouped by resource. Every command is `miployees <group> <verb> [args]`.
+
+> **Note:** The listing below is the expected output of the generation
+> pipeline, kept here for human readers of the spec. The authoritative
+> source is the `x-cli` extensions on the API routes (§12); if the
+> listing drifts, regenerate `_surface.json` and update this section.
 
 ```
 miployees auth
@@ -255,6 +342,9 @@ miployees admin
   restore --from <path>
   purge --dry-run                             # GDPR hard-delete flow
   version
+
+miployees surface
+  --json                            # dump _surface.json for programmatic discovery
 ```
 
 ### Host-CLI-only admin commands vs interactive-session-only endpoints
