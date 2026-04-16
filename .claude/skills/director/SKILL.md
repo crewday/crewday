@@ -49,7 +49,13 @@ DIRECTOR (plan, coordinate, create Beads tasks)
     │
     ▼
 5. DIRECTOR runs FULL test suite → fix or delegate failures
+    │
+    ▼
+6. /selfreview (skeptical pass on all changes before handoff)
 ```
+
+**Every plan ends with `/selfreview`.** After the full test suite is
+green and commits are pushed, run `/selfreview`. Do not skip it.
 
 For hard architectural decisions: invoke **ORACLE** for deep research
 before planning, not after.
