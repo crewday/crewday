@@ -120,6 +120,28 @@ expenses, and document invoices correctly.
 **Exit:** a month closes cleanly: shifts → payslips → approved
 expenses → reimbursement included → CSV export.
 
+## Phase 7b — Clients, vendors, work orders (§22)
+
+- **`organization`** as a unified client/supplier entity; properties
+  gain `client_org_id`; employees gain `engagement_kind` and
+  `supplier_org_id`.
+- **Client rate cards** (`client_rate` + `client_employee_rate`) and
+  shift-close rate snapshotting via `shift_billing`.
+- **`work_order`** with child tasks, **`quote`** with manager
+  approval gate, **`vendor_invoice`** with OCR autofill and
+  approval gate.
+- **Payout destinations for organizations** (same model, different
+  owner kind).
+- CSV exports: **billable hours by client**, **work-order ledger**.
+- CLI parity for everything above.
+
+**Exit:** an agency workspace manages three clients, two payroll
+employees, one contractor, and one agency-supplied worker; shifts
+at a client property produce `shift_billing` rows; a repair job
+flows draft → quoted → accepted → in_progress → completed →
+invoiced → paid with agent-submitted drafts and manager approvals;
+the billable CSV reconciles against the payroll register.
+
 ## Phase 8 — LLM features
 
 - OpenRouter client, model assignment table, redaction layer.
@@ -180,9 +202,19 @@ Items explicitly deferred, in rough priority order:
 5. QuickBooks / Xero accounting export (beyond CSV).
 6. OIDC for managers.
 7. Owner-only dashboard (when a second-party manages on behalf of an
-   owner).
-8. Realtime chat (presence, typing indicators) — v1 uses SSE for
-   task-state freshness; true realtime is separate.
-9. Integrated guest messaging (Airbnb-style threads).
-10. Additional outbound channels beyond email / WhatsApp / SMS
+   owner). Also promotes `organization.portal_user_id` (§22) into a
+   real `client_user` actor kind for client-facing read access.
+8. **Client invoice PDFs + ageing / dunning** — full counterpart to
+   the payslip PDF flow: render `client_invoice.pdf` from a
+   template, run a `draft → issued → paid → voided` state machine,
+   attach dunning emails. The v1 agency scope ships rate capture
+   and CSV only (§22 "Out of scope"); this is the next increment.
+9. **Split-billing a single property across multiple clients** — a
+   co-owned villa where two families each pay half. Requires a
+   `property_billing_split` mapping and a rewrite of rate
+   resolution. Deferred until a real user asks.
+10. Realtime chat (presence, typing indicators) — v1 uses SSE for
+    task-state freshness; true realtime is separate.
+11. Integrated guest messaging (Airbnb-style threads).
+12. Additional outbound channels beyond email / WhatsApp / SMS
     (push, Slack, Matrix).

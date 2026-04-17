@@ -32,6 +32,8 @@ junction tables.
 | emergency_contact  | jsonb     | `{name, phone_e164, relation}`   |
 | pay_destination_id | ULID FK?  | default payout for payslips (§09). Must reference a non-archived `payout_destination` whose `employee_id = employee.id`; enforced via trigger/constraint. |
 | reimbursement_destination_id | ULID FK? | default for expense reimbursements; null → falls back to pay_destination_id. Same FK guard as above. |
+| engagement_kind    | enum      | `payroll | contractor | agency_supplied`. Default `payroll`. Drives which pay pipeline applies — see "Engagement kind" below and §22. |
+| supplier_org_id    | ULID FK?  | `organization.id` where `is_supplier = true` (§22). Required iff `engagement_kind = agency_supplied`, must be null otherwise. |
 | deleted_at         | tstz?     |                                  |
 
 `languages` (spoken) and `preferred_locale` (formatting) are distinct.
@@ -40,6 +42,56 @@ locale because they work in France.
 
 An employee without any role is invalid; creation requires at least
 one `employee_role`.
+
+### Engagement kind
+
+`engagement_kind` decides which pay pipeline the employee is on:
+
+- **`payroll`** (default) — the existing behaviour. Gets
+  `pay_rule`, accrues into `pay_period`, is paid via `payslip`
+  (§09). May not carry a `supplier_org_id`.
+- **`contractor`** — an independent worker who **bills us** per
+  job. No `pay_rule`, no `payslip`. Payment flows through
+  `vendor_invoice` rows (§22). May hold their own
+  `payout_destination` rows; the invoice routes to one of them on
+  approval.
+- **`agency_supplied`** — a worker provided by a third-party agency
+  (e.g. a maid service's employee working at our property). The
+  supplying agency bills us; `supplier_org_id` points at the
+  `organization` row for that agency. Vendor invoices for this
+  worker route by default to
+  `supplier_org.default_pay_destination_id`, not to any
+  destination owned by the worker.
+
+`engagement_kind` does **not** affect task assignment, shifts,
+capabilities, the evidence-policy stack, or anything else defined
+in this document or §06. The worker is still a regular employee
+record for everything operational — only the pay pipeline
+diverges. The mapping is summarised:
+
+| kind              | pay pipeline                 | bills via             |
+|-------------------|------------------------------|-----------------------|
+| `payroll`         | `pay_rule` → `payslip` (§09) | n/a                   |
+| `contractor`      | `vendor_invoice` (§22)       | `vendor_employee_id`  |
+| `agency_supplied` | `vendor_invoice` (§22)       | `vendor_organization_id` via `supplier_org_id` |
+
+### Changing `engagement_kind`
+
+Switching between pipelines is audit-logged and gated:
+
+- **`payroll → contractor`** requires no active `pay_rule` on or
+  after the effective date, and any open `pay_period` containing
+  this employee's shifts must be locked or drained.
+- **`contractor → payroll`** requires at least one new `pay_rule`
+  created in the same transaction; the employee cannot exist in
+  `payroll` kind without one.
+- **`*_supplied ↔ anything`** additionally validates the
+  `supplier_org_id` precondition (set iff `agency_supplied`).
+- `employee.set_engagement_kind` is on §11's **unconditionally
+  approval-gated** list for transitions that cross the
+  `payroll` boundary (either direction). Switching between
+  `contractor` and `agency_supplied` does not cross that boundary
+  and is manager-only but not agent-approval-gated.
 
 ### Archive / reinstate
 

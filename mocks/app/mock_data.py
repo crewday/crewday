@@ -42,6 +42,7 @@ class Property:
     country: str = "FR"
     locale: str = "fr-FR"
     settings_override: dict[str, Any] = field(default_factory=dict)
+    client_org_id: str | None = None  # §22 — null = self-managed
 
 
 @dataclass
@@ -71,6 +72,8 @@ class Employee:
     evidence_policy: Literal["inherit", "require", "optional", "forbid"] = "inherit"
     preferred_locale: str | None = None
     settings_override: dict[str, Any] = field(default_factory=dict)
+    engagement_kind: Literal["payroll", "contractor", "agency_supplied"] = "payroll"  # §05, §22
+    supplier_org_id: str | None = None  # required iff engagement_kind = agency_supplied
 
 
 @dataclass
@@ -305,6 +308,7 @@ class Shift:
     break_seconds: int = 0
     method_in: Literal["manual", "auto", "geo"] = "manual"
     method_out: Literal["manual", "auto", "geo"] | None = None
+    client_org_id: str | None = None  # §22 — derived cache from property.client_org_id at close
 
 
 @dataclass
@@ -439,6 +443,106 @@ class AssetDocument:
     amount_currency: str | None = None
 
 
+# ── Clients, vendors, work orders (§22) ──────────────────────────────
+
+
+@dataclass
+class Organization:
+    id: str
+    name: str
+    is_client: bool = False
+    is_supplier: bool = False
+    legal_name: str | None = None
+    default_currency: str = "EUR"
+    tax_id: str | None = None
+    contacts: list[dict] = field(default_factory=list)
+    notes: str | None = None
+    default_pay_destination_stub: str | None = None  # e.g. "•• FR-07" when is_supplier
+
+
+@dataclass
+class ClientRate:
+    id: str
+    client_org_id: str
+    role_id: str | None  # null when a per-employee override; role-based otherwise
+    employee_id: str | None  # set for client_employee_rate overrides
+    hourly_cents: int
+    currency: str
+    effective_from: date
+    effective_to: date | None = None
+
+
+@dataclass
+class ShiftBilling:
+    id: str
+    shift_id: str
+    client_org_id: str
+    employee_id: str
+    currency: str
+    billable_minutes: int
+    hourly_cents: int
+    subtotal_cents: int
+    rate_source: Literal["client_employee_rate", "client_rate", "unpriced"]
+    rate_source_id: str | None = None
+
+
+@dataclass
+class WorkOrder:
+    id: str
+    property_id: str
+    title: str
+    state: Literal[
+        "draft", "quoted", "accepted", "in_progress",
+        "completed", "cancelled", "invoiced", "paid",
+    ]
+    assigned_employee_id: str | None
+    currency: str
+    client_org_id: str | None = None  # derived from property at creation
+    asset_id: str | None = None
+    description: str | None = None
+    accepted_quote_id: str | None = None
+    created_at: datetime | None = None
+
+
+@dataclass
+class Quote:
+    id: str
+    work_order_id: str
+    employee_id: str
+    currency: str
+    subtotal_cents: int
+    tax_cents: int
+    total_cents: int
+    status: Literal["draft", "submitted", "accepted", "rejected", "superseded", "expired"]
+    lines: list[dict] = field(default_factory=list)
+    valid_until: date | None = None
+    submitted_at: datetime | None = None
+    decided_at: datetime | None = None
+    decision_note: str | None = None
+
+
+@dataclass
+class VendorInvoice:
+    id: str
+    currency: str
+    subtotal_cents: int
+    tax_cents: int
+    total_cents: int
+    billed_at: date
+    status: Literal["draft", "submitted", "approved", "rejected", "paid", "voided"]
+    work_order_id: str | None = None
+    property_id: str | None = None
+    vendor_employee_id: str | None = None
+    vendor_organization_id: str | None = None
+    due_on: date | None = None
+    payout_destination_stub: str | None = None
+    lines: list[dict] = field(default_factory=list)
+    submitted_at: datetime | None = None
+    approved_at: datetime | None = None
+    paid_at: datetime | None = None
+    decision_note: str | None = None
+
+
 # ── Canonical starter data ───────────────────────────────────────────
 
 PROPERTIES: list[Property] = [
@@ -453,7 +557,8 @@ PROPERTIES: list[Property] = [
              areas=["Full unit", "Kitchen", "Bathroom 1", "Bathroom 2"],
              settings_override={
                  "evidence.policy": "optional",
-             }),
+             },
+             client_org_id="org-dupont"),
     Property("p-chalet", "Chalet Cœur", "Megève", "Europe/Paris", "rust", "vacation",
              areas=["Kitchen", "Fireplace room", "Master bedroom", "Ski room"],
              settings_override={
@@ -550,6 +655,9 @@ EMPLOYEES: list[Employee] = [
             "time.clock_mode": "auto",
             "tasks.allow_skip_with_reason": False,
         },
+        # CleanCo-supplied maid; billed to us by the supplier org, not by Ana.
+        engagement_kind="agency_supplied",
+        supplier_org_id="org-cleanco",
     ),
     Employee(
         "e-sam", "Sam Leclerc", ["Handyman"], ["p-villa-sud", "p-chalet"],
@@ -558,6 +666,8 @@ EMPLOYEES: list[Employee] = [
         workspaces=["ws-bernard"],
         villas=["p-villa-sud", "p-chalet"],
         clock_mode="manual", language="fr",
+        # Freelance handyman — quotes + vendor invoices, no payslip.
+        engagement_kind="contractor",
     ),
 ]
 
@@ -1156,24 +1266,152 @@ SHIFTS: list[Shift] = [
           method_in="manual", method_out="manual"),
     Shift("sh-4", "e-ana", "p-apt-3b", datetime(2026, 4, 14, 9, 0),
           datetime(2026, 4, 14, 14, 0), "closed", duration_seconds=18000,
-          method_in="auto", method_out="auto"),
+          method_in="auto", method_out="auto",
+          client_org_id="org-dupont"),  # billable to Dupont
     Shift("sh-5", "e-sam", "p-villa-sud", datetime(2026, 4, 14, 10, 0),
           datetime(2026, 4, 14, 12, 30), "disputed", duration_seconds=9000,
           method_in="manual", method_out="auto"),
 ]
 
 PAY_RULES: list[PayRule] = [
+    # Only payroll-engagement employees have pay rules. e-ana (agency_supplied)
+    # and e-sam (contractor) are paid through vendor_invoice (§22) instead.
     PayRule("pr-1", "e-maria", None, "monthly_salary", 240000, "EUR", date(2024, 3, 1)),
     PayRule("pr-2", "e-arun", None, "hourly", 1429, "EUR", date(2024, 9, 14)),
     PayRule("pr-3", "e-ben", None, "monthly_salary", 180000, "EUR", date(2023, 5, 20)),
-    PayRule("pr-4", "e-ana", None, "monthly_salary", 210000, "EUR", date(2024, 11, 2)),
-    PayRule("pr-5", "e-sam", None, "hourly", 1667, "EUR", date(2025, 1, 9)),
 ]
 
 PAY_PERIODS: list[PayPeriod] = [
     PayPeriod("pp-mar-26", date(2026, 3, 1), date(2026, 3, 31), "paid",
               locked_at=datetime(2026, 3, 31, 22, 0)),
     PayPeriod("pp-apr-26", date(2026, 4, 1), date(2026, 4, 30), "open"),
+]
+
+
+# ── Clients, vendors, work orders (§22) ──────────────────────────────
+
+ORGANIZATIONS: list[Organization] = [
+    Organization(
+        "org-dupont", "Dupont family", is_client=True,
+        legal_name="SCI Dupont",
+        default_currency="EUR",
+        tax_id="FR12 345 678 901",
+        contacts=[
+            {"label": "Primary", "name": "Hélène Dupont",
+             "email": "helene.dupont@example.com", "phone_e164": "+33 6 77 89 01 23",
+             "role": "owner"},
+        ],
+        notes="Owners of Apt 3B. Invoiced monthly, NET-30.",
+    ),
+    Organization(
+        "org-cleanco", "CleanCo SARL", is_supplier=True,
+        legal_name="CleanCo SARL",
+        default_currency="EUR",
+        tax_id="FR98 765 432 109",
+        contacts=[
+            {"label": "Ops", "name": "Marc Girard",
+             "email": "ops@cleanco.example", "phone_e164": "+33 1 23 45 67 89",
+             "role": "account_manager"},
+        ],
+        default_pay_destination_stub="•• FR-07",
+        notes="Supplies Ana Rossi. Invoices weekly, NET-15.",
+    ),
+]
+
+CLIENT_RATES: list[ClientRate] = [
+    # Role-based rate card for Dupont: housekeepers billed at €32/h, handymen €55/h.
+    ClientRate("cr-1", "org-dupont", "r-housekeeper", None,
+               3200, "EUR", date(2026, 1, 1)),
+    ClientRate("cr-2", "org-dupont", "r-handyman", None,
+               5500, "EUR", date(2026, 1, 1)),
+    # Per-employee override: Ana is billed at a premium rate.
+    ClientRate("cr-3", "org-dupont", None, "e-ana",
+               3600, "EUR", date(2026, 1, 1)),
+]
+
+SHIFT_BILLINGS: list[ShiftBilling] = [
+    ShiftBilling("sb-1", "sh-4", "org-dupont", "e-ana",
+                 "EUR", billable_minutes=300, hourly_cents=3600,
+                 subtotal_cents=18000,
+                 rate_source="client_employee_rate", rate_source_id="cr-3"),
+]
+
+WORK_ORDERS: list[WorkOrder] = [
+    WorkOrder(
+        "wo-1", "p-villa-sud", "Replace leaking shower mixer — master bath",
+        state="accepted",
+        assigned_employee_id="e-sam",
+        currency="EUR",
+        asset_id=None,
+        description="Cold-side mixer dripping; requires cartridge replacement.",
+        accepted_quote_id="q-1",
+        created_at=datetime(2026, 4, 10, 14, 30),
+    ),
+    WorkOrder(
+        "wo-2", "p-apt-3b", "Deep clean + linens turnover (Dupont)",
+        state="invoiced",
+        assigned_employee_id="e-ana",
+        currency="EUR",
+        client_org_id="org-dupont",
+        description="Standing weekly engagement billed through CleanCo.",
+        created_at=datetime(2026, 4, 14, 7, 0),
+    ),
+]
+
+QUOTES: list[Quote] = [
+    Quote(
+        "q-1", "wo-1", "e-sam",
+        currency="EUR", subtotal_cents=24000, tax_cents=4800, total_cents=28800,
+        status="accepted",
+        lines=[
+            {"kind": "labor", "description": "Diagnosis + swap (2h)",
+             "quantity": 2, "unit": "hour", "unit_price_cents": 6000, "total_cents": 12000},
+            {"kind": "material", "description": "OEM mixer cartridge",
+             "quantity": 1, "unit": "unit", "unit_price_cents": 8000, "total_cents": 8000},
+            {"kind": "travel", "description": "Call-out fee",
+             "quantity": 1, "unit": "unit", "unit_price_cents": 4000, "total_cents": 4000},
+        ],
+        valid_until=date(2026, 5, 10),
+        submitted_at=datetime(2026, 4, 11, 9, 15),
+        decided_at=datetime(2026, 4, 11, 16, 40),
+        decision_note="Accepted — proceed after Friday.",
+    ),
+]
+
+VENDOR_INVOICES: list[VendorInvoice] = [
+    # Invoice for the pending Sam job — draft, still to be submitted after work is done.
+    VendorInvoice(
+        "vi-1", currency="EUR",
+        subtotal_cents=24000, tax_cents=4800, total_cents=28800,
+        billed_at=date(2026, 4, 16),
+        status="draft",
+        work_order_id="wo-1",
+        vendor_employee_id="e-sam",
+        lines=[
+            {"kind": "labor", "description": "Diagnosis + swap (2h)",
+             "quantity": 2, "unit": "hour", "unit_price_cents": 6000, "total_cents": 12000},
+            {"kind": "material", "description": "OEM mixer cartridge",
+             "quantity": 1, "unit": "unit", "unit_price_cents": 8000, "total_cents": 8000},
+            {"kind": "travel", "description": "Call-out fee",
+             "quantity": 1, "unit": "unit", "unit_price_cents": 4000, "total_cents": 4000},
+        ],
+    ),
+    # CleanCo invoice for Ana's week — billed by the supplier org, not Ana herself.
+    VendorInvoice(
+        "vi-2", currency="EUR",
+        subtotal_cents=18000, tax_cents=3600, total_cents=21600,
+        billed_at=date(2026, 4, 15),
+        due_on=date(2026, 4, 30),
+        status="submitted",
+        work_order_id="wo-2",
+        vendor_organization_id="org-cleanco",
+        payout_destination_stub="•• FR-07",
+        lines=[
+            {"kind": "labor", "description": "Ana Rossi — Apt 3B turnover (5h)",
+             "quantity": 5, "unit": "hour", "unit_price_cents": 3600, "total_cents": 18000},
+        ],
+        submitted_at=datetime(2026, 4, 15, 18, 0),
+    ),
 ]
 
 INVENTORY_MOVEMENTS: list[InventoryMovement] = [

@@ -19,6 +19,7 @@ property.
 | address_json          | jsonb/text  | structured address             |
 | timezone              | text        | IANA (`Europe/Paris`)          |
 | default_currency      | text        | ISO 4217, inherits workspace   |
+| client_org_id         | ULID FK?    | `organization.id` (§22). Null = workspace-owned / self-managed. Set = billable to that client; tasks, shifts, work_orders at this property carry the client forward for rate resolution and CSV rollup. Referenced org must have `is_client = true`. |
 | country               | text        | ISO-3166-1 alpha-2. Required. Authoritative source: `address_json.country` when present; otherwise inherits workspace `default_country`. Drives holiday suggestions, payslip jurisdiction, locale derivation. |
 | locale                | text?       | BCP-47. Nullable; when null, derived from workspace language + property country. |
 | property_notes_md     | text        | internal, staff-visible        |
@@ -29,6 +30,25 @@ property.
 A property has one or more **units**, many **areas** (shared or
 unit-scoped), and many **stays** (via units). It may have one or more
 **iCal feeds** per unit (multiple platforms for the same listing).
+
+### Billing client (agency mode)
+
+A property may belong to a **billing client** via
+`client_org_id` (§22 "`property.client_org_id`"). Semantics:
+
+- **Null** (the default) preserves the pre-existing "the workspace
+  is its own employer" shape: family-run households, single-owner
+  vacation portfolios, etc. Vendor invoices at this property are
+  paid by the workspace directly and no client-billing rollup
+  applies.
+- **Set** puts the property in agency mode: the workspace operates
+  on behalf of a client, bills them for work done (via
+  `client_rate` / `client_employee_rate` resolution, §22), and
+  rolls shift hours up into the per-client CSV export.
+
+One property may have at most one `client_org_id` at a time.
+Split-billing a single property across multiple clients is
+explicitly out of scope (§22 "Out of scope").
 
 ### `address_json` canonical shape
 

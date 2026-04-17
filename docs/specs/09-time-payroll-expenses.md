@@ -4,6 +4,27 @@ Three tightly-linked features for staff who expect to get paid
 correctly and for managers who want to stop keeping shift notes in a
 phone's notes app.
 
+## Scope by `engagement_kind`
+
+The pipelines below — pay rules, pay periods, payslips, expense
+claims, payout destinations — all apply to employees with
+`engagement_kind = payroll` (§05). **Contractors** and
+**agency-supplied** employees are paid via a separate pipeline
+(`work_order` / `vendor_invoice`, §22) and do **not** get pay rules,
+pay periods, or payslips. They still produce `shift` rows when they
+clock in, which is how their hours are captured for the client-
+billing rollup (§22 "Billable-hour rollup and exports"); a
+contractor's `shift` has no corresponding `pay_period_entry` line
+because their pay runs through their invoices, not the payroll
+cycle.
+
+`expense_claim` remains available to any employee kind — a
+contractor who paid for materials out-of-pocket can still submit
+receipts, and the resulting reimbursement routes to whichever
+`payout_destination` the approval selects. But more commonly a
+contractor folds materials into their own `vendor_invoice` line
+items instead of filing claims, and the manager chooses per case.
+
 ## Time tracking (shifts)
 
 ### Model
@@ -14,6 +35,7 @@ shift
 ├── workspace_id
 ├── employee_id
 ├── property_id              # optional; unassigned shifts for remote drivers, etc.
+├── client_org_id            # derived cache from property.client_org_id at close; nullable (§22)
 ├── status                   # enum: open | closed | disputed (§02)
 ├── started_at               # utc
 ├── ended_at                 # utc, nullable while status = open
@@ -29,6 +51,15 @@ shift
 ├── created_by_actor_kind/id
 └── deleted_at
 ```
+
+`client_org_id` is written at shift close by copying
+`property.client_org_id` at that moment, and is refreshed if the
+manager edits time fields (§ "Manager adjustments"). It is the key
+used by the billable-hour rollup (§22); a sibling `shift_billing`
+row is created in the same transaction with the resolved rate and
+subtotal. A shift whose property has no `client_org_id` leaves the
+field null and skips billing-row creation (self-managed workspaces
+see no change).
 
 `status` transitions: `open` on clock-in; `closed` on clock-out or
 manager close; `disputed` when the worker auto-closes an orphan open
@@ -153,6 +184,11 @@ up in review.
 ## Pay rules
 
 A `pay_rule` binds an employee (or an employee_role) to a pay model.
+Applies only to **`engagement_kind = payroll`** employees (§05);
+contractors and agency-supplied workers use `vendor_invoice` (§22)
+and never have a `pay_rule` row. Attempting to write one for a
+non-payroll employee returns 422 `error =
+"pay_rule_requires_payroll_engagement"`.
 
 | field              | type      | notes                                 |
 |--------------------|-----------|---------------------------------------|
@@ -398,7 +434,8 @@ someone's pay. The rules below are written with that threat in mind.
 |----------------|----------|---------------------------------------------------------------|
 | id             | ULID PK  |                                                               |
 | workspace_id   | ULID FK  | scoping                                                       |
-| employee_id    | ULID FK  | **row belongs to exactly one employee**; every read/write validates the caller has rights to that employee |
+| employee_id    | ULID FK? | row belongs to exactly one employee **OR** one organization; see "Owner" below |
+| organization_id | ULID FK? | row belongs to exactly one organization; see §22              |
 | label          | text     | "Personal BNP", "Expense float — Revolut" — display only      |
 | kind           | enum     | `bank_account | card_reload | wallet | cash | other`          |
 | currency       | text     | ISO 4217; required for all non-`cash` kinds                   |
@@ -410,6 +447,31 @@ someone's pay. The rules below are written with that threat in mind.
 | notes_md       | text?    | manager-visible, not rendered on PDF                          |
 | created_at / updated_at | tstz |                                                         |
 | archived_at    | tstz?    | non-null → cannot be selected as a new default; see below     |
+
+### Owner
+
+Exactly one of `employee_id` / `organization_id` is set; the
+reverse is a 422 `error = "destination_owner_required"`. DB-level
+CHECK constraint enforces the exclusivity.
+
+- **Employee-owned** destinations (the default) serve payslips
+  (`employee.pay_destination_id`), expense reimbursements
+  (`employee.reimbursement_destination_id`), and — for employees
+  with `engagement_kind = contractor` — vendor invoices where
+  `vendor_invoice.vendor_employee_id` points at them.
+- **Organization-owned** destinations serve vendor invoices where
+  `vendor_invoice.vendor_organization_id` points at the owning
+  org. They back the `organization.default_pay_destination_id`
+  pointer used to route agency-supplied workers' invoices
+  automatically. An org-owned destination cannot be used to pay a
+  payslip or reimburse an employee expense claim — those pipelines
+  are employee-oriented.
+
+All downstream rules — per-kind field validation, verification,
+approval gates, snapshotting on use, the payout manifest endpoint —
+apply identically to both owner kinds. Where the text below says
+"the owning employee", read "the owning employee or organization"
+unless the context is explicitly payslip-only.
 
 **Validation per `kind`** (server-side, at write time):
 
@@ -744,13 +806,19 @@ A claim becomes `reimbursed` when the containing payslip moves to
 ## Reports and exports
 
 - **Timesheets** — CSV per pay period: employee, date, property,
-  hours, overtime, holiday, notes.
+  hours, overtime, holiday, notes. Includes shifts from all
+  engagement kinds; a column marks whether the hours roll into a
+  payslip or a `vendor_invoice` pipeline.
 - **Payroll register** — CSV per pay period: employee, gross, net,
-  expenses, currency.
+  expenses, currency. Payroll employees only.
 - **Expense ledger** — CSV by date range: claim id, employee, vendor,
   category, amount (claim + base currency), state.
 - **Hours by property** — rollup useful for owners: hours consumed at
   each property for budgeting.
+- **Billable hours by client** — see §22 "Billable-hour rollup and
+  exports". Per-client CSV driven by `shift_billing` rows.
+- **Work-order ledger** — see §22. Per-client work orders with
+  aggregate quote and invoice totals.
 
 Exports: `GET /api/v1/exports/...csv` (streamed) or via CLI
 `miployees export ...`.

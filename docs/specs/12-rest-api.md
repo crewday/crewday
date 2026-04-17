@@ -553,6 +553,52 @@ entity). v1 ships the `local` driver only, writing under
 Setting `MIPLOYEES_STORAGE=s3` (recipe B) routes to the S3/MinIO
 driver. API callers never see the storage path — only the ULID.
 
+### Clients, work orders, invoices (§22)
+
+```
+GET    /organizations                         # ?role=client|supplier|both&q=…
+POST   /organizations
+GET    /organizations/{id}
+PATCH  /organizations/{id}
+DELETE /organizations/{id}                    # soft delete; 409 if referenced by properties
+POST   /organizations/{id}/payout_destinations     # body includes write-only `account_number_plaintext`
+POST   /organizations/{id}/default_pay_destination # {destination_id}; always approval-gated for agents
+
+GET    /organizations/{id}/client_rates       # rate card for one client
+POST   /client_rates
+PATCH  /client_rates/{id}
+DELETE /client_rates/{id}                     # soft delete
+
+POST   /client_employee_rates
+PATCH  /client_employee_rates/{id}
+DELETE /client_employee_rates/{id}
+
+POST   /employees/{id}/engagement_kind        # body: {kind, supplier_org_id?}; always approval-gated when crossing payroll boundary
+
+GET    /work_orders                           # ?property_id=…&client_org_id=…&state=…
+POST   /work_orders
+GET    /work_orders/{id}                      # includes child tasks, quotes, vendor_invoices
+PATCH  /work_orders/{id}
+POST   /work_orders/{id}/accept_quote         # body: {quote_id}; always approval-gated
+POST   /work_orders/{id}/cancel               # body: {reason}
+DELETE /work_orders/{id}                      # soft delete
+
+GET    /work_orders/{id}/quotes
+POST   /quotes                                # body: {work_order_id, currency, lines, ...}
+PATCH  /quotes/{id}                           # only while status = draft
+POST   /quotes/{id}/submit                    # draft → submitted
+POST   /quotes/{id}/reject                    # manager
+POST   /quotes/{id}/supersede                 # manager
+
+GET    /work_orders/{id}/vendor_invoices
+POST   /vendor_invoices                       # multipart for the invoice document
+POST   /vendor_invoices/{id}/submit
+POST   /vendor_invoices/{id}/approve          # always approval-gated for agents; manager selects destination
+POST   /vendor_invoices/{id}/reject
+POST   /vendor_invoices/{id}/mark_paid        # always approval-gated for agents
+POST   /vendor_invoices/autofill              # multipart/form-data; image in → structured JSON out
+```
+
 ### Exports
 
 ```
@@ -560,6 +606,8 @@ GET    /exports/timesheets.csv?from=…&to=…
 GET    /exports/payroll_register.csv?period_id=…
 GET    /exports/expenses.csv?from=…&to=…
 GET    /exports/tasks.csv?from=…&to=…
+GET    /exports/client_billable.csv?client_org_id=…&from=…&to=…   # §22
+GET    /exports/work_orders.csv?client_org_id=…&from=…&to=…       # §22
 ```
 
 ### Audit

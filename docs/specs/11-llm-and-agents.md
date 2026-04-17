@@ -292,6 +292,20 @@ routing; the approval requirement cannot be disabled in
 - `employee.set_default_reimbursement_destination`
 - `expense_claim.set_destination_override` (agent path; the manager
   selecting a destination in the approval UI is itself the approval)
+- `work_order.accept_quote` (§22) — commits the workspace to a
+  price
+- `vendor_invoice.approve` (§22) — commits payment routing (the
+  agent path mirrors `expense_claim.set_destination_override`: the
+  manager selecting a destination in the approval UI is the
+  approval)
+- `vendor_invoice.mark_paid` (§22) — commits the `approved → paid`
+  transition
+- `organization.update_default_pay_destination` (§22) — routes
+  future agency-supplied invoices by default
+- `employee.set_engagement_kind` (§05) — **only** when the
+  transition crosses the `payroll` boundary (to or from), because
+  it moves the worker between pay pipelines. `contractor ↔
+  agency_supplied` is manager-only but not agent-approval-gated.
 
 ### Interactive-session-only endpoints
 

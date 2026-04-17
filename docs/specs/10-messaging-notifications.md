@@ -296,6 +296,13 @@ leave.*              requested, approved, rejected
 availability_override.* created, approved, rejected
 public_holiday.*     created, updated, deleted
 property_closure.*   created, updated, deleted
+organization.*       created, updated, archived
+client_rate.*        created, updated, archived
+work_order.*         created, state_changed, accept_quote,
+                     cancelled, deleted
+quote.*              submitted, accepted, rejected, superseded
+vendor_invoice.*     submitted, approved, rejected, paid, voided
+shift_billing.*      resolved
 ```
 
 There is no `person.*` family — earlier drafts used it as a

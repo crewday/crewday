@@ -145,6 +145,23 @@ erDiagram
     WEBHOOK_SUBSCRIPTION ||--o{ WEBHOOK_DELIVERY : records
 
     AUDIT_LOG }o--|| WORKSPACE : within
+
+    WORKSPACE ||--o{ ORGANIZATION : knows
+    ORGANIZATION ||--o{ PROPERTY : bills
+    ORGANIZATION ||--o{ EMPLOYEE : supplies
+    ORGANIZATION ||--o{ CLIENT_RATE : priced_at
+    ORGANIZATION ||--o{ CLIENT_EMPLOYEE_RATE : overrides
+    ORGANIZATION ||--o{ PAYOUT_DESTINATION : receives
+
+    PROPERTY ||--o{ WORK_ORDER : hosts
+    WORK_ORDER ||--o{ TASK : groups
+    WORK_ORDER ||--o{ QUOTE : priced_by
+    WORK_ORDER ||--o{ VENDOR_INVOICE : billed_by
+
+    EMPLOYEE ||--o{ QUOTE : submits
+    EMPLOYEE ||--o{ VENDOR_INVOICE : bills
+
+    SHIFT ||--o| SHIFT_BILLING : rolled_up_to
 ```
 
 Entities in the diagram but not detailed inline here have their
@@ -173,6 +190,11 @@ entity either — capabilities are sparse JSON blobs on `role` and
 - **Time / pay / expenses** (§09): `shift`, `pay_rule`, `pay_period`,
   `pay_period_entry`, `payslip`, `payout_destination`, `expense_claim`,
   `expense_line`, `expense_attachment`.
+- **Clients, vendors, work orders** (§22): `organization`,
+  `client_rate`, `client_employee_rate`, `shift_billing`,
+  `work_order`, `quote`, `vendor_invoice`. `payout_destination` is
+  shared with §09; destinations may be owned by an employee **or**
+  an organization.
 - **Comms** (§10): `digest_run`, `email_delivery`, `email_opt_out`,
   `webhook_subscription`, `webhook_delivery`, `issue`.
 - **Assets** (§21): `asset_type`, `asset`, `asset_action`,
@@ -353,6 +375,11 @@ read is too expensive:
   transaction.
 - `asset_action.last_performed_at` — updated when a task with
   `asset_action_id` is completed (§21).
+- `shift_billing.subtotal_cents` — recomputed when the parent
+  shift's time fields change (§22).
+- `work_order.state` — transitions driven by child quote/invoice
+  state changes (`quoted`/`invoiced`/`paid` derive from child
+  rows; see §22 "State machine").
 
 A `--recompute` CLI command recomputes all derived fields; a periodic
 CI job asserts no drift in test fixtures.
@@ -508,6 +535,12 @@ Defined once per document where the enum lives; summarized here.
 - `leave_category`: `vacation | sick | personal | bereavement | other`
 - `issue_status`: `open | in_progress | resolved | wont_fix`
 - `capability`: see §05.
+- `engagement_kind`: `payroll | contractor | agency_supplied` (§05, §22)
+- `organization_role`: bitmap on `organization` (`is_client`, `is_supplier`); at least one must be true (§22)
+- `work_order_state`: `draft | quoted | accepted | in_progress | completed | cancelled | invoiced | paid` (§22)
+- `quote_status`: `draft | submitted | accepted | rejected | superseded | expired` (§22)
+- `vendor_invoice_status`: `draft | submitted | approved | rejected | paid | voided` (§22)
+- `billing_rate_source`: `client_employee_rate | client_rate | unpriced` (§22)
 
 ## Full-text search ranking
 

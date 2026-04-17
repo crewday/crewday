@@ -245,3 +245,54 @@ fix the offender.
   already multi-tenant-ready — see §02 "Migration" and §19 "Beyond
   v1" for the path to true multitenancy. Replaces the v0
   "household."
+- **Organization.** A counterparty of the workspace tracked in a
+  single `organization` table, flagged as client (`is_client`),
+  supplier (`is_supplier`), or both. Replaces the need for
+  separate "client" and "supplier" tables. See §22.
+- **Client.** An `organization` with `is_client = true` — the
+  agency's billing counterparty. A property may point at one
+  client via `property.client_org_id`; when null, the workspace
+  is its own billing target. See §22.
+- **Supplier (supplying organization).** An `organization` with
+  `is_supplier = true` — an agency that provides workers to our
+  workspace. An employee with
+  `engagement_kind = agency_supplied` references one via
+  `supplier_org_id`; the supplier's
+  `default_pay_destination_id` routes the supplier's
+  vendor invoices. See §22.
+- **Engagement kind.** Per-employee enum
+  (`payroll | contractor | agency_supplied`) deciding which pay
+  pipeline the worker is on. `payroll` → `pay_rule` + `payslip`
+  (§09). `contractor` and `agency_supplied` → `vendor_invoice`
+  (§22). Does not affect task assignment, shifts, capabilities,
+  or evidence policy. Crossing the `payroll` boundary in either
+  direction is unconditionally approval-gated. See §05, §22.
+- **Work order.** A billable envelope wrapping one or more tasks
+  at a single property, with an assigned contractor or agency-
+  supplied worker, an optional accepted quote, and one or more
+  vendor invoices. Optional: a casual one-off job can skip
+  `work_order` and attach a `vendor_invoice` directly to a task.
+  See §22.
+- **Quote.** A worker-proposed price for a `work_order`. Acceptance
+  is an unconditionally approval-gated action (§11); the accepted
+  quote's total acts as a ceiling on subsequent
+  `vendor_invoice` totals (with a workspace-configurable
+  tolerance). States: `draft | submitted | accepted | rejected |
+  superseded | expired`. See §22.
+- **Vendor invoice.** A bill from a contractor or supplying
+  organization, paid from a `payout_destination` chosen at
+  approval time. Parallel to `expense_claim` in shape (OCR
+  autofill, attachments, manager approval) but the counterparty
+  is the biller, not the submitting employee. Approval and
+  `mark_paid` are unconditionally approval-gated. States:
+  `draft | submitted | approved | rejected | paid | voided`. See
+  §22.
+- **Client rate / billable rate.** Per-client hourly rate keyed to
+  a role (`client_rate`) with optional per-employee override
+  (`client_employee_rate`). Resolved at shift close and
+  snapshotted onto `shift_billing`. Rate-card edits do not
+  rewrite history. See §22.
+- **Shift billing.** Append-only derived row capturing a shift's
+  resolved billable rate, currency, minutes, and subtotal at the
+  moment the shift closes. Drives the "billable hours by client"
+  CSV. See §22.
