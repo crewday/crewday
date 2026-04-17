@@ -210,10 +210,10 @@ any verb the owner/manager can click in `.desk__nav` or
 
 ## JavaScript inventory
 
-Bundles are route-split: employee and manager code are separate
-entry points so manager-only modules never land on the employee
-phone. `React.lazy` loads manager-only components out of the employee
-bundle.
+Bundles are route-split: worker and owner/manager code are separate
+entry points so owner/manager-only modules never land on the worker
+phone. `React.lazy` loads owner/manager-only components out of the
+worker bundle.
 
 Runtime dependencies:
 
@@ -271,12 +271,12 @@ Injected by Vite PWA plugin:
 - Max queued photo bytes: 50 MB (configurable). Older entries are
   evicted with a visible "could not keep queued for longer" warning.
 
-## Today screen (employee)
+## Today screen (worker)
 
 The most-used screen. Anatomy:
 
 - **Top:** personalized greeting, date, property dropdown if the
-  employee serves multiple, a big "Clock in" pill (if capability on)
+  worker serves multiple, a big "Clock in" pill (if capability on)
   or "Clocked in @ 08:12 → Clock out".
 - **Now:** the task with the nearest start time; full details inline.
 - **Upcoming today:** list of collapsed cards.
@@ -294,7 +294,7 @@ Each task card shows:
   photo" depending on state and requirements.
 - Attached instructions collapsed under an info icon; tap to expand.
 
-## Task detail (employee)
+## Task detail (worker)
 
 - Header with status pill.
 - Big primary CTA sticky to the top on scroll.
