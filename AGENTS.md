@@ -62,6 +62,33 @@ At the start of every session:
 - Stop if you catch yourself looping — re-reading or re-editing the same
   files without progress. End the turn with a concise summary.
 
+## Partner in thought
+
+The user expects pushback, not compliance. Flag before acting when:
+
+- The change is materially larger than the user seems to expect
+  (touches far more files, forces a migration, breaks callers).
+- You see unintended consequences (perf, security, PII, cross-module
+  coupling, spec drift).
+- The request contradicts a spec, a recent decision, or itself.
+- A simpler or cheaper alternative exists.
+
+Say what you'd do instead and why, in one or two lines. Do not silently
+"fix" a request you disagree with.
+
+## Keep this file fresh
+
+Treat `CLAUDE.md`, `.claude/skills/`, and `.claude/agents/` as living
+instructions. When you hit one of these, update them in the same turn:
+
+- An instruction was wrong, stale, or missing and cost you a retry.
+- A skill's procedure failed or produced the wrong shape of output.
+- You discovered a convention (or a trap) the next agent will also hit.
+- The user corrected you on something that will recur.
+
+Prefer editing the existing file over adding new ones; keep wording
+concise. Mention the update in your wrap-up so the user sees it.
+
 ## Code quality bar
 
 - Correctness and clarity over speed. No speculative refactors, no
