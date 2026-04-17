@@ -1,9 +1,12 @@
 # miployees — UI preview mocks.
 #
 # Exposed at https://dev.miployees.com via the shared Pangolin/Traefik
-# stack (same pattern as fj2). Binds locally to 127.0.0.1:8100 for
-# direct access, and registers Traefik labels for public routing with
-# badger auth.
+# stack (same pattern as fj2). Both the public URL and the local
+# 127.0.0.1:8100 forward hit the same `web-dev` (Vite) container, so
+# SPA edits hot-reload everywhere — no rebuild, no baked-dist drift.
+# Vite proxies /api, /events, /switch, /theme, /agent, /healthz,
+# /readyz, /metrics to the `mocks` FastAPI container on :8000, which
+# gets .py HMR via `uvicorn --reload`.
 #
 # Pangolin needs a corresponding "resource" entry for dev.miployees.com
 # (add via the Pangolin dashboard once) — until that's set, requests
@@ -22,12 +25,45 @@ services:
     volumes:
       # Bind-mount keeps the Python layer in sync on every save. Paired
       # with `uvicorn --reload`, every .py change is picked up with
-      # zero `docker compose restart`. The SPA bundle is baked into the
-      # image; front-end hot reload runs under the `dev` profile via
-      # the separate `web-dev` service on :5173.
+      # zero `docker compose restart`. The SPA bundle baked into the
+      # image is only used for the Traefik/prod path — local dev is
+      # served by the `web-dev` container on :8100 below.
       - ./app:/app/app:ro
+    # No host-port publication: local dev goes through the web-dev
+    # container at 127.0.0.1:8100, which proxies /api & /events to
+    # `mocks:8000` over the compose network. Traefik also connects
+    # over the compose network (see labels), so this container does
+    # not need an external port.
+    expose:
+      - "8000"
+    networks:
+      - default
+
+  # Front-end HMR for both local and public access. The container
+  # installs dependencies on first boot (slower), then `vite` watches
+  # ./web via the bind-mount and hot-reloads in the browser.
+  #
+  # Vite's dev server on :5173 is published as 127.0.0.1:8100 for
+  # direct host access, and also joined to the traefik-proxy network
+  # so https://dev.miployees.com routes here too (HMR ws upgrade is
+  # handled by Traefik). Vite proxies /api, /events, /switch, /theme,
+  # /agent, /healthz, /readyz, /metrics to the `mocks` service via
+  # VITE_BACKEND_URL. That way code edits appear on both URLs without
+  # rebuilding any image.
+  web-dev:
+    image: node:22-alpine
+    container_name: miployees-web-dev
+    restart: unless-stopped
+    working_dir: /web
+    command: sh -lc "npm install --no-audit --no-fund && npm run dev -- --host 0.0.0.0"
+    environment:
+      VITE_BACKEND_URL: "http://mocks:8000"
+    volumes:
+      - ./web:/web
     ports:
-      - "127.0.0.1:8100:8000"
+      - "127.0.0.1:8100:5173"
+    depends_on:
+      - mocks
     networks:
       - default
       - traefik-proxy
@@ -39,31 +75,10 @@ services:
       - "traefik.http.routers.miployees-dev.tls.certresolver=letsencrypt"
       - "traefik.http.routers.miployees-dev.middlewares=badger@file"
       - "traefik.http.routers.miployees-dev.service=miployees-dev"
-      - "traefik.http.services.miployees-dev.loadbalancer.server.port=8000"
-      - "traefik.http.services.miployees-dev.loadbalancer.healthcheck.path=/healthz"
-      - "traefik.http.services.miployees-dev.loadbalancer.healthcheck.interval=5s"
+      - "traefik.http.services.miployees-dev.loadbalancer.server.port=5173"
+      - "traefik.http.services.miployees-dev.loadbalancer.healthcheck.path=/"
+      - "traefik.http.services.miployees-dev.loadbalancer.healthcheck.interval=10s"
       - "traefik.http.services.miployees-dev.loadbalancer.healthcheck.hostname=dev.miployees.com"
-
-  # Front-end HMR for local development:
-  #   docker compose --profile dev up web-dev
-  # Vite runs on 127.0.0.1:5173 and proxies /api, /events, /switch,
-  # /theme, /agent to the `mocks` service over the compose network.
-  web-dev:
-    image: node:22-alpine
-    container_name: miployees-web-dev
-    profiles: ["dev"]
-    working_dir: /web
-    command: sh -lc "npm install --no-audit --no-fund && npm run dev -- --host 0.0.0.0"
-    environment:
-      VITE_BACKEND_URL: "http://mocks:8000"
-    volumes:
-      - ./web:/web
-    ports:
-      - "127.0.0.1:5173:5173"
-    depends_on:
-      - mocks
-    networks:
-      - default
 
 networks:
   traefik-proxy:

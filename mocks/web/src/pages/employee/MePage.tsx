@@ -78,8 +78,24 @@ export default function MePage() {
   const langLabel = LANG_LABEL[employee.language] ?? employee.language;
   const clockChip = CLOCK_CHIP[employee.clock_mode] ?? "ghost";
 
+  const firstName = employee.name.split(" ")[0];
+  const todayStr = me.data.today
+    ? new Date(me.data.today).toLocaleDateString("en-GB", {
+        weekday: "long",
+        day: "numeric",
+        month: "short",
+      })
+    : "";
+
   return (
     <>
+      <section className="phone__section phone__section--hero">
+        <div className="me-greet">
+          <span className="me-greet__hello">Hi, {firstName}</span>
+          <span className="me-greet__date">{todayStr}</span>
+        </div>
+      </section>
+
       <section className="phone__section">
         <div className="profile-card">
           <div className="avatar avatar--xl">{employee.avatar_initials}</div>
@@ -191,7 +207,7 @@ export default function MePage() {
               {employee.clock_mode === "auto"
                 ? "Idle after " + employee.auto_clock_idle_minutes + " min"
                 : employee.clock_mode === "manual"
-                ? "Tap Clock in at the top of this page"
+                ? "Tap Clock in on the bottom bar (or sidebar on desktop)"
                 : "Clock-in disabled for your account"}
             </div>
           </div>

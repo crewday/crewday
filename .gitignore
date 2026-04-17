@@ -13,7 +13,10 @@ __pycache__/
 
 # Claude / tooling scratch
 .claude/scheduled_tasks.lock
+
+# Playwright MCP screenshots (but keep README)
 .playwright-mcp/
+!.playwright-mcp/README.md
 
 # Ad-hoc preview screenshots and recordings dropped at the repo root
 # (the `/` prefix scopes this to the root only, so legitimate UI

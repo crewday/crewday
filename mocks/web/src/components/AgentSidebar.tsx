@@ -10,7 +10,16 @@ import type { AgentAction, AgentMessage } from "@/types/api";
 // remounts the outlet's subtree on navigation; siblings survive.
 // That's what gives us a persistent chat log (scrollTop, composer
 // draft, EventSource-fed cache) across page changes.
-export default function AgentSidebar() {
+//
+// `mobileOpen` / `onMobileClose` drive the off-canvas drawer used at
+// tablet and phone widths. Desktop ignores them — the sidebar renders
+// inline from ManagerLayout's grid.
+interface AgentSidebarProps {
+  mobileOpen?: boolean;
+  onMobileClose?: () => void;
+}
+
+export default function AgentSidebar({ mobileOpen = false, onMobileClose }: AgentSidebarProps = {}) {
   const [collapsed, setCollapsed] = useState<boolean>(() => readAgentCollapsedCookie());
   const [draft, setDraft] = useState("");
   const logRef = useRef<HTMLDivElement>(null);
@@ -80,16 +89,18 @@ export default function AgentSidebar() {
     [draft, sendMessage],
   );
 
+  const className =
+    "desk__agent" +
+    (collapsed ? " desk__agent--collapsed" : "") +
+    (mobileOpen ? " desk__agent--mobile-open" : "");
+
   return (
-    <aside
-      className={"desk__agent" + (collapsed ? " desk__agent--collapsed" : "")}
-      aria-label="Agent sidebar"
-    >
+    <aside className={className} aria-label="Agent sidebar">
       <button
         type="button"
         className="desk__agent-head"
-        onClick={toggle}
-        aria-expanded={!collapsed}
+        onClick={mobileOpen && onMobileClose ? onMobileClose : toggle}
+        aria-expanded={mobileOpen || !collapsed}
         aria-controls="agent-body"
       >
         <span className="desk__agent-title">Agent</span>
@@ -100,7 +111,7 @@ export default function AgentSidebar() {
         <span className="desk__agent-chevron" aria-hidden="true">
           <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor"
                strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
-            <polyline points="6 9 12 15 18 9" />
+            <polyline points={mobileOpen ? "18 15 12 9 6 15" : "6 9 12 15 18 9"} />
           </svg>
         </span>
       </button>

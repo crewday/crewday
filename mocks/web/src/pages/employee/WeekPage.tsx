@@ -2,7 +2,7 @@ import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
-import { Dot, EmptyState, Loading } from "@/components/common";
+import { Chip, Dot, EmptyState, Loading } from "@/components/common";
 import type { Property, Task } from "@/types/api";
 
 interface WeekPayload {
@@ -39,19 +39,22 @@ export default function WeekPage() {
           const prop = propsById.get(t.property_id);
           if (!prop) return null;
           const cardCls =
-            "task-card task-card--compact" +
+            "task-card task-card--compact task-card--split" +
             (t.status === "completed" ? " task-card--done" : "");
           return (
             <li key={t.id}>
               <Link to={"/task/" + t.id} className={cardCls}>
-                <div className="task-card__head">
-                  <span className="task-card__when">{weekWhen(t.scheduled_start)}</span>
-                  <span className={"chip chip--" + prop.color + " chip--sm"}>{prop.name}</span>
-                  {t.priority === "high" && <Dot tone="rust" />}
+                <div className="task-card__main">
+                  <div className="task-card__title task-card__title--sm">{t.title}</div>
+                  <div className="task-card__meta">
+                    {t.area} · {t.estimated_minutes} min · {t.status}
+                  </div>
                 </div>
-                <div className="task-card__title task-card__title--sm">{t.title}</div>
-                <div className="task-card__meta">
-                  {t.area} · {t.estimated_minutes} min · {t.status}
+                <div className="task-card__aside">
+                  <span className="task-card__when">{weekWhen(t.scheduled_start)}</span>
+                  <Chip tone={prop.color} size="sm">{prop.name}</Chip>
+                  {(t.priority === "high" || t.priority === "urgent") && <Dot tone="rust" />}
+                  {t.photo_evidence === "required" && <Dot tone="sand" />}
                 </div>
               </Link>
             </li>

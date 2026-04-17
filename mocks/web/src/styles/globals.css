@@ -23,13 +23,24 @@
   padding: 8px 16px;
   background: linear-gradient(90deg, var(--moss), var(--moss-2));
   color: #fff; font-size: 13px;
+  min-height: 40px;
 }
 .preview-banner__badge {
   background: rgba(255,255,255,0.18); padding: 2px 8px;
   border-radius: 4px; font-weight: 700; letter-spacing: 0.08em; font-size: 11px;
+  flex: 0 0 auto;
 }
-.preview-banner__note { opacity: 0.9; }
-.preview-banner__switch { margin-left: auto; display: flex; gap: 6px; align-items: center; }
+.preview-banner__note { opacity: 0.9; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.preview-banner__switch { margin-left: auto; display: flex; gap: 6px; align-items: center; flex-shrink: 0; }
+
+@media (max-width: 640px) {
+  .preview-banner { gap: 8px; padding: 6px 10px; }
+  .preview-banner__note { display: none; }
+}
+@media (max-width: 420px) {
+  .preview-banner .pill { padding: 3px 8px; font-size: 12px; }
+  .preview-banner .pill--ghost:last-of-type { display: none; }
+}
 .pill {
   padding: 4px 12px; border-radius: 999px;
   font-size: 13px; color: rgba(255,255,255,0.85);
@@ -40,28 +51,71 @@
 .pill--ghost { border-color: rgba(255,255,255,0.22); padding: 4px 10px; }
 
 /* ══════════════════════════════════════════════════════════════
-   EMPLOYEE (phone) layout
+   EMPLOYEE (phone) layout.
+
+   On an actual phone (<520px) the container is edge-to-edge so the
+   app feels native. On tablet and desktop it renders inside a centred
+   "device" frame sat on a warm-paper backdrop, so the mock still
+   reads as a mobile app rather than a narrow column adrift in a sea
+   of whitespace.
    ══════════════════════════════════════════════════════════════ */
 .phone {
   max-width: 480px; margin: 0 auto;
-  min-height: calc(100vh - 40px);
-  padding-bottom: 96px; position: relative; z-index: 1;
+  min-height: calc(100dvh - var(--banner-h, 40px));
+  padding-bottom: 132px; position: relative; z-index: 1;
 }
-.phone__header {
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 22px 20px 8px; gap: 10px;
-}
-.phone__greet { display: flex; flex-direction: column; min-width: 0; }
-.phone__hello {
+.phone__body { display: contents; }
+
+.phone__section { padding: 16px 20px; }
+.phone__section--hero { padding-top: 18px; }
+.phone__section--detail { padding-bottom: 160px; }
+
+/* "Hi, <first name>" + date. Only rendered on the Me page; everything
+   else skips the greeting because it was noise on functional views. */
+.me-greet { display: flex; flex-direction: column; gap: 2px; }
+.me-greet__hello {
   font-family: "Fraunces", ui-serif, serif; font-weight: 600;
   font-size: 1.55rem; line-height: 1.1; letter-spacing: -0.02em;
 }
-.phone__date { color: var(--ink-3); font-size: 13px; }
-.phone__clock button { border: none; cursor: pointer; font-family: inherit; }
+.me-greet__date { color: var(--ink-3); font-size: 13px; }
 
-.phone__section { padding: 16px 20px; }
-.phone__section--hero { padding-top: 4px; }
-.phone__section--detail { padding-bottom: 160px; }
+/* Clock-in / On shift toggle. Used twice: in the sidebar action slot
+   (desktop) and in the `.phone__dock` above the tab bar (phone). Base
+   styling is shared; container styles handle placement. */
+.clock-toggle {
+  display: inline-flex; align-items: center; justify-content: center;
+  gap: 6px; padding: 10px 16px; border-radius: 999px;
+  border: 1px solid var(--line); background: var(--card);
+  font-family: inherit; font-size: 14px; font-weight: 600;
+  color: var(--ink-1); cursor: pointer; white-space: nowrap;
+  transition: background 120ms ease, color 120ms ease,
+              border-color 120ms ease;
+}
+.clock-toggle:disabled { opacity: 0.6; cursor: progress; }
+.clock-toggle--on {
+  background: var(--moss-soft); color: var(--moss);
+  border-color: var(--moss-soft);
+}
+.clock-toggle--off:hover { border-color: var(--moss); color: var(--moss); }
+
+/* Phone dock: hosts the clock toggle just above the fixed tab bar.
+   On chat the composer takes this space, so the dock is not rendered
+   at all there. */
+.phone__dock {
+  position: fixed; left: 0; right: 0; z-index: 19;
+  bottom: calc(60px + env(safe-area-inset-bottom, 0px));
+  display: flex; justify-content: center;
+  padding: 10px 16px;
+  background: linear-gradient(to top, var(--paper) 70%, transparent);
+  pointer-events: none;
+}
+.phone__dock > .clock-toggle {
+  pointer-events: auto;
+  box-shadow: 0 6px 18px rgba(22, 34, 22, 0.12);
+}
+@media (min-width: 480px) {
+  .phone__dock { max-width: 480px; left: 50%; transform: translateX(-50%); }
+}
 
 .section-title {
   font-family: "Fraunces", ui-serif, serif; font-size: 14px; font-weight: 600;
@@ -88,6 +142,103 @@
 .tab__glyph { font-size: 18px; line-height: 1; }
 .tab--active { color: var(--moss); font-weight: 600; }
 
+/* ══════════════════════════════════════════════════════════════
+   TABLET / DESKTOP EMPLOYEE LAYOUT
+
+   Below 720px the employee app is a phone — bottom tabs, edge-to-
+   edge, fixed-to-viewport composer and CTA. The shared <SideNav />
+   (same component, same CSS classes as the manager) is still in the
+   DOM but hidden by CSS at this width.
+
+   At 720px and above the bottom tab bar hides, the SideNav takes
+   over the left column, and the phone container becomes a two-column
+   grid that reuses the manager sidebar chrome 1:1.
+   ══════════════════════════════════════════════════════════════ */
+
+/* Shared sidebar is hidden on phone widths (the `.phone__tabs`
+   bottom bar owns navigation there). This selector is scoped to
+   `.phone` so the manager's `.desk > .desk__nav` is untouched. */
+.phone > .desk__nav { display: none; }
+
+@media (min-width: 720px) {
+  .surface[data-role="employee"] {
+    min-height: calc(100dvh - var(--banner-h, 40px));
+    display: flex;
+    flex-direction: column;
+  }
+  .phone {
+    max-width: none;
+    margin: 0;
+    padding: 0;
+    height: calc(100dvh - var(--banner-h, 40px));
+    min-height: 0;
+    display: grid;
+    grid-template-columns: 232px minmax(0, 1fr);
+    background: var(--paper);
+  }
+
+  .phone > .desk__nav {
+    display: flex;
+    grid-column: 1;
+    grid-row: 1 / -1;
+  }
+
+  /* Hide the phone-mode bottom tab bar and dock; the shared SideNav
+     hosts navigation and the clock-in at this width. */
+  .phone > .phone__tabs { display: none; }
+  .phone > .phone__dock { display: none; }
+
+  .phone__body {
+    grid-column: 2;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 20px 40px 40px;
+    align-items: stretch;
+  }
+  .phone__section { padding: 16px 0; width: 100%; max-width: 880px; margin: 0 auto; }
+  .phone__section--detail { padding-bottom: 32px; max-width: 880px; margin: 0 auto; }
+  .task-list { gap: 10px; }
+  .task-card--now { padding: 20px; }
+
+  /* Chat: the composer sticks to the bottom of the main column
+     instead of the viewport. */
+  .phone--chat {
+    height: calc(100dvh - var(--banner-h, 40px));
+  }
+  .phone--chat .chat-screen { margin-bottom: 0; }
+  .phone--chat .phone__body {
+    padding: 0;
+    overflow: hidden;
+  }
+  .phone--chat .chat-screen { padding: 0 0 0; }
+  .phone--chat .chat-log { padding: 20px 40px; }
+  .phone--chat .chat-msg { max-width: min(560px, 70%); }
+  .chat-composer {
+    position: sticky;
+    bottom: 0;
+    left: auto;
+    right: auto;
+    max-width: none;
+    transform: none;
+    border-left: 0;
+    border-right: 0;
+    padding: 10px 40px calc(10px + env(safe-area-inset-bottom, 0px));
+  }
+
+}
+
+@media (min-width: 1080px) {
+  .phone__body { padding: 0 56px 48px; }
+  .phone--chat .chat-log { padding: 24px 56px; }
+  .chat-composer { padding: 12px 56px calc(12px + env(safe-area-inset-bottom, 0px)); }
+}
+
+@media (max-width: 360px) {
+  .phone__section { padding: 14px; }
+}
+
 /* ── Task cards ─────────────────────────────────────────────── */
 .task-card {
   display: block; background: var(--card); border: 1px solid var(--line);
@@ -99,6 +250,16 @@
 .task-card--now { border-color: var(--moss); border-width: 1.5px; padding: 16px; }
 .task-card--compact { padding: 10px 12px; box-shadow: none; }
 .task-card--done { opacity: 0.62; }
+.task-card--split {
+  display: flex; align-items: flex-start; gap: 12px;
+}
+.task-card--split .task-card__main { flex: 1; min-width: 0; }
+.task-card--split .task-card__main > .task-card__title { margin-top: 0; }
+.task-card--split .task-card__aside {
+  display: flex; align-items: center; gap: 6px;
+  flex-shrink: 0;
+}
+.task-card--split .task-card__aside .task-card__when { margin-left: 0; }
 .task-card__head {
   display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
   margin-bottom: 6px;
@@ -220,6 +381,18 @@
 }
 @media (min-width: 480px) {
   .task-detail__sticky { max-width: 480px; left: 50%; transform: translateX(-50%); }
+}
+@media (min-width: 720px) {
+  /* Desktop: sticky CTA flows inline instead of pinning to the
+     viewport. The main column is wide enough that the primary action
+     sits above the fold; no need for a fixed bar. */
+  .task-detail__sticky {
+    position: static;
+    max-width: none;
+    transform: none;
+    padding: 0 0 12px;
+    background: none;
+  }
 }
 .task-detail__sticky-form { flex: 1; }
 .task-detail__sticky .btn { width: 100%; justify-content: center; }
@@ -432,10 +605,22 @@
 .nav-link:hover { background: var(--paper-2); }
 .nav-link--active { background: var(--moss-soft); color: var(--moss); font-weight: 600; }
 
+.desk__nav-action {
+  margin-top: auto; padding: 8px 4px 0;
+  display: flex; justify-content: stretch;
+}
+.desk__nav-action > .clock-toggle { width: 100%; }
+
 .desk__me {
-  margin-top: auto; display: flex; align-items: center; gap: 10px;
+  display: flex; align-items: center; gap: 10px;
   padding: 10px; border-top: 1px solid var(--line);
 }
+/* Preserve the original pin-to-bottom when no action slot is rendered
+   (e.g. the manager sidebar). When an action slot is present, the
+   action takes `margin-top: auto` and the `.desk__me` sits directly
+   below it. */
+.desk__nav > .desk__me:last-child { margin-top: auto; }
+.desk__nav > .desk__nav-action + .desk__me { margin-top: 0; }
 .desk__me-name { font-weight: 600; font-size: 13px; }
 .desk__me-role { color: var(--ink-3); font-size: 12px; }
 
@@ -1114,9 +1299,209 @@
 .agent-composer__send:hover { background: var(--moss-2); }
 .agent-composer__send:active { transform: scale(0.96); }
 
-@media (max-width: 1100px) {
-  .desk { grid-template-columns: 232px 1fr; }
-  .desk__agent { display: none; }
+/* ══════════════════════════════════════════════════════════════
+   MANAGER — mobile top bar (hamburger + brand + agent). Hidden at
+   desk widths; revealed below the nav-drawer breakpoint.
+   ══════════════════════════════════════════════════════════════ */
+.desk__mobile-bar { display: none; }
+
+.desk__icon-btn {
+  appearance: none;
+  border: 1px solid var(--line);
+  background: var(--card);
+  color: var(--ink-2);
+  width: 40px; height: 40px;
+  border-radius: 10px;
+  display: inline-flex; align-items: center; justify-content: center;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+  padding: 0;
+}
+.desk__icon-btn:hover { background: var(--paper-2); }
+.desk__icon-btn:active { transform: scale(0.97); }
+.desk__icon-btn--badge {
+  position: relative;
+}
+.desk__icon-btn__dot {
+  position: absolute; top: 8px; right: 8px;
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--moss);
+  box-shadow: 0 0 0 2px var(--card);
+}
+
+.desk__scrim {
+  position: fixed; inset: 0; z-index: 55;
+  background: rgba(31, 26, 20, 0.45);
+  backdrop-filter: blur(2px);
+  animation: scrim-in 160ms ease;
+}
+@keyframes scrim-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* ══════════════════════════════════════════════════════════════
+   RESPONSIVE MANAGER — tablet down to phone
+   ══════════════════════════════════════════════════════════════ */
+
+/* Tablet & small desktop: agent sidebar collapses to its rail form,
+   and the main column tightens up. */
+@media (max-width: 1200px) {
+  .desk { grid-template-columns: 216px 1fr 52px; }
+  .desk:has(.desk__agent--collapsed),
+  .desk[data-agent-collapsed="true"] { grid-template-columns: 216px 1fr 52px; }
+  .desk__main { padding: 0 28px 80px; }
+  .desk__agent:not(.desk__agent--mobile-open) {
+    /* Force the rail look at this width. */
+    width: 52px;
+  }
+  .desk__agent:not(.desk__agent--mobile-open) .desk__agent-body { display: none; }
+  .desk__agent:not(.desk__agent--mobile-open) .desk__agent-head {
+    flex-direction: column; gap: 8px; padding: 14px 0;
+  }
+  .desk__agent:not(.desk__agent--mobile-open) .desk__agent-title {
+    writing-mode: vertical-rl; transform: rotate(180deg); letter-spacing: 0.06em;
+  }
+  .desk__agent:not(.desk__agent--mobile-open) .desk__agent-status { display: none; }
+  .desk__agent:not(.desk__agent--mobile-open) .desk__agent-chevron { margin-left: 0; }
+}
+
+/* Small tablet: hide the built-in agent rail — open via the mobile
+   bar instead. */
+@media (max-width: 960px) {
+  .desk { grid-template-columns: 216px 1fr; }
+  .desk:has(.desk__agent--collapsed),
+  .desk[data-agent-collapsed="true"] { grid-template-columns: 216px 1fr; }
+  .desk__agent:not(.desk__agent--mobile-open) { display: none; }
+  .desk__main { padding: 0 24px 80px; }
+}
+
+/* Phone / narrow tablet: off-canvas drawer for the nav, mobile top
+   bar visible, main column full-width. */
+@media (max-width: 720px) {
+  .desk {
+    display: flex;
+    flex-direction: column;
+    height: calc(100dvh - var(--banner-h, 40px));
+    min-height: 0;
+  }
+  /* When either drawer is open, promote .desk's stacking context
+     above the preview banner (which also uses z-index: 50) so the
+     drawer overlays it end-to-end. */
+  .desk[data-nav-open="true"],
+  .desk[data-agent-mobile-open="true"] {
+    z-index: 60;
+  }
+
+  .desk__mobile-bar {
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 14px;
+    background: var(--card);
+    border-bottom: 1px solid var(--line);
+    position: sticky; top: 0; z-index: 35;
+  }
+  .desk__mobile-bar .desk__brand { padding: 0; flex: 1; min-width: 0; }
+  .desk__mobile-bar .desk__wordmark {
+    font-size: 1.1rem;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+
+  .desk__nav {
+    position: fixed; top: 0; bottom: 0; left: 0;
+    width: min(280px, 82vw);
+    z-index: 60;
+    transform: translateX(-100%);
+    transition: transform 200ms cubic-bezier(0.22, 1, 0.36, 1);
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.18);
+  }
+  .desk[data-nav-open="true"] .desk__nav {
+    transform: translateX(0);
+  }
+
+  .desk__main {
+    flex: 1 1 auto;
+    padding: 0 18px 96px;
+    min-height: 0;
+    width: 100%;
+  }
+  .desk__topbar {
+    padding-top: 16px;
+    margin-bottom: 18px;
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+  .desk__topbar-actions { flex-wrap: wrap; }
+  .page-title { font-size: 1.6rem; }
+
+  /* Agent: full-height drawer from the right. */
+  .desk__agent.desk__agent--mobile-open {
+    display: flex;
+    position: fixed; top: 0; right: 0; bottom: 0;
+    width: min(380px, 92vw);
+    z-index: 60;
+    box-shadow: -20px 0 60px rgba(0, 0, 0, 0.18);
+    animation: drawer-in-right 220ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  @keyframes drawer-in-right {
+    from { transform: translateX(100%); }
+    to { transform: translateX(0); }
+  }
+  /* Collapsed state becomes meaningless on mobile — always show full
+     agent body inside the drawer. */
+  .desk__agent.desk__agent--mobile-open.desk__agent--collapsed {
+    width: min(380px, 92vw);
+  }
+  .desk__agent.desk__agent--mobile-open.desk__agent--collapsed .desk__agent-body {
+    display: flex;
+  }
+  .desk__agent.desk__agent--mobile-open.desk__agent--collapsed .desk__agent-head {
+    flex-direction: row; gap: 10px; padding: 14px 16px;
+  }
+  .desk__agent.desk__agent--mobile-open.desk__agent--collapsed .desk__agent-title {
+    writing-mode: horizontal-tb; transform: none; letter-spacing: 0;
+  }
+  .desk__agent.desk__agent--mobile-open.desk__agent--collapsed .desk__agent-status {
+    display: inline-flex;
+  }
+
+  /* Condense table rows. */
+  .task-row {
+    grid-template-columns: 1fr auto;
+    gap: 6px 10px;
+  }
+  .task-row__time { grid-column: 1 / -1; font-size: 11px; }
+  .task-row__area { display: none; }
+  .desk__topbar-actions .btn { flex: 1 1 auto; }
+
+  /* Let wide tables scroll horizontally inside panels instead of
+     forcing the whole page to scroll. */
+  .panel { padding: 16px; overflow-x: auto; }
+  .panel--article { padding: 20px; }
+  .table { min-width: 520px; }
+
+  /* Dashboard grids collapse to a single column. */
+  .grid--stats,
+  .grid--split,
+  .grid--cards { grid-template-columns: 1fr; gap: 14px; }
+  .permissions__split { grid-template-columns: 1fr; }
+
+  /* Approvals / expense-approval cards stack. */
+  .expense-approval__grid { grid-template-columns: 1fr; gap: 10px; }
+  .expense-approval__amount,
+  .expense-approval__receipt { border: 0; padding: 0; }
+  .issue-row { grid-template-columns: 1fr; gap: 4px; }
+  .doc-row { grid-template-columns: auto 1fr; gap: 8px; }
+  .doc-row > :nth-child(n+3) { grid-column: 2 / -1; }
+
+  /* Wide horizontal calendar defaults to horizontal scroll; make sure
+     the first column stays visible. */
+  .cal-wide { overflow-x: auto; }
+}
+
+/* Extra-small phones (≤400): tighter spacing. */
+@media (max-width: 400px) {
+  .desk__main { padding: 0 14px 96px; }
+  .page-title { font-size: 1.45rem; }
 }
 
 /* ══════════════════════════════════════════════════════════════
@@ -1129,7 +1514,6 @@
   flex-direction: column;
   padding-bottom: 0;
 }
-.phone--chat .phone__header { flex: 0 0 auto; }
 
 .chat-screen {
   flex: 1 1 auto;
@@ -1274,6 +1658,45 @@
 .chat-composer__send-icon--send { display: none; }
 .chat-composer__send--ready .chat-composer__send-icon--mic { display: none; }
 .chat-composer__send--ready .chat-composer__send-icon--send { display: inline-flex; }
+
+/* Desktop/tablet chat overrides — placed after all .phone--chat /
+   .chat-composer base rules so they beat the mobile defaults. */
+@media (min-width: 720px) {
+  .phone--chat {
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr);
+    height: calc(100dvh - var(--banner-h, 40px));
+    padding-bottom: 0;
+  }
+  .phone--chat .phone__body {
+    padding: 0;
+    overflow: hidden;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    grid-column: 2;
+    grid-row: 2;
+  }
+  .phone--chat .chat-screen { margin-bottom: 0; }
+  .phone--chat .chat-composer {
+    position: sticky;
+    bottom: 0;
+    left: auto;
+    right: auto;
+    max-width: none;
+    margin: 0;
+    transform: none;
+    border-left: 0;
+    border-right: 0;
+    padding: 10px 40px calc(10px + env(safe-area-inset-bottom, 0px));
+  }
+}
+
+@media (min-width: 1080px) {
+  .phone--chat .chat-composer {
+    padding: 12px 56px calc(12px + env(safe-area-inset-bottom, 0px));
+  }
+}
 
 .avail-grid {
   display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px;

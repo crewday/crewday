@@ -1,13 +1,40 @@
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import SideNav, { type SideNavItem } from "@/components/SideNav";
 import { fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
 import type { Me } from "@/types/api";
 
-// Phone-frame layout. Header (greet + clock button) + body (<Outlet />)
-// + fixed bottom tab bar. The chat page opts into a special
-// `.phone--chat` modifier via pathname, so the whole column becomes a
-// flex container and the composer can pin below the tabs.
+function roleLabel(role: string): string {
+  return role.charAt(0).toUpperCase() + role.slice(1).replace(/_/g, " ");
+}
+
+// Phone-frame layout. Body (<Outlet />) + a bottom dock that hosts the
+// clock-in toggle, plus a fixed bottom tab bar. The chat page opts
+// into a special `.phone--chat` modifier via pathname, so the whole
+// column becomes a flex container and the composer can pin below the
+// tabs (the dock is hidden on chat to give the composer the room).
+//
+// At tablet / desktop widths (>=720px) the phone becomes a two-column
+// grid and the shared <SideNav /> takes over from the bottom tab bar,
+// so the chrome matches the manager sidebar exactly. The clock-in
+// button rides in the sidebar's `action` slot at that width; the
+// phone-mode dock + bottom tab bar stay in the DOM and are hidden by
+// CSS.
+
+const NAV_ITEMS: SideNavItem[] = [
+  { type: "link", to: "/today", label: "Today" },
+  { type: "link", to: "/week", label: "Week" },
+  { type: "link", to: "/chat", label: "Chat" },
+  { type: "link", to: "/my/expenses", label: "Expenses" },
+  { type: "link", to: "/me", matchPrefix: "/me", label: "Me" },
+];
+
+function initialsOf(name: string): string {
+  const parts = name.trim().split(/\s+/).slice(0, 2);
+  return parts.map((p) => p.charAt(0).toUpperCase()).join("") || "·";
+}
+
 export default function EmployeeLayout() {
   const { pathname } = useLocation();
   const isChat = pathname === "/chat";
@@ -22,35 +49,44 @@ export default function EmployeeLayout() {
     },
   });
 
-  const firstName = data?.employee.name.split(" ")[0] ?? "…";
-  const todayStr = data?.today
-    ? new Date(data.today).toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "short" })
-    : "";
   const clockedIn = data?.employee.clocked_in_at;
   const clockedAt = clockedIn
     ? new Date(clockedIn).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
     : null;
 
+  const footerName = data?.employee.name ?? "…";
+  const footerRole = data?.employee.roles[0] ? roleLabel(data.employee.roles[0]) : "Employee";
+  const footerInitials = data?.employee.avatar_initials
+    ?? (data ? initialsOf(data.employee.name) : "·");
+
+  const clockButton = (
+    <button
+      type="button"
+      className={"clock-toggle " + (clockedIn ? "clock-toggle--on" : "clock-toggle--off")}
+      onClick={() => toggleShift.mutate()}
+      disabled={toggleShift.isPending}
+    >
+      {clockedIn ? `● On shift · ${clockedAt}` : "Clock in"}
+    </button>
+  );
+
   return (
     <main className={"phone" + (isChat ? " phone--chat" : "")}>
-      <header className="phone__header">
-        <div className="phone__greet">
-          <span className="phone__hello">Hi, {firstName}</span>
-          <span className="phone__date">{todayStr}</span>
-        </div>
-        <div className="phone__clock">
-          <button
-            type="button"
-            className={"chip chip--lg " + (clockedIn ? "chip--moss" : "chip--ghost")}
-            onClick={() => toggleShift.mutate()}
-            disabled={toggleShift.isPending}
-          >
-            {clockedIn ? `● On shift · ${clockedAt}` : "Clock in"}
-          </button>
-        </div>
-      </header>
+      <SideNav
+        items={NAV_ITEMS}
+        action={clockButton}
+        footer={{
+          initials: footerInitials,
+          name: footerName,
+          role: footerRole,
+        }}
+      />
 
-      <Outlet />
+      <div className="phone__body">
+        <Outlet />
+      </div>
+
+      {!isChat && <div className="phone__dock">{clockButton}</div>}
 
       <nav className="phone__tabs" aria-label="Bottom navigation">
         <Tab to="/today" glyph="◎" label="Today" />

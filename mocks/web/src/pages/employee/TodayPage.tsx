@@ -118,8 +118,12 @@ function NowCard({ task, property }: { task: Task; property: Property }) {
 
 function UpcomingCard({ task, property }: { task: Task; property: Property }) {
   return (
-    <Link to={"/task/" + task.id} className="task-card task-card--compact">
-      <div className="task-card__head">
+    <Link to={"/task/" + task.id} className="task-card task-card--compact task-card--split">
+      <div className="task-card__main">
+        <div className="task-card__title task-card__title--sm">{task.title}</div>
+        <div className="task-card__meta">{task.area} · {task.estimated_minutes} min</div>
+      </div>
+      <div className="task-card__aside">
         <span className="task-card__when">{hhmm(task.scheduled_start)}</span>
         <Chip tone={property.color} size="sm">{property.name}</Chip>
         {(task.priority === "high" || task.priority === "urgent") && (
@@ -127,8 +131,6 @@ function UpcomingCard({ task, property }: { task: Task; property: Property }) {
         )}
         {task.photo_evidence === "required" && <Dot tone="sand" />}
       </div>
-      <div className="task-card__title task-card__title--sm">{task.title}</div>
-      <div className="task-card__meta">{task.area} · {task.estimated_minutes} min</div>
     </Link>
   );
 }

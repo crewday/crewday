@@ -11,6 +11,20 @@ the two disagree, this file wins.
 > and [`docs/specs/13-cli.md`](docs/specs/13-cli.md) instead. This file
 > is for agents writing code in the repo.
 
+## Environments
+
+- **Dev**: <https://dev.miployees.com> is the dev version of the app,
+  served by the mocks container running locally on this host. It is
+  exposed through Pangolin + Traefik with badger auth (same wiring as
+  `../fj2`) and bound locally to `127.0.0.1:8100` (FastAPI mocks) and
+  `127.0.0.1:5173` (Vite HMR). Prefer the public URL end-to-end
+  (auth, cookies, CSP all match prod shape); use the loopback ports
+  for quick `curl` / Playwright runs from this host.
+- **Production**: not yet deployed — there is no prod app code in
+  this repo yet, only specs and mocks. See `docs/specs/19-roadmap.md`.
+- **Bring the dev stack up**: `docker compose -f mocks/docker-compose.yml up -d --build`.
+  Never bind to the public interface; see `docs/specs/16`.
+
 ## Ask first
 
 - **Use `AskUserQuestion` for any non-obvious decision.** When in doubt,
@@ -265,6 +279,14 @@ Plain text to the user. CLI handles styling.
 - **Time is UTC at rest, local for display.** Every timestamp column is
   `TIMESTAMP WITH TIME ZONE` (Postgres) or ISO-8601 UTC text in SQLite.
   Property-local time is computed on the fly from `property.timezone`.
+- **Playwright screenshots go to `.playwright-mcp/`.** When using the
+  Playwright MCP tools (`mcp__playwright__browser_take_screenshot`,
+  etc.), always pass a `filename` under `.playwright-mcp/` so the image
+  lands in the gitignored screenshots directory rather than the repo
+  root. Use descriptive names (`homepage-desktop.png`,
+  `bug-shift-timeline-overflow.png`) — see `.playwright-mcp/README.md`
+  for the naming convention. Close the browser
+  (`mcp__playwright__browser_close`) when verification is done.
 
 ## Session wrap-up
 
