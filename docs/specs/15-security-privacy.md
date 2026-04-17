@@ -6,12 +6,11 @@
 
 | Asset                                          | Sensitivity |
 |-----------------------------------------------|-------------|
-| Household manager credentials / sessions       | Critical    |
-| Employee credentials / sessions                | Critical    |
+| User credentials / sessions (all grant roles) | Critical    |
 | API tokens (agent auth)                        | Critical    |
 | Property access data (door codes, wifi)        | High        |
-| Employee personal info (legal name, pay rate)  | High        |
-| Employee payout details (IBAN, PAN, wallet)    | Critical    |
+| User personal info (legal name, pay rate)      | High        |
+| User payout details (IBAN, PAN, wallet)        | Critical    |
 | Payroll / expense amounts                      | High        |
 | Guest names and stay dates                     | Medium      |
 | Task history / completion evidence             | Medium      |
@@ -26,10 +25,10 @@
   on public IPs by default, TLS-only, passkey-only auth.
 - **Phisher / social engineer.** Tricks staff into logging into a
   look-alike. Mitigated by: passkeys (phishing-resistant).
-- **Lost / stolen employee phone.** Mitigated by: manager can revoke;
-  passkey requires user verification (biometric).
-- **Ex-employee.** Mitigated by: off-boarding revokes credentials and
-  sessions.
+- **Lost / stolen user phone.** Mitigated by: owner or manager can
+  revoke; passkey requires user verification (biometric).
+- **Ex-staff.** Mitigated by: off-boarding revokes role grants,
+  credentials, and sessions.
 - **Leaked agent token.** Mitigated by: delegated tokens inherit user
   permissions but are separately revocable, per-token audit with full
   conversation tracing (`agent_conversation_ref`), optional IP
@@ -140,7 +139,7 @@ See §16 for deployment details.
   from the same origin under `/files/*/blob`.
 - `Strict-Transport-Security` (once HSTS opted in).
 - `Referrer-Policy: strict-origin-when-cross-origin`.
-- `Permissions-Policy`: allow `camera=(self)` only on employee pages
+- `Permissions-Policy`: allow `camera=(self)` only on worker pages
   (for evidence), `geolocation=(self)` only on clock-in page.
 - `X-Content-Type-Options: nosniff`.
 - `Cross-Origin-Opener-Policy: same-origin`, `Cross-Origin-Resource-
@@ -172,9 +171,9 @@ containing tokens, property wifi password, property access codes,
 `secret_envelope` with per-row nonce. Decryption paths are
 deliberately narrow:
 
-1. **Payout manifest** (HTTP, §09) — manager passkey session only;
-   on §11's interactive-session-only list; not stored; not cached by
-   the idempotency layer.
+1. **Payout manifest** (HTTP, §09) — owner/manager passkey session
+   only; on §11's interactive-session-only list; not stored; not
+   cached by the idempotency layer.
 2. **Envelope-key rotation** (host CLI, §15 below) — no HTTP
    surface; authorised by host shell access; plaintext never leaves
    the server process.
@@ -318,20 +317,20 @@ Append-only, see §02. Guaranteed invariants:
 Even though this is self-hosted, GDPR-like practices apply because
 much of the data is personal.
 
-- **Access export**: any person can request their own data as JSON +
+- **Access export**: any user can request their own data as JSON +
   attached files — `POST /api/v1/me/export` queues a file; email
   delivery when ready.
-- **Right to rectification**: employees can update profile fields
-  (§05).
-- **Right to erasure**: manager-triggered; `miployees admin purge
-  --person <id>` anonymizes the person row (name/email/phone nulled)
-  and scrubs free-text fields in their tasks, comments, shifts,
-  expenses. Financial rows retain amounts and dates (legal retention
-  trumps erasure for payroll).
+- **Right to rectification**: users can update their own profile
+  fields (§05).
+- **Right to erasure**: owner/manager-triggered; `miployees admin
+  purge --person <id>` anonymizes the user row (name/email/phone
+  nulled) and scrubs free-text fields in their tasks, comments,
+  shifts, expenses. Financial rows retain amounts and dates (legal
+  retention trumps erasure for payroll).
 
   Payout-specific erasure steps (§09):
 
-  - Delete the `secret_envelope` rows referenced by the person's
+  - Delete the `secret_envelope` rows referenced by the user's
     `payout_destination` rows.
   - Clear `display_stub`, `secret_ref_id`, `country`, `label` on
     those rows (keep `id`, `kind`, `currency`, timestamps so FK
@@ -367,24 +366,26 @@ used `household_id`; the rename is covered in §02 "Migration"). On
 Postgres, every user-editable table carries a `workspace_id` column
 and a policy that restricts `SELECT / UPDATE / DELETE` to the
 caller's active workspace, bound to the session at the start of
-each request from the authenticated principal (manager session,
-employee session, or token). On SQLite the equivalent is a query-
+each request from the authenticated principal (any user session or
+token). The policy gates access to rows by `workspace_id`; it does
+not distinguish `grant_role` — that is enforced at the application
+layer (see §02 `role_grants`). On SQLite the equivalent is a query-
 time filter injected by the ORM layer — the same `workspace_id`
 column, enforced in code paths rather than by the engine. v1 ships
 single-workspace so the practical effect is nil; the seam is there
 so turning on true multi-tenancy later is a policy flip, not a
 schema migration.
 
-Employees with membership in more than one workspace (§02
-`employee_workspace`) pick an active workspace at session start;
-the chosen workspace id rides with every subsequent request.
-Switching workspaces re-seeds the RLS context and is audited.
+Users with membership in more than one workspace (§02
+`user_workspace`) pick an active workspace at session start; the
+chosen workspace id rides with every subsequent request. Switching
+workspaces re-seeds the RLS context and is audited.
 
 ## Off-app channel privacy (WhatsApp / SMS)
 
-WhatsApp and SMS numbers stored on employees are **PII**. They are
-used only by the workspace agent for off-app reach-out (§10) and
-must be treated with the same care as legal-name fields:
+WhatsApp and SMS numbers stored on users are **PII**. They are used
+only by the workspace agent for off-app reach-out (§10) and must be
+treated with the same care as legal-name fields:
 
 - Numbers are **redacted from upstream LLM prompts by default**.
   The redaction layer in §11 already handles `phone_e164` with
@@ -404,9 +405,9 @@ must be treated with the same care as legal-name fields:
   stored provider message ids are scrubbed; delivery-log rows
   retain only the template key and timestamps.
 
-Workspace admins can turn off off-app reach-out globally or per
-employee; the employee's own `preferred_offapp_channel = none`
-(§10) is a hard opt-out that overrides workspace policy.
+Workspace owners can turn off off-app reach-out globally or per user;
+the user's own `preferred_offapp_channel = none` (§10) is a hard
+opt-out that overrides workspace policy.
 
 ## LLM data handling
 
@@ -453,5 +454,6 @@ See §11 redaction details. Additional rules:
 - WebAuthn signed enterprise attestation inspection.
 - OIDC as an alternative manager auth method.
 - SOC 2 / HIPAA posture (out of scope for a workspace tool).
-- End-to-end encryption of task content between managers and staff
-  (we operate server-side; any E2EE would defeat the agent layer).
+- End-to-end encryption of task content between owners/managers and
+  workers (we operate server-side; any E2EE would defeat the agent
+  layer).

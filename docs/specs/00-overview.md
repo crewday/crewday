@@ -3,7 +3,7 @@
 ## Vision
 
 **miployees** is a self-hosted workspace operations platform: one owner,
-one or more properties, several employees, and many tasks repeating across
+one or more properties, several workers, and many tasks repeating across
 days, weeks, and seasons. It is designed so that the day-to-day operator is
 an LLM agent and the humans are free to live in their house instead of
 managing it.
@@ -26,47 +26,54 @@ the driver sees tomorrow's airport run; the head of house sees everything.
 - **Villa (property).** A managed physical place. A villa is a
   **multi-belonging unit**: the same villa can belong to more than one
   workspace (e.g. a rental manager and the owning family both oversee
-  the same house from their own workspaces). Employees can therefore
-  work across villas that live in different workspaces, and an
-  employee's workspace membership is the set of workspaces reachable
-  through their assigned villas plus any explicit direct membership.
-  See §02 for the junction tables.
+  the same house from their own workspaces). Users can therefore work
+  across villas that live in different workspaces, and a user's
+  workspace membership is the set of workspaces reachable through
+  their assigned villas plus any explicit direct membership. See §02
+  for the junction tables (`user_workspace`, `property_workspace`).
 - **Agent-first guarantee.** Every user-facing action in miployees is
   also exposed as a **CLI command** (host CLI or the embedded REST
   tool surface) — there is no human-only verb. An LLM agent driving
-  the manager-side or employee-side chat acts with the **full authority
-  of its delegating user** — same permissions, same audit identity —
-  via a delegated token (§03). Every action is attributed to the user
-  in the audit log while being clearly flagged as agent-executed.
-  High-impact actions still require explicit human approval (§11). The
-  UI is a shell around those commands, not a separate capability. See
-  §11 for the invariant, §13 for the CLI catalog.
+  the owner/manager-side or worker-side chat acts with the **full
+  authority of its delegating user** — same permissions, same audit
+  identity — via a delegated token (§03). Every action is attributed
+  to the user in the audit log while being clearly flagged as
+  agent-executed. High-impact actions still require explicit human
+  approval (§11). The UI is a shell around those commands, not a
+  separate capability. See §11 for the invariant, §13 for the CLI
+  catalog.
 
 ## Personas
 
 ### Primary
 
-- **Manager (owner / head of house).** Desktop most of the time, phone
-  sometimes. Creates properties, hires and terminates staff, defines
-  tasks, approves expenses and payslips, reviews digests. There can be
-  more than one manager; all managers are peers.
-- **Employee (staff).** Phone-first. Sees today's list, ticks things
-  done, optionally attaches a photo, logs hours, reports an issue,
-  submits an expense receipt, reads comments from the manager.
-- **Agent (LLM operator).** Runs on a schedule or in response to events.
-  Acts with the full authority of its delegating user — same
+- **Owner / Manager (head of house).** A `user` with `grant_role =
+  owner` or `manager`. Desktop most of the time, phone sometimes.
+  Creates properties, invites and removes staff, defines tasks,
+  approves expenses and payslips, reviews digests. There can be more
+  than one owner or manager; owners have workspace-wide authority,
+  managers may be scoped to specific properties.
+- **Worker (staff).** A `user` with `grant_role = worker`. Phone-
+  first. Sees today's list, ticks things done, optionally attaches a
+  photo, logs hours, reports an issue, submits an expense receipt,
+  reads and writes task comments.
+- **Agent (LLM operator).** Runs on a schedule or in response to
+  events. Acts with the full authority of its delegating user — same
   permissions, same audit identity (with agent-execution flag). High-
   impact actions still require explicit human approval. The CLI is its
   ergonomic entry point.
 
 ### Secondary
 
+- **Client.** A `user` with `grant_role = client` granted at property
+  scope. Portal login showing occupancy, billable hours, and invoices
+  for that property only. Cannot create or manage tasks.
 - **Guest (STR occupant).** No login. Receives a tokenized link to a
   welcome page for their stay (wifi, house rules, check-out checklist,
   emergency contacts).
-- **Accountant / payroll provider.** Never logs into miployees directly;
-  receives CSV exports (timesheets, payslips, expense ledger) via email
-  or scheduled webhook.
+- **Accountant / payroll provider.** Never logs into miployees
+  directly; receives CSV exports (timesheets, payslips, expense
+  ledger) via email or scheduled webhook.
 
 ## Primary use cases
 
@@ -88,11 +95,11 @@ the driver sees tomorrow's airport run; the head of house sees everything.
 
 ## Goals (v1)
 
-- **G1.** Capture properties, areas, employees, roles, tasks, schedules,
+- **G1.** Capture properties, areas, users, work roles, tasks, schedules,
   instructions, inventory, time, and expenses in one coherent model.
 - **G2.** Passkey-only login for humans; API tokens for agents. No
   passwords. Ever.
-- **G3.** Mobile-first PWA for employees with **offline** task lists and
+- **G3.** Mobile-first PWA for workers with **offline** task lists and
   queued completions.
 - **G4.** iCal import from at least Airbnb, VRBO, and Booking.com, with
   automatic turnover task generation per property.
@@ -136,11 +143,11 @@ the driver sees tomorrow's airport run; the head of house sees everything.
 
 ## Success criteria
 
-- **Operational.** A workspace with 3 properties, 5 employees, 30
+- **Operational.** A workspace with 3 properties, 5 workers, 30
   weekly recurring tasks, and 2 STR calendars can be set up end-to-end
   (from empty DB to first completed task) in **under 60 minutes** by a
-  non-technical manager following the Getting Started guide.
-- **Performance.** Employee PWA first paint under 1.5s on a 2019 mid-
+  non-technical owner following the Getting Started guide.
+- **Performance.** Worker PWA first paint under 1.5s on a 2019 mid-
   range Android over 4G; a 50-row task list renders under 300ms
   server-side on SQLite with 100k tasks and 100k completions in history.
 - **Reliability.** Offline completions queued on a phone sync within 60
@@ -159,7 +166,7 @@ the driver sees tomorrow's airport run; the head of house sees everything.
 - **Hosting.** The binary/image must run on a $5/month VPS with 1 vCPU
   and 1 GB RAM for a 5-employee workspace without swapping. Compose
   deployments assume 2 vCPU / 2 GB.
-- **Privacy.** No PII leaves the deployment without explicit manager
+- **Privacy.** No PII leaves the deployment without explicit owner
   consent per capability (see §11 §15).
 
 ## Licensing

@@ -1,15 +1,15 @@
 # 09 — Time, payroll, expenses
 
-Three tightly-linked features for staff who expect to get paid
-correctly and for managers who want to stop keeping shift notes in a
-phone's notes app.
+Three tightly-linked features for workers who expect to get paid
+correctly and for owners and managers who want to stop keeping shift
+notes in a phone's notes app.
 
-## Scope by `engagement_kind`
+## Scope by `work_engagement.engagement_kind`
 
 The pipelines below — pay rules, pay periods, payslips, expense
-claims, payout destinations — all apply to employees with
-`engagement_kind = payroll` (§05). **Contractors** and
-**agency-supplied** employees are paid via a separate pipeline
+claims, payout destinations — all apply to work engagements with
+`engagement_kind = payroll` (§05, §22). **Contractors** and
+**agency-supplied** workers are paid via a separate pipeline
 (`work_order` / `vendor_invoice`, §22) and do **not** get pay rules,
 pay periods, or payslips. They still produce `shift` rows when they
 clock in, which is how their hours are captured for the client-
@@ -18,12 +18,13 @@ contractor's `shift` has no corresponding `pay_period_entry` line
 because their pay runs through their invoices, not the payroll
 cycle.
 
-`expense_claim` remains available to any employee kind — a
+`expense_claim` remains available to any engagement kind — a
 contractor who paid for materials out-of-pocket can still submit
 receipts, and the resulting reimbursement routes to whichever
 `payout_destination` the approval selects. But more commonly a
 contractor folds materials into their own `vendor_invoice` line
-items instead of filing claims, and the manager chooses per case.
+items instead of filing claims, and the owner or manager chooses
+per case.
 
 ## Time tracking (shifts)
 
@@ -33,7 +34,8 @@ items instead of filing claims, and the manager chooses per case.
 shift
 ├── id
 ├── workspace_id
-├── employee_id
+├── work_engagement_id       # FK → work_engagement.id (pay pipeline key)
+├── user_id                  # denormalised from work_engagement.user_id for fast queries
 ├── property_id              # optional; unassigned shifts for remote drivers, etc.
 ├── client_org_id            # derived cache from property.client_org_id at close; nullable (§22)
 ├── status                   # enum: open | closed | disputed (§02)
@@ -44,7 +46,7 @@ shift
 ├── method_out               # same
 ├── geo_in_lat/lon/accuracy  # nullable, only if capability + consent
 ├── geo_out_lat/lon/accuracy
-├── break_seconds            # manager-entered or self-entered
+├── break_seconds            # owner/manager-entered or self-entered
 ├── notes_md                 # optional
 ├── adjusted                 # bool
 ├── adjustment_reason        # text? when adjusted == true
@@ -78,22 +80,22 @@ evaluated alongside the mode.
 
 Same behaviour as today:
 
-- **Clock-in.** Employee taps a big green button on the PWA "home"
+- **Clock-in.** Worker taps a big green button on the PWA "home"
   screen; the server records `started_at = now()`, property defaulted
   from today's assigned task (or manually picked). If geofence
   required, the browser's Geolocation API is consulted with a
   configured accuracy threshold; if the user denies or GPS is poor,
   clock-in fails with a clear explanation and an option to request
-  a manager override.
+  an owner or manager override.
 - **Clock-out.** Green button flips to red "Clock out". Prompts for
   break time if shift > 6h (configurable). Saves `ended_at`.
-- **QR kiosk.** Managers can print a property-specific QR that opens
-  a simple clock-in/out page with passkey assertion. Useful when
-  staff share a family phone.
+- **QR kiosk.** Owners and managers can print a property-specific QR
+  that opens a simple clock-in/out page with passkey assertion.
+  Useful when staff share a family phone.
 
 #### `auto` mode
 
-The employee never taps a clock-in button. The server derives the
+The worker never taps a clock-in button. The server derives the
 shift from work activity:
 
 - The **first** checklist tick or task action (start, complete,
@@ -107,60 +109,60 @@ shift from work activity:
 - If a subsequent checklist tick happens on a task at a **different
   villa**, the current shift is closed at the previous action's
   timestamp and a **new shift segment** is opened on the new villa.
-  Shift segments are independent `shift` rows — one employee can
+  Shift segments are independent `shift` rows — one worker can
   accumulate several segments in a day.
 - The PWA shows an ambient "You're on the clock since 08:12 at
-  Villa Sud" indicator; the employee can still tap "Clock out now"
+  Villa Sud" indicator; the worker can still tap "Clock out now"
   to close the shift early, which overrides the idle timer.
 
 #### `disabled` mode
 
-Hours are not tracked — useful for a salaried manager or a family
+Hours are not tracked — useful for a salaried worker or a family
 friend who helps out. No shift rows are created; the `time.clock_in`
-affordance is hidden; payroll for this employee must use a
+affordance is hidden; payroll for this work engagement must use a
 `monthly_salary` or `per_task` pay rule (§ "Pay rules") because
 `hourly` has no hours to multiply.
 
 #### Disputed auto-close
 
-If the idle timer closes an `auto` shift but the employee resumes
+If the idle timer closes an `auto` shift but the worker resumes
 activity on the **same local calendar day** before midnight, the
-worker **re-opens** the shift (`status = open`, `ended_at = NULL`)
+server **re-opens** the shift (`status = open`, `ended_at = NULL`)
 and flags the interval between the auto-close timestamp and the
 resumed action as **disputed**:
 
 - The shift gets an additional `dispute_gap` row (or a flag on the
   shift, recorded in `audit_log`) describing the auto-closed window
-  `[auto_close_at, resumed_at)` so a manager can decide whether
-  those minutes count.
-- The shift's `status` transitions to `disputed` on re-open and the
-  manager is notified via the daily digest. Manager resolution is
+  `[auto_close_at, resumed_at)` so an owner or manager can decide
+  whether those minutes count.
+- The shift's `status` transitions to `disputed` on re-open and an
+  owner or manager is notified via the daily digest. Resolution is
   either "keep the gap as a break" (shift stays re-opened; gap
   subtracted) or "count it as worked" (shift closed/re-closed with
   the gap included).
-- Cross-midnight resumes do **not** re-open; the employee is
-  treated as starting a fresh shift on the new day.
+- Cross-midnight resumes do **not** re-open; the worker is treated
+  as starting a fresh shift on the new day.
 
 #### Per-villa `clock_mode` override
 
 Clock mode is an instance of the **settings cascade** (§02 "Settings
 cascade"), canonical key `time.clock_mode`. The cascade's generic
-resolution (workspace → property → employee → task, first concrete
-value wins) applies.
+resolution (workspace → property → work_engagement → task, first
+concrete value wins) applies.
 
-A villa can override the employee's default mode. The resolution
-order is: **villa override → employee capability → workspace
+A villa can override the worker's default mode. The resolution
+order is: **villa override → work_engagement capability → workspace
 default**. A villa that sets `clock_mode = manual` forces manual
-clock-in/out even for employees whose default is `auto` (useful
+clock-in/out even for workers whose default is `auto` (useful
 when a specific property has a shared kiosk or strict audit needs).
-A villa set to `auto` likewise forces auto for visiting employees.
+A villa set to `auto` likewise forces auto for visiting workers.
 `disabled` at the villa layer is legal but unusual — it turns off
 tracking on that property even for hourly staff.
 
 The resolved mode is surfaced on the task detail screen so the
-employee knows whether their taps will produce shift rows.
+worker knows whether their taps will produce shift rows.
 
-### Manager adjustments
+### Owner and manager adjustments
 
 Any shift can be adjusted via `PATCH /shifts/{id}` (§12). The server
 computes whether the patch touches time fields (`started_at`,
@@ -172,29 +174,30 @@ computes whether the patch touches time fields (`started_at`,
   set `adjusted`; `adjustment_reason` is optional.
 
 Original values are preserved in `audit_log.before_json` either way.
-Employees see "(edited by manager)" on shifts with `adjusted = true`.
+Workers see "(edited)" on shifts with `adjusted = true`; the edit
+is attributed to the acting user in the audit log.
 
 ### Open shift recovery
 
-If a shift stays open > 16h, the worker emails a reminder to the
-employee; if still open at 24h, manager is notified and the system
-auto-closes at `started_at + 8h` with `status = disputed` so it shows
-up in review.
+If a shift stays open > 16h, the worker process emails a reminder to
+the worker; if still open at 24h, an owner or manager is notified and
+the system auto-closes at `started_at + 8h` with `status = disputed`
+so it shows up in review.
 
 ## Pay rules
 
-A `pay_rule` binds an employee (or an employee_role) to a pay model.
-Applies only to **`engagement_kind = payroll`** employees (§05);
-contractors and agency-supplied workers use `vendor_invoice` (§22)
-and never have a `pay_rule` row. Attempting to write one for a
-non-payroll employee returns 422 `error =
-"pay_rule_requires_payroll_engagement"`.
+A `pay_rule` binds a work engagement (or a user_work_role) to a pay
+model. Applies only to work engagements with
+**`engagement_kind = payroll`** (§05, §22); contractors and
+agency-supplied workers use `vendor_invoice` (§22) and never have a
+`pay_rule` row. Attempting to write one for a non-payroll engagement
+returns 422 `error = "pay_rule_requires_payroll_engagement"`.
 
 | field              | type      | notes                                 |
 |--------------------|-----------|---------------------------------------|
 | id                 | ULID PK   |                                       |
-| employee_id        | ULID FK?  | OR employee_role_id                   |
-| employee_role_id   | ULID FK?  |                                       |
+| work_engagement_id | ULID FK?  | OR user_work_role_id                  |
+| user_work_role_id  | ULID FK?  |                                       |
 | kind               | enum      | `hourly | monthly_salary | per_task | piecework` |
 | effective_from     | date      |                                       |
 | effective_to       | date?     | null = ongoing                        |
@@ -208,7 +211,7 @@ non-payroll employee returns 422 `error =
 | weekly_hours       | int?      | for salary → hourly conversion        |
 | notes_md           | text?     |                                       |
 
-Exactly one of `employee_id` / `employee_role_id` is set.
+Exactly one of `work_engagement_id` / `user_work_role_id` is set.
 
 ### Overtime rule shape
 
@@ -255,7 +258,8 @@ when closing the period).
 
 ### Pay-rule selection when multiple rules overlap
 
-For a `(employee, period)` pair, the applicable rule is the one where:
+For a `(work_engagement, period)` pair, the applicable rule is the
+one where:
 
 - `effective_from ≤ period.ends_on`, and
 - `effective_to IS NULL OR effective_to ≥ period.starts_on`.
@@ -292,32 +296,34 @@ rules, replacing the older bundled data file approach.
 
 ## Pay period
 
-`pay_period {id, workspace_id, employee_id?, starts_on, ends_on,
+`pay_period {id, workspace_id, work_engagement_id?, starts_on, ends_on,
 frequency, status}`. `status` is the canonical `pay_period_status`
-enum in §02 (`open | locked | paid`). `employee_id` is populated when
-a workspace has divergent per-employee pay rules; otherwise null
-(the period applies to all employees).
+enum in §02 (`open | locked | paid`). `work_engagement_id` is
+populated when a workspace has divergent per-engagement pay rules;
+otherwise null (the period applies to all engagements in the
+workspace).
 
 Periods are created per workspace based on the workspace's default
 frequency (monthly by default; bi-weekly supported). Periods may
-overlap across employees when their pay rules diverge.
+overlap across engagements when their pay rules diverge.
 
 ### Period close
 
-A manager closes a period ("Lock"):
+An owner or manager closes a period ("Lock"):
 
 1. Validate: no open shifts remain in the period.
-2. Compute `pay_period_entry` rows: per employee, per day, regular
-   hours / overtime / holiday / per-task counts / piecework totals.
-   Holiday hours are identified by querying `public_holidays` (§06)
-   for dates in the period, applying `payroll_multiplier` from the
-   holiday row (overridden by pay-rule-level multiplier if both
+2. Compute `pay_period_entry` rows: per work_engagement, per day,
+   regular hours / overtime / holiday / per-task counts / piecework
+   totals. Holiday hours are identified by querying `public_holidays`
+   (§06) for dates in the period, applying `payroll_multiplier` from
+   the holiday row (overridden by pay-rule-level multiplier if both
    exist).
 3. Generate `payslip` rows (`status = draft`).
 4. Emit `payroll.period_locked` webhook.
 
-Locked periods cannot be edited; manager can "reopen" with an explicit
-audit event, which also resets the contained payslips to `draft`.
+Locked periods cannot be edited; an owner or manager can "reopen"
+with an explicit audit event, which also resets the contained
+payslips to `draft`.
 
 ### Transition to `paid`
 
@@ -330,16 +336,16 @@ source of truth.
 
 ## Payslip
 
-A computed pay document for one (employee, pay_period).
+A computed pay document for one (work_engagement, pay_period).
 
 | field                   | type    |
 |-------------------------|---------|
 | id                      | ULID PK |
-| employee_id             | ULID FK |
+| work_engagement_id      | ULID FK |
 | pay_period_id           | ULID FK |
 | currency                | text    |
-| locale                  | text    | BCP-47. Resolved at `draft` creation, immutable. Drives PDF date/number/currency formatting. Resolution: employee.preferred_locale -> property.locale -> workspace.default_locale -> `en-US`. |
-| jurisdiction            | text    | ISO-3166-1 alpha-2. From employee's primary property `country` at draft time. Immutable. Selects which payslip template to use. |
+| locale                  | text    | BCP-47. Resolved at `draft` creation, immutable. Drives PDF date/number/currency formatting. Resolution: users.preferred_locale (via work_engagement.user_id) -> property.locale -> workspace.default_locale -> `en-US`. |
+| jurisdiction            | text    | ISO-3166-1 alpha-2. From the work_engagement's primary property `country` at draft time. Immutable. Selects which payslip template to use. |
 | gross_total_cents       | int     |
 | components_json         | jsonb   |
 | expense_reimbursements_cents | int |
@@ -410,14 +416,15 @@ Line items include:
 
 ### Distribution
 
-Email to the employee with the PDF attached, or a download link
-(signed URL) if the PDF is above a configurable size.
+Email to the worker (via `work_engagement.user_id → users.email`)
+with the PDF attached, or a download link (signed URL) if the PDF
+is above a configurable size.
 
 ## Payout destinations
 
-An employee can receive **pay** and **expense reimbursements** at
+A user can receive **pay** and **expense reimbursements** at
 different destinations. A common case: the workspace opens a small
-pre-funded account in the employee's name for operational expenses
+pre-funded account in the worker's name for operational expenses
 so they don't have to front cash; reimbursements land there while
 their main paycheque lands in their personal account.
 
@@ -434,7 +441,7 @@ someone's pay. The rules below are written with that threat in mind.
 |----------------|----------|---------------------------------------------------------------|
 | id             | ULID PK  |                                                               |
 | workspace_id   | ULID FK  | scoping                                                       |
-| employee_id    | ULID FK? | row belongs to exactly one employee **OR** one organization; see "Owner" below |
+| user_id        | ULID FK? | row belongs to exactly one user **OR** one organization; see "Owner" below |
 | organization_id | ULID FK? | row belongs to exactly one organization; see §22              |
 | label          | text     | "Personal BNP", "Expense float — Revolut" — display only      |
 | kind           | enum     | `bank_account | card_reload | wallet | cash | other`          |
@@ -442,30 +449,31 @@ someone's pay. The rules below are written with that threat in mind.
 | display_stub   | text     | public-safe short form: IBAN last-4 + country (`•• FR-12`), card last-4, wallet handle. Never the full number. NULL for `cash`. |
 | secret_ref_id  | ULID FK? | pointer to the `secret_envelope` row holding the full account number. Required for `bank_account` and `card_reload`; NULL for `cash`. The full number is never returned by any standard API endpoint — it decrypts only to render a **payout manifest** (§ below), which is streamed and not stored. |
 | country        | text?    | ISO-3166; required for `bank_account`                         |
-| verified_at    | tstz?    | set when a manager hand-verifies the full number against a paper/photo artifact; `null` means unverified |
-| verified_by    | ULID FK? | manager id                                                    |
-| notes_md       | text?    | manager-visible, not rendered on PDF                          |
+| verified_at    | tstz?    | set when an owner or manager hand-verifies the full number against a paper/photo artifact; `null` means unverified |
+| verified_by    | ULID FK? | user id of the verifier                                       |
+| notes_md       | text?    | owner/manager-visible, not rendered on PDF                    |
 | created_at / updated_at | tstz |                                                         |
 | archived_at    | tstz?    | non-null → cannot be selected as a new default; see below     |
 
 ### Owner
 
-Exactly one of `employee_id` / `organization_id` is set; the
+Exactly one of `user_id` / `organization_id` is set; the
 reverse is a 422 `error = "destination_owner_required"`. DB-level
 CHECK constraint enforces the exclusivity.
 
-- **Employee-owned** destinations (the default) serve payslips
-  (`employee.pay_destination_id`), expense reimbursements
-  (`employee.reimbursement_destination_id`), and — for employees
-  with `engagement_kind = contractor` — vendor invoices where
-  `vendor_invoice.vendor_employee_id` points at them.
+- **User-owned** destinations (the default) serve payslips
+  (`work_engagement.pay_destination_id`), expense reimbursements
+  (`work_engagement.reimbursement_destination_id`), and — for
+  work engagements with `engagement_kind = contractor` — vendor
+  invoices where `vendor_invoice.vendor_user_id` points at the
+  owning user.
 - **Organization-owned** destinations serve vendor invoices where
   `vendor_invoice.vendor_organization_id` points at the owning
   org. They back the `organization.default_pay_destination_id`
   pointer used to route agency-supplied workers' invoices
   automatically. An org-owned destination cannot be used to pay a
-  payslip or reimburse an employee expense claim — those pipelines
-  are employee-oriented.
+  payslip or reimburse a user expense claim — those pipelines are
+  work-engagement-oriented.
 
 All downstream rules — per-kind field validation, verification,
 approval gates, snapshotting on use, the payout manifest endpoint —
@@ -507,39 +515,40 @@ All mutations (`POST`, `PATCH`, archive) write an audit_log row and
 fire the `payout_destination.{created,updated,archived,verified}`
 webhook. In addition:
 
-- An **employee** can create/edit their own destinations only if the
-  capability `payroll.self_manage_destinations` is on (default
-  **off**). When off, only managers can write.
+- A **worker** (user with a `worker` grant) can create/edit their own
+  destinations only if the capability `payroll.self_manage_destinations`
+  is on (default **off**). When off, only users with `owner` or
+  `manager` grants can write.
 - **Agent tokens** cannot mutate destinations without manager
   approval. `payout_destination.create`, `.update`,
   `.set_default_pay`, `.set_default_reimbursement`, and
   `expense_claim.set_destination_override` are added to §11's
   approvable-action list unconditionally — no workspace setting
   disables the gate.
-- Setting or changing an `employee.pay_destination_id` or
-  `employee.reimbursement_destination_id` to a row that does not yet
-  have `verified_at` raises a non-fatal warning in the manager UI
-  and daily digest until verification is recorded. The PDF still
-  renders unverified destinations; the warning is about operator
-  hygiene, not a system block.
+- Setting or changing a `work_engagement.pay_destination_id` or
+  `work_engagement.reimbursement_destination_id` to a row that does
+  not yet have `verified_at` raises a non-fatal warning in the
+  owner/manager UI and daily digest until verification is recorded.
+  The PDF still renders unverified destinations; the warning is about
+  operator hygiene, not a system block.
 
-### Default pointers on `employee`
+### Default pointers on `work_engagement`
 
 - `pay_destination_id` — where payslips land.
 - `reimbursement_destination_id` — where approved expense
   reimbursements land. If null, falls back to `pay_destination_id`.
 
 Both must reference a non-archived destination whose
-`employee_id = employee.id` and whose `workspace_id` matches — the
-FK is enforced with a `CHECK` trigger in SQLite and a constraint
-function in Postgres. Attempting to set a pointer to another
-employee's destination is a 422.
+`user_id = work_engagement.user_id` and whose `workspace_id` matches
+— the FK is enforced with a `CHECK` trigger in SQLite and a
+constraint function in Postgres. Attempting to set a pointer to
+another user's destination is a 422.
 
 Archiving a destination that is currently referenced as a default
-nulls the relevant pointer(s) in the same transaction and emits an
-`employee_default_destination.cleared` audit event + webhook. The
-next payslip for that employee renders "Payout: arranged manually"
-unless a new default is set first.
+nulls the relevant pointer(s) in the same transaction and emits a
+`work_engagement_default_destination.cleared` audit event + webhook.
+The next payslip for that engagement renders "Payout: arranged
+manually" unless a new default is set first.
 
 Either pointer may be null (cash-in-hand, or not yet configured);
 the payslip PDF then renders "Payout: arranged manually" on the
@@ -548,16 +557,17 @@ corresponding line — explicit, not silently defaulted to zero.
 ### Per-claim override
 
 An `expense_claim` carries an optional
-`reimbursement_destination_id`. When a manager approves the claim,
-the server validates that the referenced destination:
+`reimbursement_destination_id`. When an owner or manager approves
+the claim, the server validates that the referenced destination:
 
-- has `employee_id = claim.employee_id`,
+- has `user_id = work_engagement.user_id` for the claim's
+  `work_engagement_id`,
 - has `workspace_id = claim.workspace_id`,
 - is not archived.
 
-The approval UI lets the manager pick any destination satisfying
+The approval UI lets the approver pick any destination satisfying
 those rules; there is no separate "blessed" subset. If null, the
-employee's default reimbursement destination applies (which itself
+engagement's default reimbursement destination applies (which itself
 falls back to `pay_destination_id`).
 
 **Currency.** If `destination.currency != claim.currency`, approval
@@ -663,7 +673,7 @@ conversion acknowledgement recorded on the claim.
 ### Audit, approval, and webhook events
 
 - `payout_destination.*`: `created`, `updated`, `archived`, `verified`.
-- `employee_default_destination.*`: `set`, `cleared`.
+- `work_engagement_default_destination.*`: `set`, `cleared`.
 - `payroll.payslip_destination_snapshotted` (fires at issue time).
 - `payroll.payout_manifest_accessed` (fires on every manifest fetch).
 - All of the above are in §10's webhook catalog; the approval gate
@@ -671,12 +681,12 @@ conversion acknowledgement recorded on the claim.
 
 ## Expense claims
 
-### Submission flow (employee)
+### Submission flow (worker)
 
 The central user requirement: *submitting should be super easy, with
 the LLM auto-populating from a receipt photo.*
 
-1. Employee opens "New expense" on the PWA (or web).
+1. Worker opens "New expense" on the PWA (or web).
 2. Tap **"Add receipt"** → camera opens, takes photo (or picks from
    library). Multiple pages allowed.
 3. Upload begins in the background; simultaneously the server calls
@@ -691,9 +701,9 @@ the LLM auto-populating from a receipt photo.*
      descriptions, quantities, unit prices
    - a suggested `note_md` summary
    - a `confidence` per field
-5. Employee reviews; fields with low confidence are highlighted.
-6. Submit. State becomes `submitted`, manager gets a notification
-   (email + webhook).
+5. Worker reviews; fields with low confidence are highlighted.
+6. Submit. State becomes `submitted`, an owner or manager gets a
+   notification (email + webhook).
 
 Offline capture: the photo is queued locally; OCR runs on reconnect.
 
@@ -702,12 +712,12 @@ Offline capture: the photo is queued locally; OCR runs on reconnect.
 ```
 expense_claim
 ├── id
-├── employee_id
+├── work_engagement_id         # FK → work_engagement.id (submitter's engagement)
 ├── submitted_at
 ├── vendor
 ├── purchased_at               # date (+ time if known)
 ├── currency
-├── exchange_rate_to_default   # snapshot at submission; editable by manager
+├── exchange_rate_to_default   # snapshot at submission; editable by owner/manager
 ├── total_amount_cents         # in claim currency
 ├── category                   # supplies|fuel|food|transport|maintenance|other
 ├── property_id                # optional
@@ -715,10 +725,10 @@ expense_claim
 ├── llm_autofill_json          # full JSON returned by autofill (shape below)
 ├── autofill_confidence_overall # 0..1, derived min() of per-field scores
 ├── state                      # draft|submitted|approved|rejected|reimbursed
-├── decided_by_manager_id
+├── decided_by_user_id
 ├── decided_at
 ├── decision_note_md
-├── reimbursement_destination_id # ULID FK? override; null → use employee default
+├── reimbursement_destination_id # ULID FK? override; null → use work_engagement default
 └── deleted_at
 ```
 
@@ -744,7 +754,7 @@ expense_attachment
 ├── pages                      # int (for multi-page PDFs)
 ```
 
-### Approval (manager)
+### Approval (owner or manager)
 
 - Review claim, edit any field, approve or reject with reason.
 - Approving snaps the exchange rate (ECB daily fix fetched at
@@ -752,11 +762,12 @@ expense_attachment
   and stored on the claim in `exchange_rate_to_default` for
   reproducibility). If the ECB fetch fails, the UI blocks approval
   with a "no exchange rate available, try again or enter manually"
-  error and the manager may type the rate by hand.
+  error and the approver may type the rate by hand.
 - The claim attaches to the pay period whose `[starts_on, ends_on]`
   contains `purchased_at`. If that period is already `locked` for the
-  employee, it attaches to the next open period; a note is added to
-  the claim so the employee can see why reimbursement is delayed.
+  work_engagement, it attaches to the next open period; a note is
+  added to the claim so the worker can see why reimbursement is
+  delayed.
 - Webhook `expense.approved` / `expense.rejected` fires.
 
 ### Reimbursement
@@ -796,22 +807,22 @@ A claim becomes `reimbursed` when the containing payslip moves to
   - <0.6 left blank with "review" placeholder, never pre-filled.
 - All extractions recorded in `llm_call` (§11). Cost is attributed to
   `expenses.autofill` capability.
-- If the workspace disabled `expenses.autofill_llm` for the employee
-  or the capability globally, the photo is attached but no extraction
-  runs.
+- If the workspace disabled `expenses.autofill_llm` for the worker
+  (via their work-role capability) or the capability globally, the
+  photo is attached but no extraction runs.
 - When a user edits an OCR line, `expense_line.source` stays `ocr`
   and `edited_by_user` flips to `true`. Fully user-created lines have
   `source = manual` from the start.
 
 ## Reports and exports
 
-- **Timesheets** — CSV per pay period: employee, date, property,
-  hours, overtime, holiday, notes. Includes shifts from all
-  engagement kinds; a column marks whether the hours roll into a
-  payslip or a `vendor_invoice` pipeline.
-- **Payroll register** — CSV per pay period: employee, gross, net,
-  expenses, currency. Payroll employees only.
-- **Expense ledger** — CSV by date range: claim id, employee, vendor,
+- **Timesheets** — CSV per pay period: user, date, property, hours,
+  overtime, holiday, notes. Includes shifts from all engagement kinds;
+  a column marks whether the hours roll into a payslip or a
+  `vendor_invoice` pipeline.
+- **Payroll register** — CSV per pay period: user, gross, net,
+  expenses, currency. Payroll work engagements only.
+- **Expense ledger** — CSV by date range: claim id, user, vendor,
   category, amount (claim + base currency), state.
 - **Hours by property** — rollup useful for owners: hours consumed at
   each property for budgeting.
@@ -832,6 +843,6 @@ Exports: `GET /api/v1/exports/...csv` (streamed) or via CLI
   place: `pay_rule.currency` and `payslip.currency` carry per-entity
   codes, `property.default_currency` allows per-property overrides,
   and `components_json` is currency-stamped. v1 enforces that all pay
-  rules for one employee within a pay period share one currency.
-  Lifting that constraint requires conversion logic at period-close
-  time.
+  rules for one work_engagement within a pay period share one
+  currency. Lifting that constraint requires conversion logic at
+  period-close time.

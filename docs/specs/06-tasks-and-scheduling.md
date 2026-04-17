@@ -1,8 +1,8 @@
 # 06 — Tasks and scheduling
 
-Tasks are the heart of the system. Every interaction — for employees,
-managers, and agents — either produces tasks, consumes tasks, or
-reports on tasks.
+Tasks are the heart of the system. Every interaction — for workers,
+owners, managers, and agents — either produces tasks, consumes tasks,
+or reports on tasks.
 
 ## Task kinds (logical, not a column)
 
@@ -36,7 +36,7 @@ their bundles.
 | workspace_id                   | ULID FK   |                                       |
 | name                           | text      | "Weekly kitchen deep clean"           |
 | description_md                 | text      |                                       |
-| role_id                        | ULID FK?  | default role expected to do it        |
+| role_id                        | ULID FK?  | default work_role expected to do it   |
 | duration_minutes               | int       | hint only                             |
 | property_scope                 | enum      | `any | one | listed`                  |
 | listed_property_ids            | ULID[]    |                                       |
@@ -63,7 +63,7 @@ these times". Stored as RFC 5545 RRULE plus a property-local timezone.
 | template_id        | ULID FK |                                             |
 | property_id        | ULID FK |                                             |
 | area_id            | ULID FK?|                                             |
-| default_assignee   | ULID FK?| employee — see assignment logic             |
+| default_assignee   | ULID FK?| user — see assignment logic                 |
 | rrule              | text    | RFC 5545, e.g. `FREQ=WEEKLY;BYDAY=MO,TH`    |
 | dtstart_local      | timestamp | local time (property tz)                  |
 | duration_minutes   | int     |                                             |
@@ -98,7 +98,7 @@ A worker job `generate_task_occurrences` runs every hour:
    with `originally_scheduled_for = occurrence`, copying fields from
    the template and the schedule defaults.
 4. Run the assignment algorithm (below).
-5. Apply blackout dates (employee leave, property closures) → may
+5. Apply blackout dates (user leave, property closures) → may
    leave tasks **unassigned**.
 
 The horizon is configurable per workspace. Shrinking it doesn't
@@ -153,9 +153,9 @@ range is evaluated only when `paused_at` is null.
 | checklist_snapshot_json      | jsonb     | initial snapshot from template; authoritative list is in `task_checklist_item` rows |
 | linked_instruction_ids       | ULID[]    |                                               |
 | expected_role_id             | ULID FK?  |                                               |
-| assigned_employee_id         | ULID FK?  | null = unassigned                             |
+| assigned_user_id             | ULID FK?  | null = unassigned                             |
 | completed_at                 | tstz?     |                                               |
-| completed_by_employee_id     | ULID FK?  |                                               |
+| completed_by_user_id         | ULID FK?  |                                               |
 | completion_note_md           | text?     |                                               |
 | skipped_reason               | text?     |                                               |
 | cancellation_reason          | text?     |                                               |
@@ -182,8 +182,8 @@ The canonical enum lives in §02 (`task_state`, 7 values including
 - `scheduled` → `pending` happens at `scheduled_for_utc - 1h` (or
   immediately for one-offs created with a past `scheduled_for`). This
   is the "now actionable, on today's list" boundary used by the
-  employee PWA to separate `/today` from `/week`.
-- `pending` → `in_progress` is optional; employees may go directly
+  worker PWA to separate `/today` from `/week`.
+- `pending` → `in_progress` is optional; workers may go directly
   to `completed`.
 - `completed` is terminal.
 - `overdue` is a soft state: a worker flips `state` from
@@ -194,15 +194,16 @@ The canonical enum lives in §02 (`task_state`, 7 values including
   `overdue_since` is cleared. This means `overdue` is visible in the
   enum and in filters, but it is never a terminal state.
 
-**State transitions and who may trigger them.** Employees assigned to
-a task (and managers) may drive `pending ↔ in_progress ↔ completed`.
-Managers may move any task to `cancelled`. Employees with
-`tasks.allow_skip_with_reason` may move their own tasks to `skipped`.
-Only workers drive the automatic `scheduled → pending` transition.
+**State transitions and who may trigger them.** Workers assigned to a
+task (and owners or managers) may drive `pending ↔ in_progress ↔
+completed`. Owners or managers may move any task to `cancelled`.
+Workers with `tasks.allow_skip_with_reason` may move their own tasks
+to `skipped`. Only the scheduler worker drives the automatic
+`scheduled → pending` transition.
 
 **Concurrent completion.** If two actors complete the same task in
 overlapping transactions, the write that commits second wins — it
-overwrites `completed_at`, `completed_by_employee_id`, and
+overwrites `completed_at`, `completed_by_user_id`, and
 `completion_note_md`. The loser receives a 200 with the final state;
 the audit log records both completions via `task.complete_superseded`
 against the earlier row. Rationale: optimistic locking here costs
@@ -211,23 +212,23 @@ silently lost.
 
 ## Availability precedence stack
 
-When determining if an employee is available on a specific date/time,
-the system evaluates in this order (first match wins):
+When determining if a user is available on a specific date/time, the
+system evaluates in this order (first match wins):
 
-1. **Approved `employee_leave`** covering the date -> **unavailable**.
-2. **Approved `employee_availability_override`** for the exact date ->
+1. **Approved `user_leave`** covering the date -> **unavailable**.
+2. **Approved `user_availability_override`** for the exact date ->
    **use override hours** (or off if override marks unavailable).
 3. **`public_holiday`** for the date with `scheduling_effect = block`
    -> **unavailable**.
 4. **`public_holiday`** for the date with `scheduling_effect = reduced`
    -> **use reduced hours**.
-5. **`employee_weekly_availability`** for the weekday -> **use pattern
+5. **`user_weekly_availability`** for the weekday -> **use pattern
    hours** (or off if null).
 
 `public_holiday` with `scheduling_effect = allow` has no effect on
 availability (treated as a normal day). Country matching: a holiday
-applies to an employee if `holiday.country IS NULL` (workspace-wide)
-OR `holiday.country = employee's primary property country`.
+applies to a user if `holiday.country IS NULL` (workspace-wide) OR
+`holiday.country = user's primary property country`.
 
 ## Assignment algorithm
 
@@ -237,23 +238,23 @@ Given a new task with `expected_role_id` and `property_id` (and
 1. If the task has `schedule.default_assignee`, check availability
    using the precedence stack above. If available, assign. If not,
    fall through to candidate search.
-2. Else: candidate = employees who:
-    - have `employee_role` with `role_id = expected_role_id`,
-    - whose assignment covers `property_id` (or role is
-      unrestricted), and
+2. Else: candidates = users who:
+    - have a `user_work_role` with `role_id = expected_role_id`,
+    - whose `property_work_role_assignment` covers `property_id` (or
+      the work role is unrestricted), and
     - **are available** on `scheduled_for_local` per the availability
       precedence stack (checking leave, overrides, holidays, weekly
       pattern).
 3. If exactly one candidate, assign them.
 4. If more than one candidate:
-    - Prefer the employee with the **fewest tasks** in the 7-day window
+    - Prefer the user with the **fewest tasks** in the 7-day window
       around `scheduled_for_local` at the same property.
-    - Break ties by rotation: pick the employee whose last task at
-      this property is the oldest.
+    - Break ties by rotation: pick the user whose last task at this
+      property is the oldest.
 5. If zero candidates, leave unassigned; surface in the daily digest.
 
-Managers and agents can always override. Auto-assignment is a tie-
-breaker, not a policy.
+Owners, managers, and agents can always override. Auto-assignment is
+a tiebreaker, not a policy.
 
 ### Pull-back logic for `before_checkin` tasks
 
@@ -268,82 +269,81 @@ When assigning a `before_checkin` lifecycle task:
    - At each candidate date, run the full availability precedence
      stack.
 4. If a slot is found: assign and set `scheduled_for_local` to the
-   pulled-back date (within the employee's available hours).
+   pulled-back date (within the user's available hours).
 5. If no slot found within the window: create the task at the ideal
    date, leave **unassigned**, and emit a
    `task.unassigned_pre_arrival` alert (daily digest + webhook).
 
 **Multi-unit coordination:** When multiple units have
-checkouts/checkins on the same day and the same employee handles
-them, the pull-back considers the employee's total workload (existing
-"fewest tasks in 7-day window" tiebreaker).
+checkouts/checkins on the same day and the same user handles them,
+the pull-back considers the user's total workload (existing "fewest
+tasks in 7-day window" tiebreaker).
 
-## Blackout dates, employee leave, availability overrides, and public holidays
+## Blackout dates, user leave, availability overrides, and public holidays
 
 All are first-class v1 entities; CRUD via §12.
 
-### `employee_leave`
+### `user_leave`
 
 | field         | type      | notes                                 |
 |---------------|-----------|---------------------------------------|
 | id            | ULID PK   |                                       |
 | workspace_id  | ULID FK   |                                       |
-| employee_id   | ULID FK   |                                       |
+| user_id       | ULID FK   |                                       |
 | starts_on     | date      | inclusive                             |
 | ends_on       | date      | inclusive                             |
 | category      | enum      | `vacation | sick | personal | bereavement | other` |
 | approved_at   | tstz?     | null = pending                        |
-| approved_by   | ULID FK?  | manager id                            |
+| approved_by   | ULID FK?  | user_id of approver (owner or manager) |
 | note_md       | text?     |                                       |
 | created_at / updated_at | tstz |                                   |
 | deleted_at    | tstz?     |                                       |
 
-An employee may self-submit a leave request (`approved_at = null`);
-a manager approves. Pending leaves do **not** affect assignment —
-only approved ones do.
+A user may self-submit a leave request (`approved_at = null`); an
+owner or manager approves. Pending leaves do **not** affect
+assignment — only approved ones do.
 
 ### Weekly availability
 
-Alongside one-off `employee_leave` rows, every employee has a
-recurring weekly pattern that describes their default availability
-window per weekday. The pattern is authoritative for the assignment
-algorithm: an employee is considered a candidate for a task only if
-the occurrence's local start time falls inside their available
-window for that weekday.
+Alongside one-off `user_leave` rows, every user has a recurring
+weekly pattern that describes their default availability window per
+weekday. The pattern is authoritative for the assignment algorithm: a
+user is considered a candidate for a task only if the occurrence's
+local start time falls inside their available window for that weekday.
 
-`employee_weekly_availability` (one row per employee per weekday):
+`user_weekly_availability` (one row per user per weekday):
 
 | field          | type    | notes                                   |
 |----------------|---------|-----------------------------------------|
 | id             | ULID PK |                                         |
 | workspace_id   | ULID FK |                                         |
-| employee_id    | ULID FK |                                         |
+| user_id        | ULID FK |                                         |
 | weekday        | int     | `0..6` (Mon..Sun, ISO)                  |
 | starts_local   | time?   | nullable; null means "off that day"     |
 | ends_local     | time?   | nullable; null means "off that day"     |
 | updated_at     | tstz    |                                         |
 
 Invariant: `starts_local` and `ends_local` are either both set or
-both null. A null pair (`off`) means the employee is unavailable for
-that weekday by default; the assignment algorithm treats it like a
-standing approved leave for that weekday.
+both null. A null pair (`off`) means the user is unavailable for that
+weekday by default; the assignment algorithm treats it like a standing
+approved leave for that weekday.
 
-One-off `employee_leave` rows still win over the weekly pattern on
-dates they cover. Conversely, the weekly pattern does **not**
-automatically generate `employee_leave` rows — it is evaluated live
-at assignment time and at display time on the employee "Week" view.
+One-off `user_leave` rows still win over the weekly pattern on dates
+they cover. Conversely, the weekly pattern does **not** automatically
+generate `user_leave` rows — it is evaluated live at assignment time
+and at display time on the worker "Week" view.
 
-### `employee_availability_overrides`
+### `user_availability_overrides`
 
-A date-specific override of an employee's weekly availability pattern.
+A date-specific override of a user's weekly availability pattern.
 Adding availability is self-service; reducing availability requires
-manager approval.
+owner or manager approval.
 
 | field              | type      | notes                                 |
 |--------------------|-----------|---------------------------------------|
 | id                 | ULID PK   |                                       |
 | workspace_id       | ULID FK   |                                       |
-| employee_id        | ULID FK   |                                       |
+| user_id            | ULID FK   |                                       |
 | date               | date      | specific date this override applies to |
 | available          | bool      | true = working this date, false = not working |
 | starts_local       | time?     | if available: custom hours. null = use weekly pattern hours |
@@ -351,15 +351,15 @@ manager approval.
 | reason             | text?     | "doctor appointment", "covering for Maria", "holiday swap" |
 | approval_required  | bool      | computed on create (see approval logic below) |
 | approved_at        | tstz?     | null = pending approval (if approval_required). Auto-set to `created_at` if not approval_required |
-| approved_by        | ULID FK?  | manager id. Auto-set to creating manager if manager-created |
+| approved_by        | ULID FK?  | user_id of approver. Auto-set to creating owner/manager if owner/manager-created |
 | created_at / updated_at | tstz |                                       |
 | deleted_at         | tstz?     |                                       |
 
 **Invariants:**
 - `starts_local` and `ends_local` are either both set or both null
   (same as weekly availability).
-- `UNIQUE(workspace_id, employee_id, date)` — one override per
-  employee per date.
+- `UNIQUE(workspace_id, user_id, date)` — one override per user per
+  date.
 - When `available = true` with null hours: use the weekly pattern's
   hours for that weekday (override only changes the "working" flag,
   not the hours).
@@ -371,12 +371,12 @@ On create, the server determines `approval_required`:
 | Weekly pattern for that weekday | Override requests | approval_required |
 |------|-------|------|
 | Off (null hours) | available = true (add work day) | **false** (auto-approved) |
-| Working (hours set) | available = false (remove work day) | **true** (needs manager approval) |
+| Working (hours set) | available = false (remove work day) | **true** (needs owner or manager approval) |
 | Working 09-17 | available = true, hours = 09-12 (reduce hours) | **true** (less available) |
 | Working 09-17 | available = true, hours = 09-19 (extend hours) | **false** (more available) |
 | Off | available = false (confirm off) | **false** (no change) |
 
-**Rule:** If the override makes the employee available for fewer hours
+**Rule:** If the override makes the user available for fewer hours
 than their weekly pattern, it requires approval. Otherwise
 auto-approved.
 
@@ -384,8 +384,8 @@ auto-approved.
 pending leave). Only approved overrides enter the availability
 precedence stack.
 
-Manager-created overrides are always auto-approved (`approved_at =
-created_at`, `approved_by = manager_id`).
+Owner/manager-created overrides are always auto-approved
+(`approved_at = created_at`, `approved_by = creating_user_id`).
 
 ### `public_holidays`
 
@@ -470,7 +470,7 @@ During generation (step 5, above):
 
 ## Completing a task
 
-From the employee PWA: tap → "Mark done". If `photo_evidence =
+From the worker PWA: tap → "Mark done". If `photo_evidence =
 required`, the camera picker opens; the file is uploaded and linked
 before state flips. If `tasks.checklist_required` capability is on,
 every `task_checklist_item` with `required = true` must have
@@ -479,7 +479,7 @@ every `task_checklist_item` with `required = true` must have
 Server-side:
 
 1. Validate state transition.
-2. Record `completed_at`, `completed_by_employee_id`.
+2. Record `completed_at`, `completed_by_user_id`.
 3. Apply `inventory_consumption_json` as `inventory_movement` rows
    unless the capability is off (§08).
 4. If `asset_action_id` is set, update
@@ -497,18 +497,18 @@ The template's `checklist_template_json` seeds the items at task
 creation and is then denormalized into rows so each tick carries its
 own timestamp and actor.
 
-| field           | type     | notes                                   |
-|-----------------|----------|-----------------------------------------|
-| id              | ULID PK  |                                         |
-| workspace_id    | ULID FK  |                                         |
-| task_id         | ULID FK  |                                         |
-| ordinal         | int      | display order                           |
-| text            | text     | the line as it appears to the employee  |
-| required        | bool     | if `tasks.checklist_required`, all required items must be ticked to complete |
-| guest_visible   | bool     | surfaced on the guest welcome page for stay task bundles (§04) |
-| completed_at    | tstz?    |                                         |
-| completed_by_employee_id | ULID FK? |                                  |
-| note            | text?    | optional per-item note                  |
+| field               | type     | notes                                   |
+|---------------------|----------|-----------------------------------------|
+| id                  | ULID PK  |                                         |
+| workspace_id        | ULID FK  |                                         |
+| task_id             | ULID FK  |                                         |
+| ordinal             | int      | display order                           |
+| text                | text     | the line as it appears to the worker    |
+| required            | bool     | if `tasks.checklist_required`, all required items must be ticked to complete |
+| guest_visible       | bool     | surfaced on the guest welcome page for stay task bundles (§04) |
+| completed_at        | tstz?    |                                         |
+| completed_by_user_id | ULID FK? |                                        |
+| note                | text?    | optional per-item note                  |
 
 Ticking an item is an idempotent PATCH; untick is allowed while the
 parent task is not yet terminal. An item row is also created when an
@@ -538,20 +538,19 @@ manager when delegated.
 
 Data-model shape (persisted to `task_comment`):
 
-- Rows are ordered messages of kind
-  `employee | manager | agent | system`.
+- Rows are ordered messages of kind `user | agent | system`.
 - The `agent` kind is the embedded workspace agent speaking in the
-  thread — it is *not* a human manager acting through a token. Agent
-  messages carry the `llm_call.id` that produced them.
+  thread — it is *not* a human acting through a token. Agent messages
+  carry the `llm_call.id` that produced them.
 - The `system` kind is for state-change markers (assignment,
   completion, skip) rendered inline for readability.
-- Markdown body; `@mentions` resolve to workspace members. The
-  manager may address the agent directly with
-  `@agent <instruction>`; the agent replies in the same thread.
-- Email fallback per §10 is preserved: mentioned humans get an email
+- Markdown body; `@mentions` resolve to workspace members. Any user
+  may address the agent directly with `@agent <instruction>`; the
+  agent replies in the same thread.
+- Email fallback per §10 is preserved: mentioned users get an email
   if they are offline, but the canonical surface is the chat page
-  (§14) inside the manager or employee UI, where the thread is a
-  native conversation with the embedded agent.
+  (§14) inside the owner, manager, or worker UI, where the thread is
+  a native conversation with the embedded agent.
 
 The agent enforces only the rules it is told to enforce (task-local
 instructions, workspace defaults); it does not silently moderate.
@@ -570,7 +569,7 @@ five layers, each set to one of
 1. **Workspace default** (always concrete).
 2. **Property override.**
 3. **Unit override.**
-4. **Employee override.**
+4. **Work-engagement override** (per-user, per-workspace).
 5. **Task override.**
 
 Resolution:
@@ -580,8 +579,9 @@ Resolution:
    values are. The UI hides the camera picker and any attached photo
    on a completion payload is rejected.
 2. **Otherwise, most specific wins.** Walk from task inward
-   (task → employee → unit → property → workspace) and return the
-   first concrete (non-`inherit`) value. `inherit` layers pass through.
+   (task → work_engagement → unit → property → workspace) and return
+   the first concrete (non-`inherit`) value. `inherit` layers pass
+   through.
 
 In practice:
 
@@ -590,9 +590,9 @@ In practice:
 - A property whose owner disables photos for privacy sets
   `property.evidence_policy = forbid`; tasks at that property cannot
   attach photos even if the task template requires them.
-- An employee working under a stricter evidence rule carries
-  `require` via their per-employee override; the employee layer is
-  more specific than the workspace, so it wins over `optional` at the
+- A user working under a stricter evidence rule carries `require` via
+  their work-engagement override; the work-engagement layer is more
+  specific than the workspace, so it wins over `optional` at the
   root.
 - A task may tighten (`inherit → require`) or loosen
   (`inherit → optional`) the inherited value.
@@ -609,10 +609,10 @@ user-facing surface is now the task-scoped chat described in
 
 ## Skipping and cancellation
 
-- `skip`: employee action, requires a reason (capability gated).
-  Counts as "not done" in reporting but does not raise an issue. Used
-  for "not needed this week" (guest left early, etc.).
-- `cancel`: manager action only. Reason required.
+- `skip`: worker action, requires a reason (capability gated). Counts
+  as "not done" in reporting but does not raise an issue. Used for
+  "not needed this week" (guest left early, etc.).
+- `cancel`: owner or manager action only. Reason required.
 
 Both are terminal states.
 
@@ -621,8 +621,8 @@ Both are terminal states.
 - Full-text on title, description, checklist items, completion_note,
   comments. Weights and backend routing are in §02 "Full-text search
   ranking".
-- Facets: state, property, area, unit_id, role, assignee, priority,
-  date range, asset_id, asset_action_id.
+- Facets: state, property, area, unit_id, work_role, assigned_user,
+  priority, date range, asset_id, asset_action_id.
 
 ## Stay lifecycle rules
 
@@ -723,7 +723,7 @@ commit` with the preview id. Idempotent.
 miployees tasks list --property prop_01… --on 2026-04-21
 miployees tasks create "airport pickup" --property prop_01… \
                        --role driver --when 'tomorrow 06:30 Europe/Paris'
-miployees tasks assign <task-id> --to emp_…
+miployees tasks assign <task-id> --to usr_…
 miployees tasks complete <task-id> --photo ./done.jpg --note 'all good'
 miployees schedules add --template tmpl_… --property prop_… \
                         --rrule 'FREQ=WEEKLY;BYDAY=MO,TH' --at 09:00

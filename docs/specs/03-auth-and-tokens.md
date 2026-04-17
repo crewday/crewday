@@ -2,7 +2,7 @@
 
 ## Principles
 
-- **No passwords.** For anyone. Not for managers, not for employees.
+- **No passwords.** For anyone. Not for owners, not for workers.
 - **Passkeys (WebAuthn)** are the only human credential.
 - **Magic links** are only an enrollment mechanism — they register a
   passkey; they do not authenticate a session on their own.
@@ -17,26 +17,45 @@
 
 ## Actors
 
-- **Manager.** Human with elevated scope. All managers are peers — no
-  hierarchy in v1, but the model allows it (§05).
-- **Employee.** Human with scope limited to their own data plus the
-  tasks and properties they are assigned to.
+- **User.** Every human is a `users` row (§02) with at least one
+  `role_grants` row that authorises them somewhere. Authority comes
+  from the grant, not from a `kind` column — a user may be an
+  `owner` of one workspace, a `worker` in another, and a `client`
+  on a single property in a third, simultaneously. All actions by
+  humans — regardless of grant — log as `actor_kind = 'user'`;
+  the grant under which the action was authorised is captured in
+  `actor_grant_role` (§02 audit_log).
 - **Agent.** Non-human. Standalone agents are identified by a scoped
   API token; never by a session. Embedded agents (§11) use **delegated
   tokens** that act as the creating user — their `actor_kind` in audit
-  is the delegating user's kind (`manager` or `employee`), not `agent`.
+  is `user`, with `agent_label` and `agent_conversation_ref` set so
+  the row is clearly flagged as agent-executed.
 - **System.** The worker process itself, when generating scheduled
   tasks, sending digests, polling iCal. No token — identified by a
   reserved `actor_id = "00000000000000000000000000"` in the audit log.
 
+**"Manager", "employee", "client"** are **grant roles**, not user
+kinds. Enrollment, passkey management, session shape, magic-link
+flow, and break-glass recovery are identical across them; the
+differences are entirely in what the user sees and can do once
+authenticated (see §05 capability catalog and §02 role_grants).
+
 ## Enrollment flows
 
-### Manager (initial)
+Enrollment is unified: the same REST endpoints, magic-link flow,
+and passkey ritual enroll every user, regardless of which grants
+they will hold. The only things that vary by grant_role are the
+default magic-link TTL and whether break-glass codes are issued on
+acceptance (see "Break-glass codes" below).
 
-1. First-boot wizard runs once when the DB has no `manager` rows. The
+### Owner (first boot)
+
+1. First-boot wizard runs once when the DB has no `users` rows. The
    CLI `miployees admin init --email owner@example.com` creates the
    workspace and emails the owner a **bootstrap magic link** valid for
-   15 minutes.
+   15 minutes. The wizard inserts a `users` row and a single
+   `role_grants` row with
+   `(scope_kind='workspace', scope_id=<ws>, grant_role='owner')`.
 2. Owner clicks the link, chooses a display name and timezone,
    registers a passkey on their current device.
 3. System generates **break-glass recovery codes** (8 codes, 10 chars
@@ -48,26 +67,35 @@
    the resulting magic link expires unused — the owner must consume
    another code to get a fresh link.
 
-### Manager (additional)
+### Additional users (invite)
 
-- An existing manager invites another via
-  `POST /api/v1/managers/invite` with `{ email, display_name }`.
-- System emails a magic link (15 min TTL). On acceptance, recipient
-  registers a passkey and receives their own set of break-glass codes.
+- A user with an appropriate `users.invite` capability (owners and
+  managers by default) invites another via
+  `POST /api/v1/users/invite` with
+  `{ email, display_name, grants: [ {scope_kind, scope_id, grant_role,
+    binding_org_id?, capability_override?}, ... ],
+     work_engagement?: {workspace_id, engagement_kind, ...},
+     user_work_roles?: [ {workspace_id, work_role_id}, ... ] }`.
+  One call creates (or re-uses, if `email` matches an existing row)
+  the `users` row, inserts the requested grants, optionally adds the
+  work engagement and work-role mappings, and emails a magic link.
+- System emails a magic link (TTL depends on the primary grant:
+  `owner` and `manager` grants default to 24 h; `worker`, `client`,
+  and `guest` also 24 h). On acceptance, recipient registers a
+  passkey.
+- Users invited into an `owner` or `manager` grant also receive a
+  set of break-glass codes on their first passkey registration.
+  Lower-privilege grants do not — recovery for those users runs
+  through an owner/manager-initiated re-issue of a magic link.
 
-### Employee
+### Existing user, new grant
 
-1. Manager creates an employee record with `{ display_name, email,
-   role_ids[], property_ids[] }`.
-2. Manager clicks "Send magic link" (or calls
-   `POST /api/v1/employees/{id}/magic_link`). The system emails a
-   link valid for 24 hours.
-3. Employee clicks link on their phone, the page prompts them to
-   register a passkey (platform authenticator preferred — Face ID,
-   Touch ID, Android screen lock). They may add a second passkey for
-   a backup device.
-4. Employees do **not** receive break-glass codes; recovery is by
-   manager re-issue of a magic link (see below).
+- When the invite's `email` matches an existing `users` row, no
+  new user is created. The new `role_grants` rows are inserted and
+  the user receives a one-shot **grant-activated** email — no magic
+  link, no passkey re-registration, no break-glass regeneration.
+  They just sign in with their existing passkey and the new scope
+  appears in their workspace switcher.
 
 ### Additional passkeys
 
@@ -78,16 +106,18 @@
 
 ### Re-enrollment side-effects
 
-When a manager re-issues a magic link to a user ("Employee lost
-phone" or "Manager lost device" paths below), accepting the link and
+When an owner or manager re-issues a magic link to a user ("lost
+phone" / "lost device" paths below), accepting the link and
 registering a fresh passkey:
 
 1. Revokes **all existing passkeys** for that user (the new one is
    written after revocation in the same transaction).
 2. Revokes **all active sessions** for that user; they must log in
    again on every previously-signed-in browser.
-3. For managers: regenerates the break-glass code set (old codes
-   invalidated).
+3. For users who hold an `owner` or `manager` grant anywhere,
+   regenerates the break-glass code set (old codes invalidated).
+   Users who hold only `worker` / `client` / `guest` grants have no
+   code set to regenerate.
 
 All three events land in the audit log under `auth.reenroll`.
 
@@ -105,8 +135,12 @@ All three events land in the audit log under `auth.reenroll`.
 - Session cookie: `__Host-miployees_session`.
 - Flags: `Secure`, `HttpOnly`, `SameSite=Lax`, `Path=/`, no `Domain`.
 - Value: opaque random 192-bit token → hashed row in `sessions` table.
-- Lifetime: 30 days for employees, 7 days for managers (configurable).
-  Refreshed on each request after half its lifetime has elapsed.
+- Lifetime: 7 days for users whose highest active grant on any
+  scope is `owner` or `manager`; 30 days for everyone else
+  (configurable). Recomputed on login, not mid-session — a user who
+  gains a manager grant mid-session keeps the longer lifetime until
+  their next login. Refreshed on each request after half its
+  lifetime has elapsed.
 - CSRF: Authenticated SPA requests carry a double-submit token
   (`miployees_csrf` cookie + `X-CSRF` header) for every non-GET. Same
   origin is enforced by `SameSite=Lax` for initial navigation.
@@ -115,7 +149,8 @@ All three events land in the audit log under `auth.reenroll`.
 
 ### Creation
 
-- A manager creates a token via the UI or
+- Any user with the `users.invite` grant-capability (owners and
+  managers by default) creates a token via the UI or
   `POST /api/v1/auth/tokens`:
   ```json
   {
@@ -133,49 +168,55 @@ All three events land in the audit log under `auth.reenroll`.
 
 ### Delegated tokens
 
-A **delegated token** is created by a logged-in user (manager or
-employee) and inherits **all permissions** of that user for as long
-as the user's account is active and unarchived. This is the mechanism
-the embedded chat agents (§11) use to act on behalf of their user.
+A **delegated token** is created by a logged-in user and inherits
+**all permissions** of that user for as long as the user's account is
+active and unarchived. This is the mechanism the embedded chat
+agents (§11) use to act on behalf of their user.
 
 ```json
 POST /api/v1/auth/tokens
 {
-  "name": "manager-chat-agent",
+  "name": "chat-agent",
   "delegate": true,
   "expires_at": "2026-05-16T00:00:00Z",
-  "note": "Embedded agent for manager desktop sidebar"
+  "note": "Embedded agent for desktop sidebar"
 }
 ```
 
 Key properties:
 
-- `delegate_for_kind`: `manager` or `employee` — set from the session
-  creating the token; not caller-supplied.
-- `delegate_for_id`: ULID of the creating user — set from the session.
+- `delegate_for_user_id`: ULID of the creating user — set from the
+  session. Not caller-supplied.
 - `scopes`: **empty**. Permission checks resolve against the
-  delegating user's access, not against explicit token scopes. If the
-  user's permissions change (role edits, property reassignment), the
-  delegated token's effective permissions change immediately.
-- If the delegating user is archived or deactivated, requests with
-  the token return `401` with a clear message.
+  delegating user's `role_grants` (and the work-role narrowing rules
+  in §05), not against explicit token scopes. If the user's grants
+  change (new grant added, existing grant revoked, property
+  reassignment), the delegated token's effective permissions change
+  immediately.
+- If the delegating user is archived, globally deactivated, or loses
+  every non-revoked grant, requests with the token return `401`
+  with a clear message.
 - A delegated token can only be created by a **passkey session** — it
   cannot be created by another token (no transitive delegation).
 - Default TTL: **30 days** (shorter than the 90-day default for scoped
   tokens). A workspace-level setting can raise it, with the same
   noisy warning as for scoped tokens.
 - Revocation: the delegating user can revoke their own delegated
-  tokens; any manager can revoke any delegated token.
+  tokens; any user with the `users.revoke_grant` grant-capability
+  (owners and managers by default) in any scope that the delegating
+  user is active in can revoke that user's delegated tokens.
 
 **`api_token` columns for delegation:**
 
-| column             | type   | notes                                    |
-|--------------------|--------|------------------------------------------|
-| `delegate_for_kind` | text? | nullable; `manager` or `employee`        |
-| `delegate_for_id`  | ULID?  | nullable; references the delegating user |
+| column                | type   | notes                                     |
+|-----------------------|--------|-------------------------------------------|
+| `delegate_for_user_id` | ULID? | nullable; references `users.id`           |
 
-When both are null, the token is a classic scoped token (backward
-compatible). When both are set, it is a delegated token.
+When null the token is a classic scoped token (backward
+compatible). When set, it is a delegated token; the
+`actor_kind` in audit for requests using the token is `user`, with
+`actor_id = delegate_for_user_id`, `agent_label = api_token.name`,
+and the optional `agent_conversation_ref` header propagated in.
 
 ### Scopes
 
@@ -185,7 +226,7 @@ entirely** — permissions are resolved from the delegating user's
 access.
 
 - `tasks:{read,write,complete}`
-- `employees:{read,write}`
+- `users:{read,write}`            (identity, grants, engagements)
 - `properties:{read,write}`
 - `stays:{read,write}`
 - `inventory:{read,write,adjust}`
@@ -197,7 +238,7 @@ access.
 - `llm:{read,call}` — `call` required to execute model calls chargeable
   to the workspace
 - `admin:{impersonate,rotate,purge}` — rare; requires approval of
-  another manager before first use (see §11 approval workflow)
+  another owner or manager before first use (see §11 approval workflow)
 
 `*:read` implied by `*:write`. `admin:*` implies nothing else — it is a
 narrow escape hatch.
@@ -212,8 +253,11 @@ narrow escape hatch.
 
 ### Revocation and rotation
 
-- Any manager can revoke any token. Revocation takes effect within 5
-  seconds (token cache TTL).
+- Any user with the `users.revoke_grant` grant-capability (owners
+  and managers by default) in the token's home workspace can revoke
+  any token in that workspace; scoped tokens and their own delegated
+  tokens are always revocable by the creator. Revocation takes effect
+  within 5 seconds (token cache TTL).
 - Tokens can be rotated in place: the old secret hash is kept alongside
   the new for a configurable overlap (default 1h), so long-running
   agents can reload without downtime.
@@ -238,11 +282,11 @@ narrow escape hatch.
 
 | Situation                                  | Recovery path                                                  |
 |--------------------------------------------|----------------------------------------------------------------|
-| Employee lost phone                        | Any manager clicks "re-issue magic link" on their profile; current passkeys are revoked on registration. |
-| Manager lost only device, has backup code  | Enter recovery code → magic link emailed → register passkey; one backup code is burnt. |
-| Manager lost device + all backup codes, another manager exists | Any other manager can re-issue a magic link to their email. |
-| Last manager locked out completely         | **Host-CLI recovery only in v1.** Stop service, run `miployees admin recover --email ...` on the host, which emits a one-time magic link to stdout. Operator must have shell access to the deployment host. Hosted / SaaS recovery flows (support escalation, out-of-band identity verification) are **out of scope for v1** — see §19. |
-| Employee email address wrong / changed     | Manager updates email on their profile; next magic link goes to the new one. |
+| Worker/client lost phone                   | Any user with `users.revoke_grant` on a shared scope (owners and managers by default) clicks "re-issue magic link" on the user's profile; current passkeys are revoked on registration. |
+| Owner/manager lost only device, has backup code  | Enter recovery code → magic link emailed → register passkey; one backup code is burnt. |
+| Owner/manager lost device + all backup codes, another owner or manager exists on a shared scope | That peer re-issues a magic link to their email. |
+| Last owner/manager locked out completely         | **Host-CLI recovery only in v1.** Stop service, run `miployees admin recover --email ...` on the host, which emits a one-time magic link to stdout. Operator must have shell access to the deployment host. Hosted / SaaS recovery flows (support escalation, out-of-band identity verification) are **out of scope for v1** — see §19. |
+| Email address wrong / changed              | An owner/manager on a shared scope updates email on the user's profile; next magic link goes to the new one. Since email is globally unique (§02), the change fails if another `users` row already holds that address. |
 
 ## Break-glass codes
 
@@ -250,7 +294,7 @@ narrow escape hatch.
 break_glass_code
 ├── id                   ULID PK
 ├── workspace_id         ULID FK
-├── manager_id           ULID FK
+├── user_id              ULID FK
 ├── hash                 argon2id digest of the code
 ├── hash_params          argon2id parameters (for upgrade)
 ├── created_at           tstz
@@ -258,7 +302,8 @@ break_glass_code
 └── consumed_magic_link_id ULID?  populated on redemption
 ```
 
-Redemption: the manager submits the plaintext code to
+Redemption: the user (whose codes were issued because they hold an
+`owner` or `manager` grant) submits the plaintext code to
 `POST /auth/magic/consume` with their email. On success the code's
 `used_at` is set, a fresh `magic_link` is issued (15-min TTL), and its
 id is stored in `consumed_magic_link_id`. A used code is inert even
@@ -278,7 +323,7 @@ if the resulting magic link expires unused.
 - RP ID: configured hostname (e.g. `ops.example.com`).
 - User verification: `required` (matches "passkey" semantics).
 - Authenticator attachment: `platform` preferred, `cross-platform`
-  allowed (YubiKey for managers).
+  allowed (YubiKey for owners/managers).
 - Resident keys (discoverable credentials): `preferred`.
 - Attestation: `none` — we trust the browser's RP ID binding.
 - Algorithms: ES256 (`-7`), RS256 (`-257`) for broader iOS/Android

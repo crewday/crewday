@@ -3,10 +3,10 @@
 ## High-level picture
 
 ```
-+-------------------+         +---------------------------+
-|  Manager browser  |         |  Employee phone (PWA)     |
-|  (React SPA + SW) |         |  (React SPA + SW)         |
-+---------+---------+         +-------------+-------------+
++----------------------------+    +---------------------------+
+|  Owner/Manager browser     |    |  Worker phone (PWA)       |
+|  (React SPA + SW)          |    |  (React SPA + SW)         |
++-------------+--------------+    +-------------+-------------+
           |                                 |
           |   HTTPS, passkey session        |   HTTPS, passkey session
           v                                 v
@@ -76,7 +76,7 @@ clients** to `api.v1.*` using a long-lived API token (§03). The CLI
 
 ### `admin`
 
-- Intended surface for manager-only destructive operations (rotate API
+- Intended surface for owner/manager destructive operations (rotate API
   tokens, export, purge, re-send a magic link) — reachable from web and
   API.
 
@@ -129,7 +129,7 @@ miployees/
 │   ├── api/
 │   │   └── v1/
 │   │       ├── __init__.py
-│   │       ├── employees.py
+│   │       ├── users.py
 │   │       ├── properties.py
 │   │       ├── tasks.py
 │   │       ├── stays.py
@@ -212,8 +212,8 @@ Rationale:
 |------------|---------------------------------------|----------|-----------|--------------|-----------|
 | dev        | local dev loop (uv run, hot reload)   | SQLite   | local fs  | MailHog      | OpenRouter (or a mock) |
 | ci         | pytest + playwright in GH Actions     | SQLite + PG | tmpfs  | fake         | record/replay cassettes |
-| staging    | managers' shared test instance        | Postgres | local fs  | real SMTP    | OpenRouter |
-| prod       | operating household                   | SQLite or Postgres | local fs | real SMTP | OpenRouter |
+| staging    | owners' and managers' shared test instance | Postgres | local fs  | real SMTP    | OpenRouter |
+| prod       | operating workspace                   | SQLite or Postgres | local fs | real SMTP | OpenRouter |
 
 ## Runtime dependencies (pinned families)
 
@@ -249,8 +249,9 @@ FastAPI container.
    `clock.now()` through the `Clock` port. Determinism matters for
    scheduling.
 3. **Every mutation originates from a `RequestContext`** carrying
-   `actor_id`, `actor_kind` (human/agent/system; delegated agents
-   use the human's kind), and an
+   `actor_id`, `actor_kind` (`user | agent | system`; delegated
+   agents use `user` kind with `actor_grant_role` capturing the
+   role under which the action was taken), and an
    `audit_correlation_id`. Persisted into `audit_log` in the same
    transaction as the mutation.
 4. **Bind guard on public interfaces.** Default bind is

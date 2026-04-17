@@ -4,7 +4,7 @@ Two supported recipes; you pick one and stick with it.
 
 ## Recipe A — Single container (SQLite)
 
-Target: a household with ≤10 employees, ≤10 properties. Runs fine on a
+Target: a workspace with ≤10 workers, ≤10 properties. Runs fine on a
 $5/mo 1 vCPU / 1 GB RAM VPS.
 
 ### Image
@@ -112,7 +112,7 @@ Cron:
 0 3 * * * cd /srv/miployees && docker compose exec -T app miployees admin backup --to /backups/
 ```
 
-**Lockout recovery** is host-CLI-only in v1. If the last manager is
+**Lockout recovery** is host-CLI-only in v1. If the last owner is
 locked out, the operator stops the service, runs
 `miployees admin recover --email ...` on the host, and opens the
 magic link printed to stdout. SaaS / hosted-operator recovery flows
@@ -302,7 +302,7 @@ A full env reference lives in `deploy/.env.example`.
 
 ### Metrics
 
-- Prometheus-format at `GET /metrics` (manager-scope API token
+- Prometheus-format at `GET /metrics` (owner/manager-scope API token
   required; not public).
 - Included: HTTP histograms, DB pool gauges, worker-job durations,
   LLM cost counter, email delivery counters, webhook delivery

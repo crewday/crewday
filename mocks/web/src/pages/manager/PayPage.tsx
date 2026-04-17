@@ -132,7 +132,7 @@ export default function PayPage() {
         <p className="muted">These payroll actions always require a manager passkey — the agent approval flow cannot bypass them (§11).</p>
         <ul className="danger-list">
           <li><code className="inline-code">payout_destination.create</code> · <code className="inline-code">payout_destination.update</code></li>
-          <li><code className="inline-code">employee.set_default_pay_destination</code></li>
+          <li><code className="inline-code">work_engagement.set_default_pay_destination</code></li>
           <li>
             <code className="inline-code">POST /payslips/:id/payout_manifest</code>{" "}
             <Chip tone="rust" size="sm">session-only</Chip>

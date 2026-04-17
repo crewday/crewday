@@ -49,10 +49,10 @@
 
 - Playwright, Python bindings. Headed only locally; headless in CI.
 - Covered journeys (minimum for GA):
-  1. Install + first-boot manager enrollment.
-  2. Add property, area, role, employee; invite employee; employee
-     enrolls passkey and completes first task.
-  3. iCal feed imports stays; turnover tasks auto-generate; employee
+  1. Install + first-boot owner enrollment.
+  2. Add property, area, work_role, user; invite user; user enrolls
+     passkey and completes first task.
+  3. iCal feed imports stays; turnover tasks auto-generate; worker
      completes with photo evidence; guest opens welcome link.
   4. Expense submission with receipt; autofill population; approval;
      payslip issuance with reimbursement.
@@ -83,7 +83,7 @@
 ## Load
 
 - Locust scenarios:
-  - "10 employees clocking in at 08:00"
+  - "10 users clocking in at 08:00"
   - "Task list render for a property with 100k tasks history"
   - "Turnover day: 5 simultaneous completions with photo uploads"
 - Pass criteria in §00 (success metrics) drive the budgets.

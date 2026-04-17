@@ -2,6 +2,21 @@
 
 Shapes and vocabulary follow the specs in docs/specs/. The point is to
 make the eventual product feel real — not to simulate it.
+
+v1 identity model (per §02, §03, §05, §22):
+
+- One ``users`` row per human login; authority comes from ``role_grants``
+  keyed by (user, scope_kind, scope_id, grant_role).
+- ``work_engagement`` per (user, workspace) carries pay-pipeline data;
+  pay rules / shifts / payslips / expense claims key off
+  ``work_engagement_id`` rather than ``user_id`` directly.
+- ``work_role`` (previously ``role``) lists the jobs a workspace knows
+  about. ``user_work_role`` (previously ``employee_role``) binds a
+  user to a role within a workspace.
+
+For UI continuity the legacy ``Employee``/``Role`` dataclasses and
+``/api/v1/employees`` endpoints remain; they are now compatibility
+views derived from the canonical tables.
 """
 
 from __future__ import annotations
@@ -43,8 +58,156 @@ class Property:
     locale: str = "fr-FR"
     settings_override: dict[str, Any] = field(default_factory=dict)
     client_org_id: str | None = None  # §22 — null = self-managed
+    owner_user_id: str | None = None  # §22 — nullable FK to users.id
 
 
+# ── v1 identity model (§02, §03, §05) ────────────────────────────────
+
+
+@dataclass
+class Workspace:
+    """A tenancy boundary. v1 ships single-workspace per deployment,
+    but the mock seeds more than one to exercise the shared-property /
+    client-grant flows from §05 and §22."""
+
+    id: str
+    name: str
+    timezone: str = "Europe/Paris"
+    default_currency: str = "EUR"
+    default_country: str = "FR"
+    default_locale: str = "fr-FR"
+
+
+@dataclass
+class User:
+    """A single human login identity (§02 `users` table)."""
+
+    id: str
+    email: str
+    display_name: str
+    timezone: str = "Europe/Paris"
+    languages: list[str] = field(default_factory=list)
+    preferred_locale: str | None = None
+    avatar_file_id: str | None = None
+    primary_workspace_id: str | None = None
+    phone_e164: str | None = None
+    notes_md: str = ""
+    archived_at: datetime | None = None
+
+
+@dataclass
+class RoleGrant:
+    """A permission row: (user, scope_kind, scope_id, grant_role).
+
+    Multiple rows per user are allowed; resolution is most-specific wins
+    (§02 `role_grants`).
+    """
+
+    id: str
+    user_id: str
+    scope_kind: Literal["workspace", "property", "organization"]
+    scope_id: str
+    grant_role: Literal["owner", "manager", "worker", "client", "guest"]
+    binding_org_id: str | None = None
+    capability_override: dict[str, Any] = field(default_factory=dict)
+    started_on: date | None = None
+    ended_on: date | None = None
+    granted_by_user_id: str | None = None
+    revoked_at: datetime | None = None
+    revoke_reason: str | None = None
+
+
+@dataclass
+class WorkRole:
+    """v0 `role` renamed to `work_role` (§05)."""
+
+    id: str
+    workspace_id: str
+    key: str
+    name: str
+    description_md: str = ""
+    icon_glyph: str = ""
+    default_capabilities: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class UserWorkRole:
+    """v0 `employee_role` renamed (§05). Scoped per (user, workspace)."""
+
+    id: str
+    user_id: str
+    workspace_id: str
+    work_role_id: str
+    started_on: date
+    ended_on: date | None = None
+    pay_rule_id: str | None = None
+    capability_override: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class PropertyWorkRoleAssignment:
+    """v0 `property_role_assignment` renamed (§05)."""
+
+    id: str
+    user_work_role_id: str
+    property_id: str
+    schedule_ruleset_id: str | None = None
+    property_pay_rule_id: str | None = None
+    capability_override: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class WorkEngagement:
+    """The per-(user, workspace) pay pipeline (§02, §22).
+
+    Carries engagement_kind which drives whether the user is paid by
+    payslip (`payroll`), via vendor invoice from themselves
+    (`contractor`), or via vendor invoice from a supplier
+    (`agency_supplied`).
+    """
+
+    id: str
+    user_id: str
+    workspace_id: str
+    engagement_kind: Literal["payroll", "contractor", "agency_supplied"] = "payroll"
+    supplier_org_id: str | None = None
+    pay_destination_id: str | None = None
+    reimbursement_destination_id: str | None = None
+    started_on: date = field(default_factory=lambda: date(2024, 1, 1))
+    archived_on: date | None = None
+    notes_md: str = ""
+
+
+@dataclass
+class UserWorkspace:
+    """Derived junction (§02). A user is materialised in every workspace
+    where they hold at least one active grant.
+    """
+
+    user_id: str
+    workspace_id: str
+    source: Literal["workspace_grant", "property_grant", "org_grant", "work_engagement"]
+    added_at: datetime = field(default_factory=lambda: datetime(2026, 1, 1))
+
+
+@dataclass
+class PropertyWorkspace:
+    """A property can belong to more than one workspace (§02).
+
+    `membership_role` says how the workspace relates to the property.
+    """
+
+    property_id: str
+    workspace_id: str
+    membership_role: Literal["owner_workspace", "managed_workspace", "observer_workspace"]
+    added_at: datetime = field(default_factory=lambda: datetime(2026, 1, 1))
+    added_by_user_id: str | None = None
+    added_via: Literal["user", "agent", "system"] = "user"
+
+
+# Legacy alias kept for the web UI's "/api/v1/roles" shape (WorkRole
+# serialises with the same fields; `Role` carries only (id, name) for
+# the starter-list rendering).
 @dataclass
 class Role:
     id: str
@@ -53,6 +216,17 @@ class Role:
 
 @dataclass
 class Employee:
+    """UI-facing compatibility view of a user × workspace × work_engagement.
+
+    In the v1 domain model (§02, §05) this is not a storage entity —
+    it's a composite projection of:
+        users × work_engagement × user_work_role × property_work_role_assignment
+    The mock keeps this dataclass so the existing Jinja/React UI and
+    the ``/api/v1/employees`` alias endpoint stay stable. ``id`` here
+    re-uses the old ``e-...`` slug; ``user_id``, ``work_engagement_id``
+    and ``workspace_id`` point at the canonical rows.
+    """
+
     id: str
     name: str
     roles: list[str]
@@ -74,6 +248,9 @@ class Employee:
     settings_override: dict[str, Any] = field(default_factory=dict)
     engagement_kind: Literal["payroll", "contractor", "agency_supplied"] = "payroll"  # §05, §22
     supplier_org_id: str | None = None  # required iff engagement_kind = agency_supplied
+    user_id: str = ""  # v1 — FK into USERS
+    work_engagement_id: str = ""  # v1 — FK into WORK_ENGAGEMENTS
+    workspace_id: str = ""  # v1 — home workspace for this engagement
 
 
 @dataclass
@@ -110,10 +287,21 @@ class Task:
     turnover_bundle_id: str | None = None
     asset_id: str | None = None
     settings_override: dict[str, Any] = field(default_factory=dict)
+    # v1 — canonical FK name per §02/§06. `assignee_id` kept for the
+    # UI. These mirror each other in the seeded data and writes set
+    # both.
+    assigned_user_id: str = ""
+    workspace_id: str = ""
 
 
 @dataclass
 class Expense:
+    """Per §09 an expense claim belongs to a `work_engagement` (not to
+    a user directly). ``employee_id`` is kept for the legacy UI and
+    mirrors the employee row's id; ``user_id`` and ``work_engagement_id``
+    are the v1 canonical pointers.
+    """
+
     id: str
     employee_id: str
     amount_cents: int
@@ -124,6 +312,8 @@ class Expense:
     note: str
     ocr_confidence: float | None = None
     category: str | None = None
+    user_id: str = ""
+    work_engagement_id: str = ""
 
 
 @dataclass
@@ -147,6 +337,8 @@ class Leave:
     category: Literal["vacation", "sick", "personal", "bereavement", "other"]
     note: str
     approved_at: datetime | None = None
+    user_id: str = ""
+    decided_by_user_id: str | None = None
 
 
 @dataclass
@@ -226,6 +418,11 @@ class Issue:
 
 @dataclass
 class PaySlip:
+    """Pay-pipeline row — belongs to a `work_engagement` (§09, §22).
+    ``employee_id`` preserved for UI; ``work_engagement_id`` is the
+    canonical FK.
+    """
+
     id: str
     employee_id: str
     period_starts: date
@@ -239,6 +436,8 @@ class PaySlip:
     currency: str = "EUR"
     locale: str = "fr-FR"
     jurisdiction: str = "FR"
+    work_engagement_id: str = ""
+    user_id: str = ""
 
 
 @dataclass
@@ -267,13 +466,24 @@ class LLMCall:
 
 @dataclass
 class AuditEntry:
+    """v1 `actor_kind` collapses to `user | agent | system` (§02).
+
+    The grant under which a human acted is captured in
+    ``actor_grant_role``; it's null when the action is identity-scoped
+    (e.g. a user editing their own profile) or when the actor is not
+    a user.
+    """
+
     at: datetime
-    actor_kind: Literal["manager", "employee", "agent", "system"]
+    actor_kind: Literal["user", "agent", "system"]
     actor: str
     action: str
     target: str
     via: Literal["web", "api", "cli", "worker"]
     reason: str | None = None
+    actor_grant_role: Literal["owner", "manager", "worker", "client"] | None = None
+    actor_id: str | None = None
+    agent_label: str | None = None
 
 
 @dataclass
@@ -298,6 +508,14 @@ class Message:
 
 @dataclass
 class Shift:
+    """Pay-pipeline row — belongs to a `work_engagement` (§09).
+
+    v1 renames ``employee_id`` to ``work_engagement_id``; the
+    denormalised ``user_id`` is stored alongside for fast "who was
+    working?" queries. The legacy ``employee_id`` alias stays wired
+    to the employee compat row id so the UI keeps working.
+    """
+
     id: str
     employee_id: str
     property_id: str
@@ -309,10 +527,14 @@ class Shift:
     method_in: Literal["manual", "auto", "geo"] = "manual"
     method_out: Literal["manual", "auto", "geo"] | None = None
     client_org_id: str | None = None  # §22 — derived cache from property.client_org_id at close
+    work_engagement_id: str = ""
+    user_id: str = ""
 
 
 @dataclass
 class PayRule:
+    """Pay-pipeline row — belongs to a `work_engagement` (§09)."""
+
     id: str
     employee_id: str
     property_id: str | None
@@ -321,6 +543,7 @@ class PayRule:
     currency: str
     effective_from: date
     effective_until: date | None = None
+    work_engagement_id: str = ""
 
 
 @dataclass
@@ -336,11 +559,13 @@ class PayPeriod:
 
 @dataclass
 class InventoryMovement:
+    """`actor_kind` collapses to `user | agent | system` in v1 (§02)."""
+
     id: str
     item_id: str
     delta: int
     reason: Literal["restock", "consume", "adjust", "waste", "transfer_in", "transfer_out", "audit_correction"]
-    actor_kind: Literal["manager", "employee", "agent", "system"]
+    actor_kind: Literal["user", "agent", "system"]
     actor_id: str
     occurred_at: datetime
     note: str | None = None
@@ -362,9 +587,15 @@ class StayLifecycleRule:
 
 @dataclass
 class TaskComment:
+    """`author_kind` collapses to `user | agent | system` in v1 (§02).
+
+    Manager vs. worker authoring is recovered from the author's
+    `role_grants` on the task's workspace.
+    """
+
     id: str
     task_id: str
-    author_kind: Literal["employee", "manager", "agent", "system"]
+    author_kind: Literal["user", "agent", "system"]
     author_id: str
     body_md: str
     created_at: datetime
@@ -450,6 +681,7 @@ class AssetDocument:
 class Organization:
     id: str
     name: str
+    workspace_id: str = ""  # §22 — the workspace this org row belongs to
     is_client: bool = False
     is_supplier: bool = False
     legal_name: str | None = None
@@ -458,14 +690,34 @@ class Organization:
     contacts: list[dict] = field(default_factory=list)
     notes: str | None = None
     default_pay_destination_stub: str | None = None  # e.g. "•• FR-07" when is_supplier
+    portal_user_id: str | None = None  # convenience pointer; canonical login is via role_grants
 
 
 @dataclass
 class ClientRate:
+    """Per (client_org, work_role) billable rate (§22).
+
+    v1 split: per-user overrides live on a separate `client_user_rate`
+    row (below) rather than overloading this one with a nullable
+    `user_id` column.
+    """
+
     id: str
     client_org_id: str
-    role_id: str | None  # null when a per-employee override; role-based otherwise
-    employee_id: str | None  # set for client_employee_rate overrides
+    work_role_id: str
+    hourly_cents: int
+    currency: str
+    effective_from: date
+    effective_to: date | None = None
+
+
+@dataclass
+class ClientUserRate:
+    """Per (client_org, user) override, previously `client_employee_rate`."""
+
+    id: str
+    client_org_id: str
+    user_id: str
     hourly_cents: int
     currency: str
     effective_from: date
@@ -474,16 +726,21 @@ class ClientRate:
 
 @dataclass
 class ShiftBilling:
+    """v1 names (§22): `user_id` + `work_engagement_id`; rate_source
+    uses `client_user_rate` instead of the v0 `client_employee_rate`.
+    """
+
     id: str
     shift_id: str
     client_org_id: str
-    employee_id: str
+    user_id: str
     currency: str
     billable_minutes: int
     hourly_cents: int
     subtotal_cents: int
-    rate_source: Literal["client_employee_rate", "client_rate", "unpriced"]
+    rate_source: Literal["client_user_rate", "client_rate", "unpriced"]
     rate_source_id: str | None = None
+    work_engagement_id: str = ""
 
 
 @dataclass
@@ -495,20 +752,21 @@ class WorkOrder:
         "draft", "quoted", "accepted", "in_progress",
         "completed", "cancelled", "invoiced", "paid",
     ]
-    assigned_employee_id: str | None
+    assigned_user_id: str | None
     currency: str
     client_org_id: str | None = None  # derived from property at creation
     asset_id: str | None = None
     description: str | None = None
     accepted_quote_id: str | None = None
     created_at: datetime | None = None
+    requested_by_user_id: str | None = None
 
 
 @dataclass
 class Quote:
     id: str
     work_order_id: str
-    employee_id: str
+    submitted_by_user_id: str
     currency: str
     subtotal_cents: int
     tax_cents: int
@@ -518,7 +776,9 @@ class Quote:
     valid_until: date | None = None
     submitted_at: datetime | None = None
     decided_at: datetime | None = None
+    decided_by_user_id: str | None = None
     decision_note: str | None = None
+    work_engagement_id: str | None = None
 
 
 @dataclass
@@ -532,18 +792,27 @@ class VendorInvoice:
     status: Literal["draft", "submitted", "approved", "rejected", "paid", "voided"]
     work_order_id: str | None = None
     property_id: str | None = None
-    vendor_employee_id: str | None = None
+    vendor_user_id: str | None = None
+    vendor_work_engagement_id: str | None = None
     vendor_organization_id: str | None = None
     due_on: date | None = None
     payout_destination_stub: str | None = None
     lines: list[dict] = field(default_factory=list)
     submitted_at: datetime | None = None
     approved_at: datetime | None = None
+    decided_by_user_id: str | None = None
     paid_at: datetime | None = None
+    paid_by_user_id: str | None = None
     decision_note: str | None = None
 
 
 # ── Canonical starter data ───────────────────────────────────────────
+
+WORKSPACES: list[Workspace] = [
+    Workspace("ws-bernard",  "Bernard workspace"),
+    Workspace("ws-vincent",  "VincentOps"),
+    Workspace("ws-cleanco",  "AgencyOps — CleanCo"),
+]
 
 PROPERTIES: list[Property] = [
     Property("p-villa-sud", "Villa Sud", "Antibes", "Europe/Paris", "moss", "str",
@@ -566,8 +835,23 @@ PROPERTIES: list[Property] = [
                  "time.geofence_required": False,
                  "scheduling.horizon_days": 14,
              }),
+    # Vincent scenario properties (§05 example).
+    Property("p-villa-lac", "Villa du Lac", "Annecy", "Europe/Paris", "moss", "vacation",
+             areas=["Master bedroom", "Kitchen", "Living room", "Pool", "Garden"],
+             settings_override={
+                 "evidence.policy": "optional",
+             },
+             client_org_id="org-dupont-vincent",
+             owner_user_id="u-vincent"),
+    Property("p-seaside", "Seaside Apt", "Cassis", "Europe/Paris", "sky", "vacation",
+             areas=["Living room", "Kitchen", "Bedroom", "Terrace"],
+             client_org_id=None,
+             owner_user_id="u-vincent"),
 ]
 
+# v1: `work_role` (the workspace-defined job bundle). The shorter
+# `Role` shape is retained for the UI listings; `WORK_ROLES` carries
+# the full v1 row.
 ROLES: list[Role] = [
     Role("r-housekeeper", "Housekeeper"),
     Role("r-cook", "Cook"),
@@ -575,6 +859,20 @@ ROLES: list[Role] = [
     Role("r-gardener", "Gardener"),
     Role("r-handyman", "Handyman"),
     Role("r-poolcare", "Pool care"),
+]
+
+WORK_ROLES: list[WorkRole] = [
+    # Bernard workspace catalog (matches existing UI).
+    WorkRole("r-housekeeper", "ws-bernard", "maid",        "Housekeeper", icon_glyph="broom"),
+    WorkRole("r-cook",        "ws-bernard", "cook",        "Cook",        icon_glyph="flame"),
+    WorkRole("r-driver",      "ws-bernard", "driver",      "Driver",      icon_glyph="car"),
+    WorkRole("r-gardener",    "ws-bernard", "gardener",    "Gardener",    icon_glyph="sprout"),
+    WorkRole("r-handyman",    "ws-bernard", "handyman",    "Handyman",    icon_glyph="wrench"),
+    WorkRole("r-poolcare",    "ws-bernard", "pool_tech",   "Pool care",   icon_glyph="pool"),
+    # VincentOps — Vincent's own workspace (just a driver for Rachid).
+    WorkRole("wr-vincent-driver", "ws-vincent", "driver", "Driver", icon_glyph="car"),
+    # CleanCo — serves many clients, exposes a maid role.
+    WorkRole("wr-cleanco-maid",   "ws-cleanco", "maid",   "Maid",   icon_glyph="broom"),
 ]
 
 
@@ -620,6 +918,7 @@ EMPLOYEES: list[Employee] = [
             "time.clock_mode": "auto",
             "time.auto_clock_idle_minutes": 30,
         },
+        user_id="u-maria", work_engagement_id="we-maria-bernard", workspace_id="ws-bernard",
     ),
     Employee(
         "e-arun", "Arun Patel", ["Driver"], ["p-villa-sud"],
@@ -631,6 +930,7 @@ EMPLOYEES: list[Employee] = [
         settings_override={
             "time.geofence_required": True,
         },
+        user_id="u-arun", work_engagement_id="we-arun-bernard", workspace_id="ws-bernard",
     ),
     Employee(
         "e-ben", "Ben Traoré", ["Gardener", "Pool care"], ["p-villa-sud"],
@@ -643,6 +943,7 @@ EMPLOYEES: list[Employee] = [
             "time.clock_mode": "auto",
             "time.auto_clock_idle_minutes": 20,
         },
+        user_id="u-ben", work_engagement_id="we-ben-bernard", workspace_id="ws-bernard",
     ),
     Employee(
         "e-ana", "Ana Rossi", ["Housekeeper", "Cook"], ["p-apt-3b", "p-chalet"],
@@ -658,6 +959,7 @@ EMPLOYEES: list[Employee] = [
         # CleanCo-supplied maid; billed to us by the supplier org, not by Ana.
         engagement_kind="agency_supplied",
         supplier_org_id="org-cleanco",
+        user_id="u-ana", work_engagement_id="we-ana-bernard", workspace_id="ws-bernard",
     ),
     Employee(
         "e-sam", "Sam Leclerc", ["Handyman"], ["p-villa-sud", "p-chalet"],
@@ -668,7 +970,211 @@ EMPLOYEES: list[Employee] = [
         clock_mode="manual", language="fr",
         # Freelance handyman — quotes + vendor invoices, no payslip.
         engagement_kind="contractor",
+        user_id="u-sam", work_engagement_id="we-sam-bernard", workspace_id="ws-bernard",
     ),
+    # ── Vincent scenario (§05 example) ───────────────────────────────
+    # Rachid works only in VincentOps; Joselyn and Julie only in AgencyOps.
+    # These rows make the new identity model visible in the existing
+    # "Employees" UI while their canonical truth is in
+    # USERS / WORK_ENGAGEMENTS / USER_WORK_ROLES below.
+    Employee(
+        "e-rachid", "Rachid Haddad", ["Driver"], ["p-villa-lac", "p-seaside"],
+        "RH", "+33 6 88 11 22 33", "rachid@example.com", date(2024, 6, 1),
+        capabilities=_caps(),
+        workspaces=["ws-vincent"],
+        villas=["p-villa-lac", "p-seaside"],
+        clock_mode="manual", language="fr",
+        user_id="u-rachid", work_engagement_id="we-rachid-vincent", workspace_id="ws-vincent",
+    ),
+    Employee(
+        "e-joselyn", "Joselyn Rivera", ["Housekeeper"], ["p-villa-lac"],
+        "JR", "+33 6 99 22 33 44", "joselyn@example.com", date(2025, 2, 1),
+        capabilities=_caps(**{"chat.assistant": True}),
+        workspaces=["ws-cleanco"],
+        villas=["p-villa-lac"],
+        clock_mode="auto", auto_clock_idle_minutes=25, language="es",
+        user_id="u-joselyn", work_engagement_id="we-joselyn-cleanco", workspace_id="ws-cleanco",
+    ),
+    Employee(
+        "e-julie", "Julie Moreau", ["Housekeeper"], [],
+        "JM", "+33 6 44 33 22 11", "julie@example.com", date(2023, 9, 1),
+        capabilities=_caps(**{"chat.assistant": True}),
+        workspaces=["ws-cleanco"],
+        villas=[],
+        clock_mode="manual", language="fr",
+        user_id="u-julie", work_engagement_id="we-julie-cleanco", workspace_id="ws-cleanco",
+    ),
+]
+
+
+# ── v1 canonical identity rows ──────────────────────────────────────
+
+USERS: list[User] = [
+    # Bernard-workspace humans (legacy demo).
+    User("u-elodie",  "elodie.bernard@example.com",  "Élodie Bernard",  languages=["fr", "en"],
+         preferred_locale="fr-FR", primary_workspace_id="ws-bernard",
+         phone_e164="+33 6 11 22 33 44"),
+    User("u-maria",   "maria@example.com",           "Maria Alvarez",   languages=["fr"],
+         preferred_locale="fr-FR", primary_workspace_id="ws-bernard",
+         phone_e164="+33 6 12 34 56 78"),
+    User("u-arun",    "arun@example.com",            "Arun Patel",      languages=["en", "hi"],
+         preferred_locale="en-GB", primary_workspace_id="ws-bernard",
+         phone_e164="+33 6 22 45 67 89"),
+    User("u-ben",     "ben@example.com",             "Ben Traoré",      languages=["fr"],
+         preferred_locale="fr-FR", primary_workspace_id="ws-bernard",
+         phone_e164="+33 6 33 56 78 90"),
+    User("u-ana",     "ana@example.com",             "Ana Rossi",       languages=["fr", "it"],
+         preferred_locale="fr-FR", primary_workspace_id="ws-bernard",
+         phone_e164="+33 6 44 67 89 01"),
+    User("u-sam",     "sam@example.com",             "Sam Leclerc",     languages=["fr"],
+         preferred_locale="fr-FR", primary_workspace_id="ws-bernard",
+         phone_e164="+33 6 55 78 90 12"),
+    # Vincent scenario.
+    User("u-vincent", "vincent.dupont@example.com", "Vincent Dupont",   languages=["fr", "en"],
+         preferred_locale="fr-FR", primary_workspace_id="ws-vincent",
+         phone_e164="+33 6 77 88 99 00"),
+    User("u-rachid",  "rachid@example.com",          "Rachid Haddad",   languages=["fr", "ar"],
+         preferred_locale="fr-FR", primary_workspace_id="ws-vincent",
+         phone_e164="+33 6 88 11 22 33"),
+    User("u-joselyn", "joselyn@example.com",         "Joselyn Rivera",  languages=["es", "fr"],
+         preferred_locale="es-ES", primary_workspace_id="ws-cleanco",
+         phone_e164="+33 6 99 22 33 44"),
+    User("u-julie",   "julie@example.com",           "Julie Moreau",    languages=["fr"],
+         preferred_locale="fr-FR", primary_workspace_id="ws-cleanco",
+         phone_e164="+33 6 44 33 22 11"),
+]
+
+
+ROLE_GRANTS: list[RoleGrant] = [
+    # Élodie owns the Bernard workspace (legacy demo).
+    RoleGrant("rg-elodie-owner", "u-elodie", "workspace", "ws-bernard",
+              "owner", started_on=date(2024, 1, 1)),
+    # Maria, Arun, Ben, Ana, Sam hold worker grants on ws-bernard.
+    RoleGrant("rg-maria-worker", "u-maria", "workspace", "ws-bernard",
+              "worker", started_on=date(2024, 3, 1), granted_by_user_id="u-elodie"),
+    RoleGrant("rg-arun-worker",  "u-arun",  "workspace", "ws-bernard",
+              "worker", started_on=date(2024, 9, 14), granted_by_user_id="u-elodie"),
+    RoleGrant("rg-ben-worker",   "u-ben",   "workspace", "ws-bernard",
+              "worker", started_on=date(2023, 5, 20), granted_by_user_id="u-elodie"),
+    RoleGrant("rg-ana-worker",   "u-ana",   "workspace", "ws-bernard",
+              "worker", started_on=date(2024, 11, 2), granted_by_user_id="u-elodie"),
+    RoleGrant("rg-sam-worker",   "u-sam",   "workspace", "ws-bernard",
+              "worker", started_on=date(2025, 1, 9), granted_by_user_id="u-elodie"),
+
+    # ── Vincent scenario (§05 example) ───────────────────────────────
+    # Vincent owns his own workspace and is an organization owner for
+    # his billing entity (DupontFamily). He also holds a CLIENT grant
+    # on CleanCo's AgencyOps workspace, narrowed by binding_org_id
+    # so he only sees data billed to his own org.
+    RoleGrant("rg-vincent-owner-vincent", "u-vincent", "workspace", "ws-vincent",
+              "owner", started_on=date(2024, 1, 1)),
+    RoleGrant("rg-vincent-owner-org", "u-vincent", "organization", "org-dupont-vincent",
+              "owner", started_on=date(2024, 1, 1)),
+    RoleGrant("rg-vincent-client-cleanco", "u-vincent", "workspace", "ws-cleanco",
+              "client", binding_org_id="org-dupont-vincent",
+              started_on=date(2024, 6, 1), granted_by_user_id="u-julie"),
+    # Rachid is a worker in VincentOps only.
+    RoleGrant("rg-rachid-worker", "u-rachid", "workspace", "ws-vincent",
+              "worker", started_on=date(2024, 6, 1), granted_by_user_id="u-vincent"),
+    # Julie manages CleanCo's AgencyOps workspace.
+    RoleGrant("rg-julie-manager", "u-julie", "workspace", "ws-cleanco",
+              "manager", started_on=date(2023, 9, 1)),
+    # Joselyn works at AgencyOps.
+    RoleGrant("rg-joselyn-worker", "u-joselyn", "workspace", "ws-cleanco",
+              "worker", started_on=date(2025, 2, 1), granted_by_user_id="u-julie"),
+]
+
+
+WORK_ENGAGEMENTS: list[WorkEngagement] = [
+    # Bernard workspace — five engagements (legacy demo).
+    WorkEngagement("we-maria-bernard", "u-maria", "ws-bernard",
+                   engagement_kind="payroll", started_on=date(2024, 3, 1)),
+    WorkEngagement("we-arun-bernard", "u-arun", "ws-bernard",
+                   engagement_kind="payroll", started_on=date(2024, 9, 14)),
+    WorkEngagement("we-ben-bernard", "u-ben", "ws-bernard",
+                   engagement_kind="payroll", started_on=date(2023, 5, 20)),
+    WorkEngagement("we-ana-bernard", "u-ana", "ws-bernard",
+                   engagement_kind="agency_supplied", supplier_org_id="org-cleanco",
+                   started_on=date(2024, 11, 2)),
+    WorkEngagement("we-sam-bernard", "u-sam", "ws-bernard",
+                   engagement_kind="contractor", started_on=date(2025, 1, 9)),
+    # Vincent scenario.
+    WorkEngagement("we-rachid-vincent", "u-rachid", "ws-vincent",
+                   engagement_kind="payroll", started_on=date(2024, 6, 1)),
+    WorkEngagement("we-joselyn-cleanco", "u-joselyn", "ws-cleanco",
+                   engagement_kind="payroll", started_on=date(2025, 2, 1)),
+    WorkEngagement("we-julie-cleanco", "u-julie", "ws-cleanco",
+                   engagement_kind="payroll", started_on=date(2023, 9, 1)),
+]
+
+
+USER_WORK_ROLES: list[UserWorkRole] = [
+    # Bernard workspace.
+    UserWorkRole("uwr-maria-housekeeper", "u-maria", "ws-bernard",
+                 "r-housekeeper", started_on=date(2024, 3, 1)),
+    UserWorkRole("uwr-arun-driver", "u-arun", "ws-bernard",
+                 "r-driver", started_on=date(2024, 9, 14)),
+    UserWorkRole("uwr-ben-gardener", "u-ben", "ws-bernard",
+                 "r-gardener", started_on=date(2023, 5, 20)),
+    UserWorkRole("uwr-ben-poolcare", "u-ben", "ws-bernard",
+                 "r-poolcare", started_on=date(2023, 5, 20)),
+    UserWorkRole("uwr-ana-housekeeper", "u-ana", "ws-bernard",
+                 "r-housekeeper", started_on=date(2024, 11, 2)),
+    UserWorkRole("uwr-ana-cook", "u-ana", "ws-bernard",
+                 "r-cook", started_on=date(2024, 11, 2)),
+    UserWorkRole("uwr-sam-handyman", "u-sam", "ws-bernard",
+                 "r-handyman", started_on=date(2025, 1, 9)),
+    # Vincent scenario.
+    UserWorkRole("uwr-rachid-driver", "u-rachid", "ws-vincent",
+                 "wr-vincent-driver", started_on=date(2024, 6, 1)),
+    UserWorkRole("uwr-joselyn-maid", "u-joselyn", "ws-cleanco",
+                 "wr-cleanco-maid", started_on=date(2025, 2, 1)),
+]
+
+
+PROPERTY_WORK_ROLE_ASSIGNMENTS: list[PropertyWorkRoleAssignment] = [
+    # Rachid drives for both Villa du Lac and Seaside Apt.
+    PropertyWorkRoleAssignment("pwra-rachid-lac",     "uwr-rachid-driver", "p-villa-lac"),
+    PropertyWorkRoleAssignment("pwra-rachid-seaside", "uwr-rachid-driver", "p-seaside"),
+    # Joselyn is CleanCo's maid at Villa du Lac only (she has other
+    # CleanCo clients too, but they are out of scope for the mock).
+    PropertyWorkRoleAssignment("pwra-joselyn-lac",    "uwr-joselyn-maid",  "p-villa-lac"),
+]
+
+
+PROPERTY_WORKSPACES: list[PropertyWorkspace] = [
+    # Bernard — each property is home-scoped to ws-bernard.
+    PropertyWorkspace("p-villa-sud", "ws-bernard", "owner_workspace",
+                      added_by_user_id="u-elodie"),
+    PropertyWorkspace("p-apt-3b",    "ws-bernard", "owner_workspace",
+                      added_by_user_id="u-elodie"),
+    PropertyWorkspace("p-chalet",    "ws-bernard", "owner_workspace",
+                      added_by_user_id="u-elodie"),
+    # Vincent scenario — Villa du Lac belongs to both VincentOps (owner)
+    # and AgencyOps (managed). Seaside Apt only to VincentOps.
+    PropertyWorkspace("p-villa-lac", "ws-vincent", "owner_workspace",
+                      added_by_user_id="u-vincent"),
+    PropertyWorkspace("p-villa-lac", "ws-cleanco", "managed_workspace",
+                      added_by_user_id="u-vincent"),
+    PropertyWorkspace("p-seaside",   "ws-vincent", "owner_workspace",
+                      added_by_user_id="u-vincent"),
+]
+
+
+USER_WORKSPACES: list[UserWorkspace] = [
+    # Derived junction; real system recomputes this from ROLE_GRANTS +
+    # WORK_ENGAGEMENTS + PROPERTY_WORKSPACES. Seeded here for the UI.
+    UserWorkspace("u-elodie",  "ws-bernard", "workspace_grant"),
+    UserWorkspace("u-maria",   "ws-bernard", "workspace_grant"),
+    UserWorkspace("u-arun",    "ws-bernard", "workspace_grant"),
+    UserWorkspace("u-ben",     "ws-bernard", "workspace_grant"),
+    UserWorkspace("u-ana",     "ws-bernard", "workspace_grant"),
+    UserWorkspace("u-sam",     "ws-bernard", "workspace_grant"),
+    UserWorkspace("u-vincent", "ws-vincent", "workspace_grant"),
+    UserWorkspace("u-vincent", "ws-cleanco", "workspace_grant"),  # client grant
+    UserWorkspace("u-rachid",  "ws-vincent", "workspace_grant"),
+    UserWorkspace("u-joselyn", "ws-cleanco", "workspace_grant"),
+    UserWorkspace("u-julie",   "ws-cleanco", "workspace_grant"),
 ]
 
 STAYS: list[Stay] = [
@@ -780,11 +1286,16 @@ TASKS: list[Task] = [
 
 
 EXPENSES: list[Expense] = [
-    Expense("x-1", "e-maria", 4280, "EUR", "Carrefour",   datetime(2026, 4, 14, 17, 32), "submitted", "Cleaning supplies — bleach, sponges, 2× fresh towels", ocr_confidence=0.96, category="supplies"),
-    Expense("x-2", "e-arun",  1890, "EUR", "Total Energies", datetime(2026, 4, 13, 19, 5), "approved", "Fuel — Johnson airport run", ocr_confidence=0.99, category="fuel"),
-    Expense("x-3", "e-ben",  12500, "EUR", "Pool Pro",    datetime(2026, 4, 10, 11, 22), "submitted", "Chlorine tablets (3 month supply) + replacement skimmer basket", ocr_confidence=0.94, category="maintenance"),
-    Expense("x-4", "e-ana",   2210, "EUR", "Marché Provence", datetime(2026, 4, 11, 9, 40), "approved", "Welcome-basket groceries — Apt 3B", category="food"),
-    Expense("x-5", "e-sam",   5780, "EUR", "Brico Dépôt", datetime(2026, 4, 9, 14, 58), "reimbursed", "Door handles, screws, wood filler", category="maintenance"),
+    Expense("x-1", "e-maria", 4280, "EUR", "Carrefour",   datetime(2026, 4, 14, 17, 32), "submitted", "Cleaning supplies — bleach, sponges, 2× fresh towels", ocr_confidence=0.96, category="supplies",
+            user_id="u-maria", work_engagement_id="we-maria-bernard"),
+    Expense("x-2", "e-arun",  1890, "EUR", "Total Energies", datetime(2026, 4, 13, 19, 5), "approved", "Fuel — Johnson airport run", ocr_confidence=0.99, category="fuel",
+            user_id="u-arun", work_engagement_id="we-arun-bernard"),
+    Expense("x-3", "e-ben",  12500, "EUR", "Pool Pro",    datetime(2026, 4, 10, 11, 22), "submitted", "Chlorine tablets (3 month supply) + replacement skimmer basket", ocr_confidence=0.94, category="maintenance",
+            user_id="u-ben", work_engagement_id="we-ben-bernard"),
+    Expense("x-4", "e-ana",   2210, "EUR", "Marché Provence", datetime(2026, 4, 11, 9, 40), "approved", "Welcome-basket groceries — Apt 3B", category="food",
+            user_id="u-ana", work_engagement_id="we-ana-bernard"),
+    Expense("x-5", "e-sam",   5780, "EUR", "Brico Dépôt", datetime(2026, 4, 9, 14, 58), "reimbursed", "Door handles, screws, wood filler", category="maintenance",
+            user_id="u-sam", work_engagement_id="we-sam-bernard"),
 ]
 
 
@@ -815,11 +1326,15 @@ APPROVALS: list[ApprovalRequest] = [
 
 LEAVES: list[Leave] = [
     Leave("lv-1", "e-ben",   date(2026, 4, 18), date(2026, 4, 21), "personal",  "Family visit — Bordeaux",
-          approved_at=datetime(2026, 4, 3, 11, 0)),
-    Leave("lv-2", "e-ana",   date(2026, 5, 1),  date(2026, 5, 3),  "vacation",  "Long weekend"),
-    Leave("lv-3", "e-sam",   date(2026, 4, 22), date(2026, 4, 22), "sick",      "Migraine — will try to make Thursday"),
+          approved_at=datetime(2026, 4, 3, 11, 0),
+          user_id="u-ben", decided_by_user_id="u-elodie"),
+    Leave("lv-2", "e-ana",   date(2026, 5, 1),  date(2026, 5, 3),  "vacation",  "Long weekend",
+          user_id="u-ana"),
+    Leave("lv-3", "e-sam",   date(2026, 4, 22), date(2026, 4, 22), "sick",      "Migraine — will try to make Thursday",
+          user_id="u-sam"),
     Leave("lv-4", "e-arun",  date(2026, 6, 15), date(2026, 6, 29), "vacation",  "Annual trip home — India",
-          approved_at=datetime(2026, 2, 20, 10, 15)),
+          approved_at=datetime(2026, 2, 20, 10, 15),
+          user_id="u-arun", decided_by_user_id="u-elodie"),
 ]
 
 
@@ -938,16 +1453,26 @@ ISSUES: list[Issue] = [
 
 
 PAYSLIPS: list[PaySlip] = [
-    PaySlip("ps-1", "e-maria", date(2026, 3, 1), date(2026, 3, 31), 240000, 6420, 246420, "paid", 168.5, 4.0),
-    PaySlip("ps-2", "e-arun",  date(2026, 3, 1), date(2026, 3, 31), 120000, 1890, 121890, "paid", 84.0, 0),
-    PaySlip("ps-3", "e-ben",   date(2026, 3, 1), date(2026, 3, 31), 180000, 0,    180000, "paid", 104.0, 2.0),
-    PaySlip("ps-4", "e-ana",   date(2026, 3, 1), date(2026, 3, 31), 210000, 2210, 212210, "paid", 142.0, 0),
-    PaySlip("ps-5", "e-sam",   date(2026, 3, 1), date(2026, 3, 31), 160000, 5780, 165780, "paid", 96.0, 0),
-    PaySlip("ps-6", "e-maria", date(2026, 4, 1), date(2026, 4, 30), 248000, 4280, 252280, "draft", 170.0, 6.0),
-    PaySlip("ps-7", "e-arun",  date(2026, 4, 1), date(2026, 4, 30), 118000, 0,    118000, "draft", 82.0, 0),
-    PaySlip("ps-8", "e-ben",   date(2026, 4, 1), date(2026, 4, 30), 170000, 12500, 182500, "draft", 98.0, 0),
-    PaySlip("ps-9", "e-ana",   date(2026, 4, 1), date(2026, 4, 30), 212000, 2210, 214210, "draft", 144.0, 1.0),
-    PaySlip("ps-10","e-sam",   date(2026, 4, 1), date(2026, 4, 30), 162000, 0,    162000, "draft", 97.0, 0),
+    PaySlip("ps-1", "e-maria", date(2026, 3, 1), date(2026, 3, 31), 240000, 6420, 246420, "paid", 168.5, 4.0,
+            work_engagement_id="we-maria-bernard", user_id="u-maria"),
+    PaySlip("ps-2", "e-arun",  date(2026, 3, 1), date(2026, 3, 31), 120000, 1890, 121890, "paid", 84.0, 0,
+            work_engagement_id="we-arun-bernard", user_id="u-arun"),
+    PaySlip("ps-3", "e-ben",   date(2026, 3, 1), date(2026, 3, 31), 180000, 0,    180000, "paid", 104.0, 2.0,
+            work_engagement_id="we-ben-bernard", user_id="u-ben"),
+    PaySlip("ps-4", "e-ana",   date(2026, 3, 1), date(2026, 3, 31), 210000, 2210, 212210, "paid", 142.0, 0,
+            work_engagement_id="we-ana-bernard", user_id="u-ana"),
+    PaySlip("ps-5", "e-sam",   date(2026, 3, 1), date(2026, 3, 31), 160000, 5780, 165780, "paid", 96.0, 0,
+            work_engagement_id="we-sam-bernard", user_id="u-sam"),
+    PaySlip("ps-6", "e-maria", date(2026, 4, 1), date(2026, 4, 30), 248000, 4280, 252280, "draft", 170.0, 6.0,
+            work_engagement_id="we-maria-bernard", user_id="u-maria"),
+    PaySlip("ps-7", "e-arun",  date(2026, 4, 1), date(2026, 4, 30), 118000, 0,    118000, "draft", 82.0, 0,
+            work_engagement_id="we-arun-bernard", user_id="u-arun"),
+    PaySlip("ps-8", "e-ben",   date(2026, 4, 1), date(2026, 4, 30), 170000, 12500, 182500, "draft", 98.0, 0,
+            work_engagement_id="we-ben-bernard", user_id="u-ben"),
+    PaySlip("ps-9", "e-ana",   date(2026, 4, 1), date(2026, 4, 30), 212000, 2210, 214210, "draft", 144.0, 1.0,
+            work_engagement_id="we-ana-bernard", user_id="u-ana"),
+    PaySlip("ps-10","e-sam",   date(2026, 4, 1), date(2026, 4, 30), 162000, 0,    162000, "draft", 97.0, 0,
+            work_engagement_id="we-sam-bernard", user_id="u-sam"),
 ]
 
 
@@ -981,16 +1506,35 @@ LLM_CALLS: list[LLMCall] = [
 
 
 AUDIT: list[AuditEntry] = [
-    AuditEntry(datetime(2026, 4, 15, 10, 8, 12), "manager", "Élodie Bernard", "task.complete",          "t-1",  "web", None),
-    AuditEntry(datetime(2026, 4, 15, 9, 47, 2),  "agent",   "digest-agent",   "agent_action.requested", "a-1",  "api", "Auto-reassign pool coverage (Ben on leave)"),
-    AuditEntry(datetime(2026, 4, 15, 9, 41, 0),  "employee","Maria Alvarez",  "shift.clock_in",         "sh-…", "web", None),
-    AuditEntry(datetime(2026, 4, 15, 9, 12, 18), "agent",   "digest-agent",   "digest.sent",            "—",    "api", "Morning manager digest"),
-    AuditEntry(datetime(2026, 4, 15, 8, 54, 1),  "agent",   "procurement-agent", "expense.autofill",    "x-1",  "api", None),
-    AuditEntry(datetime(2026, 4, 15, 8, 41, 12), "system",  "redaction-layer", "llm.call.blocked",      "—",    "worker", "IBAN-like string in receipt text"),
-    AuditEntry(datetime(2026, 4, 15, 8, 12, 0),  "employee","Maria Alvarez",  "shift.clock_in",         "sh-…", "web", None),
-    AuditEntry(datetime(2026, 4, 14, 17, 32, 0), "employee","Maria Alvarez",  "expense.submit",         "x-1",  "web", None),
-    AuditEntry(datetime(2026, 4, 14, 16, 18, 0), "agent",   "procurement-agent", "agent_action.requested", "a-3","api", "Vacuum replacement"),
-    AuditEntry(datetime(2026, 4, 14, 11, 32, 0), "employee","Maria Alvarez",  "issue.open",             "iss-1","web", None),
+    # v1 `actor_kind` ∈ {user, agent, system}; `actor_grant_role`
+    # carries the grant under which the action was authorised.
+    AuditEntry(datetime(2026, 4, 15, 10, 8, 12), "user",   "Élodie Bernard", "task.complete",          "t-1",  "web", None,
+               actor_grant_role="owner",  actor_id="u-elodie"),
+    AuditEntry(datetime(2026, 4, 15, 9, 47, 2),  "agent",  "digest-agent",   "agent_action.requested", "a-1",  "api", "Auto-reassign pool coverage (Ben on leave)",
+               agent_label="digest-agent"),
+    AuditEntry(datetime(2026, 4, 15, 9, 41, 0),  "user",   "Maria Alvarez",  "shift.clock_in",         "sh-…", "web", None,
+               actor_grant_role="worker", actor_id="u-maria"),
+    AuditEntry(datetime(2026, 4, 15, 9, 12, 18), "agent",  "digest-agent",   "digest.sent",            "—",    "api", "Morning manager digest",
+               agent_label="digest-agent"),
+    AuditEntry(datetime(2026, 4, 15, 8, 54, 1),  "agent",  "procurement-agent", "expense.autofill",    "x-1",  "api", None,
+               agent_label="procurement-agent"),
+    AuditEntry(datetime(2026, 4, 15, 8, 41, 12), "system", "redaction-layer", "llm.call.blocked",      "—",    "worker", "IBAN-like string in receipt text"),
+    AuditEntry(datetime(2026, 4, 15, 8, 12, 0),  "user",   "Maria Alvarez",  "shift.clock_in",         "sh-…", "web", None,
+               actor_grant_role="worker", actor_id="u-maria"),
+    AuditEntry(datetime(2026, 4, 14, 17, 32, 0), "user",   "Maria Alvarez",  "expense.submit",         "x-1",  "web", None,
+               actor_grant_role="worker", actor_id="u-maria"),
+    AuditEntry(datetime(2026, 4, 14, 16, 18, 0), "agent",  "procurement-agent", "agent_action.requested", "a-3","api", "Vacuum replacement",
+               agent_label="procurement-agent"),
+    AuditEntry(datetime(2026, 4, 14, 11, 32, 0), "user",   "Maria Alvarez",  "issue.open",             "iss-1","web", None,
+               actor_grant_role="worker", actor_id="u-maria"),
+    # Vincent scenario — role_grant activity.
+    AuditEntry(datetime(2026, 4, 10, 14, 5, 0),  "user",   "Julie Moreau",   "role_grant.create",      "rg-vincent-client-cleanco", "web",
+               "Invited Vincent as client (binding DupontFamily)",
+               actor_grant_role="manager", actor_id="u-julie"),
+    AuditEntry(datetime(2026, 4, 11, 9, 0, 0),   "user",   "Vincent Dupont", "user.first_passkey",     "u-vincent", "web", None,
+               actor_id="u-vincent"),
+    AuditEntry(datetime(2026, 4, 15, 19, 2, 0),  "user",   "Julie Moreau",   "vendor_invoice.submit",  "vi-3", "web", None,
+               actor_grant_role="manager", actor_id="u-julie"),
 ]
 
 
@@ -1257,28 +1801,54 @@ ASSET_DOCUMENTS: list[AssetDocument] = [
 
 SHIFTS: list[Shift] = [
     Shift("sh-1", "e-maria", "p-villa-sud", datetime(2026, 4, 15, 8, 12), None, "open",
-          method_in="auto"),
+          method_in="auto",
+          work_engagement_id="we-maria-bernard", user_id="u-maria"),
     Shift("sh-2", "e-ben", "p-villa-sud", datetime(2026, 4, 15, 8, 45),
           datetime(2026, 4, 15, 12, 30), "closed", duration_seconds=13500,
-          method_in="auto", method_out="auto"),
+          method_in="auto", method_out="auto",
+          work_engagement_id="we-ben-bernard", user_id="u-ben"),
     Shift("sh-3", "e-arun", "p-villa-sud", datetime(2026, 4, 14, 13, 0),
           datetime(2026, 4, 14, 18, 30), "closed", duration_seconds=19800,
-          method_in="manual", method_out="manual"),
+          method_in="manual", method_out="manual",
+          work_engagement_id="we-arun-bernard", user_id="u-arun"),
     Shift("sh-4", "e-ana", "p-apt-3b", datetime(2026, 4, 14, 9, 0),
           datetime(2026, 4, 14, 14, 0), "closed", duration_seconds=18000,
           method_in="auto", method_out="auto",
-          client_org_id="org-dupont"),  # billable to Dupont
+          client_org_id="org-dupont",  # billable to Dupont
+          work_engagement_id="we-ana-bernard", user_id="u-ana"),
     Shift("sh-5", "e-sam", "p-villa-sud", datetime(2026, 4, 14, 10, 0),
           datetime(2026, 4, 14, 12, 30), "disputed", duration_seconds=9000,
-          method_in="manual", method_out="auto"),
+          method_in="manual", method_out="auto",
+          work_engagement_id="we-sam-bernard", user_id="u-sam"),
+    # Vincent scenario — same day, same place, two workspaces.
+    # Joselyn (CleanCo / AgencyOps) cleans Villa du Lac.
+    Shift("sh-6", "e-joselyn", "p-villa-lac", datetime(2026, 4, 15, 9, 0),
+          datetime(2026, 4, 15, 13, 0), "closed", duration_seconds=14400,
+          method_in="auto", method_out="auto",
+          client_org_id="org-dupont-vincent",
+          work_engagement_id="we-joselyn-cleanco", user_id="u-joselyn"),
+    # Rachid (VincentOps) drives Vincent around that afternoon.
+    Shift("sh-7", "e-rachid", "p-villa-lac", datetime(2026, 4, 15, 14, 30),
+          datetime(2026, 4, 15, 17, 0), "closed", duration_seconds=9000,
+          method_in="manual", method_out="manual",
+          work_engagement_id="we-rachid-vincent", user_id="u-rachid"),
 ]
 
 PAY_RULES: list[PayRule] = [
     # Only payroll-engagement employees have pay rules. e-ana (agency_supplied)
     # and e-sam (contractor) are paid through vendor_invoice (§22) instead.
-    PayRule("pr-1", "e-maria", None, "monthly_salary", 240000, "EUR", date(2024, 3, 1)),
-    PayRule("pr-2", "e-arun", None, "hourly", 1429, "EUR", date(2024, 9, 14)),
-    PayRule("pr-3", "e-ben", None, "monthly_salary", 180000, "EUR", date(2023, 5, 20)),
+    PayRule("pr-1", "e-maria", None, "monthly_salary", 240000, "EUR", date(2024, 3, 1),
+            work_engagement_id="we-maria-bernard"),
+    PayRule("pr-2", "e-arun", None, "hourly", 1429, "EUR", date(2024, 9, 14),
+            work_engagement_id="we-arun-bernard"),
+    PayRule("pr-3", "e-ben", None, "monthly_salary", 180000, "EUR", date(2023, 5, 20),
+            work_engagement_id="we-ben-bernard"),
+    # Vincent's worker Rachid earns €12/h.
+    PayRule("pr-4", "e-rachid", None, "hourly", 1200, "EUR", date(2024, 6, 1),
+            work_engagement_id="we-rachid-vincent"),
+    # Joselyn at CleanCo.
+    PayRule("pr-5", "e-joselyn", None, "hourly", 1500, "EUR", date(2025, 2, 1),
+            work_engagement_id="we-joselyn-cleanco"),
 ]
 
 PAY_PERIODS: list[PayPeriod] = [
@@ -1292,7 +1862,9 @@ PAY_PERIODS: list[PayPeriod] = [
 
 ORGANIZATIONS: list[Organization] = [
     Organization(
-        "org-dupont", "Dupont family", is_client=True,
+        "org-dupont", "Dupont family",
+        workspace_id="ws-bernard",
+        is_client=True,
         legal_name="SCI Dupont",
         default_currency="EUR",
         tax_id="FR12 345 678 901",
@@ -1304,7 +1876,9 @@ ORGANIZATIONS: list[Organization] = [
         notes="Owners of Apt 3B. Invoiced monthly, NET-30.",
     ),
     Organization(
-        "org-cleanco", "CleanCo SARL", is_supplier=True,
+        "org-cleanco", "CleanCo SARL",
+        workspace_id="ws-bernard",
+        is_supplier=True,
         legal_name="CleanCo SARL",
         default_currency="EUR",
         tax_id="FR98 765 432 109",
@@ -1316,51 +1890,86 @@ ORGANIZATIONS: list[Organization] = [
         default_pay_destination_stub="•• FR-07",
         notes="Supplies Ana Rossi. Invoices weekly, NET-15.",
     ),
+    # Vincent scenario — DupontFamily (Vincent's billing legal entity).
+    # Lives in AgencyOps's scope as a client; Vincent holds a workspace
+    # role_grant(client, binding_org_id=this.id) on AgencyOps.
+    Organization(
+        "org-dupont-vincent", "DupontFamily",
+        workspace_id="ws-cleanco",
+        is_client=True,
+        legal_name="SCI Dupont Vincent",
+        default_currency="EUR",
+        tax_id="FR34 567 890 123",
+        contacts=[
+            {"label": "Primary", "name": "Vincent Dupont",
+             "email": "vincent.dupont@example.com",
+             "phone_e164": "+33 6 77 88 99 00",
+             "role": "owner"},
+        ],
+        notes="Billing entity for Vincent Dupont. NET-30. Villa du Lac + Seaside Apt.",
+        portal_user_id="u-vincent",
+    ),
 ]
 
 CLIENT_RATES: list[ClientRate] = [
-    # Role-based rate card for Dupont: housekeepers billed at €32/h, handymen €55/h.
-    ClientRate("cr-1", "org-dupont", "r-housekeeper", None,
+    # Role-based rate card for Dupont (Bernard workspace demo): housekeepers €32/h, handymen €55/h.
+    ClientRate("cr-1", "org-dupont", "r-housekeeper",
                3200, "EUR", date(2026, 1, 1)),
-    ClientRate("cr-2", "org-dupont", "r-handyman", None,
+    ClientRate("cr-2", "org-dupont", "r-handyman",
                5500, "EUR", date(2026, 1, 1)),
-    # Per-employee override: Ana is billed at a premium rate.
-    ClientRate("cr-3", "org-dupont", None, "e-ana",
-               3600, "EUR", date(2026, 1, 1)),
+    # Vincent scenario — CleanCo charges Vincent's org €34/h for maid work.
+    ClientRate("cr-4", "org-dupont-vincent", "wr-cleanco-maid",
+               3400, "EUR", date(2026, 1, 1)),
+]
+
+CLIENT_USER_RATES: list[ClientUserRate] = [
+    # Per-user override: Ana is billed at a premium rate to Dupont.
+    ClientUserRate("cur-1", "org-dupont", "u-ana",
+                   3600, "EUR", date(2026, 1, 1)),
 ]
 
 SHIFT_BILLINGS: list[ShiftBilling] = [
-    ShiftBilling("sb-1", "sh-4", "org-dupont", "e-ana",
+    ShiftBilling("sb-1", "sh-4", "org-dupont", "u-ana",
                  "EUR", billable_minutes=300, hourly_cents=3600,
                  subtotal_cents=18000,
-                 rate_source="client_employee_rate", rate_source_id="cr-3"),
+                 rate_source="client_user_rate", rate_source_id="cur-1",
+                 work_engagement_id="we-ana-bernard"),
+    # Vincent scenario — Joselyn's shift at Villa du Lac billable to
+    # DupontFamily at the CleanCo maid rate.
+    ShiftBilling("sb-2", "sh-6", "org-dupont-vincent", "u-joselyn",
+                 "EUR", billable_minutes=240, hourly_cents=3400,
+                 subtotal_cents=13600,
+                 rate_source="client_rate", rate_source_id="cr-4",
+                 work_engagement_id="we-joselyn-cleanco"),
 ]
 
 WORK_ORDERS: list[WorkOrder] = [
     WorkOrder(
         "wo-1", "p-villa-sud", "Replace leaking shower mixer — master bath",
         state="accepted",
-        assigned_employee_id="e-sam",
+        assigned_user_id="u-sam",
         currency="EUR",
         asset_id=None,
         description="Cold-side mixer dripping; requires cartridge replacement.",
         accepted_quote_id="q-1",
         created_at=datetime(2026, 4, 10, 14, 30),
+        requested_by_user_id="u-elodie",
     ),
     WorkOrder(
         "wo-2", "p-apt-3b", "Deep clean + linens turnover (Dupont)",
         state="invoiced",
-        assigned_employee_id="e-ana",
+        assigned_user_id="u-ana",
         currency="EUR",
         client_org_id="org-dupont",
         description="Standing weekly engagement billed through CleanCo.",
         created_at=datetime(2026, 4, 14, 7, 0),
+        requested_by_user_id="u-elodie",
     ),
 ]
 
 QUOTES: list[Quote] = [
     Quote(
-        "q-1", "wo-1", "e-sam",
+        "q-1", "wo-1", "u-sam",
         currency="EUR", subtotal_cents=24000, tax_cents=4800, total_cents=28800,
         status="accepted",
         lines=[
@@ -1374,7 +1983,9 @@ QUOTES: list[Quote] = [
         valid_until=date(2026, 5, 10),
         submitted_at=datetime(2026, 4, 11, 9, 15),
         decided_at=datetime(2026, 4, 11, 16, 40),
+        decided_by_user_id="u-elodie",
         decision_note="Accepted — proceed after Friday.",
+        work_engagement_id="we-sam-bernard",
     ),
 ]
 
@@ -1386,7 +1997,8 @@ VENDOR_INVOICES: list[VendorInvoice] = [
         billed_at=date(2026, 4, 16),
         status="draft",
         work_order_id="wo-1",
-        vendor_employee_id="e-sam",
+        vendor_user_id="u-sam",
+        vendor_work_engagement_id="we-sam-bernard",
         lines=[
             {"kind": "labor", "description": "Diagnosis + swap (2h)",
              "quantity": 2, "unit": "hour", "unit_price_cents": 6000, "total_cents": 12000},
@@ -1412,16 +2024,34 @@ VENDOR_INVOICES: list[VendorInvoice] = [
         ],
         submitted_at=datetime(2026, 4, 15, 18, 0),
     ),
+    # Vincent scenario — CleanCo invoices Vincent's DupontFamily org for
+    # Joselyn's maid work at Villa du Lac.
+    VendorInvoice(
+        "vi-3", currency="EUR",
+        subtotal_cents=13600, tax_cents=2720, total_cents=16320,
+        billed_at=date(2026, 4, 15),
+        due_on=date(2026, 4, 30),
+        status="submitted",
+        property_id="p-villa-lac",
+        vendor_organization_id="org-cleanco",
+        payout_destination_stub="•• FR-07",
+        lines=[
+            {"kind": "labor", "description": "Joselyn Rivera — Villa du Lac maid service (4h)",
+             "quantity": 4, "unit": "hour", "unit_price_cents": 3400, "total_cents": 13600},
+        ],
+        submitted_at=datetime(2026, 4, 15, 19, 0),
+    ),
 ]
 
 INVENTORY_MOVEMENTS: list[InventoryMovement] = [
-    InventoryMovement("im-1", "inv-3", -1, "consume", "employee", "e-ben",
+    # `actor_kind` is the v1 collapsed enum: user | agent | system (§02).
+    InventoryMovement("im-1", "inv-3", -1, "consume", "user", "u-ben",
                       datetime(2026, 4, 12, 9, 30), "Used for weekly pool service"),
-    InventoryMovement("im-2", "inv-6", -4, "consume", "employee", "e-ana",
+    InventoryMovement("im-2", "inv-6", -4, "consume", "user", "u-ana",
                       datetime(2026, 4, 14, 8, 0), "Turnover prep — Apt 3B"),
-    InventoryMovement("im-3", "inv-4", 6, "restock", "employee", "e-maria",
+    InventoryMovement("im-3", "inv-4", 6, "restock", "user", "u-maria",
                       datetime(2026, 4, 13, 17, 0), "Carrefour run"),
-    InventoryMovement("im-4", "inv-8", -2, "consume", "employee", "e-sam",
+    InventoryMovement("im-4", "inv-8", -2, "consume", "user", "u-sam",
                       datetime(2026, 4, 10, 16, 0)),
 ]
 
@@ -1432,9 +2062,10 @@ LIFECYCLE_RULES: list[StayLifecycleRule] = [
 ]
 
 TASK_COMMENTS: list[TaskComment] = [
-    TaskComment("tc-1", "t-1", "employee", "e-ben", "pH was 7.4 — in range. Skimmer baskets clean.",
+    # v1 `author_kind` ∈ {user, agent, system} (§02).
+    TaskComment("tc-1", "t-1", "user", "u-ben", "pH was 7.4 — in range. Skimmer baskets clean.",
                 datetime(2026, 4, 15, 9, 25)),
-    TaskComment("tc-2", "t-2", "employee", "e-maria", "Bed stripped, starting fresh sheets.",
+    TaskComment("tc-2", "t-2", "user", "u-maria", "Bed stripped, starting fresh sheets.",
                 datetime(2026, 4, 15, 10, 35)),
     TaskComment("tc-3", "t-2", "agent", "digest-agent",
                 "Lavender sheets are on shelf 2 of linen cupboard A.",
@@ -1462,10 +2093,10 @@ WORKSPACE_SETTINGS: dict[str, Any] = {
 
 WORKSPACE_POLICY: dict[str, Any] = {
     "approvals": {
-        "always_gated": ["payout_destination.*", "employee.set_default_pay_destination"],
+        "always_gated": ["payout_destination.*", "work_engagement.set_default_pay_destination"],
         "configurable": ["tasks.bulk_reassign>50", "broadcast.email_many"],
     },
-    "danger_zone": ["Rotate envelope key (host CLI only)", "Purge employee (host CLI only)", "Export workspace backup"],
+    "danger_zone": ["Rotate envelope key (host CLI only)", "Purge user (host CLI only)", "Export workspace backup"],
 }
 
 WORKSPACE_META: dict[str, str] = {
@@ -1762,3 +2393,85 @@ def lifecycle_rules_for_property(pid: str) -> list[StayLifecycleRule]:
 # The "signed-in" user for each role.
 DEFAULT_EMPLOYEE_ID = "e-maria"
 DEFAULT_MANAGER_NAME = "Élodie Bernard"
+
+
+# ── v1 helpers ──────────────────────────────────────────────────────
+
+def user_by_id(uid: str) -> User | None:
+    return next((u for u in USERS if u.id == uid), None)
+
+
+def user_by_email(email: str) -> User | None:
+    target = email.strip().lower()
+    return next((u for u in USERS if u.email.lower() == target), None)
+
+
+def role_grants_for_user(uid: str) -> list[RoleGrant]:
+    return [g for g in ROLE_GRANTS if g.user_id == uid and g.revoked_at is None]
+
+
+def role_grants_for_scope(scope_kind: str, scope_id: str) -> list[RoleGrant]:
+    return [g for g in ROLE_GRANTS
+            if g.scope_kind == scope_kind and g.scope_id == scope_id
+            and g.revoked_at is None]
+
+
+def work_engagements_for_user(uid: str) -> list[WorkEngagement]:
+    return [w for w in WORK_ENGAGEMENTS if w.user_id == uid and w.archived_on is None]
+
+
+def work_engagements_for_workspace(wsid: str) -> list[WorkEngagement]:
+    return [w for w in WORK_ENGAGEMENTS if w.workspace_id == wsid and w.archived_on is None]
+
+
+def work_engagement_by_id(weid: str) -> WorkEngagement | None:
+    return next((w for w in WORK_ENGAGEMENTS if w.id == weid), None)
+
+
+def user_work_roles_for_user(uid: str, workspace_id: str | None = None) -> list[UserWorkRole]:
+    rows = [r for r in USER_WORK_ROLES if r.user_id == uid and r.ended_on is None]
+    if workspace_id:
+        rows = [r for r in rows if r.workspace_id == workspace_id]
+    return rows
+
+
+def property_assignments_for_uwr(uwr_id: str) -> list[PropertyWorkRoleAssignment]:
+    return [a for a in PROPERTY_WORK_ROLE_ASSIGNMENTS if a.user_work_role_id == uwr_id]
+
+
+def users_in_workspace(wsid: str) -> list[User]:
+    uids = {uw.user_id for uw in USER_WORKSPACES if uw.workspace_id == wsid}
+    return [u for u in USERS if u.id in uids]
+
+
+def workspaces_for_property(pid: str) -> list[PropertyWorkspace]:
+    return [pw for pw in PROPERTY_WORKSPACES if pw.property_id == pid]
+
+
+def workspace_by_id(wsid: str) -> Workspace | None:
+    return next((w for w in WORKSPACES if w.id == wsid), None)
+
+
+# ── Derived field back-fill ─────────────────────────────────────────
+# Some of the new v1 columns mirror existing ones (e.g. Task.assignee_id
+# ↔ Task.assigned_user_id). Populate the mirrors once at import time so
+# writers don't have to worry about drift.
+
+_EMPLOYEE_TO_USER: dict[str, str] = {e.id: e.user_id for e in EMPLOYEES if e.user_id}
+_EMPLOYEE_TO_ENGAGEMENT: dict[str, str] = {
+    e.id: e.work_engagement_id for e in EMPLOYEES if e.work_engagement_id
+}
+_EMPLOYEE_TO_WORKSPACE: dict[str, str] = {
+    e.id: e.workspace_id for e in EMPLOYEES if e.workspace_id
+}
+
+
+def _backfill_tasks() -> None:
+    for t in TASKS:
+        if not t.assigned_user_id:
+            t.assigned_user_id = _EMPLOYEE_TO_USER.get(t.assignee_id, "")
+        if not t.workspace_id:
+            t.workspace_id = _EMPLOYEE_TO_WORKSPACE.get(t.assignee_id, "ws-bernard")
+
+
+_backfill_tasks()

@@ -252,6 +252,14 @@ def api_property(pid: str) -> Response:
 
 @app.get("/api/v1/employees")
 def api_employees() -> Response:
+    """Legacy alias — see `/api/v1/users`.
+
+    In the v1 identity model (§02, §05) there is no `employee` entity;
+    people who perform work are `users` with a `work_engagement` per
+    workspace. The SPA still asks for /employees, and the compat
+    `Employee` shape (user × engagement × work_role projection) keeps
+    the UI working unchanged. New code should call /users instead.
+    """
     return ok(md.EMPLOYEES)
 
 
@@ -271,6 +279,222 @@ def api_employee(eid: str) -> Response:
 @app.get("/api/v1/employees/{eid}/leaves")
 def api_employee_leaves(eid: str) -> Response:
     return ok({"subject": md.employee_by_id(eid), "leaves": md.leaves_for_employee(eid)})
+
+
+# ── v1 identity endpoints (§02, §03, §05, §22) ──────────────────────
+# These are the canonical shape; /employees and /managers stay as
+# aliases so the existing web UI continues to load.
+
+
+@app.get("/api/v1/users")
+def api_users(workspace_id: str = "") -> Response:
+    """List users visible in the deployment (or scoped to a workspace).
+
+    With a `workspace_id` query param the list is narrowed to users
+    who have at least one active grant or work_engagement resolving
+    into that workspace (via `USER_WORKSPACES`).
+    """
+    if workspace_id:
+        return ok(md.users_in_workspace(workspace_id))
+    return ok(md.USERS)
+
+
+@app.get("/api/v1/users/{uid}")
+def api_user(uid: str) -> Response:
+    user = md.user_by_id(uid)
+    if user is None:
+        return JSONResponse({"detail": "not found"}, status_code=404)
+    grants = md.role_grants_for_user(uid)
+    engagements = md.work_engagements_for_user(uid)
+    work_roles = md.user_work_roles_for_user(uid)
+    return ok({
+        "user": user,
+        "role_grants": grants,
+        "work_engagements": engagements,
+        "user_work_roles": work_roles,
+    })
+
+
+@app.post("/api/v1/users/invite")
+def api_users_invite(payload: dict[str, Any] = Body(...)) -> Response:
+    """Unified invite (§03).
+
+    Accepts the v1 payload shape:
+        {
+          email, display_name,
+          grants: [ {scope_kind, scope_id, grant_role,
+                      binding_org_id?, capability_override?}, ... ],
+          work_engagement?: {workspace_id, engagement_kind, ...},
+          user_work_roles?: [ {workspace_id, work_role_id}, ... ]
+        }
+
+    The mock does not email a magic link; it creates (or reuses) a
+    `users` row and inserts the requested rows, then returns the
+    resulting triple.
+    """
+    email = str(payload.get("email") or "").strip().lower()
+    display_name = str(payload.get("display_name") or "").strip()
+    if not email or not display_name:
+        return JSONResponse({"detail": "email and display_name required"}, status_code=422)
+
+    existing = md.user_by_email(email)
+    if existing is not None:
+        user = existing
+    else:
+        user = md.User(
+            id=f"u-{len(md.USERS) + 1:03d}",
+            email=email,
+            display_name=display_name,
+            languages=list(payload.get("languages") or []),
+            preferred_locale=payload.get("preferred_locale"),
+        )
+        md.USERS.append(user)
+
+    created_grants: list[md.RoleGrant] = []
+    for gi, g in enumerate(payload.get("grants") or []):
+        scope_kind = str(g.get("scope_kind") or "workspace")
+        scope_id = str(g.get("scope_id") or "")
+        grant_role = str(g.get("grant_role") or "worker")
+        if scope_kind not in ("workspace", "property", "organization"):
+            continue
+        if grant_role not in ("owner", "manager", "worker", "client", "guest"):
+            continue
+        row = md.RoleGrant(
+            id=f"rg-{user.id}-{len(md.ROLE_GRANTS) + gi + 1}",
+            user_id=user.id,
+            scope_kind=scope_kind,  # type: ignore[arg-type]
+            scope_id=scope_id,
+            grant_role=grant_role,  # type: ignore[arg-type]
+            binding_org_id=g.get("binding_org_id"),
+            capability_override=dict(g.get("capability_override") or {}),
+            started_on=md.TODAY,
+        )
+        md.ROLE_GRANTS.append(row)
+        created_grants.append(row)
+        hub.publish("role_grant.created", {"grant": row})
+
+    created_engagement: md.WorkEngagement | None = None
+    we_payload = payload.get("work_engagement") or None
+    if we_payload:
+        we_workspace = str(we_payload.get("workspace_id") or "")
+        if we_workspace:
+            created_engagement = md.WorkEngagement(
+                id=f"we-{user.id}-{we_workspace}",
+                user_id=user.id,
+                workspace_id=we_workspace,
+                engagement_kind=str(we_payload.get("engagement_kind") or "payroll"),  # type: ignore[arg-type]
+                supplier_org_id=we_payload.get("supplier_org_id"),
+                started_on=md.TODAY,
+            )
+            md.WORK_ENGAGEMENTS.append(created_engagement)
+            hub.publish("work_engagement.created", {"work_engagement": created_engagement})
+
+    created_work_roles: list[md.UserWorkRole] = []
+    for uwr_i, uwr in enumerate(payload.get("user_work_roles") or []):
+        we_workspace = str(uwr.get("workspace_id") or "")
+        work_role_id = str(uwr.get("work_role_id") or "")
+        if not we_workspace or not work_role_id:
+            continue
+        row = md.UserWorkRole(
+            id=f"uwr-{user.id}-{work_role_id}-{uwr_i}",
+            user_id=user.id,
+            workspace_id=we_workspace,
+            work_role_id=work_role_id,
+            started_on=md.TODAY,
+        )
+        md.USER_WORK_ROLES.append(row)
+        created_work_roles.append(row)
+
+    hub.publish("user.invited", {"user": user, "grants": created_grants})
+    return ok({
+        "user": user,
+        "grants": created_grants,
+        "work_engagement": created_engagement,
+        "user_work_roles": created_work_roles,
+    }, status_code=201)
+
+
+@app.get("/api/v1/role_grants")
+def api_role_grants(user_id: str = "", scope_kind: str = "", scope_id: str = "") -> Response:
+    rows = [
+        g for g in md.ROLE_GRANTS
+        if g.revoked_at is None
+        and (not user_id or g.user_id == user_id)
+        and (not scope_kind or g.scope_kind == scope_kind)
+        and (not scope_id or g.scope_id == scope_id)
+    ]
+    return ok(rows)
+
+
+@app.get("/api/v1/work_engagements")
+def api_work_engagements(user_id: str = "", workspace_id: str = "") -> Response:
+    rows = [
+        w for w in md.WORK_ENGAGEMENTS
+        if (not user_id or w.user_id == user_id)
+        and (not workspace_id or w.workspace_id == workspace_id)
+    ]
+    return ok(rows)
+
+
+@app.get("/api/v1/work_engagements/{weid}")
+def api_work_engagement(weid: str) -> Response:
+    we = md.work_engagement_by_id(weid)
+    if we is None:
+        return JSONResponse({"detail": "not found"}, status_code=404)
+    return ok(we)
+
+
+@app.get("/api/v1/work_roles")
+def api_work_roles(workspace_id: str = "") -> Response:
+    rows = md.WORK_ROLES
+    if workspace_id:
+        rows = [r for r in rows if r.workspace_id == workspace_id]
+    return ok(rows)
+
+
+@app.get("/api/v1/user_work_roles")
+def api_user_work_roles(user_id: str = "", workspace_id: str = "") -> Response:
+    rows = md.USER_WORK_ROLES
+    if user_id:
+        rows = [r for r in rows if r.user_id == user_id]
+    if workspace_id:
+        rows = [r for r in rows if r.workspace_id == workspace_id]
+    return ok(rows)
+
+
+@app.get("/api/v1/workspaces")
+def api_workspaces() -> Response:
+    return ok(md.WORKSPACES)
+
+
+@app.get("/api/v1/property_workspaces")
+def api_property_workspaces(property_id: str = "", workspace_id: str = "") -> Response:
+    rows = md.PROPERTY_WORKSPACES
+    if property_id:
+        rows = [r for r in rows if r.property_id == property_id]
+    if workspace_id:
+        rows = [r for r in rows if r.workspace_id == workspace_id]
+    return ok(rows)
+
+
+@app.get("/api/v1/organizations")
+def api_organizations(workspace_id: str = "") -> Response:
+    rows = md.ORGANIZATIONS
+    if workspace_id:
+        rows = [o for o in rows if o.workspace_id == workspace_id]
+    return ok(rows)
+
+
+# `/api/v1/managers` — legacy alias. In v1 there is no `manager`
+# entity; the UI asks for it only in a handful of legacy spots. We
+# return users who hold an `owner` or `manager` grant somewhere.
+@app.get("/api/v1/managers")
+def api_managers() -> Response:
+    manager_ids = {
+        g.user_id for g in md.ROLE_GRANTS
+        if g.grant_role in ("owner", "manager") and g.revoked_at is None
+    }
+    return ok([u for u in md.USERS if u.id in manager_ids])
 
 
 @app.get("/api/v1/tasks")
@@ -743,6 +967,7 @@ def api_expenses_create(payload: dict[str, Any] = Body(...)) -> Response:
         cents = 0
     cat = payload.get("category")
     ocr = payload.get("ocr_confidence")
+    default_emp = md.employee_by_id(md.DEFAULT_EMPLOYEE_ID)
     x = md.Expense(
         id=f"x-{len(md.EXPENSES) + 1}",
         employee_id=md.DEFAULT_EMPLOYEE_ID,
@@ -754,6 +979,10 @@ def api_expenses_create(payload: dict[str, Any] = Body(...)) -> Response:
         note=str(payload.get("note") or ""),
         ocr_confidence=float(ocr) if ocr is not None else None,
         category=str(cat) if cat else None,
+        # v1 canonical pointers — per §09 expense claims key off
+        # work_engagement_id, not user_id directly.
+        user_id=default_emp.user_id,
+        work_engagement_id=default_emp.work_engagement_id,
     )
     md.EXPENSES.insert(0, x)
     return ok(x, status_code=201)

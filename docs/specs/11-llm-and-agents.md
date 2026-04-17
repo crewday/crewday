@@ -5,14 +5,14 @@ Per the user's direction: **Google Gemma 4 31B IT via OpenRouter**
 assignment table so other models can substitute for specific jobs.
 All in-app agentic features (natural-language task intake, daily
 digest, anomaly detection, receipt OCR, staff chat assistant, agent
-audit trail, action approval, embedded manager and employee chat
+audit trail, action approval, embedded owner/manager and worker chat
 agents) share the same plumbing.
 
 ## The agent-first invariant
 
 miployees is built around a hard rule: **every human UI verb exists
 as a CLI or REST command first, and the UI is a shell around those
-commands.** There is no manager-only button, no employee-only
+commands.** There is no owner/manager-only button, no worker-only
 button, that cannot also be driven by the CLI (§13) or by an agent
 holding a delegated token from the calling user. Concretely:
 
@@ -41,25 +41,25 @@ Two chat agents are embedded in the product. Each operates with a
 inheriting that user's full permissions. They share plumbing (client,
 redaction, audit, approval) but differ in whose authority they carry.
 
-### Manager-side agent
+### Owner/manager-side agent
 
-Lives in the right sidebar (`.desk__agent`) of the manager desktop
-shell (§14). The sidebar is mounted once at the `ManagerLayout` level
-as a sibling of `<Outlet />`, so it survives client-side route
-changes — the chat log scroll position, the composer draft, and the
-`EventSource` subscription all persist across navigation. New agent
-messages are delivered via the SSE event `agent.message.appended`,
-so every connected manager tab sees them without polling. Its tool
-surface is **the full CLI + REST surface available to the delegating
-manager** — every command the manager can execute in the UI or CLI
-is available to the agent. There is no filtered capability catalog;
-tool descriptors are resolved dynamically from the manager's current
-permissions.
+Lives in the right sidebar (`.desk__agent`) of the owner/manager
+desktop shell (§14). The sidebar is mounted once at the
+`OwnerManagerLayout` level as a sibling of `<Outlet />`, so it
+survives client-side route changes — the chat log scroll position,
+the composer draft, and the `EventSource` subscription all persist
+across navigation. New agent messages are delivered via the SSE event
+`agent.message.appended`, so every connected tab sees them without
+polling. Its tool surface is **the full CLI + REST surface available
+to the delegating user** — every command the owner or manager can
+execute in the UI or CLI is available to the agent. There is no
+filtered capability catalog; tool descriptors are resolved
+dynamically from the user's current role grants.
 
 High-impact tools are routed through the approval pipeline (§ "Agent
-action approval" below). The manager-side agent does **not** bypass
-its own approval: when it proposes a payroll issuance it still goes
-to the `/approvals` queue, where the same manager clicks "Approve"
+action approval" below). The agent does **not** bypass its own
+approval: when it proposes a payroll issuance it still goes to the
+`/approvals` queue, where the same owner or manager clicks "Approve"
 before execution. This costs one extra tap and buys a canonical
 audit trail.
 
@@ -70,23 +70,22 @@ Voice input is capability-gated (`voice.manager`); when on, audio
 is transcribed via `voice.transcribe` before being dispatched to
 the agent.
 
-### Employee-side agent
+### Worker-side agent
 
-Lives as the `Chat` tab in the employee PWA footer (§14). Its tool
+Lives as the `Chat` tab in the worker PWA footer (§14). Its tool
 surface is **the full CLI + REST surface available to the delegating
-employee** — every command the employee can execute is available to
-the agent. Tool descriptors are resolved dynamically from the
-employee's current capabilities (§05) and property assignments; the
-model sees only tools the employee is authorized to use.
+user** — every command the worker can execute is available to the
+agent. Tool descriptors are resolved dynamically from the user's
+current role grants and property assignments; the model sees only
+tools the user is authorized to use.
 
-Because the delegated token inherits the employee's permissions, the
-agent cannot read other employees' data, cannot mutate other
-employees' rows, and cannot reach payroll or audit endpoints — those
-restrictions come from the employee's own access level, not from a
-filtered tool catalog.
+Because the delegated token inherits the user's permissions, the
+agent cannot read other users' data, cannot mutate other users' rows,
+and cannot reach payroll or audit endpoints — those restrictions come
+from the user's own access level, not from a filtered tool catalog.
 
 Default model: `google/gemma-4-31b-it`. Capability keys
-`chat.employee` (default on for the employee) and `voice.employee`
+`chat.employee` (default on for workers) and `voice.employee`
 (default off).
 
 ### Conversation compaction
@@ -158,16 +157,16 @@ workspace default is used.
 |----------------------------|-------------------------------------------------------------------------|
 | `tasks.nl_intake`          | Parse a free-text description into a task / template / schedule draft   |
 | `tasks.assist`             | Staff chat assistant: "what's next?", explain an instruction, etc.      |
-| `digest.manager`           | Morning manager digest composition                                      |
-| `digest.employee`          | Morning employee digest composition                                     |
+| `digest.manager`           | Morning owner/manager digest composition                                |
+| `digest.employee`          | Morning worker digest composition                                       |
 | `anomaly.detect`           | Compare recent completions to schedule and flag anomalies               |
 | `expenses.autofill`        | OCR + structure a receipt image                                         |
-| `instructions.draft`       | Suggest an instruction from a conversation with the manager             |
-| `issue.triage`             | Classify severity/category of an employee-reported issue                |
+| `instructions.draft`       | Suggest an instruction from a conversation with the owner/manager       |
+| `issue.triage`             | Classify severity/category of a user-reported issue                     |
 | `stay.summarize`           | Summarize a stay (for guest welcome blurb drafting)                     |
 | `voice.transcribe`         | Turn a voice note into text (for chat assistant / issue reports)        |
-| `chat.manager`             | Manager-side embedded chat agent (§14 right sidebar)                    |
-| `chat.employee`            | Employee-side embedded chat agent (§14 Chat tab)                        |
+| `chat.manager`             | Owner/manager-side embedded chat agent (§14 right sidebar)              |
+| `chat.employee`            | Worker-side embedded chat agent (§14 Chat tab)                          |
 | `chat.compact`             | Summarise resolved topics in a chat thread (see "Conversation compaction") |
 | `chat.detect_language`     | Detect message language for auto-translation (§10, §18)                 |
 | `chat.translate`           | Translate a message into the workspace default language (§10, §18)      |
@@ -184,7 +183,7 @@ model_assignment
 └── updated_at/updated_by
 ```
 
-A manager can edit this in the UI or via
+An owner or manager can edit this in the UI or via
 `PUT /api/v1/llm/assignments/{capability}`. Default row for every
 capability is seeded at install with Gemma 4 31B IT and sensible
 params. Budgets are soft — the system warns and stops calls when
@@ -198,9 +197,9 @@ exceeded, with a clear message in the audit log.
 | `expenses.autofill`   | `google/gemma-4-31b-it`                            | multimodal |
 | `voice.transcribe`    | (none out of box; capability off unless assigned)  | local speech-to-text deferred |
 
-The user may override any capability to a different model (e.g.
-Claude Haiku for digests, a cheaper Qwen for intake) without code
-changes.
+Owners and managers may override any capability to a different model
+(e.g. Claude Haiku for digests, a cheaper Qwen for intake) without
+code changes.
 
 ## Prompting strategy
 
@@ -239,8 +238,12 @@ Every write performed via a delegated token is captured in `audit_log`
 (§02) and attributed to the **delegating user**, not to a separate
 "agent" actor:
 
-- `actor_kind` = the delegating user's kind (`manager` or `employee`).
+- `actor_kind` = `user` (all human actors now use a single kind; see
+  §02).
 - `actor_id` = the delegating user's ULID.
+- `actor_grant_role` = the highest grant_role the user held at the
+  time of the action (e.g. `manager`, `owner`); denormalized for
+  display.
 - `via` = `api` or `cli`.
 - `token_id` = the delegated token's id (join to `api_token` for
   delegation metadata).
@@ -254,13 +257,12 @@ Every write performed via a delegated token is captured in `audit_log`
 - `correlation_id` propagated from `X-Correlation-Id` if present, else
   generated server-side and returned via `X-Correlation-Id-Echo`.
 
-The manager's **Agent Activity** view filters `audit_log` by
+The owner/manager's **Agent Activity** view filters `audit_log` by
 `actor_kind = 'agent' OR agent_label IS NOT NULL` — capturing both
 standalone scoped-token agents and delegated-token agents — with
 facets on token, action, and time range, and a line chart of call
-volume per token. Because `actor_id`
-points to the human, every agent action is also visible in the user's
-own audit trail.
+volume per token. Because `actor_id` points to the human, every agent
+action is also visible in the user's own audit trail.
 
 ## Agent action approval
 
@@ -273,7 +275,7 @@ or a delegated token.
 The canonical list, configurable per workspace:
 
 - Any `*.delete` that would affect more than **10 rows**.
-- Employee archive (`employees.archive`).
+- Work engagement archive (`work_engagement.archive`).
 - Payslip issuance and paid transition (`payroll.issue`, `payroll.pay`).
 - Granting a new scope to an existing token.
 - Rotating another token.
@@ -288,24 +290,25 @@ routing; the approval requirement cannot be disabled in
 - `payout_destination.update`
 - `payout_destination.archive` (when the row is currently referenced
   as a default)
-- `employee.set_default_pay_destination`
-- `employee.set_default_reimbursement_destination`
-- `expense_claim.set_destination_override` (agent path; the manager
-  selecting a destination in the approval UI is itself the approval)
+- `work_engagement.set_default_pay_destination`
+- `work_engagement.set_default_reimbursement_destination`
+- `expense_claim.set_destination_override` (agent path; the owner or
+  manager selecting a destination in the approval UI is itself the
+  approval)
 - `work_order.accept_quote` (§22) — commits the workspace to a
   price
 - `vendor_invoice.approve` (§22) — commits payment routing (the
   agent path mirrors `expense_claim.set_destination_override`: the
-  manager selecting a destination in the approval UI is the
+  owner or manager selecting a destination in the approval UI is the
   approval)
 - `vendor_invoice.mark_paid` (§22) — commits the `approved → paid`
   transition
 - `organization.update_default_pay_destination` (§22) — routes
   future agency-supplied invoices by default
-- `employee.set_engagement_kind` (§05) — **only** when the
-  transition crosses the `payroll` boundary (to or from), because
-  it moves the worker between pay pipelines. `contractor ↔
-  agency_supplied` is manager-only but not agent-approval-gated.
+- `work_engagement.set_engagement_kind` (§05) — **only** when the
+  transition crosses the `payroll` boundary (to or from), because it
+  moves the worker between pay pipelines. `contractor ↔
+  agency_supplied` is owner/manager-only but not agent-approval-gated.
 
 ### Interactive-session-only endpoints
 
@@ -362,8 +365,8 @@ command writes directly, and deployment-level controls on who can
    payload (including idempotency key).
 3. Returns `202 Accepted` with
    `{ "approval_id": "appr_…", "status": "pending", "expires_at": "…" }`.
-4. Managers are notified (email + webhook `approval.pending`).
-5. Manager reviews in `/approvals` and approves or rejects.
+4. Owners and managers are notified (email + webhook `approval.pending`).
+5. Owner or manager reviews in `/approvals` and approves or rejects.
 6. On approval, the original handler is invoked with the recorded
    payload; result is stored. Agent polls `GET /api/v1/approvals/
    {id}` (or receives `approval.decided` webhook) and proceeds.
@@ -383,7 +386,7 @@ agent_action
 ├── idempotency_key
 ├── state                      # pending | approved | rejected | expired | executed
 ├── decided_at
-├── decided_by_manager_id
+├── decided_by_user_id
 ├── decision_note_md
 ├── executed_at
 └── result_json
@@ -393,8 +396,8 @@ agent_action
 
 Neither a scoped token carrying `admin:*` scope nor a delegated token
 can bypass approval on default-approvable actions. The only way to
-disable approval on an action is for a manager to flip the workspace-
-level setting in `/settings/approvals`.
+disable approval on an action is for an owner or manager to flip the
+workspace-level setting in `/settings/approvals`.
 
 ### TTL
 
@@ -421,13 +424,13 @@ Response:
   "preview_id": "nlp_…",
   "resolved": {
     "property_id": "prop_…",
-    "employee_id": "emp_…",
+    "assigned_user_id": "usr_…",
     "template": {…},
     "schedule": { "rrule": "FREQ=WEEKLY;BYDAY=TU", … }
   },
   "assumptions": [
     "Assumed Villa Sud (only match).",
-    "Resolved Maria to emp_…",
+    "Resolved Maria to usr_…",
     "Photo evidence flagged because 'needs photo evidence' was mentioned."
   ],
   "ambiguities": []
@@ -452,7 +455,7 @@ Anomaly detection query (simplified):
 
 - Tasks scheduled but no matching completion in the window → candidate
   anomaly.
-- Sudden drop in an employee's completion rate vs 4-week baseline.
+- Sudden drop in a user's completion rate vs 4-week baseline.
 - Inventory consumption deviating > 3σ from rolling mean.
 
 The LLM ranks candidates and writes a one-line explanation per
@@ -466,27 +469,27 @@ persisted in the `anomaly_suppression` table.
 | id               | ULID PK  |                                         |
 | workspace_id     | ULID FK  |                                         |
 | anomaly_kind     | text     | e.g. `task_missed`, `completion_rate_drop`, `consumption_spike` |
-| subject_kind     | text     | `task_template` \| `employee` \| `inventory_item` \| ... |
+| subject_kind     | text     | `task_template` \| `user` \| `inventory_item` \| ... |
 | subject_id       | ULID     |                                         |
-| suppressed_until | tstz     | **required** — the UI forces the manager to pick an explicit window when suppressing |
+| suppressed_until | tstz     | **required** — the UI forces the owner/manager to pick an explicit window when suppressing |
 | reason           | text?    | free-form, shown in the digest once the suppression expires |
-| suppressed_by    | ULID FK  | manager id                              |
+| suppressed_by    | ULID FK  | user_id of owner or manager who suppressed |
 | created_at       | tstz     |                                         |
 
 Scope is `(workspace_id, anomaly_kind, subject_id)`. Permanent
 suppression is not offered: chronic "false positives" usually stop
 being false when the underlying pattern shifts, and a forced revisit
-keeps the digest honest. A manager who wants a long suppression
-enters a correspondingly long `suppressed_until` — the UI defaults
-to 90 days, accepts any future date.
+keeps the digest honest. An owner or manager who wants a long
+suppression enters a correspondingly long `suppressed_until` — the
+UI defaults to 90 days, accepts any future date.
 
 ## Staff chat assistant
 
-For employees with `chat.assistant` capability on.
+For users with `chat.assistant` capability on (default on for workers).
 
 - Available as a bottom-nav chat bubble on the PWA.
 - Tools exposed to the assistant (subset of the REST API, scoped to
-  the current employee):
+  the current user):
     - `get_tasks_today()`, `mark_task_done(task_id)`,
       `report_issue(area, description)`, `get_instruction(id)`,
       `start_shift()`, `end_shift()`, `get_inventory_low()`.
@@ -498,11 +501,11 @@ For employees with `chat.assistant` capability on.
 
 Every LLM call writes to `llm_call` with the provider's reported
 `usage.total_tokens` and an estimated USD cost from a small pricing
-table kept in config. The worker aggregates daily totals and the
-manager dashboard shows rolling 30-day LLM spend, per capability and
-per model. Exceeding a configured daily cap disables the capability
-for the rest of the day (soft-fail: humans still work; agents see a
-clear error).
+table kept in config. The background worker aggregates daily totals
+and the owner/manager dashboard shows rolling 30-day LLM spend, per
+capability and per model. Exceeding a configured daily cap disables
+the capability for the rest of the day (soft-fail: humans still work;
+agents see a clear error).
 
 ## Failure modes
 

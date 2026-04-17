@@ -19,22 +19,22 @@ workspace row and prints a magic link in the dev profile.
 
 ## Phase 1 — Identity
 
-- Passkeys (managers + employees), magic links, sessions.
+- Passkeys (all users), magic links, sessions, `role_grants`.
 - API tokens with scopes + per-token audit.
 - Audit log core.
-- Basic manager UI: profile, passkeys, tokens.
+- Basic owner/manager UI: profile, passkeys, tokens.
 
-**Exit:** a manager and an employee can be enrolled end-to-end on
+**Exit:** an owner and a worker can be enrolled end-to-end on
 devices; a token can drive the API; every action appears in the audit
 log.
 
 ## Phase 2 — Places and people
 
-- Properties, **units within properties**, areas, employees, roles,
+- Properties, **units within properties**, areas, users, work_roles,
   capabilities.
-- Property detail manager UI (incl. unit management for multi-unit
-  properties).
-- Employee profile and capability management.
+- Property detail owner/manager UI (incl. unit management for multi-
+  unit properties).
+- User profile and capability management.
 - CLI covers all of the above.
 
 **Exit:** full CRUD for the identity+places core; seed demo passes;
@@ -45,20 +45,20 @@ CLI generation pipeline produces commands for all Phase 2 endpoints;
 
 - Task templates, schedules with RRULE + RDATE/EXDATE, task
   generation worker.
-- Task detail and today view for employees.
+- Task detail and today view for workers.
 - Completion, evidence, comments, skip/cancel.
 - Assignment algorithm with **availability precedence stack** (leave,
   overrides, holidays, weekly pattern).
-- Blackout dates (property closures, employee leave).
-- **Employee availability overrides** (self-service add, manager-
+- Blackout dates (property closures, user leave).
+- **User availability overrides** (self-service add, owner/manager-
   approval reduce).
 - **Public holidays with scheduling effects** (`block | allow |
   reduced`).
 
-**Exit:** a weekly recurring task is created by the manager, the
-worker generates occurrences, the assigned employee completes them
-with evidence, audit trail is complete. Availability overrides and
-holidays correctly affect assignment.
+**Exit:** a weekly recurring task is created by the owner/manager,
+the scheduler generates occurrences, the assigned worker completes
+them with evidence, audit trail is complete. Availability overrides
+and holidays correctly affect assignment.
 
 ## Phase 4 — Instructions
 
@@ -104,7 +104,7 @@ produce restock tasks; burn-rate report looks right.
 - TCO reporting and replacement forecasts.
 - Guest-visible assets on the welcome page (§04).
 
-**Exit:** a manager registers a pool pump from the pre-seeded catalog;
+**Exit:** an owner registers a pool pump from the pre-seeded catalog;
 recurring maintenance actions generate tasks via the schedule worker;
 completing a filter-clean task updates `last_performed_at`; the daily
 digest surfaces an expiring warranty; TCO report sums purchase price,
@@ -123,11 +123,11 @@ expenses → reimbursement included → CSV export.
 ## Phase 7b — Clients, vendors, work orders (§22)
 
 - **`organization`** as a unified client/supplier entity; properties
-  gain `client_org_id`; employees gain `engagement_kind` and
-  `supplier_org_id`.
-- **Client rate cards** (`client_rate` + `client_employee_rate`) and
+  gain `client_org_id`; `work_engagement` (§02) carries
+  `engagement_kind` and `supplier_org_id`.
+- **Client rate cards** (`client_rate` + `client_user_rate`) and
   shift-close rate snapshotting via `shift_billing`.
-- **`work_order`** with child tasks, **`quote`** with manager
+- **`work_order`** with child tasks, **`quote`** with owner/manager
   approval gate, **`vendor_invoice`** with OCR autofill and
   approval gate.
 - **Payout destinations for organizations** (same model, different
@@ -136,7 +136,7 @@ expenses → reimbursement included → CSV export.
 - CLI parity for everything above.
 
 **Exit:** an agency workspace manages three clients, two payroll
-employees, one contractor, and one agency-supplied worker; shifts
+workers, one contractor, and one agency-supplied worker; shifts
 at a client property produce `shift_billing` rows; a repair job
 flows draft → quoted → accepted → in_progress → completed →
 invoiced → paid with agent-submitted drafts and manager approvals;
@@ -147,21 +147,21 @@ the billable CSV reconciles against the payroll register.
 - OpenRouter client, model assignment table, redaction layer.
 - Natural-language task intake, daily digests, anomaly detection,
   staff chat assistant, agent approval workflow.
-- Embedded **manager-side** and **employee-side** chat agents (§11)
-  with conversation compaction.
+- Embedded **owner/manager-side** and **worker-side** chat agents
+  (§11) with conversation compaction.
 - **WhatsApp (agent-mediated) + SMS fallback** for agent-originated
   outbound reach-out (§10). Moved from "Beyond v1" into v1.
-- **Chat auto-translation** between employee-preferred and workspace-
-  default languages on the employee agent (§10, §18). Moved from
+- **Chat auto-translation** between worker-preferred and workspace-
+  default languages on the worker agent (§10, §18). Moved from
   "deferred" into v1.
 
 **Exit:** all capabilities run against Gemma 4 31B via OpenRouter with
 bounded budget and audit; an agent driving the CLI experiences
-approval-gated actions correctly; an employee writing in their own
-language gets the agent replying in kind and the manager seeing the
-workspace-default translation with a toggle for the original;
-agent-originated WhatsApp reach-out respects quiet hours and per-
-employee daily caps.
+approval-gated actions correctly; a worker writing in their own
+language gets the agent replying in kind and the owner/manager seeing
+the workspace-default translation with a toggle for the original;
+agent-originated WhatsApp reach-out respects quiet hours and per-user
+daily caps.
 
 ## Phase 9 — PWA and offline
 
@@ -187,23 +187,24 @@ tasks with photos, back online) syncs within 60s with zero loss.
 Items explicitly deferred, in rough priority order:
 
 1. Additional locales (ES, FR, PT-BR, TL) for UI chrome, instruction
-   bodies, and digests. Chat auto-translation for the employee
-   agent already ships in v1 (see Phase 8).
+   bodies, and digests. Chat auto-translation for the worker agent
+   already ships in v1 (see Phase 8).
 2. Local LLM provider (Ollama) adapter.
 3. **True multi-tenancy** — more than one workspace per deployment,
    with a workspace-switcher UI and workspace-admin roles. The
    **schema is already ready** (every user-editable row carries
    `workspace_id`; junction tables `property_workspace` and
-   `employee_workspace` exist; RLS seam is `workspace_id` per §15),
+   `user_workspace` exist; RLS seam is `workspace_id` per §15),
    so lifting the single-workspace lock is a policy + auth change,
    not a data migration. Bundled with SaaS lockout recovery that
    does not require host shell access — see §03.
 4. Native mobile apps (only if PWA limitations become painful).
 5. QuickBooks / Xero accounting export (beyond CSV).
-6. OIDC for managers.
+6. OIDC for owners/managers.
 7. Owner-only dashboard (when a second-party manages on behalf of an
-   owner). Also promotes `organization.portal_user_id` (§22) into a
-   real `client_user` actor kind for client-facing read access.
+   owner). `organization.portal_user_id` (§22) already grants a
+   `role_grants(grant_role='client')` row for client-facing read
+   access.
 8. **Client invoice PDFs + ageing / dunning** — full counterpart to
    the payslip PDF flow: render `client_invoice.pdf` from a
    template, run a `draft → issued → paid → voided` state machine,

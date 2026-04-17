@@ -125,7 +125,8 @@ export interface InventoryMovement {
   item_id: string;
   delta: number;
   reason: InventoryMovementReason;
-  actor_kind: "manager" | "employee" | "agent" | "system";
+  // v1 collapses manager|employee|agent|system to user|agent|system (§02).
+  actor_kind: "user" | "agent" | "system";
   actor_id: string;
   note: string | null;
   occurred_at: string;
@@ -149,7 +150,8 @@ export interface StayLifecycleRule {
 export interface TaskComment {
   id: string;
   task_id: string;
-  author_kind: "employee" | "manager" | "agent" | "system";
+  // v1 collapses author_kind to user|agent|system (§02).
+  author_kind: "user" | "agent" | "system";
   author_id: string;
   body_md: string;
   created_at: string;
@@ -331,12 +333,17 @@ export interface LLMCall {
 
 export interface AuditEntry {
   at: string;
-  actor_kind: "manager" | "employee" | "agent" | "system";
+  // v1 collapses to user|agent|system; the grant under which a user
+  // acted lives in actor_grant_role (§02).
+  actor_kind: "user" | "agent" | "system";
   actor: string;
   action: string;
   target: string;
   via: "web" | "api" | "cli" | "worker";
   reason: string | null;
+  actor_grant_role: "owner" | "manager" | "worker" | "client" | null;
+  actor_id: string | null;
+  agent_label: string | null;
 }
 
 export interface Webhook {

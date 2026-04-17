@@ -39,7 +39,8 @@ Append-only ledger.
 | delta                  | decimal | positive = restock, negative = consume / loss |
 | reason                 | enum    | `restock | consume | adjust | waste | transfer_in | transfer_out | audit_correction` |
 | source_task_id         | ULID FK?| task that caused consumption       |
-| actor_kind / actor_id  |         |                                    |
+| actor_kind             | enum    | `user \| agent \| system`          |
+| actor_id               | ULID FK?| references `users.id`; null when actor_kind = system |
 | note                   | text?   |                                    |
 
 ### `inventory_snapshot` (optional)
@@ -53,15 +54,16 @@ Task templates carry `inventory_consumption_json`, a map of
 `item_id → qty` (or `sku → qty` during authoring). On task completion:
 
 - If `inventory.consume_on_task` capability is on for the completing
-  employee, insert one `inventory_movement` with `reason = consume`,
+  user, insert one `inventory_movement` with `reason = consume`,
   `source_task_id` set, and negative delta per entry.
 - If consumption would take `on_hand` below 0: the movement **still
   applies** (the item ends the transaction with a negative `on_hand`).
-  The item is flagged in both the manager's daily digest and an
-  `inventory.stock_drift` event. Rationale: staff know more than the
-  model; counts can be wrong, and blocking task completion on a
-  bookkeeping disagreement punishes the wrong person. Managers
-  reconcile by recording a restock or running the adjust flow.
+  The item is flagged in both the owner/manager's daily digest and
+  an `inventory.stock_drift` event. Rationale: staff know more than
+  the model; counts can be wrong, and blocking task completion on a
+  bookkeeping disagreement punishes the wrong person. Owners or
+  managers reconcile by recording a restock or running the adjust
+  flow.
 
 This is a soft coupling: completing the task never fails because
 consumption disagrees with reality.
@@ -82,19 +84,19 @@ Periodic worker job `check_reorder_points` (hourly):
   one **open** restock task.
 - A restock task is a task generated from a per-property "restock"
   template (default name: "Restock {item}"), role-assigned to whichever
-  role the manager has set for restocks at that property
+  work_role the owner or manager has set for restocks at that property
   (default `property_manager`).
 - When the restock task is completed, the completion UI prompts the
-  employee/manager to enter the actual restocked quantity, creating
+  completing user to enter the actual restocked quantity, creating
   a single positive-delta `inventory_movement` with
   `reason = restock` and `source_task_id` set.
 
 ## Adjustments
 
-Inventory adjust flow (manager, or employee with
-`inventory.adjust`): enter the observed on-hand value, the system
-computes the delta, creates an `audit_correction` movement with the
-reason and an optional note.
+Inventory adjust flow (owner/manager, or any user with
+`inventory.adjust` capability): enter the observed on-hand value,
+the system computes the delta, creates an `audit_correction`
+movement with the reason and an optional note.
 
 ## Transfers between properties
 

@@ -1,9 +1,9 @@
 # 07 — Instructions (standing SOPs and knowledge base)
 
-An **instruction** is a standing piece of content that a manager wants
-staff (and agents) to reference when performing work: SOPs, house
-rules, safety notes, "how we do it here" guides, brand guidelines, pet
-quirks, local supplier preferences.
+An **instruction** is a standing piece of content that an owner or
+manager wants staff (and agents) to reference when performing work:
+SOPs, house rules, safety notes, "how we do it here" guides, brand
+guidelines, pet quirks, local supplier preferences.
 
 The user requirement: *instructions exist at global, property, and
 room/area scope, and can be attached to tasks.*
@@ -25,9 +25,9 @@ room/area scope, and can be attached to tasks.*
   the unified full-text search (§02).
 - **LLM-fed**: instructions are injected into agent prompts when
   relevant, with scoping rules described below.
-- **Rendered in context**: on the employee task screen, all
-  applicable instructions are collapsed under a single "Instructions"
-  panel, ordered by specificity (area > property > global).
+- **Rendered in context**: on the worker task screen, all applicable
+  instructions are collapsed under a single "Instructions" panel,
+  ordered by specificity (area > property > global).
 
 ## Data model
 
@@ -65,7 +65,7 @@ Immutable.
 | body_md           | text    | markdown                              |
 | summary_md        | text?   | short version for tight UIs           |
 | attachment_file_ids | ULID[]| images/PDFs                           |
-| author_manager_id | ULID FK |                                       |
+| author_user_id    | ULID FK | references `users.id` (§02); authors are typically owners or managers |
 | created_at        | tstz    |                                       |
 | change_note       | text?   |                                       |
 
@@ -79,9 +79,9 @@ to. Plus one implicit link type: **scope-based automatic inclusion**
 |-------------------|---------|--------------------------------------------|
 | id                | ULID PK |                                            |
 | instruction_id    | ULID FK |                                            |
-| target_kind       | enum    | `task_template | schedule | task | role`   |
-| target_id         | ULID    | polymorphic, resolved in application       |
-| added_by          | ULID    | manager or agent                           |
+| target_kind       | enum    | `task_template | schedule | task | work_role` |
+| target_id         | ULID    | polymorphic, resolved in application         |
+| added_by          | ULID    | user_id of owner, manager, or agent          |
 | added_at          | tstz    |                                            |
 
 ## Resolution: which instructions apply to a given task?
@@ -96,7 +96,7 @@ applicable instructions is the **union** of:
 4. Any `instruction_link` row targeting this task directly.
 5. Any `instruction_link` targeting the task's `template_id`.
 6. Any `instruction_link` targeting the task's `schedule_id`.
-7. Any `instruction_link` targeting the task's `expected_role_id`.
+7. Any `instruction_link` targeting the task's `expected_role_id` (a `work_role`).
 
 Order in the UI: more specific first (area > property > global), then
 linked (template/schedule/role/task explicit links) after, each with a
@@ -143,11 +143,11 @@ was updated after the last task completion; review".
 - Scope picker at the top: **Global / Property / Area**, with a
   live-filtered property and area selector.
 - Tag chips (free-form; auto-complete from existing tags).
-- "Link to..." picker: task templates, schedules, roles, specific
-  tasks.
-- Preview shows exactly how it will render on the employee PWA.
+- "Link to..." picker: task templates, schedules, work roles,
+  specific tasks.
+- Preview shows exactly how it will render on the worker PWA.
 
-## Reader UI (employee PWA)
+## Reader UI (worker PWA)
 
 On a task screen, an **"Instructions"** accordion shows:
 
@@ -171,16 +171,16 @@ the workspace's `llm.send_instructions` setting is on (default:
 instructions are injected into every assistant call even without a
 task context.
 
-The **employee-side chat agent** (§11) is a first-class reader of
-instructions. When an employee asks a question in the chat page —
+The **worker-side chat agent** (§11) is a first-class reader of
+instructions. When a worker asks a question in the chat page —
 "how do I reset the pool pump?", "what temperature for the linens?",
 "what do I do if the oven alarm goes off?" — the agent resolves the
 applicable instruction set using the same scope rules above (area >
 property > global, plus link-based overrides), injects the relevant
-bodies into its context, and answers inline. When the employee is
-on a task screen, the agent also reads the instructions linked via
-that task's template/schedule/role. Instructions are therefore the
-primary grounding context for the employee agent; missing or out-of-
+bodies into its context, and answers inline. When the worker is on
+a task screen, the agent also reads the instructions linked via that
+task's template/schedule/work_role. Instructions are therefore the
+primary grounding context for the worker agent; missing or out-of-
 date instructions directly degrade answer quality.
 
 ## Search

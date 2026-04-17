@@ -4,13 +4,15 @@ Terms used across the spec. Definitive form; if code or doc disagrees,
 fix the offender.
 
 - **Actor.** The kind of principal responsible for an action, recorded
-  on `audit_log` and shift/claim rows: `manager | employee | agent |
-  system`.
+  on `audit_log` and shift/claim rows: `user | agent | system`. The
+  v0 `manager` and `employee` actor kinds collapse into `user`;
+  `actor_grant_role` captures the role under which the action was
+  taken.
 - **Agent.** A non-human actor. Standalone agents are authenticated
   by scoped API tokens (`actor_kind = 'agent'`). Embedded agents use
   **delegated tokens** that act with the full authority of their
   delegating user (`actor_kind` = the user's kind). See §03, §11.
-- **Agent (embedded).** The manager-side or employee-side chat
+- **Agent (embedded).** The owner/manager-side or worker-side chat
   agent described in §11. Default model `google/gemma-4-31b-it`;
   tool surface is the full CLI + REST surface of the delegating user
   (no filtered catalog). Voice input is capability-gated.
@@ -23,10 +25,11 @@ fix the offender.
   specific `(anomaly_kind, subject_id)` pair until a required
   `suppressed_until` timestamp (§11). Permanent suppression is not
   offered by design.
-- **Approvable action.** A write that requires manager approval
-  regardless of token scope (§11). Default TTL 7 days.
+- **Approvable action.** A write that requires owner or manager
+  approval regardless of token scope (§11). Default TTL 7 days.
 - **Archive / reinstate.** The canonical verbs for off-boarding and
-  bringing back an employee (§05). Replaces "end", "terminate", "rehire".
+  bringing back a worker's `work_engagement` (§05). Replaces "end",
+  "terminate", "rehire".
 - **Area.** A subdivision of a property (kitchen, pool, Room 3).
   Optionally scoped to a specific unit (`area.unit_id`); null means
   shared/property-level.
@@ -43,31 +46,42 @@ fix the offender.
   (e.g. "Air conditioner", "Pool pump"). System-seeded types ship
   with default maintenance actions; managers add workspace-custom
   types. See §21.
-- **Assignment.** The linkage of an employee to a role+property
-  (`property_role_assignment`) and, per task, the pointer
-  `task.assigned_employee_id`. There is no separate `task_assignment`
+- **Assignment.** The linkage of a user to a work_role+property
+  (`property_work_role_assignment`) and, per task, the pointer
+  `task.assigned_user_id`. There is no separate `task_assignment`
   entity — task assignment is just a column.
 - **Audit log.** Append-only ledger of all state-changing actions.
-- **Availability override.** A date-specific override of an
-  employee's weekly availability pattern. Adding work is self-service
-  (auto-approved); reducing availability requires manager approval.
-  Only approved overrides affect the assignment algorithm. See §06
-  `employee_availability_overrides`.
-- **Break-glass code.** Manager-only single-use recovery code that
-  generates exactly one magic link on redemption (§03).
-- **Capability.** A per-employee, per-property-role feature flag,
-  resolved from a four-level sparse JSON stack (property_role_
-  assignment → employee_role → role → catalog default). Explicit
-  `false` blocks inheritance; absent keys inherit. Canonical catalog
-  in §05.
+- **Availability override.** A date-specific override of a user's
+  weekly availability pattern. Adding work is self-service
+  (auto-approved); reducing availability requires owner/manager
+  approval. Only approved overrides affect the assignment algorithm.
+  See §06 `user_availability_overrides`.
+- **Binding org.** On a `role_grants(grant_role='client')` of
+  workspace scope, the `binding_org_id` narrows the client's view
+  to data tagged to that organization within the workspace. See §02.
+- **Break-glass code.** Single-use recovery code issued to users
+  who hold an `owner` or `manager` grant; generates exactly one
+  magic link on redemption (§03).
+- **Capability.** A per-(user, work_role, property) feature flag,
+  resolved from a four-level sparse JSON stack
+  (property_work_role_assignment → user_work_role →
+  work_role.default_capabilities → catalog default). Explicit
+  `false` blocks inheritance; absent keys inherit. Parallel to
+  `role_grants.capability_override` (grant-scoped capabilities).
+  Canonical catalog in §05.
 - **Condition (asset).** The physical state of an asset: `new | good |
   fair | poor | needs_replacement`. Changes are audit-logged as
   `asset.condition_changed`. See §21.
 - **Checklist item.** A row in `task_checklist_item` — one tickable
   line on a task, seeded from the template's
   `checklist_template_json`. Per-item tick state is authoritative.
-- **Completion.** Terminal state for a task; has evidence and an
-  employee. Under concurrent writes, last-write-wins with a
+- **Client (grant role).** A user granted read-visibility to data
+  they are billed for, plus the ability to accept/reject quotes
+  and invoices tied to them. Held via a `role_grants` row with
+  `grant_role = 'client'` and either a `binding_org_id` (workspace
+  scope) or a property scope. See §02, §22.
+- **Completion.** Terminal state for a task; has evidence and a
+  completing user. Under concurrent writes, last-write-wins with a
   `task.complete_superseded` audit entry for the displaced one (§06).
 - **Correlation ID.** Per-request identifier (or caller-supplied
   `X-Correlation-Id`) that groups audit rows. Not a workflow-lifetime
@@ -75,14 +89,19 @@ fix the offender.
 - **Digest run.** A single execution of the daily summary
   email/notification pipeline (§10). Records the digest template,
   recipients, send time, and delivery outcomes.
-- **Employee leave.** Approved absence window (§06). Unapproved
-  requests do not affect assignment.
+- **Employee.** v0 entity name; **replaced by `users` + `work_engagement`
+  in v1**. Retained in prose as a general term for "a person who
+  performs work you pay for". No longer a schema table — see
+  "User" and "Work engagement".
+- **User leave.** Approved absence window (§06) keyed by `user_id`.
+  See §06 `user_leave`. Unapproved requests do not affect assignment.
 - **Evidence.** Artifact attached to a completion — photo, note, or
   checklist snapshot.
 - **Evidence policy.** Photo-evidence requirement resolved by
-  walking a five-layer stack workspace → property → unit → employee →
-  task (§05 "Evidence-policy stack", §06 "Evidence policy
-  inheritance"). Values are `inherit | require | optional | forbid`;
+  walking a five-layer stack workspace → property → unit →
+  work_engagement → task (§05 "Evidence-policy stack", §06
+  "Evidence policy inheritance"). Values are
+  `inherit | require | optional | forbid`;
   the workspace root is always concrete. **Most specific wins** — the
   walk goes from task inward, stopping at the first concrete
   (non-`inherit`) value — with one domain-specific rule: `forbid` at
@@ -108,30 +127,44 @@ fix the offender.
   to `inventory_item.on_hand`. Reason enum: `restock | consume |
   adjust | waste | transfer_in | transfer_out | audit_correction`.
   See §08.
-- **Issue.** An employee-reported problem tracked with state
+- **Issue.** A user-reported problem tracked with state
   (`open | in_progress | resolved | wont_fix`) and possibly converted
   to a task.
 - **Magic link.** Single-use, signed URL used to enroll or recover a
   passkey. Consumes a break-glass code (if that's the source)
   regardless of whether the link is later clicked.
-- **Manager.** Human with elevated scope. All managers are peers in v1.
+- **Grant role.** The permission role a user holds on a scope:
+  `owner | manager | worker | client | guest`. Stored on
+  `role_grants`. See §02.
+- **Manager (grant role).** A user with workspace-wide or scope-wide
+  authority (minus owner-only verbs). All managers are peers in v1.
+  Held via a `role_grants` row with `grant_role = 'manager'`; no
+  `managers` table exists in v1.
 - **Model assignment.** The capability → model mapping (§11).
-- **Off-app reach-out.** Agent-initiated WhatsApp or SMS message to an
-  employee for low-stakes checks. Requires the employee's
+- **Off-app reach-out.** Agent-initiated WhatsApp or SMS message to
+  a user for low-stakes checks. Requires the user's
   `preferred_offapp_channel` to be set. See §10.
+- **Owner (grant role).** A user with full authority on a scope,
+  including the exclusive right to transfer ownership. Exactly one
+  per scope. Held via a `role_grants` row with `grant_role = 'owner'`.
+- **Owner workspace.** On `property_workspace`, the workspace whose
+  creator controls access grants for the property
+  (`membership_role = 'owner_workspace'`). Other workspaces that
+  share the property are `managed_workspace` or `observer_workspace`.
+  See §02.
 - **Passkey.** WebAuthn platform or roaming authenticator credential.
 - **Pay period.** A date-bucket inside which shifts roll up into a
   payslip. `open → locked → paid`; `paid` is set automatically when
   every contained payslip reaches `paid`.
-- **Payout destination.** A per-employee record naming where money
-  lands: bank account, reloadable card, wallet, cash, or other.
-  Employees may hold more than one; the employee row carries default
-  pointers for pay and for reimbursements separately (§09). Full
-  account numbers live in `secret_envelope`; only a `display_stub`
-  (IBAN last-4 + country, card last-4, wallet handle) is returned
-  over the API. Creating, editing, or changing a default is always
-  approval-gated for bearer tokens (scoped and delegated) —
-  miployees does not execute
+- **Payout destination.** A per-user **or** per-organization record
+  naming where money lands: bank account, reloadable card, wallet,
+  cash, or other. Users may hold more than one; the
+  `work_engagement` row carries default pointers for pay and for
+  reimbursements separately (§09). Full account numbers live in
+  `secret_envelope`; only a `display_stub` (IBAN last-4 + country,
+  card last-4, wallet handle) is returned over the API. Creating,
+  editing, or changing a default is always approval-gated for bearer
+  tokens (scoped and delegated) — miployees does not execute
   payments, but routing decisions are security-critical and treated
   accordingly.
 - **Payout snapshot.** The immutable `payout_snapshot_json` captured
@@ -142,33 +175,35 @@ fix the offender.
   the PDF is always safe to keep long-term.
 - **Payout manifest.** A streaming, not-stored JSON artifact from
   `POST /payslips/{id}/payout_manifest` that decrypts full account
-  numbers at the moment the operator pushes funds. **Manager-
-  session only** (no bearer tokens, even via approval — see
-  "Interactive-session-only endpoint" below). Every fetch is audit-logged; no
-  blob is persisted; the idempotency cache does not retain the
-  response; a second fetch within 5 minutes raises a digest alert.
-  Once the payout secrets are GDPR-erased, the endpoint returns 410
-  Gone (§09, §15).
+  numbers at the moment the operator pushes funds. **Owner/manager
+  passkey session only** (no bearer tokens, even via approval — see
+  "Interactive-session-only endpoint" below). Every fetch is audit-
+  logged; no blob is persisted; the idempotency cache does not retain
+  the response; a second fetch within 5 minutes raises a digest
+  alert. Once the payout secrets are GDPR-erased, the endpoint
+  returns 410 Gone (§09, §15).
 - **Interactive-session-only endpoint.** An HTTP endpoint that
   refuses all bearer tokens (scoped and delegated) and requires a
   live passkey session, because the response contains decrypted
   secret material that must not land in any persisted store
   (including `agent_action.result_json`). v1 list (§11): the payout
-  manifest. Manager passkey session only.
+  manifest. Owner/manager passkey session only.
 - **Delegated token.** A bearer token created by a logged-in user
-  (manager or employee) that inherits their full permissions. Audit
-  records use the delegating user's identity (`actor_kind`,
-  `actor_id`), with `agent_label` and `agent_conversation_ref`
-  fields flagging the action as agent-executed and linking back to
-  the triggering conversation. See §03.
+  that inherits their full `role_grants` and work-role bindings.
+  Audit records use the delegating user's identity
+  (`actor_kind = 'user'`, `actor_id`), with `agent_label` and
+  `agent_conversation_ref` fields flagging the action as
+  agent-executed and linking back to the triggering conversation.
+  See §03.
 - **Host-CLI-only administrative command.** A `miployees admin`
   verb with no HTTP surface at all, agent or human: envelope-key
   rotation, offline lockout recovery, hard-delete purge (§11). Run
   on the deployment host; authorisation is by shell access.
-- **Payslip.** A computed pay document for one (employee, pay_period).
+- **Payslip.** A computed pay document for one
+  (work_engagement, pay_period).
 - **Pending (task).** A task whose `scheduled_for_utc` is within the
   next hour (or already past for a one-off). Distinct from
-  `scheduled`; used to populate the employee "today" list (§06).
+  `scheduled`; used to populate the worker "today" list (§06).
 - **Property.** A managed physical place containing one or more
   units. `kind` (§04) gates stay lifecycle rule seeding: `residence`
   none, `str`/`vacation` default `after_checkout` rule, `mixed` same
@@ -191,17 +226,23 @@ fix the offender.
   to an earlier date when the ideal date falls on an unavailable day
   (leave, holiday, day off). Bounded by `max_advance_days` on the
   lifecycle rule. See §06 "Pull-back logic for before_checkin tasks".
-- **Role.** A named capability bundle (maid, cook, …). `role.key` is a
-  stable slug but editable; external integrations should prefer the
-  ULID.
+- **Role.** Ambiguous in v0. In v1, prefer **Work role** (the job:
+  maid, cook, driver) or **Grant role** (the permission:
+  owner/manager/worker/client/guest). The v0 `role` entity was
+  renamed `work_role` in v1; stable slug `work_role.key` is
+  editable but external integrations should prefer the ULID.
+- **Role grant.** A row in `role_grants` attaching a user to a
+  scope with a grant_role and optional capability overrides. The
+  only source of authority for humans in v1. See §02.
 - **Schedule.** Description of when tasks materialize (RRULE).
   `paused_at` wins over `active_from/active_until`.
 - **Scope (instruction).** The visibility level of an instruction:
   `global` (all properties), `property` (one property), `area` (one
   area within a property), or linked via `instruction_link`. See §07.
 - **Session.** Browser-bound server-side record tied to a passkey.
-- **Shift.** A clocked-in interval for an employee. `status` is
-  `open | closed | disputed`.
+- **Shift.** A clocked-in interval tied to a
+  `work_engagement` (which identifies the user × workspace).
+  `status` is `open | closed | disputed`.
 - **SKU / item.** An inventory entry per property.
 - **Stay.** A reservation of a unit within a property (guest, owner,
   staff, other — see `guest_kind`) for a date range. Overlap
@@ -255,12 +296,11 @@ fix the offender.
   is its own billing target. See §22.
 - **Supplier (supplying organization).** An `organization` with
   `is_supplier = true` — an agency that provides workers to our
-  workspace. An employee with
+  workspace. A `work_engagement` with
   `engagement_kind = agency_supplied` references one via
-  `supplier_org_id`; the supplier's
-  `default_pay_destination_id` routes the supplier's
-  vendor invoices. See §22.
-- **Engagement kind.** Per-employee enum
+  `supplier_org_id`; the supplier's `default_pay_destination_id`
+  routes the supplier's vendor invoices. See §22.
+- **Engagement kind.** Per-`work_engagement` enum
   (`payroll | contractor | agency_supplied`) deciding which pay
   pipeline the worker is on. `payroll` → `pay_rule` + `payslip`
   (§09). `contractor` and `agency_supplied` → `vendor_invoice`
@@ -282,16 +322,32 @@ fix the offender.
 - **Vendor invoice.** A bill from a contractor or supplying
   organization, paid from a `payout_destination` chosen at
   approval time. Parallel to `expense_claim` in shape (OCR
-  autofill, attachments, manager approval) but the counterparty
-  is the biller, not the submitting employee. Approval and
-  `mark_paid` are unconditionally approval-gated. States:
+  autofill, attachments, owner/manager approval) but the
+  counterparty is the biller, not the submitting user. Approval
+  and `mark_paid` are unconditionally approval-gated. States:
   `draft | submitted | approved | rejected | paid | voided`. See
   §22.
 - **Client rate / billable rate.** Per-client hourly rate keyed to
-  a role (`client_rate`) with optional per-employee override
-  (`client_employee_rate`). Resolved at shift close and
-  snapshotted onto `shift_billing`. Rate-card edits do not
-  rewrite history. See §22.
+  a work_role (`client_rate`) with optional per-user override
+  (`client_user_rate`). Resolved at shift close and snapshotted
+  onto `shift_billing`. Rate-card edits do not rewrite history.
+  See §22.
+- **User.** A single login identity row (`users`); every human in
+  v1 has exactly one. Authority comes from `role_grants`; pay
+  pipelines come from `work_engagement`. No `kind` column,
+  no manager/employee split. See §02.
+- **Work engagement.** The per-(user, workspace) employment
+  relationship carrying `engagement_kind` (payroll / contractor /
+  agency_supplied), `supplier_org_id`, and pay-destination
+  defaults. Pay-pipeline tables (pay_rule, payslip, shift,
+  expense_claim) key off `work_engagement_id`. See §02, §22.
+- **Work role.** A named job bundle (maid, cook, driver, …),
+  formerly `role` in v0. Resolved against a user in a given
+  workspace via `user_work_role`. See §05.
+- **Worker (grant role).** A user operating in a scope as staff.
+  Requires at least one `user_work_role` on a workspace-scope
+  grant; surface narrows further via
+  `property_work_role_assignment`.
 - **Shift billing.** Append-only derived row capturing a shift's
   resolved billable rate, currency, minutes, and subtotal at the
   moment the shift closes. Drives the "billable hours by client"

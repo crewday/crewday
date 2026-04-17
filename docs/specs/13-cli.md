@@ -8,11 +8,12 @@ Every command can be executed against a remote deployment.
 ## Agent-first invariant
 
 **Every human UI action is also a CLI command.** There is no
-manager- or employee-facing verb in §14 that cannot be invoked from
-this CLI (or its underlying REST endpoint in §12). The manager-side
-and employee-side embedded chat agents in §11 expose the CLI + REST
-surface as their tool set — so anything a human can do in the UI,
-an agent can do from chat, subject to the approval gates in §11.
+owner/manager- or worker-facing verb in §14 that cannot be invoked
+from this CLI (or its underlying REST endpoint in §12). The
+owner/manager-side and worker-side embedded chat agents in §11
+expose the CLI + REST surface as their tool set — so anything a
+human can do in the UI, an agent can do from chat, subject to the
+approval gates in §11.
 
 See §11 "The agent-first invariant" for the broader principle and
 §14 for how each UI surface maps back to a command.
@@ -221,29 +222,29 @@ miployees ical
   poll <id>                   # manual trigger
   disable <id>
 
-miployees employees
-  list [--role] [--property] [--state]
-  add "<name>" --email <email> --role <slug> [--property <id>...]
+miployees users
+  list [--grant-role] [--property] [--state]
+  invite "<name>" --email <email> --grant-role <owner|manager|worker|client|guest> [--property <id>...]
   update <id> ...
   magic-link <id>             # (re-)issue
   archive <id>
   reinstate <id>
 
-miployees roles
+miployees work-roles
   list
   add --key maid --name "Maid"
   update <id> ...
 
 miployees capabilities
-  show <employee-id>
-  set <employee-id> <key> <on|off|inherit>
+  show <user-id>
+  set <user-id> <key> <on|off|inherit>
 
 miployees tasks
-  list [--property] [--role] [--assignee] [--state] [--on <date>] [--q]
+  list [--property] [--work-role] [--assignee] [--state] [--on <date>] [--q]
   show <id>
-  create "<title>" --property <id> --role <slug> --when '<local-datetime>' [--duration 60]
+  create "<title>" --property <id> --work-role <slug> --when '<local-datetime>' [--duration 60]
   from-nl "<free text>" [--dry-run] [--commit]
-  assign <id> --to <employee-id>
+  assign <id> --to <user-id>
   start <id>
   complete <id> [--photo <path>] [--note "..."] [--checklist-all-checked]
   skip <id> --reason "..."
@@ -260,7 +261,7 @@ miployees schedules
 
 miployees templates
   list
-  add "<name>" --role <slug> [--duration] [--photo optional|required] [--checklist @file]
+  add "<name>" --work-role <slug> [--duration] [--photo optional|required] [--checklist @file]
   update <id> ...
 
 miployees instructions
@@ -282,22 +283,22 @@ miployees inventory
 miployees shifts
   clock-in [--property <id>]
   clock-out <id?>
-  list [--employee] [--from] [--to]
+  list [--user] [--from] [--to]
 
 miployees pay
   rules list [--employee]
-  rules set --employee <id> --hourly 1500 --currency EUR --overtime-after 40
+  rules set --work-engagement <id> --hourly 1500 --currency EUR --overtime-after 40
   periods list
   periods lock <id>
-  payslips list [--employee] [--period]
+  payslips list [--user] [--period]
   payslips show <id>
   payslips issue <id>
   payslips mark-paid <id>
 
 miployees expenses
-  submit --employee <id?> --photo <path> [--vendor "..."] [--amount 1234 --currency EUR]
-                                         # autofill from receipt if photo only
-  list [--employee] [--state]
+  submit --user <id?> --photo <path> [--vendor "..."] [--amount 1234 --currency EUR]
+                                      # autofill from receipt if photo only
+  list [--user] [--state]
   approve <id>
   reject <id> --reason "..."
 
@@ -307,7 +308,7 @@ miployees issues
          [--category damage|broken|supplies|safety|other]
   list [--state] [--property] [--severity] [--category]
   resolve <id> --note "..."
-  convert-to-task <id> --role handyman
+  convert-to-task <id> --work-role handyman
 
 miployees asset-types
   list [--workspace <id>]
@@ -324,7 +325,7 @@ miployees assets
       [--warranty-expires-on <date>] [--guest-visible]
   show <id>
   update <id> ...
-  assign <id> --to <employee-id>
+  assign <id> --custodian <user-id>
   unassign <id>
   transfer <id> --to-property <id> [--note "..."]
   condition <id> --set <new|good|fair|poor|needs_replacement> [--note "..."]
@@ -376,7 +377,7 @@ miployees audit
 
 miployees admin
   init --email <owner-email>                  # bootstrap (§16)
-  recover --email <manager-email>             # emit magic link to stdout
+  recover --email <owner-email>               # emit magic link to stdout
   rotate-root-key --new-key-file <path> | --new-key-stdin
   backup --to <path>
   restore --from <path>
@@ -436,7 +437,7 @@ Examples:
 
 ```
 miployees stays list --upcoming 14d -o ndjson | jq 'select(.source=="airbnb")'
-miployees audit tail --actor-kind agent -o ndjson --follow | jq .action
+miployees audit tail --actor-kind user -o ndjson --follow | jq .action
 miployees tasks list --state overdue -o json | jq '.data[].id' |
     xargs -I{} miployees tasks show {}
 ```

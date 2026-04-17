@@ -177,8 +177,8 @@ All resources follow a consistent envelope on collections only:
 
 ### Expansion
 
-- `?expand=property,area,assigned_employee` (per endpoint,
-  documented fields).
+- `?expand=property,area,assigned_user` (per endpoint, documented
+  fields).
 - Expansion is explicit — default payloads are lean.
 
 ## Resource groups
@@ -193,16 +193,14 @@ POST   /auth/webauthn/begin_registration
 POST   /auth/webauthn/finish_registration
 POST   /auth/webauthn/begin_login
 POST   /auth/webauthn/finish_login
-POST   /auth/magic/send            # manager only
+POST   /auth/magic/send            # owner or manager only
 POST   /auth/magic/consume         # consume a break-glass code → magic link
 GET    /auth/me
 POST   /auth/logout
 POST   /auth/tokens                # create
-GET    /auth/tokens                # list (manager)
+GET    /auth/tokens                # list (owner/manager)
 POST   /auth/tokens/{id}/revoke
 POST   /auth/tokens/{id}/rotate
-
-POST   /managers/invite            # existing manager invites another
 ```
 
 ### Properties / areas / stays
@@ -254,42 +252,58 @@ PATCH  /property_closures/{id}
 DELETE /property_closures/{id}
 ```
 
-### Employees / roles / capabilities
+### Users / work roles / capabilities
 
 ```
-GET    /employees
-POST   /employees
-GET    /employees/{id}
-PATCH  /employees/{id}
-POST   /employees/{id}/archive
-POST   /employees/{id}/reinstate
-POST   /employees/{id}/magic_link
+GET    /users
+POST   /users/invite              # body: {email, grants[], work_engagement?, user_work_roles?}
+GET    /users/{id}
+PATCH  /users/{id}
+POST   /users/{id}/archive
+POST   /users/{id}/reinstate
+POST   /users/{id}/magic_link
 
-GET    /employees/{id}/roles
-POST   /employees/{id}/roles
-PATCH  /employee_roles/{id}
-DELETE /employee_roles/{id}
+GET    /users/{id}/role_grants
+POST   /role_grants
+PATCH  /role_grants/{id}
+DELETE /role_grants/{id}
 
-GET    /roles
-POST   /roles
-PATCH  /roles/{id}
+GET    /work_engagements          # ?user_id=…&workspace_id=…
+GET    /work_engagements/{id}
+PATCH  /work_engagements/{id}
+POST   /work_engagements/{id}/archive
+POST   /work_engagements/{id}/reinstate
 
-GET    /capabilities              # resolved per-employee view
-PATCH  /capabilities/{employee_id}
+GET    /users/{id}/user_work_roles
+POST   /user_work_roles
+PATCH  /user_work_roles/{id}
+DELETE /user_work_roles/{id}
 
-GET    /employee_leaves           # ?employee_id=…&from=…&to=…&approved=true|false
-POST   /employee_leaves
-PATCH  /employee_leaves/{id}
-POST   /employee_leaves/{id}/approve
-POST   /employee_leaves/{id}/reject
-DELETE /employee_leaves/{id}
+GET    /work_roles
+POST   /work_roles
+PATCH  /work_roles/{id}
 
-GET    /employee_availability_overrides   # ?employee_id=…&from=…&to=…&approved=true|false
-POST   /employee_availability_overrides
-PATCH  /employee_availability_overrides/{id}
-POST   /employee_availability_overrides/{id}/approve
-POST   /employee_availability_overrides/{id}/reject
-DELETE /employee_availability_overrides/{id}
+GET    /property_work_role_assignments
+POST   /property_work_role_assignments
+PATCH  /property_work_role_assignments/{id}
+DELETE /property_work_role_assignments/{id}
+
+GET    /capabilities              # resolved per-user view
+PATCH  /capabilities/{user_id}
+
+GET    /user_leaves               # ?user_id=…&from=…&to=…&approved=true|false
+POST   /user_leaves
+PATCH  /user_leaves/{id}
+POST   /user_leaves/{id}/approve
+POST   /user_leaves/{id}/reject
+DELETE /user_leaves/{id}
+
+GET    /user_availability_overrides   # ?user_id=…&from=…&to=…&approved=true|false
+POST   /user_availability_overrides
+PATCH  /user_availability_overrides/{id}
+POST   /user_availability_overrides/{id}/approve
+POST   /user_availability_overrides/{id}/reject
+DELETE /user_availability_overrides/{id}
 
 GET    /public_holidays                   # ?from=…&to=…&country=…
 POST   /public_holidays
@@ -298,32 +312,32 @@ PATCH  /public_holidays/{id}
 DELETE /public_holidays/{id}
 ```
 
-**`GET /capabilities` response shape** — resolved map per (employee,
-property_role_assignment). Flat JSON:
+**`GET /capabilities` response shape** — resolved map per (user,
+property_work_role_assignment). Flat JSON:
 
 ```json
 {
   "data": [
     {
-      "employee_id": "emp_…",
-      "property_role_assignment_id": "pra_…",
+      "user_id": "usr_…",
+      "property_work_role_assignment_id": "pwra_…",
       "resolved": {
-        "time.clock_in": {"value": true, "source": "property_role_assignment"},
-        "tasks.photo_evidence_required": {"value": true, "source": "property_role_assignment"},
-        "messaging.comments": {"value": true, "source": "role_default"}
+        "time.clock_in": {"value": true, "source": "property_work_role_assignment"},
+        "tasks.photo_evidence_required": {"value": true, "source": "property_work_role_assignment"},
+        "messaging.comments": {"value": true, "source": "work_role_default"}
       }
     }
   ]
 }
 ```
 
-`source` is one of `property_role_assignment | employee_role |
-role_default | catalog_default`.
+`source` is one of `property_work_role_assignment | user_work_role |
+work_role_default | catalog_default`.
 
-**`PATCH /capabilities/{employee_id}`** — body is a sparse JSON map
-of `capability_key → (true | false | null)` plus an
-`assignment_id` selector naming which `property_role_assignment`
-to write to. `null` deletes the override key (restores inheritance).
+**`PATCH /capabilities/{user_id}`** — body is a sparse JSON map of
+`capability_key → (true | false | null)` plus an `assignment_id`
+selector naming which `property_work_role_assignment` to write to.
+`null` deletes the override key (restores inheritance).
 
 ### Tasks / templates / schedules
 
@@ -397,15 +411,15 @@ GET    /pay_rules
 POST   /pay_rules
 PATCH  /pay_rules/{id}
 
-GET    /employees/{id}/payout_destinations
-POST   /employees/{id}/payout_destinations   # body includes write-only `account_number_plaintext`
-PATCH  /payout_destinations/{id}             # scoped to one employee; cross-employee writes → 422
-POST   /payout_destinations/{id}/verify      # manager records that full number matches a paper/photo artifact
+GET    /users/{id}/payout_destinations
+POST   /users/{id}/payout_destinations       # body includes write-only `account_number_plaintext`
+PATCH  /payout_destinations/{id}             # scoped to one user; cross-user writes → 422
+POST   /payout_destinations/{id}/verify      # owner/manager records that full number matches a paper/photo artifact
 POST   /payout_destinations/{id}/archive
-POST   /employees/{id}/pay_destination       # body: {destination_id}; sets employee.pay_destination_id; always approval-gated for agents
-POST   /employees/{id}/reimbursement_destination  # same for reimbursement_destination_id
-DELETE /employees/{id}/pay_destination       # clears the pointer
-DELETE /employees/{id}/reimbursement_destination
+POST   /work_engagements/{id}/pay_destination        # body: {destination_id}; always approval-gated for agents
+POST   /work_engagements/{id}/reimbursement_destination  # same for reimbursement_destination_id
+DELETE /work_engagements/{id}/pay_destination        # clears the pointer
+DELETE /work_engagements/{id}/reimbursement_destination
 
 GET    /pay_periods
 POST   /pay_periods
@@ -418,7 +432,7 @@ GET    /payslips/{id}.pdf                 # rendered from payout_snapshot_json; 
 POST   /payslips/{id}/issue
 POST   /payslips/{id}/mark_paid
 POST   /payslips/{id}/void
-POST   /payslips/{id}/payout_manifest     # MANAGER-SESSION ONLY (interactive-session-only, §11). Streams decrypted account numbers JIT; not cached in the idempotency store; returns 410 once secrets are purged.
+POST   /payslips/{id}/payout_manifest     # OWNER/MANAGER SESSION ONLY (interactive-session-only, §11). Streams decrypted account numbers JIT; not cached in the idempotency store; returns 410 once secrets are purged.
 
 GET    /expenses
 POST   /expenses                   # multipart for receipts
@@ -487,15 +501,15 @@ GET    /assets/reports/maintenance_due
 ### Settings
 
 ```
-GET    /settings                         # workspace defaults (full map)
-PATCH  /settings                         # update workspace defaults
-GET    /settings/catalog                 # all registered keys + metadata
-GET    /settings/resolved                # ?entity_kind=...&entity_id=...
-GET    /properties/{id}/settings         # sparse overrides
-PATCH  /properties/{id}/settings         # set/clear overrides (null = inherit)
-GET    /employees/{id}/settings          # sparse overrides
-PATCH  /employees/{id}/settings
-GET    /tasks/{id}/settings              # sparse overrides
+GET    /settings                               # workspace defaults (full map)
+PATCH  /settings                               # update workspace defaults
+GET    /settings/catalog                       # all registered keys + metadata
+GET    /settings/resolved                      # ?entity_kind=...&entity_id=...
+GET    /properties/{id}/settings               # sparse overrides
+PATCH  /properties/{id}/settings               # set/clear overrides (null = inherit)
+GET    /work_engagements/{id}/settings         # sparse overrides
+PATCH  /work_engagements/{id}/settings
+GET    /tasks/{id}/settings                    # sparse overrides
 PATCH  /tasks/{id}/settings
 ```
 
@@ -569,11 +583,11 @@ POST   /client_rates
 PATCH  /client_rates/{id}
 DELETE /client_rates/{id}                     # soft delete
 
-POST   /client_employee_rates
-PATCH  /client_employee_rates/{id}
-DELETE /client_employee_rates/{id}
+POST   /client_user_rates
+PATCH  /client_user_rates/{id}
+DELETE /client_user_rates/{id}
 
-POST   /employees/{id}/engagement_kind        # body: {kind, supplier_org_id?}; always approval-gated when crossing payroll boundary
+POST   /work_engagements/{id}/engagement_kind  # body: {kind, supplier_org_id?}; always approval-gated when crossing payroll boundary
 
 GET    /work_orders                           # ?property_id=…&client_org_id=…&state=…
 POST   /work_orders
@@ -613,7 +627,7 @@ GET    /exports/work_orders.csv?client_org_id=…&from=…&to=…       # §22
 ### Audit
 
 ```
-GET    /audit                      # manager only
+GET    /audit                      # owner/manager only
 GET    /audit/export.jsonl         # streamed
 ```
 
@@ -682,7 +696,7 @@ Content-Type: application/problem+json
   "type": "https://miployees.dev/errors/approval_required",
   "title": "Approval required",
   "status": 202,
-  "detail": "This action requires a manager approval",
+  "detail": "This action requires an owner or manager approval",
   "approval_id": "appr_01J…",
   "expires_at": "2026-04-18T09:00:00Z"
 }

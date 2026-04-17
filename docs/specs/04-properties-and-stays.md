@@ -43,8 +43,8 @@ A property may belong to a **billing client** via
   applies.
 - **Set** puts the property in agency mode: the workspace operates
   on behalf of a client, bills them for work done (via
-  `client_rate` / `client_employee_rate` resolution, §22), and
-  rolls shift hours up into the per-client CSV export.
+  `client_rate` / `client_user_rate` resolution, §22), and rolls
+  shift hours up into the per-client CSV export.
 
 One property may have at most one `client_org_id` at a time.
 Split-billing a single property across multiple clients is
@@ -126,7 +126,7 @@ unit-scoped.
 | default_checkout_time   | time?     | nullable = inherit from property; e.g. `10:00` |
 | max_guests              | int?      | nullable = no limit                |
 | welcome_overrides_json  | jsonb?    | per-unit overrides for wifi, access codes, etc. Merges with property `welcome_defaults_json` |
-| settings_override_json  | jsonb?    | per-unit cascade layer (between property and employee); see §02 "Settings cascade" |
+| settings_override_json  | jsonb?    | per-unit cascade layer (between property and work_engagement); see §02 "Settings cascade" |
 | notes_md                | text?     |                                    |
 | created_at / updated_at | tstz      |                                    |
 | deleted_at              | tstz?     | soft delete                        |
@@ -234,7 +234,7 @@ edits, and show in the UI as coherent groups. **Edit semantics:**
 - For `after_checkout` bundles: if
   `|new.check_out_at - old.check_out_at| < 4h` **and** the stay is
   not yet in `checked_out` state: patch `scheduled_for_local`,
-  `scheduled_for_utc`, `due_by_utc`, and `assigned_employee_id` on
+  `scheduled_for_utc`, `due_by_utc`, and `assigned_user_id` on
   the existing bundle's tasks in place (state-gated to
   `scheduled | pending`).
 - For `before_checkin` bundles: same logic keyed on

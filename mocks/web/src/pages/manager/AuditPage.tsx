@@ -5,11 +5,19 @@ import DeskPage from "@/components/DeskPage";
 import { Chip, Loading } from "@/components/common";
 import type { AuditEntry } from "@/types/api";
 
-const ACTOR_TONE: Record<AuditEntry["actor_kind"], "moss" | "sky" | "ghost" | "sand"> = {
-  manager: "moss",
-  employee: "sand",
+// v1 actor_kind ∈ {user, agent, system}. The grant under which a
+// human acted is surfaced separately via actor_grant_role.
+const ACTOR_TONE: Record<AuditEntry["actor_kind"], "moss" | "sky" | "ghost"> = {
+  user: "moss",
   agent: "sky",
   system: "ghost",
+};
+
+const GRANT_TONE: Record<NonNullable<AuditEntry["actor_grant_role"]>, "moss" | "sand" | "sky" | "ghost"> = {
+  owner: "moss",
+  manager: "moss",
+  worker: "sand",
+  client: "sky",
 };
 
 function hms(iso: string): string {
@@ -27,7 +35,7 @@ export default function AuditPage() {
     queryFn: () => fetchJson<AuditEntry[]>("/api/v1/audit"),
   });
 
-  const sub = "Append-only. Every mutation by a manager, employee, agent, or system process.";
+  const sub = "Append-only. Every mutation by a user (owner/manager/worker/client), an agent, or the system.";
   const actions = <button className="btn btn--ghost">Export JSONL</button>;
 
   if (q.isPending) return <DeskPage title="Audit log" sub={sub} actions={actions}><Loading /></DeskPage>;
@@ -36,16 +44,21 @@ export default function AuditPage() {
   const entries = q.data;
   const countBy = (kind: AuditEntry["actor_kind"]): number =>
     entries.filter((e) => e.actor_kind === kind).length;
+  const countByGrant = (role: NonNullable<AuditEntry["actor_grant_role"]>): number =>
+    entries.filter((e) => e.actor_grant_role === role).length;
 
   return (
     <DeskPage title="Audit log" sub={sub} actions={actions}>
       <section className="panel">
         <div className="desk-filters">
           <span className="chip chip--ghost chip--sm chip--active">All</span>
-          <span className="chip chip--ghost chip--sm">Manager · {countBy("manager")}</span>
-          <span className="chip chip--ghost chip--sm">Employee · {countBy("employee")}</span>
+          <span className="chip chip--ghost chip--sm">User · {countBy("user")}</span>
           <span className="chip chip--ghost chip--sm">Agent · {countBy("agent")}</span>
           <span className="chip chip--ghost chip--sm">System · {countBy("system")}</span>
+          <span className="chip chip--ghost chip--sm">Owner · {countByGrant("owner")}</span>
+          <span className="chip chip--ghost chip--sm">Manager · {countByGrant("manager")}</span>
+          <span className="chip chip--ghost chip--sm">Worker · {countByGrant("worker")}</span>
+          <span className="chip chip--ghost chip--sm">Client · {countByGrant("client")}</span>
         </div>
         <table className="table">
           <thead>
@@ -62,6 +75,11 @@ export default function AuditPage() {
                 </td>
                 <td>
                   <Chip tone={ACTOR_TONE[e.actor_kind]} size="sm">{e.actor_kind}</Chip>{" "}
+                  {e.actor_grant_role ? (
+                    <>
+                      <Chip tone={GRANT_TONE[e.actor_grant_role]} size="sm">{e.actor_grant_role}</Chip>{" "}
+                    </>
+                  ) : null}
                   {e.actor}
                 </td>
                 <td className="mono">{e.action}</td>

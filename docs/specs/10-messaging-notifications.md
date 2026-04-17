@@ -4,13 +4,14 @@
 
 v1 ships three outbound messaging channels to humans:
 
-1. **Email** — every out-message originated by a **human** (manager-
-   authored mention, notification, digest) goes here, and here only.
+1. **Email** — every out-message originated by a **human** (owner/
+   manager-authored mention, notification, digest) goes here, and
+   here only.
 2. **WhatsApp** — **agent-originated** out-messages only. The
-   workspace agent (§11) may reach an employee on WhatsApp for
+   workspace agent (§11) may reach a worker on WhatsApp for
    self-solvable, low-stakes checks ("did you finish the kitchen?",
    "please confirm the chlorine level", "your leave is approved").
-3. **SMS** — fallback for WhatsApp when the employee's number is
+3. **SMS** — fallback for WhatsApp when the user's number is
    unreachable on WhatsApp or their capability flag disables it.
    Also agent-only.
 
@@ -48,23 +49,23 @@ receive `locale` in their Jinja context. Formatting helpers
 
 ### Emails the system sends
 
-| event                          | to                      | required?     |
-|--------------------------------|-------------------------|---------------|
-| magic link (enrollment / recovery) | recipient           | yes           |
-| daily manager digest           | each manager            | opt-out       |
-| daily employee digest          | each employee           | opt-out       |
-| task overdue alert             | assignee + manager      | opt-out       |
-| task comment mention           | mentioned person        | opt-out       |
-| issue reported                 | managers                | yes           |
-| expense submitted              | managers                | yes           |
-| expense decision               | submitting employee     | yes           |
-| payslip issued                 | employee                | yes           |
-| iCal feed error                | managers                | yes           |
-| anomaly detected (§11)         | managers                | opt-out       |
-| availability override pending  | managers                | yes           |
-| pre-arrival task unassigned    | managers                | yes           |
-| holiday schedule impact        | affected employees      | opt-out       |
-| agent approval pending         | managers                | yes           |
+| event                          | to                                   | required?     |
+|--------------------------------|--------------------------------------|---------------|
+| magic link (enrollment / recovery) | recipient                        | yes           |
+| daily owner/manager digest     | each user with owner or manager grant | opt-out      |
+| daily worker digest            | each user with worker grant          | opt-out       |
+| task overdue alert             | assigned user + owner/manager        | opt-out       |
+| task comment mention           | mentioned user                       | opt-out       |
+| issue reported                 | owners and managers                  | yes           |
+| expense submitted              | owners and managers                  | yes           |
+| expense decision               | submitting user                      | yes           |
+| payslip issued                 | work-engagement user                 | yes           |
+| iCal feed error                | owners and managers                  | yes           |
+| anomaly detected (§11)         | owners and managers                  | opt-out       |
+| availability override pending  | owners and managers                  | yes           |
+| pre-arrival task unassigned    | owners and managers                  | yes           |
+| holiday schedule impact        | affected users                       | opt-out       |
+| agent approval pending         | owners and managers                  | yes           |
 
 Opt-outs are per-person, per-category, via a signed unsubscribe link
 in the footer of each email. Required emails (security-relevant, or
@@ -76,17 +77,16 @@ legally equivalent) cannot be unsubscribed but throttle by priority.
 |---------------|---------|------------------------------------------------|
 | id            | ULID PK |                                                |
 | workspace_id  | ULID FK |                                                |
-| person_kind   | enum    | `manager | employee`                           |
-| person_id     | ULID    |                                                |
+| user_id       | ULID FK |                                                |
 | category      | text    | matches `email_delivery.template_key` family   |
 | opted_out_at  | tstz    |                                                |
 | source        | enum    | `unsubscribe_link | profile | admin`           |
 
 Before sending, the worker checks for an `email_opt_out` row matching
-`(workspace_id, person_kind, person_id, category)`. Required categories
-(magic link, payslip issued, expense decision, issue reported, agent
-approval pending) are never suppressed even if a row exists — the row
-is kept for audit but ignored for those templates.
+`(workspace_id, user_id, category)`. Required categories (magic link,
+payslip issued, expense decision, issue reported, agent approval
+pending) are never suppressed even if a row exists — the row is kept
+for audit but ignored for those templates.
 
 ### Delivery tracking
 
@@ -110,14 +110,14 @@ email_delivery
 Sent at 07:00 local time per recipient (their timezone), by the
 worker. Retries if SMTP fails; skipped if no noteworthy content.
 
-- **Manager digest** — today's upcoming tasks, stays arriving/leaving,
-  overdue tasks, open issues, pending approvals (incl. availability
-  override requests), low-stock items, warranties/certificates
-  expiring soon (within `assets.warranty_alert_days`, §21), iCal
-  errors, anomalies, expenses awaiting review, **unassigned
+- **Owner/manager digest** — today's upcoming tasks, stays arriving/
+  leaving, overdue tasks, open issues, pending approvals (incl.
+  availability override requests), low-stock items, warranties/
+  certificates expiring soon (within `assets.warranty_alert_days`,
+  §21), iCal errors, anomalies, expenses awaiting review, **unassigned
   pre-arrival tasks** (pull-back failed), **upcoming public holidays
   with scheduling impact**.
-- **Employee digest** — "Today you have X tasks", grouped by property,
+- **Worker digest** — "Today you have X tasks", grouped by property,
   with a quick link to the PWA.
 
 ## In-app messaging
@@ -127,16 +127,15 @@ The in-app messaging surface is the **task-scoped agent thread**
 longer a free list of user comments — it is an **event in the log
 of a workspace-agent-mediated conversation** scoped to that task.
 
-Message kinds in the log: `employee | manager | agent | system`.
-The workspace agent (§11) is a **full participant**: it reads every
-message as it is posted, can summarise the thread on demand, answer
-questions grounded in instructions (§07), and speak in the thread
-on delegation ("@agent remind Maria the linen press is below her
-required temperature"). Managers read and reply through the same
-thread on the desktop chat surface (§14); employees read and reply
-through the employee chat page. Human `@mentions` resolve to
-workspace members and still trigger email fallback for offline
-recipients.
+Message kinds in the log: `user | agent | system`. The workspace
+agent (§11) is a **full participant**: it reads every message as it
+is posted, can summarise the thread on demand, answer questions
+grounded in instructions (§07), and speak in the thread on delegation
+("@agent remind Maria the linen press is below her required
+temperature"). Owners and managers read and reply through the same
+thread on the desktop chat surface (§14); workers read and reply
+through the worker chat page. Human `@mentions` resolve to workspace
+members and still trigger email fallback for offline recipients.
 
 There are still no DMs and no group chats outside a task thread.
 If a manager wants a free-form conversation, they use the right-
@@ -145,9 +144,9 @@ other agent write.
 
 ### Off-app agent reach-out
 
-The workspace agent may initiate outbound conversation with an
-employee over **WhatsApp** (and **SMS** fallback) for low-stakes,
-self-solvable checks:
+The workspace agent may initiate outbound conversation with a worker
+over **WhatsApp** (and **SMS** fallback) for low-stakes, self-solvable
+checks:
 
 - "did you finish the kitchen?" with a one-tap confirm link.
 - "please confirm the chlorine level at Villa Sud is between 1 and
@@ -155,22 +154,22 @@ self-solvable checks:
 - "your leave for April 22 has been approved — reply STOP to these
   messages anytime."
 
-Reach-out is **agent-only**. Humans cannot compose a WhatsApp or
-SMS message from inside miployees; they interact with the employee
-either via email (§10 above) or via the in-app task thread, which
-the agent will mirror to WhatsApp if it decides reach-out is useful.
+Reach-out is **agent-only**. Humans cannot compose a WhatsApp or SMS
+message from inside miployees; they interact with another user either
+via email (§10 above) or via the in-app task thread, which the agent
+will mirror to WhatsApp if it decides reach-out is useful.
 
 Rules:
 
-- Each employee has `preferred_offapp_channel` (`whatsapp | sms |
-  none`) and a `phone_e164_whatsapp` pair of fields. `none` opts
-  out.
-- Reach-out respects a per-employee quiet-hours window (default
-  21:00-08:00 local) and a per-workspace daily cap on agent-
-  originated messages per employee (default 5/day).
-- Inbound replies route back into the task thread they originated
-  from (or into a fresh "ad-hoc" thread if none); the agent is
-  responsible for summarising the reply for the manager.
+- Each user has `preferred_offapp_channel` (`whatsapp | sms | none`)
+  and a `phone_e164_whatsapp` pair of fields on the `users` row.
+  `none` opts out.
+- Reach-out respects a per-user quiet-hours window (default
+  21:00-08:00 local) and a per-workspace daily cap on agent-originated
+  messages per user (default 5/day).
+- Inbound replies route back into the task thread they originated from
+  (or into a fresh "ad-hoc" thread if none); the agent is responsible
+  for summarising the reply for the owner/manager.
 - Delivery is tracked in an `offapp_delivery` row mirroring
   `email_delivery` above (states `queued | sent | delivered |
   read | failed`).
@@ -183,8 +182,8 @@ are PII and are redacted from upstream LLM prompts by default.
 
 ### Auto-translation
 
-When an employee writes a message in a language other than the
-workspace's `default_language` (§02), the agent:
+When a user writes a message in a language other than the workspace's
+`default_language` (§02), the agent:
 
 1. Detects the language of the inbound message (`llm_call` with
    capability `chat.detect_language`).
@@ -199,29 +198,29 @@ workspace's `default_language` (§02), the agent:
    task_comment.translation_llm_call_id
    ```
 
-3. Managers see the workspace-default-language copy by default, with
-   a **toggle** on the message to reveal the original. Employees see
-   their own original plus the auto-translated copy if the manager
-   replies in a different language.
+3. Owners and managers see the workspace-default-language copy by
+   default, with a **toggle** on the message to reveal the original.
+   Workers see their own original plus the auto-translated copy if an
+   owner or manager replies in a different language.
 
 Agent-originated outbound messages are generated directly in the
-employee's `languages[0]` (§05) when known, falling back to the
-workspace default. No second translation is stored for those —
-the message is written once in the target language and the
-provenance is the `llm_call` row.
+user's `languages[0]` (§05) when known, falling back to the workspace
+default. No second translation is stored for those — the message is
+written once in the target language and the provenance is the
+`llm_call` row.
 
 See §18 for the broader translation policy.
 
 ## Issue reports
 
-Employee taps **"Report an issue"** from a property/area context or
+Any user taps **"Report an issue"** from a property/area context or
 from a task:
 
 ```
 issue
 ├── id
 ├── workspace_id
-├── reported_by_employee_id
+├── reported_by_user_id
 ├── property_id / area_id      # either
 ├── task_id?                   # if raised from a task
 ├── title
@@ -230,7 +229,7 @@ issue
 ├── category                   # damage | broken | supplies | safety | other
 ├── state                      # open | in_progress | resolved | wont_fix
 ├── attachment_file_ids        # ULID[]; each id references `file` (§02)
-├── converted_to_task_id       # when a manager escalates
+├── converted_to_task_id       # when an owner or manager escalates
 ├── resolution_note
 ├── resolved_at
 ├── resolved_by
@@ -238,8 +237,8 @@ issue
 └── deleted_at
 ```
 
-Manager actions: convert to task (one click → creates a handyman task
-linked back to the issue), change state, add notes. Employees see
+Owner/manager actions: convert to task (one click → creates a handyman
+task linked back to the issue), change state, add notes. Reporters see
 state changes on their issue and can comment. Email to reporter on
 resolution.
 
@@ -264,8 +263,10 @@ An agent or external system subscribes to events.
 ### Event catalog (v1)
 
 ```
-manager.*            created, updated, archived, reinstated
-employee.*           created, updated, archived, reinstated
+user.*               created, updated, archived, reinstated
+role_grant.*         granted, revoked, updated
+work_engagement.*    created, updated, archived, reinstated,
+                     engagement_kind_changed
 task.*               created, assigned, updated, started, completed,
                      complete_superseded, skipped, cancelled, overdue,
                      unassigned_pre_arrival
@@ -283,7 +284,7 @@ payroll.*            period_opened, period_locked, period_paid,
                      payslip_destination_snapshotted,
                      payout_manifest_accessed
 payout_destination.* created, updated, archived, verified
-employee_default_destination.* set, cleared
+work_engagement_default_destination.* set, cleared
 issue.*              reported, updated, resolved
 approval.*           pending, decided
 ical.*               polled, error
@@ -305,10 +306,11 @@ vendor_invoice.*     submitted, approved, rejected, paid, voided
 shift_billing.*      resolved
 ```
 
-There is no `person.*` family — earlier drafts used it as a
-supertype, but managers and employees emit their own events. Webhook
-subscribers that want both can subscribe with
-`events: ["manager.*", "employee.*"]`.
+The `manager.*` and `employee.*` event families from earlier drafts
+are replaced by `user.*`, `role_grant.*`, and `work_engagement.*`.
+Subscribers that previously watched `manager.*` or `employee.*`
+should update to `user.*`; `role_grant.*` covers permission lifecycle
+and `work_engagement.*` covers employment/pay-pipeline lifecycle.
 
 ### Envelope
 

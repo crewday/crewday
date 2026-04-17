@@ -9,9 +9,10 @@ operations tool. Real deployments extend beyond that shape:
 - A **household-as-client** whose workspace hires one or more
   external contractors (repair handymen, drivers) alongside (or
   instead of) its own payroll staff.
-- A **mixed** setup: a workspace with payroll employees, one-off
-  contractors invoicing for specific jobs, and a handful of agency-
-  supplied workers routed through a third-party vendor.
+- A **mixed** setup: a workspace with payroll engagements, one-off
+  contractor engagements invoicing for specific jobs, and a handful
+  of agency-supplied engagements routed through a third-party
+  vendor.
 
 This section defines the entities, flows, and invariants that make
 those shapes first-class while preserving the existing "family with
@@ -23,16 +24,23 @@ a maid" single-workspace default.
   unified `organization` table — via nullable
   `property.client_org_id`. When null, the workspace itself is the
   implicit billing target (the pre-existing behaviour).
-- Employees carry an **`engagement_kind`** that decides which pay
-  pipeline they are on: payroll (payslips), contractor (vendor
-  invoices), or agency-supplied (vendor invoices billed to the
-  supplying organization rather than the worker).
+- A client who is a person (not just a legal entity on paper) is
+  represented in the identity model as a `users` row with a
+  `role_grants` row of `grant_role = 'client'`, either on a
+  property directly or on the workspace with `binding_org_id =
+  <their org>` (§02, §05). Organizations hold billing data; grants
+  hold login authority; the two are connected by `binding_org_id`.
+- **Work engagements** (one per (user, workspace) — §02) carry the
+  `engagement_kind` that decides which pay pipeline applies:
+  payroll (payslips), contractor (vendor invoices), or
+  agency-supplied (vendor invoices billed to the supplying
+  organization rather than the worker).
 - Work that gets billed externally — whether to a client, or by a
   contractor — is grouped into a **`work_order`**: an optional
   parent of one or more tasks, under which a **`quote`** and one or
   more **`vendor_invoice`** rows live.
-- Agency billing is captured as **billable rates per (client, role)**
-  with an optional per-employee override; shifts carry a derived
+- Agency billing is captured as **billable rates per (client, work_role)**
+  with an optional per-user override; shifts carry a derived
   `client_org_id` for fast rollup and CSV export. v1 exports CSV;
   rendering a client-facing invoice PDF is deferred (see §19).
 - All money-routing decisions made by agents — accepting a quote,
@@ -59,7 +67,7 @@ or both. One table, role flags.
 | contacts_json      | jsonb     | array of `{label, name, email, phone_e164, role}` — free-form contacts   |
 | tax_id             | text?     | VAT / SIRET / EIN as relevant — displayed on invoices                     |
 | notes_md           | text?     | manager-visible                                                           |
-| portal_user_id     | ULID FK?  | future seam (§ "Client surface" below); null in v1                        |
+| portal_user_id     | ULID FK?  | retained as a convenience pointer for "the single natural person for this org" (e.g. sole-trader supplier). Canonical client login goes through `role_grants(grant_role='client', binding_org_id=<org>)`. See "Client surface" below. |
 | default_pay_destination_id | ULID FK? | for suppliers: where vendor_invoice payments route by default (§09) |
 | created_at/updated_at | tstz    |                                                                          |
 | deleted_at         | tstz?     | soft delete                                                               |
@@ -79,9 +87,9 @@ or both. One table, role flags.
 
 None — a fresh workspace has no organizations and no clients. The
 workspace remains the implicit billing target for its own properties.
-Organizations are created lazily when the manager enters "agency
-mode" by linking a property to a client, or registers a supplier to
-route agency-supplied workers.
+Organizations are created lazily when an owner/manager enters
+"agency mode" by linking a property to a client, or registers a
+supplier to route agency-supplied engagements.
 
 ## `property.client_org_id`
 
@@ -96,7 +104,7 @@ Added to the `property` row (§04):
   client-billing rollup.
 - **Set** = billable to that client. Shifts and work orders at this
   property carry the client forward; billable-rate resolution
-  consults `client_rate` / `client_employee_rate` (below).
+  consults `client_rate` / `client_user_rate` (below).
 - A property can only have one `client_org_id` at a time. Properties
   that are genuinely co-owned and split-billed are a deliberate
   non-goal in this iteration; see §19 "Beyond v1" for split-billing.
@@ -105,12 +113,18 @@ Added to the `property` row (§04):
 
 ## Engagement kind
 
-Added to the `employee` row (§05):
+Carried on `work_engagement` (§02), the per-(user, workspace) row:
 
 | field            | type     | notes                                                              |
 |------------------|----------|--------------------------------------------------------------------|
 | engagement_kind  | enum     | `payroll | contractor | agency_supplied`. Default `payroll`.        |
 | supplier_org_id  | ULID FK? | `organization.id` where `is_supplier = true`. Required iff `engagement_kind = agency_supplied`, else null. |
+
+Because the field lives on `work_engagement` rather than on the
+user, the **same person** can be `payroll` in one workspace and
+`contractor` or `agency_supplied` in another simultaneously. That
+is the case we support for a live-in driver who is payroll of the
+household and also takes freelance jobs through a dispatch agency.
 
 Semantics:
 
@@ -122,79 +136,85 @@ Semantics:
   `vendor_invoice` rows. May hold their own `payout_destination`
   rows (the vendor invoice routes to one of them).
 - **`agency_supplied`** — a worker provided by a third-party agency.
-  The **agency** bills us; the worker's `supplier_org_id` points at
-  the supplier. Vendor invoices for this worker route by default to
-  `supplier_org.default_pay_destination_id`, not to a destination
-  owned by the worker.
+  The **agency** bills us; the engagement's `supplier_org_id`
+  points at the supplier. Vendor invoices for this engagement route
+  by default to `supplier_org.default_pay_destination_id`, not to a
+  destination owned by the worker.
 
-An employee's `engagement_kind` is not immutable but changes are
-audited and gated: switching a row from `payroll` to `contractor`
-requires that the employee have no `pay_rule` active on or after the
-switch date, and any open `pay_period` with shifts for them must be
-locked or drained. The reverse switch (contractor → payroll)
-requires at least one `pay_rule` to be created in the same
-transaction.
+A work_engagement's `engagement_kind` is not immutable but changes
+are audited and gated: switching a row from `payroll` to
+`contractor` requires that the engagement have no `pay_rule` active
+on or after the switch date, and any open `pay_period` with shifts
+for that engagement must be locked or drained. The reverse switch
+(contractor → payroll) requires at least one `pay_rule` to be
+created in the same transaction.
 
 ### UI and assignment
 
 `engagement_kind` does **not** affect task assignment, shifts,
-capabilities, or anything in §05 / §06 — the worker is still an
-employee row with roles, property assignments, clock-mode, and
+work-role capabilities, or anything in §05 / §06 — the worker is
+still a `users` row with `user_work_role` and
+`property_work_role_assignment` rows driving scheduling and the
 evidence policy. It only affects the pay pipeline and which UI
-surfaces the person appears in.
+surfaces the person appears in when that particular engagement is
+selected.
 
 ## Billable rates
 
-Rates the workspace bills a client for work done by its employees.
+Rates the workspace bills a client for work done by its workers.
 Parallel to `pay_rule` (what we pay the worker) but oriented the
 other way.
 
-### `client_rate` (per client × role)
+### `client_rate` (per client × work_role)
 
 | field              | type     | notes                                       |
 |--------------------|----------|---------------------------------------------|
 | id                 | ULID PK  |                                             |
 | workspace_id       | ULID FK  |                                             |
 | client_org_id      | ULID FK  | must have `is_client = true`                |
-| role_id            | ULID FK  | §05                                         |
+| work_role_id       | ULID FK  | §05 (renamed from `role_id`)                |
 | currency           | text     | ISO 4217                                    |
 | hourly_cents       | int      |                                             |
 | effective_from     | date     |                                             |
 | effective_to       | date?    | null = ongoing                              |
 | notes_md           | text?    |                                             |
 
-Unique: `(client_org_id, role_id, effective_from)`.
+Unique: `(client_org_id, work_role_id, effective_from)`.
 
-### `client_employee_rate` (per client × employee override)
+### `client_user_rate` (per client × user override)
+
+(In v0 this entity was called `client_employee_rate`.)
 
 | field              | type     | notes                                       |
 |--------------------|----------|---------------------------------------------|
 | id                 | ULID PK  |                                             |
 | workspace_id       | ULID FK  |                                             |
 | client_org_id      | ULID FK  |                                             |
-| employee_id        | ULID FK  |                                             |
+| user_id            | ULID FK  | references `users.id`                       |
 | currency           | text     |                                             |
 | hourly_cents       | int      |                                             |
 | effective_from     | date     |                                             |
 | effective_to       | date?    |                                             |
 
-Unique: `(client_org_id, employee_id, effective_from)`.
+Unique: `(client_org_id, user_id, effective_from)`.
 
 ### Rate resolution
 
-For a shift with `(client_org_id, employee_id)` and date `d`:
+For a shift with `(client_org_id, user_id)` and date `d`:
 
-1. `client_employee_rate` matching `(client_org_id, employee_id)`
+1. `client_user_rate` matching `(client_org_id, user_id)`
    with `effective_from ≤ d < coalesce(effective_to, ∞)`.
-2. For each role the employee holds at the shift's property:
-   `client_rate` matching `(client_org_id, role_id)` with the same
-   effective-range test. If multiple roles resolve to different
-   rates, the **highest-priority role** wins (roles have an
-   implicit priority by `role.key` in the catalog; managers may
-   override per client with `client_rate.priority` — deferred).
+2. For each `user_work_role` the user holds at the shift's
+   workspace (narrowed by `property_work_role_assignment`):
+   `client_rate` matching `(client_org_id, work_role_id)` with the
+   same effective-range test. If multiple work roles resolve to
+   different rates, the **highest-priority work_role** wins (work
+   roles have an implicit priority by `work_role.key` in the
+   catalog; owners/managers may override per client with
+   `client_rate.priority` — deferred).
 3. No match → the shift is **not billable** to this client and its
    hours surface in a "unpriced" bucket in the rollup CSV so the
-   manager can fix the rate card.
+   owner or manager can fix the rate card.
 
 Rate resolution happens at **shift close time** and is snapshotted
 onto a new `shift_billing` row (below) so later rate-card edits do
@@ -212,12 +232,13 @@ written when a shift closes against a property with
 | workspace_id       | ULID FK  |                                                      |
 | shift_id           | ULID FK  |                                                      |
 | client_org_id      | ULID FK  | denormalised from `property.client_org_id` at close  |
-| employee_id        | ULID FK  |                                                      |
+| user_id            | ULID FK  | the worker who performed the shift                   |
+| work_engagement_id | ULID FK  | the engagement the shift is earned under (§02, §09)  |
 | currency           | text     |                                                      |
 | billable_minutes   | int      | = duration minus breaks                              |
 | hourly_cents       | int      | snapshot of the resolved rate                        |
 | subtotal_cents     | int      | `billable_minutes / 60 * hourly_cents`, rounded      |
-| rate_source        | enum     | `client_employee_rate | client_rate | unpriced`      |
+| rate_source        | enum     | `client_user_rate | client_rate | unpriced`          |
 | rate_source_id     | ULID?    | id of the resolving rate row; null when `unpriced`   |
 
 Editing a shift's time fields (`adjusted = true` in §09)
@@ -242,8 +263,8 @@ worth quoting up front or that span multiple tasks.
 | title                     | text     | "Replace pool pump seal"                                   |
 | description_md            | text     |                                                            |
 | state                     | enum     | `draft | quoted | accepted | in_progress | completed | cancelled | invoiced | paid` |
-| assigned_employee_id      | ULID FK? | the contractor / agency-supplied worker doing the work     |
-| requested_by_manager_id   | ULID FK? | who opened the work order                                  |
+| assigned_user_id          | ULID FK? | the contractor / agency-supplied worker doing the work     |
+| requested_by_user_id      | ULID FK? | who opened the work order (typically an owner or manager)  |
 | currency                  | text     | ISO 4217; defaults to property currency                    |
 | accepted_quote_id         | ULID FK? | set when a quote is accepted; null otherwise               |
 | accepted_at               | tstz?    |                                                            |
@@ -260,14 +281,15 @@ draft → quoted → accepted → in_progress → completed → invoiced → pai
   └───────────────────┘            ↑                    ↑
                                    └────────────────────┘
                                  (may skip `quoted`/`accepted`
-                                  when the manager invoices
+                                  when an owner/manager invoices
                                   directly without a quote)
 cancelled is reachable from any non-terminal state.
 ```
 
 Tasks referencing a work_order (`task.work_order_id FK?`) inherit
-its `assigned_employee_id` as a default but may be re-assigned; all
-such tasks appear grouped under the work_order in the manager UI.
+its `assigned_user_id` as a default but may be re-assigned; all
+such tasks appear grouped under the work_order in the
+owner/manager UI.
 
 ### Invariants
 
@@ -277,8 +299,9 @@ such tasks appear grouped under the work_order in the manager UI.
 - Transitioning `draft → quoted` requires at least one `quote` row
   with `status = submitted`.
 - Transitioning `quoted → accepted` is an approvable action
-  (§11 "Which actions"): `work_order.accept_quote`. The manager
-  picks exactly one submitted quote; the work_order records
+  (§11 "Which actions"): `work_order.accept_quote`. An owner,
+  manager, or authorised client picks exactly one submitted quote;
+  the work_order records
   `accepted_quote_id`, the chosen quote flips to `accepted`, all
   other submitted quotes on the same work_order flip to
   `superseded` in the same transaction.
@@ -289,18 +312,20 @@ such tasks appear grouped under the work_order in the manager UI.
 
 ## `quote`
 
-A worker-proposed price for a work_order. The quoting worker is
-almost always a `contractor` or `agency_supplied` employee; payroll
-employees usually don't quote (their labour is already paid for),
-but the model does not forbid it — a salaried handyman may submit a
-quote for a genuinely outside-scope job.
+A worker-proposed price for a work_order. The quoting worker's
+`work_engagement` is almost always a `contractor` or
+`agency_supplied` engagement; payroll engagements usually don't
+quote (their labour is already paid for), but the model does not
+forbid it — a salaried handyman may submit a quote for a genuinely
+outside-scope job.
 
 | field                | type     | notes                                                         |
 |----------------------|----------|---------------------------------------------------------------|
 | id                   | ULID PK  |                                                               |
 | workspace_id         | ULID FK  |                                                               |
 | work_order_id        | ULID FK  |                                                               |
-| employee_id          | ULID FK  | who submitted the quote                                       |
+| submitted_by_user_id | ULID FK  | who submitted the quote                                       |
+| work_engagement_id   | ULID FK? | the engagement under which the quote is being made (null for one-off quotes by a user with no engagement in this workspace — rare but allowed) |
 | currency             | text     | must equal `work_order.currency`                              |
 | subtotal_cents       | int      | sum of line totals                                            |
 | tax_cents            | int      | informational; local tax behaviour is out of scope            |
@@ -310,7 +335,7 @@ quote for a genuinely outside-scope job.
 | status               | enum     | `draft | submitted | accepted | rejected | superseded | expired` |
 | submitted_at         | tstz?    |                                                               |
 | decided_at           | tstz?    |                                                               |
-| decided_by_manager_id| ULID FK? |                                                               |
+| decided_by_user_id   | ULID FK? | owner/manager who accepted or rejected; client-grant acceptances also fill this in |
 | decision_note_md     | text?    |                                                               |
 | attachment_file_ids  | ULID[]   | PDFs/photos of the worker's own quote document                |
 | llm_autofill_json    | jsonb?   | reserved for future OCR of PDF quotes                         |
@@ -341,33 +366,34 @@ travel | other`. `total_cents` is recomputed server-side from
 
 `quote.accept` is **unconditionally approval-gated** (§11): an
 agent cannot accept a quote, even if it holds `expenses:approve` or
-any other scope. The manager-side approval UI shows the quote,
+any other scope. The owner/manager/client approval UI shows the quote,
 attachments, and the resolved `work_order` context. Acceptance
 writes `quote.status = accepted`, `work_order.accepted_quote_id =
 this.id`, and `work_order.state = accepted`. Subsequent
 `vendor_invoice` rows on the same work_order validate that
 `total_cents ≤ accepted_quote.total_cents` **plus a workspace-
 configurable tolerance** (default 10 %); overruns raise a soft
-warning at invoice submission that the manager sees before
+warning at invoice submission that the owner/manager sees before
 approving, but are not hard-blocked.
 
 ### Supersession and rejection
 
 - Submitting a new quote on a work_order already in state `quoted`
-  leaves prior submitted quotes in `submitted`; only manager
-  acceptance collapses the set.
+  leaves prior submitted quotes in `submitted`; only
+  owner/manager/client acceptance collapses the set.
 - Explicit `quote.reject` is available; sets `status = rejected`
   and records a reason. The work_order remains in `quoted` if
   other submitted quotes exist, else transitions back to `draft`.
-- `expired` is a manual status the manager may set when a quote
-  with a `valid_until` in the past is no longer usable; the system
-  does not auto-expire, to avoid silent state changes.
+- `expired` is a manual status an owner/manager may set when a
+  quote with a `valid_until` in the past is no longer usable; the
+  system does not auto-expire, to avoid silent state changes.
 
 ## `vendor_invoice`
 
 What the worker or supplier actually bills. Parallel in spirit to
-`expense_claim` (§09) — OCR autofill, attachments, manager approval
-— but the counterparty is the biller, not the submitting employee,
+`expense_claim` (§09) — OCR autofill, attachments, owner/manager
+approval — but the counterparty is the biller, not the submitting
+user,
 and payment flows to a `payout_destination` chosen at approval
 time.
 
@@ -377,7 +403,8 @@ time.
 | workspace_id           | ULID FK  |                                                                  |
 | work_order_id          | ULID FK? | nullable — a one-off repair can carry an invoice without an explicit work_order |
 | property_id            | ULID FK  | required when `work_order_id` is null                            |
-| vendor_employee_id     | ULID FK? | exactly one of `vendor_employee_id` / `vendor_organization_id` is set |
+| vendor_user_id         | ULID FK? | exactly one of `vendor_user_id` / `vendor_organization_id` is set |
+| vendor_work_engagement_id | ULID FK? | when `vendor_user_id` is set, this points at the biller's work_engagement in this workspace. Required for `contractor` kind; null for one-off quotes from a user with no engagement here. |
 | vendor_organization_id | ULID FK? | set when the biller is the supplier org (agency_supplied workers) |
 | billed_at              | date     | on the invoice                                                   |
 | due_on                 | date?    |                                                                  |
@@ -391,10 +418,10 @@ time.
 | status                 | enum     | `draft | submitted | approved | rejected | paid | voided`         |
 | submitted_at           | tstz?    |                                                                  |
 | approved_at            | tstz?    |                                                                  |
-| decided_by_manager_id  | ULID FK? |                                                                  |
+| decided_by_user_id     | ULID FK? | owner/manager who approved or rejected                           |
 | decision_note_md       | text?    |                                                                  |
 | paid_at                | tstz?    |                                                                  |
-| paid_by_manager_id     | ULID FK? |                                                                  |
+| paid_by_user_id        | ULID FK? | owner/manager who marked it paid                                 |
 | paid_reference         | text?    | bank reference, free-form                                        |
 | attachment_file_ids    | ULID[]   | PDF / photo of the worker's invoice                              |
 | llm_autofill_json      | jsonb?   | see §09 expense autofill; shape is the same, vendor field refers to biller |
@@ -404,15 +431,21 @@ time.
 
 ### Invariants
 
-- Exactly one of `vendor_employee_id` / `vendor_organization_id` is
+- Exactly one of `vendor_user_id` / `vendor_organization_id` is
   set; 422 otherwise.
-- For an `agency_supplied` employee, the server **rejects** an
-  invoice written with `vendor_employee_id = employee.id`: the
-  invoice must be written with
-  `vendor_organization_id = employee.supplier_org_id`. Rationale:
-  the supplying agency bills us, not the individual worker.
-  Conversely, a `contractor` employee must be billed via
-  `vendor_employee_id`, not through an organization.
+- For a `work_engagement` of kind `agency_supplied`, the server
+  **rejects** an invoice written with `vendor_user_id = user.id`:
+  the invoice must be written with
+  `vendor_organization_id = work_engagement.supplier_org_id`.
+  Rationale: the supplying agency bills us, not the individual
+  worker. Conversely, a `contractor` engagement must be billed via
+  `vendor_user_id` + `vendor_work_engagement_id`, not through an
+  organization.
+- `vendor_user_id` without a matching `vendor_work_engagement_id`
+  is allowed only when the user has no active work_engagement in
+  this workspace — a first-invoice-then-onboard path that is rare
+  but needed for emergency one-offs. The approval step inserts the
+  engagement if missing.
 - `currency` on submission must equal `work_order.currency` when
   `work_order_id IS NOT NULL`.
 - Approving an invoice snapshots the exchange rate against the
@@ -424,14 +457,14 @@ time.
 On approval, if `payout_destination_id` is null the server fills it
 by walking:
 
-1. If `vendor_employee_id` is set: the employee's
-   `pay_destination_id` (§09). The employee must be `contractor`
-   kind; payroll employees' pay destinations are for payslips only
-   and using them here is a 422 with
-   `error = "payroll_destination_not_billable"`.
+1. If `vendor_user_id` is set: the resolved
+   `vendor_work_engagement_id.pay_destination_id` (§09). The
+   engagement must be `contractor` kind; payroll engagements' pay
+   destinations are for payslips only and using them here is a 422
+   with `error = "payroll_destination_not_billable"`.
 2. If `vendor_organization_id` is set: the org's
-   `default_pay_destination_id`. 422 if null — the manager must
-   set one before approving.
+   `default_pay_destination_id`. 422 if null — an owner or manager
+   must set one before approving.
 
 The chosen destination is recorded on the invoice (immutable after
 approval). The **approval step itself** is the money-routing
@@ -449,41 +482,48 @@ differences:
 - The "requester" in approvable-action audit is the submitting
   agent's delegating user (same rule as elsewhere), but the
   invoice's **biller** is captured separately in
-  `vendor_employee_id` / `vendor_organization_id` for audit
+  `vendor_user_id` / `vendor_organization_id` for audit
   clarity.
 - Approval with a non-null `payout_destination_id` provided by the
   agent raises the same gate as `expense_claim.set_destination_override`
-  — the manager must re-confirm the chosen destination in the
+  — the owner/manager must re-confirm the chosen destination in the
   approval UI.
 - Unlike expense_claim, vendor_invoice does **not** roll into a
-  payslip. It is paid directly; `paid_at` is set when the manager
-  clicks "Mark paid" after pushing funds from their bank. `paid`
+  payslip. It is paid directly; `paid_at` is set when an owner or
+  manager clicks "Mark paid" after pushing funds from their bank.
+  `paid`
   is distinct from `approved` so the workspace can track an
   account-payable queue.
 
-### Relationship to payroll employees
+### Relationship to payroll engagements
 
-A **payroll** employee (default `engagement_kind`) **cannot** be
-the biller of a `vendor_invoice`. Their labour is paid through
-payslips, not invoices. Attempts to write such a row with
-`vendor_employee_id` pointing at a payroll employee return 422
-`error = "payroll_employee_not_billable"`. The manager may change
-the employee's `engagement_kind` to `contractor` for a specific
-off-cycle job, but that is explicit — no silent promotion.
+A **payroll** work_engagement (default `engagement_kind`)
+**cannot** be the biller of a `vendor_invoice`. Its labour is
+paid through payslips, not invoices. Attempts to write such a row
+with `vendor_work_engagement_id` pointing at a payroll engagement
+return 422 `error = "payroll_engagement_not_billable"`. An owner
+or manager may change the engagement's `engagement_kind` to
+`contractor` for a specific off-cycle job, but that is explicit —
+no silent promotion. Note that this is **per workspace**: a user
+who is payroll in Workspace A may still carry a separate
+`contractor` engagement in Workspace B and bill freely from there.
 
 ## Payout destinations for organizations
 
 Extends `payout_destination` (§09) so destinations can be owned by
-either an employee **or** an organization. See §09 for the full
+either a user **or** an organization. See §09 for the full
 extension; in summary:
 
-- `payout_destination.employee_id` becomes nullable.
+- `payout_destination.user_id` is nullable (owning user; previously
+  `employee_id` in v0).
 - A new nullable `payout_destination.organization_id` is added.
 - Exactly one of the two must be set; DB-level CHECK constraint.
-- The existing per-employee rules (read/write authority scoped to
-  the owner, approval gate on mutation, IBAN checksum, snapshot on
-  use) apply identically when the owner is an organization, with
-  "the org's manager" reading as "any workspace manager".
+- The existing per-user rules (read/write authority scoped to the
+  owner via `payroll.self_manage_destinations`, approval gate on
+  mutation, IBAN checksum, snapshot on use) apply identically when
+  the owner is an organization, with "the worker themselves" reading
+  as "any user with the `organizations.edit_pay_destination`
+  grant-capability on the workspace".
 
 ## Billable-hour rollup and exports
 
@@ -494,10 +534,10 @@ invoices with a state machine are deferred (§19).
 
 `GET /api/v1/exports/client_billable.csv?client_org_id=...&from=YYYY-MM-DD&to=YYYY-MM-DD`
 
-One row per `(client_org_id, employee_id, role_id, date)`:
+One row per `(client_org_id, user_id, work_role_id, date)`:
 
 ```
-client_org_id, client_name, employee_id, employee_name, role_key,
+client_org_id, client_name, user_id, user_name, work_role_key,
 date, hours, hourly_cents, currency, subtotal_cents, rate_source
 ```
 
@@ -519,19 +559,64 @@ Mirrors §13 conventions: `miployees exports client_billable
 --client ... --from ... --to ...` and `miployees exports
 work_orders ...`.
 
-## Client surface (no portal in v1)
+## Client surface (client login)
 
-Clients are internal-only records in v1. `organization.portal_user_id`
-is reserved as a future seam: when the "Owner-only dashboard" item
-in §19 ships (either Beyond-v1 or earlier as a Phase 11), a
-`client_user` actor kind can be linked to an organization row
-without schema migration, gaining read access to their own
-properties, shifts, quotes, and invoices. Adding that seam today
-has no runtime effect; it just documents the intended shape so we
-don't paint ourselves into a corner.
+Clients are first-class logins in v1. A person who pays the
+workspace (or whose organization pays the workspace) holds a
+`users` row, just like owners, managers, and workers. Their
+authority comes from a `role_grants` row of
+`grant_role = 'client'`, either:
+
+- **Workspace-scope with `binding_org_id`** — the client sees
+  everything in the workspace tagged to that org: shifts at
+  properties where `property.client_org_id = binding_org_id`,
+  work_orders / quotes / vendor_invoices billed to that org.
+  This is the usual case for a client with more than one property
+  in the workspace.
+- **Property-scope** — the client sees data at one specific
+  property only. Useful for a one-off engagement or when multiple
+  clients co-manage a property without sharing the same billing
+  org.
+
+The login flow is the unified magic-link enrollment (§03). There
+is no separate `client_user` actor — a client is a user with a
+`client` grant. The same user may hold `owner` or `manager` grants
+on other workspaces (Vincent's scenario — see §05 example).
+
+### Acceptance authority
+
+A client may **accept** a quote billed to their `binding_org_id`.
+Because quote acceptance is unconditionally approval-gated (§11),
+an agent-delegated token held by the client still routes through
+the approval UI — the client must click "Approve" in person. The
+workspace's owner/manager may also accept on the client's behalf
+(for the cases where a client has granted the agency that
+authority out of band).
+
+A client may **reject** a quote or a vendor invoice unilaterally.
+A client may **view** all `vendor_invoice` rows tagged to them but
+cannot mark them paid; paid-state is an internal bookkeeping flag
+owned by the workspace (the workspace is the one pushing the funds,
+§09, §22).
+
+### Redactions
+
+On the client surface, worker identity and compensation are
+redacted to the level the workspace's owner/manager has configured:
+
+- Worker display name: visible by default; hideable via workspace
+  setting `client.show_worker_names` (default: true).
+- Worker pay_rule / rate: always hidden. Clients see
+  `shift_billing` rates (what the agency charges) not
+  `pay_rule` rates (what the agency pays).
+- Worker profile details (phone, address, emergency contact):
+  always hidden.
 
 Existing guest-link mechanics (§04) are unrelated and continue to
-serve per-stay welcome pages only.
+serve per-stay welcome pages only. The `organization.portal_user_id`
+column is retained as a convenience pointer ("the natural person
+for this org") and seeded from the first `client` grant added for
+an org, but it is not the authority source — grants are.
 
 ## Approvable actions added
 
@@ -541,8 +626,9 @@ Appended to §11 "Always-gated (not configurable)":
 - `vendor_invoice.approve`
 - `vendor_invoice.mark_paid`
 - `organization.update_default_pay_destination`
-- `employee.set_engagement_kind` (when switching *to* or *from*
-  `payroll`, because it moves the worker between pay pipelines)
+- `work_engagement.set_engagement_kind` (when switching *to* or
+  *from* `payroll`, because it moves the engagement between pay
+  pipelines)
 
 The same rationale as existing money-routing gates: agents can
 draft, attach, and propose; humans decide who gets paid.
@@ -567,7 +653,7 @@ Appended to §10's catalog:
 ## Audit actions added
 
 `organization.create`, `.update`, `.archive`;
-`client_rate.create`, `.update`; `client_employee_rate.create`,
+`client_rate.create`, `.update`; `client_user_rate.create`,
 `.update`; `work_order.create`, `.state_change`,
 `.accept_quote`; `quote.submit`, `.accept`, `.reject`,
 `.supersede`; `vendor_invoice.submit`, `.approve`, `.reject`,

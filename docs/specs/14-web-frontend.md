@@ -2,8 +2,8 @@
 
 Two audiences, one codebase, same patterns: React SPA with a
 client-side router, hand-rolled semantic CSS, progressive enhancement.
-Employees get a mobile-first PWA; managers get the same components
-with a wider information architecture.
+Workers get a mobile-first PWA; owners and managers get the same
+components with a wider information architecture.
 
 ## Design pillars
 
@@ -21,7 +21,7 @@ with a wider information architecture.
   require JavaScript; core task reading degrades gracefully without it.
 - **Accessibility.** WCAG 2.2 AA: focus-visible, color contrast,
   semantic HTML, ARIA where HTML semantics are insufficient.
-- **Offline-first PWA** for employees: today's tasks and a completion
+- **Offline-first PWA** for workers: today's tasks and a completion
   queue survive loss of connection.
 
 ## Design language
@@ -72,10 +72,10 @@ Motion:
 /enroll/<token>           → passkey enrollment (magic link lands here)
 /recover                  → enter a break-glass code
 /guest/<token>            → tokenized guest welcome page
-/healthz, /readyz, /metrics  (manager-scoped)
+/healthz, /readyz, /metrics  (owner/manager-scoped)
 ```
 
-### Employee
+### Worker
 
 ```
 /today                    → today's tasks (home)
@@ -101,7 +101,7 @@ Motion:
 (which emits to `/issues/new` under the hood). There is **no
 floating chat FAB**; chat is a first-class footer tab.
 
-### Manager
+### Owner/Manager
 
 Everything above plus:
 
@@ -110,12 +110,12 @@ Everything above plus:
 /property/<id>            → property hub (units, areas, stays, tasks, inventory, instructions, closures, lifecycle rules, settings)
 /property/<id>/closures   → property closure calendar (incl. iCal unavailable markers)
 /stays                    → stays list & calendar
-/employees                → staff list
-/employee/<id>            → profile, roles, capabilities, settings, shifts, payslips, leaves, availability overrides
-/employee/<id>/leaves     → leave ledger (approve/reject)
-/employee/<id>/availability → availability override calendar (weekly pattern + date overrides)
-/leaves                   → cross-employee leave inbox (pending approvals)
-/availability-overrides   → cross-employee availability override inbox (pending approvals)
+/users                    → staff list
+/user/<id>                → profile, role grants, work roles, capabilities, settings, shifts, payslips, leaves, availability overrides
+/user/<id>/leaves         → leave ledger (approve/reject)
+/user/<id>/availability   → availability override calendar (weekly pattern + date overrides)
+/leaves                   → cross-user leave inbox (pending approvals)
+/availability-overrides   → cross-user availability override inbox (pending approvals)
 /holidays                 → public holiday calendar management (CRUD, scheduling effects, payroll multipliers)
 /templates                → task templates
 /schedules                → schedule list & previews
