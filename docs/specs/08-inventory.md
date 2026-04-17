@@ -53,7 +53,7 @@ daily worker job. Gives history graphs without scanning the ledger.
 Task templates carry `inventory_consumption_json`, a map of
 `item_id → qty` (or `sku → qty` during authoring). On task completion:
 
-- If `inventory.consume_on_task` capability is on for the completing
+- If the resolved setting `inventory.consume_on_task = true` for the completing
   user, insert one `inventory_movement` with `reason = consume`,
   `source_task_id` set, and negative delta per entry.
 - If consumption would take `on_hand` below 0: the movement **still
@@ -94,7 +94,7 @@ Periodic worker job `check_reorder_points` (hourly):
 ## Adjustments
 
 Inventory adjust flow (owner/manager, or any user with
-`inventory.adjust` capability): enter the observed on-hand value,
+`inventory.adjust` action): enter the observed on-hand value,
 the system computes the delta, creates an `audit_correction`
 movement with the reason and an optional note.
 

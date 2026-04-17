@@ -41,12 +41,12 @@ Two chat agents are embedded in the product. Each operates with a
 inheriting that user's full permissions. They share plumbing (client,
 redaction, audit, approval) but differ in whose authority they carry.
 
-Both agents are reached through the **chat gateway** (§23), which is
-the transport layer: the web sidebar, the worker PWA Chat tab, and
-WhatsApp are three channels into the same runtime per user. The
-agent code path does not branch on channel — the gateway normalises
-envelopes and renders affordances, and this document still describes
-what the agent does with a turn once it has one.
+Both agents are reached through the in-app chat surfaces that ship in
+v1: the web sidebar and the worker PWA Chat tab. §23 keeps the
+off-app gateway design on the shelf for later, but external channels
+are not enabled in shipped v1. The agent code path is therefore
+channel-agnostic in principle, but the only live transports are the
+two web surfaces above.
 
 ### Owner/manager-side agent
 
@@ -804,8 +804,8 @@ triggered it. The agent's HTTP request carries an
 |-----------------------|--------------------------------------------------------|
 | `web_owner_sidebar`   | Owner/manager desktop sidebar chat (§14 `.desk__agent`) |
 | `web_worker_chat`     | Worker PWA Chat tab (§14)                              |
-| `offapp_whatsapp`     | WhatsApp thread (§10 `preferred_offapp_channel`)        |
-| `offapp_sms`          | SMS thread (§10)                                       |
+| `offapp_whatsapp`     | Reserved for a future WhatsApp adapter (§23, deferred) |
+| `offapp_sms`          | Reserved for a future SMS adapter (§23, deferred)      |
 | *absent*              | `desk_only` — approval appears only in `/approvals`    |
 
 For the two web channels, pending approvals are pushed to the
@@ -816,24 +816,10 @@ buttons wired to the same `/approvals/{id}/{decision}` endpoints
 that the desk uses. The same row remains visible on `/approvals`
 so owners and managers can oversee agent activity across users.
 
-`offapp_whatsapp` is **live in v1**: the gateway (§23
-"Interactive affordances" and "Approval cards on WhatsApp") sends
-the card as a WhatsApp interactive-button message whose body is
-the resolved `card_summary` + `card_fields`, with `Approve` /
-`Reject` buttons wired to the same `/approvals/{id}/{decision}`
-endpoints the desk uses. The button reply's
-`provider_message_id` defeats replay on `chat_message`.
-`card_risk = 'high'` approvals do **not** resolve on WhatsApp —
-the gateway returns a short "open the app to confirm" message and
-the pending row stays on `/approvals`. Outside Meta's 24-hour
-session window the card is wrapped in a registered template
-message (§23 "Session window").
-
-`offapp_sms` remains deferred (no interactive primitive; parsing
-free-text `YES` across concurrent pending approvals is ambiguous),
-so `agent_action.inline_channel = 'offapp_sms'` continues to mean
-"the user is opted into SMS reach-out, but decisions land on
-`/approvals` only". See §23 "Channel catalog".
+`offapp_whatsapp` and `offapp_sms` remain **deferred**. Their values
+stay in the schema so the approval pipeline does not need a later
+re-design, but shipped v1 only renders inline cards in the two web
+surfaces. See §23 for the deferred transport-specific behaviour.
 
 ### TTL
 
@@ -921,7 +907,7 @@ UI defaults to 90 days, accepts any future date.
 
 ## Staff chat assistant
 
-For users with `chat.assistant` capability on (default on for workers).
+For users whose workspace / work-engagement settings enable chat.
 
 - Available as a bottom-nav chat bubble on the PWA.
 - Tools exposed to the assistant (subset of the REST API, scoped to
@@ -929,7 +915,8 @@ For users with `chat.assistant` capability on (default on for workers).
     - `get_tasks_today()`, `mark_task_done(task_id)`,
       `report_issue(area, description)`, `get_instruction(id)`,
       `start_shift()`, `end_shift()`, `get_inventory_low()`.
-- Voice input uses `voice.transcribe` capability; disabled by default.
+- Voice input uses the `voice.enabled` setting plus the
+  `voice.transcribe` model assignment; disabled by default.
 - Never fabricates tasks: the assistant cannot create arbitrary rows,
   only invoke the exposed tools.
 

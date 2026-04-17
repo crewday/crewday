@@ -383,10 +383,11 @@ workspaces re-seeds the RLS context and is audited.
 
 ## Off-app channel privacy (WhatsApp / SMS)
 
-WhatsApp and SMS addresses stored on `chat_channel_binding` rows
-(§23) are **PII**. They back both agent reach-out (§10) and
-user-initiated agent conversation (§23), and must be treated with
-the same care as legal-name fields:
+When off-app adapters are eventually enabled, WhatsApp and SMS
+addresses stored on `chat_channel_binding` rows (§23) are **PII**.
+They would back both agent reach-out (§10) and user-initiated agent
+conversation (§23), and must be treated with the same care as
+legal-name fields:
 
 - Addresses are **redacted from upstream LLM prompts by default**.
   The redaction layer in §11 already handles `phone_e164` with
@@ -421,10 +422,11 @@ the same care as legal-name fields:
   `language_original` are nulled on the user's own rows; the
   `kind`, `direction`, and timestamps remain.
 
-Workspace owners can turn off off-app reach-out globally or per user;
-the user's own `preferred_offapp_channel = none` (§10) is a hard
-opt-out that overrides workspace policy. A `STOP` keyword reply on
-any bound address flips the binding to `revoked` immediately (§23).
+When these adapters ship, workspace owners should be able to turn off
+off-app reach-out globally or per user; the user's own
+`preferred_offapp_channel = none` (§10) remains the hard opt-out. A
+`STOP` keyword reply on any bound address must flip the binding to
+`revoked` immediately (§23).
 
 ## LLM data handling
 

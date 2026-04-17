@@ -31,10 +31,10 @@ log.
 ## Phase 2 — Places and people
 
 - Properties, **units within properties**, areas, users, work_roles,
-  capabilities.
+  and the settings cascade UI.
 - Property detail owner/manager UI (incl. unit management for multi-
   unit properties).
-- User profile and capability management.
+- User profile and worker-settings management.
 - CLI covers all of the above.
 
 **Exit:** full CRUD for the identity+places core; seed demo passes;
@@ -112,7 +112,7 @@ expenses, and document invoices correctly.
 
 ## Phase 7 — Time, payroll, expenses
 
-- Shifts with clock-in/out + geofence capability.
+- Shifts with clock-in/out + geofence settings.
 - Pay rules, periods, payslips with PDF.
 - Expense claims with LLM-powered receipt autofill.
 - CSV exports.
@@ -149,31 +149,22 @@ the billable CSV reconciles against the payroll register.
   staff chat assistant, agent approval workflow.
 - Embedded **owner/manager-side** and **worker-side** chat agents
   (§11) with conversation compaction.
-- **Chat gateway (§23)** — unified runtime per user with pluggable
-  channel adapters. v1 ships the Meta Cloud API adapter for
-  **bidirectional WhatsApp**: users link a number from their profile
-  via a challenge-response ceremony, then chat with their own agent
-  exactly as in the web surface. Inbound media (receipts, task
-  evidence photos, voice notes when opted in) flow through the same
-  `file` adapter as the web. Inline approval cards render as WhatsApp
-  interactive buttons; `card_risk = 'high'` approvals still require
-  the web surface.
-- **SMS fallback** for agent-originated outbound reach-out (§10) —
-  shipping, outbound only (no inline approvals).
+- **Chat gateway seam (§23)** — keep the transport-agnostic runtime,
+  message schema, and adapter interfaces ready, but ship **web-only**
+  channels in v1. WhatsApp / SMS / Telegram remain deferred even
+  though the design reference is written down now.
 - **Chat auto-translation** between worker-preferred and workspace-
   default languages on the worker agent (§10, §18). Moved from
   "deferred" into v1.
 
-**Exit:** all capabilities run against Gemma 4 31B via OpenRouter with
+**Exit:** all LLM features run against Gemma 4 31B via OpenRouter with
 bounded budget and audit; an agent driving the CLI experiences
 approval-gated actions correctly; a worker writing in their own
 language gets the agent replying in kind and the owner/manager seeing
-the workspace-default translation with a toggle for the original; a
-worker who linked WhatsApp can upload a receipt photo, mark a task
-complete, and report an issue entirely from WhatsApp, with approval
-cards resolved inline and every write attributed to their delegated
-token in the audit log; agent-originated WhatsApp reach-out respects
-quiet hours, per-user daily caps, and Meta's 24-hour session window.
+the workspace-default translation with a toggle for the original; the
+web sidebar and worker Chat tab prove enough value that enabling
+external transports can be judged on product evidence instead of
+speculation.
 
 ## Phase 9 — PWA and offline
 
@@ -229,11 +220,9 @@ Items explicitly deferred, in rough priority order:
 10. Realtime chat (presence, typing indicators) — v1 uses SSE for
     task-state freshness; true realtime is separate.
 11. Integrated guest messaging (Airbnb-style threads).
-12. Additional chat-gateway adapters beyond email / WhatsApp / SMS
-    — **Telegram** first (adapter interface already landed in
-    §23, implementation deferred), then push, Slack, Matrix.
-13. **SMS inline approvals.** v1 SMS is outbound-only because free-
+12. External chat-gateway adapters beyond the in-app web surfaces:
+    **WhatsApp** first, then SMS, Telegram, push, Slack, Matrix.
+13. **SMS inline approvals.** When SMS is eventually enabled, free-
     text reply parsing across concurrent pending approvals is
-    ambiguous. Revisit when an SMS adapter gains interactive-
-    primitive support or when a disambiguation scheme (e.g.
-    short-code per approval) proves reliable enough.
+    ambiguous. Revisit only when an adapter gains an interactive
+    primitive or a disambiguation scheme proves reliable enough.

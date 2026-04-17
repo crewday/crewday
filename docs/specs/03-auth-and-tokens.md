@@ -361,7 +361,7 @@ Bindings created via the chat gateway (§23) are **not credentials**.
 A `chat_channel_binding` authenticates the transport a user picked
 to talk to their own agent; every write still flows through a
 **delegated token** that was minted from the user's session. A
-valid inbound WhatsApp message from a bound address does **not**
+valid inbound message from a future bound external channel does **not**
 grant the sender any authority beyond that user's `role_grants`
 and never creates a session.
 

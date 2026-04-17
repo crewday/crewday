@@ -168,7 +168,7 @@ export default function EmployeeDetailPage() {
         <a className="tab-link">Shifts</a>
         <a className="tab-link">Payslips</a>
         <a className="tab-link">Leaves</a>
-        <a className="tab-link">Capabilities</a>
+        <a className="tab-link">Policies</a>
         <a
           className={"tab-link" + (activeTab === "settings" ? " tab-link--active" : "")}
           onClick={() => setActiveTab("settings")}

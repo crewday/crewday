@@ -5,7 +5,6 @@ import { qk } from "@/lib/queryKeys";
 import { Loading } from "@/components/common";
 import AgentApprovalModePanel from "@/components/AgentApprovalModePanel";
 import AgentPreferencesPanel from "@/components/AgentPreferencesPanel";
-import ChatChannelsMeCard from "@/components/ChatChannelsMeCard";
 import type { Leave, Me } from "@/types/api";
 
 interface LeavesPayload {
@@ -174,8 +173,6 @@ export default function MePage() {
       </section>
 
       <AgentApprovalModePanel variant="phone" />
-
-      <ChatChannelsMeCard me={me.data} />
 
       <section className="phone__section">
         <AgentPreferencesPanel

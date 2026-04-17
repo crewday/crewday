@@ -197,7 +197,8 @@ The canonical enum lives in §02 (`task_state`, 7 values including
 **State transitions and who may trigger them.** Workers assigned to a
 task (and owners or managers) may drive `pending ↔ in_progress ↔
 completed`. Owners or managers may move any task to `cancelled`.
-Workers with `tasks.allow_skip_with_reason` may move their own tasks
+Workers may move their own tasks to `skipped` only when the resolved
+setting `tasks.allow_skip_with_reason = true`
 to `skipped`. Only the scheduler worker drives the automatic
 `scheduled → pending` transition.
 
@@ -472,7 +473,8 @@ During generation (step 5, above):
 
 From the worker PWA: tap → "Mark done". If `photo_evidence =
 required`, the camera picker opens; the file is uploaded and linked
-before state flips. If `tasks.checklist_required` capability is on,
+before state flips. If the resolved setting
+`tasks.checklist_required = true`,
 every `task_checklist_item` with `required = true` must have
 `completed_at` set.
 
@@ -481,7 +483,8 @@ Server-side:
 1. Validate state transition.
 2. Record `completed_at`, `completed_by_user_id`.
 3. Apply `inventory_consumption_json` as `inventory_movement` rows
-   unless the capability is off (§08).
+   unless the resolved setting `inventory.consume_on_task = false`
+   (§08).
 4. If `asset_action_id` is set, update
    `asset_action.last_performed_at = completed_at` and
    `asset_action.last_performed_task_id = task.id` (§21).
@@ -504,7 +507,7 @@ own timestamp and actor.
 | task_id             | ULID FK  |                                         |
 | ordinal             | int      | display order                           |
 | text                | text     | the line as it appears to the worker    |
-| required            | bool     | if `tasks.checklist_required`, all required items must be ticked to complete |
+| required            | bool     | if `tasks.checklist_required = true`, all required items must be ticked to complete |
 | guest_visible       | bool     | surfaced on the guest welcome page for stay task bundles (§04) |
 | completed_at        | tstz?    |                                         |
 | completed_by_user_id | ULID FK? |                                        |
@@ -609,7 +612,8 @@ user-facing surface is now the task-scoped chat described in
 
 ## Skipping and cancellation
 
-- `skip`: worker action, requires a reason (capability gated). Counts
+- `skip`: worker action, requires a reason when the resolved setting
+  `tasks.allow_skip_with_reason = true`. Counts
   as "not done" in reporting but does not raise an issue. Used for
   "not needed this week" (guest left early, etc.).
 - `cancel`: owner or manager action only. Reason required.

@@ -1,18 +1,18 @@
-# 23 — Chat gateway
+# 23 — Chat gateway (Deferred design reference)
 
 The **chat gateway** is the single seam through which a user's embedded
 agent (§11) exchanges messages with that user — no matter which
-channel the user reached for. The web sidebar (`.desk__agent`), the
-worker PWA Chat tab, and WhatsApp are all **channels**; the agent
-runtime, the tool surface, the delegated token, the audit trail, and
-the approval pipeline are **shared**. Telegram, push, and future
-transports plug in through the same adapter protocol with no changes
-to the agent brain.
+channel the user reached for. The web sidebar (`.desk__agent`) and the
+worker PWA Chat tab are the only **live** channels in shipped v1. This
+document keeps the off-app transport design written down so WhatsApp,
+SMS, Telegram, push, and future adapters can plug into the same
+runtime later without re-architecting the agent brain.
 
 This spec names the contract the transports must satisfy and the data
 model the runtime persists. §11 remains the authority on what the
 agent does with a message once it has one; this document is about how
-messages get in, get out, and get bound to the right user.
+messages would get in, get out, and get bound to the right user once
+external adapters are enabled.
 
 ## Principles
 
@@ -28,11 +28,11 @@ messages get in, get out, and get bound to the right user.
    unrecognised address is logged for rate-limiting and silently
    dropped — the gateway never replies to an unbound sender
    (avoiding amplification and anti-spam exposure).
-3. **Agent-first invariant (§11) is preserved.** Every human-facing
-   verb reachable in the web agent is reachable over WhatsApp. The
-   only differences are presentation (interactive buttons vs web
-   approval cards) and constraints specific to the transport
-   (Meta's 24-hour session window, text-length caps).
+3. **Agent-first invariant (§11) is preserved.** External channels are
+   expected to expose the same underlying agent runtime as the web
+   surfaces. The only differences should be presentation
+   (interactive buttons vs web approval cards) and transport-specific
+   constraints (session windows, text-length caps).
 4. **Humans do not talk to humans on off-app channels.** The gateway
    is for user ↔ **agent** conversations. Cross-user messaging stays
    on email (§10) and task threads (§06). WhatsApp is not a DM
@@ -50,11 +50,11 @@ with a code migration and an OpenAPI update.
 |-----------------------|------------------------------|-------------|----------------|
 | `web_owner_sidebar`   | FastAPI SSE / `/api/v1/agent/manager/*` | both | shipping (§14) |
 | `web_worker_chat`     | FastAPI SSE / `/api/v1/agent/employee/*` | both | shipping (§14) |
-| `offapp_whatsapp`     | Meta Cloud API (WhatsApp Business) | both | **v1 new**     |
-| `offapp_sms`          | RFC-compliant SMS gateway    | agent→user only | v1 (agent reach-out only) |
+| `offapp_whatsapp`     | Meta Cloud API (WhatsApp Business) | both | deferred |
+| `offapp_sms`          | RFC-compliant SMS gateway    | agent→user only | deferred |
 | `offapp_telegram`     | Telegram Bot API             | both        | deferred — §19 |
 
-`offapp_sms` remains outbound-only in v1 because SMS has no
+`offapp_sms` remains outbound-only in the current design because SMS has no
 interactive-button primitive and the reply parser would have to
 disambiguate free-text `YES` across every pending approval. Agent
 reach-out over SMS is still covered by §10.
@@ -101,7 +101,7 @@ WHERE state != 'revoked'` — one binding per channel kind per user
 (the decision recorded in this session). A user can hold one
 WhatsApp, one Telegram, one SMS binding simultaneously.
 
-**Multi-workspace users.** v1 ships single-workspace so every
+**Multi-workspace users.** The current product ships single-workspace so every
 binding is scoped to that workspace. When true multi-tenancy lands
 (§19), the partial-unique on `(channel_kind, address_hash)` is
 scoped to `workspace_id` and inbound routing disambiguates by
@@ -177,11 +177,10 @@ channel-agnostic.
 | last_turn_at        | tstz     |                                                            |
 | archived_at         | tstz?    |                                                            |
 
-There is **one live thread per user** in v1. New channels join the
-same thread rather than creating a fresh one, so the agent has a
-single ongoing conversation regardless of surface. A user who
-suddenly replies on WhatsApp after a week of web chat picks up
-where they left off.
+Deferred design assumption: there is **one live thread per user**.
+When external adapters are enabled, new channels join the same thread
+rather than creating a fresh one, so the agent keeps one ongoing
+conversation regardless of surface.
 
 ### `chat_message`
 
@@ -286,7 +285,7 @@ binding (updated on every inbound) and on each outbound:
 
 - If `now - last_message_at ≤ 24h` → free-form text is allowed.
 - If `> 24h` → only registered templates. The gateway ships two
-  registered templates in v1:
+  registered templates in the first off-app release:
   - `chat_channel_link_code` — used during the link ceremony.
   - `chat_agent_nudge` — used for agent reach-out; takes one
     parameter, a short body; expands to "Hi {display_name}, your
@@ -365,7 +364,7 @@ and `card_risk`. On the gateway:
   once. Separate bindings cannot cross-decide (the resolver scopes
   by `(workspace_id, for_user_id)`).
 - **High-risk** (`card_risk = 'high'`) actions are **not** resolved
-  on WhatsApp in v1. The card includes the two buttons but the
+  on WhatsApp in the first off-app release. The card includes the two buttons but the
   handler returns a short message: "This one needs a full review —
   please open the app to confirm." The approval still lives in
   `/approvals`. Owner/manager oversight is the anchor on
@@ -374,9 +373,9 @@ and `card_risk`. On the gateway:
   regardless of channel. A user who ignores the WA card for a week
   sees it expire; the agent re-requests if still relevant.
 
-This flips §11 "Inline approval UX" for `offapp_whatsapp` from
-deferred (Beyond v1) to v1. `offapp_sms` stays deferred — see
-channel catalog.
+This remains **deferred** with the rest of the external adapters.
+The schema keeps the affordance and approval mapping ready, but shipped
+v1 does not send approval cards over WhatsApp or SMS.
 
 ## Media handling
 
@@ -402,7 +401,7 @@ Three primary consumers:
   via an approval card.
 
 Voice notes are transcribed through capability `voice.transcribe`
-(§11). Default **off** in v1; flipping it on is per-user
+(§11). Default **off** in the initial external-channel rollout; flipping it on is per-user
 (`voice.employee` / `voice.manager`). Untranscribed voice notes
 are stored as files and the agent replies "I can't listen to voice
 notes yet — please type or turn on voice transcription in your
@@ -429,7 +428,7 @@ class ChannelAdapter(Protocol):
     def verify_webhook(self, headers: Headers, raw_body: bytes) -> bool: ...
 ```
 
-v1 ships one implementation: **Meta Cloud API** for
+The first planned implementation uses **Meta Cloud API** for
 `offapp_whatsapp`. The SMS adapter remains outbound-only and
 implements only `send_text` / `send_template` / `verify_webhook`.
 Telegram is specified by the same interface; the adapter is in §19.
@@ -442,7 +441,7 @@ them on `/settings → Chat gateway`; tokens are never rendered in
 the UI (`display_stub` only). Rotation follows the same rules as
 any other envelope secret (§15).
 
-## REST surface (v1)
+## REST surface (future off-app release)
 
 New routes, all under `/api/v1/chat`:
 
@@ -549,7 +548,7 @@ Gateway-specific hardening:
   by thread and render affordances from the same schema WhatsApp
   receives.
 
-## Out of scope (v1)
+## Out of scope (first off-app release)
 
 - Telegram adapter implementation (seam is ready — §19).
 - SMS inline approvals (no interactive primitive — channel

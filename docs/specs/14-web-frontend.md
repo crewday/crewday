@@ -98,7 +98,7 @@ hidden when `time.clock_mode` is `auto` or `disabled`.
 /pay                            /expenses
 /approvals                      /audit
 /webhooks                       /llm
-/chat-channels                  /me
+/me
 /settings
 ```
 
@@ -153,16 +153,11 @@ the platform must guarantee*.
   model as written" banner (§15), and a "Revisions" link opening
   the history modal backed by `/agent_preferences/revisions/…`
   (§12). Full rules in §11 "Agent preferences".
-- **Chat gateway surface.** `/me` carries a "Chat channels" card
-  listing the current user's bindings, a link/unlink control,
-  `preferred_offapp_channel` toggle, and quiet-hours editor (§23).
-  Owners and managers see a workspace-wide `/chat-channels` page
-  listing every binding, provider health, and reach-out policy,
-  plus a `/settings → Chat gateway` section for Meta credentials
-  and template registration. The chat sidebar and worker Chat tab
-  now render `chat_message` rows from §23, so affordances
-  (buttons, list choices, media) come from the same schema that
-  backs WhatsApp.
+- **Deferred external chat seam.** Off-app adapters are prepared in
+  the architecture but not enabled in shipped v1. The mocks must not
+  expose binding-management pages, phone-number linking, or provider
+  configuration as active product surfaces. When those adapters are
+  revisited, §23 remains the reference design.
 
 ## Accessibility (v1 gate)
 

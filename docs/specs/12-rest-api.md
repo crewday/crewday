@@ -274,7 +274,7 @@ PATCH  /property_closures/{id}
 DELETE /property_closures/{id}
 ```
 
-### Users / work roles / capabilities
+### Users / work roles / settings
 
 ```
 GET    /users
@@ -328,9 +328,6 @@ POST   /property_work_role_assignments
 PATCH  /property_work_role_assignments/{id}
 DELETE /property_work_role_assignments/{id}
 
-GET    /capabilities              # resolved per-user view
-PATCH  /capabilities/{user_id}
-
 GET    /user_leaves               # ?user_id=…&from=…&to=…&approved=true|false
 POST   /user_leaves
 PATCH  /user_leaves/{id}
@@ -351,13 +348,6 @@ GET    /public_holidays/{id}
 PATCH  /public_holidays/{id}
 DELETE /public_holidays/{id}
 ```
-
-`GET /capabilities` returns a resolved map per
-`(user, property_work_role_assignment)` with `{value, source}` per
-key — see §05 for the cascade and source values.
-`PATCH /capabilities/{user_id}` accepts a sparse
-`capability_key → true | false | null` map plus an `assignment_id`;
-`null` clears the override.
 
 ### Tasks / templates / schedules
 

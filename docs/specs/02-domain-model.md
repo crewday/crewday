@@ -224,9 +224,9 @@ erDiagram
 Entities in the diagram but not detailed inline here have their
 columns defined in the section referenced in the catalog below.
 `task_assignment` is not an entity — task assignment is captured as
-`task.assigned_user_id` (see §06). `capability_flag` is not an
-entity either — work-scoped capabilities are sparse JSON blobs
-on `work_role` and `user_work_role` (see §05). Authority
+`task.assigned_user_id` (see §06). Worker-facing operational policy
+is resolved through the structured settings cascade below; there is
+no separate runtime "capability" resolver. Authority
 (who-may-do-what) lives on the `permission_rule` + action
 catalog pair (see `permission_rule` below and the catalog in
 §05).
@@ -940,8 +940,10 @@ unified cascade** that applies to all entity-level settings.
 ### Key naming
 
 Canonical keys use **dotted namespaces**: `evidence.policy`,
-`time.clock_mode`, `time.geofence_radius_m`. This matches the
-existing capability key convention in §05.
+`time.clock_mode`, `time.geofence_radius_m`. The same dotted form
+is also used by the LLM model-assignment capability catalog in §11,
+but those capability keys are a separate concern: they choose models,
+not runtime policy.
 
 ### Resolution order
 
@@ -998,37 +1000,41 @@ scope, and the spec that defines the feature:
 | `time.geofence_radius_m` | int | `150` | W/P/U | §09 |
 | `time.geofence_required` | bool | `false` | W/P/U/WE | §05 |
 | `pay.frequency` | enum | `monthly` | W | §09 |
+| `pay.allow_self_manage_destinations` | bool | `false` | W/WE | §09 |
 | `pay.week_start` | enum | `monday` | W | — |
 | `retention.audit_days` | int | `730` | W | §02 |
 | `retention.llm_calls_days` | int | `90` | W | §02, §11 |
 | `retention.task_photos_days` | int | `365` | W | — |
 | `scheduling.horizon_days` | int | `30` | W/P | §06 |
 | `tasks.checklist_required` | bool | `false` | W/P/U/WE/T | §05 |
+| `tasks.allow_complete_backdated` | bool | `false` | W/P/U/WE | §05 |
 | `tasks.allow_skip_with_reason` | bool | `true` | W/P/U/WE | §05 |
+| `inventory.consume_on_task` | bool | `true` | W/P/U/WE/T | §08 |
+| `expenses.autofill_receipts` | bool | `true` | W/WE | §09 |
+| `chat.enabled` | bool | `true` | W/WE | §11 |
+| `voice.enabled` | bool | `false` | W/WE | §11 |
+| `notifications.email_digest` | bool | `true` | W/WE | §10 |
 | `assets.warranty_alert_days` | int | `30` | W/P | §21 |
 | `assets.show_guest_assets` | bool | `false` | W/P/U | §21 |
 
 "WE" in the scope column refers to the **work_engagement** layer
 (per-(user, workspace) row), replacing the v0 "employee" scope tag.
 
-### Relationship to capabilities and permissions
+### Relationship to permissions
 
-Capabilities (§05) remain a parallel system for
-per-(user_work_role, work_role, property) feature toggles — they
-gate worker-UI affordances and scheduling behaviour
-(`time.clock_in`, `tasks.photo_evidence_required`, etc.). The
-**permission system** (§02 `permission_rule` + §05 action
-catalog) is a separate mechanism for *who-may-do-what* on
-administrative actions (`expenses.approve`, `users.invite`, …).
-The settings cascade handles **entity-level configuration**:
-values that shape how a feature works rather than whether it is
-available to a given user.
+The **permission system** (§02 `permission_rule` + §05 action
+catalog) answers *who may do what* on explicit actions
+(`expenses.approve`, `users.invite`, `task_comment.create`, …).
+The settings cascade answers *how a feature behaves once the user is
+allowed to use it* (`time.clock_mode`, `evidence.policy`,
+`inventory.consume_on_task`, …).
 
-Where keys overlap (e.g. `time.clock_mode` appears in both the
-capability catalog and the settings catalog), the settings cascade
-takes precedence. Full resolution for overlapping keys:
-task → work_engagement → unit → property → (capability chain) →
-workspace → catalog default.
+The architectural rule is therefore:
+
+- **Permissions** gate verbs.
+- **Settings** shape behaviour.
+
+There is no second live runtime policy layer between them.
 
 ### Resolved settings function
 
@@ -1103,7 +1109,7 @@ Defined once per document where the enum lives; summarized here.
 - `holiday_recurrence`: `annual` (nullable enum — null = one-off)
 - `leave_category`: `vacation | sick | personal | bereavement | other`
 - `issue_status`: `open | in_progress | resolved | wont_fix`
-- `capability`: see §05.
+- `setting_key`: dotted runtime-policy key from the settings catalog (§02, §05).
 - `engagement_kind`: `payroll | contractor | agency_supplied` (§05, §22)
 - `organization_role`: bitmap on `organization` (`is_client`, `is_supplier`); at least one must be true (§22)
 - `work_order_state`: `draft | quoted | accepted | in_progress | completed | cancelled | invoiced | paid` (§22)

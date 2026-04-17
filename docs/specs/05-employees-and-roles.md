@@ -1,4 +1,4 @@
-# 05 — Users, work roles, capabilities
+# 05 — Users, work roles, and worker settings
 
 > Historical note: in v0 this document was titled "Employees and
 > roles". v1 merges every human login into a single `users` table
@@ -6,8 +6,8 @@
 > to be the `employee` entity no longer exists; the people who do
 > work are `users` with one or more `user_work_role` rows and a
 > `work_engagement` per workspace. This document covers the
-> **work** side of that model (which jobs a user performs, which
-> capabilities they have); §02 and §03 cover identity, grants, and
+> **work** side of that model (which jobs a user performs, how worker-
+> facing behaviour is configured); §02 and §03 cover identity, grants, and
 > auth.
 
 ## User (as worker)
@@ -28,7 +28,7 @@ a given workspace when they hold a `role_grants` row with
   system as an owner, manager, or client.
 - A user may hold the same `work_role` in more than one
   workspace — each binding is an independent `user_work_role`
-  row. Rates, capabilities, and schedules are per (user, workspace).
+  row. Rates, worker settings, and schedules are per (user, workspace).
 
 ### Fields that formerly lived on `employee`
 
@@ -50,7 +50,7 @@ whichever `role_grants` rows the workspace's owner/manager sees fit.
 
 ## Work role
 
-A work role is a named capability-bundle the workspace uses: maid,
+A work role is a named job definition the workspace uses: maid,
 cook, driver, gardener, pool_tech, handyman, nanny, personal
 assistant, concierge, property_manager, etc. Work roles are
 **workspace-defined** — the system ships a starter set but they are
@@ -68,7 +68,7 @@ in v1 because `role` is now ambiguous with `grant_role` from §02.)
 | key               | text     | stable slug: `maid`, `cook`. Unique per `(workspace_id, key)`. Editable but changing it audit-logs as `work_role.rekey` and breaks external references that hard-code the slug. |
 | name              | text     | display: "Maid", "Cuisinier/ère"        |
 | description_md    | text     |                                         |
-| default_capabilities | jsonb | capabilities enabled by default (see below) |
+| default_settings_json | jsonb | optional recommended worker-setting defaults to copy into a new `work_engagement.settings_override_json` when the first role in this workspace is assigned. These are provisioning hints, not a second runtime resolver. |
 | icon_glyph        | text     | tailwind heroicon name, for the UI      |
 | deleted_at        | tstz?    |                                         |
 
@@ -99,7 +99,6 @@ without being `maid` in Workspace B.
 | started_on          | date     |                                         |
 | ended_on            | date?    |                                         |
 | pay_rule_id         | ULID FK? | override the default pay rule on the user's `work_engagement` in this workspace |
-| capability_override | jsonb    | sparse, shallow-merged on top of work role defaults |
 
 Unique: `(user_id, workspace_id, work_role_id, started_on)`.
 
@@ -130,7 +129,6 @@ property assignments exist, the `user_work_role` is eligible for
 | property_id              | ULID FK  |                                         |
 | schedule_ruleset_id      | ULID FK? | which default schedule applies at this property |
 | property_pay_rule_id     | ULID FK? | rarer: per-property rate override       |
-| capability_override      | jsonb    | sparse, shallow-merged on top of the user_work_role override |
 
 ## Work engagement (pointer)
 
@@ -180,79 +178,36 @@ The words "end", "terminate", "off-board", "rehire", "soft-off" are
 **not** used in the schema, API, or UI. When writing new code or
 docs, use archive/reinstate.
 
-## Capabilities (work-scoped)
+## Worker settings
 
-Capabilities are per-user feature toggles the workspace flips based
-on the user's work role needs. They shape UI and scheduling for the
-worker surface. Capabilities are a **sparse JSON blob**; unset
-means "inherit from the next layer", which itself may be unset,
-meaning "feature off".
+Worker-facing runtime behaviour uses the single settings cascade from
+§02. There is no parallel capability resolver. Two rules keep the
+model simple:
 
-(Administrative authority — `users.invite`, `quotes.accept`,
-etc. — is **not** a work-capability. It lives on
-`permission_rule` rows keyed to the action catalog below, see
-"Permissions: surface, groups, and action catalog" further down
-this document and §02 "Permission resolution".)
+1. **Permissions decide whether a user may do something.**
+2. **Settings decide how that thing behaves.**
 
-### Canonical catalog
+Examples:
 
-| key                           | default off/on | meaning                                        |
-|-------------------------------|----------------|-------------------------------------------------|
-| `time.clock_in`               | off            | Can clock in/out                                |
-| `time.clock_mode`             | `manual`       | `manual | auto | disabled` — see §09. `manual`: worker taps clock-in/out. `auto`: first checklist tick or task action of the day opens a shift; idle timer closes it. `disabled`: hours not tracked. |
-| `time.auto_clock_idle_minutes`| `30`           | Integer; inactivity window (minutes) that closes an `auto` shift. Ignored unless `time.clock_mode = auto`. |
-| `time.geofence_required`      | off            | Must be within property radius to clock in     |
-| `time.manager_edit_only`      | off            | Shifts editable only by a user with `manager`/`owner` grant |
-| `tasks.photo_evidence`        | off            | Can attach photos to completions                |
-| `tasks.photo_evidence_required` | off          | Must attach photo to complete                   |
-| `tasks.checklist_required`    | off            | All checklist items must be ticked to complete  |
-| `tasks.allow_skip_with_reason`| on             | Can skip a task with a reason                   |
-| `tasks.allow_complete_backdated` | off         | Can complete with `completed_at < now`          |
-| `messaging.comments`          | on             | Can comment on tasks                            |
-| `messaging.report_issue`      | on             | Can open issue reports                          |
-| `inventory.adjust`            | off            | Can adjust stock levels                         |
-| `inventory.consume_on_task`   | on             | Completions can deduct stock                    |
-| `expenses.submit`             | off            | Can submit expense claims                       |
-| `expenses.photo_upload`       | on             | Can attach receipts                             |
-| `expenses.autofill_llm`       | on             | Receipts may be OCR'd by the configured model   |
-| `chat.assistant`              | off            | Gets the staff chat assistant (§11)             |
-| `voice.assistant`             | off            | Chat assistant accepts voice input              |
-| `pwa.offline_queue`           | on             | Offline completion queue enabled on their PWA   |
-| `notifications.email_digest`  | on             | Receives their own daily digest email           |
-| `payroll.self_manage_destinations` | off       | Can self-create/edit `payout_destination` rows owned by their own `work_engagement` (§09). Off by default so only users with manager/owner grants can route their pay. |
+- Whether a worker may submit an expense is a permission decision
+  (`expenses.submit` in the action catalog below).
+- Whether submitted expenses should trigger OCR autofill is a setting
+  (`expenses.autofill_receipts`) resolved through the settings cascade.
+- Whether a worker can comment on a task is a permission decision
+  (`task_comment.create`).
+- Whether a task requires a full checklist or photo evidence is a
+  settings decision (`tasks.checklist_required`,
+  `evidence.policy`).
 
-### Resolution order
+### Recommended role defaults
 
-**Capabilities vs settings cascade.** Capabilities are per-user
-feature toggles resolved through the work-role / property-assignment
-hierarchy (below). The **settings cascade** (§02 "Settings cascade")
-is a separate, unified framework for entity-level configuration
-(values like `evidence.policy`, `time.clock_mode`,
-`scheduling.horizon_days`) that resolves workspace → property →
-unit → work_engagement → task. Where a key appears in both systems
-(e.g. `time.clock_mode`), the settings cascade takes precedence;
-its resolution is: task → work_engagement → unit → property →
-(capability chain) → workspace → catalog default.
-
-For a given (user, task) pair, resolve a capability as:
-
-1. Per-`property_work_role_assignment.capability_override`
-2. Per-`user_work_role.capability_override`
-3. Per-`work_role.default_capabilities`
-4. Compile-time default in the catalog above.
-
-**First "present" wins, where present includes explicit `false`.**
-Sparse JSON semantics: a key being absent means "inherit"; a key
-being `false` means "explicitly off, stop inheritance here". This
-lets an owner/manager disable a capability at a specific property
-for a specific user even when the work-role default is on. Setting
-a key back to `null` (or deleting it) re-enables inheritance.
-
-### UI
-
-Each capability is shown as a three-state control: **On / Off /
-Inherit**, with a live preview of the resolved value underneath. The
-same blob drives both the owner/manager UI and the API.
+`work_role.default_settings_json` exists so a workspace can keep
+role-specific recommendations ("maids default to auto clocking and
+required evidence at Villa Sud") without reintroducing a second live
+runtime policy system. These defaults are copied into the appropriate
+workspace / property / work-engagement setting layers when an
+owner/manager accepts them; once copied, runtime resolution happens
+only through the settings cascade in §02.
 
 ### Evidence-policy stack
 
@@ -262,8 +217,8 @@ The evidence-policy stack is an instance of the **settings cascade**
 semantics; the cascade mechanics (layer columns, override shape,
 resolution order) are canonical in §02.
 
-A separate resolution stack, parallel to the capability stack above,
-computes whether a task needs photo evidence. Five layers, in order
+A dedicated key in the unified settings cascade computes whether a
+task needs photo evidence. Five layers, in order
 from broadest to most specific:
 
 1. **Workspace default** — always concrete (`require | optional |
@@ -332,8 +287,8 @@ Users whose highest surface grant in a scope is `worker` see only:
 - Staff-visible subset of property notes (§04) — not access codes or
   wifi passwords unless an owners-group member explicitly shares.
 - Comments on tasks they can see, plus authoring comments on those.
-- The staff chat assistant if the work-capability `chat.assistant`
-  is on.
+- The staff chat assistant when the workspace enables chat for that
+  worker via the settings cascade / agent policy.
 
 Workers never see:
 
@@ -517,15 +472,11 @@ Notes:
   surface-entitled user may see the scope exists". RLS still
   filters which rows they can read (§15).
 - Identity-scoped actions ("edit my own profile", "clock in/out
-  my own shift", "view my own payslip") are **not** in the
-  action catalog; they are governed by the `users` row / work
-  capability system and do not flow through
-  `permission_rule`.
-- Work-scoped capabilities (`time.clock_in`,
-  `tasks.photo_evidence`, etc. — the table further up this
-  document) are **not** action keys. They are operational
-  per-(user, work_role, property) toggles, resolved through the
-  §05 capability chain.
+  my own shift", "view my own payslip") are **not** listed as
+  workspace-assignable action keys; they are self-service verbs
+  anchored on the authenticated `users` / `work_engagement`
+  record. Their runtime behaviour still follows the settings
+  cascade (`time.clock_mode`, `evidence.policy`, etc.).
 
 ### How a rule narrows or widens a default
 
@@ -597,10 +548,18 @@ modeled as:
   `(user=Maria, workspace=HomeOps, work_role=maid)`,
   `(user=Maria, workspace=HomeOps, work_role=nanny)`.
 - 2 `property_work_role_assignment` rows:
-    - `(user_work_role=maid, property=Villa_Sud)`, `capability_override:
-      {time.clock_in: true, tasks.photo_evidence_required: true}`
-    - `(user_work_role=nanny, property=Main_Residence)`,
-      `capability_override: {time.clock_in: false}`.
+    - `(user_work_role=maid, property=Villa_Sud)`
+    - `(user_work_role=nanny, property=Main_Residence)`.
+
+Maria's behavioural differences are expressed through the settings
+cascade, not a live capability chain. Example overrides:
+
+- `work_engagement.settings_override_json`:
+  `{time.clock_mode: "auto", notifications.email_digest: true}`
+- `property(Villa_Sud).settings_override_json`:
+  `{evidence.policy: "require"}`
+- `property(Main_Residence).settings_override_json`:
+  `{time.clock_mode: "manual"}`
 
 Pay rules are separate and attach to `pay_rule.work_engagement_id`
 pointing at Maria's `HomeOps` engagement (§09).

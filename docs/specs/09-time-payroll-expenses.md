@@ -44,7 +44,7 @@ shift
 ├── expected_started_at      # nullable; set when clock-in is delayed
 ├── method_in                # enum: pwa | web | manager | agent | qr_kiosk
 ├── method_out               # same
-├── geo_in_lat/lon/accuracy  # nullable, only if capability + consent
+├── geo_in_lat/lon/accuracy  # nullable, only if geofencing is enabled by settings + consent
 ├── geo_out_lat/lon/accuracy
 ├── break_seconds            # owner/manager-entered or self-entered
 ├── notes_md                 # optional
@@ -69,12 +69,11 @@ shift (see "Open shift recovery").
 
 ### Clock-in / clock-out
 
-Driven by the `time.clock_mode` capability (§05), which takes one of
-three values: `manual`, `auto`, `disabled`. The companion capability
-`time.auto_clock_idle_minutes` (default `30`) controls the idle
-timer used by `auto` mode. `time.geofence_required` and the legacy
-`time.clock_in` capability still gate UI affordances and are
-evaluated alongside the mode.
+Driven by the resolved setting `time.clock_mode` (§05), which takes
+one of three values: `manual`, `auto`, `disabled`. The companion
+setting `time.auto_clock_idle_minutes` (default `30`) controls the
+idle timer used by `auto` mode. `time.geofence_required` is resolved
+through the same cascade.
 
 #### `manual` mode (default)
 
@@ -118,7 +117,7 @@ shift from work activity:
 #### `disabled` mode
 
 Hours are not tracked — useful for a salaried worker or a family
-friend who helps out. No shift rows are created; the `time.clock_in`
+friend who helps out. No shift rows are created; the clock-in
 affordance is hidden; payroll for this work engagement must use a
 `monthly_salary` or `per_task` pay rule (§ "Pay rules") because
 `hourly` has no hours to multiply.
@@ -151,7 +150,7 @@ resolution (workspace → property → work_engagement → task, first
 concrete value wins) applies.
 
 A villa can override the worker's default mode. The resolution
-order is: **villa override → work_engagement capability → workspace
+order is: **villa override → work_engagement setting → workspace
 default**. A villa that sets `clock_mode = manual` forces manual
 clock-in/out even for workers whose default is `auto` (useful
 when a specific property has a shared kiosk or strict audit needs).
@@ -516,9 +515,9 @@ fire the `payout_destination.{created,updated,archived,verified}`
 webhook. In addition:
 
 - A **worker** (user with a `worker` grant) can create/edit their own
-  destinations only if the capability `payroll.self_manage_destinations`
-  is on (default **off**). When off, only users with `owner` or
-  `manager` grants can write.
+  destinations only if the resolved setting
+  `pay.allow_self_manage_destinations = true` (default **off**).
+  When off, only users with `owner` or `manager` grants can write.
 - **Agent tokens** cannot mutate destinations without manager
   approval. `payout_destination.create`, `.update`,
   `.set_default_pay`, `.set_default_reimbursement`, and
@@ -807,9 +806,8 @@ A claim becomes `reimbursed` when the containing payslip moves to
   - <0.6 left blank with "review" placeholder, never pre-filled.
 - All extractions recorded in `llm_call` (§11). Cost is attributed to
   `expenses.autofill` capability.
-- If the workspace disabled `expenses.autofill_llm` for the worker
-  (via their work-role capability) or the capability globally, the
-  photo is attached but no extraction runs.
+- If the resolved setting `expenses.autofill_receipts = false` for the
+  worker / workspace, the photo is attached but no extraction runs.
 - When a user edits an OCR line, `expense_line.source` stays `ocr`
   and `edited_by_user` flips to `true`. Fully user-created lines have
   `source = manual` from the start.

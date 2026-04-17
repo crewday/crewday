@@ -99,13 +99,11 @@ fix the offender.
   who hold a `manager` surface grant or membership in any
   `owners` permission group; generates exactly one magic link on
   redemption (§03).
-- **Capability (work-scoped).** A per-(user, work_role,
-  property) feature flag, resolved from a four-level sparse
-  JSON stack (property_work_role_assignment → user_work_role →
-  work_role.default_capabilities → catalog default). Explicit
-  `false` blocks inheritance; absent keys inherit. Canonical
-  catalog in §05. Administrative authority is a separate
-  system — see **Action catalog** and **Permission rule**.
+- **Worker setting.** A runtime behaviour key resolved through the
+  single settings cascade (§02, §05): workspace → property → unit →
+  work_engagement → task, with the most specific concrete value
+  winning. Permissions stay separate — see **Action catalog** and
+  **Permission rule**.
 - **Condition (asset).** The physical state of an asset: `new | good |
   fair | poor | needs_replacement`. Changes are audit-logged as
   `asset.condition_changed`. See §21.
@@ -181,10 +179,10 @@ fix the offender.
   level. All managers are peers in v1. Held via a `role_grants`
   row with `grant_role = 'manager'`.
 - **Model assignment.** The capability → model mapping (§11).
-- **Off-app reach-out.** Agent-initiated WhatsApp or SMS message to
-  a user for low-stakes checks. Requires the user's
-  `preferred_offapp_channel` to be set **and** (for WhatsApp) an
-  active `chat_channel_binding` (§23). See §10.
+- **Off-app reach-out.** Deferred feature in which the agent may send
+  a WhatsApp or SMS message to a user for low-stakes checks. The
+  design still assumes `preferred_offapp_channel` plus an active
+  `chat_channel_binding` (§23). See §10.
 - **Owner / owners group.** **v0** had an `owner` grant_role
   with "exactly one per scope". **v1** replaces this with the
   `owners` **permission group**: a system group seeded per
@@ -378,7 +376,7 @@ fix the offender.
   (`payroll | contractor | agency_supplied`) deciding which pay
   pipeline the worker is on. `payroll` → `pay_rule` + `payslip`
   (§09). `contractor` and `agency_supplied` → `vendor_invoice`
-  (§22). Does not affect task assignment, shifts, capabilities,
+  (§22). Does not affect task assignment, shifts, worker settings,
   or evidence policy. Crossing the `payroll` boundary in either
   direction is unconditionally approval-gated. See §05, §22.
 - **Work order.** A billable envelope wrapping one or more tasks
@@ -401,18 +399,15 @@ fix the offender.
   and `mark_paid` are unconditionally approval-gated. States:
   `draft | submitted | approved | rejected | paid | voided`. See
   §22.
-- **Chat gateway.** Single transport layer through which the
-  user's embedded agent (§11) exchanges messages, regardless of
-  channel (web sidebar, worker PWA Chat tab, WhatsApp, and future
-  Telegram). Channels plug in through a `ChannelAdapter` protocol;
-  the agent runtime, tool surface, delegated token, and approval
-  pipeline are identical across channels. See §23.
+- **Chat gateway.** Transport layer through which the user's
+  embedded agent (§11) can exchange messages across web and future
+  external channels. Shipped v1 uses only the web sidebar and worker
+  PWA Chat tab; WhatsApp / SMS / Telegram remain deferred. See §23.
 - **Channel adapter.** Per-transport implementation of the
   gateway's `ChannelAdapter` protocol — parses inbound envelopes,
   sends text / buttons / media / templates, and verifies webhook
-  signatures. v1 ships `offapp_whatsapp` (Meta Cloud API);
-  `offapp_sms` is outbound-only; `offapp_telegram` is a reserved
-  slug with implementation deferred. See §23.
+  signatures. Off-app adapters are deferred; the spec keeps their
+  slugs and contracts ready. See §23.
 - **Chat channel binding.** Row in `chat_channel_binding` tying a
   `(channel_kind, address)` pair to exactly one `users` row.
   Created `pending`, promoted to `active` via the link-challenge
@@ -425,11 +420,10 @@ fix the offender.
   code either by inbound reply or UI POST promotes the binding to
   `active`.
 - **Chat thread / chat message.** `chat_thread` + `chat_message`
-  replace the v0 `offapp_delivery` + task-comment agent
-  participation. One live thread per user carries every turn with
-  that user's agent across all channels; messages carry
-  `channel_kind`, `direction`, affordance metadata, and media
-  references. Compaction (§11) applies uniformly. See §23.
+  are the planned unified message substrate for web and future
+  external channels. The deferred design keeps one live thread per
+  user across all channels; messages carry `channel_kind`,
+  `direction`, affordance metadata, and media references. See §23.
 - **Session window (WhatsApp).** Meta's 24-hour rule: outside the
   window since the user's last inbound, outbound from the gateway
   must be a pre-approved template message. Tracked on

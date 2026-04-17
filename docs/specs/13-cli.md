@@ -240,10 +240,6 @@ miployees work-roles
   add --key maid --name "Maid"
   update <id> ...
 
-miployees capabilities
-  show <user-id>
-  set <user-id> <key> <on|off|inherit>
-
 miployees tasks
   list [--property] [--work-role] [--assignee] [--state] [--on <date>] [--q]
   show <id>
