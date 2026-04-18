@@ -641,7 +641,7 @@ rather than `'none'`:
 - `frame-ancestors` = whitespace-separated value of
   `CREWDAY_DEMO_FRAME_ANCESTORS`; default empty → demo runs stand-
   alone (no embedding). Operators set it to the landing origins they
-  intend to embed from (e.g. `https://crewday.app https://*.crewday.app`).
+  intend to embed from (e.g. `https://crew.day https://*.crew.day`).
 - `X-Frame-Options` is not set on demo responses — the CSP
   `frame-ancestors` directive supersedes and the legacy header cannot
   express an allowlist of multiple origins.

@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
 import type { Property, Task } from "@/types/api";
+import { Checkbox } from "@/components/common";
 
 // §06 quick-add. Clicking the button opens a <dialog> (same pattern as
 // the task skip modal in TaskDetailPage) and POSTs to /api/v1/tasks.
@@ -130,14 +131,11 @@ export default function NewTaskButton() {
             </label>
           )}
 
-          <label className="field field--inline">
-            <input
-              type="checkbox"
-              checked={personal}
-              onChange={(e) => setPersonal(e.target.checked)}
-            />
-            <span>Keep this personal (only I can see it)</span>
-          </label>
+          <Checkbox
+            checked={personal}
+            onChange={(e) => setPersonal(e.target.checked)}
+            label="Keep this personal (only I can see it)"
+          />
 
           <div className="modal__actions">
             <button

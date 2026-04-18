@@ -242,7 +242,7 @@ ops.example.com {
 
 ## Recipe C — Demo deployment
 
-Target: an internet-facing public demo (`demo.crewday.app`) that
+Target: an internet-facing public demo (`demo.crew.day`) that
 lets unauthenticated visitors try the product against fake data. One
 visitor per cookie, one workspace per (cookie, scenario) pair, 24 h
 rolling TTL from last activity. See §24 for the full demo-mode spec.
@@ -254,7 +254,7 @@ entirely env.
 
 ### Topology
 
-- **Host:** `demo.crewday.app` (subdomain distinct from any prod host).
+- **Host:** `demo.crew.day` (subdomain distinct from any prod host).
 - **Database:** a dedicated SQLite file under the demo container's
   volume, **or** a dedicated Postgres DB in a dedicated cluster. It
   must not be the same physical store as any prod deployment. The
@@ -264,7 +264,7 @@ entirely env.
   per-workspace subdirectory (`/data/demo/<workspace_id>/`). S3 is
   out of scope on demo.
 - **TLS:** same as prod recipes — Caddy fronts the container on
-  443/80, binds to 127.0.0.1:8000 → `demo.crewday.app`.
+  443/80, binds to 127.0.0.1:8000 → `demo.crew.day`.
 
 ### Compose snippet
 
@@ -276,14 +276,14 @@ services:
     user: "10001:10001"
     environment:
       CREWDAY_DEMO_MODE: "1"
-      CREWDAY_PUBLIC_URL: "https://demo.crewday.app"
+      CREWDAY_PUBLIC_URL: "https://demo.crew.day"
       CREWDAY_DATABASE_URL: "sqlite+aiosqlite:///data/demo.db"
       CREWDAY_DATA_DIR: "/data"
       CREWDAY_BIND: "0.0.0.0:8000"
       CREWDAY_ALLOW_PUBLIC_BIND: "1"
       CREWDAY_ROOT_KEY: "${DEMO_ROOT_KEY}"              # distinct from prod
       CREWDAY_DEMO_COOKIE_KEY: "${DEMO_COOKIE_KEY}"     # 32 bytes base64
-      CREWDAY_DEMO_FRAME_ANCESTORS: "https://crewday.app https://*.crewday.app"
+      CREWDAY_DEMO_FRAME_ANCESTORS: "https://crew.day https://*.crew.day"
       CREWDAY_DEMO_GLOBAL_DAILY_USD_CAP: "5"
       CREWDAY_DEMO_BLOCK_CIDR: ""                        # optional deny-list
       OPENROUTER_API_KEY: "${DEMO_OPENROUTER_KEY}"       # distinct from prod
@@ -296,7 +296,7 @@ services:
 ```
 
 The bootstrap guard enforces that `CREWDAY_DEMO_MODE=1` sees a
-`CREWDAY_PUBLIC_URL` whose host ends in `.crewday.app` **and** a
+`CREWDAY_PUBLIC_URL` whose host ends in `.crew.day` **and** a
 `CREWDAY_DATABASE_URL` distinct from every URL in
 `CREWDAY_DEMO_DB_DENYLIST`. The intent is to make "flipping demo on
 in prod by accident" a hard boot failure, not a quiet misconfig.
@@ -304,7 +304,7 @@ in prod by accident" a hard boot failure, not a quiet misconfig.
 ### Caddyfile
 
 ```
-demo.crewday.app {
+demo.crew.day {
     encode zstd gzip
     reverse_proxy 127.0.0.1:8100
     log {
@@ -363,7 +363,7 @@ boot: Postgres enables `features.rls`, S3 enables
 (multi-tenancy, signup, RLS as defence-in-depth) is unified in
 the codebase.
 
-Target: the operator of `crewday.app` or any similar managed
+Target: the operator of `crew.day` or any similar managed
 deployment where tenants are untrusted strangers. Visitors self-
 serve-signup via §03 with `settings.signup_enabled = true`; every
 workspace lives in one shared Postgres, isolated at the
@@ -417,11 +417,11 @@ services:
       CREWDAY_BIND: "0.0.0.0:8000"
       CREWDAY_ALLOW_PUBLIC_BIND: "1"
       CREWDAY_ROOT_KEY: "${CREWDAY_ROOT_KEY}"
-      CREWDAY_PUBLIC_URL: "https://crewday.app"
+      CREWDAY_PUBLIC_URL: "https://crew.day"
       SMTP_HOST: "..."
       SMTP_USER: "..."
       SMTP_PASS: "..."
-      MAIL_FROM: "crewday <no-reply@crewday.app>"
+      MAIL_FROM: "crewday <no-reply@crew.day>"
       OPENROUTER_API_KEY: "..."
     depends_on: [db, worker]
     ports: ["127.0.0.1:8000:8000"]
@@ -452,7 +452,7 @@ services:
 ### Caddyfile
 
 ```
-crewday.app {
+crew.day {
   reverse_proxy app:8000
   encode zstd gzip
   header {
@@ -463,7 +463,7 @@ crewday.app {
 
 # Optional, for the future subdomain-isolation layer (§01).
 # Uncomment once wildcard DNS + DNS-01 TLS is in place.
-# *.crewday.app {
+# *.crew.day {
 #   tls {
 #     dns route53
 #   }

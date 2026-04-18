@@ -91,6 +91,29 @@ workspace once and the rest of the tree is unaware of the prefix.
 /healthz, /readyz, /version  (no auth; see §12)
 ```
 
+### Admin (bare host, deployment-admin grant only)
+
+```
+/admin                     → redirects to /admin/dashboard
+/admin/dashboard           → operator landing page: deployment health, recent audit, usage
+/admin/llm                 → LLM providers, capability → model, pricing, deployment-wide spend
+/admin/chat-gateway        → deployment-default WhatsApp provider, templates, webhook, overrides (§23)
+/admin/usage               → per-workspace spend, cap adjust, pause state
+/admin/workspaces          → list, trust, archive; per-workspace summary card
+/admin/settings            → deployment-scope settings: self-serve signup policy (§03),
+                             capability registry read-out, and the raw key/value store.
+                             (/admin/signup redirects here.)
+/admin/admins              → admin-team membership, deployment permission rules
+/admin/audit               → deployment-scope audit log
+```
+
+The `/admin` surface never carries a workspace prefix — it is
+deployment-level by construction. Routes return `404` for
+callers without any deployment grant (§12 "Admin surface");
+the React shell renders a "you don't have access, ask your
+operator" card when `GET /admin/api/v1/me` 404s so deep-links
+from a password manager don't silently land on `/login`.
+
 ### Per-workspace public
 
 ```
@@ -144,8 +167,30 @@ documents                      inventory
 pay                            expenses
 approvals                      audit
 webhooks                       tokens
-llm                            settings
+settings
 ```
+
+The former `/w/<slug>/llm` page is gone in v1 — LLM provider and
+capability config is a deployment-level concern rendered on
+`/admin/llm` (§11, "Admin shell" below). Workspace managers
+still see the "Agent usage — N%" tile on `/settings` (§11).
+
+### Administration link
+
+The manager left-nav renders a single entry, **Administration**,
+in the `ADMIN` section, visible **only** to users whose `GET
+/api/v1/me` payload carries `is_deployment_admin: true` — i.e.
+at least one active `(scope_kind='deployment')` `role_grants` row
+(§05). The link deep-links to `/admin/dashboard` on the bare
+host; it breaks the `/w/<slug>/...` pattern by design, because
+the admin shell is workspace-agnostic. Users without a
+deployment grant never see the link (same RBAC posture as any
+other manager nav entry).
+
+From the admin side the inverse is also true: `/admin` carries
+a **Back to workspaces** button that returns the user to
+`/select-workspace` (or directly to `/w/<their-only-slug>/...`
+if they hold exactly one workspace grant).
 
 - `/tokens` — admin surface for workspace API tokens (scoped and
   delegated; §03). Gated on `api_tokens.manage`. Personal access
@@ -207,6 +252,38 @@ MY WORK
 These routes render under `ManagerLayout` (the shared-route rule
 above), so managers navigate their personal work without leaving the
 desktop shell.
+
+### Admin shell
+
+The deployment admin surface lives at the bare host under
+`/admin/*` and uses a dedicated layout (`AdminLayout`). It
+follows exactly the same design language as the manager shell
+(three-region `.desk` grid, semantic class names, `.desk__nav`
++ `.desk__main` + `.desk__agent`, Moss primary action, same
+tokens) — the user should feel they stepped sideways, not into
+a different product. What differs:
+
+- **No workspace slug**, no workspace switcher. A single "Back
+  to workspaces" affordance in the nav footer returns the user
+  to `/select-workspace`.
+- **Left-nav sections** (`OPERATE` / `USAGE` / `ADMIN`):
+    - OPERATE: Dashboard, Workspaces, Signup
+    - USAGE: LLM & agents, Usage
+    - ADMIN: Admins, Permissions, Settings, Audit log
+- **Right-rail agent** is the same shared `<AgentSidebar />`
+  component with `role="admin"`. It hits
+  `/admin/api/v1/agent/{log,message,actions}` instead of the
+  per-role workspace endpoints, and every send carries the
+  `X-Agent-Page` header (§12) so the agent knows which admin
+  route the user is on.
+- **`/approvals` is intentionally absent** from the admin shell.
+  Admin-side gated actions land inline in the admin chat
+  (channel `web_admin_sidebar`, §11) — the deployment has no
+  committee.
+- **Mobile.** Same pattern as the manager shell: hamburger drawer
+  for nav, bottom-dock button opens the agent as an off-canvas
+  right drawer. The `/admin` surface is not PWA-installed — it
+  is low-frequency operator tooling, not day-job UI.
 
 ## Implementation contracts
 

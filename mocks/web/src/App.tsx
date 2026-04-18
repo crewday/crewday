@@ -2,6 +2,7 @@ import { Navigate, Route, Routes } from "react-router-dom";
 import PreviewShell from "@/layouts/PreviewShell";
 import EmployeeLayout from "@/layouts/EmployeeLayout";
 import ManagerLayout from "@/layouts/ManagerLayout";
+import AdminLayout from "@/layouts/AdminLayout";
 import PublicLayout from "@/layouts/PublicLayout";
 import { useRole } from "@/context/RoleContext";
 
@@ -43,8 +44,16 @@ import OrganizationsPage from "@/pages/manager/OrganizationsPage";
 import PermissionsPage from "@/pages/manager/PermissionsPage";
 import WebhooksPage from "@/pages/manager/WebhooksPage";
 import ApiTokensPage from "@/pages/manager/ApiTokensPage";
-import LlmPage from "@/pages/manager/LlmPage";
 import SettingsPage from "@/pages/manager/SettingsPage";
+
+import AdminDashboardPage from "@/pages/admin/DashboardPage";
+import AdminChatGatewayPage from "@/pages/admin/ChatGatewayPage";
+import AdminLlmPage from "@/pages/admin/LlmPage";
+import AdminUsagePage from "@/pages/admin/UsagePage";
+import AdminWorkspacesPage from "@/pages/admin/WorkspacesPage";
+import AdminSettingsPage from "@/pages/admin/SettingsPage";
+import AdminAdminsPage from "@/pages/admin/AdminsPage";
+import AdminAuditPage from "@/pages/admin/AuditPage";
 
 import LoginPage from "@/pages/public/LoginPage";
 import RecoverPage from "@/pages/public/RecoverPage";
@@ -142,8 +151,21 @@ export default function App() {
           <Route path="/organizations" element={<OrganizationsPage />} />
           <Route path="/webhooks" element={<WebhooksPage />} />
           <Route path="/tokens" element={<ApiTokensPage />} />
-          <Route path="/llm" element={<LlmPage />} />
           <Route path="/settings" element={<SettingsPage />} />
+        </Route>
+
+        {/* /admin — bare-host deployment admin shell (§14 "Admin shell"). */}
+        <Route element={<AdminLayout />}>
+          <Route path="/admin" element={<Navigate to="/admin/dashboard" replace />} />
+          <Route path="/admin/dashboard" element={<AdminDashboardPage />} />
+          <Route path="/admin/chat-gateway" element={<AdminChatGatewayPage />} />
+          <Route path="/admin/llm" element={<AdminLlmPage />} />
+          <Route path="/admin/usage" element={<AdminUsagePage />} />
+          <Route path="/admin/workspaces" element={<AdminWorkspacesPage />} />
+          <Route path="/admin/signup" element={<Navigate to="/admin/settings" replace />} />
+          <Route path="/admin/settings" element={<AdminSettingsPage />} />
+          <Route path="/admin/admins" element={<AdminAdminsPage />} />
+          <Route path="/admin/audit" element={<AdminAuditPage />} />
         </Route>
 
         <Route element={<ClientLayout />}>

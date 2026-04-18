@@ -60,14 +60,27 @@ list. Adding an endpoint with its `x-cli` metadata is sufficient to
 make it appear in the CLI; no hand-written click command is needed for
 standard CRUD.
 
-### Surface descriptor (`_surface.json`)
+### Surface descriptor (`_surface.json` + `_surface_admin.json`)
+
+Two descriptors are generated, one per API surface — workspace and
+deployment — so the `/admin` chat agent can load a distinct tool
+catalog without auth'ing against the tenant API just to discover
+its verbs.
+
+- `cli/crewday/_surface.json` — every operation under
+  `/w/<slug>/api/v1/...` plus the bare-host auth endpoints.
+  Powers `crewday <group>` for workspace-scoped verbs.
+- `cli/crewday/_surface_admin.json` — every operation under
+  `/admin/api/v1/...`. Powers `crewday deploy <verb>` and the
+  admin embedded agent's tool catalog.
 
 A build step (`python -m cli.codegen`) imports the FastAPI app, calls
-`app.openapi()`, walks every operation, merges `x-cli` metadata with
-inferred OpenAPI params, and writes `cli/crewday/_surface.json`.
-This file is committed and CI-verified (same pattern as
-`docs/api/openapi.json`). If the committed copy diverges from a fresh
-generation, the `cli-parity` gate (§17) fails the build.
+`app.openapi()`, walks every operation, sorts it into the matching
+descriptor by URL prefix, merges `x-cli` metadata with inferred
+OpenAPI params, and writes both files. Both are committed and
+CI-verified (same pattern as `docs/api/openapi.json`). If either
+committed copy diverges from a fresh generation, the `cli-parity`
+gate (§17) fails the build.
 
 ### Runtime command construction
 
@@ -361,10 +374,34 @@ crewday webhooks
   add --name <n> --url <u> --events task.completed,stay.upcoming
   replay <id> --since 2026-04-10
 
-crewday llm
-  assignments list
-  assignments set <capability> --model google/gemma-4-31b-it [--provider openrouter]
-  calls list [--capability] [--from] [--to]
+crewday deploy                          # HTTP-backed deployment-admin group
+                                        # — targets /admin/api/v1/*
+                                        # auth: passkey session or deployment-scope token
+                                        # — see also 'crewday admin' below for host-CLI-only verbs
+  me                                    # caller identity + deployment capabilities
+  llm assignments list
+  llm assignments set <capability> --model google/gemma-4-31b-it [--provider openrouter]
+  llm providers list
+  llm providers set <key> --url <u> --api-key-env OPENROUTER_API_KEY
+  llm pricing show
+  llm pricing reload
+  llm calls list [--capability] [--from] [--to] [--follow]
+  usage summary [--window 30d]
+  usage workspaces [--over <pct>] [--paused]
+  usage workspaces set-cap <ws-id> --cap-usd <value> [--note "..."]
+  workspaces list [--verification] [--plan]
+  workspaces show <id>
+  workspaces trust <id> [--reason "..."]
+  workspaces archive <id>               # owners-group only
+  signup settings show
+  signup settings set <key> <value>     # signup_enabled, throttle_*, disposable_domains_path
+  settings list
+  settings set <key> <value>            # owners-only for root-protected keys
+  admins list
+  admins grant --email <e> [--as-owner]
+  admins revoke <user-id>
+  audit tail [--action] [--actor] [--follow]
+  audit export --from ... --to ...
 
 crewday agent-prefs
   show workspace                                 # dump workspace blob (any grant may read)
@@ -405,6 +442,39 @@ crewday admin
 crewday surface
   --json                            # dump _surface.json for programmatic discovery
 ```
+
+### `crewday admin` vs `crewday deploy`
+
+The CLI has two distinct administrative surfaces; they are
+intentionally separate groups with different security models.
+
+| group              | transport                          | auth                                     | typical caller                     |
+|--------------------|------------------------------------|------------------------------------------|-----------------------------------|
+| `crewday admin`    | **no HTTP** — runs in-process      | shell access to the container            | the operator on the host          |
+| `crewday deploy`   | HTTP → `/admin/api/v1/*`           | passkey session or deployment-scoped token | any deployment admin, from anywhere |
+
+`crewday admin` keeps its existing host-CLI-only verb list
+(`init`, `recover`, `rotate-root-key`, `backup`, `restore`,
+`purge`, `budget set-cap`, `budget reload-pricing`,
+`workspace create`, `workspace trust`, `settings set`, `version`).
+These verbs have no HTTP route and cannot be agent-invoked — the
+approval pipeline (§11) does not apply. They survive precisely
+because some operations must require shell access to the
+running container.
+
+`crewday deploy` is new and covers every HTTP-backed deployment
+admin verb (LLM config, per-workspace cap adjust, signup
+settings, admin-team management, deployment audit). It is
+reachable from any machine a deployment admin can log in from,
+subject to the same agent-approval pipeline as workspace verbs.
+
+An admin who needs to rotate the root key still SSHes into the
+host; an admin who needs to bump a workspace's LLM cap or flip
+the default model runs `crewday deploy` from their laptop.
+`crewday admin budget set-cap` and `crewday deploy usage
+workspaces set-cap` do the same write to the same row — the
+difference is which principal is allowed to issue it and how
+the audit row is tagged.
 
 ### Host-CLI-only admin commands vs interactive-session-only endpoints
 

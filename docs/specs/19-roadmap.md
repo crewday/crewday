@@ -225,7 +225,7 @@ tasks with photos, back online) syncs within 60s with zero loss.
 
 ## Phase 9b — Demo deployment
 
-- Separate `demo.crewday.app` container with its own DB, its own
+- Separate `demo.crew.day` container with its own DB, its own
   OpenRouter key, its own root key, its own demo-cookie signing key.
 - `CREWDAY_DEMO_MODE=1` boot guard; refuses to start outside the
   demo URL allowlist.

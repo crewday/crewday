@@ -50,7 +50,7 @@ demo_workspace
 
 ## Deployment shape
 
-- **Host:** `demo.crewday.app` (subdomain distinct from any prod host).
+- **Host:** `demo.crew.day` (subdomain distinct from any prod host).
 - **Container:** a regular crewday image run with `CREWDAY_DEMO_MODE=1`.
   That env var is refused on any deployment whose `CREWDAY_PUBLIC_URL`
   does not match the demo allowlist — a belt-and-suspenders guard
@@ -73,7 +73,7 @@ See §16 "Recipe C — Demo deployment" for the compose snippet.
 ### First visit
 
 1. Visitor's browser navigates (or an iframe on the landing page loads)
-   `https://demo.crewday.app/app?scenario=<scenario_key>`.
+   `https://demo.crew.day/app?scenario=<scenario_key>`.
 2. No demo cookie on the request → the server:
    a. Validates `scenario_key` against the scenario catalog (below); an
       unknown key falls back to the default scenario and a server log
@@ -235,8 +235,8 @@ The demo app is the **only** crewday surface with a relaxed CSP
 `frame-ancestors`. The production app and staging both keep the
 §15 default (`frame-ancestors 'none'`).
 
-- CSP on `demo.crewday.app` is `frame-ancestors https://crewday.app
-  https://*.crewday.app`. Landing-page domains outside this list cannot
+- CSP on `demo.crew.day` is `frame-ancestors https://crew.day
+  https://*.crew.day`. Landing-page domains outside this list cannot
   embed the demo.
 - The allowlist is an env var (`CREWDAY_DEMO_FRAME_ANCESTORS`,
   whitespace-separated); default empty → demo runs standalone (no

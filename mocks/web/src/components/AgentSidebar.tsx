@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useLocation, useParams } from "react-router-dom";
 import { ChevronDown } from "lucide-react";
 import { fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
@@ -28,12 +29,34 @@ export default function AgentSidebar({ role }: AgentSidebarProps) {
   const [draft, setDraft] = useState("");
   const logRef = useRef<HTMLDivElement>(null);
   const qc = useQueryClient();
+  const { pathname } = useLocation();
+  const params = useParams();
 
+  const isAdmin = role === "admin";
   const isManager = role === "manager";
-  const logKey = isManager ? qk.agentManagerLog() : qk.agentEmployeeLog();
-  const actionsKey = qk.agentManagerActions();
-  const logUrl = isManager ? "/api/v1/agent/manager/log" : "/api/v1/agent/employee/log";
-  const messageUrl = isManager ? "/api/v1/agent/manager/message" : "/api/v1/agent/employee/message";
+  const showActions = isManager || isAdmin;
+
+  // Query keys and endpoints are scoped per role. The admin agent
+  // lives under /admin/api/v1/... with its own log/actions, the
+  // manager agent under /api/v1/agent/manager/..., and the worker
+  // agent under /api/v1/agent/employee/...
+  const logKey = isAdmin
+    ? qk.adminAgentLog()
+    : isManager ? qk.agentManagerLog() : qk.agentEmployeeLog();
+  const actionsKey = isAdmin ? qk.adminAgentActions() : qk.agentManagerActions();
+  const logUrl = isAdmin
+    ? "/admin/api/v1/agent/log"
+    : isManager ? "/api/v1/agent/manager/log" : "/api/v1/agent/employee/log";
+  const messageUrl = isAdmin
+    ? "/admin/api/v1/agent/message"
+    : isManager ? "/api/v1/agent/manager/message" : "/api/v1/agent/employee/message";
+  const actionsUrl = isAdmin
+    ? "/admin/api/v1/agent/actions"
+    : "/api/v1/agent/manager/actions";
+  const decideUrlFor = (id: string, decision: "approve" | "deny") =>
+    isAdmin
+      ? `/admin/api/v1/agent/action/${id}/${decision}`
+      : `/api/v1/agent/manager/action/${id}/${decision}`;
 
   const log = useQuery({
     queryKey: logKey,
@@ -41,13 +64,41 @@ export default function AgentSidebar({ role }: AgentSidebarProps) {
   });
   const actions = useQuery({
     queryKey: actionsKey,
-    queryFn: () => fetchJson<AgentAction[]>("/api/v1/agent/manager/actions"),
-    enabled: isManager,
+    queryFn: () => fetchJson<AgentAction[]>(actionsUrl),
+    enabled: showActions,
   });
 
+  // §12 "Agent audit headers" — every message carries the route the
+  // user is on so the agent can resolve "this workspace" / "this
+  // capability" without the user naming it. Admin context also
+  // encodes known entity params (ws, capability) lifted from the URL.
+  const pageHeader = buildAgentPageHeader(pathname, params, role);
+
   const sendMessage = useMutation({
-    mutationFn: (body: string) =>
-      fetchJson<AgentMessage>(messageUrl, { method: "POST", body: { body } }),
+    mutationFn: async (body: string) => {
+      // fetchJson doesn't accept custom headers; we call fetch directly
+      // here to add X-Agent-Page (a §12 header). Everything else matches
+      // the wrapper's CSRF + JSON convention.
+      const csrf = document.cookie
+        .split(";")
+        .map((c) => c.trim())
+        .find((c) => c.startsWith("crewday_csrf="))
+        ?.slice("crewday_csrf=".length);
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+        "X-Agent-Page": pageHeader,
+      };
+      if (csrf) headers["X-CSRF"] = decodeURIComponent(csrf);
+      const res = await fetch(messageUrl, {
+        method: "POST",
+        credentials: "same-origin",
+        headers,
+        body: JSON.stringify({ body }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return res.json() as Promise<AgentMessage>;
+    },
     onMutate: async (body) => {
       await qc.cancelQueries({ queryKey: logKey });
       const prev = qc.getQueryData<AgentMessage[]>(logKey) ?? [];
@@ -63,7 +114,7 @@ export default function AgentSidebar({ role }: AgentSidebarProps) {
 
   const decideAction = useMutation({
     mutationFn: ({ id, decision }: { id: string; decision: "approve" | "deny" }) =>
-      fetchJson<{ ok: true }>("/api/v1/agent/manager/action/" + id + "/" + decision, {
+      fetchJson<{ ok: true }>(decideUrlFor(id, decision), {
         method: "POST",
       }),
     onSuccess: () => {
@@ -132,7 +183,7 @@ export default function AgentSidebar({ role }: AgentSidebarProps) {
           ))}
         </div>
 
-        {isManager && actions.data && actions.data.length > 0 && (
+        {showActions && actions.data && actions.data.length > 0 && (
           <div className="agent-actions" aria-label="Pending agent actions">
             <div className="agent-actions__title">
               <span>Pending approvals</span>
@@ -174,10 +225,30 @@ export default function AgentSidebar({ role }: AgentSidebarProps) {
           value={draft}
           onChange={setDraft}
           onSubmit={handleSend}
-          placeholder="Ask the agent…"
+          placeholder={isAdmin ? "Ask the admin agent…" : "Ask the agent…"}
           ariaLabel="Message agent"
         />
       </div>
     </aside>
   );
+}
+
+// §12 "Agent audit headers" → X-Agent-Page.
+// Shape: "route=<pattern>; params=<k>=<v>,…". The server parses it
+// into a system-prompt section so the agent can act on "this
+// workspace" or "this capability" without the user naming it.
+function buildAgentPageHeader(
+  pathname: string,
+  params: Record<string, string | undefined>,
+  role: Role,
+): string {
+  const kv = Object.entries(params)
+    .filter(([, v]) => v)
+    .map(([k, v]) => `${k}=${v}`)
+    .join(",");
+  const pieces: string[] = [];
+  pieces.push(`route=${pathname}`);
+  if (kv) pieces.push(`params=${kv}`);
+  pieces.push(`surface=${role}`);
+  return pieces.join("; ");
 }

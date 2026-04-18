@@ -19,7 +19,7 @@ the driver sees tomorrow's airport run; the head of house sees everything.
   entity (a family, an estate, a small property-management outfit).
   Every user-editable row carries `workspace_id`. A single v1
   deployment holds many workspaces simultaneously: the managed SaaS
-  at `crewday.app` provisions one per self-serve signup (§03, §15);
+  at `crew.day` provisions one per self-serve signup (§03, §15);
   self-hosted deployments default to one (bootstrapped by
   `crewday admin init`) but may run many when backed by Postgres.
   Every authenticated URL on every deployment lives under
@@ -127,7 +127,7 @@ the driver sees tomorrow's airport run; the head of house sees everything.
   deployment.
 - **G11.** **Multi-tenant platform from day 1.** A single deployment
   holds many `workspace` rows simultaneously, on any supported
-  backend. The managed SaaS instance at `crewday.app`, a self-host
+  backend. The managed SaaS instance at `crew.day`, a self-host
   compose stack, and a single-container SQLite install all run the
   same code and all support many workspaces. Workspace addressing
   is path-based (`<host>/w/<slug>/...`) everywhere. Isolation is

@@ -8,6 +8,16 @@ digest, anomaly detection, receipt OCR, staff chat assistant, agent
 audit trail, action approval, embedded owner/manager and worker chat
 agents) share the same plumbing.
 
+**LLM configuration lives on the deployment, not the workspace.**
+Provider URLs, API keys, capability → model assignments, pricing
+table and deployment-wide spend visibility are deployment-scope
+concerns owned by the `/admin` surface (§14 "Admin shell"). Every
+workspace shares the same model assignments. The per-workspace
+rolling 30-day **budget cap** and **usage meter** (§ "Workspace
+usage budget" below) remain workspace-scoped — the envelope is
+about how much a single workspace is allowed to spend, not about
+which model it uses.
+
 ## The agent-first invariant
 
 crewday is built around a hard rule: **every human UI verb exists
@@ -122,6 +132,65 @@ from the user's own access level, not from a filtered tool catalog.
 Default model: `google/gemma-4-31b-it`. Capability keys
 `chat.employee` (default on for workers) and `voice.employee`
 (default off).
+
+### Admin-side agent
+
+On the `/admin` shell (§14), the same shared `.desk__agent`
+component mounts with `role="admin"`. Its characteristics:
+
+- **Principal.** Authority comes from the caller's passkey
+  session. The agent uses a delegated token (§03) minted off
+  that session; permissions resolve from whichever `role_grants`
+  the user holds — both the `(scope_kind='deployment',
+  grant_role='admin')` row and any workspace grants they happen
+  to have. There is no separate "admin-only token kind".
+- **Tool surface.** The union of two CLI descriptors:
+  `_surface_admin.json` (deployment verbs) and `_surface.json`
+  (workspace verbs, with the global `--workspace` flag resolved
+  to whichever workspace the admin is currently discussing).
+  This is the literal "admin CLI in addition to the normal CLI"
+  the operator asked for. An admin with no workspace grants sees
+  only the admin verbs; an admin who also owns a workspace sees
+  both, and the agent picks the right one based on the page
+  context below.
+- **Page context.** Every message from the `/admin` chat carries
+  an `X-Agent-Page` header (§12) describing the current admin
+  route (e.g. `route=/admin/usage; params=ws=bernard`). The
+  resolver injects the decoded context as a labelled system
+  section — format mirrors the §11 "Agent preferences" stack:
+
+  ```
+  ## Current admin page
+  Route: /admin/usage
+  Params: ws=bernard
+  Entity: workspace Bernard (id=ws_01H…)
+  Neighbouring routes: /admin/llm, /admin/workspaces, /admin/settings
+  ```
+
+  With this, the admin can say "restart that capability" or
+  "trust this workspace" without naming it — the agent resolves
+  from context. The header is stored verbatim on the chat
+  message and echoed on downstream audit rows as
+  `audit_log.ui_page`.
+- **Endpoint.** `POST /admin/api/v1/agent/message`,
+  `GET /admin/api/v1/agent/log`,
+  `GET /admin/api/v1/agent/actions`. Approvals use the same
+  `/admin/api/v1/agent/action/{id}/{approve,deny}` shape as the
+  workspace-side manager agent, scoped to the admin caller via
+  `for_user_id`.
+- **Approval pipeline.** Same as the manager-side agent: the
+  §11 workspace policy layer and the user's per-user
+  `agent_approval_mode` both apply. Deployment verbs the policy
+  layer always gates in v1: `deployment.workspaces.archive`,
+  `deployment.settings.edit` (root-protected keys),
+  `deployment.budget.edit` when the new cap is ≥ 2× the old.
+- **Capability key.** `chat.admin`, seeded with
+  `google/gemma-4-31b-it`. Distinct from `chat.manager` so an
+  operator can run a smaller model for admin chatter without
+  weakening the workspace chat.
+
+Default model: `google/gemma-4-31b-it`. Voice is capability-
+gated `voice.admin`; default off.
 
 ### Conversation compaction
 
@@ -397,6 +466,7 @@ workspace default is used.
 | `voice.transcribe`         | Turn a voice note into text (for chat assistant / issue reports)        |
 | `chat.manager`             | Owner/manager-side embedded chat agent (§14 right sidebar)              |
 | `chat.employee`            | Worker-side embedded chat agent (§14 Chat tab)                          |
+| `chat.admin`               | Deployment-admin embedded chat agent (§14 `/admin` right sidebar)       |
 | `chat.compact`             | Summarise resolved topics in a chat thread (see "Conversation compaction") |
 | `chat.detect_language`     | Detect message language for auto-translation (§10, §18)                 |
 | `chat.translate`           | Translate a message into the workspace default language (§10, §18)      |
@@ -413,11 +483,17 @@ model_assignment
 └── updated_at/updated_by
 ```
 
-An owner or manager can edit this in the UI or via
-`PUT /api/v1/llm/assignments/{capability}`. Default row for every
-capability is seeded at install with Gemma 4 31B IT and sensible
-params. Budgets are soft — the system warns and stops calls when
-exceeded, with a clear message in the audit log.
+Model assignments are **deployment-scope**: one row per
+capability, shared by every workspace on the deployment. A
+deployment admin edits the row from `/admin/llm` or via
+`PUT /admin/api/v1/llm/assignments/{capability}` (gated by
+`deployment.llm.edit`, §05). Workspace owners and managers no
+longer see an LLM page — spend visibility stays on `/settings`
+as the "Agent usage — N%" tile (see "Visible surfaces" below).
+Default row for every capability is seeded at first boot with
+Gemma 4 31B IT and sensible params. Budgets are soft — the
+system warns and stops calls when exceeded, with a clear
+message in the audit log.
 
 ### Capability defaults
 
@@ -427,9 +503,10 @@ exceeded, with a clear message in the audit log.
 | `expenses.autofill`   | `google/gemma-4-31b-it`                            | multimodal |
 | `voice.transcribe`    | (none out of box; capability off unless assigned)  | local speech-to-text deferred |
 
-Owners and managers may override any capability to a different model
+Deployment admins may override any capability to a different model
 (e.g. Claude Haiku for digests, a cheaper Qwen for intake) without
-code changes.
+code changes. The override is deployment-wide — every workspace
+picks up the new assignment on the next call.
 
 ## Prompting strategy
 
@@ -832,6 +909,7 @@ triggered it. The agent's HTTP request carries an
 |-----------------------|--------------------------------------------------------|
 | `web_owner_sidebar`   | Owner/manager web client — `.desk__agent` (desktop) or its mobile bottom-dock drawer (§14 "Desktop shell") |
 | `web_worker_chat`     | Worker web client — `.desk__agent` (desktop) or full-screen `/chat` (mobile, opened from the bottom-nav `Chat` tab) (§14) |
+| `web_admin_sidebar`   | Deployment-admin web client — `.desk__agent` on the `/admin` shell (§14 "Admin shell"). `for_user_id` is the admin caller; pending cards show only in their `/admin` chat, not in any workspace's `/approvals` desk (the deployment has no `/approvals`). |
 | `offapp_whatsapp`     | Reserved for a future WhatsApp adapter (§23, deferred) |
 | *absent*              | `desk_only` — approval appears only in `/approvals`    |
 
@@ -1015,16 +1093,24 @@ Defaults:
 - **Demo:** `cap_usd_30d = 0.1000` seeded per scenario (§24); see
   "Demo mode overrides" below.
 
-Raising or lowering the cap has **no HTTP surface**. It is a host-CLI
-admin command (§16 `crewday admin budget set-cap`). The rationale
-mirrors the §11 "Host-CLI-only administrative commands" pattern: the
-operator is the only principal that can commit their billing to a
-larger spend, and that commitment belongs on the host, not in the app.
-An owner or manager who feels they need more budget contacts the
-operator out-of-band.
+Raising or lowering a workspace cap has **two equivalent paths**:
 
-The UI exposes neither dollar amounts nor the cap itself to any
-grant role. See "Visible surfaces" below.
+1. **Host-CLI.** `crewday admin budget set-cap --workspace <id>
+   --cap-usd <value>` remains supported — the operator is always
+   the ultimate authority. No HTTP, no auth beyond container
+   shell access. Writes `audit.workspace_budget.updated` with
+   `via = 'cli'` and `actor_kind = 'system'`.
+2. **`/admin`.** Any user who passes `deployment.budget.edit`
+   (§05) can adjust a cap from `/admin/usage` or
+   `PUT /admin/api/v1/usage/workspaces/{id}/cap`. Writes the
+   same row; `via = 'api'` and `actor_kind = 'user'`. Agent
+   callers flow through the approval pipeline like any other
+   mutating deployment verb.
+
+Workspace owners and managers see their own usage tile on
+`/settings` but have no cap-edit control — the commitment-to-
+spend stays with the deployment admin. See "Visible surfaces"
+below.
 
 ### At-cap behaviour
 
@@ -1080,13 +1166,13 @@ telemetry but the cost contribution is zero.
     maths keeps the precise ratio for the at-cap decision.
   - Accessible to every user whose grant role passes the existing
     `settings.view` action (owners and managers by default; §05).
-- **LLM settings page** (`/settings/llm`). Dollar amounts, token
-  counts, and per-capability spend **remain visible here** — this is
-  the operator-visibility surface and its audience is the workspace
-  owner who hooked up the OpenRouter key in the first place. The
-  workspace cap itself is shown read-only, with a "Contact your host
-  to change this" note when the current user cannot reach the host
-  CLI. No in-app edit control.
+- **Admin LLM page** (`/admin/llm`). Dollar amounts, token counts,
+  per-capability spend, per-workspace spend, provider keys, the
+  default model per capability, and the pricing table all live
+  here. Gated by `deployment.llm.view` / `deployment.llm.edit`
+  (§05). This is the sole operator-visibility surface for LLM
+  internals in v1; it replaces the per-workspace `/settings/llm`
+  page from the earlier design.
 - **Worker PWA.** No usage surface. Workers see only the at-cap
   banner inside the chat tab on refusal.
 

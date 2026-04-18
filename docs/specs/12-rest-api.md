@@ -29,6 +29,16 @@ the workspace's URL slug (§01 "Workspace addressing", §02
   workspaces for the switcher), `/api/v1/healthz`,
   `/api/v1/readyz`, `/api/v1/version`. Anything else 404s at the
   bare host.
+- `https://<host>/admin/api/v1/...` — **deployment-scoped** routes,
+  reachable only by callers whose `role_grants` include
+  `(scope_kind='deployment', grant_role='admin')` or membership in
+  a deployment permission group. The full set — `llm/*`, `usage`,
+  `workspaces`, `signup`, `settings`, `admins`, `audit`, and the
+  admin chat agent (`agent/{log,message,actions}`) — is enumerated
+  in the "Admin surface" subsection below. Tokens without any
+  deployment grant return `404` on every route under this prefix
+  (same tenant-enumeration posture as §01); the `/admin` SPA
+  route returns a polite "ask your operator" page instead.
 
 The slug in the URL is the tenant identifier; authorisation is
 still the user's `role_grants` + `user_workspace` membership
@@ -209,6 +219,19 @@ mutating requests to enrich the audit trail (§02, §11):
 - `X-Correlation-Id` — ULID or opaque string. Groups multiple
   requests into a logical workflow. If absent, generated server-side
   and echoed via `X-Correlation-Id-Echo`.
+- `X-Agent-Page` — opaque string, up to 500 chars, set by the web
+  shells on every message the user sends to their embedded agent.
+  Shape: `route=/<route-pattern>; params=<k>=<v>,…; entity=<id?>`
+  (e.g. `route=/admin/llm; params=capability=chat.manager`). The
+  chat endpoint parses it into a structured `page_context` system
+  section injected into the agent's prompt — see §11 "Page context"
+  — so the agent can answer "restart this capability" without the
+  user having to name the page or the entity. Stored verbatim on
+  the `chat_message` row for replay; audit rows derived from a
+  chat message echo it as `audit_log.ui_page` for operator debug.
+  The admin chat agent relies on this header to disambiguate
+  workspace actions (there is no URL slug on `/admin`) and to pick
+  the right admin tool.
 
 ### Rate limiting
 
@@ -285,6 +308,101 @@ All subsequent resource groups in this document live under
 earlier resource-group listings (`/properties`, `/tasks`, `/stays`,
 …) are relative to the workspace base URL — concatenate with
 `https://<host>/w/<slug>/api/v1/` to get the absolute URL.
+
+### Admin surface (`/admin/api/v1/...`)
+
+Deployment-scoped endpoints. All require a caller that passes the
+matching `deployment.*` action key (§05 "Action catalog") resolved
+against the synthetic deployment scope. A caller with no
+deployment grant receives `404` on every path under this prefix —
+the surface does not advertise its own existence to tenants.
+
+Authorisation accepts two principals only:
+
+1. A passkey session whose user holds any active
+   `(scope_kind='deployment')` `role_grants` row. The `/admin`
+   SPA routes run under this principal exclusively.
+2. A **deployment-scoped API token** (§03 `api_token`). Scoped
+   tokens may carry scopes drawn from the `deployment:*` family —
+   `deployment.llm:{read,write}`, `deployment.usage:read`,
+   `deployment.workspaces:{read,write,archive}`,
+   `deployment.signup:{read,write}`, `deployment.settings:write`,
+   `deployment.audit:read`. Mixing `deployment:*` with workspace
+   scopes on the same token is 422 `error = "deployment_scope_conflict"`.
+   Delegated tokens minted by a deployment admin inherit the user's
+   deployment grants as well as whichever workspace grants that user
+   happens to hold.
+
+```
+# Caller identity
+GET    /admin/api/v1/me                              # deployment-admin caller's identity + capabilities
+GET    /admin/api/v1/me/admins                       # listing of deployment admins & groups
+
+# LLM (moved from per-workspace /w/<slug>/llm; see §11)
+GET    /admin/api/v1/llm/assignments
+PUT    /admin/api/v1/llm/assignments/{capability}
+GET    /admin/api/v1/llm/providers                   # configured providers (OpenRouter, optional fallback)
+PUT    /admin/api/v1/llm/providers/{key}             # update provider URL + rotate API key
+GET    /admin/api/v1/llm/pricing                     # current pricing table snapshot
+POST   /admin/api/v1/llm/pricing/reload              # hot-reload app/config/llm_pricing.yml
+GET    /admin/api/v1/llm/calls                       # deployment-wide call feed (ndjson + --follow)
+
+# Chat gateway (deployment-default provider; §23)
+GET    /admin/api/v1/chat/providers                  # deployment-default WhatsApp/Telegram providers — stubs only
+PUT    /admin/api/v1/chat/providers/{kind}           # set/rotate envelope secret for this channel kind
+GET    /admin/api/v1/chat/overrides                  # workspaces that opted into a custom provider
+GET    /admin/api/v1/chat/templates                  # Meta template sync state
+POST   /admin/api/v1/chat/templates/{name}/resync    # request re-submission to Meta
+GET    /admin/api/v1/chat/health                     # last webhook ts, 24h delivery error rate
+
+# Usage aggregates
+GET    /admin/api/v1/usage/summary                   # rolling 30d spend, per capability & per workspace
+GET    /admin/api/v1/usage/workspaces                # table: workspace → cap / spent / % / paused
+PUT    /admin/api/v1/usage/workspaces/{id}/cap       # raise or lower workspace budget cap
+
+# Workspace lifecycle
+GET    /admin/api/v1/workspaces                      # list all workspaces (id, slug, plan, verification, size)
+POST   /admin/api/v1/workspaces/{id}/trust           # promote to verification_state='trusted'
+POST   /admin/api/v1/workspaces/{id}/archive         # archive; owners-group only
+GET    /admin/api/v1/workspaces/{id}                 # summary card: counts, usage, most recent activity
+
+# Self-serve signup
+GET    /admin/api/v1/signup/settings                 # signup_enabled, throttles, disposable-domain path
+PUT    /admin/api/v1/signup/settings                 # edit any of the above
+
+# Deployment settings + capability registry
+GET    /admin/api/v1/settings                        # every `deployment_setting` row, resolved
+PUT    /admin/api/v1/settings/{key}                  # owners-only; root-only keys (e.g. trusted_interfaces) refuse
+
+# Admin team
+GET    /admin/api/v1/admins                          # every role_grants with scope_kind='deployment'
+POST   /admin/api/v1/admins                          # grant admin to an existing user by email / id
+POST   /admin/api/v1/admins/{id}/revoke
+GET    /admin/api/v1/admins/groups                   # owners + managers deployment groups, members
+POST   /admin/api/v1/admins/groups/owners/members    # add; root-only
+POST   /admin/api/v1/admins/groups/owners/members/{user_id}/revoke
+
+# Deployment audit
+GET    /admin/api/v1/audit                           # audit_log rows where scope_kind='deployment'
+GET    /admin/api/v1/audit/tail?follow=1             # ndjson stream; same filters as workspace audit
+
+# Admin chat agent (§11, §14). Contextual via X-Agent-Page.
+GET    /admin/api/v1/agent/log                       # chat log for this admin
+POST   /admin/api/v1/agent/message                   # POST body, plus X-Agent-Page
+GET    /admin/api/v1/agent/actions                   # pending gated actions for this admin
+POST   /admin/api/v1/agent/action/{id}/approve
+POST   /admin/api/v1/agent/action/{id}/deny
+```
+
+**SSE.** `/admin/events` mirrors `/w/<slug>/events` for
+deployment-scoped events (`admin.usage.updated`,
+`admin.workspace.archived`, `admin.llm.assignment_updated`,
+`admin.audit.appended`, `agent.message.appended` scoped to
+`for_user_id`, `agent.action.pending`).
+
+**Demo mode.** Every admin route 404s under
+`CREWDAY_DEMO_MODE=1` (§24). The demo has no operator seat and no
+deployment audit worth exposing.
 
 ### Properties / areas / stays
 

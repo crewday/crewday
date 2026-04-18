@@ -230,13 +230,35 @@ export default function SettingsPage() {
       </section>
 
       <section className="panel">
-        <header className="panel__head"><h2>External chat adapters</h2></header>
+        <header className="panel__head">
+          <h2>Chat gateway</h2>
+          <Chip tone="ghost" size="sm">using deployment default</Chip>
+        </header>
         <p className="muted">
-          The architecture keeps a deferred seam for WhatsApp and Telegram
-          adapters (§23), but they are not enabled in this preview or in
-          shipped v1. Settings here intentionally stay focused on the
-          in-app web chat surfaces.
+          WhatsApp runs on the deployment-default Meta account — every workspace on this
+          deployment shares one phone number. That's what your workers link when they pair their
+          phone on <Link to="/me" className="link">/me → Chat channels</Link>.
         </p>
+        <p className="muted">
+          No per-user preferences live here: a linked WhatsApp means agent reach-out is on for
+          that worker, unlinked means off. Whatever a worker could do via the CLI, the chat agent
+          can do on their behalf — never more.
+        </p>
+        <dl className="settings-kv">
+          <dt>Provider</dt>
+          <dd>Deployment-default WhatsApp (<span className="mono">offapp_whatsapp</span>)</dd>
+          <dt>Workspace override</dt>
+          <dd className="muted">None. Opt in below to bring your own Meta account.</dd>
+        </dl>
+        <div className="chat-gateway-panel__footer">
+          <button type="button" className="btn btn--ghost btn--sm" disabled>
+            Use a dedicated Meta account for this workspace
+          </button>
+          <p className="muted chat-gateway-panel__hint">
+            Overriding the default makes this workspace Meta-verify and own its own WhatsApp
+            Business number — useful for branded communication or stricter isolation.
+          </p>
+        </div>
       </section>
 
       {/* Override summary */}

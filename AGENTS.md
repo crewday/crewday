@@ -13,7 +13,7 @@ the two disagree, this file wins.
 
 ## Environments
 
-- **Dev**: <https://dev.crewday.app> is the dev version of the app,
+- **Dev**: <https://dev.crew.day> is the dev version of the app,
   served by the mocks container running locally on this host. It is
   exposed through Pangolin + Traefik with badger auth (same wiring as
   `../fj2`) and bound locally to `127.0.0.1:8100` (FastAPI mocks) and

@@ -56,7 +56,7 @@ acceptance (see "Break-glass codes" below).
 
 This is the self-hosted bootstrap flow, used by operators running
 `crewday` on their own infrastructure. The SaaS deployment at
-`crewday.app` uses the **Self-serve signup** flow below instead.
+`crew.day` uses the **Self-serve signup** flow below instead.
 
 1. First-boot wizard runs once when the DB has no `users` rows. The
    CLI `crewday admin init --email owner@example.com --slug myhome`
@@ -85,7 +85,7 @@ This is the self-hosted bootstrap flow, used by operators running
 ### Self-serve signup
 
 Self-serve signup is a first-class, always-available flow on every
-deployment (§00 G12). The managed SaaS at `crewday.app` runs it
+deployment (§00 G12). The managed SaaS at `crew.day` runs it
 with `settings.signup_enabled = true` so any visitor can provision
 a workspace; a home-network self-host typically runs it off
 (`settings.signup_enabled = false`) so nobody on the LAN can
@@ -134,7 +134,7 @@ because no workspace exists yet:
    no user and no session; the `signup_gc` worker prunes these
    after 1 hour (see §15).
 4. **Ready.** Browser is redirected to
-   `https://crewday.app/w/<slug>/today`. The workspace is now
+   `https://crew.day/w/<slug>/today`. The workspace is now
    addressable; session cookies (`__Host-crewday_sess`) are
    set on the bare host and used for every workspace the user
    later joins.

@@ -17,7 +17,7 @@ docker compose -f mocks/docker-compose.yml up -d --build
 ```
 
 - Local: http://127.0.0.1:8100
-- Public: https://dev.crewday.app (via Pangolin / Traefik with
+- Public: https://dev.crew.day (via Pangolin / Traefik with
   badger auth; same wiring as `../fj2`)
 
 ## Audience toggle
@@ -79,7 +79,7 @@ no utility frameworks). Tokens follow §14:
 
 The container joins the existing `traefik-proxy` network and
 registers Traefik labels — same pattern as `../fj2`. For badger to
-gate the domain, `dev.crewday.app` needs to exist as a **resource**
+gate the domain, `dev.crew.day` needs to exist as a **resource**
 in the Pangolin dashboard (target `crewday-mocks:8000`). DNS is
 already CNAMEd to this host.
 

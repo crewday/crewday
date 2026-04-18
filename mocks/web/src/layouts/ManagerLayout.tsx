@@ -22,7 +22,7 @@ import type { Me } from "@/types/api";
 // hamburger drawer holds the rest. MY WORK items are tagged
 // `phoneHidden` so they don't duplicate the bottom bar.
 
-const NAV_ITEMS: SideNavItem[] = [
+const BASE_NAV_ITEMS: SideNavItem[] = [
   { type: "section", label: "MY WORK", phoneHidden: true },
   { type: "link", to: "/today", label: "My Day", phoneHidden: true },
   { type: "link", to: "/week", label: "My Week", phoneHidden: true },
@@ -52,9 +52,18 @@ const NAV_ITEMS: SideNavItem[] = [
   { type: "link", to: "/audit", label: "Audit log" },
   { type: "link", to: "/webhooks", label: "Webhooks" },
   { type: "link", to: "/tokens", label: "API tokens" },
-  { type: "link", to: "/llm", label: "LLM & agents" },
   { type: "link", to: "/settings", label: "Settings" },
 ];
+
+// §14 "Administration link" — rendered only when the caller holds any
+// active (scope_kind='deployment') role_grants row. LLM provider +
+// capability config lives on /admin/llm (§11), not on the workspace.
+const ADMINISTRATION_LINK: SideNavItem = {
+  type: "link",
+  to: "/admin",
+  matchPrefix: "/admin",
+  label: "Administration",
+};
 
 // Drawer-bar visibility: only render the hamburger + mobile top bar
 // when there's at least one non-`phoneHidden` link to put inside the
@@ -71,7 +80,10 @@ export default function ManagerLayout() {
   const collapsed = initialAgentCollapsed();
   const { pathname } = useLocation();
   const [navOpen, setNavOpen] = useState(false);
-  const showMobileBar = hasDrawerItems(NAV_ITEMS);
+  const navItems: SideNavItem[] = data?.is_deployment_admin
+    ? [...BASE_NAV_ITEMS, ADMINISTRATION_LINK]
+    : BASE_NAV_ITEMS;
+  const showMobileBar = hasDrawerItems(navItems);
 
   useEffect(() => {
     setNavOpen(false);
@@ -121,7 +133,7 @@ export default function ManagerLayout() {
       )}
 
       <SideNav
-        items={NAV_ITEMS}
+        items={navItems}
         footer={{
           initials: "EB",
           name: data?.manager_name ?? "Élodie Bernard",

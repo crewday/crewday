@@ -56,7 +56,7 @@ ROLE_COOKIE = "crewday_role"
 THEME_COOKIE = "crewday_theme"
 AGENT_COLLAPSED_COOKIE = "crewday_agent_collapsed"
 WORKSPACE_COOKIE = "crewday_workspace"
-VALID_ROLES = {"employee", "manager", "client"}
+VALID_ROLES = {"employee", "manager", "client", "admin"}
 VALID_THEMES = {"light", "dark", "system"}
 
 
@@ -271,9 +271,11 @@ def current_user_id(request: Request) -> str:
 
     The `client` persona maps to Vincent Dupont — the v1 example client
     user (§22) — so demo state immediately reflects a real client grant.
+    The `admin` persona maps to Élodie (the bootstrap operator + owner
+    of the deployment; §05 "Deployment scope").
     """
     role = current_role(request)
-    if role == "manager":
+    if role == "manager" or role == "admin":
         return md.DEFAULT_MANAGER_USER_ID
     if role == "client":
         return md.DEFAULT_CLIENT_USER_ID
@@ -291,6 +293,13 @@ def api_me(request: Request) -> Response:
         if g.scope_kind == "workspace" and g.scope_id == wsid
         and g.grant_role == "client" and g.binding_org_id
     })
+    # §05 — deployment-admin gating. In production this is a
+    # membership lookup on role_grants (scope_kind='deployment').
+    # The mock treats the bootstrap operator (Élodie) as admin + owner
+    # and the deputy (Marc) as admin-only.
+    admin_team = {m.user_id: m for m in md.DEPLOYMENT_ADMINS}
+    uid = current_user_id(request)
+    admin_row = admin_team.get(uid)
     return ok({
         "role": current_role(request),
         "theme": current_theme(request),
@@ -304,6 +313,8 @@ def api_me(request: Request) -> Response:
         "current_workspace_id": wsid,
         "available_workspaces": available,
         "client_binding_org_ids": binding_org_ids,
+        "is_deployment_admin": admin_row is not None,
+        "is_deployment_owner": bool(admin_row and admin_row.is_owner),
     })
 
 
@@ -1635,7 +1646,7 @@ def _curl_example(token: md.ApiToken, plaintext: str) -> str:
     }
     path = scope_to_path.get(token.scopes[0] if token.scopes else "", "/api/v1/me") \
         if token.kind != "delegated" else "/api/v1/me"
-    host = "https://dev.crewday.app"
+    host = "https://dev.crew.day"
     return f"curl -sS -H 'Authorization: Bearer {plaintext}' {host}{path}"
 
 
@@ -1800,22 +1811,9 @@ def api_me_tokens_audit(tid: str, request: Request) -> Response:
     return ok(md.API_TOKEN_AUDIT.get(tid, []))
 
 
-@app.get("/api/v1/llm/assignments")
-def api_llm_assignments() -> Response:
-    total_spent = sum(a.spent_24h_usd for a in md.LLM_ASSIGNMENTS)
-    total_budget = sum(a.daily_budget_usd for a in md.LLM_ASSIGNMENTS)
-    total_calls = sum(a.calls_24h for a in md.LLM_ASSIGNMENTS)
-    return ok({
-        "assignments": md.LLM_ASSIGNMENTS,
-        "total_spent": total_spent,
-        "total_budget": total_budget,
-        "total_calls": total_calls,
-    })
-
-
-@app.get("/api/v1/llm/calls")
-def api_llm_calls() -> Response:
-    return ok(md.LLM_CALLS)
+# §11 — LLM assignments and the per-call feed are deployment-scoped
+# (moved to /admin/api/v1/llm/*). Workspace managers keep only the
+# percent-only usage tile on /settings via /api/v1/workspace/usage.
 
 
 @app.get("/api/v1/workspace/usage")
@@ -2576,6 +2574,398 @@ async def events_stream(request: Request) -> StreamingResponse:
 # SPA fallback
 # ══════════════════════════════════════════════════════════════════════
 
+# ══════════════════════════════════════════════════════════════════════
+# /admin/api/v1 — deployment-scoped routes (§05, §11, §12, §14).
+#
+# Non-admin callers are supposed to receive 404 on every route here
+# (same tenant-enumeration posture as the workspace prefix). In the
+# mock every visitor is the bootstrap operator Élodie, so the guard
+# is soft — we still surface the intent on the wire so the React
+# shell can test the "ask your operator" state by switching role.
+# ══════════════════════════════════════════════════════════════════════
+
+def _require_deployment_admin(request: Request) -> Response | None:
+    uid = current_user_id(request)
+    if not any(m.user_id == uid for m in md.DEPLOYMENT_ADMINS):
+        return JSONResponse({"detail": "not found"}, status_code=404)
+    return None
+
+
+@app.get("/admin/api/v1/me")
+def api_admin_me(request: Request) -> Response:
+    guard = _require_deployment_admin(request)
+    if guard is not None:
+        return guard
+    uid = current_user_id(request)
+    row = next((m for m in md.DEPLOYMENT_ADMINS if m.user_id == uid), None)
+    return ok({
+        "user_id": row.user_id,
+        "display_name": row.display_name,
+        "email": row.email,
+        "is_owner": row.is_owner,
+        "capabilities": {
+            "deployment.view": True,
+            "deployment.llm.view": True,
+            "deployment.llm.edit": True,
+            "deployment.usage.view": True,
+            "deployment.workspaces.view": True,
+            "deployment.workspaces.trust": True,
+            "deployment.workspaces.archive": row.is_owner,
+            "deployment.budget.edit": True,
+            "deployment.signup.edit": True,
+            "deployment.settings.edit": row.is_owner,
+            "deployment.audit.view": True,
+            "groups.manage_owners_membership": row.is_owner,
+        },
+    })
+
+
+@app.get("/admin/api/v1/llm/assignments")
+def api_admin_llm_assignments(request: Request) -> Response:
+    guard = _require_deployment_admin(request)
+    if guard is not None:
+        return guard
+    total_spent = sum(a.spent_24h_usd for a in md.LLM_ASSIGNMENTS)
+    total_budget = sum(a.daily_budget_usd for a in md.LLM_ASSIGNMENTS)
+    total_calls = sum(a.calls_24h for a in md.LLM_ASSIGNMENTS)
+    return ok({
+        "assignments": md.LLM_ASSIGNMENTS,
+        "total_spent": total_spent,
+        "total_budget": total_budget,
+        "total_calls": total_calls,
+    })
+
+
+@app.get("/admin/api/v1/llm/calls")
+def api_admin_llm_calls(request: Request) -> Response:
+    guard = _require_deployment_admin(request)
+    if guard is not None:
+        return guard
+    return ok(md.LLM_CALLS)
+
+
+@app.get("/admin/api/v1/llm/providers")
+def api_admin_llm_providers(request: Request) -> Response:
+    guard = _require_deployment_admin(request)
+    if guard is not None:
+        return guard
+    return ok(md.DEPLOYMENT_LLM_PROVIDERS)
+
+
+@app.get("/admin/api/v1/llm/pricing")
+def api_admin_llm_pricing(request: Request) -> Response:
+    guard = _require_deployment_admin(request)
+    if guard is not None:
+        return guard
+    return ok(md.DEPLOYMENT_LLM_PRICING)
+
+
+@app.get("/admin/api/v1/chat/providers")
+def api_admin_chat_providers(request: Request) -> Response:
+    guard = _require_deployment_admin(request)
+    if guard is not None:
+        return guard
+    return ok(md.DEPLOYMENT_CHAT_PROVIDERS)
+
+
+@app.get("/admin/api/v1/chat/overrides")
+def api_admin_chat_overrides(request: Request) -> Response:
+    guard = _require_deployment_admin(request)
+    if guard is not None:
+        return guard
+    return ok(md.DEPLOYMENT_CHAT_OVERRIDES)
+
+
+@app.get("/admin/api/v1/usage/summary")
+def api_admin_usage_summary(request: Request) -> Response:
+    guard = _require_deployment_admin(request)
+    if guard is not None:
+        return guard
+    per_cap = [
+        {
+            "capability": a.capability,
+            "spend_usd_30d": round(a.spent_24h_usd * 30, 2),
+            "calls_30d": a.calls_24h * 30,
+        }
+        for a in md.LLM_ASSIGNMENTS
+        if a.enabled and a.calls_24h > 0
+    ]
+    spend = sum(w.spent_usd_30d for w in md.DEPLOYMENT_WORKSPACES if not w.archived_at)
+    calls = sum(c["calls_30d"] for c in per_cap)
+    active = [w for w in md.DEPLOYMENT_WORKSPACES if not w.archived_at]
+    return ok({
+        "window_label": "Rolling 30 days",
+        "deployment_spend_usd_30d": round(spend, 2),
+        "deployment_call_count_30d": calls,
+        "workspace_count": len(active),
+        "paused_workspaces": sum(1 for w in active if w.paused),
+        "per_capability": per_cap,
+    })
+
+
+@app.get("/admin/api/v1/usage/workspaces")
+def api_admin_usage_workspaces(request: Request) -> Response:
+    guard = _require_deployment_admin(request)
+    if guard is not None:
+        return guard
+    return ok([w for w in md.DEPLOYMENT_WORKSPACES if not w.archived_at])
+
+
+@app.put("/admin/api/v1/usage/workspaces/{wsid}/cap")
+async def api_admin_usage_workspaces_set_cap(wsid: str, request: Request) -> Response:
+    guard = _require_deployment_admin(request)
+    if guard is not None:
+        return guard
+    ws = next((w for w in md.DEPLOYMENT_WORKSPACES if w.id == wsid), None)
+    if ws is None:
+        return JSONResponse({"detail": "not found"}, status_code=404)
+    body = await request.json()
+    cap = float((body or {}).get("cap_usd_30d", 0))
+    if cap < 0 or cap > 10_000:
+        return JSONResponse({"detail": "cap out of range"}, status_code=422)
+    ws.cap_usd_30d = cap
+    ws.usage_percent = int(min(100, (ws.spent_usd_30d / cap) * 100)) if cap else 0
+    ws.paused = cap > 0 and ws.spent_usd_30d >= cap
+    hub.publish("admin.workspace_cap_updated", {"id": ws.id, "cap_usd_30d": cap})
+    return ok(ws)
+
+
+@app.get("/admin/api/v1/workspaces")
+def api_admin_workspaces(request: Request) -> Response:
+    guard = _require_deployment_admin(request)
+    if guard is not None:
+        return guard
+    return ok(md.DEPLOYMENT_WORKSPACES)
+
+
+@app.get("/admin/api/v1/workspaces/{wsid}")
+def api_admin_workspace(wsid: str, request: Request) -> Response:
+    guard = _require_deployment_admin(request)
+    if guard is not None:
+        return guard
+    ws = next((w for w in md.DEPLOYMENT_WORKSPACES if w.id == wsid), None)
+    if ws is None:
+        return JSONResponse({"detail": "not found"}, status_code=404)
+    return ok(ws)
+
+
+@app.post("/admin/api/v1/workspaces/{wsid}/trust")
+def api_admin_workspace_trust(wsid: str, request: Request) -> Response:
+    guard = _require_deployment_admin(request)
+    if guard is not None:
+        return guard
+    ws = next((w for w in md.DEPLOYMENT_WORKSPACES if w.id == wsid), None)
+    if ws is None:
+        return JSONResponse({"detail": "not found"}, status_code=404)
+    ws.verification_state = "trusted"
+    hub.publish("admin.workspace_trusted", {"id": ws.id})
+    return ok(ws)
+
+
+@app.post("/admin/api/v1/workspaces/{wsid}/archive")
+def api_admin_workspace_archive(wsid: str, request: Request) -> Response:
+    guard = _require_deployment_admin(request)
+    if guard is not None:
+        return guard
+    uid = current_user_id(request)
+    row = next((m for m in md.DEPLOYMENT_ADMINS if m.user_id == uid), None)
+    if not row or not row.is_owner:
+        return JSONResponse({"detail": "owners-only"}, status_code=403)
+    ws = next((w for w in md.DEPLOYMENT_WORKSPACES if w.id == wsid), None)
+    if ws is None:
+        return JSONResponse({"detail": "not found"}, status_code=404)
+    ws.archived_at = md.TODAY
+    hub.publish("admin.workspace_archived", {"id": ws.id})
+    return ok(ws)
+
+
+@app.get("/admin/api/v1/signup/settings")
+def api_admin_signup_settings(request: Request) -> Response:
+    guard = _require_deployment_admin(request)
+    if guard is not None:
+        return guard
+    return ok(md.DEPLOYMENT_SIGNUP_SETTINGS)
+
+
+@app.put("/admin/api/v1/signup/settings")
+async def api_admin_signup_settings_update(request: Request) -> Response:
+    guard = _require_deployment_admin(request)
+    if guard is not None:
+        return guard
+    body = await request.json()
+    s = md.DEPLOYMENT_SIGNUP_SETTINGS
+    for key in (
+        "enabled",
+        "throttle_per_ip_hour",
+        "throttle_per_email_lifetime",
+        "pre_verified_upload_mb_cap",
+        "pre_verified_llm_percent_cap",
+    ):
+        if key in body:
+            setattr(s, key, body[key])
+    s.updated_at = datetime.now().isoformat(timespec="seconds") + "Z"
+    s.updated_by = "Élodie Bernard"
+    hub.publish("admin.signup_settings_updated", {"enabled": s.enabled})
+    return ok(s)
+
+
+@app.get("/admin/api/v1/settings")
+def api_admin_settings(request: Request) -> Response:
+    guard = _require_deployment_admin(request)
+    if guard is not None:
+        return guard
+    return ok(md.DEPLOYMENT_SETTINGS)
+
+
+@app.put("/admin/api/v1/settings/{key}")
+async def api_admin_settings_update(key: str, request: Request) -> Response:
+    guard = _require_deployment_admin(request)
+    if guard is not None:
+        return guard
+    row = next((s for s in md.DEPLOYMENT_SETTINGS if s.key == key), None)
+    if row is None:
+        return JSONResponse({"detail": "not found"}, status_code=404)
+    uid = current_user_id(request)
+    me = next((m for m in md.DEPLOYMENT_ADMINS if m.user_id == uid), None)
+    if row.root_only and not (me and me.is_owner):
+        return JSONResponse({"detail": "owners-only"}, status_code=403)
+    body = await request.json()
+    row.value = body.get("value", row.value)
+    row.updated_at = datetime.now().isoformat(timespec="seconds") + "Z"
+    row.updated_by = me.display_name if me else "(unknown)"
+    hub.publish("admin.setting_updated", {"key": key})
+    return ok(row)
+
+
+@app.get("/admin/api/v1/admins")
+def api_admin_admins(request: Request) -> Response:
+    guard = _require_deployment_admin(request)
+    if guard is not None:
+        return guard
+    return ok(md.DEPLOYMENT_ADMINS)
+
+
+@app.post("/admin/api/v1/admins")
+async def api_admin_admins_grant(request: Request) -> Response:
+    guard = _require_deployment_admin(request)
+    if guard is not None:
+        return guard
+    body = await request.json()
+    email = (body or {}).get("email", "").strip()
+    if not email:
+        return JSONResponse({"detail": "email required"}, status_code=422)
+    as_owner = bool((body or {}).get("as_owner", False))
+    if as_owner:
+        uid = current_user_id(request)
+        me = next((m for m in md.DEPLOYMENT_ADMINS if m.user_id == uid), None)
+        if not me or not me.is_owner:
+            return JSONResponse(
+                {"detail": "groups.manage_owners_membership required"},
+                status_code=403,
+            )
+    new_id = f"da-{len(md.DEPLOYMENT_ADMINS) + 1}"
+    row = md.AdminTeamMember(
+        id=new_id,
+        user_id=f"u-pending-{len(md.DEPLOYMENT_ADMINS) + 1}",
+        display_name=email.split("@")[0].title(),
+        email=email,
+        is_owner=as_owner,
+        granted_at=md.TODAY,
+        granted_by="Élodie Bernard",
+    )
+    md.DEPLOYMENT_ADMINS.append(row)
+    hub.publish("admin.granted", {"user_id": row.user_id})
+    return ok(row)
+
+
+@app.post("/admin/api/v1/admins/{daid}/revoke")
+def api_admin_admins_revoke(daid: str, request: Request) -> Response:
+    guard = _require_deployment_admin(request)
+    if guard is not None:
+        return guard
+    row = next((m for m in md.DEPLOYMENT_ADMINS if m.id == daid), None)
+    if row is None:
+        return JSONResponse({"detail": "not found"}, status_code=404)
+    owners = [m for m in md.DEPLOYMENT_ADMINS if m.is_owner]
+    if row.is_owner and len(owners) <= 1:
+        return JSONResponse(
+            {"detail": "cannot revoke last owner (≥1 owner invariant)"},
+            status_code=422,
+        )
+    md.DEPLOYMENT_ADMINS[:] = [m for m in md.DEPLOYMENT_ADMINS if m.id != daid]
+    hub.publish("admin.revoked", {"user_id": row.user_id})
+    return ok({"ok": True, "id": daid})
+
+
+@app.get("/admin/api/v1/audit")
+def api_admin_audit(request: Request) -> Response:
+    guard = _require_deployment_admin(request)
+    if guard is not None:
+        return guard
+    return ok(md.DEPLOYMENT_AUDIT)
+
+
+# ── Admin-side embedded chat agent (§11 "Admin-side agent") ──────────
+
+
+@app.get("/admin/api/v1/agent/log")
+def api_admin_agent_log(request: Request) -> Response:
+    guard = _require_deployment_admin(request)
+    if guard is not None:
+        return guard
+    return ok(md.ADMIN_AGENT_LOG)
+
+
+@app.get("/admin/api/v1/agent/actions")
+def api_admin_agent_actions(request: Request) -> Response:
+    guard = _require_deployment_admin(request)
+    if guard is not None:
+        return guard
+    return ok(md.ADMIN_AGENT_ACTIONS)
+
+
+@app.post("/admin/api/v1/agent/message")
+async def api_admin_agent_message(request: Request) -> Response:
+    guard = _require_deployment_admin(request)
+    if guard is not None:
+        return guard
+    payload = await request.json()
+    body = str((payload or {}).get("body") or "").strip()[:500]
+    if not body:
+        return JSONResponse({"detail": "empty"}, status_code=400)
+    page = request.headers.get("X-Agent-Page", "")
+    msg = md.AgentMessage(at=datetime.now(), kind="user", body=body)
+    md.ADMIN_AGENT_LOG.append(msg)
+    hub.publish(
+        "agent.message.appended",
+        {"scope": "admin", "message": msg, "page": page},
+    )
+    return ok({"message": msg, "page": page})
+
+
+@app.post("/admin/api/v1/agent/action/{aid}/{decision}")
+def api_admin_agent_action(aid: str, decision: str, request: Request) -> Response:
+    guard = _require_deployment_admin(request)
+    if guard is not None:
+        return guard
+    action = next((a for a in md.ADMIN_AGENT_ACTIONS if a.id == aid), None)
+    if action is None or decision not in {"approve", "deny"}:
+        return JSONResponse({"detail": "bad request"}, status_code=400)
+    md.ADMIN_AGENT_ACTIONS[:] = [a for a in md.ADMIN_AGENT_ACTIONS if a.id != aid]
+    verb = "Approved" if decision == "approve" else "Denied"
+    md.ADMIN_AGENT_LOG.append(
+        md.AgentMessage(at=datetime.now(), kind="user", body=f"{verb}: {action.title}")
+    )
+    if decision == "approve":
+        md.ADMIN_AGENT_LOG.append(
+            md.AgentMessage(
+                at=datetime.now(), kind="agent",
+                body=f"Done — {action.title.lower()} is in the deployment audit log.",
+            )
+        )
+    return ok({"ok": True, "id": aid, "decision": decision})
+
+
 # Mount built assets (JS, CSS, fonts) under Vite's default /assets path.
 if (WEB_DIST / "assets").is_dir():
     app.mount("/assets", StaticFiles(directory=str(WEB_DIST / "assets")), name="assets")
@@ -2583,6 +2973,7 @@ if (WEB_DIST / "assets").is_dir():
 
 _SPA_PASSTHROUGH: Iterable[str] = (
     "/api",
+    "/admin/api",
     "/events",
     "/switch",
     "/theme",

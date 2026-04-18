@@ -42,9 +42,13 @@ const BACKEND =
   process.env.VITE_BACKEND_URL ?? "http://host.docker.internal:8100";
 
 // Route prefixes that must pass through to FastAPI in dev; everything
-// else is handled by Vite (and in prod, by the SPA catch-all).
+// else is handled by Vite (and in prod, by the SPA catch-all). The
+// `/admin/api` prefix covers /admin/api/v1/* deployment-admin routes
+// (§12 "Admin surface"); /admin itself (without /api) is a SPA route
+// and stays local.
 const API_PATHS = [
   "/api",
+  "/admin/api",
   "/events",
   "/switch",
   "/theme",
@@ -68,7 +72,7 @@ export default defineConfig({
       strategies: "generateSW",
       workbox: {
         navigateFallback: "/index.html",
-        navigateFallbackDenylist: [/^\/api/, /^\/events/],
+        navigateFallbackDenylist: [/^\/api/, /^\/admin\/api/, /^\/events/],
         runtimeCaching: [
           {
             urlPattern: /\/api\/v1\/tasks.*$/,
@@ -93,7 +97,7 @@ export default defineConfig({
   // The dev server binds inside the Docker `web-dev` container on
   // 0.0.0.0 and is reached two ways:
   //   - locally: 127.0.0.1:8100 → container :5173 (port forward)
-  //   - publicly: https://dev.crewday.app → Traefik → web-dev:5173
+  //   - publicly: https://dev.crew.day → Traefik → web-dev:5173
   // Letting Vite pick HMR host/port from the page origin makes both
   // work without per-URL config: ws:// for 127.0.0.1:8100, wss://
   // for the public host (Traefik upgrades the websocket).
@@ -102,7 +106,7 @@ export default defineConfig({
     host: "0.0.0.0",
     port: 5173,
     strictPort: true,
-    allowedHosts: ["dev.crewday.app", "localhost", "127.0.0.1"],
+    allowedHosts: ["dev.crew.day", "localhost", "127.0.0.1"],
     proxy: Object.fromEntries(
       API_PATHS.map((p) => [p, { target: BACKEND, changeOrigin: true, ws: true }]),
     ),

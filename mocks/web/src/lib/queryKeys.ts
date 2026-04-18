@@ -78,4 +78,21 @@ export const qk = {
   agentPrefs: (scope: "workspace" | "property" | "me", id?: string) =>
     ["agent_preferences", scope, id ?? ""] as const,
   workspaceUsage: () => ["workspace", "usage"] as const,
+  // §14 — /admin shell.
+  adminMe: () => ["admin", "me"] as const,
+  adminWorkspaces: () => ["admin", "workspaces"] as const,
+  adminUsageSummary: () => ["admin", "usage", "summary"] as const,
+  adminUsageWorkspaces: () => ["admin", "usage", "workspaces"] as const,
+  adminLlmAssignments: () => ["admin", "llm", "assignments"] as const,
+  adminLlmCalls: () => ["admin", "llm", "calls"] as const,
+  adminLlmProviders: () => ["admin", "llm", "providers"] as const,
+  adminLlmPricing: () => ["admin", "llm", "pricing"] as const,
+  adminChatProviders: () => ["admin", "chat", "providers"] as const,
+  adminChatOverrides: () => ["admin", "chat", "overrides"] as const,
+  adminSignup: () => ["admin", "signup"] as const,
+  adminSettings: () => ["admin", "settings"] as const,
+  adminAdmins: () => ["admin", "admins"] as const,
+  adminAudit: () => ["admin", "audit"] as const,
+  adminAgentLog: () => ["admin", "agent", "log"] as const,
+  adminAgentActions: () => ["admin", "agent", "actions"] as const,
 } as const;

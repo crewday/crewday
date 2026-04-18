@@ -3166,6 +3166,7 @@ class AgentAction:
     inline_channel: Literal[
         "web_owner_sidebar",
         "web_worker_chat",
+        "web_admin_sidebar",
     ] = "web_owner_sidebar"
 
 
@@ -3713,3 +3714,479 @@ def avatar_url_for_file_id(file_id: str | None) -> str | None:
     if not file_id:
         return None
     return f"/api/v1/files/{file_id}/blob"
+
+
+# ── Deployment-admin seed data (§05, §11, §14, §16) ──────────────────
+#
+# In prod these rows live under scope_kind='deployment' with the
+# reserved synthetic scope_id `00000000000000000000000000`. The mock
+# keeps them as plain Python objects — the /admin API reads them
+# directly, a real server would resolve them through the permission
+# engine.
+
+
+@dataclass
+class AdminTeamMember:
+    id: str
+    user_id: str
+    display_name: str
+    email: str
+    is_owner: bool
+    granted_at: str
+    granted_by: str
+
+
+@dataclass
+class AdminWorkspaceRow:
+    id: str
+    slug: str
+    name: str
+    plan: str
+    verification_state: str
+    properties_count: int
+    members_count: int
+    cap_usd_30d: float
+    spent_usd_30d: float
+    usage_percent: int
+    paused: bool
+    archived_at: str | None
+    created_at: str
+
+
+@dataclass
+class AdminLlmProvider:
+    key: str
+    label: str
+    url: str
+    api_key_env: str
+    status: str  # connected | error | not_configured
+    last_check_at: str | None
+    fallback: bool
+
+
+@dataclass
+class AdminLlmPricingRow:
+    model_id: str
+    input_per_1k_usd: float
+    output_per_1k_usd: float
+    is_free_tier: bool
+
+
+@dataclass
+class AdminSignupSettings:
+    enabled: bool
+    disposable_domains_count: int
+    throttle_per_ip_hour: int
+    throttle_per_email_lifetime: int
+    pre_verified_upload_mb_cap: int
+    pre_verified_llm_percent_cap: int
+    updated_at: str
+    updated_by: str
+
+
+@dataclass
+class AdminDeploymentSetting:
+    key: str
+    value: Any
+    kind: str  # bool | int | string
+    description: str
+    root_only: bool
+    updated_at: str
+    updated_by: str
+
+
+@dataclass
+class AdminChatProviderCredential:
+    field: str          # e.g. "access_token", "phone_number_id"
+    label: str
+    display_stub: str   # e.g. "wa-tok-••••••3f2a"
+    set: bool
+    updated_at: str | None
+    updated_by: str | None
+
+
+@dataclass
+class AdminChatProviderTemplate:
+    name: str
+    purpose: str        # human-readable intent
+    status: str         # approved | pending | rejected | paused
+    last_sync_at: str | None
+    rejection_reason: str | None
+
+
+@dataclass
+class AdminChatProvider:
+    channel_kind: str           # offapp_whatsapp | offapp_telegram
+    label: str
+    phone_display: str          # "+33 6 12 34 56 78" — stub, never the real number
+    status: str                 # connected | error | not_configured
+    last_webhook_at: str | None
+    last_webhook_error: str | None
+    webhook_url: str            # for operator to copy into Meta's console
+    verify_token_stub: str
+    credentials: list[AdminChatProviderCredential]
+    templates: list[AdminChatProviderTemplate]
+    per_workspace_soft_cap: int # soft per-workspace sub-cap on the shared number
+    daily_outbound_cap: int     # Meta-tier ceiling on the whole provider
+    outbound_24h: int           # observed
+    delivery_error_rate_pct: float
+
+
+@dataclass
+class AdminChatOverrideRow:
+    workspace_id: str
+    workspace_name: str
+    channel_kind: str
+    phone_display: str
+    status: str                 # connected | error | not_configured
+    created_at: str
+    reason: str | None
+
+
+# Élodie is the bootstrap operator (also owner@bernard). Marc was added
+# later as a deputy. One "owner" + one rule-driven "manager@deployment".
+DEPLOYMENT_ADMINS: list[AdminTeamMember] = [
+    AdminTeamMember(
+        "da-1",
+        user_id="u-elodie",
+        display_name="Élodie Bernard",
+        email="elodie@bernard.example",
+        is_owner=True,
+        granted_at="2025-11-02",
+        granted_by="(bootstrap)",
+    ),
+    AdminTeamMember(
+        "da-2",
+        user_id="u-marc",
+        display_name="Marc Faure",
+        email="marc@ops.crewday.app",
+        is_owner=False,
+        granted_at="2026-01-14",
+        granted_by="Élodie Bernard",
+    ),
+]
+
+
+DEPLOYMENT_WORKSPACES: list[AdminWorkspaceRow] = [
+    AdminWorkspaceRow(
+        "ws-01", slug="bernard", name="Bernard household",
+        plan="pro", verification_state="trusted",
+        properties_count=4, members_count=9,
+        cap_usd_30d=25.0, spent_usd_30d=8.12, usage_percent=33, paused=False,
+        archived_at=None, created_at="2025-11-02",
+    ),
+    AdminWorkspaceRow(
+        "ws-02", slug="cleanco", name="CleanCo agency",
+        plan="pro", verification_state="trusted",
+        properties_count=12, members_count=23,
+        cap_usd_30d=40.0, spent_usd_30d=31.40, usage_percent=79, paused=False,
+        archived_at=None, created_at="2025-12-17",
+    ),
+    AdminWorkspaceRow(
+        "ws-03", slug="villa-mer", name="Villa Mer",
+        plan="free", verification_state="human_verified",
+        properties_count=1, members_count=3,
+        cap_usd_30d=5.0, spent_usd_30d=5.00, usage_percent=100, paused=True,
+        archived_at=None, created_at="2026-03-04",
+    ),
+    AdminWorkspaceRow(
+        "ws-04", slug="jardinerie", name="Jardinerie coop",
+        plan="free", verification_state="email_verified",
+        properties_count=2, members_count=2,
+        cap_usd_30d=0.5, spent_usd_30d=0.05, usage_percent=10, paused=False,
+        archived_at=None, created_at="2026-04-10",
+    ),
+    AdminWorkspaceRow(
+        "ws-05", slug="mas-des-oliviers", name="Mas des Oliviers",
+        plan="free", verification_state="trusted",
+        properties_count=2, members_count=5,
+        cap_usd_30d=12.0, spent_usd_30d=1.20, usage_percent=10, paused=False,
+        archived_at="2026-02-08", created_at="2025-09-01",
+    ),
+]
+
+
+DEPLOYMENT_LLM_PROVIDERS: list[AdminLlmProvider] = [
+    AdminLlmProvider(
+        "openrouter", "OpenRouter",
+        url="https://openrouter.ai/api/v1/chat/completions",
+        api_key_env="OPENROUTER_API_KEY",
+        status="connected",
+        last_check_at="2026-04-18T08:10:03Z",
+        fallback=False,
+    ),
+    AdminLlmProvider(
+        "openai_compat", "OpenAI-compatible fallback",
+        url="(none)",
+        api_key_env="OPENAI_COMPAT_API_KEY",
+        status="not_configured",
+        last_check_at=None,
+        fallback=True,
+    ),
+]
+
+
+DEPLOYMENT_LLM_PRICING: list[AdminLlmPricingRow] = [
+    AdminLlmPricingRow("google/gemma-4-31b-it", 0.10, 0.30, False),
+    AdminLlmPricingRow("google/gemma-3-27b-it:free", 0.0, 0.0, True),
+    AdminLlmPricingRow("anthropic/claude-haiku-4-5", 0.80, 4.00, False),
+    AdminLlmPricingRow("openai/gpt-4o-mini", 0.15, 0.60, False),
+    AdminLlmPricingRow("qwen/qwen3-32b-instruct", 0.12, 0.35, False),
+]
+
+
+DEPLOYMENT_CHAT_PROVIDERS: list[AdminChatProvider] = [
+    AdminChatProvider(
+        channel_kind="offapp_whatsapp",
+        label="WhatsApp (Meta Cloud API)",
+        phone_display="+33 6 44 00 12 34",
+        status="connected",
+        last_webhook_at="2026-04-18T08:09:41Z",
+        last_webhook_error=None,
+        webhook_url="https://crew.day/webhooks/chat/whatsapp",
+        verify_token_stub="wa-verify-••••••e71c",
+        credentials=[
+            AdminChatProviderCredential(
+                field="access_token", label="Access token",
+                display_stub="wa-tok-••••••3f2a", set=True,
+                updated_at="2026-02-04T14:22:07Z", updated_by="Élodie Bernard",
+            ),
+            AdminChatProviderCredential(
+                field="phone_number_id", label="Phone-number id",
+                display_stub="1057••••", set=True,
+                updated_at="2026-02-04T14:22:07Z", updated_by="Élodie Bernard",
+            ),
+            AdminChatProviderCredential(
+                field="business_account_id", label="Business-account id",
+                display_stub="5591••••", set=True,
+                updated_at="2026-02-04T14:22:07Z", updated_by="Élodie Bernard",
+            ),
+            AdminChatProviderCredential(
+                field="webhook_verify_token", label="Webhook verify-token",
+                display_stub="wa-verify-••••••e71c", set=True,
+                updated_at="2026-02-04T14:22:07Z", updated_by="Élodie Bernard",
+            ),
+        ],
+        templates=[
+            AdminChatProviderTemplate(
+                name="chat_channel_link_code",
+                purpose="Sent during the link ceremony when a user pairs their phone.",
+                status="approved",
+                last_sync_at="2026-04-17T11:30:00Z",
+                rejection_reason=None,
+            ),
+            AdminChatProviderTemplate(
+                name="chat_agent_nudge",
+                purpose="Agent-initiated reach-out past the 24h session window.",
+                status="approved",
+                last_sync_at="2026-04-17T11:30:00Z",
+                rejection_reason=None,
+            ),
+            AdminChatProviderTemplate(
+                name="chat_workspace_pick",
+                purpose="Asks a user which workspace an inbound message is for (shared-number disambiguation).",
+                status="pending",
+                last_sync_at="2026-04-18T07:02:00Z",
+                rejection_reason=None,
+            ),
+        ],
+        per_workspace_soft_cap=200,
+        daily_outbound_cap=1000,
+        outbound_24h=318,
+        delivery_error_rate_pct=0.4,
+    ),
+    AdminChatProvider(
+        channel_kind="offapp_telegram",
+        label="Telegram (Bot API)",
+        phone_display="@crewday_bot",
+        status="not_configured",
+        last_webhook_at=None,
+        last_webhook_error=None,
+        webhook_url="https://crew.day/webhooks/chat/telegram",
+        verify_token_stub="—",
+        credentials=[
+            AdminChatProviderCredential(
+                field="bot_token", label="Bot token",
+                display_stub="—", set=False,
+                updated_at=None, updated_by=None,
+            ),
+        ],
+        templates=[],
+        per_workspace_soft_cap=0,
+        daily_outbound_cap=0,
+        outbound_24h=0,
+        delivery_error_rate_pct=0.0,
+    ),
+]
+
+
+DEPLOYMENT_CHAT_OVERRIDES: list[AdminChatOverrideRow] = [
+    AdminChatOverrideRow(
+        workspace_id="ws-02",
+        workspace_name="CleanCo agency",
+        channel_kind="offapp_whatsapp",
+        phone_display="+33 1 75 00 22 00",
+        status="connected",
+        created_at="2026-03-11",
+        reason="Client-branded number — CleanCo owns the Meta business verification.",
+    ),
+]
+
+
+DEPLOYMENT_SIGNUP_SETTINGS = AdminSignupSettings(
+    enabled=True,
+    disposable_domains_count=1782,
+    throttle_per_ip_hour=5,
+    throttle_per_email_lifetime=3,
+    pre_verified_upload_mb_cap=25,
+    pre_verified_llm_percent_cap=10,
+    updated_at="2026-04-10T11:02:14Z",
+    updated_by="Élodie Bernard",
+)
+
+
+DEPLOYMENT_SETTINGS: list[AdminDeploymentSetting] = [
+    AdminDeploymentSetting(
+        "signup_enabled", True, "bool",
+        "Allow anonymous visitors to create workspaces via /signup.",
+        root_only=False,
+        updated_at="2026-04-10T11:02:14Z", updated_by="Élodie Bernard",
+    ),
+    AdminDeploymentSetting(
+        "signup_disposable_domains_path", "/etc/crewday/disposable-domains.txt", "string",
+        "Disposable-domain blocklist consulted at /signup/start (§15).",
+        root_only=False,
+        updated_at="2026-02-22T09:40:00Z", updated_by="Élodie Bernard",
+    ),
+    AdminDeploymentSetting(
+        "llm_default_budget_cents_30d", 500, "int",
+        "Default workspace rolling-30-day LLM spend cap (cents, USD).",
+        root_only=False,
+        updated_at="2026-01-03T14:21:00Z", updated_by="Élodie Bernard",
+    ),
+    AdminDeploymentSetting(
+        "trusted_interfaces", "tailscale*", "string",
+        "Comma-separated fnmatch globs of interface names the §15 bind guard trusts.",
+        root_only=True,
+        updated_at="2025-11-02T00:00:00Z", updated_by="(bootstrap)",
+    ),
+    AdminDeploymentSetting(
+        "retention_audit_days", 365, "int",
+        "Deployment default for per-workspace audit_log retention.",
+        root_only=False,
+        updated_at="2025-11-02T00:00:00Z", updated_by="(bootstrap)",
+    ),
+]
+
+
+# Deployment-scoped audit rows — reuses `AuditEntry` with actor_grant_role
+# set to 'admin' and actor_action_key in the deployment.* namespace.
+DEPLOYMENT_AUDIT: list[AuditEntry] = [
+    AuditEntry(
+        datetime(2026, 4, 18, 8, 5, 0),
+        "user", "Élodie Bernard", "deployment.llm.assignment_updated",
+        "chat.manager", "web",
+        "Switched chat.manager to google/gemma-4-31b-it (was anthropic/claude-haiku-4-5)",
+        actor_grant_role="admin",
+        actor_was_owner_member=True,
+        actor_action_key="deployment.llm.edit",
+        actor_id="u-elodie",
+    ),
+    AuditEntry(
+        datetime(2026, 4, 17, 17, 42, 0),
+        "user", "Marc Faure", "deployment.budget.updated",
+        "ws-03", "api",
+        "Raised cap_usd_30d from $2 to $5 for Villa Mer (human-verified)",
+        actor_grant_role="admin",
+        actor_was_owner_member=False,
+        actor_action_key="deployment.budget.edit",
+        actor_id="u-marc",
+    ),
+    AuditEntry(
+        datetime(2026, 4, 15, 14, 3, 0),
+        "user", "Élodie Bernard", "deployment.workspace.trusted",
+        "ws-02", "web",
+        "CleanCo promoted to verification_state='trusted' after manual review",
+        actor_grant_role="admin",
+        actor_was_owner_member=True,
+        actor_action_key="deployment.workspaces.trust",
+        actor_id="u-elodie",
+    ),
+    AuditEntry(
+        datetime(2026, 4, 10, 11, 2, 14),
+        "user", "Élodie Bernard", "deployment.signup.settings_updated",
+        "signup_enabled", "web",
+        "Tightened per-IP hourly throttle from 10 to 5",
+        actor_grant_role="admin",
+        actor_was_owner_member=True,
+        actor_action_key="deployment.signup.edit",
+        actor_id="u-elodie",
+    ),
+    AuditEntry(
+        datetime(2026, 2, 8, 9, 17, 0),
+        "user", "Élodie Bernard", "deployment.workspace.archived",
+        "ws-05", "web",
+        "Mas des Oliviers archived at the owner's request",
+        actor_grant_role="admin",
+        actor_was_owner_member=True,
+        actor_action_key="deployment.workspaces.archive",
+        actor_id="u-elodie",
+    ),
+    AuditEntry(
+        datetime(2026, 1, 14, 16, 20, 0),
+        "user", "Élodie Bernard", "deployment.admins.granted",
+        "u-marc", "web",
+        "Granted admin surface to Marc Faure",
+        actor_grant_role="admin",
+        actor_was_owner_member=True,
+        actor_action_key="role_grants.create",
+        actor_id="u-elodie",
+    ),
+]
+
+
+ADMIN_AGENT_LOG: list[AgentMessage] = [
+    AgentMessage(
+        datetime(2026, 4, 18, 8, 2), "agent",
+        "Morning. Villa Mer is paused — their $5 cap is full (5/5 spent). "
+        "They're human-verified. Raise the cap to $10 or wait for the window "
+        "to age out?",
+    ),
+    AgentMessage(
+        datetime(2026, 4, 18, 8, 3), "user",
+        "Raise to $10, note 'single-owner stretch'.",
+    ),
+    AgentMessage(
+        datetime(2026, 4, 18, 8, 3), "agent",
+        "Queued — that's a `deployment.budget.edit` > 2× bump, so it needs "
+        "your confirmation in the actions tray →",
+    ),
+    AgentMessage(
+        datetime(2026, 4, 18, 8, 5), "user",
+        "How's chat.manager spend trending? Anthropic's Haiku felt expensive.",
+    ),
+    AgentMessage(
+        datetime(2026, 4, 18, 8, 5), "agent",
+        "Haiku ran about $0.12/1k out vs. Gemma's $0.003. Last 30 days: "
+        "$12.40 on Haiku, 81% of chat.manager total. Switching chat.manager "
+        "back to Gemma would save ~$9/mo at current volume.",
+    ),
+]
+
+
+ADMIN_AGENT_ACTIONS: list[AgentAction] = [
+    AgentAction(
+        "aa-admin-1", "Raise Villa Mer cap to $10",
+        "cap_usd_30d 5 → 10 (>2× — workspace-gated in admin policy).",
+        "medium",
+        card_summary="Raise Villa Mer cap from $5 to $10 (rolling 30d)?",
+        card_fields=[
+            ("workspace", "Villa Mer (ws-03)"),
+            ("new cap", "$10.00"),
+            ("current 30d spend", "$5.00"),
+            ("note", "single-owner stretch"),
+        ],
+        gate_source="workspace_configurable",
+        inline_channel="web_admin_sidebar",
+    ),
+]

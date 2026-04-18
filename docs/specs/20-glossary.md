@@ -294,6 +294,40 @@ fix the offender.
   verb with no HTTP surface at all, agent or human: envelope-key
   rotation, offline lockout recovery, hard-delete purge (§11). Run
   on the deployment host; authorisation is by shell access.
+- **Deployment scope.** The process-level scope
+  (`scope_kind = 'deployment'`) carried by `role_grants` and
+  `permission_rule`. One synthetic row per running deployment
+  with the reserved id `00000000000000000000000000`. Governs
+  LLM provider config, capability → model assignments,
+  workspace lifecycle, signup settings, and the admin team.
+  Independent of every workspace scope — a deployment grant
+  does not widen workspace reads. See §05 "Deployment scope".
+- **Admin (grant role).** A user placed on the `/admin` shell.
+  Only valid on `scope_kind = 'deployment'` grants. Reaches the
+  admin REST surface (`/admin/api/v1/...`, §12), the
+  `crewday deploy` CLI group (§13), and the admin-side embedded
+  chat agent (§11 "Admin-side agent"). Held via a `role_grants`
+  row with `grant_role = 'admin'`.
+- **Admin shell.** The bare-host React layout at `/admin/*`
+  reserved for deployment admins. Same design language as the
+  manager shell, no workspace switcher, no `/approvals` (gated
+  agent actions land inline in the admin chat). See §14 "Admin
+  shell".
+- **Administration link.** The single entry in the manager
+  left-nav's ADMIN section that deep-links to
+  `/admin/dashboard`. Rendered only for users whose `me` payload
+  carries `is_deployment_admin = true`. See §14.
+- **`crewday deploy`.** The HTTP-backed deployment-admin CLI
+  group (§13). Targets `/admin/api/v1/*`, auth'd by passkey
+  session or a deployment-scoped token. Distinct from
+  `crewday admin`, which stays host-CLI-only.
+- **`X-Agent-Page`.** Header sent by the web shells on every
+  message to an embedded agent, encoding the user's current
+  route and entity context. Parsed by the chat endpoint into a
+  system-prompt section ("## Current admin page" / "## Current
+  workspace page") so the agent can act on "this workspace" or
+  "this capability" without the user naming it. See §12 "Agent
+  audit headers" and §11 "Admin-side agent".
 - **Payslip.** A computed pay document for one
   (work_engagement, pay_period).
 - **Pending reimbursement.** An `expense_claim` that has been
@@ -395,7 +429,7 @@ fix the offender.
   uniqueness constraints on user-editable rows are scoped to
   `workspace_id`. v1 is **multi-tenant from day 1** (§00 G11): a
   single deployment holds many workspaces; the managed SaaS at
-  `crewday.app` provisions one per self-serve signup (§03);
+  `crew.day` provisions one per self-serve signup (§03);
   self-hosted deployments default to one (bootstrapped by
   `crewday admin init`) but may run many when backed by Postgres.
   Every authenticated URL lives under `<host>/w/<slug>/...`.

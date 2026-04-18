@@ -42,6 +42,20 @@ external adapters are enabled.
 5. **The gateway does not hold business rules.** Scheduling, payroll,
    expenses, approvals all live in their own specs. The gateway only
    transports, binds, translates, and renders.
+6. **The agent never elevates (§11:127).** Every turn — web or off-app —
+   runs under a delegated token minted from the user's session. The
+   agent's effective permissions are exactly the delegating user's;
+   any verb the user cannot execute via the CLI, the agent cannot
+   execute on their behalf. Provider-level identity (the deployment's
+   or workspace's Meta Cloud account) only authenticates the
+   **transport** — it confers no app-level authority.
+7. **Provider is deployment-default, workspace-override.** The Meta
+   Cloud API account (WhatsApp Business number, tokens, templates,
+   webhook secret) is owned by the **deployment** and shared by every
+   workspace by default. A workspace may opt to bring its own
+   provider for branding, isolation, or regulatory reasons — the
+   schema and UI are the same either way; only the resolver picks a
+   different envelope row. The gateway code path is identical.
 
 ## Channel catalog
 
@@ -91,25 +105,39 @@ inbound envelopes to an identity.
 | last_message_at       | tstz?    | for 24h-session-window tracking (see "Session window")                |
 | provider_metadata_json | jsonb?  | opaque per-provider envelope (e.g. Meta `waId`, Telegram `chat_id`)   |
 
-**Uniqueness.** Partial unique index on `(channel_kind, address_hash)
-WHERE state != 'revoked'` — one active or pending binding per
-address per kind, globally across the deployment. Revoked bindings
-retain their rows for audit and can be re-verified through a fresh
-ceremony (new `id`, new challenge). Combined with the
-`(user_id, channel_kind)` cap below this enforces "one WhatsApp per
-user **and** one user per WhatsApp."
+**Uniqueness.** Partial unique index on
+`(workspace_id, channel_kind, address_hash) WHERE state != 'revoked'`
+— one active or pending binding per address per kind per workspace.
+The same phone number can therefore be bound to the same user across
+multiple workspaces (e.g. a cleaner working for two households on the
+shared deployment number); it cannot be bound to two *different*
+users inside the same workspace. Revoked bindings retain their rows
+for audit and can be re-verified through a fresh ceremony (new `id`,
+new challenge).
 
 **Per-user cap.** Partial unique index on `(user_id, channel_kind)
 WHERE state != 'revoked'` — one binding per channel kind per user
-(the decision recorded in this session). A user can hold one
-WhatsApp and one Telegram binding simultaneously.
+per workspace. A user can hold one WhatsApp and one Telegram binding
+simultaneously.
 
-**Multi-workspace users.** The current product ships single-workspace so every
-binding is scoped to that workspace. When true multi-tenancy lands
-(§19), the partial-unique on `(channel_kind, address_hash)` is
-scoped to `workspace_id` and inbound routing disambiguates by
-asking the user to pick a workspace on first contact. The schema
-already carries `workspace_id`; no data migration.
+**Shared-number routing.** When workspaces share the deployment-default
+provider (the common case — see "Provider resolution" below), the
+same Meta phone number receives inbound for all of them. The gateway
+resolves the workspace by looking up every active binding whose
+`(channel_kind, address_hash)` matches:
+
+- Exactly one match → route to that binding's workspace.
+- Zero matches → drop silently under `chat.gateway.ignored_unbound`.
+- Multiple matches (same phone bound in N workspaces) → the gateway
+  replies once with a workspace picker ("Which workspace is this
+  message for? 1) Acme 2) Bernard — reply with the number") and
+  remembers the selection on the binding for a rolling 24h. The
+  picker is itself a pre-registered template (`chat_workspace_pick`)
+  so it works outside the 24h session window.
+
+A workspace on a **custom** provider has a dedicated Meta number and
+therefore skips the picker — inbound on that number is
+unambiguous by construction.
 
 ### Link ceremony
 
@@ -312,8 +340,13 @@ Telegram has no equivalent constraint; the rule is WhatsApp-specific.
   a single throttle-reply per minute.
 - Per-user per-day **agent-initiated outbound** cap: 5 messages
   (workspace-configurable, matches §10 today).
-- Per-workspace per-day **outbound** cap on the Meta number: 1000
-  (Meta's business-initiated conversation caps apply on top).
+- **Per-provider** per-day **outbound** cap: 1000 on Meta's
+  business-initiated conversation count. On the deployment-default
+  provider this is shared across all riding workspaces; the
+  deployment admin sets a soft per-workspace sub-cap on
+  `/admin/chat-gateway` to prevent one noisy workspace starving the
+  others. Workspaces on a custom provider have their own cap
+  (Meta's tier governs the ceiling).
 - Reply-to-inbound messages do not count against the outbound cap.
 
 ## Interactive affordances
@@ -424,13 +457,58 @@ The first planned implementation uses **Meta Cloud API** for
 `offapp_whatsapp`. Telegram is specified by the same interface;
 the adapter is in §19.
 
+### Provider resolution
+
+Every outbound call and every webhook ingest picks a provider
+record through a two-tier lookup:
+
+1. If the binding's `workspace_id` has a row in
+   `chat_provider_override` with `state = 'active'` for the
+   `channel_kind`, use that envelope.
+2. Otherwise fall back to the **deployment-default** envelope for
+   the `channel_kind` (one row per kind, deployment-scoped).
+
+The adapter is the same code either way; only the envelope
+changes. A workspace that later opts out of its override simply
+flips the row to `state = 'revoked'` and falls back to the
+deployment default on the next turn.
+
+### Secret envelopes
+
 Provider credentials (WhatsApp access token, phone-number id,
 business-account id, webhook verify-token, template registrations)
-live in `secret_envelope` (§15) under
-`purpose = 'chat_channel.<kind>'`. The owner/manager configures
-them on `/settings → Chat gateway`; tokens are never rendered in
-the UI (`display_stub` only). Rotation follows the same rules as
-any other envelope secret (§15).
+live in `secret_envelope` (§15) under two distinct purposes:
+
+- `purpose = 'deployment.chat_channel.<kind>'`, `workspace_id =
+  NULL` — the deployment-default. Managed on
+  `/admin/chat-gateway` by deployment admins (§14 "Admin shell").
+  There is exactly one active row per `channel_kind`.
+- `purpose = 'workspace.chat_channel.<kind>'`, `workspace_id =
+  <id>` — a per-workspace override. Managed on
+  `/settings → Chat gateway` by the workspace owner/manager.
+  Absent when the workspace rides the default (the common case).
+
+Tokens are never rendered in either UI (`display_stub` only).
+Rotation follows the same rules as any other envelope secret
+(§15); rotating the deployment default has workspace-wide blast
+radius and must be paired with Meta's rotation window.
+
+### `chat_provider_override`
+
+| column           | type   | notes                                                                   |
+|------------------|--------|-------------------------------------------------------------------------|
+| id               | ULID PK|                                                                         |
+| workspace_id     | ULID FK| the overriding workspace                                                |
+| channel_kind     | text   | one of the catalog slugs                                                |
+| envelope_id      | ULID FK| `secret_envelope.id` holding this workspace's provider credentials      |
+| state            | text   | `active | revoked`                                                      |
+| reason           | text?  | free-form — operator note on why this workspace is off the default       |
+| created_at       | tstz   |                                                                         |
+| revoked_at       | tstz?  |                                                                         |
+
+Partial unique index on `(workspace_id, channel_kind) WHERE state
+= 'active'` — one active override per kind per workspace. Revoked
+rows are retained for audit.
 
 ## REST surface (future off-app release)
 
@@ -448,11 +526,20 @@ POST   /chat/threads/{id}/messages         send a user message (web channel)
 POST   /webhooks/chat/whatsapp             Meta Cloud webhook — adapter-owned
 GET    /webhooks/chat/whatsapp             Meta Cloud verify challenge
 
-# Owner/manager administration:
+# Owner/manager administration (workspace scope):
 GET    /chat/admin/bindings                all bindings in the workspace (manager scope)
 POST   /chat/admin/bindings/{id}/revoke    admin-initiated revocation (user lost phone, etc.)
-GET    /chat/admin/provider                provider config display (stubs only)
-PUT    /chat/admin/provider                update provider credentials (envelope-stored)
+GET    /chat/admin/provider                resolved provider (default or override) — stubs only
+PUT    /chat/admin/provider                opt into a workspace-specific override (envelope-stored)
+DELETE /chat/admin/provider                drop the override; workspace falls back to deployment default
+
+# Deployment admin surface (bare host, §14 "Admin shell"):
+GET    /admin/api/v1/chat/provider                 resolved default provider — stubs only
+PUT    /admin/api/v1/chat/provider                 set/rotate the deployment-default envelope
+GET    /admin/api/v1/chat/templates                template sync state (Meta approval per template)
+POST   /admin/api/v1/chat/templates/{name}/resync  request re-submission of a template to Meta
+GET    /admin/api/v1/chat/overrides                list workspaces on a custom provider
+GET    /admin/api/v1/chat/health                   last webhook ts, 24h delivery error rate, etc.
 ```
 
 All mutating routes honor `Idempotency-Key` (§12) and are CLI-
@@ -529,15 +616,32 @@ Gateway-specific hardening:
   cap above), and `revoked` bindings are filtered out of the list.
   There are no preference toggles or quiet-hours controls on this
   surface: linked WhatsApp means agent reach-out is on, unlinked
-  means it is off.
-- `/chat-channels` (owner/manager): workspace-wide view of
-  bindings, delivery error rates, per-user
-  opt-out status, Meta provider health ("last webhook received at
-  …", "template sync status"). Route is owner/manager-only and
-  listed in §14's route contract.
-- `/settings → Chat gateway`: provider config (Meta credentials,
-  verified templates, webhook URL copy button), workspace
-  reach-out policy, rate caps.
+  means it is off. The page tells the user which phone number they
+  will be messaging (the deployment-default or the workspace's
+  override), so the code they expect from the link ceremony arrives
+  from the right sender.
+- `/chat-channels` (owner/manager, workspace-scoped): workspace-wide
+  view of bindings, delivery error rates, per-user opt-out status,
+  and the **resolved** provider for this workspace (default vs.
+  override) with its health ("last webhook received at …",
+  "template sync status"). Route is owner/manager-only and listed
+  in §14's route contract.
+- `/settings → Chat gateway` (workspace owner/manager): shows the
+  resolved provider (deployment-default badge by default) and a
+  single **Use a dedicated Meta account for this workspace** action
+  that mints a `workspace.chat_channel.<kind>` envelope and a
+  `chat_provider_override` row. Dropping the override reverts to
+  the default. No rate-cap editor here — the deployment sets the
+  soft per-workspace sub-cap centrally; workspaces on a custom
+  provider inherit Meta's own caps for their number.
+- `/admin/chat-gateway` (deployment admin, §14 "Admin shell"):
+  owns the deployment-default Meta account — credentials
+  (`display_stub` only), webhook URL + verify-token copy buttons,
+  registered-template sync state (`chat_channel_link_code`,
+  `chat_agent_nudge`, `chat_workspace_pick`), soft per-workspace
+  outbound sub-cap, provider health. Also lists the workspaces that
+  have opted into a custom provider (audit-only — the deployment
+  does not hold those credentials).
 - Inline rendering in the web chat surfaces (§14: the shared
   `.desk__agent` sidebar on desktop for both roles, the manager
   mobile bottom-dock drawer, and the worker mobile `/chat` page) is
@@ -565,7 +669,11 @@ Gateway-specific hardening:
   per-user `/me` Chat-channels section is an inline card on
   `MePage.tsx`. The link-ceremony modal is a non-interactive
   placeholder in v1 mocks.
-- Provider config UI on `/settings` is a labeled stub.
+- Deployment-default provider stub lives on `/admin/chat-gateway`
+  (`mocks/web/src/pages/admin/ChatGatewayPage.tsx`). The workspace
+  `/settings → Chat gateway` panel points at it and offers the
+  (stubbed) "Use a dedicated Meta account for this workspace"
+  action.
 - The mock `chat_channel_binding` seed carries one active
   WhatsApp binding for the default worker and one pending
   binding for the default owner-manager.

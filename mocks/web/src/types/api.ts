@@ -3,7 +3,7 @@
 // layer serializes via dataclasses.asdict, so dates arrive as ISO-8601
 // strings and enums as their literal string values.
 
-export type Role = "employee" | "manager" | "client";
+export type Role = "employee" | "manager" | "client" | "admin";
 export type Theme = "light" | "dark" | "system";
 export type ResolvedTheme = "light" | "dark";
 
@@ -445,7 +445,7 @@ export interface AuditEntry {
   target: string;
   via: "web" | "api" | "cli" | "worker";
   reason: string | null;
-  actor_grant_role: "manager" | "worker" | "client" | "guest" | null;
+  actor_grant_role: "manager" | "worker" | "client" | "guest" | "admin" | null;
   actor_was_owner_member: boolean | null;
   actor_action_key: string | null;
   actor_id: string | null;
@@ -454,10 +454,10 @@ export interface AuditEntry {
 
 // ── Permission model (§02, §05) ───────────────────────────────────
 
-export type ScopeKind = "workspace" | "property" | "organization";
-export type GroupScopeKind = "workspace" | "organization";
+export type ScopeKind = "workspace" | "property" | "organization" | "deployment";
+export type GroupScopeKind = "workspace" | "organization" | "deployment";
 export type RuleEffect = "allow" | "deny";
-export type GrantRole = "manager" | "worker" | "client" | "guest";
+export type GrantRole = "manager" | "worker" | "client" | "guest" | "admin";
 
 export interface User {
   id: string;
@@ -781,7 +781,7 @@ export interface AgentAction {
   card_summary: string;
   card_fields: [string, string][];
   gate_source: GateSource;
-  inline_channel: "web_owner_sidebar" | "web_worker_chat";
+  inline_channel: "web_owner_sidebar" | "web_worker_chat" | "web_admin_sidebar";
 }
 
 export interface WorkspaceSettings {
@@ -879,6 +879,143 @@ export interface Me {
    *  client grant, the org(s) the user is bound to. Drives the
    *  client portal's "billed to me" filter. */
   client_binding_org_ids: string[];
+  /** §05 — true iff the caller holds any active role_grants row with
+   *  scope_kind='deployment'. Gates the "Administration" link in the
+   *  manager nav and the 404 on /admin/api/v1/* for non-admins. */
+  is_deployment_admin: boolean;
+  /** §11 — convenience flag: true iff the caller is in owners@deployment. */
+  is_deployment_owner: boolean;
+}
+
+// §14 — /admin shell.
+
+export interface AdminMe {
+  user_id: string;
+  display_name: string;
+  email: string;
+  is_owner: boolean;
+  capabilities: Record<string, boolean>;
+}
+
+export interface AdminWorkspaceRow {
+  id: string;
+  slug: string;
+  name: string;
+  plan: "free" | "pro" | "trial";
+  verification_state:
+    | "unverified"
+    | "email_verified"
+    | "human_verified"
+    | "trusted";
+  properties_count: number;
+  members_count: number;
+  cap_usd_30d: number;
+  spent_usd_30d: number;
+  usage_percent: number;
+  paused: boolean;
+  archived_at: string | null;
+  created_at: string;
+}
+
+export interface AdminUsageSummary {
+  window_label: string;
+  deployment_spend_usd_30d: number;
+  deployment_call_count_30d: number;
+  workspace_count: number;
+  paused_workspaces: number;
+  per_capability: { capability: string; spend_usd_30d: number; calls_30d: number }[];
+}
+
+export interface AdminLlmProvider {
+  key: string;
+  label: string;
+  url: string;
+  api_key_env: string;
+  status: "connected" | "error" | "not_configured";
+  last_check_at: string | null;
+  fallback: boolean;
+}
+
+export interface AdminLlmPricingRow {
+  model_id: string;
+  input_per_1k_usd: number;
+  output_per_1k_usd: number;
+  is_free_tier: boolean;
+}
+
+export interface AdminChatProviderCredential {
+  field: string;
+  label: string;
+  display_stub: string;
+  set: boolean;
+  updated_at: string | null;
+  updated_by: string | null;
+}
+
+export interface AdminChatProviderTemplate {
+  name: string;
+  purpose: string;
+  status: "approved" | "pending" | "rejected" | "paused";
+  last_sync_at: string | null;
+  rejection_reason: string | null;
+}
+
+export interface AdminChatProvider {
+  channel_kind: "offapp_whatsapp" | "offapp_telegram";
+  label: string;
+  phone_display: string;
+  status: "connected" | "error" | "not_configured";
+  last_webhook_at: string | null;
+  last_webhook_error: string | null;
+  webhook_url: string;
+  verify_token_stub: string;
+  credentials: AdminChatProviderCredential[];
+  templates: AdminChatProviderTemplate[];
+  per_workspace_soft_cap: number;
+  daily_outbound_cap: number;
+  outbound_24h: number;
+  delivery_error_rate_pct: number;
+}
+
+export interface AdminChatOverrideRow {
+  workspace_id: string;
+  workspace_name: string;
+  channel_kind: "offapp_whatsapp" | "offapp_telegram";
+  phone_display: string;
+  status: "connected" | "error" | "not_configured";
+  created_at: string;
+  reason: string | null;
+}
+
+export interface AdminSignupSettings {
+  enabled: boolean;
+  disposable_domains_count: number;
+  throttle_per_ip_hour: number;
+  throttle_per_email_lifetime: number;
+  pre_verified_upload_mb_cap: number;
+  pre_verified_llm_percent_cap: number;
+  updated_at: string;
+  updated_by: string;
+}
+
+export interface AdminDeploymentSetting {
+  key: string;
+  value: string | number | boolean;
+  kind: "bool" | "int" | "string";
+  description: string;
+  root_only: boolean;
+  updated_at: string;
+  updated_by: string;
+}
+
+export interface AdminTeamMember {
+  id: string;
+  user_id: string;
+  display_name: string;
+  email: string;
+  is_owner: boolean;
+  granted_at: string;
+  granted_by: string;
 }
 
 export interface HistoryPayload {

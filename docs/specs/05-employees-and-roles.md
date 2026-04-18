@@ -261,6 +261,7 @@ action catalog + `permission_rule` rows.
 
 | role      | typical user                                  | primary surface                                              |
 |-----------|-----------------------------------------------|--------------------------------------------------------------|
+| `admin`   | deployment operator (self-host owner, SaaS ops) | the bare-host `/admin` shell (§14): LLM + provider config, deployment-wide usage, workspace lifecycle, signup settings, admin-team management, deployment audit. Only valid on `scope_kind = 'deployment'` grants. |
 | `manager` | head of household, co-manager, agency staff   | full admin dashboard (properties, tasks, payroll, orgs). Which actions they may *perform* depends on rules + owners-group membership. |
 | `worker`  | a maid, driver, cook, contractor              | PWA: assigned tasks, own shifts, own expenses, own profile   |
 | `client`  | a villa owner who pays an agency              | read-only portal for shifts/invoices billed to them; accept/reject quotes (gated) |
@@ -273,6 +274,71 @@ A workspace creator is auto-seeded as `grant_role = manager` +
 member of `owners` (see §02 "Bootstrap"); subsequent admins can
 be added to `owners` without giving them `manager`, and vice
 versa.
+
+### Deployment scope
+
+`scope_kind = 'deployment'` is the process-level scope: a single
+synthetic row per running deployment, seeded at first boot with
+`id = '00000000000000000000000000'` (the reserved system ULID
+already used for the pseudo-system actor). Every deployment has
+exactly one, and there is no cascade with workspace scopes — a
+user's deployment grants are independent of every workspace
+grant they hold.
+
+- Only two `grant_role` values are valid here: `admin` (surface
+  grant → `/admin` shell) and — for symmetry with other scopes —
+  `owners` group membership (governance anchor for the
+  deployment). No `manager`, `worker`, `client`, or `guest`
+  grants on the deployment.
+- The **`owners@deployment`** permission group is seeded on first
+  boot with exactly one member: the operator who ran
+  `crewday admin init` (recipe A / B) or the first workspace
+  created on a managed deployment (recipe D). That user is also
+  auto-issued a `role_grants` row with
+  `(scope_kind='deployment', scope_id='00000000000000000000000000',
+  grant_role='admin')` so the `/admin` shell is reachable from
+  their first login.
+- The **`managers@deployment`** permission group is seeded empty
+  and tracks everyone currently holding
+  `(scope_kind='deployment', grant_role='admin')` — same derived-
+  from-grants pattern as `managers@<workspace>`.
+- Extending the admin team is `groups.manage_members` +
+  `role_grants.create` on the deployment scope (both default to
+  `owners@deployment` only); adding to `owners@deployment` itself
+  requires the root-only `groups.manage_owners_membership`.
+
+### Admin surface
+
+Users holding `(scope_kind='deployment', grant_role='admin')`
+see the `/admin` shell on the bare host (§14 "Admin shell").
+They do **not** get workspace access through this grant — a
+deployment admin who is also a workspace manager holds two
+separate `role_grants` rows. The manager left-nav renders an
+"Administration" link (§14) when the caller has any active
+deployment grant, which deep-links to `/admin/dashboard`; the
+link is omitted for users with no deployment grant.
+
+Admins see:
+
+- LLM provider config, capability → model assignments, pricing
+  table, the deployment-wide daily/30-day usage aggregate, and
+  per-workspace spend rollups (§11).
+- Workspace lifecycle actions: list, trust, archive; raise or
+  lower a workspace's rolling 30-day budget cap.
+- Self-serve signup toggle + throttle settings (§03, §15).
+- Deployment audit (every deployment-scoped action; §15).
+- Admin-team membership (`owners@deployment`,
+  `managers@deployment`) and deployment-scope permission rules.
+
+Admins never see (from the `/admin` surface alone):
+
+- The contents of any workspace (tasks, shifts, PII, stays).
+  RLS still filters by `workspace_id`; the deployment grant does
+  not widen workspace reads. A user who needs both views holds a
+  workspace grant too, switches through the workspace picker,
+  and is audit-logged as that workspace's actor there.
+- Decrypted account numbers, payout manifests, or any
+  interactive-session-only endpoint response (§11).
 
 ### Worker surface (web UI / PWA)
 
@@ -363,7 +429,8 @@ Each entry declares:
 - `key` — dotted, stable. Prefer existing namespaces (`users.*`,
   `properties.*`, `tasks.*`, `expenses.*`, `work_orders.*`,
   `quotes.*`, `vendor_invoices.*`, `permissions.*`, `groups.*`,
-  `organizations.*`, `scope.*`, `workspaces.*`, `admin.*`).
+  `organizations.*`, `scope.*`, `workspaces.*`, `admin.*`,
+  `deployment.*`).
 - `valid_scope_kinds` — which `permission_rule.scope_kind`
   values the key accepts. E.g. `expenses.approve` is
   workspace+property; `workspace.archive` is workspace only.
@@ -391,10 +458,11 @@ extensibility but have no effect on the resolver.
 |----------------------------------|--------------------------------|-----------------------------------------------------------------------------------------|
 | `workspace.archive`              | `workspace`                    | Archive an entire workspace. §15.                                                       |
 | `organization.archive`           | `organization`                 | Archive an org-scope record. §22.                                                       |
-| `scope.transfer`                 | `workspace`, `organization`    | Transfer governance (install a new sole member in `owners`, remove self). §15.          |
-| `permissions.edit_rules`         | `workspace`, `property`, `organization` | Create, revoke, or edit `permission_rule` rows on the scope. Root-only so "editing rules" can never be delegated into a foot-gun. |
-| `groups.manage_owners_membership`| `workspace`, `organization`    | Add/remove members of the `owners` group specifically. Distinct from `groups.manage_members` below. |
+| `scope.transfer`                 | `workspace`, `organization`, `deployment` | Transfer governance (install a new sole member in `owners`, remove self). §15. On `deployment`, hands the operator seat to someone else. |
+| `permissions.edit_rules`         | `workspace`, `property`, `organization`, `deployment` | Create, revoke, or edit `permission_rule` rows on the scope. Root-only so "editing rules" can never be delegated into a foot-gun. |
+| `groups.manage_owners_membership`| `workspace`, `organization`, `deployment` | Add/remove members of the `owners` group specifically. Distinct from `groups.manage_members` below. |
 | `admin.purge`                    | `workspace`                    | Hard-delete workspace data. CLI only (§13); the action still flows through the resolver to keep the audit trail consistent. |
+| `deployment.rotate_root_key`     | `deployment`                   | Envelope-key rotation. Host-CLI-only (§13); flows through the resolver for the audit row, but has no HTTP surface. |
 
 #### Rule-driven actions (ship with sane defaults)
 
@@ -453,6 +521,25 @@ configuration.
 | `messaging.report_issue.triage`         | `workspace`, `property`        | `owners, managers`            | —  | §10 |
 | `agent_prefs.edit_workspace`            | `workspace`                    | `owners, managers`            | —  | §11 |
 | `agent_prefs.edit_property`             | `workspace`, `property`        | `owners, managers`            | —  | §11 |
+| `deployment.view`                       | `deployment`                   | `owners, managers`            | ✅ | §14 |
+| `deployment.llm.view`                   | `deployment`                   | `owners, managers`            | —  | §11 |
+| `deployment.llm.edit`                   | `deployment`                   | `owners, managers`            | —  | §11 |
+| `deployment.usage.view`                 | `deployment`                   | `owners, managers`            | —  | §11 |
+| `deployment.workspaces.view`            | `deployment`                   | `owners, managers`            | —  | §16 |
+| `deployment.workspaces.trust`           | `deployment`                   | `owners, managers`            | —  | §03, §16 |
+| `deployment.workspaces.archive`         | `deployment`                   | `owners`                      | ✅ | §16 |
+| `deployment.budget.edit`                | `deployment`                   | `owners, managers`            | —  | §11 |
+| `deployment.signup.edit`                | `deployment`                   | `owners, managers`            | —  | §03, §16 |
+| `deployment.settings.edit`              | `deployment`                   | `owners`                      | ✅ | §16 |
+| `deployment.audit.view`                 | `deployment`                   | `owners, managers`            | ✅ | §15 |
+
+`deployment` entries use the system groups seeded on the
+deployment scope: `owners@deployment` (the operator seat,
+always ≥ 1 member) and `managers@deployment` (derived from every
+active `(scope_kind='deployment', grant_role='admin')` grant).
+`all_workers@deployment` and `all_clients@deployment` are not
+seeded — a deployment has no workers and no clients, only
+admins.
 
 Notes:
 

@@ -222,7 +222,7 @@ from every context (the "shared kernel"):
 
 crewday v1 ships as a **multi-tenant platform** from day 1 (§00).
 A single deployment holds many `workspace` rows simultaneously —
-including the managed SaaS deployment at `crewday.app`. Self-hosted
+including the managed SaaS deployment at `crew.day`. Self-hosted
 deployments may run one workspace (the original "one family" story)
 or many, using the same code.
 
@@ -248,8 +248,8 @@ or many, using the same code.
   `/w/<slug>/...` gets `404` (never `403`), so a SaaS tenant
   cannot enumerate workspaces.
 - Deployments that later adopt per-workspace subdomains
-  (`myorg.crewday.app`) keep the slug in the path too
-  (`myorg.crewday.app/w/myorg/...`). The slug remains the
+  (`myorg.crew.day`) keep the slug in the path too
+  (`myorg.crew.day/w/myorg/...`). The slug remains the
   canonical identifier; the subdomain is an additive isolation
   layer (separate browser origin for SW scope, storage jar,
   XSS blast radius — see §15).
@@ -352,7 +352,7 @@ look at env vars, do not sniff the DB URL, and do not check
 "am I in SaaS mode" — they ask `capabilities.fulltext_search`
 or `capabilities.signup_enabled` and route accordingly. This
 keeps feature behaviour testable (swap a registry fixture),
-keeps deployments uniform (`crewday.app` and a home-network
+keeps deployments uniform (`crew.day` and a home-network
 install run identical code), and keeps the boot log
 auditable (the registry snapshot is logged once at boot).
 
@@ -501,9 +501,9 @@ Rationale:
 | dev        | local dev loop (uv run, hot reload)                    | SQLite             | local fs | MailHog    | OpenRouter (or a mock) |
 | ci         | pytest + playwright in GH Actions                      | SQLite + PG        | tmpfs    | fake       | record/replay          |
 | staging    | operators' + managers' shared test instance            | Postgres           | local fs | real SMTP  | OpenRouter             |
-| saas-stage | multi-tenant SaaS staging (e.g. `staging.crewday.app`) | Postgres           | S3       | real SMTP  | OpenRouter             |
+| saas-stage | multi-tenant SaaS staging (e.g. `staging.crew.day`) | Postgres           | S3       | real SMTP  | OpenRouter             |
 | self-host  | operator's own deployment (one or many workspaces)     | SQLite or Postgres | local fs | real SMTP  | OpenRouter             |
-| saas-prod  | managed SaaS at `crewday.app`                          | Postgres           | S3       | real SMTP  | OpenRouter             |
+| saas-prod  | managed SaaS at `crew.day`                          | Postgres           | S3       | real SMTP  | OpenRouter             |
 
 The row differences are deployment-time choices: DB engine,
 storage backend, mail/LLM providers. They influence which

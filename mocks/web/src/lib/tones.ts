@@ -81,11 +81,12 @@ export const ACTOR_KIND_TONE: Record<AuditEntry["actor_kind"], "moss" | "sky" | 
   system: "ghost",
 };
 
-export const GRANT_ROLE_TONE: Record<NonNullable<AuditEntry["actor_grant_role"]>, "moss" | "sand" | "sky" | "ghost"> = {
+export const GRANT_ROLE_TONE: Record<NonNullable<AuditEntry["actor_grant_role"]>, "moss" | "sand" | "sky" | "ghost" | "rust"> = {
   manager: "moss",
   worker: "sand",
   client: "sky",
   guest: "ghost",
+  admin: "rust",
 };
 
 export const INSTRUCTION_SCOPE_TONE: Record<Instruction["scope"], "sky" | "moss" | "sand"> = {

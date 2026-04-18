@@ -60,7 +60,7 @@ v1 is **multi-tenant from day 1** (§00 G11). A single deployment
 holds many `workspace` rows simultaneously on any supported
 backend; every authenticated URL lives under
 `<host>/w/<workspace_slug>/...` (§01 "Multi-tenancy runtime",
-§14). The managed SaaS at `crewday.app` provisions one workspace
+§14). The managed SaaS at `crew.day` provisions one workspace
 per self-serve signup (§03, §15); self-hosted deployments start
 with zero workspaces and grow via the same signup path, a
 managed admin flow (`crewday admin workspace create`), or an
