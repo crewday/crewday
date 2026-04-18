@@ -126,7 +126,7 @@ export default function AdminLayout() {
         </button>
         <div className="desk__brand">
           <span className="desk__logo" aria-hidden="true">◈</span>
-          <span className="desk__wordmark">crewday · admin</span>
+          <span className="desk__wordmark">crew.day · admin</span>
         </div>
       </header>
 

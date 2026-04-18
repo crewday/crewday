@@ -427,7 +427,7 @@ pre-funded account in the worker's name for operational expenses
 so they don't have to front cash; reimbursements land there while
 their main paycheque lands in their personal account.
 
-**Payout execution is out of scope for v1** — crewday does not move
+**Payout execution is out of scope for v1** — crew.day does not move
 money. Destinations are metadata rendered on the payslip PDF and
 returned in API responses so the operator knows where to push funds
 from their bank or treasury tool. Even so, routing is
@@ -632,7 +632,7 @@ where.
 
 The operator needs the full account numbers only at the moment they
 actually push funds from their bank/treasury tool. That's a
-one-off read, not a stored artifact. crewday exposes it as:
+one-off read, not a stored artifact. crew.day exposes it as:
 
 ```
 POST /payslips/{id}/payout_manifest
@@ -843,7 +843,7 @@ reproducible for audit.
 - **Manager "Pay" page.** Per-employee pending total and a
   workspace-wide aggregate, each grouped by destination currency.
   A manager who wants to split-pay early (before period close)
-  issues one-off payments out of band — crewday records that the
+  issues one-off payments out of band — crew.day records that the
   claim is `reimbursed` when the operator marks the containing
   payslip `paid`.
 

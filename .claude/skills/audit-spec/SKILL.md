@@ -22,7 +22,7 @@ Beads tasks for code that doesn't match the intended specification.
    - Spec is correct and code is wrong → **create a Beads task**.
    - Unclear → **ask the user** with `AskUserQuestion`.
 
-Crewday is spec-first: the default when in doubt is to update the
+crew.day is spec-first: the default when in doubt is to update the
 code to match the spec. But the spec can still lag — especially after
 incremental implementation learnings — and reality eventually wins.
 

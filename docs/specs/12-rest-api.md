@@ -476,7 +476,9 @@ POST   /admin/api/v1/agent/action/{id}/deny
 deployment-scoped events (`admin.usage.updated`,
 `admin.workspace.archived`, `admin.llm.assignment_updated`,
 `admin.audit.appended`, `agent.message.appended` scoped to
-`for_user_id`, `agent.action.pending`).
+`for_user_id`, `agent.action.pending`, and the
+`agent.turn.{started,finished}` pair from §11 "Agent turn
+lifecycle").
 
 **Demo mode.** Every admin route 404s under
 `CREWDAY_DEMO_MODE=1` (§24). The demo has no operator seat and no

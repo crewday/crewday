@@ -5,8 +5,9 @@ import { ChevronDown } from "lucide-react";
 import { fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
 import { initialAgentCollapsed, persistAgentCollapsed } from "@/lib/preferences";
+import { useAgentTyping } from "@/lib/agentTyping";
 import ChatComposer from "@/components/chat/ChatComposer";
-import type { AgentAction, AgentMessage, Role } from "@/types/api";
+import type { AgentAction, AgentMessage, AgentTurnScope, Role } from "@/types/api";
 
 // CRITICAL: AgentSidebar MUST mount as a SIBLING of <Outlet /> in
 // EmployeeLayout and ManagerLayout, never inside a route's subtree.
@@ -35,6 +36,8 @@ export default function AgentSidebar({ role }: AgentSidebarProps) {
   const isAdmin = role === "admin";
   const isManager = role === "manager";
   const showActions = isManager || isAdmin;
+  const typingScope: AgentTurnScope = isAdmin ? "admin" : isManager ? "manager" : "employee";
+  const typing = useAgentTyping(typingScope);
 
   // Query keys and endpoints are scoped per role. The admin agent
   // lives under /admin/api/v1/... with its own log/actions, the
@@ -123,12 +126,12 @@ export default function AgentSidebar({ role }: AgentSidebarProps) {
     },
   });
 
-  // Scroll-to-bottom on new messages.
+  // Scroll-to-bottom on new messages or when the typing bubble toggles.
   useEffect(() => {
     const el = logRef.current;
     if (!el) return;
     el.scrollTop = el.scrollHeight;
-  }, [log.data?.length]);
+  }, [log.data?.length, typing]);
 
   const toggle = useCallback(() => {
     setCollapsed((c) => {
@@ -181,6 +184,18 @@ export default function AgentSidebar({ role }: AgentSidebarProps) {
               </span>
             </div>
           ))}
+          {typing && (
+            <div className="agent-msg agent-msg--agent agent-msg--typing">
+              <span className="agent-msg__body">
+                <span className="chat-typing" aria-hidden="true">
+                  <span className="chat-typing__dot" />
+                  <span className="chat-typing__dot" />
+                  <span className="chat-typing__dot" />
+                </span>
+                <span className="sr-only">Agent is typing</span>
+              </span>
+            </div>
+          )}
         </div>
 
         {showActions && actions.data && actions.data.length > 0 && (

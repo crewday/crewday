@@ -2,7 +2,7 @@
 
 ## Vision
 
-**crewday** is a self-hosted workspace operations platform: one owner,
+**crew.day** is a self-hosted workspace operations platform: one owner,
 one or more properties, several workers, and many tasks repeating across
 days, weeks, and seasons. It is designed so that the day-to-day operator is
 an LLM agent and the humans are free to live in their house instead of
@@ -33,7 +33,7 @@ the driver sees tomorrow's airport run; the head of house sees everything.
   workspace membership is the set of workspaces reachable through
   their assigned villas plus any explicit direct membership. See §02
   for the junction tables (`user_workspace`, `property_workspace`).
-- **Agent-first guarantee.** Every user-facing action in crewday is
+- **Agent-first guarantee.** Every user-facing action in crew.day is
   also exposed as a **CLI command** (host CLI or the embedded REST
   tool surface) — there is no human-only verb. An LLM agent driving
   the owner/manager-side or worker-side chat acts with the **full
@@ -73,7 +73,7 @@ the driver sees tomorrow's airport run; the head of house sees everything.
 - **Guest (STR occupant).** No login. Receives a tokenized link to a
   welcome page for their stay (wifi, house rules, check-out checklist,
   emergency contacts).
-- **Accountant / payroll provider.** Never logs into crewday
+- **Accountant / payroll provider.** Never logs into crew.day
   directly; receives CSV exports (timesheets, payslips, expense
   ledger) via email or scheduled webhook.
 

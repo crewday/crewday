@@ -345,7 +345,7 @@ export default function ApiTokensPage() {
             </span>
             <p className="tokens-empty__title">No workspace tokens yet</p>
             <p className="tokens-empty__sub">
-              Create one to let a script or agent hit the Crewday API on your behalf.
+              Create one to let a script or agent hit the crew.day API on your behalf.
             </p>
           </div>
         ) : (

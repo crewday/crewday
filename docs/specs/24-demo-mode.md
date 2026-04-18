@@ -1,6 +1,6 @@
 # 24 — Demo mode
 
-A separate deployment of the crewday app that lets **unauthenticated
+A separate deployment of the crew.day app that lets **unauthenticated
 visitors** try the product against fake data, with each visitor isolated
 in their own ephemeral workspace. Demo mode is not a feature flag on the
 production deployment — it is an entirely separate container, separate
@@ -231,7 +231,7 @@ schema migration.
 
 ## Iframe contract
 
-The demo app is the **only** crewday surface with a relaxed CSP
+The demo app is the **only** crew.day surface with a relaxed CSP
 `frame-ancestors`. The production app and staging both keep the
 §15 default (`frame-ancestors 'none'`).
 

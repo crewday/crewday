@@ -314,8 +314,10 @@ Items explicitly deferred, in rough priority order:
    co-owned villa where two families each pay half. Requires a
    `property_billing_split` mapping and a rewrite of rate
    resolution. Deferred until a real user asks.
-10. Realtime chat (presence, typing indicators) — v1 uses SSE for
-    task-state freshness; true realtime is separate.
+10. Realtime chat between humans (peer presence, human-to-human
+    typing indicators). v1 uses SSE for task-state freshness and for
+    the agent-turn indicator (§11 "Agent turn lifecycle"); true
+    peer-to-peer presence is separate.
 11. Integrated guest messaging (Airbnb-style threads).
 12. External chat-gateway adapters beyond the in-app web surfaces:
     **WhatsApp** first, then SMS, Telegram, push, Slack, Matrix.

@@ -3,10 +3,64 @@
 // invalidations or optimistic cache updates, and tears down on unmount.
 
 import type { QueryClient } from "@tanstack/react-query";
-import type { AgentMessage, AssetAction, SseEvent, Task, ExpenseStatus } from "@/types/api";
+import type {
+  AgentMessage,
+  AgentTurnScope,
+  AssetAction,
+  SseEvent,
+  Task,
+  ExpenseStatus,
+} from "@/types/api";
 import { qk } from "./queryKeys";
 
 type TypedEvent = { type: SseEvent["event"]; data: string };
+
+// §14 "Agent turn indicator" — 60 s local safety net so a dropped
+// `agent.turn.finished` can never leave the typing bubble stuck. Keyed
+// per scope (per task for task-scoped threads) to match `qk.agentTyping`.
+const TYPING_TIMEOUT_MS = 60_000;
+const typingTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+function typingKeySignature(scope: AgentTurnScope, taskId?: string): string {
+  return scope === "task" && taskId ? `task:${taskId}` : scope;
+}
+
+function startTyping(client: QueryClient, scope: AgentTurnScope, taskId?: string): void {
+  const sig = typingKeySignature(scope, taskId);
+  client.setQueryData<boolean>(qk.agentTyping(scope, taskId), true);
+  const prev = typingTimers.get(sig);
+  if (prev) clearTimeout(prev);
+  typingTimers.set(
+    sig,
+    setTimeout(() => {
+      client.setQueryData<boolean>(qk.agentTyping(scope, taskId), false);
+      typingTimers.delete(sig);
+    }, TYPING_TIMEOUT_MS),
+  );
+}
+
+function stopTyping(client: QueryClient, scope: AgentTurnScope, taskId?: string): void {
+  const sig = typingKeySignature(scope, taskId);
+  const prev = typingTimers.get(sig);
+  if (prev) {
+    clearTimeout(prev);
+    typingTimers.delete(sig);
+  }
+  client.setQueryData<boolean>(qk.agentTyping(scope, taskId), false);
+}
+
+function clearAllTyping(client: QueryClient): void {
+  for (const [sig, handle] of typingTimers) {
+    clearTimeout(handle);
+    const [prefix, taskId] = sig.split(":");
+    if (prefix === "task" && taskId) {
+      client.setQueryData<boolean>(qk.agentTyping("task", taskId), false);
+    } else {
+      client.setQueryData<boolean>(qk.agentTyping(prefix as AgentTurnScope), false);
+    }
+  }
+  typingTimers.clear();
+}
 
 export function startEventStream(client: QueryClient): () => void {
   if (typeof EventSource === "undefined") return () => undefined;
@@ -16,9 +70,17 @@ export function startEventStream(client: QueryClient): () => void {
     dispatch(client, { type: (evt as unknown as { type: SseEvent["event"] }).type, data: evt.data });
   };
 
+  // Every reconnect of the `EventSource` drops any stale typing state
+  // from the previous session (§14 "Agent turn indicator" — clears on
+  // SSE reconnect). `onopen` fires on first connect too; no-op then
+  // since the timer map is empty.
+  es.onopen = () => clearAllTyping(client);
+
   const events: SseEvent["event"][] = [
     "tick",
     "agent.message.appended",
+    "agent.turn.started",
+    "agent.turn.finished",
     "task.updated",
     "task.completed",
     "task.skipped",
@@ -39,6 +101,7 @@ export function startEventStream(client: QueryClient): () => void {
       es.removeEventListener(ev, handler as EventListener);
     }
     es.close();
+    clearAllTyping(client);
   };
 }
 
@@ -55,19 +118,43 @@ function dispatch(client: QueryClient, evt: TypedEvent): void {
       return;
     case "agent.message.appended": {
       const payload = data as {
-        scope: "employee" | "manager" | "task";
+        scope: AgentTurnScope;
         task_id?: string;
         message: AgentMessage;
       };
       const key =
         payload.scope === "task" && payload.task_id
           ? qk.agentTaskChat(payload.task_id)
+          : payload.scope === "admin"
+          ? qk.adminAgentLog()
           : payload.scope === "employee"
           ? qk.agentEmployeeLog()
           : qk.agentManagerLog();
       client.setQueryData<AgentMessage[]>(key, (prev) =>
         prev ? [...prev, payload.message] : [payload.message],
       );
+      // A reply arriving means the turn resolved into a message;
+      // drop the typing indicator on the same scope even if the
+      // paired `agent.turn.finished` hasn't dispatched yet.
+      stopTyping(client, payload.scope, payload.task_id);
+      return;
+    }
+    case "agent.turn.started": {
+      const payload = data as {
+        scope: AgentTurnScope;
+        task_id?: string;
+        started_at: string;
+      };
+      startTyping(client, payload.scope, payload.task_id);
+      return;
+    }
+    case "agent.turn.finished": {
+      const payload = data as {
+        scope: AgentTurnScope;
+        task_id?: string;
+        outcome: "replied" | "action" | "error" | "timeout";
+      };
+      stopTyping(client, payload.scope, payload.task_id);
       return;
     }
     case "task.updated":

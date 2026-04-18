@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import random
 from dataclasses import asdict, is_dataclass
 from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
@@ -176,6 +177,72 @@ class _EventHub:
 
 
 hub = _EventHub()
+
+
+# ── Agent turn simulator ──────────────────────────────────────────────
+#
+# §11 "Agent turn lifecycle" brackets every user→agent message with an
+# `agent.turn.started` / `agent.turn.finished` SSE pair so every
+# connected tab can render a typing indicator (§14 "Agent turn
+# indicator"). The mock has no real model to call; this helper stands
+# in by sleeping a randomised 1.5–3.5 s and appending a rotated canned
+# reply so the indicator is visible end-to-end in the preview.
+# Production replaces the sleep with the real LLM turn and the canned
+# text with the model's output; the SSE contract is unchanged.
+
+_MOCK_AGENT_REPLIES = (
+    "Got it — pulling this together now.",
+    "On it. I'll let you know what I find.",
+    "Thanks — I'll take a look and get back to you.",
+    "Noted. Running the checks now.",
+    "Understood. I'll share the result here shortly.",
+)
+
+
+def _agent_turn_scope(scope: str, task_id: str | None) -> dict[str, Any]:
+    payload: dict[str, Any] = {"scope": scope}
+    if task_id is not None:
+        payload["task_id"] = task_id
+    return payload
+
+
+async def _simulate_agent_turn(
+    scope: Literal["employee", "manager", "admin", "task"],
+    log: list[md.AgentMessage],
+    *,
+    task_id: str | None = None,
+) -> None:
+    """Publish the turn lifecycle + append one canned agent reply.
+
+    Called as a fire-and-forget `asyncio.create_task(...)` from the
+    user-message handlers. Pairs its own `started` / `finished` even
+    on error (the `finally` block) so the web surfaces never end up
+    with a stuck typing indicator.
+    """
+    start_payload = _agent_turn_scope(scope, task_id)
+    start_payload["started_at"] = datetime.now().isoformat()
+    hub.publish("agent.turn.started", start_payload)
+
+    outcome = "replied"
+    try:
+        await asyncio.sleep(random.uniform(1.5, 3.5))
+        reply = md.AgentMessage(
+            at=datetime.now(),
+            kind="agent",
+            body=random.choice(_MOCK_AGENT_REPLIES),
+        )
+        log.append(reply)
+        appended_payload = _agent_turn_scope(scope, task_id)
+        appended_payload["message"] = reply
+        hub.publish("agent.message.appended", appended_payload)
+    except Exception:
+        outcome = "error"
+        raise
+    finally:
+        finish_payload = _agent_turn_scope(scope, task_id)
+        finish_payload["finished_at"] = datetime.now().isoformat()
+        finish_payload["outcome"] = outcome
+        hub.publish("agent.turn.finished", finish_payload)
 
 
 # ── Health / ops ──────────────────────────────────────────────────────
@@ -2538,7 +2605,7 @@ def api_task_chat_log(tid: str) -> Response:
 
 
 @app.post("/api/v1/tasks/{tid}/chat/message")
-def api_task_chat_message(tid: str, payload: dict[str, Any] = Body(...)) -> Response:
+async def api_task_chat_message(tid: str, payload: dict[str, Any] = Body(...)) -> Response:
     task = md.task_by_id(tid)
     if task is None:
         return JSONResponse({"detail": "not found"}, status_code=404)
@@ -2552,6 +2619,7 @@ def api_task_chat_message(tid: str, payload: dict[str, Any] = Body(...)) -> Resp
         "agent.message.appended",
         {"scope": "task", "task_id": tid, "message": msg},
     )
+    asyncio.create_task(_simulate_agent_turn("task", log, task_id=tid))
     return ok(msg)
 
 
@@ -2882,24 +2950,26 @@ def api_quote_decide(qid: str, decision: str, request: Request) -> Response:
 
 
 @app.post("/api/v1/agent/employee/message")
-def api_agent_employee_message(payload: dict[str, Any] = Body(...)) -> Response:
+async def api_agent_employee_message(payload: dict[str, Any] = Body(...)) -> Response:
     body = str(payload.get("body") or "").strip()[:500]
     if not body:
         return JSONResponse({"detail": "empty"}, status_code=400)
     msg = md.AgentMessage(at=datetime.now(), kind="user", body=body)
     md.EMPLOYEE_CHAT_LOG.append(msg)
     hub.publish("agent.message.appended", {"scope": "employee", "message": msg})
+    asyncio.create_task(_simulate_agent_turn("employee", md.EMPLOYEE_CHAT_LOG))
     return ok(msg)
 
 
 @app.post("/api/v1/agent/manager/message")
-def api_agent_manager_message(payload: dict[str, Any] = Body(...)) -> Response:
+async def api_agent_manager_message(payload: dict[str, Any] = Body(...)) -> Response:
     body = str(payload.get("body") or "").strip()[:500]
     if not body:
         return JSONResponse({"detail": "empty"}, status_code=400)
     msg = md.AgentMessage(at=datetime.now(), kind="user", body=body)
     md.MANAGER_AGENT_LOG.append(msg)
     hub.publish("agent.message.appended", {"scope": "manager", "message": msg})
+    asyncio.create_task(_simulate_agent_turn("manager", md.MANAGER_AGENT_LOG))
     return ok(msg)
 
 
@@ -3586,6 +3656,7 @@ async def api_admin_agent_message(request: Request) -> Response:
         "agent.message.appended",
         {"scope": "admin", "message": msg, "page": page},
     )
+    asyncio.create_task(_simulate_agent_turn("admin", md.ADMIN_AGENT_LOG))
     return ok({"message": msg, "page": page})
 
 

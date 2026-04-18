@@ -1,4 +1,4 @@
-# crewday — UI preview mocks
+# crew.day — UI preview mocks
 
 Disposable, hard-coded preview of the manager and employee UIs while
 the real application hasn't been built. No DB, no auth, no real

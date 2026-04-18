@@ -52,7 +52,7 @@ services:
       SMTP_HOST: "..."
       SMTP_USER: "..."
       SMTP_PASS: "..."
-      MAIL_FROM: "crewday <ops@example.com>"
+      MAIL_FROM: "crew.day <ops@example.com>"
       OPENROUTER_API_KEY: "..."
     volumes:
       - ./data:/data
@@ -441,7 +441,7 @@ services:
       SMTP_HOST: "..."
       SMTP_USER: "..."
       SMTP_PASS: "..."
-      MAIL_FROM: "crewday <no-reply@crew.day>"
+      MAIL_FROM: "crew.day <no-reply@crew.day>"
       OPENROUTER_API_KEY: "..."
     depends_on: [db, worker]
     ports: ["127.0.0.1:8000:8000"]

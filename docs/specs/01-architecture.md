@@ -220,7 +220,7 @@ from every context (the "shared kernel"):
 
 ## Multi-tenancy runtime
 
-crewday v1 ships as a **multi-tenant platform** from day 1 (§00).
+crew.day v1 ships as a **multi-tenant platform** from day 1 (§00).
 A single deployment holds many `workspace` rows simultaneously —
 including the managed SaaS deployment at `crew.day`. Self-hosted
 deployments may run one workspace (the original "one family" story)

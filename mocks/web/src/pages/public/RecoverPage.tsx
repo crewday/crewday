@@ -18,7 +18,7 @@ export default function RecoverPage() {
         <div className="login__card">
           <div className="login__brand">
             <span className="desk__logo" aria-hidden="true">◈</span>
-            <span className="desk__wordmark">crewday</span>
+            <span className="desk__wordmark">crew.day</span>
           </div>
           <h1 className="login__headline">Lost your device?</h1>
           <p className="login__sub">

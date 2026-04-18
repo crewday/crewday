@@ -57,7 +57,7 @@ export default function SideNav({
     <aside className="desk__nav" aria-label={ariaLabel}>
       <div className="desk__brand">
         <span className="desk__logo" aria-hidden="true">◈</span>
-        <span className="desk__wordmark">crewday</span>
+        <span className="desk__wordmark">crew.day</span>
       </div>
       <WorkspaceSwitcher />
       <nav className="desk__nav-group">

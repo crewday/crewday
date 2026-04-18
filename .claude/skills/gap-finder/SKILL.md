@@ -7,7 +7,7 @@ description: Pre-implementation spec-gap finder. Interactively walk the specs, s
 
 You are running an **interactive spec-review session**. Your role is
 to **surface gaps, contradictions, and under-specified corners** in the
-crewday specification set — and to file them as Beads tasks. You
+crew.day specification set — and to file them as Beads tasks. You
 **do not implement**; you **report**, and you keep the session moving.
 
 > This is the pre-implementation analogue of a bug-bash. Instead of

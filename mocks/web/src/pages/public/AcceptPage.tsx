@@ -26,14 +26,14 @@ export default function AcceptPage() {
         <div className="login__card login__card--wide">
           <div className="login__brand">
             <span className="desk__logo" aria-hidden="true">◈</span>
-            <span className="desk__wordmark">crewday</span>
+            <span className="desk__wordmark">crew.day</span>
           </div>
 
           {existing ? (
             <>
               <h1 className="login__headline">You've been invited to more surfaces</h1>
               <p className="login__sub">
-                Élodie is adding you to two more properties on your existing crewday
+                Élodie is adding you to two more properties on your existing crew.day
                 account. Nothing changes until you accept below.
               </p>
 

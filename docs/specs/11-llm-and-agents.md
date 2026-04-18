@@ -20,7 +20,7 @@ which model it uses.
 
 ## The agent-first invariant
 
-crewday is built around a hard rule: **every human UI verb exists
+crew.day is built around a hard rule: **every human UI verb exists
 as a CLI or REST command first, and the UI is a shell around those
 commands.** There is no owner/manager-only button, no worker-only
 button, that cannot also be driven by the CLI (§13) or by an agent
@@ -192,6 +192,42 @@ component mounts with `role="admin"`. Its characteristics:
 Default model: `google/gemma-4-31b-it`. Voice is capability-
 gated `voice.admin`; default off.
 
+### Agent turn lifecycle
+
+An **agent turn** is the span from a user message landing on an agent
+endpoint (`POST /api/v1/agent/{employee,manager}/message`,
+`POST /admin/api/v1/agent/message`, or
+`POST /api/v1/tasks/{tid}/chat/message`) until the agent produces the
+next observable outcome for that thread — an appended message, a
+pending approval card, or an error. Every turn is bracketed by two SSE
+events so every connected tab and device of the delegating user can
+render a "working on it" state without polling:
+
+- `agent.turn.started` — published as the server accepts the user
+  message. Payload: `{ scope, task_id?, started_at }`. `scope` is
+  one of `employee | manager | admin | task`; `task_id` is required
+  iff `scope=task` (mirrors `agent.message.appended`).
+- `agent.turn.finished` — published exactly once per matching
+  `started`. Payload adds `{ finished_at, outcome }` where `outcome`
+  is one of `replied` (an `agent.message.appended` was emitted for
+  the same scope), `action` (an `agent.action.pending` was emitted
+  — the turn surfaced a gated action instead of a reply), `error`
+  (the agent raised), or `timeout` (the server cap fired). The
+  server is responsible for pairing; a `started` without a
+  `finished` is a bug.
+
+Both events route the existing `/events` (or `/admin/events`) stream
+and are scoped to the delegating user the same way
+`agent.message.appended` is. Web clients use them to render an
+in-log typing indicator — see §14 "Agent turn indicator".
+
+Compaction (below) is a **system operation, not a turn**; it does
+not emit turn events. Voice transcription (`voice.*`) runs before a
+turn and is surfaced by the mic affordance on the composer, also
+not by turn events. Off-app channels (§23) deliver messages but do
+not expose turn events — §23 explicitly excludes typing indicators
+from the first off-app release.
+
 ### Conversation compaction
 
 Both agents accumulate long chat histories. Token budget grows with
@@ -219,7 +255,7 @@ first," overridable per workspace.
 ## Agent preferences
 
 A seam for free-form, human-authored guidance that shapes how
-agents talk back — the crewday analogue of stacked `CLAUDE.md`
+agents talk back — the crew.day analogue of stacked `CLAUDE.md`
 files. Preferences are **soft** directives: they live alongside
 the structured §02 settings cascade (hard rules) and feed into
 the same LLM turns that the settings cascade already constrains.
@@ -415,7 +451,7 @@ textarea.
 
 The LLM plumbing is a three-layer registry modelled on the pattern in
 [`micasa-dev/fj2`](https://github.com/micasa-dev/fj2)'s `llm_providers`
-app, adapted to crewday's FastAPI + SQLAlchemy stack and semantic-CSS
+app, adapted to crew.day's FastAPI + SQLAlchemy stack and semantic-CSS
 front-end. All three tables are **deployment-scope**; workspaces never
 see these rows directly. Every table is edited from the `/admin/llm`
 graph (§ "LLM graph admin") or its CLI equivalents (§13).
@@ -480,7 +516,7 @@ llm_model
 
 ### Model capability tags
 
-Every `llm_model` row carries a `capabilities` array. Crewday's v1 set,
+Every `llm_model` row carries a `capabilities` array. crew.day's v1 set,
 chosen for the product's actual surface (no image generation, no
 dedicated embedding service yet, but audio-in is a real modality for
 `voice.transcribe`):
@@ -496,10 +532,10 @@ dedicated embedding service yet, but audio-in is a real modality for
 | `streaming`       | Supports incremental token streaming                                           |
 
 `image_generation` and `embedding` are intentionally **not** in the v1
-set — neither capability has a shipping consumer in crewday. They join
+set — neither capability has a shipping consumer in crew.day. They join
 the list the day a consumer lands.
 
-Every crewday capability in the catalog below carries a
+Every crew.day capability in the catalog below carries a
 `required_capabilities` list. Saving an `llm_assignment` whose
 `provider_model` resolves to a model missing one of the required tags
 returns `422 assignment_missing_capability` with the concrete diff.
@@ -705,7 +741,7 @@ redeploy. Overrides are deployment-wide.
 
 System prompts move from "files on disk" to a DB-backed library with
 **hash-self-seeding** — the pattern fj2 ships as `PromptTemplate`,
-adapted to crewday. Code still declares the default; the DB carries the
+adapted to crew.day. Code still declares the default; the DB carries the
 operator's customization. The hash reconciles the two.
 
 ```
@@ -1366,7 +1402,7 @@ for them.
 Code-shipped Markdown that explains how the agent should behave —
 the CLI cheat-sheet, what an `x-agent-confirm` card means, how to
 phrase a digest, how to react when the worker is on mobile, when to
-hand off to the manager. The crewday analogue of an `AGENTS.md`
+hand off to the manager. The crew.day analogue of an `AGENTS.md`
 that the agent itself reads.
 
 - Source files live under `app/agent_docs/*.md` in the codebase and

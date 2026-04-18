@@ -369,9 +369,11 @@ the platform must guarantee*.
 - **SSE-driven invalidation.** One `EventSource('/w/${slug}/events')`
   per active workspace, re-established on workspace switch. Events
   `task.updated`, `approval.resolved`, `expense.decided`,
-  `agent.message.appended`, and `agent.action.pending` drive
-  `queryClient.invalidateQueries(...)` scoped to the matching
-  `['w', slug, ...]` prefix. No polling.
+  `agent.message.appended`, `agent.action.pending`, and the
+  `agent.turn.{started,finished}` pair (§11) drive
+  `queryClient.invalidateQueries(...)` or direct
+  `setQueryData(...)` scoped to the matching `['w', slug, ...]`
+  prefix. No polling.
 - **Route-split bundles.** Worker and owner/manager entry points are
   separate. Shared routes (see route contract above) land in both
   bundles. Only manager-only operational surfaces (`/dashboard`,
@@ -384,6 +386,26 @@ the platform must guarantee*.
   confirmation card whose buttons call `/approvals/{id}/{decision}` —
   shared with the `/approvals` desk. Full flow and card-copy source in
   §11.
+- **Agent turn indicator.** While an `agent.turn.started` is
+  outstanding for the active thread (§11 "Agent turn lifecycle"),
+  every chat surface — the shared `.desk__agent` rail, the manager
+  mobile drawer, the worker full-screen `/chat`, and the
+  task-scoped chat under `/tasks/{id}/chat` — renders a single
+  non-interactive "typing" bubble in the log: three animated dots
+  styled as a `chat-msg--typing` / `agent-msg--typing` variant of
+  the regular agent bubble. The bubble carries a visually-hidden
+  `sr-only` label "Agent is typing" (routed through the i18n seam,
+  §18) so the existing `aria-live="polite"` log announces it; per
+  §"Accessibility" colour is not the sole indicator of state. The
+  client derives the visible state from SSE alone and clears the
+  bubble on any of: a matching `agent.turn.finished`, a new
+  `agent.message.appended` on the same scope, an
+  `agent.action.pending` on the same scope (the turn resolved into
+  an approval card, not a reply), an `EventSource` reconnect (stale
+  state from the dropped session), or a local 60-second timeout
+  (client-side safety net; the server should always pair its
+  events). The indicator is not focusable and not a click target;
+  it does not count toward the `chat-log` unread state.
 - **Agent preferences surface.** The `/settings` page exposes an
   "Agent preferences" section with the workspace blob (editor if
   the user passes `agent_prefs.edit_workspace`, otherwise a
@@ -491,7 +513,7 @@ WCAG 2.2 AA. Concretely:
   (`/w/<slug>/today`, `/w/<slug>/shifts/clock-in`,
   `/w/<slug>/my/expenses/new`); on multi-workspace devices the
   install prompt is offered per workspace, so each installs as a
-  distinct PWA with its own name (`Crewday — <workspace.name>`)
+  distinct PWA with its own name (`crew.day — <workspace.name>`)
   and icon. Icons at 192, 512, maskable.
 
 ## Native wrapper readiness
@@ -700,4 +722,4 @@ Reminders (§22) follow the usual agent-message delivery chain;
 clients silence them by unbinding WhatsApp (§23) or toggling the
 per-workspace `invoice_reminders.enabled` setting if they are
 admin on their own workspace. The agent sidebar is intentionally
-not mounted here: clients don't drive the crewday agent in v1.
+not mounted here: clients don't drive the crew.day agent in v1.

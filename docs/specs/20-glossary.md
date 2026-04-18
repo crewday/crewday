@@ -28,6 +28,14 @@ fix the offender.
   self-writable only. Reads are open to anyone with a grant on
   the scope (CLI/API); the UI restricts the editor to users
   with write access. See §11 "Agent preferences".
+- **Agent turn.** The span from a user message landing on an agent
+  endpoint until the agent produces the next observable outcome
+  for that thread — an appended message, a pending approval card,
+  or an error. Bracketed by the SSE pair
+  `agent.turn.started` / `agent.turn.finished`
+  (scope `employee | manager | admin | task`, §11 "Agent turn
+  lifecycle"). Web surfaces render a typing indicator while a turn
+  is in flight (§14 "Agent turn indicator").
 - **Agent knowledge tools.** The four chat-capability-only tools the
   embedded agents use to read content on demand: `list_system_docs`
   / `read_system_doc` for code-shipped operating manuals
@@ -340,7 +348,7 @@ fix the offender.
   `secret_envelope`; only a `display_stub` (IBAN last-4 + country,
   card last-4, wallet handle) is returned over the API. Creating,
   editing, or changing a default is always approval-gated for bearer
-  tokens (scoped and delegated) — crewday does not execute
+  tokens (scoped and delegated) — crew.day does not execute
   payments, but routing decisions are security-critical and treated
   accordingly.
 - **Payout snapshot.** The immutable `payout_snapshot_json` captured

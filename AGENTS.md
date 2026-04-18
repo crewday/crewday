@@ -13,13 +13,12 @@ the two disagree, this file wins.
 
 ## Environments
 
-- **Dev**: <https://dev.crew.day> is the dev version of the app,
-  served by the mocks container running locally on this host. It is
-  exposed through Pangolin + Traefik with badger auth (same wiring as
-  `../fj2`) and bound locally to `127.0.0.1:8100` (FastAPI mocks) and
-  `127.0.0.1:5173` (Vite HMR). Prefer the public URL end-to-end
-  (auth, cookies, CSP all match prod shape); use the loopback ports
-  for quick `curl` / Playwright runs from this host.
+- **Dev**: <https://dev.crew.day> is gated by Pangolin badger
+  forward-auth (it's the user's remote entry point — they're not on
+  this host). **Agents on this host can't pass badger** and must use
+  the loopback equivalent <http://127.0.0.1:8100>, which hits the
+  same Vite container with paths 1:1 (`/foo` ≡ `/foo`). Point
+  `curl`, Playwright, and scripted verification there.
 - **Production**: not yet deployed — there is no prod app code in
   this repo yet, only specs and mocks. See `docs/specs/19-roadmap.md`.
 - **Bring the dev stack up**: `docker compose -f mocks/docker-compose.yml up -d --build`.
@@ -213,7 +212,7 @@ its own plan mode — this is intentional.
 
 ## Issue tracking with Beads
 
-Crewday uses **Beads** (`bd` CLI) as its task queue. Non-trivial
+crew.day uses **Beads** (`bd` CLI) as its task queue. Non-trivial
 work — anything bigger than a typo, a one-line clarification, or an
 obvious same-file fix — should have a Beads issue so follow-ups don't
 get lost between sessions. Day-to-day tweaks can skip it.

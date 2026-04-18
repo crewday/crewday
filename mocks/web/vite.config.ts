@@ -82,8 +82,8 @@ export default defineConfig({
         ],
       },
       manifest: {
-        name: "crewday",
-        short_name: "crewday",
+        name: "crew.day",
+        short_name: "crew.day",
         theme_color: "#3F6E3B",
         background_color: "#FAF7F2",
         display: "standalone",

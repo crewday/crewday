@@ -1,7 +1,7 @@
-# Claude Code configuration for crewday
+# Claude Code configuration for crew.day
 
 This directory holds agent-development configuration for anyone operating on
-the crewday codebase with an AI coding tool (Claude Code, Codex, Cursor,
+the crew.day codebase with an AI coding tool (Claude Code, Codex, Cursor,
 OpenClaw, etc.).
 
 > Authoritative rules live in the top-level [`AGENTS.md`](../AGENTS.md).
@@ -10,7 +10,7 @@ OpenClaw, etc.).
 
 ## Status
 
-Crewday is **pre-implementation**. The repo currently contains specs only
+crew.day is **pre-implementation**. The repo currently contains specs only
 (see [`docs/specs/`](../docs/specs/)). The agents and skills here are sized
 for that reality: the most useful ones right now are `audit-spec`,
 `selfreview`, `director`, `gap-finder`, and `security-check` — all of which

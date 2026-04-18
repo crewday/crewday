@@ -1,4 +1,4 @@
-# crewday
+# crew.day
 
 A self-hosted, agent-first system for managing household and short-term-rental
 staff across one or more properties: maids, cooks, drivers, gardeners,
@@ -21,7 +21,7 @@ behind. Existing hotel PMS software assumes a hotel's org chart, a front desk,
 and a commercial chart of accounts. Household managers end up juggling
 WhatsApp groups, paper checklists, and spreadsheets.
 
-crewday starts from a different premise: **the operator is an LLM agent**,
+crew.day starts from a different premise: **the operator is an LLM agent**,
 and the humans (owner, head of house, staff) interact through the surfaces
 that are natural to them — a phone for the cleaner, an email digest for the
 owner, a REST API for the agent.

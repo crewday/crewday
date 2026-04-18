@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
+import { useAgentTyping } from "@/lib/agentTyping";
 import type { AgentMessage } from "@/types/api";
 import ChatLog from "@/components/chat/ChatLog";
 import ChatComposer from "@/components/chat/ChatComposer";
@@ -9,6 +10,7 @@ import ChatComposer from "@/components/chat/ChatComposer";
 export default function ChatPage() {
   const qc = useQueryClient();
   const [draft, setDraft] = useState("");
+  const typing = useAgentTyping("employee");
 
   const q = useQuery({
     queryKey: qk.agentEmployeeLog(),
@@ -51,6 +53,7 @@ export default function ChatPage() {
           messages={q.data}
           onDecideAction={(idx, decision) => decide.mutate({ idx, decision })}
           variant="screen"
+          typing={typing}
         />
       </section>
 

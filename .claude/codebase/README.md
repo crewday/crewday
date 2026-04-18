@@ -5,7 +5,7 @@ per logical slice — that agents read at the start of a session so they do
 not re-explore from scratch (see [`AGENTS.md`](../../AGENTS.md) §Session
 bootstrap).
 
-> Crewday is currently pre-implementation. There is no code to map yet.
+> crew.day is currently pre-implementation. There is no code to map yet.
 > When code lands, the first few files to write here are likely:
 >
 > - `app-layout.md` — package structure, entry points, import graph

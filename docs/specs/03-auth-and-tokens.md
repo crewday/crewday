@@ -351,7 +351,7 @@ only). The server:
    address only. The token payload carries `user_id` and
    `pending_new_email`; 15-min TTL; single-use.
 5. Sends an informational, link-free notice to the **old** address
-   ("Someone requested changing the email on your crewday account
+   ("Someone requested changing the email on your crew.day account
    to <masked-new>. If this wasn't you, contact your manager.")
    with the caller's IP prefix for provenance.
 6. Writes `auth.email_change_requested` with `actor_id`,

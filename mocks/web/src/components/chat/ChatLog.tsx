@@ -11,6 +11,9 @@ export interface ChatLogProps {
    *  flex:1 scroll-box behaviour so the log flows inside a regular page. */
   variant?: "screen" | "inline";
   ariaLabel?: string;
+  /** §14 "Agent turn indicator" — when true, renders a WhatsApp-style
+   *  typing pill (three animated dots) at the tail of the log. */
+  typing?: boolean;
 }
 
 export default function ChatLog({
@@ -18,6 +21,7 @@ export default function ChatLog({
   onDecideAction,
   variant = "screen",
   ariaLabel,
+  typing = false,
 }: ChatLogProps) {
   const logRef = useRef<HTMLDivElement>(null);
 
@@ -25,7 +29,7 @@ export default function ChatLog({
     if (variant !== "screen") return;
     const el = logRef.current;
     if (el) el.scrollTop = el.scrollHeight;
-  }, [messages?.length, variant]);
+  }, [messages?.length, typing, variant]);
 
   const className = variant === "inline" ? "chat-log chat-log--inline" : "chat-log";
 
@@ -71,6 +75,18 @@ export default function ChatLog({
           </div>
         );
       })}
+      {typing && (
+        <div className="chat-msg chat-msg--agent chat-msg--typing">
+          <span className="chat-msg__body">
+            <span className="chat-typing" aria-hidden="true">
+              <span className="chat-typing__dot" />
+              <span className="chat-typing__dot" />
+              <span className="chat-typing__dot" />
+            </span>
+            <span className="sr-only">Agent is typing</span>
+          </span>
+        </div>
+      )}
     </div>
   );
 }

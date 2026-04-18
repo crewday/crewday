@@ -1374,15 +1374,36 @@ export interface AssetDetailPayload {
 // SSE event shapes. The server emits JSON-serialised payloads under
 // different event names; the SseContext dispatches on `event` and
 // feeds `data` into TanStack Query invalidations.
+export type AgentTurnScope = "employee" | "manager" | "admin" | "task";
+
 export type SseEvent =
   | { event: "tick"; data: { now: string } }
   | {
       event: "agent.message.appended";
       data: {
-        scope: "employee" | "manager" | "task";
+        scope: "employee" | "manager" | "admin" | "task";
         /** Present when `scope === "task"`; identifies which task the message belongs to. */
         task_id?: string;
         message: AgentMessage;
+      };
+    }
+  | {
+      // §11 "Agent turn lifecycle" — bracket the server-side agent turn
+      // so clients can render the typing indicator (§14).
+      event: "agent.turn.started";
+      data: {
+        scope: AgentTurnScope;
+        task_id?: string;
+        started_at: string;
+      };
+    }
+  | {
+      event: "agent.turn.finished";
+      data: {
+        scope: AgentTurnScope;
+        task_id?: string;
+        finished_at: string;
+        outcome: "replied" | "action" | "error" | "timeout";
       };
     }
   | { event: "task.updated"; data: { task: Task } }
