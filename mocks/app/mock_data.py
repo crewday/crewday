@@ -348,6 +348,7 @@ class Employee:
     user_id: str = ""  # v1 — FK into USERS
     work_engagement_id: str = ""  # v1 — FK into WORK_ENGAGEMENTS
     workspace_id: str = ""  # v1 — home workspace for this engagement
+    avatar_file_id: str | None = None  # §02, §12 — mirrors User.avatar_file_id for the compat projection
 
 
 @dataclass
@@ -3278,3 +3279,65 @@ def _backfill_tasks() -> None:
 
 
 _backfill_tasks()
+
+
+# ── Avatar store (§02 `file`, §12 POST /me/avatar) ─────────────────
+# The mock keeps uploaded avatar bytes in memory. In production this
+# would be a `file` row + blob on disk / S3 (§15). Here we just map
+# `file_id -> (bytes, mime_type)` and expose the bytes via
+# `GET /api/v1/files/{id}/blob`.
+
+AVATAR_BYTES: dict[str, tuple[bytes, str]] = {}
+_AVATAR_SEQ = 0
+
+
+def _next_avatar_file_id() -> str:
+    global _AVATAR_SEQ
+    _AVATAR_SEQ += 1
+    return f"f-avatar-{_AVATAR_SEQ:04d}"
+
+
+def set_user_avatar(user_id: str, image_bytes: bytes, mime_type: str) -> str | None:
+    """Store avatar bytes for `user_id`. Returns the previous file_id
+    (to let the caller emit a before/after audit event), or None when
+    no prior avatar was set.
+
+    Keeps the compat `Employee.avatar_file_id` in sync with the
+    authoritative `User.avatar_file_id` so employee-shaped serialisers
+    pick up the change without extra work.
+    """
+    user = user_by_id(user_id)
+    if user is None:
+        return None
+    previous = user.avatar_file_id
+    new_id = _next_avatar_file_id()
+    AVATAR_BYTES[new_id] = (image_bytes, mime_type)
+    user.avatar_file_id = new_id
+    for emp in EMPLOYEES:
+        if emp.user_id == user_id:
+            emp.avatar_file_id = new_id
+    if previous and previous in AVATAR_BYTES:
+        AVATAR_BYTES.pop(previous, None)
+    return previous
+
+
+def clear_user_avatar(user_id: str) -> str | None:
+    """Clear `users.avatar_file_id`; returns the previous file_id."""
+    user = user_by_id(user_id)
+    if user is None:
+        return None
+    previous = user.avatar_file_id
+    user.avatar_file_id = None
+    for emp in EMPLOYEES:
+        if emp.user_id == user_id:
+            emp.avatar_file_id = None
+    if previous and previous in AVATAR_BYTES:
+        AVATAR_BYTES.pop(previous, None)
+    return previous
+
+
+def avatar_url_for_file_id(file_id: str | None) -> str | None:
+    """Public URL clients drop into `<img src>` (§12)."""
+    if not file_id:
+        return None
+    return f"/api/v1/files/{file_id}/blob"

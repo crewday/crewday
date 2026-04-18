@@ -279,7 +279,11 @@ versa.
 Users whose highest surface grant in a scope is `worker` see only:
 
 - Their own profile (read + limited update: display name, avatar,
-  timezone, emergency contact, language).
+  timezone, emergency contact, language). Avatar uploads go
+  through `POST /me/avatar` (§12) and are **self-only** — a
+  manager can rename an employee but cannot replace their face.
+  Clearing the avatar reverts to the initials circle computed
+  from `display_name`.
 - Tasks assigned to them, plus unassigned tasks at properties in
   their scope that match their `user_work_role`s.
 - Instructions scoped to those properties/areas/global (read-only).

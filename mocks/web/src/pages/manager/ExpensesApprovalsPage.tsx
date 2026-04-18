@@ -98,7 +98,7 @@ export default function ExpensesApprovalsPage() {
             return (
               <li key={x.id} className={cls}>
                 <div className="approval__head">
-                  {emp && <Avatar initials={emp.avatar_initials} size="xs" />}
+                  {emp && <Avatar url={emp.avatar_url} initials={emp.avatar_initials} size="xs" alt={emp.name} />}
                   <strong>{emp?.name}</strong>
                   <Chip tone="ghost" size="sm">{x.merchant}</Chip>
                   {x.ocr_confidence !== null ? (
@@ -172,7 +172,7 @@ export default function ExpensesApprovalsPage() {
               return (
                 <tr key={x.id}>
                   <td>
-                    {emp && <><Avatar initials={emp.avatar_initials} size="xs" /> {emp.name}</>}
+                    {emp && <><Avatar url={emp.avatar_url} initials={emp.avatar_initials} size="xs" alt={emp.name} /> {emp.name}</>}
                   </td>
                   <td>{x.merchant}<div className="table__sub">{x.note}</div></td>
                   <td className="mono">{formatMoney(x.amount_cents, x.currency)}</td>

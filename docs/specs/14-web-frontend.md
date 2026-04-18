@@ -257,6 +257,32 @@ the platform must guarantee*.
   expose binding-management pages, phone-number linking, or provider
   configuration as active product surfaces. When those adapters are
   revisited, §23 remains the reference design.
+- **Avatar editor on `/me`.** Clicking the large avatar on `/me`
+  opens an in-modal editor (native `<dialog>`, same pattern as the
+  new-task modal). The modal accepts an image from a file picker
+  (`<input type=file accept="image/*">`) or, on mobile, the front
+  camera (`capture="user"`). Selected image renders inside a
+  circular viewport the user pans (pointer-drag) and zooms
+  (range slider, pinch on touch). The stage sizes responsively
+  (`min(320px, 86vw)` wide, 1:1 aspect) and pan/scale math is
+  stage-pixel relative, so the crop is correct at any width.
+  Below 640 px the dialog promotes to a full-height sheet
+  (`.modal--sheet` class, 100 vw × 100 dvh, safe-area inset
+  padding, action row anchored to the bottom) — tapping a
+  32-pixel handle on the phone shouldn't compete with the
+  stage for space. Save serialises the crop box to a 512×512
+  WebP via an offscreen `<canvas>` and POSTs
+  `multipart/form-data` to `/api/v1/me/avatar`; the server
+  re-crops authoritatively from the original bytes + crop-box
+  form fields (see §12). Cancel closes without writing. A
+  "Remove photo" action (visible only when an avatar is set)
+  calls `DELETE /api/v1/me/avatar`. The `<Avatar />` component
+  renders an `<img>` at the configured size when `avatar_url`
+  is present, else the initials circle; every site that shows
+  a user (lists, tables, nav footer) goes through this
+  component so a single upload updates every surface after the
+  `me` / `employees` query invalidates. No presentational
+  classes on the `<img>` — the circular crop lives on `.avatar`.
 
 ## Accessibility (v1 gate)
 

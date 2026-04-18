@@ -83,6 +83,11 @@ def _encode(obj: Any) -> Any:
         out = {k: _encode(v) for k, v in asdict(obj).items()}
         out["next_due_on"] = _encode(_asset_action_next_due(obj))
         return out
+    if isinstance(obj, (md.Employee, md.User)):
+        # `avatar_url` is derived from `avatar_file_id` on read (§12).
+        out = {k: _encode(v) for k, v in asdict(obj).items()}
+        out["avatar_url"] = md.avatar_url_for_file_id(obj.avatar_file_id)
+        return out
     if is_dataclass(obj) and not isinstance(obj, type):
         return {k: _encode(v) for k, v in asdict(obj).items()}
     if isinstance(obj, (list, tuple)):
@@ -274,6 +279,79 @@ async def api_me_agent_approval_mode_set(request: Request) -> Response:
         {"user_id": user.id, "old_mode": old_mode, "new_mode": new_mode},
     )
     return ok({"mode": user.agent_approval_mode})
+
+
+# ── Avatar (§12 POST/DELETE /me/avatar, GET /files/{id}/blob) ────────
+
+AVATAR_MIME_TYPES = {"image/png", "image/jpeg", "image/webp", "image/heic"}
+AVATAR_MAX_BYTES = 10 * 1024 * 1024  # §15 images default
+
+
+@app.post("/api/v1/me/avatar")
+async def api_me_avatar_set(request: Request) -> Response:
+    """Accept a cropped image from the /me editor (§14) and store it.
+
+    The production server re-encodes to 512×512 WebP with EXIF stripped
+    (§15). The mock trusts the client-side crop, keeps the submitted
+    bytes as-is, and surfaces them via `/api/v1/files/{id}/blob`.
+    """
+    user = md.user_by_id(current_user_id(request))
+    if user is None:
+        return ok({"error": "not_found"}, status_code=404)
+
+    form = await request.form()
+    image = form.get("image")
+    if image is None or not hasattr(image, "read"):
+        return ok({"error": "image_required"}, status_code=422)
+
+    mime = (getattr(image, "content_type", None) or "").lower()
+    if mime not in AVATAR_MIME_TYPES:
+        return ok(
+            {"error": "unsupported_mime", "allowed": sorted(AVATAR_MIME_TYPES)},
+            status_code=415,
+        )
+
+    data = await image.read()
+    if len(data) > AVATAR_MAX_BYTES:
+        return ok({"error": "too_large", "max_bytes": AVATAR_MAX_BYTES}, status_code=413)
+
+    before_file_id = md.set_user_avatar(user.id, data, mime)
+    hub.publish(
+        "user.avatar_changed",
+        {
+            "user_id": user.id,
+            "before_file_id": before_file_id,
+            "after_file_id": user.avatar_file_id,
+        },
+    )
+    return ok({"user": user, "avatar_url": md.avatar_url_for_file_id(user.avatar_file_id)})
+
+
+@app.delete("/api/v1/me/avatar")
+def api_me_avatar_clear(request: Request) -> Response:
+    user = md.user_by_id(current_user_id(request))
+    if user is None:
+        return ok({"error": "not_found"}, status_code=404)
+    before_file_id = md.clear_user_avatar(user.id)
+    hub.publish(
+        "user.avatar_changed",
+        {"user_id": user.id, "before_file_id": before_file_id, "after_file_id": None},
+    )
+    return ok({"user": user, "avatar_url": None})
+
+
+@app.get("/api/v1/files/{file_id}/blob")
+def api_file_blob(file_id: str) -> Response:
+    """Serve stored file bytes (mock scope: avatars only)."""
+    entry = md.AVATAR_BYTES.get(file_id)
+    if entry is None:
+        return JSONResponse({"detail": "not found"}, status_code=404)
+    data, mime = entry
+    return Response(
+        content=data,
+        media_type=mime,
+        headers={"Cache-Control": "private, max-age=60"},
+    )
 
 
 # ── Agent preferences (§11) ──────────────────────────────────────────

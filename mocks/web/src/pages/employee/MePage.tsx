@@ -1,5 +1,7 @@
+import { useState } from "react";
 import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
+import { Pencil } from "lucide-react";
 import { fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
 import { fmtDate, fmtTime } from "@/lib/dates";
@@ -8,6 +10,7 @@ import { Chip, Loading } from "@/components/common";
 import AgentApprovalModePanel from "@/components/AgentApprovalModePanel";
 import AgentPreferencesPanel from "@/components/AgentPreferencesPanel";
 import AppearancePanel from "@/components/AppearancePanel";
+import AvatarEditor from "@/components/AvatarEditor";
 import ChatChannelsMeCard from "@/components/ChatChannelsMeCard";
 import type { Leave, Me } from "@/types/api";
 
@@ -39,6 +42,7 @@ const DAYS: [string, string][] = [
 ];
 
 export default function MePage() {
+  const [editorOpen, setEditorOpen] = useState(false);
   const me = useQuery({
     queryKey: qk.me(),
     queryFn: () => fetchJson<Me>("/api/v1/me"),
@@ -76,7 +80,21 @@ export default function MePage() {
     <section className="me-page">
       <section className="panel">
         <div className="profile-card">
-          <div className="avatar avatar--xl">{employee.avatar_initials}</div>
+          <button
+            type="button"
+            className="avatar-trigger"
+            onClick={() => setEditorOpen(true)}
+            aria-label="Change profile photo"
+          >
+            <span className="avatar avatar--xl">
+              {employee.avatar_url
+                ? <img className="avatar__img" src={employee.avatar_url} alt={employee.name} />
+                : employee.avatar_initials}
+            </span>
+            <span className="avatar-trigger__edit" aria-hidden="true">
+              <Pencil size={12} strokeWidth={2.5} />
+            </span>
+          </button>
           <div>
             <h2 className="profile-card__name">{employee.name}</h2>
             <div className="profile-card__roles">
@@ -233,6 +251,13 @@ export default function MePage() {
           <Chip tone="ghost" size="sm">View</Chip>
         </Link>
       </section>
+
+      <AvatarEditor
+        open={editorOpen}
+        onClose={() => setEditorOpen(false)}
+        currentUrl={employee.avatar_url}
+        userName={employee.name}
+      />
     </section>
   );
 }

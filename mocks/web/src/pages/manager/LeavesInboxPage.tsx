@@ -72,7 +72,7 @@ export default function LeavesInboxPage() {
               return (
                 <tr key={lv.id}>
                   <td>
-                    {emp && <><Avatar initials={emp.avatar_initials} size="xs" /> {emp.name}</>}
+                    {emp && <><Avatar url={emp.avatar_url} initials={emp.avatar_initials} size="xs" alt={emp.name} /> {emp.name}</>}
                   </td>
                   <td className="mono">{fmtDate(lv.starts_on)} → {fmtDate(lv.ends_on)}</td>
                   <td>{rangeDays(lv.starts_on, lv.ends_on)}</td>
@@ -113,7 +113,7 @@ export default function LeavesInboxPage() {
               return (
                 <tr key={lv.id}>
                   <td>
-                    {emp && <><Avatar initials={emp.avatar_initials} size="xs" /> {emp.name}</>}
+                    {emp && <><Avatar url={emp.avatar_url} initials={emp.avatar_initials} size="xs" alt={emp.name} /> {emp.name}</>}
                   </td>
                   <td className="mono">{fmtDate(lv.starts_on)} → {fmtDate(lv.ends_on)}</td>
                   <td><Chip tone="ghost" size="sm">{lv.category}</Chip></td>

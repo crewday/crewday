@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import { fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
 import DeskPage from "@/components/DeskPage";
-import { Chip, Loading } from "@/components/common";
+import { Avatar, Chip, Loading } from "@/components/common";
 import { fmtTime } from "@/lib/dates";
 import type { Employee, Property } from "@/types/api";
 
@@ -56,7 +56,7 @@ export default function EmployeesPage() {
           <tbody>
             {employees.map((e) => (
               <tr key={e.id}>
-                <td><div className="avatar avatar--md">{e.avatar_initials}</div></td>
+                <td><Avatar url={e.avatar_url} initials={e.avatar_initials} size="md" alt={e.name} /></td>
                 <td>
                   <Link className="link" to={"/employee/" + e.id}>{e.name}</Link>
                 </td>

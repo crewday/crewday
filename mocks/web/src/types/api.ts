@@ -30,6 +30,8 @@ export interface Employee {
   roles: string[];
   properties: string[];
   avatar_initials: string;
+  avatar_file_id: string | null;
+  avatar_url: string | null;
   phone: string;
   email: string;
   started_on: string;

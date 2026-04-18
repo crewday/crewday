@@ -86,7 +86,7 @@ export default function PayPage() {
               return (
                 <tr key={p.id}>
                   <td>
-                    {emp && <><Avatar initials={emp.avatar_initials} size="xs" /> {emp.name}</>}
+                    {emp && <><Avatar url={emp.avatar_url} initials={emp.avatar_initials} size="xs" alt={emp.name} /> {emp.name}</>}
                   </td>
                   <td className="mono">{p.hours} h</td>
                   <td className="mono">{p.overtime} h</td>

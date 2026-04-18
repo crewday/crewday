@@ -39,8 +39,13 @@ export async function fetchJson<T>(path: string, opts: FetchOpts = {}): Promise<
     signal: opts.signal,
   };
   if (opts.body !== undefined) {
-    headers["Content-Type"] = "application/json";
-    init.body = JSON.stringify(opts.body);
+    if (opts.body instanceof FormData) {
+      // Let the browser set the multipart boundary on Content-Type.
+      init.body = opts.body;
+    } else {
+      headers["Content-Type"] = "application/json";
+      init.body = JSON.stringify(opts.body);
+    }
   }
   if (method !== "GET") {
     const csrf = readCookie(CSRF_COOKIE);

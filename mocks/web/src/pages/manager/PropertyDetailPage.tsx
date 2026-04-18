@@ -232,7 +232,7 @@ export default function PropertyDetailPage() {
                     <span className="task-row__assignee">
                       {emp && (
                         <>
-                          <Avatar initials={emp.avatar_initials} size="xs" />{" "}
+                          <Avatar url={emp.avatar_url} initials={emp.avatar_initials} size="xs" alt={emp.name} />{" "}
                           {emp.name.split(" ")[0]}
                         </>
                       )}

@@ -334,6 +334,9 @@ POST   /users/{id}/archive
 POST   /users/{id}/reinstate
 POST   /users/{id}/magic_link
 
+POST   /me/avatar                 # multipart; self-only; replaces users.avatar_file_id
+DELETE /me/avatar                 # self-only; clears avatar_file_id → initials fallback
+
 GET    /users/{id}/role_grants
 POST   /role_grants
 PATCH  /role_grants/{id}
@@ -667,6 +670,55 @@ entity). v1 ships the `local` driver only, writing under
 `$CREWDAY_DATA_DIR/files/{workspace_id}/{sha256[0:2]}/{sha256[2:4]}/{sha256}`.
 Setting `CREWDAY_STORAGE=s3` (recipe B) routes to the S3/MinIO
 driver. API callers never see the storage path — only the ULID.
+
+`GET /files/{id}/blob` is authorized per the file's attach site:
+a file referenced by `users.avatar_file_id` is readable by any
+authenticated user who can see that user's `display_name` (so
+avatars render everywhere the user appears). Task / expense /
+issue attachments stay gated by their owning resource's ACL.
+
+### Avatar upload (`POST /me/avatar`)
+
+Convenience endpoint for the /me avatar editor (§14). One call
+replaces the two-step "upload file, then PATCH user". Self only;
+managers cannot set another user's avatar.
+
+- **Request.** `multipart/form-data` with a single `image` part.
+  Accepts `image/png`, `image/jpeg`, `image/webp`, `image/heic`
+  (sniffed, not trusted). Max 10 MB (§15).
+- **Server processing.** Decode, re-encode as 512×512 WebP with
+  the submitted crop box applied (see §14 for the client-side
+  crop payload — sent as additional form fields `crop_x`,
+  `crop_y`, `crop_size` in source-image pixels; the server
+  re-crops authoritatively). EXIF stripped per §15. Any
+  `retain_exif` workspace override does **not** apply to avatars.
+- **Persistence.** New `file` row; previous `avatar_file_id`
+  soft-deleted (`deleted_at`). `users.avatar_file_id` updated in
+  the same transaction.
+- **Audit.** Emits `user.avatar_changed` with
+  `{before_file_id, after_file_id}`.
+- **Response.** `200` with the updated `user` serialisation
+  including `avatar_url` (see below).
+
+`DELETE /me/avatar` clears `avatar_file_id` (soft-deletes the
+previous `file` row), emits `user.avatar_changed` with
+`after_file_id = null`, and returns the updated user.
+
+### `avatar_url` in user serialisations
+
+Wherever the API returns a user (`/me`, `/users`,
+`/employees`, embeds in `/tasks`, …), the payload includes an
+`avatar_url` field:
+
+- `null` when `avatar_file_id is null`.
+- Otherwise a deployment-relative path (`/api/v1/files/{id}/blob`)
+  the client can drop straight into an `<img src>`. No signed
+  URLs in v1 — auth is cookie-based and the endpoint enforces
+  visibility server-side.
+
+`avatar_initials` stays as the fallback string for the
+no-avatar case; clients render the image when `avatar_url` is
+present and the initials circle otherwise.
 
 ### Clients, work orders, invoices (§22)
 

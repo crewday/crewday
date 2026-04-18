@@ -90,7 +90,7 @@ export default function DashboardPage() {
                     <td><strong>{t.title}</strong><div className="table__sub">{t.area}</div></td>
                     <td>{prop && <Chip tone={prop.color} size="sm">{prop.name}</Chip>}</td>
                     <td>
-                      {emp && <><Avatar initials={emp.avatar_initials} size="xs" /> {emp.name.split(" ")[0]}</>}
+                      {emp && <><Avatar url={emp.avatar_url} initials={emp.avatar_initials} size="xs" alt={emp.name} /> {emp.name.split(" ")[0]}</>}
                     </td>
                     <td><Chip tone={TASK_STATUS_TONE[t.status]} size="sm">{t.status.replace("_", " ")}</Chip></td>
                   </tr>

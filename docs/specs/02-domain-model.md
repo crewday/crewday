@@ -420,7 +420,7 @@ properties, or organizations they are connected to.
 | full_legal_name     | text?     | visible only on scopes where the viewer has `manager` or `owner` grant; redacted from `worker` and `client` views |
 | email               | text      | globally unique across the deployment; used for magic links and digest emails |
 | phone_e164          | text?     | manager/owner-visible only                                        |
-| avatar_file_id      | ULID FK?  | `file.id`                                                         |
+| avatar_file_id      | ULID FK?  | `file.id`; square 512×512 WebP with EXIF stripped (§15). Self-writable only via `POST /me/avatar` (§12); managers cannot set another user's avatar. NULL → the UI falls back to the initials circle (computed from `display_name`). Every change writes `user.avatar_changed` to `audit_log`. |
 | timezone            | text      | user's default; property/workspace context may override for display |
 | languages           | text[]    | BCP-47 spoken; informational                                      |
 | preferred_locale    | text?     | BCP-47 locale tag; formatting override (§18)                      |

@@ -32,6 +32,7 @@ export type SideNavItem = SideNavLinkItem | SideNavSectionItem;
 
 interface SideNavFooter {
   initials: string;
+  avatarUrl?: string | null;
   name: string;
   role: string;
 }
@@ -82,7 +83,11 @@ export default function SideNav({
       {action && <div className="desk__nav-action">{action}</div>}
       {footer && (
         <div className="desk__me">
-          <div className="avatar avatar--md">{footer.initials}</div>
+          <span className="avatar avatar--md">
+            {footer.avatarUrl
+              ? <img className="avatar__img" src={footer.avatarUrl} alt={footer.name} />
+              : footer.initials}
+          </span>
           <div>
             <div className="desk__me-name">{footer.name}</div>
             <div className="desk__me-role">{footer.role}</div>

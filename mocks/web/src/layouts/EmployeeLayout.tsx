@@ -92,6 +92,7 @@ export default function EmployeeLayout() {
         action={clockButton}
         footer={{
           initials: footerInitials,
+          avatarUrl: data?.employee.avatar_url ?? null,
           name: footerName,
           role: footerRole,
         }}

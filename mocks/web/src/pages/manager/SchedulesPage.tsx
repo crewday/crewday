@@ -68,7 +68,7 @@ export default function SchedulesPage() {
                   <td className="table__sub">{s.rrule_human}</td>
                   <td>
                     {emp ? (
-                      <><Avatar initials={emp.avatar_initials} size="xs" /> {emp.name.split(" ")[0]}</>
+                      <><Avatar url={emp.avatar_url} initials={emp.avatar_initials} size="xs" alt={emp.name} /> {emp.name.split(" ")[0]}</>
                     ) : "—"}
                   </td>
                   <td className="mono">{s.duration_minutes} min</td>

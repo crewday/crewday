@@ -284,7 +284,9 @@ See §03 for ceremonies. Additional hardening:
   - MIME sniffed server-side; we trust the sniff, not the header.
   - Image re-encoding: uploaded JPEGs are re-encoded to strip EXIF
     and GPS unless the workspace sets `retain_exif=true` on that
-    purpose.
+    purpose. **Avatars (`users.avatar_file_id`) always strip EXIF,
+    regardless of the workspace override**, and are normalised to
+    a 512×512 WebP (§12 `POST /me/avatar`).
   - PDFs are not re-encoded but are scanned for embedded scripts via
     a small `pdfid` wrapper; scripted PDFs are rejected.
 - SQL via SQLAlchemy ORM; no string concat.

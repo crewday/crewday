@@ -73,12 +73,22 @@ export function FilterChipGroup<T extends string>({
 
 export function Avatar({
   initials,
+  url,
   size = "md",
+  alt,
 }: {
   initials: string;
+  url?: string | null;
   size?: "xs" | "sm" | "md" | "xl";
+  alt?: string;
 }) {
-  return <span className={"avatar avatar--" + size}>{initials}</span>;
+  return (
+    <span className={"avatar avatar--" + size}>
+      {url
+        ? <img className="avatar__img" src={url} alt={alt ?? initials} />
+        : initials}
+    </span>
+  );
 }
 
 export function Panel({

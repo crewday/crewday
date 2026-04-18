@@ -84,6 +84,12 @@ fix the offender.
   (e.g. "Air conditioner", "Pool pump"). System-seeded types ship
   with default maintenance actions; managers add workspace-custom
   types. See §21.
+- **Avatar.** Profile photo stored on `users.avatar_file_id` —
+  a 512×512 WebP with EXIF stripped (§15), uploaded via
+  `POST /me/avatar` (§12). Self-only: managers cannot set another
+  user's avatar. When NULL, the UI renders an initials circle
+  derived from `display_name`. Visible wherever `display_name` is
+  visible.
 - **Assignment.** The linkage of a user to a work_role+property
   (`property_work_role_assignment`) and, per task, the pointer
   `task.assigned_user_id`. There is no separate `task_assignment`
