@@ -4,6 +4,7 @@ import { fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
 import { formatMoney } from "@/lib/money";
 import { fmtDate, fmtDateTime } from "@/lib/dates";
+import { cap } from "@/lib/strings";
 import { Loading } from "@/components/common";
 import type { HistoryPayload, Property } from "@/types/api";
 
@@ -18,10 +19,6 @@ const TABS: [Tab, string][] = [
 
 function isTab(v: string): v is Tab {
   return v === "tasks" || v === "chats" || v === "expenses" || v === "leaves";
-}
-
-function cap(s: string): string {
-  return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
 export default function HistoryPage() {

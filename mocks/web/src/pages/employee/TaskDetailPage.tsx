@@ -4,8 +4,11 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
 import { Chip, Loading } from "@/components/common";
+import AutoGrowTextarea from "@/components/AutoGrowTextarea";
 import ChatLog from "@/components/chat/ChatLog";
 import ChatComposer from "@/components/chat/ChatComposer";
+import { fmtTime } from "@/lib/dates";
+import { cap } from "@/lib/strings";
 import type { AgentMessage, Instruction, Property, Task } from "@/types/api";
 
 interface TaskPayload {
@@ -23,10 +26,6 @@ const STATUS_TONE: Record<Task["status"], "moss" | "sky" | "ghost" | "rust"> = {
   cancelled: "rust",
   overdue: "rust",
 };
-
-function hhmm(iso: string): string {
-  return new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-}
 
 export default function TaskDetailPage() {
   const { tid = "" } = useParams();
@@ -181,7 +180,7 @@ export default function TaskDetailPage() {
         </div>
         <h2 className="task-detail__title">{task.title}</h2>
         <div className="task-detail__meta">
-          {hhmm(task.scheduled_start)} · est. {task.estimated_minutes} min
+          {fmtTime(task.scheduled_start)} · est. {task.estimated_minutes} min
         </div>
       </header>
 
@@ -275,8 +274,7 @@ export default function TaskDetailPage() {
           <p className="modal__sub">Give a quick reason so the manager knows. It'll go in the audit log.</p>
           <label className="field">
             <span>Reason</span>
-            <textarea
-              rows={3}
+            <AutoGrowTextarea
               required
               placeholder="e.g. Guest still in the room — came back early from their day."
               value={skipReason}
@@ -297,8 +295,4 @@ export default function TaskDetailPage() {
       </dialog>
     </section>
   );
-}
-
-function cap(s: string): string {
-  return s.charAt(0).toUpperCase() + s.slice(1);
 }

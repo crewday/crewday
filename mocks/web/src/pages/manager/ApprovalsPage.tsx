@@ -3,6 +3,7 @@ import { fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
 import DeskPage from "@/components/DeskPage";
 import { Chip, EmptyState, Loading } from "@/components/common";
+import { fmtTime } from "@/lib/dates";
 import type { ApprovalRequest } from "@/types/api";
 
 const RISK_TONE: Record<ApprovalRequest["risk"], "sky" | "sand" | "rust"> = {
@@ -10,10 +11,6 @@ const RISK_TONE: Record<ApprovalRequest["risk"], "sky" | "sand" | "rust"> = {
   medium: "sand",
   high: "rust",
 };
-
-function hhmm(iso: string): string {
-  return new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-}
 
 export default function ApprovalsPage() {
   const qc = useQueryClient();
@@ -59,7 +56,7 @@ export default function ApprovalsPage() {
               <div className="approval__head">
                 <Chip tone="ghost" size="sm">{a.agent}</Chip>
                 <Chip tone={RISK_TONE[a.risk]} size="sm">{a.risk} risk</Chip>
-                <span className="approval__time">requested {hhmm(a.requested_at)}</span>
+                <span className="approval__time">requested {fmtTime(a.requested_at)}</span>
               </div>
               <div className="approval__title"><strong>{a.action}</strong> — {a.target}</div>
               <p className="approval__reason">{a.reason}</p>

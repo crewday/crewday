@@ -4,11 +4,8 @@ import { fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
 import DeskPage from "@/components/DeskPage";
 import { Chip, Loading } from "@/components/common";
+import { fmtTime } from "@/lib/dates";
 import type { Employee, Property } from "@/types/api";
-
-function hhmm(iso: string): string {
-  return new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-}
 
 export default function EmployeesPage() {
   const empsQ = useQuery({
@@ -78,7 +75,7 @@ export default function EmployeesPage() {
                 <td className="table__mono">{e.phone}</td>
                 <td>
                   {e.clocked_in_at ? (
-                    <Chip tone="moss" size="sm">On shift · {hhmm(e.clocked_in_at)}</Chip>
+                    <Chip tone="moss" size="sm">On shift · {fmtTime(e.clocked_in_at)}</Chip>
                   ) : (
                     <Chip tone="ghost" size="sm">Off shift</Chip>
                   )}

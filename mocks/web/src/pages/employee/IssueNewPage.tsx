@@ -4,6 +4,8 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
 import { Loading } from "@/components/common";
+import AutoGrowTextarea from "@/components/AutoGrowTextarea";
+import { cap } from "@/lib/strings";
 import type { Issue, Property } from "@/types/api";
 
 type Category = "damage" | "broken" | "supplies" | "safety" | "other";
@@ -16,10 +18,6 @@ const SEVERITIES: [Severity, string][] = [
   ["high", "High — unsafe or guest-facing"],
   ["urgent", "Urgent — needs action today"],
 ];
-
-function cap(s: string): string {
-  return s.charAt(0).toUpperCase() + s.slice(1);
-}
 
 interface NewIssueBody {
   title: string;
@@ -155,9 +153,8 @@ export default function IssueNewPage() {
 
         <label className="field">
           <span>What happened?</span>
-          <textarea
+          <AutoGrowTextarea
             name="body"
-            rows={4}
             placeholder="What you saw, what you tried, anything the manager should know."
             value={body}
             onChange={(e) => setBody(e.target.value)}

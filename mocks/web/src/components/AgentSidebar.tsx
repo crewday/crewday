@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
 import { persistAgentCollapsed, readAgentCollapsedCookie } from "@/lib/preferences";
+import AutoGrowTextarea from "@/components/AutoGrowTextarea";
 import type { AgentAction, AgentMessage } from "@/types/api";
 
 // CRITICAL: AgentSidebar MUST mount as a SIBLING of <Outlet /> in
@@ -167,8 +168,9 @@ export default function AgentSidebar({ mobileOpen = false, onMobileClose }: Agen
 
         <form className="agent-composer" onSubmit={handleSend}>
           <div className="agent-composer__field">
-            <textarea
+            <AutoGrowTextarea
               rows={1}
+              maxHeight={140}
               placeholder="Ask the agent…"
               aria-label="Message agent"
               value={draft}

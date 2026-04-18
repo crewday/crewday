@@ -1,4 +1,5 @@
 import { useRef } from "react";
+import AutoGrowTextarea from "@/components/AutoGrowTextarea";
 
 export interface ChatComposerProps {
   value: string;
@@ -21,16 +22,10 @@ export default function ChatComposer({
 }: ChatComposerProps) {
   const textRef = useRef<HTMLTextAreaElement>(null);
 
-  const autogrow = (el: HTMLTextAreaElement) => {
-    el.style.height = "auto";
-    el.style.height = Math.min(el.scrollHeight, 140) + "px";
-  };
-
   const submit = () => {
     const trimmed = value.trim();
     if (!trimmed) return;
     onSubmit(trimmed);
-    if (textRef.current) textRef.current.style.height = "auto";
   };
 
   return (
@@ -45,13 +40,14 @@ export default function ChatComposer({
         </svg>
       </button>
       <div className="chat-composer__field">
-        <textarea
+        <AutoGrowTextarea
           ref={textRef}
           rows={1}
+          maxHeight={140}
           placeholder={placeholder}
           aria-label={ariaLabel}
           value={value}
-          onChange={(e) => { onChange(e.target.value); autogrow(e.currentTarget); }}
+          onChange={(e) => onChange(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === "Enter" && !e.shiftKey) {
               e.preventDefault();

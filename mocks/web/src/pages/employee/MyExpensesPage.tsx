@@ -5,6 +5,7 @@ import { qk } from "@/lib/queryKeys";
 import { formatMoney } from "@/lib/money";
 import { fmtDate } from "@/lib/dates";
 import { Chip, Loading } from "@/components/common";
+import AutoGrowTextarea from "@/components/AutoGrowTextarea";
 import type { Expense, ExpenseCategory, ExpenseScanResult, ExpenseStatus } from "@/types/api";
 
 type ScanPhase = "upload" | "processing" | "review" | "submitted";
@@ -226,8 +227,7 @@ export default function MyExpensesPage() {
                   <span className="chat-msg__body">{agentQuestion}</span>
                 </div>
                 <div className="comment__compose">
-                  <textarea
-                    rows={2}
+                  <AutoGrowTextarea
                     placeholder="Your reply..."
                     value={agentReply}
                     onChange={(e) => setAgentReply(e.target.value)}
@@ -320,9 +320,8 @@ export default function MyExpensesPage() {
                     <Chip tone="sand" size="sm">{Math.round(conf.note * 100)}%</Chip>
                   )}
                 </span>
-                <textarea
+                <AutoGrowTextarea
                   name="note"
-                  rows={2}
                   placeholder="What it was for"
                   value={note}
                   onChange={(e) => setNote(e.target.value)}

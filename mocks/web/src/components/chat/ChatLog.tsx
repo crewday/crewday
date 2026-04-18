@@ -1,9 +1,6 @@
 import { useEffect, useRef } from "react";
+import { fmtTime } from "@/lib/dates";
 import type { AgentMessage } from "@/types/api";
-
-function hhmm(iso: string): string {
-  return new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-}
 
 type ActionDecision = "approve" | "details";
 
@@ -63,14 +60,14 @@ export default function ChatLog({
                   </button>
                 </div>
               )}
-              <span className="chat-msg__time">{hhmm(m.at)}</span>
+              <span className="chat-msg__time">{fmtTime(m.at)}</span>
             </div>
           );
         }
         return (
           <div key={idx} className={"chat-msg chat-msg--" + m.kind}>
             <span className="chat-msg__body">{m.body}</span>
-            <span className="chat-msg__time">{hhmm(m.at)}</span>
+            <span className="chat-msg__time">{fmtTime(m.at)}</span>
           </div>
         );
       })}

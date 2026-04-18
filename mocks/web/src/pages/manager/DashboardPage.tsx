@@ -4,6 +4,7 @@ import { fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
 import DeskPage from "@/components/DeskPage";
 import { Avatar, Chip, Loading, Panel, StatCard } from "@/components/common";
+import { fmtTime } from "@/lib/dates";
 import type {
   DashboardPayload as Dashboard, Issue, Me, Task,
 } from "@/types/api";
@@ -21,10 +22,6 @@ const ISSUE_STATUS: Record<Issue["status"], "sand" | "sky" | "moss" | "ghost"> =
 const APPROVAL_RISK: Record<"low" | "medium" | "high", "sky" | "sand" | "rust"> = {
   low: "sky", medium: "sand", high: "rust",
 };
-
-function hhmm(iso: string): string {
-  return new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-}
 
 export default function DashboardPage() {
   const d = useQuery({ queryKey: qk.dashboard(), queryFn: () => fetchJson<Dashboard>("/api/v1/dashboard") });
@@ -99,7 +96,7 @@ export default function DashboardPage() {
                 const emp = empsById.get(t.assignee_id);
                 return (
                   <tr key={t.id}>
-                    <td className="mono">{hhmm(t.scheduled_start)}</td>
+                    <td className="mono">{fmtTime(t.scheduled_start)}</td>
                     <td><strong>{t.title}</strong><div className="table__sub">{t.area}</div></td>
                     <td>{prop && <Chip tone={prop.color} size="sm">{prop.name}</Chip>}</td>
                     <td>

@@ -4,6 +4,8 @@ import { fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
 import { Chip, EmptyState, Loading, ProgressBar } from "@/components/common";
 import TaskListCard from "@/components/TaskListCard";
+import { fmtTime } from "@/lib/dates";
+import { cap } from "@/lib/strings";
 import type { Property, Task } from "@/types/api";
 
 interface TodayPayload {
@@ -17,10 +19,6 @@ function ctaLabel(t: Task): string {
   if (t.status === "pending") return "Start";
   if (t.photo_evidence === "required") return "Complete with photo";
   return "Mark done";
-}
-
-function hhmm(iso: string): string {
-  return new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
 export default function TodayPage() {
@@ -73,7 +71,7 @@ export default function TodayPage() {
                 <li key={t.id}>
                   <Link to={"/task/" + t.id} className="task-card task-card--compact task-card--done">
                     <div className="task-card__head">
-                      <span className="task-card__when">✓ {hhmm(t.scheduled_start)}</span>
+                      <span className="task-card__when">✓ {fmtTime(t.scheduled_start)}</span>
                       <Chip tone={prop.color} size="sm">{prop.name}</Chip>
                     </div>
                     <div className="task-card__title task-card__title--sm">{t.title}</div>
@@ -102,7 +100,7 @@ function NowCard({ task, property }: { task: Task; property: Property }) {
         {task.photo_evidence === "required" && (
           <Chip tone="sand" size="sm">📷 photo required</Chip>
         )}
-        <span className="task-card__when">{hhmm(task.scheduled_start)} · {task.estimated_minutes} min</span>
+        <span className="task-card__when">{fmtTime(task.scheduled_start)} · {task.estimated_minutes} min</span>
       </div>
       <h3 className="task-card__title">{task.title}</h3>
       <div className="task-card__meta">{task.area}</div>
@@ -117,6 +115,3 @@ function NowCard({ task, property }: { task: Task; property: Property }) {
   );
 }
 
-function cap(s: string): string {
-  return s.charAt(0).toUpperCase() + s.slice(1);
-}
