@@ -242,7 +242,7 @@ function SharingPanel({
         )}
       </header>
       <p className="muted">
-        Multi-belonging property (§02). The owner workspace controls who else may see or manage it.
+        Multi-belonging property. The owner workspace controls who else may see or manage it.
         Worker shifts and work orders carry their own workspace tag forward, so payroll, billing and
         history stay separated even when several teams share the same villa.
       </p>
@@ -327,7 +327,7 @@ function SharingPanel({
             <p className="modal__sub">
               {confirm.kind === "share"
                 ? "Adds a managed_workspace link. The workspace gains operational access — its members can dispatch workers and create work orders here. Acceptance and invoicing remain bound to the owner workspace's policy."
-                : "Removes the property_workspace link. In production this is approval-gated (§22). The mock skips the approval and applies it immediately so you can see the result."}
+                : "Removes the property_workspace link. In production this is approval-gated. The mock skips the approval and applies it immediately so you can see the result."}
             </p>
             <div className="modal__actions">
               <button

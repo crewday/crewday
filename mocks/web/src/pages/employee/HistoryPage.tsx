@@ -6,6 +6,7 @@ import { formatMoney } from "@/lib/money";
 import { fmtDate, fmtDateTime } from "@/lib/dates";
 import { cap } from "@/lib/strings";
 import { Loading } from "@/components/common";
+import PageHeader from "@/components/PageHeader";
 import type { HistoryPayload, Property } from "@/types/api";
 
 type Tab = "tasks" | "chats" | "expenses" | "leaves";
@@ -39,14 +40,15 @@ export default function HistoryPage() {
   const propsById = new Map((propsQ.data ?? []).map((p) => [p.id, p]));
 
   return (
-    <section className="phone__section">
-      <Link to="/me" className="back-link">← Back to Me</Link>
-      <h2 className="section-title">History</h2>
-      <p className="muted">
-        Everything already wrapped up — tasks, chats, expenses and leaves.
-      </p>
+    <>
+      <PageHeader
+        title="History"
+        sub="Everything already wrapped up — tasks, chats, expenses and leaves."
+      />
+      <section className="phone__section">
+        <Link to="/me" className="back-link">← Back to Me</Link>
 
-      <nav className="tabs" aria-label="History tabs">
+        <nav className="tabs" aria-label="History tabs">
         {TABS.map(([key, label]) => (
           <Link
             key={key}
@@ -154,6 +156,7 @@ export default function HistoryPage() {
           )}
         </ul>
       )}
-    </section>
+      </section>
+    </>
   );
 }

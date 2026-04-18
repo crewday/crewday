@@ -243,9 +243,10 @@ All three events land in the audit log under `auth.reenroll`.
 
 ### Creation
 
-- Any user with the `users.invite` grant-capability (owners and
-  managers by default) creates a token via the UI or
-  `POST /api/v1/auth/tokens`:
+- Any user who passes the `api_tokens.manage` action check on the
+  workspace (owners and managers by default, §05) creates a scoped
+  workspace token via the UI at `/tokens` or
+  `POST /w/<slug>/api/v1/auth/tokens`:
   ```json
   {
     "name": "hermes-scheduler",
@@ -319,6 +320,82 @@ compatible). When set, it is a delegated token; the
 `actor_id = delegate_for_user_id`, `agent_label = api_token.name`,
 and the optional `agent_conversation_ref` header propagated in.
 
+### Personal access tokens
+
+A **personal access token (PAT)** is a scoped token minted by a
+logged-in user **for themselves**, limited to the `me:*` scope
+family, so any authenticated worker or client can write a small
+script against their own data without a manager provisioning a
+token for them. The canonical use case: a maid writing a one-file
+script that prints today's tasks on her home printer.
+
+```json
+POST /api/v1/me/tokens
+{
+  "name": "kitchen-printer",
+  "scopes": ["me.tasks:read", "me.shifts:read"],
+  "expires_at": "2026-06-01T00:00:00Z",
+  "note": "Raspberry Pi in the kitchen"
+}
+```
+
+Key properties:
+
+- `subject_user_id`: ULID of the creating user — set from the
+  session, not caller-supplied. Identical role to
+  `delegate_for_user_id` on delegated tokens but semantically
+  distinct: a PAT can only read/write the subject's own rows (the
+  `me:*` filter is applied at query time regardless of scope
+  string), while a delegated token inherits *all* the subject's
+  `role_grants`.
+- `scopes`: **must** be drawn from the `me:*` family. Mixing
+  `me:*` with workspace scopes on the same token is a 422
+  `error = "me_scope_conflict"`. An empty scope list is a 422
+  `error = "scopes_required"` (unlike delegated tokens, which
+  require empty).
+- A PAT can only be created by a **passkey session** — no
+  transitive creation from another token.
+- Default TTL: **90 days**. The workspace cap ("never" with noisy
+  warning, see Guardrails) applies to PATs too, but the user can
+  always override their own PAT to a shorter expiry — never a
+  longer one than the workspace ceiling.
+- Every user may create a PAT regardless of `grant_role`; the
+  right to do so is an identity-scoped self-service verb anchored
+  on the authenticated `users` row (§05 "Identity-scoped
+  actions"), not an action-catalog entry.
+- If the subject user is archived, globally deactivated, or loses
+  every non-revoked grant in every workspace, PAT requests return
+  `401` with a clear message. Reinstating the user reinstates
+  their PATs only if they survived archive (spec is
+  archive-preserves-rows; `users.archived_at` is set, the token
+  stays but returns 401 until the archive flag clears).
+- A PAT scoped to a workspace the user is no longer a member of
+  returns `404 workspace_out_of_scope` — matching the behaviour
+  of a scoped standalone token used against the wrong workspace.
+- **Per-user cap: 5 PATs**, same shape as the 5-passkey cap.
+  Creating the 6th returns 422 `error = "too_many_personal_tokens"`
+  and asks the user to revoke one. This cap is separate from the
+  workspace-wide cap below.
+- PATs are visible and revocable by the subject user on the
+  "Personal access tokens" panel on `/me` (§14). They are **not**
+  listed on the
+  workspace-wide `/tokens` admin page — a manager does not need
+  to audit every worker's printer script. Workspace owners who
+  need a kill-switch use `users.archive` (§05) or revoke the
+  user's session + passkeys via `users.reissue_magic_link`, both
+  of which cascade to that user's PATs.
+- Every write made through a PAT is audited as `actor_kind = 'user'`,
+  `actor_id = subject_user_id`, `agent_label = api_token.name`,
+  plus `api_token_kind = 'personal'` so the row is filterable from
+  a workspace PAT or a delegated token.
+
+**`api_token` columns for subject narrowing:**
+
+| column              | type   | notes                                     |
+|---------------------|--------|-------------------------------------------|
+| `subject_user_id`   | ULID?  | nullable; references `users.id`. Set only on personal tokens. Mutually exclusive with `delegate_for_user_id`. |
+| `kind`              | text   | `'scoped' \| 'delegated' \| 'personal'`. Derived at insert time from which id columns are set; persisted so the revocation and listing queries stay O(1). |
+
 ### Scopes
 
 Fine-grained, resource-scoped verbs. A standalone agent should be
@@ -342,8 +419,24 @@ access.
   another `owners`-group member before first use (see §11 approval
   workflow)
 
+A separate **`me:*`** scope family is reserved for
+**personal access tokens** (next section) and may not be mixed with
+workspace scopes on the same token:
+
+- `me.tasks:{read}` — tasks assigned to the token's subject, plus
+  unassigned tasks on properties in scope matching their
+  `user_work_role`.
+- `me.shifts:{read}` — the subject's own shifts and payslips.
+- `me.expenses:{read,write}` — read own expense claims; write creates
+  or edits drafts scoped to the subject. Never `expenses:approve`.
+- `me.profile:{read,write}` — the subject's `users` row, limited to
+  the fields the worker surface already lets them self-update
+  (display name, avatar, timezone, emergency contact, language).
+
 `*:read` implied by `*:write`. `admin:*` implies nothing else — it is a
-narrow escape hatch.
+narrow escape hatch. `me:*` implies nothing outside `me:*` — the
+subject narrowing is enforced at the row level regardless of which
+`me:*` verb the caller asked for.
 
 ### Usage
 
@@ -357,26 +450,52 @@ narrow escape hatch.
 
 - Any user who passes the `api_tokens.manage` action check (owners
   and managers by default) in the token's home workspace can revoke
-  any token in that workspace; scoped tokens and their own delegated
-  tokens are always revocable by the creator. Revocation takes effect
-  within 5 seconds (token cache TTL).
+  any scoped or delegated token in that workspace; scoped tokens and
+  their own delegated tokens are always revocable by the creator.
+  **Personal access tokens** are revocable only by their subject
+  user or via a cascade (`users.archive`, `users.reissue_magic_link`)
+  — a manager cannot revoke a worker's PAT directly from `/tokens`.
+  Revocation takes effect within 5 seconds (token cache TTL).
 - Tokens can be rotated in place: the old secret hash is kept alongside
   the new for a configurable overlap (default 1h), so long-running
   agents can reload without downtime.
-- A **per-token audit log view** is available in the UI: every request,
-  method, path, response status, and `audit_correlation_id` link.
+- A **per-token audit log view** is available in the UI (inline on
+  `/tokens` for workspace tokens; inline on `/me` for PATs): every
+  request with its method, path, response status, IP prefix
+  (truncated to `/24` for IPv4, `/64` for IPv6 per §15 PII-minimisation),
+  `user_agent`, `audit_correlation_id` link, and timestamp. The list
+  page shows `last_used_at` and the last-used IP prefix so managers
+  can spot dormant tokens.
+
+### Observability fields on `api_token`
+
+| column              | type   | notes                                         |
+|---------------------|--------|-----------------------------------------------|
+| `last_used_at`      | tstz?  | Updated best-effort per request (coalesced to ≤1 write/minute per token to bound write amp). |
+| `last_used_ip_hash` | text?  | argon2id hash of the last-used IP prefix; the prefix itself is kept in the per-request audit rows, not on the token row, so the token row never leaks PII. |
+| `last_used_path`    | text?  | path of the most recent request, truncated to 256 chars; useful to spot a rotated-away token still pinging an old endpoint. |
 
 ### Guardrails
 
 - Tokens cannot create tokens unless scope `admin:rotate` is granted.
+  A personal access token can never create any token (no `admin:*`
+  scope is selectable on a PAT), so scripting an exfiltration chain
+  through a leaked PAT is not possible.
 - Tokens cannot accept their own `admin:*` approval (§11).
 - Scoped tokens default to 90 days TTL if `expires_at` is omitted;
-  delegated tokens default to 30 days. A workspace-level setting can
-  raise either default to "never" but emits a noisy warning in the UI.
+  delegated tokens default to 30 days; personal access tokens default
+  to 90 days. A workspace-level setting can raise any of them to
+  "never" but emits a noisy warning in the UI.
 - Delegated tokens cannot create other delegated tokens (no transitive
   delegation). A delegated token cannot outlive its delegating user's
   account — archiving the user effectively revokes all their delegated
-  tokens.
+  tokens. Archiving the user likewise cascades to their personal
+  access tokens.
+- **Workspace cap: 50 live scoped + delegated tokens per workspace.**
+  Creating the 51st returns 422 `error = "too_many_workspace_tokens"`
+  asking the user to revoke one. Personal access tokens do not count
+  against the workspace cap — they are capped at **5 per user** (see
+  "Personal access tokens" above).
 - IP allow-lists optional per token (CIDR, comma-separated). Violations
   log and 403.
 

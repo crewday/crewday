@@ -44,7 +44,7 @@ export default function PayPage() {
       fetchJson<PendingReimbursement>("/api/v1/expenses/pending_reimbursement"),
   });
 
-  const sub = "Periods, payslips, pay rules. Gross only — taxes and social contributions are out of scope (§00, N2).";
+  const sub = "Periods, payslips, pay rules. Gross only — taxes and social contributions are out of scope.";
   const actions = (
     <>
       <button className="btn btn--ghost">Export CSV</button>
@@ -136,7 +136,7 @@ export default function PayPage() {
             <p className="panel__sub muted">
               Approved expense claims waiting to roll into a payslip.
               Each row shows what the employee is owed in the currency
-              of the account the reimbursement will land in (§09).
+              of the account the reimbursement will land in.
             </p>
           </div>
         </header>
@@ -230,7 +230,7 @@ export default function PayPage() {
 
       <div className="panel panel--danger">
         <header className="panel__head"><h2>Always-gated actions</h2></header>
-        <p className="muted">These payroll actions always require a manager passkey — the agent approval flow cannot bypass them (§11).</p>
+        <p className="muted">These payroll actions always require a manager passkey — the agent approval flow cannot bypass them.</p>
         <ul className="danger-list">
           <li><code className="inline-code">payout_destination.create</code> · <code className="inline-code">payout_destination.update</code></li>
           <li><code className="inline-code">work_engagement.set_default_pay_destination</code></li>

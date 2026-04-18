@@ -529,11 +529,26 @@ minimum behavioural shape the implementation must satisfy:
 
 ## Permissions (API tokens)
 
-Covered in §03. A **scoped standalone token** carries an explicit
-scope list and bypasses `role_grants` entirely. A **delegated
-token** inherits the delegating user's `role_grants` and work-role
-bindings at request time; when the user's grants change, the
-delegated token's authority changes immediately.
+Covered in §03. Three token kinds:
+
+- **Scoped standalone token** — carries an explicit `scopes` list
+  and bypasses `role_grants` entirely. Created by owners/managers
+  via the `api_tokens.manage` action (see catalog above).
+- **Delegated token** — inherits the delegating user's
+  `role_grants` and work-role bindings at request time; when the
+  user's grants change, the delegated token's authority changes
+  immediately. Created from a passkey session by the user whose
+  chat agent will use it (§11).
+- **Personal access token (PAT)** — limited to the `me:*` scope
+  family, mints are row-filtered to the creating user's own data.
+  Creating a PAT is an **identity-scoped self-service verb**
+  (same category as "edit my own profile" and "clock in my own
+  shift"); it has **no entry in the action catalog** and cannot
+  be assigned through a `permission_rule`. Every authenticated
+  user — worker, client, or manager — may create up to 5 PATs
+  for themselves. A manager cannot create a PAT for someone
+  else: the subject narrowing is anchored on the session, not
+  a body field.
 
 ## Example (real world)
 

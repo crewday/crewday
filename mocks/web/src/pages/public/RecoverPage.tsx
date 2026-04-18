@@ -32,7 +32,7 @@ export default function RecoverPage() {
           <p className="login__footnote muted">
             Codes expire after one use or 15 minutes, whichever comes first.
             The manager has to kick off recovery from the host — there's no self-service
-            path, by design. See §03 of the spec.
+            path, by design.
           </p>
           <a href="/login" className="login__recover">← Back to sign in</a>
         </div>

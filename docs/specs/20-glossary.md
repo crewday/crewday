@@ -282,6 +282,14 @@ fix the offender.
   `agent_conversation_ref` fields flagging the action as
   agent-executed and linking back to the triggering conversation.
   See §03.
+- **Personal access token (PAT).** A self-service bearer token
+  minted by a user for themselves, limited to the `me:*` scope
+  family (`me.tasks:read`, `me.shifts:read`,
+  `me.expenses:read|write`, `me.profile:read|write`). Row
+  filtering is anchored on the token's `subject_user_id` — a
+  PAT can only reach the subject's own data regardless of which
+  `me:*` verb is set. Capped at 5 per user. Managed from
+  `/me` (worker / client) or the Me page for managers. See §03.
 - **Host-CLI-only administrative command.** A `crewday admin`
   verb with no HTTP surface at all, agent or human: envelope-key
   rotation, offline lockout recovery, hard-delete purge (§11). Run

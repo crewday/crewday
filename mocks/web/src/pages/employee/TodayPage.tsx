@@ -3,11 +3,12 @@ import { useQuery } from "@tanstack/react-query";
 import { fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
 import { Chip, EmptyState, Loading, ProgressBar } from "@/components/common";
+import PageHeader from "@/components/PageHeader";
 import TaskListCard from "@/components/TaskListCard";
 import NewTaskButton from "@/components/NewTaskModal";
 import { fmtTime } from "@/lib/dates";
 import { cap } from "@/lib/strings";
-import type { Property, Task } from "@/types/api";
+import type { Me, Property, Task } from "@/types/api";
 
 interface TodayPayload {
   now_task: Task | null;
@@ -27,20 +28,32 @@ export default function TodayPage() {
     queryKey: qk.today(),
     queryFn: () => fetchJson<TodayPayload>("/api/v1/today"),
   });
+  const me = useQuery({
+    queryKey: qk.me(),
+    queryFn: () => fetchJson<Me>("/api/v1/me"),
+  });
 
-  if (q.isPending) return <section className="phone__section"><Loading /></section>;
-  if (q.isError || !q.data) return <section className="phone__section"><EmptyState>Failed to load.</EmptyState></section>;
+  const header = (
+    <PageHeader
+      title="Today"
+      sub={me.data ? new Date(me.data.today).toLocaleDateString("en-GB", {
+        weekday: "long", day: "numeric", month: "long", year: "numeric",
+      }) : null}
+      actions={<NewTaskButton />}
+    />
+  );
+
+  if (q.isPending) return <>{header}<section className="phone__section"><Loading /></section></>;
+  if (q.isError || !q.data) return <>{header}<section className="phone__section"><EmptyState>Failed to load.</EmptyState></section></>;
 
   const { now_task, upcoming, completed, properties } = q.data;
   const propsById = new Map(properties.map((p) => [p.id, p]));
 
   return (
     <>
+      {header}
       <section className="phone__section phone__section--hero">
-        <div className="section-title-row">
-          <h2 className="section-title">Now</h2>
-          <NewTaskButton />
-        </div>
+        <h2 className="section-title">Now</h2>
         {now_task ? (
           <NowCard task={now_task} property={propsById.get(now_task.property_id) ?? null} />
         ) : (

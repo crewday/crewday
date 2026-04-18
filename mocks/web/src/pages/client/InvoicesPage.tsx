@@ -37,7 +37,7 @@ export default function ClientInvoicesPage() {
   return (
     <DeskPage
       title="Invoices"
-      sub="Vendor invoices billed to your organization (§22)."
+      sub="Vendor invoices billed to your organization."
     >
       {invoices.length === 0 ? (
         <div className="panel">

@@ -307,7 +307,6 @@ function RulesTab() {
                       {entry.root_protected_deny ? (
                         <Chip tone="sand" size="sm">owners immune to deny</Chip>
                       ) : null}
-                      <Chip tone="ghost" size="sm">{entry.spec}</Chip>
                     </div>
                   </td>
                   <td>

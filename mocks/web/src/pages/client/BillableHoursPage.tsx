@@ -48,7 +48,7 @@ export default function ClientBillableHoursPage() {
   return (
     <DeskPage
       title="Billable hours"
-      sub="What the agency has charged for work on your properties (§22)."
+      sub="What the agency has charged for work on your properties."
     >
       <section className="grid grid--stats">
         {Object.entries(totalsByCurrency).map(([ccy, total]) => (

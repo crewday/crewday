@@ -5,6 +5,7 @@ import { qk } from "@/lib/queryKeys";
 import { formatMoney } from "@/lib/money";
 import { fmtDate } from "@/lib/dates";
 import { Chip, Loading } from "@/components/common";
+import PageHeader from "@/components/PageHeader";
 import AutoGrowTextarea from "@/components/AutoGrowTextarea";
 import type {
   Expense,
@@ -194,20 +195,26 @@ export default function MyExpensesPage() {
 
   return (
     <>
+      <PageHeader
+        title="My expenses"
+        sub="Scan a receipt or add one by hand — approved claims land with your next payslip."
+        actions={
+          phase === "upload" ? (
+            <button
+              type="button"
+              className="btn btn--moss"
+              onClick={handleManualEntry}
+            >
+              + New expense
+            </button>
+          ) : undefined
+        }
+      />
       <section className="phone__section">
         {/* ── Upload phase ──────────────────────────────── */}
         {phase === "upload" && (
           <>
-            <div className="section-title-row">
-              <h2 className="section-title">Submit an expense</h2>
-              <button
-                type="button"
-                className="btn btn--moss btn--sm"
-                onClick={handleManualEntry}
-              >
-                + New expense
-              </button>
-            </div>
+            <h2 className="section-title">Submit an expense</h2>
             <label className="evidence__picker" tabIndex={0}>
               <input
                 ref={fileRef}

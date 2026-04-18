@@ -34,8 +34,8 @@ export default function AppearancePanel({
         Choose a theme. System follows your device's light/dark setting;
         currently resolved to <strong>{resolved}</strong>.
       </p>
-      <fieldset className="theme-choices">
-        <legend className="sr-only">Choose your theme</legend>
+      <fieldset className="theme-choices" aria-label="Theme preference">
+
         {CHOICES.map((c) => {
           const selected = theme === c.value;
           const Icon = c.icon;

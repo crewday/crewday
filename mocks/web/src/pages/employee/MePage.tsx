@@ -12,6 +12,7 @@ import AgentPreferencesPanel from "@/components/AgentPreferencesPanel";
 import AppearancePanel from "@/components/AppearancePanel";
 import AvatarEditor from "@/components/AvatarEditor";
 import ChatChannelsMeCard from "@/components/ChatChannelsMeCard";
+import PersonalTokensPanel from "@/components/PersonalTokensPanel";
 import type { Leave, Me } from "@/types/api";
 
 interface LeavesPayload {
@@ -58,16 +59,12 @@ export default function MePage() {
 
   if (me.isPending) {
     return (
-      <section className="me-page">
-        <Loading />
-      </section>
+      <section className="me-page"><Loading /></section>
     );
   }
   if (me.isError || !me.data) {
     return (
-      <section className="me-page">
-        <p className="muted">Failed to load.</p>
-      </section>
+      <section className="me-page"><p className="muted">Failed to load.</p></section>
     );
   }
 
@@ -225,18 +222,38 @@ export default function MePage() {
         </div>
       </section>
 
+      <PersonalTokensPanel />
+
       <section className="panel">
         <header className="panel__head">
-          <h2>Passkeys</h2>
+          <div className="panel__head-stack">
+            <h2>Passkeys</h2>
+            <p className="panel__sub">
+              Devices you've registered to sign in. Remove any you no longer trust —
+              re-enrolling on a new device revokes the rest automatically.
+            </p>
+          </div>
           <button className="btn btn--moss btn--sm" type="button">+ Register another device</button>
         </header>
-        <ul className="task-list">
-          <li className="stack-row">
-            <div>
-              <strong>iPhone 14 · Face ID</strong>
-              <div className="stack-row__sub">Added 12 Mar 2025 · last used today</div>
+        <ul className="entry-cards">
+          <li className="entry-card">
+            <div className="entry-card__head">
+              <span className="entry-card__name">iPhone 14 · Face ID</span>
+              <Chip tone="moss" size="sm">active</Chip>
+              <div className="entry-card__action">
+                <button type="button" className="btn btn--sm btn--ghost">Remove</button>
+              </div>
             </div>
-            <button className="btn btn--ghost btn--sm" type="button">Remove</button>
+            <div className="entry-card__meta">
+              <span>
+                <span className="entry-card__meta-label">Added</span>
+                12 Mar 2025
+              </span>
+              <span>
+                <span className="entry-card__meta-label">Last used</span>
+                today
+              </span>
+            </div>
           </li>
         </ul>
       </section>

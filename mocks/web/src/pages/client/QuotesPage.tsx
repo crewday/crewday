@@ -64,7 +64,7 @@ export default function ClientQuotesPage() {
   return (
     <DeskPage
       title="Quotes"
-      sub="Work orders awaiting your decision (§22 client surface)."
+      sub="Work orders awaiting your decision."
     >
       {quotes.length === 0 ? (
         <div className="panel">

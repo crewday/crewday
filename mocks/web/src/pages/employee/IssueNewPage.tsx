@@ -4,6 +4,7 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
 import { Loading } from "@/components/common";
+import PageHeader from "@/components/PageHeader";
 import AutoGrowTextarea from "@/components/AutoGrowTextarea";
 import { cap } from "@/lib/strings";
 import type { Issue, Property } from "@/types/api";
@@ -48,23 +49,28 @@ export default function IssueNewPage() {
     onSuccess: () => nav("/me"),
   });
 
-  if (propsQ.isPending) return <section className="phone__section"><Loading /></section>;
+  const header = (
+    <PageHeader
+      title="Report an issue"
+      sub="Tell the manager something is broken, missing, or unsafe. The more specific the better."
+    />
+  );
+
+  if (propsQ.isPending) return <>{header}<section className="phone__section"><Loading /></section></>;
   if (propsQ.isError || !propsQ.data) {
-    return <section className="phone__section"><p className="muted">Failed to load.</p></section>;
+    return <>{header}<section className="phone__section"><p className="muted">Failed to load.</p></section></>;
   }
 
   const properties = propsQ.data;
   const activePropertyId = propertyId || properties[0]?.id || "";
 
   return (
-    <section className="phone__section">
-      <h2 className="section-title">Report an issue</h2>
-      <p className="muted">
-        You can also report this in <Link to="/chat">Chat</Link> — it's usually faster.
-      </p>
-      <p className="muted">
-        Tell the manager something is broken, missing, or unsafe. The more specific the better.
-      </p>
+    <>
+      {header}
+      <section className="phone__section">
+        <p className="muted">
+          You can also report this in <Link to="/chat">Chat</Link> — it's usually faster.
+        </p>
 
       <form
         className="form"
@@ -166,6 +172,7 @@ export default function IssueNewPage() {
           <button type="submit" className="btn btn--moss">Send to manager</button>
         </div>
       </form>
-    </section>
+      </section>
+    </>
   );
 }

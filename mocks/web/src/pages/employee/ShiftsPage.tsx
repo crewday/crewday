@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
 import { Loading } from "@/components/common";
+import PageHeader from "@/components/PageHeader";
 import { fmtTime } from "@/lib/dates";
 import type { Employee, Me } from "@/types/api";
 
@@ -37,9 +38,11 @@ export default function ShiftsPage() {
     },
   });
 
-  if (me.isPending) return <section className="phone__section"><Loading /></section>;
+  const header = <PageHeader title="Shifts" sub="Clock in, clock out, and review recent shifts." />;
+
+  if (me.isPending) return <>{header}<section className="phone__section"><Loading /></section></>;
   if (me.isError || !me.data) {
-    return <section className="phone__section"><p className="muted">Failed to load.</p></section>;
+    return <>{header}<section className="phone__section"><p className="muted">Failed to load.</p></section></>;
   }
 
   const { employee } = me.data;
@@ -48,8 +51,9 @@ export default function ShiftsPage() {
 
   return (
     <>
+      {header}
       <section className="phone__section">
-        <h2 className="section-title">Shift</h2>
+        <h2 className="section-title">Current shift</h2>
         <div className={cardCls}>
           {clockedIn ? (
             <>

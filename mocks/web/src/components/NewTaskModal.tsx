@@ -56,7 +56,7 @@ export default function NewTaskButton() {
     <>
       <button
         type="button"
-        className="btn btn--moss btn--sm"
+        className="btn btn--moss"
         onClick={() => ref.current?.showModal()}
       >
         + New task

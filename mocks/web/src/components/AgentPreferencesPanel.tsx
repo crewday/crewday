@@ -123,9 +123,17 @@ export default function AgentPreferencesPanel({
 
   const heading =
     variant === "phone" ? (
-      <h2 className="section-title" id={headingId}>{title}</h2>
+      <>
+        <h2 className="section-title" id={headingId}>{title}</h2>
+        <p className="panel__sub">{subtitle}</p>
+      </>
     ) : (
-      <header className="panel__head"><h2 id={headingId}>{title}</h2></header>
+      <header className="panel__head">
+        <div className="panel__head-stack">
+          <h2 id={headingId}>{title}</h2>
+          <p className="panel__sub">{subtitle}</p>
+        </div>
+      </header>
     );
 
   if (q.isPending) {
@@ -152,7 +160,6 @@ export default function AgentPreferencesPanel({
   return (
     <section className={wrapperClass} aria-labelledby={headingId}>
       {heading}
-      <p className="muted">{subtitle}</p>
 
       <div className="agent-prefs__banner" role="note">
         Preferences are <strong>sent to the model as written.</strong> Do not paste

@@ -257,15 +257,27 @@ POST   /api/v1/auth/magic/consume                # consume a break-glass code �
 GET    /api/v1/auth/me
 POST   /api/v1/auth/logout
 GET    /api/v1/me/workspaces                     # switcher payload for the current session
+
+# Personal access tokens (§03 "Personal access tokens"). Identity-
+# scoped, passkey-session only, `me:*` scopes only, subject is always
+# the authenticated user. Not listed on the workspace admin page.
+GET    /api/v1/me/tokens                         # list PATs the caller owns
+POST   /api/v1/me/tokens                         # create a PAT (plaintext shown once)
+POST   /api/v1/me/tokens/{id}/revoke
+POST   /api/v1/me/tokens/{id}/rotate
+GET    /api/v1/me/tokens/{id}/audit              # per-token request history
 ```
 
-**Workspace-scoped routes** (API tokens scope to a workspace; §03):
+**Workspace-scoped routes** (scoped and delegated API tokens scope
+to a workspace; §03). Personal access tokens live on the bare host
+above, not here:
 
 ```
-POST   /w/<slug>/api/v1/auth/tokens              # create
-GET    /w/<slug>/api/v1/auth/tokens              # list (owner/manager)
+POST   /w/<slug>/api/v1/auth/tokens              # create scoped or delegated
+GET    /w/<slug>/api/v1/auth/tokens              # list (owner/manager — excludes PATs)
 POST   /w/<slug>/api/v1/auth/tokens/{id}/revoke
 POST   /w/<slug>/api/v1/auth/tokens/{id}/rotate
+GET    /w/<slug>/api/v1/auth/tokens/{id}/audit   # per-token request history
 ```
 
 All subsequent resource groups in this document live under

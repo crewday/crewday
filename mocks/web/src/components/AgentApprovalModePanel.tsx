@@ -88,11 +88,11 @@ export default function AgentApprovalModePanel({
       )}
       <p className="muted">
         Controls when your embedded chat agent pauses for a confirmation card
-        before making changes on your behalf. Workspace policy (§11) still gates
+        before making changes on your behalf. Workspace policy still gates
         committee-level actions regardless of the mode you pick.
       </p>
-      <fieldset className="agent-mode-choices">
-        <legend className="sr-only">Choose your agent approval mode</legend>
+      <fieldset className="agent-mode-choices" aria-label="Agent approval mode">
+
         {CHOICES.map((c) => {
           const selected = current === c.value;
           return (

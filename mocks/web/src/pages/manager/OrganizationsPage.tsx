@@ -80,7 +80,7 @@ export default function OrganizationsPage() {
           <p className="muted">
             No organizations in this workspace. Create one when an owner enters
             "agency mode" — link a property to a client, or register a supplier
-            to route agency-supplied engagements (§22).
+            to route agency-supplied engagements.
           </p>
         </div>
       </DeskPage>
@@ -90,7 +90,7 @@ export default function OrganizationsPage() {
   return (
     <DeskPage
       title="Organizations"
-      sub="Clients we bill, suppliers that bill us, and the contracts in between (§22)."
+      sub="Clients we bill, suppliers that bill us, and the contracts in between."
       actions={<button className="btn btn--moss btn--sm">+ New organization</button>}
     >
       <section className="grid grid--split">
