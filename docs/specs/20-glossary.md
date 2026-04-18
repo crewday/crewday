@@ -197,10 +197,20 @@ fix the offender.
   level. All managers are peers in v1. Held via a `role_grants`
   row with `grant_role = 'manager'`.
 - **Model assignment.** The capability → model mapping (§11).
+- **Native wrapper readiness.** The contract this repo's web platform
+  publishes to a future **separate** native-app project (§00 N4):
+  every authenticated URL is a plain HTTPS deep link, passkey RP is
+  the hostname, every route works at 360 px wide, no UA gating, the
+  strict CSP is WebView-compatible, session cookies survive WebView
+  navigation, and the push-token REST surface is reserved. See §14
+  "Native wrapper readiness".
 - **Off-app reach-out.** Deferred feature in which the agent may send
   a WhatsApp message to a user for low-stakes checks. Opt-in is the
   presence of an active `chat_channel_binding`; unlinking it opts
-  the user out (§23). SMS is intentionally not supported. See §10.
+  the user out (§23). SMS is intentionally not supported. In v1 the
+  web SSE + email fallback cover agent-message delivery; see §10
+  "Agent-message delivery" for the full chain (SSE → push →
+  WhatsApp → email).
 - **Owner / owners group.** **v0** had an `owner` grant_role
   with "exactly one per scope". **v1** replaces this with the
   `owners` **permission group**: a system group seeded per

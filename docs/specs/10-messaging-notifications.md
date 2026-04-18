@@ -12,10 +12,16 @@ Cross-user messaging stays on email (§10) and task threads (§06).
 The embedded agent conversations in the shared `.desk__agent` web
 sidebar (both roles, desktop) and its mobile counterparts (worker
 `/chat` page, manager bottom-dock drawer) are the only shipped chat
-transports in v1. Off-app chat adapters (WhatsApp, SMS, Telegram,
-push) are intentionally **not enabled in v1**; §23 is retained as a
-deferred design reference so those transports can be added later
-without re-architecting the runtime.
+transports in v1. Off-app chat adapters (WhatsApp, SMS, Telegram)
+are specified in §23 but **not enabled in shipped v1**; activation
+is gated on an explicit adapter configuration plus, for WhatsApp,
+template approval with the provider. OS-level push is **specified
+now but delivered by the future native-app project** (see
+"Agent-message delivery" below and §14 "Native wrapper readiness");
+the push-token registration surface (§12 `/me/push-tokens`) is
+reserved in the REST contract and returns `501 push_unavailable`
+until the native app ships. Together, push + WhatsApp + email form
+the fallback chain for agent-initiated outbound (next subsection).
 
 ## Email
 
@@ -138,25 +144,85 @@ If a manager wants a free-form conversation, they use the right-
 sidebar workspace agent (§14), whose actions are audited like any
 other agent write.
 
-### Off-app agent reach-out
+### Agent-message delivery
 
-Off-app agent reach-out is intentionally **not enabled in shipped
-v1**. The future design still assumes:
+When the agent (§11) needs to reach a human out-of-band — a pending
+approval card, a proactive heads-up, a reply to an off-app question
+— the delivery worker walks a **fixed fallback chain** per recipient
+and stops at the first channel that is both **configured** and
+**capable of a human-visible alert** for that user:
 
-- User ↔ **agent** conversation, not human ↔ human DM.
-- Opt-in is **implicit in the binding** — presence of an active
-  `chat_channel_binding` means agent reach-out is on; unlinking it
-  is the opt-out. No separate `preferred_offapp_channel` toggle.
-- Notification timing is the user's phone's job (OS-level
-  do-not-disturb, WhatsApp's own mute). The product does not carry
-  its own quiet-hours window. Per-binding `PAUSE <duration>` still
-  works for ad-hoc silence (§23).
-- Daily-cap controls at the workspace level still apply.
-- A shared `chat_message` / `chat_thread` substrate rather than a
-  separate delivery model.
+1. **Live web session (SSE).** If the recipient currently has an
+   open `/chat` page or an active `.desk__agent` sidebar for the
+   relevant workspace, the message arrives over SSE
+   (`agent.message.appended`, §14) and no out-of-band alert is sent.
+   The "live" window is a deployment-wide constant (default 30s):
+   if the SSE client has been connected within that window, skip
+   fan-out to the lower tiers.
+2. **OS push (native app).** If the recipient has at least one
+   **active** `user_push_token` row (§12 `/me/push-tokens`) whose
+   `last_seen_at` is within the deployment-wide freshness window
+   (default 60 days), enqueue a push-notification delivery to
+   **every** active token for that user. Payload is a small
+   envelope (
+   `workspace_slug`, `chat_thread_ref`, the first ~140 chars of the
+   message, a deep-link URL to `/w/<slug>/chat#<message_id>`).
+   The server **never** ships the full message body in the push
+   payload — the OS notification is a "you have a message"
+   alert; the app retrieves the body over HTTPS when the user taps.
+   A push delivery that fails or is silently dropped does **not**
+   cascade to WhatsApp or email — push delivery receipts are
+   unreliable and the chain's next steps are only triggered when
+   a channel is *unconfigured*, not when it *failed*.
+3. **WhatsApp (§23 binding).** If the recipient has no active push
+   token and has an **active** `chat_channel_binding` for the
+   WhatsApp adapter on this workspace, enqueue a WhatsApp message
+   via §23. Requires the WhatsApp adapter to be enabled for the
+   deployment and the user to have consented via the binding
+   flow. Unaffected by push-delivery outcomes (see above).
+4. **Email fallback.** No push token, no WhatsApp binding → email.
+   The message body renders inline in the email with a "Open in
+   app" button linking to `/w/<slug>/chat#<message_id>` that
+   authenticates via the existing session cookie or, if absent,
+   walks the user through a passkey-login challenge and lands
+   them on the chat page with the thread pre-opened.
 
-See §23 for the deferred reference design and §15 for the privacy
-rules that should apply when these adapters are eventually enabled.
+Email is the fallback of record: every user has an email, email is
+always enabled, and we never silently swallow an agent message.
+There is no separate "notification preferences" table — the fan-out
+walks capability presence (push tokens exist, WhatsApp binding
+exists) and stops at the first configured tier. A user who wants
+to stop receiving push removes their device via `/me/push-tokens`
+(from the app on sign-out, or from `/me` on the web); a user who
+wants to stop WhatsApp unlinks the binding (§23). Email cannot be
+fully disabled for agent messages the same way magic-link emails
+cannot be disabled for security-relevant categories.
+
+All four tiers share the same `chat_message` / `chat_thread`
+substrate (§23) — the per-tier adapter is a delivery path, not a
+separate conversation model. The message_id that lands in push, in
+WhatsApp, and in email is the same id; a reply on any channel
+threads into the same conversation. Opt-in is **implicit in the
+capability**: a push token registered by the native app means push
+is on; a WhatsApp binding means WhatsApp is on. No separate
+"preferred channel" toggle — the chain is the preference.
+
+Notification timing is the user's device's job (OS-level do-not-
+disturb, WhatsApp's own mute). The product does not carry its own
+quiet-hours window. Per-binding `PAUSE <duration>` still works for
+ad-hoc silence (§23). Per-workspace daily-cap controls still apply.
+
+**v1 scope note.** Tier 1 (SSE) and tier 4 (email) ship in v1.
+Tier 2 (push) ships when the native-app project lights up and
+operator-level FCM/APNS credentials are provisioned; until then
+`POST /me/push-tokens` returns `501 push_unavailable` and the
+delivery worker skips the push tier. Tier 3 (WhatsApp) ships when
+§23 adapters are enabled on the deployment. The fallback chain
+above is **authoritative for v1** — it simply collapses to tier 1
+→ tier 4 while the intermediate tiers are off.
+
+See §23 for the shared `chat_message` / `chat_thread` substrate and
+§15 for the privacy rules that apply to off-app tiers.
 
 ### Auto-translation
 

@@ -169,9 +169,16 @@ the driver sees tomorrow's airport run; the head of house sees everything.
   to your accountant.
 - **N3. Payments.** No credit-card acceptance, no payroll bank runs.
   Expenses are recorded; reimbursement happens externally.
-- **N4. Native mobile apps.** PWA only. If we need capabilities a PWA
-  cannot offer (geofencing, background sync beyond Periodic Background
-  Sync, barcode scanning hardware APIs), we re-evaluate then.
+- **N4. Native mobile app code.** The native mobile app is a
+  **separate project** and is out of scope for this repo. This repo
+  owns the web platform — PWA, responsive design, passkey RP, deep-
+  linkable URLs, the push-token registration API, and the agent-
+  message notification fan-out. A future native shell
+  (Capacitor / TWA / WKWebView / whatever the native team picks)
+  consumes these as a black-box contract; see §14 "Native wrapper
+  readiness". One native app per deployment covers every workspace
+  the user belongs to (in-app workspace switcher, same as the web
+  SPA); one-app-per-workspace is explicitly not the model.
 - **N5. Realtime chat.** Task comments + email, no presence indicators
   or message-seen receipts. Those belong in WhatsApp, not in the
   operations system.

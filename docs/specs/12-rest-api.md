@@ -289,6 +289,19 @@ POST   /api/v1/me/tokens                         # create a PAT (plaintext shown
 POST   /api/v1/me/tokens/{id}/revoke
 POST   /api/v1/me/tokens/{id}/rotate
 GET    /api/v1/me/tokens/{id}/audit              # per-token request history
+
+# Device push tokens for the future native app (§02 `user_push_token`,
+# §10 "Agent-message delivery", §14 "Native wrapper readiness"). Identity-
+# scoped, self-only. The native shell registers its FCM/APNS token here
+# after passkey sign-in so the agent-message delivery worker can fan out
+# to the user's installed devices. Reserved surface: until push delivery
+# is wired and deployment-level FCM/APNS credentials are provisioned,
+# POST returns `501 push_unavailable`; GET and DELETE are always live so
+# a sign-out can prune a stale row even on a deployment with push off.
+GET    /api/v1/me/push-tokens                    # list caller's registered devices (no raw token bytes)
+POST   /api/v1/me/push-tokens                    # register; body: {platform: "android"|"ios", token, device_label?, app_version?}
+PUT    /api/v1/me/push-tokens/{id}               # refresh last_seen_at / swap rotated token (self-only)
+DELETE /api/v1/me/push-tokens/{id}               # unregister on sign-out (self-only)
 ```
 
 **Workspace-scoped routes** (scoped and delegated API tokens scope

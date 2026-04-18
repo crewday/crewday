@@ -929,6 +929,44 @@ that are pruned in the same worker job that rotates the audit
 log. The **latest** revision is never pruned, regardless of age —
 `agent_preference.body_md` always has a history of at least one.
 
+### `user_push_token`
+
+One row per device the user has signed into from the future native
+app (§14 "Native wrapper readiness"). Identity-scoped — a push token
+is tied to a user and a device, not to a workspace, because one app
+install delivers notifications for every workspace the user belongs
+to (the push payload names the target workspace). See §10 "Agent-
+message delivery" for the fan-out rules and §12 `/me/push-tokens`
+for the REST surface.
+
+| column             | type      | notes                                                             |
+|--------------------|-----------|-------------------------------------------------------------------|
+| id                 | ULID PK   |                                                                   |
+| user_id            | ULID FK   | subject user — the only legitimate reader/writer                  |
+| platform           | text      | `android` (FCM), `ios` (APNS). Extend as adapters grow.           |
+| token              | text      | FCM registration id or APNS device token; re-rotated by the OS on app upgrade and at OS discretion. Stored as raw text — these are device-scoped public-ish identifiers, not credentials, but still treated as PII and never logged. |
+| device_label       | text?     | user-friendly label shown on `/me` (e.g. "Pixel 9"). Supplied by the client; trimmed to 64 chars. |
+| app_version        | text?     | free-form, e.g. `crewday-android/1.2.3`. Debug aid only.          |
+| created_at         | tstz      |                                                                   |
+| last_seen_at       | tstz      | bumped on every `/me/push-tokens` PUT/refresh and on every successful push delivery that returned a non-error vendor ack. Used by the delivery worker's freshness check (default window 60 days; older tokens treated as `disabled`, never revived). |
+| disabled_at        | tstz?     | set when a vendor ack says the token is invalid/uninstalled. The row is retained (never hard-deleted from this path) so the delivery worker can report "app uninstalled, moving to next tier" without racing concurrent re-registrations. Re-registration from the same device with a fresh token creates a new row; the stale row stays `disabled`. |
+
+Primary key on `id`; unique on `(platform, token)` so a token that
+surfaces on two user accounts (device hand-off without a sign-out)
+fails registration with a deterministic `409 token_claimed`. The
+client is expected to call `DELETE /me/push-tokens/{id}` on sign-out
+so the next sign-in can register cleanly.
+
+**Visibility.** Reads and writes self-only. Neither owners/managers
+nor deployment admins see another user's push tokens on any REST
+surface. The audit log records `user_push_token.registered`,
+`user_push_token.disabled`, and `user_push_token.deleted` with
+`actor_kind='user'` and no token payload.
+
+**Retention.** Disabled rows are purged after 90 days by the same
+worker that rotates the audit log. Active rows live as long as the
+user does; archiving a user disables every token atomically.
+
 ## Schema evolution rules
 
 - Every change ships as an **Alembic migration** in `migrations/`, with

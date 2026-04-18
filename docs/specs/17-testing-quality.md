@@ -116,6 +116,12 @@ and verifies that code in one cannot reach rows in the other:
 - Passkey ceremonies are exercised via
   [WebAuthn virtual authenticator](https://playwright.dev/docs/api/
   class-cdpsession) in both Chromium and WebKit.
+- **360 px viewport sitemap** (§14 "Native wrapper readiness"): the
+  full authenticated sitemap — worker + manager shells — is walked
+  at a 360×780 viewport and fails on any horizontal scroll, any
+  tap target < 44×44, or any unreachable nav entry. This is the
+  web-platform side of the native-wrapper contract; the native
+  shell later consumes it as a black box.
 
 ## Frontend
 

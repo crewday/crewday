@@ -435,6 +435,80 @@ WCAG 2.2 AA. Concretely:
   distinct PWA with its own name (`Crewday — <workspace.name>`)
   and icon. Icons at 192, 512, maskable.
 
+## Native wrapper readiness
+
+The native mobile app is a **separate project** (§00 N4); this repo
+owns the web platform and publishes a stable contract the native
+shell can build against. The working assumption is that the native
+project ships **one app per deployment** that covers every workspace
+the user belongs to (same in-app workspace switcher as the web SPA;
+per-workspace PWA installs remain a browser-only affordance — the
+native app is not replicated per tenant). A Capacitor / TWA /
+WKWebView shell that loads the PWA is the expected baseline; richer
+native bridges are additive.
+
+Guarantees this repo makes to the wrapper:
+
+- **Every authenticated route is a plain HTTPS URL** under
+  `/w/<slug>/...` with no custom schemes. A tap on a push
+  notification, an email link, or an OS deep-link handler routes
+  to the same route the web SPA uses; the native shell decides
+  whether to open it in a native view or in its embedded WebView.
+- **Passkey RP is strictly bound to the hostname** (§15). A native
+  app that declares `associatedDomains`
+  (`webcredentials:<host>`, `applinks:<host>`) and the matching
+  Android `assetlinks.json` relation can share passkeys with the
+  web SPA without any server-side change. This repo does **not**
+  ship `/.well-known/assetlinks.json` or
+  `/.well-known/apple-app-site-association` in v1 — they are a
+  future deployment-level configuration, off by default, authored
+  when the native project publishes its first signed build. Until
+  then the wrapper falls back to its embedded WebView's cookie
+  session for passkey flows.
+- **Responsive down to 360 px wide.** Every authenticated route —
+  worker and manager alike — is usable at `min-width: 360px` on a
+  touch device, with tap targets ≥ 44×44 CSS pixels (Accessibility
+  gate above). The manager shell collapses `.desk__nav` to a
+  hamburger and `.desk__agent` to a bottom-dock drawer below
+  720 px; this has to remain true under any future layout change.
+  The release playbook (§17) verifies the full authenticated
+  sitemap at a 360 px Playwright viewport.
+- **No User-Agent gating.** The server never rejects a request
+  based on UA string alone. A custom UA like
+  `crewday-android/1.2.3 (Android 14; Pixel 9)` is acceptable and
+  surfaces in audit (`http_user_agent`). A future `X-Crewday-Client`
+  header is reserved — when set it is logged and telemetered but
+  never load-bearing for auth or routing decisions.
+- **Same-origin CSP is compatible with WebView.** The strict
+  `frame-ancestors 'none'` (§15) only restricts iframe embedding;
+  it does **not** restrict WKWebView / Android WebView / Chrome
+  Custom Tabs / TWA, which are not iframes. The native shell
+  loads the PWA directly and sees the same CSP as a desktop
+  browser.
+- **Session cookies survive WebView navigation.** The
+  `__Host-crewday_session` cookie (§15) is `Secure; HttpOnly;
+  SameSite=Lax`. It works in a WebView over HTTPS the same way it
+  works in a desktop browser; the native shell does not need a
+  separate bearer-token path just to keep the user signed in.
+- **Agent-message delivery over push** is specified in §10 and the
+  REST surface `/me/push-tokens` is reserved in §12. Activation is
+  gated on the native project: until it ships, `POST /me/push-tokens`
+  returns `501 push_unavailable` and the delivery worker collapses
+  to the email tier.
+
+What this repo deliberately does **not** provide:
+
+- No device-authorization / OAuth flow — the wrapper authenticates
+  the same way the web does (passkey over HTTPS in the embedded
+  browser). If the native project later needs a bearer-token
+  handshake it can layer one on using the existing PAT surface
+  (§03 "Personal access tokens") without a spec change here.
+- No native-side signing keys, no app attestation check. If the
+  native project introduces one it files a spec change here.
+- No custom URL scheme (`crewday://...`). Every link is HTTPS.
+- No per-tenant branding, icons, or app IDs. A deployment that
+  wants branded apps operates its own fork of the native project.
+
 ## Internationalization readiness
 
 All user-facing strings go through an i18n helper backed by a JSON

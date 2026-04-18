@@ -219,9 +219,18 @@ existing host-CLI-only administrative commands class.
 - Manifest + service worker.
 - Offline task list, queued completions, photo-then-completion
   ordering.
+- **Native wrapper readiness gate** (§14): every authenticated
+  route passes a 360 px Playwright viewport check — worker and
+  manager shells alike; deep-link routing from cold start;
+  passkey ceremony inside an embedded-browser fixture. Wrapper
+  contract green before the native-app project can start
+  consuming it.
 
 **Exit:** the scripted offline scenario (airplane mode, complete 5
-tasks with photos, back online) syncs within 60s with zero loss.
+tasks with photos, back online) syncs within 60s with zero loss;
+the 360 px sitemap check is green for every authenticated route;
+the reserved `/me/push-tokens` endpoint answers `501
+push_unavailable` on a v1 deployment with no push backend wired.
 
 ## Phase 9b — Demo deployment
 
@@ -280,7 +289,16 @@ Items explicitly deferred, in rough priority order:
    proration, dunning, tax handling per region, and tenant self-
    serve plan changes. The multi-tenancy platform itself already
    shipped in Phase 1 (§01 §03 §15).
-4. Native mobile apps (only if PWA limitations become painful).
+4. **Native mobile app(s).** Separate project(s) — one cross-platform
+   shell, or one per platform (Android + iOS) if the native team
+   prefers. This repo already ships the wrapper contract (§14
+   "Native wrapper readiness"); the native work is the shell, OS
+   integration, and app-store plumbing. The first product motivator
+   is **delivering agent messages via OS push** (§10 tier 2). When
+   the native project goes live it also flips `POST /me/push-tokens`
+   from `501 push_unavailable` to active and provisions deployment-
+   level FCM/APNS credentials. Everything on the web platform side
+   is already in place at that point.
 5. QuickBooks / Xero accounting export (beyond CSV).
 6. OIDC for owners/managers.
 7. Owner-only dashboard (when a second-party manages on behalf of an
