@@ -883,6 +883,103 @@ Local driver writes to `$DATA_DIR/files/{workspace_id}/{sha256[0:2]}/
 {sha256[2:4]}/{sha256}`. See §15 for MIME sniffing, EXIF stripping, and PDF script
 rejection.
 
+Uploads that land as an `asset_document` (§21) trigger the
+**document text extraction** worker (§21 "Document text
+extraction"); the extracted text is stored on `file_extraction`
+below and indexed for the agent knowledge-base search (§ "Full-text
+search ranking — knowledge base"). Other file kinds (evidence
+photos, receipt-claim images, instruction attachments) are not
+auto-extracted in v1 — receipt OCR runs through the
+`expenses.autofill` capability (§11) and instruction bodies are
+already stored as Markdown.
+
+### `file_extraction`
+
+One row per `file` whose owning row is an `asset_document` (§21).
+Holds the server-extracted plain text plus the bookkeeping the
+extraction worker and the KB tools (§11 "Agent knowledge tools")
+need.
+
+| column                | type      | notes                                                              |
+|-----------------------|-----------|--------------------------------------------------------------------|
+| file_id               | ULID PK/FK | `file.id`. PK because a file extracts to exactly one body.        |
+| workspace_id          | ULID FK   | denormalised from `file.workspace_id` for index locality           |
+| extraction_status     | enum      | `pending \| extracting \| succeeded \| failed \| unsupported \| empty` |
+| extractor             | enum?     | `pypdf \| pdfminer \| python_docx \| openpyxl \| tesseract \| llm_vision \| passthrough`. Null while `pending` / `extracting`. |
+| body_text             | text?     | UTF-8 plain text. Null when status is not `succeeded`.             |
+| pages_json            | jsonb?    | array of `{page: int, char_start: int, char_end: int}` so `read_doc(ref, page=N)` can return a single page-window without re-scanning the whole body. Null for non-paginated extractors. |
+| token_count           | int?      | model-tokens in `body_text`, measured with the deployment default model's tokenizer at extraction time. Drives the per-call page-window cap in `read_doc` (§11). |
+| has_secret_marker     | bool      | true if the redactor swapped at least one hard-drop secret pattern in `body_text`. Surfaces a warning on the document UI (§14, §21). |
+| extracted_at          | tstz?     | clock time of the successful extraction. Null while pending.       |
+| attempts              | int       | retry count; the worker stops at 3 and flips to `failed`.          |
+| last_error            | text?     | short human-readable cause on `failed`; cleared on retry-success.  |
+| created_at            | tstz      |                                                                    |
+| updated_at            | tstz      |                                                                    |
+
+Primary key on `file_id` (one extraction per file). FK to `file`
+with `ON DELETE CASCADE` — purging the source file purges the
+extracted text in the same transaction; soft-deleting the file
+preserves the row so a restore can re-use the cached extraction.
+
+The body is **never** considered authoritative content. It is a
+search-and-grounding surface only; the canonical document remains
+the binary on `file.storage_key`.
+
+Retention follows the parent `file`. The body itself is **not**
+extra-encrypted at rest in v1 — it lives next to its source file
+under the same storage protections; deployments needing
+column-level encryption can layer it later without a schema
+change.
+
+### `agent_doc`
+
+Code-shipped Markdown that the chat agents read on demand via
+`list_system_docs` / `read_system_doc` (§11 "Agent knowledge
+tools"). Hash-self-seeds from `app/agent_docs/*.md` using the same
+algorithm `llm_prompt_template` uses (§11 "Self-seeding
+algorithm").
+
+| column          | type      | notes                                                                           |
+|-----------------|-----------|---------------------------------------------------------------------------------|
+| id              | ULID PK   |                                                                                 |
+| slug            | text      | unique while `is_active = true`; matches the source filename (`crewday_overview.md` → `crewday_overview`) |
+| title           | text      |                                                                                 |
+| summary         | text?     | one-sentence summary surfaced in `list_system_docs` so the model can pick what to read without fetching the body |
+| body_md         | text      | full Markdown                                                                   |
+| roles           | text[]    | subset of `{owner, manager, employee, admin}`; the doc is offered to the agent only when at least one matches a role grant the delegating user holds in the turn |
+| capabilities    | text[]    | optional further allow-list; defaults to `{chat.manager, chat.employee, chat.admin}` |
+| version         | int       | auto-incremented per slug                                                       |
+| is_active       | bool      |                                                                                 |
+| default_hash    | text(16)  | sha256[:16] of the code default at the time of the last seed                    |
+| notes           | text?     | operator-facing change note                                                     |
+| created_at      | tstz      |                                                                                 |
+| updated_at      | tstz      |                                                                                 |
+
+Primary key on `id`; unique `(slug)` while `is_active = true`.
+Deployment-scope: there is no `workspace_id` — system docs apply to
+every workspace served by the deployment, just like the prompt
+library and the LLM registry.
+
+### `agent_doc_revision`
+
+One row per save (admin edit, code-default upgrade, or
+reset-to-default), mirroring `llm_prompt_template_revision`.
+
+| column             | type      | notes                                                   |
+|--------------------|-----------|---------------------------------------------------------|
+| id                 | ULID PK   |                                                         |
+| doc_id             | ULID FK   | `agent_doc.id`                                          |
+| version            | int       | snapshot                                                |
+| body_md            | text      | snapshot at save time                                   |
+| notes              | text?     |                                                         |
+| created_at         | tstz      |                                                         |
+| created_by_user_id | ULID FK?  | acting user; null for code-default upgrades             |
+
+Unique `(doc_id, version)`. Retention follows
+`retention.llm_prompt_revisions_days` (§ "Operational-log retention
+defaults" picks up this key implicitly through the prompt-library
+rotation worker).
+
 ### `secret_envelope`
 
 Per-workspace AES-GCM-encrypted blobs for secret values we must store
@@ -1303,6 +1400,8 @@ Defined once per document where the enum lives; summarized here.
 - `asset_condition`: `new | good | fair | poor | needs_replacement`
 - `asset_status`: `active | in_repair | decommissioned | disposed`
 - `asset_document_kind`: `manual | warranty | invoice | receipt | photo | certificate | contract | permit | insurance | other`
+- `file_extraction_status`: `pending | extracting | succeeded | failed | unsupported | empty` (§02 `file_extraction`, §21 "Document text extraction")
+- `file_extractor`: `pypdf | pdfminer | python_docx | openpyxl | tesseract | llm_vision | passthrough` (§21 "Document text extraction")
 - `asset_type_category`: `climate | appliance | plumbing | pool | heating | outdoor | safety | security | vehicle | other`
 - `inventory_movement_reason`: `restock | consume | adjust | waste | transfer_in | transfer_out | audit_correction`
 - `delivery_state`: `queued | sent | delivered | bounced | failed`
@@ -1335,6 +1434,42 @@ ranked by a simple weighted sum:
 
 SQLite uses FTS5 `bm25()` with the same weight vector; Postgres uses
 `ts_rank_cd` against a `tsvector` built with the same weights.
+
+## Full-text search ranking — knowledge base
+
+The `search.search_kb(q, *, workspace_id, property_id?, asset_id?, kind?)`
+interface backs the agent's `search_kb` tool (§11 "Agent knowledge
+tools") and the worker / manager UI's KB search box. It walks two
+shapes in a single ranked pass:
+
+- `instruction_revision.body_md` (current revision only) — weights
+  4 on `instruction.title`, 3 on `instruction.tags`, 2 on
+  `body_md`, 1 on `summary_md`.
+- `file_extraction.body_text` for rows where `extraction_status =
+  'succeeded'` — weights 4 on `asset_document.title`, 3 on
+  `asset_document.kind` (so a query for "warranty" prefers warranty
+  rows), 2 on the matching page body, 1 on the file's
+  `original_name`.
+
+The two shapes share the same FTS5 virtual table on SQLite (one row
+per searchable unit, discriminated by a `kind` column) and the same
+`tsvector` index on Postgres. Snippet generation uses the same
+SQLite `snippet()` / Postgres `ts_headline` helpers as the task
+search and is capped at 240 characters; the agent's tool result
+truncates further to keep `search_kb` responses model-friendly.
+
+Pagination is offset+limit (default 10, max 50); the agent
+caller keeps the limit small so it can iterate, while the human
+search UI shows the standard page bar.
+
+The index is rebuilt incrementally:
+
+- Instruction edits write the new revision and re-index the
+  current revision in the same transaction (already true in §07's
+  prose; called out here for the joined index).
+- The extraction worker writes `file_extraction` and re-indexes in
+  the same transaction. Restoring a soft-deleted document re-indexes
+  from the cached body without re-extracting.
 
 ## Operational-log retention defaults
 

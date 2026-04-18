@@ -28,6 +28,7 @@ const NAV_ITEMS: SideNavItem[] = [
   { type: "link", to: "/admin/workspaces", matchPrefix: "/admin/workspaces", label: "Workspaces" },
   { type: "section", label: "USAGE" },
   { type: "link", to: "/admin/llm", label: "LLM & agents" },
+  { type: "link", to: "/admin/agent-docs", label: "Agent docs" },
   { type: "link", to: "/admin/chat-gateway", label: "Chat gateway" },
   { type: "link", to: "/admin/usage", label: "Usage" },
   { type: "section", label: "ADMIN" },

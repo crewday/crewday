@@ -98,4 +98,13 @@ export const qk = {
   adminAudit: () => ["admin", "audit"] as const,
   adminAgentLog: () => ["admin", "agent", "log"] as const,
   adminAgentActions: () => ["admin", "agent", "actions"] as const,
+  // §11 — Agent knowledge tools.
+  documentExtraction: (did: string) => ["document", did, "extraction"] as const,
+  kbSearch: (q: string) => ["kb", "search", q] as const,
+  kbDoc: (kind: "instruction" | "document", id: string, page: number = 1) =>
+    ["kb", "doc", kind, id, page] as const,
+  kbSystemDocs: (role?: string) => ["kb", "system_docs", role ?? "all"] as const,
+  kbSystemDoc: (slug: string) => ["kb", "system_docs", slug] as const,
+  adminAgentDocs: () => ["admin", "agent_docs"] as const,
+  adminAgentDoc: (slug: string) => ["admin", "agent_docs", slug] as const,
 } as const;

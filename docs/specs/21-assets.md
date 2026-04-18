@@ -189,6 +189,139 @@ invoices, certificates, insurance documents, etc.
 non-null. A document belongs to either an asset or a property, never
 both, never neither.
 
+## Document text extraction
+
+Every uploaded `asset_document` triggers server-side text extraction
+so the file becomes searchable through the knowledge-base index
+(§02 "Full-text search ranking — knowledge base") and readable by
+the agent through `search_kb` / `read_doc` (§11 "Agent knowledge
+tools"). The extracted body is **not** authoritative content — the
+binary on `file.storage_key` remains the canonical document — and
+it is **not** shown to the user as a replacement for the original;
+it powers search, agent grounding, and an optional "View extracted
+text" disclosure for transparency.
+
+### Pipeline
+
+Always asynchronous. The upload `POST /assets/{id}/documents`
+returns `201` as soon as the `file` and `asset_document` rows are
+written, with `extraction_status = "pending"` echoed in the
+response. A background worker `extract_document` picks the row up
+within seconds.
+
+The worker walks one extractor per MIME family, in this order, and
+stops at the first that produces non-empty UTF-8 text:
+
+| MIME family                                       | extractor                |
+|---------------------------------------------------|--------------------------|
+| `application/pdf` with a text layer                | `pypdf` → `pdfminer`     |
+| `application/pdf` image-only (no text layer)       | `tesseract` → `llm_vision` (if assigned) |
+| `image/jpeg`, `image/png`, `image/heic`, `image/webp` | `tesseract` → `llm_vision` (if assigned) |
+| `application/vnd.openxmlformats…wordprocessingml.document` (`.docx`) | `python_docx` |
+| `application/vnd.openxmlformats…spreadsheetml.sheet` (`.xlsx`) | `openpyxl` |
+| `text/plain`, `text/markdown`, `text/csv`           | `passthrough`            |
+| `text/html`                                          | `passthrough` (script-tag scrubbed) |
+| anything else                                        | `unsupported` (no body)  |
+
+The `llm_vision` rung uses the `documents.ocr` capability (§11). It
+runs only when an admin has assigned a vision model to that
+capability **and** the local OCR rung produced empty/garbage output
+(< 16 useful characters per page on average). Every `llm_vision`
+attempt charges the workspace 30-day budget like any other LLM
+call; refusals from the budget envelope mark the file
+`extraction_status = "failed"` with `last_error =
+"budget_exceeded"`. The next worker tick retries when budget
+returns.
+
+### Sizing and timeouts
+
+- **Hard cap**: documents larger than `documents.extraction.max_bytes`
+  (default **50 MB**) skip extraction with `extraction_status =
+  "unsupported"` and `last_error = "file_too_large"`.
+- **Page cap**: PDFs and image batches stop at
+  `documents.extraction.max_pages` (default **200**); subsequent
+  pages are not extracted but the body that did extract remains
+  searchable. The `pages_json` array notes the truncation so
+  `read_doc` can tell the agent.
+- **Time-out**: each extractor rung runs in a worker subprocess
+  with a 120 s wall-clock cap; on time-out the worker advances to
+  the next rung. Three full-pipeline failures flip the row to
+  `failed`; the operator can `POST /documents/{id}/extraction/retry`
+  to reset attempts.
+
+### Status surface
+
+`asset_document` responses include a denormalised
+`extraction_status` and `extracted_at` so the UI can render a
+status badge without a second fetch. The full extraction record
+(body, pages, extractor, errors) lives behind a separate endpoint
+because it can be large and is not always needed:
+
+```
+GET    /api/v1/documents/{id}/extraction
+        → { status, extractor, body_preview, page_count,
+            token_count, has_secret_marker, last_error,
+            extracted_at }
+GET    /api/v1/documents/{id}/extraction/pages/{n}
+        → { page, char_start, char_end, body, more_pages }
+POST   /api/v1/documents/{id}/extraction/retry
+        → 202; resets attempts and re-queues the worker.
+        Owner / manager only.
+```
+
+`/extraction` returns at most a 4 000-char `body_preview` for the
+human UI; the agent consumes the same data through `read_doc`,
+which paginates by token-window per §11.
+
+### Redaction marker
+
+The extraction worker passes `body_text` through the §11 hard-drop
+secret patterns (Wi-Fi codes, alarm codes, IBAN-shaped tokens, API
+tokens). When at least one match is replaced, the row is flagged
+`has_secret_marker = true` and the document detail UI shows a
+small banner:
+
+> *"Extraction found a value that looks like a password or access
+> code. The agent will not see the original; you may want to
+> re-upload a less sensitive version."*
+
+The original binary is untouched — only the extracted text is
+redacted. Operators who explicitly want the agent to see the
+secret should set the value in the appropriate structured field
+(asset notes, instruction body) instead of a free-text scan.
+
+### Settings-cascade additions
+
+| key                                 | type | default | scope | spec |
+|-------------------------------------|------|---------|-------|------|
+| `documents.extraction.max_bytes`    | int  | `52428800` (50 MB) | D | §21 |
+| `documents.extraction.max_pages`    | int  | `200`              | D | §21 |
+| `documents.ocr.enabled`             | bool | `true`             | D/W | §21 |
+
+`documents.ocr.enabled` lets a workspace opt out of the
+LLM-vision fallback even when the deployment has assigned a model
+to the `documents.ocr` capability — useful if the workspace wants
+to keep its 30-day budget for chat.
+
+### Audit log additions
+
+```
+asset_document.extracted          status transition pending → succeeded
+asset_document.extraction_failed  status transition * → failed (with last_error)
+asset_document.extraction_retried operator-initiated retry
+```
+
+`asset_document.extracted` carries `extractor` and `token_count`
+so the manager's audit view can spot a sudden jump in vision-LLM
+extractions (and the budget cost behind them).
+
+### Webhook additions
+
+```
+asset_document.extracted        body extraction succeeded
+asset_document.extraction_failed body extraction failed; carries last_error
+```
+
 ## Asset-action to task integration
 
 The flow from asset type to completed maintenance:

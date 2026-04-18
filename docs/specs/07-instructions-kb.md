@@ -189,6 +189,17 @@ date instructions directly degrade answer quality.
 - Scope filter (global/property/area).
 - "Applies to <this task>" quick filter in the task view.
 
+Instructions are also surfaced through the unified
+**knowledge-base search** (§02 "Full-text search ranking —
+knowledge base") that powers the agent's `search_kb` tool (§11
+"Agent knowledge tools"). Instructions appear in the same ranked
+result list as extracted asset-document text, each row tagged
+with its `kind`. The KB tools are **additive** to the existing
+in-prompt injection: instructions linked to the current task or
+scoped to the user's reachable properties still flow into the
+system prompt at turn start; the KB tools let the agent reach
+*other* instructions on demand without inflating every turn.
+
 ## Bulk operations
 
 - Archive (soft, reversible).

@@ -628,6 +628,25 @@ Implementation notes:
   to workspace A — audit never crosses workspace boundaries,
   regardless of `share_guest_identity`.
 
+### Client rota visibility
+
+The client portal scheduler (§14 "Client portal shell", §22) is a
+read-only view onto `/api/v1/scheduler/calendar` scoped to the
+caller's bound properties. To keep staff PII minimal, workers on
+that feed serialise as **first name + `work_role.name`** only —
+no last name, no email, no phone, no avatar URL. Tasks and rota
+slots include the property, the weekday, and the local time
+window; the client sees *who is booked when*, not where that
+person lives or how to reach them. Contact channels to staff go
+through the messaging surface (§10, §23) under the same existing
+mediation, not through the rota view.
+
+The serialisation is server-enforced on `GET
+/scheduler/calendar` when the caller's active role grant is a
+client binding (§22). A client who happens to also hold a manager
+grant in the same workspace sees the manager-wide feed when they
+switch roles, not the narrowed one.
+
 ## Off-app channel privacy (WhatsApp / SMS)
 
 When off-app adapters are eventually enabled, WhatsApp and SMS
@@ -696,6 +715,30 @@ See §11 redaction details. Additional rules:
   (IBAN, access codes, Wi-Fi passwords, API tokens) and the
   editor shows a "sent to the model as written" banner. No other
   free-text field gets this carve-out.
+- **Extracted document text** (§02 `file_extraction`, §21 "Document
+  text extraction") goes through the same redaction layer as other
+  free-text fields. Hard-drop secret patterns are stripped from
+  `body_text` before the row is indexed or returned by `read_doc`,
+  and the row is flagged `has_secret_marker = true` so the
+  document UI warns the operator. The original binary on
+  `file.storage_key` is **not** modified — only the extracted
+  text. Extraction never sends bytes upstream unless the
+  `documents.ocr` capability is assigned to a vision model and
+  local OCR returned no usable text; in that case the per-call
+  budget envelope and the per-capability redaction rules apply
+  as for any other LLM call.
+- **Extraction worker isolation.** The `extract_document` worker
+  runs in a subprocess with no network egress except the
+  configured LLM provider endpoint. The only system binaries
+  invoked are `tesseract` and `pdftotext`; both are pinned via
+  the container image's package manifest (§16). PDF script
+  rejection (existing in §15 "MIME sniffing") still applies — a
+  PDF that fails the script check never reaches the extraction
+  worker.
+- **System docs** (§02 `agent_doc`) are operator-shipped Markdown.
+  They are **not** redacted on the way to the model and are not
+  workspace-scoped — the editor banner reminds operators not to
+  paste workspace secrets, customer data, or live API keys.
 
 ## Backup / restore security
 

@@ -412,6 +412,13 @@ POST   /admin/api/v1/llm/prompts/{id}/reset-to-default   # writes a revision con
 # Pricing sync — replaces pricing/reload from earlier drafts.
 POST   /admin/api/v1/llm/sync-pricing                # trigger the OpenRouter sync; streams per-row deltas
 
+# Agent docs — system-side virtual files for the chat agents (§02 agent_doc, §11).
+GET    /admin/api/v1/agent_docs                      # one row per active slug, with is_customised flag
+GET    /admin/api/v1/agent_docs/{slug}               # full body + default_hash + roles + capabilities
+PUT    /admin/api/v1/agent_docs/{slug}               # snapshot old body → revision; bump version
+GET    /admin/api/v1/agent_docs/{slug}/revisions     # full edit history
+POST   /admin/api/v1/agent_docs/{slug}/reset-to-default  # write a revision containing the current code default
+
 # Call feed — unchanged shape; writes from the new pipeline.
 GET    /admin/api/v1/llm/calls                       # deployment-wide call feed (ndjson + --follow)
                                                      # filters: ?capability= / ?provider_model_id= / ?assignment_id= /
@@ -631,6 +638,31 @@ GET    /schedules/{id}/preview?for=30d   # upcoming occurrences
 POST   /schedules/{id}/pause
 POST   /schedules/{id}/resume
 
+GET    /schedule_rulesets                # per-property recurring rota (§06)
+POST   /schedule_rulesets
+GET    /schedule_rulesets/{id}
+PATCH  /schedule_rulesets/{id}
+DELETE /schedule_rulesets/{id}           # soft-delete; fails if wired to an
+                                         #   active property_work_role_assignment
+POST   /schedule_rulesets/{id}/slots     # body: {weekday, starts_local, ends_local}
+                                         #   422 `rota_overlap` on conflict (§06)
+PATCH  /schedule_rulesets/{id}/slots/{slot_id}
+DELETE /schedule_rulesets/{id}/slots/{slot_id}
+
+GET    /scheduler/calendar               # "who is booked where" feed
+                                         #   params: from, to (ISO dates),
+                                         #     user?, property?, role?
+                                         #   returns: { slots: [rota...],
+                                         #     tasks: [task...],
+                                         #     stay_bundles: [bundle...] }
+                                         #   caller-role scoping:
+                                         #     manager/owner → full workspace,
+                                         #     worker → self-only,
+                                         #     client → properties with matching
+                                         #       client_org_id, users serialised
+                                         #       as {first_name, work_role} only
+                                         #       per §15 "Client rota visibility".
+
 POST   /stay_lifecycle_rules/{property_id}/apply_to_upcoming
        # body: {"from": "2026-04-15", "to": "2026-07-15",
        #        "rebuild_patched": false}
@@ -756,12 +788,49 @@ DELETE /documents/{id}
 GET    /properties/{id}/documents     # documents for this property
 POST   /properties/{id}/documents     # multipart; file + metadata
 
+GET    /documents/{id}/extraction     # status + body_preview + page_count (§21)
+GET    /documents/{id}/extraction/pages/{n}   # paginated extracted-text page-window
+POST   /documents/{id}/extraction/retry       # owner/manager only; resets attempts
+
 GET    /asset/scan/{qr_token}         # redirect or error (§21 QR)
 
 GET    /assets/reports/tco?property_id=…
 GET    /assets/reports/replacements?within_days=…
 GET    /assets/reports/maintenance_due
 ```
+
+### Knowledge base (KB)
+
+Backs the agent's `search_kb` / `read_doc` tools (§11 "Agent
+knowledge tools") and the in-app KB search box (§14). All scoped
+to the calling workspace; results are filtered by the caller's
+read access — owners/managers see every reachable instruction and
+asset_document, workers see what their property/area grants
+allow.
+
+```
+GET    /kb/search                     # ?q=…&kind=instruction|document&property_id=…&asset_id=…&document_kind=…&limit=10&offset=0
+GET    /kb/doc/{kind}/{id}            # full body or page-window; ?page=N for documents
+GET    /kb/system_docs                # list_system_docs(); only docs whose role tag matches the caller
+GET    /kb/system_docs/{slug}         # read_system_doc(slug)
+```
+
+`/kb/search` returns
+`{ results: [{kind, id, title, snippet, score, why}], total }`.
+`/kb/doc/{kind}/{id}` for `kind = "instruction"` returns the
+current revision body; for `kind = "document"` returns
+`{title, body, page, page_count, more_pages, source_ref}` with
+`page` defaulting to 1 and the page-window capped at the
+`documents.read.page_token_cap` setting (default 4 000 model-
+tokens).
+
+`/kb/system_docs` is open to any authenticated user, but the
+returned list is filtered by the requester's role grants — a worker
+sees no admin-tagged docs.
+
+The deployment-admin surface (§ "Admin") exposes parallel routes
+under `/admin/api/v1/agent_docs/*` for editing the system-doc
+overrides themselves; KB search and read tools never call those.
 
 ### Settings
 

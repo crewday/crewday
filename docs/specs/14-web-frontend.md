@@ -100,6 +100,7 @@ workspace once and the rest of the tree is unaware of the prefix.
 /admin                     → redirects to /admin/dashboard
 /admin/dashboard           → operator landing page: deployment health, recent audit, usage
 /admin/llm                 → LLM providers, capability → model, pricing, deployment-wide spend
+/admin/agent-docs          → system-side virtual files (§11 "Agent knowledge tools" — agent_doc table, §02)
 /admin/chat-gateway        → deployment-default WhatsApp provider, templates, webhook, overrides (§23)
 /admin/usage               → per-workspace spend, cap adjust, pause state
 /admin/workspaces          → list, trust, archive; per-workspace summary card
@@ -140,7 +141,8 @@ shifts           asset/<id>
 ### Worker-only (under /w/<slug>/)
 
 ```
-chat             asset/scan
+chat             asset/scan       kb
+me/schedule
 ```
 
 Footer bottom-nav: `Today · Week · Chat · My Expenses · Me`. Chat is
@@ -163,15 +165,69 @@ user/<id>                      user/<id>/leaves
 user/<id>/availability         leaves
 availability-overrides         holidays
 permissions                    templates
-schedules                      instructions
-instructions/<id>              assets
-asset/<id>                     asset_types
-documents                      inventory
-pay                            expenses
-approvals                      audit
-webhooks                       tokens
-settings
+scheduler                      schedules
+instructions                   instructions/<id>
+assets                         asset/<id>
+asset_types                    documents
+inventory                      pay
+expenses                       approvals
+audit                          webhooks
+tokens                         settings
+kb
 ```
+
+The `documents` page renders an **Extraction** badge per row
+(`pending`, `extracting`, `succeeded`, `failed`, `unsupported`,
+`empty`) sourced from the `asset_document.extraction_status`
+denorm; clicking it opens a small disclosure with the extractor
+used, the page count, the token count, the
+`has_secret_marker` warning when set, and a "Retry" button for
+owners and managers (§21 "Document text extraction"). The doc
+detail view adds a collapsed "Extracted text" panel that lazily
+loads pages from `GET /documents/{id}/extraction/pages/{n}`.
+
+The `scheduler` page is the **"who is booked where"** calendar.
+It renders a time grid (day or week) with one row per user (or one
+row per property — the toggle is a view preference, not two pages)
+and overlays three kinds of event:
+
+- **Rota slots** (`schedule_ruleset_slot` resolved per
+  `property_work_role_assignment`) — the background band for the
+  cell, coloured by property.
+- **Materialised tasks** at `scheduled_for_local` — cards inside
+  the slot they fall in, linking to `/task/<id>`.
+- **Stay lifecycle bundle markers** (§06) — badges on the day
+  column, linking to the relevant unit/stay.
+
+Filters: property, work role, user. The page shares the
+`/api/v1/scheduler/calendar` feed (§12) with the worker and client
+views; it also surfaces two soft warnings sourced from that feed —
+**rota gaps** (rota slot with no assigned task during the window)
+and **cross-workspace overlaps** (the same user has rota slots in
+two linked workspaces that collide on a day; the server cannot
+reject these on write, see §06). Edits to rulesets and slots are
+inline on the `/w/<slug>/schedules` page (the "Rota" tab added
+alongside task schedules) — the `/scheduler` page itself is
+view-first, edit-on-click.
+
+SSE invalidation: `schedule_ruleset.upserted`,
+`schedule_ruleset.deleted`, and the existing `task.*` /
+`stay_task_bundle.*` events all invalidate
+`['scheduler-calendar']`.
+
+The worker surface `/me/schedule` is the self-only slice of the
+same feed — a read-only week view showing the user's rota, their
+assigned tasks, and any stay bundles their tasks belong to. It
+replaces the thin `Weekly availability` panel currently on `/me`
+(the panel becomes a link into `/me/schedule`).
+
+The `kb` page (worker and manager) is the human-facing
+counterpart of the agent's `search_kb` tool — a single search
+input that returns mixed instruction + document hits with the
+same `why` provenance label, and a "Read" action that opens the
+instruction page or the document detail. It is built on the
+same `/kb/search` endpoint the agent uses, so the relevance
+ranking the user sees is the relevance ranking the agent sees.
 
 The former `/w/<slug>/llm` page is gone in v1 — LLM provider and
 capability config is a deployment-level concern rendered on
@@ -530,7 +586,10 @@ than adding to this list:
   `user_work_roles` / `work_engagement` migration.
 - **Availability & holidays.** No mock pages yet for
   `/availability-overrides`, `/user/<id>/availability`, or
-  `/holidays`.
+  `/holidays`. The `/scheduler`, `/me/schedule`, and client
+  scheduler are new as of this revision — see §06 "Schedule
+  ruleset (per-property rota)" for the model and this section for
+  the surfaces.
 - **Agent sidebar (`.desk__agent`).** The shared component
   `mocks/web/src/components/AgentSidebar.tsx` mounts in both
   `EmployeeLayout` and `ManagerLayout` (role-scoped via a `role`
@@ -626,9 +685,13 @@ the property page.
 The third role pill alongside Employee / Manager renders the
 **client portal** — a separate `ClientLayout` with a narrower
 nav: Properties (only those whose `client_org_id` matches one of
-the user's `binding_org_id`s on the active workspace), Billable
-hours (read-only `shift_billing` rollup), Quotes (with accept /
-reject controls — acceptance still routes through the unconditionally
+the user's `binding_org_id`s on the active workspace), **Scheduler**
+(read-only rota calendar scoped to the client's own properties;
+user cells render **first name + work role only** per §15
+cross-workspace visibility — no last names, no contact, no tasks
+the client has no business seeing), Billable hours (read-only
+`shift_billing` rollup), Quotes (with accept / reject controls —
+acceptance still routes through the unconditionally
 approval-gated set in §22 in production; the mock applies it
 in-memory), Invoices (read-only `vendor_invoice` list, no mark-paid
 control, **Upload proof** control on any invoice in `status =

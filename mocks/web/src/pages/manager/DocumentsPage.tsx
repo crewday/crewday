@@ -4,7 +4,13 @@ import { fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
 import DeskPage from "@/components/DeskPage";
 import { Chip, FilterChipGroup, Loading } from "@/components/common";
-import type { Asset, AssetDocument, DocumentKind, Property } from "@/types/api";
+import type {
+  Asset,
+  AssetDocument,
+  DocumentKind,
+  FileExtractionStatus,
+  Property,
+} from "@/types/api";
 
 const KIND_ICON: Record<DocumentKind, string> = {
   manual: "\u{1F4D6}",
@@ -20,6 +26,24 @@ const KIND_ICON: Record<DocumentKind, string> = {
 };
 
 const WARN_CUTOFF = "2026-05-15";
+
+const EXTRACTION_TONE: Record<FileExtractionStatus, "moss" | "rust" | "sand" | "ghost"> = {
+  pending: "ghost",
+  extracting: "ghost",
+  succeeded: "moss",
+  failed: "rust",
+  unsupported: "sand",
+  empty: "ghost",
+};
+
+const EXTRACTION_LABEL: Record<FileExtractionStatus, string> = {
+  pending: "queued",
+  extracting: "extracting…",
+  succeeded: "indexed",
+  failed: "failed",
+  unsupported: "unsupported",
+  empty: "no text",
+};
 
 function fmtDate(iso: string | null): string {
   if (!iso) return "\u2014";
@@ -93,6 +117,7 @@ export default function DocumentsPage() {
               <th>Size</th>
               <th>Expires</th>
               <th>Amount</th>
+              <th>Extraction</th>
             </tr>
           </thead>
           <tbody>
@@ -115,6 +140,11 @@ export default function DocumentsPage() {
                   <td className="mono muted">{doc.size_kb} KB</td>
                   <td>{fmtDate(doc.expires_on)}</td>
                   <td>{fmtCents(doc.amount_cents, doc.amount_currency)}</td>
+                  <td>
+                    <Chip tone={EXTRACTION_TONE[doc.extraction_status]} size="sm">
+                      {EXTRACTION_LABEL[doc.extraction_status]}
+                    </Chip>
+                  </td>
                 </tr>
               );
             })}

@@ -368,6 +368,17 @@ crewday documents
   show <id>
   download <id> [-o <path>]
   archive <id>
+  extraction status <id>            # status, extractor, page_count, errors
+  extraction text <id> [--page N]   # paginated extracted text (capped at 4 000 model-tokens/page)
+  extraction retry <id>             # re-queue the worker; owner/manager only
+
+crewday kb                          # knowledge-base search & read (§11)
+  search "<query>" [--kind instruction|document] [--property <id>] \
+                   [--asset <id>] [--document-kind <enum>] [--limit 10]
+  read instruction <id>
+  read document <id> [--page N]
+  system-docs list                  # docs the caller can see (filtered by role)
+  system-docs show <slug>
 
 crewday webhooks
   list
@@ -423,6 +434,12 @@ crewday deploy                          # HTTP-backed deployment-admin group
   llm prompt edit <id> --body @prompt.md [--note "..."]
   llm prompt revisions <id>
   llm prompt reset-to-default <id>
+  # Agent docs (system-side virtual files; §11 "Agent knowledge tools")
+  agent-docs list                       # slug, title, roles, version, customised? y/n
+  agent-docs show <slug>                # body + default_hash + roles + capabilities
+  agent-docs edit <slug> --body @doc.md [--note "..."]
+  agent-docs revisions <slug>
+  agent-docs reset-to-default <slug>
   # Pricing
   llm sync-pricing [--dry-run]          # triggers the OpenRouter sync on demand
   # Call feed

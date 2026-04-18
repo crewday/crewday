@@ -2155,6 +2155,199 @@ def api_documents(property_id: str = "", asset_id: str = "", kind: str = "") -> 
     return ok(result)
 
 
+@app.get("/api/v1/documents/{did}/extraction")
+def api_document_extraction(did: str) -> Response:
+    doc = md.document_by_id(did)
+    if doc is None:
+        return JSONResponse({"detail": "not found"}, status_code=404)
+    extraction = md.extraction_for_document(did)
+    body_preview = ""
+    page_count = 0
+    token_count = 0
+    extractor = None
+    last_error = None
+    has_secret_marker = False
+    if extraction is not None:
+        body_preview = (extraction.body_text or "")[:4000]
+        page_count = len(extraction.pages or [])
+        token_count = extraction.token_count
+        extractor = extraction.extractor
+        last_error = extraction.last_error
+        has_secret_marker = extraction.has_secret_marker
+    return ok({
+        "document_id": doc.id,
+        "status": doc.extraction_status,
+        "extractor": extractor,
+        "body_preview": body_preview,
+        "page_count": page_count,
+        "token_count": token_count,
+        "has_secret_marker": has_secret_marker,
+        "last_error": last_error,
+        "extracted_at": doc.extracted_at,
+    })
+
+
+@app.get("/api/v1/documents/{did}/extraction/pages/{n}")
+def api_document_extraction_page(did: str, n: int) -> Response:
+    doc = md.document_by_id(did)
+    if doc is None:
+        return JSONResponse({"detail": "not found"}, status_code=404)
+    extraction = md.extraction_for_document(did)
+    if extraction is None or doc.extraction_status != "succeeded":
+        return JSONResponse(
+            {"detail": "extraction not available", "status": doc.extraction_status},
+            status_code=409,
+        )
+    pages = extraction.pages or []
+    if n < 1 or n > max(1, len(pages)):
+        return JSONResponse({"detail": "page out of range"}, status_code=404)
+    page_meta = pages[n - 1] if pages else {"page": n, "char_start": 0, "char_end": len(extraction.body_text)}
+    body = extraction.body_text[page_meta["char_start"]:page_meta["char_end"]]
+    return ok({
+        "page": n,
+        "char_start": page_meta["char_start"],
+        "char_end": page_meta["char_end"],
+        "body": body,
+        "more_pages": n < len(pages),
+    })
+
+
+@app.post("/api/v1/documents/{did}/extraction/retry")
+def api_document_extraction_retry(did: str) -> Response:
+    doc = md.document_by_id(did)
+    if doc is None:
+        return JSONResponse({"detail": "not found"}, status_code=404)
+    doc.extraction_status = "pending"
+    hub.publish("asset_document.extraction_retried", {"document_id": doc.id})
+    return ok({"document_id": doc.id, "status": doc.extraction_status})
+
+
+# ── Knowledge base (kb) — agent search_kb / read_doc surfaces ────────
+
+@app.get("/api/v1/kb/search")
+def api_kb_search(
+    q: str = "",
+    kind: str = "",
+    property_id: str = "",
+    asset_id: str = "",
+    document_kind: str = "",
+    limit: int = 10,
+) -> Response:
+    results = md.search_kb(
+        q,
+        kind=kind,
+        property_id=property_id,
+        asset_id=asset_id,
+        document_kind=document_kind,
+        limit=limit,
+    )
+    return ok({"results": results, "total": len(results)})
+
+
+@app.get("/api/v1/kb/doc/{kind}/{id_}")
+def api_kb_read(kind: str, id_: str, page: int = 1) -> Response:
+    if kind == "instruction":
+        instr = next((i for i in md.INSTRUCTIONS if i.id == id_), None)
+        if instr is None:
+            return JSONResponse({"detail": "not found"}, status_code=404)
+        return ok({
+            "kind": "instruction",
+            "id": instr.id,
+            "title": instr.title,
+            "body": instr.body_md,
+            "page": 1,
+            "page_count": 1,
+            "more_pages": False,
+            "source_ref": {"scope": instr.scope, "property_id": instr.property_id, "area": instr.area},
+        })
+    if kind == "document":
+        doc = md.document_by_id(id_)
+        if doc is None:
+            return JSONResponse({"detail": "not found"}, status_code=404)
+        if doc.extraction_status != "succeeded":
+            return ok({
+                "kind": "document",
+                "id": doc.id,
+                "extraction_status": doc.extraction_status,
+                "hint": (
+                    "Extraction is still running — try again in a minute."
+                    if doc.extraction_status in ("pending", "extracting")
+                    else "I haven't been able to read this file."
+                ),
+            })
+        extraction = md.extraction_for_document(id_)
+        assert extraction is not None
+        pages = extraction.pages or [{"page": 1, "char_start": 0, "char_end": len(extraction.body_text)}]
+        if page < 1 or page > len(pages):
+            return JSONResponse({"detail": "page out of range"}, status_code=404)
+        page_meta = pages[page - 1]
+        body = extraction.body_text[page_meta["char_start"]:page_meta["char_end"]]
+        return ok({
+            "kind": "document",
+            "id": doc.id,
+            "title": doc.title,
+            "body": body,
+            "page": page,
+            "page_count": len(pages),
+            "more_pages": page < len(pages),
+            "source_ref": {"property_id": doc.property_id, "asset_id": doc.asset_id, "document_kind": doc.kind},
+        })
+    return JSONResponse({"detail": f"unknown kind: {kind}"}, status_code=400)
+
+
+@app.get("/api/v1/kb/system_docs")
+def api_kb_system_docs(role: str = "") -> Response:
+    docs = md.AGENT_DOCS
+    if role:
+        docs = [d for d in docs if role in d.roles]
+    return ok([
+        {
+            "slug": d.slug,
+            "title": d.title,
+            "summary": d.summary,
+            "roles": d.roles,
+            "updated_at": d.updated_at,
+        }
+        for d in docs
+    ])
+
+
+@app.get("/api/v1/kb/system_docs/{slug}")
+def api_kb_system_doc(slug: str) -> Response:
+    doc = md.agent_doc_by_slug(slug)
+    if doc is None:
+        return JSONResponse({"detail": "not found"}, status_code=404)
+    return ok(doc)
+
+
+# ── Admin: agent_doc overrides (§02 agent_doc, §11) ────────────────────
+
+@app.get("/admin/api/v1/agent_docs")
+def admin_agent_docs() -> Response:
+    return ok([
+        {
+            "slug": d.slug,
+            "title": d.title,
+            "summary": d.summary,
+            "roles": d.roles,
+            "capabilities": d.capabilities,
+            "version": d.version,
+            "is_customised": d.is_customised,
+            "default_hash": d.default_hash,
+            "updated_at": d.updated_at,
+        }
+        for d in md.AGENT_DOCS
+    ])
+
+
+@app.get("/admin/api/v1/agent_docs/{slug}")
+def admin_agent_doc(slug: str) -> Response:
+    doc = md.agent_doc_by_slug(slug)
+    if doc is None:
+        return JSONResponse({"detail": "not found"}, status_code=404)
+    return ok(doc)
+
+
 @app.post("/api/v1/assets/{aid}/actions/{action_id}/complete")
 def api_asset_action_complete(aid: str, action_id: str) -> Response:
     action = next((a for a in md.ASSET_ACTIONS if a.id == action_id and a.asset_id == aid), None)

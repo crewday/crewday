@@ -28,6 +28,37 @@ fix the offender.
   self-writable only. Reads are open to anyone with a grant on
   the scope (CLI/API); the UI restricts the editor to users
   with write access. See §11 "Agent preferences".
+- **Agent knowledge tools.** The four chat-capability-only tools the
+  embedded agents use to read content on demand: `list_system_docs`
+  / `read_system_doc` for code-shipped operating manuals
+  (`agent_doc`, §02), and `search_kb` / `read_doc` for the
+  workspace's instructions (§07) and extracted asset documents
+  (§21). All four call REST endpoints under the delegating user's
+  token, so the agent never sees content the user could not. See
+  §11 "Agent knowledge tools".
+- **System doc (agent doc).** Code-shipped Markdown that the chat
+  agents read on demand to learn how to behave (CLI cheat-sheet,
+  card phrasing, hand-off rules). Hash-self-seeded into the
+  `agent_doc` table (§02) using the same algorithm as
+  `llm_prompt_template`. Operators override per deployment via
+  `/admin/agent-docs` or `crewday deploy agent-docs edit <slug>`.
+- **Knowledge base (KB).** The unified search-and-read surface
+  over instruction revisions (§07) and extracted document text
+  (§21 `file_extraction`). Backs the agent's `search_kb` /
+  `read_doc` tools (§11) and the worker / manager `/kb` page
+  (§14). Index is the existing FTS5 / tsvector path extended to
+  cover both shapes (§02 "Full-text search ranking — knowledge
+  base"). Vector embeddings are out of scope for v1.
+- **Document extraction.** Server-side text extraction triggered on
+  every `asset_document` upload (§21 "Document text extraction").
+  Always asynchronous. Local libraries (pypdf, pdfminer,
+  python-docx, openpyxl, Tesseract) handle the common cases; the
+  optional `documents.ocr` LLM-vision capability handles
+  image-only uploads when local OCR fails. Extracted body lives on
+  `file_extraction` (§02), passes through the standard PII
+  redaction layer, and is the only document content the agent ever
+  sees — the canonical binary on `file.storage_key` is never sent
+  upstream.
 - **Agent approval mode.** Per-user enum on `users.agent_approval_mode`
   — `bypass | auto | strict`, default `strict`. Decides when the
   user's own embedded chat agent pauses for an inline confirmation

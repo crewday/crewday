@@ -1274,6 +1274,23 @@ export interface AssetAction {
   estimated_duration_minutes: number | null;
 }
 
+export type FileExtractionStatus =
+  | "pending"
+  | "extracting"
+  | "succeeded"
+  | "failed"
+  | "unsupported"
+  | "empty";
+
+export type FileExtractor =
+  | "pypdf"
+  | "pdfminer"
+  | "python_docx"
+  | "openpyxl"
+  | "tesseract"
+  | "llm_vision"
+  | "passthrough";
+
 export interface AssetDocument {
   id: string;
   asset_id: string | null;
@@ -1286,6 +1303,63 @@ export interface AssetDocument {
   expires_on: string | null;
   amount_cents: number | null;
   amount_currency: string | null;
+  extraction_status: FileExtractionStatus;
+  extracted_at: string | null;
+}
+
+export interface DocumentExtraction {
+  document_id: string;
+  status: FileExtractionStatus;
+  extractor: FileExtractor | null;
+  body_preview: string;
+  page_count: number;
+  token_count: number;
+  has_secret_marker: boolean;
+  last_error: string | null;
+  extracted_at: string | null;
+}
+
+export interface KbHit {
+  kind: "instruction" | "document";
+  id: string;
+  title: string;
+  snippet: string;
+  score: number;
+  why: string;
+}
+
+export interface KbSearchResponse {
+  results: KbHit[];
+  total: number;
+}
+
+export interface KbDocPayload {
+  kind: "instruction" | "document";
+  id: string;
+  title?: string;
+  body?: string;
+  page?: number;
+  page_count?: number;
+  more_pages?: boolean;
+  source_ref?: Record<string, string | null>;
+  extraction_status?: FileExtractionStatus;
+  hint?: string;
+}
+
+export interface AgentDocSummary {
+  slug: string;
+  title: string;
+  summary: string;
+  roles: string[];
+  updated_at: string;
+}
+
+export interface AgentDoc extends AgentDocSummary {
+  body_md: string;
+  capabilities: string[];
+  version: number;
+  is_customised: boolean;
+  default_hash: string;
 }
 
 export interface AssetDetailPayload {

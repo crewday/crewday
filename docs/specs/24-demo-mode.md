@@ -289,7 +289,14 @@ Only the following capabilities run live on a demo workspace:
   feature.
 
 All other capabilities are **disabled** with a "Not available in
-demo" inline notice at the call site.
+demo" inline notice at the call site. In particular, `documents.ocr`
+(§11, §21) is **disabled** in demo: every uploaded document goes
+through local extractors only. An image-only PDF or photo with no
+extractable text records `extraction_status = "unsupported"` and
+the agent is told to suggest the visitor try a text PDF — there is
+no LLM-vision fallback eating the demo budget. The agent still has
+full `search_kb` / `read_doc` / `list_system_docs` access; only
+the optional vision rung of the extraction pipeline is silenced.
 
 The live capabilities route to **OpenRouter free-tier models** by
 default (suffix `:free`, e.g. `google/gemma-3-27b-it:free`). The

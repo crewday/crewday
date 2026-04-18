@@ -1015,6 +1015,42 @@ class AssetDocument:
     expires_on: date | None = None
     amount_cents: int | None = None
     amount_currency: str | None = None
+    extraction_status: Literal[
+        "pending", "extracting", "succeeded", "failed", "unsupported", "empty",
+    ] = "pending"
+    extracted_at: datetime | None = None
+
+
+@dataclass
+class FileExtraction:
+    """Server-extracted body for an `asset_document` (§02 file_extraction)."""
+
+    document_id: str
+    extractor: Literal[
+        "pypdf", "pdfminer", "python_docx", "openpyxl",
+        "tesseract", "llm_vision", "passthrough",
+    ] | None
+    body_text: str
+    pages: list[dict[str, int]]
+    token_count: int
+    has_secret_marker: bool = False
+    last_error: str | None = None
+
+
+@dataclass
+class AgentDoc:
+    """Code-shipped Markdown the chat agents read on demand (§02 agent_doc)."""
+
+    slug: str
+    title: str
+    summary: str
+    body_md: str
+    roles: list[str]
+    capabilities: list[str]
+    version: int
+    is_customised: bool
+    default_hash: str
+    updated_at: datetime
 
 
 # ── Clients, vendors, work orders (§22) ──────────────────────────────
@@ -3026,28 +3062,172 @@ ASSET_ACTIONS: list[AssetAction] = [
 
 ASSET_DOCUMENTS: list[AssetDocument] = [
     AssetDocument("ad-1", "a-villa-ac-bed", "p-villa-sud", "manual", "Mitsubishi MSZ-AP25VGK manual",
-                  "msz-ap25vgk-manual.pdf", 4200, datetime(2024, 6, 15, 10, 0)),
+                  "msz-ap25vgk-manual.pdf", 4200, datetime(2024, 6, 15, 10, 0),
+                  extraction_status="succeeded", extracted_at=datetime(2024, 6, 15, 10, 1)),
     AssetDocument("ad-2", "a-villa-ac-bed", "p-villa-sud", "warranty", "AC warranty certificate",
                   "ac-warranty-2024.pdf", 180, datetime(2024, 6, 15, 10, 5),
-                  expires_on=date(2028, 6, 15)),
+                  expires_on=date(2028, 6, 15),
+                  extraction_status="succeeded", extracted_at=datetime(2024, 6, 15, 10, 6)),
     AssetDocument("ad-3", "a-villa-pool-pump", "p-villa-sud", "invoice", "Pool pump purchase invoice",
                   "hayward-invoice-2022.pdf", 320, datetime(2022, 3, 10, 14, 0),
-                  amount_cents=85000, amount_currency="EUR"),
+                  amount_cents=85000, amount_currency="EUR",
+                  extraction_status="succeeded", extracted_at=datetime(2022, 3, 10, 14, 1)),
     AssetDocument("ad-4", "a-villa-water-heater", "p-villa-sud", "manual", "Atlantic O'Pro 200L manual",
-                  "atlantic-opro-manual.pdf", 3800, datetime(2019, 11, 5, 9, 0)),
+                  "atlantic-opro-manual.pdf", 3800, datetime(2019, 11, 5, 9, 0),
+                  extraction_status="succeeded", extracted_at=datetime(2019, 11, 5, 9, 1)),
     AssetDocument("ad-5", "a-apt-dishwasher", "p-apt-3b", "warranty", "Bosch Serie 4 warranty",
                   "bosch-warranty-2023.pdf", 150, datetime(2023, 7, 1, 12, 0),
-                  expires_on=date(2025, 7, 1)),
+                  expires_on=date(2025, 7, 1),
+                  extraction_status="succeeded", extracted_at=datetime(2023, 7, 1, 12, 1)),
     AssetDocument("ad-6", "a-chalet-boiler", "p-chalet", "invoice", "Boiler installation invoice",
                   "vaillant-install-invoice.pdf", 280, datetime(2020, 10, 5, 15, 0),
-                  amount_cents=320000, amount_currency="EUR"),
+                  amount_cents=320000, amount_currency="EUR",
+                  extraction_status="failed"),
     # Property-level documents (asset_id = None)
     AssetDocument("ad-7", None, "p-villa-sud", "insurance", "Villa Sud insurance policy 2026",
                   "villa-sud-insurance-2026.pdf", 1200, datetime(2026, 1, 5, 9, 30),
-                  expires_on=date(2027, 1, 5), amount_cents=285000, amount_currency="EUR"),
+                  expires_on=date(2027, 1, 5), amount_cents=285000, amount_currency="EUR",
+                  extraction_status="succeeded", extracted_at=datetime(2026, 1, 5, 9, 31)),
     AssetDocument("ad-8", None, "p-villa-sud", "permit", "Pool safety compliance certificate",
                   "pool-safety-cert-2025.pdf", 450, datetime(2025, 6, 20, 11, 0),
-                  expires_on=date(2026, 6, 20)),
+                  expires_on=date(2026, 6, 20),
+                  extraction_status="extracting"),
+]
+
+
+# ── Document text extractions (server-derived bodies; §02 file_extraction) ──
+
+FILE_EXTRACTIONS: dict[str, FileExtraction] = {
+    "ad-1": FileExtraction(
+        "ad-1", "pypdf",
+        body_text=(
+            "Mitsubishi MSZ-AP25VGK installation and user manual.\n\n"
+            "## Filter cleaning (recommended monthly)\n"
+            "1. Power off the unit at the wall switch.\n"
+            "2. Open the front grille; the filter slides out from the top.\n"
+            "3. Rinse with cool water; do not use detergent.\n"
+            "4. Allow to fully air-dry before reinstalling.\n"
+            "5. Replace the filter at least every 24 months.\n\n"
+            "## Refrigerant\nR32. Servicing requires a certified F-gas technician.\n"
+        ),
+        pages=[{"page": 1, "char_start": 0, "char_end": 420}],
+        token_count=132,
+    ),
+    "ad-2": FileExtraction(
+        "ad-2", "pypdf",
+        body_text=(
+            "Mitsubishi Electric — Limited Warranty Certificate\n"
+            "Model: MSZ-AP25VGK   Installed: 2024-06-15\n"
+            "Coverage: 4 years parts, 2 years labour. "
+            "Warranty void if non-OEM filters used or if unit moved without recertification."
+        ),
+        pages=[{"page": 1, "char_start": 0, "char_end": 220}],
+        token_count=64,
+    ),
+    "ad-4": FileExtraction(
+        "ad-4", "pypdf",
+        body_text=(
+            "Atlantic O'Pro 200L water heater — operating manual.\n\n"
+            "## Annual maintenance\n"
+            "1. Cut power at the disconnect.\n"
+            "2. Drain the tank using the bottom valve.\n"
+            "3. Inspect the magnesium anode; replace if eroded > 50%.\n"
+            "4. Refill, restore power, observe pressure-relief valve for 30 min."
+        ),
+        pages=[{"page": 1, "char_start": 0, "char_end": 320}],
+        token_count=98,
+    ),
+    "ad-5": FileExtraction(
+        "ad-5", "pypdf",
+        body_text=(
+            "Bosch Serie 4 dishwasher warranty — 2 years parts and labour from 2023-07-01."
+        ),
+        pages=[{"page": 1, "char_start": 0, "char_end": 90}],
+        token_count=24,
+    ),
+    "ad-7": FileExtraction(
+        "ad-7", "pypdf",
+        body_text=(
+            "Villa Sud insurance policy 2026 — Allianz contract n° AZ-882441.\n"
+            "Annual premium: €2 850. Coverage: building, fixtures, public liability up to €5 M.\n"
+            "Excludes pool incidents involving unsupervised minors."
+        ),
+        pages=[{"page": 1, "char_start": 0, "char_end": 240}],
+        token_count=72,
+    ),
+    "ad-6": FileExtraction(
+        "ad-6", None,
+        body_text="",
+        pages=[],
+        token_count=0,
+        last_error="image-only PDF; tesseract returned < 16 chars per page",
+    ),
+}
+
+
+# ── Agent docs (system-side virtual files; §02 agent_doc) ──────────────
+
+AGENT_DOCS: list[AgentDoc] = [
+    AgentDoc(
+        slug="cli-cheatsheet",
+        title="CLI cheat-sheet",
+        summary="Crewday CLI verbs grouped by surface, with the rare flags worth remembering.",
+        body_md=(
+            "# CLI cheat-sheet\n\n"
+            "Use this when the user asks 'how do I…?' and the answer maps to a single CLI verb.\n\n"
+            "## Tasks\n- `crewday tasks list --today --assigned-to @me`\n"
+            "- `crewday tasks complete <id> --note '…'`\n\n"
+            "## Documents & KB\n- `crewday kb search '<query>'`\n"
+            "- `crewday kb read document <id> [--page N]`\n"
+            "- `crewday documents extraction status <id>`"
+        ),
+        roles=["manager", "employee", "admin"],
+        capabilities=["chat.manager", "chat.employee", "chat.admin"],
+        version=1,
+        is_customised=False,
+        default_hash="b27c0a1f3d49aa12",
+        updated_at=datetime(2026, 4, 18, 9, 0),
+    ),
+    AgentDoc(
+        slug="worker-tone",
+        title="How to talk to workers on mobile",
+        summary="Short replies, second-person plural in formal locales, no walls of text on a 4-inch screen.",
+        body_md=(
+            "# Worker tone\n\n"
+            "Workers chat from a phone, often one-handed between tasks. Keep replies under 80 words "
+            "unless they ask for a step-by-step. Never paste a whole manual; quote one line and "
+            "offer 'want me to read more?'.\n\n"
+            "When the worker is on a task screen, prefer the linked instructions before "
+            "searching the KB. If the answer is in `search_kb` only, name the source ('From the "
+            "AC manual at Villa Sud:')."
+        ),
+        roles=["employee"],
+        capabilities=["chat.employee"],
+        version=1,
+        is_customised=False,
+        default_hash="6f1c8842e5b0a103",
+        updated_at=datetime(2026, 4, 18, 9, 0),
+    ),
+    AgentDoc(
+        slug="approval-cards",
+        title="Inline approval card phrasing",
+        summary="When to skip the inline confirmation card, when to insist, what the verbs mean.",
+        body_md=(
+            "# Inline approval cards\n\n"
+            "Every mutating action you propose may surface an `x-agent-confirm` card. Do not "
+            "echo the card body in chat — the user will see the card. Instead, narrate the "
+            "*reason* for the action ('Marcie's been off the schedule for two weeks; I can "
+            "archive her engagement.') and let the card take it from there.\n\n"
+            "If the user already typed the answer ('yes go ahead'), still show the card; the "
+            "card is the audit trail."
+        ),
+        roles=["manager", "admin"],
+        capabilities=["chat.manager", "chat.admin"],
+        version=1,
+        is_customised=False,
+        default_hash="ab8240f04c5b6712",
+        updated_at=datetime(2026, 4, 18, 9, 0),
+    ),
 ]
 
 
@@ -4042,6 +4222,114 @@ def documents_for_asset(aid: str) -> list[AssetDocument]:
 
 def documents_for_property(pid: str) -> list[AssetDocument]:
     return [d for d in ASSET_DOCUMENTS if d.property_id == pid]
+
+
+def document_by_id(did: str) -> AssetDocument | None:
+    return next((d for d in ASSET_DOCUMENTS if d.id == did), None)
+
+
+def extraction_for_document(did: str) -> FileExtraction | None:
+    return FILE_EXTRACTIONS.get(did)
+
+
+def agent_doc_by_slug(slug: str) -> AgentDoc | None:
+    return next((d for d in AGENT_DOCS if d.slug == slug), None)
+
+
+def search_kb(
+    q: str,
+    *,
+    kind: str = "",
+    property_id: str = "",
+    asset_id: str = "",
+    document_kind: str = "",
+    limit: int = 10,
+) -> list[dict]:
+    """Lightweight FTS-shaped mock for §02 search_kb.
+
+    Walks instructions (current revisions) and successfully-extracted
+    asset documents; ranks by simple substring count weighted per the
+    spec's vector. Snippets cap at 240 chars.
+    """
+    query = q.strip().lower()
+    if not query:
+        return []
+    hits: list[dict] = []
+    if kind in ("", "instruction"):
+        for instr in INSTRUCTIONS:
+            if property_id and instr.property_id not in (None, property_id):
+                continue
+            title = (instr.title or "").lower()
+            tags = " ".join(instr.tags or []).lower()
+            body = (instr.body_md or "").lower()
+            score = (
+                4 * title.count(query)
+                + 3 * tags.count(query)
+                + 2 * body.count(query)
+            )
+            if score == 0:
+                continue
+            snippet_src = instr.body_md or instr.title
+            idx = snippet_src.lower().find(query)
+            start = max(0, idx - 80)
+            snippet = snippet_src[start:start + 240].strip()
+            why = "Instruction"
+            if instr.property_id:
+                prop = property_by_id(instr.property_id)
+                if prop:
+                    why = f"Instruction at *{prop.name}*"
+            hits.append({
+                "kind": "instruction",
+                "id": instr.id,
+                "title": instr.title,
+                "snippet": snippet,
+                "score": score,
+                "why": why,
+            })
+    if kind in ("", "document"):
+        for doc in ASSET_DOCUMENTS:
+            if doc.extraction_status != "succeeded":
+                continue
+            if property_id and doc.property_id != property_id:
+                continue
+            if asset_id and doc.asset_id != asset_id:
+                continue
+            if document_kind and doc.kind != document_kind:
+                continue
+            extraction = FILE_EXTRACTIONS.get(doc.id)
+            if extraction is None:
+                continue
+            title = (doc.title or "").lower()
+            body = (extraction.body_text or "").lower()
+            score = (
+                4 * title.count(query)
+                + 3 * doc.kind.lower().count(query)
+                + 2 * body.count(query)
+                + 1 * (doc.filename or "").lower().count(query)
+            )
+            if score == 0:
+                continue
+            snippet_src = extraction.body_text or doc.title
+            idx = snippet_src.lower().find(query)
+            start = max(0, idx - 80)
+            snippet = snippet_src[start:start + 240].strip()
+            why_parts = [doc.kind]
+            asset = asset_by_id(doc.asset_id) if doc.asset_id else None
+            if asset:
+                why_parts.append(f"for *{asset.name}*")
+            prop = property_by_id(doc.property_id)
+            if prop:
+                why_parts.append(f"at *{prop.name}*")
+            hits.append({
+                "kind": "document",
+                "id": doc.id,
+                "title": doc.title,
+                "snippet": snippet,
+                "score": score,
+                "why": " ".join(why_parts).capitalize(),
+            })
+    hits.sort(key=lambda h: h["score"], reverse=True)
+    return hits[:limit]
 
 
 def shifts_for_employee(eid: str) -> list[Shift]:

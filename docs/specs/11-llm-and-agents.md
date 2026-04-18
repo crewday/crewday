@@ -607,6 +607,7 @@ check returns `422 assignment_missing_capability`.
 | `chat.compact`         | Summarise resolved topics in a chat thread (see "Conversation compaction")  | `chat`                       |
 | `chat.detect_language` | Detect message language for auto-translation (§10, §18)                     | `chat`, `json_mode`          |
 | `chat.translate`       | Translate a message into the workspace default language (§10, §18)          | `chat`                       |
+| `documents.ocr`        | Vision fallback for image-bearing documents when local OCR yields no text   | `vision`                     |
 
 The `required_capabilities` column lives in code — capabilities are a
 closed enum declared by the application, not workspace-configurable.
@@ -695,6 +696,7 @@ At first boot the deployment is seeded with:
 | all chat-kind           | OpenRouter × `google/gemma-3-27b-it` (priority 0)                           | Matches the user's Gemma pick. Multimodal, supports JSON mode. |
 | `expenses.autofill`     | OpenRouter × `google/gemma-3-27b-it` (priority 0)                           | Same model; `vision` tag drives OCR. |
 | `voice.transcribe`      | **No seed** — capability is disabled until an admin assigns an audio model  | No default audio-input model ships. |
+| `documents.ocr`         | **No seed** — capability is disabled until an admin assigns a vision model  | Local extractors handle the common cases; the LLM fallback is opt-in per deployment because every call charges the workspace 30-day budget. See §21 "Document text extraction". |
 
 Deployment admins override any chain from `/admin/llm` without a
 redeploy. Overrides are deployment-wide.
@@ -1349,6 +1351,193 @@ without a decision, a worker flips `state` to `expired`, emits
 `decision_note_md = "auto-expired"`. Expired approvals cannot be
 revived — the agent must re-request.
 
+## Agent knowledge tools
+
+Agents never read the operator's filesystem. Two well-defined virtual
+file surfaces are wired as in-process tools so the model can pull on
+demand instead of carrying everything in every prompt. Both are
+exposed only to chat-kind capabilities (`chat.manager`,
+`chat.employee`, `chat.admin`); composition capabilities (digests,
+OCR, anomaly detection) do not run in a conversation and have no use
+for them.
+
+### System docs
+
+Code-shipped Markdown that explains how the agent should behave —
+the CLI cheat-sheet, what an `x-agent-confirm` card means, how to
+phrase a digest, how to react when the worker is on mobile, when to
+hand off to the manager. The crewday analogue of an `AGENTS.md`
+that the agent itself reads.
+
+- Source files live under `app/agent_docs/*.md` in the codebase and
+  ship with the deployment. Front-matter declares
+  `slug`, `title`, `summary`, `roles: [manager | employee | admin]`,
+  and an optional `capabilities: […]` allow-list (defaulting to all
+  three chat capabilities).
+- A new table `agent_doc` (§02 "Shared tables") **hash-self-seeds**
+  from these files on boot using the same algorithm as
+  `llm_prompt_template` (§ "Self-seeding algorithm"). A
+  `default_hash` mismatch with the current code default
+  auto-upgrades unmodified rows and preserves operator edits.
+- Operators edit per-deployment overrides at `/admin/agent-docs`
+  (a slide-over on the `/admin/llm` page, mirroring the prompt
+  library) or via `crewday admin agent-docs edit <slug>`.
+- Reset-to-default and revision history follow the prompt-library
+  pattern (§ "Reset and history"). Retention follows
+  `retention.llm_prompt_revisions_days` (§02).
+
+The two tools exposed to the agent:
+
+| tool                       | description                                                                                                  |
+|----------------------------|--------------------------------------------------------------------------------------------------------------|
+| `list_system_docs()`       | Returns `[{slug, title, summary, updated_at}]` for every active doc whose role tag matches at least one of the delegating user's role grants. |
+| `read_system_doc(slug)`    | Returns the full Markdown body. The resolver caches per LLM turn so repeated reads are free.                 |
+
+System docs are **not redacted** — they are operator-trusted. The
+editor banner on `/admin/agent-docs` reads "Body is sent to every
+chat agent that loads this doc. Do not paste workspace secrets,
+customer data, or live API keys."
+
+### Knowledge base (instructions + documents)
+
+The agent's view of the workspace's actual content — the manuals,
+warranties, contracts, SOPs, certificates the user can already read
+in the UI — is a single combined search + read surface that walks
+two existing sources:
+
+- `instruction` revisions (§07) — already injected into the system
+  prompt for the in-scope set; the KB tools let the agent pull
+  *other* instructions on demand without inflating every turn.
+- Extracted `asset_document` text (§21) — newly available in v1
+  via the extraction pipeline below.
+
+Two tools, exposed to the same chat-kind capabilities as system docs:
+
+| tool                                                                | description                                                                                                                                                            |
+|---------------------------------------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `search_kb(q, *, property_id?, asset_id?, kind?, limit=10)`         | Top-N ranked hits across instruction revisions and extracted document text, filtered by the delegating user's read access. Each hit is `{kind, id, title, snippet, score, why}`. |
+| `read_doc(ref, page=1)`                                             | Returns the full body for an instruction or a paginated extracted-text window for a document. Default page size **4 000 model-tokens**. Returns `{kind, title, body, page, page_count, more_pages, source_ref}`. |
+
+`ref` is `{kind: "instruction" \| "document", id}`. `kind` on the
+search filter accepts `instruction \| document` (omit for both) and
+`{document_kind: manual \| warranty \| ...}` for the §21 enum.
+
+`why` is a short human-readable provenance string the model can
+quote back ("Manual for *Daikin AC* at *Villa Sud*, page 3"). It is
+the analogue of the §07 "Linked to this task template" badge.
+
+Both tools call REST endpoints (§12 `GET /kb/search`,
+`GET /kb/doc/{ref}`) **through the delegated token**, so the agent
+can never see a doc the delegating user cannot see. The server-side
+authorisation is the same one that already guards
+`GET /documents/{id}` and the instruction read APIs — no new action
+key is introduced.
+
+For documents whose `extraction_status` (§02 `file_extraction`,
+§21) is not `succeeded`, the row is omitted from `search_kb` and
+`read_doc` returns the structured stub:
+
+```json
+{
+  "kind": "document",
+  "id": "doc_…",
+  "extraction_status": "extracting" | "failed" | "unsupported" | "empty",
+  "hint": "I haven't been able to read this manual yet — extraction is still running. Try again in a minute."
+}
+```
+
+The agent is expected to surface the hint to the user in plain
+language, not retry tightly.
+
+### Why a tool, not a system-prompt dump
+
+Three reasons:
+
+1. **Context stays small.** The combined manual library for a
+   household with thirty assets can run to 50 000+ tokens; injecting
+   it every turn is wasteful and degrades attention on the actual
+   question.
+2. **Permission boundary is naturally enforced.** Tool calls flow
+   through the delegated token (memory: *the agent never elevates*).
+   There is no "filtered system prompt" surface to keep in sync
+   with role grants as they change.
+3. **Audit is honest.** `llm_call.redacted_prompt_json` carries the
+   tool result the model actually used; `redacted_response_json`
+   carries the tool calls it issued. A read on a document that
+   never reached the model leaves no trace beyond the REST hit
+   logged on `audit_log` (§ "Read auditing" below).
+
+### Read auditing
+
+Reads through `search_kb` and `read_doc` produce one
+`audit_log` row apiece with action `kb.search` /
+`kb.doc.read`, the resolved `instruction_id` or
+`asset_document_id`, and the same delegated-token attribution as
+any other agent action (§ "Agent audit trail"). They are **not**
+agent-action approvals — reads never gate. The rows are visible in
+the user's own audit trail and on the manager's "Agent activity"
+filter so a worried owner can see "the agent looked at this
+contract twice this week."
+
+`list_system_docs` and `read_system_doc` do **not** write
+`audit_log` rows — they read shipped, operator-edited content, not
+workspace state. They are visible only via the LLM-call trace.
+
+### Redaction posture
+
+KB content goes through the standard §11 redaction layer at
+injection time — the same scrub already applied to instruction
+bodies and free-text fields.
+
+- `email`, `phone_e164`, `full_legal_name` → tokenised; addresses
+  truncated to city.
+- Hard-drop secret patterns (Wi-Fi passwords, alarm codes,
+  IBAN-shaped tokens, API tokens, OAuth bearers) are **stripped
+  from extracted text before the snippet leaves the client** and
+  replaced with the marker `[redacted secret]`. The same
+  hard-drop list as agent preferences (§ "PII posture") is reused
+  to keep the policy in one place.
+- A document whose extracted text contains a hard-drop secret is
+  flagged `file_extraction.has_secret_marker = true` and the
+  `/documents/{id}` UI shows a small warning so the operator can
+  re-upload a less sensitive version if the secret was accidental.
+
+System docs are operator-shipped and **not** redacted. Agent
+preferences (§ "Agent preferences") remain the only PII-pass-through
+surface — the carve-out stays narrow and intentional.
+
+### Document text extraction (capability)
+
+A new capability key, intentionally separate from
+`expenses.autofill`:
+
+- `documents.ocr` — vision-model fallback used by the extraction
+  worker when local libraries (pypdf, pdfminer, python-docx,
+  openpyxl, Tesseract) yield no usable text from an image-bearing
+  upload. Required model capability: `vision`.
+
+The capability is **disabled by default** (no seed assignment).
+Local extractors handle text PDFs, office documents, and image
+PDFs with an OCR layer; the LLM fallback is opt-in per deployment
+because every call eats workspace budget (§ "Workspace usage
+budget"). When unassigned, an image-only upload with no extractable
+text records `extraction_status = unsupported` and surfaces the
+hint to the agent and to the upload UI.
+
+Pipeline mechanics, storage, and retry behaviour are specified in
+§21 "Document text extraction"; the capability key and the budget
+linkage live here.
+
+### Cross-references
+
+- `agent_doc` schema and the seeding algorithm: §02 "Shared tables".
+- Instruction grounding rules: §07 "LLM use".
+- Extraction pipeline, status enum, retry policy, REST surface:
+  §21 "Document text extraction".
+- KB search index (FTS5 / tsvector ranking weights): §02 "Full-text
+  search ranking — knowledge base".
+- Demo posture (capability disabled, smaller index): §24.
+
 ## Natural-language task intake
 
 `POST /api/v1/tasks/from_nl`:
@@ -1648,8 +1837,17 @@ workspace-level refusal wins when both would fire.
 
 - Fine-tuning or prompt-caching beyond what OpenRouter offers
   natively.
-- Retrieval-augmented generation across the whole DB (we pick
-  relevant rows per capability).
+- Retrieval-augmented generation across **arbitrary entity tables**.
+  The grounding surfaces in v1 are: (a) the structured row sets each
+  capability already pulls in, (b) the §07 instruction injection,
+  (c) the agent knowledge tools (§ "Agent knowledge tools") covering
+  instruction revisions and extracted document text, and (d) the
+  on-demand system docs. Anything outside these surfaces still
+  requires a tool call to a typed CLI/REST verb.
+- Vector embeddings. The KB index stays on the existing FTS5 /
+  tsvector path (§02 "Full-text search ranking — knowledge base").
+  Embeddings join the day FTS recall proves insufficient, with a
+  measurable consumer first.
 - Autonomous long-running agent loops hosted in-process. Agents run
   elsewhere and call the API.
 - Native Anthropic / OpenAI / Z.AI SDK adapters. v1 reaches every
