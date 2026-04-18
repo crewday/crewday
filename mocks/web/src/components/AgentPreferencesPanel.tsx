@@ -185,15 +185,17 @@ export default function AgentPreferencesPanel({
                 : "Never saved."}
             </span>
           </div>
-          <div className="agent-prefs__actions">
-            <button
-              className="btn btn--moss"
-              disabled={!dirty || hardOver || save.isPending}
-              onClick={() => save.mutate(draft)}
-            >
-              {save.isPending ? "Saving…" : "Save"}
-            </button>
-          </div>
+          {dirty && (
+            <div className="agent-prefs__actions">
+              <button
+                className="btn btn--moss"
+                disabled={hardOver || save.isPending}
+                onClick={() => save.mutate(draft)}
+              >
+                {save.isPending ? "Saving…" : "Save"}
+              </button>
+            </div>
+          )}
           {error && <p className="agent-prefs__error">{error}</p>}
         </>
       ) : (

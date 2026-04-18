@@ -1907,8 +1907,9 @@
 .agent-prefs__meta--sand { color: var(--sand); }
 .agent-prefs__meta--rust { color: var(--rust); font-weight: 500; }
 .agent-prefs__actions {
-  display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
+  display: grid; gap: 8px;
 }
+.agent-prefs__actions .btn { width: 100%; }
 .agent-prefs__error {
   margin: 10px 0 0; padding: 8px 10px;
   background: color-mix(in srgb, var(--rust) 10%, transparent);
