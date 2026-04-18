@@ -13,17 +13,23 @@ import path from "node:path";
 // content-hashed filenames from Rollup.
 function cacheBustHtml(): PluginOption {
   const nonce = Date.now().toString(36);
+  // Vite's dev middleware only substitutes `__HMR_CONFIG_NAME__` &
+  // friends in `/@vite/client` when the URL has no extra query
+  // string; appending `?v=` here would silently break HMR. Same for
+  // the other `/@…` pseudo-paths Vite injects.
+  const skip = /^\/@(vite|react-refresh|id|fs|vite-plugin-pwa)\b/;
+  const stamp = (path: string) => (skip.test(path) ? path : `${path}?v=${nonce}`);
   return {
     name: "crewday:cache-bust-html",
     transformIndexHtml(html) {
       return html
         .replace(
           /(<script\b[^>]*\ssrc=")(\/[^"?#]+)(")/g,
-          `$1$2?v=${nonce}$3`,
+          (_m, pre, path, post) => `${pre}${stamp(path)}${post}`,
         )
         .replace(
           /(<link\b[^>]*\shref=")(\/[^"?#]+)(")/g,
-          `$1$2?v=${nonce}$3`,
+          (_m, pre, path, post) => `${pre}${stamp(path)}${post}`,
         );
     },
   };
