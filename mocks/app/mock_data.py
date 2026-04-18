@@ -254,6 +254,26 @@ class PropertyWorkRoleAssignment:
 
 
 @dataclass
+class ScheduleRuleset:
+    """Reusable recurring weekly rota keyed to a property (§06)."""
+
+    id: str
+    workspace_id: str
+    name: str
+
+
+@dataclass
+class ScheduleRulesetSlot:
+    """One weekday window inside a `ScheduleRuleset` (§06)."""
+
+    id: str
+    schedule_ruleset_id: str
+    weekday: int  # 0..6 (Mon..Sun, ISO)
+    starts_local: str  # HH:MM
+    ends_local: str  # HH:MM, > starts_local
+
+
+@dataclass
 class WorkEngagement:
     """The per-(user, workspace) pay pipeline (§02, §22).
 
@@ -1376,6 +1396,15 @@ EMPLOYEES: list[Employee] = [
         workspaces=["ws-cleanco"],
         villas=["p-villa-lac"],
         clock_mode="auto", auto_clock_idle_minutes=25, language="es",
+        weekly_availability={
+            "mon": ("08:00", "16:00"),
+            "tue": ("08:00", "16:00"),
+            "wed": ("08:00", "16:00"),
+            "thu": ("08:00", "16:00"),
+            "fri": ("08:00", "16:00"),
+            "sat": None,
+            "sun": None,
+        },
         user_id="u-joselyn", work_engagement_id="we-joselyn-cleanco", workspace_id="ws-cleanco",
     ),
     Employee(
@@ -1794,12 +1823,51 @@ USER_WORK_ROLES: list[UserWorkRole] = [
 
 
 PROPERTY_WORK_ROLE_ASSIGNMENTS: list[PropertyWorkRoleAssignment] = [
-    # Rachid drives for both Villa du Lac and Seaside Apt.
+    # Rachid drives for both Villa du Lac and Seaside Apt. No rota —
+    # on-call driver; availability comes from user_weekly_availability
+    # alone.
     PropertyWorkRoleAssignment("pwra-rachid-lac",     "uwr-rachid-driver", "p-villa-lac"),
     PropertyWorkRoleAssignment("pwra-rachid-seaside", "uwr-rachid-driver", "p-seaside"),
-    # Joselyn is CleanCo's maid at Villa du Lac only (she has other
-    # CleanCo clients too, but they are out of scope for the mock).
-    PropertyWorkRoleAssignment("pwra-joselyn-lac",    "uwr-joselyn-maid",  "p-villa-lac"),
+    # Joselyn is CleanCo's maid at Villa du Lac only. She follows the
+    # "CleanCo weekday mornings" rota at the client property.
+    PropertyWorkRoleAssignment("pwra-joselyn-lac",    "uwr-joselyn-maid",  "p-villa-lac",
+                               schedule_ruleset_id="sr-cleanco-weekday-am"),
+    # Maria splits her week across two Bernard properties — Villa Sud
+    # in the morning, Apt 3B in the afternoon. This is the classic
+    # agency rota the /scheduler page is built for.
+    PropertyWorkRoleAssignment("pwra-maria-sud",      "uwr-maria-housekeeper", "p-villa-sud",
+                               schedule_ruleset_id="sr-maria-villa-sud"),
+    PropertyWorkRoleAssignment("pwra-maria-3b",       "uwr-maria-housekeeper", "p-apt-3b",
+                               schedule_ruleset_id="sr-maria-apt-3b"),
+]
+
+
+SCHEDULE_RULESETS: list[ScheduleRuleset] = [
+    ScheduleRuleset("sr-cleanco-weekday-am", "ws-cleanco",
+                    "CleanCo weekday mornings"),
+    ScheduleRuleset("sr-maria-villa-sud", "ws-bernard",
+                    "Maria — Villa Sud mornings"),
+    ScheduleRuleset("sr-maria-apt-3b", "ws-bernard",
+                    "Maria — Apt 3B afternoons"),
+]
+
+
+SCHEDULE_RULESET_SLOTS: list[ScheduleRulesetSlot] = [
+    # Joselyn at Villa du Lac: Mon / Wed / Fri 09:00–12:00.
+    ScheduleRulesetSlot("srs-cleanco-mon", "sr-cleanco-weekday-am", 0, "09:00", "12:00"),
+    ScheduleRulesetSlot("srs-cleanco-wed", "sr-cleanco-weekday-am", 2, "09:00", "12:00"),
+    ScheduleRulesetSlot("srs-cleanco-fri", "sr-cleanco-weekday-am", 4, "09:00", "12:00"),
+    # Maria at Villa Sud: weekday mornings 08:30–12:00 (disjoint from
+    # Apt 3B in the afternoon — no overlap per §06 invariant).
+    ScheduleRulesetSlot("srs-maria-sud-mon", "sr-maria-villa-sud", 0, "08:30", "12:00"),
+    ScheduleRulesetSlot("srs-maria-sud-tue", "sr-maria-villa-sud", 1, "08:30", "12:00"),
+    ScheduleRulesetSlot("srs-maria-sud-thu", "sr-maria-villa-sud", 3, "08:30", "12:00"),
+    ScheduleRulesetSlot("srs-maria-sud-fri", "sr-maria-villa-sud", 4, "08:30", "12:00"),
+    # Maria at Apt 3B: weekday afternoons 14:00–17:00.
+    ScheduleRulesetSlot("srs-maria-3b-mon", "sr-maria-apt-3b", 0, "14:00", "17:00"),
+    ScheduleRulesetSlot("srs-maria-3b-tue", "sr-maria-apt-3b", 1, "14:00", "17:00"),
+    ScheduleRulesetSlot("srs-maria-3b-thu", "sr-maria-apt-3b", 3, "14:00", "17:00"),
+    ScheduleRulesetSlot("srs-maria-3b-fri", "sr-maria-apt-3b", 4, "14:00", "17:00"),
 ]
 
 
@@ -4346,6 +4414,31 @@ def movements_for_item(iid: str) -> list[InventoryMovement]:
 
 def lifecycle_rules_for_property(pid: str) -> list[StayLifecycleRule]:
     return [r for r in LIFECYCLE_RULES if r.property_id == pid]
+
+
+def slots_for_ruleset(rsid: str) -> list[ScheduleRulesetSlot]:
+    return [s for s in SCHEDULE_RULESET_SLOTS if s.schedule_ruleset_id == rsid]
+
+
+def ruleset_by_id(rsid: str) -> ScheduleRuleset | None:
+    return next((r for r in SCHEDULE_RULESETS if r.id == rsid), None)
+
+
+def assignments_for_workspace(ws_id: str) -> list[PropertyWorkRoleAssignment]:
+    """All property_work_role_assignment rows whose parent user_work_role
+    belongs to the given workspace."""
+    uwr_ids = {r.id for r in USER_WORK_ROLES if r.workspace_id == ws_id}
+    return [a for a in PROPERTY_WORK_ROLE_ASSIGNMENTS if a.user_work_role_id in uwr_ids]
+
+
+def user_id_for_uwr(uwr_id: str) -> str | None:
+    row = next((r for r in USER_WORK_ROLES if r.id == uwr_id), None)
+    return row.user_id if row else None
+
+
+def work_role_id_for_uwr(uwr_id: str) -> str | None:
+    row = next((r for r in USER_WORK_ROLES if r.id == uwr_id), None)
+    return row.work_role_id if row else None
 
 
 # The "signed-in" user for each role.

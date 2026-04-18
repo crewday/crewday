@@ -1754,6 +1754,171 @@ def api_schedules() -> Response:
     })
 
 
+# ── Scheduler: rulesets + calendar feed (§06, §12, §14) ──────────────
+
+@app.get("/api/v1/schedule_rulesets")
+def api_schedule_rulesets(request: Request) -> Response:
+    """List rulesets + slots + assignments for the active workspace."""
+    ws_id = current_workspace_id(request)
+    rulesets = [r for r in md.SCHEDULE_RULESETS if r.workspace_id == ws_id]
+    ruleset_ids = {r.id for r in rulesets}
+    slots = [s for s in md.SCHEDULE_RULESET_SLOTS if s.schedule_ruleset_id in ruleset_ids]
+    assignments = md.assignments_for_workspace(ws_id)
+    return ok({
+        "rulesets": rulesets,
+        "slots": slots,
+        "assignments": [
+            {
+                "id": a.id,
+                "user_work_role_id": a.user_work_role_id,
+                "property_id": a.property_id,
+                "schedule_ruleset_id": a.schedule_ruleset_id,
+                "user_id": md.user_id_for_uwr(a.user_work_role_id),
+                "work_role_id": md.work_role_id_for_uwr(a.user_work_role_id),
+            }
+            for a in assignments
+        ],
+    })
+
+
+def _client_bound_property_ids(uid: str, ws_id: str) -> set[str]:
+    """Properties visible to a client user on the given workspace per §22.
+
+    A client grant with `binding_org_id` sees every property whose
+    `client_org_id` matches. A property-scoped client grant sees only
+    that one property.
+    """
+    pids: set[str] = set()
+    for g in md.ROLE_GRANTS:
+        if (
+            g.user_id != uid
+            or g.grant_role != "client"
+            or g.revoked_at is not None
+        ):
+            continue
+        if g.scope_kind == "workspace" and g.scope_id == ws_id and g.binding_org_id:
+            for p in md.PROPERTIES:
+                if getattr(p, "client_org_id", None) == g.binding_org_id:
+                    pids.add(p.id)
+        elif g.scope_kind == "property":
+            pids.add(g.scope_id)
+    return pids
+
+
+def _scheduler_user_view(uid: str, role: str) -> dict[str, Any]:
+    """Serialise a user for the scheduler feed.
+
+    Client callers see `first_name` + `work_role` only per §15 "Client
+    rota visibility"; manager/worker callers get the regular user shape
+    (first + last name, no phone / email — the scheduler never needs
+    them).
+    """
+    u = md.user_by_id(uid)
+    if u is None:
+        return {"id": uid, "first_name": "", "display_name": ""}
+    full = u.display_name or ""
+    first = full.split(" ", 1)[0] if full else ""
+    if role == "client":
+        return {"id": uid, "first_name": first}
+    return {"id": uid, "first_name": first, "display_name": full}
+
+
+@app.get("/api/v1/scheduler/calendar")
+def api_scheduler_calendar(request: Request,
+                           from_: str | None = None,
+                           to: str | None = None) -> Response:
+    """Calendar feed: rota slots + tasks + stay bundles for a date range.
+
+    `from`/`to` are ISO dates; defaults are [today, today+14d]. Scoping
+    is by caller role (§14, §15): manager/owner get the full workspace
+    feed, worker gets self-only, client gets their bound properties and
+    first-name-only user rows.
+    """
+    role = current_role(request)
+    ws_id = current_workspace_id(request)
+    today = date.today()
+    from_d = date.fromisoformat(from_) if from_ else today
+    to_d = date.fromisoformat(to) if to else today + timedelta(days=14)
+
+    rulesets = [r for r in md.SCHEDULE_RULESETS if r.workspace_id == ws_id]
+    ruleset_ids = {r.id for r in rulesets}
+    slots = [s for s in md.SCHEDULE_RULESET_SLOTS if s.schedule_ruleset_id in ruleset_ids]
+    assignments = md.assignments_for_workspace(ws_id)
+
+    # Scope by role.
+    if role == "employee":
+        uid = md.DEFAULT_EMPLOYEE_USER_ID
+        uwr_ids = {r.id for r in md.USER_WORK_ROLES if r.user_id == uid and r.workspace_id == ws_id}
+        assignments = [a for a in assignments if a.user_work_role_id in uwr_ids]
+    elif role == "client":
+        uid = md.DEFAULT_CLIENT_USER_ID
+        visible_pids = _client_bound_property_ids(uid, ws_id)
+        assignments = [a for a in assignments if a.property_id in visible_pids]
+    # manager + owner: no narrowing.
+
+    # Tasks overlapping the window, narrowed the same way as assignments.
+    pids_in_scope = {a.property_id for a in assignments}
+    user_ids_in_scope = {md.user_id_for_uwr(a.user_work_role_id) for a in assignments}
+    user_ids_in_scope.discard(None)
+
+    def in_window(t: md.Task) -> bool:
+        d = t.scheduled_start.date()
+        if d < from_d or d > to_d:
+            return False
+        if role == "manager" or role == "owner":
+            return getattr(t, "workspace_id", ws_id) == ws_id
+        if role == "employee":
+            return t.assigned_user_id == md.DEFAULT_EMPLOYEE_USER_ID
+        if role == "client":
+            return t.property_id in pids_in_scope
+        return False
+
+    tasks = [t for t in md.TASKS if in_window(t)]
+    task_view = [
+        {
+            "id": t.id,
+            "title": t.title,
+            "property_id": t.property_id,
+            "user_id": t.assigned_user_id,
+            "scheduled_start": t.scheduled_start,
+            "estimated_minutes": t.estimated_minutes,
+            "priority": t.priority,
+            "status": t.status,
+        }
+        for t in tasks
+    ]
+
+    # Surface relevant users for rendering (de-duplicated).
+    uids = {md.user_id_for_uwr(a.user_work_role_id) for a in assignments}
+    uids.update(t.assigned_user_id for t in tasks if t.assigned_user_id)
+    uids.discard(None)
+    uids.discard("")
+    users = [_scheduler_user_view(u, role) for u in sorted(u for u in uids if u)]
+
+    return ok({
+        "window": {"from": from_d.isoformat(), "to": to_d.isoformat()},
+        "rulesets": rulesets,
+        "slots": slots,
+        "assignments": [
+            {
+                "id": a.id,
+                "user_id": md.user_id_for_uwr(a.user_work_role_id),
+                "work_role_id": md.work_role_id_for_uwr(a.user_work_role_id),
+                "property_id": a.property_id,
+                "schedule_ruleset_id": a.schedule_ruleset_id,
+            }
+            for a in assignments
+        ],
+        "tasks": task_view,
+        "users": users,
+        "properties": [
+            {"id": p.id, "name": p.name, "timezone": getattr(p, "timezone", "Europe/Paris")}
+            for p in md.PROPERTIES
+            if p.id in {a.property_id for a in assignments} | {t.property_id for t in tasks}
+        ],
+    })
+
+
 @app.get("/api/v1/instructions")
 def api_instructions() -> Response:
     return ok(md.INSTRUCTIONS)

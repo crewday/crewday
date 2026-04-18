@@ -35,6 +35,7 @@ const BASE_NAV_ITEMS: SideNavItem[] = [
   { type: "link", to: "/employees", matchPrefix: "/employee", label: "Employees" },
   { type: "link", to: "/templates", label: "Templates" },
   { type: "link", to: "/schedules", label: "Schedules" },
+  { type: "link", to: "/scheduler", label: "Scheduler" },
   { type: "link", to: "/instructions", matchPrefix: "/instructions", label: "Instructions" },
   { type: "link", to: "/inventory", label: "Inventory" },
   { type: "section", label: "ASSETS" },
@@ -118,7 +119,7 @@ export default function ManagerLayout() {
           </button>
           <div className="desk__brand">
             <span className="desk__logo" aria-hidden="true">◈</span>
-            <span className="desk__wordmark">crewday</span>
+            <span className="desk__wordmark">crew.day</span>
           </div>
         </header>
       )}

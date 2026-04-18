@@ -161,8 +161,16 @@ export default function MePage() {
       </section>
 
       <section className="panel">
-        <header className="panel__head"><h2>Weekly availability</h2></header>
-        <p className="muted">Read-only. Ask the manager to change these.</p>
+        <header className="panel__head">
+          <h2>Weekly availability</h2>
+          <Link to="/me/schedule" className="btn btn--ghost btn--sm">
+            Open schedule
+          </Link>
+        </header>
+        <p className="muted">
+          Read-only. Ask the manager to change these. Your per-property rota
+          lives under <Link to="/me/schedule">Schedule</Link>.
+        </p>
         <div className="avail-grid">
           {DAYS.map(([key, label]) => {
             const slot = employee.weekly_availability[key];

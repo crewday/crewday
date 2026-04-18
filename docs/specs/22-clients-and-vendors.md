@@ -1,6 +1,6 @@
 # 22 — Clients, vendors, work orders, and billing
 
-crewday started life as a **single-employer, single-household**
+crew.day started life as a **single-employer, single-household**
 operations tool. Real deployments extend beyond that shape:
 
 - A **cleaning / property-management agency** whose workspace owns
@@ -774,6 +774,20 @@ redacted to the level the workspace's owner/manager has configured:
 - Worker profile details (phone, address, emergency contact):
   always hidden.
 
+### Scheduler (client view)
+
+Clients also get a read-only **Scheduler** tab in the portal
+(§14 "Client portal shell") that surfaces the agency's rota for
+the client's own properties — "who is booked where" on a
+week-by-week grid. The feed is `GET /scheduler/calendar` (§12)
+scoped server-side to the caller's bound properties; worker
+serialisation is first-name + work-role only (§15 "Client rota
+visibility"). This is the main place the agency advertises to
+the client *which maid shows up when*, without ever exposing last
+names or contact channels. Clients who need to reach a worker
+use the messaging surface (§10, §23) under the existing
+mediation rules.
+
 Existing guest-link mechanics (§04) are unrelated and continue to
 serve per-stay welcome pages only. The `organization.portal_user_id`
 column is retained as a convenience pointer ("the natural person
@@ -864,7 +878,7 @@ Appended to §10's catalog:
   rates + CSV; render PDFs when a real agency asks for it.
 - **Multi-currency within a single work_order.** Same rationale as
   §09 single-currency-per-pay-period.
-- **Payment execution.** crewday does not move money — vendor
+- **Payment execution.** crew.day does not move money — vendor
   invoices and payslips alike produce routing metadata; operators
   push funds from their bank and mark the row paid.
 - **Real-time tax calculation.** Invoices and quotes carry an

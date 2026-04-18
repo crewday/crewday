@@ -62,6 +62,7 @@ import AcceptPage from "@/pages/public/AcceptPage";
 import GuestPage from "@/pages/public/GuestPage";
 
 import StyleguidePage from "@/pages/StyleguidePage";
+import SchedulerPage from "@/pages/SchedulerPage";
 
 import ClientLayout from "@/layouts/ClientLayout";
 import ClientPortfolioPage from "@/pages/client/PortfolioPage";
@@ -105,6 +106,8 @@ export default function App() {
           <Route path="/task/:tid" element={<TaskDetailPage />} />
           <Route path="/my/expenses" element={<MyExpensesPage />} />
           <Route path="/me" element={<MePage />} />
+          <Route path="/me/schedule" element={<SchedulerPage />} />
+          <Route path="/scheduler" element={<SchedulerPage />} />
           <Route path="/shifts" element={<ShiftsPage />} />
           <Route path="/history" element={<HistoryPage />} />
           <Route path="/issues/new" element={<IssueNewPage />} />

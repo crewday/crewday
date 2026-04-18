@@ -469,6 +469,18 @@ fix the offender.
   permission-group membership plus `permission_rule` rows;
   `role_grants` only says which UI shell the user sees and
   which rows RLS lets them read. See §02.
+- **Rota (schedule ruleset).** A reusable recurring weekly pattern
+  that says *where* a user works, as opposed to
+  `user_weekly_availability` (which says *whether* a user works).
+  `schedule_ruleset` carries zero or more
+  `schedule_ruleset_slot` rows (weekday + local start + local
+  end); `property_work_role_assignment.schedule_ruleset_id`
+  attaches a ruleset to a (user, property) assignment. Rota
+  composes with weekly availability — both must allow a slot to
+  fire. The task assignment algorithm (§06) filters candidates
+  through the rota; generalists (no
+  `property_work_role_assignment` rows) skip the rota filter. See
+  §06 "Schedule ruleset (per-property rota)".
 - **Schedule.** Description of when tasks materialize (RRULE).
   `paused_at` wins over `active_from/active_until`.
 - **Scope (instruction).** The visibility level of an instruction:

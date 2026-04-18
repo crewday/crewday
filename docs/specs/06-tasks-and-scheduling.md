@@ -287,6 +287,18 @@ availability (treated as a normal day). Country matching: a holiday
 applies to a user if `holiday.country IS NULL` (workspace-wide) OR
 `holiday.country = user's primary property country`.
 
+**Rota composition.** The stack above answers "is the user available
+at all on this date/time?". For tasks targeting a specific property,
+a second filter runs after the stack returns an "available" verdict:
+the user's `property_work_role_assignment` for that property must
+have a `schedule_ruleset_id` whose slots cover the occurrence's
+weekday and local time window, **or** the user's `user_work_role`
+must be unrestricted (no `property_work_role_assignment` rows — the
+"generalist" case in §05). A user available per the stack but
+outside their rota for that property is not a candidate for the
+property's tasks; a generalist skips the rota filter and relies on
+the stack alone.
+
 ## Assignment algorithm
 
 Given a new task with `expected_role_id` and `property_id` (and
@@ -304,10 +316,16 @@ Given a new task with `expected_role_id` and `property_id` (and
 2. Else: candidates = users who:
     - have a `user_work_role` with `role_id = expected_role_id`,
     - whose `property_work_role_assignment` covers `property_id` (or
-      the work role is unrestricted), and
+      the work role is unrestricted),
     - **are available** on `scheduled_for_local` per the availability
       precedence stack (checking leave, overrides, holidays, weekly
-      pattern).
+      pattern), and
+    - **pass the rota filter** — either the
+      `property_work_role_assignment` for `property_id` has a
+      `schedule_ruleset` whose slots cover the occurrence's weekday
+      and local time window, or the user is a generalist (no
+      `property_work_role_assignment` rows), in which case the rota
+      filter is skipped (see "Rota composition" above).
     Exclude any user already tried via step 1 (they were unavailable).
 3. If exactly one candidate, assign them.
 4. If more than one candidate:
@@ -410,6 +428,77 @@ One-off `user_leave` rows still win over the weekly pattern on dates
 they cover. Conversely, the weekly pattern does **not** automatically
 generate `user_leave` rows — it is evaluated live at assignment time
 and at display time on the worker "Week" view.
+
+### Schedule ruleset (per-property rota)
+
+`user_weekly_availability` answers "when is this user willing to
+work?". It does not answer "where does this user work on a given
+day?". Agencies routinely need both: a maid works Villa Sud on
+Mondays 09:00–12:00 and Apt 3B on Mondays 14:00–18:00, and the
+agency wants to see that laid out on a calendar.
+
+A **schedule ruleset** is a reusable recurring weekly pattern keyed
+to a property. `property_work_role_assignment.schedule_ruleset_id`
+(§05) points at a ruleset; the ruleset's slots declare the weekdays
+and hours the user works that property.
+
+`schedule_ruleset`:
+
+| field          | type    | notes                                     |
+|----------------|---------|-------------------------------------------|
+| id             | ULID PK |                                           |
+| workspace_id   | ULID FK |                                           |
+| name           | text    | "Weekday morning", "Alternating weekends" |
+| created_at / updated_at | tstz |                                    |
+| deleted_at     | tstz?   |                                           |
+
+`schedule_ruleset_slot` (zero or more per ruleset):
+
+| field          | type    | notes                                   |
+|----------------|---------|-----------------------------------------|
+| id             | ULID PK |                                         |
+| schedule_ruleset_id | ULID FK |                                    |
+| weekday        | int     | `0..6` (Mon..Sun, ISO)                  |
+| starts_local   | time    | property-local                          |
+| ends_local     | time    | property-local; `ends_local > starts_local` |
+
+A ruleset may have **multiple slots per weekday** (e.g.
+`Mon 08:00–10:00` and `Mon 14:00–16:00` at the same property).
+Rulesets with zero slots mean "no rota — fall back to
+`user_weekly_availability` alone". Property-local time is resolved
+via the `property.timezone` of the property attached to the
+`property_work_role_assignment`.
+
+**Rota composes with `user_weekly_availability`.** The ruleset
+narrows *where* a user works; the weekly pattern gates *whether* a
+user works. A rota slot only fires when both agree: the weekly
+pattern's window for that weekday must cover the slot. Leave,
+approved overrides, and blocking public holidays still win (see
+"Availability precedence stack" below).
+
+**Generalist fallback.** A `user_work_role` with zero
+`property_work_role_assignment` rows remains eligible for **all**
+properties of the workspace (unchanged from §05). In that case the
+assignment algorithm falls back to `user_weekly_availability`
+alone — there is no rota to filter on.
+
+**Overlap invariant.** A user must not be in two places at once.
+The write returns 422 `error = "rota_overlap"` when a new slot
+would overlap another slot of the same user in the same workspace
+on the same weekday, across all of that user's
+`property_work_role_assignment` rows. Overlap is half-open
+(`[starts_local, ends_local)`). The check is per-workspace;
+cross-workspace overlaps (same human holding engagements in both
+an agency workspace and an owner workspace) are surfaced as
+non-blocking warnings on the scheduler UI (§14) — the server
+cannot reject them without cross-workspace reads.
+
+**Editing authority.** Managers (and owners) edit rulesets and
+slots freely; workers see the effective rota read-only on
+`/me/schedule` (§14). Per-date exceptions go through
+`user_availability_override` (below) — a worker who needs a
+specific Monday off still submits an override; a manager who
+needs to shuffle a recurring pattern edits the ruleset.
 
 ### `user_availability_overrides`
 

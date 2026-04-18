@@ -27,6 +27,8 @@ export function startEventStream(client: QueryClient): () => void {
     "expense.rejected",
     "expense.reimbursed",
     "asset_action.performed",
+    "schedule_ruleset.upserted",
+    "schedule_ruleset.deleted",
   ];
   for (const ev of events) {
     es.addEventListener(ev, handler as EventListener);
@@ -103,5 +105,10 @@ function dispatch(client: QueryClient, evt: TypedEvent): void {
       client.invalidateQueries({ queryKey: qk.assets() });
       return;
     }
+    case "schedule_ruleset.upserted":
+    case "schedule_ruleset.deleted":
+      client.invalidateQueries({ queryKey: qk.scheduleRulesets() });
+      client.invalidateQueries({ queryKey: ["scheduler-calendar"] });
+      return;
   }
 }

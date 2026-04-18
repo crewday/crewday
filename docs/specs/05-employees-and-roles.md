@@ -127,8 +127,16 @@ property assignments exist, the `user_work_role` is eligible for
 | id                       | ULID PK  |                                         |
 | user_work_role_id        | ULID FK  | replaces v0's `employee_role_id`        |
 | property_id              | ULID FK  |                                         |
-| schedule_ruleset_id      | ULID FK? | which default schedule applies at this property |
+| schedule_ruleset_id      | ULID FK? | recurring weekly rota at this property; see §06 "Schedule ruleset (per-property rota)". Null = property assignment with no declared rota — user is eligible per `user_weekly_availability` alone. |
 | property_pay_rule_id     | ULID FK? | rarer: per-property rate override       |
+
+A maid handling Villa Sud on weekday mornings and Apt 3B on
+weekday afternoons has two `property_work_role_assignment` rows,
+each pointing at its own `schedule_ruleset` (or sharing one if the
+pattern is the same). The assignment algorithm in §06 uses both
+the availability precedence stack and the per-property rota to
+decide eligibility; generalists (no assignments) keep their
+workspace-wide eligibility and skip the rota filter.
 
 ## Work engagement (pointer)
 

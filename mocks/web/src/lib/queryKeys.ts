@@ -24,6 +24,9 @@ export const qk = {
   stays: () => ["stays"] as const,
   taskTemplates: () => ["task_templates"] as const,
   schedules: () => ["schedules"] as const,
+  scheduleRulesets: () => ["schedule_rulesets"] as const,
+  schedulerCalendar: (fromIso: string, toIso: string) =>
+    ["scheduler-calendar", fromIso, toIso] as const,
   instructions: () => ["instructions"] as const,
   instruction: (iid: string) => ["instruction", iid] as const,
   inventory: () => ["inventory"] as const,

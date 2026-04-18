@@ -17,6 +17,7 @@ import type { Me, User } from "@/types/api";
 const NAV_ITEMS: SideNavItem[] = [
   { type: "section", label: "PORTFOLIO" },
   { type: "link", to: "/portfolio", label: "Properties" },
+  { type: "link", to: "/scheduler", label: "Scheduler" },
   { type: "link", to: "/billable_hours", label: "Billable hours" },
   { type: "section", label: "BILLING" },
   { type: "link", to: "/quotes", label: "Quotes" },
@@ -80,7 +81,7 @@ export default function ClientLayout() {
           </button>
           <div className="desk__brand">
             <span className="desk__logo" aria-hidden="true">◈</span>
-            <span className="desk__wordmark">crewday</span>
+            <span className="desk__wordmark">crew.day</span>
           </div>
         </header>
       )}

@@ -1392,4 +1392,56 @@ export type SseEvent =
   | { event: "expense.approved"; data: { id: string; status: ExpenseStatus } }
   | { event: "expense.rejected"; data: { id: string; status: ExpenseStatus } }
   | { event: "expense.reimbursed"; data: { id: string; status: ExpenseStatus } }
-  | { event: "asset_action.performed"; data: { asset_id: string; action: AssetAction } };
+  | { event: "asset_action.performed"; data: { asset_id: string; action: AssetAction } }
+  | { event: "schedule_ruleset.upserted"; data: { ruleset: ScheduleRuleset } }
+  | { event: "schedule_ruleset.deleted"; data: { id: string } };
+
+// §06 — per-property recurring rota (Schedule ruleset).
+export interface ScheduleRuleset {
+  id: string;
+  workspace_id: string;
+  name: string;
+}
+
+export interface ScheduleRulesetSlot {
+  id: string;
+  schedule_ruleset_id: string;
+  weekday: number; // 0..6 (Mon..Sun, ISO)
+  starts_local: string; // "HH:MM"
+  ends_local: string;
+}
+
+export interface ScheduleAssignment {
+  id: string;
+  user_id: string | null;
+  work_role_id: string | null;
+  property_id: string;
+  schedule_ruleset_id: string | null;
+}
+
+export interface SchedulerUserView {
+  id: string;
+  first_name: string;
+  display_name?: string;
+}
+
+export interface SchedulerTaskView {
+  id: string;
+  title: string;
+  property_id: string;
+  user_id: string;
+  scheduled_start: string;
+  estimated_minutes: number;
+  priority: TaskPriority;
+  status: TaskStatus;
+}
+
+export interface SchedulerCalendarPayload {
+  window: { from: string; to: string };
+  rulesets: ScheduleRuleset[];
+  slots: ScheduleRulesetSlot[];
+  assignments: ScheduleAssignment[];
+  tasks: SchedulerTaskView[];
+  users: SchedulerUserView[];
+  properties: { id: string; name: string; timezone: string }[];
+}
