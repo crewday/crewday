@@ -1,40 +1,23 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
+import { useDecideMutation } from "@/lib/useDecideMutation";
 import DeskPage from "@/components/DeskPage";
 import { Chip, EmptyState, Loading } from "@/components/common";
 import { fmtTime } from "@/lib/dates";
+import { APPROVAL_RISK_TONE } from "@/lib/tones";
 import type { ApprovalRequest } from "@/types/api";
 
-const RISK_TONE: Record<ApprovalRequest["risk"], "sky" | "sand" | "rust"> = {
-  low: "sky",
-  medium: "sand",
-  high: "rust",
-};
-
 export default function ApprovalsPage() {
-  const qc = useQueryClient();
   const q = useQuery({
     queryKey: qk.approvals(),
     queryFn: () => fetchJson<ApprovalRequest[]>("/api/v1/approvals"),
   });
 
-  const decide = useMutation({
-    mutationFn: ({ id, decision }: { id: string; decision: "approve" | "reject" }) =>
-      fetchJson("/api/v1/approvals/" + id + "/" + decision, { method: "POST" }),
-    onMutate: async ({ id }) => {
-      await qc.cancelQueries({ queryKey: qk.approvals() });
-      const prev = qc.getQueryData<ApprovalRequest[]>(qk.approvals());
-      if (prev) qc.setQueryData<ApprovalRequest[]>(qk.approvals(), prev.filter((a) => a.id !== id));
-      return { prev };
-    },
-    onError: (_err, _vars, ctx) => {
-      if (ctx?.prev) qc.setQueryData(qk.approvals(), ctx.prev);
-    },
-    onSettled: () => {
-      qc.invalidateQueries({ queryKey: qk.approvals() });
-      qc.invalidateQueries({ queryKey: qk.dashboard() });
-    },
+  const decide = useDecideMutation<ApprovalRequest[], "approve" | "reject">({
+    queryKey: qk.approvals(),
+    endpoint: (id, decision) => "/api/v1/approvals/" + id + "/" + decision,
+    applyOptimistic: (prev, id) => prev.filter((a) => a.id !== id),
   });
 
   const sub = "Actions an LLM agent has proposed — review before they happen.";
@@ -55,7 +38,7 @@ export default function ApprovalsPage() {
             <li key={a.id} className={"approval approval--" + a.risk}>
               <div className="approval__head">
                 <Chip tone="ghost" size="sm">{a.agent}</Chip>
-                <Chip tone={RISK_TONE[a.risk]} size="sm">{a.risk} risk</Chip>
+                <Chip tone={APPROVAL_RISK_TONE[a.risk]} size="sm">{a.risk} risk</Chip>
                 <span className="approval__time">requested {fmtTime(a.requested_at)}</span>
               </div>
               <div className="approval__title"><strong>{a.action}</strong> — {a.target}</div>

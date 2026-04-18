@@ -1,6 +1,7 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
+import { useDecideMutation } from "@/lib/useDecideMutation";
 import DeskPage from "@/components/DeskPage";
 import { Avatar, Chip, Loading } from "@/components/common";
 import type { Employee, Leave } from "@/types/api";
@@ -20,7 +21,6 @@ function rangeDays(starts: string, ends: string): number {
 }
 
 export default function LeavesInboxPage() {
-  const qc = useQueryClient();
   const leaves = useQuery({
     queryKey: qk.leaves(),
     queryFn: () => fetchJson<LeavesPayload>("/api/v1/leaves"),
@@ -30,27 +30,13 @@ export default function LeavesInboxPage() {
     queryFn: () => fetchJson<Employee[]>("/api/v1/employees"),
   });
 
-  const decide = useMutation({
-    mutationFn: ({ id, decision }: { id: string; decision: "approve" | "reject" }) =>
-      fetchJson("/api/v1/leaves/" + id + "/" + decision, { method: "POST" }),
-    onMutate: async ({ id }) => {
-      await qc.cancelQueries({ queryKey: qk.leaves() });
-      const prev = qc.getQueryData<LeavesPayload>(qk.leaves());
-      if (prev) {
-        qc.setQueryData<LeavesPayload>(qk.leaves(), {
-          pending: prev.pending.filter((lv) => lv.id !== id),
-          approved: prev.approved,
-        });
-      }
-      return { prev };
-    },
-    onError: (_err, _vars, ctx) => {
-      if (ctx?.prev) qc.setQueryData(qk.leaves(), ctx.prev);
-    },
-    onSettled: () => {
-      qc.invalidateQueries({ queryKey: qk.leaves() });
-      qc.invalidateQueries({ queryKey: qk.dashboard() });
-    },
+  const decide = useDecideMutation<LeavesPayload, "approve" | "reject">({
+    queryKey: qk.leaves(),
+    endpoint: (id, decision) => "/api/v1/leaves/" + id + "/" + decision,
+    applyOptimistic: (prev, id) => ({
+      pending: prev.pending.filter((lv) => lv.id !== id),
+      approved: prev.approved,
+    }),
   });
 
   const sub = "Approve or reject time-off requests. Approved leave drops the employee out of assignment.";

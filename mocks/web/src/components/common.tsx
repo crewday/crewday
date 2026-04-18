@@ -23,6 +23,54 @@ export function Dot({ tone }: { tone: "moss" | "rust" | "sand" }) {
   return <span className={"dot dot--" + tone} aria-hidden="true" />;
 }
 
+export type ChipTone = "moss" | "rust" | "sand" | "sky" | "ghost";
+
+export interface FilterChipOption<T extends string> {
+  value: T;
+  label: ReactNode;
+  tone?: ChipTone;
+}
+
+// Interactive filter row. An empty string is the "all" sentinel; keep
+// it in state so callers can read `active === ""` without a second
+// field. Markup stays identical to what AssetsPage/DocumentsPage emit
+// by hand so `.desk-filters .chip--active` CSS keeps matching.
+export function FilterChipGroup<T extends string>({
+  value,
+  onChange,
+  allLabel = "All",
+  options,
+}: {
+  value: T | "";
+  onChange: (next: T | "") => void;
+  allLabel?: ReactNode;
+  options: FilterChipOption<T>[];
+}) {
+  return (
+    <div className="desk-filters">
+      <span
+        className={"chip chip--ghost chip--sm" + (value === "" ? " chip--active" : "")}
+        onClick={() => onChange("")}
+      >
+        {allLabel}
+      </span>
+      {options.map((opt) => {
+        const tone = opt.tone ?? "ghost";
+        const active = value === opt.value ? " chip--active" : "";
+        return (
+          <span
+            key={opt.value}
+            className={"chip chip--" + tone + " chip--sm" + active}
+            onClick={() => onChange(opt.value)}
+          >
+            {opt.label}
+          </span>
+        );
+      })}
+    </div>
+  );
+}
+
 export function Avatar({
   initials,
   size = "md",

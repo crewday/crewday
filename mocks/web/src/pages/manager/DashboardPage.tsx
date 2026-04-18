@@ -5,23 +5,13 @@ import { qk } from "@/lib/queryKeys";
 import DeskPage from "@/components/DeskPage";
 import { Avatar, Chip, Loading, Panel, StatCard } from "@/components/common";
 import { fmtTime } from "@/lib/dates";
-import type {
-  DashboardPayload as Dashboard, Issue, Me, Task,
-} from "@/types/api";
-
-const STATUS_TONE: Record<Task["status"], "moss" | "sky" | "ghost" | "rust" | "sand"> = {
-  scheduled: "ghost", pending: "ghost", in_progress: "sky", completed: "moss",
-  skipped: "rust", cancelled: "rust", overdue: "sand",
-};
-const ISSUE_TONE: Record<Issue["severity"], "ghost" | "sand" | "rust"> = {
-  low: "ghost", normal: "sand", high: "rust", urgent: "rust",
-};
-const ISSUE_STATUS: Record<Issue["status"], "sand" | "sky" | "moss" | "ghost"> = {
-  open: "sand", in_progress: "sky", resolved: "moss", wont_fix: "ghost",
-};
-const APPROVAL_RISK: Record<"low" | "medium" | "high", "sky" | "sand" | "rust"> = {
-  low: "sky", medium: "sand", high: "rust",
-};
+import {
+  APPROVAL_RISK_TONE,
+  ISSUE_SEVERITY_TONE,
+  ISSUE_STATUS_TONE,
+  TASK_STATUS_TONE,
+} from "@/lib/tones";
+import type { DashboardPayload as Dashboard, Me } from "@/types/api";
 
 export default function DashboardPage() {
   const d = useQuery({ queryKey: qk.dashboard(), queryFn: () => fetchJson<Dashboard>("/api/v1/dashboard") });
@@ -102,7 +92,7 @@ export default function DashboardPage() {
                     <td>
                       {emp && <><Avatar initials={emp.avatar_initials} size="xs" /> {emp.name.split(" ")[0]}</>}
                     </td>
-                    <td><Chip tone={STATUS_TONE[t.status]} size="sm">{t.status.replace("_", " ")}</Chip></td>
+                    <td><Chip tone={TASK_STATUS_TONE[t.status]} size="sm">{t.status.replace("_", " ")}</Chip></td>
                   </tr>
                 );
               })}
@@ -116,7 +106,7 @@ export default function DashboardPage() {
               <li key={a.id} className={"approval approval--" + a.risk}>
                 <div className="approval__head">
                   <Chip tone="ghost" size="sm">{a.agent}</Chip>
-                  <Chip tone={APPROVAL_RISK[a.risk]} size="sm">{a.risk} risk</Chip>
+                  <Chip tone={APPROVAL_RISK_TONE[a.risk]} size="sm">{a.risk} risk</Chip>
                 </div>
                 <div className="approval__title"><strong>{a.action}</strong> · {a.target}</div>
                 <div className="approval__reason">{a.reason}</div>
@@ -156,8 +146,8 @@ export default function DashboardPage() {
                       {reporter?.name.split(" ")[0]} · {prop?.name} · {i.area}
                     </div>
                   </div>
-                  <Chip tone={ISSUE_TONE[i.severity]} size="sm">{i.severity}</Chip>
-                  <Chip tone={ISSUE_STATUS[i.status]} size="sm">{i.status.replace("_", " ")}</Chip>
+                  <Chip tone={ISSUE_SEVERITY_TONE[i.severity]} size="sm">{i.severity}</Chip>
+                  <Chip tone={ISSUE_STATUS_TONE[i.status]} size="sm">{i.status.replace("_", " ")}</Chip>
                 </li>
               );
             })}

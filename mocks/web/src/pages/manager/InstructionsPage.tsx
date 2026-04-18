@@ -4,13 +4,8 @@ import { fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
 import DeskPage from "@/components/DeskPage";
 import { Chip, Loading } from "@/components/common";
+import { INSTRUCTION_SCOPE_TONE } from "@/lib/tones";
 import type { Instruction, Property } from "@/types/api";
-
-const SCOPE_TONE: Record<Instruction["scope"], "sky" | "moss" | "sand"> = {
-  global: "sky",
-  property: "moss",
-  area: "sand",
-};
 
 function fmtUpdated(iso: string): string {
   return new Date(iso).toLocaleDateString("en-GB", { day: "2-digit", month: "short" });
@@ -68,7 +63,7 @@ export default function InstructionsPage() {
               <Link to={"/instructions/" + i.id} className="kb-item__main">
                 <div className="kb-item__head">
                   <h3 className="kb-item__title">{i.title}</h3>
-                  <Chip tone={SCOPE_TONE[i.scope]} size="sm">{scopeLabel(i)}</Chip>
+                  <Chip tone={INSTRUCTION_SCOPE_TONE[i.scope]} size="sm">{scopeLabel(i)}</Chip>
                 </div>
                 <p className="kb-item__preview">{preview(i.body_md)}</p>
                 <div className="kb-item__meta">

@@ -3,7 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
 import DeskPage from "@/components/DeskPage";
-import { Chip, Loading } from "@/components/common";
+import { Chip, FilterChipGroup, Loading } from "@/components/common";
 import type { Asset, AssetDocument, DocumentKind, Property } from "@/types/api";
 
 const KIND_ICON: Record<DocumentKind, string> = {
@@ -32,8 +32,8 @@ function fmtCents(cents: number | null, currency: string | null): string {
 }
 
 export default function DocumentsPage() {
-  const [activeKind, setActiveKind] = useState("");
-  const [activeProperty, setActiveProperty] = useState("");
+  const [activeKind, setActiveKind] = useState<DocumentKind | "">("");
+  const [activeProperty, setActiveProperty] = useState<string>("");
 
   const docsQ = useQuery({
     queryKey: qk.documents(),
@@ -71,40 +71,17 @@ export default function DocumentsPage() {
   return (
     <DeskPage title="Documents" sub={sub}>
       <section className="panel">
-        <div className="desk-filters">
-          <span
-            className={"chip chip--ghost chip--sm" + (activeKind === "" ? " chip--active" : "")}
-            onClick={() => setActiveKind("")}
-          >
-            All
-          </span>
-          {kinds.map((k) => (
-            <span
-              key={k}
-              className={"chip chip--ghost chip--sm" + (activeKind === k ? " chip--active" : "")}
-              onClick={() => setActiveKind(k)}
-            >
-              {k}
-            </span>
-          ))}
-        </div>
-        <div className="desk-filters">
-          <span
-            className={"chip chip--ghost chip--sm" + (activeProperty === "" ? " chip--active" : "")}
-            onClick={() => setActiveProperty("")}
-          >
-            All properties
-          </span>
-          {propsQ.data.map((p) => (
-            <span
-              key={p.id}
-              className={"chip chip--" + p.color + " chip--sm" + (activeProperty === p.id ? " chip--active" : "")}
-              onClick={() => setActiveProperty(p.id)}
-            >
-              {p.name}
-            </span>
-          ))}
-        </div>
+        <FilterChipGroup
+          value={activeKind}
+          onChange={setActiveKind}
+          options={kinds.map((k) => ({ value: k, label: k }))}
+        />
+        <FilterChipGroup
+          value={activeProperty}
+          onChange={setActiveProperty}
+          allLabel="All properties"
+          options={propsQ.data.map((p) => ({ value: p.id, label: p.name, tone: p.color }))}
+        />
 
         <table className="table">
           <thead>

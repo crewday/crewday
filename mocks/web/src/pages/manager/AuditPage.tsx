@@ -3,22 +3,8 @@ import { fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
 import DeskPage from "@/components/DeskPage";
 import { Chip, Loading } from "@/components/common";
+import { ACTOR_KIND_TONE, GRANT_ROLE_TONE } from "@/lib/tones";
 import type { AuditEntry } from "@/types/api";
-
-// v1 actor_kind ∈ {user, agent, system}. The grant under which a
-// human acted is surfaced separately via actor_grant_role.
-const ACTOR_TONE: Record<AuditEntry["actor_kind"], "moss" | "sky" | "ghost"> = {
-  user: "moss",
-  agent: "sky",
-  system: "ghost",
-};
-
-const GRANT_TONE: Record<NonNullable<AuditEntry["actor_grant_role"]>, "moss" | "sand" | "sky" | "ghost"> = {
-  manager: "moss",
-  worker: "sand",
-  client: "sky",
-  guest: "ghost",
-};
 
 function hms(iso: string): string {
   return new Date(iso).toLocaleTimeString([], {
@@ -75,10 +61,10 @@ export default function AuditPage() {
                   <div className="table__sub">{dayMon(e.at)}</div>
                 </td>
                 <td>
-                  <Chip tone={ACTOR_TONE[e.actor_kind]} size="sm">{e.actor_kind}</Chip>{" "}
+                  <Chip tone={ACTOR_KIND_TONE[e.actor_kind]} size="sm">{e.actor_kind}</Chip>{" "}
                   {e.actor_grant_role ? (
                     <>
-                      <Chip tone={GRANT_TONE[e.actor_grant_role]} size="sm">{e.actor_grant_role}</Chip>{" "}
+                      <Chip tone={GRANT_ROLE_TONE[e.actor_grant_role]} size="sm">{e.actor_grant_role}</Chip>{" "}
                     </>
                   ) : null}
                   {e.actor_was_owner_member ? (

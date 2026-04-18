@@ -4,27 +4,13 @@ import { Link } from "react-router-dom";
 import { fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
 import DeskPage from "@/components/DeskPage";
-import { Chip, Loading } from "@/components/common";
-import type { Asset, AssetCondition, AssetStatus, AssetType, Property } from "@/types/api";
-
-const CONDITION_TONE: Record<AssetCondition, "moss" | "sand" | "rust"> = {
-  new: "moss",
-  good: "moss",
-  fair: "sand",
-  poor: "rust",
-  needs_replacement: "rust",
-};
-
-const STATUS_TONE: Record<AssetStatus, "moss" | "sand" | "rust" | "ghost"> = {
-  active: "moss",
-  in_repair: "sand",
-  decommissioned: "ghost",
-  disposed: "rust",
-};
+import { Chip, FilterChipGroup, Loading } from "@/components/common";
+import { ASSET_CONDITION_TONE, ASSET_STATUS_TONE } from "@/lib/tones";
+import type { Asset, AssetType, Property } from "@/types/api";
 
 export default function AssetsPage() {
-  const [activeCategory, setActiveCategory] = useState("");
-  const [activeProperty, setActiveProperty] = useState("");
+  const [activeCategory, setActiveCategory] = useState<string>("");
+  const [activeProperty, setActiveProperty] = useState<string>("");
 
   const assetsQ = useQuery({
     queryKey: qk.assets(),
@@ -66,40 +52,17 @@ export default function AssetsPage() {
   return (
     <DeskPage title="Assets" sub={sub} actions={actions}>
       <section className="panel">
-        <div className="desk-filters">
-          <span
-            className={"chip chip--ghost chip--sm" + (activeCategory === "" ? " chip--active" : "")}
-            onClick={() => setActiveCategory("")}
-          >
-            All
-          </span>
-          {categories.map((cat) => (
-            <span
-              key={cat}
-              className={"chip chip--ghost chip--sm" + (activeCategory === cat ? " chip--active" : "")}
-              onClick={() => setActiveCategory(cat)}
-            >
-              {cat}
-            </span>
-          ))}
-        </div>
-        <div className="desk-filters">
-          <span
-            className={"chip chip--ghost chip--sm" + (activeProperty === "" ? " chip--active" : "")}
-            onClick={() => setActiveProperty("")}
-          >
-            All properties
-          </span>
-          {propsQ.data.map((p) => (
-            <span
-              key={p.id}
-              className={"chip chip--" + p.color + " chip--sm" + (activeProperty === p.id ? " chip--active" : "")}
-              onClick={() => setActiveProperty(p.id)}
-            >
-              {p.name}
-            </span>
-          ))}
-        </div>
+        <FilterChipGroup
+          value={activeCategory}
+          onChange={setActiveCategory}
+          options={categories.map((cat) => ({ value: cat, label: cat }))}
+        />
+        <FilterChipGroup
+          value={activeProperty}
+          onChange={setActiveProperty}
+          allLabel="All properties"
+          options={propsQ.data.map((p) => ({ value: p.id, label: p.name, tone: p.color }))}
+        />
 
         <table className="table">
           <thead>
@@ -128,8 +91,8 @@ export default function AssetsPage() {
                   <td>{at?.name ?? <span className="muted">--</span>}</td>
                   <td>{prop && <Chip tone={prop.color} size="sm">{prop.name}</Chip>}</td>
                   <td>{a.area ?? <span className="muted">--</span>}</td>
-                  <td><Chip tone={CONDITION_TONE[a.condition]} size="sm">{a.condition.replace("_", " ")}</Chip></td>
-                  <td><Chip tone={STATUS_TONE[a.status]} size="sm">{a.status.replace("_", " ")}</Chip></td>
+                  <td><Chip tone={ASSET_CONDITION_TONE[a.condition]} size="sm">{a.condition.replace("_", " ")}</Chip></td>
+                  <td><Chip tone={ASSET_STATUS_TONE[a.status]} size="sm">{a.status.replace("_", " ")}</Chip></td>
                 </tr>
               );
             })}

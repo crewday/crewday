@@ -1,19 +1,15 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
+import { useDecideMutation } from "@/lib/useDecideMutation";
 import { formatMoney } from "@/lib/money";
 import { fmtDateTime } from "@/lib/dates";
 import DeskPage from "@/components/DeskPage";
 import { Avatar, Chip, Loading, StatCard } from "@/components/common";
+import { EXPENSE_STATUS_TONE } from "@/lib/tones";
 import type { Employee, Expense, ExpenseStatus } from "@/types/api";
 
 type Decision = "approve" | "reject" | "reimburse";
-
-const STATUS_TONE: Record<Exclude<ExpenseStatus, "draft" | "submitted">, "moss" | "rust" | "sky"> = {
-  approved: "moss",
-  rejected: "rust",
-  reimbursed: "sky",
-};
 
 function sumCents(xs: Expense[]): number {
   return xs.reduce((acc, x) => acc + x.amount_cents, 0);
@@ -26,7 +22,6 @@ function totalLabel(xs: Expense[]): string {
 }
 
 export default function ExpensesApprovalsPage() {
-  const qc = useQueryClient();
   const expensesQ = useQuery({
     queryKey: qk.expenses("all"),
     queryFn: () => fetchJson<Expense[]>("/api/v1/expenses"),
@@ -36,28 +31,13 @@ export default function ExpensesApprovalsPage() {
     queryFn: () => fetchJson<Employee[]>("/api/v1/employees"),
   });
 
-  const decide = useMutation({
-    mutationFn: ({ id, decision }: { id: string; decision: Decision }) =>
-      fetchJson("/api/v1/expenses/" + id + "/" + decision, { method: "POST" }),
-    onMutate: async ({ id, decision }) => {
-      await qc.cancelQueries({ queryKey: qk.expenses("all") });
-      const prev = qc.getQueryData<Expense[]>(qk.expenses("all"));
+  const decide = useDecideMutation<Expense[], Decision>({
+    queryKey: qk.expenses("all"),
+    endpoint: (id, decision) => "/api/v1/expenses/" + id + "/" + decision,
+    applyOptimistic: (prev, id, decision) => {
       const nextStatus: ExpenseStatus =
         decision === "approve" ? "approved" : decision === "reject" ? "rejected" : "reimbursed";
-      if (prev) {
-        qc.setQueryData<Expense[]>(
-          qk.expenses("all"),
-          prev.map((x) => (x.id === id ? { ...x, status: nextStatus } : x)),
-        );
-      }
-      return { prev };
-    },
-    onError: (_err, _vars, ctx) => {
-      if (ctx?.prev) qc.setQueryData(qk.expenses("all"), ctx.prev);
-    },
-    onSettled: () => {
-      qc.invalidateQueries({ queryKey: qk.expenses("all") });
-      qc.invalidateQueries({ queryKey: qk.dashboard() });
+      return prev.map((x) => (x.id === id ? { ...x, status: nextStatus } : x));
     },
   });
 
@@ -197,7 +177,7 @@ export default function ExpensesApprovalsPage() {
                   <td>{x.merchant}<div className="table__sub">{x.note}</div></td>
                   <td className="mono">{formatMoney(x.amount_cents, x.currency)}</td>
                   <td className="mono">{fmtDateTime(x.submitted_at)}</td>
-                  <td><Chip tone={STATUS_TONE[status]} size="sm">{x.status}</Chip></td>
+                  <td><Chip tone={EXPENSE_STATUS_TONE[status]} size="sm">{x.status}</Chip></td>
                 </tr>
               );
             })}

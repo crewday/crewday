@@ -69,24 +69,11 @@ export default function TodayPage() {
             <Chip tone="ghost" size="sm">{String(completed.length)}</Chip>
           </summary>
           <ul className="task-list">
-            {completed.map((t) => {
-              const prop = propsById.get(t.property_id) ?? null;
-              return (
-                <li key={t.id}>
-                  <Link to={"/task/" + t.id} className="task-card task-card--compact task-card--done">
-                    <div className="task-card__head">
-                      <span className="task-card__when">✓ {fmtTime(t.scheduled_start)}</span>
-                      {prop ? (
-                        <Chip tone={prop.color} size="sm">{prop.name}</Chip>
-                      ) : t.is_personal ? (
-                        <Chip tone="ghost" size="sm">Personal</Chip>
-                      ) : null}
-                    </div>
-                    <div className="task-card__title task-card__title--sm">{t.title}</div>
-                  </Link>
-                </li>
-              );
-            })}
+            {completed.map((t) => (
+              <li key={t.id}>
+                <TaskListCard task={t} property={propsById.get(t.property_id) ?? null} />
+              </li>
+            ))}
           </ul>
         </details>
       </section>
