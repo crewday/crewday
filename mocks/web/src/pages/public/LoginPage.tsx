@@ -1,6 +1,7 @@
-// Static (mock) sign-in surface. The form is decorative — passkey
-// registration / magic-link issuance are owned by the real auth flow,
-// not the mocks app.
+// Static (mock) sign-in surface. Passkey is the only credential
+// (§03 Principles). Magic links never issue a session on their own —
+// users who have lost every passkey device recover via /recover
+// (§03 "Self-service lost-device recovery").
 
 export default function LoginPage() {
   return (
@@ -14,13 +15,11 @@ export default function LoginPage() {
           <h1 className="login__headline">Sign in with your passkey</h1>
           <p className="login__sub">No passwords, ever. Tap once to unlock the house.</p>
           <button className="btn btn--moss btn--lg login__primary" type="button">🔑 Use passkey</button>
-          <div className="login__divider"><span>or</span></div>
-          <button className="btn btn--ghost btn--lg" type="button">Email me a magic link</button>
-          <a href="/recover" className="login__recover">I lost my device</a>
+          <a href="/recover" className="login__recover">Lost your device? Recover access →</a>
         </div>
         <p className="login__footnote">
-          First time here? Your manager will email you an enrollment link.{" "}
-          <a href="/enroll/demo-abc123" className="link">See what enrollment looks like →</a>
+          First time here? Open the invite link your manager sent.{" "}
+          <a href="/accept/demo-abc123" className="link">See what accepting an invite looks like →</a>
         </p>
       </main>
     </div>

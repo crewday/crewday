@@ -418,7 +418,7 @@ properties, or organizations they are connected to.
 | primary_workspace_id | ULID FK? | nullable; the workspace the user was first invited into. UI sort key only — authorisation never consults this column. |
 | display_name        | text      | shown to everyone who can see them                                |
 | full_legal_name     | text?     | visible only on scopes where the viewer has `manager` or `owner` grant; redacted from `worker` and `client` views |
-| email               | text      | globally unique across the deployment; used for magic links and digest emails |
+| email               | text      | globally unique (case-insensitive) across the deployment; used for magic links and digest emails. Self-service change via `POST /me/email/change_request` is gated on a passkey session and verified by a magic link sent to the new address (§03 "Self-service email change"). Manager-initiated change via `users.edit_profile_other` is the fallback for users who cannot reach `/me`. |
 | phone_e164          | text?     | manager/owner-visible only                                        |
 | avatar_file_id      | ULID FK?  | `file.id`; square 512×512 WebP with EXIF stripped (§15). Self-writable only via `POST /me/avatar` (§12); managers cannot set another user's avatar. NULL → the UI falls back to the initials circle (computed from `display_name`). Every change writes `user.avatar_changed` to `audit_log`. |
 | timezone            | text      | user's default; property/workspace context may override for display |

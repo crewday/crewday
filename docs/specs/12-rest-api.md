@@ -275,11 +275,24 @@ POST   /api/v1/auth/webauthn/begin_registration
 POST   /api/v1/auth/webauthn/finish_registration
 POST   /api/v1/auth/webauthn/begin_login
 POST   /api/v1/auth/webauthn/finish_login
-POST   /api/v1/auth/magic/send                   # owner or manager only
+POST   /api/v1/auth/magic/send                   # owner or manager only (manual re-issue)
 POST   /api/v1/auth/magic/consume                # consume a break-glass code → magic link
+POST   /api/v1/auth/recover/start                # self-service lost-device; body: {email, break_glass_code?}. Always 200 {status:"sent_if_exists"}.
 GET    /api/v1/auth/me
 POST   /api/v1/auth/logout
 GET    /api/v1/me/workspaces                     # switcher payload for the current session
+
+# Self-service email change (§03 "Self-service email change"). Passkey
+# session only; PATs and delegated tokens cannot touch email.
+POST   /api/v1/me/email/change_request           # body: {new_email}; emails a magic link to new address, notice to old address.
+POST   /api/v1/auth/email/verify                 # body: {token}; requires passkey session on same user; swaps users.email atomically.
+POST   /api/v1/auth/email/revert                 # body: {token}; 72h revert link from the original old-address notice.
+
+# Click-to-accept invite (§03 "Additional users (invite)"). Identity-
+# scoped; same token lands new users in a passkey ceremony and existing
+# users on an Accept card. Rejected unless the token's purpose == 'accept'.
+GET    /api/v1/invites/{token}                   # introspect the invite (grants, inviter, expiry) pre-accept
+POST   /api/v1/invites/{token}/accept            # activate the pending grants atomically
 
 # Personal access tokens (§03 "Personal access tokens"). Identity-
 # scoped, passkey-session only, `me:*` scopes only, subject is always

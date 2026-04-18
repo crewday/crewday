@@ -21,6 +21,7 @@ const NAMESPACE_LABELS: Record<string, string> = {
   retention: "Retention",
   scheduling: "Scheduling",
   tasks: "Tasks",
+  auth: "Authentication",
 };
 
 function groupByNamespace(

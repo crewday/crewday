@@ -86,7 +86,10 @@ workspace once and the rest of the tree is unaware of the prefix.
 /signup/verify             → magic-link landing after signup email
 /select-workspace          → picker for users with ≥2 workspaces (see below)
 /login                     → passkey login
-/recover                   → break-glass recovery
+/recover                   → self-service lost-device recovery (§03);
+                             owners / managers see a step-up break-glass code field
+/recover/enroll            → magic-link landing; fresh passkey ceremony
+/me/email/verify           → email-change magic-link landing (swap + notice)
 /styleguide                (dev + staging only)
 /healthz, /readyz, /version  (no auth; see §12)
 ```
@@ -117,7 +120,7 @@ from a password manager don't silently land on `/login`.
 ### Per-workspace public
 
 ```
-/w/<slug>/enroll/<token>   → invited user completing enrollment
+/w/<slug>/accept/<token>   → click-to-accept invite (new or existing user; §03)
 /w/<slug>/guest/<token>    → guest welcome page
 ```
 

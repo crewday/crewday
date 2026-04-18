@@ -32,8 +32,10 @@ redirects to that audience's home) and a **☾ / ☀** theme toggle
 **Public / unauthenticated**
 
 - `/login` — passkey sign-in
-- `/recover` — enter a break-glass code (admin CLI kicks it off)
-- `/enroll/<token>` — passkey enrollment landing page
+- `/recover` — self-service lost-device recovery (§03); managers
+  / owners see a step-up break-glass code field
+- `/accept/<token>` — click-to-accept invite (new user → passkey
+  ceremony; existing user → Accept card)
 - `/guest/<token>` — tokenized guest welcome page (wifi, access,
   check-out checklist from `guest_visible` items)
 

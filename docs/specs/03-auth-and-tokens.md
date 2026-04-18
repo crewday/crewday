@@ -4,8 +4,13 @@
 
 - **No passwords.** For anyone. Not for owners, not for workers.
 - **Passkeys (WebAuthn)** are the only human credential.
-- **Magic links** are only an enrollment mechanism — they register a
-  passkey; they do not authenticate a session on their own.
+- **Magic links** never authenticate a session on their own. They are
+  a one-shot consent + ownership proof for four narrow purposes:
+  (1) first-passkey enrollment, (2) accepting a grant invitation,
+  (3) self-service lost-device recovery (registers a fresh passkey,
+  revokes the old ones), and (4) verifying a self-service email
+  change. Every purpose is stamped into the signed token and
+  rejected if redeemed against the wrong endpoint.
 - **Standalone agents** use long-lived, revocable, scope-limited API
   tokens. **Embedded agents** (§11) use delegated tokens that inherit
   the calling user's full permissions (see "Delegated tokens" below).
@@ -154,7 +159,12 @@ at most **3 workspaces** lifetime on the SaaS deployment
 configurable by the SaaS operator; self-host operators override
 via env vars.
 
-### Additional users (invite)
+### Additional users (invite → click-to-accept)
+
+Invitations are **click-to-accept**, uniformly — whether the
+invitee already has a `users` row or not. The recipient always
+sees an Acceptance card listing the grants being added before
+they take effect; grants never attach silently.
 
 - A user who passes the `users.invite` action check on the target
   scope (owners and managers by default — see §05 action catalog)
@@ -164,30 +174,43 @@ via env vars.
      permission_group_memberships?: [ {group_id}, ... ],
      work_engagement?: {workspace_id, engagement_kind, ...},
      user_work_roles?: [ {workspace_id, work_role_id}, ... ] }`.
-  One call creates (or re-uses, if `email` matches an existing row)
-  the `users` row, inserts the requested surface grants, optionally
-  adds explicit permission-group memberships (including the
-  `owners` group when delegating governance), optionally adds the
-  work engagement and work-role mappings, and emails a magic link.
-  Inviting someone directly into `owners@<scope>` requires the
-  inviter to pass the root-only
+  One call creates (or re-uses, if `email` matches an existing
+  row) the `users` row and inserts a pending `invite` record
+  carrying the requested grants, permission-group memberships,
+  work engagement, and work-role mappings. Nothing on the invited
+  scope is active yet. The requested rows live alongside the
+  invite as `pending = true` and are activated atomically on
+  acceptance. Inviting someone directly into `owners@<scope>`
+  requires the inviter to pass the root-only
   `groups.manage_owners_membership` action check for that scope.
-- System emails a magic link (24 h TTL across all surfaces).
-  On acceptance, recipient registers a passkey.
-- Users invited with a `manager` surface grant **or** with
-  `owners` group membership also receive a set of break-glass
-  codes on their first passkey registration. Users invited purely
-  as `worker`, `client`, or `guest` do not — recovery for those
-  users runs through a managerial re-issue of a magic link.
-
-### Existing user, new grant
-
-- When the invite's `email` matches an existing `users` row, no
-  new user is created. The new `role_grants` rows are inserted and
-  the user receives a one-shot **grant-activated** email — no magic
-  link, no passkey re-registration, no break-glass regeneration.
-  They just sign in with their existing passkey and the new scope
-  appears in their workspace switcher.
+- System emails a magic link of purpose `accept` that lands on
+  `/w/<slug>/accept/<token>` (24 h TTL across all surfaces;
+  single-use; `jti` recorded). The same endpoint handles both
+  cases:
+  - **New user**: the redemption is followed inline by the
+    passkey enrollment ceremony (display name confirmation,
+    timezone, `webauthn/finish_registration`). On success the
+    pending grants are activated, and — for invitees into a
+    `manager` surface grant or any `owners` permission group —
+    a set of break-glass codes is generated (same ritual as the
+    self-serve signup flow).
+  - **Existing user**: the redemption prompts a passkey sign-in
+    if no active session is present, then renders the Acceptance
+    card. The card lists the exact grants, group memberships, and
+    work-role rows that will activate. On **Accept**, the pending
+    rows activate in a single transaction; on **Dismiss**, they
+    are left pending until the invite TTL lapses, at which point
+    the nightly `signup_gc` worker prunes them. No existing
+    passkey is re-registered; no break-glass regeneration.
+- Two audit events distinguish the two outcomes: `user.enrolled`
+  on first-passkey completion, `user.grant_accepted` on the
+  existing-user Accept. Both carry the `invite.id`, the list of
+  activated grant ids, and the `actor_grant_role` of the
+  inviter.
+- If the invite's `email` is changed by the recipient on the
+  `/me` page before acceptance (self-service email change;
+  below), the pending invite rides along on `user_id`, not on the
+  old email — no re-send is required.
 
 ### Additional passkeys
 
@@ -198,9 +221,13 @@ via env vars.
 
 ### Re-enrollment side-effects
 
-When a user who passes `users.reissue_magic_link` re-issues a
-magic link ("lost phone" / "lost device" paths below), accepting
-the link and registering a fresh passkey:
+Re-enrollment happens whenever a fresh passkey is registered
+through a magic link of purpose `recover` — whether the magic
+link was minted by a manager via `users.reissue_magic_link`, by
+a self-service recovery request (§"Self-service lost-device
+recovery" below), or by consuming a break-glass code. The
+ceremony's final `webauthn/finish_registration` call, in a
+single transaction:
 
 1. Revokes **all existing passkeys** for that user (the new one is
    written after revocation in the same transaction).
@@ -212,7 +239,147 @@ the link and registering a fresh passkey:
    hold only `worker` / `client` / `guest` surface grants and are
    not `owners` members anywhere have no code set to regenerate.
 
-All three events land in the audit log under `auth.reenroll`.
+All three events land in the audit log under `auth.reenroll`
+with a `trigger` column of
+`manager_reissue | self_service | break_glass`.
+
+### Self-service lost-device recovery
+
+Users who have lost access to every device with a registered
+passkey can re-enroll from any browser without waiting on a
+manager. The flow is an **enrollment magic link**, not an
+authenticated session — §"Principles" still holds.
+
+**Entry point.** `/recover` (bare host). Form asks for the
+account email. Managers and owners-group members see a second
+field: **"Break-glass code"**. Workers, clients, and guests see
+only the email field. The UI copy makes clear that the code
+field is required for owners and managers.
+
+**Request.** `POST /api/v1/auth/recover/start` with
+`{ email, break_glass_code? }`. The server:
+
+1. Applies per-email and per-IP rate limits (§15 self-serve abuse
+   mitigations — same family used on `signup/start`).
+2. Looks up `users.email` case-insensitively. If no match, logs
+   `auth.recover.miss` with `ip_hash` and `email_hash`. **Always
+   returns 200** with the generic body
+   `{ "status": "sent_if_exists" }` regardless of the lookup
+   outcome — the response does not reveal which emails map to a
+   user, nor which users require step-up.
+3. If the user holds a `manager` surface grant anywhere **or** is
+   a member of any `owners` permission group — the **step-up
+   population** — the request is only honoured when
+   `break_glass_code` is present and matches an unused
+   `break_glass_code` row for that user. A matching code is burnt
+   (`used_at = now()`) and a magic link of purpose `recover`
+   (15-min TTL, single-use) is mailed. Missing or invalid code
+   logs `auth.recover.stepup_missing` or
+   `auth.recover.stepup_invalid` and sends nothing. A burnt code
+   is inert even if the resulting magic link expires unused —
+   the user consumes another code to retry.
+4. For the non-step-up population (workers, clients, guests with
+   no manager or owners membership anywhere), the code field is
+   ignored and never burnt; a recover-purpose magic link is
+   mailed directly.
+5. If **every** workspace the target user holds a grant in has
+   `auth.self_service_recovery_enabled = false` (§"Workspace
+   kill-switch" below), no email is sent and
+   `auth.recover.disabled_by_workspace` is logged. The 200 body
+   is unchanged. The user falls back to manager-mediated recovery
+   (existing `users.reissue_magic_link` path).
+
+**Redemption.** The magic link lands on
+`/recover/enroll?token=…`, which:
+
+1. Verifies the token signature, purpose (`recover`), expiry, and
+   single-use `jti`.
+2. Walks the user through the passkey-registration ceremony
+   (display name confirmation, timezone if missing, a WebAuthn
+   `finish_registration`).
+3. Applies the "Re-enrollment side-effects" above in the same
+   transaction as writing the new passkey.
+
+**Manager-initiated path unchanged.** A user who passes
+`users.reissue_magic_link` on a shared scope can still click
+"re-issue magic link" on another user's profile
+(`POST /api/v1/users/{id}/magic_link`). That path skips the
+workspace kill-switch entirely — it is the fallback for
+deployments that disable self-service.
+
+### Workspace kill-switch
+
+A workspace setting
+`auth.self_service_recovery_enabled` (bool, default `true`,
+override scope `W`, §"Settings catalog" in §05) gates the
+self-service path **for members of that workspace only**. Because
+identity is global and a user may hold grants in multiple
+workspaces, the server evaluates the flag as
+*most-restrictive-wins*: if **any** workspace the user holds a
+non-archived grant in has the flag `false`, self-service recovery
+is refused for that user (step 5 above). Managers may still
+re-issue a magic link manually; break-glass codes still redeem
+through `POST /auth/magic/consume`; and the host-CLI recovery
+remains available to the deployment operator (§"Recovery paths").
+
+There is no per-user opt-out: a locked-out user cannot flip a
+personal setting. Users who want individual protection should ask
+an owner to raise the bar at workspace scope.
+
+### Self-service email change
+
+`users.email` is the identity anchor for every magic-link flow
+above. A user can change their own address from `/me` without
+manager intervention; the change is gated on proving control of
+the new mailbox.
+
+**Request.** `POST /api/v1/me/email/change_request` with
+`{ new_email }`, from a passkey session only (no PAT, no
+delegated token — `me.profile:write` does **not** unlock the
+email field; the field is self-service via the session cookie
+only). The server:
+
+1. Validates syntax and canonicalises (trim + lowercase).
+2. Rejects with 409 `error = "email_in_use"` if another
+   non-archived `users` row already holds it (case-insensitive).
+3. Rejects with 409 `error = "recent_reenrollment"` if the
+   caller's passkey was registered less than **15 minutes** ago
+   — this bounds the window in which an attacker who just hijacked
+   the account via a compromised magic link could pivot to a new
+   mailbox.
+4. Issues a magic link of purpose `email_change` to the **new**
+   address only. The token payload carries `user_id` and
+   `pending_new_email`; 15-min TTL; single-use.
+5. Sends an informational, link-free notice to the **old** address
+   ("Someone requested changing the email on your crewday account
+   to <masked-new>. If this wasn't you, contact your manager.")
+   with the caller's IP prefix for provenance.
+6. Writes `auth.email_change_requested` with `actor_id`,
+   `old_email_hash`, `new_email_hash`, `ip_hash`.
+
+**Confirmation.** The recipient clicks the link on the new
+address, which calls
+`POST /api/v1/auth/email/verify { token }`. The server:
+
+1. Validates the signature, purpose (`email_change`), expiry, and
+   single-use `jti`.
+2. Requires an active passkey session for the same
+   `user_id` — opening the link on a signed-out browser prompts
+   a passkey sign-in (on any device that still has a passkey)
+   before the swap. An attacker with mailbox access alone cannot
+   complete the swap.
+3. Re-checks uniqueness and swaps `users.email` atomically with
+   the `jti` consumption.
+4. Writes `auth.email_changed` with the old/new hashes; sends a
+   notice to **both** addresses ("Your email was changed to
+   <masked-new>").
+
+**Revert window.** The notice to the old address includes a link
+to `POST /api/v1/auth/email/revert { token }` signed with a
+72-hour TTL. Redemption reverts `users.email` to the old value
+and logs `auth.email_change_reverted`. The revert link is the
+only flow that consumes a magic link against the **old** address
+after the swap — it is not an authentication primitive.
 
 ## Login
 
@@ -503,11 +670,12 @@ subject narrowing is enforced at the row level regardless of which
 
 | Situation                                  | Recovery path                                                  |
 |--------------------------------------------|----------------------------------------------------------------|
-| Worker/client lost phone                   | Any user who passes `users.reissue_magic_link` on a shared scope (owners and managers by default) clicks "re-issue magic link" on the user's profile; current passkeys are revoked on registration. |
-| Manager or owners-member lost only device, has backup code | Enter recovery code → magic link emailed → register passkey; one backup code is burnt. |
-| Manager or owners-member lost device + all backup codes, another owners-group member exists on a shared scope | That peer re-issues a magic link to their email. |
+| Worker/client/guest lost every device      | **Self-service** via `/recover` — enter email, receive a magic link, register a fresh passkey. No break-glass code required. Available unless every workspace the user belongs to has `auth.self_service_recovery_enabled = false`; managers on deployments that disable it use `users.reissue_magic_link` as before. |
+| Manager or owners-member lost every device | **Self-service with step-up** via `/recover` — enter email **and** an unused break-glass code. The code is burnt on request; the magic link enrolls a fresh passkey and regenerates the code set. |
+| Manager or owners-member lost every device + all break-glass codes, another owners-group member exists on a shared scope | Peer clicks `users.reissue_magic_link` on the user's profile. |
 | Last owners-group member locked out completely | **Host-CLI recovery only in v1.** Stop service, run `crewday admin recover --email ...` on the host, which emits a one-time magic link to stdout. Operator must have shell access to the deployment host. Hosted / SaaS recovery flows (support escalation, out-of-band identity verification) are **out of scope for v1** — see §19. |
-| Email address wrong / changed              | A user who passes `users.edit_profile_other` on a shared scope updates email on the user's profile; next magic link goes to the new one. Since email is globally unique (§02), the change fails if another `users` row already holds that address. |
+| Email address wrong (manager-initiated)    | A user who passes `users.edit_profile_other` on a shared scope updates email on the user's profile; used for account-admin fixes and for users who cannot reach `/me`. Since email is globally unique (§02), the change fails if another `users` row already holds that address. No verification email is sent on the new address — the manager vouches for the change. Audited as `user.email_changed` with `trigger = manager`. |
+| User changes their own email               | **Self-service** via `/me` → "Email" panel, verified by a magic link sent to the new address; see §"Self-service email change" above. |
 
 ## Break-glass codes
 

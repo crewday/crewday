@@ -1,8 +1,17 @@
-// Static (mock) recovery surface. The real flow is manager-initiated
-// (`crewday admin recover`) — this page only shows what the operator
-// would see after they receive the one-time code.
+import { useState } from "react";
+
+// Static (mock) self-service recovery surface (§03).
+// Workers, clients, and guests: enter email only.
+// Managers and owners-group members: step-up — email AND an unused
+// break-glass code. The server responds with a generic
+// "sent_if_exists" payload either way to avoid role enumeration.
+// Magic links never issue a session on their own; the link lands
+// on /recover/enroll and walks the user through a fresh passkey
+// ceremony with the usual re-enrollment side-effects.
 
 export default function RecoverPage() {
+  const [stepUp, setStepUp] = useState(false);
+
   return (
     <div className="surface surface--login">
       <main className="login">
@@ -13,26 +22,44 @@ export default function RecoverPage() {
           </div>
           <h1 className="login__headline">Lost your device?</h1>
           <p className="login__sub">
-            Ask your manager to run <code className="inline-code">crewday admin recover</code>{" "}
-            and send you a one-time recovery code. Then enter it below.
+            We'll email you a one-time link that lets you register a new passkey. Your old
+            passkeys are revoked when the new one is saved.
           </p>
           <form className="form" onSubmit={(e) => e.preventDefault()}>
             <label className="field">
               <span>Your email</span>
-              <input type="email" placeholder="you@example.com" required />
+              <input type="email" placeholder="you@example.com" autoComplete="email" required />
             </label>
-            <label className="field">
-              <span>Recovery code</span>
-              <input className="recovery-code" placeholder="XXXX-XXXX-XXXX" required />
+
+            <label className="field field--inline">
+              <input
+                type="checkbox"
+                checked={stepUp}
+                onChange={(e) => setStepUp(e.target.checked)}
+              />
+              <span>I'm a manager or owner (I have a break-glass code)</span>
             </label>
+
+            {stepUp ? (
+              <label className="field">
+                <span>Break-glass code</span>
+                <input
+                  className="recovery-code"
+                  placeholder="XXXXXXXXXX"
+                  autoComplete="one-time-code"
+                  required
+                />
+              </label>
+            ) : null}
+
             <button type="button" className="btn btn--moss btn--lg">
-              Verify &amp; enroll new passkey
+              Send recovery link
             </button>
           </form>
           <p className="login__footnote muted">
-            Codes expire after one use or 15 minutes, whichever comes first.
-            The manager has to kick off recovery from the host — there's no self-service
-            path, by design.
+            Links expire after one use or 15 minutes, whichever comes first. If nothing arrives,
+            your workspace may have disabled self-service recovery — ask a manager to re-issue
+            your link.
           </p>
           <a href="/login" className="login__recover">← Back to sign in</a>
         </div>

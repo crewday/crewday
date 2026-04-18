@@ -113,6 +113,20 @@ export default function MePage() {
       </section>
 
       <section className="panel">
+        <header className="panel__head"><h2>Email</h2></header>
+        <div className="stack-row">
+          <div>
+            <strong>{employee.email}</strong>
+            <div className="stack-row__sub">
+              Used for magic links (invites, lost-device recovery) and digests. Changing it sends
+              a confirmation link to the new address and a 72-hour revert link to this one.
+            </div>
+          </div>
+          <button type="button" className="btn btn--ghost btn--sm">Change</button>
+        </div>
+      </section>
+
+      <section className="panel">
         <header className="panel__head"><h2>Shift</h2></header>
         <Link to="/shifts" className="stack-row">
           <div>

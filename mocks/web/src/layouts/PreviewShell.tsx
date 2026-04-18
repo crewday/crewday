@@ -22,12 +22,12 @@ export default function PreviewShell() {
     pathname === "/styleguide" ||
     pathname === "/login" ||
     pathname === "/recover" ||
-    pathname.startsWith("/enroll/") ||
+    pathname.startsWith("/accept/") ||
     pathname.startsWith("/guest/");
   const stayOnRoleSwitch =
     pathname === "/login" ||
     pathname === "/recover" ||
-    pathname.startsWith("/enroll/") ||
+    pathname.startsWith("/accept/") ||
     pathname.startsWith("/guest/");
 
   const switchRole = (r: typeof role) => {

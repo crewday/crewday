@@ -3088,6 +3088,14 @@ SETTINGS_CATALOG: list[SettingDefinition] = [
                       override_scope="W/P/U",
                       description="Whether guest-visible assets appear on the guest welcome page.",
                       spec="21"),
+    SettingDefinition("auth.self_service_recovery_enabled", "Self-service lost-device recovery", "bool", True,
+                      override_scope="W",
+                      description=(
+                          "When on, users who lost their passkey device can re-enroll via /recover without a manager. "
+                          "Managers and owners must still supply an unused break-glass code (step-up). "
+                          "When off, workspace members fall back to the manager-mediated re-issue path."
+                      ),
+                      spec="03"),
 ]
 
 def resolve_settings(

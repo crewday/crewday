@@ -512,6 +512,49 @@ outbound email. The following gates apply whenever
   with a constant-time response so slug-probing can't time-
   fingerprint existence.
 
+### Self-service lost-device & email-change abuse mitigations
+
+The self-service flows in §03 ("Self-service lost-device
+recovery", "Self-service email change") introduce a second
+email-anchored re-enrollment surface. The mitigations below apply
+whether or not self-serve signup is enabled:
+
+- **Rate limits on `POST /api/v1/auth/recover/start`:**
+  - ≤ 3 successful starts per email per hour.
+  - ≤ 10 starts per source IP per hour.
+  - ≤ 200 starts per deployment per hour (global cool-off).
+  All limits use constant-time responses; callers always see
+  `200 {"status": "sent_if_exists"}` so neither a user's
+  existence nor their step-up status can be probed. 429 is only
+  returned once the per-IP or global cap trips.
+- **Rate limits on `POST /api/v1/me/email/change_request`:**
+  - ≤ 5 requests per user per hour.
+  - ≤ 3 requests per source IP per minute (covers session
+    hijack that fan-outs across users).
+  A duplicate request for the same `(user_id, new_email)` within
+  the magic link's 15-min TTL is idempotent — the server
+  returns 202 without re-sending, to prevent mailbox flooding.
+- **Recent re-enrollment cool-off.** Email-change requests made
+  from a passkey session younger than **15 minutes** return
+  `409 recent_reenrollment`. This bounds the attacker window on a
+  hijacked recovery magic link.
+- **Revert link TTL 72 h.** The informational notice to the old
+  address carries a revert link whose token reverts the
+  `users.email` swap once; after redemption or TTL, the notice is
+  inert.
+- **Audit always written.** `auth.recover.*` and
+  `auth.email_change_*` events land in `audit_log` on every
+  request (including misses and rate-limit trips), with
+  `email_hash` and `ip_hash` only — no plaintext addresses — so
+  the trail is usable for abuse response without leaking PII on
+  export.
+- **Step-up bypass is not a fallback.** If the user holds a
+  `manager` or `owners` position anywhere and does not supply a
+  valid break-glass code, no email is sent. The user is expected
+  to use the manager-mediated `users.reissue_magic_link` path
+  instead (§03). The response shape is identical to the success
+  case.
+
 ### Personal task visibility
 
 Tasks with `is_personal = true` (§06) are visible only to: (a) the

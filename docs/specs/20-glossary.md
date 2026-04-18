@@ -183,9 +183,30 @@ fix the offender.
 - **Issue.** A user-reported problem tracked with state
   (`open | in_progress | resolved | wont_fix`) and possibly converted
   to a task.
-- **Magic link.** Single-use, signed URL used to enroll or recover a
-  passkey. Consumes a break-glass code (if that's the source)
+- **Magic link.** Single-use, signed URL that is **never** a session
+  credential by itself — it carries a purpose (`enroll`, `accept`,
+  `recover`, `email_change`) and is only honoured by the matching
+  endpoint. Consumes a break-glass code (if that's the source)
   regardless of whether the link is later clicked.
+- **Click-to-accept invite.** Unified invitation flow (§03):
+  the invitee clicks a magic link of purpose `accept` and — for new
+  users — completes a passkey ceremony, or — for existing users —
+  signs in with a passkey and confirms an Acceptance card listing
+  the grants being added. Pending grants never activate silently.
+- **Self-service recovery.** User-initiated re-enrollment for a lost
+  passkey device (§03). Available to workers, clients, and guests
+  directly; managers and owners-group members must supply an
+  unused break-glass code as step-up. Gated by the workspace
+  setting `auth.self_service_recovery_enabled`.
+- **Step-up (break-glass).** Requirement that a recovery request
+  from a user holding a manager surface or `owners` membership
+  also carry an unused break-glass code. The code is burnt on
+  request; missing or invalid codes fail silently to prevent role
+  enumeration.
+- **Email change verification.** Self-service swap of `users.email`
+  (§03): magic link of purpose `email_change` sent to the new
+  address, informational notice + 72-h revert link sent to the
+  old address, atomic swap on redemption.
 - **Grant role (surface).** The UI-shell / data-filter persona
   a user holds on a scope: `manager | worker | client | guest`.
   Stored on
