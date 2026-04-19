@@ -1,4 +1,4 @@
-.PHONY: lint fmt type test
+.PHONY: lint fmt type test coverage
 
 lint:
 	uv run ruff check .
@@ -11,3 +11,6 @@ type:
 
 test:
 	uv run pytest
+
+coverage:
+	uv run pytest --cov=app --cov-report=term-missing

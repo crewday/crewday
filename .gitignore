@@ -9,6 +9,13 @@ __pycache__/
 !.env.example
 .secrets/
 
+# Pytest / coverage
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+
 # Editors / OS
 .DS_Store
 *.swp

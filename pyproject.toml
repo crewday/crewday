@@ -35,6 +35,8 @@ dev = [
     "mypy",
     "import-linter",
     "locust",
+    "factory-boy",
+    "hypothesis",
 ]
 
 [tool.ruff]
@@ -56,3 +58,21 @@ exclude = ["mocks/"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+# Use importlib to prevent per-context dir name collisions
+# (tests/unit/<ctx>/test_smoke.py appears under 13 contexts). The
+# trade-off is that pytest no longer injects the project root into
+# sys.path implicitly, so we set ``pythonpath`` to make ``app`` and
+# ``tests._fakes``/``tests.factories`` importable.
+addopts = "--import-mode=importlib"
+pythonpath = ["."]
+markers = [
+    "integration: marks tests as integration (deselect with '-m \"not integration\"')",
+]
+
+[tool.coverage.run]
+source = ["app"]
+omit = ["*/migrations/*", "*/__init__.py"]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = true

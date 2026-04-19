@@ -1,25 +1,12 @@
 """Shared pytest configuration for crewday tests.
 
-The scaffolding task (cd-t5xe) will replace this with proper shared
-fixtures and factories. Until then, this file exists to:
+The scaffolding (cd-t5xe) now provides per-context unit
+``conftest.py`` files, an integration harness under
+``tests/integration/conftest.py``, and shared fakes under
+``tests/_fakes/``. This top-level module is intentionally thin —
+cross-cutting fixtures would encourage leakage between contexts.
 
-1. Give pytest a stable collection root, and
-2. Treat an empty test suite as a successful run so CI stays green
-   while we bootstrap the ``app/`` tree. Without this hook pytest
-   exits with status 5 ("no tests collected"), which fails CI even
-   though nothing is broken.
+See ``docs/specs/17-testing-quality.md``.
 """
 
 from __future__ import annotations
-
-import pytest
-
-
-def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
-    """Downgrade the "no tests collected" exit code to success (0).
-
-    Remove this hook once the test scaffolding task (cd-t5xe) lands
-    real tests.
-    """
-    if exitstatus == pytest.ExitCode.NO_TESTS_COLLECTED:
-        session.exitstatus = pytest.ExitCode.OK
