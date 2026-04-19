@@ -1,0 +1,58 @@
+[project]
+name = "crewday"
+version = "0.0.1"
+description = "crew.day — ops co-pilot for short-term-rental and small-hospitality teams."
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "Apache-2.0" }
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "sqlalchemy>=2.0",
+    "alembic",
+    "pydantic>=2.6",
+    "pydantic-settings",
+    "python-multipart",
+    "webauthn",
+    "python-ulid",
+    "apscheduler",
+    "httpx",
+    "icalendar",
+    "python-dateutil",
+    "itsdangerous",
+    "weasyprint",
+    "click",
+]
+
+[dependency-groups]
+dev = [
+    "pytest",
+    "pytest-asyncio",
+    "pytest-cov",
+    "schemathesis",
+    "playwright",
+    "ruff",
+    "mypy",
+    "import-linter",
+    "locust",
+]
+
+[tool.ruff]
+line-length = 88
+target-version = "py312"
+extend-exclude = ["mocks"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+
+[tool.mypy]
+strict = true
+python_version = "3.12"
+plugins = ["pydantic.mypy"]
+explicit_package_bases = true
+namespace_packages = true
+exclude = ["mocks/"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
