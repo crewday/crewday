@@ -1,13 +1,45 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Outlet, useLocation } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { Menu } from "lucide-react";
+import {
+  Archive,
+  BedDouble,
+  Boxes,
+  Building2,
+  CalendarCheck,
+  CalendarClock,
+  CalendarDays,
+  ClipboardCheck,
+  Euro,
+  FileText,
+  Files,
+  Home,
+  KeyRound,
+  LayoutDashboard,
+  ListChecks,
+  Menu,
+  Palmtree,
+  ScrollText,
+  Settings,
+  Shield,
+  ShieldCheck,
+  Sunrise,
+  UserCircle,
+  Users,
+  Wallet,
+  Webhook,
+  Wrench,
+} from "lucide-react";
 import AgentSidebar from "@/components/AgentSidebar";
 import BottomTabs from "@/components/BottomTabs";
 import SideNav, { type SideNavItem } from "@/components/SideNav";
 import { fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
-import { initialAgentCollapsed } from "@/lib/preferences";
+import {
+  initialAgentCollapsed,
+  initialNavCollapsed,
+  persistNavCollapsed,
+} from "@/lib/preferences";
 import type { Me } from "@/types/api";
 
 // ManagerLayout mounts AgentSidebar as a SIBLING of <Outlet />.
@@ -22,38 +54,44 @@ import type { Me } from "@/types/api";
 // the hamburger drawer holds the rest. MY WORK items are tagged
 // `phoneHidden` so they don't duplicate the bottom bar.
 
+const ICON_SIZE = 16;
+const ICON_STROKE = 1.75;
+const NAV_ICON = (Icon: typeof LayoutDashboard) => (
+  <Icon size={ICON_SIZE} strokeWidth={ICON_STROKE} />
+);
+
 const BASE_NAV_ITEMS: SideNavItem[] = [
   { type: "section", label: "MY WORK", phoneHidden: true },
-  { type: "link", to: "/today", label: "My Day", phoneHidden: true },
-  { type: "link", to: "/schedule", label: "My Schedule", phoneHidden: true },
-  { type: "link", to: "/my/expenses", matchPrefix: "/my/expenses", label: "My Expenses", phoneHidden: true },
-  { type: "link", to: "/me", matchPrefix: "/me", label: "Me", phoneHidden: true },
+  { type: "link", to: "/today", label: "My Day", phoneHidden: true, icon: NAV_ICON(Sunrise) },
+  { type: "link", to: "/schedule", label: "My Schedule", phoneHidden: true, icon: NAV_ICON(CalendarClock) },
+  { type: "link", to: "/my/expenses", matchPrefix: "/my/expenses", label: "My Expenses", phoneHidden: true, icon: NAV_ICON(Euro) },
+  { type: "link", to: "/me", matchPrefix: "/me", label: "Me", phoneHidden: true, icon: NAV_ICON(UserCircle) },
   { type: "section", label: "OPERATE" },
-  { type: "link", to: "/dashboard", label: "Dashboard" },
-  { type: "link", to: "/properties", matchPrefix: "/propert", label: "Properties" },
-  { type: "link", to: "/stays", label: "Stays" },
-  { type: "link", to: "/employees", matchPrefix: "/employee", label: "Employees" },
-  { type: "link", to: "/templates", label: "Templates" },
-  { type: "link", to: "/schedules", label: "Schedules" },
-  { type: "link", to: "/scheduler", label: "Scheduler" },
-  { type: "link", to: "/instructions", matchPrefix: "/instructions", label: "Instructions" },
-  { type: "link", to: "/inventory", label: "Inventory" },
+  { type: "link", to: "/dashboard", label: "Dashboard", icon: NAV_ICON(LayoutDashboard) },
+  { type: "link", to: "/properties", matchPrefix: "/propert", label: "Properties", icon: NAV_ICON(Home) },
+  { type: "link", to: "/stays", label: "Stays", icon: NAV_ICON(BedDouble) },
+  { type: "link", to: "/employees", matchPrefix: "/employee", label: "Employees", icon: NAV_ICON(Users) },
+  { type: "link", to: "/templates", label: "Templates", icon: NAV_ICON(FileText) },
+  { type: "link", to: "/schedules", label: "Schedules", icon: NAV_ICON(CalendarCheck) },
+  { type: "link", to: "/scheduler", label: "Scheduler", icon: NAV_ICON(CalendarDays) },
+  { type: "link", to: "/instructions", matchPrefix: "/instructions", label: "Instructions", icon: NAV_ICON(ListChecks) },
+  { type: "link", to: "/inventory", label: "Inventory", icon: NAV_ICON(Boxes) },
   { type: "section", label: "ASSETS" },
-  { type: "link", to: "/assets", matchPrefix: ["/assets", "/asset/"], label: "Assets" },
-  { type: "link", to: "/asset_types", label: "Catalog" },
-  { type: "link", to: "/documents", label: "Documents" },
+  { type: "link", to: "/assets", matchPrefix: ["/assets", "/asset/"], label: "Assets", icon: NAV_ICON(Wrench) },
+  { type: "link", to: "/asset_types", label: "Catalog", icon: NAV_ICON(Archive) },
+  { type: "link", to: "/documents", label: "Documents", icon: NAV_ICON(Files) },
   { type: "section", label: "DECIDE" },
-  { type: "link", to: "/approvals", label: "Approvals" },
-  { type: "link", to: "/leaves", label: "Leaves" },
-  { type: "link", to: "/expenses", label: "Expenses" },
-  { type: "link", to: "/pay", label: "Pay" },
+  { type: "link", to: "/approvals", label: "Approvals", icon: NAV_ICON(ClipboardCheck) },
+  { type: "link", to: "/leaves", label: "Leaves", icon: NAV_ICON(Palmtree) },
+  { type: "link", to: "/expenses", label: "Expenses", icon: NAV_ICON(Euro) },
+  { type: "link", to: "/pay", label: "Pay", icon: NAV_ICON(Wallet) },
   { type: "section", label: "ADMIN" },
-  { type: "link", to: "/organizations", matchPrefix: "/organization", label: "Organizations" },
-  { type: "link", to: "/permissions", label: "Permissions" },
-  { type: "link", to: "/audit", label: "Audit log" },
-  { type: "link", to: "/webhooks", label: "Webhooks" },
-  { type: "link", to: "/tokens", label: "API tokens" },
-  { type: "link", to: "/settings", label: "Settings" },
+  { type: "link", to: "/organizations", matchPrefix: "/organization", label: "Organizations", icon: NAV_ICON(Building2) },
+  { type: "link", to: "/permissions", label: "Permissions", icon: NAV_ICON(ShieldCheck) },
+  { type: "link", to: "/audit", label: "Audit log", icon: NAV_ICON(ScrollText) },
+  { type: "link", to: "/webhooks", label: "Webhooks", icon: NAV_ICON(Webhook) },
+  { type: "link", to: "/tokens", label: "API tokens", icon: NAV_ICON(KeyRound) },
+  { type: "link", to: "/settings", label: "Settings", icon: NAV_ICON(Settings) },
 ];
 
 // §14 "Administration link" — rendered only when the caller holds any
@@ -64,6 +102,7 @@ const ADMINISTRATION_LINK: SideNavItem = {
   to: "/admin",
   matchPrefix: "/admin",
   label: "Administration",
+  icon: NAV_ICON(Shield),
 };
 
 // Drawer-bar visibility: only render the hamburger + mobile top bar
@@ -81,6 +120,14 @@ export default function ManagerLayout() {
   const collapsed = initialAgentCollapsed();
   const { pathname } = useLocation();
   const [navOpen, setNavOpen] = useState(false);
+  const [navCollapsed, setNavCollapsed] = useState<boolean>(() => initialNavCollapsed());
+  const toggleNavCollapsed = useCallback(() => {
+    setNavCollapsed((c) => {
+      const next = !c;
+      persistNavCollapsed(next ? "collapsed" : "open");
+      return next;
+    });
+  }, []);
   const navItems: SideNavItem[] = data?.is_deployment_admin
     ? [...BASE_NAV_ITEMS, ADMINISTRATION_LINK]
     : BASE_NAV_ITEMS;
@@ -103,6 +150,7 @@ export default function ManagerLayout() {
     <div
       className="desk"
       data-agent-collapsed={collapsed ? "true" : "false"}
+      data-nav-collapsed={navCollapsed ? "true" : "false"}
       data-nav-open={navOpen ? "true" : "false"}
       data-mobile-bar={showMobileBar ? "true" : "false"}
     >
@@ -135,6 +183,8 @@ export default function ManagerLayout() {
 
       <SideNav
         items={navItems}
+        collapsed={navCollapsed}
+        onToggleCollapsed={toggleNavCollapsed}
         footer={{
           initials: "EB",
           name: data?.manager_name ?? "Élodie Bernard",

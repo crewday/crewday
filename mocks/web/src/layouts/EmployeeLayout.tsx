@@ -1,11 +1,17 @@
+import { useCallback, useState } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
+import { CalendarDays, CalendarRange, Euro, ListTodo, UserCircle } from "lucide-react";
 import AgentSidebar from "@/components/AgentSidebar";
 import BottomTabs from "@/components/BottomTabs";
 import SideNav, { type SideNavItem } from "@/components/SideNav";
 import { fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
-import { initialAgentCollapsed } from "@/lib/preferences";
+import {
+  initialAgentCollapsed,
+  initialNavCollapsed,
+  persistNavCollapsed,
+} from "@/lib/preferences";
 import type { Booking, Me } from "@/types/api";
 
 function roleLabel(role: string): string {
@@ -23,12 +29,18 @@ function roleLabel(role: string): string {
 // — the agent lives on the right), the page <Outlet /> in the middle,
 // and the shared <AgentSidebar /> on the right.
 
+const ICON_SIZE = 16;
+const ICON_STROKE = 1.75;
+const NAV_ICON = (Icon: typeof ListTodo) => (
+  <Icon size={ICON_SIZE} strokeWidth={ICON_STROKE} />
+);
+
 const NAV_ITEMS: SideNavItem[] = [
-  { type: "link", to: "/today", label: "Today", phoneHidden: true },
-  { type: "link", to: "/schedule", label: "Schedule", phoneHidden: true },
-  { type: "link", to: "/bookings", label: "Bookings", phoneHidden: true },
-  { type: "link", to: "/my/expenses", label: "Expenses", phoneHidden: true },
-  { type: "link", to: "/me", matchPrefix: "/me", label: "Me", phoneHidden: true },
+  { type: "link", to: "/today", label: "Today", phoneHidden: true, icon: NAV_ICON(ListTodo) },
+  { type: "link", to: "/schedule", label: "Schedule", phoneHidden: true, icon: NAV_ICON(CalendarDays) },
+  { type: "link", to: "/bookings", label: "Bookings", phoneHidden: true, icon: NAV_ICON(CalendarRange) },
+  { type: "link", to: "/my/expenses", label: "Expenses", phoneHidden: true, icon: NAV_ICON(Euro) },
+  { type: "link", to: "/me", matchPrefix: "/me", label: "Me", phoneHidden: true, icon: NAV_ICON(UserCircle) },
 ];
 
 function initialsOf(name: string): string {
@@ -54,6 +66,14 @@ export default function EmployeeLayout() {
     queryFn: () => fetchJson<Booking[]>("/api/v1/bookings"),
   });
   const collapsed = initialAgentCollapsed();
+  const [navCollapsed, setNavCollapsed] = useState<boolean>(() => initialNavCollapsed());
+  const toggleNavCollapsed = useCallback(() => {
+    setNavCollapsed((c) => {
+      const next = !c;
+      persistNavCollapsed(next ? "collapsed" : "open");
+      return next;
+    });
+  }, []);
 
   const myEmpId = data?.employee.id;
   const now = Date.now();
@@ -77,9 +97,12 @@ export default function EmployeeLayout() {
     <main
       className={"phone" + (isChat ? " phone--chat" : "")}
       data-agent-collapsed={collapsed ? "true" : "false"}
+      data-nav-collapsed={navCollapsed ? "true" : "false"}
     >
       <SideNav
         items={NAV_ITEMS}
+        collapsed={navCollapsed}
+        onToggleCollapsed={toggleNavCollapsed}
         action={bookingHint}
         footer={{
           initials: footerInitials,

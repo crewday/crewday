@@ -227,6 +227,14 @@
   .phone[data-agent-collapsed="true"] {
     grid-template-columns: 232px minmax(0, 1fr) 52px;
   }
+  .phone:has(.desk__nav--collapsed),
+  .phone[data-nav-collapsed="true"] {
+    grid-template-columns: auto minmax(0, 1fr) 340px;
+  }
+  .phone:has(.desk__nav--collapsed):has(.desk__agent--collapsed),
+  .phone[data-nav-collapsed="true"][data-agent-collapsed="true"] {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+  }
 
   /* Hide the phone-mode bottom tab bar (shared between both shells)
      and employee clock-in dock; the shared SideNav hosts navigation
@@ -854,15 +862,54 @@
 
 .desk__nav-group { display: flex; flex-direction: column; gap: 2px; }
 .nav-section {
+  display: flex; align-items: center; gap: 8px;
   font-size: 10px; text-transform: uppercase; letter-spacing: 0.14em;
   color: var(--ink-3); padding: 12px 12px 4px 12px;
 }
+.nav-section__text { flex: 0 0 auto; }
+.nav-section__rule {
+  flex: 1 1 auto; height: 1px; background: var(--line);
+  align-self: center;
+}
+
 .nav-link {
+  position: relative;
+  display: grid; grid-template-columns: 18px 1fr;
+  align-items: center; gap: 10px;
   padding: 7px 12px; border-radius: 8px; color: var(--ink-2);
   font-weight: 500; font-size: 14px;
+  transition: background 140ms ease, color 140ms ease;
 }
-.nav-link:hover { background: var(--paper-2); }
-.nav-link--active { background: var(--moss-soft); color: var(--moss); font-weight: 600; }
+.nav-link__icon {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 18px; height: 18px; color: var(--ink-3);
+  transition: color 140ms ease;
+}
+.nav-link__icon svg { display: block; }
+.nav-link__label {
+  display: block; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.nav-link__marker {
+  position: absolute; left: 0; top: 50%;
+  width: 2px; height: 0; border-radius: 0 2px 2px 0;
+  background: var(--moss);
+  transform: translateY(-50%);
+  transition: height 160ms ease;
+}
+.nav-link__fallback-glyph {
+  font-family: "Fraunces", serif; font-weight: 600; font-size: 13px;
+  line-height: 1; color: var(--ink-3);
+}
+.nav-link:hover {
+  background: var(--paper-2); color: var(--ink);
+}
+.nav-link:hover .nav-link__icon { color: var(--ink-2); }
+.nav-link--active {
+  background: var(--moss-soft); color: var(--moss); font-weight: 600;
+}
+.nav-link--active .nav-link__icon { color: var(--moss); }
+.nav-link--active .nav-link__marker { height: 62%; }
 
 /* Hide items duplicated in the bottom tab bar from the off-canvas
    hamburger drawer at phone widths. They still render in the desktop
@@ -873,7 +920,7 @@
 }
 
 .desk__nav-action {
-  margin-top: auto; padding: 8px 4px 0;
+  padding: 8px 4px 0;
   display: flex; justify-content: stretch;
 }
 .desk__nav-action > .clock-toggle { width: 100%; }
@@ -881,15 +928,195 @@
 .desk__me {
   display: flex; align-items: center; gap: 10px;
   padding: 10px; border-top: 1px solid var(--line);
+  position: relative;
 }
-/* Preserve the original pin-to-bottom when no action slot is rendered
-   (e.g. the manager sidebar). When an action slot is present, the
-   action takes `margin-top: auto` and the `.desk__me` sits directly
-   below it. */
-.desk__nav > .desk__me:last-child { margin-top: auto; }
-.desk__nav > .desk__nav-action + .desk__me { margin-top: 0; }
-.desk__me-name { font-weight: 600; font-size: 13px; }
-.desk__me-role { color: var(--ink-3); font-size: 12px; }
+.desk__me-meta { min-width: 0; flex: 1 1 auto; }
+.desk__me-name {
+  font-weight: 600; font-size: 13px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.desk__me-role {
+  color: var(--ink-3); font-size: 12px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+/* When present, the me footer is pinned to the bottom. The
+   nav-action slot (booking hint) sits just above it. */
+.desk__nav > .desk__nav-group ~ .desk__nav-action,
+.desk__nav > .desk__nav-group ~ .desk__me { margin-top: auto; }
+.desk__nav > .desk__nav-action ~ .desk__me { margin-top: 0; }
+
+/* Collapse-toggle hinge — a small icon button tucked into the brand
+   row, so it's always reachable even when the nav list is long and
+   scrolls. Acts as a "page pull" that folds the rail inward. */
+.desk__brand { position: relative; }
+.desk__nav-hinge {
+  margin-left: auto;
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 28px; height: 28px;
+  padding: 0;
+  background: transparent; border: 1px solid transparent;
+  border-radius: 7px; color: var(--ink-3);
+  cursor: pointer;
+  transition: background 140ms ease, color 140ms ease, border-color 140ms ease;
+}
+.desk__nav-hinge:hover {
+  background: var(--paper-2); color: var(--ink);
+  border-color: var(--line);
+}
+.desk__nav-hinge:focus-visible {
+  outline: 0;
+  background: var(--paper-2); border-color: var(--moss);
+  color: var(--moss);
+}
+.desk__nav-hinge__icon {
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.desk__nav-hinge__icon svg { display: block; }
+
+/* ── Tooltip (collapsed rail) ─────────────────────────────────
+   Semantic content lives in [data-tip]. The label slides out from
+   under the collapsed rail on hover/focus as a small cream tab with
+   a moss tick on its left edge — echoes the section rule. Only
+   activated inside a collapsed sidebar to avoid colliding with the
+   expanded label.                                               */
+.desk__nav--collapsed [data-tip] { position: relative; }
+.desk__nav--collapsed [data-tip]::after {
+  content: attr(data-tip);
+  position: absolute;
+  top: 50%; left: calc(100% + 8px);
+  transform: translate(-4px, -50%);
+  padding: 6px 12px 6px 10px;
+  background: var(--card-raised);
+  color: var(--ink);
+  font-family: "Fraunces", serif; font-weight: 500;
+  font-size: 13px; font-variation-settings: "opsz" 72;
+  letter-spacing: -0.005em;
+  white-space: nowrap;
+  border-radius: 6px;
+  border-left: 2px solid var(--moss);
+  box-shadow: 0 6px 20px rgba(31, 26, 20, 0.12), 0 1px 2px rgba(31, 26, 20, 0.06);
+  opacity: 0; pointer-events: none;
+  transition: opacity 140ms ease, transform 180ms cubic-bezier(0.22, 1, 0.36, 1);
+  z-index: 40;
+}
+.desk__nav--collapsed [data-tip]:hover::after,
+.desk__nav--collapsed [data-tip]:focus-visible::after {
+  opacity: 1; transform: translate(0, -50%);
+}
+[data-theme="dark"] .desk__nav--collapsed [data-tip]::after {
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.55), 0 1px 2px rgba(0, 0, 0, 0.35);
+}
+
+/* ── Collapsed side nav layout ───────────────────────────────── */
+/* Tooltips need to escape the rail rightward into `.desk__main` —
+   but we also need the rail to scroll internally for tall nav
+   lists. Split responsibilities: the rail itself stays
+   overflow-visible (so the ::after bubble can paint past the right
+   edge), and we give the nav-group a scrollable body via a hybrid
+   approach — a wide "hit-box" that extends past the rail so
+   tooltips have somewhere to render. The extra width is
+   `pointer-events: none` except on the actual link, so main-column
+   interactions are never blocked. */
+.desk__nav--collapsed {
+  padding: 20px 6px;
+  gap: 10px;
+  align-items: stretch;
+  overflow: visible;
+}
+.desk__nav--collapsed .desk__nav-group {
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow-y: auto;
+  overflow-x: visible;
+  /* Extend the scroll container rightward so the tooltip `::after`
+     bubble (absolutely-positioned inside each nav-link) has room to
+     render without being clipped by this overflow container. The
+     negative margin + positive padding keeps the visible hit-target
+     at the rail's 64px, while the box itself is wide enough for
+     tooltips. */
+  margin-right: -220px;
+  padding-right: 220px;
+  pointer-events: none;
+  scrollbar-width: none;
+}
+.desk__nav--collapsed .desk__nav-group::-webkit-scrollbar { width: 0; }
+.desk__nav--collapsed .desk__nav-group > * {
+  pointer-events: auto;
+}
+.desk__nav--collapsed .desk__brand {
+  flex-direction: column;
+  justify-content: center; align-items: center;
+  gap: 6px;
+  padding: 0;
+}
+.desk__nav--collapsed .desk__logo {
+  font-size: 26px; line-height: 1;
+}
+.desk__nav--collapsed .desk__wordmark { display: none; }
+.desk__nav--collapsed .desk__nav-hinge {
+  margin-left: 0;
+  width: 36px; height: 32px;
+  border-radius: 8px;
+  color: var(--ink-2);
+}
+.desk__nav--collapsed .desk__nav-hinge:hover {
+  background: var(--paper-2); color: var(--moss);
+  border-color: var(--line);
+}
+
+/* Workspace switcher and free-form action slot (e.g. booking hint)
+   don't collapse gracefully — hide them in the narrow rail. The user
+   re-opens the sidebar to switch workspace or tap the booking chip. */
+.desk__nav--collapsed .ws-switcher,
+.desk__nav--collapsed .desk__nav-action { display: none; }
+
+/* Section headers become a thin rule — the text is still in the DOM
+   for screen readers but hidden visually so the rail stays calm. */
+.desk__nav--collapsed .nav-section {
+  padding: 8px 10px 2px;
+  gap: 0;
+}
+.desk__nav--collapsed .nav-section__text {
+  position: absolute; width: 1px; height: 1px; overflow: hidden;
+  clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap;
+}
+.desk__nav--collapsed .nav-section__rule {
+  width: 100%; background: var(--line-strong); opacity: 0.6;
+}
+
+/* Nav links: icon centered in a square tap target, label hidden. */
+.desk__nav--collapsed .nav-link {
+  grid-template-columns: 1fr;
+  justify-items: center;
+  padding: 9px 0;
+  width: 44px; height: 40px;
+  margin: 0 auto;
+  border-radius: 10px;
+  gap: 0;
+}
+.desk__nav--collapsed .nav-link__label { display: none; }
+.desk__nav--collapsed .nav-link__icon {
+  width: 20px; height: 20px; color: var(--ink-2);
+}
+.desk__nav--collapsed .nav-link:hover .nav-link__icon { color: var(--ink); }
+.desk__nav--collapsed .nav-link--active {
+  background: var(--moss-soft);
+}
+.desk__nav--collapsed .nav-link--active .nav-link__icon { color: var(--moss); }
+.desk__nav--collapsed .nav-link__marker {
+  left: -6px; width: 3px; border-radius: 0 3px 3px 0;
+}
+.desk__nav--collapsed .nav-link--active .nav-link__marker { height: 56%; }
+
+/* Me footer: avatar only, centered. Hover shows the tooltip stash. */
+.desk__nav--collapsed .desk__me {
+  justify-content: center;
+  padding: 10px 4px;
+  gap: 0;
+}
+.desk__nav--collapsed .desk__me-meta { display: none; }
+
 
 .desk__main {
   padding: 0 44px 80px;
@@ -1481,6 +1708,27 @@
 .desk[data-agent-collapsed="true"] {
   grid-template-columns: 232px 1fr auto;
 }
+
+/* Collapsed LEFT nav mirrors the same approach. `auto` lets the
+   rail's own transitioned width drive the grid column, so the main
+   column reclaims the space as the sidebar shrinks. The selector
+   carries `[data-nav-collapsed="true"]` to win over the media-query
+   overrides further down. */
+.desk:has(.desk__nav--collapsed),
+.desk[data-nav-collapsed="true"] {
+  grid-template-columns: auto 1fr 340px;
+}
+.desk:has(.desk__nav--collapsed):has(.desk__agent--collapsed),
+.desk[data-nav-collapsed="true"][data-agent-collapsed="true"] {
+  grid-template-columns: auto 1fr auto;
+}
+/* Smooth width transition as the sidebar flips between states. */
+.desk__nav {
+  transition: width 220ms cubic-bezier(0.22, 1, 0.36, 1),
+              padding 220ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.desk__nav--collapsed { width: 64px; }
+
 .desk__agent--collapsed { width: 52px; }
 .desk__agent--collapsed .desk__agent-head {
   flex-direction: column; gap: 8px; padding: 14px 0;
@@ -1652,9 +1900,21 @@
   .desk { grid-template-columns: 216px 1fr 340px; }
   .desk:has(.desk__agent--collapsed),
   .desk[data-agent-collapsed="true"] { grid-template-columns: 216px 1fr auto; }
+  .desk:has(.desk__nav--collapsed),
+  .desk[data-nav-collapsed="true"] { grid-template-columns: auto 1fr 340px; }
+  .desk:has(.desk__nav--collapsed):has(.desk__agent--collapsed),
+  .desk[data-nav-collapsed="true"][data-agent-collapsed="true"] {
+    grid-template-columns: auto 1fr auto;
+  }
   .phone { grid-template-columns: 216px minmax(0, 1fr) 340px; }
   .phone:has(.desk__agent--collapsed),
   .phone[data-agent-collapsed="true"] { grid-template-columns: 216px minmax(0, 1fr) auto; }
+  .phone:has(.desk__nav--collapsed),
+  .phone[data-nav-collapsed="true"] { grid-template-columns: auto minmax(0, 1fr) 340px; }
+  .phone:has(.desk__nav--collapsed):has(.desk__agent--collapsed),
+  .phone[data-nav-collapsed="true"][data-agent-collapsed="true"] {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+  }
   .desk__main { padding: 0 28px 80px; }
 }
 
@@ -1725,6 +1985,45 @@
      bottom Chat tab/dock to /chat (full-screen) instead. */
   .desk__agent { display: none; }
   .phone > .desk__agent { display: none; }
+
+  /* The desktop collapse hinge is a no-op inside the off-canvas
+     drawer — the drawer IS the "closed" state. Hide it there; it
+     returns at >=720px. */
+  .desk__nav-hinge { display: none; }
+  /* If the user collapsed on desktop then dropped into phone, the
+     drawer still needs full width/content. Force it open visually. */
+  .desk__nav--collapsed {
+    width: min(280px, 82vw);
+    padding: 20px 12px;
+  }
+  .desk__nav--collapsed .desk__wordmark { display: block; }
+  .desk__nav--collapsed .desk__brand {
+    flex-direction: row; justify-content: flex-start;
+    align-items: center; gap: 8px;
+    padding: 0 8px;
+  }
+  .desk__nav--collapsed .ws-switcher,
+  .desk__nav--collapsed .desk__nav-action { display: flex; }
+  .desk__nav--collapsed .ws-switcher { display: block; }
+  .desk__nav--collapsed .nav-link {
+    width: auto; height: auto;
+    grid-template-columns: 18px 1fr;
+    justify-items: start;
+    padding: 7px 12px;
+    margin: 0;
+    gap: 10px;
+  }
+  .desk__nav--collapsed .nav-link__label { display: block; }
+  .desk__nav--collapsed .nav-section__text {
+    position: static; width: auto; height: auto;
+    clip: auto; clip-path: none;
+  }
+  .desk__nav--collapsed .nav-section__rule { display: none; }
+  .desk__nav--collapsed .desk__me {
+    justify-content: flex-start; padding: 10px; gap: 10px;
+  }
+  .desk__nav--collapsed .desk__me-meta { display: block; }
+  .desk__nav--collapsed [data-tip]::after { display: none; }
 
   /* Condense table rows. */
   .task-row {

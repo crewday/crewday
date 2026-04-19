@@ -37,7 +37,7 @@ function cacheBustHtml(): PluginOption {
 
 // Vite dev server proxies the FastAPI backend so the SPA can hit
 // /api/v1, /events, and the cookie-setting endpoints /switch,
-// /theme/toggle, /agent/sidebar without CORS headaches.
+// /theme/toggle, /agent/sidebar, /nav/sidebar without CORS headaches.
 const BACKEND =
   process.env.VITE_BACKEND_URL ?? "http://host.docker.internal:8100";
 
@@ -53,6 +53,7 @@ const API_PATHS = [
   "/switch",
   "/theme",
   "/agent",
+  "/nav/sidebar",
   "/healthz",
   "/readyz",
   "/metrics",

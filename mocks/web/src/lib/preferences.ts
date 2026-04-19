@@ -8,6 +8,7 @@ import type { Role, Theme } from "@/types/api";
 const ROLE_COOKIE = "crewday_role";
 const THEME_COOKIE = "crewday_theme";
 const AGENT_COLLAPSED_COOKIE = "crewday_agent_collapsed";
+const NAV_COLLAPSED_COOKIE = "crewday_nav_collapsed";
 const WORKSPACE_COOKIE = "crewday_workspace";
 
 function readCookie(name: string): string | null {
@@ -62,6 +63,30 @@ export function initialAgentCollapsed(): boolean {
   return pref !== null ? pref : defaultAgentCollapsed();
 }
 
+// Tri-state for the LEFT side nav, same shape as the agent rail:
+// "1" / "0" / missing. The cookie is set when the user toggles the
+// collapse button; missing means we use a viewport default.
+export function readNavCollapsedCookie(): boolean | null {
+  const v = readCookie(NAV_COLLAPSED_COOKIE);
+  if (v === "1") return true;
+  if (v === "0") return false;
+  return null;
+}
+
+// Small screens are already covered by the off-canvas drawer
+// (<=720px). Between 720px and NAV_DEFAULT_OPEN_AT we start collapsed
+// so laptop widths breathe; wider screens start open.
+const NAV_DEFAULT_OPEN_AT = 1200;
+function defaultNavCollapsed(): boolean {
+  if (typeof window === "undefined") return false;
+  return window.innerWidth < NAV_DEFAULT_OPEN_AT;
+}
+
+export function initialNavCollapsed(): boolean {
+  const pref = readNavCollapsedCookie();
+  return pref !== null ? pref : defaultNavCollapsed();
+}
+
 // Fire-and-forget writers. The server is authoritative; we optimistic
 // -mirror so the next paint reflects the choice.
 export function persistRole(role: Role): void {
@@ -81,6 +106,22 @@ export function persistWorkspace(workspaceId: string): void {
 
 export function persistAgentCollapsed(state: "open" | "collapsed"): void {
   const url = "/agent/sidebar/" + state;
+  let delivered = false;
+  if (navigator.sendBeacon) {
+    try {
+      delivered = navigator.sendBeacon(url, new Blob([], { type: "text/plain" }));
+    } catch {
+      /* fall through */
+    }
+  }
+  if (!delivered) {
+    fetch(url, { method: "POST", credentials: "same-origin", keepalive: true })
+      .catch(() => { /* best-effort */ });
+  }
+}
+
+export function persistNavCollapsed(state: "open" | "collapsed"): void {
+  const url = "/nav/sidebar/" + state;
   let delivered = false;
   if (navigator.sendBeacon) {
     try {

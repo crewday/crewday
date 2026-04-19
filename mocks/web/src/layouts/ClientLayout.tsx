@@ -1,10 +1,19 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Outlet, useLocation } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { Menu } from "lucide-react";
+import {
+  CalendarDays,
+  Clock3,
+  FileText,
+  Home,
+  Menu,
+  Receipt,
+  UserCircle,
+} from "lucide-react";
 import SideNav, { type SideNavItem } from "@/components/SideNav";
 import { fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
+import { initialNavCollapsed, persistNavCollapsed } from "@/lib/preferences";
 import type { Me, User } from "@/types/api";
 
 // §22 — client portal layout. A read-mostly shell with a narrower
@@ -14,16 +23,22 @@ import type { Me, User } from "@/types/api";
 // crewday agent in v1; their actions are the accept/reject of
 // quotes and the read of billing rollups.
 
+const ICON_SIZE = 16;
+const ICON_STROKE = 1.75;
+const NAV_ICON = (Icon: typeof Home) => (
+  <Icon size={ICON_SIZE} strokeWidth={ICON_STROKE} />
+);
+
 const NAV_ITEMS: SideNavItem[] = [
   { type: "section", label: "PORTFOLIO" },
-  { type: "link", to: "/portfolio", label: "Properties" },
-  { type: "link", to: "/scheduler", label: "Scheduler" },
-  { type: "link", to: "/billable_hours", label: "Billable hours" },
+  { type: "link", to: "/portfolio", label: "Properties", icon: NAV_ICON(Home) },
+  { type: "link", to: "/scheduler", label: "Scheduler", icon: NAV_ICON(CalendarDays) },
+  { type: "link", to: "/billable_hours", label: "Billable hours", icon: NAV_ICON(Clock3) },
   { type: "section", label: "BILLING" },
-  { type: "link", to: "/quotes", label: "Quotes" },
-  { type: "link", to: "/invoices", label: "Invoices" },
+  { type: "link", to: "/quotes", label: "Quotes", icon: NAV_ICON(FileText) },
+  { type: "link", to: "/invoices", label: "Invoices", icon: NAV_ICON(Receipt) },
   { type: "section", label: "ACCOUNT" },
-  { type: "link", to: "/me", matchPrefix: "/me", label: "Me" },
+  { type: "link", to: "/me", matchPrefix: "/me", label: "Me", icon: NAV_ICON(UserCircle) },
 ];
 
 function hasDrawerItems(items: SideNavItem[]): boolean {
@@ -48,6 +63,14 @@ export default function ClientLayout() {
   });
   const { pathname } = useLocation();
   const [navOpen, setNavOpen] = useState(false);
+  const [navCollapsed, setNavCollapsed] = useState<boolean>(() => initialNavCollapsed());
+  const toggleNavCollapsed = useCallback(() => {
+    setNavCollapsed((c) => {
+      const next = !c;
+      persistNavCollapsed(next ? "collapsed" : "open");
+      return next;
+    });
+  }, []);
   const showMobileBar = hasDrawerItems(NAV_ITEMS);
 
   useEffect(() => { setNavOpen(false); }, [pathname]);
@@ -65,6 +88,7 @@ export default function ClientLayout() {
     <div
       className="desk"
       data-nav-open={navOpen ? "true" : "false"}
+      data-nav-collapsed={navCollapsed ? "true" : "false"}
       data-mobile-bar={showMobileBar ? "true" : "false"}
       data-agent-collapsed="true"
     >
@@ -92,6 +116,8 @@ export default function ClientLayout() {
 
       <SideNav
         items={NAV_ITEMS}
+        collapsed={navCollapsed}
+        onToggleCollapsed={toggleNavCollapsed}
         footer={{
           initials,
           name: displayName,

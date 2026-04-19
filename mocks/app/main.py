@@ -13,7 +13,7 @@ This module exposes:
 - `/events` — Server-Sent Events stream emitting deterministic mock
   events so the SPA can prove its SSE + invalidation wiring.
 - `/switch/<role>`, `/theme/toggle`, `/theme/set/<value>`,
-  `/agent/sidebar/<state>` —
+  `/agent/sidebar/<state>`, `/nav/sidebar/<state>` —
   cookie-setting endpoints preserved for atomicity (the server is
   authoritative for the preference cookie).
 - SPA catch-all — any other GET falls through to
@@ -56,6 +56,7 @@ app = FastAPI(title="crewday mocks", docs_url=None, redoc_url=None, openapi_url=
 ROLE_COOKIE = "crewday_role"
 THEME_COOKIE = "crewday_theme"
 AGENT_COLLAPSED_COOKIE = "crewday_agent_collapsed"
+NAV_COLLAPSED_COOKIE = "crewday_nav_collapsed"
 WORKSPACE_COOKIE = "crewday_workspace"
 VALID_ROLES = {"employee", "manager", "client", "admin"}
 VALID_THEMES = {"light", "dark", "system"}
@@ -322,6 +323,20 @@ def agent_sidebar_set(state: str) -> Response:
     resp = JSONResponse({"ok": True, "state": state})
     resp.set_cookie(
         AGENT_COLLAPSED_COOKIE,
+        "1" if state == "collapsed" else "0",
+        max_age=60 * 60 * 24 * 365,
+        samesite="lax",
+    )
+    return resp
+
+
+@app.post("/nav/sidebar/{state}")
+def nav_sidebar_set(state: str) -> Response:
+    if state not in {"open", "collapsed"}:
+        return JSONResponse({"ok": False}, status_code=400)
+    resp = JSONResponse({"ok": True, "state": state})
+    resp.set_cookie(
+        NAV_COLLAPSED_COOKIE,
         "1" if state == "collapsed" else "0",
         max_age=60 * 60 * 24 * 365,
         samesite="lax",
@@ -4070,6 +4085,7 @@ _SPA_PASSTHROUGH: Iterable[str] = (
     "/switch",
     "/theme",
     "/agent/sidebar",
+    "/nav/sidebar",
     "/healthz",
     "/readyz",
     "/metrics",

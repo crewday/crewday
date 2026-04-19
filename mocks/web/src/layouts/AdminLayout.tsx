@@ -1,12 +1,27 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { Menu } from "lucide-react";
+import {
+  ActivitySquare,
+  BookOpen,
+  Building2,
+  Gauge,
+  MessageSquareMore,
+  Menu,
+  ScrollText,
+  Settings,
+  Sparkles,
+  Users,
+} from "lucide-react";
 import AgentSidebar from "@/components/AgentSidebar";
 import SideNav, { type SideNavItem } from "@/components/SideNav";
 import { fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
-import { initialAgentCollapsed } from "@/lib/preferences";
+import {
+  initialAgentCollapsed,
+  initialNavCollapsed,
+  persistNavCollapsed,
+} from "@/lib/preferences";
 import type { AdminMe, Me } from "@/types/api";
 
 // AdminLayout — bare-host /admin/* shell (§14 "Admin shell").
@@ -22,19 +37,25 @@ import type { AdminMe, Me } from "@/types/api";
 // concern, not a routing concern — matches §14's "polite card,
 // not /login").
 
+const ICON_SIZE = 16;
+const ICON_STROKE = 1.75;
+const NAV_ICON = (Icon: typeof Gauge) => (
+  <Icon size={ICON_SIZE} strokeWidth={ICON_STROKE} />
+);
+
 const NAV_ITEMS: SideNavItem[] = [
   { type: "section", label: "OPERATE" },
-  { type: "link", to: "/admin/dashboard", label: "Dashboard" },
-  { type: "link", to: "/admin/workspaces", matchPrefix: "/admin/workspaces", label: "Workspaces" },
+  { type: "link", to: "/admin/dashboard", label: "Dashboard", icon: NAV_ICON(Gauge) },
+  { type: "link", to: "/admin/workspaces", matchPrefix: "/admin/workspaces", label: "Workspaces", icon: NAV_ICON(Building2) },
   { type: "section", label: "USAGE" },
-  { type: "link", to: "/admin/llm", label: "LLM & agents" },
-  { type: "link", to: "/admin/agent-docs", label: "Agent docs" },
-  { type: "link", to: "/admin/chat-gateway", label: "Chat gateway" },
-  { type: "link", to: "/admin/usage", label: "Usage" },
+  { type: "link", to: "/admin/llm", label: "LLM & agents", icon: NAV_ICON(Sparkles) },
+  { type: "link", to: "/admin/agent-docs", label: "Agent docs", icon: NAV_ICON(BookOpen) },
+  { type: "link", to: "/admin/chat-gateway", label: "Chat gateway", icon: NAV_ICON(MessageSquareMore) },
+  { type: "link", to: "/admin/usage", label: "Usage", icon: NAV_ICON(ActivitySquare) },
   { type: "section", label: "ADMIN" },
-  { type: "link", to: "/admin/admins", label: "Admins" },
-  { type: "link", to: "/admin/settings", label: "Settings" },
-  { type: "link", to: "/admin/audit", label: "Audit log" },
+  { type: "link", to: "/admin/admins", label: "Admins", icon: NAV_ICON(Users) },
+  { type: "link", to: "/admin/settings", label: "Settings", icon: NAV_ICON(Settings) },
+  { type: "link", to: "/admin/audit", label: "Audit log", icon: NAV_ICON(ScrollText) },
 ];
 
 export default function AdminLayout() {
@@ -42,6 +63,14 @@ export default function AdminLayout() {
   const collapsed = initialAgentCollapsed();
   const { pathname } = useLocation();
   const [navOpen, setNavOpen] = useState(false);
+  const [navCollapsed, setNavCollapsed] = useState<boolean>(() => initialNavCollapsed());
+  const toggleNavCollapsed = useCallback(() => {
+    setNavCollapsed((c) => {
+      const next = !c;
+      persistNavCollapsed(next ? "collapsed" : "open");
+      return next;
+    });
+  }, []);
 
   const meQ = useQuery({
     queryKey: qk.me(),
@@ -111,6 +140,7 @@ export default function AdminLayout() {
     <div
       className="desk desk--admin"
       data-agent-collapsed={collapsed ? "true" : "false"}
+      data-nav-collapsed={navCollapsed ? "true" : "false"}
       data-nav-open={navOpen ? "true" : "false"}
       data-mobile-bar="true"
     >
@@ -141,6 +171,8 @@ export default function AdminLayout() {
 
       <SideNav
         items={NAV_ITEMS}
+        collapsed={navCollapsed}
+        onToggleCollapsed={toggleNavCollapsed}
         footer={{
           initials: (adminMeQ.data?.display_name ?? "Admin")
             .split(" ")
