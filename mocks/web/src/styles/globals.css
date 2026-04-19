@@ -4021,7 +4021,7 @@
   justify-content: space-between;
   gap: 12px;
   padding: 10px 14px;
-  margin-bottom: 12px;
+  margin-bottom: 8px;
   border: 1px solid var(--sand);
   border-left-width: 4px;
   border-radius: 8px;
@@ -4185,6 +4185,7 @@
   gap: 18px;
 }
 
+
 /* Phone-only: gutter the whole agenda column so cells, monthbar, and
    sentinels all share a consistent inset against the viewport edge.
    `.page-stack` and `.phone__body { display: contents }` give us no
@@ -4224,37 +4225,60 @@
 .schedule__intro-help { margin: 0; font-size: 12px; }
 .schedule__intro .schedule__legend { border-top: none; padding-top: 0; }
 
-/* Sticky month/year ribbon. Drives orientation as the worker thumbs
-   through weeks: the topmost-visible day's month is mirrored here, plus
-   an inline "Today" jump when today has scrolled out of view.
-   No negative side margin — it would bleed past the `.schedule--phone`
-   gutter and cause a 4-8px horizontal scrollbar.
+/* Sticky header stack: pending-booking banner (when present) sits on
+   top of the month/year ribbon. Both pin together as the worker
+   thumbs through weeks, so the actionable alert stays reachable even
+   after the infinite agenda auto-scrolls to today.
    Sticky offset depends on the scroll container rather than the
    breakpoint. Phone's shell is document-scrolled so the preview banner
    consumes 40px of viewport and sticky must clear it; desktop variants
    both scroll inside an own-overflow pane (`.phone__body` for worker,
    `.desk__main` for manager) that already sits below the banner, so
    sticky pins flush at top:0. */
-.schedule__monthbar {
+.schedule__sticky-top {
   position: sticky;
   top: 0;
   z-index: 4;
+  background: color-mix(in oklab, var(--paper) 88%, transparent);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+}
+/* Desktop variants get an intrinsic top inset so the banner has
+   breathing room above it — both on first paint and after the
+   sticky pins to the scroll root. The inset lives inside the
+   sticky wrapper, so its frosted backdrop masks content scrolling
+   behind, no bare gap. Phone already uses page chrome as the
+   sticky reference and doesn't need this. */
+.schedule--desktop .schedule__sticky-top {
+  padding-top: 12px;
+}
+/* Phone worker: the document is the scroll container and the page
+   topbar is itself sticky at `var(--banner-h, 0px)` with a 52px
+   min-height and a 12px bottom margin (see `.page-topbar` in the
+   <720px block). Park our header just past its bottom margin so the
+   sticky offset matches its natural layout position — no 12px jump
+   when the user begins to scroll. */
+.schedule--phone .schedule__sticky-top {
+  top: calc(var(--banner-h, 40px) + 52px + 12px);
+}
+
+/* The month/year ribbon drives orientation: the topmost-visible day's
+   month is mirrored here, plus an inline "Today" jump when today has
+   scrolled out of view. Not independently sticky and has no own
+   background — the wrapper above carries the frosted backdrop so the
+   banner + monthbar pin together as one opaque strip. */
+.schedule__monthbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 10px;
   padding: 8px 10px;
-  margin: 0 0 8px;
-  background: color-mix(in oklab, var(--paper) 88%, transparent);
-  -webkit-backdrop-filter: blur(8px);
-  backdrop-filter: blur(8px);
   border-bottom: 1px solid var(--line);
   font-family: "Fraunces", ui-serif, serif;
   font-size: 1.05rem;
   letter-spacing: 0.005em;
   color: var(--ink);
 }
-.schedule--phone .schedule__monthbar { top: var(--banner-h, 40px); }
 .schedule__monthbar-label { font-weight: 600; }
 .schedule__monthbar-jump {
   font: inherit;
@@ -4277,10 +4301,15 @@
    set it there. Desktop scrolls inside a pane that already sits
    below the banner (88px = monthbar + intro border); phone scrolls
    the document and needs an extra banner-h to clear the preview
-   strip above the monthbar. */
+   strip above the monthbar. The pending-banner above the monthbar
+   adds ~48px when present, so bump the offset with :has(). */
 .schedule [data-schedule-iso] { scroll-margin-top: 88px; }
+.schedule:has(.schedule-banner) [data-schedule-iso] { scroll-margin-top: 136px; }
 .schedule--phone [data-schedule-iso] {
   scroll-margin-top: calc(var(--banner-h, 40px) + 72px);
+}
+.schedule--phone:has(.schedule-banner) [data-schedule-iso] {
+  scroll-margin-top: calc(var(--banner-h, 40px) + 72px + 12px + 56px);
 }
 
 /* Top/bottom sentinels watched by IntersectionObserver. The hint text

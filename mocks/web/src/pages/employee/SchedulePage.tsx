@@ -1745,31 +1745,32 @@ function InfiniteScheduleBody({
 
   return (
     <>
-      {bannerParts.length > 0 && (
-        <ScheduleBanner
-          allPending={allPending}
-          bannerParts={bannerParts}
-          firstPendingIso={firstPendingIso}
-          onReview={setSelectedIso}
-        />
-      )}
-
       <div ref={setContainerEl} className={`schedule schedule--${variant}`}>
-        <div
-          className="schedule__monthbar"
-          aria-live="polite"
-          aria-atomic="true"
-        >
-          <span className="schedule__monthbar-label">{monthLabel}</span>
-          {!todayInView && (
-            <button
-              type="button"
-              className="schedule__monthbar-jump"
-              onClick={scrollToToday}
-            >
-              Today
-            </button>
+        <div className="schedule__sticky-top">
+          {bannerParts.length > 0 && (
+            <ScheduleBanner
+              allPending={allPending}
+              bannerParts={bannerParts}
+              firstPendingIso={firstPendingIso}
+              onReview={setSelectedIso}
+            />
           )}
+          <div
+            className="schedule__monthbar"
+            aria-live="polite"
+            aria-atomic="true"
+          >
+            <span className="schedule__monthbar-label">{monthLabel}</span>
+            {!todayInView && (
+              <button
+                type="button"
+                className="schedule__monthbar-jump"
+                onClick={scrollToToday}
+              >
+                Today
+              </button>
+            )}
+          </div>
         </div>
 
         {variant === "desktop" && (
