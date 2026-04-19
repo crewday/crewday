@@ -261,25 +261,104 @@ from the first off-app release.
 
 Both agents accumulate long chat histories. Token budget grows with
 thread length; "attention drag" on older, resolved topics degrades
-answer quality. Every thread is therefore subject to **compaction**:
+answer quality. Every thread is therefore subject to **compaction**,
+shaped by three rules the runtime enforces.
 
-- The agent marks a **topic** as resolved when it has produced an
-  accepted reply, a completed action, or an explicit "thanks" /
-  dismissal from the human.
-- Turns belonging to a resolved topic are compacted into a **short
-  summary message** (one system-kind row) that replaces them in
-  the live context window.
-- The original, uncompacted turns are retained in the `chat_archive`
-  table (scoped by workspace + thread) and remain **full-text
-  searchable** from the agent's `search_chat_archive(q)` tool. The
-  agent can therefore pull the original back into context on
-  demand when a follow-up references an older topic.
-- Compaction itself is an `llm_call` under capability
-  `chat.compact`; the summary is verified against numeric claims
-  the same way digests are (see "Daily digest / anomaly detection").
+**One live summary, ever.** A thread carries **at most one** live
+summary row at a time. A compaction pass emits a single
+`chat_message` row with `kind = 'summary'` that *replaces* every
+prior summary plus the newly-eligible span of originals. The live
+context window therefore contains exactly one summary row, never a
+stack of summaries-of-summaries. The superseded summary is not
+deleted — its `compacted_into_id` is pointed at the new summary,
+preserving the chain for audit and recall.
 
-Compaction windows default to "30 days or 200 turns, whichever
-first," overridable per workspace.
+**Persistence is span-based.** The summary row carries two ULID
+columns, `summary_range_from_id` and `summary_range_to_id` (§23
+`chat_message`), naming the inclusive range of originals it
+covers. Re-compaction widens the span; the originals themselves
+never move — they remain in `chat_message`, linked forward via
+`compacted_into_id` to whichever summary currently covers them.
+The agent's `search_chat_archive(q)` tool searches those originals
+(including one-offs stripped from the summary prose; see below) so
+a later turn that references an older exchange can pull the real
+text back into context on demand. ("chat_archive" is the
+agent-facing tool name; under the hood it is the set of
+`chat_message` rows with `compacted_into_id IS NOT NULL`.)
+
+**Recent-window floor.** Turns inside the **smaller of the last 24
+hours or the last 20 turns** are never compacted. A high-volume
+thread (200 turns in an hour) keeps 20 recent originals live; a
+quiet thread (5 turns over a week) keeps those 5. The floor is
+deliberately tight — the goal is to keep recency honest, not to
+defend the window against compaction. Workspace-overridable via
+`chat.compact.recent_floor_hours` (default 24) and
+`chat.compact.recent_floor_turns` (default 20); the resolver
+takes the `min` of the two floors.
+
+**Resolved topics are split into durable facts and one-offs.** The
+`chat.compact` capability prompt instructs the model to walk the
+eligible span (everything older than the recent-window floor) and
+separate each resolved topic into one of two buckets:
+
+- **Durable facts** — statements whose usefulness outlives the
+  exchange they appeared in. Example: "*user confirmed no heavy
+  lifting until July 2026*", "*Villa Sud alarm is rearmed via the
+  kitchen keypad*". These are carried forward verbatim (or
+  paraphrased) into the one live summary.
+- **One-offs** — completed actions whose outcome is already
+  recorded on the canonical entity row, so the chat chatter about
+  them is redundant. Example: "*asked to swap Thursday, swap was
+  granted*" (the `booking` row carries the swap), "*thanks for the
+  list*" (no entity at all), "*uploaded task evidence photo*" (the
+  `task_evidence` row carries the photo). These are **omitted
+  entirely** from the summary prose. The originals stay in
+  `chat_message` and remain reachable via `search_chat_archive` if
+  a later turn references them.
+
+The split is decided by the compactor LLM on prompt only — there
+is no separate mechanical signal required. The shipped
+`pt-compact` prompt (§ "Prompt library") instructs the model to
+err toward stripping when the referenced entity carries its own
+outcome, on the reasoning that the entity row is the source of
+truth and the chat text about it is redundant. The
+post-generation numeric-claim verifier (see "Daily digest /
+anomaly detection") still runs on the surviving prose. A
+mis-classification is recoverable because the originals are still
+in `chat_message`; the agent pulls them back via
+`search_chat_archive` when a follow-up surfaces.
+
+**Long-term memory lives on Agent preferences, not on the
+summary.** When the user asks the agent to remember something
+durably ("remember that I only do morning shifts", "please save my
+preferred name as Jean rather than Jean-Baptiste"), the agent
+calls the existing `agent_prefs.edit_self` verb via its
+delegated token (§13 `crewday agent-prefs set me`). That write
+flows through the per-user approval mode (`bypass | auto |
+strict`, § "Agent action approval") exactly like any other
+mutation — the user sees an inline confirmation card rather than
+a silent edit. The compactor itself **never** edits preferences;
+the `User` preference blob is self-writable only, and "the LLM
+decided a fact was durable" is not self-authorship. The line is
+hard: durable facts that belong in the preference blob reach it
+by a deliberate user request, not by a compaction side-effect.
+
+**Cost.** A compaction pass is a single `llm_call` under
+capability `chat.compact`, regardless of whether it is the
+thread's first pass or a re-compaction that folds the prior
+summary plus a new eligible span. The audit row names the range
+of originals consumed via `summary_range_from_id` /
+`summary_range_to_id` on the produced `chat_message`.
+
+**Triggers.** Compaction fires when either bound is exceeded:
+
+- More than **200 non-recent turns** exist on the thread, OR
+- The oldest non-recent turn is more than **30 days old**.
+
+"Non-recent" means outside the recent-window floor above. Both
+bounds are workspace-overridable (`chat.compact.trigger_turns`
+and `chat.compact.trigger_days`). A thread that sits entirely
+inside its recent-window floor never compacts — the floor wins.
 
 ## Agent preferences
 

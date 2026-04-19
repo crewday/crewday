@@ -220,7 +220,7 @@ conversation regardless of surface.
 | id                  | ULID PK  |                                                                       |
 | thread_id           | ULID FK  |                                                                       |
 | workspace_id        | ULID FK  |                                                                       |
-| kind                | text     | `user | agent | system | action`                                      |
+| kind                | text     | `user | agent | system | action | summary`                            |
 | direction           | text     | `inbound | outbound` — inbound is user→agent, outbound is agent→user  |
 | channel_kind        | text     | which channel this turn traversed                                     |
 | binding_id          | ULID FK? | set for off-app channels; null for web                                 |
@@ -236,12 +236,20 @@ conversation regardless of surface.
 | sent_at             | tstz     |                                                                       |
 | delivered_at        | tstz?    |                                                                       |
 | read_at             | tstz?    |                                                                       |
-| compacted_into_id   | ULID FK? | set when a resolved topic is folded into a summary message (§11 compaction) |
+| compacted_into_id   | ULID FK? | set when a turn (or a superseded summary) is folded into a newer summary message (§11 compaction). Chases forward: original → summary → newer summary |
+| summary_range_from_id | ULID FK? | set iff `kind = 'summary'`. Inclusive lower bound of the span this summary covers, as a `chat_message.id` |
+| summary_range_to_id | ULID FK? | set iff `kind = 'summary'`. Inclusive upper bound of the span |
 
 Unique index on `(binding_id, provider_message_id)` where both are
 non-null — defeats replay of the same provider message id. Inbound
 messages whose `provider_message_id` already exists are silently
 discarded with a `chat_message.duplicate_inbound` audit line.
+
+Partial unique index on `(thread_id) WHERE kind = 'summary' AND
+compacted_into_id IS NULL` — enforces the §11 "one live summary,
+ever" rule. A thread has zero or one live summary; older summaries
+linger with `compacted_into_id` set forward to whichever summary
+currently supersedes them.
 
 The existing §10 `offapp_delivery` table is **retired** in favour of
 `chat_message` above; the worker migration drops it. The same rows
