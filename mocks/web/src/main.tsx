@@ -8,6 +8,7 @@ import { RoleProvider } from "@/context/RoleContext";
 import { ThemeProvider } from "@/context/ThemeContext";
 import { SseProvider } from "@/context/SseContext";
 import { WorkspaceProvider } from "@/context/WorkspaceContext";
+import { NavHistoryProvider } from "@/context/NavHistoryContext";
 
 import "@/styles/tokens.css";
 import "@/styles/reset.css";
@@ -35,15 +36,17 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>
-        <ThemeProvider>
-          <RoleProvider>
-            <WorkspaceProvider>
-              <SseProvider>
-                <App />
-              </SseProvider>
-            </WorkspaceProvider>
-          </RoleProvider>
-        </ThemeProvider>
+        <NavHistoryProvider>
+          <ThemeProvider>
+            <RoleProvider>
+              <WorkspaceProvider>
+                <SseProvider>
+                  <App />
+                </SseProvider>
+              </WorkspaceProvider>
+            </RoleProvider>
+          </ThemeProvider>
+        </NavHistoryProvider>
       </BrowserRouter>
     </QueryClientProvider>
   </React.StrictMode>,
