@@ -240,28 +240,43 @@ entry (present on every employee and manager surface per the
 "Today · Schedule · Chat · My Expenses · Me" footer nav above),
 which makes an extra card on `/me` redundant.
 
-**Layout responsiveness.** Mobile (`<720px`) renders a vertical
-**agenda**: one row per day, each row showing the day's rota band
-(coloured by property per §05), the day's assigned tasks as compact
-chips (title + time, up to N before an "+M more" collapse), and
-any leave / override / public-holiday / closure markers. The agenda
-is backed by a **bidirectional infinite query** (one network page =
-one ISO week, 7 days): on first paint the worker lands on today —
-auto-anchored under a sticky **month/year ribbon** — and can scroll
-in either direction without paging. Top and bottom
-`IntersectionObserver` sentinels extend the past / future a week
-at a time as they approach the viewport edge; scroll position is
-preserved across prepends so the world doesn't jump under the
-thumb. A floating **"Today" pill** (FAB + duplicate inline jump in
-the ribbon) appears whenever today scrolls out of view, taking the
-worker back to "now" in one tap. There is no Prev/Next paginator on
-phone — a network-blocking weekNav button is strictly worse than
-infinite scroll for the surface a worker checks twenty times a day.
-Desktop (`≥720px`) renders the existing **week grid** (Mon..Sun
-columns) with rota as the background band and tasks tiled inside;
-a "next/prev/this week" navigator matches `/scheduler`. Both
-layouts drill into the same **day drawer** on click (mobile sheet,
-desktop side panel).
+**Layout responsiveness.** Both phone (`<720px`) and desktop
+(`≥720px`) render the **same bidirectional infinite agenda**
+backed by a single 7-day-per-page query. On first paint the worker
+lands on today — auto-anchored under a sticky **month/year
+ribbon** — and can scroll in either direction without paging. Top
+and bottom `IntersectionObserver` sentinels extend the past /
+future a week at a time as they approach the viewport edge; scroll
+position is preserved across prepends so the world doesn't jump
+under the thumb. A floating **"Today" pill** (FAB + duplicate
+inline jump in the ribbon) appears whenever today scrolls out of
+view, taking the worker back to "now" in one tap. There is no
+Prev/Next paginator on either surface — a network-blocking weekNav
+button is strictly worse than infinite scroll for the surface a
+worker checks twenty times a day.
+
+The *rendering* of each loaded week differs by width. Phone stacks
+one row per day: rota band (coloured by property per §05), the
+day's assigned tasks as compact chips (title + time, up to N
+before an "+M more" collapse), and any leave / override /
+public-holiday / closure markers. Desktop stacks one 7-column
+Mon..Sun **week grid** per ISO week (rota as the background band,
+tasks tiled inside each cell, coloured legend above the first
+week); the grids are the only thing that reflows at the breakpoint
+— the infinite-scroll plumbing, monthbar, sentinels, and Today FAB
+are shared across both variants.
+
+Scroll ownership follows the shell. Phone scrolls the document
+(`.phone__body` is `display: contents` there). Worker `/schedule`
+at desktop width scrolls inside `.phone__body` (which flips to
+`overflow-y: auto` at 720px). Manager `/schedule` scrolls inside
+`.desk__main`, the manager shell's own pane. The agenda detects
+its scroll container at mount and scopes every
+`IntersectionObserver` root, scroll-height read, and programmatic
+scroll to that ancestor — one code path, correct for all three.
+
+Both layouts drill into the same **day drawer** on click (mobile
+sheet, desktop side panel).
 
 **Day drawer.** Shows, for the focused date: rota slots
 (read-only), the day's tasks (each linking to `/task/<id>`,

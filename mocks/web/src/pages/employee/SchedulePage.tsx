@@ -36,17 +36,17 @@ import type {
 
 // §14 "Schedule view". Self-only calendar hub that replaces the old
 // `/week` flat list, the `/me/schedule` alias, and the retired
-// `/bookings` page. Phone renders a continuous agenda backed by a
-// bidirectional infinite query (7-day pages): the worker lands on
-// today, scrolls up to past weeks, scrolls down to load the next.
-// Desktop renders a Mon..Sun week grid with explicit prev/next
-// navigation. Click a day anywhere to open the shared day drawer
-// with rota, tasks, bookings (§09, amend/decline inline), plus the
-// Request-leave / Request-override forms. A pending banner sits
-// above the agenda whenever any booking in the loaded window is
-// pending_approval or has a pending self-amend — so a stale
-// approval can't fall off-screen. See spec §06 for the approval
-// rules and §09 for the booking lifecycle.
+// `/bookings` page. Phone and desktop both render a continuous
+// agenda backed by a bidirectional infinite query (7-day pages): the
+// worker lands on today, scrolls up to past weeks, scrolls down to
+// load the next. Phone stacks days as cards; desktop stacks 7-column
+// Mon..Sun grids, one per ISO week. Click a day anywhere to open the
+// shared day drawer with rota, tasks, bookings (§09, amend/decline
+// inline), plus the Request-leave / Request-override forms. A
+// pending banner sits above the agenda whenever any booking in the
+// loaded window is pending_approval or has a pending self-amend —
+// so a stale approval can't fall off-screen. See spec §06 for the
+// approval rules and §09 for the booking lifecycle.
 
 const BOOKING_STATUS_LABEL: Record<BookingStatus, string> = {
   pending_approval: "Pending approval",
@@ -133,8 +133,10 @@ function parseIsoDate(s: string): Date {
 }
 
 // Phone vs desktop split. Mirrors the `(min-width: 720px)` breakpoint
-// used by `.schedule__agenda` / `.schedule__grid-panel` in CSS so the
-// JS-side fetching strategy lines up with what is actually visible.
+// used by `.schedule--phone` / `.schedule--desktop` in CSS so the
+// per-variant layout lines up with what `useIsPhone` reports. Both
+// variants run the same bidirectional infinite query; only the
+// per-week rendering differs.
 function useIsPhone(): boolean {
   const query = "(max-width: 719px)";
   const [isPhone, setIsPhone] = useState<boolean>(() => {
@@ -338,6 +340,7 @@ function DayCellView({
     <div
       role="button"
       tabIndex={0}
+      data-schedule-iso={cell.iso}
       aria-label={
         `Open schedule for ${label.weekday} ${label.day} ${label.month}`
         + (pendingBookings.length > 0
@@ -743,23 +746,11 @@ export default function SchedulePage() {
     ? "Your rota, hours, and time off — request changes inline."
     : "Your week at a glance. Tap a day to see tasks or request time off.";
 
-  const body: ReactNode = phoneMode ? (
-    <PhoneAgendaBody
+  const body: ReactNode = (
+    <InfiniteScheduleBody
+      variant={phoneMode ? "phone" : "desktop"}
       today={today}
       todayIso={todayIso}
-      empId={empId}
-      selectedIso={selectedIso}
-      setSelectedIso={setSelectedIso}
-      leaveIso={leaveIso}
-      setLeaveIso={setLeaveIso}
-      overrideIso={overrideIso}
-      setOverrideIso={setOverrideIso}
-      proposeIso={proposeIso}
-      setProposeIso={setProposeIso}
-    />
-  ) : (
-    <DesktopWeekBody
-      today={today}
       empId={empId}
       selectedIso={selectedIso}
       setSelectedIso={setSelectedIso}
@@ -800,139 +791,7 @@ interface BodyProps {
   setProposeIso: (iso: string | null) => void;
 }
 
-// ── Desktop body — Mon..Sun grid (current behaviour preserved) ────────
-
-function DesktopWeekBody({
-  today,
-  empId,
-  selectedIso,
-  setSelectedIso,
-  leaveIso,
-  setLeaveIso,
-  overrideIso,
-  setOverrideIso,
-  proposeIso,
-  setProposeIso,
-}: BodyProps) {
-  const [weekStart, setWeekStart] = useState<Date>(() => startOfIsoWeek(today));
-  const windowDays = 14;
-  const windowEnd = addDays(weekStart, windowDays - 1);
-  const from = isoDate(weekStart);
-  const to = isoDate(windowEnd);
-
-  const q = useQuery({
-    queryKey: qk.mySchedule(from, to),
-    queryFn: () => fetchJson<MySchedulePayload>(`/api/v1/me/schedule?from_=${from}&to=${to}`),
-  });
-
-  const cells = useMemo(
-    () => (q.data ? buildCells(weekStart, windowDays, q.data) : []),
-    [q.data, weekStart],
-  );
-  const selectedCell = useMemo(
-    () => (selectedIso ? cells.find((c) => c.iso === selectedIso) ?? null : null),
-    [selectedIso, cells],
-  );
-
-  if (q.isPending) return <Loading />;
-  if (!q.data) return <p className="muted">Failed to load schedule.</p>;
-  const data = q.data;
-
-  const nextWeek = cells.slice(7);
-  const { allPending, firstPendingIso, bannerParts } = computePendingState(data.bookings);
-
-  return (
-    <>
-      {bannerParts.length > 0 && (
-        <ScheduleBanner
-          allPending={allPending}
-          bannerParts={bannerParts}
-          firstPendingIso={firstPendingIso}
-          onReview={setSelectedIso}
-        />
-      )}
-      <div className="scheduler-weeknav">
-        <button
-          type="button"
-          className="btn btn--ghost btn--sm"
-          onClick={() => setWeekStart((w) => addDays(w, -7))}
-        >
-          ← Previous
-        </button>
-        <span className="scheduler-weeknav__label">
-          {weekStart.toLocaleDateString("en-GB", { day: "numeric", month: "short" })}
-          {" – "}
-          {windowEnd.toLocaleDateString("en-GB", { day: "numeric", month: "short" })}
-        </span>
-        <button
-          type="button"
-          className="btn btn--ghost btn--sm"
-          onClick={() => setWeekStart(startOfIsoWeek(today))}
-        >
-          This week
-        </button>
-        <button
-          type="button"
-          className="btn btn--ghost btn--sm"
-          onClick={() => setWeekStart((w) => addDays(w, 7))}
-        >
-          Next →
-        </button>
-      </div>
-      <div className="schedule">
-        <div className="schedule__grid-panel panel">
-          <ScheduleWeekGrid
-            cells={cells.slice(0, 7)}
-            data={data}
-            today={today}
-            onOpen={setSelectedIso}
-            label="This week"
-          />
-          {nextWeek.length > 0 && (
-            <ScheduleWeekGrid
-              cells={nextWeek}
-              data={data}
-              today={today}
-              onOpen={setSelectedIso}
-              label="Next week"
-            />
-          )}
-          <div className="schedule__legend">
-            {data.properties.map((p) => (
-              <span
-                key={p.id}
-                className="schedule__legend-item"
-                style={{ "--rota-tint": propertyColor(p.id, data) } as React.CSSProperties}
-              >
-                <span className="schedule__legend-swatch" aria-hidden />
-                {p.name}
-              </span>
-            ))}
-          </div>
-          <p className="muted">
-            Click any day to see tasks, adjust hours, or request leave.
-            Reducing availability needs manager approval (§06).
-          </p>
-        </div>
-      </div>
-
-      <ScheduleDialogsFooter
-        data={data}
-        empId={empId}
-        selectedCell={selectedCell}
-        setSelectedIso={setSelectedIso}
-        leaveIso={leaveIso}
-        setLeaveIso={setLeaveIso}
-        overrideIso={overrideIso}
-        setOverrideIso={setOverrideIso}
-        proposeIso={proposeIso}
-        setProposeIso={setProposeIso}
-      />
-    </>
-  );
-}
-
-// ── Phone body — bidirectional infinite agenda ────────────────────────
+// ── Infinite body — bidirectional agenda shared by phone + desktop ────
 //
 // Loads 7-day pages on demand. On first paint the worker lands on
 // today (centred under the sticky monthbar). IntersectionObserver
@@ -941,15 +800,50 @@ function DesktopWeekBody({
 // preserved when prepending so the world doesn't jump under the
 // thumb.
 //
-// Why this matters: this is the single view a worker hits to know
-// where they are working today and tomorrow — it has to feel fast,
-// it has to land in the right place, and it has to keep working
-// when the worker idly thumbs back to last Tuesday. A weekNav
-// "Prev / Next" button that stalls for a network round-trip is
-// strictly worse on a phone, and a manual page paginator means a
-// busy worker can miss tomorrow's booking sitting one tap away.
+// Phone stacks one day card per row; desktop stacks one 7-column
+// Mon..Sun week grid per row (see `variant`). Both paths share the
+// query, the sentinels, the monthbar, the anchor-to-today settle
+// phase, and the Today FAB — the only thing that differs is how a
+// week's cells lay out inside the week group.
+//
+// Scroll root is detected once on mount by walking up from the
+// agenda container and picking the nearest scrollable ancestor.
+// That lands on `.desk__main` for manager /schedule (own-scroll
+// pane), on `.phone__body` for worker /schedule at desktop width
+// (`.phone__body` has `overflow-y: auto` above 720px), and on
+// `window` / the document for phone (`.phone__body` is
+// `display: contents` there, deferring scroll to `<html>`). Every
+// IntersectionObserver, scroll-preservation delta, and scroll-by
+// is then scoped to that root — a single code path that works
+// for all three surfaces without the body caring whether its
+// viewport is the document or a container.
+//
+// Why this matters: `/schedule` is the single view a worker hits
+// to know where they are working today and tomorrow — it has to
+// feel fast, land in the right place, and keep working when the
+// worker idly thumbs back to last Tuesday. A weekNav "Prev / Next"
+// button that stalls for a network round-trip is strictly worse
+// than scrolling, and a manual page paginator means a busy worker
+// can miss tomorrow's booking sitting one tap away.
 
-function PhoneAgendaBody({
+type ScheduleVariant = "phone" | "desktop";
+
+// Walk up from `start` until we hit an element with `overflow-y` of
+// `auto`, `scroll`, or `overlay`. Returns that element, or `null`
+// meaning "the document itself scrolls, use `window`". Caught at
+// mount once; the ancestor chain doesn't change within a page.
+function findScrollRoot(start: HTMLElement): HTMLElement | null {
+  let node: HTMLElement | null = start.parentElement;
+  while (node) {
+    const oy = getComputedStyle(node).overflowY;
+    if (oy === "auto" || oy === "scroll" || oy === "overlay") return node;
+    node = node.parentElement;
+  }
+  return null;
+}
+
+function InfiniteScheduleBody({
+  variant,
   today,
   todayIso,
   empId,
@@ -961,7 +855,7 @@ function PhoneAgendaBody({
   setOverrideIso,
   proposeIso,
   setProposeIso,
-}: BodyProps & { todayIso: string }) {
+}: BodyProps & { todayIso: string; variant: ScheduleVariant }) {
   const initialMondayIso = useMemo(
     () => isoDate(startOfIsoWeek(today)),
     [today],
@@ -1007,8 +901,40 @@ function PhoneAgendaBody({
 
   // ── Scroll plumbing ────────────────────────────────────────────────
 
+  const containerRef = useRef<HTMLDivElement | null>(null);
   const topSentinelRef = useRef<HTMLDivElement | null>(null);
   const bottomSentinelRef = useRef<HTMLDivElement | null>(null);
+
+  // `null` ⇒ the document is the scroll container (phone only, where
+  // `.phone__body { display: contents }` defers overflow to `<html>`).
+  // An HTMLElement here means an ancestor with its own overflow owns
+  // scroll: `.phone__body` at desktop width for worker /schedule, or
+  // `.desk__main` for manager /schedule. Every observer, height read,
+  // and scroll-by has to target that root rather than `window`.
+  //
+  // Captured via a callback ref so the detection fires the moment the
+  // container mounts — not in a `useLayoutEffect([])`, which runs once
+  // after the *first* render. The first render currently commits
+  // `<Loading />` (see wrapper below), so a mount-only effect would
+  // fire with `containerRef.current === null` and never re-run once
+  // the real container appears on the next render. Detection via
+  // callback ref fires after the ref is actually assigned.
+  const [scrollRoot, setScrollRoot] = useState<HTMLElement | null>(null);
+  const setContainerEl = useCallback((node: HTMLDivElement | null) => {
+    containerRef.current = node;
+    if (node) setScrollRoot(findScrollRoot(node));
+  }, []);
+
+  // `null` root = use `window` / document. Any non-null root is an
+  // element whose own overflow owns scroll.
+  const getScrollHeight = useCallback(
+    () => scrollRoot?.scrollHeight ?? document.documentElement.scrollHeight,
+    [scrollRoot],
+  );
+  const scrollByDelta = useCallback((delta: number) => {
+    const target: Element | Window = scrollRoot ?? window;
+    target.scrollBy({ top: delta, behavior: "instant" as ScrollBehavior });
+  }, [scrollRoot]);
 
   // Preserve scroll position when prepending. Captured BEFORE
   // `fetchPreviousPage` runs and consumed once the new first page
@@ -1027,6 +953,7 @@ function PhoneAgendaBody({
   const settledRef = useRef(false);
 
   // Bottom sentinel — extend the future when the worker thumbs down.
+  // `root` is the scrollRoot element or `null` (document).
   useEffect(() => {
     const node = bottomSentinelRef.current;
     if (!node) return;
@@ -1043,11 +970,17 @@ function PhoneAgendaBody({
           }
         }
       },
-      { rootMargin: "600px 0px 600px 0px" },
+      { root: scrollRoot, rootMargin: "600px 0px 600px 0px" },
     );
     obs.observe(node);
     return () => obs.disconnect();
-  }, [q.hasNextPage, q.isFetchingNextPage, q.isFetching, q.fetchNextPage]);
+  }, [
+    scrollRoot,
+    q.hasNextPage,
+    q.isFetchingNextPage,
+    q.isFetching,
+    q.fetchNextPage,
+  ]);
 
   // Top sentinel — extend the past, capturing scroll height so we
   // can compensate after the prepend.
@@ -1063,17 +996,18 @@ function PhoneAgendaBody({
             && !q.isFetchingPreviousPage
             && !q.isFetching
           ) {
-            heightBeforePrependRef.current =
-              document.documentElement.scrollHeight;
+            heightBeforePrependRef.current = getScrollHeight();
             q.fetchPreviousPage();
           }
         }
       },
-      { rootMargin: "600px 0px 600px 0px" },
+      { root: scrollRoot, rootMargin: "600px 0px 600px 0px" },
     );
     obs.observe(node);
     return () => obs.disconnect();
   }, [
+    scrollRoot,
+    getScrollHeight,
     q.hasPreviousPage,
     q.isFetchingPreviousPage,
     q.isFetching,
@@ -1081,10 +1015,10 @@ function PhoneAgendaBody({
   ]);
 
   // After a prepend lands and we are *past* the initial settle, keep
-  // the worker's visual position by compensating for the document
-  // growth. During settle the re-anchor below takes priority instead
-  // — running both isn't harmful but the re-anchor is what actually
-  // pins today, so we skip the scrollBy work then.
+  // the worker's visual position by compensating for the scroll
+  // root's growth. During settle the re-anchor below takes priority
+  // instead — running both isn't harmful but the re-anchor is what
+  // actually pins today, so we skip the scrollBy work then.
   useLayoutEffect(() => {
     if (!q.data) return;
     const first = q.data.pageParams[0] as string;
@@ -1094,11 +1028,8 @@ function PhoneAgendaBody({
       && prevFirstParamRef.current !== first
       && heightBeforePrependRef.current !== null
     ) {
-      const delta =
-        document.documentElement.scrollHeight - heightBeforePrependRef.current;
-      if (delta > 0) {
-        window.scrollBy({ top: delta, behavior: "instant" as ScrollBehavior });
-      }
+      const delta = getScrollHeight() - heightBeforePrependRef.current;
+      if (delta > 0) scrollByDelta(delta);
     }
     if (
       prevFirstParamRef.current !== null
@@ -1107,7 +1038,7 @@ function PhoneAgendaBody({
       heightBeforePrependRef.current = null;
     }
     prevFirstParamRef.current = first;
-  }, [q.data]);
+  }, [q.data, getScrollHeight, scrollByDelta]);
 
   // Re-anchor today on every cells change while we are still in the
   // initial settle window. Bails out as soon as the worker scrolls
@@ -1115,7 +1046,7 @@ function PhoneAgendaBody({
   useLayoutEffect(() => {
     if (settledRef.current) return;
     if (cells.length === 0) return;
-    const node = document.querySelector(
+    const node = (containerRef.current ?? document).querySelector(
       `[data-schedule-iso="${todayIso}"]`,
     ) as HTMLElement | null;
     if (!node) return;
@@ -1123,13 +1054,17 @@ function PhoneAgendaBody({
     const drift = rect.top;
     // If today has drifted off-screen by more than ~one viewport in
     // either direction, the worker is actively reading another week.
-    // Stop fighting them.
-    if (drift > window.innerHeight * 1.5 || rect.bottom < -window.innerHeight * 0.5) {
+    // Stop fighting them. Use the scroll root's client height on
+    // manager / worker desktop (where `.desk__main` / `.phone__body`
+    // is smaller than the window) so the threshold tracks the pane
+    // the user actually sees, not the outer window.
+    const paneHeight = scrollRoot?.clientHeight ?? window.innerHeight;
+    if (drift > paneHeight * 1.5 || rect.bottom < -paneHeight * 0.5) {
       settledRef.current = true;
       return;
     }
     node.scrollIntoView({ block: "start", behavior: "instant" as ScrollBehavior });
-  }, [cells, todayIso]);
+  }, [cells, todayIso, scrollRoot]);
 
   // End the settle window 200ms after all initial fetches have
   // calmed down. Past that point auto-anchoring stops and the
@@ -1160,8 +1095,10 @@ function PhoneAgendaBody({
   // the monthbar label, and the today cell drives the FAB visibility.
   useEffect(() => {
     if (cells.length === 0) return;
+    const root = containerRef.current;
+    if (!root) return;
     const nodes = Array.from(
-      document.querySelectorAll<HTMLElement>("[data-schedule-iso]"),
+      root.querySelectorAll<HTMLElement>("[data-schedule-iso]"),
     );
     if (nodes.length === 0) return;
 
@@ -1187,12 +1124,14 @@ function PhoneAgendaBody({
       },
       // Crop to the area between the sticky monthbar and the bottom
       // of the viewport. ≈64px is the monthbar height; adjust here
-      // if the bar grows.
-      { rootMargin: "-64px 0px -40% 0px", threshold: [0, 1] },
+      // if the bar grows. `root` is the scrollRoot (or null = document),
+      // which matters for manager /schedule where the viewport is
+      // `.desk__main` rather than the window.
+      { root: scrollRoot, rootMargin: "-64px 0px -40% 0px", threshold: [0, 1] },
     );
     nodes.forEach((n) => obs.observe(n));
     return () => obs.disconnect();
-  }, [cells, todayIso]);
+  }, [scrollRoot, cells, todayIso]);
 
   const monthLabel = useMemo(() => {
     const d = parseIsoDate(topVisibleIso);
@@ -1200,7 +1139,7 @@ function PhoneAgendaBody({
   }, [topVisibleIso]);
 
   const scrollToToday = useCallback(() => {
-    const node = document.querySelector(
+    const node = (containerRef.current ?? document).querySelector(
       `[data-schedule-iso="${todayIso}"]`,
     ) as HTMLElement | null;
     if (!node) return;
@@ -1212,9 +1151,26 @@ function PhoneAgendaBody({
   }, [todayIso]);
 
   // ── Render ─────────────────────────────────────────────────────────
+  //
+  // We always mount the `.schedule` wrapper so the callback ref above
+  // fires on first paint and captures the scroll root — even while
+  // the initial query is in flight. Loading / failure states render
+  // inside the wrapper instead of early-returning in place of it.
 
-  if (q.isPending) return <Loading />;
-  if (!merged) return <p className="muted">Failed to load schedule.</p>;
+  if (q.isPending) {
+    return (
+      <div ref={setContainerEl} className={`schedule schedule--${variant}`}>
+        <Loading />
+      </div>
+    );
+  }
+  if (!merged) {
+    return (
+      <div ref={setContainerEl} className={`schedule schedule--${variant}`}>
+        <p className="muted">Failed to load schedule.</p>
+      </div>
+    );
+  }
   const data = merged;
 
   const { allPending, firstPendingIso, bannerParts } = computePendingState(
@@ -1253,7 +1209,7 @@ function PhoneAgendaBody({
         />
       )}
 
-      <div className="schedule schedule--phone">
+      <div ref={setContainerEl} className={`schedule schedule--${variant}`}>
         <div
           className="schedule__monthbar"
           aria-live="polite"
@@ -1270,6 +1226,32 @@ function PhoneAgendaBody({
             </button>
           )}
         </div>
+
+        {variant === "desktop" && (
+          // Desktop-only: the colour legend + help line that used to
+          // sit inside the old grid-panel footer. Rendered above the
+          // agenda so it's seen on first paint and then scrolls away
+          // as the worker thumbs through weeks; the monthbar above
+          // stays pinned. Phone drops it — cards are labelled in-line.
+          <div className="schedule__intro">
+            <div className="schedule__legend">
+              {data.properties.map((p) => (
+                <span
+                  key={p.id}
+                  className="schedule__legend-item"
+                  style={{ "--rota-tint": propertyColor(p.id, data) } as React.CSSProperties}
+                >
+                  <span className="schedule__legend-swatch" aria-hidden />
+                  {p.name}
+                </span>
+              ))}
+            </div>
+            <p className="muted schedule__intro-help">
+              Click any day to see tasks, adjust hours, or request leave.
+              Reducing availability needs manager approval (§06).
+            </p>
+          </div>
+        )}
 
         <div className="schedule__agenda" role="list">
           <div
@@ -1291,16 +1273,27 @@ function PhoneAgendaBody({
                   <span>{group.weekLabel}</span>
                 </div>
               )}
-              {group.cells.map((cell) => (
-                <div key={cell.iso} role="listitem" data-schedule-iso={cell.iso}>
-                  <DayCellView
-                    cell={cell}
-                    data={data}
-                    onOpen={setSelectedIso}
-                    today={today}
-                  />
-                </div>
-              ))}
+              {variant === "desktop" ? (
+                <ScheduleWeekGrid
+                  cells={group.cells}
+                  data={data}
+                  today={today}
+                  onOpen={setSelectedIso}
+                  label={group.weekLabel}
+                  hideLabel={gi > 0}
+                />
+              ) : (
+                group.cells.map((cell) => (
+                  <div key={cell.iso} role="listitem">
+                    <DayCellView
+                      cell={cell}
+                      data={data}
+                      onOpen={setSelectedIso}
+                      today={today}
+                    />
+                  </div>
+                ))
+              )}
             </Fragment>
           ))}
 
@@ -1471,16 +1464,22 @@ function ScheduleWeekGrid({
   today,
   onOpen,
   label,
+  hideLabel = false,
 }: {
   cells: DayCell[];
   data: MySchedulePayload;
   today: Date;
   onOpen: (iso: string) => void;
   label: string;
+  /** Hide the inline week label when a `.schedule__weekgap` separator
+   *  above the grid already shows the date range. The first week in
+   *  the infinite stream has no separator above it, so it still
+   *  renders the label for orientation on first paint. */
+  hideLabel?: boolean;
 }) {
   return (
     <div className="schedule-week" role="grid" aria-label={label}>
-      <div className="schedule-week__label">{label}</div>
+      {!hideLabel && <div className="schedule-week__label">{label}</div>}
       <div className="schedule-week__header-row">
         {cells.map((c) => {
           const { weekday, day } = dayLabel(c.date);

@@ -4197,24 +4197,47 @@
   padding: 0 12px;
 }
 
-/* Phone agenda: stacked day rows backed by a bidirectional infinite
-   query. The whole document scrolls (`.phone__body { display: contents }`),
-   so `position: sticky` on the monthbar pins it under the dev banner.
-   Hidden on desktop. */
+/* Agenda column: vertical stack shared by both variants. Phone lays
+   out one day card per row; desktop lays out one 7-column week grid
+   per row. Gap differs: phone's 10px matches card spacing, desktop's
+   18px leaves air between week blocks. */
 .schedule__agenda {
   display: flex;
   flex-direction: column;
   gap: 10px;
 }
+.schedule--desktop .schedule__agenda {
+  gap: 18px;
+}
+
+/* Desktop intro: legend + help line rendered once above the agenda,
+   below the sticky monthbar. Scrolls away as the worker thumbs
+   deeper into weeks — the monthbar still pins orientation. */
+.schedule__intro {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 4px;
+}
+.schedule__intro-help { margin: 0; font-size: 12px; }
+.schedule__intro .schedule__legend { border-top: none; padding-top: 0; }
 
 /* Sticky month/year ribbon. Drives orientation as the worker thumbs
    through weeks: the topmost-visible day's month is mirrored here, plus
    an inline "Today" jump when today has scrolled out of view.
    No negative side margin — it would bleed past the `.schedule--phone`
-   gutter and cause a 4-8px horizontal scrollbar. */
+   gutter and cause a 4-8px horizontal scrollbar.
+   Sticky offset depends on the scroll container rather than the
+   breakpoint. Phone's shell is document-scrolled so the preview banner
+   consumes 40px of viewport and sticky must clear it; desktop variants
+   both scroll inside an own-overflow pane (`.phone__body` for worker,
+   `.desk__main` for manager) that already sits below the banner, so
+   sticky pins flush at top:0. */
 .schedule__monthbar {
   position: sticky;
-  top: var(--banner-h, 40px);
+  top: 0;
   z-index: 4;
   display: flex;
   align-items: center;
@@ -4231,6 +4254,7 @@
   letter-spacing: 0.005em;
   color: var(--ink);
 }
+.schedule--phone .schedule__monthbar { top: var(--banner-h, 40px); }
 .schedule__monthbar-label { font-weight: 600; }
 .schedule__monthbar-jump {
   font: inherit;
@@ -4246,13 +4270,16 @@
 }
 .schedule__monthbar-jump:hover { border-color: var(--moss); }
 
-/* Each day-row wrapper needs to clear the sticky monthbar when
-   scrolled into view by the JS scroll-to-today pass. The wrapper is
-   `[data-schedule-iso]` (the element passed to `scrollIntoView`);
-   targeting the inner `.schedule-day` would be a no-op because
-   scroll-margin only applies to the element actually being scrolled
-   into view. */
-.schedule__agenda > [data-schedule-iso] {
+/* Each day cell needs to clear the sticky monthbar when scrolled
+   into view by the JS scroll-to-today pass. `data-schedule-iso`
+   lives on the `.schedule-day` element itself — scroll-margin only
+   applies to the element actually being scrolled into view, so we
+   set it there. Desktop scrolls inside a pane that already sits
+   below the banner (88px = monthbar + intro border); phone scrolls
+   the document and needs an extra banner-h to clear the preview
+   strip above the monthbar. */
+.schedule [data-schedule-iso] { scroll-margin-top: 88px; }
+.schedule--phone [data-schedule-iso] {
   scroll-margin-top: calc(var(--banner-h, 40px) + 72px);
 }
 
@@ -4316,8 +4343,9 @@
 
 /* Floating "Today" pill. Only mounted while today is off-screen
    (workers spend most of their schedule glances on today; if they
-   scroll away by accident, this brings them back in one tap). Sits
-   above `.phone__dock` and `BottomTabs`. */
+   scroll away by accident, this brings them back in one tap).
+   Phone: sits above `.phone__dock` and `BottomTabs`. Desktop: sits
+   above the document edge (no dock on desktop). */
 .schedule__today-fab {
   position: fixed;
   right: 16px;
@@ -4337,25 +4365,20 @@
   cursor: pointer;
   animation: schedule-fab-in 220ms ease-out;
 }
+/* Desktop has no bottom dock, but the right column is the agent rail
+   (`.desk__agent`, 340px wide on worker + manager shells). Pinning
+   the FAB at `right: 28px` would float it over the chat composer.
+   Offset past the rail's max width so the FAB stays inside the
+   schedule column. When the rail is collapsed (52px) the extra gap
+   is harmless; overlapping chat is not. */
+.schedule--desktop .schedule__today-fab {
+  right: calc(340px + 28px);
+  bottom: 28px;
+}
 .schedule__today-fab:hover { filter: brightness(1.05); }
 @keyframes schedule-fab-in {
   from { opacity: 0; transform: translateY(8px); }
   to   { opacity: 1; transform: translateY(0); }
-}
-
-/* Desktop week grid: hidden on phone. */
-.schedule__grid-panel {
-  display: none;
-  padding: 20px;
-  flex-direction: column;
-  gap: 20px;
-}
-
-@media (min-width: 720px) {
-  /* Above the breakpoint the desktop grid takes over. The phone-only
-     monthbar / FAB / sentinels are mounted only when `useIsPhone` is
-     true, so no display:none rule is needed for them. */
-  .schedule__grid-panel { display: flex; }
 }
 
 .schedule-week {
