@@ -14,6 +14,7 @@ from __future__ import annotations
 import factory
 from sqlalchemy.orm import Session
 
+from app.adapters.db.authz.bootstrap import seed_owners_system_group
 from app.adapters.db.identity.models import User, canonicalise_email
 from app.adapters.db.workspace.models import UserWorkspace, Workspace
 from app.tenancy import WorkspaceContext, tenant_agnostic
@@ -141,18 +142,25 @@ def bootstrap_workspace(
     owner_user_id: str,
     clock: Clock | None = None,
 ) -> Workspace:
-    """Seed a :class:`Workspace` + owner :class:`UserWorkspace` row.
+    """Seed a :class:`Workspace` + owner membership + ``owners`` group.
 
     Test-only. Production signup (cd-3i5) will ship its own flow that
-    also seeds ``role_grants``, emits ``workspace.created`` audit, and
-    honours quota. This helper does none of that; its sole purpose is
-    to unblock integration tests that need a live tenant row before the
-    signup domain service lands.
+    also emits ``workspace.created`` audit and honours quota. This
+    helper does none of that; its sole purpose is to unblock
+    integration tests that need a live tenant row plus the
+    governance anchor seeded by §02 "permission_group" §"Invariants".
 
     The helper runs under :func:`~app.tenancy.tenant_agnostic` because
     it creates the tenancy anchor before any
     :class:`~app.tenancy.WorkspaceContext` exists — there is literally
-    nothing to filter against yet.
+    nothing to filter against yet, and the ``permission_group`` /
+    ``permission_group_member`` / ``role_grant`` tables seeded below
+    are workspace-scoped (their tenant filter would otherwise trip).
+
+    Delegates to :func:`seed_owners_system_group` so production signup
+    (cd-3i5) and the integration-test fixtures share one write path;
+    diverging factory shims would silently skew the
+    governance-anchor invariant between environments.
     """
     now = (clock if clock is not None else SystemClock()).now()
     workspace_id = new_ulid()
@@ -178,4 +186,10 @@ def bootstrap_workspace(
             )
         )
         session.flush()
+        seed_owners_system_group(
+            session,
+            workspace_id=workspace_id,
+            owner_user_id=owner_user_id,
+            clock=clock,
+        )
     return workspace

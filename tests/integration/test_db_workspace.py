@@ -30,7 +30,7 @@ from app.tenancy.context import WorkspaceContext
 from app.tenancy.current import reset_current, set_current
 from app.tenancy.orm_filter import TenantFilterMissing, install_tenant_filter
 from app.util.clock import FrozenClock
-from tests.factories.identity import bootstrap_workspace
+from tests.factories.identity import bootstrap_user, bootstrap_workspace
 
 pytestmark = pytest.mark.integration
 
@@ -355,11 +355,25 @@ class TestBootstrapHelper:
 
     def test_seeds_workspace_and_membership(self, db_session: Session) -> None:
         clock = FrozenClock(_PINNED)
+        # ``bootstrap_workspace`` seeds the ``owners`` permission-group
+        # row (cd-ctb) whose ``permission_group_member.user_id`` FKs to
+        # ``user`` — so the owner must exist as a real row, not a
+        # fabricated ULID literal. The ``user_workspace.user_id``
+        # column is still a soft reference (see
+        # ``app/adapters/db/workspace/models.py`` §docstring), but
+        # seeding through the same helper ensures both paths see a
+        # consistent identity.
+        owner = bootstrap_user(
+            db_session,
+            email="bootstrap-owner@example.com",
+            display_name="BootstrapOwner",
+            clock=clock,
+        )
         ws = bootstrap_workspace(
             db_session,
             slug="bootstrap-slug",
             name="Bootstrap",
-            owner_user_id="01HWA00000000000000000USRB",
+            owner_user_id=owner.id,
             clock=clock,
         )
         assert ws.slug == "bootstrap-slug"
@@ -376,7 +390,7 @@ class TestBootstrapHelper:
             WorkspaceContext(
                 workspace_id=ws.id,
                 workspace_slug=ws.slug,
-                actor_id="01HWA00000000000000000USRB",
+                actor_id=owner.id,
                 actor_kind="user",
                 actor_grant_role="manager",
                 actor_was_owner_member=True,
@@ -390,7 +404,7 @@ class TestBootstrapHelper:
         finally:
             reset_current(token)
         assert len(memberships) == 1
-        assert memberships[0].user_id == "01HWA00000000000000000USRB"
+        assert memberships[0].user_id == owner.id
         assert memberships[0].source == "workspace_grant"
         # SQLite's ``DateTime(timezone=True)`` loses tzinfo on reload
         # (the driver returns a naive ``datetime``); Postgres keeps it.
