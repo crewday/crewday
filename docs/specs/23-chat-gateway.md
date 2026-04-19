@@ -232,7 +232,9 @@ conversation regardless of surface.
 | agent_action_id     | ULID FK? | for `kind = 'action'` rows, the linked approval row (§11)             |
 | file_ids            | ULID[]   | attachments (photos, voice notes, documents) materialised as `file` rows (§02) |
 | delivery_state      | text     | outbound only — `queued | sent | delivered | read | failed`; inbound rows are always `delivered` on arrival |
-| failure_reason      | text?    | provider-side error, free-form                                        |
+| agent_dispatch_state | text?   | off-app inbound only — `pending | dispatching | dispatched | failed`; null on web-channel inbound (those turns run synchronously inside `POST /api/v1/agent/*` per §11) and on outbound. Governs the async dispatch handoff described in "Routing > Inbound": the webhook handler writes `pending`; the dispatcher CASes `pending → dispatching` (stamping `dispatch_started_at`) before invoking the runtime, then to `dispatched` or `failed` on completion; the `agent_dispatch_sweep` job (§16) re-fires rows stuck in either non-terminal state past their respective grace windows |
+| dispatch_started_at | tstz?    | set to `clock.now()` at the `pending → dispatching` CAS. Lets the sweeper distinguish "never picked up" (short grace, 60 s) from "in-flight, possibly long turn" (wide grace, 5 min). Null on web-channel inbound, outbound, and any row that has not yet left `pending` |
+| failure_reason      | text?    | provider-side error (outbound) or agent-runtime error (inbound dispatch failure), free-form |
 | sent_at             | tstz     |                                                                       |
 | delivered_at        | tstz?    |                                                                       |
 | read_at             | tstz?    |                                                                       |
@@ -288,12 +290,46 @@ matches the unified gateway.
      (added as part of this spec); the agent will not reach out
      over this binding until the timestamp passes. Inbound from the
      user during the pause resumes the agent immediately.
-5. Otherwise, a `chat_message` row with `direction = 'inbound'` is
-   inserted, the thread's `last_turn_at` is advanced, and the
-   agent runtime is invoked in-process with the turn appended to
-   context. The agent's tool calls, approvals (§11), and
-   responses produce further `chat_message` rows with
-   `direction = 'outbound'`.
+5. Otherwise, a `chat_message` row with `direction = 'inbound'` and
+   `agent_dispatch_state = 'pending'` is inserted, the thread's
+   `last_turn_at` is advanced, the `chat_message.received` event is
+   published, and the webhook handler returns `200`. **The agent
+   runtime is not invoked inside the HTTP request.** Provider webhook
+   timeouts are short (Meta's WhatsApp Cloud redelivers on any
+   non-2xx past ~20 s) while agent turns have highly variable
+   latency — LLM round-trip, multi-step tool calls, and approvals
+   blocking on a human (§11). Inline dispatch would manufacture
+   duplicate deliveries on slow turns and starve the app process's
+   request handlers under a message burst.
+6. An in-process dispatcher subscribed to `chat_message.received`
+   handles the row. Because the event bus is synchronous (§01), the
+   subscriber's body MUST NOT run the turn inline — it schedules the
+   runtime invocation on a background task
+   (`asyncio.create_task` / FastAPI `BackgroundTasks`) and returns
+   immediately, so the `publish()` call that woke it stays fast.
+   Inside that background task the dispatcher CASes the row
+   `pending → dispatching` (stamping `dispatch_started_at = now()`).
+   A lost CAS means another caller — either a sibling subscriber or
+   the `agent_dispatch_sweep` job — already claimed the row; the
+   task exits. On a won CAS the agent runtime runs with the turn
+   appended to context; on completion the row flips to `dispatched`,
+   on raise to `failed` with `failure_reason` populated. The agent's
+   tool calls, approvals (§11), and responses produce further
+   `chat_message` rows with `direction = 'outbound'`.
+7. Durability across process restarts comes from
+   `agent_dispatch_sweep` (§16), which re-fires rows stuck in the
+   dispatch state machine — `pending` past a 60 s grace (subscriber
+   never picked up) or `dispatching` past a 5 min grace (task died
+   mid-turn). Under the default `CREWDAY_WORKER=inprocess` the
+   sweeper shares the bus with the subscriber and simply re-publishes
+   `chat_message.received`. Under `CREWDAY_WORKER=external` the
+   scheduler runs in a separate process whose bus the app-process
+   subscriber does not see; there the sweeper invokes the agent
+   runtime **directly** from the worker process (same DB, same
+   adapters, same CAS). Either path, the `(binding_id,
+   provider_message_id)` dedup (above) makes re-ingest idempotent
+   on the provider side, and the state-machine CAS prevents two
+   callers from running the same turn.
 
 ### Outbound
 

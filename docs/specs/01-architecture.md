@@ -110,7 +110,10 @@ clients** to `api.v1.*` using a long-lived API token (§03). The CLI
   `CREWDAY_WORKER=external`.
 - Jobs: `generate_task_occurrences`, `poll_ical`, `send_daily_digest`,
   `detect_anomalies`, `retry_failed_webhooks`, `prune_sessions`,
-  `rotate_audit_log`, `refresh_exchange_rates` (daily, §09).
+  `rotate_audit_log`, `refresh_exchange_rates` (daily, §09),
+  `agent_dispatch_sweep` (§16, §23 — restart-safety net for the
+  chat-gateway inbound dispatcher; the dispatcher itself is an
+  event-bus subscriber, not a scheduled job).
 
 ## Module boundaries and bounded contexts
 

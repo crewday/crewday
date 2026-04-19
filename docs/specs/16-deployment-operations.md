@@ -346,6 +346,21 @@ The regular, non-demo job set (shared by recipes A / B / D) is:
 - `ical_poll`, `digest_compose`, `anomaly_detect`, `email_retry`,
   `webhook_retry`, `approval_expire` — the rest of the standard
   worker cadence, unchanged.
+- `agent_dispatch_sweep` — every 30 s; targets inbound
+  `chat_message` rows stuck in the dispatch state machine
+  (§23 "Routing > Inbound") on two conditions: `pending` past a
+  60 s grace (subscriber never picked up — usually an app-process
+  restart between webhook commit and task scheduling) and
+  `dispatching` past a 5 min grace (task started but the process
+  died before CASing the terminal state). Under the default
+  `CREWDAY_WORKER=inprocess` the sweeper re-publishes
+  `chat_message.received` on the in-process bus and the app-process
+  subscriber retries. Under `CREWDAY_WORKER=external` the scheduler
+  runs in a separate process whose bus the app subscriber does not
+  see, so the sweeper invokes the agent runtime directly (same DB,
+  same adapters). Both paths CAS `agent_dispatch_state` before
+  invoking the runtime; a sweep firing while the primary dispatch
+  is genuinely still running loses the CAS and no-ops.
 
 The following jobs run on demo in addition to the regular set:
 
