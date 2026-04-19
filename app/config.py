@@ -1,4 +1,127 @@
-"""Pydantic-settings config — implementation lands in a later task.
+"""Pydantic-settings config loader.
 
-See docs/specs/01-architecture.md §"Environments".
+Every adapter, worker, and API router imports ``get_settings`` (or the
+module-level ``settings`` proxy) from here; nothing else reads
+``os.environ`` directly. Values come from process environment variables
+prefixed ``CREWDAY_`` with an optional ``.env`` file at the repo root
+— see ``.env.example`` for the full template.
+
+See ``docs/specs/01-architecture.md`` §"Runtime invariants" and
+``docs/specs/16-deployment-operations.md`` §"Environment variables".
 """
+
+from __future__ import annotations
+
+from functools import lru_cache
+from pathlib import Path
+from typing import Annotated, Any, Literal
+
+from pydantic import Field, SecretStr, field_validator
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
+
+__all__ = ["Settings", "get_settings"]
+
+_SECRET_MASK = "***"
+
+
+class Settings(BaseSettings):
+    """Process-wide configuration, loaded from env + optional ``.env``.
+
+    Secrets are wrapped in :class:`pydantic.SecretStr` so they never
+    appear in ``repr()`` or default serialisation. Use
+    :meth:`safe_dump` when emitting settings to logs.
+    """
+
+    model_config = SettingsConfigDict(
+        env_prefix="CREWDAY_",
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
+
+    # --- Required ---
+    database_url: str
+
+    # --- Paths ---
+    data_dir: Path = Path("./data")
+
+    # --- Bind guard (see docs/specs/01 §"Runtime invariants" + §16) ---
+    bind_host: str = "127.0.0.1"
+    bind_port: int = 8000
+    trusted_interfaces: Annotated[list[str], NoDecode] = Field(
+        default_factory=lambda: ["tailscale*"],
+    )
+    allow_public_bind: bool = False
+
+    # --- Public URL ---
+    public_url: str | None = None
+
+    # --- SMTP (optional; see §10 messaging-notifications) ---
+    smtp_host: str | None = None
+    smtp_port: int = 587
+    smtp_user: str | None = None
+    smtp_password: SecretStr | None = None
+
+    # --- LLM (optional; see §11 llm-and-agents) ---
+    openrouter_api_key: SecretStr | None = None
+
+    # --- Signing / tokens ---
+    root_key: SecretStr | None = None
+
+    # --- Runtime ---
+    demo_mode: bool = False
+    worker: Literal["internal", "external"] = "internal"
+    storage_backend: Literal["localfs", "s3"] = "localfs"
+
+    @field_validator("trusted_interfaces", mode="before")
+    @classmethod
+    def _split_trusted_interfaces(cls, value: object) -> object:
+        """Parse comma-separated env input into a list.
+
+        ``pydantic-settings`` would otherwise try to decode the raw
+        env value as JSON for a ``list[str]`` field, which makes the
+        natural ``CREWDAY_TRUSTED_INTERFACES=tailscale*,wg*`` form
+        fail. Whitespace-only entries are dropped so a trailing comma
+        doesn't turn into an empty-string glob.
+        """
+        if isinstance(value, str):
+            return [item.strip() for item in value.split(",") if item.strip()]
+        return value
+
+    def safe_dump(self) -> dict[str, Any]:
+        """Return a dict with every :class:`SecretStr` masked.
+
+        ``"***"`` for populated secrets, ``None`` for unset ones;
+        non-secret fields pass through unchanged. Safe to log.
+        """
+        out: dict[str, Any] = {}
+        for name in self.__class__.model_fields:
+            value = getattr(self, name)
+            if isinstance(value, SecretStr):
+                out[name] = _SECRET_MASK if value.get_secret_value() else None
+            else:
+                out[name] = value
+        return out
+
+
+@lru_cache(maxsize=1)
+def get_settings() -> Settings:
+    """Return the process-wide :class:`Settings` instance.
+
+    Cached so repeated calls are free and every caller sees the same
+    object. Tests that mutate env between cases must call
+    ``get_settings.cache_clear()``.
+    """
+    return Settings()
+
+
+def __getattr__(name: str) -> Any:
+    """Lazy module attribute for ``from app.config import settings``.
+
+    Deferring construction until first access keeps the module
+    importable in test collection even when required env vars haven't
+    been set yet — mirrors the ``get_settings()`` contract.
+    """
+    if name == "settings":
+        return get_settings()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
