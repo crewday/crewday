@@ -18,11 +18,11 @@ interface TabDef {
   to: string;
   glyph: ReactNode;
   label: string;
-  matchPrefix?: string;
+  matchPrefix?: string | string[];
 }
 
 const TABS: TabDef[] = [
-  { to: "/today", glyph: <ListTodo size={18} strokeWidth={1.8} />, label: "Today" },
+  { to: "/today", glyph: <ListTodo size={18} strokeWidth={1.8} />, label: "Today", matchPrefix: ["/today", "/task/"] },
   { to: "/schedule", glyph: <CalendarDays size={18} strokeWidth={1.8} />, label: "Schedule" },
   { to: "/chat", glyph: <MessageSquareMore size={18} strokeWidth={1.8} />, label: "Chat" },
   { to: "/my/expenses", glyph: <Euro size={18} strokeWidth={1.8} />, label: "Expenses", matchPrefix: "/my/expenses" },
@@ -36,11 +36,14 @@ export default function BottomTabs() {
   return (
     <nav className="phone__tabs" aria-label="Bottom navigation">
       {TABS.map((t) => {
+        const prefixes = t.matchPrefix
+          ? (Array.isArray(t.matchPrefix) ? t.matchPrefix : [t.matchPrefix])
+          : null;
         const active =
           t.to === "/me"
             ? ME_PATHS.has(pathname)
-            : t.matchPrefix
-              ? pathname.startsWith(t.matchPrefix)
+            : prefixes
+              ? prefixes.some((p) => pathname.startsWith(p))
               : pathname === t.to;
         return (
           <NavLink

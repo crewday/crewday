@@ -62,10 +62,10 @@ const NAV_ICON = (Icon: typeof LayoutDashboard) => (
 
 const BASE_NAV_ITEMS: SideNavItem[] = [
   { type: "section", label: "MY WORK", phoneHidden: true },
-  { type: "link", to: "/today", label: "My Day", phoneHidden: true, icon: NAV_ICON(Sunrise) },
+  { type: "link", to: "/today", matchPrefix: ["/today", "/task/"], label: "My Day", phoneHidden: true, icon: NAV_ICON(Sunrise) },
   { type: "link", to: "/schedule", label: "My Schedule", phoneHidden: true, icon: NAV_ICON(CalendarClock) },
   { type: "link", to: "/my/expenses", matchPrefix: "/my/expenses", label: "My Expenses", phoneHidden: true, icon: NAV_ICON(Euro) },
-  { type: "link", to: "/me", matchPrefix: "/me", label: "Me", phoneHidden: true, icon: NAV_ICON(UserCircle) },
+  { type: "link", to: "/me", matchPrefix: ["/me", "/history"], label: "Me", phoneHidden: true, icon: NAV_ICON(UserCircle) },
   { type: "section", label: "OPERATE" },
   { type: "link", to: "/dashboard", label: "Dashboard", icon: NAV_ICON(LayoutDashboard) },
   { type: "link", to: "/properties", matchPrefix: "/propert", label: "Properties", icon: NAV_ICON(Home) },

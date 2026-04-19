@@ -38,7 +38,7 @@ const NAV_ITEMS: SideNavItem[] = [
   { type: "link", to: "/quotes", label: "Quotes", icon: NAV_ICON(FileText) },
   { type: "link", to: "/invoices", label: "Invoices", icon: NAV_ICON(Receipt) },
   { type: "section", label: "ACCOUNT" },
-  { type: "link", to: "/me", matchPrefix: "/me", label: "Me", icon: NAV_ICON(UserCircle) },
+  { type: "link", to: "/me", matchPrefix: ["/me", "/history"], label: "Me", icon: NAV_ICON(UserCircle) },
 ];
 
 function hasDrawerItems(items: SideNavItem[]): boolean {

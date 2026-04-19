@@ -37,10 +37,10 @@ const NAV_ICON = (Icon: typeof ListTodo) => (
 );
 
 const NAV_ITEMS: SideNavItem[] = [
-  { type: "link", to: "/today", label: "Today", phoneHidden: true, icon: NAV_ICON(ListTodo) },
+  { type: "link", to: "/today", matchPrefix: ["/today", "/task/"], label: "Today", phoneHidden: true, icon: NAV_ICON(ListTodo) },
   { type: "link", to: "/schedule", label: "Schedule", phoneHidden: true, icon: NAV_ICON(CalendarDays) },
   { type: "link", to: "/my/expenses", label: "Expenses", phoneHidden: true, icon: NAV_ICON(Euro) },
-  { type: "link", to: "/me", matchPrefix: "/me", label: "Me", phoneHidden: true, icon: NAV_ICON(UserCircle) },
+  { type: "link", to: "/me", matchPrefix: ["/me", "/history"], label: "Me", phoneHidden: true, icon: NAV_ICON(UserCircle) },
 ];
 
 function initialsOf(name: string): string {
