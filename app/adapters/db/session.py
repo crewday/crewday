@@ -17,9 +17,10 @@ See ``docs/specs/01-architecture.md`` §"Adapters".
 from __future__ import annotations
 
 import logging
+import sqlite3
 from types import TracebackType
 
-from sqlalchemy import Engine, create_engine, make_url
+from sqlalchemy import Engine, create_engine, event, make_url
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -91,15 +92,45 @@ def make_engine(url: str | None = None) -> Engine:
         connect_args: dict[str, object] = {"check_same_thread": False}
         is_memory = parsed.database in (None, "", ":memory:")
         if is_memory:
-            return create_engine(
+            engine = create_engine(
                 normalised,
                 connect_args=connect_args,
                 poolclass=StaticPool,
                 future=True,
             )
-        return create_engine(normalised, connect_args=connect_args, future=True)
+        else:
+            engine = create_engine(normalised, connect_args=connect_args, future=True)
+        _enable_sqlite_foreign_keys(engine)
+        return engine
 
     return create_engine(normalised, future=True)
+
+
+def _enable_sqlite_foreign_keys(engine: Engine) -> None:
+    """Issue ``PRAGMA foreign_keys=ON`` on every SQLite connection.
+
+    SQLite ships FK enforcement OFF by default for backwards
+    compatibility; without this hook the ``ON DELETE CASCADE`` and
+    referential-integrity constraints on ``user_workspace`` etc. silently
+    do nothing. The pragma is per-connection, so we re-issue it on each
+    ``connect`` event the pool hands back. Postgres and other dialects
+    ignore this path entirely (the caller guards by drivername).
+    """
+
+    @event.listens_for(engine, "connect")
+    def _set_sqlite_pragma(
+        dbapi_connection: object, _connection_record: object
+    ) -> None:
+        if not isinstance(dbapi_connection, sqlite3.Connection):
+            # Defensive: ``sqlite+aiosqlite`` and other drivers wrap the
+            # DBAPI connection; the pragma statement is safe but we skip
+            # anything we don't recognise so Postgres can never trip this.
+            return
+        cursor = dbapi_connection.cursor()
+        try:
+            cursor.execute("PRAGMA foreign_keys=ON")
+        finally:
+            cursor.close()
 
 
 # Lazy module-level defaults. We do NOT build the engine at import time:
