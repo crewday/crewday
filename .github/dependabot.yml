@@ -59,22 +59,3 @@ updates:
       npm-all:
         patterns:
           - "*"
-
-  # GitHub Actions
-  - package-ecosystem: "github-actions"
-    directory: "/"
-    schedule:
-      interval: "weekly"
-      day: "monday"
-      time: "09:00"
-      timezone: "Europe/Paris"
-    open-pull-requests-limit: 3
-    commit-message:
-      prefix: "deps(actions)"
-    labels:
-      - "dependencies"
-      - "github-actions"
-    groups:
-      actions-all:
-        patterns:
-          - "*"
