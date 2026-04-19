@@ -249,7 +249,9 @@
     flex-direction: column;
     min-height: 0;
     overflow-y: auto;
-    padding: 20px 40px 40px;
+    /* Top padding is 0 on purpose: `.page-topbar` supplies its own
+       36px top breathing room, matching the ≥1080px rule below. */
+    padding: 0 40px 40px;
     align-items: stretch;
   }
   .phone__section { padding: 16px 0; width: 100%; max-width: 880px; margin: 0 auto; }
