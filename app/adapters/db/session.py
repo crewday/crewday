@@ -25,6 +25,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.adapters.db.ports import DbSession
 from app.config import get_settings
+from app.tenancy.orm_filter import install_tenant_filter
 
 __all__ = ["UnitOfWorkImpl", "make_engine", "make_uow", "normalise_sync_url"]
 
@@ -111,7 +112,15 @@ _default_sessionmaker_: sessionmaker[Session] | None = None
 
 
 def _default_sessionmaker() -> sessionmaker[Session]:
-    """Return the process-wide default ``sessionmaker``, building on first use."""
+    """Return the process-wide default ``sessionmaker``, building on first use.
+
+    The tenancy ``do_orm_execute`` hook is installed here so every query
+    routed through the production sessionmaker auto-injects the
+    ``workspace_id`` filter. UoW unit tests that build their own
+    ``sessionmaker`` directly bypass this and don't get the hook — they
+    exercise raw transaction mechanics against tables that are not
+    registered as scoped, so the un-hooked path is safe there.
+    """
     global _default_engine, _default_sessionmaker_
     if _default_sessionmaker_ is None:
         _default_engine = make_engine()
@@ -120,6 +129,7 @@ def _default_sessionmaker() -> sessionmaker[Session]:
             expire_on_commit=False,
             class_=Session,
         )
+        install_tenant_filter(_default_sessionmaker_)
     return _default_sessionmaker_
 
 
