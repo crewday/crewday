@@ -112,17 +112,64 @@ because no workspace exists yet:
    Per-IP and per-email rate limits (§15 "Self-serve abuse
    mitigations") apply; disposable-domain blocklist rejects
    throwaway providers. `desired_slug` is validated against the
-   §02 regex and blocklist, then checked against live `workspaces`
-   rows; `409 slug_taken` returns a suggested alternative. The
-   server stores a `signup_attempt` row keyed by
-   `(email, desired_slug)` with a 15-minute TTL and emails a
-   magic link (`/signup/verify?token=...`).
+   §02 regex and the reserved-slug guard below, then checked
+   against live `workspaces` rows; `409 slug_taken` returns a
+   suggested alternative. The server stores a `signup_attempt`
+   row keyed by `(email, desired_slug)` with a 15-minute TTL and
+   emails a magic link (`/signup/verify?token=...`).
+
+   **Reserved slugs.** The following labels are permanently
+   reserved — `POST /signup/start` rejects them with
+   `409 slug_reserved`, and the admin-init path (§ "First-owner
+   bootstrap") refuses them too:
+
+   ```
+   admin, api, app, assets, auth, demo, docs, events, guest,
+   healthz, login, logout, public, readyz, recover, signup,
+   static, status, support, version, w, webhooks, ws, www
+   ```
+
+   This list is the operational superset of §02's blocklist and
+   MUST stay in sync with the reverse-proxy routing table (§01,
+   §16) — any future route reserved at the bare host gets an
+   entry here first. The list lives alongside the §02 regex as a
+   constant in `app.tenancy.slug` and is loaded by both signup
+   and admin-init.
+
+   **Homoglyph guard.** Reject any `desired_slug` whose
+   ASCII-folded, Punycode-normalized, digit-substituted form
+   (`0 → o`, `1 → l`) collides with an existing active slug.
+   Example: `rnicasa` is rejected when `micasa` is taken (rn vs
+   m); `0wner` is rejected when `owner` is taken. Error:
+   `409 slug_homoglyph_collision` with the colliding existing
+   slug in the error body so the signup UI can explain the
+   rejection. The fold is purely defensive — the regex in §02
+   already restricts the character set, but the fold catches
+   typographic look-alikes registered before a similar slug gets
+   trademarked.
+
+   **Grace period.** On workspace archive
+   (`verification_state='archived'`) or hard delete, the slug is
+   copied to a `slug_reservation` row (§02) with a **30-day**
+   hold before any other signup may claim it. Attempts inside
+   the window return `409 slug_in_grace_period` with the
+   `reserved_until` value in the error body. The
+   `slug_reservation` row carries `previous_workspace_id` (for
+   audit), `reserved_until` (the reservation's expiry), and
+   `reason` (`archived | hard_deleted | system_reserved |
+   homoglyph_guard`) — see §02 for the full schema. The signup
+   worker prunes expired rows during `signup_gc`. A manager who
+   archives a workspace by mistake can recover the slug within
+   the window via `crewday admin workspace unarchive`, which
+   clears the reservation atomically.
 2. **Magic-link verification.** Visitor clicks the link. `GET
    /signup/verify` redeems the token. The server atomically, in a
    single transaction:
    - inserts the `workspaces` row
      (`created_via='self_serve'`, `verification_state='email_verified'`,
-     `plan='free'`, `quota_json` copied from the free-tier caps);
+     `plan='free'`, `quota_json` copied from the free-tier caps,
+     `signup_ip` set to the `POST /signup/start` request's source
+     IP — see §15 "Per-IP aggregate LLM spend cap");
    - inserts the `users` row, a `role_grants` row with
      `(scope_kind='workspace', scope_id=<ws>, grant_role='manager')`,
      the four system permission groups on the new workspace, and
@@ -243,6 +290,24 @@ All three events land in the audit log under `auth.reenroll`
 with a `trigger` column of
 `manager_reissue | self_service | break_glass`.
 
+### Worker recovery flow — three layered paths
+
+Workers frequently lose phones, change devices, or arrive without
+a working email address. v1 lands three layered paths so the
+human surface always has an exit and no single compromised actor
+can unilaterally impersonate a worker:
+
+1. **Email magic-link (default)** — see "Self-service lost-device
+   recovery" immediately below.
+2. **Owner-initiated reset (safety net)** — see "Owner-initiated
+   worker passkey reset" below.
+3. **Printable welcome packet** — see "Printable welcome packet"
+   below; minted at invite time, carried on paper.
+
+Each path independently satisfies the enrollment-magic-link
+requirement; they differ in *who triggers it* and *who is copied
+on the notification*, not in *what lands on the device*.
+
 ### Self-service lost-device recovery
 
 Users who have lost access to every device with a registered
@@ -306,6 +371,73 @@ field is required for owners and managers.
 (`POST /api/v1/users/{id}/magic_link`). That path skips the
 workspace kill-switch entirely — it is the fallback for
 deployments that disable self-service.
+
+### Owner-initiated worker passkey reset
+
+Any workspace owner MAY tap **"Reset worker passkey"** on a
+worker's profile (`POST /api/v1/users/{id}/reset_passkey`). This
+differs from `users.reissue_magic_link` in one important way:
+the server mails the enrollment magic link to **both** the
+worker's email **and** the owner's email. The email body sent to
+the owner is an **audit notification copy**, not a second valid
+token — it carries a rendered summary of the action ("You reset
+the passkey for Marie L. on <timestamp>; a magic link has been
+mailed to her at m***@example.com") and the link in it is **not
+claimable**: clicking it lands on `/recover/notice` with a
+human-readable "this is your copy; the worker clicks the link in
+her own email" page.
+
+Concretely:
+
+- The worker's email carries the real magic link
+  (`/recover/enroll?token=…`); consuming it enrols a fresh
+  passkey under the worker's account.
+- The owner's email carries a
+  *non-consumable* copy with the worker's email address masked
+  (`m***@example.com`) plus a prominent "Not you?" link that
+  reports the action for review.
+- If the owner forwards their own email's non-consumable link to
+  the worker, the worker sees the notice page — not an enrolment
+  ceremony — and both parties can see that the action started.
+- A compromised owner account therefore cannot unilaterally
+  impersonate a worker: the enrolment still requires the
+  worker's mailbox.
+
+Error codes:
+
+- `reset_requires_worker_consent` — the owner tried to enrol a
+  passkey under the worker's account using the notification-copy
+  link.
+
+### Printable welcome packet
+
+At invite time, `POST /api/v1/users/invite` (§12) returns a
+one-page PDF under `Content-Type: application/pdf` containing:
+
+- a **passkey-enrolment QR code** pointing at a tokenised enrol
+  URL (the same token used in the email invite, so the PDF and
+  the email are equivalent on first use);
+- the **workspace identifier** and the **worker's display
+  name**;
+- a **"recover from any device" URL**
+  (`https://<host>/recover?u=<worker_user_id_public>`) so a
+  worker without the QR-capable device can still find the right
+  starting page;
+- the **owner's phone number** (if set in workspace contact
+  settings) for offline contact;
+- plain-language copy: *"If you lose your phone, visit this link
+  from any device and we'll email you a new setup code. If you
+  can't get email, ask the person who invited you."*
+
+The manager UI offers a **"Download PDF"** button next to every
+invite in the outbox and a **"Print packets"** bulk action in
+the Employees list that renders one page per selected user. The
+PDF is generated server-side from the same template the welcome
+email uses, and it carries no cryptographic material beyond the
+same invite token already in the email; losing the packet is no
+worse than losing a single invite email and is mitigated the
+same way (owner revokes the invite via
+`DELETE /api/v1/users/invite/{id}`).
 
 ### Workspace kill-switch
 
@@ -698,6 +830,28 @@ plaintext code to
 `used_at` is set, a fresh `magic_link` is issued (15-min TTL), and its
 id is stored in `consumed_magic_link_id`. A used code is inert even
 if the resulting magic link expires unused.
+
+**Redemption rate limit.** Break-glass redemption is capped at
+**3 failed attempts per user per 1-hour rolling window**. On the
+3rd failure, redemption locks for **24 hours** for that user
+(all subsequent `POST /auth/magic/consume` calls keyed to this
+user return `429 break_glass_locked_out`, regardless of source IP
+or client). The user and every workspace owner on any shared
+scope receive an `audit.break_glass.locked_out` notification
+through §10 messaging. Successful redemption burns the code
+immediately (no replay) and resets the failure counter.
+
+**Re-minting.** Code consumption does **not** automatically
+regenerate the set (re-enrolment does, per "Re-enrollment
+side-effects" above — that path invalidates every credential,
+including the code set, in a single transaction). After a user
+simply **uses a code** outside a re-enrolment (e.g. to pass a
+step-up challenge that didn't trigger a full passkey rotation),
+they MUST visit `/me/security` (§14) and re-mint the set by
+hand. The **old codes remain valid** until explicitly replaced,
+so the user is never locked out of recovery during the re-mint
+step. The UI surfaces an amber banner on the home page for any
+user whose unused-code count drops below 3 until they re-mint.
 
 ## Magic link format
 

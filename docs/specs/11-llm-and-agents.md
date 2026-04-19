@@ -44,6 +44,35 @@ holding a delegated token from the calling user. Concretely:
 This inversion — CLI and REST first, UI last — is why the two
 embedded agents below can drive the product end-to-end.
 
+## Agent authority boundary
+
+The agent-first invariant stops at three lines. Every route in §12
+falls into exactly one of the columns below; the approval pipeline,
+the interactive-session-only list, and the host-CLI-only fence are
+the three concrete enforcement mechanisms behind them.
+
+| (a) Available to delegated tokens | (b) Gated by approval always | (c) Forbidden to delegated tokens entirely |
+|-----------------------------------|-------------------------------|---------------------------------------------|
+| Read queries across every resource the delegating user can already read. | Payroll run / issue / pay (`payroll.issue`, `payroll.pay`, §09). | `crewday admin *` — host-CLI-only verbs (§13, "Host-CLI-only administrative commands"). |
+| Draft and create writes (tasks, expenses, issues, stays, schedules, messaging) subject to §11 approval and §12 idempotency. | Payout-detail reads (interactive-session-only — see § "Interactive-session-only endpoints" and §09). | `settings.signup_enabled` toggle — flipping self-serve provisioning is deployment-scope. |
+| Edits to the delegating user's own preferences, drafts, and self-service rows (leave, availability overrides, personal task lists). | Expense approval above the workspace's configured threshold (`expenses.approve`, §09). | Root-key / envelope-key rotation (`crewday admin rotate-root-key`, §15). |
+| `--dry-run` / `--explain` for any endpoint (§13), regardless of whether the underlying verb is in column (b) or (c). | Work-order accept-quote and vendor-invoice approve/mark-paid (§22). | Direct DB operations of any kind — there is no HTTP or CLI surface agents can invoke. |
+| Voice transcription for the agent's own chat turn (`voice.*`), when the corresponding capability is on. | Workspace setting changes that move money routing or quotas (default-pay-destination, engagement-kind boundary crossings, §05, §09, §22). | Backup restore (`crewday admin restore`, §16). |
+| | Permission-group membership changes (`permission_group.*`) and role-grant edits (§05). | Workspace archive / unarchive and hard-delete purges (`crewday admin workspace archive`, `crewday admin purge`, §02, §15). |
+| | Token mint, rotate, and scope grants (`auth.tokens.*`, §03). | `POST /payslips/{id}/payout_manifest` and every other endpoint tagged interactive-session-only — delegated tokens receive `403 session_only_endpoint` regardless of scope (§12). |
+| | Bulk destructives above the §11 row threshold (`*.delete` > 10 rows, bulk schedule changes > 50 future tasks). | Deployment-wide settings (`/admin/*` verbs guarded by `deployment.*` grants) — admins reach these through the `/admin` shell agent (§11 "Admin-side agent"), not from a workspace-scoped delegated token. |
+
+The openapi.json annotations are the single source of truth: column
+(b) routes carry `x-agent-confirm` (§ "Action confirmation
+annotation") **or** a workspace-policy always-gated entry;
+column (c) routes carry `x-agent-forbidden: true` (delegated-token
+requests reject at the auth middleware before reaching the handler)
+or `x-interactive-only: true` (the interactive-session gate in § "Interactive-session-only endpoints").
+A CI lint (§17 "CLI parity") fails the build when a new mutating
+route is added without either `x-agent-confirm`, `x-agent-forbidden`,
+or `x-interactive-only` — there is no "silent" category. See §12 for
+the annotation shape and §17 for the enforcement gate.
+
 ## Embedded agents
 
 Two chat agents are embedded in the product. Each operates with a
@@ -739,15 +768,19 @@ redeploy. Overrides are deployment-wide.
 
 ## Prompt library
 
-System prompts move from "files on disk" to a DB-backed library with
-**hash-self-seeding** — the pattern fj2 ships as `PromptTemplate`,
-adapted to crew.day. Code still declares the default; the DB carries the
-operator's customization. The hash reconciles the two.
+`llm_prompt_template` is one of the **hash-self-seeded tables**
+defined in §02 — system prompts move from "files on disk" to a
+DB-backed library where code declares the default and the DB
+carries the operator's customisation. The shared contract (resolver
+algorithm, revision twin, admin operations, retention, deployment
+scope) lives in §02 "Hash-self-seeded tables"; this section
+specifies the prompt-specific columns, seeds, and admin surface.
+The pattern is adapted from fj2's `PromptTemplate`.
 
 ```
 llm_prompt_template
 ├── id                  ULID PK
-├── capability          text            -- one row per capability; unique while is_active
+├── capability          text            -- identity key; unique while is_active
 ├── name                text            -- human-readable, defaults to Title-Cased capability
 ├── template            text            -- full prompt body, Jinja2-compatible
 ├── version             int             -- auto-incremented
@@ -768,45 +801,32 @@ llm_prompt_template_revision
 └── UNIQUE(template_id, version)
 ```
 
-### Self-seeding algorithm
+### Self-seeding
 
-1. Code calls `get_active_prompt(capability, default=...)` once per
-   process for each capability it uses.
-2. No DB row yet → auto-create with `template = default`,
-   `default_hash = sha256(default)[:16]`, `version = 1`,
-   `is_active = true`.
-3. Row exists and `default_hash` matches the current code default →
-   return the stored body.
-4. Row exists with a different `default_hash`:
-   - If the stored `template` still hashes to `default_hash` (admin
-     never customised) → **auto-upgrade** the row: write the new
-     `template`, bump `version`, snapshot the old body into
-     `llm_prompt_template_revision`, set `default_hash` to the new
-     hash. The next call returns the upgraded body.
-   - If the stored `template` differs from `default_hash` (admin
-     customised) → **preserve** the admin version; only update
-     `default_hash` to the new baseline so future code changes can
-     compare against it. Emit a structured log
-     `prompt.customised_code_default_changed` with the capability.
-5. Admin edit via `PUT /admin/api/v1/llm/prompts/{id}` always
-   snapshots the old body into `..._revision`, bumps `version`, and
-   stores `default_hash` unchanged (the code default didn't move).
+Code calls `get_active_prompt(capability, default=...)` once per
+process for each capability it uses. The resolver implements the
+hash-self-seed algorithm defined in §02 "Hash-self-seeded tables"
+(create / match / auto-upgrade / preserve). The operator-facing
+guarantee — "edit the prompt in the admin UI, keep your
+customisation across deploys" **and** "my unmodified prompts stay
+in sync with the code" — is the invariant the primitive exists to
+provide. The capability-scoped observability log
+`template.customised_code_default_changed` carries `capability`
+as its identity key.
 
-This gives operators "edit the prompt in the admin UI, keep your
-customization across deploys" **and** "my unmodified prompts stay in
-sync with the code" simultaneously — the guarantee that made the fj2
-version worth porting.
+### Admin operations
 
-### Reset and history
+Follows the hash-self-seeded admin contract (§02). Concrete paths
+for prompts:
 
-- `DELETE /admin/api/v1/llm/prompts/{id}` is disallowed; "reset to
-  default" is a `POST .../reset-to-default` that writes a new
-  revision containing the current code default and bumps the version.
-- `GET .../revisions` lists every past version with a diff-against-
-  current button (rendered client-side; the server only returns raw
-  bodies).
-- Revision retention follows `retention.llm_prompt_revisions_days`
-  (default 365) in the settings cascade (§02).
+- `GET /admin/api/v1/llm/prompts` — list active rows with
+  `{version, default_hash, is_customised}`.
+- `GET /admin/api/v1/llm/prompts/{id}/revisions` — revision history.
+- `PUT /admin/api/v1/llm/prompts/{id}` — operator edit.
+- `POST /admin/api/v1/llm/prompts/{id}/reset-to-default` — re-seed
+  from the current code default (see §02 on why `DELETE` is not
+  offered).
+- Retention: `retention.template_revisions_days` (§02), default 365.
 
 ### What does and does not go here
 
@@ -981,6 +1001,61 @@ no extra service.
 by default, configurable per workspace (§02). `raw_response_json` is
 separate, shorter-lived, and controlled by the settings above.
 
+### Trust boundary for prompt inputs
+
+Not every string that reaches the model is equal. The redaction layer
+above handles PII; this subsection handles **prompt injection** — the
+separate concern of untrusted text reaching a privileged context and
+coaxing the agent into actions its human never asked for. crew.day's
+rule is that prompt inputs divide into two tiers and the two tiers
+never merge.
+
+**Author-trusted sources.** May reach the model without an extra
+redaction pass beyond standard PII scrubbing, because the only
+humans who can write them already hold the authority the agent
+borrows:
+
+- Owner / manager-authored "Agent preferences" blobs (§ "Agent
+  preferences") — the user writes instructions to their own agent.
+- SOP and KB bodies authored under `kb.edit` (§07).
+- System prompts and capability prompts (`llm_prompt_template`,
+  § "Prompt library").
+- Fixed server-side scaffolding (resource descriptors, tool schemas,
+  the "Current admin page" block).
+
+**Untrusted sources.** MUST flow through the redaction + scrub
+layer and MUST NOT be promoted into any author-trusted scope without
+a deliberate re-scrub at the boundary:
+
+- Task comments, task titles, and description fields authored by
+  any user (including workers and clients).
+- Expense descriptions, line-item notes, and amount-justification
+  text.
+- Receipt OCR output and any other text extracted from uploaded
+  files (§08, §21).
+- iCal event names and descriptions pulled from external calendar
+  feeds (§04).
+- Guest welcome-page inputs (wifi notes, guest-provided fields).
+- Chat-adapter message payloads arriving from external channels
+  (§23) — WhatsApp/Telegram/email body content before it reaches
+  the agent dispatcher.
+- Uploaded file contents broadly — PDFs, images, text documents —
+  once extracted by OCR or text conversion.
+
+**Boundary rule.** Any server-side code that assembles an
+author-trusted blob (preference stack, SOP injection, prompt
+template, admin-page context) from data that originated in an
+untrusted source MUST re-run the redaction + scrub layer at the
+boundary, with a `trust_source='untrusted'` tag so the scrub is not
+skipped on a "preferences already redacted" cache hit. Preferences
+are **never** computed from task data, expense data, or chat
+payloads; that path is forbidden, not merely gated. Review the
+seam when adding a new preference source.
+
+See §15 "Personal task visibility" and §07 "KB authoring" for the
+downstream consequences — a visibility bug on either side would
+turn an untrusted input into an author-trusted one by accident.
+
 ## Agent audit trail
 
 Every write performed via a delegated token is captured in `audit_log`
@@ -1051,6 +1126,63 @@ rows. They appear together in the `/approvals` desk for
 owner/manager oversight and, when the triggering channel supports
 it, are rendered inline in the chat surface where the agent lives
 (see "Inline approval UX").
+
+### Approval decisions travel through the human session, not the agent token
+
+The approval model is the Claude-Code-style inline confirmation: the
+user is already authorised to do the thing, the card is there so they
+see what their agent is about to do and can say yes or no before it
+commits. **A user can absolutely self-approve their own agent's
+actions** — they originated the intent and they carry the permission.
+What the spec pins is which credential carries the decision, so a
+compromised delegated token cannot close its own loop.
+
+- Approval decisions
+  (`POST /api/v1/agent/action/{id}/{approve,deny}` and its admin
+  sibling) MUST be submitted under a **passkey-authenticated user
+  session**. Requests authenticated by any delegated token
+  (scoped or delegated under §03) reject with
+  `403 approval_requires_session`. The user's own browser clicking
+  "Confirm" on the chat card is the expected path; a second agent
+  call is not.
+- The approving session may belong to the **same user** who
+  delegated the initiating token — this is the common single-owner
+  case. What matters is the credential type (session vs delegated
+  token), not that two different humans are in the loop.
+- Personal API tokens (PATs, §03) that a human minted for their own
+  CLI use count as session-class for this purpose *only* when they
+  carry the `approvals:act` scope, which is off by default and
+  must be granted explicitly at mint time. This lets a CLI-driven
+  owner approve from a terminal without opening the browser, at
+  the cost of one deliberate scope grant that the owner can revoke
+  later. Delegated agent tokens can never hold this scope.
+- Workspace-policy always-gated actions in `/approvals` follow the
+  same rule (decision must come via a session or a PAT with
+  `approvals:act`). They do *not* require a second human — a single
+  owner can review their agent's payroll run from their own
+  `/approvals` desk. The queue is a visibility surface, not a
+  two-person control.
+
+Audit-log fields make the decision chain legible after the fact:
+
+- `action.agent_token_id` — token that proposed the action (may be
+  `NULL` for actions proposed by a passkey session rather than a
+  delegated-token agent).
+- `action.initiator_user_id` — the delegating user behind that
+  token; denormalised on the `agent_action` row so rotations and
+  revocations do not lose the identity.
+- `decision.approver_user_id` — the human who clicked
+  approve/deny, resolved from the approver's passkey session (or,
+  for PAT-submitted approvals, the PAT's subject user).
+- `decision.approver_credential_kind` — `session` | `pat`.
+  Delegated-token submissions never reach this field; they reject
+  at the auth middleware.
+
+The corresponding audit row is `audit.approval.granted` or
+`audit.approval.denied`; a rejected submission writes
+`audit.approval.credential_rejected` with the offending token id so
+attempted closed-loop bypass surfaces in the Agent Activity view
+(§ "Agent audit trail") rather than failing silently.
 
 ### Action confirmation annotation
 
@@ -1410,17 +1542,17 @@ that the agent itself reads.
   `slug`, `title`, `summary`, `roles: [manager | employee | admin]`,
   and an optional `capabilities: […]` allow-list (defaulting to all
   three chat capabilities).
-- A new table `agent_doc` (§02 "Shared tables") **hash-self-seeds**
-  from these files on boot using the same algorithm as
-  `llm_prompt_template` (§ "Self-seeding algorithm"). A
-  `default_hash` mismatch with the current code default
-  auto-upgrades unmodified rows and preserves operator edits.
+- The `agent_doc` table (§02) is one of the **hash-self-seeded
+  tables** (§02 "Hash-self-seeded tables"); it seeds from these
+  files on boot. A `default_hash` mismatch with the current code
+  default auto-upgrades unmodified rows and preserves operator
+  edits.
 - Operators edit per-deployment overrides at `/admin/agent-docs`
   (a slide-over on the `/admin/llm` page, mirroring the prompt
   library) or via `crewday admin agent-docs edit <slug>`.
-- Reset-to-default and revision history follow the prompt-library
-  pattern (§ "Reset and history"). Retention follows
-  `retention.llm_prompt_revisions_days` (§02).
+- Reset-to-default and revision history follow the shared
+  hash-self-seeded admin contract (§02). Retention follows
+  `retention.template_revisions_days` (§02).
 
 The two tools exposed to the agent:
 
@@ -1490,7 +1622,7 @@ language, not retry tightly.
 Three reasons:
 
 1. **Context stays small.** The combined manual library for a
-   household with thirty assets can run to 50 000+ tokens; injecting
+   workspace with thirty assets can run to 50 000+ tokens; injecting
    it every turn is wasteful and degrades attention on the actual
    question.
 2. **Permission boundary is naturally enforced.** Tool calls flow
@@ -1683,8 +1815,17 @@ aggregated `llm_call` totals): a **workspace-wide rolling dollar
 budget** that envelopes every LLM capability charged to the workspace.
 The per-capability caps stay — they remain useful to throttle a single
 noisy capability — but the product-level question "how much is this
-household spending on agents?" is answered by this envelope, and so is
+workspace spending on agents?" is answered by this envelope, and so is
 the "stop me before I overspend" guard.
+
+A further layer above this one — for open self-serve deployments —
+aggregates `llm_call.cost_usd` across every workspace sharing a
+`signup_ip` (or IPv6 `/64` prefix). That **per-IP aggregate LLM
+spend cap** is the deploy-wide guard against a single actor
+provisioning many unverified workspaces to multiply the
+per-workspace cap; see §15 "Per-IP aggregate LLM spend cap" for
+the cap formula, the promotion-on-verification rule, and the
+`ip_budget_exceeded` error surface.
 
 ### Meter
 

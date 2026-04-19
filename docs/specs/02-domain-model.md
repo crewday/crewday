@@ -324,9 +324,10 @@ introduces `workspace_id` on every user-editable table.)
 | plan               | text        | `free \| pro \| enterprise \| unlimited`. Enforced by the quota gate (§15). v1 ships every SaaS workspace on `free`; self-host operators typically assign `unlimited` to their own workspaces via `crewday admin workspace set-plan`. Paid-tier enforcement (Stripe, dunning) is Beyond v1 — §19. |
 | quota_json         | jsonb/text  | caps actually enforced: `{users_max, properties_max, storage_bytes, llm_budget_cents_30d}`. Derived from `plan` on provisioning; editable by deployment operator via `crewday admin workspace set-quota`. |
 | created_via        | text        | `self_serve \| admin_invite \| admin_init \| seed`. Drives first-run UI + quota tightening.    |
-| verification_state | text        | `unverified \| email_verified \| human_verified \| trusted`. Self-serve tenants stay below `human_verified` under tight quotas until a manager approves. See §03, §15. |
+| verification_state | text        | `unverified \| email_verified \| human_verified \| trusted \| archived`. Self-serve tenants stay below `human_verified` under tight quotas until a manager approves. `archived` is a terminal state reachable via `crewday admin workspace archive` (§13); archived workspaces are read-only, hold their slug in `slug_reservation` for 30 days, and can be unarchived atomically within the window. See §03, §15. |
 | created_at         | tstz        |                                                                                                |
 | created_by_user_id | ULID FK?    | provisioning user (the first owner); null for seeded rows                                      |
+| signup_ip          | inet?       | source IP captured at `POST /signup/start` for self-serve workspaces; null for `admin_invite`, `admin_init`, `seed`. Indexed (IPv4 full; IPv6 as `/64` prefix) for the per-IP aggregate LLM-spend cap (§15). Retained for audit; `verification_state = human_verified` promotes the workspace out of the aggregate pool. |
 | default_language   | text        | BCP-47; used by §10 auto-translation and digest prose                                          |
 | default_currency   | text        | ISO-4217. Referenced by Money section below; per-property override in §04.                     |
 | default_country    | text        | ISO-3166-1 alpha-2. Workspace-level fallback for properties.                                   |
@@ -356,6 +357,49 @@ passkey enrollment and a minimum-activity gate (one property,
 one user invited, one task created); → `trusted` only when the
 deployment operator promotes the workspace. Per-state LLM and
 storage caps live in §15.
+
+### `slug_reservation`
+
+Holding area for workspace slugs that are temporarily off-limits
+even though no live `workspaces` row carries them — the grace
+period referenced by §03's reserved-slug logic (see §03
+"Self-serve signup" and `409 slug_in_grace_period`).
+
+| column                | type        | notes                                                 |
+|-----------------------|-------------|-------------------------------------------------------|
+| id                    | ULID PK     |                                                       |
+| slug                  | text UNIQUE NOT NULL | matches the §02 slug regex; normalised to lowercase on insert |
+| reserved_until        | tstz NOT NULL | 30 days after the triggering event; past-dated rows are pruned by `signup_gc` (§03) |
+| reason                | text NOT NULL | CHECK: `reason IN ('archived', 'hard_deleted', 'system_reserved', 'homoglyph_guard')` |
+| previous_workspace_id | ULID FK? ON DELETE SET NULL | references `workspaces.id`; nullable for `reason = 'system_reserved'` (new labels reserved ahead of a planned release) |
+| created_at            | tstz NOT NULL |                                                      |
+
+**Purpose.** A `POST /signup/start` whose `desired_slug`
+collides with a live `slug_reservation` returns `409
+slug_in_grace_period` with the `reserved_until` value in the
+error body, so the signup UI can explain when the slug becomes
+available. A manager who archives a workspace by mistake can
+recover the slug within the window via `crewday admin workspace
+unarchive` (§13), which deletes the reservation atomically.
+
+**Reasons:**
+
+- `archived` — workspace transitioned to `verification_state =
+  'archived'`. The slug cannot be re-used for 30 days after the
+  archive event to avoid a new workspace impersonating the old
+  one while cached links still point at it.
+- `hard_deleted` — workspace row was hard-deleted (operator
+  action via `crewday admin workspace purge`). Same 30-day
+  hold.
+- `system_reserved` — pre-seeded labels reserved ahead of a
+  planned release (e.g. a future route `/marketplace` pinning
+  `marketplace` so no one registers it as a workspace). Never
+  expires in practice (`reserved_until` set to
+  `9999-12-31T00:00:00Z`).
+- `homoglyph_guard` — added by the homoglyph rejection path
+  (§03) when a look-alike variant of an active slug is
+  submitted; the variant is held for the 30-day window so the
+  attacker cannot retry immediately.
 
 ### `property_workspace`
 
@@ -846,6 +890,17 @@ Append-only. Written in the same transaction as every mutation.
 | reason             | text    | optional, agent-supplied              |
 | agent_label        | text?   | token `name`; set when action performed via a delegated token (§03) |
 | agent_conversation_ref | text? | opaque prompt/conversation ref from `X-Agent-Conversation-Ref`, up to 500 chars |
+| prev_hash          | bytea NOT NULL | 32-byte SHA-256 of the previous row in insertion order; first row of the chain is `0x00…` (32 zero bytes) |
+| row_hash           | bytea NOT NULL | 32-byte SHA-256 of this row; see definition below |
+
+**Hash chain.** `row_hash = SHA256(prev_hash || actor_user_id ||
+action || entity_type || entity_id || before_json || after_json ||
+created_at)`, with each field serialised in a stable canonical form
+(UUIDs as raw 16 bytes, text UTF-8, JSON with sorted keys and no
+insignificant whitespace, timestamps as ISO-8601 UTC strings). The
+chain is append-only and per-deployment (not per-workspace) so a
+multi-workspace attacker cannot splice rows across tenants. See §15
+"Tamper detection" for the verifier.
 
 **Correlation scope.** `correlation_id` defaults to the HTTP request
 ID (generated server-side if the caller did not pass
@@ -931,13 +986,137 @@ under the same storage protections; deployments needing
 column-level encryption can layer it later without a schema
 change.
 
+### Hash-self-seeded tables
+
+A shared primitive for **code-shipped text defaults that operators
+can override per deployment without losing upgrades**. Code ships
+the default body, the DB carries the operator's customisation, and
+a hash reconciles the two on every boot. Unmodified rows
+auto-upgrade when the code default changes; customised rows are
+preserved. This is the pattern both the prompt library (§11
+"Prompt library", `llm_prompt_template`) and the agent knowledge
+tools (`agent_doc`, next subsection) implement — described once
+here and cited from both surfaces.
+
+**Who uses this primitive (v1).**
+
+| table                  | seed source                   | scope      | admin surface            | spec |
+|------------------------|-------------------------------|------------|--------------------------|------|
+| `llm_prompt_template`  | code-declared via `get_active_prompt(capability, default=…)` | deployment | `/admin/llm` "Prompts" slide-over | §11 "Prompt library" |
+| `agent_doc`            | `app/agent_docs/*.md` with front-matter | deployment | `/admin/agent-docs` | §11 "Agent knowledge tools" |
+
+Both tables keep two concrete shapes — `llm_prompt_template`
+carries `capability`, `agent_doc` carries `slug` / `roles` /
+`capabilities` — rather than folding into one polymorphic table.
+The contract below is the *shared shape*, not a shared schema.
+
+**Who does not use this primitive.** The following are also called
+"templates" in the codebase but are owned differently; they
+deliberately do **not** hash-self-seed:
+
+- **Email templates** (§10 "Template system") — filesystem-resident
+  Jinja2/MJML under `app/templates/email/`, compiled at build time.
+  Operators change email copy by editing the template file, not
+  through an admin UI. The locale-fallback resolver in §10 is
+  filesystem-based.
+- **WhatsApp templates** (§23 "Session window") — Meta-approved
+  content registered at the provider. The source of truth lives at
+  Meta; the gateway tracks sync state and offers a resubmit endpoint
+  (`POST /admin/api/v1/chat/templates/{name}/resync`) but does not
+  override template bodies locally.
+- **Task templates** (§06) and **stay-lifecycle rule templates**
+  (§04) — structured domain data (checklists, durations, role,
+  trigger offsets), not code-defaulted text.
+- **Action-confirmation `summary` templates** (§12 `x-agent-confirm`)
+  — OpenAPI-annotation-authored; the middleware pre-renders once
+  against the resolved payload and freezes the result on the
+  `agent_action` row (see §12's "never re-templates" rule).
+
+**Required shape of a hash-self-seeded table.** Every concrete
+caller ships the following columns on its primary row (names may be
+`template` / `body_md` / whatever fits the surface; the
+*semantics* are what matter):
+
+| column         | type      | purpose                                                                 |
+|----------------|-----------|-------------------------------------------------------------------------|
+| `id`           | ULID PK   |                                                                         |
+| identity key   | text      | `capability` / `slug` / etc.; unique while `is_active = true`           |
+| body           | text      | the active body the resolver returns                                    |
+| `version`      | int       | auto-incremented on every save (admin edit, code-default upgrade, or reset) |
+| `is_active`    | bool      | soft-delete guard; the unique index is partial on `is_active = true`    |
+| `default_hash` | text(16)  | `sha256(current-code-default)[:16]` at the time of the last seed        |
+| `created_at` / `updated_at` | tstz | standard bookkeeping                                         |
+
+Plus a **revision twin table** (`*_revision`) with one row per
+save, carrying `version`, the full body at save time, an optional
+operator note, `created_at`, and `created_by_user_id` (nullable;
+null identifies code-default upgrades). `UNIQUE(parent_id,
+version)`.
+
+Deployment-scope by construction: no `workspace_id`. These are the
+operator's defaults, applied to every workspace served by the
+deployment.
+
+**Resolver algorithm** (canonical; both surfaces implement this).
+
+1. Code calls the resolver once per process with the identity key
+   and the current code default: `get_active_prompt(capability,
+   default=…)` for prompts, the boot-time seed loop for agent docs.
+2. **No row yet** → auto-create with `body = default`,
+   `default_hash = sha256(default)[:16]`, `version = 1`,
+   `is_active = true`.
+3. **Row exists, `default_hash` matches the current code default**
+   → return the stored body.
+4. **Row exists, `default_hash` differs from the current code
+   default:**
+   - If the stored body still hashes to the *stored* `default_hash`
+     (operator never customised) → **auto-upgrade**: write the new
+     body, bump `version`, snapshot the old body into
+     `*_revision`, set `default_hash` to the new hash. Next call
+     returns the upgraded body.
+   - If the stored body differs from `default_hash` (operator
+     customised) → **preserve** the operator body; only update
+     `default_hash` to the new baseline so future code changes can
+     compare against it. Emit a structured log
+     `template.customised_code_default_changed` with the table and
+     identity key.
+5. An admin save always snapshots the previous body into
+   `*_revision`, bumps `version`, and stores `default_hash`
+   unchanged — the code default didn't move.
+
+**Admin contract.** Every concrete surface exposes the same four
+operations, under its own path:
+
+- `GET` list of active rows with `{version, default_hash, is_customised}`.
+- `GET /{id}/revisions` — chronological revision list; diff is
+  rendered client-side, server returns raw bodies.
+- `PUT /{id}` — operator edit; writes a new revision.
+- `POST /{id}/reset-to-default` — writes a new revision containing
+  the current code default, bumps `version`. **`DELETE` is not
+  offered** — "reset" is the disallowed-delete's replacement, so the
+  history stays continuous.
+
+**Retention.** Revision twin tables rotate on
+`retention.template_revisions_days` (default 365; workspace-scope
+setting in the cascade above). One key governs every
+hash-self-seeded table's revisions — when a new caller joins the
+primitive, it inherits this retention automatically. The latest
+revision is never pruned regardless of age.
+
+**Observability.** Structured logs emitted by the resolver:
+
+- `template.seeded` (first-boot row creation).
+- `template.auto_upgraded` (code default moved, operator hadn't
+  customised).
+- `template.customised_code_default_changed` (code default moved,
+  operator body preserved — worth reviewing at next release).
+
 ### `agent_doc`
 
 Code-shipped Markdown that the chat agents read on demand via
 `list_system_docs` / `read_system_doc` (§11 "Agent knowledge
-tools"). Hash-self-seeds from `app/agent_docs/*.md` using the same
-algorithm `llm_prompt_template` uses (§11 "Self-seeding
-algorithm").
+tools"). One of the hash-self-seeded tables (see previous
+subsection); seeds from `app/agent_docs/*.md` on boot.
 
 | column          | type      | notes                                                                           |
 |-----------------|-----------|---------------------------------------------------------------------------------|
@@ -963,7 +1142,9 @@ library and the LLM registry.
 ### `agent_doc_revision`
 
 One row per save (admin edit, code-default upgrade, or
-reset-to-default), mirroring `llm_prompt_template_revision`.
+reset-to-default) — the revision twin required by the
+hash-self-seeded tables contract. Mirrors
+`llm_prompt_template_revision`.
 
 | column             | type      | notes                                                   |
 |--------------------|-----------|---------------------------------------------------------|
@@ -976,15 +1157,43 @@ reset-to-default), mirroring `llm_prompt_template_revision`.
 | created_by_user_id | ULID FK?  | acting user; null for code-default upgrades             |
 
 Unique `(doc_id, version)`. Retention follows
-`retention.llm_prompt_revisions_days` (§ "Operational-log retention
-defaults" picks up this key implicitly through the prompt-library
-rotation worker).
+`retention.template_revisions_days` (§ "Hash-self-seeded tables" —
+shared with the prompt library and any future caller of the
+primitive).
 
 ### `secret_envelope`
 
 Per-workspace AES-GCM-encrypted blobs for secret values we must store
 (OpenRouter API key, SMTP password, iCal feed URLs that carry tokens).
 See §15.
+
+### `root_key_slot`
+
+Deployment-level storage of the active and legacy root encryption
+keys used by `secret_envelope`. Present to support the 72-hour
+dual-key window during root-key rotation — without it, rotation
+would require a synchronous re-encrypt sweep and block the app.
+One row per live key material; the active key is identified by
+`is_active = true`. Keys enter the table only through
+`crewday admin rotate-root-key` (§13, §15 "Root key compromise
+playbook").
+
+| column       | type        | notes                                                                                                  |
+|--------------|-------------|--------------------------------------------------------------------------------------------------------|
+| id           | ULID PK     |                                                                                                        |
+| key_fp       | bytea / BLOB(8) UNIQUE NOT NULL | 8-byte SHA-256 prefix of the key; the same fingerprint is stamped on every `secret_envelope` encrypted under this key |
+| key_ref      | text        | pointer to the actual key material (env var name, file path, KMS URI). Never the key itself.          |
+| is_active    | bool NOT NULL | exactly one row has `is_active = true`; enforced by a unique partial index                           |
+| activated_at | tstz NOT NULL |                                                                                                      |
+| retired_at   | tstz?       | set when a rotation moves this key to legacy; NULL while active                                        |
+| purge_after  | tstz?       | 72 hours after `retired_at`; `rotate-root-key --finalize` deletes the row once this has passed and the re-encrypt worker has processed every envelope carrying this fingerprint |
+| notes        | text?       | operator-supplied (e.g. `"leaked via Slack 2026-04-18"`) for audit                                     |
+
+A `secret_envelope.key_fp` that does not match any current
+`root_key_slot` row decrypts only if the operator re-supplies the
+key material via `crewday admin restore --legacy-key-file` (§15),
+which temporarily inserts a `root_key_slot` row with
+`is_active = false, purge_after = now() + 72h`.
 
 ### `agent_preference`
 
@@ -1204,6 +1413,7 @@ scope, and the spec that defines the feature:
 | `retention.audit_days` | int | `730` | W | §02 |
 | `retention.llm_calls_days` | int | `90` | W | §02, §11 |
 | `retention.task_photos_days` | int | `365` | W | — |
+| `retention.template_revisions_days` | int | `365` | W | §02 "Hash-self-seeded tables" — governs **every** hash-self-seeded revision twin (prompt library, agent docs, future callers). Not task templates, not email templates, not WhatsApp templates. |
 | `scheduling.horizon_days` | int | `30` | W/P | §06 |
 | `tasks.checklist_required` | bool | `false` | W/P/U/WE/T | §05 |
 | `tasks.allow_complete_backdated` | bool | `false` | W/P/U/WE | §05 |
@@ -1218,6 +1428,14 @@ scope, and the spec that defines the feature:
 | `invoice_reminders.enabled` | bool | `true` | W/P | §22 |
 | `invoice_reminders.offsets_days` | int[] | `[-3, 1, 7]` | W/P | §22 |
 | `invoice_reminders.stop_after_days` | int | `30` | W/P | §22 |
+| `auth.self_service_recovery_enabled` | bool | `true` | W | §03 |
+| `auth.webauthn_rollback_auto_revoke` | bool | `true` | W | §15 |
+| `ical.allow_self_signed` | bool | `false` | W/P | §04 |
+| `signup.disposable_domains_path` | text? | `null` (deployment-managed) | W | §15 |
+| `signup.ip_cap_multiplier` | int | `3` | W | §15 |
+| `signup.ip_cap_hard_usd_30d` | int | `50` | W | §15 |
+| `webhook.outbound.signing_window_minutes` | int | `5` | W | §10 |
+| `webhook.outbound.secret_rotation_window_hours` | int | `24` | W | §10 |
 
 "WE" in the scope column refers to the **work_engagement** layer
 (per-(user, workspace) row), replacing the v0 "employee" scope tag.

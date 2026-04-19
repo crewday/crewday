@@ -42,6 +42,16 @@ Jinja2 templates under `app/templates/email/`. MJML compiled at build
 time into plain HTML. Every email is **both** HTML and plaintext. No
 external CSS. Preheader text as a hidden first div.
 
+Email templates are **filesystem-resident** and authored in code;
+they deliberately do **not** use the hash-self-seeded primitive
+(§02). Operators change email copy by editing the template file and
+redeploying, not through an admin UI — MJML is a build-time concern
+and a per-variable override surface would hide layout bugs from
+review. If a future deployment needs per-operator copy tweaks, the
+right move is a curated variable set (subject, preheader, lead
+paragraph) exposed *on top of* the filesystem template, not a
+wholesale move to DB bodies.
+
 **Locale-aware template resolution.** The system resolves templates
 with locale fallback: it looks for `{key}_{locale}.html`, then
 `{key}_{language}.html`, then `{key}.html`. v1 ships only English
@@ -379,9 +389,36 @@ and `work_engagement.*` covers employment/pay-pipeline lifecycle.
 ```
 
 Headers:
-- `X-Crewday-Signature: t=<unix>,v1=<hex HMAC-SHA256>`
-  over `t.raw_body`; secret is the subscription's secret.
-- `X-Crewday-Event`, `X-Crewday-Delivery`.
+- `X-CrewDay-Signature: v1=<hex>` where `hex` is the lowercase
+  hex encoding of `HMAC-SHA256(subscription_secret,
+  "<iso8601_timestamp>.<request_body>")`. The signing payload is
+  the ISO-8601 UTC timestamp (second precision, suffixed `Z`),
+  a literal `.`, and the raw request body bytes; no trailing
+  newline, no whitespace normalisation.
+- `X-CrewDay-Timestamp: <iso8601_timestamp>` — the same
+  timestamp used in the signing payload. Receivers MUST verify
+  the timestamp is within a **5-minute** drift window relative
+  to their own clock, rejecting outside the window to block
+  replay. A 30-second clock-skew tolerance is recommended for
+  receivers that can't guarantee perfect sync.
+- `X-CrewDay-Event`, `X-CrewDay-Delivery`.
+
+### Secret rotation
+
+A workspace webhook secret is rotated via
+`crewday admin webhook rotate --workspace <slug>`
+(§13). The command mints a new secret, stamps it as `current`,
+and holds the previous secret in a `previous` slot for **24
+hours**. During that window each outbound delivery is sent
+**twice** in a single HTTP POST by presenting the signature
+computed under both secrets — concatenated as
+`X-CrewDay-Signature: v1=<hex_current>, v1=<hex_previous>`;
+compliant receivers accept a POST if either `v1=...` value
+matches their configured secret. After 24 hours the
+`previous` slot is discarded and only `current` signs;
+receivers still holding the old secret fail with
+`401 signature_mismatch` until they rotate too. The rotation
+verb is a first-class CLI entry in §13.
 
 ### Retries
 
@@ -406,6 +443,41 @@ Headers:
 `POST /api/v1/webhooks/{id}/replay {since, until, events[]}` replays
 the matching events. Idempotency is the receiver's responsibility,
 but every delivery carries a stable `delivery_id`.
+
+## Webhooks (inbound)
+
+Inbound webhooks are endpoints we **receive** from external
+systems — primarily email delivery providers (SES, SendGrid,
+Postmark) reporting bounces, complaints, and opens. Every
+inbound webhook MUST **verify the sending provider's
+signature** before the handler reads any payload field:
+
+- **AWS SES via SNS** — validate the SNS signature against the
+  pinned `SigningCertURL` set (AWS SES SigningCertURL hosts);
+  reject any message whose `SigningCertURL` does not match.
+- **SendGrid signed events** — verify
+  `X-Twilio-Email-Event-Webhook-Signature` with the per-
+  workspace configured public key.
+- **Postmark, Mailgun, etc.** — use each provider's documented
+  signing scheme; store the shared secret in
+  `secret_envelope`.
+
+Unsigned or mis-signed payloads return `401 signature_missing`
+(for "no signature header") or `401 signature_invalid` (for
+"header present, HMAC mismatch"), write
+`audit.webhook_inbound.signature_rejected`, and raise an
+operator alert. **If a provider does not support signing, the
+integration does not ship** — v1 does not accept unauthenticated
+inbound webhooks under any feature flag.
+
+The `POST /webhooks/email/bounce` route is the only inbound
+webhook in v1; future inbound integrations (calendar-provider
+push, payout-provider status) follow the same rule.
+
+**Note on iCal polling.** iCal feed polling (§04) is **not** an
+inbound webhook — it is outbound HTTP initiated by our worker,
+and falls under the §04 "SSRF guard" rules rather than this
+section's signing rules.
 
 ## CLI (examples)
 

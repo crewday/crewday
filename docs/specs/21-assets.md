@@ -189,6 +189,14 @@ invoices, certificates, insurance documents, etc.
 non-null. A document belongs to either an asset or a property, never
 both, never neither.
 
+**Blob download authorization.** Asset images, warranty PDFs, and
+every other `asset_document` blob are served through the standard
+`/uploads/<hash>` surface and inherit §15 "Blob download
+authorization" wholesale — same 404-on-cross-workspace behaviour,
+same short-lived signed URL for guest welcome pages (§"Guest
+welcome page integration"), same audit trail. §21 does not
+re-specify the rule; §15 is the source of truth.
+
 ## Document text extraction
 
 Every uploaded `asset_document` triggers server-side text extraction

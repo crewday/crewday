@@ -60,18 +60,89 @@ to a public surface.
 ## Tenant isolation
 
 A dedicated test package `tests/tenant/` seeds two workspaces
-and verifies that code in one cannot reach rows in the other:
+and verifies that code in one cannot reach rows in the other.
 
-- **Repository parity.** For every workspace-scoped repository
-  method across every context, a parametrised case asserts that
-  a caller with `WorkspaceContext(workspace_id=A)` cannot read,
-  write, soft-delete, or restore a row with `workspace_id=B`.
-  Runs on both SQLite (app-filter only) and Postgres (RLS +
-  app-filter) via `testcontainers`.
+### Cross-tenant regression test
+
+The test fixture seeds two workspaces `A` and `B` in a single test
+database with distinct, colliding data (same property names, same
+user emails where uniqueness allows, same scheduling windows) so
+that an accidental cross-tenant read is visible as a wrong row,
+not merely an empty one. The test runs **nightly on both SQLite
+AND Postgres** (via `testcontainers`) and gates the CI
+`surface-parity` check: any new repository method, background
+job, or event subscription added without extending one of the
+cases below fails the gate.
+
+Four cases, each applied exhaustively to the relevant surface:
+
+- **(a) HTTP surface.** For every resource endpoint listed in
+  `_surface.json`, issue the request under a token scoped to
+  workspace `A` with a path prefix for workspace `B`
+  (`/w/<slug-B>/api/v1/...`). The test asserts `404 not_found`.
+  Never `200`, never `403` — a `403` leaks workspace existence.
+  The assertion is byte-for-byte on the error envelope to catch
+  timing-side-channel differences too (see §15 "Constant-time
+  cross-tenant responses"). Across a sample of **at least 100
+  endpoints** drawn from `_surface.json`, the test also asserts
+  **byte-identical error envelopes** (identical body bytes,
+  identical header set) and **timing bands that overlap within
+  ±5 ms** between the "resource does not exist" case and the
+  "resource exists but belongs to workspace B" case, under the
+  steady-load harness described in §15.
+- **(b) Background jobs.** For every worker job —
+  `task_generator`, `ical_poller`, `digest_composer`,
+  `anomaly_detector`, `retry_failed_webhooks`, `prune_sessions`,
+  `rotate_audit_log`, `refresh_exchange_rates`, plus every job
+  registered via the worker registry — inject a
+  `WorkspaceContext(workspace_id=B)` and intercept the job's SQL
+  via a SQL assertion harness (e.g. `sqlalchemy.event.listen` on
+  `before_cursor_execute`). Assert every emitted statement
+  targeting a workspace-scoped table carries a
+  `WHERE workspace_id = 'B'` clause (or the equivalent bound
+  parameter). Statements without a workspace filter — or with a
+  filter bound to `A` while the context is `B` — fail the test.
+- **(c) Event subscriptions.** For every event kind published on
+  the SSE/`/events` bus and every internal in-process subscription
+  (digest triggers, anomaly triggers, webhook dispatchers), publish
+  an event scoped to workspace `A` and assert that subscribers
+  bound to workspace `B` do not receive it. The test subscribes
+  concurrently under both contexts and fails on any cross-delivery.
+- **(d) Repository parity.** For every workspace-scoped
+  repository method across every context, a parametrised case
+  asserts that a caller with `WorkspaceContext(workspace_id=A)`
+  cannot read, write, soft-delete, or restore a row with
+  `workspace_id=B`. Runs on both SQLite (app-filter only) and
+  Postgres (RLS + app-filter).
+
+The surface-parity CI gate expands the reverse check (§ "Quality
+gates") with three clauses:
+
+- Every `operationId` in `_surface.json` must have an (a) case.
+- Every job class registered in the worker registry must have a
+  (b) case.
+- Every event kind declared in the event registry must have a
+  (c) case.
+
+Gaps fail the gate; the fix is either to extend the tenant test
+suite or to explain why the surface is genuinely tenant-agnostic
+(deployment-scope, identity-scope — both recorded as explicit
+opt-outs in `tests/tenant/_optouts.py` with a `# justification:`
+comment).
+
+### Additional checks
+
 - **RLS enforcement.** For Postgres, the test clears
   `current_setting('crewday.workspace_id')` mid-transaction and
   asserts every subsequent query raises rather than silently
   returns cross-tenant rows.
+- **Cross-workspace visibility (shared properties).** The
+  `property_workspace` narrowing rules in §15 are exercised: a
+  property shared from A to B with `share_guest_identity = false`
+  hides guest name, email, phone; the cross-workspace `users`
+  projection (§15 "Cross-workspace user identity") returns first
+  name + last initial and nulls for PII columns. Runs on both
+  backends.
 - **URL enumeration.** HTTP-level tests hit
   `/w/<slug-B>/api/v1/...` with a session authenticated in
   workspace A and assert `404` with a constant-time response
@@ -183,6 +254,14 @@ and verifies that code in one cannot reach rows in the other:
   4. **operationId lint** — format must be
      `^[a-z][a-z0-9]*(\.[a-z][a-z0-9_]*)+$`, first segment must be a
      known CLI group.
+- `openapi-agent-annotations` — every **mutating** route in
+  `openapi.json` (`x-cli.mutates = true`, or a non-
+  `GET`/`HEAD`/`OPTIONS` method when the flag is absent) MUST
+  carry exactly one of `x-agent-confirm`, `x-agent-forbidden`, or
+  `x-interactive-only` (§12 "Rule for mutating routes"). A route
+  carrying zero, or two or more, fails the gate. The check runs
+  against the committed `docs/api/openapi.json` so reviewers see
+  the annotation in the PR diff.
 - Coverage threshold: 85% domain, 70% overall; tracked via codecov.
 
 ## Release gates

@@ -194,8 +194,22 @@ secret_envelope
 ├── purpose                    # free slug
 ├── ciphertext                 # bytes
 ├── nonce                      # bytes
+├── key_fp                     # 8-byte BLOB; first 8 bytes of SHA-256(root_key)
 ├── created_at, rotated_at
 ```
+
+**Key fingerprint.** On encrypt, the current root key's 8-byte
+fingerprint (`SHA256(root_key)[:8]`) is stamped into `key_fp`. On
+decrypt, the code checks `envelope.key_fp` against the fingerprint
+of whichever root key is about to be used; a mismatch raises
+`KeyFingerprintMismatch` with a clear, actionable message — for
+example, `"envelope encrypted with key fingerprint abc123; current
+key is def456. Restore the correct key or re-encrypt."` — rather
+than returning garbage bytes or a generic AES-GCM tag-mismatch
+error. The fingerprint is short enough to be useless as an oracle
+(8 bytes ≈ 2^64 collision space for a random preimage) and long
+enough to distinguish the handful of keys a deployment actually
+sees in a rotation.
 
 ### Key rotation
 
@@ -247,6 +261,54 @@ shred -u /tmp/newkey
 op read "op://prod/crewday/root" | crewday admin rotate-root-key --new-key-stdin
 ```
 
+### Root key compromise playbook
+
+Root-key exposure is a P0 incident. The command surface above
+plus `key_fp` (see "Secret envelope") give operators a deterministic
+recovery path. The playbook is:
+
+1. **Rotate immediately.** `crewday admin rotate-root-key
+   --new-key-file /secure/path` generates a new key, stamps it
+   active, and keeps the compromised key in a `legacy_keys` slot
+   for 72 hours. Envelopes still carrying the old `key_fp` decrypt
+   under the legacy key during the transition so scheduled jobs
+   (payouts, iCal polls, SMTP sends) do not break mid-rotation.
+2. **Re-encrypt.** `crewday admin rotate-root-key --reencrypt`
+   starts a background worker that walks every `secret_envelope`
+   row, decrypts with whichever key's fingerprint matches
+   (`envelope.key_fp`), and re-encrypts under the new key with
+   the new fingerprint. Progress is logged to
+   `audit.key_rotation.progress`; the worker is resumable — if
+   interrupted, it picks up where it left off by filtering on
+   `key_fp = <old>`.
+3. **Finalise.** After `SELECT COUNT(*) FROM secret_envelope
+   WHERE key_fp = <old_fp>` returns 0 **and** the 72-hour window
+   has elapsed, `crewday admin rotate-root-key --finalize` removes
+   the legacy key slot. Any subsequent decryption attempt against
+   a legacy-fingerprint envelope fails loudly with
+   `KeyFingerprintMismatch`; this is the cryptographic signal that
+   any leaked key is now useless. The finalise step writes
+   `audit.key_rotation.finalized`.
+4. **Restore-with-wrong-key guard.** `crewday admin restore`
+   refuses to start if any envelope in the backup carries a
+   `key_fp` not matching the current root key or a loaded legacy
+   key. The operator is prompted to supply additional keys via
+   `--legacy-key-file <path>` (repeatable) until every fingerprint
+   resolves; otherwise the restore aborts before any rows land in
+   the target database. No silent corruption, no half-encrypted
+   restore.
+
+**Threat model note.** The 72-hour legacy window is deliberate:
+it trades a continued exposure risk for operational continuity.
+During that window, anyone with the leaked key **and** database
+access can still decrypt old envelopes. The re-encrypt worker
+(step 2) is the thing that actually makes the leak historical —
+operators MUST watch it to completion and not shorten the window
+until step 3 prerequisites are met. A shorter window is available
+(`--finalize-now`) for operators who can tolerate a brief outage
+and prefer to minimise exposure; it refuses unless step 2 has
+completed.
+
 ### Token hashing
 
 API token and magic-link tokens stored as **argon2id** hashes.
@@ -260,8 +322,31 @@ See §03 for ceremonies. Additional hardening:
 - `userVerification: required` on both registration and assertion.
 - `userHandle` is a per-person random 32-byte blob (not the email),
   so the hostname + userHandle pair does not reveal user identity.
-- Assertion sign-count decreases trigger an alert (`webauthn.rollback`
-  audit event). Does not auto-revoke, but surfaces in digest.
+- **Assertion sign-count rollback auto-revokes the credential.**
+  FIDO2's sign-count exists precisely to detect clones; ignoring
+  the signal while logging it is the worst-of-both-worlds posture.
+  On the first rollback event for any credential, the server
+  auto-revokes that credential (sets `passkey.deleted_at = now()`
+  in the same transaction that detected the rollback, rejects any
+  subsequent auth ceremony with the credential id), writes
+  `audit.webauthn.rollback_auto_revoke` with the rolled-back
+  counter values, and notifies the credential's owner plus every
+  workspace owner through the shared audit view (§10 messaging).
+  The user recovers via §03's lost-device flow (magic link → new
+  passkey enrolment); if the original credential is still in the
+  user's possession, re-enrolling it is a 30-second flow on the
+  same device.
+
+  Revocation is irreversible — there is no "false-positive
+  restore" path. Password-manager bugs that cause the sign-count
+  to decrement are vanishingly rare; the cost of a false-positive
+  revocation (30 seconds to re-enrol) is tiny compared to the
+  cost of a false-negative (a cloned credential remains live).
+  Deployments that want to accept that tradeoff for other
+  reasons MAY flip
+  `settings.webauthn_rollback_auto_revoke = false`, which falls
+  back to the v0 behaviour (alert only, no revoke) and carries
+  an operator warning in `/admin/alerts`.
 
 ## Rate limiting and abuse controls
 
@@ -291,6 +376,65 @@ See §03 for ceremonies. Additional hardening:
     a small `pdfid` wrapper; scripted PDFs are rejected.
 - SQL via SQLAlchemy ORM; no string concat.
 
+### Blob download authorization
+
+Files are content-addressed by SHA-256, but the download URL is
+**not** a bearer token. Every `GET /uploads/<hash>` goes through an
+authorization middleware that looks up the `upload` row (§02 `file`)
+joining `<hash>` to a workspace the requester has access to under
+the current session's `WorkspaceContext`. If no such row exists for
+the viewer's workspace, the middleware returns `404 blob_not_found`
+— never `403` — so an attacker cannot distinguish "hash does not
+exist" from "hash exists but belongs to another workspace"
+(aligned with §"Constant-time cross-tenant responses"). The SHA-256
+path stays the stable content address; deduplication across
+workspaces works at the blob-bytes level, but the `file` row
+(which carries `workspace_id`) is the authorization anchor.
+
+For guest welcome pages and client portals where the consumer is
+unauthenticated, the server mints a **short-lived signed URL** at
+page-render time:
+
+```
+/uploads/signed/<hash>?e=<unix_expiry>&s=<hex_signature>
+```
+
+with `signature = HMAC-SHA256(server-signing-key, hash || "." ||
+expiry || "." || guest_token_id)`. Default expiry is 15 minutes;
+the signed-URL route is parallel to `/uploads/<hash>` and ignores
+session cookies. The authenticated `/uploads/<hash>` route, in
+turn, ignores any `e` / `s` query parameters and always performs
+the session-based authorization check — so a URL cannot "upgrade"
+from guest-signed to session-bearer by path rewriting. Signed URLs
+are single-scope (one blob, one guest token) and are logged
+(`audit.upload.signed_url_issued`) for review.
+
+## SSRF
+
+Any server-side fetch whose URL is operator- or user-supplied
+(iCal feeds §04, outbound webhooks §10, future LLM-tool
+fetches §11) MUST run through the shared fetch-guard module
+`app/net/fetch_guard.py`, which enforces:
+
+- `https://` scheme only; all other schemes rejected.
+- Host resolution pinned: the caller resolves the host once, the
+  resolved address is checked against the private-range blocklist
+  (loopback, RFC 1918, link-local, multicast, reserved, `0.0.0.0`),
+  and the TCP connection opens to the pinned address with no
+  subsequent re-resolution.
+- Certificate validation mandatory; self-signed only when the
+  caller opts in per-deployment (`settings.*_allow_self_signed`).
+- Redirect policy: same-origin only (scheme+host+port); cross-
+  origin redirects abort.
+- Hard limits: per-call body cap, connect + read timeouts,
+  per-feature monthly budgets. Callers override the defaults only
+  upward to stricter values.
+
+Per-feature sections (§04 "SSRF guard", §10 "Webhooks
+(outbound)") specify the exact limits and error surface for
+their fetches; they inherit these defaults from the guard
+module.
+
 ## Logging and redaction
 
 - Logs JSON-structured via `structlog`.
@@ -313,6 +457,31 @@ Append-only, see §02. Guaranteed invariants:
   as logs before storage.
 - Worker job `audit_integrity_check` runs daily, verifying
   monotonic ULID ordering and no gaps in `correlation_id` blocks.
+
+### Tamper detection
+
+Every `audit_log` row carries a `prev_hash` and a `row_hash` column
+(§02). Together they form a per-deployment hash chain. The worker
+job `audit_verify` walks the log ordered by `id`, recomputes each
+row's hash, and compares with the stored `row_hash`. Any mismatch
+raises an `audit.tamper_detected` alert (highest severity) with the
+first bad row's id and halts further workspace-admin actions
+(`crewday admin *`) until an operator investigates via
+`crewday admin audit verify`.
+
+The verifier runs nightly and is also invoked inline at the start
+of every `crewday admin audit export` so an exported archive is
+never produced from a silently corrupted tail.
+
+This is **tamper-evident, not tamper-proof**: a DB-level attacker
+who also has the hash-chain code can rewrite history consistently
+— recompute every `row_hash` and `prev_hash` downstream of the
+forged row. The chain raises the bar to "someone who can also
+rewrite the application code", which is the realistic threat model
+for a self-host deployment. Operators concerned about a stronger
+guarantee should periodically pin the latest `row_hash` off-box
+(printed receipt, off-site notary, witness workspace); the design
+does not require it, and v1 does not ship it.
 
 ## Privacy and data rights
 
@@ -373,10 +542,12 @@ Isolation is enforced in two layers:
 
 1. **Application layer (always on, every backend).** Every
    repository call filters by `ctx.workspace_id` from the active
-   `WorkspaceContext` (§01). This is the primary isolation
-   mechanism; the import-boundary gate + per-repository tenant
-   regression test (§17) keep it honest. It runs identically on
-   SQLite and Postgres.
+   `WorkspaceContext` (§01). The filter is auto-injected by the
+   ORM-level hook described in §01 "Tenant filter enforcement" —
+   that section is the primary implementation reference; the
+   import-boundary gate + per-repository tenant regression test
+   (§17) keep it honest. It runs identically on SQLite and
+   Postgres.
 2. **Database layer (capability `features.rls` — Postgres only).**
    Every workspace-scoped table also carries an RLS policy that
    restricts `SELECT / UPDATE / DELETE` to
@@ -419,6 +590,43 @@ Users with membership in more than one workspace (§02
 `/select-workspace` picker (§14); the chosen workspace id rides
 with every subsequent request as the URL slug. Switching
 workspaces re-seeds the RLS context and is audited.
+
+### Constant-time cross-tenant responses
+
+For any workspace-scoped resource URL, the `404 not_found`
+response when the resource does not exist MUST be
+**byte-identical and timing-identical (±5 ms)** to the
+`404 not_found` when the resource exists but belongs to a
+different workspace. We never return `403` — distinguishing
+"doesn't exist" from "exists but not yours" leaks enough to
+enumerate workspace slugs, task ids, property ids, user ids,
+and every other opaque identifier across tenants.
+
+Implementation: the auth middleware performs the workspace
+scope check **before** the resource lookup. On a workspace
+mismatch, the middleware issues a deterministic
+`time.sleep()`-padded response using the **same code path**
+as the nonexistent case (same `404` envelope, same headers,
+same response body shape; the padding uses a pre-computed
+uniform draw from the observed lookup-time distribution so
+timing bands overlap without leaking through the padding
+distribution itself). No branch in the response path depends
+on whether the row exists under another workspace.
+
+The error envelope is the shared `{"error": "not_found",
+"detail": null}` shape — never `{"error":
+"forbidden_cross_workspace", ...}` or any variant that
+reveals scope. Logging records the real reason internally for
+operator diagnostics (`audit.tenant.cross_scope_miss`); the
+wire response does not.
+
+§17 tenant-isolation test suite asserts:
+
+- byte-identical error envelope for both the "missing" and
+  "exists-elsewhere" cases across a sample of 100 endpoints;
+- timing bands overlap (±5 ms) across the same sample under
+  a steady-load harness;
+- no `403` is ever returned from a workspace-scoped URL.
 
 ### Shared-origin XSS containment
 
@@ -487,6 +695,20 @@ outbound email. The following gates apply whenever
   `settings.signup_disposable_domains_path` (§01 "Capability
   registry"). A blocked domain returns `400 disposable_email`
   with copy inviting the user to use a different address.
+
+  **Freshness.** The bundled list MUST be refreshed weekly by a
+  CI job `refresh-disposable-domains.yml` that pulls from the
+  pinned upstream dataset, regenerates the in-repo file
+  (`app/abuse/data/disposable_domains.txt`), and opens a PR.
+  The first line of the file is a pinned reference date comment
+  (`# generated 2026-04-14`) the CI build checks against: if
+  the in-repo dataset is more than **30 days old** (comment
+  date vs. build date), CI fails the build with a clear
+  "disposable-domain list stale; merge the open refresh PR"
+  error so drift does not compound. Operators override per
+  domain using `crewday admin allow-email-domain <domain>`
+  (§13), which writes to a workspace- or deployment-scoped
+  allowlist that takes precedence over the blocklist.
 - **Magic-link TTL 15 min, one-use.** Links are single-consumption
   and invalidate on claim or on `/signup/start` retry for the
   same `(email, desired_slug)`.
@@ -511,6 +733,63 @@ outbound email. The following gates apply whenever
   unauthenticated or non-member caller returns `404` uniformly,
   with a constant-time response so slug-probing can't time-
   fingerprint existence.
+
+### Per-IP aggregate LLM spend cap
+
+Per-workspace LLM budgets (§11) are bounded; an adversary can
+still burn real money by provisioning `N` unverified workspaces
+and summing the caps. To close that loop, every `workspace` row
+stores `signup_ip` (captured at creation; IPv4 or IPv6). Every
+`llm_call` row is already workspace-scoped (§11). The existing
+llm-budget subsystem maintains a rolling **30-day sum of
+`llm_call.cost_usd` across every workspace whose `signup_ip`
+matches the same IP** (or /64 prefix for IPv6, since a single
+household on IPv6 rotates `/128`s freely but holds a stable
+`/64`).
+
+Default policy: when the per-IP aggregate exceeds
+`3 × workspace_llm_cap_usd_30d` (i.e. $15/month per IP with the
+default $5 per-workspace cap), every subsequent LLM call from
+any of those workspaces returns
+`402 payment_required` with `error_code = ip_budget_exceeded`
+and a user-facing banner:
+
+> *"This IP address has exceeded its unverified-workspace spend
+> limit. Verify one of your workspaces (the owner email address
+> on file) to continue."*
+
+**Verification** is an email-link round trip that reuses the
+§03 magic-link machinery: the banner links to
+`/w/<slug>/settings/verify-ownership`, which mails a magic
+link to the owner's address; redemption promotes the workspace
+out of the aggregate pool by setting
+`workspace.verification_state = human_verified`. The
+`signup_ip` value is retained for audit but no longer counts
+against the cap. A single verified workspace is enough to
+continue operating; sibling unverified workspaces under the
+same IP still count against the multiplier until each is
+verified on its own.
+
+The multiplier (`3×`) and a per-IP hard ceiling
+(`ip_llm_cap_hard_usd_30d`) are deployment-configurable via
+`crewday admin signup set-ip-cap [--multiplier N]
+[--hard-cap-usd N]`; neither persists into `workspace` rows,
+both are stored in `deployment_setting` (§02).
+
+**Shared egress handling.** The spec does **not** distinguish
+VPN / Tor / corporate-NAT / dorm networks from residential IPs;
+the `3×` multiplier is already generous for a small team on the
+same egress, and operators who run crew.day on networks with
+genuinely shared egress (a residence with an aggregator, a
+corporate network provisioning dozens of family accounts) adjust
+the multiplier upward or lean on the verification email path.
+Operators who want to trade off more fairness for more cost risk
+may wire a human-moderated allow path
+(`crewday admin signup allow-ip <cidr>`) into the same setting.
+
+Cross-refs: §03 "Self-serve signup" (`workspace.signup_ip`
+capture); §11 "LLM budget" (`llm_call.cost_usd` source and the
+existing per-workspace enforcement path).
 
 ### Self-service lost-device & email-change abuse mitigations
 
@@ -627,6 +906,46 @@ Implementation notes:
 - Audit rows (`audit_log`) written in workspace A are visible only
   to workspace A — audit never crosses workspace boundaries,
   regardless of `share_guest_identity`.
+
+### Cross-workspace user identity
+
+A `users` row can surface in workspace A's views even though the
+user's primary workspace is B — for example a contractor authored
+in B who also appears on a property A and B share via
+`property_workspace` (§02, §22), or a worker who holds a role
+grant in both workspaces. The user's full profile belongs to B;
+A sees only what it needs to dispatch or observe.
+
+When workspace A reads a `users` row whose authoring workspace is
+B:
+
+- `display_name` MUST be projected to **first name + last
+  initial** (e.g. "Marie L."). The raw `display_name` column
+  never ships cross-workspace.
+- `email`, `phone_e164`, `address_*`, `full_legal_name`, and
+  `bank_payout_detail_id` (plus any column cross-referenced to
+  bank or tax PII) MUST be hidden — the serializer returns
+  `null`, not an empty string, so clients cannot distinguish
+  "absent" from "redacted" and infer presence.
+- Avatar URL MAY be served if the user has opted in (default is
+  hidden, matching the default of strict redaction below).
+
+Workspace B's own reads are unchanged and see the full row.
+
+Implementation is a server-side projection keyed off
+`workspace_id`: the repository layer resolves the "home" workspace
+for the user (`users.primary_workspace_id` or the union of the
+user's non-client role grants) and compares it to the viewer's
+`WorkspaceContext`. A raw `users` row is never serialised
+cross-workspace — callers that bypass the projection fail the
+tenant isolation tests (§17).
+
+**Opt-in widening.** A user may grant full-name visibility to a
+named peer workspace via a `user_workspace_visibility` preference
+(future work — Beyond v1, §19). v1 ships with strict redaction as
+the only behaviour; the preference surface is reserved but
+inactive, so that adding the opt-in later is an additive change
+rather than a flip of the default.
 
 ### Client rota visibility
 

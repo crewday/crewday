@@ -3705,6 +3705,7 @@ WORKSPACE_SETTINGS: dict[str, Any] = {
     "retention.audit_days": 730,
     "retention.llm_calls_days": 90,
     "retention.task_photos_days": 365,
+    "retention.template_revisions_days": 365,
     "scheduling.horizon_days": 30,
     "tasks.checklist_required": False,
     "tasks.allow_skip_with_reason": True,
@@ -3911,6 +3912,10 @@ SETTINGS_CATALOG: list[SettingDefinition] = [
     SettingDefinition("retention.task_photos_days", "Task photo retention (days)", "int", 365,
                       override_scope="W",
                       description="How many days task evidence photos are kept."),
+    SettingDefinition("retention.template_revisions_days", "Template revision retention (days)", "int", 365,
+                      override_scope="W",
+                      description="Retention for every hash-self-seeded table's revision twin (prompt library, agent docs, future callers). Not task templates, not email templates, not WhatsApp templates.",
+                      spec="02"),
     SettingDefinition("scheduling.horizon_days", "Scheduling horizon (days)", "int", 30,
                       override_scope="W/P",
                       description="How far ahead the scheduler materializes task occurrences.",
@@ -4230,11 +4235,22 @@ HISTORY: dict[str, list[dict[str, str]]] = {
 # ── Helpers ─────────────────────────────────────────────────────────
 
 def property_by_id(pid: str) -> Property:
-    return next(p for p in PROPERTIES if p.id == pid)
+    # Raising HTTPException(404) is a minor coupling, but it matches the
+    # spec's "unknown id returns 404" contract that several callers relied
+    # on via the now-broken `next(...)`-raises-StopIteration pattern.
+    from fastapi import HTTPException
+    hit = next((p for p in PROPERTIES if p.id == pid), None)
+    if hit is None:
+        raise HTTPException(status_code=404, detail=f"property_not_found:{pid}")
+    return hit
 
 
 def employee_by_id(eid: str) -> Employee:
-    return next(e for e in EMPLOYEES if e.id == eid)
+    from fastapi import HTTPException
+    hit = next((e for e in EMPLOYEES if e.id == eid), None)
+    if hit is None:
+        raise HTTPException(status_code=404, detail=f"employee_not_found:{eid}")
+    return hit
 
 
 def tasks_for_employee(eid: str) -> list[Task]:

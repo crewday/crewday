@@ -50,11 +50,16 @@ the driver sees tomorrow's airport run; the head of house sees everything.
 ### Primary
 
 - **Owner / Manager (head of house).** A `user` with `grant_role =
-  owner` or `manager`. Desktop most of the time, phone sometimes.
-  Creates properties, invites and removes staff, defines tasks,
-  approves expenses and payslips, reviews digests. There can be more
-  than one owner or manager; owners have workspace-wide authority,
-  managers may be scoped to specific properties.
+  manager`, plus — for the owner case — membership in the workspace's
+  system `owners` permission group (the governance anchor, see §05).
+  Desktop most of the time, phone sometimes. Creates properties,
+  invites and removes staff, defines tasks, approves expenses and
+  payslips, reviews digests. There can be more than one owner or
+  manager; owners have workspace-wide authority (via the `owners`
+  group), managers may be scoped to specific properties via
+  `role_grants.scope_property_id`. The legacy `grant_role = 'owner'`
+  value was retired — see §20 "Owner" and §05 for the replacement
+  model.
 - **Worker (staff).** A `user` with `grant_role = worker`. Phone-
   first. Sees today's list, ticks things done, optionally attaches a
   photo, logs hours, reports an issue, submits an expense receipt,

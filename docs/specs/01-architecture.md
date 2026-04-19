@@ -299,6 +299,35 @@ signup; Postgres buys defence-in-depth RLS and better concurrent-
 write scalability. See §15 for the full threat analysis and §16
 for deployment topology guidance.
 
+### Tenant filter enforcement
+
+The primary isolation mechanism for SQLite — and defence-in-depth
+on top of RLS on Postgres — is an **ORM-layer middleware that
+auto-injects `AND workspace_id = :current_workspace_id` on every
+query against a workspace-scoped table**. Implementation: a
+SQLAlchemy event hook on `before_compile` inspects the query's
+target tables, looks up each against a registry of workspace-
+scoped table names (`app/tenancy/registry.py`), and adds the
+filter transparently. Developers write queries normally and never
+thread the filter by hand.
+
+Genuine cross-tenant reads (deployment-admin tooling, identity
+lookups during auth, analytics worker jobs) MUST wrap the block
+in a `with tenant_agnostic():` context manager, which flips a
+thread-local off; the event hook checks the flag and skips the
+injection when set. `tenant_agnostic()` is the **single
+searchable escape hatch** and every use MUST carry a
+`# justification:` comment describing why cross-tenant access is
+legitimate. CI greps for uncommented uses and fails the build.
+
+Failure modes: if a query against a workspace-scoped table runs
+outside both a `WorkspaceContext` **and** a `tenant_agnostic()`
+block, the hook raises `TenantFilterMissing` before SQL compile.
+No query reaches the database in an ambiguous state. Unit tests
+in `tests/tenant/` assert this behaviour explicitly by issuing
+each repository method without a context and expecting the
+exception.
+
 ## Capability registry
 
 There is **one codepath**. The code does not branch on "self-host

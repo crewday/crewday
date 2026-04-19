@@ -384,6 +384,10 @@ crewday webhooks
   list
   add --name <n> --url <u> --events task.completed,stay.upcoming
   replay <id> --since 2026-04-10
+  rotate-secret <id>                      # alias for 'crewday admin webhook rotate --workspace <slug>'
+                                          # mints a new signing secret; holds the previous secret for 24 h
+                                          # so outbound deliveries during the window carry both signatures
+                                          # (see §10 "Secret rotation")
 
 crewday deploy                          # HTTP-backed deployment-admin group
                                         # — targets /admin/api/v1/*
@@ -494,9 +498,23 @@ crewday admin
   init --email <owner-email>                  # bootstrap (§16)
   recover --email <owner-email>               # emit magic link to stdout
   rotate-root-key --new-key-file <path> | --new-key-stdin
+                                              # also accepts --reencrypt, --finalize
+                                              # (§15 "Root key compromise playbook")
   backup --to <path>
-  restore --from <path>
+  restore --from <path> [--legacy-key-file <path>]…
+                                              # legacy-key-file entries loaded for
+                                              # envelopes still carrying an older key fingerprint
   purge --dry-run                             # GDPR hard-delete flow
+  audit verify                                # walk the audit-log hash chain; halts
+                                              # admin actions on first mismatch (§15 "Tamper detection")
+  audit export --to <path>                    # implicitly runs 'audit verify' first
+  allow-email-domain <domain> [--workspace <slug>]
+                                              # override the disposable-email blocklist at
+                                              # workspace or deployment scope (§15)
+  signup set-ip-cap [--multiplier <N>] [--hard-cap-usd <N>]
+                                              # tune the per-IP aggregate LLM spend cap (§15)
+  signup allow-ip <cidr>                      # human-moderated allow path for shared egress networks (§15)
+  webhook rotate --workspace <slug>           # mint a new webhook secret; hold previous for 24 h (§10)
   version
 
 crewday surface
@@ -515,8 +533,10 @@ intentionally separate groups with different security models.
 
 `crewday admin` keeps its existing host-CLI-only verb list
 (`init`, `recover`, `rotate-root-key`, `backup`, `restore`,
-`purge`, `budget set-cap`, `llm sync-pricing`,
-`workspace create`, `workspace trust`, `settings set`, `version`).
+`purge`, `audit verify`, `audit export`, `allow-email-domain`,
+`signup set-ip-cap`, `signup allow-ip`, `webhook rotate`,
+`budget set-cap`, `llm sync-pricing`, `workspace create`,
+`workspace trust`, `settings set`, `version`).
 The earlier `budget reload-pricing` verb is retired — pricing lives
 in the DB now (§11 "Price sync"), and the host-CLI sync helper is
 `crewday admin llm sync-pricing`.

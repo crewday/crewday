@@ -120,7 +120,7 @@ are out of scope (see §03 recovery paths).
 
 ## Recipe B — Compose full-stack (Postgres + MinIO + Caddy)
 
-Target: households with >10 staff, >10 properties, or those who want
+Target: workspaces with >10 staff, >10 properties, or those who want
 object storage, managed TLS, and a smoother path to self-hosted
 fallback.
 

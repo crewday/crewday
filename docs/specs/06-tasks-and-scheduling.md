@@ -213,7 +213,7 @@ range is evaluated only when `paused_at` is null.
 | skipped_reason               | text?     |                                               |
 | cancellation_reason          | text?     |                                               |
 | created_by                   | ULID FK   | user who originated the task (NOT NULL)       |
-| is_personal                  | bool      | task is private to creator + workspace owners; default false |
+| is_personal                  | bool      | task is private to creator + workspace owners. Column default is `false` (used by scheduled/imported tasks and any direct `POST /api/v1/tasks` without an explicit flag). The quick-add UI on `/today` and `/schedule` supplies `true` explicitly — see "Self-created and personal tasks" below. |
 | llm_generated                | bool      | created by an agent                           |
 | llm_correlation_id           | ULID?     | if llm_generated                              |
 | created_at / updated_at      | tstz      |                                               |

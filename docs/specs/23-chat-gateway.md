@@ -109,7 +109,7 @@ inbound envelopes to an identity.
 `(workspace_id, channel_kind, address_hash) WHERE state != 'revoked'`
 — one active or pending binding per address per kind per workspace.
 The same phone number can therefore be bound to the same user across
-multiple workspaces (e.g. a cleaner working for two households on the
+multiple workspaces (e.g. a cleaner working for two workspaces on the
 shared deployment number); it cannot be bound to two *different*
 users inside the same workspace. Revoked bindings retain their rows
 for audit and can be re-verified through a fresh ceremony (new `id`,
@@ -314,8 +314,28 @@ keyword below is still honoured per-binding for ad-hoc silence.
 
 Meta requires that outside a 24-hour window starting at the user's
 most recent inbound message, outbound must be a pre-approved
-**template message**. The gateway tracks `last_message_at` on the
-binding (updated on every inbound) and on each outbound:
+**template message**. This is a WhatsApp Business Platform policy,
+not a crew.day design choice — inside the 24h "customer service
+window" the agent can send free-form text like a real person in the
+thread; outside it, only templates reviewed and approved in
+advance by Meta may leave the gateway. The two templates below are
+therefore the minimum to cover the two moments where an agent has
+to reach a user past a cold thread: the very first pairing ceremony
+(no prior inbound exists) and any post-24h follow-up.
+
+WhatsApp templates are **Meta-approved content registered at the
+provider** — the source of truth lives on Meta's side, and each
+body change goes through Meta's review-and-approval cycle. They
+deliberately do **not** use the hash-self-seeded primitive (§02):
+the gateway cannot rewrite an approved body locally, and letting
+operators edit a body we can't actually send would be a trap. The
+admin surface surfaces sync status and a resubmit endpoint
+(`POST /admin/api/v1/chat/templates/{name}/resync`) rather than a
+free-text editor; to change a body, edit the registration at Meta
+and re-sync.
+
+The gateway tracks `last_message_at` on the binding (updated on
+every inbound) and on each outbound:
 
 - If `now - last_message_at ≤ 24h` → free-form text is allowed.
 - If `> 24h` → only registered templates. The gateway ships two
@@ -323,7 +343,7 @@ binding (updated on every inbound) and on each outbound:
   - `chat_channel_link_code` — used during the link ceremony.
   - `chat_agent_nudge` — used for agent reach-out; takes one
     parameter, a short body; expands to "Hi {display_name}, your
-    household assistant has an update: {body}. Reply to continue."
+    crew.day assistant has an update: {body}. Reply to continue."
 - Attempts to send free-form text past the window are **auto-
   wrapped** in `chat_agent_nudge` by the adapter, with the original
   body as the `{body}` parameter. A note is added to the message's

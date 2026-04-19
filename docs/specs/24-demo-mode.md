@@ -106,11 +106,20 @@ See §16 "Recipe C — Demo deployment" for the compose snippet.
 ### Scenario switching
 
 A visitor who loads two iframes with two different `scenario` values
-ends up with **two demo workspaces** bound to the same cookie via a
-per-scenario entry in the cookie payload (§ "Demo cookie"). The
-landing page renders a third iframe? Three workspaces. This is fine:
-garbage collection handles cleanup, and scenarios are independent
-playgrounds by design.
+ends up with **two demo workspaces** — each bound to its **own**
+signed cookie, not to a shared cookie with two bindings. The
+landing page renders a third iframe? Three cookies, three
+workspaces. Scenarios are independent playgrounds by design, and
+cookie scope enforces the separation at the browser layer, not
+only at the server.
+
+A visitor switching scenarios in the same tab (say, the landing
+page swaps its iframe's `scenario` query param) MUST be treated as
+a fresh session: the per-scenario cookie name is never reused, so
+the `rental-manager` scenario cannot inherit state authored in the
+`villa-owner` scenario even if both were visited seconds apart. See
+§ "Demo cookie" for the cookie name and path scoping that enforces
+this; see § "Garbage collection" for the independent TTLs.
 
 ### Garbage collection
 
@@ -127,24 +136,36 @@ playgrounds by design.
 
 ## Demo cookie
 
-Name: `__Host-crewday_demo`.
+Name: `__Host-crewday_demo_<scenario_id>` — one cookie per scenario,
+not a single cookie holding multiple bindings. The `<scenario_id>`
+segment is the scenario's stable identifier (e.g.
+`rental_manager`, `villa_owner`), matching the keys used in
+`app/fixtures/demo/`. The `__Host-` prefix requires `Path=/`, so
+path scoping is handled via the workspace slug inside the cookie
+payload rather than in the cookie's `Path` attribute — the demo
+app enforces a same-scenario check on every request.
 
 Flags: `Secure; HttpOnly; SameSite=None; Path=/; Partitioned;
 Max-Age=2592000` (30 days).
 
-The cookie is an `itsdangerous` signed blob:
+Each cookie is an `itsdangerous` signed blob holding exactly one
+binding:
 
 ```json
 {
   "v": 1,
-  "bindings": [
-    { "scenario": "rental-manager", "workspace_id": "wks_01J…" },
-    { "scenario": "villa-owner",    "workspace_id": "wks_01J…" }
-  ],
+  "scenario": "rental-manager",
+  "binding": { "workspace_id": "wks_01J…", "persona_user_id": "usr_01J…" },
   "iat": 1713552000
 }
 ```
 
+- One cookie per scenario means a visitor concurrently running two
+  scenarios has two distinct cookies; neither can pivot into the
+  other's workspace even if a request is somehow mis-routed. The
+  cookie name is never reused across scenarios — reassigning
+  `rental-manager` to a fresh workspace rotates the cookie's
+  signature input, not the cookie name.
 - `SameSite=None; Secure; Partitioned` is required for the cross-origin
   iframe use case: the demo app loads inside an iframe on the landing
   page and must still read its own cookie. The `Partitioned` attribute

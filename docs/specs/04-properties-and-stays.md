@@ -340,6 +340,43 @@ units).
 - Surface parse errors as `issue` against the feed.
 - Rate-limit per host; respect provider 429s.
 
+### SSRF guard
+
+The iCal worker fetches `url` against the public Internet, so the
+field is an **operator-supplied URL** subject to SSRF rules
+(cross-ref §15 "SSRF"):
+
+- **Scheme.** `https://` only. Any other scheme — `http://`,
+  `file://`, `ftp://`, `data:`, anything — is rejected at both
+  validation time (`POST /properties/{id}/ical_feeds`) and fetch
+  time with `error = "ical_url_insecure_scheme"`.
+- **Host resolution.** The URL's host MUST resolve only to public
+  IP addresses. Reject loopback (`127.0.0.0/8`, `::1`), RFC 1918
+  (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`), link-local
+  (`169.254.0.0/16`, `fe80::/10`), multicast, reserved ranges, and
+  `0.0.0.0`. **Resolution happens at both validation time and
+  fetch time** — no TOCTOU shortcut where a malicious DNS record
+  resolves public on save and private on poll. The fetch-time
+  resolver performs the resolution, pins the resolved address,
+  and connects only to that address (no re-resolution after
+  connect). Rejected fetches record `error =
+  "ical_url_private_address"`.
+- **TLS.** Certificate validation is required; no self-signed
+  certificates without explicit operator allowance per deployment
+  via `settings.ical_allow_self_signed` (default `false`,
+  override scope `D`). When `true`, the worker still verifies
+  the chain up to the operator-provided trust root; it does NOT
+  silently skip validation.
+- **Redirects.** Followed only within the same origin
+  (scheme+host+port). A cross-origin redirect aborts with
+  `error = "ical_url_cross_origin_redirect"`. This prevents a
+  public URL from redirecting into a private-IP target on a
+  subsequent poll.
+- **Limits.** 2 MB body cap; 10-second fetch timeout; 5 MB
+  per-feed monthly poll budget. Exceeded limits record
+  `error = "ical_url_oversize"` or `"ical_url_timeout"` and
+  back off the feed.
+
 ### Supported providers
 
 - **Airbnb** export feeds (`*.ics` per listing).

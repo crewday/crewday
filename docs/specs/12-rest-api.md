@@ -130,6 +130,69 @@ change later. CI lint (§17) fails any placeholder that can't
 resolve against the request model; deliberate omissions go in
 `app/agent_confirm/_exclusions.yaml` with a reason.
 
+### Agent-forbidden extension (`x-agent-forbidden`)
+
+`x-agent-forbidden: true` declares that **delegated tokens** (§03)
+cannot reach the route. The auth middleware short-circuits with
+`403 agent_forbidden` before the handler runs, so the route is
+never even dispatched for a delegated caller; scoped tokens with
+no `x-agent-forbidden` annotation follow the usual scope rules.
+
+Applied to:
+
+- every endpoint corresponding to a `crewday admin *` CLI verb
+  (listed for symmetry; the CLI has no HTTP surface, so the
+  route itself does not exist in v1, but if/when one is added
+  the annotation fails closed);
+- workspace archive / unarchive (`POST
+  /workspaces/{id}/archive`, `POST /workspaces/{id}/unarchive`);
+- root-key rotation endpoints (reserved; no HTTP surface in v1);
+- settings writes that move money routing
+  (`PATCH /pay/rules/*`, `PATCH
+  /work_engagements/{id}/default_destination`);
+- every route also carrying `x-interactive-only: true` (see
+  below) — the two extensions compose, not conflict.
+
+### Interactive-only extension (`x-interactive-only`)
+
+`x-interactive-only: true` declares that the route only serves
+requests authenticated by a **passkey-backed session** (not a
+token of any kind). PATs and delegated tokens both reject with
+`403 session_only_endpoint` before the handler runs.
+
+Applied to:
+
+- payout manifest render (`POST
+  /payslips/{id}/payout_manifest`);
+- bank payout detail reads
+  (`GET /pay/destinations/{id}/reveal`);
+- one-time-secret views (receipts issued under §11's
+  "one-shot secret" flow);
+- demo cookie mint (§24).
+
+### Rule for mutating routes
+
+Every mutating route (`x-cli.mutates = true` or implied by a
+non-`GET`/`HEAD`/`OPTIONS` method) MUST carry **exactly one** of:
+
+- `x-agent-confirm` — route is reachable by delegated tokens,
+  subject to the confirmation pipeline;
+- `x-agent-forbidden` — route refuses delegated tokens outright;
+- `x-interactive-only` — route refuses every token (delegated or
+  scoped) and requires a passkey session.
+
+CI fails any new mutating route added without one of the three.
+The gate is named **`openapi-agent-annotations`** in §17 and
+runs on the generated OpenAPI document on every PR.
+
+**Relationship to the §11 "Agent authority boundary" table.**
+The three extensions **are the implementation** of the three
+columns of that table — `confirm`, `forbidden`, `interactive-
+only`. A route's column membership is derivable from its
+OpenAPI entry; if the table and the OpenAPI disagree, the
+OpenAPI wins, and the §11 table is regenerated from the
+schema.
+
 ## Common conventions
 
 ### Dates and times
@@ -543,6 +606,9 @@ PATCH  /users/{id}
 POST   /users/{id}/archive
 POST   /users/{id}/reinstate
 POST   /users/{id}/magic_link
+POST   /users/{id}/reset_passkey   # owner-initiated worker passkey reset (§03);
+                                   # mails the enrolment link to the worker AND a
+                                   # non-consumable notification copy to the owner
 
 POST   /me/avatar                 # multipart; self-only; replaces users.avatar_file_id
 DELETE /me/avatar                 # self-only; clears avatar_file_id → initials fallback
