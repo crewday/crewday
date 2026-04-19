@@ -85,8 +85,9 @@
 /* Booking hint pill. Replaces the v0 clock-in toggle: under §09's
    booking model the booking IS the time record (no clock-in / clock-out
    tap). The hint shows the user's next scheduled booking and links to
-   /bookings. Used twice: sidebar action slot (desktop) and
-   `.phone__dock` above the tab bar (phone). */
+   `/schedule` (which folded in the retired `/bookings` page). Used
+   twice: sidebar action slot (desktop) and `.phone__dock` above the
+   tab bar (phone). */
 .booking-hint {
   display: inline-flex; align-items: center; justify-content: center;
   gap: 6px; padding: 10px 16px; border-radius: 999px;
@@ -253,7 +254,7 @@
   }
   .phone__section { padding: 16px 0; width: 100%; max-width: 880px; margin: 0 auto; }
   .phone__section--detail { padding-bottom: 32px; max-width: 880px; margin: 0 auto; }
-  /* Shared routes (/today, /week, /my/expenses, /bookings, /history,
+  /* Shared routes (/today, /week, /my/expenses, /schedule, /history,
      /issues/new, /task/:tid) also mount inside .desk__main when a
      manager views them. Drop the 880px cap there so they fill the
      manager column like /me; the cap applies only to the .phone
@@ -3906,6 +3907,30 @@
 }
 
 /* ── Scheduler (§14 "Scheduler", §06 "Schedule ruleset") ──────────── */
+
+/* Pending-attention banner above the weeknav on /schedule. Appears
+   only when the window holds any pending_approval or pending-amend
+   bookings — so it is never ambient noise, only a one-line "you have
+   something open" flag. */
+.schedule-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  margin-bottom: 12px;
+  border: 1px solid var(--sand);
+  border-left-width: 4px;
+  border-radius: 8px;
+  background: var(--sand-soft);
+  color: var(--ink);
+  font-size: 14px;
+}
+.schedule-banner__text { flex: 1; min-width: 0; }
+.schedule-banner__detail { color: var(--ink-2); }
+.schedule-banner--pending strong { color: #8A6A22; }
+[data-theme="dark"] .schedule-banner--pending strong { color: var(--sand); }
+
 .scheduler-weeknav {
   display: flex;
   align-items: center;
@@ -4140,6 +4165,15 @@
   box-shadow: inset 3px 0 0 var(--moss);
 }
 .schedule-day--quiet { opacity: 0.75; }
+.schedule-day--pending {
+  border-color: var(--sand);
+  box-shadow: inset 3px 0 0 var(--sand);
+}
+.schedule-day--pending.schedule-day--today {
+  /* Today + pending: rail is sand (attention wins), top stripe stays
+     moss. Keeps both signals without fighting. */
+  box-shadow: inset 3px 0 0 var(--sand), inset 0 3px 0 var(--moss);
+}
 
 .schedule-day__date {
   display: flex;
@@ -4180,6 +4214,12 @@
   min-width: 0;
 }
 
+.schedule-day__hours-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
 .schedule-day__hours {
   font-family: "JetBrains Mono", ui-monospace, monospace;
   font-size: 12px;
@@ -4194,6 +4234,26 @@
 [data-theme="dark"] .schedule-day__hours--sand { color: var(--sand); }
 .schedule-day__hours--rust  { background: var(--rust-soft); color: var(--rust); }
 .schedule-day__hours--ghost { background: var(--paper-2);   color: var(--ink-3); }
+
+/* Count chip shown on a cell when one or more of its bookings need
+   attention (pending_approval or pending_amend). Same sand palette as
+   the cell's left rail so the two read as one signal. */
+.schedule-day__pending-dot {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: var(--sand-soft);
+  color: #8A6A22;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+[data-theme="dark"] .schedule-day__pending-dot { color: var(--sand); }
 
 .schedule-day__rota {
   display: flex;

@@ -135,14 +135,18 @@ below are relative to `/w/<slug>/`.
 ```
 today            schedule         task/<id>
 my/expenses      me               history          issues/new
-bookings         asset/<id>
+asset/<id>
 ```
 
-The legacy routes `/week` and `/me/schedule` both 302-redirect to
-`/schedule` (§06 "Schedule view" is the single canonical surface
-for "my time"). Deep-links, bookmarks, agent tool outputs, and
-CLI examples that still name `/week` or `/me/schedule` continue to
-land on the right page.
+The legacy routes `/week`, `/me/schedule`, `/bookings`, and
+`/shifts` all 302-redirect to `/schedule` (§06 "Schedule view"
+is the single canonical surface for "my time"). Deep-links,
+bookmarks, agent tool outputs, and CLI examples that still name
+any of those URLs continue to land on the right page. The
+standalone `/bookings` page is retired in v1 — booking rows
+surface as a section of the `/schedule` day drawer (below), so
+a worker never has to cross-reference two calendars to answer
+"what am I doing, and will I be paid for it".
 
 ### Worker-only (under /w/<slug>/)
 
@@ -157,12 +161,12 @@ full-screen `/chat` page. On desktop (≥720px) the worker shell drops
 the bottom-nav (the shared `<SideNav />` takes over) and the agent
 moves to the right-hand `.desk__agent` rail (§14 "Desktop shell")
 shared with the manager layout, so `Chat` is no longer listed in the
-left-nav. The `/bookings` page is the worker's view of their booked
-hours (per §09): it lists every booking they have within the rolling
-window, lets them tap a row to amend (overrun / underrun reason),
-decline a future booking, or propose an ad-hoc booking. There is no
-clock-in / clock-out button — the booking *is* the time record (see
-§09 "Bookings").
+left-nav. Booked hours (per §09) live on `/schedule`: the day
+drawer surfaces the day's bookings with inline **amend**
+(overrun / underrun reason), **decline** (future bookings only),
+and — from an otherwise empty day — **propose ad-hoc booking**.
+There is no clock-in / clock-out button anywhere in the UI: the
+booking *is* the time record (§09 "Bookings").
 
 ### Owner/Manager (under /w/<slug>/)
 
@@ -230,8 +234,11 @@ for "my time". It renders the same calendar feed as `/scheduler`
 narrowed to the caller, and adds the self-service edit affordances
 described below. It replaces the flat `/week` task list; `/me` no
 longer carries weekly-availability, leave, or availability-override
-panels — those move here, and `/me` surfaces a single card link
-into `/schedule`.
+panels — those move here. `/me` does not surface a link into
+`/schedule`; the page is reached via the sidebar / bottom-tabs
+entry (present on every employee and manager surface per the
+"Today · Schedule · Chat · My Expenses · Me" footer nav above),
+which makes an extra card on `/me` redundant.
 
 **Layout responsiveness.** Mobile (`<720px`) renders a vertical
 **agenda**: one row per day across a 14-day window, each row showing
@@ -246,11 +253,30 @@ click (mobile sheet, desktop side panel).
 
 **Day drawer.** Shows, for the focused date: rota slots
 (read-only), the day's tasks (each linking to `/task/<id>`,
-read-only — workers don't self-reassign), availability summary
-(effective hours resolved through §06 "Availability precedence
-stack"), and any covering leave or override. Action buttons:
-**Request leave** and **Request override**.
+read-only — workers don't self-reassign), the day's **bookings**
+(per §09, with inline amend / decline / propose), availability
+summary (effective hours resolved through §06 "Availability
+precedence stack"), and any covering leave or override. Action
+buttons: **Request leave** and **Request override**.
 
+- **Bookings** render as one row per booking with
+  `scheduled_start–scheduled_end`, a status pill, a duration
+  badge, and the property name. The inline actions are:
+  - **Amend** (future or past) — opens the `POST
+    /bookings/{id}/amend` dialog (§09 "Amend"). The mock ships
+    a stub "+15 min" quick-amend that posts a fixed reason; the
+    production shell is a proper time-and-reason form. Pending
+    self-amends above the threshold render a `pending manager`
+    chip instead of a number until the manager decides.
+  - **Decline** (future, `status = scheduled` only) — calls
+    `POST /bookings/{id}/decline`. Unilateral per §09 "Worker
+    decline"; the row flips to `pending_approval` and disappears
+    from the active list until the manager reassigns.
+  - **Propose ad-hoc booking** — visible only on a day with no
+    existing bookings and no rota. Opens a form prefilled with
+    the signed-in worker's engagement and a chooser for
+    property + start + end, posting to `POST /bookings` with
+    `status = pending_approval` (§09 "Ad-hoc bookings").
 - **Request override** opens an inline form pre-filled with the
   weekday's pattern hours. The worker can flip "available" off
   (→ `user_availability_override.available = false`) or pick
@@ -276,6 +302,44 @@ stack"), and any covering leave or override. Action buttons:
   this surface (managers edit them under `/holidays` and
   `/property/<id>/closures` respectively); they render as
   non-interactive markers.
+
+**Day-cell booking markers.** In both the phone agenda row and
+the desktop week-grid cell, a booking in `status =
+pending_approval` or carrying a non-null `pending_amend_minutes`
+flips the cell into a `--pending` visual state (sand-coloured
+edge + small dot). A cancelled or no-show booking stays visible
+with a rust-coloured edge so a worker scrolling history doesn't
+assume it happened. The cell only carries a count marker for
+pending rows (sand dot + edge); inline booking chips inside the
+cell are deferred — the drawer is the canonical read surface and
+bookings never compete with task chips for attention.
+
+**Pending banner.** The page header on `/schedule` renders a
+compact banner at the top whenever the window contains any
+booking in `pending_approval` or with `pending_amend_minutes !=
+null`. It reads e.g. "2 bookings need attention — 1 waiting for
+manager approval, 1 declined awaiting reassignment" and links
+each count into the matching day's drawer. The banner is the
+single skimmable answer to "do I have anything open?" so a
+pending amend from 10 days ago can't fall off the viewport.
+
+**/api/v1/me/schedule** includes a `bookings[]` array alongside
+`tasks`, `leaves`, and `overrides` — same window, same worker,
+single round-trip. Invalidation follows the existing booking SSE
+events (`booking.amended`, `booking.declined`,
+`booking.approved`, `booking.reassigned`): any of them bumps the
+`['my-schedule', …]` query keys. The manager / agency list
+feed (`GET /bookings`, `?pending_amend=true`) is unchanged and
+remains the audit-and-admin surface (§12).
+
+**Past-booking recap.** There is deliberately no flat "recent
+bookings" list in the worker UI. The 14-day agenda already
+renders history day-by-day (scroll back, open the drawer); the
+formal payroll recap lives on `/pay` (owner-managers) and the
+settled-period payslips on `/me` (§09 "Pay rollup and exports").
+If a future customer asks for a per-day booking export, that's
+a new surface — it does not mean reintroducing a standalone
+`/bookings` page.
 
 **Manager use of /schedule.** Under `MY WORK → My Schedule`, the
 manager gets the exact same page rendered against their own
@@ -595,7 +659,7 @@ WCAG 2.2 AA. Concretely:
   a visible "could not keep queued for longer" warning.
 - **Manifest.** `display: standalone`, `theme_color: #3F6E3B`,
   `background_color: #FAF7F2`. Shortcuts are workspace-scoped
-  (`/w/<slug>/today`, `/w/<slug>/bookings`,
+  (`/w/<slug>/today`, `/w/<slug>/schedule`,
   `/w/<slug>/my/expenses/new`); on multi-workspace devices the
   install prompt is offered per workspace, so each installs as a
   distinct PWA with its own name (`crew.day — <workspace.name>`)

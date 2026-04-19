@@ -96,42 +96,6 @@ export default function MePage() {
         </div>
       </section>
 
-      <section className="panel">
-        <header className="panel__head"><h2>Bookings</h2></header>
-        <Link to="/bookings" className="stack-row">
-          <div>
-            <strong>My bookings</strong>
-            <div className="stack-row__sub">
-              Booked time is paid time. Tap a row to amend or decline →
-            </div>
-          </div>
-          <Chip tone="ghost" size="sm">Open</Chip>
-        </Link>
-      </section>
-
-      <section className="panel">
-        <header className="panel__head"><h2>Schedule</h2></header>
-        <Link to="/schedule" className="stack-row">
-          <div>
-            <strong>My schedule</strong>
-            <div className="stack-row__sub">
-              Weekly pattern, leave and one-off day adjustments →
-            </div>
-          </div>
-          <Chip tone="ghost" size="sm">Open</Chip>
-        </Link>
-      </section>
-
-      <AppearancePanel />
-
-      <AgentApprovalModePanel />
-
-      <AgentPreferencesPanel
-        scope="user"
-        title="My agent preferences"
-        subtitle="Private to you. Written in plain language; sent to your chat agent on every turn."
-      />
-
       <ChatChannelsMeCard me={me.data} />
 
       <section className="panel">
@@ -146,6 +110,16 @@ export default function MePage() {
           <button type="button" className="btn btn--ghost btn--sm">Change</button>
         </div>
       </section>
+
+      <AppearancePanel />
+
+      <AgentApprovalModePanel />
+
+      <AgentPreferencesPanel
+        scope="user"
+        title="My agent preferences"
+        subtitle="Private to you. Written in plain language; sent to your chat agent on every turn."
+      />
 
       <PersonalTokensPanel />
 

@@ -1,7 +1,7 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
 import PageHeader from "@/components/PageHeader";
@@ -11,6 +11,8 @@ import { LeaveDialog, OverrideDialog } from "@/components/ScheduleDialogs";
 import { useRole } from "@/context/RoleContext";
 import type {
   AvailabilityOverride,
+  Booking,
+  BookingStatus,
   Leave,
   Me,
   MySchedulePayload,
@@ -20,11 +22,52 @@ import type {
 } from "@/types/api";
 
 // §14 "Schedule view". Self-only calendar hub that replaces the old
-// `/week` flat list and the `/me/schedule` alias. Phone renders an
-// agenda (one row per day, 14-day window); desktop renders a week
-// grid (Mon..Sun, one row). Click a day anywhere to open the shared
-// day drawer with rota, tasks, and the Request-leave / Request-
-// override forms. See spec §06 for the approval rules.
+// `/week` flat list, the `/me/schedule` alias, and the retired
+// `/bookings` page. Phone renders an agenda (one row per day, 14-day
+// window); desktop renders a week grid (Mon..Sun, one row). Click a
+// day anywhere to open the shared day drawer with rota, tasks,
+// bookings (§09, amend/decline inline), plus the Request-leave /
+// Request-override forms. A pending banner sits above the weeknav
+// whenever any booking in the window is pending_approval or has a
+// pending self-amend — so a stale approval can't fall off-screen.
+// See spec §06 for the approval rules and §09 for the booking
+// lifecycle.
+
+const BOOKING_STATUS_LABEL: Record<BookingStatus, string> = {
+  pending_approval: "Pending approval",
+  scheduled: "Scheduled",
+  completed: "Completed",
+  cancelled_by_client: "Cancelled (client)",
+  cancelled_by_agency: "Cancelled (agency)",
+  no_show_worker: "No-show",
+  adjusted: "Completed (edited)",
+};
+
+function bookingMinutes(b: Booking): number {
+  if (b.actual_minutes_paid != null) return b.actual_minutes_paid;
+  if (b.actual_minutes != null) return b.actual_minutes;
+  const ms = new Date(b.scheduled_end).getTime() - new Date(b.scheduled_start).getTime();
+  return Math.max(0, Math.round(ms / 60_000) - Math.round(b.break_seconds / 60));
+}
+
+function fmtDuration(minutes: number): string {
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  return `${h}h ${String(m).padStart(2, "0")}m`;
+}
+
+function fmtHM(iso: string): string {
+  const d = new Date(iso);
+  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+}
+
+// "Needs attention" = a pending_approval row (ad-hoc proposal or a
+// declined-and-unassigned one) OR a non-null pending self-amend the
+// manager hasn't ruled on yet. Drives both the top banner count and
+// the day-cell sand-edge modifier.
+function bookingNeedsAttention(b: Booking): boolean {
+  return b.status === "pending_approval" || b.pending_amend_minutes != null;
+}
 
 const WEEKDAYS: { idx: number; short: string; long: string }[] = [
   { idx: 0, short: "Mon", long: "Monday" },
@@ -92,6 +135,7 @@ interface DayCell {
   tasks: SchedulerTaskView[];
   leaves: Leave[];
   overrides: AvailabilityOverride[];
+  bookings: Booking[];
   pattern: SelfWeeklyAvailabilitySlot | null;
 }
 
@@ -126,6 +170,9 @@ function buildCells(
       (lv) => lv.starts_on <= iso && lv.ends_on >= iso,
     );
     const overrides = data.overrides.filter((ao) => ao.date === iso);
+    const bookings = data.bookings
+      .filter((b) => b.scheduled_start.slice(0, 10) === iso)
+      .sort((a, b) => a.scheduled_start.localeCompare(b.scheduled_start));
     cells.push({
       date: d,
       iso,
@@ -133,6 +180,7 @@ function buildCells(
       tasks,
       leaves,
       overrides,
+      bookings,
       pattern: weeklyByDay.get(wd) ?? null,
     });
   }
@@ -203,15 +251,24 @@ function DayCellView({
   const { text: hours, tone } = hoursLabel(cell);
   const isToday = sameDate(cell.date, today);
   const label = dayLabel(cell.date);
+  const pendingBookings = cell.bookings.filter(bookingNeedsAttention);
   return (
     <div
       role="button"
       tabIndex={0}
-      aria-label={`Open schedule for ${label.weekday} ${label.day} ${label.month}`}
+      aria-label={
+        `Open schedule for ${label.weekday} ${label.day} ${label.month}`
+        + (pendingBookings.length > 0
+          ? ` — ${pendingBookings.length} booking${pendingBookings.length === 1 ? "" : "s"} ${pendingBookings.length === 1 ? "needs" : "need"} attention`
+          : "")
+      }
       className={
         "schedule-day" +
         (isToday ? " schedule-day--today" : "") +
-        (cell.tasks.length === 0 && cell.rota.length === 0 ? " schedule-day--quiet" : "")
+        (cell.tasks.length === 0 && cell.rota.length === 0 && cell.bookings.length === 0
+          ? " schedule-day--quiet"
+          : "") +
+        (pendingBookings.length > 0 ? " schedule-day--pending" : "")
       }
       onClick={(e) => {
         // Nested <Link>s for individual tasks keep their own
@@ -232,7 +289,18 @@ function DayCellView({
         <span className="schedule-day__mo">{label.month}</span>
       </div>
       <div className="schedule-day__body">
-        <div className={"schedule-day__hours schedule-day__hours--" + tone}>{hours}</div>
+        <div className="schedule-day__hours-row">
+          <span className={"schedule-day__hours schedule-day__hours--" + tone}>{hours}</span>
+          {pendingBookings.length > 0 && (
+            <span
+              className="schedule-day__pending-dot"
+              aria-label={`${pendingBookings.length} booking${pendingBookings.length === 1 ? "" : "s"} ${pendingBookings.length === 1 ? "needs" : "need"} attention`}
+              title={`${pendingBookings.length} booking${pendingBookings.length === 1 ? "" : "s"} ${pendingBookings.length === 1 ? "needs" : "need"} attention`}
+            >
+              {pendingBookings.length}
+            </span>
+          )}
+        </div>
         {cell.rota.length > 0 && (
           <div className="schedule-day__rota">
             {cell.rota.map((r) => (
@@ -272,18 +340,52 @@ function DayDrawer({
   onClose,
   onRequestLeave,
   onRequestOverride,
+  onProposeBooking,
 }: {
   cell: DayCell | null;
   data: MySchedulePayload;
   onClose: () => void;
   onRequestLeave: (iso: string) => void;
   onRequestOverride: (iso: string) => void;
+  onProposeBooking: (iso: string) => void;
 }) {
+  const qc = useQueryClient();
+
+  // §09 amend and decline. Self-amend above the threshold goes
+  // straight to `pending_amend_*`, below it mutates actuals directly
+  // — the server decides, we just post. The mock endpoint does the
+  // simpler "applies whatever you send" behaviour; production does
+  // the real §09 gating.
+  const amendMutation = useMutation({
+    mutationFn: ({ id, body }: { id: string; body: Record<string, unknown> }) =>
+      fetchJson<Booking>(`/api/v1/bookings/${id}/amend`, {
+        method: "POST",
+        body,
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["my-schedule"] });
+      qc.invalidateQueries({ queryKey: qk.bookings() });
+    },
+  });
+
+  const declineMutation = useMutation({
+    mutationFn: ({ id, reason }: { id: string; reason: string }) =>
+      fetchJson<Booking>(`/api/v1/bookings/${id}/decline`, {
+        method: "POST",
+        body: { reason },
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["my-schedule"] });
+      qc.invalidateQueries({ queryKey: qk.bookings() });
+    },
+  });
+
   if (!cell) return null;
   const heading = cell.date.toLocaleDateString("en-GB", {
     weekday: "long", day: "numeric", month: "long", year: "numeric",
   });
   const { text: hours, tone } = hoursLabel(cell);
+  const canPropose = cell.bookings.length === 0 && cell.rota.length === 0;
   return (
     <>
       <div className="day-drawer__scrim" onClick={onClose} aria-hidden />
@@ -384,6 +486,118 @@ function DayDrawer({
 
           <section className="day-drawer__section">
             <h3 className="day-drawer__section-title">
+              Bookings · {cell.bookings.length}
+            </h3>
+            {cell.bookings.length === 0 ? (
+              <>
+                {cell.rota.length > 0 ? (
+                  // Rota exists but the nightly materialiser (§09) hasn't
+                  // produced the booking yet. "No booking on this day"
+                  // would read as a contradiction next to the rota row.
+                  <p className="day-drawer__muted">
+                    Rota scheduled — booking will be created automatically.
+                  </p>
+                ) : (
+                  <p className="day-drawer__muted">No booking on this day.</p>
+                )}
+                {canPropose && (
+                  <div className="day-drawer__actions">
+                    <button
+                      type="button"
+                      className="btn btn--ghost btn--sm"
+                      onClick={() => onProposeBooking(cell.iso)}
+                    >
+                      Propose ad-hoc booking
+                    </button>
+                  </div>
+                )}
+              </>
+            ) : (
+              <ul className="booking-list">
+                {cell.bookings.map((b) => {
+                  const isFutureScheduled =
+                    b.status === "scheduled"
+                    && new Date(b.scheduled_end).getTime() > Date.now();
+                  const canAmend =
+                    (b.status === "scheduled"
+                      || b.status === "completed"
+                      || b.status === "adjusted")
+                    && b.pending_amend_minutes == null;
+                  return (
+                    <li key={b.id} className={`booking-card booking-card--${b.status}`}>
+                      <div className="booking-card__head">
+                        <strong>{fmtHM(b.scheduled_start)}–{fmtHM(b.scheduled_end)}</strong>
+                        <span className="booking-card__time">
+                          {propertyName(b.property_id, data)}
+                        </span>
+                      </div>
+                      <div className="booking-card__meta">
+                        <span className="booking-card__pill">
+                          {BOOKING_STATUS_LABEL[b.status]}
+                        </span>
+                        <span className="booking-card__dur">
+                          {fmtDuration(bookingMinutes(b))}
+                        </span>
+                      </div>
+                      {b.notes_md && <p className="booking-card__note">{b.notes_md}</p>}
+                      {b.adjusted && b.adjustment_reason && (
+                        <p className="booking-card__note">
+                          <em>Edited:</em> {b.adjustment_reason}
+                        </p>
+                      )}
+                      {b.pending_amend_minutes != null && (
+                        <p className="booking-card__pending">
+                          Pending manager approval:
+                          {" "}{fmtDuration(b.pending_amend_minutes)}
+                          {b.pending_amend_reason ? ` — ${b.pending_amend_reason}` : ""}
+                        </p>
+                      )}
+                      {(canAmend || isFutureScheduled) && (
+                        <div className="booking-card__actions">
+                          {canAmend && (
+                            <button
+                              type="button"
+                              className="btn btn--moss btn--sm"
+                              disabled={amendMutation.isPending}
+                              onClick={() =>
+                                amendMutation.mutate({
+                                  id: b.id,
+                                  body: {
+                                    actual_minutes: bookingMinutes(b) + 15,
+                                    reason: "Stayed 15 min extra to finish",
+                                  },
+                                })
+                              }
+                            >
+                              Amend (+15 min)
+                            </button>
+                          )}
+                          {isFutureScheduled && (
+                            <button
+                              type="button"
+                              className="btn btn--rust btn--sm"
+                              disabled={declineMutation.isPending}
+                              onClick={() =>
+                                declineMutation.mutate({
+                                  id: b.id,
+                                  reason: "Sick today",
+                                })
+                              }
+                            >
+                              Decline
+                            </button>
+                          )}
+                        </div>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </section>
+
+          <section className="day-drawer__section">
+            <h3 className="day-drawer__section-title">
               Tasks · {cell.tasks.length}
             </h3>
             {cell.tasks.length === 0 ? (
@@ -425,6 +639,7 @@ export default function SchedulePage() {
   const [selectedIso, setSelectedIso] = useState<string | null>(null);
   const [leaveIso, setLeaveIso] = useState<string | null>(null);
   const [overrideIso, setOverrideIso] = useState<string | null>(null);
+  const [proposeIso, setProposeIso] = useState<string | null>(null);
 
   const windowDays = 14;
   const windowEnd = addDays(weekStart, windowDays - 1);
@@ -495,8 +710,53 @@ export default function SchedulePage() {
     if (!q.data) return <p className="muted">Failed to load schedule.</p>;
 
     const nextWeek = cells.slice(7);
+
+    // §14 "Pending banner" — count of bookings in the window that
+    // need manager attention. Empty means no banner (no false
+    // urgency). Two buckets: proposal (pending_approval) and
+    // self-amend (pending_amend_minutes). The first day that has
+    // any of either is the scroll target; on click we open its
+    // drawer so the worker can see the specific row.
+    const pendingProposal = q.data.bookings.filter((b) => b.status === "pending_approval");
+    const pendingAmend = q.data.bookings.filter((b) => b.pending_amend_minutes != null);
+    const allPending = [...pendingProposal, ...pendingAmend];
+    const firstPendingIso = allPending
+      .map((b) => b.scheduled_start.slice(0, 10))
+      .sort()[0] ?? null;
+    const bannerParts: string[] = [];
+    if (pendingProposal.length > 0) {
+      bannerParts.push(
+        `${pendingProposal.length} awaiting manager approval`,
+      );
+    }
+    if (pendingAmend.length > 0) {
+      bannerParts.push(
+        `${pendingAmend.length} amendment${pendingAmend.length === 1 ? "" : "s"} pending`,
+      );
+    }
+
     return (
       <>
+        {bannerParts.length > 0 && (
+          <div className="schedule-banner schedule-banner--pending" role="status">
+            <span className="schedule-banner__text">
+              <strong>
+                {allPending.length} booking{allPending.length === 1 ? "" : "s"}{" "}
+                need{allPending.length === 1 ? "s" : ""} attention
+              </strong>
+              <span className="schedule-banner__detail"> · {bannerParts.join(" · ")}</span>
+            </span>
+            {firstPendingIso && (
+              <button
+                type="button"
+                className="btn btn--ghost btn--sm"
+                onClick={() => setSelectedIso(firstPendingIso)}
+              >
+                Review
+              </button>
+            )}
+          </div>
+        )}
         {weekNav}
         <div className="schedule">
           <div className="schedule__agenda" role="list">
@@ -549,6 +809,7 @@ export default function SchedulePage() {
           onClose={() => setSelectedIso(null)}
           onRequestLeave={(iso) => { setSelectedIso(null); setLeaveIso(iso); }}
           onRequestOverride={(iso) => { setSelectedIso(null); setOverrideIso(iso); }}
+          onProposeBooking={(iso) => { setSelectedIso(null); setProposeIso(iso); }}
         />
 
         <OverrideDialog
@@ -567,6 +828,11 @@ export default function SchedulePage() {
           iso={leaveIso}
           employeeId={empId}
           onClose={() => setLeaveIso(null)}
+        />
+        <BookingProposeDialog
+          iso={proposeIso}
+          properties={q.data.properties}
+          onClose={() => setProposeIso(null)}
         />
       </>
     );
@@ -626,5 +892,118 @@ function ScheduleWeekGrid({
         ))}
       </div>
     </div>
+  );
+}
+
+// §09 "Ad-hoc bookings" — worker proposes an unscheduled booking
+// (swung by for laundry, covered a gap). Always lands with
+// `status = pending_approval`; the manager sees it in the queue and
+// approves or rejects. The mock implements the minimum viable form;
+// the production shell will expand it to match the full §09 body.
+function BookingProposeDialog({
+  iso,
+  properties,
+  onClose,
+}: {
+  iso: string | null;
+  properties: { id: string; name: string; timezone: string }[];
+  onClose: () => void;
+}) {
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  const qc = useQueryClient();
+  const [propertyId, setPropertyId] = useState<string>("");
+  const [starts, setStarts] = useState<string>("09:00");
+  const [ends, setEnds] = useState<string>("12:00");
+  const [notes, setNotes] = useState<string>("");
+
+  useEffect(() => {
+    if (iso === null) return;
+    setPropertyId(properties[0]?.id ?? "");
+    setStarts("09:00");
+    setEnds("12:00");
+    setNotes("");
+    const d = dialogRef.current;
+    if (d && !d.open) d.showModal();
+    return () => {
+      if (d && d.open) d.close();
+    };
+  }, [iso, properties]);
+
+  const m = useMutation({
+    mutationFn: (body: unknown) =>
+      fetchJson<Booking>("/api/v1/bookings", {
+        method: "POST",
+        body,
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["my-schedule"] });
+      qc.invalidateQueries({ queryKey: qk.bookings() });
+      onClose();
+    },
+  });
+
+  if (!iso) return null;
+
+  return (
+    <dialog className="modal" ref={dialogRef} onClose={onClose}>
+      <form
+        className="modal__body"
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (!propertyId || !starts || !ends || ends <= starts) return;
+          m.mutate({
+            property_id: propertyId,
+            scheduled_start: `${iso}T${starts}:00`,
+            scheduled_end: `${iso}T${ends}:00`,
+            notes_md: notes.trim() || null,
+          });
+        }}
+      >
+        <h3 className="modal__title">Propose ad-hoc booking</h3>
+        <p className="modal__sub">
+          {iso} · Sent to your manager for approval.
+        </p>
+
+        <label className="field">
+          <span>Property</span>
+          <select
+            value={propertyId}
+            onChange={(e) => setPropertyId(e.target.value)}
+            required
+          >
+            {properties.map((p) => (
+              <option key={p.id} value={p.id}>{p.name}</option>
+            ))}
+          </select>
+        </label>
+
+        <div className="avail-hours">
+          <label className="field">
+            <span>From</span>
+            <input type="time" value={starts} onChange={(e) => setStarts(e.target.value)} required />
+          </label>
+          <label className="field">
+            <span>Until</span>
+            <input type="time" value={ends} onChange={(e) => setEnds(e.target.value)} required />
+          </label>
+        </div>
+
+        <label className="field">
+          <span>Notes (optional)</span>
+          <input
+            value={notes}
+            onChange={(e) => setNotes(e.target.value)}
+            placeholder="Swung by for forgotten laundry…"
+          />
+        </label>
+
+        <div className="modal__actions">
+          <button type="button" className="btn btn--ghost" onClick={onClose}>Cancel</button>
+          <button type="submit" className="btn btn--moss" disabled={m.isPending}>
+            {m.isPending ? "Submitting…" : "Propose"}
+          </button>
+        </div>
+      </form>
+    </dialog>
   );
 }

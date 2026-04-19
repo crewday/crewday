@@ -519,11 +519,15 @@ fix the offender.
   `paused_at` wins over `active_from/active_until`.
 - **Schedule view (`/schedule`).** The self-only calendar surface
   for workers and managers — replaces the legacy `/week` flat list
-  and the `/me/schedule` alias. Hub for "where am I, when am I
-  off, what hours do I need swapped on this day". Phone renders
-  an agenda; desktop renders a week grid. See §14 "Schedule view"
-  and §06 "Availability precedence stack" for the resolution rules.
-  Team-wide equivalent is `/scheduler`.
+  and absorbs the v0 `/me/schedule` alias and the v0 `/bookings`
+  and `/shifts` pages (all three now 302 to here). Hub for "where
+  am I, when am I off, what hours do I need swapped, which
+  bookings are still open". Phone renders an agenda; desktop
+  renders a week grid. The day drawer lists rota, tasks, and
+  bookings (with inline amend / decline / propose per §09), plus
+  the leave / override request forms (§06). See §14 "Schedule
+  view" and §06 "Availability precedence stack" for the
+  resolution rules. Team-wide equivalent is `/scheduler`.
 - **Scope (instruction).** The visibility level of an instruction:
   `global` (all properties), `property` (one property), `area` (one
   area within a property), or linked via `instruction_link`. See §07.

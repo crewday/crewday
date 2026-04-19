@@ -2134,6 +2134,19 @@ def api_me_schedule(
         if ao.user_id == uid and from_d <= ao.date <= to_d
     ]
 
+    # Bookings (§09) — worker's pay-and-contract records for the
+    # window. /schedule is the single canonical surface (§14); the
+    # standalone /bookings page is retired. Any status is returned so
+    # the UI can surface pending_approval and cancelled rows alongside
+    # the live scheduled ones.
+    bookings = [
+        b for b in md.BOOKINGS
+        if (b.user_id == uid or (emp_id and b.employee_id == emp_id))
+        and from_d <= b.scheduled_start.date() <= to_d
+    ]
+    bookings.sort(key=lambda b: b.scheduled_start)
+    pids = pids | {b.property_id for b in bookings}
+
     return ok({
         "window": {"from": from_d.isoformat(), "to": to_d.isoformat()},
         "user_id": uid,
@@ -2157,6 +2170,7 @@ def api_me_schedule(
         ],
         "leaves": leaves,
         "overrides": overrides,
+        "bookings": bookings,
     })
 
 
@@ -2310,6 +2324,53 @@ def api_booking(bid: str) -> Response:
     if bk is None:
         return JSONResponse({"detail": "not found"}, status_code=404)
     return ok(bk)
+
+
+@app.post("/api/v1/bookings")
+def api_booking_create(request: Request, payload: dict) -> Response:
+    """Worker-initiated ad-hoc booking proposal (§09 "Ad-hoc bookings").
+
+    Always lands as `pending_approval`; the manager approves or rejects
+    via the existing amend / approve / reject queue. The mock resolves
+    `work_engagement_id` from the signed-in user + active workspace and
+    parses datetimes as naive local time (matches the seeded fixtures).
+    """
+    property_id = (payload.get("property_id") or "").strip()
+    starts = payload.get("scheduled_start")
+    ends = payload.get("scheduled_end")
+    if not property_id or not starts or not ends:
+        return JSONResponse(
+            {"detail": "property_id, scheduled_start, scheduled_end required"},
+            status_code=422,
+        )
+    try:
+        start_dt = datetime.fromisoformat(starts)
+        end_dt = datetime.fromisoformat(ends)
+    except ValueError:
+        return JSONResponse({"detail": "invalid_datetime"}, status_code=422)
+    if end_dt <= start_dt:
+        return JSONResponse({"detail": "end_before_start"}, status_code=422)
+    uid = current_user_id(request)
+    ws_id = current_workspace_id(request)
+    we = next(
+        (w for w in md.WORK_ENGAGEMENTS if w.user_id == uid and w.workspace_id == ws_id),
+        None,
+    )
+    emp = md.employee_by_user_id(uid)
+    bk = md.Booking(
+        id=f"bk-adhoc-{len(md.BOOKINGS) + 1}",
+        employee_id=emp.id if emp else "",
+        property_id=property_id,
+        scheduled_start=start_dt,
+        scheduled_end=end_dt,
+        status="pending_approval",
+        notes_md=(payload.get("notes_md") or "") or "",
+        work_engagement_id=we.id if we else "",
+        user_id=uid,
+    )
+    md.BOOKINGS.append(bk)
+    hub.publish("booking.created", {"booking": bk})
+    return ok(bk, status_code=201)
 
 
 @app.post("/api/v1/bookings/{bid}/amend")

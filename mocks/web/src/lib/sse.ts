@@ -91,6 +91,13 @@ export function startEventStream(client: QueryClient): () => void {
     "asset_action.performed",
     "schedule_ruleset.upserted",
     "schedule_ruleset.deleted",
+    "booking.created",
+    "booking.amended",
+    "booking.declined",
+    "booking.approved",
+    "booking.rejected",
+    "booking.cancelled",
+    "booking.reassigned",
   ];
   for (const ev of events) {
     es.addEventListener(ev, handler as EventListener);
@@ -196,6 +203,20 @@ function dispatch(client: QueryClient, evt: TypedEvent): void {
     case "schedule_ruleset.deleted":
       client.invalidateQueries({ queryKey: qk.scheduleRulesets() });
       client.invalidateQueries({ queryKey: ["scheduler-calendar"] });
+      return;
+    case "booking.created":
+    case "booking.amended":
+    case "booking.declined":
+    case "booking.approved":
+    case "booking.rejected":
+    case "booking.cancelled":
+    case "booking.reassigned":
+      // §09 booking lifecycle. `/schedule` keys include a window
+      // (`["my-schedule", from, to]`), so invalidate by the root
+      // prefix to catch every currently-mounted window.
+      client.invalidateQueries({ queryKey: ["my-schedule"] });
+      client.invalidateQueries({ queryKey: qk.bookings() });
+      client.invalidateQueries({ queryKey: qk.dashboard() });
       return;
   }
 }

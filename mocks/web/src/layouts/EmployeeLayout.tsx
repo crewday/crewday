@@ -1,7 +1,7 @@
 import { useCallback, useState } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { CalendarDays, CalendarRange, Euro, ListTodo, UserCircle } from "lucide-react";
+import { CalendarDays, Euro, ListTodo, UserCircle } from "lucide-react";
 import AgentSidebar from "@/components/AgentSidebar";
 import BottomTabs from "@/components/BottomTabs";
 import SideNav, { type SideNavItem } from "@/components/SideNav";
@@ -22,7 +22,8 @@ function roleLabel(role: string): string {
 // includes the Chat button (mobile entry to the agent). The v0 clock-in
 // dock is gone — under §09's booking model, the booking IS the time
 // record (no clock-in / clock-out tap). The dock now renders the
-// "next booking" hint and a one-tap shortcut to /bookings.
+// "next booking" hint and a one-tap shortcut to /schedule; the
+// drawer on that day opens straight to the booking row (§14).
 //
 // At tablet / desktop widths (>=720px) the phone becomes a three-column
 // grid: shared <SideNav /> on the left (Chat is removed from its items
@@ -38,7 +39,6 @@ const NAV_ICON = (Icon: typeof ListTodo) => (
 const NAV_ITEMS: SideNavItem[] = [
   { type: "link", to: "/today", label: "Today", phoneHidden: true, icon: NAV_ICON(ListTodo) },
   { type: "link", to: "/schedule", label: "Schedule", phoneHidden: true, icon: NAV_ICON(CalendarDays) },
-  { type: "link", to: "/bookings", label: "Bookings", phoneHidden: true, icon: NAV_ICON(CalendarRange) },
   { type: "link", to: "/my/expenses", label: "Expenses", phoneHidden: true, icon: NAV_ICON(Euro) },
   { type: "link", to: "/me", matchPrefix: "/me", label: "Me", phoneHidden: true, icon: NAV_ICON(UserCircle) },
 ];
@@ -88,7 +88,7 @@ export default function EmployeeLayout() {
     ?? (data ? initialsOf(data.employee.name) : "·");
 
   const bookingHint = (
-    <NavLink to="/bookings" className="booking-hint">
+    <NavLink to="/schedule" className="booking-hint">
       {fmtBookingHint(myNext)}
     </NavLink>
   );

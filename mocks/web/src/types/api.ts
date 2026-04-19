@@ -1437,7 +1437,18 @@ export type SseEvent =
   | { event: "expense.reimbursed"; data: { id: string; status: ExpenseStatus } }
   | { event: "asset_action.performed"; data: { asset_id: string; action: AssetAction } }
   | { event: "schedule_ruleset.upserted"; data: { ruleset: ScheduleRuleset } }
-  | { event: "schedule_ruleset.deleted"; data: { id: string } };
+  | { event: "schedule_ruleset.deleted"; data: { id: string } }
+  // §09 booking lifecycle — every mutation from any tab (including
+  // another manager approving an amend) fans out to every connected
+  // client so `/schedule` and `/dashboard` stay coherent without a
+  // poll. One dispatch case invalidates the shared roots.
+  | { event: "booking.created"; data: { booking: Booking } }
+  | { event: "booking.amended"; data: { booking: Booking } }
+  | { event: "booking.declined"; data: { booking: Booking } }
+  | { event: "booking.approved"; data: { booking: Booking } }
+  | { event: "booking.rejected"; data: { booking: Booking } }
+  | { event: "booking.cancelled"; data: { booking: Booking } }
+  | { event: "booking.reassigned"; data: { booking: Booking } };
 
 // §06 — per-property recurring rota (Schedule ruleset).
 export interface ScheduleRuleset {
@@ -1529,4 +1540,9 @@ export interface MySchedulePayload {
   properties: { id: string; name: string; timezone: string }[];
   leaves: Leave[];
   overrides: AvailabilityOverride[];
+  // §09 — worker's booking rows covering the window, any status. The
+  // day drawer renders them inline with amend / decline actions; the
+  // page header surfaces a banner counting pending_approval +
+  // pending_amend rows.
+  bookings: Booking[];
 }
