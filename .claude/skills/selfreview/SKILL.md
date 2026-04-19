@@ -54,19 +54,36 @@ pairing rule.
 
 ## Workflow (autofix mode)
 
+The phase numbering mirrors interactive mode — autofix just skips
+phases 2 (plan mode) and 5 (ask user), and Phase 7 replaces the
+interactive hand-off with a full close-commit-push sequence.
+
 ```
-1. GATHER CHANGES (git diff, git log, bd show <main-task>)
+1. GATHER CHANGES         (git diff, git log, bd show <main-task>)
    ↓
-3. DEEP REVIEW (systematic, adversarial) — same as interactive
+2. —  skipped in autofix — no plan mode
    ↓
-4. WRITE FINDINGS (for the commit message / bd comment)
+3. DEEP REVIEW            (systematic, adversarial — same as interactive)
    ↓
-6. FIX every BUGS / MISSING / RISKY finding
+4. WRITE FINDINGS         (organised BUGS/MISSING/RISKY/NITPICKS with file:line)
    ↓
-7. RUN QUALITY GATES, COMMIT, PUSH, CLOSE THE BEADS TASK
+5. —  skipped in autofix — do not ask the user
+   ↓
+6. FIX + QUALITY GATES    (every BUGS/MISSING/RISKY; then run repo's lint/format/type/tests)
+   ↓
+7. CLOSE + COMMIT + PUSH  (bd close → bd sync → git add → git commit -s → git push → verify)
 ```
 
-Phases 2 and 5 are skipped entirely in autofix mode.
+**Order inside Phase 7 matters** — close Beads and `bd sync` BEFORE
+`git add`, so the `.beads/*.jsonl` delta ships inside the same commit
+as the code. See the Phase 7 (autofix) section below for the exact
+commands.
+
+**Empty findings are a valid outcome.** If the review surfaces nothing
+worth fixing, Phase 6 still runs the quality gates (they must be green)
+and Phase 7 still commits + pushes the underlying main-task work — it
+isn't on `main` yet, and the selfreview Beads task must be closed
+regardless.
 
 ## Phase 1: Gather changes
 
@@ -90,7 +107,9 @@ git diff --cached
 You review against intent, not against generic "could be better"
 observations.
 
-## Phase 2: Enter plan mode
+## Phase 2: Enter plan mode (interactive mode only)
+
+> **Autofix mode: skip this phase entirely.** Go straight to Phase 3.
 
 Call `EnterPlanMode` to switch to read-only analysis. All investigation
 happens here before proposing any change.
@@ -218,7 +237,10 @@ Organise by severity. Every finding needs a specific `file:line`.
 - If nothing is wrong, say so. An empty report is better than invented
   issues.
 
-## Phase 5: Ask the user
+## Phase 5: Ask the user (interactive mode only)
+
+> **Autofix mode: skip this phase entirely.** Fix every BUGS / MISSING /
+> RISKY directly and move on to quality gates (Phase 6).
 
 Use `AskUserQuestion` to triage:
 
@@ -246,29 +268,100 @@ If the user wants details, walk through findings one at a time.
 
 **Autofix mode**: apply fixes for every BUGS, MISSING, and RISKY
 finding. Skip NITPICKS unless trivially safe. Do not ask the user.
+If findings is empty, there is nothing to fix here — proceed to the
+quality gates and commit the underlying main-task work anyway.
 
-Afterwards (both modes):
+### Quality gates (both modes)
+
+Run the repo's actual gates. Do **not** assume `./scripts/*.sh` —
+those don't exist in every repo. Discover the right commands from
+the repo:
+
+- `Makefile` targets (common pattern: `make lint`, `make fmt`,
+  `make type`, `make test`) — usually the simplest entrypoint.
+- `pyproject.toml` / `package.json` scripts for the underlying tools.
+- `AGENTS.md` / `CLAUDE.md` "quality gates" section.
+
+Typical Python stack (adapt to this repo):
 
 ```bash
-./scripts/lint.sh
-./scripts/format.sh --check
-./scripts/typecheck.sh
-pytest <affected paths> -x -q
+uv run ruff check .
+uv run ruff format --check .
+uv run mypy <module>
+uv run pytest <affected paths> -x -q
 ```
 
-When green, present the fixes for the user to review (interactive) or
-commit, push, and close the Beads task (autofix).
-
-## Phase 7: Close the Beads task (autofix mode only)
+Typical JS/TS stack:
 
 ```bash
-bd comments add <selfreview-task-id> "Autofix self-review complete.
-Summary of findings: <inline summary>.
-Commits: <sha1>, <sha2>."
+pnpm -C <web-dir> lint
+pnpm -C <web-dir> typecheck
+pnpm -C <web-dir> test
+```
+
+When green, move on: interactive mode hands the fixes to the user
+for review; autofix mode continues to Phase 7.
+
+## Phase 7: Close Beads, commit, push, verify (autofix mode only)
+
+**Order matters.** `bd close` + `bd sync` must run *before* `git add`
+so the `.beads/*.jsonl` delta ships inside the same commit as the
+code. Don't push before committing. Don't commit before closing.
+
+```bash
+# 7.1 — Close the selfreview Beads task
 bd close <selfreview-task-id> --reason "Autofix self-review complete"
+
+# 7.2 — Optional: add a comment with the findings summary
+bd comments add <selfreview-task-id> "Autofix complete. Findings: <summary>."
+
+# 7.3 — Sync .beads/*.jsonl to the worktree
 bd sync
+
+# 7.4 — Stage the in-scope work PLUS .beads/
+git add <in-scope paths under the main task> .beads
+
+# 7.5 — Commit (Conventional Commits, signed-off, HEREDOC)
+git commit -s -m "$(cat <<'EOF'
+<type>(<scope>): <subject> (<main-task-id>, <selfreview-task-id>)
+
+<1-4 lines: what landed, notable self-review findings or "no findings".>
+
+Refs: docs/specs/<section>.md §"<section title>"
+EOF
+)"
+
+# 7.6 — Push to origin
+git push
+
+# If the push is rejected as non-fast-forward:
+git pull --rebase origin main
 git push
 ```
+
+### Rules for the commit
+
+- **Conventional Commits** type (`feat`, `fix`, `chore`, `docs`,
+  `refactor`, `test`, `sec`, `perf`, `build`, `ci`) + scope + short
+  subject.
+- **Signed-off**: `git commit -s` (never skip).
+- **HEREDOC** for multi-line messages so the body survives shell
+  quoting.
+- Reference both Beads task IDs (main + selfreview) in the title so
+  `git log | grep <id>` finds the landing commit.
+- Stage only in-scope files plus `.beads/` — never `git add -A` /
+  `git add .`.
+- Never `--amend`, never `--no-verify`, never force-push.
+
+### 7.7 — Verify
+
+```bash
+git log --oneline -3              # confirm the commit landed
+bd show <selfreview-task-id>      # confirm CLOSED
+git status                        # confirm clean worktree
+```
+
+Report all three outputs back to the caller.
 
 Do NOT create a new self-review task for the fixes you just applied —
 that would infinite-loop with the beads skill pairing rule. The autofix
