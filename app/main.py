@@ -61,6 +61,7 @@ from app.auth.csrf import CSRFMiddleware
 from app.capabilities import Capabilities
 from app.capabilities import probe as probe_capabilities
 from app.config import Settings, get_settings
+from app.security import BindGuardError, assert_bind_allowed
 from app.tenancy.middleware import WorkspaceContextMiddleware
 from app.util.logging import setup_logging
 
@@ -78,12 +79,6 @@ _PACKAGE_NAME: Final[str] = "crewday"
 # rootdir, without ``pip install -e .``). We prefer a clear sentinel over
 # a crash because ``/version`` is probed in smoke tests.
 _UNKNOWN_VERSION: Final[str] = "0.0.0+unknown"
-
-# The "public" v4 any-address. Matched literally; the IPv6 equivalent
-# (``::``) is caught too. The richer interface-glob guard is cd-z2g's
-# scope — here we only enforce the spec's "never bind wide without the
-# opt-in" rule (§15 "Binding policy" #3).
-_WILDCARD_BIND_HOSTS: Final[frozenset[str]] = frozenset({"0.0.0.0", "::"})
 
 # SPA build directories, tried in order. The production location is
 # ``app/web/dist``; during the early Phase-0 window the production
@@ -133,11 +128,14 @@ _SECURITY_HEADERS: Final[dict[str, str]] = {
 
 
 class PublicBindRefused(RuntimeError):
-    """Raised when ``create_app()`` is asked to run on a wildcard bind.
+    """Raised when ``create_app()`` is asked to run on a refused bind.
 
     The caller (uvicorn entrypoint, tests, composition root) gets a
     loud failure mode — this is a configuration bug, not something
-    the process should recover from.
+    the process should recover from. Wraps the underlying
+    :class:`~app.security.BindGuardError` so :mod:`app.main`'s caller
+    can keep catching the narrower, ``app.main``-scoped type without
+    reaching into the security module.
     """
 
 
@@ -177,20 +175,24 @@ def _resolve_version() -> str:
 
 
 def _enforce_bind_guard(settings: Settings) -> None:
-    """Refuse to boot on ``0.0.0.0`` / ``::`` without ``allow_public_bind``.
+    """Delegate to :func:`app.security.assert_bind_allowed`.
 
-    Spec §15 "Binding policy" #3: ``0.0.0.0`` and ``::`` never pass on
-    their own; they always need the opt-in. The richer interface-glob
-    path (cd-z2g) lands in a follow-up — here we only enforce the
-    unambiguous wildcard refusal so the factory can't accidentally
-    default-open a process.
+    Spec §15 "Binding policy": loopback always passes; an address on
+    an interface whose name matches :attr:`Settings.trusted_interfaces`
+    passes; ``0.0.0.0`` / ``::`` and any other address require
+    :attr:`Settings.allow_public_bind`. A refusal propagates as
+    :class:`PublicBindRefused` so callers keep a single, ``app.main``-
+    scoped exception to pattern on.
     """
-    if settings.bind_host in _WILDCARD_BIND_HOSTS and not settings.allow_public_bind:
-        raise PublicBindRefused(
-            f"Refusing to start with CREWDAY_BIND_HOST={settings.bind_host!r}: "
-            "wildcard binds require CREWDAY_ALLOW_PUBLIC_BIND=1 "
-            "(see docs/specs/15-security-privacy.md §Binding policy)"
+    try:
+        assert_bind_allowed(
+            settings.bind_host,
+            settings.bind_port,
+            trusted_globs=list(settings.trusted_interfaces),
+            allow_public=settings.allow_public_bind,
         )
+    except BindGuardError as exc:
+        raise PublicBindRefused(str(exc)) from exc
 
 
 def _resolve_spa_dist() -> Path | None:
