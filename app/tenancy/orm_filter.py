@@ -44,13 +44,30 @@ See ``docs/specs/01-architecture.md`` §"Tenant filter enforcement" and
 
 from __future__ import annotations
 
+import weakref
+
 from sqlalchemy import Delete, Select, Table, Update, event
 from sqlalchemy.orm import ORMExecuteState, Session, sessionmaker
+from sqlalchemy.orm.attributes import QueryableAttribute
 from sqlalchemy.sql.selectable import CTE, Alias, FromClause, Join, Subquery
 
 from app.tenancy import current, registry
 
 __all__ = ["TenantFilterMissing", "install_tenant_filter"]
+
+# Track which targets have the hook installed. ``WeakSet`` lets the
+# entry drop automatically when a ``sessionmaker`` (or ``Session``
+# subclass) is garbage-collected, so a new object allocated at the
+# **same memory address** is correctly treated as "not yet installed".
+# :func:`sqlalchemy.event.contains` keys by ``id(target)`` via a plain
+# dict, so it returns a **false positive** after address reuse (cd-3yhd
+# flake: a new per-test ``sessionmaker`` inherited a stale True,
+# ``install_tenant_filter`` no-op'd, and the fresh ``Session`` had no
+# listener — unfiltered SQL hit the wire). Gating on a ``WeakSet``
+# we own closes that hole without touching SQLAlchemy internals.
+_installed_targets: weakref.WeakSet[type[Session] | sessionmaker[Session]] = (
+    weakref.WeakSet()
+)
 
 
 class TenantFilterMissing(RuntimeError):
@@ -77,15 +94,27 @@ def install_tenant_filter(target: type[Session] | sessionmaker[Session]) -> None
     :class:`~sqlalchemy.orm.sessionmaker`. SQLAlchemy's event system
     accepts either. The hook fires on every ``session.execute()``.
 
-    Idempotent: :func:`sqlalchemy.event.contains` gates against
-    double-registration so the second call is a no-op. Without this
-    guard, a re-registered listener would append a *second* identical
+    Idempotent by **identity**: a module-level :class:`weakref.WeakSet`
+    tracks installed targets so a second call on the same live object
+    is a no-op. A double ``event.listen`` appends a *second* identical
     ``workspace_id`` filter on every query — a correctness (not just
-    performance) concern, because hidden duplicate predicates mask
-    bugs in the underlying filter logic.
+    performance) concern because hidden duplicate predicates mask bugs
+    in the underlying filter logic.
+
+    Not reusing :func:`sqlalchemy.event.contains` here: it keys by
+    ``id(target)``, which is stable only while ``target`` is alive.
+    When a ``sessionmaker`` is garbage-collected and a new one is
+    allocated at the same address (common in per-test fixtures),
+    :func:`event.contains` returns a **false positive** for the new
+    object and the install silently no-ops — so the fresh
+    ``Session`` has no listener and queries escape unfiltered
+    (cd-3yhd flake). ``WeakSet`` drops the entry when the target is
+    GC'd, so address reuse re-registers correctly.
     """
-    if not event.contains(target, "do_orm_execute", _do_orm_execute):
-        event.listen(target, "do_orm_execute", _do_orm_execute)
+    if target in _installed_targets:
+        return
+    event.listen(target, "do_orm_execute", _do_orm_execute)
+    _installed_targets.add(target)
 
 
 def _do_orm_execute(orm_execute_state: ORMExecuteState) -> None:
@@ -143,13 +172,22 @@ def _collect_scoped_targets(
     so an aliased FROM element is filtered on its alias columns, not
     the base table's.
 
-    For :class:`~sqlalchemy.sql.Select` every element of
-    ``get_final_froms()`` is walked: plain tables and aliases of scoped
-    tables are collected (deduplicated by object identity, so a
-    self-join with an aliased side is filtered on **both** sides);
-    joins are walked recursively; subqueries/CTEs that reach scoped
-    tables raise :class:`TenantFilterMissing` because the rewriter
-    cannot safely inject a filter inside an opaque selectable.
+    For :class:`~sqlalchemy.sql.Select`, walks the **pre-compile** top
+    level FROM sources directly (``_raw_columns`` from the SELECT list,
+    ``_from_obj`` from ``select_from``, and ``_setup_joins`` for
+    ``.join()`` targets) rather than :meth:`Select.get_final_froms`.
+    ``get_final_froms`` materialises an intermediate :class:`Join`
+    tree whose annotation state is tied to the ORM compile cache;
+    walking the raw pre-compile structure is both stable (cd-3yhd
+    investigation path) and cheaper (no compile step).
+
+    Plain tables and aliases of scoped tables are collected
+    (deduplicated by object identity, so a self-join with an aliased
+    side is filtered on **both** sides). Subqueries / CTEs that reach
+    scoped tables raise :class:`TenantFilterMissing` because the
+    rewriter cannot safely inject a filter inside an opaque
+    selectable. ``WHERE``-clause subqueries are deliberately **not**
+    walked — the invariant documented on the module docstring.
 
     For :class:`~sqlalchemy.sql.Update` / :class:`~sqlalchemy.sql.Delete`
     the sole target is ``stmt.table``.
@@ -164,12 +202,56 @@ def _collect_scoped_targets(
                 return [target]
         return []
 
-    # stmt is a Select
+    # stmt is a Select. Gather the top-level FROM sources without
+    # triggering a compile. ``_raw_columns`` + ``_from_obj`` +
+    # ``_setup_joins`` is what the ORM itself feeds to the compiler;
+    # walking them directly is stable across test orderings because
+    # the cached annotations on ``Select.get_final_froms()`` are what
+    # vary (cd-3yhd).
     collected: list[Table | Alias] = []
     seen: set[int] = set()
-    for from_clause in stmt.get_final_froms():
-        _walk_from(from_clause, collected, seen)
+    for source in _iter_select_from_sources(stmt):
+        _walk_from(source, collected, seen)
     return collected
+
+
+def _iter_select_from_sources(
+    stmt: Select[tuple[object, ...]],
+) -> list[FromClause]:
+    """Return top-level FROM sources from ``stmt`` without compiling.
+
+    Order matches SQLAlchemy's own compile-time pipeline: FROMs
+    implied by the SELECT list come first, then explicit
+    ``select_from(...)`` entries, then ``.join(...)`` right-hand
+    sides. Deduplicates by object identity so each source is walked
+    once.
+    """
+    sources: list[FromClause] = []
+    seen: set[int] = set()
+
+    def _add(src: object) -> None:
+        if isinstance(src, FromClause) and id(src) not in seen:
+            seen.add(id(src))
+            sources.append(src)
+
+    for raw_col in stmt._raw_columns:
+        for fr in raw_col._from_objects:
+            _add(fr)
+    for from_obj in stmt._from_obj:
+        _add(from_obj)
+    for setup_join in stmt._setup_joins:
+        target = setup_join[0]
+        # ``.join(Parent.children)`` stores an ``InstrumentedAttribute``;
+        # unwrap to the related mapper's local table.
+        if isinstance(target, QueryableAttribute):
+            prop = getattr(target, "property", None)
+            entity = getattr(prop, "entity", None)
+            local_table = getattr(entity, "local_table", None)
+            if local_table is not None:
+                _add(local_table)
+            continue
+        _add(target)
+    return sources
 
 
 def _walk_from(
@@ -188,6 +270,10 @@ def _walk_from(
     cannot safely rewrite inside an opaque selectable, so it fails
     closed rather than emit an unfiltered query. Callers who need that
     wrap the block in :func:`~app.tenancy.current.tenant_agnostic`.
+
+    Still handles :class:`Join` in case a consumer ever hands us a
+    pre-joined FROM element, even though :func:`_iter_select_from_sources`
+    returns already-unjoined sources today.
     """
     if isinstance(node, Table):
         if registry.is_scoped(node.name) and id(node) not in seen:
@@ -203,8 +289,8 @@ def _walk_from(
         # can't reach into a compiled selectable to add a predicate on the
         # inner table without changing the query shape.
         inner = node.element
-        if _subselect_has_scoped(inner):
-            offender = _first_scoped_in(inner)
+        offender = _first_scoped_name_in_selectable(inner)
+        if offender:
             raise TenantFilterMissing(table=offender)
         return
     if isinstance(node, Alias):
@@ -232,27 +318,25 @@ def _walk_from(
             _walk_from(inner_attr, collected, seen)
 
 
-def _subselect_has_scoped(selectable: object) -> bool:
-    """Return ``True`` if any table referenced by ``selectable`` is scoped."""
-    return _first_scoped_in(selectable) != ""
-
-
-def _first_scoped_in(selectable: object) -> str:
+def _first_scoped_name_in_selectable(selectable: object) -> str:
     """Return the first scoped table name inside ``selectable``, else ``""``.
 
-    Walks the selectable's ``froms`` recursively. Used only to name the
-    offending table in :class:`TenantFilterMissing` when a subquery or
-    CTE hides a scoped table from the top-level rewriter.
+    Used only to name the offending table in :class:`TenantFilterMissing`
+    when a subquery or CTE hides a scoped table from the top-level
+    rewriter. Walks by recursing into ``_raw_columns`` / ``_from_obj`` /
+    ``_setup_joins`` for :class:`~sqlalchemy.sql.Select` and falling
+    back to a structural walk for other selectables — never calls
+    :meth:`Select.get_final_froms` (cd-3yhd flake).
     """
-    froms_attr = getattr(selectable, "get_final_froms", None)
-    if froms_attr is None:
+    if isinstance(selectable, Select):
+        for source in _iter_select_from_sources(selectable):
+            name = _first_scoped_name(source)
+            if name:
+                return name
         return ""
-    froms = froms_attr()
-    for f in froms:
-        name = _first_scoped_name(f)
-        if name:
-            return name
-    return ""
+    # Non-Select selectables (e.g. compound selects): fall back to the
+    # structural walk, which handles Table / Join / Alias / Subquery.
+    return _first_scoped_name(selectable)
 
 
 def _first_scoped_name(node: object) -> str:
@@ -265,7 +349,7 @@ def _first_scoped_name(node: object) -> str:
             return left
         return _first_scoped_name(node.right)
     if isinstance(node, Subquery | CTE):
-        return _first_scoped_in(node.element)
+        return _first_scoped_name_in_selectable(node.element)
     inner_attr = getattr(node, "element", None)
     if inner_attr is not None and inner_attr is not node:
         return _first_scoped_name(inner_attr)

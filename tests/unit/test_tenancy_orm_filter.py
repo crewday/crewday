@@ -450,6 +450,42 @@ def test_install_tenant_filter_is_idempotent(
     assert flattened.count("foo.workspace_id = ?") == 1
 
 
+def test_install_tenant_filter_every_fresh_sessionmaker_filters(
+    engine: Engine,
+) -> None:
+    """Regression for cd-3yhd: every fresh :class:`sessionmaker` that passes
+    through :func:`install_tenant_filter` must have the listener attached.
+
+    Before the fix, idempotency was checked via
+    :func:`sqlalchemy.event.contains`, which keys on ``id(target)``.
+    When one ``sessionmaker`` was garbage-collected and a new one was
+    allocated at the same address (common in per-test fixtures, cd-3yhd
+    flake), the check returned a stale ``True`` and ``install`` silently
+    no-op'd — the fresh :class:`Session` executed queries unfiltered.
+
+    We simulate many fixture turnovers and assert the listener is
+    present on a :class:`Session` spawned from **every** factory —
+    direct proof that the guard doesn't false-positive across
+    back-to-back allocations.
+    """
+    import gc
+
+    for _ in range(100):
+        factory = sessionmaker(bind=engine, expire_on_commit=False, class_=Session)
+        install_tenant_filter(factory)
+        with factory() as session:
+            listeners = list(session.dispatch.do_orm_execute)
+            from app.tenancy.orm_filter import _do_orm_execute
+
+            assert _do_orm_execute in listeners, (
+                "install_tenant_filter must attach the listener to every "
+                "freshly-created sessionmaker, including those that land on "
+                "a previously-used memory address"
+            )
+        del factory, session
+        gc.collect()
+
+
 def test_subquery_with_scoped_table_agnostic_escape(
     session_factory: sessionmaker[Session],
 ) -> None:
