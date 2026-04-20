@@ -150,6 +150,10 @@ def throttle() -> Throttle:
 
 @pytest.fixture
 def capabilities() -> Capabilities:
+    # ``captcha_required=False`` keeps the full-flow test focused on
+    # the happy path through start → verify → complete; the CAPTCHA
+    # gate itself is exercised in
+    # :mod:`tests.integration.auth.test_signup_abuse_wired` (cd-055).
     return Capabilities(
         features=Features(
             rls=False,
@@ -160,7 +164,7 @@ def capabilities() -> Capabilities:
             email_bounce_webhooks=False,
             llm_voice_input=False,
         ),
-        settings=DeploymentSettings(signup_enabled=True),
+        settings=DeploymentSettings(signup_enabled=True, captcha_required=False),
     )
 
 

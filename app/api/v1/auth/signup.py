@@ -34,17 +34,22 @@ See ``docs/specs/03-auth-and-tokens.md`` §"Self-serve signup" and
 
 from __future__ import annotations
 
+import logging
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from app.adapters.db.identity.models import SignupAttempt
+from app.adapters.db.identity.models import SignupAttempt, canonicalise_email
+from app.adapters.db.session import make_uow
 from app.adapters.mail.ports import Mailer
 from app.api.deps import db_session
-from app.auth import passkey, signup
-from app.auth._throttle import Throttle
+from app.audit import write_audit
+from app.auth import passkey, signup, signup_abuse
+from app.auth._hashing import hash_with_pepper
+from app.auth._throttle import SignupRateLimited, Throttle
+from app.auth.keys import derive_subkey
 from app.auth.magic_link import (
     AlreadyConsumed,
     ConsumeLockout,
@@ -52,10 +57,13 @@ from app.auth.magic_link import (
     PurposeMismatch,
     RateLimited,
     TokenExpired,
+    _agnostic_audit_ctx,
 )
+from app.auth.signup_abuse import CaptchaFailed, DisposableEmail
 from app.capabilities import Capabilities
 from app.config import Settings, get_settings
 from app.tenancy import InvalidSlug, tenant_agnostic
+from app.util.clock import SystemClock
 
 __all__ = [
     "PasskeyFinishBody",
@@ -72,6 +80,8 @@ __all__ = [
 
 _Db = Annotated[Session, Depends(db_session)]
 
+_log = logging.getLogger(__name__)
+
 
 # ---------------------------------------------------------------------------
 # Request / response schemas
@@ -79,10 +89,18 @@ _Db = Annotated[Session, Depends(db_session)]
 
 
 class SignupStartBody(BaseModel):
-    """Request body for ``POST /signup/start``."""
+    """Request body for ``POST /signup/start``.
+
+    ``captcha_token`` is optional on the wire so self-host
+    deployments with ``capabilities.captcha_required=false`` can
+    omit it entirely. When the deployment requires a CAPTCHA the
+    abuse gate rejects an unset token with ``422 captcha_required``
+    (§15 "Self-serve abuse mitigations"; cd-055).
+    """
 
     email: str = Field(..., min_length=3, max_length=320)
     desired_slug: str = Field(..., min_length=3, max_length=40)
+    captcha_token: str | None = None
 
 
 class SignupStartResponse(BaseModel):
@@ -155,6 +173,16 @@ _StartDomainError = (
     signup.SlugHomoglyphError,
     signup.SlugInGracePeriod,
     RateLimited,
+)
+
+
+# Abuse guards run BEFORE the domain service. The router catches the
+# whole family in a single block so the refusal-audit pattern lines
+# up on every branch.
+_StartAbuseError = (
+    SignupRateLimited,
+    DisposableEmail,
+    CaptchaFailed,
 )
 
 
@@ -350,6 +378,119 @@ def _client_ip(request: Request) -> str:
     return request.client.host
 
 
+# HKDF purpose for the email / IP hash pepper used on the refusal
+# audit path. Mirrors :mod:`app.auth.signup` so a signup-start
+# refusal and its sibling successful signup hash the same identity
+# with the same subkey — abuse correlation joins cleanly.
+_ABUSE_HKDF_PURPOSE = "magic-link"
+
+
+def _audit_signup_refusal(
+    *,
+    action: str,
+    email_hash: str,
+    ip_hash: str,
+    reason: str,
+    extra: dict[str, str] | None = None,
+) -> None:
+    """Emit a refusal audit row on its own UoW.
+
+    Signup-start refusals raise before :func:`signup.start_signup`
+    ever opens its transaction, so the router can't piggyback on the
+    request's session. We open a fresh UoW via :func:`make_uow` — the
+    same pattern magic-link's ``write_rejected_audit`` uses — so the
+    refusal trail lands regardless of whatever rollback happens on
+    the primary path.
+
+    Failures of the audit UoW are logged and swallowed: this helper
+    runs inside an ``except _StartAbuseError`` clause about to
+    re-raise the mapped :class:`HTTPException`, and an audit failure
+    here would shadow the 429/422 the client expects with a 500. The
+    catch is deliberately broad (``Exception``) so any transient DB
+    / config hiccup (e.g. uninitialised engine in a misconfigured
+    test fixture) still logs-and-drops. :class:`BaseException`
+    propagates so operator aborts aren't swallowed.
+
+    PII minimisation: only hashes + symbolic ``reason``. Never the
+    raw email, raw IP, or raw token.
+    """
+    diff: dict[str, str] = {
+        "email_hash": email_hash,
+        "ip_hash": ip_hash,
+        "reason": reason,
+    }
+    if extra is not None:
+        diff.update(extra)
+    try:
+        with make_uow() as uow_session:
+            assert isinstance(uow_session, Session)
+            write_audit(
+                uow_session,
+                _agnostic_audit_ctx(),
+                entity_kind="signup_attempt",
+                entity_id="00000000000000000000000000",
+                action=action,
+                diff=diff,
+            )
+    except Exception:
+        _log.exception("signup refusal audit write failed on fresh UoW")
+
+
+def _abuse_audit_action(exc: Exception) -> str:
+    """Return the ``audit.signup.*`` action symbol for ``exc``."""
+    if isinstance(exc, SignupRateLimited):
+        return "audit.signup.rate_limited"
+    if isinstance(exc, DisposableEmail):
+        return "audit.signup.disposable_email"
+    assert isinstance(exc, CaptchaFailed)
+    return "audit.signup.captcha_failed"
+
+
+def _abuse_audit_reason(exc: Exception) -> str:
+    """Return the refusal ``reason`` symbol recorded in the audit diff."""
+    if isinstance(exc, SignupRateLimited):
+        return f"rate_limited:{exc.scope}"
+    if isinstance(exc, DisposableEmail):
+        # The domain is a low-cardinality enum (hundreds of entries
+        # max) — carrying it in ``reason`` is fine and lets operators
+        # grep for "who's spraying mailinator at us today".
+        return f"disposable_email:{exc.domain}"
+    assert isinstance(exc, CaptchaFailed)
+    return exc.reason
+
+
+def _http_for_abuse(exc: Exception) -> HTTPException:
+    """Map a :mod:`app.auth.signup_abuse` refusal to an HTTP response."""
+    if isinstance(exc, SignupRateLimited):
+        return HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail={
+                "error": "rate_limited",
+                "retry_after_seconds": exc.retry_after_seconds,
+            },
+            headers={"Retry-After": str(exc.retry_after_seconds)},
+        )
+    if isinstance(exc, DisposableEmail):
+        return HTTPException(
+            status_code=422,
+            detail={"error": "disposable_email"},
+        )
+    # CaptchaFailed — last branch; ``_StartAbuseError`` is exhaustive.
+    assert isinstance(exc, CaptchaFailed)
+    # The ``captcha_required`` reason is a distinct symbol so the SPA
+    # can tell "you need to solve the CAPTCHA" apart from "you solved
+    # it wrong".
+    if exc.reason == "captcha_required":
+        return HTTPException(
+            status_code=422,
+            detail={"error": "captcha_required"},
+        )
+    return HTTPException(
+        status_code=422,
+        detail={"error": "captcha_failed"},
+    )
+
+
 def build_signup_router(
     *,
     mailer: Mailer,
@@ -384,18 +525,88 @@ def build_signup_router(
         request: Request,
         session: _Db,
     ) -> SignupStartResponse:
-        """Kick off the signup flow — validate + mint link + audit."""
+        """Kick off the signup flow — abuse gates + domain service.
+
+        Gate order (cheap checks before expensive ones, every gate
+        rejects without opening the primary UoW so the DB never
+        touches a refused request):
+
+        1. Signup-enabled check — 404 the whole surface.
+        2. Rate limits — per-global / per-IP / per-email fixed
+           windows (§15). Hashes are peppered so plaintext IP /
+           email never reaches the throttle.
+        3. Disposable-email blocklist (§15) — cheap set membership.
+        4. CAPTCHA — hits the Turnstile endpoint when required;
+           falls through to offline test-mode when no secret is
+           configured.
+        5. :func:`signup.start_signup` — slug validation, attempt
+           insert, magic link mint. Its own errors carry the
+           existing mapping.
+        """
         if resolved_base_url is None:
             raise RuntimeError(
                 "base_url / settings.public_url is not set; "
                 "cannot build magic-link URLs"
             )
+
+        # Fail fast on the 404-for-disabled-deployment path before
+        # we bother hashing anything.
+        if not capabilities.settings.signup_enabled:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={"error": "not_found"},
+            )
+
+        ip = _client_ip(request)
+        pepper = derive_subkey(cfg.root_key, purpose=_ABUSE_HKDF_PURPOSE)
+        email_hash = hash_with_pepper(canonicalise_email(body.email), pepper)
+        ip_hash = hash_with_pepper(ip, pepper)
+        now = SystemClock().now()
+
+        try:
+            signup_abuse.check_rate(
+                throttle, ip_hash=ip_hash, email_hash=email_hash, now=now
+            )
+            signup_abuse.check_captcha(
+                body.captcha_token, capabilities=capabilities, settings=cfg
+            )
+            if signup_abuse.is_disposable(body.email):
+                domain = body.email.rpartition("@")[2].strip().lower()
+                raise DisposableEmail(domain)
+        except _StartAbuseError as exc:
+            reason = _abuse_audit_reason(exc)
+            action = _abuse_audit_action(exc)
+            # One structured log line per refusal so operators can
+            # correlate a 429/422 at the edge with a hash in the audit
+            # table (§15 "Self-serve abuse mitigations"). Particularly
+            # relevant for rate-limit fairness behind shared egress
+            # (CGNAT / campus / corporate NAT) — the log carries the
+            # ``scope`` symbol so ops can distinguish "this IP is
+            # spraying" from "the global brake is up" without opening
+            # the DB. No raw IP or email: only the peppered hashes.
+            _log.info(
+                "signup abuse refusal",
+                extra={
+                    "action": action,
+                    "reason": reason,
+                    "ip_hash": ip_hash,
+                    "email_hash": email_hash,
+                },
+            )
+            _audit_signup_refusal(
+                action=action,
+                email_hash=email_hash,
+                ip_hash=ip_hash,
+                reason=reason,
+            )
+            raise _http_for_abuse(exc) from exc
+
         try:
             signup.start_signup(
                 session,
                 email=body.email,
                 desired_slug=body.desired_slug,
-                ip=_client_ip(request),
+                ip=ip,
                 mailer=mailer,
                 base_url=resolved_base_url,
                 throttle=throttle,

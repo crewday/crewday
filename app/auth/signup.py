@@ -49,7 +49,6 @@ mitigations".
 
 from __future__ import annotations
 
-import hashlib
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any, Final
@@ -71,6 +70,7 @@ from app.adapters.db.workspace.models import UserWorkspace, Workspace
 from app.adapters.mail.ports import Mailer
 from app.audit import write_audit
 from app.auth import magic_link, passkey
+from app.auth._hashing import hash_with_pepper
 from app.auth._throttle import Throttle
 from app.auth.keys import derive_subkey
 from app.capabilities import Capabilities
@@ -275,11 +275,11 @@ def _pepper(settings: Settings | None) -> bytes:
     return derive_subkey(s.root_key, purpose=_HKDF_PURPOSE)
 
 
-def _hash_with_pepper(plaintext: str, pepper: bytes) -> str:
-    h = hashlib.sha256()
-    h.update(plaintext.encode("utf-8"))
-    h.update(pepper)
-    return h.hexdigest()
+# Local re-export of the shared helper — see :mod:`app.auth._hashing`
+# (cd-3dc7). Keeping the private alias means intra-module call sites
+# (``email_hash = _hash_with_pepper(email_lower, pepper)`` etc.) stay
+# a one-word swap without reshuffling the entire file.
+_hash_with_pepper = hash_with_pepper
 
 
 def _agnostic_audit_ctx() -> WorkspaceContext:

@@ -104,6 +104,13 @@ class TestRefreshSettings:
         caps.refresh_settings(db_session)
         assert caps.settings.signup_throttle_overrides == {"per_email_per_day": 5}
 
+    def test_captcha_required_false_override(self, db_session: Session) -> None:
+        """cd-055: operators disable the CAPTCHA gate on self-host."""
+        _add(db_session, "captcha_required", False)
+        caps = _empty_capabilities()
+        caps.refresh_settings(db_session)
+        assert caps.settings.captcha_required is False
+
     def test_unknown_key_silently_ignored(self, db_session: Session) -> None:
         """A DB row with a key the app doesn't know about must not crash."""
         _add(db_session, "invented_future_toggle", "anything")

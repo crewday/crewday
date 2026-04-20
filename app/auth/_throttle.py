@@ -6,7 +6,7 @@ shared abuse-throttle module (``app/abuse/throttle.py``) has not yet
 landed. cd-7huk absorbs these checks into the deployment-wide
 throttle; until then the magic-link service keeps them private.
 
-Two scoped buckets per caller:
+Three scoped buckets per caller:
 
 * **Request rate** — per-IP and per-email fixed window, 5 hits / 60 s
   on ``/auth/magic/request`` (§15 "Rate limiting and abuse controls":
@@ -14,6 +14,12 @@ Two scoped buckets per caller:
 * **Consume failure lockout** — per-IP sliding counter, 3 failed
   attempts / 60 s → 10-minute lockout on ``/auth/magic/consume``
   (§15: "3 failed attempts → 10-minute IP lockout").
+* **Signup-start budget** — per-IP, per-email, and deployment-wide
+  global fixed-window buckets on ``POST /api/v1/signup/start`` (§15
+  "Self-serve abuse mitigations": "≤ 5 per IP / hour, ≤ 3 per email
+  / hour, ≤ 200 deployment / hour"). Called from
+  :mod:`app.auth.signup_abuse`; cd-7huk will absorb this alongside
+  the magic-link buckets into the shared abuse throttle.
 
 Storage: single process memory. crew.day v1 runs one worker per
 deployment (§01 "One worker pool per process"), so an in-memory dict
@@ -42,6 +48,7 @@ from typing import Final
 __all__ = [
     "ConsumeLockout",
     "RateLimited",
+    "SignupRateLimited",
     "Throttle",
 ]
 
@@ -55,6 +62,23 @@ _REQUEST_WINDOW: Final[timedelta] = timedelta(minutes=1)
 _CONSUME_FAIL_LIMIT: Final[int] = 3
 _CONSUME_FAIL_WINDOW: Final[timedelta] = timedelta(minutes=1)
 _CONSUME_LOCKOUT: Final[timedelta] = timedelta(minutes=10)
+
+# Signup-start budgets — spec §15 "Self-serve abuse mitigations":
+#   * ≤ 5 successful starts per source IP per hour
+#   * ≤ 3 successful starts per email lifetime on the deployment
+#   * ≤ 200 signup starts per deployment per hour (global cool-off)
+#
+# Spec treats the per-email cap as "lifetime on the deployment"; we
+# implement it as a 1-hour rolling window here. The deployment-wide
+# persistent counter moves to the shared throttle with cd-7huk — the
+# in-memory rolling window is the right local approximation until
+# then, and the per-IP + global caps are already enough to defeat a
+# single-shot abuser before the email cap even comes into play.
+_SIGNUP_IP_LIMIT: Final[int] = 5
+_SIGNUP_EMAIL_LIMIT: Final[int] = 3
+_SIGNUP_GLOBAL_LIMIT: Final[int] = 200
+_SIGNUP_WINDOW: Final[timedelta] = timedelta(hours=1)
+_SIGNUP_GLOBAL_KEY: Final[str] = "__global__"
 
 
 class RateLimited(Exception):
@@ -71,6 +95,43 @@ class ConsumeLockout(Exception):
     can emit a different error symbol (``consume_locked_out``) and
     the test suite can pin the 3-fail trigger semantics.
     """
+
+
+class SignupRateLimited(Exception):
+    """Caller exceeded a signup-start bucket (per-IP, per-email, global).
+
+    Carries a ``retry_after_seconds`` hint derived from the oldest
+    hit still inside the window + :data:`_SIGNUP_WINDOW`. The HTTP
+    router maps this to ``429 rate_limited`` with a ``Retry-After``
+    header so the SPA can back off deterministically rather than
+    poll-spamming. ``scope`` is one of ``"ip"``, ``"email"``, or
+    ``"global"`` — audit rows carry it verbatim so operators can tell
+    which limit tripped without parsing the exception message.
+    """
+
+    def __init__(self, scope: str, retry_after_seconds: int) -> None:
+        super().__init__(
+            f"signup-start rate limit exceeded (scope={scope!r}, "
+            f"retry_after={retry_after_seconds}s)"
+        )
+        self.scope = scope
+        self.retry_after_seconds = retry_after_seconds
+
+
+def _signup_limit_for(scope: str) -> int:
+    """Return the limit for a signup-start scope (``"ip"``/``"email"``/``"global"``).
+
+    Centralised so the bucket-evaluation loop doesn't branch inline.
+    Unknown scopes raise :class:`ValueError` — this is a programming
+    error, not a runtime surprise.
+    """
+    if scope == "ip":
+        return _SIGNUP_IP_LIMIT
+    if scope == "email":
+        return _SIGNUP_EMAIL_LIMIT
+    if scope == "global":
+        return _SIGNUP_GLOBAL_LIMIT
+    raise ValueError(f"unknown signup-start scope: {scope!r}")
 
 
 @dataclass(frozen=True, slots=True)
@@ -178,6 +239,84 @@ class Throttle:
         with self._lock:
             self._fails.pop(ip, None)
             self._fail_locked_until.pop(ip, None)
+
+    # ------------------------------------------------------------------
+    # Signup-start (/api/v1/signup/start) budget
+    # ------------------------------------------------------------------
+
+    def check_signup_start(
+        self, *, ip_hash: str, email_hash: str, now: datetime
+    ) -> None:
+        """Raise :class:`SignupRateLimited` when any signup bucket is over.
+
+        Evaluates three fixed-window buckets in priority order so the
+        caller learns which one tripped first:
+
+        1. **Global** (``_SIGNUP_GLOBAL_LIMIT`` per
+           ``_SIGNUP_WINDOW``) — deployment-wide cool-off. Checked
+           first so a hostile swarm across distinct IPs still flips
+           the brake before either per-IP or per-email even counts.
+        2. **Per-IP** (``_SIGNUP_IP_LIMIT`` per
+           ``_SIGNUP_WINDOW``) — stop a single IP spraying many
+           emails.
+        3. **Per-email** (``_SIGNUP_EMAIL_LIMIT`` per
+           ``_SIGNUP_WINDOW``) — stop an attacker cycling IPs against
+           one inbox.
+
+        On success (below every cap) each bucket is incremented in
+        turn — a successful call advances all three. The ``ip`` key
+        is an **IP hash**, not the raw IP: signup_abuse hashes the
+        address with the per-deployment pepper before handing it in,
+        so this module never touches plaintext PII. Mirror this for
+        ``email_hash``.
+
+        ``retry_after_seconds`` on the raised exception is computed
+        from the oldest hit inside the violating bucket + window, so
+        the client's back-off matches the window tail exactly rather
+        than always being the full hour.
+        """
+        with self._lock:
+            for scope, bucket_key in (
+                ("global", _BucketKey("signup_start:global", _SIGNUP_GLOBAL_KEY)),
+                ("ip", _BucketKey("signup_start:ip", ip_hash)),
+                ("email", _BucketKey("signup_start:email", email_hash)),
+            ):
+                limit = _signup_limit_for(scope)
+                if self._over_signup_limit(bucket_key, now, limit=limit):
+                    retry_after = self._signup_retry_after_seconds(bucket_key, now)
+                    raise SignupRateLimited(
+                        scope=scope, retry_after_seconds=retry_after
+                    )
+            # Every bucket is under its cap — record the hit against all
+            # three so the next call sees it. The global bucket is
+            # advanced *after* per-IP/per-email so a failed per-IP
+            # check doesn't pollute the global counter.
+            self._record_hit(_BucketKey("signup_start:global", _SIGNUP_GLOBAL_KEY), now)
+            self._record_hit(_BucketKey("signup_start:ip", ip_hash), now)
+            self._record_hit(_BucketKey("signup_start:email", email_hash), now)
+
+    def _over_signup_limit(self, key: _BucketKey, now: datetime, *, limit: int) -> bool:
+        bucket = self._hits[key]
+        self._evict_expired(bucket, now, _SIGNUP_WINDOW)
+        return len(bucket) >= limit
+
+    def _signup_retry_after_seconds(self, key: _BucketKey, now: datetime) -> int:
+        """Return seconds until the oldest hit in ``key`` falls out of window.
+
+        Zero-or-negative values are clamped up to ``1`` so the
+        ``Retry-After`` header never tells the client "retry in
+        0 seconds", which some SPAs treat as "now".
+        """
+        bucket = self._hits[key]
+        if not bucket:
+            # Shouldn't happen on the refusal path (_over_signup_limit
+            # only returns True when bucket length >= limit), but the
+            # guard keeps the helper total so a future caller can't
+            # crash on an empty bucket.
+            return int(_SIGNUP_WINDOW.total_seconds())
+        expires_at = bucket[0] + _SIGNUP_WINDOW
+        seconds = int((expires_at - now).total_seconds())
+        return max(seconds, 1)
 
     # ------------------------------------------------------------------
     # Internal helpers

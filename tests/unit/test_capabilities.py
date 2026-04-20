@@ -177,6 +177,9 @@ class TestProbeWithoutSession:
         assert caps.settings.signup_throttle_overrides == {}
         assert caps.settings.require_passkey_attestation is False
         assert caps.settings.llm_default_budget_cents_30d == 500
+        # cd-055: captcha_required defaults on (SaaS default); operators
+        # toggle off via deployment_setting for self-host.
+        assert caps.settings.captcha_required is True
 
     def test_features_populated_when_session_none(self) -> None:
         caps = probe(_sqlite_settings(storage_backend="s3"), session=None)

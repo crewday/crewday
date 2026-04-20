@@ -167,7 +167,12 @@ def throttle() -> Throttle:
 
 @pytest.fixture
 def capabilities_enabled() -> Capabilities:
-    """Capabilities with signup enabled (default)."""
+    """Capabilities with signup enabled (default).
+
+    ``captcha_required=False`` because these tests don't exercise the
+    CAPTCHA gate added in cd-055; the abuse gate + its refusal
+    shapes are covered in :mod:`tests.unit.auth.test_signup_abuse`.
+    """
     return Capabilities(
         features=Features(
             rls=False,
@@ -178,7 +183,7 @@ def capabilities_enabled() -> Capabilities:
             email_bounce_webhooks=False,
             llm_voice_input=False,
         ),
-        settings=DeploymentSettings(signup_enabled=True),
+        settings=DeploymentSettings(signup_enabled=True, captcha_required=False),
     )
 
 

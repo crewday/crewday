@@ -82,7 +82,6 @@ the nonce row either never existed or stays pending under rollback.
 
 from __future__ import annotations
 
-import hashlib
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any, Final, Literal
@@ -102,6 +101,7 @@ from app.adapters.db.identity.models import (
 )
 from app.adapters.mail.ports import Mailer
 from app.audit import write_audit
+from app.auth._hashing import hash_with_pepper
 from app.auth._throttle import ConsumeLockout, RateLimited, Throttle
 from app.auth.keys import derive_subkey
 from app.config import Settings, get_settings
@@ -286,18 +286,12 @@ def _serializer(settings: Settings | None) -> URLSafeTimedSerializer:
     return URLSafeTimedSerializer(secret_key=key, salt=_SERIALIZER_SALT)
 
 
-def _hash_with_pepper(plaintext: str, pepper: bytes) -> str:
-    """Return ``sha256(plaintext || pepper)`` as a 64-char hex digest.
-
-    ``pepper`` is the HKDF subkey; keeping it separate from the
-    serializer's signing key is defence-in-depth should a future
-    refactor split the two. The hex digest is the form stored on the
-    row and echoed into audit diffs.
-    """
-    h = hashlib.sha256()
-    h.update(plaintext.encode("utf-8"))
-    h.update(pepper)
-    return h.hexdigest()
+# Local re-export of the shared helper — see :mod:`app.auth._hashing`
+# (cd-3dc7). The private ``_hash_with_pepper`` alias stays so sibling
+# modules that already import it (router refusal-audit path in
+# :mod:`app.api.v1.auth.signup`, for instance) keep working without a
+# drive-by import shuffle.
+_hash_with_pepper = hash_with_pepper
 
 
 def _ip_hash(ip: str, pepper: bytes) -> str:

@@ -92,6 +92,18 @@ class Settings(BaseSettings):
     # --- Signing / tokens ---
     root_key: SecretStr | None = None
 
+    # --- Signup abuse mitigations (§15 "Self-serve abuse mitigations"; cd-055) ---
+    # Cloudflare Turnstile server-side secret. ``None`` means "test /
+    # offline mode": the CAPTCHA verifier accepts the fixed token
+    # ``"test-pass"`` and rejects ``"test-fail"`` so unit tests never
+    # hit the network. Operators running on the SaaS deployment set
+    # this to the real Turnstile secret; the deployment setting
+    # ``captcha_required`` then governs whether a token is mandatory
+    # at all (spec §15 "Self-serve abuse mitigations"). The Turnstile
+    # endpoint URL is pinned (not configurable) — changing the
+    # provider is a code diff, not an ops switch.
+    captcha_turnstile_secret: SecretStr | None = None
+
     # --- Runtime ---
     demo_mode: bool = False
     worker: Literal["internal", "external"] = "internal"
