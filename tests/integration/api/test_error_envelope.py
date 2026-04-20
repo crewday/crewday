@@ -384,3 +384,26 @@ class TestCrossCuttingEnvelopeInvariants:
         """Every rendered envelope carries a full URI under ``type``."""
         body = composed_client.get(path).json()
         assert body["type"].startswith(CANONICAL_TYPE_BASE)
+
+
+class TestSPACatchAllAPIFallthrough:
+    """API paths that reach the SPA catch-all return problem+json, not bare JSON."""
+
+    def test_unknown_api_path_returns_problem_json(
+        self, composed_client: TestClient
+    ) -> None:
+        """An unknown path under ``/api/`` returns the RFC 7807 envelope.
+
+        The SPA catch-all previously emitted ``{"error": "not_found"}``
+        with ``Content-Type: application/json`` — a regression from the
+        spec §12 envelope contract. The fix raises ``HTTPException(404)``
+        so the registered problem+json handler wraps the response.
+        """
+        resp = composed_client.get("/api/v1/nonexistent-endpoint")
+        assert resp.status_code == 404
+        assert resp.headers["content-type"].startswith(CONTENT_TYPE_PROBLEM_JSON)
+        body = resp.json()
+        assert body["type"] == f"{CANONICAL_TYPE_BASE}not_found"
+        assert body["status"] == 404
+        assert "title" in body
+        assert "instance" in body

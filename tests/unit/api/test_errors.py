@@ -453,6 +453,23 @@ class TestEnvelopeHeaders:
         assert "x-correlation-id" not in lower
         assert "x-request-id" not in lower
 
+    def test_crlf_in_correlation_id_is_stripped(self) -> None:
+        """CRLF / NUL bytes in an inbound correlation header are stripped.
+
+        h11 (uvicorn's HTTP/1.1 serialiser) rejects CRLF in outbound
+        header values with a ``LocalProtocolError`` — the sanitizer
+        prevents the connection abort that would otherwise occur.
+        """
+        client = _client(_app_raising(NotFound()))
+        resp = client.get(
+            "/boom",
+            headers={"X-Correlation-Id": "abc\r\nX-Evil: injected"},
+        )
+        echoed = resp.headers.get("X-Correlation-Id", "")
+        assert "\r" not in echoed
+        assert "\n" not in echoed
+        assert "X-Evil" not in resp.headers
+
 
 class TestExtraFieldBehaviour:
     """Extension fields in ``extra`` can't shadow reserved keys."""

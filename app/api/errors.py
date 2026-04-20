@@ -164,6 +164,20 @@ def _http_title(status: int) -> str:
         return "HTTP error"
 
 
+def _sanitize_header_value(value: str) -> str:
+    """Strip characters that would break HTTP header serialisation.
+
+    CRLF (``\\r``, ``\\n``) and NUL (``\\x00``) are illegal in HTTP/1.1
+    header values per RFC 7230 §3.2. When echoing caller-supplied
+    values back on the response (correlation-id echo), a value that
+    survived a lenient inbound transport would cause the outbound
+    ``h11`` serialiser to abort the connection with a
+    ``LocalProtocolError`` — effectively a DoS for that request.
+    Stripping them here is the defence-in-depth guard.
+    """
+    return value.translate({ord("\r"): None, ord("\n"): None, ord("\x00"): None})
+
+
 def _correlation_id(request: Request) -> str | None:
     """Return the first inbound correlation header value, if any.
 
@@ -171,11 +185,14 @@ def _correlation_id(request: Request) -> str | None:
     caller that set the spec-level name gets that value back — the
     two fall back to each other (§12 "Agent audit headers"). Case-
     insensitive because Starlette's :class:`Headers` already is.
+
+    The returned value is sanitized by :func:`_sanitize_header_value`
+    before being placed in the outbound response headers.
     """
     for header in CORRELATION_HEADERS:
         value = request.headers.get(header)
         if value:
-            return value
+            return _sanitize_header_value(value)
     return None
 
 

@@ -57,7 +57,7 @@ from typing import Any, Final
 
 from fastapi import FastAPI
 from fastapi.openapi.utils import get_openapi
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.cors import CORSMiddleware
 
@@ -426,10 +426,13 @@ def _register_spa_catch_all(app: FastAPI) -> None:
         """
         path = "/" + full_path
         if _is_api_path(path):
-            return JSONResponse(
-                status_code=404,
-                content={"error": "not_found", "detail": None},
-            )
+            # Raise rather than return so the registered StarletteHTTPException
+            # handler wraps the response in the RFC 7807 problem+json envelope
+            # (§12 "Errors"). A bare JSONResponse here would bypass the seam
+            # and emit the wrong Content-Type / envelope shape.
+            from starlette.exceptions import HTTPException as _HTTPException
+
+            raise _HTTPException(status_code=404)
 
         if dist is not None:
             # Favicon / manifest / top-level static file served directly.
