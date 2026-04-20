@@ -9,9 +9,11 @@ Covers:
 * factory shape — ``create_app()`` returns a :class:`FastAPI` and is
   re-callable per test with a pinned :class:`Settings`;
 * bind guard — wildcard hosts refuse without the public-bind opt-in;
-* ops probes — ``/healthz``, ``/version`` (``/readyz`` with a live DB
-  lives in the integration suite); security-headers middleware stamps
-  every response including the probe surface;
+* ops probe mounting — ``/healthz`` is reachable and carries the
+  tenancy correlation header (the ops-probe handler contracts
+  themselves live in ``tests/unit/test_health.py``);
+  security-headers middleware stamps every response including the
+  probe surface;
 * SPA catch-all — fallback HTML at ``/`` when the dist dir is absent,
   and an HTTP 404 JSON envelope for unknown ``/api/...`` paths;
 * middleware ordering — tenancy + CSRF + security headers all engage
@@ -25,8 +27,6 @@ See ``docs/specs/01-architecture.md`` §"High-level picture",
 from __future__ import annotations
 
 from collections.abc import Iterator
-from importlib.metadata import PackageNotFoundError
-from importlib.metadata import version as pkg_version
 from pathlib import Path
 from typing import Literal
 
@@ -235,58 +235,20 @@ class TestBindGuard:
 # ---------------------------------------------------------------------------
 
 
-class TestHealthz:
-    """Unconditional 200 — no DB, no side effects."""
+class TestHealthzMount:
+    """The factory mounts the ops-probe router and the tenancy middleware
+    treats the path as a skip-path (adds the correlation header).
 
-    def test_returns_200_ok_json(self, app_factory: Settings) -> None:
+    The probe handler's own contract (body shape, failure modes) is
+    asserted in ``tests/unit/test_health.py``; this test only asserts
+    the factory-level wiring.
+    """
+
+    def test_healthz_mounted_and_tenancy_skipped(self, app_factory: Settings) -> None:
         client = _client(create_app(settings=app_factory))
         resp = client.get("/healthz")
         assert resp.status_code == 200
-        assert resp.json() == {"status": "ok"}
-
-    def test_healthz_is_tenancy_skip_path(self, app_factory: Settings) -> None:
-        """Skip paths emit a correlation id on the response."""
-        client = _client(create_app(settings=app_factory))
-        resp = client.get("/healthz")
         assert CORRELATION_ID_HEADER in resp.headers
-
-
-# ---------------------------------------------------------------------------
-# /version
-# ---------------------------------------------------------------------------
-
-
-class TestVersion:
-    """Reads ``importlib.metadata`` — falls back to sentinel when uninstalled."""
-
-    def test_returns_installed_version_when_package_present(
-        self, app_factory: Settings
-    ) -> None:
-        client = _client(create_app(settings=app_factory))
-        resp = client.get("/version")
-        assert resp.status_code == 200
-        body = resp.json()
-        assert "version" in body
-        # Package IS installed in the test venv; assert we matched it.
-        try:
-            expected = pkg_version("crewday")
-        except PackageNotFoundError:
-            expected = "0.0.0+unknown"
-        assert body["version"] == expected
-
-    def test_version_falls_back_when_package_missing(
-        self, app_factory: Settings, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """Simulate running from a non-installed source checkout."""
-
-        def _raise(_name: str) -> str:
-            raise PackageNotFoundError("crewday")
-
-        monkeypatch.setattr("app.main.pkg_version", _raise)
-        client = _client(create_app(settings=app_factory))
-        resp = client.get("/version")
-        assert resp.status_code == 200
-        assert resp.json() == {"version": "0.0.0+unknown"}
 
 
 # ---------------------------------------------------------------------------

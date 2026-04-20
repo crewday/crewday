@@ -43,14 +43,12 @@ from typing import Final
 from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
-from sqlalchemy import text
-from sqlalchemy.exc import SQLAlchemyError
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.middleware.cors import CORSMiddleware
 
-from app.adapters.db.session import make_uow
 from app.adapters.mail.ports import Mailer
 from app.adapters.mail.smtp import SMTPMailer
+from app.api.health import router as health_router
 from app.api.v1.auth import invite as invite_module
 from app.api.v1.auth import magic as magic_module
 from app.api.v1.auth import passkey as passkey_module
@@ -352,44 +350,15 @@ def _mount_routers(
 
 
 def _register_ops_routes(app: FastAPI) -> None:
-    """Attach the unconditional ops probes (§16 "Healthchecks").
+    """Mount the ops-probe router (§16 "Healthchecks").
 
-    Registered directly on the app so they cannot be accidentally
-    shadowed by a router's route pattern. Each probe lives in the
-    :data:`~app.tenancy.middleware.SKIP_PATHS` set so the tenancy
-    middleware passes the request through without slug resolution.
+    Delegates every probe shape to :mod:`app.api.health`. Each route
+    lives in :data:`~app.tenancy.middleware.SKIP_PATHS` so the
+    tenancy middleware passes the request through without slug
+    resolution; ``/healthz`` additionally never touches the DB
+    (see :mod:`app.api.health` docstring).
     """
-
-    @app.get("/healthz", include_in_schema=False)
-    def healthz() -> dict[str, str]:
-        """Process liveness — always 200 once the ASGI server is up."""
-        return {"status": "ok"}
-
-    @app.get("/readyz", include_in_schema=False)
-    def readyz() -> Response:
-        """DB readiness — 200 on a clean ``SELECT 1``, 503 otherwise.
-
-        A fresh :class:`~app.adapters.db.session.UnitOfWorkImpl` is
-        opened per probe so a crashed pool recovers on the next
-        scrape. Catching :class:`SQLAlchemyError` (not bare
-        ``Exception``) keeps the failure surface narrow to database
-        faults; any other crash bubbles to the default 500 handler.
-        """
-        try:
-            with make_uow() as session:
-                session.execute(text("SELECT 1"))
-        except SQLAlchemyError as exc:
-            _log.warning("readyz: db ping failed", extra={"error": repr(exc)})
-            return JSONResponse(
-                status_code=503,
-                content={"status": "degraded", "detail": "db_unreachable"},
-            )
-        return JSONResponse(status_code=200, content={"status": "ok"})
-
-    @app.get("/version", include_in_schema=False)
-    def version() -> dict[str, str]:
-        """Package version resolved via :mod:`importlib.metadata`."""
-        return {"version": _resolve_version()}
+    app.include_router(health_router)
 
 
 def _register_spa_catch_all(app: FastAPI) -> None:
