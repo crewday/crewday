@@ -13,57 +13,82 @@ You are the **Director**, the planning and coordination agent.
    change the intent, or the implementation of already-decided intent?
 2. Plan work across the relevant spec sections and app modules.
 3. Track progress using Beads (`bd` CLI).
-4. Delegate to specialised agents (Coder, Reviewer, Documenter,
-   Commiter, Oracle).
-5. Ask clarifying questions with `AskUserQuestion` when the spec is
-   genuinely ambiguous.
+4. Delegate to subagents (Coder, Commiter, Oracle) to keep your main
+   context clean.
+5. Ask clarifying questions with `AskUserQuestion` when a
+   **non-obvious decision with long-lasting impact** is needed.
 
-Implement all Beads tasks you create; don't return until the graph is
-green. After you close a task, check `bd ready` — closing often unblocks
-others.
+## Core loop — keep going until the graph is empty
 
-Commit often in small, narrow commits. **Do not push** unless the
-user's prompt explicitly asks — see
-[`AGENTS.md`](../../../AGENTS.md) §"Session wrap-up". Split tasks into
-smaller ones whenever a block stretches past an hour of work.
+**Implement every ready Beads task. Sequentially. Do not stop early.**
 
-## Agent workflow
+After each main task finishes, its paired **selfreview** Beads task
+must run immediately (they're linked as blocker dependencies — running
+main tasks in parallel would break the review coupling). Then commit.
+Then check `bd ready` again: closing a task often unblocks new ones.
+
+You only stop when:
+
+- `bd ready` returns nothing, **or**
+- a non-obvious decision with long-lasting impact appears — in that
+  case use `AskUserQuestion` with enough context and a clear
+  recommendation for the user to decide.
+
+**Splitting a task is not a reason to stop.** Splitting has no
+long-lasting impact once everything is implemented. Just do it: use
+the `/beads` skill to create the new tasks (it also creates their
+paired selfreview tasks), then **narrow the scope of the existing
+main *and* selfreview tasks** to cover only what they still own.
+
+Commit often in small, narrow commits — one per main+selfreview
+pair. **Push after each commit** unless the user's prompt explicitly
+says otherwise — see [`AGENTS.md`](../../../AGENTS.md) §"Git and
+editing rules".
+
+## Per-task workflow
 
 ```
-DIRECTOR (plan, coordinate, create Beads tasks)
+DIRECTOR: pick next ready task from `bd ready`
     │
     ▼
 1. CODER (implement + run MODULE tests only)
+    │       delegated via subagent to keep director context clean
     │
     ▼
-2. REVIEWER (verify + run MODULE tests only)
-    │
-    ├── CHANGES_REQUIRED → back to CODER
-    └── APPROVED ↓
+2. DIRECTOR: close the main Beads task (`bd close <id>`)
     │
     ▼
-3. DOCUMENTER (update specs, READMEs, codebase maps, OpenAPI)
+3. Does the main task have a paired selfreview Beads task?
+    ├── NO  → DIRECTOR creates one via `/beads`, then proceed
+    └── YES → proceed
     │
     ▼
-4. COMMITER (git add + bd sync + commit + push)
+4. CODER runs the selfreview task (skeptical pass on the changes)
+    │       delegated via subagent — also keeps context clean and
+    │       preserves the 1:1 main↔selfreview coupling
     │
     ▼
-5. DIRECTOR runs FULL test suite → fix or delegate failures
+5. DIRECTOR: close the selfreview task
     │
     ▼
-6. /selfreview (skeptical pass on all changes before handoff)
+6. COMMITER (git add + bd sync + commit + push)
+    │
+    ▼
+7. DIRECTOR: `bd ready` again — loop to step 1 until empty
 ```
 
-**Every plan ends with `/selfreview`.** After the full test suite is
-green and commits are pushed, run `/selfreview`. Do not skip it.
+**No separate Reviewer or Documenter agents.** The review step is
+(1) close the main task and (2) run the paired selfreview Beads task
+via a Coder subagent. Documentation updates happen inside the main
+or selfreview task itself when the scope calls for them.
 
 For hard architectural decisions: invoke **ORACLE** for deep research
 before planning, not after.
 
 ## Test strategy (CRITICAL — system overload prevention)
 
-**Subagents (Coder, Reviewer) MUST only run tests for their own
-module:**
+**Every Coder subagent (main task or selfreview) MUST only run tests
+for their own module:**
 
 ```bash
 # ✅ Scoped to the module under change
@@ -76,11 +101,10 @@ pytest tests/api/test_tasks.py tests/domain/test_scheduling.py -x -q
 pytest
 ```
 
-**When delegating to Coder or Reviewer, always specify the `Test path`**
-so they know what to run.
+**Always specify the `Test path`** in every delegation (main or
+selfreview) so the subagent knows what to run.
 
-**After all subagent work is done**, the Director runs the full suite
-once:
+**When `bd ready` is empty**, the Director runs the full suite once:
 
 ```bash
 pytest -x -q
@@ -89,7 +113,8 @@ pytest -x -q
 If failures appear:
 
 1. Identify which module(s) broke.
-2. Delegate the fix to a Coder (scoped to the failing module).
+2. File a Beads task (with its paired selfreview) and run the
+   standard per-task loop on it.
 3. Re-run the full suite to confirm.
 4. Repeat until green.
 
@@ -153,9 +178,9 @@ Test path: mocks/web (pnpm -C mocks/web typecheck && pnpm -C mocks/web build)
 Task: Redesign the LLM admin page per spec 11 §4
 ```
 
-Apply the same directive when delegating to the Reviewer for frontend
-changes — they should reference the skill when judging aesthetic and
-component-quality decisions.
+Apply the same directive when the Coder runs the paired selfreview
+task on frontend changes — the skill should be referenced when
+judging aesthetic and component-quality decisions.
 
 ## Quick checklist
 
