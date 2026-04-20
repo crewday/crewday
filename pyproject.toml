@@ -91,6 +91,27 @@ markers = [
 source = ["app"]
 omit = ["*/migrations/*", "*/__init__.py"]
 
+# CSP inline linter (cd-wv2v).
+#
+# ``scripts/check_csp_inlines.py`` walks ``app/web/dist/**/*.html`` and
+# refuses any ``<script>`` or ``<style>`` tag that is inline (no ``src=``
+# / ``href=``) and not nonced. The strict CSP served by
+# :class:`app.api.middleware.SecurityHeadersMiddleware` only accepts
+# nonced inlines; an un-nonced one would silently be refused by the
+# browser, breaking the SPA with no server-side error.
+#
+# Run locally:
+#
+#   uv run python scripts/check_csp_inlines.py
+#   uv run python scripts/check_csp_inlines.py app/web/dist
+#
+# Wiring this into CI is deployment-infra scope (separate task); the
+# script is ready to drop into any pipeline that already invokes the
+# scripts/ directory. See docs/specs/15-security-privacy.md
+# §"HTTP security headers".
+[tool.check_csp]
+default_path = "app/web/dist"
+
 [tool.coverage.report]
 show_missing = true
 skip_covered = true

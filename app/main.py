@@ -36,21 +36,20 @@ See ``docs/specs/01-architecture.md`` §"High-level picture",
 from __future__ import annotations
 
 import logging
-from collections.abc import Awaitable, Callable
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as pkg_version
 from pathlib import Path
 from typing import Final
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
-from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.middleware.cors import CORSMiddleware
 
 from app.adapters.mail.ports import Mailer
 from app.adapters.mail.smtp import SMTPMailer
 from app.api.health import router as health_router
+from app.api.middleware import SecurityHeadersMiddleware
 from app.api.v1.auth import invite as invite_module
 from app.api.v1.auth import magic as magic_module
 from app.api.v1.auth import passkey as passkey_module
@@ -99,33 +98,6 @@ _SPA_STUB_HTML: Final[str] = (
     "<body><h1>SPA not built — run pnpm build in app/web</h1></body></html>"
 )
 
-# Baseline security headers (§15 "HTTP security headers"). The
-# CSP-nonce + full permissions policy is cd-wv2v's scope; here we
-# install the static headers that are safe to apply on every route.
-_SECURITY_HEADERS: Final[dict[str, str]] = {
-    "Content-Security-Policy": (
-        "default-src 'self'; "
-        "script-src 'self'; "
-        "style-src 'self' 'unsafe-inline'; "
-        "img-src 'self' data:; "
-        "font-src 'self' data:; "
-        "connect-src 'self'; "
-        "frame-ancestors 'none'; "
-        "form-action 'self'; "
-        "base-uri 'self'"
-    ),
-    # HSTS is only honoured over HTTPS; shipping it on every response is
-    # safe — browsers ignore it on plaintext — and saves a conditional
-    # branch here. ``includeSubDomains`` is deliberately omitted: a self-
-    # hosted deployment can live under a subdomain of a shared apex.
-    "Strict-Transport-Security": "max-age=31536000",
-    "X-Content-Type-Options": "nosniff",
-    "X-Frame-Options": "DENY",
-    "Referrer-Policy": "strict-origin-when-cross-origin",
-    "Cross-Origin-Opener-Policy": "same-origin",
-    "Cross-Origin-Resource-Policy": "same-origin",
-}
-
 
 class PublicBindRefused(RuntimeError):
     """Raised when ``create_app()`` is asked to run on a refused bind.
@@ -137,28 +109,6 @@ class PublicBindRefused(RuntimeError):
     can keep catching the narrower, ``app.main``-scoped type without
     reaching into the security module.
     """
-
-
-class SecurityHeadersMiddleware(BaseHTTPMiddleware):
-    """Append the baseline security headers to every response.
-
-    A full CSP with per-request nonces lands in cd-wv2v; until then
-    this middleware installs the static header set from §15 "HTTP
-    security headers" so the skeleton is in place. Each header is
-    set only when the downstream handler didn't already emit one, so
-    a future per-route override (e.g. the demo mode's relaxed
-    ``frame-ancestors``) can simply pre-populate the value.
-    """
-
-    async def dispatch(
-        self,
-        request: Request,
-        call_next: Callable[[Request], Awaitable[Response]],
-    ) -> Response:
-        response = await call_next(request)
-        for name, value in _SECURITY_HEADERS.items():
-            response.headers.setdefault(name, value)
-        return response
 
 
 def _resolve_version() -> str:
@@ -487,7 +437,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # ``CREWDAY_CORS_ALLOW_ORIGINS`` with an explicit list.
     app.add_middleware(CSRFMiddleware)
     app.add_middleware(WorkspaceContextMiddleware)
-    app.add_middleware(SecurityHeadersMiddleware)
+    app.add_middleware(SecurityHeadersMiddleware, settings=cfg)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=list(cfg.cors_allow_origins),

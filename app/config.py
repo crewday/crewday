@@ -120,6 +120,21 @@ class Settings(BaseSettings):
 
     # --- Runtime ---
     demo_mode: bool = False
+    # Whitelist of top-frame origins the demo app is willing to be
+    # embedded from (§15 "CSP on demo"). Whitespace-separated, pasted
+    # verbatim into the ``frame-ancestors`` CSP directive when
+    # :attr:`demo_mode` is ``True``. ``None`` / empty = the demo runs
+    # stand-alone (no embedding), matching the §15 default. Ignored
+    # outside demo mode — prod always keeps ``frame-ancestors 'none'``.
+    demo_frame_ancestors: str | None = None
+    # Emit ``Strict-Transport-Security`` on every response (§15 "HTTP
+    # security headers"). Default **off** so a fresh deployment that
+    # has not yet provisioned TLS doesn't accidentally send a 2-year
+    # HSTS pin over HTTP — which a browser will cache and then refuse
+    # to downgrade on the next request, bricking the operator's own
+    # dev loop. Operators flip this to ``True`` once their TLS cert
+    # is live and verified.
+    hsts_enabled: bool = False
     worker: Literal["internal", "external"] = "internal"
     storage_backend: Literal["localfs", "s3"] = "localfs"
     # Deployment profile selector for the SPA-serving seam (cd-q1be).

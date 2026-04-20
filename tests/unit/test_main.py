@@ -340,13 +340,18 @@ class TestSpaCatchAll:
 
 
 class TestSecurityHeaders:
-    """Every response gets the baseline §15 header set."""
+    """Every response gets the baseline §15 header set.
+
+    ``Strict-Transport-Security`` is opt-in (``settings.hsts_enabled``)
+    — the full on/off matrix lives in
+    ``tests/unit/api/test_csp_nonce.py`` so this suite is free to
+    focus on the unconditional set.
+    """
 
     @pytest.mark.parametrize(
         "header",
         [
             "Content-Security-Policy",
-            "Strict-Transport-Security",
             "X-Content-Type-Options",
             "X-Frame-Options",
             "Referrer-Policy",
