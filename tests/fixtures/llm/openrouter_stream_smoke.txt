@@ -1,0 +1,14 @@
+data: {"id":"gen-01JN0K8AKC5DH0GP6F9MZWTX4N","model":"google/gemma-3-27b-it","choices":[{"index":0,"delta":{"role":"assistant"}}]}
+
+data: {"id":"gen-01JN0K8AKC5DH0GP6F9MZWTX4N","model":"google/gemma-3-27b-it","choices":[{"index":0,"delta":{"content":"Hello"}}]}
+
+data: {"id":"gen-01JN0K8AKC5DH0GP6F9MZWTX4N","model":"google/gemma-3-27b-it","choices":[{"index":0,"delta":{"content":", "}}]}
+
+data: {"id":"gen-01JN0K8AKC5DH0GP6F9MZWTX4N","model":"google/gemma-3-27b-it","choices":[{"index":0,"delta":{"content":"crew"}}]}
+
+data: {"id":"gen-01JN0K8AKC5DH0GP6F9MZWTX4N","model":"google/gemma-3-27b-it","choices":[{"index":0,"delta":{"content":".day"}}]}
+
+data: {"id":"gen-01JN0K8AKC5DH0GP6F9MZWTX4N","model":"google/gemma-3-27b-it","choices":[{"index":0,"delta":{"content":"!"},"finish_reason":"stop"}]}
+
+data: [DONE]
+

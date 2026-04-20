@@ -1,0 +1,22 @@
+{
+  "id": "gen-01JN0K5X5ZQ7BA23V9C1Q8RHJ4",
+  "provider": "Google AI Studio",
+  "model": "google/gemma-3-27b-it",
+  "object": "chat.completion",
+  "created": 1745153400,
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "Taking out the bins is a weekly property task — assign it to whoever's on rota Wednesday morning."
+      },
+      "finish_reason": "stop"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 42,
+    "completion_tokens": 18,
+    "total_tokens": 60
+  }
+}

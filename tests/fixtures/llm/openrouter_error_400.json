@@ -1,0 +1,6 @@
+{
+  "error": {
+    "code": 400,
+    "message": "model 'no-such-model/fake' is not available on this provider"
+  }
+}

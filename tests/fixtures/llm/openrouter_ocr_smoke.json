@@ -1,0 +1,22 @@
+{
+  "id": "gen-01JN0K79Y8CKQXP2R4NA7TM3HS",
+  "provider": "Google AI Studio",
+  "model": "google/gemma-3-27b-it",
+  "object": "chat.completion",
+  "created": 1745153512,
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "COFFEE BEANS LTD\nReceipt #38271\nDate: 2026-04-18\n1x Espresso Blend 1kg  12.50 EUR\n1x Oat Milk 1L         2.30 EUR\nTotal: 14.80 EUR"
+      },
+      "finish_reason": "stop"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 512,
+    "completion_tokens": 48,
+    "total_tokens": 560
+  }
+}

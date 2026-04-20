@@ -1,0 +1,22 @@
+{
+  "id": "gen-01JN0K6Q3M4WFYR1T5Z8KP0BVD",
+  "provider": "Google AI Studio",
+  "model": "google/gemma-3-27b-it",
+  "object": "chat.completion",
+  "created": 1745153450,
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "Block the Tuesday morning slot on property #3 and rebook the guest for the following weekend."
+      },
+      "finish_reason": "stop"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 128,
+    "completion_tokens": 22,
+    "total_tokens": 150
+  }
+}
