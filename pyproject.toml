@@ -22,6 +22,11 @@ dependencies = [
     "itsdangerous",
     "weasyprint",
     "click",
+    # argon2id hashing for API-token secrets (§03 "API tokens",
+    # §15 "Token hashing"). The secret never leaves the server as
+    # plaintext after mint; only its argon2id digest is stored, so a
+    # DB leak cannot be replayed.
+    "argon2-cffi>=23",
 ]
 
 [dependency-groups]
