@@ -494,6 +494,7 @@ def request_link(
     throttle: Throttle,
     settings: Settings | None = None,
     clock: Clock | None = None,
+    subject_id: str | None = None,
 ) -> None:
     """Mint + send one magic-link; always returns ``None`` (enumeration guard).
 
@@ -505,7 +506,10 @@ def request_link(
     3. Resolve the subject id (new ULID for signup/invite, existing
        user id for recover/email-change). No subject → return early
        silently; the 202 response is identical whether or not the
-       email existed.
+       email existed. Callers that already own a subject row (e.g. the
+       signup service pre-inserts a :class:`SignupAttempt` row) pass
+       ``subject_id=`` directly so the nonce lines up with the
+       caller's row without a subsequent rewrite.
     4. Server-cap the TTL at the per-purpose ceiling, mint jti +
        token.
     5. Insert a pending :class:`MagicLinkNonce` row.
@@ -533,7 +537,8 @@ def request_link(
     # hammering the mail relay.
     throttle.check_request(ip=ip, email_hash=email_hash, now=resolved_now)
 
-    subject_id = _resolve_subject_id(session, email=email, purpose=purpose)
+    if subject_id is None:
+        subject_id = _resolve_subject_id(session, email=email, purpose=purpose)
     if subject_id is None:
         # No user row for a recovery / email-change request — silently
         # return without inserting a nonce or sending mail.

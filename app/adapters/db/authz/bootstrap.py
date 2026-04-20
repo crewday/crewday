@@ -37,7 +37,28 @@ from app.adapters.db.authz.models import (
 from app.util.clock import Clock, SystemClock
 from app.util.ulid import new_ulid
 
-__all__ = ["seed_owners_system_group"]
+__all__ = [
+    "seed_owners_system_group",
+    "seed_system_permission_groups",
+]
+
+
+# Slug → display-name mapping for the four system permission groups
+# described in §02 "permission_group" §"System groups". The v1 slice
+# only relies on ``owners`` for governance (cd-ctb), but seeding the
+# other three on workspace creation lets cd-zkr / cd-79r light up
+# capability checks without a backfill migration once they land.
+#
+# ``capabilities_json`` is a coarse ``{"all": True}`` only on the
+# ``owners`` group for v1 — every other group starts with an empty
+# capabilities payload. The finer capability matrix lands with
+# cd-zkr; seeding an empty payload now keeps the rows schema-valid
+# without pre-committing to a particular rule shape.
+_NON_OWNERS_SYSTEM_GROUPS: tuple[tuple[str, str], ...] = (
+    ("managers", "Managers"),
+    ("all_workers", "All workers"),
+    ("all_clients", "All clients"),
+)
 
 
 def seed_owners_system_group(
@@ -110,3 +131,44 @@ def seed_owners_system_group(
     session.add_all([member, grant])
     session.flush()
     return group, member, grant
+
+
+def seed_system_permission_groups(
+    session: Session,
+    *,
+    workspace_id: str,
+    clock: Clock | None = None,
+) -> list[PermissionGroup]:
+    """Seed the three non-owners system groups on ``workspace_id``.
+
+    The spec (§02 "permission_group") calls out four system groups:
+    ``owners``, ``managers``, ``all_workers``, ``all_clients``. The
+    first is seeded by :func:`seed_owners_system_group` alongside its
+    sole member + manager role grant. The remaining three are
+    empty-membership rows — a future capability-matrix follow-up (cd-
+    zkr) populates their ``capabilities_json`` and attaches derived
+    members.
+
+    Separating the two helpers keeps :func:`seed_owners_system_group`
+    focused on the governance anchor (which cannot ever be empty,
+    §02) while :func:`seed_system_permission_groups` is a pure
+    scaffold: no memberships, no role grants. Callers compose them
+    when the signup / admin-init flow reaches the "seed the four
+    groups" step.
+    """
+    now = (clock if clock is not None else SystemClock()).now()
+    rows: list[PermissionGroup] = []
+    for slug, name in _NON_OWNERS_SYSTEM_GROUPS:
+        group = PermissionGroup(
+            id=new_ulid(),
+            workspace_id=workspace_id,
+            slug=slug,
+            name=name,
+            system=True,
+            capabilities_json={},
+            created_at=now,
+        )
+        session.add(group)
+        rows.append(group)
+    session.flush()
+    return rows

@@ -38,6 +38,7 @@ from sqlalchemy import (
     Integer,
     LargeBinary,
     String,
+    UniqueConstraint,
     event,
 )
 from sqlalchemy.orm import Mapped, mapped_column
@@ -49,6 +50,7 @@ __all__ = [
     "MagicLinkNonce",
     "PasskeyCredential",
     "Session",
+    "SignupAttempt",
     "User",
     "WebAuthnChallenge",
     "canonicalise_email",
@@ -373,6 +375,78 @@ class MagicLinkNonce(Base):
         Index("ix_magic_link_nonce_expires", "expires_at"),
         Index("ix_magic_link_nonce_email_hash", "created_email_hash"),
         Index("ix_magic_link_nonce_ip_hash", "created_ip_hash"),
+    )
+
+
+class SignupAttempt(Base):
+    """Self-serve signup session ledger — one row per ``/signup/start`` request.
+
+    The row is born *verified=false, completed=false* at
+    :func:`app.auth.signup.start_signup`, flips to *verified=true* when
+    the magic link is consumed
+    (:func:`app.auth.signup.consume_verify`), and finally *completed=
+    true, workspace_id=<ws>* when the passkey ceremony lands the new
+    workspace + user + role-grant row
+    (:func:`app.auth.signup.complete_signup`).
+
+    **PII minimisation (§15).** We store ``email_lower`` so the signup
+    service can hand it to the workspace / user inserts verbatim, plus
+    ``email_hash`` (the same SHA-256 + HKDF-pepper shape that magic
+    link nonces carry) so abuse-tracking joins stay PII-free. The
+    plaintext email is never logged, never audited — only the hash
+    flows into audit diffs. ``ip_hash`` mirrors the magic-link shape.
+
+    **Tenant-agnostic.** No ``workspace_id`` column — the whole point
+    of this row is to precede the workspace's existence. The domain
+    service reads/writes under :func:`app.tenancy.tenant_agnostic` the
+    same way the magic-link and identity tables do.
+
+    **Unique on `(email_lower, desired_slug)`.** A re-hit of
+    ``/signup/start`` with the same email + slug inside the 15-minute
+    TTL is treated as a duplicate — the caller may get a fresh magic
+    link for the same attempt row, but the row itself does not
+    duplicate. Different slugs for the same email each get their own
+    row; different emails aiming at the same slug each get their own
+    row too, and the slug-taken / homoglyph guards fire at start time
+    to stop a downstream conflict on ``workspace.slug``.
+    """
+
+    __tablename__ = "signup_attempt"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    email_lower: Mapped[str] = mapped_column(String, nullable=False)
+    # SHA-256 of ``canonicalise_email(email) + hkdf_subkey``; 64 hex chars.
+    email_hash: Mapped[str] = mapped_column(String, nullable=False)
+    desired_slug: Mapped[str] = mapped_column(String, nullable=False)
+    # SHA-256 of ``ip + hkdf_subkey``; 64 hex chars.
+    ip_hash: Mapped[str] = mapped_column(String, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    verified_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    completed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    # Set on successful completion. Soft FK — the workspace table is
+    # workspace-scoped and this row is tenant-agnostic, so carrying a
+    # hard FK would force the write to cross the tenancy seam on
+    # insert. Left as a plain string until a later cleanup consolidates
+    # the FK discipline across identity-layer tables.
+    workspace_id: Mapped[str | None] = mapped_column(String, nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "email_lower",
+            "desired_slug",
+            name="uq_signup_attempt_email_slug",
+        ),
+        Index("ix_signup_attempt_expires", "expires_at"),
+        Index("ix_signup_attempt_email_hash", "email_hash"),
     )
 
 

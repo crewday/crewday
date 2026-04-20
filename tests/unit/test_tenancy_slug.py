@@ -11,7 +11,9 @@ from app.tenancy.slug import (
     RESERVED_SLUGS,
     SLUG_PATTERN,
     InvalidSlug,
+    is_homoglyph_collision,
     is_reserved,
+    normalise_for_collision,
     normalise_slug,
     validate_slug,
 )
@@ -131,26 +133,122 @@ def test_is_reserved_false_for_regular_slug() -> None:
 
 
 def test_reserved_slugs_contains_full_spec_list() -> None:
-    # Lock the exact list from §01 so a silent edit surfaces here.
+    # Lock the exact list from ``docs/specs/03-auth-and-tokens.md``
+    # §"Self-serve signup" → "Reserved slugs" so a silent edit
+    # surfaces here. The list is a superset of §01 §02's smaller
+    # subset; all routing-reserved labels live together.
     expected = {
-        "w",
-        "api",
+        # spec §03 canonical list
         "admin",
-        "signup",
-        "login",
-        "recover",
-        "select-workspace",
-        "healthz",
-        "readyz",
-        "version",
+        "api",
+        "app",
+        "assets",
+        "auth",
+        "demo",
         "docs",
+        "events",
+        "guest",
+        "healthz",
+        "login",
+        "logout",
+        "public",
+        "readyz",
+        "recover",
+        "signup",
+        "static",
+        "status",
+        "support",
+        "version",
+        "w",
+        "webhooks",
+        "ws",
+        "www",
+        # §01 additional operational reservations (redoc,
+        # select-workspace, styleguide, unsupported) the routing layer
+        # owns today; keeping them in the same set means a single
+        # source-of-truth for the full bare-host surface.
         "redoc",
+        "select-workspace",
         "styleguide",
         "unsupported",
-        "static",
-        "assets",
     }
     assert expected == RESERVED_SLUGS
+
+
+# ---------------------------------------------------------------------------
+# normalise_for_collision — homoglyph fold
+# ---------------------------------------------------------------------------
+
+
+class TestNormaliseForCollision:
+    """The fold returns a canonical collision key per §03 "Homoglyph guard"."""
+
+    def test_ascii_slug_is_idempotent(self) -> None:
+        assert normalise_for_collision("villa-sud") == "villa-sud"
+
+    def test_strips_unicode_accents(self) -> None:
+        # NFKD decomposition pulls the combining tilde off, leaving
+        # plain ASCII. Case-folding lowers too.
+        assert normalise_for_collision("piñata") == "pinata"
+        assert normalise_for_collision("café") == "cafe"
+
+    def test_folds_digit_substitutes(self) -> None:
+        # 0 → o, 1 → l, 5 → s per spec.
+        assert normalise_for_collision("0wner") == "owner"
+        assert normalise_for_collision("b1lly") == "bllly"  # b + l (from 1) + lly
+        assert normalise_for_collision("5unny") == "sunny"
+
+    def test_folds_rn_to_m_pair(self) -> None:
+        # The spec's canonical homoglyph example: rnicasa vs micasa.
+        assert normalise_for_collision("rnicasa") == "micasa"
+
+    def test_upper_case_folds_to_lower(self) -> None:
+        assert normalise_for_collision("VILLA") == "villa"
+
+    def test_empty_string_returns_empty(self) -> None:
+        assert normalise_for_collision("") == ""
+
+    def test_non_str_input_raises_invalid_slug(self) -> None:
+        with pytest.raises(InvalidSlug, match="must be str"):
+            normalise_for_collision(None)  # type: ignore[arg-type]
+
+
+# ---------------------------------------------------------------------------
+# is_homoglyph_collision
+# ---------------------------------------------------------------------------
+
+
+class TestIsHomoglyphCollision:
+    """Return the colliding existing slug, or ``None`` if clear."""
+
+    def test_rn_vs_m_collision_returns_existing(self) -> None:
+        assert is_homoglyph_collision("rnicasa", ["micasa", "other"]) == "micasa"
+
+    def test_digit_fold_collision(self) -> None:
+        assert is_homoglyph_collision("0wner", ["owner"]) == "owner"
+        # ``b1lly`` folds to ``bllly`` (b + l-for-1 + lly); ``bllly``
+        # exists → collision.
+        assert is_homoglyph_collision("b1lly", ["bllly"]) == "bllly"
+
+    def test_no_collision_returns_none(self) -> None:
+        assert is_homoglyph_collision("villa-nord", ["villa-sud", "casa"]) is None
+
+    def test_exact_match_is_not_treated_as_collision(self) -> None:
+        # An exact slug match is the ``slug_taken`` path and must not
+        # surface here so the signup service can distinguish the two
+        # error families (409 slug_taken vs 409 slug_homoglyph_collision).
+        assert is_homoglyph_collision("micasa", ["micasa"]) is None
+
+    def test_first_collision_wins(self) -> None:
+        # Stable pick — the first matching existing slug wins so the
+        # error body ``{"colliding_slug": ...}`` is deterministic.
+        assert is_homoglyph_collision("0wner", ["owner", "owne0r"]) == "owner"
+
+    def test_empty_candidate_never_collides(self) -> None:
+        # An empty key short-circuits; the candidate is already rejected
+        # upstream by :func:`validate_slug`. Don't falsely match any
+        # existing slug whose fold is also empty (none, in practice).
+        assert is_homoglyph_collision("", ["owner"]) is None
 
 
 # ---------------------------------------------------------------------------

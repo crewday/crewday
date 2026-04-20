@@ -29,6 +29,7 @@ from app.adapters.db.identity.models import (
     MagicLinkNonce,
     PasskeyCredential,
     Session,
+    SignupAttempt,
     User,
     WebAuthnChallenge,
 )
@@ -38,6 +39,7 @@ __all__ = [
     "MagicLinkNonce",
     "PasskeyCredential",
     "Session",
+    "SignupAttempt",
     "User",
     "WebAuthnChallenge",
 ]
