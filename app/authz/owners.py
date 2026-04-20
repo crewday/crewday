@@ -34,8 +34,9 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.adapters.db.authz.models import PermissionGroup, PermissionGroupMember
+from app.tenancy import tenant_agnostic
 
-__all__ = ["is_owner_member", "resolve_is_owner"]
+__all__ = ["is_owner_member", "is_owner_on_any_workspace", "resolve_is_owner"]
 
 
 def is_owner_member(
@@ -87,3 +88,43 @@ def is_owner_member(
 # names resolve to the same helper so neither call site has to learn
 # the other's idiom.
 resolve_is_owner = is_owner_member
+
+
+def is_owner_on_any_workspace(session: Session, *, user_id: str) -> bool:
+    """Return ``True`` iff ``user_id`` is in ``owners@*`` on any workspace.
+
+    Used by the login flow (§03 "Sessions") to decide session TTL — a
+    user who is an ``owners`` member on any scope gets the shorter
+    7-day session; everyone else gets 30 days. Evaluated **once at
+    login** per spec ("recomputed on login, not mid-session").
+
+    **Single SELECT.** No workspace predicate — we scan the
+    ``permission_group_member`` table for any row pointing at a
+    system ``owners`` group anywhere. The join on
+    ``permission_group_member.group_id = permission_group.id``
+    already implies both rows live on the same workspace (the two
+    tables each carry a ``workspace_id`` column but the group id is
+    a global ULID, so the join is sufficient).
+
+    **Tenant-agnostic.** Login runs at the bare host before any
+    :class:`~app.tenancy.WorkspaceContext` has been resolved — the
+    whole point of the check is to inspect grants across every
+    workspace the user touches. Wrap the read in
+    :func:`tenant_agnostic` so the ORM tenant filter doesn't inject
+    a workspace predicate that doesn't apply here.
+    """
+    stmt = (
+        select(PermissionGroupMember.user_id)
+        .join(
+            PermissionGroup,
+            PermissionGroup.id == PermissionGroupMember.group_id,
+        )
+        .where(
+            PermissionGroupMember.user_id == user_id,
+            PermissionGroup.slug == "owners",
+            PermissionGroup.system.is_(True),
+        )
+        .limit(1)
+    )
+    with tenant_agnostic():
+        return session.scalars(stmt).first() is not None

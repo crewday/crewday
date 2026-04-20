@@ -1,32 +1,36 @@
-"""Passkey registration ceremony — domain service.
+"""Passkey registration + login ceremonies — domain service.
 
-Two round-trips:
+Two surfaces, one module:
 
-* :func:`register_start` mints a challenge, persists it as a
-  :class:`~app.adapters.db.identity.models.WebAuthnChallenge` row
-  (10-minute TTL), and returns the options JSON
-  (``PublicKeyCredentialCreationOptions``) the browser passes to
-  ``navigator.credentials.create()``.
-* :func:`register_finish` loads the challenge row by id, verifies the
+* **Registration.** :func:`register_start` / :func:`register_finish`
+  (plus signup + recovery variants) mint a challenge, verify the
   authenticator's attestation via
-  :func:`app.auth.webauthn.verify_registration`, inserts one
-  :class:`~app.adapters.db.identity.models.PasskeyCredential` row and
-  one ``audit.passkey.registered`` row in the same transaction, and
-  deletes the challenge so the request is single-use.
+  :func:`app.auth.webauthn.verify_registration`, and persist one
+  :class:`~app.adapters.db.identity.models.PasskeyCredential` row.
+* **Login.** :func:`login_start` / :func:`login_finish` mint an
+  assertion challenge, verify the browser's signature via
+  :func:`app.auth.webauthn.verify_authentication`, detect
+  cloned authenticators via the FIDO2 sign-count rollback check
+  (§15 "Passkey specifics"), and issue a session cookie via
+  :func:`app.auth.session.issue`. Conditional-UI login (§03
+  "Login") means the browser picks the credential, so no user
+  context is needed at ``start`` — the server discovers the
+  authenticating user on ``finish``.
 
-Two subject families are supported:
+Three challenge subject families are supported:
 
 * **Authenticated user adding a passkey** — :func:`register_start` /
-  :func:`register_finish`. The challenge row carries the ``user_id``;
-  a workspace context is present but the write is identity-scoped,
-  so the ORM tenant filter is bypassed via
-  :func:`app.tenancy.tenant_agnostic` on every query.
+  :func:`register_finish`. The challenge row carries the ``user_id``.
 * **Signup session enrolling its first passkey** —
-  :func:`register_start_signup` / :func:`register_finish_signup`. No
-  user row exists yet at ``start``; the caller supplies a
-  ``signup_session_id`` we stash on the challenge. ``finish`` accepts
-  the freshly-minted ``user_id`` (created in the same transaction by
-  the signup service, cd-3i5) and inserts the credential row.
+  :func:`register_start_signup` / :func:`register_finish_signup`. The
+  challenge row carries a ``signup_session_id``.
+* **Login** — :func:`login_start` / :func:`login_finish`. The
+  challenge row carries the sentinel value
+  :data:`_LOGIN_SUBJECT_SENTINEL` in ``signup_session_id`` so the
+  existing ``webauthn_challenge`` CHECK constraint (exactly one of
+  ``user_id`` / ``signup_session_id`` non-null) is satisfied without
+  a schema change. See the constant's docstring for why we chose the
+  sentinel path over a new column.
 
 **Caps (§03 "Additional passkeys").** A user may hold up to 5
 passkeys; the 6th registration raises :class:`TooManyPasskeys` (422
@@ -41,9 +45,21 @@ or rp_id values raise :class:`InvalidRegistration` (400) — we rewrap
 py_webauthn's `InvalidRegistrationResponse` so the HTTP layer doesn't
 need to know about the upstream type.
 
+**Login error shape.** :func:`login_finish` collapses unknown
+credential, bad signature, and challenge-subject mismatch into a
+single :class:`InvalidLoginAttempt` so the HTTP layer can return
+one opaque 401 envelope. Clone detection raises the separate
+:class:`CloneDetected` so audit + metrics can distinguish the two,
+but the HTTP response body never reveals which fired. Throttle
+lockout (3 fails / 10-min per §15) raises
+:class:`~app.auth._throttle.PasskeyLoginLockout`.
+
 **Transaction discipline.** The service never calls
 ``session.commit()`` — the Unit-of-Work that opened the session owns
-the transaction boundary (§01 "Key runtime invariants" #3).
+the transaction boundary (§01 "Key runtime invariants" #3). The
+clone-detected + login-rejected audit rows are written by the HTTP
+router on **fresh** UoWs so they land even though the primary UoW
+rolls back on the raise.
 """
 
 from __future__ import annotations
@@ -61,29 +77,44 @@ from app.adapters.db.identity.models import (
     WebAuthnChallenge,
 )
 from app.audit import write_audit
+from app.auth import session as session_module
+from app.auth._hashing import hash_with_pepper
+from app.auth._throttle import Throttle
 from app.auth.webauthn import (
+    InvalidAuthenticationResponse,
     InvalidRegistrationResponse,
     RelyingParty,
+    VerifiedAuthentication,
     VerifiedRegistration,
+    base64url_to_bytes,
     bytes_to_base64url,
+    generate_authentication_challenge,
     generate_registration_challenge,
     make_relying_party,
     options_to_dict,
+    verify_authentication,
     verify_registration,
 )
+from app.authz.owners import is_owner_on_any_workspace
 from app.tenancy import WorkspaceContext, tenant_agnostic
 from app.util.clock import Clock, SystemClock
 from app.util.ulid import new_ulid
 
 __all__ = [
+    "AuthenticationOptions",
     "ChallengeAlreadyConsumed",
     "ChallengeExpired",
     "ChallengeNotFound",
     "ChallengeSubjectMismatch",
+    "CloneDetected",
+    "InvalidLoginAttempt",
     "InvalidRegistration",
+    "LoginResult",
     "PasskeyCredentialRef",
     "RegistrationOptions",
     "TooManyPasskeys",
+    "login_finish",
+    "login_start",
     "register_finish",
     "register_finish_signup",
     "register_start",
@@ -108,6 +139,22 @@ _MAX_PASSKEYS_PER_USER: Final[int] = 5
 # shorter tightens the race window on slow authenticators.
 _CHALLENGE_TTL: Final[timedelta] = timedelta(minutes=10)
 
+# Subject discriminator sentinel for login challenges. The
+# ``webauthn_challenge`` row's CHECK constraint requires exactly one
+# of ``user_id`` / ``signup_session_id`` to be non-null. Login
+# challenges bind to **no** user up-front (conditional UI means the
+# browser picks the credential and the server discovers the user on
+# finish), so neither of the existing subject families fits. Rather
+# than churn the schema with a new ``purpose`` column (and its
+# migration), we reuse the ``signup_session_id`` column with a fixed
+# sentinel value and guard against collisions with real signup
+# session ids — those are ULIDs (26 chars, Crockford base32), which
+# cannot produce the ``__login__`` string. The finish handler
+# rejects any challenge whose ``signup_session_id`` isn't this
+# sentinel when called through the login path, and the register
+# handlers reject it symmetrically on their side.
+_LOGIN_SUBJECT_SENTINEL: Final[str] = "__login__"
+
 
 # ---------------------------------------------------------------------------
 # Value objects
@@ -128,6 +175,46 @@ class RegistrationOptions:
 
     challenge_id: str
     options: dict[str, Any]
+
+
+@dataclass(frozen=True, slots=True)
+class AuthenticationOptions:
+    """Output of :func:`login_start`.
+
+    Mirrors :class:`RegistrationOptions` on the shape side: an opaque
+    challenge handle the browser echoes back with the assertion, and
+    the parsed ``PublicKeyCredentialRequestOptions`` dict the SPA
+    passes to ``navigator.credentials.get()``.
+
+    Unlike registration, ``options`` carries an empty
+    ``allowCredentials`` list — conditional UI + discoverable
+    credentials let the browser surface any passkey the user has
+    enrolled on the device, and the server discovers the matching
+    credential row on finish. That shape is also the privacy-
+    preserving one: we never leak the set of credentials the
+    attacker's guessed email has.
+    """
+
+    challenge_id: str
+    options: dict[str, Any]
+
+
+@dataclass(frozen=True, slots=True)
+class LoginResult:
+    """Output of :func:`login_finish`.
+
+    Carries the :class:`~app.auth.session.SessionIssue` the router
+    stamps into the ``Set-Cookie`` header, the authenticating
+    ``user_id`` for the response body, and the credential id
+    (base64url) for audit correlation at the HTTP layer — the domain
+    service already wrote the ``audit.passkey.assertion_ok`` row in
+    the same transaction, but the router needs the id echoable
+    without a second DB read.
+    """
+
+    session_issue: session_module.SessionIssue
+    user_id: str
+    credential_id_b64url: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -194,6 +281,60 @@ class ChallengeAlreadyConsumed(LookupError):
     id. We surface the two as separate types so tests can assert the
     specific HTTP 409 mapping intended by the spec (AC #5).
     """
+
+
+class InvalidLoginAttempt(ValueError):
+    """Passkey assertion failed to verify — any cause.
+
+    The HTTP router maps this to **401 invalid_credential**, with the
+    same error symbol as :class:`CloneDetected` so an attacker can't
+    tell "unknown credential" from "bad signature" from
+    "clone detected" based on the response shape. The domain service
+    deliberately collapses several underlying causes (unknown
+    credential id, py_webauthn rejection, challenge subject
+    mismatch at the login path) into this one type — the audit row
+    carries the fine-grained ``reason`` for operators, the HTTP
+    response stays opaque.
+    """
+
+
+class CloneDetected(ValueError):
+    """Assertion's ``new_sign_count`` did not exceed the stored counter.
+
+    Per §15 "Passkey specifics" — FIDO2's sign-count exists exactly to
+    detect cloned authenticators, and ignoring a rollback is the
+    worst-of-both-worlds posture. The domain service refuses the
+    login; the HTTP router writes ``audit.passkey.cloned_detected``
+    on its own fresh UoW so the operator trail lands even though the
+    primary UoW rolls back on the raise.
+
+    ``credential_id_b64``, ``old_sign_count``, ``new_sign_count`` are
+    stashed on the exception so the router's fresh-UoW audit write
+    has the payload without re-reading the DB.
+
+    **v1 scope**: this task ships the *detection* + refusal; the
+    auto-revoke half of §15 (setting ``passkey.deleted_at``) is a
+    distinct task and tracked separately. The detection alone is
+    enough to stop a cloned credential from logging in — a follow-up
+    adds the revocation write + operator notification.
+
+    Surface-level mapping at the HTTP layer: **401 invalid_credential**,
+    identical to :class:`InvalidLoginAttempt`, so the response shape
+    reveals nothing.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        credential_id_b64: str,
+        old_sign_count: int,
+        new_sign_count: int,
+    ) -> None:
+        super().__init__(message)
+        self.credential_id_b64 = credential_id_b64
+        self.old_sign_count = old_sign_count
+        self.new_sign_count = new_sign_count
 
 
 class ChallengeSubjectMismatch(ValueError):
@@ -762,6 +903,13 @@ def register_finish_signup(
         raise ChallengeSubjectMismatch(
             "challenge was minted for an authenticated user; call register_finish"
         )
+    if row.signup_session_id == _LOGIN_SUBJECT_SENTINEL:
+        # Login challenge smuggled into the signup finish path. Reject
+        # with the same "wrong subject" shape — the HTTP router
+        # collapses this to the privacy-preserving envelope.
+        raise ChallengeSubjectMismatch(
+            "challenge was minted for login; call login_finish"
+        )
     if row.signup_session_id != signup_session_id:
         raise ChallengeSubjectMismatch(
             f"challenge is for signup session {row.signup_session_id!r}, "
@@ -786,3 +934,295 @@ def register_finish_signup(
 
     _delete_challenge(session, row=row)
     return credential_ref
+
+
+# ---------------------------------------------------------------------------
+# Login helpers (internal)
+# ---------------------------------------------------------------------------
+
+
+def _load_passkey_by_credential_id(
+    session: Session, *, credential_id: bytes
+) -> PasskeyCredential | None:
+    """Return the ``passkey_credential`` row for ``credential_id``, or None.
+
+    Identity-scoped — the table has no ``workspace_id`` column, so
+    the ORM tenant filter is bypassed via :func:`tenant_agnostic`.
+    A miss returns ``None`` (not a raise) so the caller can collapse
+    "unknown credential" and "bad signature" into a single
+    :class:`InvalidLoginAttempt`.
+    """
+    # justification: passkey_credential is identity-scoped.
+    with tenant_agnostic():
+        return session.get(PasskeyCredential, credential_id)
+
+
+def _decode_credential_id(credential: dict[str, Any]) -> bytes:
+    """Extract the raw credential id bytes from a browser assertion payload.
+
+    WebAuthn payloads carry the credential id as base64url in the
+    top-level ``id`` field. A malformed (non-string or unparsable)
+    ``id`` is translated into :class:`InvalidLoginAttempt` — the
+    caller already collapses unknown-credential and bad-signature
+    into the same envelope, so a wrong-shape body gets the same
+    treatment rather than bubbling a py_webauthn internal error.
+    """
+    raw_id = credential.get("id")
+    if not isinstance(raw_id, str) or not raw_id:
+        raise InvalidLoginAttempt("credential payload missing 'id'")
+    try:
+        return base64url_to_bytes(raw_id)
+    except (ValueError, TypeError) as exc:
+        # py_webauthn raises a concrete :class:`ValueError` /
+        # :class:`TypeError` on a malformed base64url. We rewrap
+        # into the login vocabulary so the HTTP layer stays opaque;
+        # the cause chain preserves the upstream message for log
+        # readers.
+        raise InvalidLoginAttempt(f"credential id is not base64url: {exc}") from exc
+
+
+def _tenant_agnostic_login_audit_ctx() -> WorkspaceContext:
+    """Return a tenant-agnostic :class:`WorkspaceContext` for login audit.
+
+    Mirrors the shape used by :mod:`app.auth.session` — login runs
+    before any workspace is picked, so the audit row carries zero-ULID
+    placeholders in the workspace / actor fields and the real
+    details live in the ``diff`` payload.
+    """
+    return WorkspaceContext(
+        workspace_id="00000000000000000000000000",
+        workspace_slug="",
+        actor_id="00000000000000000000000000",
+        actor_kind="system",
+        actor_grant_role="manager",
+        actor_was_owner_member=False,
+        audit_correlation_id=new_ulid(),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Public surface — login (discoverable credential / conditional UI)
+# ---------------------------------------------------------------------------
+
+
+def login_start(
+    session: Session,
+    *,
+    clock: Clock | None = None,
+    rp: RelyingParty | None = None,
+    now: datetime | None = None,
+) -> AuthenticationOptions:
+    """Mint an authentication challenge for the login page.
+
+    Conditional UI + discoverable credentials (§03 "Login") mean the
+    browser picks the credential and the server discovers the user
+    on ``finish`` — no user context is needed at ``start``, and the
+    returned options carry an empty ``allowCredentials`` list so the
+    authenticator surfaces every passkey the user has enrolled on
+    this device.
+
+    The challenge row carries :data:`_LOGIN_SUBJECT_SENTINEL` in
+    ``signup_session_id`` so it satisfies the ``webauthn_challenge``
+    CHECK constraint (exactly one of ``user_id`` / ``signup_session_id``
+    non-null) while being distinguishable from a real signup session.
+
+    Caller's UoW owns the transaction boundary; this function never
+    commits.
+    """
+    resolved_now = now if now is not None else _now(clock)
+    rp = rp or make_relying_party()
+
+    options_json, challenge_bytes = generate_authentication_challenge(
+        rp=rp,
+        # Conditional UI: empty allow-list so the browser's
+        # authenticator surfaces every enrolled passkey.
+        allow_credential_ids=(),
+    )
+
+    challenge_id = new_ulid(clock=clock)
+    _insert_challenge(
+        session,
+        challenge_id=challenge_id,
+        user_id=None,
+        signup_session_id=_LOGIN_SUBJECT_SENTINEL,
+        challenge=challenge_bytes,
+        existing_credential_ids=[],
+        now=resolved_now,
+    )
+
+    return AuthenticationOptions(
+        challenge_id=challenge_id,
+        options=options_to_dict(options_json),
+    )
+
+
+def login_finish(
+    session: Session,
+    *,
+    challenge_id: str,
+    credential: dict[str, Any],
+    ip: str,
+    ua: str,
+    ip_hash_pepper: bytes,
+    throttle: Throttle,
+    clock: Clock | None = None,
+    rp: RelyingParty | None = None,
+    now: datetime | None = None,
+) -> LoginResult:
+    """Verify the browser's assertion, issue a session, return the cookie.
+
+    The flow:
+
+    1. **Lockout check.** Hash the credential id + IP with
+       ``ip_hash_pepper`` and ask the throttle whether either bucket
+       is locked out (3 fails / 10-min per §15). A lockout raises
+       :class:`PasskeyLoginLockout` before any DB read.
+    2. **Challenge load.** Load the ``webauthn_challenge`` row;
+       reject if it isn't the login sentinel subject. Expiry is
+       surfaced as :class:`ChallengeExpired`, which the HTTP router
+       maps to the same 401 envelope as an invalid credential.
+    3. **Credential load.** Resolve ``credential["id"]`` to a
+       ``passkey_credential`` row. A miss collapses to
+       :class:`InvalidLoginAttempt` — the caller can't tell unknown
+       credential from bad signature.
+    4. **Verify assertion.** Hand off to
+       :func:`app.auth.webauthn.verify_authentication`. Any rejection
+       is rewrapped as :class:`InvalidLoginAttempt`.
+    5. **Clone detection.** If the returned counter did not exceed
+       the stored counter AND the stored counter is non-zero,
+       raise :class:`CloneDetected` (§15 "Passkey specifics"). A
+       stored counter of zero means the authenticator doesn't
+       implement the counter, which is legal per WebAuthn — we skip
+       the check in that case.
+    6. **Persist.** Update ``sign_count`` + ``last_used_at`` on the
+       credential row, delete the challenge (single-use), write an
+       ``audit.passkey.assertion_ok`` row, and issue a session via
+       :func:`app.auth.session.issue`. The session's
+       ``has_owner_grant`` flag is resolved via
+       :func:`app.authz.owners.is_owner_on_any_workspace` so the
+       7-day-vs-30-day TTL matches the spec.
+
+    The throttle's failure-recording is the caller's (router's)
+    responsibility — the domain service only consults the lockout
+    gate. Keeping the write side at the router means a test harness
+    can observe individual failures without the success-path being
+    coupled to the router's except handler, and the caller's
+    transaction rolls back cleanly on a raise without leaving a
+    throttle bucket half-advanced.
+    """
+    resolved_now = now if now is not None else _now(clock)
+    rp = rp or make_relying_party()
+
+    ip_hash = hash_with_pepper(ip, ip_hash_pepper)
+    credential_id = _decode_credential_id(credential)
+    credential_id_b64 = bytes_to_base64url(credential_id)
+    credential_id_hash = hash_with_pepper(credential_id_b64, ip_hash_pepper)
+
+    # Lockout gate first — a locked-out bucket short-circuits before
+    # any DB read. The throttle raises :class:`PasskeyLoginLockout`
+    # which the HTTP router maps to 429 rate_limited.
+    throttle.check_passkey_login_allowed(
+        credential_id_hash=credential_id_hash,
+        ip_hash=ip_hash,
+        now=resolved_now,
+    )
+
+    # Challenge load — :class:`ChallengeNotFound` / :class:`ChallengeExpired`
+    # propagate directly; the HTTP router collapses them into the
+    # same 401 envelope as :class:`InvalidLoginAttempt`.
+    row = _load_challenge(session, challenge_id=challenge_id, now=resolved_now)
+    if row.user_id is not None or row.signup_session_id != _LOGIN_SUBJECT_SENTINEL:
+        # Non-login challenge smuggled into the login finish path.
+        raise ChallengeSubjectMismatch(
+            "challenge was not minted for login; call register_finish"
+        )
+
+    # Credential load — a miss collapses to :class:`InvalidLoginAttempt`
+    # so the HTTP shape cannot fingerprint "unknown credential" vs
+    # "bad signature".
+    pk_row = _load_passkey_by_credential_id(session, credential_id=credential_id)
+    if pk_row is None:
+        raise InvalidLoginAttempt(
+            f"no passkey credential for id (b64={credential_id_b64})"
+        )
+
+    try:
+        verified: VerifiedAuthentication = verify_authentication(
+            rp=rp,
+            credential=credential,
+            expected_challenge=row.challenge,
+            credential_public_key=pk_row.public_key,
+            credential_current_sign_count=pk_row.sign_count,
+        )
+    except InvalidAuthenticationResponse as exc:
+        raise InvalidLoginAttempt(str(exc)) from exc
+
+    old_sign_count = pk_row.sign_count
+    # Clone detection — §15 "Passkey specifics". A stored counter of
+    # zero means the authenticator doesn't implement the counter
+    # (legal per WebAuthn); skip the check in that case. Otherwise
+    # the new counter MUST strictly exceed the stored one. The
+    # ``cloned_detected`` audit is written by the HTTP router on a
+    # fresh UoW — the caller's UoW rolls back on this raise, so an
+    # in-UoW audit would be lost. The exception carries the payload
+    # the router needs to emit the audit row without re-reading the
+    # DB.
+    if old_sign_count > 0 and verified.new_sign_count <= old_sign_count:
+        raise CloneDetected(
+            f"sign_count rollback detected: stored={old_sign_count} "
+            f"returned={verified.new_sign_count}",
+            credential_id_b64=credential_id_b64,
+            old_sign_count=old_sign_count,
+            new_sign_count=verified.new_sign_count,
+        )
+
+    # Persist — update counter, bump last_used_at, delete the single-
+    # use challenge row.
+    # justification: passkey_credential is identity-scoped.
+    with tenant_agnostic():
+        pk_row.sign_count = verified.new_sign_count
+        pk_row.last_used_at = resolved_now
+        session.flush()
+
+    _delete_challenge(session, row=row)
+
+    # Issue session — TTL depends on ``has_owner_grant``. The owner
+    # lookup is a single SELECT against the permission_group_member
+    # table, tenant-agnostic because login runs before a workspace
+    # is picked.
+    has_owner_grant = is_owner_on_any_workspace(session, user_id=pk_row.user_id)
+    session_issue = session_module.issue(
+        session,
+        user_id=pk_row.user_id,
+        has_owner_grant=has_owner_grant,
+        ua=ua,
+        ip=ip,
+        now=resolved_now,
+        clock=clock,
+    )
+
+    # Audit the successful assertion. Hash-only — the credential id
+    # is public per WebAuthn, but the IP stays hashed to match the
+    # rest of the identity-layer audit shape (§15 PII minimisation).
+    write_audit(
+        session,
+        _tenant_agnostic_login_audit_ctx(),
+        entity_kind="passkey_credential",
+        entity_id=credential_id_b64,
+        action="passkey.assertion_ok",
+        diff={
+            "user_id": pk_row.user_id,
+            "cred_id_b64": credential_id_b64,
+            "ip_hash": ip_hash,
+            "has_owner_grant": has_owner_grant,
+            "old_sign_count": old_sign_count,
+            "new_sign_count": verified.new_sign_count,
+        },
+        clock=clock,
+    )
+
+    return LoginResult(
+        session_issue=session_issue,
+        user_id=pk_row.user_id,
+        credential_id_b64url=credential_id_b64,
+    )

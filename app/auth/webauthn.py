@@ -32,7 +32,10 @@ from webauthn.authentication.verify_authentication_response import (
 )
 from webauthn.helpers import base64url_to_bytes, bytes_to_base64url
 from webauthn.helpers.cose import COSEAlgorithmIdentifier
-from webauthn.helpers.exceptions import InvalidRegistrationResponse
+from webauthn.helpers.exceptions import (
+    InvalidAuthenticationResponse,
+    InvalidRegistrationResponse,
+)
 from webauthn.helpers.structs import (
     AttestationConveyancePreference,
     AuthenticatorAttachment,
@@ -46,6 +49,7 @@ from webauthn.registration.verify_registration_response import VerifiedRegistrat
 from app.config import Settings, get_settings
 
 __all__ = [
+    "InvalidAuthenticationResponse",
     "InvalidRegistrationResponse",
     "RelyingParty",
     "RelyingPartyMisconfigured",

@@ -47,6 +47,7 @@ from typing import Final
 
 __all__ = [
     "ConsumeLockout",
+    "PasskeyLoginLockout",
     "RateLimited",
     "RecoveryRateLimited",
     "SignupRateLimited",
@@ -100,6 +101,18 @@ _RECOVER_GLOBAL_LIMIT: Final[int] = 200
 _RECOVER_WINDOW: Final[timedelta] = timedelta(hours=1)
 _RECOVER_GLOBAL_KEY: Final[str] = "__global__"
 
+# Passkey-login failure lockout — spec §15 "Passkey specifics" +
+# §"Rate limiting and abuse controls" (magic-link consume carries the
+# same 3-fails → 10-min shape; we mirror that for passkey assertion
+# failures). Keyed on the credential-id hash AND the source-IP hash:
+# an attacker cycling IPs against one credential trips the
+# credential-scoped lockout; an attacker cycling credentials from one
+# IP trips the IP-scoped lockout. The two keys are evaluated
+# independently so either one raises on its own.
+_PASSKEY_LOGIN_FAIL_LIMIT: Final[int] = 3
+_PASSKEY_LOGIN_FAIL_WINDOW: Final[timedelta] = timedelta(minutes=1)
+_PASSKEY_LOGIN_LOCKOUT: Final[timedelta] = timedelta(minutes=10)
+
 
 class RateLimited(Exception):
     """Caller exceeded the per-scope request budget.
@@ -136,6 +149,27 @@ class SignupRateLimited(Exception):
         )
         self.scope = scope
         self.retry_after_seconds = retry_after_seconds
+
+
+class PasskeyLoginLockout(Exception):
+    """Caller IP or credential is inside the passkey-login lockout window.
+
+    429-equivalent. The router maps this to ``429 rate_limited`` —
+    distinct from :class:`ConsumeLockout` (magic-link) so audit rows
+    and metrics can tell the two surfaces apart, but the public error
+    symbol stays identical so an attacker cannot tell *which* surface
+    locked them out.
+
+    ``scope`` is ``"credential"`` or ``"ip"`` — the bucket that
+    tripped the lockout. Included so audit / metrics can distinguish
+    "this credential is under attack" from "this IP is spraying"; the
+    HTTP response body never reveals it (both map to the same
+    ``rate_limited`` envelope).
+    """
+
+    def __init__(self, scope: str) -> None:
+        super().__init__(f"passkey-login locked out (scope={scope!r})")
+        self.scope = scope
 
 
 class RecoveryRateLimited(Exception):
@@ -216,7 +250,14 @@ class Throttle:
     microseconds of dict mutation, no I/O.
     """
 
-    __slots__ = ("_fail_locked_until", "_fails", "_hits", "_lock")
+    __slots__ = (
+        "_fail_locked_until",
+        "_fails",
+        "_hits",
+        "_lock",
+        "_passkey_login_fails",
+        "_passkey_login_locked_until",
+    )
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
@@ -230,6 +271,15 @@ class Throttle:
         # IPs currently locked out (value is the moment the lockout
         # expires). Not a deque — single expiry per key.
         self._fail_locked_until: dict[str, datetime] = {}
+        # Passkey-login failure counters, keyed by a composite
+        # ``("credential"|"ip", key_hash)`` tuple so the two buckets
+        # evict independently. Separate dicts from the magic-link
+        # ``_fails`` so a consume failure can't count against a login
+        # bucket and vice versa (§15 "Passkey specifics").
+        self._passkey_login_fails: dict[tuple[str, str], deque[datetime]] = defaultdict(
+            deque
+        )
+        self._passkey_login_locked_until: dict[tuple[str, str], datetime] = {}
 
     # ------------------------------------------------------------------
     # Request (/auth/magic/request) budget
@@ -448,6 +498,106 @@ class Throttle:
         expires_at = bucket[0] + _RECOVER_WINDOW
         seconds = int((expires_at - now).total_seconds())
         return max(seconds, 1)
+
+    # ------------------------------------------------------------------
+    # Passkey-login (/auth/passkey/login/finish) lockout
+    # ------------------------------------------------------------------
+
+    def check_passkey_login_allowed(
+        self,
+        *,
+        credential_id_hash: str,
+        ip_hash: str,
+        now: datetime,
+    ) -> None:
+        """Raise :class:`PasskeyLoginLockout` on an active lockout.
+
+        Evaluates both buckets (credential-scoped + IP-scoped) in
+        turn; either one raises on its own. The router calls this
+        **before** calling :func:`app.auth.webauthn.verify_authentication`
+        so a locked-out IP or credential never exercises the
+        verification code path. Clears lapsed lockouts in passing.
+
+        ``credential_id_hash`` and ``ip_hash`` are caller-supplied
+        hashes — this module deliberately never touches plaintext
+        credentials or IPs. The caller hashes them with the same
+        ``hash_with_pepper`` subkey the audit layer uses so a single
+        pepper rotation invalidates every live lockout.
+        """
+        with self._lock:
+            for scope, key in (
+                ("credential", credential_id_hash),
+                ("ip", ip_hash),
+            ):
+                bucket_key = (scope, key)
+                self._evict_expired_passkey_lockout(bucket_key, now)
+                if bucket_key in self._passkey_login_locked_until:
+                    raise PasskeyLoginLockout(scope)
+
+    def record_passkey_login_failure(
+        self,
+        *,
+        credential_id_hash: str,
+        ip_hash: str,
+        now: datetime,
+    ) -> None:
+        """Increment both buckets; flip the per-bucket lockout at N failures.
+
+        Called by the router on any observable failure: unknown
+        credential, bad signature, clone-detected, challenge consumed
+        or expired. Bumps the credential-scoped AND IP-scoped
+        counters — an attacker spraying credentials from one IP trips
+        the IP bucket, an attacker cycling IPs against one credential
+        trips the credential bucket. Either lockout is enough to stop
+        the next attempt.
+        """
+        with self._lock:
+            for scope, key in (
+                ("credential", credential_id_hash),
+                ("ip", ip_hash),
+            ):
+                bucket_key = (scope, key)
+                bucket = self._passkey_login_fails[bucket_key]
+                self._evict_expired(bucket, now, _PASSKEY_LOGIN_FAIL_WINDOW)
+                bucket.append(now)
+                if len(bucket) >= _PASSKEY_LOGIN_FAIL_LIMIT:
+                    self._passkey_login_locked_until[bucket_key] = (
+                        now + _PASSKEY_LOGIN_LOCKOUT
+                    )
+                    # Clear the rolling window so the bucket has to
+                    # earn the next lockout from scratch once this
+                    # one expires — matches the magic-link shape.
+                    bucket.clear()
+
+    def record_passkey_login_success(
+        self,
+        *,
+        credential_id_hash: str,
+        ip_hash: str,
+    ) -> None:
+        """Reset both per-credential and per-IP failure counters.
+
+        A successful login means the user finally got through — we
+        don't want one bad attempt 30 seconds ago to still count
+        against their next legitimate try. Called by the router
+        after :func:`app.auth.passkey.login_finish` returns.
+        """
+        with self._lock:
+            for scope, key in (
+                ("credential", credential_id_hash),
+                ("ip", ip_hash),
+            ):
+                bucket_key = (scope, key)
+                self._passkey_login_fails.pop(bucket_key, None)
+                self._passkey_login_locked_until.pop(bucket_key, None)
+
+    def _evict_expired_passkey_lockout(
+        self, bucket_key: tuple[str, str], now: datetime
+    ) -> None:
+        """Clear ``bucket_key`` from the lockout table if the ban has elapsed."""
+        expires_at = self._passkey_login_locked_until.get(bucket_key)
+        if expires_at is not None and expires_at <= now:
+            del self._passkey_login_locked_until[bucket_key]
 
     # ------------------------------------------------------------------
     # Internal helpers

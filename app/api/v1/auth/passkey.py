@@ -1,6 +1,6 @@
-"""Passkey registration HTTP routers.
+"""Passkey registration + login HTTP routers.
 
-Two routers are exposed:
+Three routers are exposed:
 
 * :data:`router` — mounted at ``/auth/passkey`` inside the
   workspace-scoped tree (``/w/<slug>/api/v1/auth/passkey``). Both
@@ -18,6 +18,14 @@ Two routers are exposed:
   :func:`app.auth.passkey.register_start_signup` /
   :func:`app.auth.passkey.register_finish_signup`.
 
+* :func:`build_login_router` — bare-host login flow
+  (``/api/v1/auth/passkey/login``). No session exists yet; the
+  browser does a conditional-UI passkey ceremony and on success the
+  router stamps a ``Set-Cookie: __Host-crewday_session=...`` header
+  via :func:`app.auth.session.build_session_cookie`. Constructed by
+  the v1 app factory with the process-wide :class:`Throttle` so
+  concurrent requests share the rolling lockout state.
+
 Handlers are intentionally thin: unpack the body, call the domain
 service under the request's Unit-of-Work, shape the response. The
 UoW (see :func:`app.api.deps.db_session`) owns the transaction
@@ -25,35 +33,51 @@ boundary — domain code never calls ``session.commit()`` (§01
 "Key runtime invariants" #3).
 
 See ``docs/specs/03-auth-and-tokens.md`` §"WebAuthn specifics",
-§"Self-serve signup" step 3, §"Additional passkeys".
+§"Login", §"Self-serve signup" step 3, §"Additional passkeys";
+``docs/specs/15-security-privacy.md`` §"Passkey specifics".
 """
 
 from __future__ import annotations
 
+import logging
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
+from app.adapters.db.session import make_uow
 from app.api.deps import current_workspace_context, db_session
+from app.audit import write_audit
+from app.auth._hashing import hash_with_pepper
+from app.auth._throttle import PasskeyLoginLockout, Throttle
+from app.auth.keys import derive_subkey
 from app.auth.passkey import (
+    AuthenticationOptions,
     ChallengeAlreadyConsumed,
     ChallengeExpired,
     ChallengeNotFound,
     ChallengeSubjectMismatch,
+    CloneDetected,
+    InvalidLoginAttempt,
     InvalidRegistration,
+    LoginResult,
     PasskeyCredentialRef,
     RegistrationOptions,
     TooManyPasskeys,
+    login_finish,
+    login_start,
     register_finish,
     register_finish_signup,
     register_start,
     register_start_signup,
 )
+from app.auth.session import build_session_cookie
+from app.config import Settings, get_settings
 from app.tenancy import WorkspaceContext
+from app.util.clock import SystemClock
 
-__all__ = ["router", "signup_router"]
+__all__ = ["build_login_router", "router", "signup_router"]
 
 
 # FastAPI's convention puts ``Depends`` on the default; newer style is
@@ -319,3 +343,335 @@ def post_signup_register_finish(
         backup_eligible=ref.backup_eligible,
         aaguid=ref.aaguid,
     )
+
+
+# ---------------------------------------------------------------------------
+# Bare-host login router — discoverable credential / conditional UI
+# ---------------------------------------------------------------------------
+
+
+class LoginStartResponse(BaseModel):
+    """Response body for ``POST /auth/passkey/login/start``."""
+
+    challenge_id: str
+    options: dict[str, Any] = Field(
+        ...,
+        description=(
+            "Parsed PublicKeyCredentialRequestOptions ready for "
+            "navigator.credentials.get()."
+        ),
+    )
+
+
+class LoginFinishRequest(BaseModel):
+    """Request body for ``POST /auth/passkey/login/finish``."""
+
+    challenge_id: str
+    credential: dict[str, Any] = Field(
+        ...,
+        description=("Raw JSON assertion response from navigator.credentials.get()."),
+    )
+
+
+class LoginFinishResponse(BaseModel):
+    """Response body for ``POST /auth/passkey/login/finish``.
+
+    Only the ``user_id`` is surfaced — the session cookie is delivered
+    as a ``Set-Cookie`` header (``__Host-crewday_session``), not in
+    the body. JSON response (not a 302 redirect) keeps the SPA in
+    control of navigation after sign-in.
+    """
+
+    user_id: str
+
+
+# HKDF purpose for peppering the throttle's credential-id + IP hashes
+# on the login surface. Distinct from ``session-hash`` / ``magic-link``
+# so an oracle on one surface doesn't weaken the others.
+_PASSKEY_LOGIN_HKDF_PURPOSE = "passkey-login-throttle"
+
+
+def _client_ip(request: Request) -> str:
+    """Best-effort source IP for ``request``.
+
+    Mirrors the magic / signup routers. Returns the empty string when
+    the framework can't resolve a client — keeps hashing total and
+    means a test client that omits ``host`` still gets a deterministic
+    (empty-string) bucket rather than a crash.
+    """
+    if request.client is None:
+        return ""
+    return request.client.host
+
+
+_log = logging.getLogger(__name__)
+
+
+def _login_audit_ctx() -> WorkspaceContext:
+    """Return the tenant-agnostic :class:`WorkspaceContext` for login audit.
+
+    Login runs before any workspace is picked (§03 "Sessions"); the
+    audit row carries zero-ULID placeholders for workspace + actor
+    and the real details live in the ``diff`` payload. Matches the
+    shape used by :mod:`app.auth.session` + :mod:`app.auth.passkey`.
+    """
+    return WorkspaceContext(
+        workspace_id="00000000000000000000000000",
+        workspace_slug="",
+        actor_id="00000000000000000000000000",
+        actor_kind="system",
+        actor_grant_role="manager",
+        actor_was_owner_member=False,
+        audit_correlation_id="00000000000000000000000000",
+    )
+
+
+def _write_login_audit_fresh_uow(
+    *,
+    action: str,
+    credential_id_b64: str | None,
+    diff: dict[str, Any],
+) -> None:
+    """Emit a failure audit row on its own UoW.
+
+    The primary UoW rolls back on the domain service's raise — any
+    audit row written inside it is lost. Opening a fresh UoW via
+    :func:`make_uow` (the same pattern magic-link + signup use for
+    their refusal audits) means the rejection trail survives the
+    rollback that returns 401 / 429 to the client.
+
+    Failures of the audit UoW are logged and swallowed: this helper
+    runs inside an ``except`` clause about to re-raise the mapped
+    :class:`HTTPException`, and an audit failure here would shadow
+    the client's intended status code with a 500. The catch is
+    deliberately broad (``Exception``) so any transient DB / config
+    hiccup still logs-and-drops; :class:`BaseException` propagates
+    so operator aborts aren't swallowed.
+
+    PII minimisation (§15): only hashes + the public credential id
+    in base64url. Never the plaintext IP, UA, email, or user id.
+    """
+    try:
+        with make_uow() as uow_session:
+            assert isinstance(uow_session, Session)
+            write_audit(
+                uow_session,
+                _login_audit_ctx(),
+                entity_kind="passkey_credential",
+                entity_id=credential_id_b64 or "",
+                action=action,
+                diff=diff,
+            )
+    except Exception:
+        _log.exception("passkey login refusal audit write failed on fresh UoW")
+
+
+def _extract_credential_id_b64(credential: dict[str, Any]) -> str | None:
+    """Return the assertion's ``id`` field as base64url, or None.
+
+    Used for audit payloads on failure — the caller has already been
+    through :func:`app.auth.passkey._decode_credential_id` which
+    would have raised :class:`InvalidLoginAttempt` on a malformed id,
+    so a ``None`` here is a genuine "body didn't carry an id" (shape
+    error that beat the domain service to the draw). Keeping the
+    extraction defensive means the audit write never crashes on an
+    edge-case payload.
+    """
+    raw_id = credential.get("id") if isinstance(credential, dict) else None
+    if isinstance(raw_id, str) and raw_id:
+        return raw_id
+    return None
+
+
+def build_login_router(
+    *,
+    throttle: Throttle,
+    settings: Settings | None = None,
+) -> APIRouter:
+    """Return a fresh :class:`APIRouter` for the passkey login flow.
+
+    The v1 app factory constructs one instance per process with the
+    shared :class:`Throttle` so every worker sees the same rolling
+    lockout counters (single-process today, §01 "One worker pool per
+    process"). Tests instantiate a fresh router per case with their
+    own :class:`Throttle` so per-test state never bleeds across
+    sibling cases.
+
+    ``settings`` is read once at build time — the HKDF subkey for
+    peppering the throttle's credential-id / IP hashes stays
+    constant for the router's lifetime. The login domain service
+    itself reads :func:`app.config.get_settings` lazily; the router
+    only needs the root-key hash material.
+    """
+    cfg = settings if settings is not None else get_settings()
+    # Derive the HKDF subkey once at router build — the root key is
+    # stable for the process lifetime and the subkey is used on every
+    # login request for hashing the credential id + IP into throttle
+    # buckets.
+    login_pepper = derive_subkey(cfg.root_key, purpose=_PASSKEY_LOGIN_HKDF_PURPOSE)
+
+    router = APIRouter(prefix="/auth/passkey/login", tags=["auth", "login"])
+
+    @router.post(
+        "/start",
+        response_model=LoginStartResponse,
+        summary="Begin a passkey login; returns request options + a challenge id",
+    )
+    def post_login_start(session: _Db) -> LoginStartResponse:
+        """Mint an assertion challenge for conditional UI.
+
+        No body — the caller is anonymous (no session yet). The
+        challenge row carries a login-sentinel subject so the
+        finish handler can reject a signup or register challenge
+        smuggled through the login path.
+        """
+        opts: AuthenticationOptions = login_start(session)
+        return LoginStartResponse(
+            challenge_id=opts.challenge_id,
+            options=opts.options,
+        )
+
+    @router.post(
+        "/finish",
+        response_model=LoginFinishResponse,
+        summary=(
+            "Verify the passkey assertion, issue a session cookie, "
+            "return the authenticating user id"
+        ),
+    )
+    def post_login_finish(
+        body: LoginFinishRequest,
+        request: Request,
+        response: Response,
+        session: _Db,
+    ) -> LoginFinishResponse:
+        """Run :func:`login_finish`, stamp the session cookie on success.
+
+        On failure we hash the observable identifiers for audit and
+        throttle advancement. The HTTP envelope collapses
+        :class:`InvalidLoginAttempt`, :class:`CloneDetected`,
+        :class:`ChallengeSubjectMismatch`, :class:`ChallengeNotFound`,
+        :class:`ChallengeAlreadyConsumed`, and :class:`ChallengeExpired`
+        into the same ``401 invalid_credential`` shape so the client
+        can't fingerprint which internal gate refused the request.
+        :class:`PasskeyLoginLockout` maps to ``429 rate_limited``
+        because the lockout is the one failure the SPA can act on
+        (back off).
+        """
+        ip = _client_ip(request)
+        ua = request.headers.get("user-agent", "")
+        credential_id_b64 = _extract_credential_id_b64(body.credential)
+        ip_hash = hash_with_pepper(ip, login_pepper)
+
+        try:
+            result: LoginResult = login_finish(
+                session,
+                challenge_id=body.challenge_id,
+                credential=body.credential,
+                ip=ip,
+                ua=ua,
+                ip_hash_pepper=login_pepper,
+                throttle=throttle,
+            )
+        except PasskeyLoginLockout as exc:
+            # Throttle already raised — no throttle advancement here,
+            # the lockout *is* the advancement. Still audit so
+            # operators see the sustained pressure.
+            _write_login_audit_fresh_uow(
+                action="passkey.login_rejected",
+                credential_id_b64=credential_id_b64,
+                diff={
+                    "reason": "rate_limited",
+                    "cred_id_b64": credential_id_b64,
+                    "ip_hash": ip_hash,
+                    "scope": exc.scope,
+                },
+            )
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail={"error": "rate_limited"},
+            ) from exc
+        except CloneDetected as exc:
+            # Clone detection is the rare case that warrants two
+            # audit rows: the operator-facing ``cloned_detected`` (so
+            # §15's "auto-revoke on rollback" follow-up has a record
+            # to work from) and the uniform ``login_rejected`` so the
+            # refusal trail matches every other 401 shape.
+            if credential_id_b64 is not None:
+                credential_id_hash = hash_with_pepper(credential_id_b64, login_pepper)
+                throttle.record_passkey_login_failure(
+                    credential_id_hash=credential_id_hash,
+                    ip_hash=ip_hash,
+                    now=SystemClock().now(),
+                )
+            _write_login_audit_fresh_uow(
+                action="passkey.cloned_detected",
+                credential_id_b64=exc.credential_id_b64,
+                diff={
+                    "cred_id_b64": exc.credential_id_b64,
+                    "ip_hash": ip_hash,
+                    "old_sign_count": exc.old_sign_count,
+                    "new_sign_count": exc.new_sign_count,
+                },
+            )
+            _write_login_audit_fresh_uow(
+                action="passkey.login_rejected",
+                credential_id_b64=exc.credential_id_b64,
+                diff={
+                    "reason": "CloneDetected",
+                    "cred_id_b64": exc.credential_id_b64,
+                    "ip_hash": ip_hash,
+                },
+            )
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail={"error": "invalid_credential"},
+            ) from exc
+        except (
+            InvalidLoginAttempt,
+            ChallengeNotFound,
+            ChallengeAlreadyConsumed,
+            ChallengeExpired,
+            ChallengeSubjectMismatch,
+        ) as exc:
+            # Any of these is a "the caller's attempt didn't redeem"
+            # signal — advance the per-credential + per-IP failure
+            # counters and audit with the fine-grained reason.
+            reason = type(exc).__name__
+            if credential_id_b64 is not None:
+                credential_id_hash = hash_with_pepper(credential_id_b64, login_pepper)
+                throttle.record_passkey_login_failure(
+                    credential_id_hash=credential_id_hash,
+                    ip_hash=ip_hash,
+                    now=SystemClock().now(),
+                )
+            _write_login_audit_fresh_uow(
+                action="passkey.login_rejected",
+                credential_id_b64=credential_id_b64,
+                diff={
+                    "reason": reason,
+                    "cred_id_b64": credential_id_b64,
+                    "ip_hash": ip_hash,
+                },
+            )
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail={"error": "invalid_credential"},
+            ) from exc
+
+        # Success — reset the throttle counters so a previous bad
+        # attempt doesn't count against the user's next login, then
+        # stamp the session cookie on the response.
+        credential_id_hash = hash_with_pepper(result.credential_id_b64url, login_pepper)
+        throttle.record_passkey_login_success(
+            credential_id_hash=credential_id_hash,
+            ip_hash=ip_hash,
+        )
+        cookie_header = build_session_cookie(
+            result.session_issue.cookie_value,
+            result.session_issue.expires_at,
+        )
+        response.headers.append("set-cookie", cookie_header)
+        return LoginFinishResponse(user_id=result.user_id)
+
+    return router
