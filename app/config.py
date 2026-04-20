@@ -122,6 +122,23 @@ class Settings(BaseSettings):
     demo_mode: bool = False
     worker: Literal["internal", "external"] = "internal"
     storage_backend: Literal["localfs", "s3"] = "localfs"
+    # Root logger level applied by :func:`app.util.logging.setup_logging`
+    # at factory boot. Kept as a string literal so ``CREWDAY_LOG_LEVEL``
+    # maps one-to-one onto the stdlib names; ``DEBUG`` is deliberately
+    # available as an ops lever without a code change.
+    log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
+    # Additional CORS origins allowed past the v1 "same-origin only"
+    # default. Empty in every production deployment; dev work behind a
+    # Vite proxy on a different port / host populates this with the
+    # dev origin (e.g. ``http://127.0.0.1:5173``). Never wildcard —
+    # the CORS middleware is ``allow_credentials=False``, so echoing
+    # an untrusted Origin would still leak nothing sensitive, but a
+    # mis-set wildcard here is a privacy regression waiting to
+    # happen. Comma-separated at the env layer, via
+    # :meth:`_split_cors_origins`.
+    cors_allow_origins: Annotated[list[str], NoDecode] = Field(
+        default_factory=list,
+    )
 
     # --- Tenancy (cd-iwsv, cd-9il) ---
     # Gates the Phase-0 ``X-Test-Workspace-Id`` header path inside
@@ -145,6 +162,14 @@ class Settings(BaseSettings):
         fail. Whitespace-only entries are dropped so a trailing comma
         doesn't turn into an empty-string glob.
         """
+        if isinstance(value, str):
+            return [item.strip() for item in value.split(",") if item.strip()]
+        return value
+
+    @field_validator("cors_allow_origins", mode="before")
+    @classmethod
+    def _split_cors_origins(cls, value: object) -> object:
+        """Parse comma-separated env input into a list (see above)."""
         if isinstance(value, str):
             return [item.strip() for item in value.split(",") if item.strip()]
         return value

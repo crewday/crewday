@@ -1,4 +1,539 @@
-"""FastAPI application factory — implementation lands in a later task.
+"""FastAPI application factory.
 
-See docs/specs/01-architecture.md §"Component responsibilities".
+``create_app(settings)`` composes the process-wide ASGI app:
+
+* structured JSON logging (§15 "Logging and redaction") is configured
+  before anything else so the subsequent wiring steps are captured
+  under the same handler + redaction filter;
+* the public-interface bind guard (§15 "Binding policy", §16
+  "Environment variables") refuses to start on ``0.0.0.0`` unless
+  :attr:`~app.config.Settings.allow_public_bind` is explicitly set;
+* the middleware stack installs CORS, security headers,
+  :class:`~app.tenancy.middleware.WorkspaceContextMiddleware`, and
+  :class:`~app.auth.csrf.CSRFMiddleware` (§01 "web.*");
+* the bare-host auth entry points + workspace-scoped ``/w/<slug>``
+  sub-tree (§01 "Workspace addressing", §12 "REST API") are mounted;
+* ``/healthz``, ``/readyz``, ``/version`` are the unconditional ops
+  probes (§16 "Healthchecks");
+* the SPA catch-all falls through to ``app/web/dist/index.html`` (or a
+  ``mocks/web/dist/`` / stub fallback when the production build is not
+  yet present) so deep-linking works in production (§14 "SPA
+  fallback", cd-q1be).
+
+The factory is deliberately the single seam between ``Settings`` and
+every other module. Tests pass a pinned :class:`Settings` via
+``create_app(settings=...)`` so no test touches process env.
+
+See ``docs/specs/01-architecture.md`` §"High-level picture",
+§"Component responsibilities"; ``docs/specs/16-deployment-operations.md``
+§"Environment variables", §"Healthchecks";
+``docs/specs/15-security-privacy.md`` §"Binding policy",
+§"HTTP security headers".
 """
+
+from __future__ import annotations
+
+import logging
+from collections.abc import Awaitable, Callable
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as pkg_version
+from pathlib import Path
+from typing import Final
+
+from fastapi import FastAPI, Request
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
+from fastapi.staticfiles import StaticFiles
+from sqlalchemy import text
+from sqlalchemy.exc import SQLAlchemyError
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.middleware.cors import CORSMiddleware
+
+from app.adapters.db.session import make_uow
+from app.adapters.mail.ports import Mailer
+from app.adapters.mail.smtp import SMTPMailer
+from app.api.v1.auth import invite as invite_module
+from app.api.v1.auth import magic as magic_module
+from app.api.v1.auth import passkey as passkey_module
+from app.api.v1.auth import recovery as recovery_module
+from app.api.v1.auth import signup as signup_module
+from app.api.v1.auth import tokens as tokens_module
+from app.api.v1.users import build_users_router
+from app.auth._throttle import Throttle
+from app.auth.csrf import CSRFMiddleware
+from app.capabilities import Capabilities
+from app.capabilities import probe as probe_capabilities
+from app.config import Settings, get_settings
+from app.tenancy.middleware import WorkspaceContextMiddleware
+from app.util.logging import setup_logging
+
+__all__ = ["PublicBindRefused", "create_app"]
+
+_log = logging.getLogger(__name__)
+
+# Package name we look up via :mod:`importlib.metadata`. Matches
+# ``pyproject.toml`` ``[project].name`` — kept as a module constant so a
+# rename lands in one place.
+_PACKAGE_NAME: Final[str] = "crewday"
+
+# Fallback emitted by ``/version`` when the package isn't installed (e.g.
+# running straight from a source checkout under pytest's default
+# rootdir, without ``pip install -e .``). We prefer a clear sentinel over
+# a crash because ``/version`` is probed in smoke tests.
+_UNKNOWN_VERSION: Final[str] = "0.0.0+unknown"
+
+# The "public" v4 any-address. Matched literally; the IPv6 equivalent
+# (``::``) is caught too. The richer interface-glob guard is cd-z2g's
+# scope — here we only enforce the spec's "never bind wide without the
+# opt-in" rule (§15 "Binding policy" #3).
+_WILDCARD_BIND_HOSTS: Final[frozenset[str]] = frozenset({"0.0.0.0", "::"})
+
+# SPA build directories, tried in order. The production location is
+# ``app/web/dist``; during the early Phase-0 window the production
+# build hasn't landed yet so we fall through to ``mocks/web/dist``.
+# Both paths are resolved against the repo root (two levels up from
+# this file).
+_REPO_ROOT: Final[Path] = Path(__file__).resolve().parent.parent
+_SPA_DIST_CANDIDATES: Final[tuple[Path, ...]] = (
+    _REPO_ROOT / "app" / "web" / "dist",
+    _REPO_ROOT / "mocks" / "web" / "dist",
+)
+
+# Minimal fallback served when neither SPA build exists. 200 OK so
+# health probes + smoke curls succeed; a distinctive body so a human
+# hitting ``/`` understands why they don't see the app.
+_SPA_STUB_HTML: Final[str] = (
+    "<!doctype html><html><head><title>crewday</title></head>"
+    "<body><h1>SPA not built — run pnpm build in app/web</h1></body></html>"
+)
+
+# Baseline security headers (§15 "HTTP security headers"). The
+# CSP-nonce + full permissions policy is cd-wv2v's scope; here we
+# install the static headers that are safe to apply on every route.
+_SECURITY_HEADERS: Final[dict[str, str]] = {
+    "Content-Security-Policy": (
+        "default-src 'self'; "
+        "script-src 'self'; "
+        "style-src 'self' 'unsafe-inline'; "
+        "img-src 'self' data:; "
+        "font-src 'self' data:; "
+        "connect-src 'self'; "
+        "frame-ancestors 'none'; "
+        "form-action 'self'; "
+        "base-uri 'self'"
+    ),
+    # HSTS is only honoured over HTTPS; shipping it on every response is
+    # safe — browsers ignore it on plaintext — and saves a conditional
+    # branch here. ``includeSubDomains`` is deliberately omitted: a self-
+    # hosted deployment can live under a subdomain of a shared apex.
+    "Strict-Transport-Security": "max-age=31536000",
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "DENY",
+    "Referrer-Policy": "strict-origin-when-cross-origin",
+    "Cross-Origin-Opener-Policy": "same-origin",
+    "Cross-Origin-Resource-Policy": "same-origin",
+}
+
+
+class PublicBindRefused(RuntimeError):
+    """Raised when ``create_app()`` is asked to run on a wildcard bind.
+
+    The caller (uvicorn entrypoint, tests, composition root) gets a
+    loud failure mode — this is a configuration bug, not something
+    the process should recover from.
+    """
+
+
+class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    """Append the baseline security headers to every response.
+
+    A full CSP with per-request nonces lands in cd-wv2v; until then
+    this middleware installs the static header set from §15 "HTTP
+    security headers" so the skeleton is in place. Each header is
+    set only when the downstream handler didn't already emit one, so
+    a future per-route override (e.g. the demo mode's relaxed
+    ``frame-ancestors``) can simply pre-populate the value.
+    """
+
+    async def dispatch(
+        self,
+        request: Request,
+        call_next: Callable[[Request], Awaitable[Response]],
+    ) -> Response:
+        response = await call_next(request)
+        for name, value in _SECURITY_HEADERS.items():
+            response.headers.setdefault(name, value)
+        return response
+
+
+def _resolve_version() -> str:
+    """Return the installed package version or a clear sentinel.
+
+    Wrapped so the ``/version`` handler stays trivial and we have a
+    single place to swap in a git-sha / OpenAPI-hash payload once
+    cd-leif lands the full build-metadata surface.
+    """
+    try:
+        return pkg_version(_PACKAGE_NAME)
+    except PackageNotFoundError:
+        return _UNKNOWN_VERSION
+
+
+def _enforce_bind_guard(settings: Settings) -> None:
+    """Refuse to boot on ``0.0.0.0`` / ``::`` without ``allow_public_bind``.
+
+    Spec §15 "Binding policy" #3: ``0.0.0.0`` and ``::`` never pass on
+    their own; they always need the opt-in. The richer interface-glob
+    path (cd-z2g) lands in a follow-up — here we only enforce the
+    unambiguous wildcard refusal so the factory can't accidentally
+    default-open a process.
+    """
+    if settings.bind_host in _WILDCARD_BIND_HOSTS and not settings.allow_public_bind:
+        raise PublicBindRefused(
+            f"Refusing to start with CREWDAY_BIND_HOST={settings.bind_host!r}: "
+            "wildcard binds require CREWDAY_ALLOW_PUBLIC_BIND=1 "
+            "(see docs/specs/15-security-privacy.md §Binding policy)"
+        )
+
+
+def _resolve_spa_dist() -> Path | None:
+    """Return the first SPA dist directory that exists, or ``None``.
+
+    Preferring ``app/web/dist`` over ``mocks/web/dist`` keeps the
+    production build authoritative once it lands; the mocks fallback
+    covers the Phase-0 window where tasks reference the bundled mock
+    build. Tests that need to assert the stub path set both
+    candidates aside so this returns ``None``.
+    """
+    for candidate in _SPA_DIST_CANDIDATES:
+        if (candidate / "index.html").is_file():
+            return candidate
+    return None
+
+
+def _is_api_path(path: str) -> bool:
+    """Return ``True`` if ``path`` looks like an API request.
+
+    An API 404 must stay JSON so agent / CLI callers get a parseable
+    body; the SPA catch-all deliberately does **not** handle these
+    paths. Anything under ``/api/`` or ``/w/<slug>/...`` counts —
+    including ``/api`` exactly.
+    """
+    if path == "/api" or path.startswith("/api/"):
+        return True
+    # ``/w`` bare is an SPA route (the workspace picker); only
+    # ``/w/<slug>/<sub>`` carries the scoped API tree.
+    if path.startswith("/w/"):
+        segments = [s for s in path.split("/") if s]
+        # ['w', slug, 'api', ...] or deeper. Under ``/w/<slug>`` only
+        # ``api/...`` is the JSON API; everything else is SPA chrome.
+        return len(segments) >= 3 and segments[2] == "api"
+    return False
+
+
+def _wire_services(
+    app: FastAPI, settings: Settings
+) -> tuple[Mailer | None, Throttle, Capabilities]:
+    """Instantiate process-wide services and stash them on ``app.state``.
+
+    The throttle is always constructed (it's pure in-memory state).
+    The mailer is ``None`` when SMTP isn't configured — the signup /
+    magic / recovery routers each raise :class:`RuntimeError` on the
+    first request in that case, which is the right failure mode for
+    a deployment that forgot to set ``CREWDAY_SMTP_*``. Capabilities
+    is probed without a DB session; the mutable subset is refreshed
+    on the first readyz probe that actually opens a UoW.
+    """
+    throttle = Throttle()
+    capabilities = probe_capabilities(settings)
+    mailer: Mailer | None = None
+    if settings.smtp_host is not None and settings.smtp_from is not None:
+        mailer = SMTPMailer(
+            host=settings.smtp_host,
+            port=settings.smtp_port,
+            from_addr=settings.smtp_from,
+            user=settings.smtp_user,
+            password=settings.smtp_password,
+            use_tls=settings.smtp_use_tls,
+            timeout=settings.smtp_timeout,
+            bounce_domain=settings.smtp_bounce_domain,
+        )
+    app.state.settings = settings
+    app.state.throttle = throttle
+    app.state.capabilities = capabilities
+    app.state.mailer = mailer
+    return mailer, throttle, capabilities
+
+
+def _mount_routers(
+    app: FastAPI,
+    *,
+    settings: Settings,
+    mailer: Mailer | None,
+    throttle: Throttle,
+    capabilities: Capabilities,
+) -> None:
+    """Attach every v1 router onto ``app``.
+
+    Bare-host routers (signup, magic-link, recovery, invite, passkey
+    signup / login) live at ``/api/v1/...``; workspace-scoped routers
+    nest under ``/w/{slug}/api/v1/...`` and run behind the tenancy
+    middleware. Routers that need a mailer are skipped when SMTP is
+    not configured — each one would raise on first use anyway, but
+    skipping the mount keeps the OpenAPI surface honest.
+    """
+    bare_prefix = "/api/v1"
+    scoped_prefix = "/w/{slug}/api/v1"
+
+    # --- Bare-host auth routers (§03 "Self-serve signup", §12) ---
+    app.include_router(passkey_module.signup_router, prefix=bare_prefix)
+    app.include_router(
+        passkey_module.build_login_router(throttle=throttle, settings=settings),
+        prefix=bare_prefix,
+    )
+    # Invite accept does NOT need SMTP — redeeming a magic link the
+    # operator mailed out-of-band is still valid in an SMTP-less
+    # deployment. Keep this mount unconditional so the SPA's
+    # ``/invite/...`` flow survives ``CREWDAY_SMTP_HOST`` being unset.
+    app.include_router(
+        invite_module.build_invite_router(
+            throttle=throttle,
+            settings=settings,
+        ),
+        prefix=bare_prefix,
+    )
+    if mailer is not None:
+        app.include_router(
+            signup_module.build_signup_router(
+                mailer=mailer,
+                throttle=throttle,
+                capabilities=capabilities,
+                settings=settings,
+            ),
+            prefix=bare_prefix,
+        )
+        app.include_router(
+            magic_module.build_magic_router(
+                mailer=mailer,
+                throttle=throttle,
+                settings=settings,
+            ),
+            prefix=bare_prefix,
+        )
+        app.include_router(
+            recovery_module.build_recovery_router(
+                mailer=mailer,
+                throttle=throttle,
+                settings=settings,
+            ),
+            prefix=bare_prefix,
+        )
+
+    # --- Workspace-scoped routers (§12 "Base URL") ---
+    # The tenancy middleware binds the :class:`WorkspaceContext` from
+    # the path's ``{slug}`` — the FastAPI prefix placeholder is the
+    # contract between the two. Routes inside each router are
+    # relative (e.g. ``/auth/tokens``), so the final path is
+    # ``/w/{slug}/api/v1/auth/tokens``.
+    app.include_router(tokens_module.build_tokens_router(), prefix=scoped_prefix)
+    if mailer is not None:
+        app.include_router(
+            build_users_router(
+                mailer=mailer,
+                throttle=throttle,
+                settings=settings,
+            ),
+            prefix=scoped_prefix,
+        )
+
+    # Workspace-scoped passkey register (authenticated "add another
+    # passkey" flow). Reused verbatim — the router requires a live
+    # :class:`WorkspaceContext` which the tenancy middleware installs.
+    app.include_router(passkey_module.router, prefix=scoped_prefix)
+
+
+def _register_ops_routes(app: FastAPI) -> None:
+    """Attach the unconditional ops probes (§16 "Healthchecks").
+
+    Registered directly on the app so they cannot be accidentally
+    shadowed by a router's route pattern. Each probe lives in the
+    :data:`~app.tenancy.middleware.SKIP_PATHS` set so the tenancy
+    middleware passes the request through without slug resolution.
+    """
+
+    @app.get("/healthz", include_in_schema=False)
+    def healthz() -> dict[str, str]:
+        """Process liveness — always 200 once the ASGI server is up."""
+        return {"status": "ok"}
+
+    @app.get("/readyz", include_in_schema=False)
+    def readyz() -> Response:
+        """DB readiness — 200 on a clean ``SELECT 1``, 503 otherwise.
+
+        A fresh :class:`~app.adapters.db.session.UnitOfWorkImpl` is
+        opened per probe so a crashed pool recovers on the next
+        scrape. Catching :class:`SQLAlchemyError` (not bare
+        ``Exception``) keeps the failure surface narrow to database
+        faults; any other crash bubbles to the default 500 handler.
+        """
+        try:
+            with make_uow() as session:
+                session.execute(text("SELECT 1"))
+        except SQLAlchemyError as exc:
+            _log.warning("readyz: db ping failed", extra={"error": repr(exc)})
+            return JSONResponse(
+                status_code=503,
+                content={"status": "degraded", "detail": "db_unreachable"},
+            )
+        return JSONResponse(status_code=200, content={"status": "ok"})
+
+    @app.get("/version", include_in_schema=False)
+    def version() -> dict[str, str]:
+        """Package version resolved via :mod:`importlib.metadata`."""
+        return {"version": _resolve_version()}
+
+
+def _register_spa_catch_all(app: FastAPI) -> None:
+    """Mount the SPA static assets + fallback route.
+
+    Assets under ``/assets/*`` are served by
+    :class:`~starlette.staticfiles.StaticFiles` when the dist dir
+    exists. Every other GET falls through to the catch-all below,
+    which returns ``index.html`` so client-side routing handles deep
+    links; API prefixes are deliberately excluded so a missing
+    ``/api/...`` route returns a JSON 404 instead of HTML.
+    """
+    dist = _resolve_spa_dist()
+
+    if dist is not None:
+        assets_dir = dist / "assets"
+        if assets_dir.is_dir():
+            app.mount(
+                "/assets",
+                StaticFiles(directory=str(assets_dir)),
+                name="assets",
+            )
+
+    @app.get("/{full_path:path}", include_in_schema=False)
+    def spa_catch_all(full_path: str) -> Response:
+        """Serve ``index.html`` for any non-API GET.
+
+        ``full_path`` is the match FastAPI captures — empty on the
+        root ``/``. API prefixes are already peeled off by the earlier
+        routers; we defensively re-check via :func:`_is_api_path` here
+        so a bad API path returns a JSON 404 rather than leaking the
+        SPA shell.
+        """
+        path = "/" + full_path
+        if _is_api_path(path):
+            return JSONResponse(
+                status_code=404,
+                content={"error": "not_found", "detail": None},
+            )
+
+        if dist is not None:
+            # Favicon / manifest / top-level static file served directly.
+            if full_path:
+                candidate = (dist / full_path).resolve()
+                # ``resolve()`` canonicalises traversal attempts; the
+                # subsequent ``relative_to`` check rejects anything
+                # that escaped the dist root. Without this a crafted
+                # ``../etc/passwd`` would read arbitrary files.
+                try:
+                    candidate.relative_to(dist.resolve())
+                except ValueError:
+                    pass
+                else:
+                    if candidate.is_file():
+                        return FileResponse(candidate)
+
+            index = dist / "index.html"
+            if index.is_file():
+                return FileResponse(index)
+
+        return HTMLResponse(content=_SPA_STUB_HTML, status_code=200)
+
+
+def create_app(settings: Settings | None = None) -> FastAPI:
+    """Compose and return the process-wide FastAPI application.
+
+    Pass ``settings`` in tests and alternate composition roots to
+    avoid the lru_cached :func:`~app.config.get_settings` singleton.
+    Production (uvicorn ``--factory`` invocation) lets the default
+    ``None`` fall through to :func:`~app.config.get_settings`.
+    """
+    cfg = settings if settings is not None else get_settings()
+
+    # Logging must land before anything else emits — subsequent import-
+    # time side effects (pydantic validation errors, SMTP config
+    # warnings, capability probes) deserve to show up in the JSON
+    # stream with the redaction filter already installed.
+    setup_logging(level=cfg.log_level)
+
+    _enforce_bind_guard(cfg)
+
+    app = FastAPI(
+        title="crewday",
+        version=_resolve_version(),
+        # The OpenAPI surface lives at ``/api/openapi.json`` per §12
+        # "Base URL"; the default ``/openapi.json`` would shadow an
+        # SPA route and confuse CDN caching rules.
+        openapi_url="/api/openapi.json",
+        docs_url="/docs",
+        redoc_url="/redoc",
+    )
+
+    # Middleware is applied OUTER → INNER at request time. FastAPI's
+    # ``add_middleware`` prepends to ``user_middleware``, so the LAST
+    # call lands outermost. The desired chain (reads top-down as "first
+    # thing to see the request, last thing to see the response"):
+    #
+    # 1. CORS — reject cross-origin preflights before any stateful work.
+    # 2. SecurityHeaders — stamp every response, even middleware rejects.
+    # 3. WorkspaceContextMiddleware — bind the tenancy ctx for routers.
+    # 4. CSRFMiddleware — double-submit check on mutation verbs.
+    #
+    # To get that layout we register INNER → OUTER: CSRF first (ends up
+    # innermost), CORS last (ends up outermost). CORS defaults to
+    # same-origin only (§15 "HTTP security headers"): agent callers
+    # hit ``/api/v1/...`` with a bearer token and no browser origin,
+    # and a mis-set wildcard here would be a privacy regression.
+    # Dev work behind a separate Vite origin can populate
+    # ``CREWDAY_CORS_ALLOW_ORIGINS`` with an explicit list.
+    app.add_middleware(CSRFMiddleware)
+    app.add_middleware(WorkspaceContextMiddleware)
+    app.add_middleware(SecurityHeadersMiddleware)
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=list(cfg.cors_allow_origins),
+        allow_origin_regex=None,
+        allow_credentials=False,
+        allow_methods=["GET", "HEAD", "OPTIONS", "POST", "PUT", "PATCH", "DELETE"],
+        allow_headers=["Authorization", "Content-Type", "X-CSRF", "X-Request-Id"],
+    )
+
+    mailer, throttle, capabilities = _wire_services(app, cfg)
+
+    _register_ops_routes(app)
+    _mount_routers(
+        app,
+        settings=cfg,
+        mailer=mailer,
+        throttle=throttle,
+        capabilities=capabilities,
+    )
+    # SPA catch-all MUST register last — its ``/{full_path:path}``
+    # pattern would otherwise swallow every subsequent route.
+    _register_spa_catch_all(app)
+
+    # Worker hook — cd-pnbn / cd-3p3z formalise APScheduler wiring
+    # (crons, iCal pollers, digest emails). Until then we only
+    # record the mode so operations can assert the factory read the
+    # env var. An ``external`` deployment runs the worker in its own
+    # process; ``internal`` would in-process today once the
+    # scheduler lands.
+    _log.info(
+        "worker mode resolved",
+        extra={"event": "worker.mode", "mode": cfg.worker},
+    )
+
+    return app
