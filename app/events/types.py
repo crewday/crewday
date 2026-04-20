@@ -24,6 +24,7 @@ __all__ = [
     "ShiftChangedAction",
     "ShiftEnded",
     "StayUpcoming",
+    "TaskAssigned",
     "TaskCompleted",
     "TaskCreated",
     "TaskOverdue",
@@ -62,6 +63,25 @@ class TaskCreated(Event):
     name: ClassVar[str] = "task.created"
 
     task_id: str
+
+
+@register
+class TaskAssigned(Event):
+    """A task occurrence now has an ``assigned_user_id``.
+
+    Fired at creation time when the one-off service resolves an
+    assignee (explicit payload value or assignment-hook output), and
+    at amend time when an owner / manager / agent changes who is on
+    the hook. The ``assigned_to`` field is the new assignee; the
+    previous one (if any) is available on the task row itself via
+    the audit trail, not on this event — subscribers that need the
+    transition rebuild it from the audit log.
+    """
+
+    name: ClassVar[str] = "task.assigned"
+
+    task_id: str
+    assigned_to: str
 
 
 @register

@@ -222,6 +222,18 @@ ignore_imports = [
     # tracked by cd-duv6 (extended scope) — drops once the tasks
     # repositories land.
     "app.domain.tasks.schedules -> app.adapters.db.tasks.models",
+    # v1 stopgap (cd-0rf): ``app.domain.tasks.oneoff`` reads
+    # :class:`TaskTemplate` / :class:`Occurrence` from
+    # ``app.adapters.db.tasks.models`` and :class:`Property` from
+    # ``app.adapters.db.places.models`` (to resolve the property
+    # timezone for the local → UTC projection). It also invokes
+    # :func:`app.authz.enforce.require` for the ``tasks.create``
+    # defence-in-depth check. Same Protocol-seam pattern as the
+    # other tasks services above; tracked by cd-duv6 (extended
+    # scope) — drops once the repositories land.
+    "app.domain.tasks.oneoff -> app.adapters.db.tasks.models",
+    "app.domain.tasks.oneoff -> app.adapters.db.places.models",
+    "app.domain.tasks.oneoff -> app.authz",
     # v1 stopgap (cd-whl): ``app.domain.time.shifts`` reads
     # :class:`Shift` + ``_SHIFT_SOURCE_VALUES`` from
     # ``app.adapters.db.time.models`` directly. Same Protocol-seam
@@ -256,6 +268,12 @@ ignore_imports = [
     # Drops when the enforcement body moves to a pure-domain seam
     # (or when app.authz.enforce stops reaching into app.api.deps).
     "app.domain.time.shifts -> app.authz",
+    # v1 stopgap (cd-0rf): same reasoning as
+    # ``app.domain.time.shifts -> app.authz`` — the one-off
+    # service calls :func:`app.authz.enforce.require` for the
+    # ``tasks.create`` defence-in-depth check, which transitively
+    # pulls the FastAPI-dep seam. Drops with the same cleanup.
+    "app.domain.tasks.oneoff -> app.authz",
 ]
 unmatched_ignore_imports_alerting = "none"
 

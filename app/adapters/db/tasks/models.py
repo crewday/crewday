@@ -508,8 +508,21 @@ class Occurrence(Base):
     hard-deleted — history must survive. ``property_id`` cascades
     (property deletion sweeps its history); the actor pointers
     (``assignee_user_id``, ``completed_by_user_id``,
-    ``reviewer_user_id``) all ``SET NULL`` so the rows outlive their
-    actors.
+    ``reviewer_user_id``, ``created_by_user_id``) all ``SET NULL``
+    so the rows outlive their actors.
+
+    **cd-0rf** extends the cd-22e slice with the §06 "Task row" columns
+    the one-off creation service (:mod:`app.domain.tasks.oneoff`)
+    needs to materialise an ad-hoc task without a parent schedule:
+    ``title``, ``description_md``, ``priority``, ``photo_evidence``,
+    ``duration_minutes``, ``area_id``, ``unit_id``,
+    ``expected_role_id``, ``linked_instruction_ids``,
+    ``inventory_consumption_json``, ``is_personal``, and
+    ``created_by_user_id``. Every new column is nullable or carries
+    a server default so rows inserted by cd-22e (the scheduler
+    worker — which still copies only the minimum generator surface)
+    stay legal; a follow-up Beads task teaches the generator to
+    carry the full shape through from the template.
     """
 
     __tablename__ = "occurrence"
@@ -529,15 +542,25 @@ class Occurrence(Base):
     # of what this occurrence was; losing it would orphan every
     # record of completion. Callers must soft-delete the template
     # (column not in this slice; arrives with cd-0tg) to retire it.
-    template_id: Mapped[str] = mapped_column(
+    #
+    # cd-0rf widens this to nullable so pure-ad-hoc one-off tasks
+    # (no parent template) can land. The scheduler worker still
+    # writes a template on every generator insert, so RESTRICT
+    # semantics survive in practice for schedule-backed rows.
+    template_id: Mapped[str | None] = mapped_column(
         String,
         ForeignKey("task_template.id", ondelete="RESTRICT"),
-        nullable=False,
+        nullable=True,
     )
-    property_id: Mapped[str] = mapped_column(
+    # cd-0rf widens this to nullable so personal one-off tasks
+    # without a property anchor can land. The domain service
+    # validates property ownership at write time when ``property_id``
+    # is set; a ``NULL`` value flags a workspace-scoped personal
+    # task (§06 "Self-created and personal tasks").
+    property_id: Mapped[str | None] = mapped_column(
         String,
         ForeignKey("property.id", ondelete="CASCADE"),
-        nullable=False,
+        nullable=True,
     )
     assignee_user_id: Mapped[str | None] = mapped_column(
         String,
@@ -586,6 +609,47 @@ class Occurrence(Base):
     # "cancelled ↔ reason" pairing at write time (per-spec: the
     # delete cascade populates ``'schedule deleted'`` verbatim).
     cancellation_reason: Mapped[str | None] = mapped_column(String, nullable=True)
+    # cd-0rf §06 "Task row" columns. ``title`` / ``description_md``
+    # are nullable on the migration side because the cd-22e
+    # generator does not populate them; every ad-hoc write through
+    # :mod:`app.domain.tasks.oneoff` fills them.
+    title: Mapped[str | None] = mapped_column(String, nullable=True)
+    description_md: Mapped[str | None] = mapped_column(String, nullable=True)
+    priority: Mapped[str] = mapped_column(String, nullable=False, default="normal")
+    photo_evidence: Mapped[str] = mapped_column(
+        String, nullable=False, default="disabled"
+    )
+    # Per-occurrence duration override. Rendered values fall back to
+    # ``ends_at - starts_at`` when NULL.
+    duration_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Soft pointers — no FK. Losing the area / unit / role must not
+    # orphan the task row. The domain service validates existence at
+    # write time once cd-sn26 widens area / unit CRUD.
+    area_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    unit_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    expected_role_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    # §07 linked instructions + §08 SKU → qty inventory consumption.
+    # Both copied down from the template on the ad-hoc path; the
+    # authoritative per-task lists live on the parent template until
+    # a manager amends the task itself.
+    linked_instruction_ids: Mapped[list[str]] = mapped_column(
+        JSON, nullable=False, default=list
+    )
+    inventory_consumption_json: Mapped[dict[str, Any]] = mapped_column(
+        JSON, nullable=False, default=dict
+    )
+    # §06 "Self-created and personal tasks". Default ``False`` —
+    # only the quick-add UI flips it to ``True`` explicitly. The
+    # visibility filter lives in the §15 read layer.
+    is_personal: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # Origin actor — ``SET NULL`` on user delete so history survives.
+    # Nullable on the migration side (cd-22e generator does not
+    # populate); every ad-hoc write populates it.
+    created_by_user_id: Mapped[str | None] = mapped_column(
+        String,
+        ForeignKey("user.id", ondelete="SET NULL"),
+        nullable=True,
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
     )
@@ -594,6 +658,14 @@ class Occurrence(Base):
         CheckConstraint(
             f"state IN ({_in_clause(_OCCURRENCE_STATE_VALUES)})",
             name="state",
+        ),
+        CheckConstraint(
+            f"priority IN ({_in_clause(_PRIORITY_VALUES)})",
+            name="priority",
+        ),
+        CheckConstraint(
+            f"photo_evidence IN ({_in_clause(_PHOTO_EVIDENCE_VALUES)})",
+            name="photo_evidence",
         ),
         CheckConstraint("ends_at > starts_at", name="ends_after_starts"),
         # Per-acceptance: "my tasks" sort by time (`/today` view).
