@@ -46,6 +46,7 @@ from app.adapters.db.base import Base
 
 __all__ = [
     "ApiToken",
+    "MagicLinkNonce",
     "PasskeyCredential",
     "Session",
     "User",
@@ -309,6 +310,69 @@ class WebAuthnChallenge(Base):
         Index("ix_webauthn_challenge_expires", "expires_at"),
         Index("ix_webauthn_challenge_user", "user_id"),
         Index("ix_webauthn_challenge_signup", "signup_session_id"),
+    )
+
+
+class MagicLinkNonce(Base):
+    """Single-use token ledger for ``POST /auth/magic/consume``.
+
+    Every magic-link emission inserts one row in the *pending* state
+    (``consumed_at IS NULL``); the matching consume flips
+    ``consumed_at`` via a conditional ``UPDATE`` that only touches
+    still-pending rows. The ``WHERE consumed_at IS NULL`` predicate on
+    that update is how the single-use guarantee is enforced on every
+    backend: SQLite serialises the write transaction, Postgres takes
+    a row-level lock, and in either case exactly one of two racing
+    consumers sees ``rowcount = 1`` while the loser sees ``0`` and is
+    rejected with ``409 already_consumed``.
+
+    **PII minimisation (§15).** We never store the plaintext email
+    or IP — only SHA-256 hashes salted with the deployment's root key
+    (see :func:`app.auth.keys.derive_subkey`). The hashes are enough
+    to correlate related requests (rate-limit enforcement, abuse
+    trail) without turning the table into a PII sink.
+
+    **Tenant-agnostic.** Like :class:`User`, :class:`WebAuthnChallenge`,
+    this row has no ``workspace_id``: magic-link purposes span
+    ``signup_verify`` (pre-workspace), ``recover_passkey``,
+    ``email_change_confirm``, and ``grant_invite``, and the first
+    two exist before any :class:`~app.tenancy.WorkspaceContext` has
+    been resolved. The domain layer (:mod:`app.auth.magic_link`)
+    wraps every read/write in :func:`app.tenancy.tenant_agnostic`.
+
+    **``subject_id`` is soft-typed.** For ``recover_passkey`` and
+    ``email_change_confirm`` it's a ``user.id`` ULID; for
+    ``signup_verify`` it points at a future ``signup_session`` row
+    (cd-3i5) that doesn't exist yet; for ``grant_invite`` it points at
+    an ``invite.id``. We store the bare string and let the consuming
+    service interpret it per its ``purpose`` — adding the FKs would
+    force the column to be nullable-per-FK and the row to exist
+    pre-commit in one particular subject space.
+    """
+
+    __tablename__ = "magic_link_nonce"
+
+    jti: Mapped[str] = mapped_column(String, primary_key=True)
+    purpose: Mapped[str] = mapped_column(String, nullable=False)
+    subject_id: Mapped[str] = mapped_column(String, nullable=False)
+    consumed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    # SHA-256 of ``ip + hkdf_subkey``; 64 hex chars.
+    created_ip_hash: Mapped[str] = mapped_column(String, nullable=False)
+    # SHA-256 of ``canonicalise_email(email) + hkdf_subkey``; 64 hex chars.
+    created_email_hash: Mapped[str] = mapped_column(String, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+
+    __table_args__ = (
+        Index("ix_magic_link_nonce_expires", "expires_at"),
+        Index("ix_magic_link_nonce_email_hash", "created_email_hash"),
+        Index("ix_magic_link_nonce_ip_hash", "created_ip_hash"),
     )
 
 

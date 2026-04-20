@@ -1,0 +1,861 @@
+"""Magic-link domain service — mint, send, consume.
+
+Two public entry points:
+
+* :func:`request_link` — rate-limit check, token mint, nonce-row
+  insert, email send. Always returns ``None`` to uphold the
+  enumeration guard: the caller cannot distinguish whether the email
+  existed, only whether the rate-limit tripped.
+* :func:`consume_link` — unseal + row-check + single-use flip. Returns
+  a :class:`MagicLinkOutcome` on success; raises a typed error
+  otherwise.
+
+Token format (§03 "Magic link format"):
+
+```
+{
+  "purpose": "signup_verify | recover_passkey | email_change_confirm |
+              grant_invite",
+  "subject_id": "<ULID>",
+  "jti":        "<ULID>",
+  "exp":        <unix_timestamp>,
+}
+```
+
+Signed with an HKDF subkey derived from ``settings.root_key`` via
+:func:`app.auth.keys.derive_subkey` and the fixed purpose label
+``"magic-link"``. The subkey doesn't rotate with the link's
+``purpose`` field — we want a single signing key across every purpose
+so ``purpose`` stays inside the signed payload where it belongs, not
+smuggled into the key schedule.
+
+**TTL ceilings (§03).** Signup verification gets 15 minutes; every
+other purpose gets 10. The caller may request a shorter TTL (future
+"link this device now" flow), but never a longer one — the server
+caps at the spec.
+
+**Single-use under concurrency.** The consume step runs one
+conditional ``UPDATE``:
+
+```
+UPDATE magic_link_nonce
+   SET consumed_at = :now
+ WHERE jti = :jti AND consumed_at IS NULL
+```
+
+SQLite serialises the writing transaction; Postgres takes a
+row-level lock (``FOR UPDATE`` happens implicitly for the filtered
+``UPDATE`` under READ COMMITTED). Exactly one concurrent consumer
+sees ``rowcount == 1``; the loser sees ``0`` and the service raises
+:class:`AlreadyConsumed`.
+
+**PII minimisation (§15).** No plaintext email or IP is ever logged,
+persisted, or passed to audit. We store SHA-256 hashes salted with a
+per-deployment HKDF subkey; audit rows carry the same hashes. The
+plaintext email is handed to the :class:`Mailer` port and never
+retained past that call.
+
+**Rate limits (§15).** Enforced by :mod:`app.auth._throttle`. A
+single :class:`Throttle` instance is shared per-process and passed
+into both entry points so tests can use a fresh one per case.
+cd-7huk will absorb this into the deployment-wide throttle; until
+then the in-memory instance is the canonical store.
+
+**Audit.** Every ``request`` writes ``audit.magic_link.sent``; every
+``consume`` writes ``audit.magic_link.consumed`` on success or
+``audit.magic_link.rejected`` on failure. Both use a synthetic
+tenant-agnostic :class:`WorkspaceContext` because the magic-link
+flow runs at the bare host (no slug, no tenant — see
+:func:`_agnostic_audit_ctx`).
+
+The rejected row must land even when the caller's primary UoW rolls
+back — :func:`consume_link` itself can't write it, because the typed
+domain exception rolls back the caller's UoW (and with it any audit
+row the service had queued on the same session). The router opens
+a **fresh** UoW via :func:`app.adapters.db.session.make_uow` and
+calls :func:`write_rejected_audit` there, committing the rejected
+audit independently of whatever state the primary UoW left behind.
+Forensic value: pre-signup magic-link abuse (signature forgeries,
+cross-purpose replays, brute-force consumes) has no other trail —
+the nonce row either never existed or stays pending under rollback.
+"""
+
+from __future__ import annotations
+
+import hashlib
+from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
+from typing import Any, Final, Literal
+
+from itsdangerous import (
+    BadSignature,
+    SignatureExpired,
+    URLSafeTimedSerializer,
+)
+from sqlalchemy import CursorResult, select, update
+from sqlalchemy.orm import Session
+
+from app.adapters.db.identity.models import (
+    MagicLinkNonce,
+    User,
+    canonicalise_email,
+)
+from app.adapters.mail.ports import Mailer
+from app.audit import write_audit
+from app.auth._throttle import ConsumeLockout, RateLimited, Throttle
+from app.auth.keys import derive_subkey
+from app.config import Settings, get_settings
+from app.mail.templates import magic_link as magic_link_template
+from app.mail.templates import render as render_template
+from app.tenancy import WorkspaceContext, tenant_agnostic
+from app.util.clock import Clock, SystemClock
+from app.util.ulid import new_ulid
+
+__all__ = [
+    "AlreadyConsumed",
+    "ConsumeLockout",
+    "InvalidToken",
+    "MagicLinkOutcome",
+    "MagicLinkPurpose",
+    "PurposeMismatch",
+    "RateLimited",
+    "Throttle",
+    "TokenExpired",
+    "consume_link",
+    "reason_for_exception",
+    "request_link",
+    "write_rejected_audit",
+]
+
+
+# ---------------------------------------------------------------------------
+# Constants — spec-pinned
+# ---------------------------------------------------------------------------
+
+
+MagicLinkPurpose = Literal[
+    "signup_verify",
+    "recover_passkey",
+    "email_change_confirm",
+    "grant_invite",
+]
+
+
+_VALID_PURPOSES: Final[frozenset[str]] = frozenset(
+    {
+        "signup_verify",
+        "recover_passkey",
+        "email_change_confirm",
+        "grant_invite",
+    }
+)
+
+# Per-purpose TTL ceiling (§03). Requests for a shorter TTL are
+# respected; longer requests silently cap at the value below.
+_TTL_BY_PURPOSE: Final[dict[str, timedelta]] = {
+    "signup_verify": timedelta(minutes=15),
+    "recover_passkey": timedelta(minutes=10),
+    "email_change_confirm": timedelta(minutes=10),
+    "grant_invite": timedelta(minutes=10),
+}
+
+# itsdangerous salt. Changing the value invalidates every link in
+# flight and is a breaking change; treat it like a schema migration.
+# Purpose is in the payload, not in the salt, so one signing key
+# covers every purpose (and a stolen token can't be re-signed under
+# a different purpose).
+_SERIALIZER_SALT: Final[str] = "magic-link-v1"
+
+# HKDF purpose used to derive the signing subkey. A future rotation
+# bumps this to ``"magic-link-v2"`` and keeps the v1 signer around
+# during the grace window so in-flight tokens keep verifying.
+_HKDF_PURPOSE: Final[str] = "magic-link"
+
+# Synthetic tenant for audit emission. The tenant-agnostic flows
+# (signup, recovery) have no :class:`WorkspaceContext` to borrow, but
+# :func:`app.audit.write_audit` requires one. We build a sentinel
+# value matching the actor-free system voice — the audit reader
+# recognises the zero-ULID workspace as "pre-tenant identity event"
+# and displays it accordingly (cd-dir, future). Until that reader
+# lands, the audit row still pins actor / ip-hash / email-hash
+# through ``diff``, which is the forensic data operators need.
+_AGNOSTIC_WORKSPACE_ID: Final[str] = "00000000000000000000000000"
+_AGNOSTIC_ACTOR_ID: Final[str] = "00000000000000000000000000"
+
+
+# ---------------------------------------------------------------------------
+# Value objects
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class MagicLinkOutcome:
+    """Result of :func:`consume_link` on success.
+
+    ``purpose`` + ``subject_id`` are the fields the calling flow
+    (signup / recover / email-change / invite-accept) needs to
+    continue: they identify *why* the link was minted and *against
+    whom*. ``email_hash`` and ``ip_hash`` are exposed so the caller
+    can log or audit without re-deriving the hashes.
+    """
+
+    purpose: str
+    subject_id: str
+    email_hash: str
+    ip_hash: str
+
+
+# ---------------------------------------------------------------------------
+# Errors
+# ---------------------------------------------------------------------------
+
+
+class InvalidToken(ValueError):
+    """Token failed signature verification or is structurally malformed.
+
+    400-equivalent. Covers :class:`itsdangerous.BadSignature`,
+    tampering, unknown claims, and unexpected types — the caller
+    sees one error symbol regardless so the HTTP body doesn't leak
+    which part of the payload was wrong.
+    """
+
+
+class TokenExpired(ValueError):
+    """Token's ``exp`` claim is in the past, or the nonce-row TTL lapsed.
+
+    410-equivalent — the caller's link is no longer redeemable; they
+    must request a fresh one.
+    """
+
+
+class PurposeMismatch(ValueError):
+    """Token's ``purpose`` differs from what the caller asked to redeem.
+
+    400-equivalent. The signup endpoint must never accept a
+    recovery token (and vice versa), even if every other field
+    lines up — the defence is independent of the nonce row existing.
+    """
+
+
+class AlreadyConsumed(ValueError):
+    """Nonce row is already flipped (``consumed_at`` is not NULL).
+
+    409-equivalent. Also raised when a concurrent consumer wins the
+    race — the conditional ``UPDATE`` returns ``rowcount == 0`` and
+    we map that to this type.
+    """
+
+
+# ---------------------------------------------------------------------------
+# Internal helpers
+# ---------------------------------------------------------------------------
+
+
+def _now(clock: Clock | None) -> datetime:
+    """Return an aware UTC ``datetime`` from ``clock`` or a fresh system clock."""
+    return (clock if clock is not None else SystemClock()).now()
+
+
+def _subkey(settings: Settings | None) -> bytes:
+    """Return the HKDF subkey used for signing + hashing.
+
+    One key covers both the itsdangerous signature (via the
+    serializer) and the IP / email hash-pepper — separating them
+    would require two :attr:`Settings.root_key` subkeys without any
+    concrete security gain: both are server-owned secrets and a
+    compromise of one would, in practice, happen with the other.
+    """
+    s = settings if settings is not None else get_settings()
+    return derive_subkey(s.root_key, purpose=_HKDF_PURPOSE)
+
+
+def _serializer(settings: Settings | None) -> URLSafeTimedSerializer:
+    """Build a fresh :class:`URLSafeTimedSerializer` bound to the HKDF subkey.
+
+    We don't cache the instance: the serializer is cheap to construct
+    (one HMAC init) and caching couples the returned object to a
+    ``Settings`` instance in a way that complicates test rewiring.
+    A :class:`SecretStr` wrapper on the key would move the caching
+    burden to the caller; plain bytes keep it symmetric with the
+    other HMAC surfaces.
+    """
+    key = _subkey(settings)
+    # itsdangerous accepts bytes for ``secret_key`` directly (via its
+    # typing-union of ``str | bytes``); passing the raw HKDF subkey
+    # avoids a lossy encode roundtrip.
+    return URLSafeTimedSerializer(secret_key=key, salt=_SERIALIZER_SALT)
+
+
+def _hash_with_pepper(plaintext: str, pepper: bytes) -> str:
+    """Return ``sha256(plaintext || pepper)`` as a 64-char hex digest.
+
+    ``pepper`` is the HKDF subkey; keeping it separate from the
+    serializer's signing key is defence-in-depth should a future
+    refactor split the two. The hex digest is the form stored on the
+    row and echoed into audit diffs.
+    """
+    h = hashlib.sha256()
+    h.update(plaintext.encode("utf-8"))
+    h.update(pepper)
+    return h.hexdigest()
+
+
+def _ip_hash(ip: str, pepper: bytes) -> str:
+    return _hash_with_pepper(ip, pepper)
+
+
+def _email_hash(email: str, pepper: bytes) -> str:
+    return _hash_with_pepper(canonicalise_email(email), pepper)
+
+
+def _agnostic_audit_ctx() -> WorkspaceContext:
+    """Return a sentinel :class:`WorkspaceContext` for bare-host events.
+
+    Mirrors the pattern used by :func:`app.auth.passkey.register_finish_signup`'s
+    deferred audit emission: the signup flow emits its own audit
+    rows with a :class:`WorkspaceContext` borrowed from the freshly-
+    minted workspace. Magic-link *request* and *consume* both run
+    strictly before a workspace exists (or outside the workspace
+    scope for recovery), so no real ctx is available — we synthesise
+    one whose workspace_id / actor_id are the zero-ULID (26 zeros)
+    and whose ``actor_kind`` is ``"system"``. The audit reader
+    recognises this sentinel and renders the row as a pre-tenant
+    identity event.
+    """
+    return WorkspaceContext(
+        workspace_id=_AGNOSTIC_WORKSPACE_ID,
+        workspace_slug="",  # no slug exists at this layer
+        actor_id=_AGNOSTIC_ACTOR_ID,
+        actor_kind="system",
+        actor_grant_role="manager",  # unused for system actors
+        actor_was_owner_member=False,
+        audit_correlation_id=new_ulid(),
+    )
+
+
+def _lookup_user_by_email(session: Session, *, email: str) -> User | None:
+    """Return the :class:`User` row matching canonicalised ``email``, if any.
+
+    Runs under :func:`tenant_agnostic` because ``user`` is
+    identity-scoped (see :mod:`app.adapters.db.identity`) and the
+    ORM tenant filter has nothing to apply. Returning ``None`` for
+    missing rows is part of the enumeration guard — the caller
+    always returns 202, regardless.
+    """
+    email_lower = canonicalise_email(email)
+    # justification: user is identity-scoped; no tenant predicate applies.
+    with tenant_agnostic():
+        return session.scalar(select(User).where(User.email_lower == email_lower))
+
+
+def _resolve_subject_id(
+    session: Session,
+    *,
+    email: str,
+    purpose: str,
+) -> str | None:
+    """Return the subject ULID to bake into the token, per ``purpose``.
+
+    For ``signup_verify`` and ``grant_invite`` we mint a fresh ULID on
+    the fly — the signup session / invite row doesn't exist yet at
+    this point in the flow, and the signup service (cd-3i5) / invite
+    accept service will persist under the same id when it lands.
+
+    For ``recover_passkey`` / ``email_change_confirm`` we resolve the
+    existing :class:`User` row by email; if no row exists we return
+    ``None`` and the caller short-circuits silently (still sending
+    a 202 response to preserve the enumeration guard).
+    """
+    if purpose in ("signup_verify", "grant_invite"):
+        # Fresh subject id; the downstream flow owns the row creation.
+        return new_ulid()
+    user = _lookup_user_by_email(session, email=email)
+    return user.id if user is not None else None
+
+
+def _sign(
+    serializer: URLSafeTimedSerializer,
+    *,
+    purpose: str,
+    subject_id: str,
+    jti: str,
+    exp: int,
+) -> str:
+    """Pack + sign the magic-link payload into a URL-safe token."""
+    payload = {
+        "purpose": purpose,
+        "subject_id": subject_id,
+        "jti": jti,
+        "exp": exp,
+    }
+    return serializer.dumps(payload)
+
+
+def _unseal(
+    serializer: URLSafeTimedSerializer, *, token: str, now: datetime
+) -> dict[str, object]:
+    """Verify the signature + payload shape, return the claims dict.
+
+    itsdangerous' ``max_age`` is **not** used: we do the ``exp``
+    check ourselves so the error semantics (``TokenExpired`` vs
+    ``InvalidToken``) are ours to control and the server-side
+    ``exp`` cap applies uniformly to every purpose.
+    """
+    try:
+        data = serializer.loads(token)
+    except SignatureExpired as exc:
+        # ``SignatureExpired`` only fires if the caller set ``max_age``
+        # on :meth:`loads` — we don't, so this branch is defensive.
+        raise TokenExpired("token expired per signature timestamp") from exc
+    except BadSignature as exc:
+        raise InvalidToken("token signature is invalid") from exc
+    if not isinstance(data, dict):
+        raise InvalidToken("token payload is not an object")
+    for key in ("purpose", "subject_id", "jti", "exp"):
+        if key not in data:
+            raise InvalidToken(f"token payload missing {key!r}")
+    if not isinstance(data.get("exp"), int):
+        raise InvalidToken("token payload 'exp' is not an integer")
+    exp_at = datetime.fromtimestamp(int(data["exp"]), tz=UTC)
+    if exp_at <= now:
+        raise TokenExpired("token expired per payload exp")
+    return data
+
+
+def _claim_nonce(session: Session, *, jti: str, now: datetime) -> MagicLinkNonce:
+    """Flip the matching nonce row from pending → consumed under a conditional
+    ``UPDATE``.
+
+    Raises :class:`AlreadyConsumed` when ``rowcount == 0`` — either
+    the row was never inserted (caller never went through the
+    ``request`` step) or a parallel consumer won the race.
+    """
+    # justification: magic_link_nonce is identity-scoped; no tenant
+    # predicate applies.
+    with tenant_agnostic():
+        stmt = (
+            update(MagicLinkNonce)
+            .where(
+                MagicLinkNonce.jti == jti,
+                MagicLinkNonce.consumed_at.is_(None),
+            )
+            .values(consumed_at=now)
+            .execution_options(synchronize_session=False)
+        )
+        # :class:`Result` is the generic public type; the concrete
+        # object returned by an UPDATE is a :class:`CursorResult` whose
+        # ``rowcount`` attribute is the row-count integer we need to
+        # detect the race. The ``isinstance`` narrow is purely a
+        # mypy-strict gate — every real DB-API driver returns a
+        # CursorResult for an UPDATE.
+        result = session.execute(stmt)
+        if not isinstance(result, CursorResult):  # pragma: no cover - defensive
+            raise RuntimeError(
+                f"expected CursorResult from UPDATE; got {type(result).__name__}"
+            )
+        if result.rowcount != 1:
+            raise AlreadyConsumed(f"nonce {jti!r} already consumed or unknown")
+        row = session.get(MagicLinkNonce, jti)
+    if row is None:  # pragma: no cover - defensive; UPDATE touched one row
+        raise AlreadyConsumed(f"nonce {jti!r} update succeeded but row vanished")
+    return row
+
+
+def _check_row_expiry(row: MagicLinkNonce, *, now: datetime) -> None:
+    """Raise :class:`TokenExpired` if the persisted TTL lapsed.
+
+    Checked after the conditional update so the expiry message wins
+    over AlreadyConsumed on a stale, unconsumed row. Normalises
+    tzinfo for the SQLite roundtrip (see the same comment in
+    :mod:`app.auth.passkey`).
+    """
+    expires_at = row.expires_at
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=UTC)
+    if expires_at <= now:
+        raise TokenExpired(f"nonce {row.jti!r} expired at {expires_at.isoformat()}")
+
+
+# ---------------------------------------------------------------------------
+# Public surface — request
+# ---------------------------------------------------------------------------
+
+
+def request_link(
+    session: Session,
+    *,
+    email: str,
+    purpose: MagicLinkPurpose,
+    ip: str,
+    mailer: Mailer,
+    base_url: str,
+    now: datetime | None = None,
+    ttl: timedelta | None = None,
+    throttle: Throttle,
+    settings: Settings | None = None,
+    clock: Clock | None = None,
+) -> None:
+    """Mint + send one magic-link; always returns ``None`` (enumeration guard).
+
+    Steps:
+
+    1. Validate ``purpose``; canonicalise the email.
+    2. Rate-limit on (ip, email_hash) — :class:`RateLimited` propagates
+       up so the HTTP router can return 429.
+    3. Resolve the subject id (new ULID for signup/invite, existing
+       user id for recover/email-change). No subject → return early
+       silently; the 202 response is identical whether or not the
+       email existed.
+    4. Server-cap the TTL at the per-purpose ceiling, mint jti +
+       token.
+    5. Insert a pending :class:`MagicLinkNonce` row.
+    6. Send via ``mailer``; a transport failure propagates so the
+       caller's UoW rolls back and a future retry mints a fresh
+       token.
+    7. Audit ``audit.magic_link.sent`` with hashes only.
+
+    The caller's UoW owns the transaction (§01). This function never
+    calls ``session.commit()``.
+    """
+    if purpose not in _VALID_PURPOSES:
+        # Router body validation should have caught this, but the
+        # domain gate means a programmatic caller (CLI, worker) can't
+        # sneak through with a typo.
+        raise InvalidToken(f"unknown magic-link purpose: {purpose!r}")
+
+    resolved_now = now if now is not None else _now(clock)
+    pepper = _subkey(settings)
+    email_hash = _email_hash(email, pepper)
+    ip_hash = _ip_hash(ip, pepper)
+
+    # Rate-limit BEFORE we touch the DB or the mailer — this is both
+    # cheaper (no IO) and the right order to stop a burst from
+    # hammering the mail relay.
+    throttle.check_request(ip=ip, email_hash=email_hash, now=resolved_now)
+
+    subject_id = _resolve_subject_id(session, email=email, purpose=purpose)
+    if subject_id is None:
+        # No user row for a recovery / email-change request — silently
+        # return without inserting a nonce or sending mail.
+        # Enumeration guard: the caller sees the same 202 either way.
+        return
+
+    # Cap the TTL at the per-purpose ceiling. Callers passing a larger
+    # window get silently clamped; passing a shorter window is fine.
+    max_ttl = _TTL_BY_PURPOSE[purpose]
+    effective_ttl = min(ttl, max_ttl) if ttl is not None else max_ttl
+    expires_at = resolved_now + effective_ttl
+
+    jti = new_ulid(clock=clock)
+    token = _sign(
+        _serializer(settings),
+        purpose=purpose,
+        subject_id=subject_id,
+        jti=jti,
+        exp=int(expires_at.timestamp()),
+    )
+
+    # Insert the pending row inside the caller's UoW. Failing here
+    # (e.g. a unique-violation on ``jti`` — vanishingly unlikely on a
+    # fresh ULID, but let's be honest about the shape) propagates so
+    # the caller's UoW rolls back and the mail is never sent.
+    # justification: magic_link_nonce is identity-scoped.
+    with tenant_agnostic():
+        session.add(
+            MagicLinkNonce(
+                jti=jti,
+                purpose=purpose,
+                subject_id=subject_id,
+                consumed_at=None,
+                expires_at=expires_at,
+                created_ip_hash=ip_hash,
+                created_email_hash=email_hash,
+                created_at=resolved_now,
+            )
+        )
+        session.flush()
+
+    _send_link_email(
+        mailer=mailer,
+        to_email=email,
+        base_url=base_url,
+        token=token,
+        purpose=purpose,
+        ttl=effective_ttl,
+    )
+
+    write_audit(
+        session,
+        _agnostic_audit_ctx(),
+        entity_kind="magic_link",
+        entity_id=jti,
+        action="magic_link.sent",
+        diff={
+            "purpose": purpose,
+            "email_hash": email_hash,
+            "ip_hash": ip_hash,
+            "ttl_seconds": int(effective_ttl.total_seconds()),
+        },
+        clock=clock,
+    )
+
+
+def _send_link_email(
+    *,
+    mailer: Mailer,
+    to_email: str,
+    base_url: str,
+    token: str,
+    purpose: str,
+    ttl: timedelta,
+) -> None:
+    """Render the template and hand the message to the mailer port.
+
+    ``base_url`` is typed-in by the deployment operator (e.g.
+    ``https://crew.day``) and **not** a user-supplied value. We strip
+    a trailing slash defensively so the joined URL ends up with
+    exactly one slash before ``auth/``.
+    """
+    url = f"{base_url.rstrip('/')}/auth/magic/{token}"
+    ttl_minutes = max(1, int(ttl.total_seconds() // 60))
+    label = magic_link_template.purpose_label(purpose)
+    subject = render_template(magic_link_template.SUBJECT, purpose_label=label)
+    body_text = render_template(
+        magic_link_template.BODY_TEXT,
+        purpose_label=label,
+        url=url,
+        ttl_minutes=str(ttl_minutes),
+    )
+    mailer.send(to=[to_email], subject=subject, body_text=body_text)
+
+
+# ---------------------------------------------------------------------------
+# Public surface — consume
+# ---------------------------------------------------------------------------
+
+
+def consume_link(
+    session: Session,
+    *,
+    token: str,
+    expected_purpose: MagicLinkPurpose,
+    ip: str,
+    now: datetime | None = None,
+    throttle: Throttle,
+    settings: Settings | None = None,
+    clock: Clock | None = None,
+) -> MagicLinkOutcome:
+    """Unseal, race-check-flip, audit. Return the outcome.
+
+    Raises:
+
+    * :class:`ConsumeLockout` — the caller's IP is currently locked
+      out. The router maps to ``429 consume_locked_out``. This check
+      happens first so a locked-out IP never touches the nonce row.
+    * :class:`InvalidToken` — signature failed, payload malformed,
+      unknown purpose. Maps to 400.
+    * :class:`PurposeMismatch` — token purpose != ``expected_purpose``.
+      Maps to 400.
+    * :class:`TokenExpired` — ``exp`` claim in the past, or the
+      nonce row's ``expires_at`` lapsed. Maps to 410.
+    * :class:`AlreadyConsumed` — nonce was already redeemed, or a
+      parallel consumer won the race. Maps to 409.
+
+    On any of the above (except :class:`ConsumeLockout` itself), the
+    router calls :meth:`Throttle.record_consume_failure` so the IP
+    gradually trips the 3-fails lockout. On success we reset the
+    counter — a legitimate redemption should wipe the slate for the
+    next one.
+    """
+    if expected_purpose not in _VALID_PURPOSES:
+        raise InvalidToken(f"unknown magic-link purpose: {expected_purpose!r}")
+
+    resolved_now = now if now is not None else _now(clock)
+
+    # Pre-flight lockout check — raises ConsumeLockout which the router
+    # maps to 429 without touching the DB.
+    throttle.check_consume_allowed(ip=ip, now=resolved_now)
+
+    payload = _unseal(_serializer(settings), token=token, now=resolved_now)
+    payload_purpose = payload["purpose"]
+    if not isinstance(payload_purpose, str):
+        raise InvalidToken("token payload 'purpose' is not a string")
+    if payload_purpose != expected_purpose:
+        raise PurposeMismatch(
+            f"token purpose {payload_purpose!r} != expected {expected_purpose!r}"
+        )
+    jti = payload["jti"]
+    subject_id = payload["subject_id"]
+    if not isinstance(jti, str) or not isinstance(subject_id, str):
+        raise InvalidToken("token payload 'jti' / 'subject_id' must be strings")
+
+    row = _claim_nonce(session, jti=jti, now=resolved_now)
+    _check_row_expiry(row, now=resolved_now)
+
+    if row.purpose != payload_purpose:
+        # Token and row disagree — shouldn't happen unless somebody
+        # tampered with the row out-of-band. Map to InvalidToken for
+        # privacy (don't tell the caller their row exists with a
+        # different purpose).
+        raise InvalidToken("nonce / token purpose disagree")
+    if row.subject_id != subject_id:
+        raise InvalidToken("nonce / token subject disagree")
+
+    write_audit(
+        session,
+        _agnostic_audit_ctx(),
+        entity_kind="magic_link",
+        entity_id=jti,
+        action="magic_link.consumed",
+        diff={
+            "purpose": row.purpose,
+            "email_hash": row.created_email_hash,
+            "ip_hash_at_request": row.created_ip_hash,
+            "ip_hash_at_consume": _ip_hash(ip, _subkey(settings)),
+        },
+        clock=clock,
+    )
+
+    return MagicLinkOutcome(
+        purpose=row.purpose,
+        subject_id=row.subject_id,
+        email_hash=row.created_email_hash,
+        ip_hash=row.created_ip_hash,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Public surface — rejected audit (pre-signup abuse trail)
+# ---------------------------------------------------------------------------
+
+
+# Sentinel used when the token failed signature verification (pre-parse
+# failure): we can't derive a ``jti`` from it, so the audit row lands
+# with a fixed entity_id that reader tooling can filter on. Any real
+# jti is a ULID (26 chars) so the sentinel can't collide.
+_UNKNOWN_JTI: Final[str] = "unknown"
+
+
+# Symbol-level reasons the router may attach to a rejected-audit row.
+# Keeping the vocabulary in one place (instead of formatting strings
+# at each call site) means the audit reader can index by reason without
+# reverse-engineering message text.
+_REASON_BY_EXC: Final[dict[type[Exception], str]] = {
+    InvalidToken: "invalid_token",
+    PurposeMismatch: "purpose_mismatch",
+    TokenExpired: "expired",
+    AlreadyConsumed: "already_consumed",
+    RateLimited: "rate_limited",
+    ConsumeLockout: "consume_locked_out",
+}
+
+
+def reason_for_exception(exc: Exception) -> str:
+    """Return the rejected-audit ``reason`` symbol for ``exc``.
+
+    Unmapped exception types return ``"unknown"`` so the caller never
+    blocks on an audit row just because a future error type slipped
+    through without a symbol of its own.
+    """
+    for exc_type, symbol in _REASON_BY_EXC.items():
+        if isinstance(exc, exc_type):
+            return symbol
+    return "unknown"
+
+
+def _best_effort_unseal(
+    token: str, *, settings: Settings | None
+) -> tuple[str | None, str | None]:
+    """Best-effort extract ``(jti, purpose)`` from ``token``; never raise.
+
+    Used by :func:`write_rejected_audit` so the rejected row can carry
+    forensic fields when the token parsed far enough to reveal them.
+    Unlike :func:`_unseal`, this function suppresses every failure
+    path — we do not want the audit-writer to throw while the caller
+    is already handling another exception.
+    """
+    try:
+        data = _serializer(settings).loads(token)
+    except BadSignature:
+        return (None, None)
+    if not isinstance(data, dict):
+        return (None, None)
+    raw_jti = data.get("jti")
+    raw_purpose = data.get("purpose")
+    jti = raw_jti if isinstance(raw_jti, str) else None
+    purpose = raw_purpose if isinstance(raw_purpose, str) else None
+    return (jti, purpose)
+
+
+def write_rejected_audit(
+    session: Session,
+    *,
+    token: str | None,
+    expected_purpose: str,
+    ip: str,
+    reason: str,
+    settings: Settings | None = None,
+    clock: Clock | None = None,
+) -> None:
+    """Best-effort write of an ``audit.magic_link.rejected`` row.
+
+    Called from the HTTP router inside a **fresh** UoW after a consume
+    raised a typed domain error: the primary UoW has rolled back any
+    rows the service queued, so the rejected trail must land on its
+    own transaction (see module docstring).
+
+    Contents of the ``diff`` payload (PII minimisation §15):
+
+    * ``reason`` — the caller-supplied symbol (e.g. ``"invalid_token"``,
+      ``"already_consumed"``, ``"consume_locked_out"``). Kept symbolic
+      instead of the exception's ``args[0]`` so downstream readers can
+      aggregate by reason without regex.
+    * ``ip_hash`` — SHA-256 hashed with the deployment's HKDF pepper;
+      the plaintext IP is never persisted.
+    * ``expected_purpose`` — the ``purpose`` string the caller asked
+      us to redeem (from the request body). Always known.
+    * ``token_purpose`` — extracted from the token payload when the
+      signature verified; absent otherwise. A mismatch with
+      ``expected_purpose`` is the forensic signature of a cross-purpose
+      replay attempt.
+    * ``email_hash`` — looked up from the nonce row when the token
+      parsed far enough to reveal a ``jti``. Absent when signature
+      verification failed or the nonce row has already been deleted.
+
+    Plaintext email, plaintext IP, and the raw token are **never**
+    included. The ``token`` argument is optional so tests can simulate
+    a pre-parse failure path where the body never reached the handler
+    at all.
+    """
+    pepper = _subkey(settings)
+    diff: dict[str, Any] = {
+        "reason": reason,
+        "ip_hash": _ip_hash(ip, pepper),
+        "expected_purpose": expected_purpose,
+    }
+
+    jti: str | None = None
+    if token is not None:
+        jti, token_purpose = _best_effort_unseal(token, settings=settings)
+        if token_purpose is not None:
+            diff["token_purpose"] = token_purpose
+
+    if jti is not None:
+        # The nonce row may not exist (orphaned token / TTL row swept)
+        # — a miss leaves ``email_hash`` out of the diff rather than
+        # carrying a bogus value. ``tenant_agnostic`` mirrors the
+        # service's own lookup pattern.
+        with tenant_agnostic():
+            row = session.get(MagicLinkNonce, jti)
+        if row is not None:
+            diff["email_hash"] = row.created_email_hash
+
+    write_audit(
+        session,
+        _agnostic_audit_ctx(),
+        entity_kind="magic_link",
+        entity_id=jti if jti is not None else _UNKNOWN_JTI,
+        action="magic_link.rejected",
+        diff=diff,
+        clock=clock,
+    )

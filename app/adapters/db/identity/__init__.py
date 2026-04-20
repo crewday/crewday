@@ -26,10 +26,18 @@ from __future__ import annotations
 
 from app.adapters.db.identity.models import (
     ApiToken,
+    MagicLinkNonce,
     PasskeyCredential,
     Session,
     User,
     WebAuthnChallenge,
 )
 
-__all__ = ["ApiToken", "PasskeyCredential", "Session", "User", "WebAuthnChallenge"]
+__all__ = [
+    "ApiToken",
+    "MagicLinkNonce",
+    "PasskeyCredential",
+    "Session",
+    "User",
+    "WebAuthnChallenge",
+]
