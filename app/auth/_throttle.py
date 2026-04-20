@@ -48,6 +48,7 @@ from typing import Final
 __all__ = [
     "ConsumeLockout",
     "RateLimited",
+    "RecoveryRateLimited",
     "SignupRateLimited",
     "Throttle",
 ]
@@ -79,6 +80,25 @@ _SIGNUP_EMAIL_LIMIT: Final[int] = 3
 _SIGNUP_GLOBAL_LIMIT: Final[int] = 200
 _SIGNUP_WINDOW: Final[timedelta] = timedelta(hours=1)
 _SIGNUP_GLOBAL_KEY: Final[str] = "__global__"
+
+# Recover-start budgets — spec §15 "Self-service lost-device &
+# email-change abuse mitigations":
+#   * ≤ 3 successful starts per email per hour
+#   * ≤ 10 starts per source IP per hour
+#   * ≤ 200 starts per deployment per hour (global cool-off)
+#
+# The email + global caps match signup's; the per-IP cap is looser
+# (10 vs 5) because recovery is the "I already have an account" door
+# and a shared egress (CGNAT / campus / corporate NAT) can legitimately
+# push more concurrent recoveries than signups. Buckets are scoped
+# under their own prefixes so a signup burst does not poison the
+# recovery counter (and vice versa): the two flows share machinery,
+# not state.
+_RECOVER_IP_LIMIT: Final[int] = 10
+_RECOVER_EMAIL_LIMIT: Final[int] = 3
+_RECOVER_GLOBAL_LIMIT: Final[int] = 200
+_RECOVER_WINDOW: Final[timedelta] = timedelta(hours=1)
+_RECOVER_GLOBAL_KEY: Final[str] = "__global__"
 
 
 class RateLimited(Exception):
@@ -118,6 +138,28 @@ class SignupRateLimited(Exception):
         self.retry_after_seconds = retry_after_seconds
 
 
+class RecoveryRateLimited(Exception):
+    """Caller exceeded a recover-start bucket (per-IP, per-email, global).
+
+    Mirrors :class:`SignupRateLimited` for the self-service recovery
+    surface (§15 "Self-service lost-device & email-change abuse
+    mitigations"). A distinct exception type — rather than re-using
+    :class:`SignupRateLimited` — means the router can emit a recover-
+    specific audit symbol (``audit.recovery.rate_limited``) and tests
+    can pin the recover-vs-signup dispatch without a stringly-typed
+    ``scope`` discriminator. ``scope`` is one of ``"ip"``, ``"email"``,
+    or ``"global"``.
+    """
+
+    def __init__(self, scope: str, retry_after_seconds: int) -> None:
+        super().__init__(
+            f"recover-start rate limit exceeded (scope={scope!r}, "
+            f"retry_after={retry_after_seconds}s)"
+        )
+        self.scope = scope
+        self.retry_after_seconds = retry_after_seconds
+
+
 def _signup_limit_for(scope: str) -> int:
     """Return the limit for a signup-start scope (``"ip"``/``"email"``/``"global"``).
 
@@ -132,6 +174,24 @@ def _signup_limit_for(scope: str) -> int:
     if scope == "global":
         return _SIGNUP_GLOBAL_LIMIT
     raise ValueError(f"unknown signup-start scope: {scope!r}")
+
+
+def _recover_limit_for(scope: str) -> int:
+    """Return the limit for a recover-start scope.
+
+    Sibling of :func:`_signup_limit_for`; kept as a separate helper
+    rather than folded into a ``(family, scope)`` two-key lookup
+    because the two flows pin their own spec citations and a future
+    tweak (e.g. tighter email cap for recovery) should land without
+    churning the signup surface.
+    """
+    if scope == "ip":
+        return _RECOVER_IP_LIMIT
+    if scope == "email":
+        return _RECOVER_EMAIL_LIMIT
+    if scope == "global":
+        return _RECOVER_GLOBAL_LIMIT
+    raise ValueError(f"unknown recover-start scope: {scope!r}")
 
 
 @dataclass(frozen=True, slots=True)
@@ -315,6 +375,77 @@ class Throttle:
             # crash on an empty bucket.
             return int(_SIGNUP_WINDOW.total_seconds())
         expires_at = bucket[0] + _SIGNUP_WINDOW
+        seconds = int((expires_at - now).total_seconds())
+        return max(seconds, 1)
+
+    # ------------------------------------------------------------------
+    # Recover-start (/api/v1/auth/recover/passkey/request) budget
+    # ------------------------------------------------------------------
+
+    def check_recover_start(
+        self, *, ip_hash: str, email_hash: str, now: datetime
+    ) -> None:
+        """Raise :class:`RecoveryRateLimited` when any recover bucket is over.
+
+        Mirrors :meth:`check_signup_start` in structure but pins
+        recover's own caps (:data:`_RECOVER_IP_LIMIT`,
+        :data:`_RECOVER_EMAIL_LIMIT`, :data:`_RECOVER_GLOBAL_LIMIT`)
+        and uses distinct bucket prefixes (``recover_start:ip`` /
+        ``recover_start:email`` / ``recover_start:global``) so the
+        two flows share machinery without sharing state: a signup
+        burst does not poison the recover counter, and a recover
+        burst does not poison the signup counter.
+
+        Eval order mirrors signup — global → per-IP → per-email — so
+        a deployment-wide cool-off fires before either per-IP or
+        per-email caps come into play. ``retry_after_seconds`` on
+        the raised exception is computed from the oldest hit inside
+        the violating bucket.
+        """
+        with self._lock:
+            for scope, bucket_key in (
+                (
+                    "global",
+                    _BucketKey("recover_start:global", _RECOVER_GLOBAL_KEY),
+                ),
+                ("ip", _BucketKey("recover_start:ip", ip_hash)),
+                ("email", _BucketKey("recover_start:email", email_hash)),
+            ):
+                limit = _recover_limit_for(scope)
+                if self._over_recover_limit(bucket_key, now, limit=limit):
+                    retry_after = self._recover_retry_after_seconds(bucket_key, now)
+                    raise RecoveryRateLimited(
+                        scope=scope, retry_after_seconds=retry_after
+                    )
+            # Every bucket is under its cap — record the hit against
+            # all three. Order mirrors signup: global last so a later
+            # per-IP refusal doesn't pollute the deployment-wide
+            # counter (actually we advance all three once all three
+            # passed, matching :meth:`check_signup_start`).
+            self._record_hit(
+                _BucketKey("recover_start:global", _RECOVER_GLOBAL_KEY), now
+            )
+            self._record_hit(_BucketKey("recover_start:ip", ip_hash), now)
+            self._record_hit(_BucketKey("recover_start:email", email_hash), now)
+
+    def _over_recover_limit(
+        self, key: _BucketKey, now: datetime, *, limit: int
+    ) -> bool:
+        bucket = self._hits[key]
+        self._evict_expired(bucket, now, _RECOVER_WINDOW)
+        return len(bucket) >= limit
+
+    def _recover_retry_after_seconds(self, key: _BucketKey, now: datetime) -> int:
+        """Return seconds until the oldest hit in ``key`` falls out of window.
+
+        Sibling of :meth:`_signup_retry_after_seconds`. Zero-or-
+        negative values are clamped up to ``1`` so the ``Retry-After``
+        header never tells the client "retry in 0 seconds".
+        """
+        bucket = self._hits[key]
+        if not bucket:
+            return int(_RECOVER_WINDOW.total_seconds())
+        expires_at = bucket[0] + _RECOVER_WINDOW
         seconds = int((expires_at - now).total_seconds())
         return max(seconds, 1)
 

@@ -1,0 +1,510 @@
+"""Integration test for :mod:`app.auth.recovery` — end-to-end HTTP flow.
+
+Exercises ``request → verify → passkey/start → passkey/finish``
+against a real engine (SQLite by default; Postgres when
+``CREWDAY_TEST_DB=postgres``) driving the FastAPI router with a stub
+mailer that captures the magic-link URL and a stub passkey verifier
+that produces a deterministic credential.
+
+The flow must, in one happy path:
+
+* issue a magic link whose URL lands at
+  ``/recover/enroll?token=...``;
+* consume it and return a recovery session handle that is distinct
+  from any :class:`AuthSession` row;
+* revoke every prior passkey + web session for the user when the
+  finish route lands;
+* insert one fresh passkey row bound to the user.
+
+Plus error-path coverage:
+
+* unknown recovery session → 404;
+* replayed finish → 404 (session was consumed);
+* rate-limit trip → 429 with ``Retry-After``.
+
+See ``docs/specs/03-auth-and-tokens.md`` §"Self-service lost-device
+recovery", §"Recovery paths" and ``docs/specs/15-security-privacy.md``
+§"Self-service lost-device & email-change abuse mitigations".
+"""
+
+from __future__ import annotations
+
+from collections.abc import Iterator, Mapping, Sequence
+from dataclasses import dataclass, field
+from typing import Any
+
+import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+from pydantic import SecretStr
+from sqlalchemy import Engine, select
+from sqlalchemy.orm import Session, sessionmaker
+from webauthn.helpers.structs import (
+    AttestationFormat,
+    CredentialDeviceType,
+    PublicKeyCredentialType,
+)
+
+from app.adapters.db.audit.models import AuditLog
+from app.adapters.db.identity.models import (
+    MagicLinkNonce,
+    PasskeyCredential,
+    User,
+)
+from app.adapters.db.identity.models import (
+    Session as AuthSession,
+)
+from app.adapters.db.workspace.models import Workspace
+from app.api.deps import db_session as _db_session_dep
+from app.api.v1.auth.recovery import build_recovery_router
+from app.auth import passkey
+from app.auth import recovery as recovery_module
+from app.auth._throttle import Throttle
+from app.auth.webauthn import VerifiedRegistration
+from app.config import Settings
+from app.util.ulid import new_ulid
+from tests.factories.identity import bootstrap_user
+
+pytestmark = pytest.mark.integration
+
+
+# ---------------------------------------------------------------------------
+# Test doubles
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class _RecordingMailer:
+    sent: list[tuple[tuple[str, ...], str, str]] = field(default_factory=list)
+
+    def send(
+        self,
+        *,
+        to: Sequence[str],
+        subject: str,
+        body_text: str,
+        body_html: str | None = None,
+        headers: Mapping[str, str] | None = None,
+        reply_to: str | None = None,
+    ) -> str:
+        del body_html, headers, reply_to
+        self.sent.append((tuple(to), subject, body_text))
+        return "test-message-id"
+
+
+def _extract_recovery_token(body: str) -> str:
+    for line in body.splitlines():
+        stripped = line.strip()
+        if "recover/enroll?token=" in stripped:
+            return stripped.rsplit("=", 1)[-1]
+    raise AssertionError(f"no recovery URL in body: {body!r}")
+
+
+def _stub_passkey_verifier(
+    monkeypatch: pytest.MonkeyPatch,
+) -> bytes:
+    """Patch :func:`app.auth.passkey._verify_or_raise` with a stub.
+
+    Returns the deterministic credential id the stub produces, so
+    tests can assert the persisted passkey row carries it.
+    """
+    credential_id = b"recovery-cred-" + b"x" * 18
+    verified = VerifiedRegistration(
+        credential_id=credential_id,
+        credential_public_key=b"pub-" + b"\x00" * 60,
+        sign_count=0,
+        aaguid="00000000-0000-0000-0000-000000000000",
+        fmt=AttestationFormat.NONE,
+        credential_type=PublicKeyCredentialType.PUBLIC_KEY,
+        user_verified=True,
+        attestation_object=b"",
+        credential_device_type=CredentialDeviceType.SINGLE_DEVICE,
+        credential_backed_up=False,
+    )
+
+    def _fake_verify(**_: Any) -> VerifiedRegistration:
+        return verified
+
+    monkeypatch.setattr(passkey, "_verify_or_raise", _fake_verify)
+    return credential_id
+
+
+# ---------------------------------------------------------------------------
+# Fixtures
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def settings() -> Settings:
+    return Settings.model_construct(
+        database_url="sqlite:///:memory:",
+        root_key=SecretStr("integration-recovery-root-key"),
+        public_url="https://crew.day",
+    )
+
+
+@pytest.fixture
+def throttle() -> Throttle:
+    return Throttle()
+
+
+@pytest.fixture
+def mailer() -> _RecordingMailer:
+    return _RecordingMailer()
+
+
+@pytest.fixture(autouse=True)
+def reset_recovery_store() -> Iterator[None]:
+    """Clear the in-memory recovery-session store between tests."""
+    recovery_module._RECOVERY_SESSIONS.clear()
+    yield
+    recovery_module._RECOVERY_SESSIONS.clear()
+
+
+@pytest.fixture
+def client(
+    engine: Engine,
+    mailer: _RecordingMailer,
+    throttle: Throttle,
+    settings: Settings,
+) -> Iterator[TestClient]:
+    """FastAPI :class:`TestClient` mounted on the recovery router."""
+    app = FastAPI()
+    router = build_recovery_router(
+        mailer=mailer,
+        throttle=throttle,
+        base_url="https://crew.day",
+        settings=settings,
+    )
+    app.include_router(router, prefix="/api/v1")
+
+    factory = sessionmaker(bind=engine, expire_on_commit=False, class_=Session)
+
+    def _session() -> Iterator[Session]:
+        s = factory()
+        try:
+            yield s
+            s.commit()
+        except Exception:
+            s.rollback()
+            raise
+        finally:
+            s.close()
+
+    app.dependency_overrides[_db_session_dep] = _session
+    with TestClient(app) as c:
+        yield c
+
+    # Sweep committed rows so sibling tests see a clean table.
+    with factory() as s:
+        for table_model in (
+            PasskeyCredential,
+            AuthSession,
+            MagicLinkNonce,
+            User,
+            Workspace,
+            AuditLog,
+        ):
+            for row in s.scalars(select(table_model)).all():
+                s.delete(row)
+        s.commit()
+
+
+def _seed_user_with_state(
+    engine: Engine,
+    *,
+    email: str,
+    display_name: str,
+    passkey_count: int,
+    session_count: int,
+) -> tuple[str, str]:
+    """Seed a user with pre-existing passkeys + auth sessions.
+
+    Returns ``(user_id, workspace_id)``. The workspace is needed as
+    the FK target for the web sessions.
+    """
+    factory = sessionmaker(bind=engine, expire_on_commit=False, class_=Session)
+    with factory() as s:
+        user = bootstrap_user(s, email=email, display_name=display_name)
+        workspace_id = new_ulid()
+        s.add(
+            Workspace(
+                id=workspace_id,
+                slug=f"ws-{workspace_id[:8].lower()}",
+                name="Placeholder",
+                plan="free",
+                quota_json={},
+                created_at=user.created_at,
+            )
+        )
+        s.flush()
+        for i in range(passkey_count):
+            s.add(
+                PasskeyCredential(
+                    id=bytes([0xB0 + i]) * 32,
+                    user_id=user.id,
+                    public_key=b"\x00" * 32,
+                    sign_count=0,
+                    backup_eligible=False,
+                    created_at=user.created_at,
+                )
+            )
+        for _ in range(session_count):
+            s.add(
+                AuthSession(
+                    id=new_ulid(),
+                    user_id=user.id,
+                    workspace_id=workspace_id,
+                    expires_at=user.created_at,
+                    last_seen_at=user.created_at,
+                    created_at=user.created_at,
+                )
+            )
+        s.commit()
+        return user.id, workspace_id
+
+
+# ---------------------------------------------------------------------------
+# End-to-end happy path
+# ---------------------------------------------------------------------------
+
+
+class TestRecoveryFullFlow:
+    """request → verify → passkey/start → passkey/finish via HTTP."""
+
+    def test_happy_path_revokes_old_and_lands_new(
+        self,
+        client: TestClient,
+        engine: Engine,
+        mailer: _RecordingMailer,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        user_id, _workspace_id = _seed_user_with_state(
+            engine,
+            email="happy@example.com",
+            display_name="Happy User",
+            passkey_count=2,
+            session_count=3,
+        )
+        cred_id = _stub_passkey_verifier(monkeypatch)
+
+        # 1. request — 202, magic link mailed.
+        r = client.post(
+            "/api/v1/recover/passkey/request",
+            json={"email": "happy@example.com"},
+        )
+        assert r.status_code == 202, r.text
+        assert r.json()["status"] == "accepted"
+        assert len(mailer.sent) == 1
+        token = _extract_recovery_token(mailer.sent[0][2])
+
+        # 2. verify — returns a recovery session handle.
+        r = client.get(f"/api/v1/recover/passkey/verify?token={token}")
+        assert r.status_code == 200, r.text
+        recovery_session_id = r.json()["recovery_session_id"]
+        assert len(recovery_session_id) == 26  # ULID
+
+        # 3. passkey/start — returns the WebAuthn creation options.
+        r = client.post(
+            "/api/v1/recover/passkey/start",
+            json={"recovery_session_id": recovery_session_id},
+        )
+        assert r.status_code == 200, r.text
+        body = r.json()
+        challenge_id = body["challenge_id"]
+        assert body["options"]
+        # Recovery start skips excludeCredentials — the prior
+        # credentials are about to be revoked.
+        assert body["options"].get("excludeCredentials", []) == []
+
+        # 4. passkey/finish — revokes old + lands new.
+        r = client.post(
+            "/api/v1/recover/passkey/finish",
+            json={
+                "recovery_session_id": recovery_session_id,
+                "challenge_id": challenge_id,
+                "credential": {
+                    "id": "stub",
+                    "rawId": "stub",
+                    "response": {},
+                    "type": "public-key",
+                },
+            },
+        )
+        assert r.status_code == 200, r.text
+        finish_body = r.json()
+        assert finish_body["user_id"] == user_id
+        assert finish_body["revoked_credential_count"] == 2
+        assert finish_body["revoked_session_count"] == 3
+        assert finish_body["credential_id"]  # base64url of cred_id
+
+        # 5. Assert final DB state.
+        factory = sessionmaker(bind=engine, expire_on_commit=False, class_=Session)
+        with factory() as s:
+            creds = s.scalars(
+                select(PasskeyCredential).where(PasskeyCredential.user_id == user_id)
+            ).all()
+            assert len(creds) == 1
+            assert creds[0].id == cred_id
+
+            # No web sessions left.
+            assert (
+                s.scalars(
+                    select(AuthSession).where(AuthSession.user_id == user_id)
+                ).all()
+                == []
+            )
+
+            # Audit trail: requested + verified + completed + passkey.registered.
+            actions = {
+                row.action
+                for row in s.scalars(
+                    select(AuditLog).where(
+                        AuditLog.action.like("recovery.%")
+                        | (AuditLog.action == "passkey.registered")
+                    )
+                ).all()
+            }
+            assert {
+                "recovery.requested",
+                "recovery.verified",
+                "recovery.completed",
+                "passkey.registered",
+            } <= actions
+
+
+class TestRecoveryEnumerationGuard:
+    """Unknown-email request still returns 202 and writes audit."""
+
+    def test_unknown_email_request_returns_202(
+        self,
+        client: TestClient,
+        engine: Engine,
+        mailer: _RecordingMailer,
+    ) -> None:
+        r = client.post(
+            "/api/v1/recover/passkey/request",
+            json={"email": "noone@example.com"},
+        )
+        assert r.status_code == 202, r.text
+        # Unknown-email template still sent.
+        assert len(mailer.sent) == 1
+        assert mailer.sent[0][0] == ("noone@example.com",)
+        assert "https://" not in mailer.sent[0][2]  # no link
+
+        # Audit row carries hit=False.
+        factory = sessionmaker(bind=engine, expire_on_commit=False, class_=Session)
+        with factory() as s:
+            row = s.scalars(
+                select(AuditLog).where(AuditLog.action == "recovery.requested")
+            ).one()
+            assert isinstance(row.diff, dict)
+            assert row.diff["hit"] is False
+
+
+class TestRecoveryFinishReplay:
+    """A replayed finish sees the consumed recovery session — 404."""
+
+    def test_second_finish_returns_404(
+        self,
+        client: TestClient,
+        engine: Engine,
+        mailer: _RecordingMailer,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        _seed_user_with_state(
+            engine,
+            email="replay@example.com",
+            display_name="Replay",
+            passkey_count=1,
+            session_count=1,
+        )
+        _stub_passkey_verifier(monkeypatch)
+        r = client.post(
+            "/api/v1/recover/passkey/request",
+            json={"email": "replay@example.com"},
+        )
+        assert r.status_code == 202
+        token = _extract_recovery_token(mailer.sent[0][2])
+        r = client.get(f"/api/v1/recover/passkey/verify?token={token}")
+        recovery_session_id = r.json()["recovery_session_id"]
+        r = client.post(
+            "/api/v1/recover/passkey/start",
+            json={"recovery_session_id": recovery_session_id},
+        )
+        challenge_id = r.json()["challenge_id"]
+        r = client.post(
+            "/api/v1/recover/passkey/finish",
+            json={
+                "recovery_session_id": recovery_session_id,
+                "challenge_id": challenge_id,
+                "credential": {
+                    "id": "s",
+                    "rawId": "s",
+                    "response": {},
+                    "type": "public-key",
+                },
+            },
+        )
+        assert r.status_code == 200
+        # Second finish with same session → 404.
+        replay = client.post(
+            "/api/v1/recover/passkey/finish",
+            json={
+                "recovery_session_id": recovery_session_id,
+                "challenge_id": challenge_id,
+                "credential": {
+                    "id": "s",
+                    "rawId": "s",
+                    "response": {},
+                    "type": "public-key",
+                },
+            },
+        )
+        assert replay.status_code == 404
+        assert replay.json()["detail"]["error"] == "recovery_session_not_found"
+
+
+class TestRecoveryRateLimit:
+    """Rate-limit trip returns 429 with ``Retry-After``."""
+
+    def test_per_email_cap_returns_429(
+        self,
+        client: TestClient,
+        engine: Engine,
+    ) -> None:
+        _seed_user_with_state(
+            engine,
+            email="rate@example.com",
+            display_name="Rate",
+            passkey_count=0,
+            session_count=0,
+        )
+        for _ in range(3):
+            r = client.post(
+                "/api/v1/recover/passkey/request",
+                json={"email": "rate@example.com"},
+            )
+            assert r.status_code == 202
+        # 4th trips the 3/email/hour cap.
+        r = client.post(
+            "/api/v1/recover/passkey/request",
+            json={"email": "rate@example.com"},
+        )
+        assert r.status_code == 429
+        body = r.json()["detail"]
+        assert body["error"] == "rate_limited"
+        assert body["retry_after_seconds"] >= 1
+        assert "Retry-After" in r.headers
+
+
+class TestRecoveryInvalidToken:
+    """Verify with a garbage token → 400 invalid_token."""
+
+    def test_garbage_token_returns_400(
+        self,
+        client: TestClient,
+    ) -> None:
+        r = client.get("/api/v1/recover/passkey/verify?token=not-a-real-token")
+        assert r.status_code == 400
+        assert r.json()["detail"]["error"] == "invalid_token"

@@ -87,6 +87,7 @@ __all__ = [
     "register_finish",
     "register_finish_signup",
     "register_start",
+    "register_start_recovery",
     "register_start_signup",
 ]
 
@@ -593,6 +594,84 @@ def register_finish(
 
     _delete_challenge(session, row=row)
     return credential_ref
+
+
+# ---------------------------------------------------------------------------
+# Public surface — recovery flow (existing user, start-from-scratch semantics)
+# ---------------------------------------------------------------------------
+
+
+def register_start_recovery(
+    session: Session,
+    *,
+    user_id: str,
+    clock: Clock | None = None,
+    rp: RelyingParty | None = None,
+) -> RegistrationOptions:
+    """Mint a registration challenge during self-service recovery.
+
+    Mirrors :func:`register_start` but:
+
+    * Accepts no :class:`WorkspaceContext` — recovery runs outside
+      every workspace (the user may hold grants in any number of
+      them; recovery picks none).
+    * Skips the :data:`_MAX_PASSKEYS_PER_USER` cap check. Recovery's
+      semantics are "start fresh": by the time
+      :func:`app.auth.recovery.complete_recovery` lands the new
+      credential, every prior passkey is gone. Enforcing the cap
+      at start would make a user with 5 existing passkeys
+      permanently stuck — they can't log in (lost device) and
+      can't recover.
+    * Omits the ``excludeCredentials`` list. The existing
+      credentials are about to be revoked, so asking the browser
+      to refuse a duplicate against one of them would force the
+      user onto a specific device (the one that isn't already
+      enrolled). Letting the browser choose any authenticator —
+      including one that happens to match an old credential id —
+      is the correct shape for "register a fresh passkey, any
+      device is fine".
+
+    The returned challenge is still single-use, still bound to the
+    user via ``user_id``, and still 10-minute TTL. The
+    :func:`register_finish` call that consumes it (via
+    :func:`app.auth.recovery.complete_recovery`) re-checks the
+    user's identity against the challenge row and fails closed if
+    they disagree.
+    """
+    now = _now(clock)
+    rp = rp or make_relying_party()
+
+    user = _load_user(session, user_id=user_id)
+
+    options_json, challenge_bytes = generate_registration_challenge(
+        rp=rp,
+        # Same opaque-bytes encoding as :func:`register_start`.
+        user_id=user.id.encode("utf-8"),
+        user_name=user.email,
+        user_display_name=user.display_name,
+        # Deliberate empty: existing credentials are about to be
+        # revoked by :func:`complete_recovery`, so the browser must
+        # NOT refuse a duplicate against them.
+        existing_credential_ids=(),
+    )
+
+    challenge_id = new_ulid(clock=clock)
+    _insert_challenge(
+        session,
+        challenge_id=challenge_id,
+        user_id=user_id,
+        signup_session_id=None,
+        challenge=challenge_bytes,
+        # No excludeCredentials stashed either — matches the
+        # empty list we passed to ``generate_registration_challenge``.
+        existing_credential_ids=[],
+        now=now,
+    )
+
+    return RegistrationOptions(
+        challenge_id=challenge_id,
+        options=options_to_dict(options_json),
+    )
 
 
 # ---------------------------------------------------------------------------
