@@ -220,8 +220,20 @@ class TestMigrationShape:
             assert table in tables, f"{table} missing from schema"
 
     def test_task_template_columns(self, engine: Engine) -> None:
+        """Post-cd-0tg column set.
+
+        The cd-chd slice landed the ten core columns (legacy pair
+        preserved at the bottom for backward compat); cd-0tg's
+        additive migration ``a9b3c7d5e2f1`` adds the richer spec
+        columns needed by the CRUD service (``name``, ``role_id``,
+        ``duration_minutes``, scope shape, photo-evidence enum,
+        priority, linked instructions, inventory hints, LLM hints,
+        soft-delete). Any further expansion or rename should update
+        this list in the same commit.
+        """
         cols = {c["name"]: c for c in inspect(engine).get_columns("task_template")}
         expected = {
+            # cd-chd v1 slice — legacy columns, still present.
             "id",
             "workspace_id",
             "title",
@@ -232,9 +244,24 @@ class TestMigrationShape:
             "default_assignee_role",
             "checklist_template_json",
             "created_at",
+            # cd-0tg additive columns.
+            "name",
+            "role_id",
+            "duration_minutes",
+            "property_scope",
+            "listed_property_ids",
+            "area_scope",
+            "listed_area_ids",
+            "photo_evidence",
+            "linked_instruction_ids",
+            "priority",
+            "inventory_consumption_json",
+            "llm_hints_md",
+            "deleted_at",
         }
         assert set(cols) == expected
         assert cols["default_assignee_role"]["nullable"] is True
+        assert cols["deleted_at"]["nullable"] is True
 
     def test_occurrence_per_acceptance_indexes(self, engine: Engine) -> None:
         indexes = {ix["name"]: ix for ix in inspect(engine).get_indexes("occurrence")}

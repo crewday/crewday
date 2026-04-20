@@ -36,7 +36,7 @@ their bundles.
 | workspace_id                   | ULID FK   |                                       |
 | name                           | text      | "Weekly kitchen deep clean"           |
 | description_md                 | text      |                                       |
-| role_id                        | ULID FK?  | default work_role expected to do it   |
+| role_id                        | ULID FK?  | default work_role expected to do it; FK deferred until `work_role` table lands (cd-65kn) |
 | duration_minutes               | int       | hint only                             |
 | property_scope                 | enum      | `any | one | listed`                  |
 | listed_property_ids            | ULID[]    |                                       |
@@ -48,6 +48,7 @@ their bundles.
 | priority                       | enum      | `low | normal | high | urgent`        |
 | inventory_consumption_json     | jsonb     | SKU → qty expected, see §08           |
 | llm_hints_md                   | text      | free text to help agents understand intent |
+| created_at                     | tstz      | used for list ordering (ascending)    |
 | deleted_at                     | tstz?     |                                       |
 
 ### Checklist template shape

@@ -203,6 +203,12 @@ ignore_imports = [
     # the transitive import keeps the contract honest without
     # forcing every domain caller to route through a third-party port.
     "app.audit -> app.adapters.db.audit.models",
+    # v1 stopgap (cd-0tg): ``app.domain.tasks.templates`` reads
+    # :class:`TaskTemplate` / :class:`Schedule` from
+    # ``app.adapters.db.tasks.models`` directly. Same Protocol-seam
+    # pattern as the identity stopgaps above; tracked by cd-duv6
+    # (extended scope) — drops once the tasks repositories land.
+    "app.domain.tasks.templates -> app.adapters.db.tasks.models",
 ]
 unmatched_ignore_imports_alerting = "none"
 

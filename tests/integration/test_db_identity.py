@@ -137,9 +137,13 @@ class TestMigrationShape:
             "user_id",
             "workspace_id",
             "expires_at",
+            "absolute_expires_at",
             "last_seen_at",
             "ua_hash",
             "ip_hash",
+            "fingerprint_hash",
+            "invalidated_at",
+            "invalidation_cause",
             "created_at",
         }
         assert set(cols) == expected

@@ -1,15 +1,21 @@
 """TaskTemplate / ChecklistTemplateItem / Schedule / Occurrence /
 ChecklistItem / Evidence / Comment SQLAlchemy models.
 
-v1 slice per cd-chd — sufficient for seeding the template → schedule
-→ occurrence → {checklist / evidence / comment} chain that backs
-the product's centre of gravity. The richer §02 / §06 surface
-(``paused_at``, ``active_from`` / ``active_until``,
-``checklist_snapshot_json``, ``photo_evidence`` as a three-value
-enum, the fuller ``scheduled | cancelled | overdue`` state machine,
-soft-delete ``deleted_at``) lands with follow-up tasks
-(cd-0tg template CRUD, cd-4qr turnover auto-generation) without
-breaking this migration's public write contract.
+v1 slice per cd-chd, extended by cd-0tg (template CRUD) to carry
+the full §02 / §06 task-template shape needed by the manager UI
+(``name``, ``role_id``, ``duration_minutes``, ``property_scope`` +
+``listed_property_ids``, ``area_scope`` + ``listed_area_ids``,
+``photo_evidence`` three-value enum, ``priority``, ``linked_
+instruction_ids``, ``inventory_consumption_json``, ``llm_hints_md``,
+``deleted_at``). The cd-chd slice's original columns (``title``,
+``default_duration_min``, ``required_evidence``, ``photo_required``,
+``default_assignee_role``) remain in place for backward compat with
+the cd-chd integration tests; the domain service writes through to
+both the old and new names until a follow-up migration drops the
+legacy pair. Further §02 / §06 columns (``paused_at``, ``active_
+from`` / ``active_until``, ``checklist_snapshot_json``, the fuller
+``scheduled | cancelled | overdue`` state machine) land with cd-4qr
+(turnover auto-generation) and later follow-ups.
 
 Every table carries a ``workspace_id`` column and is registered as
 workspace-scoped via the package's ``__init__``. FK hygiene mirrors
@@ -106,6 +112,28 @@ _OCCURRENCE_STATE_VALUES: tuple[str, ...] = (
 # required" marker rather than a stored-artefact kind).
 _EVIDENCE_KIND_VALUES: tuple[str, ...] = ("photo", "note", "voice", "gps")
 
+# Allowed ``task_template.property_scope`` values (cd-0tg). Drives the
+# "which properties does this template target" filter at generation
+# time. ``any`` → workspace-wide; ``one`` → exactly one id in
+# ``listed_property_ids``; ``listed`` → the enumerated set.
+_PROPERTY_SCOPE_VALUES: tuple[str, ...] = ("any", "one", "listed")
+
+# Allowed ``task_template.area_scope`` values (cd-0tg). Same shape as
+# ``property_scope`` plus ``derived`` — used by stay-lifecycle
+# bundles where the area comes from the stay at generation time.
+_AREA_SCOPE_VALUES: tuple[str, ...] = ("any", "one", "listed", "derived")
+
+# Allowed ``task_template.photo_evidence`` values (cd-0tg). Three-
+# value enum replacing the v1 slice's ``required_evidence`` +
+# ``photo_required`` pair. ``disabled`` hides the camera picker;
+# ``optional`` shows it but accepts completions without a photo;
+# ``required`` rejects completions that lack one.
+_PHOTO_EVIDENCE_VALUES: tuple[str, ...] = ("disabled", "optional", "required")
+
+# Allowed ``task_template.priority`` values (cd-0tg). Drives the
+# manager's default sort and chip tone (see §06 "Task template").
+_PRIORITY_VALUES: tuple[str, ...] = ("low", "normal", "high", "urgent")
+
 
 def _in_clause(values: tuple[str, ...]) -> str:
     """Render a ``col IN ('a', 'b', …)`` CHECK body fragment.
@@ -121,11 +149,25 @@ class TaskTemplate(Base):
     """Re-usable blueprint for an occurrence.
 
     Carries the fields every spawned :class:`Occurrence` copies down
-    at generation time — title, description, expected duration,
-    evidence requirements, the embedded checklist payload. The
-    ``checklist_template_json`` column is an ergonomic cache for the
-    client-side editor; the authoritative per-item list lives on
+    at generation time — name, description, expected duration,
+    evidence policy, the embedded checklist payload, and the scope
+    shape that decides which properties / areas the template targets.
+    The ``checklist_template_json`` column is an ergonomic cache for
+    the client-side editor; the authoritative per-item list lives on
     :class:`ChecklistTemplateItem` rows.
+
+    **cd-0tg** extends the cd-chd v1 slice with the richer §02 / §06
+    surface (``name``, ``role_id``, ``duration_minutes``,
+    ``property_scope`` + ``listed_property_ids``, ``area_scope`` +
+    ``listed_area_ids``, ``photo_evidence``, ``priority``,
+    ``linked_instruction_ids``, ``inventory_consumption_json``,
+    ``llm_hints_md``, ``deleted_at``). The legacy cd-chd columns
+    (``title``, ``default_duration_min``, ``required_evidence``,
+    ``photo_required``, ``default_assignee_role``) remain in place
+    for backward compat; the CRUD service
+    (:mod:`app.domain.tasks.templates`) writes through to both the
+    old and new names until a follow-up migration drops the legacy
+    pair.
     """
 
     __tablename__ = "task_template"
@@ -136,20 +178,53 @@ class TaskTemplate(Base):
         ForeignKey("workspace.id", ondelete="CASCADE"),
         nullable=False,
     )
+    # cd-chd legacy display column. Kept nullable on the model side
+    # because the DB column is still NOT NULL — the CRUD service
+    # writes ``name`` into both fields until ``title`` is dropped.
     title: Mapped[str] = mapped_column(String, nullable=False)
+    # cd-0tg spec display column. Nullable for backward compat with
+    # rows inserted before this migration; new writes populate it.
+    name: Mapped[str | None] = mapped_column(String, nullable=True)
+    # Soft reference to ``work_role.id`` (§05). The ``work_role``
+    # table isn't in the schema yet, so no FK — plain String, matching
+    # the ``scope_property_id`` convention on ``role_grant``.
+    role_id: Mapped[str | None] = mapped_column(String, nullable=True)
     # Markdown body rendered in the template detail view. Plain text
     # is a legal subset, so unit tests can write unescaped strings.
     description_md: Mapped[str] = mapped_column(String, nullable=False, default="")
+    # cd-chd legacy duration column. See ``duration_minutes`` below.
     default_duration_min: Mapped[int] = mapped_column(
         Integer, nullable=False, default=30
     )
+    # cd-0tg spec duration column. Nullable for backward compat.
+    duration_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # cd-chd legacy evidence-policy columns, superseded by
+    # ``photo_evidence`` below.
     required_evidence: Mapped[str] = mapped_column(
         String, nullable=False, default="none"
     )
     photo_required: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    # Nullable — a template without a default persona lets the
-    # schedule / ad-hoc creator pick per-occurrence.
+    # cd-chd legacy default-assignee column (enum, not FK). Superseded
+    # by ``role_id`` above.
     default_assignee_role: Mapped[str | None] = mapped_column(String, nullable=True)
+    # cd-0tg property-scope shape. ``any`` → workspace-wide; ``one``
+    # → exactly one id in ``listed_property_ids``; ``listed`` → the
+    # enumerated set. Server default ``'any'`` so existing rows
+    # survive the migration.
+    property_scope: Mapped[str] = mapped_column(String, nullable=False, default="any")
+    # IDs targeted by ``property_scope``. Empty for ``any``, one-
+    # element for ``one``, non-empty for ``listed`` — the domain
+    # service enforces this consistency; the DB only holds the list.
+    listed_property_ids: Mapped[list[str]] = mapped_column(
+        JSON, nullable=False, default=list
+    )
+    # cd-0tg area-scope shape. Same semantics as ``property_scope``
+    # plus ``derived`` for stay-lifecycle bundles where the area
+    # comes from the stay at generation time (§06).
+    area_scope: Mapped[str] = mapped_column(String, nullable=False, default="any")
+    listed_area_ids: Mapped[list[str]] = mapped_column(
+        JSON, nullable=False, default=list
+    )
     # Flat list of checklist-item payloads. The outer ``Any`` is
     # scoped to SQLAlchemy's JSON column type — callers writing a
     # typed payload should use a TypedDict locally and coerce into
@@ -158,6 +233,31 @@ class TaskTemplate(Base):
     # the client editor.
     checklist_template_json: Mapped[list[Any]] = mapped_column(
         JSON, nullable=False, default=list
+    )
+    # cd-0tg three-value photo-evidence enum. Server default
+    # ``'disabled'`` so existing rows survive the migration.
+    photo_evidence: Mapped[str] = mapped_column(
+        String, nullable=False, default="disabled"
+    )
+    # IDs of linked instructions (§07). Empty list by default.
+    linked_instruction_ids: Mapped[list[str]] = mapped_column(
+        JSON, nullable=False, default=list
+    )
+    # cd-0tg priority enum. Server default ``'normal'``.
+    priority: Mapped[str] = mapped_column(String, nullable=False, default="normal")
+    # SKU → qty map consumed by the on-task inventory worker (§08).
+    # JSON rather than a join table for v1; promoted with cd-jkwr.
+    inventory_consumption_json: Mapped[dict[str, Any]] = mapped_column(
+        JSON, nullable=False, default=dict
+    )
+    # Free-text hints the agent inbox (§06) passes to the LLM when
+    # explaining the task.
+    llm_hints_md: Mapped[str | None] = mapped_column(String, nullable=True)
+    # Soft-delete marker. ``NULL`` means live; non-null means the
+    # template is retired. The ``occurrence.template_id`` FK is
+    # ``RESTRICT``, so history survives the soft-delete.
+    deleted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
@@ -173,7 +273,26 @@ class TaskTemplate(Base):
             f"({_in_clause(_ASSIGNEE_ROLE_VALUES)})",
             name="default_assignee_role",
         ),
+        CheckConstraint(
+            f"property_scope IN ({_in_clause(_PROPERTY_SCOPE_VALUES)})",
+            name="property_scope",
+        ),
+        CheckConstraint(
+            f"area_scope IN ({_in_clause(_AREA_SCOPE_VALUES)})",
+            name="area_scope",
+        ),
+        CheckConstraint(
+            f"photo_evidence IN ({_in_clause(_PHOTO_EVIDENCE_VALUES)})",
+            name="photo_evidence",
+        ),
+        CheckConstraint(
+            f"priority IN ({_in_clause(_PRIORITY_VALUES)})",
+            name="priority",
+        ),
         Index("ix_task_template_workspace", "workspace_id"),
+        # "list live templates" hot path — filter on
+        # (workspace_id, deleted_at IS NULL) most of the time.
+        Index("ix_task_template_workspace_deleted", "workspace_id", "deleted_at"),
     )
 
 

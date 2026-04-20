@@ -5,13 +5,15 @@ per logical slice — that agents read at the start of a session so they do
 not re-explore from scratch (see [`AGENTS.md`](../../AGENTS.md) §Session
 bootstrap).
 
-> crew.day is currently pre-implementation. There is no code to map yet.
-> When code lands, the first few files to write here are likely:
+> crew.day has a growing implementation as of 2026-04-20. Slice maps have not
+> been written yet. Priority files to create (tracked by the first agent that
+> writes a substantial new module):
 >
 > - `app-layout.md` — package structure, entry points, import graph
-> - `domain.md` — key entities and relationships (mirrors
->   [`docs/specs/02-domain-model.md`](../../docs/specs/02-domain-model.md)
->   against the actual SQLAlchemy models)
+> - `domain.md` — key entities and relationships; at minimum document
+>   `app/adapters/db/tasks/models.py` (TaskTemplate, Schedule, Occurrence,
+>   ChecklistTemplateItem, Evidence, Comment) and
+>   `app/domain/tasks/templates.py` (CRUD service, DTOs, typed errors)
 > - `api.md` — REST surface (mirrors
 >   [`docs/specs/12-rest-api.md`](../../docs/specs/12-rest-api.md) against
 >   the actual FastAPI routers)
