@@ -87,6 +87,7 @@ recovery", §"Recovery paths" and ``docs/specs/15-security-privacy.md``
 from __future__ import annotations
 
 import hmac
+import logging
 import secrets
 import threading
 from collections.abc import Mapping, Sequence
@@ -102,7 +103,7 @@ from app.adapters.db.identity.models import (
     User,
     canonicalise_email,
 )
-from app.adapters.mail.ports import Mailer
+from app.adapters.mail.ports import MailDeliveryError, Mailer
 from app.audit import write_audit
 from app.auth import magic_link, passkey
 from app.auth import session as session_module
@@ -116,6 +117,8 @@ from app.mail.templates import render as render_template
 from app.tenancy import WorkspaceContext, tenant_agnostic
 from app.util.clock import Clock, SystemClock
 from app.util.ulid import new_ulid
+
+_log = logging.getLogger(__name__)
 
 __all__ = [
     "CompletedRecovery",
@@ -562,6 +565,16 @@ def request_recovery(
     user = _lookup_user_by_email(session, email_lower=email_lower)
     hit = user is not None
 
+    # Enumeration guard (§15 "constant-time responses"): both branches
+    # must produce an identical observable response regardless of
+    # mailer outcome. A :class:`MailDeliveryError` here (SMTP down, DNS
+    # fail, relay refusal) must not short-circuit the audit row or
+    # surface as a 5xx — the caller always sees 202. The row minted by
+    # the hit branch inside :func:`magic_link.request_link` still
+    # commits so the link is usable once SMTP recovers (an operator
+    # can re-render from the row or the user can re-request); the
+    # miss branch has nothing to commit. Log loudly so operators notice
+    # a relay outage even though the wire stays silent.
     if user is not None:
         # Hit branch — mint the magic link + send the recovery template.
         # The mint + nonce-insert reuses :func:`magic_link.request_link`;
@@ -569,17 +582,24 @@ def request_recovery(
         # recovery-specific template (which calls out the destructive
         # side-effect). See :func:`_mint_and_send_recovery_link` for
         # the capturing-mailer seam.
-        _mint_and_send_recovery_link(
-            session,
-            user=user,
-            ip=ip,
-            mailer=mailer,
-            base_url=base_url,
-            throttle=throttle,
-            now=resolved_now,
-            settings=settings,
-            clock=clock,
-        )
+        try:
+            _mint_and_send_recovery_link(
+                session,
+                user=user,
+                ip=ip,
+                mailer=mailer,
+                base_url=base_url,
+                throttle=throttle,
+                now=resolved_now,
+                settings=settings,
+                clock=clock,
+            )
+        except MailDeliveryError:
+            _log.warning(
+                "recovery mail send failed (hit branch); swallowing "
+                "per §15 enumeration guard",
+                exc_info=True,
+            )
     else:
         # Miss branch — burn matching CPU so the HMAC-sign cost the hit
         # branch pays inside ``magic_link.request_link`` doesn't show
@@ -590,7 +610,14 @@ def request_recovery(
         # — writing a throwaway row to balance it is worse than the
         # sub-millisecond residual leak).
         _burn_cpu_for_miss_branch(pepper)
-        _send_unknown_email(mailer=mailer, to_email=email)
+        try:
+            _send_unknown_email(mailer=mailer, to_email=email)
+        except MailDeliveryError:
+            _log.warning(
+                "recovery mail send failed (miss branch); swallowing "
+                "per §15 enumeration guard",
+                exc_info=True,
+            )
 
     # Audit lands in the caller's UoW — committing or rolling back
     # with the rest of the request's state. The ``hit`` discriminator

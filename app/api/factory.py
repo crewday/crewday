@@ -70,6 +70,7 @@ from app.api.middleware import IdempotencyMiddleware, SecurityHeadersMiddleware
 from app.api.v1 import CONTEXT_ROUTERS
 from app.api.v1.auth import invite as invite_module
 from app.api.v1.auth import magic as magic_module
+from app.api.v1.auth import me as me_module
 from app.api.v1.auth import passkey as passkey_module
 from app.api.v1.auth import recovery as recovery_module
 from app.api.v1.auth import signup as signup_module
@@ -279,6 +280,9 @@ def _mount_auth_routers(
         passkey_module.build_login_router(throttle=throttle, settings=settings),
         prefix=bare_prefix,
     )
+    # /auth/me — SPA identity-bootstrap probe. Mounted unconditionally
+    # (no SMTP dependency) because every authenticated SPA load hits it.
+    app.include_router(me_module.build_me_router(), prefix=bare_prefix)
     # Invite accept does NOT need SMTP — redeeming a magic link the
     # operator mailed out-of-band is still valid in an SMTP-less
     # deployment. Keep this mount unconditional so the SPA's

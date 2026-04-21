@@ -306,7 +306,18 @@ class SMTPMailer:
                         f"SMTP rejected message permanently: {_describe(exc)}"
                     ) from exc
                 if not _is_transient(exc):
-                    raise
+                    # Unclassified transport failure — DNS resolution
+                    # (``socket.gaierror``), TLS handshake (``ssl.SSLError``
+                    # without a transient errno), address-family errors,
+                    # etc. The :class:`Mailer` port contract promises a
+                    # :class:`MailDeliveryError` for any send failure, so
+                    # we wrap rather than leak the raw exception — a raw
+                    # ``socket.gaierror`` escaping through §03 / §15
+                    # endpoints breaks the enumeration guard (hit 500 vs
+                    # miss 500 still differs from the spec-required 202).
+                    raise MailDeliveryError(
+                        f"SMTP transport failed: {_describe(exc)}"
+                    ) from exc
                 last_transient = exc
                 _log.warning(
                     "SMTP transient failure (attempt %d/%d): %s",

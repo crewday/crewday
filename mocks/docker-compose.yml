@@ -251,8 +251,15 @@ services:
     container_name: crewday-mailpit
     restart: unless-stopped
     ports:
+      # Host bindings for inspection from the host only — app-api
+      # reaches mailpit over the compose network by hostname, so these
+      # are optional. 8025 → 8026 on the host because another project's
+      # mailpit (e.g. tubededentifrice) commonly squats 127.0.0.1:8025
+      # on the shared dev box; keeping the container-side port at 8025
+      # means CREWDAY_SMTP_HOST=mailpit / _PORT=1025 in app-api and the
+      # internal UI at http://mailpit:8025 stay unchanged.
       - "127.0.0.1:1025:1025"
-      - "127.0.0.1:8025:8025"
+      - "127.0.0.1:8026:8025"
     networks:
       - default
 

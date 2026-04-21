@@ -57,6 +57,7 @@ import AdminAuditPage from "@/pages/admin/AuditPage";
 
 import LoginPage from "@/pages/public/LoginPage";
 import RecoverPage from "@/pages/public/RecoverPage";
+import EnrollPage from "@/pages/public/EnrollPage";
 import AcceptPage from "@/pages/public/AcceptPage";
 import GuestPage from "@/pages/public/GuestPage";
 
@@ -104,6 +105,7 @@ export default function App() {
         <Route element={<PublicLayout />}>
           <Route path="/login" element={<LoginPage />} />
           <Route path="/recover" element={<RecoverPage />} />
+          <Route path="/recover/enroll" element={<EnrollPage />} />
           <Route path="/accept/:token" element={<AcceptPage />} />
           <Route path="/guest/:token" element={<GuestPage />} />
         </Route>

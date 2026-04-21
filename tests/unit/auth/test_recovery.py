@@ -85,6 +85,33 @@ class _SentMessage:
 
 
 @dataclass
+class _ExplodingMailer:
+    """:class:`Mailer` double that raises a pre-canned exception.
+
+    Used to exercise the §15 enumeration guard in
+    :func:`request_recovery`: the function must swallow
+    :class:`MailDeliveryError` on both hit and miss branches so a
+    mailer outage never turns into a 5xx (which would leak the
+    hit/miss bit via status code alone).
+    """
+
+    exc: BaseException
+
+    def send(
+        self,
+        *,
+        to: Sequence[str],
+        subject: str,
+        body_text: str,
+        body_html: str | None = None,
+        headers: Mapping[str, str] | None = None,
+        reply_to: str | None = None,
+    ) -> str:
+        del to, subject, body_text, body_html, headers, reply_to
+        raise self.exc
+
+
+@dataclass
 class _RecordingMailer:
     """In-memory :class:`app.adapters.mail.ports.Mailer` double."""
 
@@ -613,6 +640,72 @@ class TestRequestRecoveryEnumerationGuard:
             (a.diff["hit"] for a in audits if isinstance(a.diff, dict)),
         )
         assert hits == [False, True]
+
+    def test_hit_branch_swallows_mail_delivery_error(
+        self,
+        session: Session,
+        throttle: Throttle,
+        settings: Settings,
+    ) -> None:
+        """§15: a mailer outage must not surface as 5xx on the hit path.
+
+        ``request_recovery`` catches :class:`MailDeliveryError` from
+        the hit branch so the caller sees an identical 202 whether the
+        relay is up or down. The audit row still commits so operators
+        can detect the outage from logs.
+        """
+        from app.adapters.mail.ports import MailDeliveryError
+
+        bootstrap_user(session, email="hit@example.com", display_name="Hit")
+        failing_mailer = _ExplodingMailer(MailDeliveryError("relay down"))
+        # Must not raise.
+        request_recovery(
+            session,
+            email="hit@example.com",
+            ip="127.0.0.1",
+            mailer=failing_mailer,
+            base_url="https://crew.day",
+            now=_PINNED,
+            throttle=throttle,
+            settings=settings,
+        )
+        audits = session.scalars(
+            select(AuditLog).where(AuditLog.action == "recovery.requested")
+        ).all()
+        assert len(audits) == 1
+        assert isinstance(audits[0].diff, dict) and audits[0].diff["hit"] is True
+
+    def test_miss_branch_swallows_mail_delivery_error(
+        self,
+        session: Session,
+        throttle: Throttle,
+        settings: Settings,
+    ) -> None:
+        """§15: the miss branch swallows mailer failures too.
+
+        Mirrors the hit-branch test. The miss branch has no nonce row
+        to commit, but the audit row must still land with
+        ``hit=False``.
+        """
+        from app.adapters.mail.ports import MailDeliveryError
+
+        failing_mailer = _ExplodingMailer(MailDeliveryError("relay down"))
+        # Must not raise.
+        request_recovery(
+            session,
+            email="ghost@example.com",
+            ip="127.0.0.1",
+            mailer=failing_mailer,
+            base_url="https://crew.day",
+            now=_PINNED,
+            throttle=throttle,
+            settings=settings,
+        )
+        audits = session.scalars(
+            select(AuditLog).where(AuditLog.action == "recovery.requested")
+        ).all()
+        assert len(audits) == 1
+        assert isinstance(audits[0].diff, dict) and audits[0].diff["hit"] is False
 
 
 # ---------------------------------------------------------------------------

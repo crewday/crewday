@@ -536,6 +536,42 @@ class TestPermanentFailure:
         assert len(plain_factory.connections) == 1
 
 
+class TestUnclassifiedFailure:
+    """``_retry_on_transient`` wraps non-transient, non-permanent errors.
+
+    The :class:`Mailer` port promises ``MailDeliveryError`` for any
+    send failure; without the wrap, a DNS resolution miss
+    (``socket.gaierror`` with ``errno=-2`` — not in
+    ``_TRANSIENT_ERRNOS``) leaks through as a raw ``OSError``. That
+    breaks every caller that catches ``MailDeliveryError`` (notably
+    the §15 enumeration guard in ``request_recovery``), so the
+    adapter must classify the unknown-errno branch explicitly.
+    """
+
+    def test_socket_gaierror_wrapped_as_mail_delivery_error(
+        self,
+        plain_factory: _FakeSMTPFactory,
+        ssl_factory: _FakeSMTPFactory,
+        sleeps: list[float],
+    ) -> None:
+        import socket
+
+        plain_factory.raise_on_connection.append(
+            {
+                "send_message": socket.gaierror(
+                    -2, "Name or service not known"
+                )
+            }
+        )
+        mailer = _make_mailer(plain_factory, ssl_factory, sleeps)
+        with pytest.raises(MailDeliveryError, match="transport failed"):
+            mailer.send(to=["alice@example.com"], subject="Hi", body_text="text")
+        # No retry — an unclassified error is not in the transient
+        # set, so the loop shortcircuits on the first attempt.
+        assert len(plain_factory.connections) == 1
+        assert sleeps == []
+
+
 # ---------------------------------------------------------------------------
 # Validation / construction
 # ---------------------------------------------------------------------------
