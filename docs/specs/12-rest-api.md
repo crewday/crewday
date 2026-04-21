@@ -404,6 +404,35 @@ GET    /w/<slug>/api/v1/auth/tokens              # list (owner/manager — exclu
 POST   /w/<slug>/api/v1/auth/tokens/{id}/revoke
 POST   /w/<slug>/api/v1/auth/tokens/{id}/rotate
 GET    /w/<slug>/api/v1/auth/tokens/{id}/audit   # per-token request history
+
+# Additional passkeys (§03 "Additional passkeys"). Authenticated (any
+# principal that resolves a WorkspaceContext — session cookie or API
+# token scoped to the workspace); CSRF-guarded via the global middleware
+# on the write routes (same posture as every other mutating route on
+# the workspace surface). These are NOT `x-interactive-only`: the
+# hard-lockout ceremonies (last-credential gate + `/recover` break-glass)
+# live in the domain service, not the auth gate.
+POST   /w/<slug>/api/v1/auth/passkey/register/start   # mint a registration challenge for the caller
+POST   /w/<slug>/api/v1/auth/passkey/register/finish  # verify + persist the attestation; invalidates every session for the user — including the caller's own (cause `passkey_registered`, see §15 "Session-invalidation causes"); SPA re-auths after the ceremony
+DELETE /w/<slug>/api/v1/auth/passkey/{credential_id}  # revoke one of the caller's own passkeys
+                                                      #   credential_id is base64url. Refuses to revoke the caller's
+                                                      #   last remaining passkey; admin-revocation-on-behalf-of-another-
+                                                      #   user rides on `POST /users/{id}/reset_passkey` instead (§03
+                                                      #   "Owner-initiated worker passkey reset").
+                                                      #   204 No Content on success; every active session for the user
+                                                      #   (including the caller's own) is invalidated in the same UoW
+                                                      #   with cause `passkey_revoked` — see §15 "Session-invalidation
+                                                      #   causes".
+                                                      #   404 {"error": "passkey_not_found"} — unknown credential id
+                                                      #     OR credential owned by another user (deliberately collapsed
+                                                      #     to refuse the credential-id space as an enumeration oracle).
+                                                      #     Malformed base64url maps to the same 404 for the same
+                                                      #     reason.
+                                                      #   422 {"error": "last_credential"} — refuses to revoke the
+                                                      #     user's sole remaining passkey; the SPA should steer the
+                                                      #     caller through `/recover` (§03 "Self-service lost-device
+                                                      #     recovery") for a deliberate break-glass, or prompt them
+                                                      #     to enrol another credential first.
 ```
 
 All subsequent resource groups in this document live under

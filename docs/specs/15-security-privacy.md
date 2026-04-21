@@ -693,6 +693,27 @@ recommended on self-host.
   explicit `targetOrigin` checks on both sides. Any other
   `postMessage` listener in the SPA is a lint error.
 
+### Session-invalidation causes
+
+Credential-population changes (and a few other surgical security
+events) flip every matching session row to invalidated rather than
+deleting it — `invalidated_at` + `invalidation_cause` are stamped
+so `validate()` refuses the cookie while the forensic trail
+survives (§02 `session`, `app/auth/session.py` `invalidate_for_user`
+/ `invalidate_for_credential`). Every call site emits a single
+`audit.session.invalidated` row carrying the cause and the count.
+
+The complete catalogue of causes the codebase emits today — any new
+cause MUST land here in the same PR as its call site so operators
+retain a single lookup table:
+
+| `invalidation_cause` | Emitted by | Scope | Notes |
+|----------------------|------------|-------|-------|
+| `passkey_registered` | `register_finish` (app/auth/passkey.py) | per-user | Credential-population change (§03 "Additional passkeys"). The domain function receives `user_id` but not the caller's session PK, so every session for the user is invalidated — including the caller's own; the SPA re-auths after the ceremony. The signup sibling `register_finish_signup` does **not** emit this cause: it creates the user's first credential on a brand-new account with no prior sessions to invalidate. `complete_recovery` also funnels through `register_finish`, so the recovery path emits one `recovery_consumed` audit (non-zero count) followed by a trailing `passkey_registered` audit (zero count — the sessions were already flipped). |
+| `passkey_revoked`    | `revoke_passkey` (app/auth/passkey.py) | per-user | User-initiated revoke via `DELETE /auth/passkey/{credential_id}` (§03 "Additional passkeys", §12). The caller's own session is invalidated with the rest — a credential-revocation needs a clean re-auth. |
+| `recovery_consumed`  | `complete_recovery` (app/auth/recovery.py), via the internal `_invalidate_sessions` helper | per-user | Recovery re-enrolment (§03 "Re-enrollment side-effects" / "Self-service lost-device recovery"). No caller session to preserve — the ceremony runs on a device with no prior session for this user. |
+| `clone_detected`     | `post_login_finish` route handler's `except CloneDetected` branch (app/api/v1/auth/passkey.py), via `_invalidate_for_credential_fresh_uow` → `invalidate_for_credential` | per-credential-owner | §"Passkey specifics" "sign-count rollback auto-revoke". The domain `login_finish` raises `CloneDetected`; the router handler catches it and runs the invalidate on a **fresh** UoW because the primary UoW rolls back on the raise — otherwise the suspected-stolen sessions would stay live. |
+
 ### Self-serve abuse mitigations
 
 Open self-serve signup (§03, §00 G12) exposes any deployment that

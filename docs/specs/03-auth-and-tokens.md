@@ -265,6 +265,28 @@ they take effect; grants never attach silently.
   Up to 5 passkeys per user.
 - Each passkey carries a user-editable `nickname` ("work phone",
   "wife's iPad").
+- Users may **revoke** their own passkeys from the same profile page
+  (`DELETE /w/<slug>/api/v1/auth/passkey/{credential_id}`, §12). The
+  server refuses to revoke the user's last remaining credential — a
+  credential-less account would be forced through recovery to sign
+  in again, so the SPA either steers the user to enrol another
+  passkey first or (deliberately) through §"Self-service lost-device
+  recovery" as the break-glass. A credential id that belongs to
+  another user is indistinguishable from an unknown id and both
+  collapse to `404 passkey_not_found` so the credential-id space is
+  not an enumeration oracle; admin-initiated revocation rides on
+  §"Owner-initiated worker passkey reset" instead.
+- Every successful revoke invalidates **every active session** for
+  that user — including the caller's own session — in the same UoW
+  as the delete, via the `invalidate_for_user` seam described in §15
+  "Shared-origin XSS containment". The invalidation row carries
+  `cause = "passkey_revoked"` (catalogued in §15 "Session-
+  invalidation causes"). Registering a new passkey is also a
+  credential-population change and invalidates every session for
+  the user with `cause = "passkey_registered"` — the router seam
+  doesn't know the caller's own session PK, so the SPA re-auths
+  after the ceremony. Forensic rows survive both paths so operators
+  can join sign-in → session → subsequent activity after the fact.
 
 ### Re-enrollment side-effects
 
