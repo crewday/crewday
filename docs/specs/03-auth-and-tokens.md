@@ -571,11 +571,17 @@ after the swap — it is not an authentication primitive.
   ```json
   {
     "name": "hermes-scheduler",
-    "scopes": ["tasks:read", "tasks:write", "stays:read"],
+    "scopes": {"tasks:read": true, "tasks:write": true, "stays:read": true},
     "expires_at": "2027-01-01T00:00:00Z",
     "note": "nightly scheduling agent"
   }
   ```
+- `scopes` is a flat `{"<action_key>": true}` dict — the same shape
+  the `api_token.scope_json` column stores, so the router holds no
+  list-to-dict coercion. The key is an action string from the scope
+  catalog below; the value is truthy (v1 uses `true`; reserved for a
+  future per-scope constraint payload). Delegated tokens send
+  `scopes: {}` — see "Delegated tokens" below.
 - Response shows the **plaintext token once**; never again.
 - Token format: `mip_<key_id>_<secret>` where `key_id` is a public
   ULID and `secret` is 256 bits of base32. Only the argon2id hash of
@@ -654,7 +660,7 @@ script that prints today's tasks on her home printer.
 POST /api/v1/me/tokens
 {
   "name": "kitchen-printer",
-  "scopes": ["me.tasks:read", "me.bookings:read"],
+  "scopes": {"me.tasks:read": true, "me.bookings:read": true},
   "expires_at": "2026-06-01T00:00:00Z",
   "note": "Raspberry Pi in the kitchen"
 }

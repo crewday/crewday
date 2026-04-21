@@ -403,11 +403,64 @@ to a workspace; §03). Personal access tokens live on the bare host
 above, not here:
 
 ```
-POST   /w/<slug>/api/v1/auth/tokens              # create scoped or delegated
-GET    /w/<slug>/api/v1/auth/tokens              # list (owner/manager — excludes PATs)
-POST   /w/<slug>/api/v1/auth/tokens/{id}/revoke
-POST   /w/<slug>/api/v1/auth/tokens/{id}/rotate
-GET    /w/<slug>/api/v1/auth/tokens/{id}/audit   # per-token request history
+# API tokens (§03 "API tokens"). Workspace-scoped, gated by the
+# `api_tokens.manage` action (owners + managers by default, §05);
+# CSRF-guarded on mutating verbs via the global middleware. The
+# plaintext token is returned by POST only — never re-surfaced.
+#
+# Every error response uses the §12 "Errors" problem+json envelope —
+# the `{"error": "<symbol>"}` tags below are the same shorthand used
+# throughout §12 for the error vocabulary (the symbol maps to the
+# canonical `type` URI; e.g. 404 → `type: https://crewday.dev/errors/not_found`,
+# 422 → `type: .../validation`). The RFC 7807 seam (cd-waq3, landed)
+# wraps every `HTTPException` and `DomainError` into that envelope at
+# `app/api/errors.py`; the inline symbols are the error-condition
+# identifiers the handler uses to pick `type` + `title`, not a literal
+# wire payload.
+POST   /w/<slug>/api/v1/auth/tokens              # mint a scoped or delegated token; body:
+                                                 #   {label, scopes, expires_at_days?}. `label` is 1-160 chars;
+                                                 #   `scopes` is a flat `{"<action_key>": true}` dict (matches
+                                                 #   the `api_token.scope_json` column — see §03 "Scoped tokens"
+                                                 #   example); `expires_at_days` is 1-3650, defaulting to 90
+                                                 #   per §03 "Guardrails" when omitted.
+                                                 #   201 {token, key_id, prefix, expires_at} — `token` is the
+                                                 #     full `mip_<key_id>_<secret>` plaintext; store it now.
+                                                 #   401 {"error": "not_authenticated"} — no session / invalid.
+                                                 #   403 {"error": "permission_denied"} — caller lacks the
+                                                 #     `api_tokens.manage` action on this workspace.
+                                                 #   422 {"error": "too_many_tokens"} — user already holds 5
+                                                 #     active tokens on this workspace (§03 "Guardrails" cap).
+                                                 #   422 `type: validation` — empty `label`, `label` > 160
+                                                 #     chars, `scopes` not an object, or `expires_at_days`
+                                                 #     outside [1, 3650]. Pydantic field errors surface in the
+                                                 #     `errors[]` array of the problem+json envelope per §12
+                                                 #     "Errors".
+GET    /w/<slug>/api/v1/auth/tokens              # list every token on the workspace (active + revoked, most
+                                                 # recent first). PATs are NOT included — they live on
+                                                 # `/me/tokens` per §03 "Personal access tokens".
+                                                 #   200 [{key_id, label, prefix, scopes, expires_at,
+                                                 #     last_used_at, revoked_at, created_at}, …]. `scopes`
+                                                 #     is returned in the same dict shape the body accepts.
+                                                 #     The argon2id hash is never surfaced.
+                                                 #   401 {"error": "not_authenticated"}.
+                                                 #   403 {"error": "permission_denied"}.
+DELETE /w/<slug>/api/v1/auth/tokens/{token_id}   # revoke — flips `revoked_at`. Idempotent: a second call
+                                                 # on an already-revoked row still lands a
+                                                 # `api_token.revoked_noop` audit entry but returns 204
+                                                 # so a UI double-click doesn't fail.
+                                                 #   204 No Content on success (both first revocation and
+                                                 #     idempotent replay).
+                                                 #   401 {"error": "not_authenticated"}.
+                                                 #   403 {"error": "permission_denied"}.
+                                                 #   404 {"error": "token_not_found"} — unknown `token_id`
+                                                 #     OR a token that belongs to another workspace
+                                                 #     (collapsed to the same shape so the API does not leak
+                                                 #     cross-workspace token existence).
+# TBD — not yet implemented (v1 covers mint / list / revoke above):
+#   POST   /w/<slug>/api/v1/auth/tokens/{id}/rotate  # §03 "Revocation and rotation"
+#   GET    /w/<slug>/api/v1/auth/tokens/{id}/audit   # per-token request history
+# The prose spec in §03 still stands; the routes are deferred to a
+# follow-up under the cd-rpxd identity-API parent.
 
 # Additional passkeys (§03 "Additional passkeys"). Authenticated (any
 # principal that resolves a WorkspaceContext — session cookie or API
