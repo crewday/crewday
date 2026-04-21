@@ -16,7 +16,7 @@ See cd-8m4 acceptance criteria.
 from __future__ import annotations
 
 from collections.abc import Iterator
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
@@ -26,7 +26,7 @@ from sqlalchemy import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.adapters.db.base import Base
-from app.adapters.db.identity.models import PasskeyCredential
+from app.adapters.db.identity.models import PasskeyCredential, WebAuthnChallenge
 from app.adapters.db.session import UnitOfWorkImpl, make_engine
 from app.adapters.db.workspace.models import Workspace
 from app.api.deps import current_workspace_context, db_session
@@ -507,3 +507,322 @@ class TestDeletePasskeyRouter:
         resp = client.delete("/api/v1/auth/passkey/AAAAAAAAAAAAAAAAAAAAAAAAAAAA")
         assert resp.status_code == 401
         assert resp.json()["detail"]["error"] == "not_authenticated"
+
+
+# ---------------------------------------------------------------------------
+# cd-qx1f — challenge row is single-use even on verification failure
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def redirect_default_engine(
+    engine: Engine,
+    factory: sessionmaker[Session],
+) -> Iterator[None]:
+    """Point :func:`app.adapters.db.session.make_uow` at the test engine.
+
+    cd-qx1f burns the challenge row on a fresh UoW via :func:`make_uow`,
+    which reads the module-level default sessionmaker. Without this
+    redirect, the fresh UoW would open against the production default
+    DB (wrong schema, wrong data) and the broad ``except Exception``
+    in :func:`_delete_challenge_fresh_uow` would silently swallow the
+    failure — the test would pass but the assertion "row gone" would
+    read from the test DB where nothing was ever deleted. Mirrors
+    :func:`tests.unit.api.middleware.test_idempotency.redirect_default_engine`
+    and :mod:`tests.integration.auth.test_passkey_login_pg`.
+    """
+    import app.adapters.db.session as _session_mod
+
+    original_engine = _session_mod._default_engine
+    original_factory = _session_mod._default_sessionmaker_
+    _session_mod._default_engine = engine
+    _session_mod._default_sessionmaker_ = factory
+    try:
+        yield
+    finally:
+        _session_mod._default_engine = original_engine
+        _session_mod._default_sessionmaker_ = original_factory
+
+
+class TestRegisterFinishChallengeSingleUse:
+    """cd-qx1f: challenge row burned on every register-finish failure.
+
+    The failing paths for :func:`register_finish` are enumerated in
+    its docstring — ChallengeExpired, ChallengeSubjectMismatch,
+    InvalidRegistration, TooManyPasskeys. ChallengeNotFound /
+    ChallengeAlreadyConsumed are naturally idempotent (the row is
+    already gone) so they exercise the zero-rows-affected branch.
+    Every failure must leave the DB without the challenge row, even
+    though the primary UoW rolled back on the raise.
+    """
+
+    def test_invalid_registration_burns_challenge(
+        self,
+        app_with_overrides: FastAPI,
+        factory: sessionmaker[Session],
+        redirect_default_engine: None,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from app.auth.webauthn import InvalidRegistrationResponse
+
+        client = TestClient(app_with_overrides)
+        start = client.post("/api/v1/auth/passkey/register/start")
+        challenge_id = start.json()["challenge_id"]
+        # Precondition: the challenge row exists before the failed finish.
+        with factory() as s:
+            assert s.get(WebAuthnChallenge, challenge_id) is not None
+
+        def _raise(**_: Any) -> VerifiedRegistration:
+            raise InvalidRegistrationResponse("challenge mismatch")
+
+        monkeypatch.setattr(passkey_module, "verify_registration", _raise)
+        resp = client.post(
+            "/api/v1/auth/passkey/register/finish",
+            json={"challenge_id": challenge_id, "credential": _raw()},
+        )
+        assert resp.status_code == 400
+        assert resp.json()["detail"]["error"] == "invalid_registration"
+        # cd-qx1f acceptance: challenge row is gone even though the
+        # caller's UoW rolled back.
+        with factory() as s:
+            assert s.get(WebAuthnChallenge, challenge_id) is None
+
+    def test_challenge_expired_burns_challenge(
+        self,
+        app_with_overrides: FastAPI,
+        factory: sessionmaker[Session],
+        redirect_default_engine: None,
+        seeded: tuple[WorkspaceContext, str],
+    ) -> None:
+        """An expired challenge is still burned on failure so a replay
+        with the (attacker-leaked) id returns 409 not 400 on the second
+        try — matches the privacy envelope around consumed challenges.
+        """
+        ctx, user_id = seeded
+        # Seed an expired challenge directly — register_start would
+        # mint a fresh one with TTL from "now".
+        stale_id = new_ulid()
+        with factory() as s:
+            s.add(
+                WebAuthnChallenge(
+                    id=stale_id,
+                    user_id=user_id,
+                    signup_session_id=None,
+                    challenge=b"\x00" * 32,
+                    exclude_credentials=[],
+                    created_at=datetime(2020, 1, 1, tzinfo=UTC),
+                    expires_at=datetime(2020, 1, 1, 0, 10, tzinfo=UTC),
+                )
+            )
+            s.commit()
+            assert s.get(WebAuthnChallenge, stale_id) is not None
+        del ctx
+
+        client = TestClient(app_with_overrides)
+        resp = client.post(
+            "/api/v1/auth/passkey/register/finish",
+            json={"challenge_id": stale_id, "credential": _raw()},
+        )
+        assert resp.status_code == 400
+        assert resp.json()["detail"]["error"] == "challenge_expired"
+        with factory() as s:
+            assert s.get(WebAuthnChallenge, stale_id) is None
+
+    def test_subject_mismatch_burns_challenge(
+        self,
+        app_with_overrides: FastAPI,
+        factory: sessionmaker[Session],
+        redirect_default_engine: None,
+        seeded: tuple[WorkspaceContext, str],
+    ) -> None:
+        """A signup-scoped challenge smuggled into the user finish path
+        is still burned — the caller's ULID was valid, it just pointed
+        at the wrong subject family.
+        """
+        ctx, user_id = seeded
+        # Seed a signup-shaped challenge (wrong subject for the user
+        # finisher); the user id on ctx points at the seeded user.
+        # Use a far-future expiry so the real wall-clock passes the TTL
+        # check in :func:`_load_challenge` and we land on the subject
+        # check.
+        far_future = datetime.now(tz=UTC) + timedelta(hours=1)
+        signup_challenge_id = new_ulid()
+        with factory() as s:
+            s.add(
+                WebAuthnChallenge(
+                    id=signup_challenge_id,
+                    user_id=None,
+                    signup_session_id="01HWA00000000000000000SGN0",
+                    challenge=b"\x00" * 32,
+                    exclude_credentials=[],
+                    created_at=datetime.now(tz=UTC),
+                    expires_at=far_future,
+                )
+            )
+            s.commit()
+        del ctx, user_id
+
+        client = TestClient(app_with_overrides)
+        resp = client.post(
+            "/api/v1/auth/passkey/register/finish",
+            json={"challenge_id": signup_challenge_id, "credential": _raw()},
+        )
+        assert resp.status_code == 400
+        assert resp.json()["detail"]["error"] == "invalid_registration"
+        with factory() as s:
+            assert s.get(WebAuthnChallenge, signup_challenge_id) is None
+
+    def test_too_many_passkeys_burns_challenge(
+        self,
+        app_with_overrides: FastAPI,
+        factory: sessionmaker[Session],
+        redirect_default_engine: None,
+        seeded: tuple[WorkspaceContext, str],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """The 6th finish races the cap recheck; the challenge is still
+        burned so the attacker can't keep replaying the same id."""
+        _, user_id = seeded
+        client = TestClient(app_with_overrides)
+        # Mint a legit challenge while the user has zero credentials.
+        start = client.post("/api/v1/auth/passkey/register/start")
+        challenge_id = start.json()["challenge_id"]
+        # Seed 5 existing credentials between start and finish — the
+        # in-transaction recheck fires.
+        with factory() as s:
+            for i in range(5):
+                s.add(
+                    PasskeyCredential(
+                        id=bytes([i + 0x10]) * 32,
+                        user_id=user_id,
+                        public_key=b"\x00" * 32,
+                        sign_count=0,
+                        backup_eligible=False,
+                        created_at=_PINNED,
+                    )
+                )
+            s.commit()
+
+        monkeypatch.setattr(
+            passkey_module,
+            "verify_registration",
+            lambda **_: _verified(),
+        )
+        resp = client.post(
+            "/api/v1/auth/passkey/register/finish",
+            json={"challenge_id": challenge_id, "credential": _raw()},
+        )
+        assert resp.status_code == 422
+        assert resp.json()["detail"]["error"] == "too_many_passkeys"
+        with factory() as s:
+            assert s.get(WebAuthnChallenge, challenge_id) is None
+
+    def test_unknown_challenge_is_idempotent(
+        self,
+        app_with_overrides: FastAPI,
+        factory: sessionmaker[Session],
+        redirect_default_engine: None,
+    ) -> None:
+        """Concurrent-finish race: posting a challenge id that was
+        already consumed by a sibling call must NOT crash the handler.
+        The fresh-UoW delete tolerates zero rows affected.
+        """
+        client = TestClient(app_with_overrides)
+        # No challenge row seeded — simulates "the other racer won".
+        fake_id = new_ulid()
+        resp = client.post(
+            "/api/v1/auth/passkey/register/finish",
+            json={"challenge_id": fake_id, "credential": _raw()},
+        )
+        assert resp.status_code == 409
+        assert resp.json()["detail"]["error"] == "challenge_consumed_or_unknown"
+        # Still no row — the idempotent delete didn't insert or crash.
+        with factory() as s:
+            assert s.get(WebAuthnChallenge, fake_id) is None
+
+
+class TestSignupFinishChallengeSingleUse:
+    """cd-qx1f: signup-flow finish burns the challenge on failure too."""
+
+    def test_invalid_registration_burns_challenge(
+        self,
+        app_with_overrides: FastAPI,
+        factory: sessionmaker[Session],
+        redirect_default_engine: None,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from app.auth.webauthn import InvalidRegistrationResponse
+
+        client = TestClient(app_with_overrides)
+        # Seed a user for the finish path — the signup service
+        # normally creates this atomically; we pre-create for the test.
+        with factory() as s:
+            user = bootstrap_user(
+                s,
+                email="sigfail@example.com",
+                display_name="Signup Fail",
+                clock=FrozenClock(_PINNED),
+            )
+            s.commit()
+            user_id = user.id
+
+        start = client.post(
+            "/api/v1/auth/passkey/signup/register/start",
+            json={
+                "signup_session_id": "01HWA00000000000000000SGN8",
+                "email": "sigfail@example.com",
+                "display_name": "Signup Fail",
+            },
+        )
+        challenge_id = start.json()["challenge_id"]
+        with factory() as s:
+            assert s.get(WebAuthnChallenge, challenge_id) is not None
+
+        def _raise(**_: Any) -> VerifiedRegistration:
+            raise InvalidRegistrationResponse("signature mismatch")
+
+        monkeypatch.setattr(passkey_module, "verify_registration", _raise)
+        resp = client.post(
+            "/api/v1/auth/passkey/signup/register/finish",
+            json={
+                "signup_session_id": "01HWA00000000000000000SGN8",
+                "user_id": user_id,
+                "challenge_id": challenge_id,
+                "credential": _raw(),
+            },
+        )
+        assert resp.status_code == 400
+        with factory() as s:
+            assert s.get(WebAuthnChallenge, challenge_id) is None
+
+    def test_wrong_signup_session_burns_challenge(
+        self,
+        app_with_overrides: FastAPI,
+        factory: sessionmaker[Session],
+        redirect_default_engine: None,
+    ) -> None:
+        """Cross-signup replay is refused and the original challenge is
+        burned so the attacker can't keep swinging at it."""
+        client = TestClient(app_with_overrides)
+        start = client.post(
+            "/api/v1/auth/passkey/signup/register/start",
+            json={
+                "signup_session_id": "01HWA00000000000000000SGNA",
+                "email": "a@example.com",
+                "display_name": "A",
+            },
+        )
+        challenge_id = start.json()["challenge_id"]
+
+        resp = client.post(
+            "/api/v1/auth/passkey/signup/register/finish",
+            json={
+                "signup_session_id": "01HWA00000000000000000SGNB",
+                "user_id": "01HWA00000000000000000USRX",
+                "challenge_id": challenge_id,
+                "credential": _raw(),
+            },
+        )
+        assert resp.status_code == 400
+        with factory() as s:
+            assert s.get(WebAuthnChallenge, challenge_id) is None

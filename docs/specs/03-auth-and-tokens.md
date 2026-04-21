@@ -894,6 +894,24 @@ user whose unused-code count drops below 3 until they re-mint.
 - Attestation: `none` — we trust the browser's RP ID binding.
 - Algorithms: ES256 (`-7`), RS256 (`-257`) for broader iOS/Android
   support.
+- **Challenge rows are single-use, including on failure.** A
+  `webauthn_challenge` row is deleted the moment its matching
+  `/finish` HTTP call lands — whether the domain service accepted
+  the assertion (success path) or refused it (bad signature, clone
+  detected, subject mismatch, expired, unknown credential, any
+  verifier-library rejection). The rate-limit short-circuit
+  (`PasskeyLoginLockout`) is the sole exception: it fires before
+  any DB read, so the row stays valid for the same caller to
+  finish once the throttle bucket drains inside the 10-min TTL.
+  The delete on failure runs on a **fresh** Unit-of-Work so it
+  lands even though the primary UoW rolls back on the raise, and
+  it's idempotent (`DELETE ... WHERE id = ?`) so two concurrent
+  finish calls racing to consume the same challenge both exit
+  cleanly. Scope caveat: as of cd-qx1f the delete-on-failure is
+  wired into the HTTP router surface only. The internal callers
+  `complete_signup` / `complete_recovery` invoke `register_finish*`
+  inside their own UoWs and still leak the row to the 10-minute
+  TTL on failure — tracked as a follow-up (cd-wgbl).
 
 ## Chat-channel bindings
 

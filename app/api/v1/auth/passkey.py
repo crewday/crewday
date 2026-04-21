@@ -44,10 +44,12 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel, Field
+from sqlalchemy import delete
 from sqlalchemy.orm import Session
 
 from app.abuse.throttle import ShieldStore
 from app.abuse.throttle import throttle as throttle_decorator
+from app.adapters.db.identity.models import WebAuthnChallenge
 from app.adapters.db.session import make_uow
 from app.api.deps import current_workspace_context, db_session
 from app.audit import write_audit
@@ -284,6 +286,10 @@ def post_register_finish(
             credential=body.credential,
         )
     except _DomainError as exc:
+        # cd-qx1f: challenge rows are single-use even on verification
+        # failure. The primary UoW rolls back on the raise, so we
+        # land the delete on a fresh UoW before mapping to HTTP.
+        _delete_challenge_fresh_uow(body.challenge_id)
         raise _http_for(exc) from exc
     return RegisterFinishResponse(
         credential_id=ref.credential_id_b64url,
@@ -407,6 +413,9 @@ def post_signup_register_finish(
             credential=body.credential,
         )
     except _DomainError as exc:
+        # cd-qx1f: single-use even on failure. See sibling in
+        # :func:`post_register_finish`.
+        _delete_challenge_fresh_uow(body.challenge_id)
         raise _http_for(exc) from exc
     return RegisterFinishResponse(
         credential_id=ref.credential_id_b64url,
@@ -552,6 +561,42 @@ def _invalidate_for_credential_fresh_uow(
             )
     except Exception:
         _log.exception("clone-detected session invalidate failed on fresh UoW")
+
+
+def _delete_challenge_fresh_uow(challenge_id: str) -> None:
+    """Idempotently delete ``challenge_id`` on its own Unit-of-Work.
+
+    Spec §03 "WebAuthn specifics" / cd-qx1f: challenge rows are
+    single-use **even on verification failure**. The primary UoW
+    rolls back on any domain raise, so a challenge delete inside it
+    would disappear with the rollback and leave the row redeemable
+    until its 10-minute TTL — handing an attacker with a leaked
+    ``challenge_id`` a replay window that the spec wants to be zero.
+    Opening a fresh UoW via :func:`make_uow` here lands the delete
+    even when the caller's UoW is about to roll back, mirroring the
+    sibling :func:`_write_login_audit_fresh_uow` pattern.
+
+    Idempotency: uses a ``DELETE ... WHERE id = ?`` statement, which
+    tolerates zero rows affected. Two concurrent finish calls (one
+    succeeds and deletes the row, the other fails post-success and
+    tries to delete it again) both exit cleanly. No ``tenant_agnostic``
+    gate is needed — ``webauthn_challenge`` is an identity-scoped
+    table, not registered in :mod:`app.tenancy.registry`, so the
+    ORM tenant filter ignores it.
+
+    Failures are logged and swallowed so a DB hiccup on the delete
+    never shadows the 4xx response the router is about to return.
+    Broad ``Exception`` catch — ``BaseException`` still propagates so
+    operator aborts aren't swallowed.
+    """
+    try:
+        with make_uow() as uow_session:
+            assert isinstance(uow_session, Session)
+            uow_session.execute(
+                delete(WebAuthnChallenge).where(WebAuthnChallenge.id == challenge_id)
+            )
+    except Exception:
+        _log.exception("fresh-UoW challenge delete failed for id=%r", challenge_id)
 
 
 def _write_login_audit_fresh_uow(
@@ -746,6 +791,15 @@ def build_login_router(
             # Throttle already raised — no throttle advancement here,
             # the lockout *is* the advancement. Still audit so
             # operators see the sustained pressure.
+            #
+            # cd-qx1f: the lockout short-circuits **before** any DB
+            # read, so the challenge row is untouched and we do NOT
+            # burn it here. A legitimate user rate-limited for 10
+            # minutes can still finish with the same challenge once
+            # the bucket drains (within its 10-min TTL). Every
+            # branch below DOES burn the challenge because the
+            # domain verified-and-failed — single-use even on
+            # failure per §03 "WebAuthn specifics".
             _write_login_audit_fresh_uow(
                 action="passkey.login_rejected",
                 credential_id_b64=credential_id_b64,
@@ -800,6 +854,9 @@ def build_login_router(
                     "ip_hash": ip_hash,
                 },
             )
+            # cd-qx1f: single-use even on failure. Idempotent —
+            # zero-rows-affected is fine if another caller beat us.
+            _delete_challenge_fresh_uow(body.challenge_id)
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail={"error": "invalid_credential"},
@@ -831,6 +888,11 @@ def build_login_router(
                     "ip_hash": ip_hash,
                 },
             )
+            # cd-qx1f: single-use even on failure. ``ChallengeNotFound``
+            # naturally lands in a no-op delete (row already gone);
+            # the other four burn the row so a leaked id can't be
+            # replayed until TTL. Idempotent.
+            _delete_challenge_fresh_uow(body.challenge_id)
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail={"error": "invalid_credential"},

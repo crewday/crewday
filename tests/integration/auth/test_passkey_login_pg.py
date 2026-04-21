@@ -314,6 +314,8 @@ class TestLoginFullFlowIntegration:
             actions = {a.action for a in s.scalars(select(AuditLog)).all()}
             assert "passkey.cloned_detected" in actions
             assert "session.created" not in actions
+            # cd-qx1f: challenge row burned on failure via fresh UoW.
+            assert s.get(WebAuthnChallenge, challenge_id) is None
 
     def test_unknown_credential_returns_401_no_session(
         self,
@@ -347,3 +349,5 @@ class TestLoginFullFlowIntegration:
 
         with factory() as s:
             assert s.scalars(select(SessionRow)).first() is None
+            # cd-qx1f: challenge burned even though no credential matched.
+            assert s.get(WebAuthnChallenge, challenge_id) is None

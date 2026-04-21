@@ -1011,3 +1011,348 @@ class TestLoginRouter:
         )
         assert resp.status_code == 429
         assert resp.json()["detail"]["error"] == "rate_limited"
+
+
+# ---------------------------------------------------------------------------
+# cd-qx1f — challenge row is single-use even on login-finish failure
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def redirect_default_engine(
+    engine: Engine,
+    factory: sessionmaker[Session],
+) -> Iterator[None]:
+    """Point :func:`app.adapters.db.session.make_uow` at the test engine.
+
+    cd-qx1f's fresh-UoW challenge delete reads the module-level default
+    sessionmaker. Without this redirect the fresh UoW opens against the
+    production default DB, the broad ``except Exception`` swallows the
+    cross-DB failure, and the assertion "challenge gone" reads from the
+    test DB where nothing was deleted. Mirrors the shim in
+    :mod:`tests.integration.auth.test_passkey_login_pg`.
+    """
+    import app.adapters.db.session as _session_mod
+
+    original_engine = _session_mod._default_engine
+    original_factory = _session_mod._default_sessionmaker_
+    _session_mod._default_engine = engine
+    _session_mod._default_sessionmaker_ = factory
+    try:
+        yield
+    finally:
+        _session_mod._default_engine = original_engine
+        _session_mod._default_sessionmaker_ = original_factory
+
+
+class TestLoginFinishChallengeSingleUse:
+    """cd-qx1f: login finish burns the challenge on every failure path.
+
+    Exercises every raise shape that :func:`login_finish` emits:
+    InvalidLoginAttempt (unknown credential, malformed id, verifier
+    rejection), CloneDetected, ChallengeExpired, ChallengeSubjectMismatch.
+    ChallengeNotFound is naturally idempotent (row already gone).
+    PasskeyLoginLockout is NOT covered here because it short-circuits
+    before any DB read — the challenge row is untouched and deliberately
+    left intact so the caller can retry inside the 10-min TTL once the
+    throttle bucket drains.
+    """
+
+    def test_unknown_credential_burns_challenge(
+        self,
+        login_app: FastAPI,
+        factory: sessionmaker[Session],
+        redirect_default_engine: None,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        client = TestClient(login_app)
+        start = client.post("/api/v1/auth/passkey/login/start")
+        challenge_id = start.json()["challenge_id"]
+        with factory() as s:
+            assert s.get(WebAuthnChallenge, challenge_id) is not None
+
+        # No credential seeded — the finish resolves to InvalidLoginAttempt.
+        _stub_verify(monkeypatch, verified=_verified_authentication())
+        resp = client.post(
+            "/api/v1/auth/passkey/login/finish",
+            json={
+                "challenge_id": challenge_id,
+                "credential": _raw_assertion(b"\xde" * 32),
+            },
+        )
+        assert resp.status_code == 401
+        with factory() as s:
+            assert s.get(WebAuthnChallenge, challenge_id) is None
+
+    def test_verifier_rejection_burns_challenge(
+        self,
+        login_app: FastAPI,
+        factory: sessionmaker[Session],
+        redirect_default_engine: None,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """py_webauthn raises :class:`InvalidAuthenticationResponse`; the
+        domain rewraps as :class:`InvalidLoginAttempt`."""
+        with factory() as s:
+            user = bootstrap_user(s, email="bad@example.com", display_name="Bad")
+            credential_id = b"\x55" * 32
+            s.add(
+                PasskeyCredential(
+                    id=credential_id,
+                    user_id=user.id,
+                    public_key=b"\x66" * 64,
+                    sign_count=1,
+                    backup_eligible=False,
+                    created_at=_PINNED,
+                )
+            )
+            s.commit()
+
+        client = TestClient(login_app)
+        start = client.post("/api/v1/auth/passkey/login/start")
+        challenge_id = start.json()["challenge_id"]
+
+        _stub_verify_raises(monkeypatch, message="bad signature")
+        resp = client.post(
+            "/api/v1/auth/passkey/login/finish",
+            json={
+                "challenge_id": challenge_id,
+                "credential": _raw_assertion(credential_id),
+            },
+        )
+        assert resp.status_code == 401
+        with factory() as s:
+            assert s.get(WebAuthnChallenge, challenge_id) is None
+
+    def test_malformed_credential_id_burns_challenge(
+        self,
+        login_app: FastAPI,
+        factory: sessionmaker[Session],
+        redirect_default_engine: None,
+    ) -> None:
+        """A malformed base64url id → InvalidLoginAttempt inside the
+        domain, before any DB work. The challenge row is still burned.
+        """
+        client = TestClient(login_app)
+        start = client.post("/api/v1/auth/passkey/login/start")
+        challenge_id = start.json()["challenge_id"]
+
+        resp = client.post(
+            "/api/v1/auth/passkey/login/finish",
+            json={
+                "challenge_id": challenge_id,
+                "credential": {"id": "not_base64!!!", "type": "public-key"},
+            },
+        )
+        assert resp.status_code == 401
+        with factory() as s:
+            assert s.get(WebAuthnChallenge, challenge_id) is None
+
+    def test_clone_detected_burns_challenge(
+        self,
+        login_app: FastAPI,
+        factory: sessionmaker[Session],
+        redirect_default_engine: None,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        with factory() as s:
+            user = bootstrap_user(s, email="clone2@example.com", display_name="C2")
+            credential_id = b"\x33" * 32
+            s.add(
+                PasskeyCredential(
+                    id=credential_id,
+                    user_id=user.id,
+                    public_key=b"\x44" * 64,
+                    sign_count=10,
+                    backup_eligible=False,
+                    created_at=_PINNED,
+                )
+            )
+            s.commit()
+
+        client = TestClient(login_app)
+        start = client.post("/api/v1/auth/passkey/login/start")
+        challenge_id = start.json()["challenge_id"]
+
+        # Counter regresses 10 → 3 → CloneDetected.
+        _stub_verify(monkeypatch, verified=_verified_authentication(new_sign_count=3))
+        resp = client.post(
+            "/api/v1/auth/passkey/login/finish",
+            json={
+                "challenge_id": challenge_id,
+                "credential": _raw_assertion(credential_id),
+            },
+        )
+        assert resp.status_code == 401
+        with factory() as s:
+            assert s.get(WebAuthnChallenge, challenge_id) is None
+
+    def test_challenge_expired_burns_challenge(
+        self,
+        login_app: FastAPI,
+        factory: sessionmaker[Session],
+        redirect_default_engine: None,
+    ) -> None:
+        """Seed an already-expired login challenge and post finish; the
+        domain raises :class:`ChallengeExpired` and the row is burned.
+        """
+        stale_id = new_ulid()
+        with factory() as s:
+            s.add(
+                WebAuthnChallenge(
+                    id=stale_id,
+                    user_id=None,
+                    signup_session_id="__login__",
+                    challenge=b"\x00" * 32,
+                    exclude_credentials=[],
+                    created_at=datetime(2020, 1, 1, tzinfo=UTC),
+                    expires_at=datetime(2020, 1, 1, 0, 10, tzinfo=UTC),
+                )
+            )
+            s.commit()
+            assert s.get(WebAuthnChallenge, stale_id) is not None
+
+        client = TestClient(login_app)
+        resp = client.post(
+            "/api/v1/auth/passkey/login/finish",
+            json={
+                "challenge_id": stale_id,
+                "credential": _raw_assertion(b"\x77" * 32),
+            },
+        )
+        assert resp.status_code == 401
+        with factory() as s:
+            assert s.get(WebAuthnChallenge, stale_id) is None
+
+    def test_subject_mismatch_burns_challenge(
+        self,
+        login_app: FastAPI,
+        factory: sessionmaker[Session],
+        redirect_default_engine: None,
+    ) -> None:
+        """A signup challenge smuggled into login_finish is refused and
+        the row is burned so the attacker can't keep pounding it.
+        """
+        cid = new_ulid()
+        # Use a far-future expiry so the real wall-clock stays inside
+        # the TTL; we want to land on the subject check, not expiry.
+        now = datetime.now(tz=UTC)
+        with factory() as s:
+            s.add(
+                WebAuthnChallenge(
+                    id=cid,
+                    user_id=None,
+                    # Not the login sentinel → subject mismatch.
+                    signup_session_id="01HWA00000000000000000SGN2",
+                    challenge=b"\x00" * 32,
+                    exclude_credentials=[],
+                    created_at=now,
+                    expires_at=now + timedelta(hours=1),
+                )
+            )
+            s.commit()
+
+        client = TestClient(login_app)
+        resp = client.post(
+            "/api/v1/auth/passkey/login/finish",
+            json={
+                "challenge_id": cid,
+                "credential": _raw_assertion(b"\x77" * 32),
+            },
+        )
+        assert resp.status_code == 401
+        with factory() as s:
+            assert s.get(WebAuthnChallenge, cid) is None
+
+    def test_unknown_challenge_is_idempotent(
+        self,
+        login_app: FastAPI,
+        factory: sessionmaker[Session],
+        redirect_default_engine: None,
+    ) -> None:
+        """Concurrent-finish race: if a sibling call already consumed
+        the challenge, the fresh-UoW delete is a no-op and the handler
+        still returns 401 without crashing.
+        """
+        client = TestClient(login_app)
+        fake_id = new_ulid()
+        resp = client.post(
+            "/api/v1/auth/passkey/login/finish",
+            json={
+                "challenge_id": fake_id,
+                "credential": _raw_assertion(b"\x77" * 32),
+            },
+        )
+        assert resp.status_code == 401
+        with factory() as s:
+            assert s.get(WebAuthnChallenge, fake_id) is None
+
+    def test_rate_limit_preserves_challenge(
+        self,
+        login_app: FastAPI,
+        factory: sessionmaker[Session],
+        redirect_default_engine: None,
+        throttle: Throttle,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """PasskeyLoginLockout fires before any DB read — the challenge
+        row stays intact so the caller can finish once the bucket drains.
+        """
+        with factory() as s:
+            user = bootstrap_user(s, email="rlc@example.com", display_name="RLC")
+            credential_id = b"\x22" * 32
+            s.add(
+                PasskeyCredential(
+                    id=credential_id,
+                    user_id=user.id,
+                    public_key=b"\x11" * 64,
+                    sign_count=1,
+                    backup_eligible=False,
+                    created_at=_PINNED,
+                )
+            )
+            s.commit()
+
+        # Prime the lockout — same pepper/IP arithmetic as
+        # test_finish_rate_limited_returns_429.
+        from webauthn.helpers import bytes_to_base64url
+
+        from app.auth._hashing import hash_with_pepper
+        from app.auth.keys import derive_subkey
+
+        settings = Settings.model_construct(
+            database_url="sqlite:///:memory:",
+            root_key=SecretStr("unit-test-passkey-login-root-key"),
+            session_owner_ttl_days=7,
+            session_user_ttl_days=30,
+        )
+        login_pepper = derive_subkey(
+            settings.root_key, purpose="passkey-login-throttle"
+        )
+        ip_hash = hash_with_pepper("testclient", login_pepper)
+        cred_b64 = bytes_to_base64url(credential_id)
+        cred_hash = hash_with_pepper(cred_b64, login_pepper)
+        for _ in range(3):
+            throttle.record_passkey_login_failure(
+                credential_id_hash=cred_hash,
+                ip_hash=ip_hash,
+                now=datetime.now(tz=UTC),
+            )
+
+        client = TestClient(login_app)
+        start = client.post("/api/v1/auth/passkey/login/start")
+        challenge_id = start.json()["challenge_id"]
+
+        _stub_verify(monkeypatch, verified=_verified_authentication())
+        resp = client.post(
+            "/api/v1/auth/passkey/login/finish",
+            json={
+                "challenge_id": challenge_id,
+                "credential": _raw_assertion(credential_id),
+            },
+        )
+        assert resp.status_code == 429
+        # Row stays — lockout is not a "verification failure" for
+        # the purposes of §03 "single-use on failure".
+        with factory() as s:
+            assert s.get(WebAuthnChallenge, challenge_id) is not None
