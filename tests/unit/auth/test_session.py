@@ -26,7 +26,7 @@ See ``docs/specs/03-auth-and-tokens.md`` §"Sessions",
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -990,11 +990,16 @@ class TestBuildSessionCookie:
         assert "domain=" not in header
 
     def test_secure_false_falls_back_to_dev_cookie(
-        self, caplog: pytest.LogCaptureFixture
+        self,
+        caplog: pytest.LogCaptureFixture,
+        allow_propagated_log_capture: Callable[..., None],
     ) -> None:
         """``secure=False`` drops the ``__Host-`` prefix + Secure attr."""
         from app.auth.session_cookie import DEV_SESSION_COOKIE_NAME
 
+        # alembic's fileConfig in the integration fixture disables
+        # propagation on app.* loggers; re-enable for capture.
+        allow_propagated_log_capture("app.auth.session_cookie")
         expires = _PINNED + timedelta(days=7)
         with caplog.at_level("WARNING", logger="app.auth.session_cookie"):
             header = build_session_cookie("t", expires, secure=False)
