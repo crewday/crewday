@@ -25,7 +25,7 @@ without the (not-yet-shipped) ``permission_rule`` table.
 from __future__ import annotations
 
 import logging
-from collections.abc import Iterator, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
@@ -787,28 +787,18 @@ class TestDefaultAllow:
 class TestStructuredLogging:
     """Every deny emits one ``authz.denied`` log record with the decision data.
 
-    The integration fixture's ``alembic upgrade head`` path runs
-    ``logging.config.fileConfig`` with ``disable_existing_loggers=True``
-    (alembic.ini default), which flips ``propagate=False`` on loggers
-    not listed in the config. ``caplog`` attaches to the root logger,
-    so every test in this class force-enables propagation before the
-    assertions to stay stable regardless of whether an alembic-
-    touching fixture ran earlier in the session.
+    Delegates the propagate/disabled restore dance to the shared
+    :func:`allow_propagated_log_capture` fixture in
+    ``tests/conftest.py`` — alembic's ``fileConfig`` side effect
+    otherwise hides records from ``caplog``. See cd-0dyv.
     """
 
     @pytest.fixture(autouse=True)
-    def _restore_logger_propagation(self) -> Iterator[None]:
-        """Force ``app.authz.enforce`` to propagate for caplog visibility."""
-        logger = logging.getLogger("app.authz.enforce")
-        saved_propagate = logger.propagate
-        saved_disabled = logger.disabled
-        logger.propagate = True
-        logger.disabled = False
-        try:
-            yield
-        finally:
-            logger.propagate = saved_propagate
-            logger.disabled = saved_disabled
+    def _allow_enforce_capture(
+        self, allow_propagated_log_capture: Callable[..., None]
+    ) -> None:
+        """Re-enable propagation on ``app.authz.enforce`` for this class."""
+        allow_propagated_log_capture("app.authz.enforce")
 
     def test_deny_emits_structured_log(
         self,

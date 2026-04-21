@@ -26,6 +26,7 @@ See ``docs/specs/01-architecture.md`` §"High-level picture",
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Literal
@@ -287,12 +288,22 @@ class TestSpaCatchAll:
         app_factory: Settings,
         monkeypatch: pytest.MonkeyPatch,
         caplog: pytest.LogCaptureFixture,
+        allow_propagated_log_capture: Callable[..., None],
     ) -> None:
-        """A missing prod build is logged at WARNING so ops notice."""
+        """A missing prod build is logged at WARNING so ops notice.
+
+        The ``allow_propagated_log_capture`` fixture
+        (``tests/conftest.py``) re-enables propagation for the factory
+        logger after alembic's ``fileConfig`` flipped it during an
+        earlier integration fixture — without it ``caplog.records`` is
+        empty even though the WARNING fired. See the fixture docstring
+        and cd-0dyv for the full story.
+        """
         monkeypatch.setattr(
             "app.api.factory._SPA_DIST", Path("/tmp/does-not-exist-xyz")
         )
-        with caplog.at_level("WARNING", logger="app.api.factory"):
+        allow_propagated_log_capture("app.api.factory")
+        with caplog.at_level(logging.WARNING, logger="app.api.factory"):
             create_app(settings=app_factory)
         events = [
             rec

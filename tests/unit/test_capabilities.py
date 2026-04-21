@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import dataclasses
 import logging
+from collections.abc import Callable
 from pathlib import Path
 from typing import Literal
 
@@ -189,27 +190,20 @@ class TestProbeWithoutSession:
 
 class TestProbeLogsSnapshotOnce:
     def test_boot_log_is_emitted_exactly_once(
-        self, caplog: pytest.LogCaptureFixture
+        self,
+        caplog: pytest.LogCaptureFixture,
+        allow_propagated_log_capture: Callable[..., None],
     ) -> None:
         """One INFO snapshot line per :func:`probe` call.
 
-        ``caplog`` attaches its handler to the root logger, so we also
-        force ``propagate=True`` on the capabilities logger: the
-        integration fixture's ``alembic upgrade head`` path runs
-        ``logging.config.fileConfig`` which can leave non-listed
-        loggers with ``propagate`` cleared. Without the force, the
-        INFO line reaches the capabilities logger but never the root,
-        and the capture is empty.
+        The ``allow_propagated_log_capture`` fixture
+        (``tests/conftest.py``) re-enables propagation for the
+        capabilities logger after alembic's ``fileConfig`` flipped it
+        during an earlier integration fixture — otherwise the INFO
+        line never reaches the root logger and ``caplog.records`` is
+        empty. See cd-0dyv for the root cause.
         """
-        caps_logger = logging.getLogger("app.capabilities")
-        caps_logger.propagate = True
-        # ``logging.config.fileConfig`` (used by alembic.ini during
-        # integration test setup) defaults to
-        # ``disable_existing_loggers=True``, which flips
-        # :attr:`logging.Logger.disabled` on loggers that aren't in the
-        # config file. Re-enable explicitly so this test is stable
-        # regardless of whether the alembic fixture ran earlier.
-        caps_logger.disabled = False
+        allow_propagated_log_capture("app.capabilities")
         caplog.set_level(logging.INFO, logger="app.capabilities")
         probe(_sqlite_settings(), session=None)
         snapshot_lines = [
