@@ -384,20 +384,54 @@ def _handle_http_exception(
     response still carries a stable URI. FastAPI's built-in
     :class:`HTTPException` subclasses :class:`StarletteHTTPException`
     so a single handler covers both.
+
+    ``exc.detail`` shapes (spec §12 "Errors"):
+
+    * ``None`` → ``detail`` field omitted from the envelope.
+    * ``str`` → rendered as the ``detail`` field (but suppressed when
+      it duplicates ``title``; see below).
+    * ``dict`` → spread into the envelope's extension fields (so
+      ``HTTPException(detail={"error": "token_not_found"})`` surfaces
+      ``"error": "token_not_found"`` at envelope top level, not as
+      a Python-repr string inside ``detail``). The dict's ``"message"``
+      key — if any — becomes the ``detail`` field; every other key
+      flows through :paramref:`problem_response.extra`, which already
+      guards the reserved envelope keys against accidental override.
+    * Any other type (list, tuple, int, …) → ``str(exc.detail)``
+      fallback so the envelope still carries a non-null ``detail``.
+
+    FastAPI defaults ``detail`` to :class:`HTTPStatus.phrase`
+    (e.g. ``"Not Found"``) when omitted; the case-insensitive compare
+    below suppresses that redundant duplication of ``title``.
     """
     status = exc.status_code
     type_name = _HTTP_STATUS_TYPE_MAP.get(status, f"http_{status}")
     title = _http_title(status)
-    # ``exc.detail`` is whatever the caller passed to ``HTTPException``.
-    # FastAPI defaults it to :class:`HTTPStatus.phrase` (e.g. ``"Not
-    # Found"``) when omitted, which would duplicate ``title``; only
-    # render it when the caller set a distinct value. Compare
-    # case-insensitively to handle the spec's lowercase titles
-    # (``"Not found"``) vs stdlib's title-case phrases (``"Not Found"``).
+
     detail_value: str | None
+    envelope_extra: dict[str, object] | None = None
     if exc.detail is None:
         detail_value = None
+    elif isinstance(exc.detail, dict):
+        # Dict-shaped details are the router idiom for structured
+        # error symbols (``{"error": "token_not_found"}``). Spread
+        # every non-``message`` key into ``extra`` so the envelope
+        # surfaces them as first-class JSON fields; the ``message``
+        # key (if present) is the human-readable detail. Skip the
+        # title-dedup pass here because a dict detail is explicit —
+        # the caller chose these exact fields and didn't fall back
+        # to the FastAPI ``HTTPStatus.phrase`` default.
+        raw_detail = exc.detail.get("message")
+        detail_value = str(raw_detail) if raw_detail is not None else None
+        envelope_extra = {k: v for k, v in exc.detail.items() if k != "message"}
+    elif isinstance(exc.detail, str):
+        detail_value = exc.detail
+        if detail_value.casefold() == title.casefold():
+            detail_value = None
     else:
+        # List, tuple, int, … — preserve the pre-fix fallback so the
+        # envelope still carries a ``detail`` value for arbitrary
+        # types we aren't getting smart about.
         detail_value = str(exc.detail)
         if detail_value.casefold() == title.casefold():
             detail_value = None
@@ -416,6 +450,7 @@ def _handle_http_exception(
         type_name=type_name,
         title=title,
         detail=detail_value,
+        extra=envelope_extra,
         extra_headers=extra_headers,
     )
 
