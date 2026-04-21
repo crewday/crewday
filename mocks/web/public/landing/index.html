@@ -1,0 +1,616 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#3F6E3B" />
+    <title>crew.day — run your houses like a hotel. Without the front desk.</title>
+    <meta
+      name="description"
+      content="crew.day is the operations back-office for owners and small property-management outfits — designed so an LLM agent runs the day-to-day and the humans live in the house."
+    />
+    <link rel="icon" href="/mocks/crewday-logo.svg" type="image/svg+xml" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,400;0,9..144,500;0,9..144,600;0,9..144,700;1,9..144,300;1,9..144,400;1,9..144,500;1,9..144,600&family=Inter+Tight:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="landing.css" />
+  </head>
+  <body>
+    <div class="grain" aria-hidden="true"></div>
+
+    <div class="frame">
+      <!-- ── Masthead ─────────────────────────────────────────── -->
+      <header class="masthead" role="banner">
+        <a href="/mocks/landing/" class="masthead__mark" aria-label="crew.day — home">
+          <span class="masthead__mark-dot" aria-hidden="true"></span>
+          <span>crew.day</span>
+        </a>
+        <div class="masthead__dateline">
+          Vol. <em>MMXXVI</em> · No. <em>01</em> · <em>Paper</em> Edition
+        </div>
+        <nav class="masthead__nav" aria-label="Primary">
+          <a href="#why">Why</a>
+          <a href="#try-it">Demo</a>
+          <a href="#audiences">Who it's for</a>
+          <a href="#pricing">Pricing</a>
+          <a href="/mocks/">App preview</a>
+          <button class="masthead__theme" id="theme-toggle" type="button" aria-label="Toggle theme">☾</button>
+        </nav>
+      </header>
+      <hr class="rule-pair" />
+
+      <!-- ── Hero ─────────────────────────────────────────────── -->
+      <section class="hero stagger" id="top">
+        <div>
+          <p class="hero__slug">An operations back-office for places with beds</p>
+          <h1 class="hero__headline">
+            Run your houses<span class="break"> like a hotel.</span>
+            <em>Without the front desk.</em>
+          </h1>
+          <p class="hero__sub">
+            crew.day is the operations back-office for owners and small
+            property-management outfits — designed so an LLM agent runs
+            the day-to-day and the humans live in the house.
+          </p>
+          <div class="hero__cta">
+            <a class="btn btn--primary" href="#try-it">
+              Try the demo <span class="btn__arrow" aria-hidden="true">→</span>
+            </a>
+            <a class="btn btn--ghost" href="https://app.crew.day/signup/start">
+              Sign up <span class="btn__arrow" aria-hidden="true">⟶</span>
+            </a>
+          </div>
+          <dl class="hero__meta">
+            <div>
+              <strong>1–50</strong>
+              Rooms, not chains
+            </div>
+            <div>
+              <strong>§16</strong>
+              Self-hostable
+            </div>
+            <div>
+              <strong>UTC</strong>
+              Time at rest
+            </div>
+          </dl>
+        </div>
+
+        <figure class="hero__art" aria-hidden="true">
+          <!-- Editorial etching: gabled house with ivy, moss-ink strokes. -->
+          <svg viewBox="0 0 420 420" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+            <defs>
+              <pattern id="hatch" width="5" height="5" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+                <line x1="0" y1="0" x2="0" y2="5" stroke="currentColor" stroke-width="0.6" opacity="0.35"/>
+              </pattern>
+              <linearGradient id="skywash" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stop-color="#EBE1D0"/>
+                <stop offset="100%" stop-color="#FAF7F2"/>
+              </linearGradient>
+            </defs>
+
+            <!-- sky -->
+            <rect x="0" y="0" width="420" height="280" fill="url(#skywash)"/>
+            <!-- ground -->
+            <rect x="0" y="280" width="420" height="140" fill="#F3ECE0"/>
+            <line x1="0" y1="280" x2="420" y2="280" stroke="#1F1A14" stroke-width="1"/>
+
+            <!-- far hills -->
+            <path d="M 0 280 Q 90 220 180 260 T 420 250 L 420 280 Z" fill="#3F6E3B" opacity="0.18"/>
+            <path d="M 0 280 Q 60 250 140 270 T 300 260 T 420 275 L 420 280 Z" fill="#3F6E3B" opacity="0.35"/>
+
+            <!-- sun -->
+            <circle cx="330" cy="110" r="26" fill="none" stroke="#B04A27" stroke-width="1.4"/>
+            <circle cx="330" cy="110" r="26" fill="#D9A441" opacity="0.35"/>
+
+            <!-- house body -->
+            <g stroke="#1F1A14" fill="#FFFDF9" stroke-width="1.4">
+              <rect x="120" y="200" width="180" height="120"/>
+              <polygon points="110,200 210,125 310,200" fill="#2F5A2C"/>
+              <rect x="200" y="240" width="32" height="80" fill="#1F1A14"/>
+              <!-- windows -->
+              <rect x="140" y="220" width="36" height="36"/>
+              <line x1="158" y1="220" x2="158" y2="256"/>
+              <line x1="140" y1="238" x2="176" y2="238"/>
+              <rect x="244" y="220" width="36" height="36"/>
+              <line x1="262" y1="220" x2="262" y2="256"/>
+              <line x1="244" y1="238" x2="280" y2="238"/>
+              <rect x="140" y="270" width="36" height="36"/>
+              <rect x="244" y="270" width="36" height="36"/>
+              <!-- chimney -->
+              <rect x="260" y="140" width="18" height="38" fill="#1F1A14"/>
+            </g>
+
+            <!-- ivy -->
+            <g stroke="#3F6E3B" fill="none" stroke-width="1.3" stroke-linecap="round">
+              <path d="M 120 200 Q 108 180 116 160 Q 102 144 112 124 Q 96 108 108 88"/>
+              <path d="M 300 200 Q 312 186 304 170 Q 318 156 308 138"/>
+              <!-- leaves -->
+              <g fill="#3F6E3B">
+                <ellipse cx="112" cy="174" rx="4.5" ry="3" transform="rotate(-30 112 174)"/>
+                <ellipse cx="105" cy="152" rx="4.5" ry="3" transform="rotate(20 105 152)"/>
+                <ellipse cx="113" cy="130" rx="4.5" ry="3" transform="rotate(-20 113 130)"/>
+                <ellipse cx="101" cy="110" rx="4.5" ry="3" transform="rotate(30 101 110)"/>
+                <ellipse cx="109" cy="92"  rx="4.5" ry="3" transform="rotate(-10 109 92)"/>
+                <ellipse cx="308" cy="180" rx="4.5" ry="3" transform="rotate(20 308 180)"/>
+                <ellipse cx="314" cy="160" rx="4.5" ry="3" transform="rotate(-30 314 160)"/>
+                <ellipse cx="308" cy="140" rx="4.5" ry="3" transform="rotate(20 308 140)"/>
+              </g>
+            </g>
+
+            <!-- garden path + hedges -->
+            <path d="M 216 320 L 216 420 M 205 420 L 227 420 M 210 400 L 222 400 M 208 380 L 224 380 M 212 360 L 220 360 M 210 340 L 222 340" stroke="#1F1A14" stroke-width="1"/>
+            <g fill="url(#hatch)" stroke="#1F1A14" stroke-width="1" color="#3F6E3B">
+              <rect x="40" y="310" width="90" height="34" rx="3"/>
+              <rect x="296" y="318" width="88" height="28" rx="3"/>
+            </g>
+
+            <!-- birds -->
+            <g stroke="#1F1A14" fill="none" stroke-width="1.2" stroke-linecap="round">
+              <path d="M 60 80 q 6 -6 12 0 q 6 -6 12 0"/>
+              <path d="M 96 64 q 5 -4 10 0 q 5 -4 10 0"/>
+            </g>
+
+            <!-- subtle keyline -->
+            <rect x="0.5" y="0.5" width="419" height="419" stroke="#1F1A14" stroke-width="1" fill="none" opacity="0.08"/>
+          </svg>
+          <figcaption class="hero__caption">
+            <span>Fig. 1</span>Crew.day at rest — a household as seen from the back office. The agent knows what everyone is doing tomorrow.
+          </figcaption>
+        </figure>
+      </section>
+    </div>
+
+    <!-- ── Pull-quote band ─────────────────────────────────────── -->
+    <section class="band-quote">
+      <div class="band-quote__mark" aria-hidden="true">“</div>
+      <blockquote class="band-quote__text">
+        A hotel of one to fifty rooms, <em>minus the front desk</em>. Guest
+        stays flow in from Airbnb and VRBO; turnovers auto-generate; the
+        cook sees what to prepare tomorrow; the driver sees the airport
+        run; the head of house sees everything.
+      </blockquote>
+      <p class="band-quote__cite">— working mental model · docs/specs §00</p>
+    </section>
+
+    <div class="frame">
+      <!-- ── Feature bands I · II · III ──────────────────────── -->
+      <section class="bands" id="why">
+        <article class="band">
+          <div class="band__numeral">I</div>
+          <div class="band__body">
+            <span class="band__tag">Agent-first</span>
+            <h3>Every button is a <em>tool call.</em></h3>
+            <p>
+              Every user-facing action in crew.day is also exposed as a CLI
+              command; every CLI command is a tool the agent can call;
+              every action is attributed to the delegating user and
+              written to the audit log. The UI is a shell around those
+              commands, not a separate capability.
+            </p>
+            <p>
+              High-impact actions still require a human's explicit
+              approval — the agent drafts, you sign.
+            </p>
+          </div>
+          <div class="band__art" aria-hidden="true">
+            <span class="band__art-label">Fig. 2 — delegation</span>
+            <svg viewBox="0 0 360 220" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <!-- two hands exchanging a card -->
+              <g stroke="#1F1A14" stroke-width="1.4" fill="#FFFDF9" stroke-linecap="round" stroke-linejoin="round">
+                <!-- left hand -->
+                <path d="M 20 150 q 20 -30 60 -26 l 50 4 q 30 2 40 16 l 8 12"/>
+                <path d="M 50 148 l 0 40 M 70 150 l 0 44 M 90 152 l 0 46 M 110 154 l 0 46"/>
+                <!-- right hand -->
+                <path d="M 340 150 q -20 -30 -60 -26 l -50 4 q -30 2 -40 16 l -8 12"/>
+                <path d="M 310 148 l 0 40 M 290 150 l 0 44 M 270 152 l 0 46 M 250 154 l 0 46"/>
+              </g>
+              <!-- card in the middle -->
+              <g>
+                <rect x="135" y="80" width="90" height="60" rx="4" fill="#FAF7F2" stroke="#1F1A14" stroke-width="1.4"/>
+                <rect x="135" y="80" width="90" height="14" fill="#3F6E3B"/>
+                <text x="180" y="92" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="8" fill="#FAF7F2" letter-spacing="1">TOOL · delegate</text>
+                <line x1="145" y1="108" x2="215" y2="108" stroke="#1F1A14" stroke-width="0.8"/>
+                <line x1="145" y1="118" x2="200" y2="118" stroke="#1F1A14" stroke-width="0.8"/>
+                <line x1="145" y1="128" x2="210" y2="128" stroke="#1F1A14" stroke-width="0.8"/>
+                <!-- moss seal -->
+                <circle cx="208" cy="130" r="8" fill="#B04A27" opacity="0.85"/>
+                <text x="208" y="133" text-anchor="middle" font-family="Fraunces, serif" font-size="9" font-style="italic" fill="#FAF7F2">s</text>
+              </g>
+              <!-- arrow of authority -->
+              <path d="M 180 60 Q 180 30 240 34" stroke="#3F6E3B" stroke-width="1.4" fill="none" stroke-linecap="round" marker-end="url(#arrow)"/>
+              <defs>
+                <marker id="arrow" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto">
+                  <path d="M 0 0 L 8 4 L 0 8 Z" fill="#3F6E3B"/>
+                </marker>
+              </defs>
+              <text x="180" y="20" text-anchor="middle" font-family="Fraunces, serif" font-style="italic" font-size="13" fill="#1F1A14">full authority, attributed</text>
+            </svg>
+          </div>
+        </article>
+
+        <article class="band">
+          <div class="band__numeral">II</div>
+          <div class="band__body">
+            <span class="band__tag">Places · People · Tasks</span>
+            <h3>A ledger for <em>who does what, where.</em></h3>
+            <p>
+              Properties, staff, stays, tasks, payroll — all modelled
+              around the ways a small outfit actually works. Owners and
+              managers see everything; workers see today; clients see the
+              slice that is theirs. One data model, three audiences, no
+              double-entry.
+            </p>
+            <p>
+              Turnovers auto-generate from bookings. Evidence photos close
+              tasks. Hours roll up to payslips. The boring parts stay
+              boring.
+            </p>
+          </div>
+          <div class="band__art" aria-hidden="true">
+            <span class="band__art-label">Fig. 3 — ledger</span>
+            <svg viewBox="0 0 360 220" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <!-- ledger book -->
+              <rect x="24" y="20" width="312" height="180" rx="4" fill="#FFFDF9" stroke="#1F1A14" stroke-width="1.4"/>
+              <line x1="180" y1="20" x2="180" y2="200" stroke="#1F1A14" stroke-width="1.4"/>
+              <!-- column heads -->
+              <g font-family="JetBrains Mono, monospace" font-size="9" letter-spacing="1.5" fill="#1F1A14">
+                <text x="44" y="44">PLACE</text>
+                <text x="112" y="44">PERSON</text>
+                <text x="200" y="44">TASK</text>
+                <text x="290" y="44">WHEN</text>
+              </g>
+              <line x1="36" y1="52" x2="324" y2="52" stroke="#1F1A14" stroke-width="0.8"/>
+              <!-- rows -->
+              <g font-family="Fraunces, serif" font-style="italic" font-size="13" fill="#1F1A14">
+                <text x="44" y="76">Villa Mar</text>
+                <text x="112" y="76">Luz</text>
+                <text x="200" y="76">Turnover</text>
+                <text x="290" y="76">10:00</text>
+                <text x="44" y="102">La Bastide</text>
+                <text x="112" y="102">Bernard</text>
+                <text x="200" y="102">Checklist</text>
+                <text x="290" y="102">14:30</text>
+                <text x="44" y="128">Le Clos</text>
+                <text x="112" y="128">Agent</text>
+                <text x="200" y="128">Draft reply</text>
+                <text x="290" y="128">16:00</text>
+                <text x="44" y="154">Villa Mar</text>
+                <text x="112" y="154">Carla</text>
+                <text x="200" y="154">Airport run</text>
+                <text x="290" y="154">18:40</text>
+                <text x="44" y="180">—</text>
+                <text x="112" y="180">Vincent</text>
+                <text x="200" y="180">Expense</text>
+                <text x="290" y="180">22:00</text>
+              </g>
+              <!-- marginal check marks -->
+              <g stroke="#3F6E3B" stroke-width="1.4" fill="none" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M 28 72 l 4 4 l 6 -8"/>
+                <path d="M 28 98 l 4 4 l 6 -8"/>
+                <path d="M 28 124 l 4 4 l 6 -8" stroke="#B04A27"/>
+              </g>
+              <!-- row bands -->
+              <rect x="24" y="136" width="312" height="24" fill="#3F6E3B" opacity="0.06"/>
+              <rect x="24" y="164" width="312" height="24" fill="#D9A441" opacity="0.08"/>
+            </svg>
+          </div>
+        </article>
+
+        <article class="band">
+          <div class="band__numeral">III</div>
+          <div class="band__body">
+            <span class="band__tag">Self-hostable, single-binary</span>
+            <h3>Your box, your data. <em>Your keys.</em></h3>
+            <p>
+              One binary, one SQLite file. Postgres optional. No required
+              SaaS, no phone-home, no marketplace you have to use. The
+              managed deployment at <em>crew.day</em> is convenience — not
+              a gate — and every feature of the product is available on
+              the box sitting in your hall cupboard.
+            </p>
+            <p>
+              Time is UTC at rest, local for display. No PII goes to an
+              upstream LLM without explicit opt-in.
+            </p>
+          </div>
+          <div class="band__art" aria-hidden="true">
+            <span class="band__art-label">Fig. 4 — the box</span>
+            <svg viewBox="0 0 360 220" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <!-- pedestal -->
+              <rect x="60" y="176" width="240" height="8" fill="#1F1A14"/>
+              <rect x="80" y="184" width="200" height="14" fill="#3F6E3B" opacity="0.15"/>
+              <!-- single-binary server -->
+              <g stroke="#1F1A14" stroke-width="1.4" fill="#FFFDF9">
+                <rect x="96" y="60" width="168" height="116" rx="4"/>
+                <!-- ventilation lines -->
+                <line x1="108" y1="74" x2="252" y2="74" stroke-width="1"/>
+                <line x1="108" y1="84" x2="252" y2="84" stroke-width="1" opacity="0.4"/>
+                <line x1="108" y1="94" x2="252" y2="94" stroke-width="1" opacity="0.4"/>
+                <line x1="108" y1="104" x2="252" y2="104" stroke-width="1" opacity="0.4"/>
+                <!-- indicator lights -->
+                <circle cx="120" cy="128" r="5" fill="#3F6E3B"/>
+                <circle cx="136" cy="128" r="5" fill="#D9A441"/>
+                <circle cx="152" cy="128" r="5" fill="#B04A27" opacity="0.5"/>
+                <!-- label -->
+                <rect x="180" y="120" width="68" height="20" rx="2" fill="#FAF7F2" stroke="#1F1A14"/>
+              </g>
+              <text x="214" y="134" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9" letter-spacing="1" fill="#1F1A14">crewday</text>
+              <!-- cable to key -->
+              <path d="M 180 176 Q 180 200 200 200 Q 230 200 230 210" stroke="#1F1A14" stroke-width="1.4" fill="none"/>
+              <!-- key -->
+              <g stroke="#1F1A14" stroke-width="1.4" fill="#D9A441">
+                <circle cx="310" cy="120" r="14"/>
+                <rect x="300" y="118" width="20" height="4" fill="#1F1A14"/>
+                <rect x="324" y="120" width="16" height="4" fill="#1F1A14"/>
+                <rect x="332" y="118" width="4" height="8" fill="#1F1A14"/>
+              </g>
+              <!-- arrow -->
+              <path d="M 276 126 L 294 122" stroke="#1F1A14" stroke-width="1.2" marker-end="url(#arrow2)"/>
+              <defs>
+                <marker id="arrow2" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto">
+                  <path d="M 0 0 L 8 4 L 0 8 Z" fill="#1F1A14"/>
+                </marker>
+              </defs>
+              <text x="30" y="50" font-family="Fraunces, serif" font-style="italic" font-size="13" fill="#1F1A14">one binary,</text>
+              <text x="30" y="68" font-family="Fraunces, serif" font-style="italic" font-size="13" fill="#3F6E3B">your key</text>
+            </svg>
+          </div>
+        </article>
+      </section>
+    </div>
+
+    <!-- ── Compose your demo (scenario picker + cell) ──────────── -->
+    <section class="compose" id="try-it">
+      <div class="compose__inner">
+        <div class="compose__heading">
+          <h2 class="compose__title">Compose <em>your</em> demo.</h2>
+          <p class="compose__meta">
+            Step 01 · pick a persona &nbsp; · &nbsp; Step 02 · pick an intent &nbsp; · &nbsp; <strong>Step 03</strong> · run it
+          </p>
+        </div>
+
+        <div class="picker" role="group" aria-label="Demo scenario picker">
+          <!-- Persona column -->
+          <div class="picker__col">
+            <p class="picker__label">Persona · <em>who you are</em></p>
+            <div class="axis" role="radiogroup" aria-label="Persona" id="axis-persona">
+              <button class="axis__opt" role="radio" data-persona="villa-owner" data-as="owner" aria-selected="true">
+                <span class="axis__glyph">O</span>
+                <span class="axis__label">
+                  <span class="axis__name">I own a villa</span>
+                  <span class="axis__sub">scenario · villa-owner</span>
+                </span>
+              </button>
+              <button class="axis__opt" role="radio" data-persona="rental-manager" data-as="manager" aria-selected="false">
+                <span class="axis__glyph">M</span>
+                <span class="axis__label">
+                  <span class="axis__name">I run a property-management agency</span>
+                  <span class="axis__sub">scenario · rental-manager</span>
+                </span>
+              </button>
+              <button class="axis__opt" role="radio" data-persona="housekeeper" data-as="worker" aria-selected="false">
+                <span class="axis__glyph">H</span>
+                <span class="axis__label">
+                  <span class="axis__name">I work as a housekeeper</span>
+                  <span class="axis__sub">scenario · housekeeper</span>
+                </span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Intent column (populated by JS) -->
+          <div class="picker__col">
+            <p class="picker__label">Intent · <em>what you came to do</em></p>
+            <div class="axis" role="radiogroup" aria-label="Intent" id="axis-intent"></div>
+          </div>
+
+          <!-- Demo cell -->
+          <div class="picker__col cell" aria-label="Demo preview">
+            <p class="picker__label">Preview · <em>live or looped</em></p>
+            <div class="cell__frame">
+              <svg class="cell__poster" id="poster" viewBox="0 0 800 500" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                <!-- poster is a fake SPA screenshot rendered in SVG -->
+                <rect width="800" height="500" fill="#FAF7F2"/>
+                <!-- chrome bar -->
+                <rect x="0" y="0" width="800" height="40" fill="#3F6E3B"/>
+                <circle cx="18" cy="20" r="5" fill="#FAF7F2" opacity="0.85"/>
+                <circle cx="34" cy="20" r="5" fill="#FAF7F2" opacity="0.65"/>
+                <circle cx="50" cy="20" r="5" fill="#FAF7F2" opacity="0.45"/>
+                <rect x="80" y="10" width="640" height="20" rx="10" fill="#2F5A2C"/>
+                <text x="100" y="24" font-family="JetBrains Mono, monospace" font-size="11" fill="#FAF7F2" id="poster-url">demo.crew.day/w/demo-abc/schedule</text>
+                <!-- sidebar -->
+                <rect x="0" y="40" width="200" height="460" fill="#F3ECE0"/>
+                <g font-family="Inter Tight, sans-serif" font-size="12" fill="#1F1A14">
+                  <rect x="16" y="70" width="168" height="28" rx="3" fill="#3F6E3B" opacity="0.12"/>
+                  <text x="30" y="88" font-weight="600" fill="#3F6E3B">● Schedule</text>
+                  <text x="30" y="124">Dashboard</text>
+                  <text x="30" y="150">Properties</text>
+                  <text x="30" y="176">Stays</text>
+                  <text x="30" y="202">Employees</text>
+                  <text x="30" y="228">Approvals</text>
+                  <text x="30" y="254">Payroll</text>
+                  <text x="30" y="280">Instructions</text>
+                  <text x="30" y="306">Audit</text>
+                  <text x="30" y="332">Settings</text>
+                </g>
+                <!-- main area -->
+                <g font-family="Fraunces, serif" fill="#1F1A14">
+                  <text x="228" y="84" font-size="28" font-weight="500" letter-spacing="-0.5" id="poster-title">Tomorrow — 22 Apr</text>
+                  <text x="228" y="108" font-size="13" font-style="italic" fill="#524A3E">Four crews, three properties, one turnover.</text>
+                </g>
+                <!-- schedule grid -->
+                <g>
+                  <line x1="228" y1="140" x2="776" y2="140" stroke="#D6CCB7"/>
+                  <line x1="228" y1="180" x2="776" y2="180" stroke="#E7E0D1"/>
+                  <line x1="228" y1="220" x2="776" y2="220" stroke="#E7E0D1"/>
+                  <line x1="228" y1="260" x2="776" y2="260" stroke="#E7E0D1"/>
+                  <line x1="228" y1="300" x2="776" y2="300" stroke="#E7E0D1"/>
+                  <line x1="228" y1="340" x2="776" y2="340" stroke="#E7E0D1"/>
+                  <line x1="228" y1="380" x2="776" y2="380" stroke="#E7E0D1"/>
+                  <line x1="228" y1="420" x2="776" y2="420" stroke="#E7E0D1"/>
+                  <line x1="228" y1="460" x2="776" y2="460" stroke="#E7E0D1"/>
+                  <g font-family="JetBrains Mono, monospace" font-size="10" fill="#8C8274">
+                    <text x="232" y="138">08</text>
+                    <text x="232" y="178">09</text>
+                    <text x="232" y="218">10</text>
+                    <text x="232" y="258">11</text>
+                    <text x="232" y="298">12</text>
+                    <text x="232" y="338">13</text>
+                    <text x="232" y="378">14</text>
+                    <text x="232" y="418">15</text>
+                    <text x="232" y="458">16</text>
+                  </g>
+                </g>
+                <!-- schedule blocks -->
+                <g>
+                  <rect x="260" y="148" width="220" height="64" rx="2" fill="#3F6E3B" opacity="0.92"/>
+                  <text x="272" y="170" font-family="Inter Tight, sans-serif" font-size="12" font-weight="600" fill="#FAF7F2">Turnover · Villa Mar</text>
+                  <text x="272" y="188" font-family="JetBrains Mono, monospace" font-size="10" fill="#FAF7F2" opacity="0.8">08:30 – 10:30 · Luz</text>
+                  <text x="272" y="204" font-family="JetBrains Mono, monospace" font-size="9" fill="#FAF7F2" opacity="0.7">✓ check-out · ✓ linens · ◇ evidence</text>
+
+                  <rect x="500" y="192" width="250" height="44" rx="2" fill="#B04A27" opacity="0.9"/>
+                  <text x="512" y="214" font-family="Inter Tight, sans-serif" font-size="12" font-weight="600" fill="#FAF7F2">Issue · boiler · La Bastide</text>
+                  <text x="512" y="230" font-family="JetBrains Mono, monospace" font-size="10" fill="#FAF7F2" opacity="0.8">09:40 · awaiting approval</text>
+
+                  <rect x="260" y="252" width="280" height="48" rx="2" fill="#4F7CA8" opacity="0.9"/>
+                  <text x="272" y="274" font-family="Inter Tight, sans-serif" font-size="12" font-weight="600" fill="#FAF7F2">Check-in prep · Le Clos</text>
+                  <text x="272" y="290" font-family="JetBrains Mono, monospace" font-size="10" fill="#FAF7F2" opacity="0.85">11:00 · Bernard + agent</text>
+
+                  <rect x="560" y="332" width="200" height="44" rx="2" fill="#D9A441" opacity="0.95"/>
+                  <text x="572" y="354" font-family="Inter Tight, sans-serif" font-size="12" font-weight="600" fill="#1F1A14">Airport · 18:40</text>
+                  <text x="572" y="370" font-family="JetBrains Mono, monospace" font-size="10" fill="#1F1A14" opacity="0.75">13:30 · Carla</text>
+
+                  <rect x="400" y="388" width="180" height="40" rx="2" fill="#1F1A14" opacity="0.8"/>
+                  <text x="412" y="410" font-family="Inter Tight, sans-serif" font-size="12" font-weight="600" fill="#FAF7F2">Payroll review</text>
+                </g>
+                <!-- agent hint -->
+                <g>
+                  <rect x="560" y="420" width="210" height="60" rx="6" fill="#FFFDF9" stroke="#3F6E3B" stroke-dasharray="3 3"/>
+                  <text x="572" y="442" font-family="Fraunces, serif" font-style="italic" font-size="12" fill="#3F6E3B">Agent:</text>
+                  <text x="572" y="458" font-family="Inter Tight, sans-serif" font-size="11" fill="#1F1A14">Draft Carla's route now?</text>
+                  <text x="572" y="472" font-family="JetBrains Mono, monospace" font-size="9" fill="#524A3E">⏎ approve · esc skip</text>
+                </g>
+              </svg>
+
+              <button class="cell__play" id="cell-play" type="button" aria-label="Play demo loop">
+                <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                  <path d="M5 3v18l15-9L5 3z"/>
+                </svg>
+              </button>
+
+              <div class="cell__caption" id="cell-caption">
+                <span>Looped preview · 00:32</span>
+                The owner reviews tomorrow's schedule. The agent has already drafted the airport run.
+              </div>
+            </div>
+            <div class="cell__footer">
+              <code class="cell__url" id="cell-url">
+                demo.crew.day/app?scenario=<em>villa-owner</em>&as=<em>owner</em>&start=<em>%2Fschedule</em>
+              </code>
+              <a class="cell__live" id="cell-live" href="#">Try it live</a>
+            </div>
+          </div>
+        </div>
+
+        <p class="compose__notice">
+          Opens a fresh demo workspace · ephemeral · anything you break is gone on reset
+        </p>
+      </div>
+    </section>
+
+    <div class="frame">
+      <!-- ── Audience shortcuts ─────────────────────────────────── -->
+      <section class="audiences" id="audiences">
+        <article class="audience">
+          <p class="audience__tag">For owners</p>
+          <h3 class="audience__title">One villa, <em>many lives.</em></h3>
+          <p class="audience__note">
+            Your cleaner sees today. Your cook sees tomorrow. You see
+            everything, when you want — and nothing, when you don't.
+          </p>
+          <a class="audience__link" href="/for-owners">Read the long form →</a>
+        </article>
+        <article class="audience">
+          <p class="audience__tag">For agencies</p>
+          <h3 class="audience__title">Small, <em>not shrink-wrapped.</em></h3>
+          <p class="audience__note">
+            Staff across properties. Per-client views. Payslips and
+            invoices that add up. Permissions that bend to how you're
+            actually run.
+          </p>
+          <a class="audience__link" href="/for-agencies">Read the long form →</a>
+        </article>
+        <article class="audience">
+          <p class="audience__tag">For housekeepers</p>
+          <h3 class="audience__title">Today, <em>then home.</em></h3>
+          <p class="audience__note">
+            A phone-shaped list of what to do. Complete with a photo.
+            Hours logged without a clock-in ritual. Messages in the
+            language you actually speak.
+          </p>
+          <a class="audience__link" href="/for-housekeepers">Read the long form →</a>
+        </article>
+      </section>
+
+      <!-- ── Pricing strip ──────────────────────────────────────── -->
+      <section class="strip-pricing" id="pricing">
+        <p class="strip-pricing__label">Pricing</p>
+        <p class="strip-pricing__copy">
+          <strong>Self-host — free.</strong>
+          Managed pricing — <em>contact us via the suggestion box.</em>
+        </p>
+        <a class="strip-pricing__cta" href="/suggest">Open the suggestion box →</a>
+      </section>
+
+      <!-- ── Imprint / footer ───────────────────────────────────── -->
+      <footer class="imprint" role="contentinfo">
+        <div class="imprint__about">
+          <h4>crew.day — the almanac</h4>
+          <p>
+            A quiet operations surface for houses. Source code, specs and
+            issues are public; the product itself is self-hostable out of
+            one binary. Made in France, with a bias toward silence.
+          </p>
+          <a class="imprint__rss" href="/changelog.rss">◎ RSS changelog</a>
+        </div>
+        <div class="imprint__col">
+          <h5>Product</h5>
+          <ul>
+            <li><a href="#why">Why crew.day</a></li>
+            <li><a href="#audiences">Who it's for</a></li>
+            <li><a href="#try-it">Demo</a></li>
+            <li><a href="#pricing">Pricing</a></li>
+          </ul>
+        </div>
+        <div class="imprint__col">
+          <h5>Build</h5>
+          <ul>
+            <li><a href="/changelog">Changelog</a></li>
+            <li><a href="/suggest">Suggestion box</a></li>
+            <li><a href="/docs">Docs</a></li>
+            <li><a href="/mocks/">App preview</a></li>
+          </ul>
+        </div>
+        <div class="imprint__col">
+          <h5>Legal</h5>
+          <ul>
+            <li><a href="/legal/terms">Terms</a></li>
+            <li><a href="/legal/privacy">Privacy</a></li>
+            <li><a href="/legal/security">Security</a></li>
+            <li><a href="https://app.crew.day/signup/start">Sign up</a></li>
+          </ul>
+        </div>
+      </footer>
+      <div class="imprint__bottom">
+        <span>© MMXXVI crew.day · <em>printed in moss ink on warm paper</em></span>
+        <span>v0.1 — landing mock · spec-site §01</span>
+      </div>
+    </div>
+
+    <script src="landing.js"></script>
+  </body>
+</html>

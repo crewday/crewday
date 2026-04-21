@@ -1,6 +1,7 @@
 import { defineConfig, type PluginOption } from "vite";
 import react from "@vitejs/plugin-react";
 import { VitePWA } from "vite-plugin-pwa";
+import fs from "node:fs";
 import path from "node:path";
 
 // URL-based cache busting in dev: Vite adds ?t=<timestamp> to HMR
@@ -11,6 +12,45 @@ import path from "node:path";
 // Cache-Control / ETag revalidation. External absolute URLs
 // (https://fonts…) are left alone. Production builds already get
 // content-hashed filenames from Rollup.
+// Standalone static mocks under `public/<folder>/index.html` (e.g. the
+// spec-site landing mock at `public/landing/`) need a bare directory
+// URL — `/mocks/landing/` — to resolve to their own index.html.
+// Vite's SPA fallback intercepts that path and serves the SPA's root
+// index.html instead. Walk `public/` at config-time and map each
+// directory that owns an index.html to a dev-server rewrite so the
+// static file wins.
+function serveStandalonePublic(): PluginOption {
+  const root = path.resolve(__dirname, "public");
+  const dirs: string[] = [];
+  const walk = (dir: string) => {
+    if (!fs.existsSync(dir) || !fs.statSync(dir).isDirectory()) return;
+    if (fs.existsSync(path.join(dir, "index.html"))) {
+      dirs.push("/" + path.relative(root, dir).replace(/\\/g, "/"));
+    }
+    for (const name of fs.readdirSync(dir)) {
+      const full = path.join(dir, name);
+      if (fs.statSync(full).isDirectory()) walk(full);
+    }
+  };
+  walk(root);
+  return {
+    name: "crewday:serve-standalone-public",
+    configureServer(server) {
+      server.middlewares.use((req, _res, next) => {
+        if (!req.url) return next();
+        // Strip optional `/mocks` prefix (Vite runs with --base /mocks/
+        // but its middleware sees the un-prefixed URL in some paths).
+        const raw = req.url.split("?")[0].replace(/\/+$/, "");
+        const stripped = raw.replace(/^\/mocks/, "");
+        if (stripped && dirs.includes(stripped)) {
+          req.url = `${raw}/index.html` + (req.url.includes("?") ? req.url.slice(req.url.indexOf("?")) : "");
+        }
+        next();
+      });
+    },
+  };
+}
+
 function cacheBustHtml(): PluginOption {
   const nonce = Date.now().toString(36);
   // Vite's dev middleware only substitutes `__HMR_CONFIG_NAME__` &
@@ -67,6 +107,7 @@ const API_PATHS = [
 
 export default defineConfig({
   plugins: [
+    serveStandalonePublic(),
     cacheBustHtml(),
     react(),
     // The PWA plugin only emits a service worker for the production
