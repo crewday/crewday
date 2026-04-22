@@ -4,12 +4,16 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="theme-color" content="#3F6E3B" />
-    <title>crew.day — run your houses like a hotel. Without the front desk.</title>
+    <title>crew.day — your home organization operating system.</title>
     <meta
       name="description"
-      content="crew.day is the operations back-office for owners and small property-management outfits — designed so an LLM agent runs the day-to-day and the humans live in the house."
+      content="crew.day is your home organization operating system — from a single house to 50 hotels, from a single part time maid to 500, with an LLM agent running the day-to-day."
     />
-    <link rel="icon" href="/mocks/crewday-logo.svg" type="image/svg+xml" />
+    <link rel="icon" href="/mocks/favicon.svg" type="image/svg+xml" />
+    <link rel="alternate icon" href="/mocks/favicon.ico" sizes="any" />
+    <link rel="icon" type="image/png" sizes="16x16" href="/mocks/favicon-16x16.png" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/mocks/favicon-32x32.png" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/mocks/apple-touch-icon.png" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
@@ -29,7 +33,7 @@
           <span>crew.day</span>
         </a>
         <div class="masthead__dateline">
-          Vol. <em>MMXXVI</em> · No. <em>01</em> · <em>Paper</em> Edition
+          Proudly <em>open source</em> · Self hostable · <a href="https://github.com/crewday/crewday"><em>GitHub</em></a>
         </div>
         <nav class="masthead__nav" aria-label="Primary">
           <a href="#why">Why</a>
@@ -45,13 +49,14 @@
       <!-- ── Hero ─────────────────────────────────────────────── -->
       <section class="hero stagger" id="top">
         <div>
-          <p class="hero__slug">An operations back-office for places with beds</p>
+          <p class="hero__slug">Your home organization operating system</p>
           <h1 class="hero__headline">
-            Run your houses<span class="break"> like a hotel.</span>
-            <em>Without the front desk.</em>
+            From a single house<span class="break"> to 50 hotels.</span>
+            <em>From a single part time maid to 500.</em>
           </h1>
           <p class="hero__sub">
-            crew.day is the operations back-office for owners and small
+            <span class="brand-mark"><span class="brand-mark__dot" aria-hidden="true"></span>crew.day</span>
+            is the operations back-office for owners and small
             property-management outfits — designed so an LLM agent runs
             the day-to-day and the humans live in the house.
           </p>
@@ -63,103 +68,20 @@
               Sign up <span class="btn__arrow" aria-hidden="true">⟶</span>
             </a>
           </div>
-          <dl class="hero__meta">
-            <div>
-              <strong>1–50</strong>
-              Rooms, not chains
-            </div>
-            <div>
-              <strong>§16</strong>
-              Self-hostable
-            </div>
-            <div>
-              <strong>UTC</strong>
-              Time at rest
-            </div>
-          </dl>
         </div>
 
-        <figure class="hero__art" aria-hidden="true">
-          <!-- Editorial etching: gabled house with ivy, moss-ink strokes. -->
-          <svg viewBox="0 0 420 420" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-            <defs>
-              <pattern id="hatch" width="5" height="5" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
-                <line x1="0" y1="0" x2="0" y2="5" stroke="currentColor" stroke-width="0.6" opacity="0.35"/>
-              </pattern>
-              <linearGradient id="skywash" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stop-color="#EBE1D0"/>
-                <stop offset="100%" stop-color="#FAF7F2"/>
-              </linearGradient>
-            </defs>
-
-            <!-- sky -->
-            <rect x="0" y="0" width="420" height="280" fill="url(#skywash)"/>
-            <!-- ground -->
-            <rect x="0" y="280" width="420" height="140" fill="#F3ECE0"/>
-            <line x1="0" y1="280" x2="420" y2="280" stroke="#1F1A14" stroke-width="1"/>
-
-            <!-- far hills -->
-            <path d="M 0 280 Q 90 220 180 260 T 420 250 L 420 280 Z" fill="#3F6E3B" opacity="0.18"/>
-            <path d="M 0 280 Q 60 250 140 270 T 300 260 T 420 275 L 420 280 Z" fill="#3F6E3B" opacity="0.35"/>
-
-            <!-- sun -->
-            <circle cx="330" cy="110" r="26" fill="none" stroke="#B04A27" stroke-width="1.4"/>
-            <circle cx="330" cy="110" r="26" fill="#D9A441" opacity="0.35"/>
-
-            <!-- house body -->
-            <g stroke="#1F1A14" fill="#FFFDF9" stroke-width="1.4">
-              <rect x="120" y="200" width="180" height="120"/>
-              <polygon points="110,200 210,125 310,200" fill="#2F5A2C"/>
-              <rect x="200" y="240" width="32" height="80" fill="#1F1A14"/>
-              <!-- windows -->
-              <rect x="140" y="220" width="36" height="36"/>
-              <line x1="158" y1="220" x2="158" y2="256"/>
-              <line x1="140" y1="238" x2="176" y2="238"/>
-              <rect x="244" y="220" width="36" height="36"/>
-              <line x1="262" y1="220" x2="262" y2="256"/>
-              <line x1="244" y1="238" x2="280" y2="238"/>
-              <rect x="140" y="270" width="36" height="36"/>
-              <rect x="244" y="270" width="36" height="36"/>
-              <!-- chimney -->
-              <rect x="260" y="140" width="18" height="38" fill="#1F1A14"/>
-            </g>
-
-            <!-- ivy -->
-            <g stroke="#3F6E3B" fill="none" stroke-width="1.3" stroke-linecap="round">
-              <path d="M 120 200 Q 108 180 116 160 Q 102 144 112 124 Q 96 108 108 88"/>
-              <path d="M 300 200 Q 312 186 304 170 Q 318 156 308 138"/>
-              <!-- leaves -->
-              <g fill="#3F6E3B">
-                <ellipse cx="112" cy="174" rx="4.5" ry="3" transform="rotate(-30 112 174)"/>
-                <ellipse cx="105" cy="152" rx="4.5" ry="3" transform="rotate(20 105 152)"/>
-                <ellipse cx="113" cy="130" rx="4.5" ry="3" transform="rotate(-20 113 130)"/>
-                <ellipse cx="101" cy="110" rx="4.5" ry="3" transform="rotate(30 101 110)"/>
-                <ellipse cx="109" cy="92"  rx="4.5" ry="3" transform="rotate(-10 109 92)"/>
-                <ellipse cx="308" cy="180" rx="4.5" ry="3" transform="rotate(20 308 180)"/>
-                <ellipse cx="314" cy="160" rx="4.5" ry="3" transform="rotate(-30 314 160)"/>
-                <ellipse cx="308" cy="140" rx="4.5" ry="3" transform="rotate(20 308 140)"/>
-              </g>
-            </g>
-
-            <!-- garden path + hedges -->
-            <path d="M 216 320 L 216 420 M 205 420 L 227 420 M 210 400 L 222 400 M 208 380 L 224 380 M 212 360 L 220 360 M 210 340 L 222 340" stroke="#1F1A14" stroke-width="1"/>
-            <g fill="url(#hatch)" stroke="#1F1A14" stroke-width="1" color="#3F6E3B">
-              <rect x="40" y="310" width="90" height="34" rx="3"/>
-              <rect x="296" y="318" width="88" height="28" rx="3"/>
-            </g>
-
-            <!-- birds -->
-            <g stroke="#1F1A14" fill="none" stroke-width="1.2" stroke-linecap="round">
-              <path d="M 60 80 q 6 -6 12 0 q 6 -6 12 0"/>
-              <path d="M 96 64 q 5 -4 10 0 q 5 -4 10 0"/>
-            </g>
-
-            <!-- subtle keyline -->
-            <rect x="0.5" y="0.5" width="419" height="419" stroke="#1F1A14" stroke-width="1" fill="none" opacity="0.08"/>
-          </svg>
-          <figcaption class="hero__caption">
-            <span>Fig. 1</span>Crew.day at rest — a household as seen from the back office. The agent knows what everyone is doing tomorrow.
-          </figcaption>
+        <figure class="hero__art" aria-label="crew.day — today, previewed on a pocket device">
+          <span class="hero__art-speaker" aria-hidden="true"></span>
+          <span class="hero__art-camera" aria-hidden="true"></span>
+          <div class="hero__art-screen">
+            <iframe
+              src="https://dev.crew.day/mocks/today"
+              title="crew.day — today"
+              loading="lazy"
+              scrolling="no"
+              referrerpolicy="no-referrer"
+            ></iframe>
+          </div>
         </figure>
       </section>
     </div>
