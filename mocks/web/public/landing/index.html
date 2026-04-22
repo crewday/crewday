@@ -182,52 +182,81 @@
         <article class="band">
           <div class="band__numeral">I</div>
           <div class="band__body">
-            <span class="band__tag">Agent-first</span>
-            <h3>Every button is a <em>tool call.</em></h3>
+            <span class="band__tag">Ask anywhere</span>
+            <h3>A vast back-office. <em>The easiest to use.</em></h3>
             <p>
-              Every user-facing action in crew.day is also exposed as a CLI
-              command; every CLI command is a tool the agent can call;
-              every action is attributed to the delegating user and
-              written to the audit log. The UI is a shell around those
-              commands, not a separate capability.
+              Every schedule, payslip, warranty and bedsheet lives
+              inside crew.day. On top of it — a concierge who already
+              knows how to use the whole system, waiting for your
+              word.
             </p>
             <p>
-              High-impact actions still require a human's explicit
-              approval — the agent drafts, you sign.
+              Reach them wherever you happen to be: the browser at
+              your desk, the dedicated app in your pocket, a WhatsApp
+              thread mid-errand. Same memory, same house, same
+              conversation. <em>You just ask; the agent does.</em>
             </p>
           </div>
           <div class="band__art" aria-hidden="true">
-            <span class="band__art-label">Fig. 2 — delegation</span>
+            <span class="band__art-label">Fig. 2 — one bell, three doors</span>
             <svg viewBox="0 0 360 220" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <!-- two hands exchanging a card -->
-              <g stroke="#1F1A14" stroke-width="1.4" fill="#FFFDF9" stroke-linecap="round" stroke-linejoin="round">
-                <!-- left hand -->
-                <path d="M 20 150 q 20 -30 60 -26 l 50 4 q 30 2 40 16 l 8 12"/>
-                <path d="M 50 148 l 0 40 M 70 150 l 0 44 M 90 152 l 0 46 M 110 154 l 0 46"/>
-                <!-- right hand -->
-                <path d="M 340 150 q -20 -30 -60 -26 l -50 4 q -30 2 -40 16 l -8 12"/>
-                <path d="M 310 148 l 0 40 M 290 150 l 0 44 M 270 152 l 0 46 M 250 154 l 0 46"/>
+              <!-- ring waves (moss green, hand-drawn) -->
+              <g stroke="#3F6E3B" stroke-width="1" fill="none" opacity="0.55" stroke-linecap="round">
+                <path d="M 150 46 q -7 -3 -10 -11"/>
+                <path d="M 142 56 q -12 -3 -15 -12"/>
+                <path d="M 210 46 q 7 -3 10 -11"/>
+                <path d="M 218 56 q 12 -3 15 -12"/>
               </g>
-              <!-- card in the middle -->
-              <g>
-                <rect x="135" y="80" width="90" height="60" rx="4" fill="#FAF7F2" stroke="#1F1A14" stroke-width="1.4"/>
-                <rect x="135" y="80" width="90" height="14" fill="#3F6E3B"/>
-                <text x="180" y="92" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="8" fill="#FAF7F2" letter-spacing="1">TOOL · delegate</text>
-                <line x1="145" y1="108" x2="215" y2="108" stroke="#1F1A14" stroke-width="0.8"/>
-                <line x1="145" y1="118" x2="200" y2="118" stroke="#1F1A14" stroke-width="0.8"/>
-                <line x1="145" y1="128" x2="210" y2="128" stroke="#1F1A14" stroke-width="0.8"/>
-                <!-- moss seal -->
-                <circle cx="208" cy="130" r="8" fill="#B04A27" opacity="0.85"/>
-                <text x="208" y="133" text-anchor="middle" font-family="Fraunces, serif" font-size="9" font-style="italic" fill="#FAF7F2">s</text>
+
+              <!-- concierge bell: base shadow, plate, dome, stem, finial -->
+              <ellipse cx="180" cy="92" rx="36" ry="3" fill="#1F1A14" opacity="0.14"/>
+              <rect x="144" y="80" width="72" height="2" fill="#1F1A14"/>
+              <rect x="150" y="82" width="60" height="8" fill="#1F1A14"/>
+              <path d="M 154 82 Q 154 44 180 44 Q 206 44 206 82 Z" fill="#D9A441" stroke="#1F1A14" stroke-width="1.4"/>
+              <path d="M 162 78 Q 162 58 176 54" stroke="#1F1A14" stroke-width="0.6" fill="none" opacity="0.4"/>
+              <path d="M 168 79 Q 168 62 180 58" stroke="#1F1A14" stroke-width="0.5" fill="none" opacity="0.28"/>
+              <path d="M 174 80 Q 174 66 184 64" stroke="#1F1A14" stroke-width="0.4" fill="none" opacity="0.2"/>
+              <line x1="180" y1="44" x2="180" y2="34" stroke="#1F1A14" stroke-width="1.4"/>
+              <circle cx="180" cy="30" r="4" fill="#D9A441" stroke="#1F1A14" stroke-width="1.4"/>
+
+              <!-- dashed threads fanning from bell to each channel -->
+              <g stroke="#1F1A14" stroke-width="0.9" fill="none" stroke-linecap="round" stroke-dasharray="2 3" opacity="0.55">
+                <path d="M 170 94 C 132 108 92 122 66 136"/>
+                <path d="M 180 94 L 180 130"/>
+                <path d="M 190 94 C 228 108 268 122 294 136"/>
               </g>
-              <!-- arrow of authority -->
-              <path d="M 180 60 Q 180 30 240 34" stroke="#3F6E3B" stroke-width="1.4" fill="none" stroke-linecap="round" marker-end="url(#arrow)"/>
-              <defs>
-                <marker id="arrow" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto">
-                  <path d="M 0 0 L 8 4 L 0 8 Z" fill="#3F6E3B"/>
-                </marker>
-              </defs>
-              <text x="180" y="20" text-anchor="middle" font-family="Fraunces, serif" font-style="italic" font-size="13" fill="#1F1A14">full authority, attributed</text>
+
+              <!-- UI · at your desk (browser window) -->
+              <rect x="20" y="140" width="94" height="58" rx="3" fill="#FFFDF9" stroke="#1F1A14" stroke-width="1.2"/>
+              <rect x="20" y="140" width="94" height="10" fill="#3F6E3B"/>
+              <circle cx="27" cy="145" r="1.4" fill="#FAF7F2" opacity="0.9"/>
+              <circle cx="33" cy="145" r="1.4" fill="#FAF7F2" opacity="0.65"/>
+              <circle cx="39" cy="145" r="1.4" fill="#FAF7F2" opacity="0.45"/>
+              <line x1="28" y1="160" x2="104" y2="160" stroke="#1F1A14" stroke-width="0.6" opacity="0.45"/>
+              <line x1="28" y1="170" x2="90" y2="170" stroke="#1F1A14" stroke-width="0.6" opacity="0.45"/>
+              <line x1="28" y1="180" x2="98" y2="180" stroke="#1F1A14" stroke-width="0.6" opacity="0.45"/>
+              <rect x="28" y="186" width="34" height="6" rx="1" fill="#3F6E3B" opacity="0.7"/>
+              <text x="67" y="214" text-anchor="middle" font-family="Fraunces, serif" font-style="italic" font-size="11" fill="#1F1A14" opacity="0.8">at your desk</text>
+
+              <!-- APP · in your pocket (phone) -->
+              <rect x="156" y="132" width="48" height="66" rx="7" fill="#FFFDF9" stroke="#1F1A14" stroke-width="1.2"/>
+              <line x1="156" y1="142" x2="204" y2="142" stroke="#1F1A14" stroke-width="0.6" opacity="0.45"/>
+              <circle cx="180" cy="137" r="0.9" fill="#1F1A14"/>
+              <line x1="172" y1="192" x2="188" y2="192" stroke="#1F1A14" stroke-width="1.4" stroke-linecap="round"/>
+              <rect x="160" y="148" width="40" height="20" rx="3" fill="#3F6E3B" opacity="0.12"/>
+              <text x="164" y="157" font-family="Fraunces, serif" font-style="italic" font-size="8" fill="#3F6E3B">agent</text>
+              <text x="164" y="165" font-family="Fraunces, serif" font-style="italic" font-size="8" fill="#1F1A14">today</text>
+              <line x1="162" y1="174" x2="198" y2="174" stroke="#1F1A14" stroke-width="0.5" opacity="0.4"/>
+              <line x1="162" y1="181" x2="190" y2="181" stroke="#1F1A14" stroke-width="0.5" opacity="0.4"/>
+              <line x1="162" y1="188" x2="196" y2="188" stroke="#1F1A14" stroke-width="0.5" opacity="0.4"/>
+              <text x="180" y="214" text-anchor="middle" font-family="Fraunces, serif" font-style="italic" font-size="11" fill="#1F1A14" opacity="0.8">in your pocket</text>
+
+              <!-- WhatsApp · mid-errand (chat bubble, tail lower-left toward bell) -->
+              <path d="M 248 140 L 338 140 Q 342 140 342 144 L 342 182 Q 342 186 338 186 L 264 186 L 254 198 L 258 186 L 248 186 Q 244 186 244 182 L 244 144 Q 244 140 248 140 Z" fill="#FFFDF9" stroke="#1F1A14" stroke-width="1.2"/>
+              <text x="252" y="156" font-family="Fraunces, serif" font-style="italic" font-size="10" fill="#1F1A14">“ask Luz to bring</text>
+              <text x="252" y="168" font-family="Fraunces, serif" font-style="italic" font-size="10" fill="#1F1A14">extra sheets today?”</text>
+              <text x="252" y="180" font-family="JetBrains Mono, monospace" font-size="7" letter-spacing="1.2" fill="#3F6E3B">✓✓ · 10:14</text>
+              <text x="293" y="214" text-anchor="middle" font-family="Fraunces, serif" font-style="italic" font-size="11" fill="#1F1A14" opacity="0.8">mid-errand</text>
             </svg>
           </div>
         </article>
@@ -303,60 +332,101 @@
         <article class="band">
           <div class="band__numeral">III</div>
           <div class="band__body">
-            <span class="band__tag">Self-hostable, single-binary</span>
-            <h3>Your box, your data. <em>Your keys.</em></h3>
+            <span class="band__tag">Assets · Actions · Inventory</span>
+            <h3>Inventory and assets, <em>on autopilot.</em></h3>
             <p>
-              One binary, one SQLite file. Postgres optional. No required
-              SaaS, no phone-home, no marketplace you have to use. The
-              managed deployment at <em>crew.day</em> is convenience — not
-              a gate — and every feature of the product is available on
-              the box sitting in your hall cupboard.
+              Every appliance, boiler and pool pump lives on the
+              books — with its warranty, its manual, its next service
+              due. <em>When does the AC warranty expire? How do I
+              change the dryer filter?</em> Ask the agent; the answer
+              is already there.
             </p>
             <p>
-              Time is UTC at rest, local for display. No PII goes to an
-              upstream LLM without explicit opt-in.
+              Inventory moves with the work. Each turnover draws down
+              the linens; each service burns its filter. You know how
+              many clean sheets are in the cupboard — and when to
+              reorder, <em>before the last one's gone.</em>
             </p>
           </div>
           <div class="band__art" aria-hidden="true">
-            <span class="band__art-label">Fig. 4 — the box</span>
+            <span class="band__art-label">Fig. 4 — what's on hand</span>
             <svg viewBox="0 0 360 220" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <!-- pedestal -->
-              <rect x="60" y="176" width="240" height="8" fill="#1F1A14"/>
-              <rect x="80" y="184" width="200" height="14" fill="#3F6E3B" opacity="0.15"/>
-              <!-- single-binary server -->
+              <!-- top section labels -->
+              <text x="24" y="18" font-family="JetBrains Mono, monospace" font-size="8" letter-spacing="1.5" fill="#1F1A14" opacity="0.65">§21 · ASSET</text>
+              <text x="336" y="18" text-anchor="end" font-family="JetBrains Mono, monospace" font-size="8" letter-spacing="1.5" fill="#1F1A14" opacity="0.65">§08 · INVENTORY</text>
+
+              <!-- ── LEFT · warranty tag hanging over AC unit ─── -->
+              <!-- string from AC top to tag -->
+              <line x1="92" y1="72" x2="92" y2="58" stroke="#1F1A14" stroke-width="0.8"/>
+              <!-- tag, tilted like an estate label -->
+              <g transform="rotate(-6 92 42)">
+                <path d="M 48 32 L 60 22 L 146 22 L 146 58 L 48 58 Z" fill="#D9A441" stroke="#1F1A14" stroke-width="1.2"/>
+                <circle cx="64" cy="32" r="1.8" fill="#FAF7F2" stroke="#1F1A14" stroke-width="0.8"/>
+                <text x="74" y="37" font-family="JetBrains Mono, monospace" font-size="6.5" letter-spacing="1.4" fill="#1F1A14">WARRANTY</text>
+                <text x="74" y="50" font-family="Fraunces, serif" font-style="italic" font-size="10" fill="#1F1A14">exp. 2029-05</text>
+              </g>
+
+              <!-- AC unit body -->
               <g stroke="#1F1A14" stroke-width="1.4" fill="#FFFDF9">
-                <rect x="96" y="60" width="168" height="116" rx="4"/>
-                <!-- ventilation lines -->
-                <line x1="108" y1="74" x2="252" y2="74" stroke-width="1"/>
-                <line x1="108" y1="84" x2="252" y2="84" stroke-width="1" opacity="0.4"/>
-                <line x1="108" y1="94" x2="252" y2="94" stroke-width="1" opacity="0.4"/>
-                <line x1="108" y1="104" x2="252" y2="104" stroke-width="1" opacity="0.4"/>
-                <!-- indicator lights -->
-                <circle cx="120" cy="128" r="5" fill="#3F6E3B"/>
-                <circle cx="136" cy="128" r="5" fill="#D9A441"/>
-                <circle cx="152" cy="128" r="5" fill="#B04A27" opacity="0.5"/>
-                <!-- label -->
-                <rect x="180" y="120" width="68" height="20" rx="2" fill="#FAF7F2" stroke="#1F1A14"/>
+                <rect x="30" y="72" width="120" height="56" rx="3"/>
+                <rect x="30" y="72" width="120" height="8" fill="#3F6E3B" opacity="0.25" stroke="none"/>
+                <line x1="42" y1="90" x2="138" y2="90" stroke-width="1" opacity="0.45"/>
+                <line x1="42" y1="98" x2="138" y2="98" stroke-width="1" opacity="0.45"/>
+                <line x1="42" y1="106" x2="138" y2="106" stroke-width="1" opacity="0.45"/>
+                <line x1="42" y1="114" x2="138" y2="114" stroke-width="1" opacity="0.45"/>
+                <circle cx="140" cy="122" r="2.4" fill="#3F6E3B"/>
               </g>
-              <text x="214" y="134" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9" letter-spacing="1" fill="#1F1A14">crewday</text>
-              <!-- cable to key -->
-              <path d="M 180 176 Q 180 200 200 200 Q 230 200 230 210" stroke="#1F1A14" stroke-width="1.4" fill="none"/>
-              <!-- key -->
-              <g stroke="#1F1A14" stroke-width="1.4" fill="#D9A441">
-                <circle cx="310" cy="120" r="14"/>
-                <rect x="300" y="118" width="20" height="4" fill="#1F1A14"/>
-                <rect x="324" y="120" width="16" height="4" fill="#1F1A14"/>
-                <rect x="332" y="118" width="4" height="8" fill="#1F1A14"/>
+
+              <!-- asset caption · next action · documents -->
+              <text x="30" y="148" font-family="Fraunces, serif" font-style="italic" font-size="12" fill="#1F1A14">air conditioner · Villa Mar</text>
+              <text x="30" y="164" font-family="JetBrains Mono, monospace" font-size="9" fill="#3F6E3B">⟳ filter · due in 12d</text>
+              <text x="30" y="176" font-family="JetBrains Mono, monospace" font-size="8" fill="#1F1A14" opacity="0.55">manual.pdf · receipt.pdf</text>
+
+              <!-- ── RIGHT · shelf of folded linens ─── -->
+              <!-- shelf plank with shadow edge -->
+              <line x1="186" y1="118" x2="342" y2="118" stroke="#1F1A14" stroke-width="1.4"/>
+              <line x1="186" y1="120" x2="342" y2="120" stroke="#1F1A14" stroke-width="0.6" opacity="0.45"/>
+              <!-- shelf brackets -->
+              <path d="M 192 118 L 192 124 L 198 124" stroke="#1F1A14" stroke-width="0.8" fill="none" opacity="0.5"/>
+              <path d="M 336 118 L 336 124 L 330 124" stroke="#1F1A14" stroke-width="0.8" fill="none" opacity="0.5"/>
+
+              <!-- stack · sheets -->
+              <g stroke="#1F1A14" stroke-width="0.9">
+                <rect x="200" y="92" width="36" height="5" fill="#FFFDF9"/>
+                <rect x="200" y="99" width="36" height="5" fill="#FFFDF9"/>
+                <rect x="200" y="106" width="36" height="5" fill="#FFFDF9"/>
+                <line x1="218" y1="92" x2="218" y2="111" stroke-width="0.4" opacity="0.3"/>
               </g>
-              <!-- arrow -->
-              <path d="M 276 126 L 294 122" stroke="#1F1A14" stroke-width="1.2" marker-end="url(#arrow2)"/>
-              <defs>
-                <marker id="arrow2" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto">
-                  <path d="M 0 0 L 8 4 L 0 8 Z" fill="#1F1A14"/>
-                </marker>
-              </defs>
-              <text x="30" y="50" font-family="Fraunces, serif" font-style="italic" font-size="13" fill="#1F1A14">one binary,</text>
-              <text x="30" y="68" font-family="Fraunces, serif" font-style="italic" font-size="13" fill="#3F6E3B">your key</text>
+              <text x="218" y="134" text-anchor="middle" font-family="Fraunces, serif" font-style="italic" font-size="10" fill="#1F1A14">sheets</text>
+              <text x="218" y="150" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="12" font-weight="600" fill="#3F6E3B">×12</text>
+
+              <!-- stack · towels (with warm fold accent) -->
+              <g stroke="#1F1A14" stroke-width="0.9">
+                <rect x="250" y="94" width="36" height="5" fill="#FFFDF9"/>
+                <rect x="250" y="101" width="36" height="5" fill="#FFFDF9"/>
+                <rect x="250" y="108" width="36" height="5" fill="#D9A441" opacity="0.35"/>
+              </g>
+              <text x="268" y="134" text-anchor="middle" font-family="Fraunces, serif" font-style="italic" font-size="10" fill="#1F1A14">towels</text>
+              <text x="268" y="150" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="12" font-weight="600" fill="#3F6E3B">×08</text>
+
+              <!-- stack · pillow covers (low stock, rust count) -->
+              <g stroke="#1F1A14" stroke-width="0.9">
+                <rect x="300" y="102" width="32" height="4" fill="#FFFDF9"/>
+                <rect x="300" y="108" width="32" height="4" fill="#FFFDF9"/>
+              </g>
+              <text x="316" y="134" text-anchor="middle" font-family="Fraunces, serif" font-style="italic" font-size="10" fill="#1F1A14">pillow</text>
+              <text x="316" y="150" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="12" font-weight="600" fill="#B04A27">×04</text>
+              <!-- reorder indicator: dashed underline + tiny marginal label -->
+              <path d="M 300 155 l 32 0" stroke="#B04A27" stroke-width="0.9" stroke-dasharray="2 2"/>
+              <text x="316" y="166" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="7" letter-spacing="1.4" fill="#B04A27">REORDER</text>
+
+              <!-- ── Bottom · unifying ledger strip ─── -->
+              <rect x="16" y="184" width="328" height="30" rx="2" fill="#3F6E3B" opacity="0.08" stroke="none"/>
+              <line x1="16" y1="184" x2="344" y2="184" stroke="#1F1A14" stroke-width="0.6" opacity="0.35"/>
+              <line x1="16" y1="214" x2="344" y2="214" stroke="#1F1A14" stroke-width="0.6" opacity="0.35"/>
+              <text x="24" y="204" font-family="JetBrains Mono, monospace" font-size="8" letter-spacing="1.4" fill="#1F1A14" opacity="0.6">10:47 ↷</text>
+              <text x="68" y="204" font-family="Fraunces, serif" font-style="italic" font-size="11" fill="#1F1A14">turnover · Villa Mar</text>
+              <text x="190" y="204" font-family="JetBrains Mono, monospace" font-size="10" fill="#3F6E3B">−2 sheets · filter ✓</text>
             </svg>
           </div>
         </article>
