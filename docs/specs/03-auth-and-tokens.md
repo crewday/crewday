@@ -570,12 +570,17 @@ after the swap — it is not an authentication primitive.
   `POST /w/<slug>/api/v1/auth/tokens`:
   ```json
   {
-    "name": "hermes-scheduler",
+    "label": "hermes-scheduler",
     "scopes": {"tasks:read": true, "tasks:write": true, "stays:read": true},
-    "expires_at": "2027-01-01T00:00:00Z",
-    "note": "nightly scheduling agent"
+    "expires_at_days": 365
   }
   ```
+  `label` is a human-readable identifier (1–160 chars) shown on the
+  `/tokens` admin list and stamped into audit rows as `agent_label`.
+  `expires_at_days` is a positive integer count of days (1–3650,
+  defaulting to 90 when omitted); the server computes the absolute
+  `expires_at` timestamp from it at mint time and returns the ISO
+  value on the response for the client's reference.
 - `scopes` is a flat `{"<action_key>": true}` dict — the same shape
   the `api_token.scope_json` column stores, so the router holds no
   list-to-dict coercion. The key is an action string from the scope
@@ -598,10 +603,10 @@ agents (§11) use to act on behalf of their user.
 ```json
 POST /api/v1/auth/tokens
 {
-  "name": "chat-agent",
+  "label": "chat-agent",
   "delegate": true,
-  "expires_at": "2026-05-16T00:00:00Z",
-  "note": "Embedded agent for desktop sidebar"
+  "expires_at_days": 30,
+  "scopes": {}
 }
 ```
 
@@ -644,7 +649,7 @@ Key properties:
 When null the token is a classic scoped token (backward
 compatible). When set, it is a delegated token; the
 `actor_kind` in audit for requests using the token is `user`, with
-`actor_id = delegate_for_user_id`, `agent_label = api_token.name`,
+`actor_id = delegate_for_user_id`, `agent_label = api_token.label`,
 and the optional `agent_conversation_ref` header propagated in.
 
 ### Personal access tokens
@@ -659,10 +664,9 @@ script that prints today's tasks on her home printer.
 ```json
 POST /api/v1/me/tokens
 {
-  "name": "kitchen-printer",
+  "label": "kitchen-printer",
   "scopes": {"me.tasks:read": true, "me.bookings:read": true},
-  "expires_at": "2026-06-01T00:00:00Z",
-  "note": "Raspberry Pi in the kitchen"
+  "expires_at_days": 90
 }
 ```
 
@@ -712,7 +716,7 @@ Key properties:
   user's session + passkeys via `users.reissue_magic_link`, both
   of which cascade to that user's PATs.
 - Every write made through a PAT is audited as `actor_kind = 'user'`,
-  `actor_id = subject_user_id`, `agent_label = api_token.name`,
+  `actor_id = subject_user_id`, `agent_label = api_token.label`,
   plus `api_token_kind = 'personal'` so the row is filterable from
   a workspace PAT or a delegated token.
 
@@ -809,10 +813,10 @@ subject narrowing is enforced at the row level regardless of which
   scope is selectable on a PAT), so scripting an exfiltration chain
   through a leaked PAT is not possible.
 - Tokens cannot accept their own `admin:*` approval (§11).
-- Scoped tokens default to 90 days TTL if `expires_at` is omitted;
-  delegated tokens default to 30 days; personal access tokens default
-  to 90 days. A workspace-level setting can raise any of them to
-  "never" but emits a noisy warning in the UI.
+- Scoped tokens default to 90 days TTL if `expires_at_days` is
+  omitted; delegated tokens default to 30 days; personal access
+  tokens default to 90 days. A workspace-level setting can raise any
+  of them to "never" but emits a noisy warning in the UI.
 - Delegated tokens cannot create other delegated tokens (no transitive
   delegation). A delegated token cannot outlive its delegating user's
   account — archiving the user effectively revokes all their delegated
