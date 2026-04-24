@@ -2,12 +2,12 @@
 
 v1 slice per cd-1b2 — sufficient for seeding the external-calendar →
 reservation → turnover-bundle chain that drives property turnover.
-Richer §02 / §04 columns (``reservation.unit_id``,
-``nightly_rate_cents``, ``guest_kind``; ``ical_feed.unit_id`` /
-``poll_cadence`` / ``last_error``; ``stay_bundle_state`` as an enum;
-etc.) land with the domain-layer follow-ups (cd-1ai ical registration,
-cd-l0k guest welcome pages) without breaking this migration's public
-write contract.
+cd-ewd7 extends ``ical_feed`` to the full §04 shape (``unit_id``,
+``poll_cadence``, ``last_error``, and the widened ``provider``
+enum including ``gcal``). Richer ``reservation`` columns
+(``nightly_rate_cents``, ``guest_kind``, ``unit_id``) and the
+``stay_bundle_state`` enum still land with later domain-layer
+follow-ups without breaking this migration's public write contract.
 
 Every table carries a ``workspace_id`` column and is registered as
 workspace-scoped via the package's ``__init__``. FK hygiene mirrors
@@ -19,6 +19,8 @@ the rest of the app:
 * ``reservation.ical_feed_id`` uses ``SET NULL`` — a reservation
   captured from iCal outlives the feed's deletion (think: agency
   swaps provider, but the booking remains real work).
+* ``ical_feed.unit_id`` uses ``SET NULL`` — feeds outlive unit churn
+  (renaming / merging units shouldn't delete the poller config).
 
 See ``docs/specs/02-domain-model.md`` §"reservation", §"ical_feed",
 §"stay_bundle", and ``docs/specs/04-properties-and-stays.md``
@@ -45,14 +47,27 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from app.adapters.db.base import Base
 
-__all__ = ["IcalFeed", "Reservation", "StayBundle"]
+__all__ = ["DEFAULT_POLL_CADENCE", "IcalFeed", "Reservation", "StayBundle"]
 
 
 # Allowed ``ical_feed.provider`` values, enforced by a CHECK
-# constraint. Matches the v1 slice — ``custom`` covers generic ICS
-# feeds (Google Calendar, arbitrary URLs) until the domain layer
-# introduces a richer taxonomy.
-_PROVIDER_VALUES: tuple[str, ...] = ("airbnb", "vrbo", "booking", "custom")
+# constraint. Matches §04 "Supported providers": the four
+# hosted-platform slugs (``airbnb | vrbo | booking | gcal``) plus
+# the ``generic`` fallback. cd-ewd7 widened the set from the v1
+# ``airbnb | vrbo | booking | custom`` shape so the detector's
+# output can land in the DB directly (no ``gcal/generic → custom``
+# collapse at the service boundary). ``custom`` stays in the
+# accept set so v1-era rows (written before cd-ewd7) remain
+# readable — the service does not mint new ``custom`` rows; it
+# stores the detector's ``generic`` result verbatim.
+_PROVIDER_VALUES: tuple[str, ...] = (
+    "airbnb",
+    "vrbo",
+    "booking",
+    "gcal",
+    "generic",
+    "custom",
+)
 
 # Allowed ``reservation.status`` values — the v1 lifecycle. The
 # fuller §04 machine (``tentative | confirmed | in_house |
@@ -85,16 +100,35 @@ def _in_clause(values: tuple[str, ...]) -> str:
     return "'" + "', '".join(values) + "'"
 
 
+#: Default per-feed polling cron. §04 "iCal feed" pins this to
+#: ``*/15 * * * *`` — every fifteen minutes is a sensible default
+#: that respects upstream rate limits yet catches a same-day
+#: cancellation inside the turnover window. Public so the domain
+#: service and the poller (cd-d48) share a single source of truth.
+DEFAULT_POLL_CADENCE: str = "*/15 * * * *"
+
+
 class IcalFeed(Base):
     """External calendar URL the poller ingests reservations from.
 
-    The v1 slice carries the minimum needed to identify and track a
-    feed: ``url`` (the iCal endpoint), ``provider`` (canonical
-    channel enum), ``last_polled_at`` / ``last_etag`` (conditional-
-    GET plumbing), and ``enabled`` (operator kill switch). The
-    richer §04 columns (``unit_id``, ``poll_cadence``, ``last_error``)
-    land with cd-1ai. FK cascades on ``property_id`` so deleting the
-    property sweeps its feeds.
+    Carries the full §04 "iCal feed" shape after cd-ewd7:
+
+    * ``url`` — the operator-supplied iCal endpoint (envelope-
+      encrypted at the domain layer; TEXT here).
+    * ``provider`` — canonical channel enum.
+    * ``unit_id`` — the unit this feed populates. When NULL, stays
+      land at the property level and the manager maps to a unit
+      manually. ``SET NULL`` on unit deletion — feeds outlive unit
+      churn (rename / merge / delete shouldn't lose the poller config).
+    * ``poll_cadence`` — per-feed cron (default ``*/15 * * * *``).
+      The poller (cd-d48) reads this to drive APScheduler.
+    * ``last_polled_at`` / ``last_etag`` — conditional-GET plumbing.
+    * ``last_error`` — the most recent §04 ``ical_url_*`` error code,
+      cleared on a successful probe.
+    * ``enabled`` — operator kill switch.
+
+    FK cascades on ``property_id`` so deleting the property sweeps
+    its feeds.
     """
 
     __tablename__ = "ical_feed"
@@ -110,11 +144,27 @@ class IcalFeed(Base):
         ForeignKey("property.id", ondelete="CASCADE"),
         nullable=False,
     )
+    # ``NULL`` means the feed is property-scoped (no unit mapping);
+    # the domain-layer upsert falls back to ``(property_id, source,
+    # external_id)`` per §04 "iCal feed". ``SET NULL`` so a unit
+    # delete doesn't cascade into the feed row.
+    unit_id: Mapped[str | None] = mapped_column(
+        String,
+        ForeignKey("unit.id", ondelete="SET NULL"),
+        nullable=True,
+    )
     # The operator-supplied iCal URL. §04's SSRF guard
     # (``ical_url_insecure_scheme`` / ``ical_url_private_address``)
     # runs in the domain layer, not at the DB.
     url: Mapped[str] = mapped_column(String, nullable=False)
     provider: Mapped[str] = mapped_column(String, nullable=False)
+    # Per-feed cron expression — populated with the §04 default on
+    # insert unless the operator overrides. Free-form TEXT because
+    # the parser (APScheduler / croniter) owns validation; the DB
+    # is not the right place to reject a malformed cron.
+    poll_cadence: Mapped[str] = mapped_column(
+        String, nullable=False, default=DEFAULT_POLL_CADENCE
+    )
     # ``NULL`` means the feed has never been polled — a fresh
     # registration. The poller treats a null value as "due now".
     last_polled_at: Mapped[datetime | None] = mapped_column(
@@ -123,6 +173,11 @@ class IcalFeed(Base):
     # Last ``ETag`` seen on a 200; the next poll sends it as
     # ``If-None-Match`` to save bandwidth.
     last_etag: Mapped[str | None] = mapped_column(String, nullable=True)
+    # Last §04 error code (``ical_url_timeout``,
+    # ``ical_url_private_address``, …). ``NULL`` when the most
+    # recent probe succeeded — the domain layer clears on success
+    # so the operator UI can surface a live-vs-stale indicator.
+    last_error: Mapped[str | None] = mapped_column(String, nullable=True)
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
@@ -134,6 +189,10 @@ class IcalFeed(Base):
             name="provider",
         ),
         Index("ix_ical_feed_workspace_property", "workspace_id", "property_id"),
+        # The poller's due-work scan is keyed on ``unit_id`` when
+        # upserting stays by ``(unit_id, source, external_id)``; a
+        # plain index keeps that lookup cheap on a mostly-NULL column.
+        Index("ix_ical_feed_unit", "unit_id"),
     )
 
 

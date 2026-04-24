@@ -26,7 +26,7 @@ _LATER = datetime(2026, 4, 20, 12, 0, 0, tzinfo=UTC)
 
 
 class TestIcalFeedModel:
-    """The ``IcalFeed`` mapped class constructs from the v1 slice."""
+    """The ``IcalFeed`` mapped class constructs from the full §04 shape."""
 
     def test_minimal_construction(self) -> None:
         feed = IcalFeed(
@@ -47,6 +47,8 @@ class TestIcalFeedModel:
         # Nullable fields default to None.
         assert feed.last_polled_at is None
         assert feed.last_etag is None
+        assert feed.last_error is None
+        assert feed.unit_id is None
         assert feed.created_at == _PINNED
 
     def test_with_poll_state(self) -> None:
@@ -58,12 +60,31 @@ class TestIcalFeedModel:
             provider="vrbo",
             last_polled_at=_PINNED,
             last_etag='W/"deadbeef"',
+            last_error="ical_url_timeout",
             enabled=False,
             created_at=_PINNED,
         )
         assert feed.last_polled_at == _PINNED
         assert feed.last_etag == 'W/"deadbeef"'
+        assert feed.last_error == "ical_url_timeout"
         assert feed.enabled is False
+
+    def test_with_unit_and_cadence(self) -> None:
+        """cd-ewd7 columns: ``unit_id``, ``poll_cadence`` round-trip."""
+        feed = IcalFeed(
+            id="01HWA00000000000000000FEDC",
+            workspace_id="01HWA00000000000000000WSPA",
+            property_id="01HWA00000000000000000PRPA",
+            unit_id="01HWA00000000000000000UNIT",
+            url="https://calendar.google.com/x/ical.ics",
+            provider="gcal",
+            poll_cadence="*/30 * * * *",
+            enabled=True,
+            created_at=_PINNED,
+        )
+        assert feed.unit_id == "01HWA00000000000000000UNIT"
+        assert feed.poll_cadence == "*/30 * * * *"
+        assert feed.provider == "gcal"
 
     def test_tablename(self) -> None:
         assert IcalFeed.__tablename__ == "ical_feed"
@@ -72,7 +93,8 @@ class TestIcalFeedModel:
         # Constraint name ``provider`` on the model; the shared naming
         # convention rewrites it to ``ck_ical_feed_provider`` on the
         # bound column, so match by suffix (mirrors the sibling
-        # ``tasks`` / ``places`` test pattern).
+        # ``tasks`` / ``places`` test pattern). cd-ewd7 widened the
+        # set from v1's ``airbnb | vrbo | booking | custom``.
         checks = [
             c
             for c in IcalFeed.__table_args__
@@ -82,7 +104,7 @@ class TestIcalFeedModel:
         ]
         assert len(checks) == 1
         sql = str(checks[0].sqltext)
-        for provider in ("airbnb", "vrbo", "booking", "custom"):
+        for provider in ("airbnb", "vrbo", "booking", "gcal", "generic", "custom"):
             assert provider in sql, f"{provider} missing from CHECK constraint"
 
     def test_workspace_property_index_present(self) -> None:
@@ -91,6 +113,14 @@ class TestIcalFeedModel:
         assert "ix_ical_feed_workspace_property" in names
         target = next(i for i in indexes if i.name == "ix_ical_feed_workspace_property")
         assert [c.name for c in target.columns] == ["workspace_id", "property_id"]
+
+    def test_unit_index_present(self) -> None:
+        """cd-ewd7: the poller's ``unit_id`` lookup needs an index."""
+        indexes = [i for i in IcalFeed.__table_args__ if isinstance(i, Index)]
+        names = [i.name for i in indexes]
+        assert "ix_ical_feed_unit" in names
+        target = next(i for i in indexes if i.name == "ix_ical_feed_unit")
+        assert [c.name for c in target.columns] == ["unit_id"]
 
 
 class TestReservationModel:

@@ -319,7 +319,10 @@ class TestRegistrationEndToEnd:
         )
 
         assert view.enabled is True
-        assert view.provider == "custom"  # loopback → generic → custom
+        # cd-ewd7: the detector's ``generic`` result lands verbatim;
+        # the v1 ``_to_db_provider`` gcal/generic→custom collapse is
+        # gone, so a loopback hostname stays labelled ``generic``.
+        assert view.provider == "generic"
 
         # Row landed, URL envelope-encrypted (not plaintext).
         row = db_session.get(IcalFeed, view.id)

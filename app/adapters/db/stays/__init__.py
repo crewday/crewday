@@ -21,10 +21,20 @@ See ``docs/specs/02-domain-model.md`` §"reservation", §"ical_feed",
 
 from __future__ import annotations
 
-from app.adapters.db.stays.models import IcalFeed, Reservation, StayBundle
+from app.adapters.db.stays.models import (
+    DEFAULT_POLL_CADENCE,
+    IcalFeed,
+    Reservation,
+    StayBundle,
+)
 from app.tenancy.registry import register
 
 for _table in ("ical_feed", "reservation", "stay_bundle"):
     register(_table)
 
-__all__ = ["IcalFeed", "Reservation", "StayBundle"]
+__all__ = [
+    "DEFAULT_POLL_CADENCE",
+    "IcalFeed",
+    "Reservation",
+    "StayBundle",
+]

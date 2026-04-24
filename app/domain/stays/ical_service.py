@@ -10,9 +10,9 @@ everything up to the point the poller would run:
   parseable VCALENDAR we flip ``enabled=True`` in the same
   transaction.
 * **Probe** an existing feed. Re-runs validation + fetch; updates
-  ``last_polled_at`` and ``last_error`` (stubbed out below since the
-  v1 ORM doesn't carry ``last_error`` yet — see "Spec drift" note
-  below). Flips ``enabled=True`` on the first successful probe.
+  ``last_polled_at`` and ``last_error`` (the §04 ``ical_url_*``
+  error code on failure, cleared on success). Flips ``enabled=True``
+  on the first successful probe.
 * **Update** an existing feed's URL and/or provider. Swapping the URL
   re-runs the full validate-encrypt-probe path; swapping just the
   provider override skips the probe.
@@ -31,20 +31,13 @@ The URL is redacted to host-only in the audit diff — §15 forbids
 plaintext secrets in the audit stream, and the envelope-encrypted
 ciphertext would be noise.
 
-**Spec drift notes.**
-
-* The ORM only carries the v1 slice (``url`` / ``provider`` /
-  ``last_polled_at`` / ``last_etag`` / ``enabled``). §04 adds
-  ``unit_id``, ``poll_cadence``, and ``last_error``. This service
-  stubs the ``last_error`` surface (see :data:`_LAST_ERROR_HINT`)
-  so the shape lands once the column does; filed as a Beads task
-  on top of cd-1ai (``last_error`` column + migration).
-* The ``provider`` CHECK constraint allows ``airbnb | vrbo |
-  booking | custom``. The auto-detect emits ``gcal`` and
-  ``generic`` from :mod:`app.adapters.ical.providers`; the service
-  collapses both to ``"custom"`` before the row write. The
-  provider-override DTO also maps any non-v1 slug to ``"custom"``
-  at the boundary, so the CHECK never fires.
+**Provider taxonomy.** The auto-detect and override DTO share the
+§04 :data:`~app.adapters.ical.ports.IcalProvider` alphabet
+(``airbnb | vrbo | booking | gcal | generic``); the DB CHECK admits
+every slug in that set plus the legacy ``custom`` spelling for
+v1-era rows (cd-ewd7 widened the CHECK and dropped the
+``gcal/generic → custom`` collapse — the detector's result now
+lands verbatim).
 
 **Port wiring.** The service takes an
 :class:`~app.adapters.ical.ports.IcalValidator`, a
@@ -62,14 +55,14 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Literal
+from typing import Any, get_args
 from urllib.parse import urlsplit
 
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.adapters.db.stays.models import IcalFeed
+from app.adapters.db.stays.models import DEFAULT_POLL_CADENCE, IcalFeed
 from app.adapters.ical.ports import (
     IcalProvider,
     IcalValidation,
@@ -112,18 +105,16 @@ __all__ = [
 # invalidate every persisted URL.
 _URL_PURPOSE = "ical-feed-url"
 _MAX_URL_LEN = 2048
-_LAST_ERROR_HINT = "not_persisted_v1"  # §04 column lands with follow-up
 
-# The v1 DB CHECK only allows these four provider slugs; the
-# auto-detect's richer taxonomy (``gcal`` / ``generic``) collapses
-# to ``custom`` on write. A spec-drift follow-up tracks the CHECK
-# widening.
-_DbProvider = Literal["airbnb", "vrbo", "booking", "custom"]
-_DB_PROVIDERS: frozenset[str] = frozenset({"airbnb", "vrbo", "booking", "custom"})
+# The DB CHECK admits every :data:`IcalProvider` slug (cd-ewd7
+# widened it) plus the legacy ``custom`` spelling for v1-era rows.
+# The frozenset powers :func:`_narrow_loaded_provider`, which loud-
+# fails on an out-of-alphabet value loaded from disk.
+_LOADED_PROVIDERS: frozenset[str] = frozenset(get_args(IcalProvider)) | {"custom"}
 
 
 # Provider override accepted at the service boundary — callers pass a
-# public slug, the service coerces to the DB slug before write.
+# §04 slug, the service stores it verbatim.
 IcalProviderOverride = IcalProvider
 
 
@@ -168,16 +159,22 @@ class IcalFeedCreate(BaseModel):
     """Body for :func:`register_feed`.
 
     ``provider_override`` is optional — when ``None`` the service
-    auto-detects from the URL host. The DTO caps the URL length to
-    ``_MAX_URL_LEN`` so a pathological caller can't push
-    multi-megabyte strings through the envelope path.
+    auto-detects from the URL host. ``unit_id`` is also optional —
+    when ``None`` the feed is property-scoped and stays land at
+    the property level until the manager maps a unit. ``poll_cadence``
+    defaults to the §04 ``*/15 * * * *`` baseline when omitted.
+    The DTO caps the URL length to ``_MAX_URL_LEN`` so a pathological
+    caller can't push multi-megabyte strings through the envelope
+    path.
     """
 
     model_config = ConfigDict(extra="forbid")
 
     property_id: str = Field(..., min_length=1, max_length=64)
+    unit_id: str | None = Field(default=None, min_length=1, max_length=64)
     url: str = Field(..., min_length=10, max_length=_MAX_URL_LEN)
     provider_override: IcalProviderOverride | None = None
+    poll_cadence: str | None = Field(default=None, min_length=1, max_length=128)
 
 
 class IcalFeedUpdate(BaseModel):
@@ -186,7 +183,10 @@ class IcalFeedUpdate(BaseModel):
     All fields optional — the service diffs against the stored row
     and only re-runs validation / probe on URL changes. Swapping
     just the provider override is a cheap metadata flip that does
-    not re-hit the network.
+    not re-hit the network. Per-unit remapping and cadence tweaks
+    go through a follow-up DTO once §04's field-by-field PATCH
+    surface lands — today's update only accepts ``url`` and
+    ``provider_override``.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -204,15 +204,25 @@ class IcalFeedView:
     secret token). ``url_plaintext`` is deliberately **not** on
     this DTO — the only legal way to reach the plaintext is through
     :func:`get_plaintext_url`, which is the poller's entry point.
+
+    ``provider`` is typed as ``str`` rather than the richer
+    :data:`IcalProvider` literal because v1-era rows may still carry
+    the legacy ``custom`` slug; callers that want a narrowed literal
+    should go through :func:`_narrow_loaded_provider` first.
+    ``unit_id`` carries the §04 per-unit feed mapping (NULL when
+    the feed is property-scoped). ``poll_cadence`` is the per-feed
+    cron the poller (cd-d48) honours.
     """
 
     id: str
     workspace_id: str
     property_id: str
-    provider: _DbProvider
+    unit_id: str | None
+    provider: str
     provider_override: IcalProviderOverride | None
     url_preview: str
     enabled: bool
+    poll_cadence: str
     last_polled_at: datetime | None
     last_etag: str | None
     last_error: str | None
@@ -282,7 +292,6 @@ def register_feed(
         if body.provider_override is not None
         else detector.detect(validation.url)
     )
-    db_provider = _to_db_provider(effective_provider)
 
     ciphertext = envelope.encrypt(validation.url.encode("utf-8"), purpose=_URL_PURPOSE)
 
@@ -290,10 +299,15 @@ def register_feed(
         id=new_ulid(),
         workspace_id=ctx.workspace_id,
         property_id=body.property_id,
+        unit_id=body.unit_id,
         url=_ciphertext_to_str(ciphertext),
-        provider=db_provider,
+        provider=effective_provider,
+        poll_cadence=(
+            body.poll_cadence if body.poll_cadence is not None else DEFAULT_POLL_CADENCE
+        ),
         last_polled_at=now,
         last_etag=None,
+        last_error=None,
         enabled=validation.parseable_ics,
         created_at=now,
     )
@@ -304,7 +318,6 @@ def register_feed(
         row,
         validation=validation,
         provider_override=body.provider_override,
-        last_error=None,
     )
     write_audit(
         session,
@@ -346,9 +359,7 @@ def update_feed(
     resolved_clock = clock if clock is not None else SystemClock()
     now = resolved_clock.now()
     row = _load_row(session, ctx, feed_id=feed_id)
-    before_view = _row_to_view(
-        row, validation=None, provider_override=None, last_error=None
-    )
+    before_view = _row_to_view(row, validation=None, provider_override=None)
 
     validation: IcalValidation | None = None
     if body.url is not None:
@@ -361,24 +372,27 @@ def update_feed(
         )
         row.url = _ciphertext_to_str(ciphertext)
         row.last_polled_at = now
+        # A fresh URL invalidates any prior probe error — the new URL
+        # has not been judged yet, so ``last_error`` is cleared and
+        # will be re-populated on the next probe-level failure.
+        row.last_error = None
         row.enabled = validation.parseable_ics
 
     if body.provider_override is not None:
         # Override wins; auto-detect only runs when the override is
         # absent. When both ``url`` and ``provider_override`` are
         # set, the override still wins — matches :func:`register_feed`.
-        row.provider = _to_db_provider(body.provider_override)
+        row.provider = body.provider_override
     elif validation is not None:
         # URL changed but override is absent — re-run auto-detect on
         # the new URL.
-        row.provider = _to_db_provider(detector.detect(validation.url))
+        row.provider = detector.detect(validation.url)
 
     session.flush()
     after_view = _row_to_view(
         row,
         validation=validation,
         provider_override=body.provider_override,
-        last_error=None,
     )
     write_audit(
         session,
@@ -410,14 +424,10 @@ def disable_feed(
     """
     resolved_clock = clock if clock is not None else SystemClock()
     row = _load_row(session, ctx, feed_id=feed_id)
-    before_view = _row_to_view(
-        row, validation=None, provider_override=None, last_error=None
-    )
+    before_view = _row_to_view(row, validation=None, provider_override=None)
     row.enabled = False
     session.flush()
-    after_view = _row_to_view(
-        row, validation=None, provider_override=None, last_error=None
-    )
+    after_view = _row_to_view(row, validation=None, provider_override=None)
     write_audit(
         session,
         ctx,
@@ -451,9 +461,7 @@ def delete_feed(
     """
     resolved_clock = clock if clock is not None else SystemClock()
     row = _load_row(session, ctx, feed_id=feed_id)
-    before_view = _row_to_view(
-        row, validation=None, provider_override=None, last_error=None
-    )
+    before_view = _row_to_view(row, validation=None, provider_override=None)
     session.delete(row)
     session.flush()
     write_audit(
@@ -493,8 +501,10 @@ def probe_feed(
         validation = validator.validate(plaintext_url)
     except IcalValidationError as exc:
         row.last_polled_at = now
-        # last_error would be persisted here once §04's column lands;
-        # see _LAST_ERROR_HINT + follow-up Beads task.
+        # Persist the §04 error code on the feed so the operator UI
+        # can render a live-vs-stale indicator without tailing the
+        # audit stream. Cleared on the next successful probe below.
+        row.last_error = exc.code
         session.flush()
         write_audit(
             session,
@@ -514,6 +524,10 @@ def probe_feed(
         )
 
     row.last_polled_at = now
+    # Success clears any prior error so the "most recent outcome"
+    # shape holds — a feed that healed after a transient failure
+    # looks healthy again to the operator UI.
+    row.last_error = None
     if validation.parseable_ics and not row.enabled:
         # First-success gate: flip ``enabled`` only when we've seen a
         # real VCALENDAR. A non-parseable body leaves ``enabled``
@@ -561,10 +575,7 @@ def list_feeds(
         stmt = stmt.where(IcalFeed.property_id == property_id)
     stmt = stmt.order_by(IcalFeed.created_at.asc(), IcalFeed.id.asc())
     rows = session.scalars(stmt).all()
-    return [
-        _row_to_view(row, validation=None, provider_override=None, last_error=None)
-        for row in rows
-    ]
+    return [_row_to_view(row, validation=None, provider_override=None) for row in rows]
 
 
 def get_plaintext_url(
@@ -608,17 +619,6 @@ def _load_row(session: Session, ctx: WorkspaceContext, *, feed_id: str) -> IcalF
     return row
 
 
-def _to_db_provider(provider: IcalProvider) -> _DbProvider:
-    """Collapse the full ``IcalProvider`` taxonomy to the v1 DB slug.
-
-    ``gcal`` / ``generic`` → ``"custom"``. A spec-drift follow-up
-    tracks widening the DB CHECK to carry the richer set.
-    """
-    if provider in ("airbnb", "vrbo", "booking"):
-        return provider  # narrowed by the Literal overlap.
-    return "custom"
-
-
 def _ciphertext_to_str(ciphertext: bytes) -> str:
     """Encode ciphertext bytes for the ``ical_feed.url`` TEXT column.
 
@@ -641,16 +641,19 @@ def _row_to_view(
     *,
     validation: IcalValidation | None,
     provider_override: IcalProviderOverride | None,
-    last_error: str | None,
 ) -> IcalFeedView:
     """Project an :class:`IcalFeed` row into the safe read shape.
 
     ``validation`` is passed through only during register / update so
     the returned view carries a fresh ``url_preview`` for the
-    caller; reads that don't have a validation handy fall back to
-    decrypting is NOT OK here — the list path explicitly must not
-    round-trip plaintext. Instead the view carries ``"(encrypted)"``
-    when we can't derive a preview without decryption.
+    caller; reads that don't have a validation handy never decrypt —
+    the list path explicitly must not round-trip plaintext. Instead
+    the view carries ``"(encrypted)"`` when we can't derive a preview
+    without decryption.
+
+    ``last_error`` is sourced straight from the row (cd-ewd7); the
+    domain service stamps it on probe failure and clears it on
+    success, so the caller always sees the most recent outcome.
     """
     preview: str
     if validation is not None:
@@ -667,35 +670,33 @@ def _row_to_view(
         id=row.id,
         workspace_id=row.workspace_id,
         property_id=row.property_id,
-        provider=_narrow_db_provider(row.provider),
+        unit_id=row.unit_id,
+        provider=_narrow_loaded_provider(row.provider),
         provider_override=provider_override,
         url_preview=preview,
         enabled=row.enabled,
+        poll_cadence=row.poll_cadence,
         last_polled_at=row.last_polled_at,
         last_etag=row.last_etag,
-        last_error=last_error,
+        last_error=row.last_error,
         created_at=row.created_at,
     )
 
 
-def _narrow_db_provider(value: str) -> _DbProvider:
-    """Narrow a loaded DB string to the :data:`_DbProvider` literal.
+def _narrow_loaded_provider(value: str) -> str:
+    """Validate that a DB-loaded ``provider`` slug is in the accept set.
 
     The CHECK constraint on ``ical_feed.provider`` already rejects
-    anything else; the narrow surfaces schema drift as a loud
-    :class:`ValueError` rather than silently returning junk.
+    anything else at write time; the narrow here surfaces schema
+    drift as a loud :class:`ValueError` rather than silently
+    returning junk when a row is loaded. Returns the original value
+    untyped because :class:`IcalFeedView.provider` is a plain ``str``
+    — the accept set is the union of :data:`IcalProvider` slugs
+    (``airbnb | vrbo | booking | gcal | generic``) plus the v1-era
+    ``custom`` spelling.
     """
-    if value in _DB_PROVIDERS:
-        # Literal narrowing happens via the equality checks below;
-        # the frozenset membership is for fast rejection on garbage.
-        if value == "airbnb":
-            return "airbnb"
-        if value == "vrbo":
-            return "vrbo"
-        if value == "booking":
-            return "booking"
-        if value == "custom":
-            return "custom"
+    if value in _LOADED_PROVIDERS:
+        return value
     raise ValueError(f"unknown ical_feed.provider {value!r} on loaded row")
 
 
@@ -719,10 +720,12 @@ def _view_to_diff_dict(view: IcalFeedView) -> dict[str, Any]:
         "id": view.id,
         "workspace_id": view.workspace_id,
         "property_id": view.property_id,
+        "unit_id": view.unit_id,
         "provider": view.provider,
         "provider_override": view.provider_override,
         "url_preview": view.url_preview,
         "enabled": view.enabled,
+        "poll_cadence": view.poll_cadence,
         "last_polled_at": (
             view.last_polled_at.isoformat() if view.last_polled_at else None
         ),

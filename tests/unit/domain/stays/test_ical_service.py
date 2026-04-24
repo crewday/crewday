@@ -315,7 +315,9 @@ class TestRegister:
         )
 
         assert view.enabled is False
-        assert view.provider == "custom"  # generic → custom at DB layer
+        # cd-ewd7 widened the CHECK so ``generic`` lands verbatim
+        # (was ``custom`` under the v1 ``_to_db_provider`` collapse).
+        assert view.provider == "generic"
 
     def test_register_honours_provider_override(
         self,
@@ -376,13 +378,19 @@ class TestRegister:
         # No row landed on the failure path.
         assert session_stays.scalars(select(IcalFeed)).all() == []
 
-    def test_register_collapses_gcal_to_custom(
+    def test_register_stores_gcal_directly(
         self,
         session_stays: Session,
         frozen_clock: FrozenClock,
         envelope: FakeEnvelope,
     ) -> None:
-        """``gcal`` → ``custom`` so the v1 CHECK doesn't fire."""
+        """cd-ewd7: detector's ``gcal`` result now lands verbatim.
+
+        Pre-cd-ewd7, the service layer collapsed ``gcal`` to
+        ``custom`` because the v1 CHECK only admitted four slugs;
+        the widened CHECK plus the removal of ``_to_db_provider``
+        means the DB row carries the detector's output directly.
+        """
         ws = _bootstrap_workspace(session_stays, slug="ical-gc")
         prop = _bootstrap_property(session_stays, ws)
         ctx = _ctx(ws, slug="ical-gc")
@@ -399,7 +407,106 @@ class TestRegister:
             envelope=envelope,
             clock=frozen_clock,
         )
-        assert view.provider == "custom"
+        assert view.provider == "gcal"
+        # The DB row carries the same slug — no stealth collapse.
+        row = session_stays.scalars(select(IcalFeed)).one()
+        assert row.provider == "gcal"
+
+    def test_register_defaults_poll_cadence(
+        self,
+        session_stays: Session,
+        frozen_clock: FrozenClock,
+        envelope: FakeEnvelope,
+    ) -> None:
+        """§04 default ``*/15 * * * *`` applies when caller omits the field."""
+        from app.adapters.db.stays.models import DEFAULT_POLL_CADENCE
+
+        ws = _bootstrap_workspace(session_stays, slug="ical-cadence")
+        prop = _bootstrap_property(session_stays, ws)
+        ctx = _ctx(ws, slug="ical-cadence")
+
+        view = register_feed(
+            session_stays,
+            ctx,
+            body=IcalFeedCreate(
+                property_id=prop,
+                url="https://www.airbnb.com/ical/abc.ics",
+            ),
+            validator=FakeValidator(default_parseable=True),
+            detector=FakeDetector("airbnb"),
+            envelope=envelope,
+            clock=frozen_clock,
+        )
+        assert view.poll_cadence == DEFAULT_POLL_CADENCE
+        assert DEFAULT_POLL_CADENCE == "*/15 * * * *"
+
+    def test_register_honours_poll_cadence_override(
+        self,
+        session_stays: Session,
+        frozen_clock: FrozenClock,
+        envelope: FakeEnvelope,
+    ) -> None:
+        """Operator-supplied cadence overrides the §04 default."""
+        ws = _bootstrap_workspace(session_stays, slug="ical-cad-ovr")
+        prop = _bootstrap_property(session_stays, ws)
+        ctx = _ctx(ws, slug="ical-cad-ovr")
+
+        view = register_feed(
+            session_stays,
+            ctx,
+            body=IcalFeedCreate(
+                property_id=prop,
+                url="https://www.airbnb.com/ical/abc.ics",
+                poll_cadence="*/5 * * * *",
+            ),
+            validator=FakeValidator(default_parseable=True),
+            detector=FakeDetector("airbnb"),
+            envelope=envelope,
+            clock=frozen_clock,
+        )
+        assert view.poll_cadence == "*/5 * * * *"
+
+    def test_register_with_unit_id(
+        self,
+        session_stays: Session,
+        frozen_clock: FrozenClock,
+        envelope: FakeEnvelope,
+    ) -> None:
+        """cd-ewd7: feed can target a specific unit via ``unit_id``."""
+        from app.adapters.db.places.models import Unit
+
+        ws = _bootstrap_workspace(session_stays, slug="ical-unit")
+        prop = _bootstrap_property(session_stays, ws)
+        unit_id = new_ulid()
+        session_stays.add(
+            Unit(
+                id=unit_id,
+                property_id=prop,
+                label="Apt 3B",
+                type="apartment",
+                capacity=2,
+                created_at=_PINNED,
+            )
+        )
+        session_stays.flush()
+        ctx = _ctx(ws, slug="ical-unit")
+
+        view = register_feed(
+            session_stays,
+            ctx,
+            body=IcalFeedCreate(
+                property_id=prop,
+                unit_id=unit_id,
+                url="https://www.airbnb.com/ical/abc.ics",
+            ),
+            validator=FakeValidator(default_parseable=True),
+            detector=FakeDetector("airbnb"),
+            envelope=envelope,
+            clock=frozen_clock,
+        )
+        assert view.unit_id == unit_id
+        row = session_stays.scalars(select(IcalFeed)).one()
+        assert row.unit_id == unit_id
 
 
 # ---------------------------------------------------------------------------
@@ -760,12 +867,19 @@ class TestProbe:
         assert row is not None
         assert row.enabled is True
 
-    def test_probe_failure_records_error_code(
+    def test_probe_failure_persists_last_error(
         self,
         session_stays: Session,
         frozen_clock: FrozenClock,
         envelope: FakeEnvelope,
     ) -> None:
+        """cd-ewd7: probe failure stamps ``last_error`` on the feed row.
+
+        Pre-cd-ewd7 the error only surfaced in the audit diff because
+        the column didn't exist yet; post-cd-ewd7 the service writes
+        the code to the row so the operator UI can render a live-
+        vs-stale indicator without tailing the audit stream.
+        """
         ws = _bootstrap_workspace(session_stays, slug="prb-err")
         prop = _bootstrap_property(session_stays, ws)
         ctx = _ctx(ws, slug="prb-err")
@@ -781,6 +895,11 @@ class TestProbe:
             envelope=envelope,
             clock=frozen_clock,
         )
+        # Fresh registration: ``last_error`` starts NULL.
+        fresh_row = session_stays.get(IcalFeed, view.id)
+        assert fresh_row is not None
+        assert fresh_row.last_error is None
+
         # Next probe fails.
         url = "https://example.com/feed.ics"
         failing_validator = FakeValidator(
@@ -797,13 +916,145 @@ class TestProbe:
         )
         assert result.ok is False
         assert result.error_code == "ical_url_timeout"
-        # The last probe audit records the error code.
+        # Row now carries the §04 code so the UI can pick it up.
+        session_stays.expire_all()
+        row_after = session_stays.get(IcalFeed, view.id)
+        assert row_after is not None
+        assert row_after.last_error == "ical_url_timeout"
+        # The last probe audit still records the error code.
         audits = session_stays.scalars(
             select(AuditLog)
             .where(AuditLog.entity_id == view.id)
             .where(AuditLog.action == "probe")
         ).all()
         assert audits[-1].diff["error_code"] == "ical_url_timeout"
+
+    def test_probe_success_clears_last_error(
+        self,
+        session_stays: Session,
+        frozen_clock: FrozenClock,
+        envelope: FakeEnvelope,
+    ) -> None:
+        """A successful probe wipes any prior ``last_error`` stamp.
+
+        Without the clear the column would be stuck at whatever code
+        the last failure wrote even after the feed healed, which
+        would confuse the operator UI ("why is this feed flagged
+        stale when it just polled cleanly?").
+        """
+        ws = _bootstrap_workspace(session_stays, slug="prb-ok")
+        prop = _bootstrap_property(session_stays, ws)
+        ctx = _ctx(ws, slug="prb-ok")
+        view = register_feed(
+            session_stays,
+            ctx,
+            body=IcalFeedCreate(
+                property_id=prop,
+                url="https://example.com/feed.ics",
+            ),
+            validator=FakeValidator(default_parseable=True),
+            detector=FakeDetector("generic"),
+            envelope=envelope,
+            clock=frozen_clock,
+        )
+        # Fail once to plant a code.
+        url = "https://example.com/feed.ics"
+        probe_feed(
+            session_stays,
+            ctx,
+            feed_id=view.id,
+            validator=FakeValidator(
+                {url: IcalValidationError("ical_url_timeout", "nope")}
+            ),
+            envelope=envelope,
+            clock=frozen_clock,
+        )
+        session_stays.expire_all()
+        row = session_stays.get(IcalFeed, view.id)
+        assert row is not None
+        assert row.last_error == "ical_url_timeout"
+
+        # Now heal.
+        frozen_clock.set(_LATER)
+        result = probe_feed(
+            session_stays,
+            ctx,
+            feed_id=view.id,
+            validator=FakeValidator(default_parseable=True),
+            envelope=envelope,
+            clock=frozen_clock,
+        )
+        assert result.ok is True
+        session_stays.expire_all()
+        row_after = session_stays.get(IcalFeed, view.id)
+        assert row_after is not None
+        assert row_after.last_error is None
+
+    def test_update_url_clears_stale_last_error(
+        self,
+        session_stays: Session,
+        frozen_clock: FrozenClock,
+        envelope: FakeEnvelope,
+    ) -> None:
+        """Swapping the URL invalidates the prior probe's verdict.
+
+        ``last_error`` reflects the outcome of the last probe against
+        the current URL; a fresh URL has not been judged yet, so
+        leaving a stale code on the row would mis-represent the
+        feed's health.
+        """
+        ws = _bootstrap_workspace(session_stays, slug="up-err")
+        prop = _bootstrap_property(session_stays, ws)
+        ctx = _ctx(ws, slug="up-err")
+        view = register_feed(
+            session_stays,
+            ctx,
+            body=IcalFeedCreate(
+                property_id=prop,
+                url="https://example.com/feed.ics",
+            ),
+            validator=FakeValidator(default_parseable=True),
+            detector=FakeDetector("generic"),
+            envelope=envelope,
+            clock=frozen_clock,
+        )
+        # Plant a failure on the row.
+        probe_feed(
+            session_stays,
+            ctx,
+            feed_id=view.id,
+            validator=FakeValidator(
+                {
+                    "https://example.com/feed.ics": IcalValidationError(
+                        "ical_url_timeout", "nope"
+                    )
+                }
+            ),
+            envelope=envelope,
+            clock=frozen_clock,
+        )
+        session_stays.expire_all()
+        mid = session_stays.get(IcalFeed, view.id)
+        assert mid is not None
+        assert mid.last_error == "ical_url_timeout"
+
+        # Swap URL; the update path should clear the stale code.
+        from app.domain.stays.ical_service import update_feed
+
+        update_feed(
+            session_stays,
+            ctx,
+            feed_id=view.id,
+            body=IcalFeedUpdate(url="https://www.airbnb.com/ical/new.ics"),
+            validator=FakeValidator(default_parseable=True),
+            detector=FakeDetector("airbnb"),
+            envelope=envelope,
+            clock=frozen_clock,
+        )
+        session_stays.expire_all()
+        row_after = session_stays.get(IcalFeed, view.id)
+        assert row_after is not None
+        assert row_after.last_error is None
 
 
 # ---------------------------------------------------------------------------

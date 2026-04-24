@@ -177,22 +177,27 @@ class TestMigrationShape:
 
     def test_ical_feed_columns(self, engine: Engine) -> None:
         cols = {c["name"]: c for c in inspect(engine).get_columns("ical_feed")}
+        # cd-ewd7 landed ``unit_id``, ``poll_cadence``, ``last_error``.
         expected = {
             "id",
             "workspace_id",
             "property_id",
+            "unit_id",
             "url",
             "provider",
+            "poll_cadence",
             "last_polled_at",
             "last_etag",
+            "last_error",
             "enabled",
             "created_at",
         }
         assert set(cols) == expected
-        for nullable in ("last_polled_at", "last_etag"):
-            assert cols[nullable]["nullable"] is True, f"{nullable} must be nullable"
-        for notnull in expected - {"last_polled_at", "last_etag"}:
-            assert cols[notnull]["nullable"] is False, f"{notnull} must be NOT NULL"
+        nullable = {"unit_id", "last_polled_at", "last_etag", "last_error"}
+        for name in nullable:
+            assert cols[name]["nullable"] is True, f"{name} must be nullable"
+        for name in expected - nullable:
+            assert cols[name]["nullable"] is False, f"{name} must be NOT NULL"
 
     def test_ical_feed_fks(self, engine: Engine) -> None:
         fks = {
@@ -203,6 +208,9 @@ class TestMigrationShape:
         assert fks[("property_id",)]["options"].get("ondelete") == "CASCADE"
         assert fks[("workspace_id",)]["referred_table"] == "workspace"
         assert fks[("workspace_id",)]["options"].get("ondelete") == "CASCADE"
+        # cd-ewd7: ``unit_id`` FK with SET NULL — feed outlives unit churn.
+        assert fks[("unit_id",)]["referred_table"] == "unit"
+        assert fks[("unit_id",)]["options"].get("ondelete") == "SET NULL"
 
     def test_ical_feed_index(self, engine: Engine) -> None:
         indexes = {ix["name"]: ix for ix in inspect(engine).get_indexes("ical_feed")}
@@ -211,6 +219,9 @@ class TestMigrationShape:
             "workspace_id",
             "property_id",
         ]
+        # cd-ewd7: ``unit_id`` lookup index.
+        assert "ix_ical_feed_unit" in indexes
+        assert indexes["ix_ical_feed_unit"]["column_names"] == ["unit_id"]
 
     def test_reservation_columns(self, engine: Engine) -> None:
         cols = {c["name"]: c for c in inspect(engine).get_columns("reservation")}
