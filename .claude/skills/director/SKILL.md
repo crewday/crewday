@@ -64,6 +64,13 @@ editing rules".
 
 ## Per-task workflow
 
+**One commit per pair, and only after selfreview has finished.**
+Selfreview (even in autofix mode) does **not** commit — it applies
+fixes in the working tree and runs gates. The director then dispatches
+the `commiter` subagent, which bundles the main task's implementation
+**and** its review fixes into a single commit and pushes. No interim
+commit between implementation and selfreview.
+
 ```
 DIRECTOR: pick top task from `bv --robot-triage --format toon`
     │
@@ -72,33 +79,42 @@ DIRECTOR: pick top task from `bv --robot-triage --format toon`
    selfreview task — triage doesn't return it
     │
     ▼
-2. CODER (implement + run MODULE tests only)
-    │       delegated via subagent to keep director context clean
+2. CODER: implement + run MODULE tests only.
+    │       **Do NOT commit.** Leave changes in the working tree.
+    │       Delegated via subagent to keep director context clean.
     │
     ▼
-3. DIRECTOR: close the main Beads task (`bd close <id>`)
+3. CODER: run the paired selfreview task **in autofix mode**
+    │       (`/selfreview autofix` — fixes every BUGS/MISSING/RISKY
+    │       directly, no plan mode, no user prompt, runs the repo's
+    │       quality gates). Fixes stay uncommitted in the working
+    │       tree. Delegated via subagent; preserves the 1:1
+    │       main↔selfreview coupling.
     │
     ▼
-4. CODER runs the selfreview task (skeptical pass on the changes)
-    │       delegated via subagent — also keeps context clean and
-    │       preserves the 1:1 main↔selfreview coupling
+4. DIRECTOR: `bd close <main-task-id>` and
+    │       `bd close <selfreview-task-id>` (no `bd sync`, no commit
+    │       yet — the commiter will sync and bundle both closures
+    │       into the single commit).
     │
     ▼
-5. DIRECTOR: close the selfreview task
+5. COMMITER: `bd sync` → `git add` (in-scope code + `.beads/`) →
+    │       signed-off Conventional Commit referencing both task IDs
+    │       → `git push`. **This is the only commit for the pair.**
     │
     ▼
-6. COMMITER (git add + bd sync + commit + push)
-    │
-    ▼
-7. DIRECTOR: `bv --robot-triage --format toon` again —
-   loop to step 1 until empty
+6. DIRECTOR: `bv --robot-triage --format toon` again —
+   loop to step 1 until empty.
 ```
 
-**No separate Reviewer or Documenter agents.** The review step is
-(1) close the main task and (2) run the paired selfreview Beads task
-via a Coder subagent. Documentation updates happen inside the main
-or selfreview task itself — the Coder owns spec / README / OpenAPI
-changes for the scope it touched.
+**No Reviewer or Documenter agents.** Review = the paired selfreview
+Beads task run in autofix mode. Documentation updates happen inside
+the main or selfreview task itself — the Coder owns spec / README /
+OpenAPI changes for the scope it touched.
+
+**Never commit before step 5.** If the Coder or the selfreview
+subagent commits mid-flow, that's a bug — stop and investigate
+rather than stacking more commits on top.
 
 For hard architectural decisions: invoke **ORACLE** for deep research
 before planning, not after.
@@ -174,6 +190,24 @@ prompt: |
   Test path: tests/api/test_tasks.py
   Task: Add POST /tasks/{id}/complete per spec 06 §3.2
   Acceptance criteria: see bd-042
+```
+
+**For selfreview delegations, explicitly instruct autofix mode** —
+belt-and-braces even though the `selfreview` label auto-triggers it:
+
+```
+subagent_type: "general-purpose"
+prompt: |
+  Read and follow: .claude/agents/coder.md
+
+  Area: app/api/tasks  (same as the paired main task)
+  Beads task: bd-042-sr   # the selfreview task, labelled `selfreview`
+  Test path: tests/api/test_tasks.py
+  Task: Run `/selfreview` in **autofix mode** against bd-042's commits.
+    - No plan mode, no user prompt.
+    - Fix every BUGS / MISSING / RISKY finding directly.
+    - Run the repo's quality gates (lint, type, affected tests).
+    - Close the Beads task, commit, push.
 ```
 
 ### Frontend work — load `/frontend-design:frontend-design`
