@@ -67,7 +67,7 @@ from app.api.admin import admin_router
 from app.api.errors import add_exception_handlers
 from app.api.health import router as health_router
 from app.api.middleware import IdempotencyMiddleware, SecurityHeadersMiddleware
-from app.api.v1 import CONTEXT_ROUTERS
+from app.api.v1 import CONTEXT_ROUTERS, WORKSPACE_ADMIN_ROUTER
 from app.api.v1.auth import invite as invite_module
 from app.api.v1.auth import magic as magic_module
 from app.api.v1.auth import me as me_module
@@ -121,6 +121,23 @@ _SPA_STUB_HTML: Final[str] = (
 # but we pin the string explicitly so a future FastAPI version that
 # silently regresses to 3.0.x fails our factory shape tests loudly.
 _OPENAPI_VERSION: Final[str] = "3.1.0"
+
+# Tag seeds for non-context surfaces. The Swagger UI shows one section
+# per tag; FastAPI does not auto-populate tag *definitions* from
+# operation tag lists, so without seeding these we'd get sections with
+# no description. Keep this list short — the right home for most new
+# tags is still the §01 context map via :data:`CONTEXT_ROUTERS`.
+_NON_CONTEXT_OPENAPI_TAGS: Final[tuple[tuple[str, str], ...]] = (
+    (
+        "workspace_admin",
+        (
+            "Workspace-scoped admin aggregator — owner/manager-only "
+            "read-only surfaces spanning multiple contexts (abuse "
+            "signals, security posture). See §15 'Self-serve abuse "
+            "mitigations'."
+        ),
+    ),
+)
 
 
 class PublicBindRefused(RuntimeError):
@@ -354,10 +371,21 @@ def _mount_context_routers(app: FastAPI) -> None:
     Beads tasks (cd-rpxd, cd-75wp, cd-sn26, ...) fill in the real
     routes without having to re-wire this seam.
 
-    The admin tree (:data:`app.api.admin.admin_router`) is mounted
-    under ``/admin/api/v1`` alongside — deployment-scoped routes
-    live there, empty for now and gated by the admin authz
-    middleware (cd-jlms) when real routes land.
+    Three non-context routers also mount here alongside the §01
+    contexts — they're neither bounded contexts nor part of the
+    context-map invariant, but they share the workspace or
+    deployment URL prefix so keeping them co-located with the
+    context fan-out is easier to audit than scattering mounts:
+
+    * :data:`app.api.v1.WORKSPACE_ADMIN_ROUTER` under
+      ``/w/{slug}/api/v1/admin`` — workspace-scoped owner/manager
+      admin aggregator (§15 "Self-serve abuse mitigations", cd-g1ay).
+      Declares its own ``workspace_admin`` tag so the OpenAPI
+      tag list stays distinct from the deployment admin tree's
+      ``admin`` tag.
+    * :data:`app.api.admin.admin_router` under ``/admin/api/v1`` —
+      deployment-scoped admin tree, empty for now and gated by
+      the admin authz middleware (cd-jlms) when real routes land.
     """
     scoped_prefix = "/w/{slug}/api/v1"
     for context_name, router in CONTEXT_ROUTERS:
@@ -368,6 +396,15 @@ def _mount_context_routers(app: FastAPI) -> None:
         # add sub-prefixes like ``/tasks/{id}/evidence``.
         app.include_router(router, prefix=f"{scoped_prefix}/{context_name}")
 
+    # Workspace-scoped admin aggregator. Mounted OUTSIDE the
+    # ``CONTEXT_ROUTERS`` loop so the §01 13-context invariant stays
+    # intact in that data structure and the custom OpenAPI generator
+    # does not seed a phantom ``admin`` tag from a context name that
+    # isn't in §01. The router's own ``tags=["workspace_admin"]``
+    # drives the tag that appears in the schema.
+    app.include_router(WORKSPACE_ADMIN_ROUTER, prefix=f"{scoped_prefix}/admin")
+
+    # Deployment-scoped admin tree (bare host).
     app.include_router(admin_router, prefix="/admin/api/v1")
 
 
@@ -479,6 +516,13 @@ def _build_custom_openapi(app: FastAPI) -> dict[str, Any]:
        but the seed guarantees every context appears even when its
        router is empty, so `/api/openapi.json` stays a stable
        reference for client generators while routes fill in.
+    3. Append tag definitions for non-context surfaces that live
+       outside :data:`CONTEXT_ROUTERS` but still deserve a Swagger
+       UI section with a real description (e.g. ``workspace_admin``
+       from :data:`app.api.v1.WORKSPACE_ADMIN_ROUTER`). FastAPI does
+       not auto-populate ``tags[]`` from operation-level tag lists,
+       so without this seed the Swagger UI would render the section
+       with no description.
 
     ``operation_id`` rewriting is deliberately NOT done here: spec
     §12 requires every handler to declare its own
@@ -498,9 +542,10 @@ def _build_custom_openapi(app: FastAPI) -> dict[str, Any]:
 
     # Merge the context tag seed with whatever FastAPI already
     # emitted (auth, admin, health, …) while preserving order:
-    # context tags first (§01 order), everything else after, no
-    # duplicates. Deterministic ordering matters for the committed
-    # ``docs/api/openapi.json`` diff.
+    # context tags first (§01 order), then any cross-cutting surfaces
+    # that carry their own tag but aren't §01 contexts, then everything
+    # else already present in the schema. Deterministic ordering
+    # matters for the committed ``docs/api/openapi.json`` diff.
     existing = {t.get("name"): t for t in schema.get("tags", [])}
     merged_tags: list[dict[str, Any]] = []
     seen: set[str] = set()
@@ -512,6 +557,20 @@ def _build_custom_openapi(app: FastAPI) -> dict[str, Any]:
             )
         )
         seen.add(context_name)
+
+    # Non-context tag seeds. These are surfaces that ride the same
+    # ``/w/<slug>/api/v1/...`` or bare-host URL shape as the context
+    # tree but are not themselves bounded contexts per §01. Keep the
+    # list short — the right answer for most new surfaces is still a
+    # context entry, not a new row here.
+    for non_context_tag, description in _NON_CONTEXT_OPENAPI_TAGS:
+        merged_tags.append(
+            existing.get(
+                non_context_tag, {"name": non_context_tag, "description": description}
+            )
+        )
+        seen.add(non_context_tag)
+
     for name, tag in existing.items():
         if name not in seen and name is not None:
             merged_tags.append(tag)

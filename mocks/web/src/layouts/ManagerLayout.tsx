@@ -21,6 +21,7 @@ import {
   ScrollText,
   Settings,
   Shield,
+  ShieldAlert,
   ShieldCheck,
   Sunrise,
   UserCircle,
@@ -89,6 +90,12 @@ const BASE_NAV_ITEMS: SideNavItem[] = [
   { type: "link", to: "/organizations", matchPrefix: "/organization", label: "Organizations", icon: NAV_ICON(Building2) },
   { type: "link", to: "/permissions", label: "Permissions", icon: NAV_ICON(ShieldCheck) },
   { type: "link", to: "/audit", label: "Audit log", icon: NAV_ICON(ScrollText) },
+  // §15 "Self-serve abuse mitigations" — workspace-scoped signup
+  // abuse-signal feed. Gated server-side on ``audit_log.view``
+  // (owners + managers per §05 default-allow); the ManagerLayout
+  // shell is itself manager-only, so rendering the link here is
+  // equivalent to "visible to owners/managers only".
+  { type: "link", to: "/signups", label: "Signups", icon: NAV_ICON(ShieldAlert) },
   { type: "link", to: "/webhooks", label: "Webhooks", icon: NAV_ICON(Webhook) },
   { type: "link", to: "/tokens", label: "API tokens", icon: NAV_ICON(KeyRound) },
   { type: "link", to: "/settings", label: "Settings", icon: NAV_ICON(Settings) },

@@ -10,8 +10,18 @@ makes it impossible for a new router to appear in the OpenAPI
 surface without an explicit line here — i.e. without a reviewer
 noticing.
 
-See ``docs/specs/01-architecture.md`` §"Context map" and
-``docs/specs/12-rest-api.md`` §"Base URL".
+The workspace-scoped admin aggregator (:data:`WORKSPACE_ADMIN_ROUTER`)
+is exported **alongside** — not inside — :data:`CONTEXT_ROUTERS`.
+It is not one of the §01 13 bounded contexts (it aggregates
+owner/manager read-only surfaces spanning multiple contexts), so
+folding it into the context map would dilute that invariant and
+add a phantom ``admin`` tag to the OpenAPI seed. The factory
+mounts it directly at ``/w/{slug}/api/v1/admin/*``.
+
+See ``docs/specs/01-architecture.md`` §"Context map",
+``docs/specs/12-rest-api.md`` §"Base URL", and
+``docs/specs/15-security-privacy.md`` §"Self-serve abuse
+mitigations" for the admin aggregator scope.
 """
 
 from __future__ import annotations
@@ -20,6 +30,7 @@ from collections.abc import Sequence
 
 from fastapi import APIRouter
 
+from .admin import router as _workspace_admin_router
 from .assets import router as assets_router
 from .billing import router as billing_router
 from .expenses import router as expenses_router
@@ -55,4 +66,13 @@ CONTEXT_ROUTERS: Sequence[tuple[str, APIRouter]] = (
     ("llm", llm_router),
 )
 
-__all__ = ["CONTEXT_ROUTERS"]
+# Workspace-scoped admin aggregator — owner/manager-only cross-context
+# surfaces (abuse signals, security posture, workspace health). Kept
+# outside :data:`CONTEXT_ROUTERS` so the 13-context invariant survives
+# and the OpenAPI tag seed remains exactly the §01 contexts. The
+# router tags its operations ``workspace_admin`` (not ``admin``) to
+# avoid colliding with the deployment-admin tree's tag; see the
+# :mod:`app.api.v1.admin` module docstring for the full rationale.
+WORKSPACE_ADMIN_ROUTER: APIRouter = _workspace_admin_router
+
+__all__ = ["CONTEXT_ROUTERS", "WORKSPACE_ADMIN_ROUTER"]

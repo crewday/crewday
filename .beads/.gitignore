@@ -1,6 +1,17 @@
 # Dolt database (managed by Dolt, not git)
 dolt/
+embeddeddolt/
 dolt-access.lock
+dolt-server.lock
+dolt-server.log
+dolt-server.pid
+dolt-server.port
+
+# Credentials (per-machine, never shared)
+.beads-credential-key
+
+# Local Dolt backup snapshots (per-machine)
+backup/
 
 # Runtime files
 bd.sock
@@ -21,6 +32,7 @@ redirect
 .jsonl.lock
 sync_base.jsonl
 export-state/
+export-state.json
 
 # Ephemeral store (SQLite - wisps/molecules, intentionally not versioned)
 ephemeral.sqlite3

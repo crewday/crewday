@@ -1139,6 +1139,38 @@ export interface Me {
   is_deployment_owner: boolean;
 }
 
+// §15 "Self-serve abuse mitigations" — workspace-scoped signup
+// abuse-signal feed. The page lists abuse-relevant signup events
+// (burst-rate trips, same IP across distinct emails, repeat
+// provisioning, quota near-breach) projected from the workspace's
+// audit log. Shape mirrors the server's
+// :class:`app.api.v1.admin.signups.SignupAuditEntry`.
+//
+// Distinct from the deployment-scoped :interface:`AdminMe` et al.
+// below — that tree is /admin/api/v1/* (deployment operator). This
+// entry lives at /w/<slug>/api/v1/admin/signups and is gated on
+// ``audit_log.view`` per §05.
+export type SignupAuditKind =
+  | "burst_rate"
+  | "distinct_emails_one_ip"
+  | "repeat_email"
+  | "quota_near_breach";
+
+export interface SignupAuditEntry {
+  event_id: string;
+  kind: SignupAuditKind | string;
+  occurred_at: string;
+  ip_hash: string | null;
+  email_hash: string | null;
+  detail: Record<string, unknown>;
+}
+
+export interface SignupsListResponse {
+  data: SignupAuditEntry[];
+  next_cursor: string | null;
+  has_more: boolean;
+}
+
 // §14 — /admin shell.
 
 export interface AdminMe {

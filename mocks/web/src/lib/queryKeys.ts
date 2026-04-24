@@ -101,6 +101,11 @@ export const qk = {
   agentPrefs: (scope: "workspace" | "property" | "me", id?: string) =>
     ["agent_preferences", scope, id ?? ""] as const,
   workspaceUsage: () => ["workspace", "usage"] as const,
+  // §15 "Self-serve abuse mitigations" — workspace-scoped signup
+  // abuse-signal feed. Namespaced under ``workspace`` (not
+  // ``admin``) so it does NOT collide with the deployment-scoped
+  // /admin/* shell keys below.
+  workspaceSignups: () => ["workspace", "signups"] as const,
   // §14 — /admin shell.
   adminMe: () => ["admin", "me"] as const,
   adminWorkspaces: () => ["admin", "workspaces"] as const,

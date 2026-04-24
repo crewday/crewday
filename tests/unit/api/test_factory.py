@@ -139,10 +139,12 @@ class TestOpenapiShape:
         targets the still-empty scaffolds so an accidental route
         leakage anywhere else still fails the test.
         """
-        # ``time`` carries routes as of cd-whl; add any further
+        # ``time`` carries routes as of cd-whl. Add any further
         # implemented contexts here as they land. Every name in this
         # set must still appear in :data:`CONTEXT_ROUTERS` so the tag
-        # seed check above keeps firing.
+        # seed check above keeps firing. The workspace-scoped admin
+        # aggregator (cd-g1ay) does NOT belong here — it lives outside
+        # ``CONTEXT_ROUTERS`` and mounts through its own seam.
         implemented_contexts = {"time"}
         client = _client(create_app(settings=_settings()))
         schema = client.get("/api/openapi.json").json()
@@ -236,7 +238,13 @@ class TestContextRouterMount:
     """
 
     def test_all_contexts_registered(self) -> None:
-        """``CONTEXT_ROUTERS`` contains all 13 spec §01 entries."""
+        """``CONTEXT_ROUTERS`` contains exactly the 13 §01 entries.
+
+        The workspace-scoped admin aggregator (cd-g1ay) is a separate
+        export (:data:`WORKSPACE_ADMIN_ROUTER`) — it isn't one of the
+        §01 bounded contexts and folding it in here would dilute that
+        invariant and seed a phantom ``admin`` tag in the OpenAPI.
+        """
         names = {name for name, _ in CONTEXT_ROUTERS}
         assert names == {
             "identity",
@@ -283,3 +291,91 @@ class TestContextRouterMount:
         body = resp.json()
         assert body["type"] == "https://crewday.dev/errors/not_found"
         assert body["status"] == 404
+
+
+# ---------------------------------------------------------------------------
+# Workspace-scoped admin aggregator (cd-g1ay)
+# ---------------------------------------------------------------------------
+
+
+class TestWorkspaceAdminMount:
+    """The workspace-admin aggregator mounts alongside context routers
+    but is neither in ``CONTEXT_ROUTERS`` nor sharing the
+    deployment-admin tree's ``admin`` tag.
+    """
+
+    def test_workspace_admin_router_exported(self) -> None:
+        """:data:`WORKSPACE_ADMIN_ROUTER` is re-exported from
+        :mod:`app.api.v1` for the factory to import.
+
+        Name parity with :mod:`app.api.v1.admin` ``router`` matters —
+        swapping the reference would lose route registrations made
+        later on the imported symbol.
+        """
+        from fastapi import APIRouter
+
+        from app.api.v1 import WORKSPACE_ADMIN_ROUTER
+        from app.api.v1.admin import router as admin_module_router
+
+        assert isinstance(WORKSPACE_ADMIN_ROUTER, APIRouter)
+        assert WORKSPACE_ADMIN_ROUTER is admin_module_router
+
+    def test_admin_is_not_a_context(self) -> None:
+        """``admin`` must not appear in ``CONTEXT_ROUTERS`` — doing so
+        would seed a phantom OpenAPI tag and claim the URL segment
+        through the context-fan-out loop.
+        """
+        names = {name for name, _ in CONTEXT_ROUTERS}
+        assert "admin" not in names
+
+    def test_workspace_admin_tag_is_workspace_admin_not_admin(self) -> None:
+        """Operations from :data:`WORKSPACE_ADMIN_ROUTER` tag as
+        ``workspace_admin`` — the deployment admin tree owns ``admin``.
+        """
+        client = _client(create_app(settings=_settings()))
+        schema = client.get("/api/openapi.json").json()
+        admin_signups = (
+            schema["paths"].get("/w/{slug}/api/v1/admin/signups", {}).get("get")
+        )
+        assert admin_signups is not None, "workspace admin signups mount missing"
+        assert "workspace_admin" in admin_signups.get("tags", []), (
+            "expected workspace-admin ops tagged 'workspace_admin', "
+            f"got {admin_signups.get('tags')}"
+        )
+        assert "admin" not in admin_signups.get("tags", []), (
+            "workspace-admin ops must not tag 'admin' — that clashes "
+            "with the deployment-admin tree's tag"
+        )
+
+    def test_workspace_admin_operation_id_prefix(self) -> None:
+        """Operation IDs use ``workspace_admin.*`` — ``admin.*`` is
+        reserved for the host-CLI-only ``crewday admin`` group (§13).
+        """
+        client = _client(create_app(settings=_settings()))
+        schema = client.get("/api/openapi.json").json()
+        op = schema["paths"]["/w/{slug}/api/v1/admin/signups"]["get"]
+        assert op["operationId"] == "workspace_admin.signups.list"
+
+    def test_workspace_admin_cli_group_not_reserved(self) -> None:
+        """``x-cli.group`` is ``workspace-admin`` — neither the
+        host-only ``admin`` nor the deployment-HTTP ``deploy`` (§13).
+        """
+        client = _client(create_app(settings=_settings()))
+        schema = client.get("/api/openapi.json").json()
+        op = schema["paths"]["/w/{slug}/api/v1/admin/signups"]["get"]
+        cli = op.get("x-cli", {})
+        assert cli.get("group") == "workspace-admin"
+        assert cli.get("group") != "admin"
+        assert cli.get("group") != "deploy"
+
+    def test_workspace_admin_tag_is_defined_with_description(self) -> None:
+        """Schema-level ``tags[]`` carries a ``workspace_admin``
+        definition — without this, Swagger UI renders the section
+        with no description since FastAPI doesn't auto-populate tag
+        definitions from operation-level tag references.
+        """
+        client = _client(create_app(settings=_settings()))
+        schema = client.get("/api/openapi.json").json()
+        tag_defs = {t["name"]: t for t in schema.get("tags", [])}
+        assert "workspace_admin" in tag_defs
+        assert tag_defs["workspace_admin"].get("description")
