@@ -84,6 +84,7 @@ See ``docs/specs/03-auth-and-tokens.md`` §"Additional users
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -107,7 +108,7 @@ from app.adapters.db.identity.models import (
     Session as SessionRow,
 )
 from app.adapters.db.workspace.models import UserWorkspace, Workspace
-from app.adapters.mail.ports import Mailer
+from app.adapters.mail.ports import MailDeliveryError, Mailer
 from app.audit import write_audit
 from app.auth import magic_link
 from app.auth._hashing import hash_with_pepper
@@ -148,6 +149,9 @@ __all__ = [
     "switch_session_workspace",
     "write_member_remove_rejected_audit",
 ]
+
+
+_log = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -676,14 +680,31 @@ def invite(
         raise RuntimeError(
             f"magic_link.request_link returned None for invite {invite_id!r}"
         )
-    _send_invite_email(
-        mailer=mailer,
-        captured_url=url,
-        to_email=email_lower,
-        invitee_display_name=display_name,
-        inviter_display_name=inviter_display_name,
-        workspace_name=workspace_name,
-    )
+    # Invite is manager-gated, so this isn't an enumeration-guard path
+    # per se — but a mailer outage must not fail the write. The invite
+    # row, the magic-link nonce, and the audit row all need to commit
+    # so an operator can re-issue the email from the invite UI once
+    # SMTP recovers. Swallow :class:`MailDeliveryError` the same way
+    # the recovery / magic-link surfaces do; log loudly so the outage
+    # is visible in ops logs even though the caller sees 2xx. Sibling
+    # of the §15 enumeration guard; same try/except shape so the
+    # behaviour is uniform across auth-adjacent mail sends.
+    try:
+        _send_invite_email(
+            mailer=mailer,
+            captured_url=url,
+            to_email=email_lower,
+            invitee_display_name=display_name,
+            inviter_display_name=inviter_display_name,
+            workspace_name=workspace_name,
+        )
+    except MailDeliveryError:
+        _log.warning(
+            "invite mail send failed for invite %r; swallowing so the "
+            "invite row commits and an operator can re-issue",
+            invite_id,
+            exc_info=True,
+        )
 
     write_audit(
         session,

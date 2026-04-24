@@ -99,6 +99,33 @@ class _RecordingMailer:
         return "test-message-id"
 
 
+@dataclass
+class _ExplodingMailer:
+    """:class:`Mailer` double that raises a pre-canned exception on send.
+
+    Drives the §15 enumeration-guard coverage in
+    :class:`TestRequestLinkEnumerationGuard` — mirrors the fixture of
+    the same name in :mod:`tests.unit.auth.test_recovery` so the shape
+    stays consistent across the three auth surfaces that share the
+    swallow-MailDeliveryError pattern.
+    """
+
+    exc: BaseException
+
+    def send(
+        self,
+        *,
+        to: Sequence[str],
+        subject: str,
+        body_text: str,
+        body_html: str | None = None,
+        headers: Mapping[str, str] | None = None,
+        reply_to: str | None = None,
+    ) -> str:
+        del to, subject, body_text, body_html, headers, reply_to
+        raise self.exc
+
+
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -408,6 +435,56 @@ class TestRequestLink:
     # service. Deliberately no runtime test: writing one would
     # require bypassing mypy's check on the typed call, which
     # AGENTS.md §"Code quality bar" forbids.
+
+
+class TestRequestLinkEnumerationGuard:
+    """§15: mailer outages must not fail the write or surface as 5xx.
+
+    Mirrors
+    :class:`tests.unit.auth.test_recovery.TestRequestRecoveryEnumerationGuard
+    .test_hit_branch_swallows_mail_delivery_error` — swapping the
+    recording mailer for an exploding one must not change the caller-
+    visible outcome. The nonce + audit rows still commit so the link
+    is redeemable once SMTP recovers and operators can see the relay
+    outage in the forensic trail.
+    """
+
+    def test_request_link_swallows_mail_delivery_error(
+        self,
+        session: Session,
+        throttle: Throttle,
+        settings: Settings,
+    ) -> None:
+        from app.adapters.mail.ports import MailDeliveryError
+
+        bootstrap_user(session, email="outage@example.com", display_name="Out")
+        failing_mailer = _ExplodingMailer(MailDeliveryError("relay down"))
+        # Must NOT raise — the §15 guard catches MailDeliveryError.
+        url = request_link(
+            session,
+            email="outage@example.com",
+            purpose="recover_passkey",
+            ip="127.0.0.1",
+            mailer=failing_mailer,
+            base_url="https://crew.day",
+            now=_PINNED,
+            throttle=throttle,
+            settings=settings,
+        )
+        # The URL is still produced (the caller's router uses the
+        # presence / absence to branch between 202 and short-circuit;
+        # nothing about the mailer outcome changes the return).
+        assert url is not None
+        # Nonce row committed — the link is redeemable once SMTP
+        # recovers (or an operator re-sends from the row).
+        nonces = session.scalars(select(MagicLinkNonce)).all()
+        assert len(nonces) == 1
+        # Audit row landed so operators see the request in the trail
+        # regardless of mail outcome.
+        audits = session.scalars(
+            select(AuditLog).where(AuditLog.action == "magic_link.sent")
+        ).all()
+        assert len(audits) == 1
 
 
 # ---------------------------------------------------------------------------

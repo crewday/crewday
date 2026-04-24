@@ -82,6 +82,7 @@ the nonce row either never existed or stays pending under rollback.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any, Final, Literal
@@ -99,7 +100,7 @@ from app.adapters.db.identity.models import (
     User,
     canonicalise_email,
 )
-from app.adapters.mail.ports import Mailer
+from app.adapters.mail.ports import MailDeliveryError, Mailer
 from app.audit import write_audit
 from app.auth._hashing import hash_with_pepper
 from app.auth._throttle import ConsumeLockout, RateLimited, Throttle
@@ -126,6 +127,9 @@ __all__ = [
     "request_link",
     "write_rejected_audit",
 ]
+
+
+_log = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -513,13 +517,18 @@ def request_link(
        token.
     5. Insert a pending :class:`MagicLinkNonce` row.
     6. When ``send_email`` is ``True`` (the default), send via
-       ``mailer``; a transport failure propagates so the caller's UoW
-       rolls back and a future retry mints a fresh token. When
-       ``send_email`` is ``False``, the mailer is not touched and the
-       signed URL is returned to the caller so they can re-frame it
-       with flow-specific copy (e.g. the invite surface). ``mailer``
-       may be ``None`` in that case.
-    7. Audit ``audit.magic_link.sent`` with hashes only.
+       ``mailer``; a :class:`MailDeliveryError` is swallowed and logged
+       at WARNING (§15 enumeration guard — a mailer outage must not
+       turn into an observable 5xx that leaks hit vs miss on the
+       recovery / email-change paths). The nonce row still commits so
+       a retry or operator-side re-send is viable once SMTP recovers.
+       When ``send_email`` is ``False``, the mailer is not touched and
+       the signed URL is returned to the caller so they can re-frame
+       it with flow-specific copy (e.g. the invite surface).
+       ``mailer`` may be ``None`` in that case.
+    7. Audit ``audit.magic_link.sent`` with hashes only — written
+       *after* the send attempt but regardless of its outcome, so the
+       forensic trail records the request even when the relay is down.
 
     Returns the signed acceptance URL on success (``/auth/magic/<token>``),
     or ``None`` if the enumeration guard short-circuited. The caller's
@@ -589,14 +598,32 @@ def request_link(
     if send_email:
         if mailer is None:
             raise ValueError("send_email=True requires a non-None mailer")
-        _send_link_email(
-            mailer=mailer,
-            to_email=email,
-            base_url=base_url,
-            token=token,
-            purpose=purpose,
-            ttl=effective_ttl,
-        )
+        # §15 enumeration guard: a :class:`MailDeliveryError` here (SMTP
+        # down, DNS fail, relay refusal) must not surface as 5xx — on
+        # the ``recover_passkey`` / ``email_change_confirm`` purposes
+        # the miss branch short-circuits above with no mailer call, so
+        # a 5xx on the hit branch would leak hit/miss via status code
+        # alone. We swallow the error, log loudly so the outage is
+        # visible to operators, and let the nonce + audit rows commit
+        # so the link is redeemable once SMTP recovers and forensic
+        # data is preserved. Mirrors the pattern in
+        # :func:`app.auth.recovery.request_recovery`.
+        try:
+            _send_link_email(
+                mailer=mailer,
+                to_email=email,
+                base_url=base_url,
+                token=token,
+                purpose=purpose,
+                ttl=effective_ttl,
+            )
+        except MailDeliveryError:
+            _log.warning(
+                "magic-link mail send failed (purpose=%r); swallowing "
+                "per §15 enumeration guard",
+                purpose,
+                exc_info=True,
+            )
 
     write_audit(
         session,

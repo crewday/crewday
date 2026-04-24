@@ -91,6 +91,33 @@ class _RecordingMailer:
         return "test-message-id"
 
 
+@dataclass
+class _ExplodingMailer:
+    """:class:`Mailer` double that raises a pre-canned exception on send.
+
+    Drives the §15 enumeration-guard coverage in
+    :class:`TestStartSignupEnumerationGuard` — mirrors the fixture of
+    the same name in :mod:`tests.unit.auth.test_recovery` so the shape
+    stays consistent across the three auth surfaces that swallow
+    :class:`MailDeliveryError` uniformly.
+    """
+
+    exc: BaseException
+
+    def send(
+        self,
+        *,
+        to: Sequence[str],
+        subject: str,
+        body_text: str,
+        body_html: str | None = None,
+        headers: Mapping[str, str] | None = None,
+        reply_to: str | None = None,
+    ) -> str:
+        del to, subject, body_text, body_html, headers, reply_to
+        raise self.exc
+
+
 def _stub_verify_registration(
     monkeypatch: pytest.MonkeyPatch, *, fail: bool = False
 ) -> bytes:
@@ -834,6 +861,64 @@ class TestStartSignupRetryPurposeGuard:
         assert len(surviving) == 1
         assert surviving[0].jti == "01HWMLNCOLLIDER0000000001A"
         assert surviving[0].consumed_at is None
+
+
+class TestStartSignupEnumerationGuard:
+    """§15: a mailer outage must not fail ``start_signup``.
+
+    Mirrors
+    :class:`tests.unit.auth.test_recovery.TestRequestRecoveryEnumerationGuard
+    .test_hit_branch_swallows_mail_delivery_error`. ``start_signup``
+    delegates the actual send to :func:`app.auth.magic_link.request_link`
+    via ``send_email=True``; the guard therefore lives inside
+    :mod:`app.auth.magic_link` but the signup-level observable is the
+    same: caller does NOT raise and both ``magic_link.sent`` +
+    ``signup.requested`` audit rows commit so operators can still see
+    the outage in forensic logs.
+    """
+
+    def test_signup_start_swallows_mail_delivery_error(
+        self,
+        session: Session,
+        throttle: Throttle,
+        settings: Settings,
+        capabilities_enabled: Capabilities,
+    ) -> None:
+        from app.adapters.mail.ports import MailDeliveryError
+
+        failing_mailer = _ExplodingMailer(MailDeliveryError("relay down"))
+        # Must NOT raise — the magic-link send inside request_link
+        # swallows MailDeliveryError per §15.
+        signup.start_signup(
+            session,
+            email="outage@example.com",
+            desired_slug="villa-outage",
+            ip="127.0.0.1",
+            mailer=failing_mailer,
+            base_url="https://crew.day",
+            throttle=throttle,
+            capabilities=capabilities_enabled,
+            now=_PINNED,
+            settings=settings,
+        )
+        # The signup_attempt row committed.
+        attempts = session.scalars(select(SignupAttempt)).all()
+        assert len(attempts) == 1
+        assert attempts[0].desired_slug == "villa-outage"
+        # The magic-link nonce committed so a retry / operator resend
+        # is viable once SMTP recovers.
+        nonces = session.scalars(select(MagicLinkNonce)).all()
+        assert len(nonces) == 1
+        # Both audit rows lived — forensic trail intact despite the
+        # mailer outage.
+        signup_audits = session.scalars(
+            select(AuditLog).where(AuditLog.action == "signup.requested")
+        ).all()
+        assert len(signup_audits) == 1
+        magic_audits = session.scalars(
+            select(AuditLog).where(AuditLog.action == "magic_link.sent")
+        ).all()
+        assert len(magic_audits) == 1
 
 
 class TestStartSignupAudit:
