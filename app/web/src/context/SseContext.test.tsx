@@ -62,10 +62,17 @@ class TestEventSource {
 }
 
 const originalEventSource = (globalThis as { EventSource?: unknown }).EventSource;
+const originalRandom = Math.random;
 
 beforeEach(() => {
   created.length = 0;
   (globalThis as { EventSource: unknown }).EventSource = TestEventSource;
+  // Freeze the RNG so the `connectEventStream` backoff jitter
+  // (±20 %) lands on the exact base delay (jitterFactor = 1 when
+  // `rng() === 0.5`). Lets these lifecycle tests advance timers by
+  // the exact ladder values (1_000, 2_000, …) without chasing a
+  // non-deterministic ±200 ms band.
+  Math.random = () => 0.5;
   // SseProvider only opens the transport when the auth store reports
   // `authenticated` (cd-kc7u § "Logout closes SSE"). Seed the store so
   // the existing lifecycle tests stay focused on URL / backoff /
@@ -77,6 +84,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   (globalThis as { EventSource?: unknown }).EventSource = originalEventSource as typeof EventSource;
+  Math.random = originalRandom;
   __resetAuthStoreForTests();
 });
 
