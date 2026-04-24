@@ -1,0 +1,84 @@
+# CLI codegen exclusions (cd-1cfg).
+#
+# Endpoints listed here are intentionally OMITTED from
+# ``_surface.json`` / ``_surface_admin.json`` — the codegen pipeline
+# (``python -m crewday._codegen``) skips them and the CLI never
+# generates a command for them.
+#
+# Every entry requires a ``reason:`` — the spec rule from
+# ``docs/specs/13-cli.md`` §"Exclusions" ("Adding an exclusion without a
+# reason fails CI lint") is enforced by the loader.
+#
+# Two match modes are supported; pick whichever is less fragile for the
+# route in question:
+#
+#   * ``operation_id`` — exact string match against the route's
+#     ``operationId``. Preferred: operation ids are the stable contract
+#     between spec + code.
+#   * ``path_pattern`` — ``fnmatch`` glob against the raw path. Use this
+#     for routes that use FastAPI's auto-generated operation ids
+#     (``get_foo_api_v1_foo_get``) or whose identity lives in the URL
+#     shape (e.g. SSE transport at ``/w/{slug}/events``).
+#
+# Unknown operation ids are silently tolerated at debug level — the
+# canonical list below is stable across PRs even when a route has not
+# yet been implemented, so a single exclusions file covers both current
+# code and near-term planned surface.
+
+exclusions:
+  # ----- WebAuthn browser ceremonies (§13 §"Exclusions") -----
+  #
+  # The passkey login start/finish pair and its signup equivalent both
+  # require a browser-side WebAuthn authenticator — navigator.credentials
+  # is the single source of assertions. A CLI cannot produce one without
+  # a YubiKey USB-HID broker that is out of scope for v1.
+  - operation_id: "auth.passkey.login_start"
+    reason: "browser-only WebAuthn ceremony; CLI has no WebAuthn authenticator"
+  - operation_id: "auth.passkey.login_finish"
+    reason: "browser-only WebAuthn ceremony; CLI has no WebAuthn authenticator"
+  - operation_id: "auth.passkey.register_start"
+    reason: "browser-only WebAuthn ceremony; CLI has no WebAuthn authenticator"
+  - operation_id: "auth.passkey.register_finish"
+    reason: "browser-only WebAuthn ceremony; CLI has no WebAuthn authenticator"
+  # Signup passkey register pair (cd-ju0q retired the parallel
+  # ``/auth/passkey/signup/register/*`` surface; the canonical home is
+  # now the signup router under ``/api/v1/signup/passkey/*``). The
+  # operation ids are listed even though the routes are not mounted
+  # yet — the loader tolerates unknown ids, and landing the routes
+  # later does not require touching this file.
+  - operation_id: "signup.passkey.start"
+    reason: "browser-only WebAuthn ceremony; CLI has no WebAuthn authenticator"
+  - operation_id: "signup.passkey.finish"
+    reason: "browser-only WebAuthn ceremony; CLI has no WebAuthn authenticator"
+
+  # ----- SSE transport (not a request/response verb) -----
+  #
+  # ``/w/{slug}/events`` streams server-sent events for cache
+  # invalidation + agent turn lifecycle (§14). It is neither REST nor
+  # JSON; the CLI would not know what to do with an infinite chunked
+  # response. A future ``crewday events tail`` override can wrap it
+  # if needed, but the generated surface has no place for it.
+  - path_pattern: "/w/{slug}/events"
+    reason: "SSE transport; not a request/response verb"
+
+  # ----- Ops probes (§13 §"Exclusions") -----
+  #
+  # Healthz / readyz / version.get are no-auth infrastructure probes.
+  # ``crewday admin version`` (a host-CLI-only override) covers the
+  # operator use case; routing the probes through the CLI would add
+  # noise to ``crewday --help`` without improving agent UX.
+  - operation_id: "healthz"
+    reason: "no-auth infrastructure probe; operator uses curl /healthz directly"
+  - operation_id: "readyz"
+    reason: "no-auth infrastructure probe; operator uses curl /readyz directly"
+  - operation_id: "version.get"
+    reason: "covered by host-CLI 'crewday admin version' override"
+
+  # ----- Binary blob redirect (§13 §"Exclusions") -----
+  #
+  # ``files.blob`` returns a 302 / binary stream rather than JSON. The
+  # ``files show`` generated command surfaces the metadata; the
+  # ``documents download`` override (cd-2ms7 sibling work) handles the
+  # blob fetch when that surface lands.
+  - operation_id: "files.blob"
+    reason: "returns 302/binary stream; covered by 'files show' metadata + 'documents download' override"

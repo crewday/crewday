@@ -45,6 +45,15 @@ dependencies = [
     # a transitive dep) makes the dependency explicit and survives a
     # future dev-tool shake-up that might drop Flask / locust.
     "jinja2>=3.1",
+    # PyYAML for the CLI codegen pipeline (cd-1cfg). The exclusion
+    # manifest :file:`cli/crewday/_exclusions.yaml` ships as YAML
+    # (not TOML / JSON) because reviewers need to add entries with a
+    # `reason:` comment block — YAML's `#` comments survive into the
+    # diff while JSON strips them. PyYAML is already present as a
+    # transitive of ``uvicorn[standard]`` + ``schemathesis`` but we
+    # pin it directly so a future shake-up of those deps does not
+    # silently break ``python -m crewday._codegen``.
+    "pyyaml>=6.0",
 ]
 
 # ``crewday`` is the sole console-script entry point. The target is
@@ -100,6 +109,11 @@ dev = [
     # rrulestr`` as untyped; installing them keeps the strict gate
     # green without a blanket ``ignore_missing_imports``.
     "types-python-dateutil",
+    # Type stubs for :mod:`yaml` used by the CLI codegen pipeline
+    # (cd-1cfg). ``mypy --strict`` rejects ``import yaml`` as untyped
+    # without them, and the codegen module is in scope for the strict
+    # gate (``mypy cli/crewday/_codegen.py``).
+    "types-PyYAML",
 ]
 
 [tool.ruff]

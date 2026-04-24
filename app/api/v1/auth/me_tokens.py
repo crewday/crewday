@@ -220,6 +220,21 @@ def build_me_tokens_router() -> APIRouter:
         response_model=MintPersonalTokenResponse,
         operation_id="auth.me.tokens.mint",
         summary="Mint a personal access token — plaintext returned once",
+        openapi_extra={
+            # Bare-host personal tokens live under a DISTINCT CLI
+            # group from the workspace-scoped ``tokens`` surface
+            # (``app/api/v1/auth/tokens.py``) — both would otherwise
+            # collide on ``(group=tokens, verb=create)``. The runtime
+            # (cd-lato) registers at most one Click command per
+            # ``(group, verb)`` pair, so the heuristic's natural
+            # collision has to be broken explicitly here.
+            "x-cli": {
+                "group": "me-tokens",
+                "verb": "create",
+                "summary": "Mint a personal access token (me:* scopes)",
+                "mutates": True,
+            },
+        },
     )
     def post_me_token(
         body: MintPersonalTokenBody,
@@ -316,6 +331,14 @@ def build_me_tokens_router() -> APIRouter:
         response_model=list[TokenSummaryResponse],
         operation_id="auth.me.tokens.list",
         summary="List every personal access token the caller owns",
+        openapi_extra={
+            "x-cli": {
+                "group": "me-tokens",
+                "verb": "list",
+                "summary": "List your personal access tokens",
+                "mutates": False,
+            },
+        },
     )
     def get_me_tokens(
         session: _Db,
@@ -342,6 +365,14 @@ def build_me_tokens_router() -> APIRouter:
         status_code=status.HTTP_204_NO_CONTENT,
         operation_id="auth.me.tokens.revoke",
         summary="Revoke one of the caller's personal access tokens",
+        openapi_extra={
+            "x-cli": {
+                "group": "me-tokens",
+                "verb": "revoke",
+                "summary": "Revoke one of your personal access tokens",
+                "mutates": True,
+            },
+        },
     )
     def delete_me_token(
         token_id: str,

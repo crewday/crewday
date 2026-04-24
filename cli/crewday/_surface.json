@@ -1,0 +1,485 @@
+[
+  {
+    "body_schema_ref": null,
+    "group": "auth",
+    "http": {
+      "method": "DELETE",
+      "path": "/w/{slug}/api/v1/auth/passkey/{credential_id}"
+    },
+    "idempotent": true,
+    "name": "passkey-revoke",
+    "operation_id": "auth.passkey.revoke",
+    "path_params": [
+      {
+        "name": "credential_id",
+        "required": true,
+        "schema": {
+          "title": "Credential Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": null,
+    "summary": "Revoke one of the authenticated user's passkeys",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "auth",
+      "mutates": true,
+      "summary": "Revoke one of your passkeys",
+      "verb": "passkey-revoke"
+    }
+  },
+  {
+    "body_schema_ref": null,
+    "group": "auth",
+    "http": {
+      "method": "GET",
+      "path": "/api/v1/auth/me"
+    },
+    "idempotent": true,
+    "name": "whoami",
+    "operation_id": "auth.me.get",
+    "path_params": [],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/AuthMeResponse",
+    "summary": "Return the authenticated user + their available workspaces",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "auth",
+      "mutates": false,
+      "summary": "Show the authenticated user + their workspaces",
+      "verb": "whoami"
+    }
+  },
+  {
+    "body_schema_ref": "#/components/schemas/AcceptRequest",
+    "group": "invite",
+    "http": {
+      "method": "POST",
+      "path": "/api/v1/invite/accept"
+    },
+    "idempotent": false,
+    "name": "accept",
+    "operation_id": "auth.invite.accept",
+    "path_params": [],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/AcceptResponse",
+    "summary": "Redeem the invite magic link",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": "#/components/schemas/CompleteRequest",
+    "group": "invite",
+    "http": {
+      "method": "POST",
+      "path": "/api/v1/invite/complete"
+    },
+    "idempotent": false,
+    "name": "complete",
+    "operation_id": "auth.invite.complete",
+    "path_params": [],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/ConfirmResponse",
+    "summary": "Complete invite after new-user passkey ceremony",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "invite",
+    "http": {
+      "method": "POST",
+      "path": "/api/v1/invite/{invite_id}/confirm"
+    },
+    "idempotent": false,
+    "name": "confirm",
+    "operation_id": "auth.invite.confirm",
+    "path_params": [
+      {
+        "name": "invite_id",
+        "required": true,
+        "schema": {
+          "title": "Invite Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/ConfirmResponse",
+    "summary": "Confirm pending invite acceptance (existing-user branch)",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": "#/components/schemas/MintPersonalTokenBody",
+    "group": "me-tokens",
+    "http": {
+      "method": "POST",
+      "path": "/api/v1/me/tokens"
+    },
+    "idempotent": false,
+    "name": "create",
+    "operation_id": "auth.me.tokens.mint",
+    "path_params": [],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/MintPersonalTokenResponse",
+    "summary": "Mint a personal access token \u2014 plaintext returned once",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "me-tokens",
+      "mutates": true,
+      "summary": "Mint a personal access token (me:* scopes)",
+      "verb": "create"
+    }
+  },
+  {
+    "body_schema_ref": null,
+    "group": "me-tokens",
+    "http": {
+      "method": "GET",
+      "path": "/api/v1/me/tokens"
+    },
+    "idempotent": true,
+    "name": "list",
+    "operation_id": "auth.me.tokens.list",
+    "path_params": [],
+    "query_params": [],
+    "response_schema_ref": null,
+    "summary": "List every personal access token the caller owns",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "me-tokens",
+      "mutates": false,
+      "summary": "List your personal access tokens",
+      "verb": "list"
+    }
+  },
+  {
+    "body_schema_ref": null,
+    "group": "me-tokens",
+    "http": {
+      "method": "DELETE",
+      "path": "/api/v1/me/tokens/{token_id}"
+    },
+    "idempotent": true,
+    "name": "revoke",
+    "operation_id": "auth.me.tokens.revoke",
+    "path_params": [
+      {
+        "name": "token_id",
+        "required": true,
+        "schema": {
+          "title": "Token Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": null,
+    "summary": "Revoke one of the caller's personal access tokens",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "me-tokens",
+      "mutates": true,
+      "summary": "Revoke one of your personal access tokens",
+      "verb": "revoke"
+    }
+  },
+  {
+    "body_schema_ref": "#/components/schemas/ShiftClose",
+    "group": "time",
+    "http": {
+      "method": "POST",
+      "path": "/w/{slug}/api/v1/time/shifts/{shift_id}/close"
+    },
+    "idempotent": false,
+    "name": "close",
+    "operation_id": "time.close_shift",
+    "path_params": [
+      {
+        "name": "shift_id",
+        "required": true,
+        "schema": {
+          "title": "Shift Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/ShiftPayload",
+    "summary": "Close (clock-out) a shift",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "time",
+    "http": {
+      "method": "GET",
+      "path": "/w/{slug}/api/v1/time/shifts"
+    },
+    "idempotent": true,
+    "name": "list",
+    "operation_id": "time.list_shifts",
+    "path_params": [],
+    "query_params": [
+      {
+        "name": "user_id",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "maxLength": 40,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "User Id"
+        }
+      },
+      {
+        "name": "starts_from",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Starts From"
+        }
+      },
+      {
+        "name": "starts_until",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Starts Until"
+        }
+      },
+      {
+        "name": "open_only",
+        "required": false,
+        "schema": {
+          "default": false,
+          "title": "Open Only",
+          "type": "boolean"
+        }
+      }
+    ],
+    "response_schema_ref": "#/components/schemas/ShiftListResponse",
+    "summary": "List shifts in the workspace",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": "#/components/schemas/ShiftOpen",
+    "group": "time",
+    "http": {
+      "method": "POST",
+      "path": "/w/{slug}/api/v1/time/shifts/open"
+    },
+    "idempotent": false,
+    "name": "open",
+    "operation_id": "time.open_shift",
+    "path_params": [],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/ShiftPayload",
+    "summary": "Open (clock-in) a shift",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "time",
+    "http": {
+      "method": "GET",
+      "path": "/w/{slug}/api/v1/time/shifts/{shift_id}"
+    },
+    "idempotent": true,
+    "name": "show",
+    "operation_id": "time.get_shift",
+    "path_params": [
+      {
+        "name": "shift_id",
+        "required": true,
+        "schema": {
+          "title": "Shift Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/ShiftPayload",
+    "summary": "Read a single shift",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": "#/components/schemas/ShiftEdit",
+    "group": "time",
+    "http": {
+      "method": "PATCH",
+      "path": "/w/{slug}/api/v1/time/shifts/{shift_id}"
+    },
+    "idempotent": false,
+    "name": "update",
+    "operation_id": "time.edit_shift",
+    "path_params": [
+      {
+        "name": "shift_id",
+        "required": true,
+        "schema": {
+          "title": "Shift Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/ShiftPayload",
+    "summary": "Manager edit of a shift",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": "#/components/schemas/MintTokenBody",
+    "group": "tokens",
+    "http": {
+      "method": "POST",
+      "path": "/w/{slug}/api/v1/auth/tokens"
+    },
+    "idempotent": false,
+    "name": "create",
+    "operation_id": "auth.tokens.mint",
+    "path_params": [],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/MintTokenResponse",
+    "summary": "Mint a new API token \u2014 plaintext returned once",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "tokens",
+      "mutates": true,
+      "summary": "Mint a workspace API token \u2014 plaintext shown once",
+      "verb": "create"
+    }
+  },
+  {
+    "body_schema_ref": null,
+    "group": "tokens",
+    "http": {
+      "method": "GET",
+      "path": "/w/{slug}/api/v1/auth/tokens"
+    },
+    "idempotent": true,
+    "name": "list",
+    "operation_id": "auth.tokens.list",
+    "path_params": [],
+    "query_params": [],
+    "response_schema_ref": null,
+    "summary": "List every token on this workspace (active + revoked)",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "tokens",
+      "mutates": false,
+      "summary": "List workspace API tokens (active + revoked)",
+      "verb": "list"
+    }
+  },
+  {
+    "body_schema_ref": null,
+    "group": "tokens",
+    "http": {
+      "method": "DELETE",
+      "path": "/w/{slug}/api/v1/auth/tokens/{token_id}"
+    },
+    "idempotent": true,
+    "name": "revoke",
+    "operation_id": "auth.tokens.revoke",
+    "path_params": [
+      {
+        "name": "token_id",
+        "required": true,
+        "schema": {
+          "title": "Token Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": null,
+    "summary": "Revoke a token \u2014 idempotent",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "tokens",
+      "mutates": true,
+      "summary": "Revoke a workspace API token",
+      "verb": "revoke"
+    }
+  },
+  {
+    "body_schema_ref": null,
+    "group": "workspace-admin",
+    "http": {
+      "method": "GET",
+      "path": "/w/{slug}/api/v1/admin/signups"
+    },
+    "idempotent": true,
+    "name": "signups-list",
+    "operation_id": "workspace_admin.signups.list",
+    "path_params": [],
+    "query_params": [
+      {
+        "name": "cursor",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Cursor"
+        }
+      },
+      {
+        "name": "limit",
+        "required": false,
+        "schema": {
+          "default": 50,
+          "maximum": 500,
+          "minimum": 1,
+          "title": "Limit",
+          "type": "integer"
+        }
+      }
+    ],
+    "response_schema_ref": "#/components/schemas/SignupsListResponse",
+    "summary": "List workspace signup abuse signals",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "workspace-admin",
+      "mutates": false,
+      "summary": "List workspace signup abuse signals",
+      "verb": "signups-list"
+    }
+  }
+]

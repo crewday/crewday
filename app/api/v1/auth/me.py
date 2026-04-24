@@ -225,7 +225,21 @@ def build_me_router() -> APIRouter:
     @router.get(
         "/me",
         response_model=AuthMeResponse,
+        operation_id="auth.me.get",
         summary="Return the authenticated user + their available workspaces",
+        openapi_extra={
+            # Singleton endpoint: "whoami" is the spec's verb (§13
+            # ``crewday auth whoami``). The bare heuristic would
+            # classify a GET without a trailing ``{id}`` as ``list``;
+            # pin the CLI surface so the committed ``_surface.json``
+            # does not drift on the heuristic alone.
+            "x-cli": {
+                "group": "auth",
+                "verb": "whoami",
+                "summary": "Show the authenticated user + their workspaces",
+                "mutates": False,
+            },
+        },
     )
     def get_me(
         request: Request,

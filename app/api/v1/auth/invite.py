@@ -259,6 +259,7 @@ def build_invite_router(
     @router.post(
         "/accept",
         response_model=AcceptResponse,
+        operation_id="auth.invite.accept",
         summary="Redeem the invite magic link",
     )
     def post_accept(
@@ -325,6 +326,7 @@ def build_invite_router(
     @router.post(
         "/{invite_id}/confirm",
         response_model=ConfirmResponse,
+        operation_id="auth.invite.confirm",
         summary="Confirm pending invite acceptance (existing-user branch)",
     )
     def post_confirm(
@@ -389,6 +391,7 @@ def build_invite_router(
     @router.post(
         "/complete",
         response_model=ConfirmResponse,
+        operation_id="auth.invite.complete",
         summary="Complete invite after new-user passkey ceremony",
     )
     def post_complete(

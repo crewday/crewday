@@ -256,8 +256,23 @@ def build_tokens_router() -> APIRouter:
         "",
         status_code=status.HTTP_201_CREATED,
         response_model=MintTokenResponse,
+        operation_id="auth.tokens.mint",
         summary="Mint a new API token — plaintext returned once",
         dependencies=[permission_gate],
+        openapi_extra={
+            # Workspace-scoped token mint — the canonical
+            # ``crewday tokens create`` verb in spec §13. The
+            # ``x-cli.group`` is pinned here so the heuristic's bare
+            # ``tokens`` group cannot collide with the bare-host
+            # ``/me/tokens`` surface (which surfaces as ``me-tokens``;
+            # see ``app/api/v1/auth/me_tokens.py``).
+            "x-cli": {
+                "group": "tokens",
+                "verb": "create",
+                "summary": "Mint a workspace API token — plaintext shown once",
+                "mutates": True,
+            },
+        },
     )
     def post_tokens(
         body: MintTokenBody,
@@ -334,8 +349,17 @@ def build_tokens_router() -> APIRouter:
     @api.get(
         "",
         response_model=list[TokenSummaryResponse],
+        operation_id="auth.tokens.list",
         summary="List every token on this workspace (active + revoked)",
         dependencies=[permission_gate],
+        openapi_extra={
+            "x-cli": {
+                "group": "tokens",
+                "verb": "list",
+                "summary": "List workspace API tokens (active + revoked)",
+                "mutates": False,
+            },
+        },
     )
     def get_tokens(
         ctx: _Ctx,
@@ -348,8 +372,17 @@ def build_tokens_router() -> APIRouter:
     @api.delete(
         "/{token_id}",
         status_code=status.HTTP_204_NO_CONTENT,
+        operation_id="auth.tokens.revoke",
         summary="Revoke a token — idempotent",
         dependencies=[permission_gate],
+        openapi_extra={
+            "x-cli": {
+                "group": "tokens",
+                "verb": "revoke",
+                "summary": "Revoke a workspace API token",
+                "mutates": True,
+            },
+        },
     )
     def delete_token(
         token_id: str,
