@@ -114,13 +114,13 @@ models without opt-in.
 Refs: bd-042
 ```
 
-### 4. Handle pre-commit hook failures
+### 5. Handle pre-commit hook failures
 
 If a hook fails, **fix the underlying issue**. Do not pass `--no-verify`
 and do not `--amend` the prior commit. After fixing, re-stage and make a
 **new** commit.
 
-### 5. Handle GPG-signing failures
+### 6. Handle GPG-signing failures
 
 If GPG signing is not configured locally, commit without it:
 
@@ -130,7 +130,7 @@ git commit --no-gpg-sign -s -m "…"
 
 Do not change git config.
 
-### 6. Push
+### 7. Push
 
 ```bash
 git push
