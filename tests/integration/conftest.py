@@ -81,7 +81,9 @@ def pytest_collection_modifyitems(
 
 
 @pytest.fixture(scope="session")
-def db_url(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
+def db_url(
+    tmp_path_factory: pytest.TempPathFactory, worker_id: str
+) -> Iterator[str]:
     """Session-scoped test DB URL.
 
     Honours ``CREWDAY_TEST_DATABASE_URL`` (explicit URL override, used
@@ -89,14 +91,22 @@ def db_url(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
     the ``CREWDAY_TEST_DB`` backend selector:
 
     * ``sqlite`` (default): a fresh file-based SQLite under pytest's
-      ``tmp_path_factory`` root.
+      ``tmp_path_factory`` root. Under ``pytest-xdist`` each worker
+      gets its own file (``test-<worker_id>.db``) so parallel workers
+      don't stomp on a shared SQLite file (locks + corruption).
     * ``postgres``: a session-scoped :class:`PostgresContainer`
       (``postgres:15-alpine``). The container is torn down at
-      session end. We pass ``driver="psycopg"`` so testcontainers
-      emits a ``postgresql+psycopg://`` URL directly — this repo
-      pins psycopg 3, not psycopg2, and pinning the driver via
-      the constructor avoids a brittle string substitution on the
+      session end. Under xdist each worker stands up its own
+      container — testcontainers picks a free host port per
+      container, so there's no collision. We pass
+      ``driver="psycopg"`` so testcontainers emits a
+      ``postgresql+psycopg://`` URL directly — this repo pins
+      psycopg 3, not psycopg2, and pinning the driver via the
+      constructor avoids a brittle string substitution on the
       returned URL.
+
+    ``worker_id`` is the built-in pytest-xdist fixture; when xdist is
+    not active it resolves to the literal ``"master"``.
     """
     override = os.environ.get("CREWDAY_TEST_DATABASE_URL")
     if override:
@@ -106,7 +116,7 @@ def db_url(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
     backend = _backend()
     if backend == "sqlite":
         root = tmp_path_factory.mktemp("crewday-db")
-        yield f"sqlite:///{root / 'test.db'}"
+        yield f"sqlite:///{root / f'test-{worker_id}.db'}"
         return
 
     if backend == "postgres":

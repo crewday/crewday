@@ -100,9 +100,14 @@ class _IcsHandler(BaseHTTPRequestHandler):
         """Silence the default stderr spam from BaseHTTPRequestHandler."""
 
 
-@pytest.fixture(name="ics_server")
+@pytest.fixture(name="ics_server", scope="module")
 def fixture_ics_server() -> Iterator[ThreadingHTTPServer]:
-    """Yield a local ICS server bound to ``127.0.0.1`` on an ephemeral port."""
+    """Yield a local ICS server bound to ``127.0.0.1`` on an ephemeral port.
+
+    Module-scoped: the handler serves a static canned VCALENDAR with no
+    per-test state, so reusing one server across the module's tests is
+    safe and avoids the ~0.5s ``server.shutdown()`` polling cost per test.
+    """
     server = ThreadingHTTPServer(("127.0.0.1", 0), _IcsHandler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()

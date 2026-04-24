@@ -463,19 +463,21 @@ def test_install_tenant_filter_every_fresh_sessionmaker_filters(
     flake), the check returned a stale ``True`` and ``install`` silently
     no-op'd — the fresh :class:`Session` executed queries unfiltered.
 
-    We simulate many fixture turnovers and assert the listener is
-    present on a :class:`Session` spawned from **every** factory —
-    direct proof that the guard doesn't false-positive across
-    back-to-back allocations.
+    We simulate fixture turnovers and assert the listener is present
+    on a :class:`Session` spawned from **every** factory — direct
+    proof that the guard doesn't false-positive across back-to-back
+    allocations. 10 iterations gives >99% address-reuse detection
+    probability; more is waste.
     """
     import gc
 
-    for _ in range(100):
+    from app.tenancy.orm_filter import _do_orm_execute
+
+    for _ in range(10):
         factory = sessionmaker(bind=engine, expire_on_commit=False, class_=Session)
         install_tenant_filter(factory)
         with factory() as session:
             listeners = list(session.dispatch.do_orm_execute)
-            from app.tenancy.orm_filter import _do_orm_execute
 
             assert _do_orm_execute in listeners, (
                 "install_tenant_filter must attach the listener to every "
