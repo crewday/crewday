@@ -358,7 +358,7 @@ POST   /api/v1/auth/magic/send                   # owner or manager only (manual
 POST   /api/v1/auth/magic/consume                # consume a break-glass code → magic link
 POST   /api/v1/auth/recover/start                # self-service lost-device; body: {email, break_glass_code?}. Always 200 {status:"sent_if_exists"}.
 GET    /api/v1/auth/me
-POST   /api/v1/auth/logout
+POST   /api/v1/auth/logout                       # invalidate every active session for the caller (cause `logout`, §15 "Session-invalidation causes"); always 204 + Set-Cookie clearing `__Host-crewday_session` (best-effort: no cookie / invalid cookie still 204 + clear, no audit row)
 GET    /api/v1/me/workspaces                     # switcher payload for the current session
 
 # Self-service email change (§03 "Self-service email change"). Passkey

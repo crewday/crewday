@@ -71,6 +71,7 @@ from app.api.health import router as health_router
 from app.api.middleware import IdempotencyMiddleware, SecurityHeadersMiddleware
 from app.api.v1 import CONTEXT_ROUTERS, WORKSPACE_ADMIN_ROUTER
 from app.api.v1.auth import invite as invite_module
+from app.api.v1.auth import logout as logout_module
 from app.api.v1.auth import magic as magic_module
 from app.api.v1.auth import me as me_module
 from app.api.v1.auth import passkey as passkey_module
@@ -304,6 +305,11 @@ def _mount_auth_routers(
     # /auth/me — SPA identity-bootstrap probe. Mounted unconditionally
     # (no SMTP dependency) because every authenticated SPA load hits it.
     app.include_router(me_module.build_me_router(), prefix=bare_prefix)
+    # /auth/logout — session-teardown ceremony invoked by the SPA's
+    # :mod:`useAuth.logout`. Mounted alongside /auth/me because both
+    # are bare-host, tenant-agnostic, and hit on every authenticated
+    # load / sign-out respectively.
+    app.include_router(logout_module.build_logout_router(), prefix=bare_prefix)
     # Invite accept does NOT need SMTP — redeeming a magic link the
     # operator mailed out-of-band is still valid in an SMTP-less
     # deployment. Keep this mount unconditional so the SPA's
