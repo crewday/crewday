@@ -54,12 +54,12 @@ class TestShape:
         assert frozenset(ACTION_CATALOG.keys()) == ACTION_KEYS
 
     def test_catalog_has_expected_size(self) -> None:
-        """v1 spec §05 enumerates 7 root-only + 71 rule-driven = 78 keys.
+        """v1 spec §05 enumerates 7 root-only + 74 rule-driven = 81 keys.
 
         A hard number — if it changes, either the spec or the catalog
         drifted and the author needs to say which.
         """
-        assert len(ACTION_CATALOG) == 78
+        assert len(ACTION_CATALOG) == 81
 
     def test_entries_are_action_spec_instances(self) -> None:
         for key, spec in ACTION_CATALOG.items():

@@ -955,6 +955,40 @@ PATCH  /time/shifts/{shift_id}     # manager retroactive amend: body ShiftEdit {
 GET    /time/shifts/{shift_id}     # read a single shift; 404 if unknown.
                                    # 200 ShiftPayload.
 
+# Leave requests (cd-31c). State machine: pending -> approved | rejected |
+# cancelled; approval/rejection ships with cd-8pi. The `reason_md` free-text
+# field is redacted through the audit writer (`scope="log"`) on every write,
+# per §15 "Audit log" — it never lands in plaintext on disk.
+#
+# `/time/me/leaves/{id}` paths are STRICTLY caller-scoped: a manager must use
+# `/time/leaves/{id}` for cross-user edits. A `/time/me/leaves/<other-leave-id>`
+# PATCH or DELETE collapses to 404 (not 403) so the `/me/` surface doesn't
+# enumerate other users' leave ids (§01 "tenant surface is not enumerable").
+POST   /time/me/leaves             # worker self-create: body {kind, starts_at, ends_at, reason_md?}.
+                                   # gated on leaves.create_self (auto-allowed to all_workers).
+                                   # 201 LeavePayload with status="pending".
+                                   # 422 {"error": "invalid_window", ...} when starts_at >= ends_at;
+                                   # 422 {"error": "invalid_kind", ...} when kind is out-of-set
+                                   #   (service-layer defence; HTTP layer rejects first via Literal).
+GET    /time/me/leaves             # ?status=pending|approved|rejected|cancelled
+                                   # self-only list, ordered (starts_at ASC, id ASC).
+                                   # 200 {"items": [LeavePayload, ...]}.
+PATCH  /time/me/leaves/{leave_id}  # rewrite window: body {starts_at, ends_at}. pending-only,
+                                   # caller-owned-only. 200 LeavePayload; 404 not_found (incl.
+                                   # leaves owned by someone else); 422 invalid_window;
+                                   # 409 invalid_transition when status != "pending".
+DELETE /time/me/leaves/{leave_id}  # cancel; valid from pending or approved-with-future-start,
+                                   # caller-owned-only. 200 LeavePayload with status="cancelled".
+                                   # 404 / 409 invalid_transition as above.
+GET    /time/leaves                # ?user_id=…&status=…
+                                   # manager inbox when user_id omitted -> leaves.view_others.
+                                   # when user_id is caller: self-service (no cap); otherwise -> leaves.view_others.
+                                   # 200 {"items": [LeavePayload, ...]}; 403 forbidden.
+GET    /time/leaves/{leave_id}     # read single; requester or leaves.view_others.
+                                   # 200 LeavePayload; 404 not_found; 403 forbidden.
+DELETE /time/leaves/{leave_id}     # manager cancel; requester or leaves.edit_others.
+                                   # same state-machine semantics as DELETE /time/me/leaves/{id}.
+
 GET    /bookings                   # filter: ?user_id=…&property_id=…&from=…&to=…&status=…&pending_amend=true
 GET    /bookings/{id}
 POST   /bookings                   # body: {property_id?, work_engagement_id?,

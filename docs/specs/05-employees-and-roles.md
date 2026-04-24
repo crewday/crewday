@@ -519,6 +519,9 @@ configuration.
 | `expenses.submit`                       | `workspace`, `property`        | `owners, managers, all_workers` | — | §09 |
 | `expenses.approve`                      | `workspace`, `property`        | `owners, managers`            | —  | §09 |
 | `expenses.reimburse`                    | `workspace`                    | `owners, managers`            | ✅ | §09 |
+| `leaves.create_self`                    | `workspace`                    | `owners, managers, all_workers` | — | §09 |
+| `leaves.edit_others`                    | `workspace`                    | `owners, managers`            | —  | §09 |
+| `leaves.view_others`                    | `workspace`                    | `owners, managers`            | —  | §09 |
 | `inventory.adjust`                      | `workspace`, `property`        | `owners, managers`            | —  | §08 |
 | `inventory.stocktake`                   | `workspace`, `property`        | `owners, managers`            | —  | §08 — open, edit, and commit an `inventory_stocktake` session. |
 | `instructions.edit`                     | `workspace`, `property`        | `owners, managers`            | —  | §07 |

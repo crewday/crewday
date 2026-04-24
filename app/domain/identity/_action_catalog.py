@@ -337,6 +337,41 @@ _RULE_DRIVEN: tuple[ActionSpec, ...] = (
         root_protected_deny=False,
     ),
     ActionSpec(
+        key="leaves.create_self",
+        # Workers self-request leave; managers + owners also hold the
+        # capability so a manager creating a leave on their own account
+        # takes the same code path. Cross-user creation is gated on
+        # ``leaves.edit_others`` — see :mod:`app.services.leave.service`
+        # (cd-31c). Listed in ``docs/specs/05-employees-and-roles.md``
+        # §"Rule-driven actions".
+        valid_scope_kinds=("workspace",),
+        default_allow=("owners", "managers", "all_workers"),
+        root_only=False,
+        root_protected_deny=False,
+    ),
+    ActionSpec(
+        key="leaves.edit_others",
+        # Manager / owner retroactive edits on someone else's leave —
+        # create-on-behalf-of, cancel, amend dates. Listed in
+        # ``docs/specs/05-employees-and-roles.md`` §"Rule-driven actions".
+        valid_scope_kinds=("workspace",),
+        default_allow=("owners", "managers"),
+        root_only=False,
+        root_protected_deny=False,
+    ),
+    ActionSpec(
+        key="leaves.view_others",
+        # Manager / owner inbox view — "every leave in this workspace".
+        # A worker reads their own leaves via :func:`list_for_user`
+        # (defaults ``user_id=ctx.actor_id``); only cross-user visibility
+        # requires this capability. Listed in
+        # ``docs/specs/05-employees-and-roles.md`` §"Rule-driven actions".
+        valid_scope_kinds=("workspace",),
+        default_allow=("owners", "managers"),
+        root_only=False,
+        root_protected_deny=False,
+    ),
+    ActionSpec(
         key="inventory.adjust",
         valid_scope_kinds=("workspace", "property"),
         default_allow=("owners", "managers"),
