@@ -361,6 +361,16 @@ COVERED_METHODS: frozenset[str] = frozenset(
         "app.domain.tasks.schedules.resume",
         "app.domain.tasks.schedules.delete",
         "app.domain.tasks.oneoff.create_oneoff",
+        # cd-7am7: completion service. Every entry point loads the
+        # task through ``_load_task`` which scopes the SELECT by
+        # ``ctx.workspace_id`` (see ``app/domain/tasks/completion.py``);
+        # subsequent writes touch fields on the loaded row, so the
+        # ORM-filter seam covers the surface end-to-end.
+        "app.domain.tasks.completion.start",
+        "app.domain.tasks.completion.complete",
+        "app.domain.tasks.completion.skip",
+        "app.domain.tasks.completion.cancel",
+        "app.domain.tasks.completion.revert_overdue",
         # time context
         "app.domain.time.shifts.open_shift",
         "app.domain.time.shifts.close_shift",
@@ -368,6 +378,43 @@ COVERED_METHODS: frozenset[str] = frozenset(
         "app.domain.time.shifts.get_shift",
         "app.domain.time.shifts.list_shifts",
         "app.domain.time.shifts.list_open_shifts",
+        # cd-8luu: assignment service. Every entry point loads the
+        # task through ``_load_task`` which scopes the SELECT by
+        # ``ctx.workspace_id``; mutation happens on the loaded row,
+        # so the ORM-filter seam covers the surface end-to-end.
+        # ``availability_for`` does not read the DB itself (it calls
+        # an injectable port) but takes ``ctx`` to stay composable
+        # with the rest of the assignment surface.
+        "app.domain.tasks.assignment.assign_task",
+        "app.domain.tasks.assignment.availability_for",
+        "app.domain.tasks.assignment.reassign_task",
+        "app.domain.tasks.assignment.unassign_task",
+        # places context (cd-pjf): property CRUD reads through the
+        # ORM filter (``workspace_id`` scoping proven in
+        # :class:`TestScopedRowIsolation`). Writes set
+        # ``workspace_id = ctx.workspace_id`` at the top of the
+        # insert path and otherwise mutate fields on a
+        # filter-resolved row.
+        "app.domain.places.property_service.create_property",
+        "app.domain.places.property_service.get_property",
+        "app.domain.places.property_service.list_properties",
+        "app.domain.places.property_service.soft_delete_property",
+        "app.domain.places.property_service.update_property",
+        # llm context (cd-irng, cd-ybrt, cd-pd0e): router + budget +
+        # usage recorder all scope their reads through
+        # ``workspace_id = ctx.workspace_id`` (inheritance chain walk
+        # in :mod:`app.domain.llm.router` and the budget aggregate
+        # table queries in :mod:`app.domain.llm.budget`). Writes
+        # land on rows loaded through the same filter — e.g.
+        # ``budget_ledger`` updates target a row keyed on
+        # ``(workspace_id, window_start)`` resolved by SELECT.
+        "app.domain.llm.budget.check_budget",
+        "app.domain.llm.budget.record_usage",
+        "app.domain.llm.budget.refresh_aggregate",
+        "app.domain.llm.budget.warm_start_aggregate",
+        "app.domain.llm.router.resolve_model",
+        "app.domain.llm.router.resolve_primary",
+        "app.domain.llm.usage_recorder.record",
     }
 )
 

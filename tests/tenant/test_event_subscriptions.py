@@ -97,18 +97,42 @@ def _build_event(
 def _sentinel_value_for(field_name: str, annotation: object) -> object:
     """Return a minimal sentinel value matching the field's annotation.
 
-    Today's events only carry ``str`` payload fields (task ids, user
-    ids, action enums) plus one :class:`~datetime.datetime` field on
-    a handful (``overdue_since``, ``arrives_at``, ``ended_at``).
-    Handling those two cases covers the entire registered surface;
-    an unknown annotation falls back to a ULID-shaped string so the
+    Today's events carry a mix of ``str`` payload fields (task ids,
+    user ids, action enums), short ``int`` counters, and a handful
+    of :class:`~datetime.datetime` fields (``overdue_since``,
+    ``arrives_at``, ``ended_at``). A small set of string fields also
+    carry a publish-time validator (``reason`` on
+    :class:`~app.events.types.TaskUnassigned` /
+    :class:`~app.events.types.TaskSkipped` /
+    :class:`~app.events.types.TaskCancelled`) that rejects free text
+    — a ULID sentinel would fail the identifier-shape regex.
+
+    An unknown annotation falls back to a ULID-shaped string so the
     test keeps the assertion alive even against a newly-added event
-    kind — the regression is what we're guarding.
+    kind — the regression is what we're guarding. A new validator-
+    constrained string field added without a case here surfaces as
+    a :class:`ValidationError` in the parametrised test above; add
+    a branch.
     """
     # datetime first — some payload datetimes (``overdue_since``,
     # ``arrives_at``, ``ended_at``) enforce timezone-aware UTC.
     if annotation is datetime or annotation is datetime | None:
         return _PINNED_NOW
+    # Integer payload fields (``candidate_count`` on
+    # :class:`TaskPrimaryUnavailable`). A ULID would fail Pydantic's
+    # int-parse; ``0`` is the canonical sentinel the field accepts
+    # (the spec also defines ``candidate_count=0`` as the normal
+    # value for this event — "the pool was empty too").
+    if annotation is int:
+        return 0
+    # ``reason`` on :class:`TaskUnassigned` / :class:`TaskSkipped` /
+    # :class:`TaskCancelled` is guarded by ``_REASON_CODE_RE``
+    # (``^[a-z][a-z0-9_]{0,63}$``) — a ULID sentinel fails the regex.
+    # Using a plausible identifier-shaped code keeps the test
+    # assertion about cross-tenant delivery, not about payload
+    # shape.
+    if field_name == "reason":
+        return "test_sentinel"
     # Narrow the action enum on :class:`ShiftChanged` — any of the
     # three literal values is valid, ``opened`` is the most common
     # shape.

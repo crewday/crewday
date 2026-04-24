@@ -47,11 +47,13 @@ __all__ = [
     "ShiftEnded",
     "StayUpcoming",
     "TaskAssigned",
+    "TaskCancelled",
     "TaskCompleted",
     "TaskCreated",
     "TaskOverdue",
     "TaskPrimaryUnavailable",
     "TaskReassigned",
+    "TaskSkipped",
     "TaskUnassigned",
 ]
 
@@ -234,6 +236,78 @@ class TaskCompleted(Event):
 
     task_id: str
     completed_by: str
+
+
+@register
+class TaskSkipped(Event):
+    """A task occurrence was skipped by the caller (§06 "Skipping").
+
+    Fired by :func:`app.domain.tasks.completion.skip` when a worker
+    (or owner/manager) marks the task as "not needed this week" —
+    guest left early, conditions made the task unnecessary, etc.
+    Counts as "not done" in reporting but does not raise an issue.
+
+    ``reason`` is a short identifier-shaped code the caller supplies
+    (``"guest_left_early"``, ``"weather_blocked"``, …). The code is
+    constrained to ``[a-z][a-z0-9_]{0,63}`` at publish time —
+    free-text explanations are rejected because the event fans out
+    to worker / client subscribers and can carry per-task details
+    that the original author would not otherwise broadcast.
+
+    **Role scope.** Guests are excluded from ``allowed_roles``: a
+    guest on the welcome page has no legitimate need to learn that
+    a back-office task was skipped, and ``skipped_by`` is a
+    workspace user identifier they should never see. The usual
+    manager / worker / client tuple covers every real subscriber.
+    """
+
+    name: ClassVar[str] = "task.skipped"
+    # Guests don't see back-office skip events; the other three
+    # grant roles legitimately observe them (manager timeline,
+    # worker "today" list invalidation, client digest).
+    allowed_roles: ClassVar[tuple[EventRole, ...]] = ("manager", "worker", "client")
+
+    task_id: str
+    skipped_by: str
+    reason: str
+
+    @field_validator("reason")
+    @classmethod
+    def _reason_is_code(cls, value: str) -> str:
+        return _require_reason_code(value)
+
+
+@register
+class TaskCancelled(Event):
+    """A task occurrence was cancelled by an owner / manager (§06).
+
+    Fired by :func:`app.domain.tasks.completion.cancel` when an
+    owner or manager pulls a task out of the pipeline — the work is
+    no longer needed (schedule deleted, property closed, owner's
+    call). Workers cannot cancel; the service rejects the call with
+    a permission error before reaching this event.
+
+    ``reason`` is a short identifier-shaped code the caller supplies
+    and carries the same validator as :class:`TaskSkipped` /
+    :class:`TaskUnassigned` — the field fans out across grant roles
+    and cannot carry a manager's free-text note.
+
+    **Role scope.** Same narrowing as :class:`TaskSkipped`: guests
+    are excluded so cancellation details of back-office tasks do
+    not reach the welcome page.
+    """
+
+    name: ClassVar[str] = "task.cancelled"
+    allowed_roles: ClassVar[tuple[EventRole, ...]] = ("manager", "worker", "client")
+
+    task_id: str
+    cancelled_by: str
+    reason: str
+
+    @field_validator("reason")
+    @classmethod
+    def _reason_is_code(cls, value: str) -> str:
+        return _require_reason_code(value)
 
 
 @register
