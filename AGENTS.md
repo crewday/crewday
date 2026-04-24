@@ -296,6 +296,15 @@ Plain text to the user; CLI handles styling.
   no presentational attributes (`bgcolor`, `align`). Reuse before
   inventing; promote variants via modifiers (`task-card--overdue`).
   Justify one-offs in the PR.
+- **Design language is in [`DESIGN.md`](DESIGN.md)** at the repo
+  root — palette, type scale, radii, elevation, component shapes,
+  do's and don'ts. It carries normative tokens in YAML frontmatter
+  and prose rationale below. Read it before any visual change.
+  The living CSS implementation is `mocks/web/src/styles/tokens.css`
+  and `mocks/web/src/styles/globals.css`. **If `DESIGN.md` and the
+  CSS disagree on any value, stop and resolve via `AskUserQuestion`**
+  — ask the user which side is correct, then fix the wrong side in
+  the same turn. Never silently match one to the other.
 - **No PII to upstream LLMs without explicit opt-in.** Use the
   model client's redaction layer.
 - **Time is UTC at rest, local for display.** Timestamp columns are
