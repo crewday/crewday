@@ -1,4 +1,5 @@
-"""Workspace + UserWorkspace + WorkRole + UserWorkRole SQLAlchemy models.
+"""Workspace + UserWorkspace + WorkRole + UserWorkRole + WorkEngagement
+SQLAlchemy models.
 
 v1 slice of §02's ``workspaces`` and ``user_workspace`` schemas —
 enough columns to unblock downstream DB + auth work:
@@ -32,17 +33,30 @@ cd-5kv4 adds two more workspace-scoped tables to the same package
 * :class:`UserWorkRole` — links a user to a work role within one
   workspace, with per-assignment overrides per §05 "User work role".
 
-These two land here rather than under a dedicated ``employees``
-package because their FKs all target ``workspace.id`` and the
-upcoming employees domain service (cd-dv2) is the only consumer; a
-sibling package would duplicate the registration plumbing without a
-clean ownership story while the rest of the §05 schema (``work_engagement``
-etc.) is still pending.
+cd-4saj lands the third §05 sibling in the same package:
+
+* :class:`WorkEngagement` — the per-(user, workspace) employment
+  relationship that carries the pay pipeline (§02 "work_engagement",
+  §22 "Engagement kinds"). The soft-ref columns
+  ``supplier_org_id`` / ``pay_destination_id`` /
+  ``reimbursement_destination_id`` are plain :class:`str` with no FK
+  declared because the ``organization`` and ``pay_destination``
+  tables do not exist yet — **cd-0ro4** (filed alongside cd-4saj)
+  is the follow-up that promotes these columns into real FKs once
+  the parent tables land.
+
+These all land here rather than under a dedicated ``employees``
+package because their FKs target ``workspace.id`` and the upcoming
+employees domain service (cd-dv2) is the only consumer; a sibling
+package would duplicate the registration plumbing without a clean
+ownership story.
 
 See ``docs/specs/02-domain-model.md`` §"workspaces",
-§"user_workspace"; ``docs/specs/05-employees-and-roles.md`` §"Work
-role" / §"User work role"; ``docs/specs/01-architecture.md``
-§"Workspace addressing" and §"Tenant filter enforcement".
+§"user_workspace", §"work_engagement";
+``docs/specs/05-employees-and-roles.md`` §"Work role" / §"User work
+role"; ``docs/specs/22-clients-and-vendors.md`` §"Engagement kinds";
+``docs/specs/01-architecture.md`` §"Workspace addressing" and
+§"Tenant filter enforcement".
 """
 
 from __future__ import annotations
@@ -59,12 +73,19 @@ from sqlalchemy import (
     Index,
     String,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.adapters.db.base import Base
 
-__all__ = ["UserWorkRole", "UserWorkspace", "WorkRole", "Workspace"]
+__all__ = [
+    "UserWorkRole",
+    "UserWorkspace",
+    "WorkEngagement",
+    "WorkRole",
+    "Workspace",
+]
 
 
 # Allowed plan values, enforced by a CHECK constraint. Matches §02
@@ -81,6 +102,18 @@ _SOURCE_VALUES: tuple[str, ...] = (
     "property_grant",
     "org_grant",
     "work_engagement",
+)
+
+# Allowed ``work_engagement.engagement_kind`` values — enforced by a
+# CHECK constraint. Matches §22 "Engagement kinds": ``payroll`` is
+# the default (direct-employment pipeline), ``contractor`` is a
+# self-invoicing individual, ``agency_supplied`` routes payment
+# through a supplier organisation. Switching kinds mid-engagement is
+# gated by the §22 domain rules.
+_ENGAGEMENT_KIND_VALUES: tuple[str, ...] = (
+    "payroll",
+    "contractor",
+    "agency_supplied",
 )
 
 
@@ -371,5 +404,163 @@ class UserWorkRole(Base):
             "ix_user_work_role_workspace_role",
             "workspace_id",
             "work_role_id",
+        ),
+    )
+
+
+class WorkEngagement(Base):
+    """Per-(user, workspace) employment relationship (§02 ``work_engagement``).
+
+    Carries the pay pipeline that used to sit on ``employee`` in v0.
+    A user who holds a ``worker`` grant on a workspace and draws
+    compensation for it has **exactly one active** ``work_engagement``
+    row there; a user may stack historical archived engagements in
+    the same workspace and multiple active engagements across
+    different workspaces.
+
+    **Soft-ref columns (no FK yet).** ``supplier_org_id``,
+    ``pay_destination_id``, and ``reimbursement_destination_id`` are
+    plain :class:`str` columns rather than :class:`~sqlalchemy.ForeignKey`
+    relations because the ``organization`` and ``pay_destination``
+    tables do not exist yet. **cd-0ro4** (filed alongside cd-4saj)
+    is the follow-up task that promotes these columns into real FKs
+    once the parent tables land; the column names and nullability
+    stay stable so domain callers are undisturbed. Same soft-ref
+    pattern as
+    :class:`~app.adapters.db.authz.models.RoleGrant.scope_property_id`
+    and :attr:`UserWorkRole.pay_rule_id`.
+
+    **CHECK: engagement_kind enum.** Matches §22 "Engagement kinds"
+    — ``payroll`` / ``contractor`` / ``agency_supplied``. A bad value
+    is a data bug; the CHECK rejects it before the ORM sees it.
+
+    **CHECK: supplier pairing.** §02 records "``supplier_org_id``
+    required iff ``engagement_kind = 'agency_supplied'``" — both
+    directions. ``agency_supplied`` without a supplier is a
+    half-wired pipeline; ``payroll`` / ``contractor`` carrying a
+    supplier reference is a UX bug waiting to happen (the UI would
+    surface supplier details for a direct-employment row). The CHECK
+    enforces both halves.
+
+    **Partial UNIQUE** on ``(user_id, workspace_id) WHERE
+    archived_on IS NULL`` — exactly one active engagement per
+    (user, workspace). Two active rows is the invariant violation;
+    active + archived rows co-exist happily (the archive history is
+    linear). SQLite 3.8+ supports partial indexes; the Alembic op
+    uses the ``sqlite_where`` / ``postgresql_where`` kwargs so the
+    same DDL lands on both backends. The ORM declaration mirrors
+    the dialect-specific kwargs so ``Base.metadata.create_all``
+    (the unit-test path) and Alembic agree on shape.
+
+    **Hot-path indexes.** ``(workspace_id, user_id)`` backs the
+    "what engagements does this user hold here?" view; ``(workspace_id,
+    archived_on)`` backs the "who is currently engaged in this
+    workspace?" scan (the manager's roster view). Leading
+    ``workspace_id`` keeps the tenant filter on a local column.
+
+    **Pay-pipeline reference.** §09 rows (``pay_rule``, ``payslip``,
+    ``booking``, ``expense_claim``) reference
+    ``work_engagement_id`` rather than ``user_id`` directly, so the
+    same person in different workspaces accrues and bills
+    independently.
+
+    Registered as workspace-scoped in
+    ``app/adapters/db/workspace/__init__.py``: every SELECT auto-
+    filters on ``workspace_id`` through the ORM tenant filter.
+
+    See ``docs/specs/02-domain-model.md`` §"work_engagement",
+    ``docs/specs/05-employees-and-roles.md`` §"Work engagement",
+    ``docs/specs/22-clients-and-vendors.md`` §"Engagement kinds",
+    ``docs/specs/09-time-payroll-expenses.md`` §"Pay rule" /
+    §"Payslip".
+    """
+
+    __tablename__ = "work_engagement"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    # Soft reference to ``users.id`` until the broader tenancy-join
+    # refactor lands; matches the ``user_workspace.user_id`` /
+    # ``UserWorkRole.user_id`` rationale above.
+    user_id: Mapped[str] = mapped_column(String, nullable=False)
+    workspace_id: Mapped[str] = mapped_column(
+        String,
+        ForeignKey("workspace.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    engagement_kind: Mapped[str] = mapped_column(String, nullable=False)
+    # Soft reference to the future ``organization`` table (cd-4saj
+    # follow-up). Required when ``engagement_kind = 'agency_supplied'``
+    # (enforced by CHECK); NULL otherwise.
+    supplier_org_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    # Soft reference to the future ``pay_destination`` table (cd-4saj
+    # follow-up). Default payout target for payslips / vendor
+    # invoices on this engagement.
+    pay_destination_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    # Soft reference — default target for expense reimbursements.
+    # NULL falls back to :attr:`pay_destination_id` at payout time
+    # (§09 "Expense claim").
+    reimbursement_destination_id: Mapped[str | None] = mapped_column(
+        String, nullable=True
+    )
+    started_on: Mapped[date] = mapped_column(Date, nullable=False)
+    # Engagement end — archives the pay pipeline, not the user.
+    # NULL = active; the partial UNIQUE below pivots on this column.
+    archived_on: Mapped[date | None] = mapped_column(Date, nullable=True)
+    # Manager-visible notes. Empty-string default keeps the column
+    # NOT NULL without forcing every seeder / API caller to thread
+    # ``notes_md=""`` through.
+    notes_md: Mapped[str] = mapped_column(
+        String, nullable=False, default="", server_default=""
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "engagement_kind IN ('" + "', '".join(_ENGAGEMENT_KIND_VALUES) + "')",
+            name="engagement_kind",
+        ),
+        # §02 "work_engagement": ``supplier_org_id`` required iff
+        # ``engagement_kind = 'agency_supplied'``. Expressed as a
+        # biconditional so both half-wired shapes (agency without
+        # supplier, non-agency with supplier) fail at the DB.
+        CheckConstraint(
+            "(engagement_kind = 'agency_supplied' "
+            "AND supplier_org_id IS NOT NULL) "
+            "OR (engagement_kind != 'agency_supplied' "
+            "AND supplier_org_id IS NULL)",
+            name="supplier_org_pairing",
+        ),
+        # §02 "work_engagement": at most one active engagement per
+        # (user, workspace). Archived rows are free to co-exist.
+        # Partial index — SQLite 3.8+ and PG both honour the ``WHERE``
+        # predicate; the dialect-specific kwargs pass through to the
+        # DDL emitter on the matching backend.
+        Index(
+            "uq_work_engagement_user_workspace_active",
+            "user_id",
+            "workspace_id",
+            unique=True,
+            sqlite_where=text("archived_on IS NULL"),
+            postgresql_where=text("archived_on IS NULL"),
+        ),
+        # "What engagements does this user hold in this workspace?"
+        # Leading ``workspace_id`` carries the tenant filter.
+        Index(
+            "ix_work_engagement_workspace_user",
+            "workspace_id",
+            "user_id",
+        ),
+        # "Who is currently engaged in this workspace?" The manager
+        # roster filters on ``archived_on IS NULL``; trailing
+        # ``archived_on`` lets the planner skip archived rows.
+        Index(
+            "ix_work_engagement_workspace_archived",
+            "workspace_id",
+            "archived_on",
         ),
     )
