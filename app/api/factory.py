@@ -65,6 +65,8 @@ from starlette.middleware.cors import CORSMiddleware
 
 from app.adapters.mail.ports import Mailer
 from app.adapters.mail.smtp import SMTPMailer
+from app.adapters.storage.localfs import LocalFsStorage
+from app.adapters.storage.ports import Storage
 from app.api.admin import admin_router
 from app.api.errors import add_exception_handlers
 from app.api.health import router as health_router
@@ -75,6 +77,7 @@ from app.api.v1.auth import invite as invite_module
 from app.api.v1.auth import logout as logout_module
 from app.api.v1.auth import magic as magic_module
 from app.api.v1.auth import me as me_module
+from app.api.v1.auth import me_avatar as me_avatar_module
 from app.api.v1.auth import me_tokens as me_tokens_module
 from app.api.v1.auth import passkey as passkey_module
 from app.api.v1.auth import recovery as recovery_module
@@ -83,6 +86,7 @@ from app.api.v1.auth import tokens as tokens_module
 from app.api.v1.users import build_users_router
 from app.auth._throttle import Throttle
 from app.auth.csrf import CSRFMiddleware
+from app.auth.keys import KeyDerivationError, derive_subkey
 from app.capabilities import Capabilities
 from app.capabilities import probe as probe_capabilities
 from app.config import Settings, get_settings
@@ -272,11 +276,48 @@ def _wire_services(
             timeout=settings.smtp_timeout,
             bounce_domain=settings.smtp_bounce_domain,
         )
+    storage = _build_storage(settings)
     app.state.settings = settings
     app.state.throttle = throttle
     app.state.capabilities = capabilities
     app.state.mailer = mailer
+    app.state.storage = storage
     return mailer, throttle, capabilities
+
+
+def _build_storage(settings: Settings) -> Storage | None:
+    """Return the configured :class:`Storage` backend, or ``None``.
+
+    ``localfs`` wiring requires ``settings.root_key`` so the signing
+    seam on :class:`~app.adapters.storage.localfs.LocalFsStorage` can
+    derive its HMAC key. A deployment with no ``CREWDAY_ROOT_KEY``
+    already refuses to sign magic links or sessions; storage stays
+    consistent with that posture — the dep surfaces a 503 instead of
+    crashing the boot, so ``/healthz`` and the non-avatar routes
+    still serve.
+
+    ``s3`` is deferred until the credentials / endpoint wiring lands
+    alongside §16 Recipe B; until then the branch falls through and
+    ``app.state.storage`` stays ``None``.
+    """
+    if settings.storage_backend != "localfs":
+        # S3 backend wiring lands alongside the deployment recipe
+        # (cd-6vq5 sibling). The router degrades to 503 in the
+        # meantime, which is the right failure mode for a deploy
+        # that flipped the env var without finishing the wiring.
+        return None
+    try:
+        signing_key = derive_subkey(settings.root_key, purpose="storage-sign")
+    except KeyDerivationError:
+        # Surface the misconfig at request time, not boot — a box
+        # that never actually calls an avatar / file endpoint
+        # shouldn't refuse to start just because the key is unset.
+        _log.warning(
+            "storage backend unavailable: CREWDAY_ROOT_KEY is unset",
+            extra={"event": "storage.unwired", "backend": settings.storage_backend},
+        )
+        return None
+    return LocalFsStorage(settings.data_dir, signing_key=signing_key)
 
 
 def _mount_auth_routers(
@@ -322,6 +363,15 @@ def _mount_auth_routers(
     # reads the session cookie itself, matching ``/auth/me``.
     app.include_router(
         me_tokens_module.build_me_tokens_router(),
+        prefix=bare_prefix,
+    )
+    # /me/avatar — identity-scoped avatar upload / clear (§05 "Worker
+    # surface", §12 "Avatar upload"). Bare-host because avatars are
+    # user-global (one face across every workspace the user belongs
+    # to). Reads the session cookie itself to stay in lock-step with
+    # the other ``/me`` endpoints.
+    app.include_router(
+        me_avatar_module.build_me_avatar_router(),
         prefix=bare_prefix,
     )
     # /auth/logout — session-teardown ceremony invoked by the SPA's

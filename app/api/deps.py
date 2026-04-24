@@ -15,16 +15,18 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 
-from fastapi import HTTPException, status
+from fastapi import HTTPException, Request, status
 from sqlalchemy.orm import Session
 
 from app.adapters.db.session import make_uow
+from app.adapters.storage.ports import Storage
 from app.tenancy import WorkspaceContext
 from app.tenancy.current import get_current
 
 __all__ = [
     "current_workspace_context",
     "db_session",
+    "get_storage",
 ]
 
 
@@ -62,3 +64,30 @@ def db_session() -> Iterator[Session]:
     with make_uow() as session:
         assert isinstance(session, Session)
         yield session
+
+
+def get_storage(request: Request) -> Storage:
+    """FastAPI dep — return the configured :class:`Storage` backend.
+
+    Reads :attr:`app.state.storage`, populated by the app factory at
+    boot time from :attr:`Settings.storage_backend`. Raises
+    :class:`HTTPException` 503 when no backend is wired — this is a
+    deployment misconfiguration (missing ``CREWDAY_ROOT_KEY`` or an
+    incomplete S3 config) rather than a client bug, so the surface
+    error is "service not ready" rather than a generic 500.
+
+    Tests override via ``app.dependency_overrides[get_storage] = …``
+    to inject :class:`tests._fakes.storage.InMemoryStorage` without
+    touching :attr:`app.state.storage`.
+    """
+    # Read lazily: the factory sets ``app.state.storage`` at boot (see
+    # :func:`app.api.factory._wire_services`); tests that hit a router
+    # without going through the factory must set the attribute
+    # themselves or override this dep.
+    storage: Storage | None = getattr(request.app.state, "storage", None)
+    if storage is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"error": "storage_unavailable"},
+        )
+    return storage

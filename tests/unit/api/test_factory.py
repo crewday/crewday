@@ -379,3 +379,100 @@ class TestWorkspaceAdminMount:
         tag_defs = {t["name"]: t for t in schema.get("tags", [])}
         assert "workspace_admin" in tag_defs
         assert tag_defs["workspace_admin"].get("description")
+
+
+# ---------------------------------------------------------------------------
+# Storage dep wiring (cd-6vq5)
+# ---------------------------------------------------------------------------
+
+
+class TestStorageWiring:
+    """``_build_storage`` composes the :class:`Storage` backend and stashes
+    it on :attr:`app.state.storage` so the :func:`get_storage` dep resolves
+    without a 503. Covers the degraded paths (missing root key, s3 backend)
+    too — each one must surface a ``None`` that the dep turns into a 503
+    rather than crashing the boot.
+    """
+
+    def test_localfs_backend_wires_storage_on_app_state(self) -> None:
+        """Default ``localfs`` + a root key → a live :class:`Storage` on app state."""
+        from app.adapters.storage.localfs import LocalFsStorage
+
+        app = create_app(settings=_settings())
+        # ``app.state.storage`` is the seam ``get_storage`` reads.
+        storage = getattr(app.state, "storage", None)
+        assert isinstance(storage, LocalFsStorage), (
+            f"expected LocalFsStorage on app.state.storage, got {type(storage)!r}"
+        )
+
+    def test_build_storage_localfs_returns_localfs_impl(self) -> None:
+        """``localfs`` + a root key composes :class:`LocalFsStorage`.
+
+        Exercises :func:`_build_storage` directly rather than the full
+        factory so the test does not depend on the passkey / mailer /
+        lifespan wiring that also reads ``Settings``. If
+        :func:`_build_storage` ever grows new branches, this is the
+        narrow seam that pins the default path.
+        """
+        from app.adapters.storage.localfs import LocalFsStorage
+        from app.api.factory import _build_storage
+
+        storage = _build_storage(_settings())
+        assert isinstance(storage, LocalFsStorage), (
+            f"expected LocalFsStorage, got {type(storage)!r}"
+        )
+
+    def test_build_storage_without_root_key_returns_none(self) -> None:
+        """Missing ``root_key`` surfaces as ``None``, not a crash.
+
+        :func:`app.auth.keys.derive_subkey` raises
+        :class:`KeyDerivationError` when the root key is absent; the
+        factory catches it and returns ``None``. The rest of the boot
+        path (passkey router, CSRF, …) still needs the root key and
+        will refuse to build — but that's a separate failure mode; the
+        storage helper alone must degrade gracefully so an operator
+        who only inspects ``CREWDAY_ROOT_KEY unset`` sees one
+        coherent warning per concern.
+        """
+        from app.api.factory import _build_storage
+
+        cfg = _settings()
+        cfg_no_key = Settings.model_construct(**{**cfg.model_dump(), "root_key": None})
+        assert _build_storage(cfg_no_key) is None
+
+    def test_build_storage_s3_backend_returns_none(self) -> None:
+        """``s3`` is a valid setting value but the wiring is deferred
+        (cd-6vq5 sibling recipe). Until then :func:`_build_storage`
+        returns ``None`` and the router's dep turns that into a 503
+        — exactly the shape a deploy that flipped the env var without
+        finishing the credentials wiring deserves.
+        """
+        from app.api.factory import _build_storage
+
+        cfg = _settings()
+        cfg_s3 = Settings.model_construct(
+            **{**cfg.model_dump(), "storage_backend": "s3"}
+        )
+        assert _build_storage(cfg_s3) is None
+
+    def test_get_storage_dep_returns_live_backend_in_default_build(self) -> None:
+        """End-to-end: a fresh :class:`TestClient` resolves the storage
+        dep without the 503 ``storage_unavailable`` shape. Exercises
+        the full dep chain (``app.state.storage`` hydration +
+        :func:`get_storage` read) so a future refactor that moves the
+        wiring elsewhere still trips this assertion.
+
+        The smoke path POSTs to a route that depends on ``get_storage``
+        (``/api/v1/me/avatar``) with no session cookie — we expect a
+        401, not a 503. A 503 here means the storage dep fired before
+        the auth check did, which is the exact regression we're
+        guarding against.
+        """
+        client = _client(create_app(settings=_settings()))
+        resp = client.post(
+            "/api/v1/me/avatar",
+            files={"image": ("a.png", b"pngbytes", "image/png")},
+        )
+        # 401 because no cookie; anything else (especially 503) would
+        # mean the storage wiring regressed.
+        assert resp.status_code == 401, resp.text
