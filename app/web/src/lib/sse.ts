@@ -108,6 +108,12 @@ export type EventKind =
   // Shifts (§09 time + payroll).
   | "shift.ended"
   | "time.shift.changed"
+  // Admin / deployment-scope audit (§12 SSE — `/admin/events`). The
+  // server emits `admin.audit.appended` only for `scope_kind ==
+  // 'deployment'` rows; the `/admin/audit` page invalidates its
+  // cached list so a fresh row appears at the top without a full
+  // re-render.
+  | "admin.audit.appended"
   // Catch-all workspace invalidation — e.g. owner flips a workspace
   // setting that reshapes policy. Drops every cached query under
   // the active workspace.
@@ -462,6 +468,17 @@ export const INVALIDATIONS: Record<EventKind, InvalidationHandler> = {
   "time.shift.changed": (_event, qc) => {
     invalidate(qc, ["my-schedule"]);
     invalidate(qc, qk.dashboard());
+  },
+
+  "admin.audit.appended": (_event, qc) => {
+    // §12 SSE — `/admin/events` only carries `scope_kind ==
+    // 'deployment'` audit rows, so client-side filtering is
+    // unnecessary: the server has already enforced the scope before
+    // the frame leaves the deployment stream. The `/admin/audit`
+    // page key (`["admin", "audit"]`) lives outside the workspace
+    // namespace because admin is deployment-scope, not
+    // workspace-scope (§14 "Admin shell").
+    invalidate(qc, qk.adminAudit());
   },
 
   "workspace.changed": (_event, qc) => {

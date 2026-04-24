@@ -109,6 +109,7 @@ describe("INVALIDATIONS — coverage", () => {
     "booking.reassigned",
     "shift.ended",
     "time.shift.changed",
+    "admin.audit.appended",
     "workspace.changed",
   ];
 
@@ -374,6 +375,20 @@ describe("INVALIDATIONS — per-kind behaviour", () => {
         expect.arrayContaining([["my-schedule"], qk.dashboard()]),
       );
     }
+  });
+
+  it("admin.audit.appended invalidates the deployment-scope audit list", () => {
+    // §12 SSE — `/admin/events` only carries deployment-scope audit
+    // rows, so the dispatcher just invalidates `qk.adminAudit()` and
+    // lets TanStack Query refetch the page list.
+    const qc = makeClient();
+    const spy = vi.spyOn(qc, "invalidateQueries");
+    INVALIDATIONS["admin.audit.appended"](
+      makeEvent("admin.audit.appended"),
+      qc,
+    );
+    const called = spy.mock.calls.map((c) => c[0]?.queryKey);
+    expect(called).toEqual(expect.arrayContaining([qk.adminAudit()]));
   });
 
   it("workspace.changed invalidates everything", () => {
