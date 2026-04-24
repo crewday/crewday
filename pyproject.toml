@@ -368,6 +368,23 @@ ignore_imports = [
     # as the router above; tracked by cd-duv6 (extended scope) —
     # drops once the LLM repositories land.
     "app.domain.llm.budget -> app.adapters.db.llm.models",
+    # v1 stopgap (cd-8luu): ``app.domain.tasks.assignment`` reads
+    # :class:`Occurrence` / :class:`Schedule` from
+    # ``app.adapters.db.tasks.models`` for the §06 "Assignment
+    # algorithm" walk + default workload port. Same Protocol-seam
+    # pattern as the other tasks services above; tracked by
+    # cd-duv6 (extended scope) — drops once the tasks repositories
+    # land.
+    "app.domain.tasks.assignment -> app.adapters.db.tasks.models",
+    # v1 stopgap (cd-7am7): ``app.domain.tasks.completion`` reads
+    # :class:`Occurrence` / :class:`ChecklistItem` / :class:`Evidence`
+    # from ``app.adapters.db.tasks.models`` and :class:`Movement`
+    # from ``app.adapters.db.inventory.models`` for the state
+    # machine + inventory-apply hook. Same Protocol-seam pattern
+    # as the other tasks services; tracked by cd-duv6 — drops once
+    # the tasks + inventory repositories land.
+    "app.domain.tasks.completion -> app.adapters.db.tasks.models",
+    "app.domain.tasks.completion -> app.adapters.db.inventory.models",
 ]
 unmatched_ignore_imports_alerting = "none"
 
@@ -403,6 +420,56 @@ type = "forbidden"
 source_modules = ["app.adapters"]
 forbidden_modules = ["app.api", "app.web", "app.cli", "cli", "app.worker"]
 
+# Spec `docs/specs/01-architecture.md` §"Boundary rules" rule 1 —
+# each ``domain.<X>`` reaches siblings only through the sibling's
+# public ``__init__.py`` surface, never by importing the sibling's
+# submodules directly.
+#
+# ``independence`` actually enforces the *stricter* rule: no imports
+# between the listed contexts in any direction, even through the
+# public ``__init__.py``. That is deliberate — the v1 spec prefers
+# events and cross-context refs (``UserRef`` / ``TaskRef``) over
+# direct calls, and treating every ``app.domain.tasks ->
+# app.domain.messaging`` edge as opt-in keeps cross-context
+# coupling visible. When a legitimate public-surface import lands
+# later (e.g. a re-exported service function from the sibling's
+# ``__init__``), add it to ``ignore_imports`` below with a
+# rationale — don't silently relax the contract.
+#
+# Contexts with no runtime submodules (assets, billing, expenses,
+# instructions, inventory, payroll, stays) are intentionally left
+# off — import-linter's ``modules`` list rejects entries without
+# at least one importable child. They'll join the contract as soon
+# as they grow real code; the selfreview gate on each new context
+# reminds us to re-landscape this list.
+[[tool.importlinter.contracts]]
+name = "Domain contexts are independent (siblings via __init__ only)"
+type = "independence"
+modules = [
+    "app.domain.identity",
+    "app.domain.llm",
+    "app.domain.messaging",
+    "app.domain.places",
+    "app.domain.tasks",
+    "app.domain.time",
+]
+ignore_imports = [
+    # v1 stopgap (cd-whl, cd-0rf): ``app.domain.time.shifts`` and
+    # ``app.domain.tasks.oneoff`` both call :func:`app.authz.require`
+    # for their defence-in-depth capability checks;
+    # :mod:`app.authz.enforce` reads
+    # ``app.domain.identity._action_catalog`` to resolve action →
+    # required-grants. The transitive edge is a shared-kernel
+    # capability lookup, not a sibling-context dependency — the
+    # action catalog is data (a dict), not behaviour. Dropping this
+    # whitelist would force every ``require`` caller to duplicate
+    # the catalog inline. The clean fix is to promote the action
+    # catalog to ``app.capabilities`` (the shared-kernel home per
+    # spec §01); tracked by cd-duv6's broader seam cleanup.
+    "app.authz.enforce -> app.domain.identity._action_catalog",
+]
+unmatched_ignore_imports_alerting = "none"
+
 # The ``crewday`` CLI is a thin client over the HTTP surface; it must
 # not reach into server-side business logic. ``app.util.ulid`` is the
 # one shared-kernel exception today (used for :class:`CrewdayContext`'s
@@ -431,5 +498,19 @@ ignore_imports = [
     # ``forbidden_modules`` above, but the name is recorded here so a
     # future reviewer grepping for ``app.util`` lands on this note.
     "crewday._globals -> app.util.ulid",
+    # Build-time-only edge: :func:`crewday._codegen.load_live_schema`
+    # boots the FastAPI app via :func:`app.api.factory.create_app` to
+    # read ``app.openapi()``. The import is lazy (inside the function
+    # body — see its docstring) and is only reached by the codegen
+    # script that regenerates ``cli/crewday/_surface.json``; the CLI
+    # runtime entrypoint never imports :mod:`crewday._codegen`. The
+    # long-term fix is to teach the codegen to read the committed
+    # ``docs/api/openapi.json`` instead of booting the app — tracked
+    # by cd-uky5. Whitelisting only this root edge is sufficient:
+    # import-linter's ``forbidden`` contract stops walking once the
+    # edge it would flag is ignored, so transitive edges through
+    # :mod:`app.api.factory` (routers, middleware, ``app.worker``)
+    # don't need listing and won't rot as the factory evolves.
+    "crewday._codegen -> app.api.factory",
 ]
 unmatched_ignore_imports_alerting = "none"
