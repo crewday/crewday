@@ -5,8 +5,27 @@ Each class inherits from :class:`app.events.registry.Event`, overrides
 at import time so a subscriber can resolve a name to a class without
 importing the class directly.
 
-See ``docs/specs/01-architecture.md`` §"Boundary rules" #3 for the list
-of events and their purpose.
+**Role-scope invariant (SSE, cd-clz9).** Every concrete event here
+ships with an :class:`~app.events.registry.Event` subclass whose
+``allowed_roles`` controls which SSE subscribers observe it
+(:mod:`app.api.transport.sse`). The base class defaults the tuple to
+:data:`~app.events.registry.ALL_ROLES` for ergonomic reasons — most
+business events (tasks, stays, shifts) legitimately fan out to every
+role in the workspace. That default is a **choice, not a
+right-to-ignore**: when adding a new event, decide consciously
+whether every grant role (manager, worker, client, guest) may see
+its payload, or narrow the tuple on the subclass. Free-text payload
+fields (bodies, subjects, names) are especially sensitive — prefer a
+narrower ``allowed_roles`` OR keep the payload to foreign-key IDs
+only and let the client re-fetch free text via REST, where the usual
+per-row authorisation applies.
+
+The ``DEFAULT_ROLE_EVENTS_ALLOWLIST`` in
+:mod:`tests.api.transport.test_sse` tracks which events knowingly
+inherit the ``ALL_ROLES`` default; a new event that keeps the
+default without being added to that list fails its test, forcing a
+review conversation. See ``docs/specs/01-architecture.md``
+§"Boundary rules" #3 for the list of events and their purpose.
 """
 
 from __future__ import annotations

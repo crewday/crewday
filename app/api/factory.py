@@ -69,6 +69,7 @@ from app.api.admin import admin_router
 from app.api.errors import add_exception_handlers
 from app.api.health import router as health_router
 from app.api.middleware import IdempotencyMiddleware, SecurityHeadersMiddleware
+from app.api.transport.sse import router as sse_router
 from app.api.v1 import CONTEXT_ROUTERS, WORKSPACE_ADMIN_ROUTER
 from app.api.v1.auth import invite as invite_module
 from app.api.v1.auth import logout as logout_module
@@ -139,6 +140,16 @@ _NON_CONTEXT_OPENAPI_TAGS: Final[tuple[tuple[str, str], ...]] = (
             "read-only surfaces spanning multiple contexts (abuse "
             "signals, security posture). See §15 'Self-serve abuse "
             "mitigations'."
+        ),
+    ),
+    (
+        "transport",
+        (
+            "Non-REST workspace-scoped transports. Today: the "
+            "``/w/<slug>/events`` Server-Sent Events stream that "
+            "carries TanStack Query invalidation + agent lifecycle "
+            "events (§11 'Agent turn lifecycle', §14 'SSE-driven "
+            "invalidation')."
         ),
     ),
 )
@@ -419,6 +430,15 @@ def _mount_context_routers(app: FastAPI) -> None:
     # isn't in §01. The router's own ``tags=["workspace_admin"]``
     # drives the tag that appears in the schema.
     app.include_router(WORKSPACE_ADMIN_ROUTER, prefix=f"{scoped_prefix}/admin")
+
+    # Workspace-scoped SSE transport (``/w/<slug>/events``, cd-clz9).
+    # Mounted outside the ``/api/v1`` tree because the SPA talks to
+    # it by the shorter ``/w/<slug>/events`` path (§14 "SSE-driven
+    # invalidation") — a single EventSource per workspace, not one
+    # per bounded context. Not a §01 bounded context either, so it
+    # stays outside :data:`CONTEXT_ROUTERS`; the router declares
+    # ``tags=["transport"]`` which the OpenAPI merge preserves.
+    app.include_router(sse_router, prefix="/w/{slug}")
 
     # Deployment-scoped admin tree (bare host).
     app.include_router(admin_router, prefix="/admin/api/v1")

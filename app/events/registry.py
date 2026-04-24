@@ -15,19 +15,37 @@ import threading
 from collections.abc import Mapping
 from datetime import datetime, timedelta
 from types import MappingProxyType
-from typing import ClassVar
+from typing import ClassVar, Literal
 
 from pydantic import BaseModel, ConfigDict, field_validator
 
 __all__ = [
+    "ALL_ROLES",
     "Event",
     "EventAlreadyRegistered",
     "EventNotFound",
+    "EventRole",
     "_reset_for_tests",
     "get_event_type",
     "register",
     "registered_events",
 ]
+
+
+# The four workspace-scoped grant roles a subscribed SSE client can
+# carry. Kept as a module-level ``Literal`` alias rather than a reach
+# into :mod:`app.tenancy.context` so the events package stays
+# importable without pulling in the tenancy layer (boundary discipline:
+# events are upstream of tenancy). The values are the same strings
+# :class:`~app.tenancy.context.WorkspaceContext.actor_grant_role`
+# produces, so the SSE transport can compare them directly.
+EventRole = Literal["manager", "worker", "client", "guest"]
+
+# Concrete tuple used as the default ``allowed_roles`` for the base
+# ``Event`` class. Every role receives the event unless the concrete
+# subclass narrows it. Tuple so the class-level default is hashable +
+# immutable — a mutable list would share state across subclasses.
+ALL_ROLES: tuple[EventRole, ...] = ("manager", "worker", "client", "guest")
 
 
 class EventAlreadyRegistered(ValueError):
@@ -53,6 +71,26 @@ class Event(BaseModel):
     # empty string so ``Event`` itself is never a valid registration
     # target; ``register`` rejects empty names explicitly.
     name: ClassVar[str] = ""
+
+    # Role allowlist the SSE transport (cd-clz9) reads when deciding
+    # whether to forward this event to a subscribed client. The default
+    # is every workspace-scoped role — business events that show up
+    # across the whole workspace (task.created, stay.upcoming, …) do
+    # not need to override. Narrow it on a subclass to scope an event
+    # away from a surface that must not see it (e.g. a payroll event
+    # that only managers should observe). ``actor_was_owner_member``
+    # on the caller's :class:`~app.tenancy.WorkspaceContext` is NOT
+    # considered — owners are implicitly a superset of ``manager`` in
+    # §05, so an event manager-visible is also owner-visible.
+    allowed_roles: ClassVar[tuple[EventRole, ...]] = ALL_ROLES
+
+    # When ``True`` the concrete subclass MUST carry an
+    # ``actor_user_id: str`` field, and the SSE transport filters the
+    # fan-out so only the client whose ``WorkspaceContext.actor_id``
+    # matches receives a copy. Used for events that are personal to
+    # one user inside the workspace (agent.turn.*,
+    # agent.action.pending, agent.message.appended per §11).
+    user_scoped: ClassVar[bool] = False
 
     workspace_id: str
     actor_id: str
@@ -102,6 +140,27 @@ def register(event_cls: type[Event]) -> type[Event]:
         raise ValueError(
             f"{event_cls.__name__} must set a non-empty ``name`` ClassVar "
             "before registering."
+        )
+    if not event_cls.allowed_roles:
+        # An empty tuple would register an event that no client can
+        # ever receive — almost certainly a typo when a subclass
+        # intended to narrow but dropped every role. Refuse loudly at
+        # import time rather than silently stranding the event.
+        raise ValueError(
+            f"{event_cls.__name__}.allowed_roles must list at least one "
+            "role; an empty tuple would make the event invisible to every "
+            "SSE subscriber."
+        )
+    if event_cls.user_scoped and "actor_user_id" not in event_cls.model_fields:
+        # The SSE transport's user-scope filter compares
+        # ``WorkspaceContext.actor_id`` against ``event.actor_user_id``;
+        # a ``user_scoped`` event without that field would either be
+        # delivered to everyone (fail-open) or never (fail-closed), and
+        # both are silent bugs.
+        raise ValueError(
+            f"{event_cls.__name__} declares user_scoped=True but has no "
+            "``actor_user_id`` field; add ``actor_user_id: str`` or drop "
+            "the flag."
         )
     with _lock:
         existing = _REGISTRY.get(name)
