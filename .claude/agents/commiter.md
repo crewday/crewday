@@ -92,15 +92,18 @@ Commit-message format — Conventional Commits:
 
 <body — why, what, any caveats>
 
-Refs: bd-<id>
+Refs: bd-<id>[, bd-<sr-id>]
 Signed-off-by: <name> <email>     # added automatically by -s
 ```
 
 Types: `feat`, `fix`, `docs`, `chore`, `refactor`, `test`, `perf`,
-`build`, `ci`, `style`.
+`build`, `ci`, `sec`, `style`.
 
 Scopes: the app area (`api`, `cli`, `domain`, `specs`, `infra`, etc.)
 or the spec section (`specs/06`).
+
+**Reference every Beads ID you closed** (main + paired selfreview)
+so `git log | grep <id>` finds the landing commit.
 
 Example:
 
@@ -109,9 +112,9 @@ feat(api): add POST /tasks/{id}/complete endpoint
 
 Adds the task-completion endpoint documented in docs/specs/06 §3.2.
 Writes evidence via the redaction seam so no PII reaches upstream
-models without opt-in.
+models without opt-in. Selfreview surfaced no findings.
 
-Refs: bd-042
+Refs: bd-042, bd-042-sr
 ```
 
 ### 5. Handle pre-commit hook failures
