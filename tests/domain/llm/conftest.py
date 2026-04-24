@@ -82,6 +82,18 @@ _PINNED = datetime(2026, 4, 19, 12, 0, 0, tzinfo=UTC)
 _LLM_TABLES: tuple[str, ...] = (
     "model_assignment",
     "llm_capability_inheritance",
+    # cd-irng adds ``llm_usage`` + ``budget_ledger`` reads / writes
+    # to the budget module's surface; both must stay in the
+    # workspace-scoped registry for the ORM tenant filter to inject
+    # the ``workspace_id`` predicate on SELECT / UPDATE.
+    "llm_usage",
+    "budget_ledger",
+    # cd-irng selfreview adds negative-invariant tests that query
+    # :class:`~app.adapters.db.audit.models.AuditLog` — the table's
+    # own importer registers it, but the unit-suite's autouse fixture
+    # wipes the process-wide registry between modules; belt-and-
+    # braces reapply keeps the tenant filter attached for our shard.
+    "audit_log",
 )
 
 

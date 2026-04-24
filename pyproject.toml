@@ -339,6 +339,21 @@ ignore_imports = [
     # repositories land.
     "app.domain.messaging.notifications -> app.adapters.db.messaging.models",
     "app.domain.messaging.notifications -> app.adapters.db.identity.models",
+    # v1 stopgap (cd-k0qf): ``app.domain.llm.router`` reads
+    # :class:`ModelAssignment` / :class:`LlmCapabilityInheritance`
+    # from ``app.adapters.db.llm.models`` directly. Same Protocol-
+    # seam pattern as the tasks / places / time stopgaps above;
+    # tracked by cd-duv6 (extended scope) — drops once the LLM
+    # repositories land.
+    "app.domain.llm.router -> app.adapters.db.llm.models",
+    # v1 stopgap (cd-irng): ``app.domain.llm.budget`` reads
+    # :class:`BudgetLedger` / :class:`LlmUsage` from
+    # ``app.adapters.db.llm.models`` directly — the rolling 30-day
+    # envelope needs both to check the cached aggregate and to
+    # write the post-flight usage row. Same Protocol-seam pattern
+    # as the router above; tracked by cd-duv6 (extended scope) —
+    # drops once the LLM repositories land.
+    "app.domain.llm.budget -> app.adapters.db.llm.models",
 ]
 unmatched_ignore_imports_alerting = "none"
 

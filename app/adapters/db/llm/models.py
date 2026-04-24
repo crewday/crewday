@@ -530,6 +530,17 @@ class LlmUsage(Base):
     # callers mint a ULID; no FK to keep this module decoupled from
     # a hypothetical future ``llm_operation`` aggregate table.
     correlation_id: Mapped[str] = mapped_column(String, nullable=False)
+    # Retry index within one logical ``(workspace_id, correlation_id)``
+    # operation — 0 is the first attempt; the fallback-chain walker
+    # (§11 "Failure modes") bumps this on every rung. Paired with the
+    # unique on ``(workspace_id, correlation_id, attempt)`` below,
+    # this turns a retried ``record_usage`` post-flight write into a
+    # single row instead of a double-count on the §11 budget envelope
+    # (§11 "Workspace usage budget" §"At-cap behaviour"). Default 0
+    # keeps cd-cm5-era rows (pre-cd-irng) backwards-compatible.
+    attempt: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
     )
@@ -556,6 +567,20 @@ class LlmUsage(Base):
             "workspace_id",
             "capability",
             "created_at",
+        ),
+        # Idempotency guard for the cd-irng ``record_usage`` path
+        # (§11 "Workspace usage budget"): a retried post-flight write
+        # that carries the same ``(workspace_id, correlation_id,
+        # attempt)`` tuple as an already-landed row is silently
+        # deduplicated at the service layer via the unique-violation
+        # catch. Workspace leads so the tenant filter rides the same
+        # index's prefix.
+        Index(
+            "uq_llm_usage_workspace_correlation_attempt",
+            "workspace_id",
+            "correlation_id",
+            "attempt",
+            unique=True,
         ),
     )
 

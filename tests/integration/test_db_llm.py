@@ -319,6 +319,11 @@ class TestMigrationShape:
             "latency_ms",
             "status",
             "correlation_id",
+            # ``attempt`` landed in cd-irng — retry index for the
+            # idempotency key on ``(workspace_id, correlation_id,
+            # attempt)``. See migration
+            # ``20260424_1600_a7b8c9d0e1f2_llm_usage_attempt_cd_irng``.
+            "attempt",
             "created_at",
         }
         assert set(cols) == expected
@@ -349,6 +354,20 @@ class TestMigrationShape:
             "capability",
             "created_at",
         ]
+        # cd-irng: idempotency key for :func:`record_usage`. Unique on
+        # ``(workspace_id, correlation_id, attempt)``.
+        assert "uq_llm_usage_workspace_correlation_attempt" in indexes
+        attempt_idx = indexes["uq_llm_usage_workspace_correlation_attempt"]
+        assert attempt_idx["column_names"] == [
+            "workspace_id",
+            "correlation_id",
+            "attempt",
+        ]
+        # SQLite's dialect returns ``1`` / ``0``; Postgres returns
+        # ``True`` / ``False``. Both are truthy when the index is
+        # unique — a plain ``bool()`` cast keeps the assertion
+        # cross-backend.
+        assert bool(attempt_idx["unique"]) is True
 
     def test_budget_ledger_columns(self, engine: Engine) -> None:
         cols = {c["name"]: c for c in inspect(engine).get_columns("budget_ledger")}
