@@ -78,6 +78,19 @@ explicit_package_bases = true
 namespace_packages = true
 exclude = ["mocks/"]
 
+# APScheduler 3.x ships no ``py.typed`` marker and has no published
+# stubs. The wrapper in :mod:`app.worker.scheduler` narrows the
+# surface we depend on to ``AsyncIOScheduler`` + trigger classes;
+# the ``ignore_missing_imports`` keeps ``mypy --strict`` quiet
+# without masking type issues in our own code. Drops if APScheduler
+# ships a typed release, or when we migrate to 4.x (which is
+# typed).
+[[tool.mypy.overrides]]
+module = [
+    "apscheduler.*",
+]
+ignore_missing_imports = true
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"

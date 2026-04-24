@@ -50,6 +50,8 @@ URL", §"OpenAPI"; ``docs/specs/16-deployment-operations.md``
 from __future__ import annotations
 
 import logging
+from collections.abc import AsyncIterator, Callable
+from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as pkg_version
 from pathlib import Path
@@ -601,6 +603,82 @@ def _install_custom_openapi(app: FastAPI) -> None:
     app.openapi = openapi  # type: ignore[method-assign]
 
 
+def _build_worker_lifespan(
+    cfg: Settings,
+) -> Callable[[FastAPI], AbstractAsyncContextManager[None]]:
+    """Build the ASGI lifespan that bootstraps the in-process worker.
+
+    Gated on ``cfg.worker``:
+
+    * ``"internal"`` (default) — the scheduler is started in-process
+      at lifespan ``__aenter__`` and stopped at ``__aexit__``. Single-
+      container deployments (Recipe A of §16) need no separate worker
+      service; dev runs the same way for convenience.
+    * ``"external"`` — the lifespan is a no-op on the scheduler side;
+      a dedicated ``worker`` container (Recipes B / D) runs
+      :mod:`app.worker.__main__` instead. We still install the
+      lifespan seam so any future per-request state (SSE registries,
+      warm caches) has one place to plug in.
+
+    The scheduler is stashed on :attr:`FastAPI.state.scheduler` so
+    tests can inject a pinned :class:`~app.util.clock.FrozenClock`
+    before lifespan entry and dashboards can introspect the running
+    job set without reaching into APScheduler internals. Startup is
+    idempotent (see :func:`app.worker.scheduler.start`), so a
+    supervised restart that re-fires the lifespan hook does not
+    crash.
+
+    ``cfg`` is captured by closure so the lifespan sees the same
+    :class:`Settings` instance the rest of the factory composed
+    against — tests that pass a pinned settings get deterministic
+    behaviour without an env var round-trip.
+    """
+
+    @asynccontextmanager
+    async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
+        # Imported lazily so the factory module stays importable
+        # even if the worker module fails to load (e.g. a circular
+        # import during a refactor). The lazy import also keeps the
+        # apscheduler cost off the hot path for the rare caller
+        # (tests, static analysis) that imports ``create_app`` just
+        # for its signature without ever building the app.
+        from app.worker import create_scheduler, register_jobs
+        from app.worker import start as scheduler_start
+        from app.worker import stop as scheduler_stop
+
+        if cfg.worker == "internal":
+            scheduler = create_scheduler()
+            register_jobs(scheduler)
+            scheduler_start(scheduler)
+            app.state.scheduler = scheduler
+            _log.info(
+                "in-process scheduler started",
+                extra={"event": "worker.lifespan.started", "mode": cfg.worker},
+            )
+        else:
+            app.state.scheduler = None
+            _log.info(
+                "worker mode external; lifespan skipping scheduler start",
+                extra={"event": "worker.lifespan.skipped", "mode": cfg.worker},
+            )
+
+        try:
+            yield
+        finally:
+            scheduler = getattr(app.state, "scheduler", None)
+            if scheduler is not None:
+                # ``wait=False`` matches the ASGI shutdown shape — a
+                # reverse proxy / orchestrator typically gives the
+                # process 10-30 s to exit and a slow job body must
+                # not block that. Jobs that need a graceful drain
+                # should add their own cancellation seam (tracked
+                # as a follow-up if the need actually surfaces).
+                scheduler_stop(scheduler, wait=False)
+                app.state.scheduler = None
+
+    return _lifespan
+
+
 def create_app(settings: Settings | None = None) -> FastAPI:
     """Compose and return the process-wide FastAPI application.
 
@@ -628,6 +706,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         openapi_url="/api/openapi.json",
         docs_url="/docs",
         redoc_url="/redoc",
+        # Lifespan hook (§16 "Worker process"): starts the in-process
+        # APScheduler when ``cfg.worker == "internal"``, no-ops
+        # otherwise. Driven by :class:`TestClient` only when the
+        # caller uses ``with TestClient(app) as client:`` — tests
+        # that build the app for a single route hit (like the
+        # existing ``/readyz`` integration suite) are unaffected.
+        lifespan=_build_worker_lifespan(cfg),
     )
 
     # Middleware is applied OUTER → INNER at request time. FastAPI's
@@ -697,12 +782,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     else:
         _register_spa_catch_all(app)
 
-    # Worker hook — cd-pnbn / cd-3p3z formalise APScheduler wiring
-    # (crons, iCal pollers, digest emails). Until then we only
-    # record the mode so operations can assert the factory read the
-    # env var. An ``external`` deployment runs the worker in its own
-    # process; ``internal`` would in-process today once the
-    # scheduler lands.
+    # Worker mode lands via the lifespan hook built at the top of
+    # this factory (``_build_worker_lifespan``). The log line here
+    # stays so boot-time operator diagnostics + existing grep
+    # recipes keep working; the actual scheduler start/stop is
+    # driven by ASGI lifespan events, not this code path.
     _log.info(
         "worker mode resolved",
         extra={"event": "worker.mode", "mode": cfg.worker},
