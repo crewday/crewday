@@ -69,8 +69,10 @@ from app.domain.tasks.completion import (
     SkipNotPermitted,
     TaskNotFound,
     _assert_transition,
+    add_note_evidence,
     cancel,
     complete,
+    list_evidence,
     revert_overdue,
     skip,
     start,
@@ -1194,3 +1196,117 @@ class TestRevertOverdue:
                     target_state="pending",
                     clock=clock,
                 )
+
+
+# ---------------------------------------------------------------------------
+# Evidence reads + ad-hoc writes (cd-sn26 HTTP seam)
+# ---------------------------------------------------------------------------
+
+
+class TestListEvidence:
+    """``list_evidence`` returns every row anchored to a task."""
+
+    def test_empty_when_no_rows(self, session: Session, clock: FrozenClock) -> None:
+        ws = _bootstrap_workspace(session)
+        prop = _bootstrap_property(session)
+        occ = _bootstrap_occurrence(session, workspace_id=ws, property_id=prop)
+        views = list_evidence(session, _ctx(ws), task_id=occ)
+        assert views == ()
+
+    def test_returns_notes_and_orders_by_created_at(
+        self, session: Session, clock: FrozenClock
+    ) -> None:
+        ws = _bootstrap_workspace(session)
+        prop = _bootstrap_property(session)
+        occ = _bootstrap_occurrence(session, workspace_id=ws, property_id=prop)
+        # Seed the ctx's actor as a real user so the
+        # ``evidence.created_by_user_id`` FK is satisfied at flush.
+        author = _bootstrap_user(session)
+        ctx = _ctx(ws, actor_id=author)
+        first = add_note_evidence(
+            session, ctx, task_id=occ, note_md="first", clock=clock
+        )
+        second = add_note_evidence(
+            session, ctx, task_id=occ, note_md="second", clock=clock
+        )
+        views = list_evidence(session, ctx, task_id=occ)
+        ids = [v.id for v in views]
+        # created_at ties → ULID tiebreaker keeps order stable.
+        assert first.id in ids
+        assert second.id in ids
+
+    def test_unknown_task_raises_not_found(
+        self, session: Session, clock: FrozenClock
+    ) -> None:
+        ws = _bootstrap_workspace(session)
+        with pytest.raises(TaskNotFound):
+            list_evidence(session, _ctx(ws), task_id="01UNKNOWN000000000000000000")
+
+    def test_cross_tenant_raises_not_found(
+        self, session: Session, clock: FrozenClock
+    ) -> None:
+        ws_a = _bootstrap_workspace(session, slug="ev-a")
+        ws_b = _bootstrap_workspace(session, slug="ev-b")
+        prop = _bootstrap_property(session)
+        occ = _bootstrap_occurrence(session, workspace_id=ws_a, property_id=prop)
+        with pytest.raises(TaskNotFound):
+            list_evidence(session, _ctx(ws_b, slug="ev-b"), task_id=occ)
+
+
+class TestAddNoteEvidence:
+    """``add_note_evidence`` inserts ``kind='note'`` rows + audits."""
+
+    def test_happy_path_writes_row_and_audit(
+        self, session: Session, clock: FrozenClock
+    ) -> None:
+        ws = _bootstrap_workspace(session)
+        prop = _bootstrap_property(session)
+        occ = _bootstrap_occurrence(session, workspace_id=ws, property_id=prop)
+        author = _bootstrap_user(session)
+        ctx = _ctx(ws, actor_id=author)
+        view = add_note_evidence(
+            session, ctx, task_id=occ, note_md="Smells like chlorine", clock=clock
+        )
+        assert view.kind == "note"
+        assert view.note_md == "Smells like chlorine"
+        assert view.blob_hash is None
+
+        row = session.scalars(select(Evidence).where(Evidence.id == view.id)).one()
+        assert row.occurrence_id == occ
+        assert row.workspace_id == ws
+
+        audits = session.scalars(
+            select(AuditLog.action).where(AuditLog.entity_id == occ)
+        ).all()
+        assert "task.evidence.note.add" in audits
+
+    def test_empty_note_rejected(self, session: Session, clock: FrozenClock) -> None:
+        ws = _bootstrap_workspace(session)
+        prop = _bootstrap_property(session)
+        occ = _bootstrap_occurrence(session, workspace_id=ws, property_id=prop)
+        author = _bootstrap_user(session)
+        with pytest.raises(ValueError, match="note_md"):
+            add_note_evidence(
+                session,
+                _ctx(ws, actor_id=author),
+                task_id=occ,
+                note_md="   ",
+                clock=clock,
+            )
+
+    def test_cross_tenant_raises_not_found(
+        self, session: Session, clock: FrozenClock
+    ) -> None:
+        ws_a = _bootstrap_workspace(session, slug="note-a")
+        ws_b = _bootstrap_workspace(session, slug="note-b")
+        prop = _bootstrap_property(session)
+        occ = _bootstrap_occurrence(session, workspace_id=ws_a, property_id=prop)
+        author = _bootstrap_user(session)
+        with pytest.raises(TaskNotFound):
+            add_note_evidence(
+                session,
+                _ctx(ws_b, slug="note-b", actor_id=author),
+                task_id=occ,
+                note_md="hijack",
+                clock=clock,
+            )

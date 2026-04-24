@@ -58,9 +58,13 @@ from app.adapters.db.workspace.models import Workspace
 from app.domain.tasks.oneoff import (
     PersonalAssignmentError,
     TaskCreate,
+    TaskNotFound,
+    TaskPatch,
     TaskTemplateNotFound,
     TaskView,
     create_oneoff,
+    read_task,
+    update_task,
 )
 from app.events.bus import EventBus
 from app.events.types import TaskAssigned, TaskCreated
@@ -1461,3 +1465,340 @@ class TestRowShape:
             view.title = "changed"  # type: ignore[misc]
         with pytest.raises((AttributeError, TypeError)):
             view.extra = "nope"  # type: ignore[attr-defined]
+
+
+# ---------------------------------------------------------------------------
+# Read + partial-update path (cd-sn26 HTTP seam)
+# ---------------------------------------------------------------------------
+
+
+class TestReadTask:
+    """``read_task`` returns a :class:`TaskView` for every §06 state."""
+
+    @pytest.mark.parametrize(
+        "state",
+        # ``overdue`` is accepted by the view's Literal, but the DB
+        # CHECK constraint on ``occurrence.state`` does not yet carry
+        # it (the widening migration is tracked alongside cd-7am7).
+        # Excluded here so the FK / CHECK layer doesn't reject the
+        # force-set in the test fixture.
+        ["scheduled", "pending", "in_progress", "done", "skipped", "cancelled"],
+    )
+    def test_every_state_round_trips(
+        self,
+        session: Session,
+        bus: EventBus,
+        clock: FrozenClock,
+        state: str,
+    ) -> None:
+        """Regression for cd-me3q: the narrowed Literal covers every
+        state-machine name, not just the two that :func:`create_oneoff`
+        stamps at insert time."""
+        ws = _bootstrap_workspace(session, slug=f"read-{state}")
+        _bootstrap_actor(session, workspace_id=ws)
+        prop_id = _bootstrap_property(session)
+        ctx = _ctx(ws, slug=f"read-{state}")
+
+        view = create_oneoff(
+            session,
+            ctx,
+            payload=TaskCreate.model_validate(
+                {
+                    "title": f"{state} task",
+                    "property_id": prop_id,
+                    "scheduled_for_local": _future_local(),
+                }
+            ),
+            clock=clock,
+            event_bus=bus,
+        )
+        # Force-set the row into the state under test.
+        row = session.scalars(select(Occurrence).where(Occurrence.id == view.id)).one()
+        row.state = state
+        session.flush()
+
+        refreshed = read_task(session, ctx, task_id=view.id)
+        assert refreshed.state == state
+
+    def test_unknown_id_raises(
+        self, session: Session, bus: EventBus, clock: FrozenClock
+    ) -> None:
+        ws = _bootstrap_workspace(session, slug="read-missing")
+        _bootstrap_actor(session, workspace_id=ws)
+        ctx = _ctx(ws, slug="read-missing")
+        with pytest.raises(TaskNotFound):
+            read_task(session, ctx, task_id="01UNKNOWN000000000000000000")
+
+    def test_cross_tenant_raises_not_found(
+        self,
+        session: Session,
+        bus: EventBus,
+        clock: FrozenClock,
+    ) -> None:
+        """A task in workspace A is 404 for the workspace B caller —
+        the service never leaks the row."""
+        ws_a = _bootstrap_workspace(session, slug="read-a")
+        ws_b = _bootstrap_workspace(session, slug="read-b")
+        actor_a = "01HWA00000000000000000USRA"
+        actor_b = "01HWA00000000000000000USRB"
+        _bootstrap_actor(session, workspace_id=ws_a, user_id=actor_a)
+        _bootstrap_actor(session, workspace_id=ws_b, user_id=actor_b)
+        prop_id = _bootstrap_property(session)
+
+        ctx_a = _ctx(ws_a, slug="read-a", actor_id=actor_a)
+        view = create_oneoff(
+            session,
+            ctx_a,
+            payload=TaskCreate.model_validate(
+                {
+                    "title": "A only",
+                    "property_id": prop_id,
+                    "scheduled_for_local": _future_local(),
+                }
+            ),
+            clock=clock,
+            event_bus=bus,
+        )
+        ctx_b = _ctx(ws_b, slug="read-b", actor_id=actor_b)
+        with pytest.raises(TaskNotFound):
+            read_task(session, ctx_b, task_id=view.id)
+
+    def test_personal_gate_hides_task_from_non_creator(
+        self,
+        session: Session,
+        bus: EventBus,
+        clock: FrozenClock,
+    ) -> None:
+        """A personal task is not visible to a non-owner non-creator."""
+        ws = _bootstrap_workspace(session, slug="read-pers")
+        _bootstrap_actor(session, workspace_id=ws)
+        # The stranger exists in the workspace but isn't the creator.
+        stranger_id = "01HWA00000000000000000USR3"
+        _bootstrap_user(session, email="stranger@example.com", user_id=stranger_id)
+
+        prop_id = _bootstrap_property(session)
+        creator_ctx = _ctx(ws, slug="read-pers")
+        view = create_oneoff(
+            session,
+            creator_ctx,
+            payload=TaskCreate.model_validate(
+                {
+                    "title": "secret",
+                    "property_id": prop_id,
+                    "is_personal": True,
+                    "assigned_user_id": _ACTOR_ID,
+                    "scheduled_for_local": _future_local(),
+                }
+            ),
+            clock=clock,
+            event_bus=bus,
+        )
+
+        stranger_ctx = _ctx(ws, slug="read-pers", actor_id=stranger_id, was_owner=False)
+        with pytest.raises(TaskNotFound):
+            read_task(session, stranger_ctx, task_id=view.id)
+
+        # The creator still sees the task.
+        assert read_task(session, creator_ctx, task_id=view.id).id == view.id
+
+
+class TestUpdateTask:
+    """``update_task`` rewrites title / description_md and audits the delta."""
+
+    def test_updates_title_and_writes_audit(
+        self,
+        session: Session,
+        bus: EventBus,
+        clock: FrozenClock,
+    ) -> None:
+        ws = _bootstrap_workspace(session, slug="upd-title")
+        _bootstrap_actor(session, workspace_id=ws)
+        prop_id = _bootstrap_property(session)
+        ctx = _ctx(ws, slug="upd-title")
+        view = create_oneoff(
+            session,
+            ctx,
+            payload=TaskCreate.model_validate(
+                {
+                    "title": "Original",
+                    "property_id": prop_id,
+                    "scheduled_for_local": _future_local(),
+                }
+            ),
+            clock=clock,
+            event_bus=bus,
+        )
+        updated = update_task(
+            session,
+            ctx,
+            task_id=view.id,
+            body=TaskPatch(title="New title"),
+            clock=clock,
+        )
+        assert updated.title == "New title"
+
+        audit_actions = session.scalars(
+            select(AuditLog.action).where(AuditLog.entity_id == view.id)
+        ).all()
+        assert "task.update" in audit_actions
+
+    def test_description_null_clears_field(
+        self,
+        session: Session,
+        bus: EventBus,
+        clock: FrozenClock,
+    ) -> None:
+        ws = _bootstrap_workspace(session, slug="upd-desc")
+        _bootstrap_actor(session, workspace_id=ws)
+        prop_id = _bootstrap_property(session)
+        ctx = _ctx(ws, slug="upd-desc")
+        view = create_oneoff(
+            session,
+            ctx,
+            payload=TaskCreate.model_validate(
+                {
+                    "title": "Has body",
+                    "property_id": prop_id,
+                    "scheduled_for_local": _future_local(),
+                    "description_md": "original body",
+                }
+            ),
+            clock=clock,
+            event_bus=bus,
+        )
+        updated = update_task(
+            session,
+            ctx,
+            task_id=view.id,
+            body=TaskPatch.model_validate({"description_md": None}),
+            clock=clock,
+        )
+        assert updated.description_md is None
+
+    def test_empty_body_is_noop_no_audit(
+        self,
+        session: Session,
+        bus: EventBus,
+        clock: FrozenClock,
+    ) -> None:
+        ws = _bootstrap_workspace(session, slug="upd-noop")
+        _bootstrap_actor(session, workspace_id=ws)
+        prop_id = _bootstrap_property(session)
+        ctx = _ctx(ws, slug="upd-noop")
+        view = create_oneoff(
+            session,
+            ctx,
+            payload=TaskCreate.model_validate(
+                {
+                    "title": "Unchanged",
+                    "property_id": prop_id,
+                    "scheduled_for_local": _future_local(),
+                }
+            ),
+            clock=clock,
+            event_bus=bus,
+        )
+        before_audit = session.scalars(
+            select(AuditLog.id).where(AuditLog.entity_id == view.id)
+        ).all()
+
+        update_task(
+            session,
+            ctx,
+            task_id=view.id,
+            body=TaskPatch(),
+            clock=clock,
+        )
+        after_audit = session.scalars(
+            select(AuditLog.id).where(AuditLog.entity_id == view.id)
+        ).all()
+        assert list(before_audit) == list(after_audit), (
+            "no-op PATCH must not write an audit row"
+        )
+
+    def test_zero_delta_patch_skips_audit(
+        self,
+        session: Session,
+        bus: EventBus,
+        clock: FrozenClock,
+    ) -> None:
+        """Regression for cd-me3q: sending an explicit null on an
+        already-null field must not trip a no-delta audit row."""
+        ws = _bootstrap_workspace(session, slug="upd-zero")
+        _bootstrap_actor(session, workspace_id=ws)
+        prop_id = _bootstrap_property(session)
+        ctx = _ctx(ws, slug="upd-zero")
+        view = create_oneoff(
+            session,
+            ctx,
+            payload=TaskCreate.model_validate(
+                {
+                    "title": "Intact",
+                    "property_id": prop_id,
+                    "scheduled_for_local": _future_local(),
+                    # description_md intentionally omitted → defaults
+                    # to None on the row.
+                }
+            ),
+            clock=clock,
+            event_bus=bus,
+        )
+        before_audit = session.scalars(
+            select(AuditLog.id).where(AuditLog.entity_id == view.id)
+        ).all()
+
+        # Explicit null on a field that is already null — the row
+        # value doesn't change, so no audit row should land.
+        update_task(
+            session,
+            ctx,
+            task_id=view.id,
+            body=TaskPatch.model_validate({"description_md": None}),
+            clock=clock,
+        )
+        after_audit = session.scalars(
+            select(AuditLog.id).where(AuditLog.entity_id == view.id)
+        ).all()
+        assert list(before_audit) == list(after_audit)
+
+    def test_cross_tenant_update_raises_not_found(
+        self,
+        session: Session,
+        bus: EventBus,
+        clock: FrozenClock,
+    ) -> None:
+        ws_a = _bootstrap_workspace(session, slug="upd-a")
+        ws_b = _bootstrap_workspace(session, slug="upd-b")
+        actor_a = "01HWA00000000000000000USRA"
+        actor_b = "01HWA00000000000000000USRB"
+        _bootstrap_actor(session, workspace_id=ws_a, user_id=actor_a)
+        _bootstrap_actor(session, workspace_id=ws_b, user_id=actor_b)
+        prop_id = _bootstrap_property(session)
+        ctx_a = _ctx(ws_a, slug="upd-a", actor_id=actor_a)
+        view = create_oneoff(
+            session,
+            ctx_a,
+            payload=TaskCreate.model_validate(
+                {
+                    "title": "A only",
+                    "property_id": prop_id,
+                    "scheduled_for_local": _future_local(),
+                }
+            ),
+            clock=clock,
+            event_bus=bus,
+        )
+        ctx_b = _ctx(ws_b, slug="upd-b", actor_id=actor_b)
+        with pytest.raises(TaskNotFound):
+            update_task(
+                session,
+                ctx_b,
+                task_id=view.id,
+                body=TaskPatch(title="hijack"),
+                clock=clock,
+            )
+
+    def test_unknown_field_rejected(self) -> None:
+        """``TaskPatch`` uses ``extra='forbid'`` — a stray key is 422."""
+        with pytest.raises(ValidationError):
+            TaskPatch.model_validate({"title": "ok", "extra": "nope"})

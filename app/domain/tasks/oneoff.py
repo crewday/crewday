@@ -115,9 +115,13 @@ __all__ = [
     "ChecklistExpansionHook",
     "PersonalAssignmentError",
     "TaskCreate",
+    "TaskNotFound",
+    "TaskPatch",
     "TaskTemplateNotFound",
     "TaskView",
     "create_oneoff",
+    "read_task",
+    "update_task",
 ]
 
 
@@ -194,6 +198,20 @@ class PersonalAssignmentError(ValueError):
     the quick-add default to ``is_personal=True, assigned_user_id =
     created_by``; any deviation is a caller bug the router should
     surface as a 422 rather than silently flipping the flag off.
+    """
+
+
+class TaskNotFound(LookupError):
+    """The task id is unknown in the caller's workspace (404).
+
+    Re-exported by :mod:`app.domain.tasks.oneoff` so callers that
+    already import ``oneoff`` do not have to cross into
+    :mod:`app.domain.tasks.completion` or
+    :mod:`app.domain.tasks.assignment` for the ``read`` / ``update``
+    paths. The three modules share one loader shape; a single
+    ``TaskNotFound`` matching class per module kept the modules
+    decoupled, but cd-sn26's router needs one import site for the
+    CRUD handlers — this alias.
     """
 
 
@@ -317,7 +335,22 @@ class TaskView:
     title: str
     description_md: str | None
     priority: Priority
-    state: Literal["scheduled", "pending"]
+    # The full §06 state machine. ``create_oneoff`` only ever stamps
+    # ``'scheduled'`` or ``'pending'`` at insert time, but
+    # :func:`read_task` / :func:`update_task` (cd-sn26) re-project the
+    # same :class:`TaskView` for tasks that have since transitioned
+    # through the completion service — so the Literal must cover the
+    # full enum or the read path blows up with a narrowing error on
+    # any non-fresh row.
+    state: Literal[
+        "scheduled",
+        "pending",
+        "in_progress",
+        "done",
+        "skipped",
+        "cancelled",
+        "overdue",
+    ]
     scheduled_for_local: str
     scheduled_for_utc: datetime
     duration_minutes: int | None
@@ -767,26 +800,59 @@ def _assert_can_create(
 # ---------------------------------------------------------------------------
 
 
+_TaskStateName = Literal[
+    "scheduled",
+    "pending",
+    "in_progress",
+    "done",
+    "skipped",
+    "cancelled",
+    "overdue",
+]
+
+
+def _narrow_task_state(value: str) -> _TaskStateName:
+    """Narrow a loaded ``occurrence.state`` string to the §06 enum.
+
+    Kept local to this module (rather than imported from
+    :mod:`app.domain.tasks.completion`) so the one-off / read path
+    does not pick up a circular import through the completion
+    module. The CHECK constraint on the column rules out new values
+    in practice; a row that slips past it is a schema-drift bug and
+    warrants loud failure rather than a silent default.
+    """
+    if value == "scheduled":
+        return "scheduled"
+    if value == "pending":
+        return "pending"
+    if value == "in_progress":
+        return "in_progress"
+    if value == "done":
+        return "done"
+    if value == "skipped":
+        return "skipped"
+    if value == "cancelled":
+        return "cancelled"
+    if value == "overdue":
+        return "overdue"
+    raise ValueError(f"unexpected occurrence.state {value!r} on loaded row")
+
+
 def _row_to_view(row: Occurrence) -> TaskView:
-    """Project a freshly-inserted :class:`Occurrence` row into a view.
+    """Project an :class:`Occurrence` row into a :class:`TaskView`.
 
     Narrowing the enum columns to their :class:`Literal` types goes
     through the templates module's :func:`_narrow_priority` /
     :func:`_narrow_photo_evidence` helpers so the one-off service
-    doesn't reimplement the same per-value ``if`` chain.
+    doesn't reimplement the same per-value ``if`` chain; the state
+    narrowing is module-local via :func:`_narrow_task_state`.
+
+    Accepts every §06 state (not just ``'scheduled'`` / ``'pending'``)
+    because the HTTP read path (:func:`read_task` + :func:`update_task`)
+    calls through for tasks that have moved through the completion
+    state machine.
     """
-    # The service only writes ``'scheduled'`` or ``'pending'``; any
-    # other value on a freshly-inserted row is a schema-drift bug
-    # that warrants loud failure rather than silent downgrade. The
-    # per-value returns are what narrow ``str`` to the
-    # :class:`Literal` without a ``cast`` or ``# type: ignore``.
-    narrowed_state: Literal["scheduled", "pending"]
-    if row.state == "scheduled":
-        narrowed_state = "scheduled"
-    elif row.state == "pending":
-        narrowed_state = "pending"
-    else:
-        raise ValueError(f"unexpected state {row.state!r} on fresh one-off occurrence")
+    narrowed_state = _narrow_task_state(row.state)
     return TaskView(
         id=row.id,
         workspace_id=row.workspace_id,
@@ -825,6 +891,142 @@ def _ensure_utc(value: datetime) -> datetime:
     if value.tzinfo is None:
         return value.replace(tzinfo=UTC)
     return value.astimezone(UTC)
+
+
+# ---------------------------------------------------------------------------
+# Read + partial update (HTTP-layer fallback for cd-sn26)
+# ---------------------------------------------------------------------------
+
+
+class TaskPatch(BaseModel):
+    """Partial update DTO for ``PATCH /api/v1/tasks/{id}``.
+
+    The scope of the cd-sn26 HTTP surface is deliberately narrow: the
+    full §06 "mutable task fields" set (``scheduled_for_local``,
+    ``property_id``, ``area_id``, …) is driven by dedicated verbs
+    (``/tasks/{id}/assign``, ``/scheduler/tasks/{id}/reschedule``)
+    that already carry the domain invariants. The catch-all ``PATCH``
+    handler today supports only the text fields a caller can safely
+    rewrite without crossing a state-machine or assignment boundary:
+
+    * ``title`` — corrects the one-liner the worker reads in the card.
+    * ``description_md`` — the long-form body rendered below it.
+
+    Omitted fields keep their current value; an explicit ``null`` on a
+    nullable column clears it. The ``model_fields_set`` introspection
+    the router uses preserves "field not sent" vs "field sent as
+    null", so the service can differentiate the two shapes.
+
+    A follow-up Beads task (cd-task-patch-wider) will open the body
+    up to the remaining spec fields once the cross-cutting checks
+    (availability for ``scheduled_for_local``, scope validity for
+    ``property_id`` / ``area_id``) are ready to ship alongside them.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    title: str | None = Field(default=None, min_length=1, max_length=_MAX_TITLE_LEN)
+    description_md: str | None = Field(default=None, max_length=_MAX_DESC_LEN)
+
+
+def read_task(
+    session: Session,
+    ctx: WorkspaceContext,
+    *,
+    task_id: str,
+) -> TaskView:
+    """Return the :class:`TaskView` for ``task_id`` in the caller's workspace.
+
+    Cross-tenant lookups collapse to :class:`TaskNotFound` (404) so
+    the router never leaks the mere existence of another workspace's
+    row. The personal-task gate is enforced by the §15 read layer on
+    list endpoints; for a direct ``GET`` the spec treats
+    "I created it" / "owner member" as the visibility rule, so we
+    re-apply it here defensively.
+    """
+    row = session.scalar(
+        select(Occurrence).where(
+            Occurrence.id == task_id,
+            Occurrence.workspace_id == ctx.workspace_id,
+        )
+    )
+    if row is None:
+        raise TaskNotFound(task_id)
+    if (
+        row.is_personal
+        and not ctx.actor_was_owner_member
+        and row.created_by_user_id != ctx.actor_id
+    ):
+        raise TaskNotFound(task_id)
+    return _row_to_view(row)
+
+
+def update_task(
+    session: Session,
+    ctx: WorkspaceContext,
+    *,
+    task_id: str,
+    body: TaskPatch,
+    clock: Clock | None = None,
+) -> TaskView:
+    """Rewrite the text fields on ``task_id`` and audit the delta.
+
+    Mirrors the :func:`app.domain.identity.users.update_profile`
+    shape: walk ``body.model_fields_set`` to distinguish "omit" from
+    "null", apply only the sent fields, write one
+    ``task.update`` audit row. Permission gating is the router's job;
+    the service defends against cross-tenant reads via the loader
+    below.
+
+    Raises :class:`TaskNotFound` when the id is not visible in the
+    caller's workspace. Does not publish an event — cd-sn26 does not
+    yet have a :class:`TaskChanged` shape on the bus; the follow-up
+    that adds per-field PATCH widens this seam.
+    """
+    resolved_clock = clock if clock is not None else SystemClock()
+
+    row = session.scalar(
+        select(Occurrence).where(
+            Occurrence.id == task_id,
+            Occurrence.workspace_id == ctx.workspace_id,
+        )
+    )
+    if row is None:
+        raise TaskNotFound(task_id)
+
+    before = _row_to_view(row)
+    sent = body.model_fields_set
+    if "title" in sent and body.title is not None:
+        row.title = body.title.strip()
+    if "description_md" in sent:
+        row.description_md = body.description_md
+    session.flush()
+    after = _row_to_view(row)
+
+    # Audit only when a field genuinely changed. A PATCH that lands
+    # with an explicit null on an already-null column (or the same
+    # string on an unchanged column) would otherwise spam the audit
+    # log with zero-delta rows. Skipping the empty-sent case on its
+    # own is insufficient — ``model_fields_set`` tracks *sent*, not
+    # *changed*.
+    before_dict = _view_to_diff_dict(before)
+    after_dict = _view_to_diff_dict(after)
+    if before_dict == after_dict:
+        return after
+
+    write_audit(
+        session,
+        ctx,
+        entity_kind="task",
+        entity_id=row.id,
+        action="task.update",
+        diff={
+            "before": before_dict,
+            "after": after_dict,
+        },
+        clock=resolved_clock,
+    )
+    return after
 
 
 def _view_to_diff_dict(view: TaskView) -> dict[str, Any]:

@@ -818,7 +818,16 @@ POST   /me/availability_overrides         # body: {date, available, starts_local
 ```
 GET    /task_templates
 POST   /task_templates
-GET    /tasks
+GET    /task_templates/{id}
+PATCH  /task_templates/{id}              # full-body replace
+DELETE /task_templates/{id}              # soft-delete; 409 `template_in_use`
+                                         #   when a schedule or stay-lifecycle
+                                         #   rule still references the row.
+GET    /tasks                            # cursor paginated; filters:
+                                         #   ?state=&assignee_user_id=&
+                                         #     property_id=&
+                                         #     scheduled_for_utc_gte=&
+                                         #     scheduled_for_utc_lt=
 POST   /tasks                      # ad-hoc; body: {title, scheduled_start?,
                                    #   property_id?, area?, notes?,
                                    #   is_personal?} → Task; requires
@@ -826,19 +835,42 @@ POST   /tasks                      # ad-hoc; body: {title, scheduled_start?,
 POST   /tasks/from_nl              # natural language intake
 POST   /tasks/from_nl/commit       # commit a preview
 GET    /tasks/{id}
-PATCH  /tasks/{id}
+PATCH  /tasks/{id}                 # partial update (v1: title +
+                                   #   description_md only; wider mutable
+                                   #   set lands with cd-task-patch-wider).
 POST   /tasks/{id}/assign
 POST   /tasks/{id}/start
 POST   /tasks/{id}/complete
 POST   /tasks/{id}/skip
 POST   /tasks/{id}/cancel
+GET    /tasks/{id}/comments              # cursor-paginated; tuple cursor
+                                         #   (created_at, id) so comments
+                                         #   sharing a clock tick stay ordered.
 POST   /tasks/{id}/comments
+PATCH  /tasks/{id}/comments/{comment_id} # author only; 409
+                                         #   `comment_edit_window_expired` past
+                                         #   the 5-minute grace window.
+DELETE /tasks/{id}/comments/{comment_id} # author any time; moderators gated
+                                         #   on `tasks.comment_moderate`.
 GET    /tasks/{id}/evidence
-POST   /tasks/{id}/evidence        # multipart/form-data
+POST   /tasks/{id}/evidence        # multipart/form-data; kind=note wired
+                                   #   end-to-end. Photo / voice / gps
+                                   #   uploads return 501 until the asset
+                                   #   pipeline lands (tracked separately).
 
-GET    /schedules
+GET    /schedules                        # cursor paginated; filters:
+                                         #   ?template_id=&property_id=&paused=
 POST   /schedules
-GET    /schedules/{id}/preview?for=30d   # upcoming occurrences
+GET    /schedules/{id}
+PATCH  /schedules/{id}                   # full-body replace; optional
+                                         #   ?apply_to_existing=true cascades
+                                         #   into scheduled/pending tasks.
+DELETE /schedules/{id}                   # soft-delete; cancels every linked
+                                         #   `state=scheduled` task with
+                                         #   `cancellation_reason='schedule deleted'`.
+GET    /schedules/{id}/preview?for=30d   # upcoming occurrences — v1 ships the
+                                         #   `?n=<int>` shape; the `?for=`
+                                         #   window variant lands with cd-lczu.
 POST   /schedules/{id}/pause
 POST   /schedules/{id}/resume
 

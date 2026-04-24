@@ -1,15 +1,1801 @@
-"""Tasks context router scaffold.
+"""Tasks context router — templates, schedules, occurrences, comments, evidence.
 
-Owns task templates, schedules, occurrences, completion, evidence,
-comments, and approvals (spec §01 "Context map", §12 "Tasks /
-templates / schedules"). Routes land in cd-sn26; this file is the
-reserved seat under ``/w/<slug>/api/v1/tasks``.
+Mounted by the app factory under ``/w/<slug>/api/v1/tasks``. The tag
+``tasks`` is declared on the module-level router so every route the
+factory's per-resource sub-routers attach inherits it without having to
+repeat the declaration (parity with the ``identity`` + ``time`` routers
+that each sit under one tag).
+
+Surface (spec §12 "Tasks / templates / schedules"):
+
+**Templates** — ``app.domain.tasks.templates``
+
+* ``GET    /task_templates`` (cursor-paginated)
+* ``POST   /task_templates``
+* ``GET    /task_templates/{id}``
+* ``PATCH  /task_templates/{id}``
+* ``DELETE /task_templates/{id}`` — soft-delete; 409 ``template_in_use``.
+
+**Schedules** — ``app.domain.tasks.schedules``
+
+* ``GET    /schedules`` (cursor-paginated)
+* ``POST   /schedules``
+* ``GET    /schedules/{id}``
+* ``PATCH  /schedules/{id}``
+* ``DELETE /schedules/{id}``
+* ``GET    /schedules/{id}/preview?for=30d``
+* ``POST   /schedules/{id}/pause``
+* ``POST   /schedules/{id}/resume``
+
+**Occurrences (product-label "tasks")** — ``app.domain.tasks.{oneoff,
+completion,assignment,comments}``
+
+* ``GET    /tasks`` (cursor-paginated; filters: ``state``,
+  ``assignee_user_id``, ``property_id``,
+  ``scheduled_for_utc_gte`` / ``scheduled_for_utc_lt``).
+* ``POST   /tasks`` — ad-hoc create.
+* ``GET    /tasks/{id}`` — 404 on cross-tenant.
+* ``PATCH  /tasks/{id}`` — narrow PATCH (title + description_md) —
+  the full mutable set lands with cd-task-patch-wider.
+* ``POST   /tasks/{id}/assign`` — assign to an explicit user.
+* ``POST   /tasks/{id}/start``
+* ``POST   /tasks/{id}/complete``
+* ``POST   /tasks/{id}/skip``
+* ``POST   /tasks/{id}/cancel``
+* ``POST   /tasks/{id}/comments``
+* ``GET    /tasks/{id}/comments``
+* ``PATCH  /tasks/{id}/comments/{comment_id}``
+* ``DELETE /tasks/{id}/comments/{comment_id}``
+* ``GET    /tasks/{id}/evidence``
+* ``POST   /tasks/{id}/evidence`` — accepts ``multipart/form-data``;
+  ``kind=note`` is wired end-to-end. Photo / voice / gps uploads
+  require the asset pipeline (tracked separately); the route returns
+  ``501 not_implemented`` for those kinds until the seam lands.
+
+**Idempotency.** The replay cache on ``POST`` routes is driven by the
+process-wide :mod:`app.api.middleware.idempotency` middleware — no
+per-route plumbing needed. A replayed POST returns the original
+response verbatim with ``Idempotency-Replay: true``; a mismatched body
+hash under the same key returns 409 ``idempotency_conflict``.
+
+**Approvals.** The §12 ``/approvals`` surface (HITL agent-mediated) is
+not in this slice — see :mod:`app.api.v1.admin` and the LLM context
+follow-up. The "return 409 ``approval_required``" branch on a capped
+action is not wired at the domain layer today (no
+``requires_approval=True`` action in the catalog); when that lands it
+fits in the existing error-mapping helper below.
+
+**Scope boundaries for cd-sn26** (see ``bd show cd-sn26``):
+
+* NL intake (``/tasks/from_nl*``) belongs to the LLM context.
+* Schedule rulesets (``/schedule_rulesets``) and the scheduler feed
+  (``/scheduler/*``) are separate features and not in this slice.
+
+See ``docs/specs/06-tasks-and-scheduling.md`` §"Task template",
+§"Schedule", §"State machine", §"Task notes are the agent inbox";
+``docs/specs/12-rest-api.md`` §"Tasks / templates / schedules".
 """
 
 from __future__ import annotations
 
-from fastapi import APIRouter
+from datetime import datetime
+from typing import Annotated, Any, Literal
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    Form,
+    HTTPException,
+    Query,
+    UploadFile,
+    status,
+)
+from pydantic import BaseModel, ConfigDict, Field
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from app.adapters.db.places.models import Property
+from app.adapters.db.tasks.models import Occurrence
+from app.api.deps import current_workspace_context, db_session
+from app.api.pagination import (
+    DEFAULT_LIMIT,
+    LimitQuery,
+    PageCursorQuery,
+    decode_cursor,
+    encode_cursor,
+    paginate,
+)
+from app.domain.tasks.assignment import (
+    TaskAlreadyAssigned,
+    assign_task,
+)
+from app.domain.tasks.assignment import (
+    TaskNotFound as AssignTaskNotFound,
+)
+from app.domain.tasks.comments import (
+    CommentAttachmentInvalid,
+    CommentCreate,
+    CommentEditWindowExpired,
+    CommentKindForbidden,
+    CommentMentionAmbiguous,
+    CommentMentionInvalid,
+    CommentNotEditable,
+    CommentNotFound,
+    CommentView,
+    delete_comment,
+    edit_comment,
+    list_comments,
+    post_comment,
+)
+from app.domain.tasks.completion import (
+    EvidenceRequired,
+    EvidenceView,
+    InvalidStateTransition,
+    PhotoForbidden,
+    RequiredChecklistIncomplete,
+    SkipNotPermitted,
+    TaskState,
+    add_note_evidence,
+    list_evidence,
+)
+from app.domain.tasks.completion import (
+    PermissionDenied as CompletionPermissionDenied,
+)
+from app.domain.tasks.completion import (
+    TaskNotFound as CompletionTaskNotFound,
+)
+from app.domain.tasks.completion import (
+    cancel as cancel_task,
+)
+from app.domain.tasks.completion import (
+    complete as complete_task,
+)
+from app.domain.tasks.completion import (
+    skip as skip_task,
+)
+from app.domain.tasks.completion import (
+    start as start_task,
+)
+from app.domain.tasks.oneoff import (
+    PersonalAssignmentError,
+    TaskCreate,
+    TaskPatch,
+    TaskView,
+    create_oneoff,
+    read_task,
+    update_task,
+)
+from app.domain.tasks.oneoff import (
+    TaskNotFound as OneOffTaskNotFound,
+)
+from app.domain.tasks.schedules import (
+    InvalidBackupWorkRole,
+    InvalidRRule,
+    ScheduleCreate,
+    ScheduleNotFound,
+    ScheduleUpdate,
+    ScheduleView,
+    list_schedules,
+    preview_occurrences,
+)
+from app.domain.tasks.schedules import (
+    create as create_schedule,
+)
+from app.domain.tasks.schedules import (
+    delete as delete_schedule,
+)
+from app.domain.tasks.schedules import (
+    pause as pause_schedule,
+)
+from app.domain.tasks.schedules import (
+    read as read_schedule,
+)
+from app.domain.tasks.schedules import (
+    resume as resume_schedule,
+)
+from app.domain.tasks.schedules import (
+    update as update_schedule,
+)
+from app.domain.tasks.templates import (
+    ScopeInconsistent,
+    TaskTemplateCreate,
+    TaskTemplateNotFound,
+    TaskTemplateUpdate,
+    TaskTemplateView,
+    TemplateInUseError,
+    list_templates,
+)
+from app.domain.tasks.templates import (
+    create as create_template,
+)
+from app.domain.tasks.templates import (
+    delete as delete_template,
+)
+from app.domain.tasks.templates import (
+    read as read_template,
+)
+from app.domain.tasks.templates import (
+    update as update_template,
+)
+from app.tenancy import WorkspaceContext
+
+__all__ = ["router"]
+
 
 router = APIRouter(tags=["tasks"])
 
-__all__ = ["router"]
+
+_Ctx = Annotated[WorkspaceContext, Depends(current_workspace_context)]
+_Db = Annotated[Session, Depends(db_session)]
+
+
+# ---------------------------------------------------------------------------
+# Response shapes
+# ---------------------------------------------------------------------------
+#
+# Each resource gets a named Pydantic model so FastAPI's OpenAPI
+# generator emits a stable component schema — the SPA pattern-matches
+# on the name ("TaskTemplatePayload", not "Read_0") and the generated
+# TS types stay readable.
+
+
+class TaskTemplatePayload(BaseModel):
+    """HTTP projection of :class:`TaskTemplateView`.
+
+    The checklist items ride through as plain dicts (rather than the
+    domain :class:`ChecklistTemplateItemPayload`) so the OpenAPI schema
+    matches the shape the caller POSTed — a round-trip-identical wire
+    format means the SPA can post a template and echo the response
+    back on PATCH without a reshape step.
+    """
+
+    id: str
+    workspace_id: str
+    name: str
+    description_md: str
+    role_id: str | None
+    duration_minutes: int
+    property_scope: str
+    listed_property_ids: list[str]
+    area_scope: str
+    listed_area_ids: list[str]
+    checklist_template_json: list[dict[str, Any]]
+    photo_evidence: str
+    linked_instruction_ids: list[str]
+    priority: str
+    inventory_consumption_json: dict[str, int]
+    llm_hints_md: str | None
+    created_at: datetime
+    deleted_at: datetime | None
+
+    @classmethod
+    def from_view(cls, view: TaskTemplateView) -> TaskTemplatePayload:
+        """Copy a :class:`TaskTemplateView` into its HTTP payload."""
+        return cls(
+            id=view.id,
+            workspace_id=view.workspace_id,
+            name=view.name,
+            description_md=view.description_md,
+            role_id=view.role_id,
+            duration_minutes=view.duration_minutes,
+            property_scope=view.property_scope,
+            listed_property_ids=list(view.listed_property_ids),
+            area_scope=view.area_scope,
+            listed_area_ids=list(view.listed_area_ids),
+            checklist_template_json=[
+                item.model_dump() for item in view.checklist_template_json
+            ],
+            photo_evidence=view.photo_evidence,
+            linked_instruction_ids=list(view.linked_instruction_ids),
+            priority=view.priority,
+            inventory_consumption_json=dict(view.inventory_consumption_json),
+            llm_hints_md=view.llm_hints_md,
+            created_at=view.created_at,
+            deleted_at=view.deleted_at,
+        )
+
+
+class SchedulePayload(BaseModel):
+    """HTTP projection of :class:`ScheduleView`."""
+
+    id: str
+    workspace_id: str
+    name: str
+    template_id: str
+    property_id: str | None
+    area_id: str | None
+    default_assignee: str | None
+    backup_assignee_user_ids: list[str]
+    rrule: str
+    dtstart_local: str
+    duration_minutes: int | None
+    rdate_local: str
+    exdate_local: str
+    active_from: str | None
+    active_until: str | None
+    paused_at: datetime | None
+    created_at: datetime
+    deleted_at: datetime | None
+
+    @classmethod
+    def from_view(cls, view: ScheduleView) -> SchedulePayload:
+        """Copy a :class:`ScheduleView` into its HTTP payload."""
+        return cls(
+            id=view.id,
+            workspace_id=view.workspace_id,
+            name=view.name,
+            template_id=view.template_id,
+            property_id=view.property_id,
+            area_id=view.area_id,
+            default_assignee=view.default_assignee,
+            backup_assignee_user_ids=list(view.backup_assignee_user_ids),
+            rrule=view.rrule,
+            dtstart_local=view.dtstart_local,
+            duration_minutes=view.duration_minutes,
+            rdate_local=view.rdate_local,
+            exdate_local=view.exdate_local,
+            active_from=(
+                view.active_from.isoformat() if view.active_from is not None else None
+            ),
+            active_until=(
+                view.active_until.isoformat() if view.active_until is not None else None
+            ),
+            paused_at=view.paused_at,
+            created_at=view.created_at,
+            deleted_at=view.deleted_at,
+        )
+
+
+class TaskPayload(BaseModel):
+    """HTTP projection of :class:`TaskView` with two derived fields.
+
+    * ``overdue`` — boolean: the task is past its scheduled UTC
+      anchor and not yet in a terminal state. Mirrors §06's soft-
+      overdue rule without needing the ``overdue_since`` column that
+      is still pending migration.
+    * ``time_window_local`` — ``"HH:MM-HH:MM"`` in the property
+      timezone, computed from ``scheduled_for_utc`` + the task's
+      ``duration_minutes`` (fallback to 30 minutes when the column
+      is ``NULL``, matching the :func:`create_oneoff` default). Only
+      populated when the task carries a resolvable ``property_id``;
+      workspace-scoped (personal) tasks render as ``None``.
+    """
+
+    id: str
+    workspace_id: str
+    template_id: str | None
+    schedule_id: str | None
+    property_id: str | None
+    area_id: str | None
+    unit_id: str | None
+    title: str
+    description_md: str | None
+    priority: str
+    state: str
+    scheduled_for_local: str
+    scheduled_for_utc: datetime
+    duration_minutes: int | None
+    photo_evidence: str
+    linked_instruction_ids: list[str]
+    inventory_consumption_json: dict[str, int]
+    expected_role_id: str | None
+    assigned_user_id: str | None
+    created_by: str
+    is_personal: bool
+    created_at: datetime
+    overdue: bool
+    time_window_local: str | None
+
+    @classmethod
+    def from_view(
+        cls,
+        view: TaskView,
+        *,
+        property_timezone: str | None = None,
+        now_utc: datetime | None = None,
+    ) -> TaskPayload:
+        """Copy a :class:`TaskView` into its HTTP payload.
+
+        ``property_timezone`` resolves ``time_window_local`` — callers
+        that already know the zone pass it in (saving a redundant
+        property lookup); an omitted zone leaves the window unrendered.
+        ``now_utc`` drives the ``overdue`` bool; defaults to
+        :func:`datetime.now` in UTC so unit tests can pin a fixed clock
+        without mocking module state.
+        """
+        moment = now_utc if now_utc is not None else datetime.now(tz=ZoneInfo("UTC"))
+        overdue = _compute_overdue(view, moment)
+        window = _compute_time_window_local(view, property_timezone)
+        return cls(
+            id=view.id,
+            workspace_id=view.workspace_id,
+            template_id=view.template_id,
+            schedule_id=view.schedule_id,
+            property_id=view.property_id,
+            area_id=view.area_id,
+            unit_id=view.unit_id,
+            title=view.title,
+            description_md=view.description_md,
+            priority=view.priority,
+            state=view.state,
+            scheduled_for_local=view.scheduled_for_local,
+            scheduled_for_utc=view.scheduled_for_utc,
+            duration_minutes=view.duration_minutes,
+            photo_evidence=view.photo_evidence,
+            linked_instruction_ids=list(view.linked_instruction_ids),
+            inventory_consumption_json=dict(view.inventory_consumption_json),
+            expected_role_id=view.expected_role_id,
+            assigned_user_id=view.assigned_user_id,
+            created_by=view.created_by,
+            is_personal=view.is_personal,
+            created_at=view.created_at,
+            overdue=overdue,
+            time_window_local=window,
+        )
+
+
+class TaskStatePayload(BaseModel):
+    """HTTP projection of :class:`TaskState`.
+
+    Returned by ``start`` / ``complete`` / ``skip`` / ``cancel``. The
+    router echoes every field the SPA renders to draw the toast + chip
+    after a state transition.
+    """
+
+    task_id: str
+    state: str
+    completed_at: datetime | None
+    completed_by_user_id: str | None
+    reason: str | None
+
+    @classmethod
+    def from_view(cls, view: TaskState) -> TaskStatePayload:
+        """Copy a :class:`TaskState` into its HTTP payload."""
+        return cls(
+            task_id=view.task_id,
+            state=view.state,
+            completed_at=view.completed_at,
+            completed_by_user_id=view.completed_by_user_id,
+            reason=view.reason,
+        )
+
+
+class AssignmentPayload(BaseModel):
+    """HTTP projection of :class:`AssignmentResult`.
+
+    Returned by ``POST /tasks/{id}/assign``. Keeps the shape distinct
+    from :class:`TaskStatePayload` so callers don't confuse "state
+    transition" with "assignee changed" — two different events on
+    the bus (``task.assigned`` vs ``task.state_changed``).
+
+    ``state`` echoes the task's current :attr:`Occurrence.state` after
+    the assignment so the SPA can refresh the chip without a second
+    round-trip; assignment never changes the state machine, so this
+    mirrors the pre-call value.
+    """
+
+    task_id: str
+    assigned_user_id: str | None
+    assignment_source: str
+    candidate_count: int
+    backup_index: int | None
+    state: str
+
+
+class CommentPayload(BaseModel):
+    """HTTP projection of :class:`CommentView`."""
+
+    id: str
+    occurrence_id: str
+    kind: str
+    author_user_id: str | None
+    body_md: str
+    mentioned_user_ids: list[str]
+    attachments: list[dict[str, Any]]
+    created_at: datetime
+    edited_at: datetime | None
+    deleted_at: datetime | None
+    llm_call_id: str | None
+
+    @classmethod
+    def from_view(cls, view: CommentView) -> CommentPayload:
+        """Copy a :class:`CommentView` into its HTTP payload."""
+        return cls(
+            id=view.id,
+            occurrence_id=view.occurrence_id,
+            kind=view.kind,
+            author_user_id=view.author_user_id,
+            body_md=view.body_md,
+            mentioned_user_ids=list(view.mentioned_user_ids),
+            attachments=[dict(item) for item in view.attachments],
+            created_at=view.created_at,
+            edited_at=view.edited_at,
+            deleted_at=view.deleted_at,
+            llm_call_id=view.llm_call_id,
+        )
+
+
+class EvidencePayload(BaseModel):
+    """HTTP projection of :class:`EvidenceView`."""
+
+    id: str
+    workspace_id: str
+    occurrence_id: str
+    kind: str
+    blob_hash: str | None
+    note_md: str | None
+    created_at: datetime
+    created_by_user_id: str | None
+
+    @classmethod
+    def from_view(cls, view: EvidenceView) -> EvidencePayload:
+        """Copy an :class:`EvidenceView` into its HTTP payload."""
+        return cls(
+            id=view.id,
+            workspace_id=view.workspace_id,
+            occurrence_id=view.occurrence_id,
+            kind=view.kind,
+            blob_hash=view.blob_hash,
+            note_md=view.note_md,
+            created_at=view.created_at,
+            created_by_user_id=view.created_by_user_id,
+        )
+
+
+class TaskTemplateListResponse(BaseModel):
+    """Collection envelope for ``GET /task_templates``."""
+
+    data: list[TaskTemplatePayload]
+    next_cursor: str | None = None
+    has_more: bool = False
+
+
+class ScheduleListResponse(BaseModel):
+    """Collection envelope for ``GET /schedules``."""
+
+    data: list[SchedulePayload]
+    next_cursor: str | None = None
+    has_more: bool = False
+
+
+class TaskListResponse(BaseModel):
+    """Collection envelope for ``GET /tasks``."""
+
+    data: list[TaskPayload]
+    next_cursor: str | None = None
+    has_more: bool = False
+
+
+class CommentListResponse(BaseModel):
+    """Collection envelope for ``GET /tasks/{id}/comments``.
+
+    Cursor is a base64-url-encoded ``(created_at_iso, id)`` tuple so
+    two comments sharing a clock tick still paginate deterministically
+    per the service's tuple-cursor contract.
+    """
+
+    data: list[CommentPayload]
+    next_cursor: str | None = None
+    has_more: bool = False
+
+
+class EvidenceListResponse(BaseModel):
+    """Collection envelope for ``GET /tasks/{id}/evidence``."""
+
+    data: list[EvidencePayload]
+    next_cursor: str | None = None
+    has_more: bool = False
+
+
+class OccurrencePreviewItem(BaseModel):
+    """One occurrence in :class:`SchedulePreviewResponse.occurrences`."""
+
+    starts_local: str
+
+
+class SchedulePreviewResponse(BaseModel):
+    """Response body for ``GET /schedules/{id}/preview``."""
+
+    occurrences: list[OccurrencePreviewItem]
+
+
+# ---------------------------------------------------------------------------
+# Request shapes
+# ---------------------------------------------------------------------------
+
+
+class AssignRequest(BaseModel):
+    """Body for ``POST /tasks/{id}/assign``."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    assignee_user_id: str = Field(..., min_length=1, max_length=64)
+
+
+class ReasonRequest(BaseModel):
+    """Shared body for ``/skip`` and ``/cancel``."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    reason_md: str = Field(..., min_length=1, max_length=20_000)
+
+
+class CompleteRequest(BaseModel):
+    """Body for ``POST /tasks/{id}/complete``."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    note_md: str | None = Field(default=None, max_length=20_000)
+    photo_evidence_ids: list[str] = Field(default_factory=list, max_length=50)
+
+
+class CommentEditRequest(BaseModel):
+    """Body for ``PATCH /tasks/{id}/comments/{comment_id}``."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    body_md: str = Field(..., min_length=1, max_length=20_000)
+
+
+# ---------------------------------------------------------------------------
+# Derived-field helpers
+# ---------------------------------------------------------------------------
+
+
+_TERMINAL_STATES: frozenset[str] = frozenset({"done", "skipped", "cancelled"})
+
+
+def _compute_overdue(view: TaskView, now_utc: datetime) -> bool:
+    """``True`` when the task is past its UTC anchor + not terminal."""
+    if view.state in _TERMINAL_STATES:
+        return False
+    anchor = view.scheduled_for_utc
+    if anchor.tzinfo is None:
+        anchor = anchor.replace(tzinfo=ZoneInfo("UTC"))
+    return anchor < now_utc
+
+
+def _compute_time_window_local(
+    view: TaskView, property_timezone: str | None
+) -> str | None:
+    """Render ``HH:MM-HH:MM`` in the property's timezone.
+
+    Returns ``None`` for workspace-scoped (personal) tasks without a
+    property, or when the zone is unknown / junk. The window width
+    falls back to 30 minutes when ``duration_minutes`` is ``NULL`` —
+    matching the :func:`create_oneoff` default so the UI never shows
+    a zero-minute window.
+    """
+    if property_timezone is None:
+        return None
+    try:
+        zone = ZoneInfo(property_timezone)
+    except (ZoneInfoNotFoundError, ValueError):
+        return None
+    anchor = view.scheduled_for_utc
+    if anchor.tzinfo is None:
+        anchor = anchor.replace(tzinfo=ZoneInfo("UTC"))
+    local_start = anchor.astimezone(zone)
+    duration = view.duration_minutes if view.duration_minutes is not None else 30
+    # ``datetime + timedelta`` keeps the zone; the minutes come out in
+    # the property frame.
+    from datetime import timedelta
+
+    local_end = local_start + timedelta(minutes=duration)
+    return f"{local_start.strftime('%H:%M')}-{local_end.strftime('%H:%M')}"
+
+
+def _property_timezone(session: Session, property_id: str | None) -> str | None:
+    """Return the IANA timezone for ``property_id`` or ``None``.
+
+    ``None`` on unknown id keeps the caller from rendering a stale
+    window; a junk zone string is surfaced up so the caller can
+    decide (we let :func:`_compute_time_window_local` swallow it,
+    so the window collapses to ``None``). One query per task list
+    would be noisy; callers fetching a page pre-resolve zones via
+    :func:`_resolve_zones_for_views` below.
+    """
+    if property_id is None:
+        return None
+    zone = session.scalar(select(Property.timezone).where(Property.id == property_id))
+    return zone
+
+
+def _resolve_zones_for_views(session: Session, views: list[TaskView]) -> dict[str, str]:
+    """Fetch the ``property.timezone`` for every property in ``views``.
+
+    One SELECT per page, keyed by ``property_id``, so the
+    ``TaskPayload.from_view`` factory can pick the zone out of a dict
+    instead of firing a query per task. Rows without a property (personal
+    tasks) are filtered at the call site.
+    """
+    ids = {v.property_id for v in views if v.property_id is not None}
+    if not ids:
+        return {}
+    rows = session.execute(
+        select(Property.id, Property.timezone).where(Property.id.in_(list(ids)))
+    ).all()
+    return {row[0]: row[1] for row in rows}
+
+
+# ---------------------------------------------------------------------------
+# Cursor helpers (comments — tuple cursor)
+# ---------------------------------------------------------------------------
+
+
+def _encode_comment_cursor(created_at: datetime, comment_id: str) -> str:
+    """Encode the tuple ``(created_at, id)`` as an opaque cursor."""
+    return encode_cursor(f"{created_at.isoformat()}|{comment_id}")
+
+
+def _decode_comment_cursor(
+    cursor: str | None,
+) -> tuple[datetime | None, str | None]:
+    """Decode an opaque comment cursor into ``(created_at, id)`` or the empty
+    pair when ``cursor`` is ``None``."""
+    if cursor is None or cursor == "":
+        return None, None
+    raw = decode_cursor(cursor)
+    if raw is None:
+        return None, None
+    # "<iso>|<id>" — a missing pipe is tampered input; collapse to 422
+    # via the same envelope as :func:`app.api.pagination.decode_cursor`.
+    if "|" not in raw:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "error": "invalid_cursor",
+                "message": "comment cursor missing separator",
+            },
+        )
+    iso, comment_id = raw.split("|", 1)
+    try:
+        created_at = datetime.fromisoformat(iso)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "error": "invalid_cursor",
+                "message": "comment cursor timestamp is not ISO-8601",
+            },
+        ) from exc
+    return created_at, comment_id
+
+
+# ---------------------------------------------------------------------------
+# Error mapping
+# ---------------------------------------------------------------------------
+#
+# Domain exceptions → HTTP shape. Every route that can raise maps
+# through one of the helpers below; mixing ``isinstance`` ladders into
+# each handler would let a new error class slip through with the wrong
+# status. Keeping one table per resource keeps the mapping auditable.
+
+
+def _http(status_code: int, error: str, **extra: object) -> HTTPException:
+    """Construct the ``{"error": "<code>", ...}`` detail envelope."""
+    detail: dict[str, object] = {"error": error}
+    detail.update(extra)
+    return HTTPException(status_code=status_code, detail=detail)
+
+
+def _template_not_found() -> HTTPException:
+    return _http(status.HTTP_404_NOT_FOUND, "task_template_not_found")
+
+
+def _schedule_not_found() -> HTTPException:
+    return _http(status.HTTP_404_NOT_FOUND, "schedule_not_found")
+
+
+def _task_not_found() -> HTTPException:
+    return _http(status.HTTP_404_NOT_FOUND, "task_not_found")
+
+
+def _comment_not_found() -> HTTPException:
+    return _http(status.HTTP_404_NOT_FOUND, "comment_not_found")
+
+
+def _http_for_template_mutation(exc: Exception) -> HTTPException:
+    """Map a template-domain exception to its HTTP shape."""
+    if isinstance(exc, TaskTemplateNotFound):
+        return _template_not_found()
+    if isinstance(exc, TemplateInUseError):
+        return _http(
+            status.HTTP_409_CONFLICT,
+            "template_in_use",
+            schedule_ids=list(exc.schedule_ids),
+            stay_lifecycle_rule_ids=list(exc.stay_lifecycle_rule_ids),
+        )
+    if isinstance(exc, ScopeInconsistent):
+        return _http(422, "scope_inconsistent", message=str(exc))
+    return _http(500, "internal")
+
+
+def _http_for_schedule_mutation(exc: Exception) -> HTTPException:
+    """Map a schedule-domain exception to its HTTP shape."""
+    if isinstance(exc, ScheduleNotFound):
+        return _schedule_not_found()
+    if isinstance(exc, InvalidRRule):
+        return _http(422, "invalid_rrule", message=str(exc))
+    if isinstance(exc, InvalidBackupWorkRole):
+        return _http(
+            422,
+            "backup_invalid_work_role",
+            invalid_user_ids=list(exc.invalid_user_ids),
+            role_id=exc.role_id,
+        )
+    if isinstance(exc, ValueError):
+        # Fallthrough ValueError covers the "template_id unknown"
+        # case the service raises during create/update (see
+        # :func:`app.domain.tasks.schedules._load_template`). Surface
+        # as 422 with a dedicated code so the SPA can branch.
+        return _http(422, "invalid_schedule_payload", message=str(exc))
+    return _http(500, "internal")
+
+
+def _http_for_task_mutation(exc: Exception) -> HTTPException:
+    """Map a task-domain exception (state machine + evidence) to HTTP."""
+    if isinstance(
+        exc, OneOffTaskNotFound | CompletionTaskNotFound | AssignTaskNotFound
+    ):
+        return _task_not_found()
+    if isinstance(exc, TaskTemplateNotFound):
+        return _template_not_found()
+    if isinstance(exc, PersonalAssignmentError):
+        return _http(422, "personal_assignment_invalid", message=str(exc))
+    if isinstance(exc, InvalidStateTransition):
+        return _http(
+            status.HTTP_409_CONFLICT,
+            "invalid_state_transition",
+            current=exc.current,
+            target=exc.target,
+        )
+    if isinstance(exc, RequiredChecklistIncomplete):
+        return _http(
+            422,
+            "required_checklist_incomplete",
+            unchecked_ids=list(exc.unchecked_ids),
+        )
+    if isinstance(exc, PhotoForbidden):
+        return _http(422, "photo_forbidden", message=str(exc))
+    if isinstance(exc, EvidenceRequired):
+        return _http(422, "evidence_required", message=str(exc))
+    if isinstance(exc, SkipNotPermitted):
+        return _http(status.HTTP_403_FORBIDDEN, "skip_not_permitted")
+    if isinstance(exc, CompletionPermissionDenied):
+        return _http(status.HTTP_403_FORBIDDEN, "permission_denied")
+    if isinstance(exc, TaskAlreadyAssigned):
+        return _http(422, "task_already_assigned", message=str(exc))
+    return _http(500, "internal")
+
+
+def _http_for_comment_mutation(exc: Exception) -> HTTPException:
+    """Map a comment-domain exception to its HTTP shape."""
+    if isinstance(exc, CommentNotFound):
+        return _comment_not_found()
+    if isinstance(exc, CommentKindForbidden):
+        return _http(status.HTTP_403_FORBIDDEN, "comment_kind_forbidden")
+    if isinstance(exc, CommentEditWindowExpired):
+        return _http(status.HTTP_409_CONFLICT, "comment_edit_window_expired")
+    if isinstance(exc, CommentNotEditable):
+        return _http(status.HTTP_409_CONFLICT, "comment_not_editable")
+    if isinstance(exc, CommentMentionInvalid):
+        return _http(
+            422,
+            "comment_mention_invalid",
+            unknown_slugs=list(exc.unknown_slugs),
+        )
+    if isinstance(exc, CommentMentionAmbiguous):
+        return _http(
+            422,
+            "comment_mention_ambiguous",
+            ambiguous_slugs=list(exc.ambiguous_slugs),
+        )
+    if isinstance(exc, CommentAttachmentInvalid):
+        return _http(
+            422,
+            "comment_attachment_invalid",
+            unknown_ids=list(exc.unknown_ids),
+        )
+    return _http(500, "internal")
+
+
+# ---------------------------------------------------------------------------
+# Templates
+# ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/task_templates",
+    response_model=TaskTemplateListResponse,
+    operation_id="list_task_templates",
+    summary="List task templates in the caller's workspace",
+)
+def list_task_templates_route(
+    ctx: _Ctx,
+    session: _Db,
+    q: Annotated[str | None, Query(max_length=200)] = None,
+    role_id: Annotated[str | None, Query(max_length=64)] = None,
+    cursor: PageCursorQuery = None,
+    limit: LimitQuery = DEFAULT_LIMIT,
+) -> TaskTemplateListResponse:
+    """Return a cursor-paginated page of live templates."""
+    after_id = decode_cursor(cursor)
+    # The service returns every row ordered (created_at, id); we pull
+    # the whole set and slice client-side. Workspaces with >500
+    # templates are not a realistic v1 shape; cd-template-pagination
+    # tracks the proper DB-side cursor when that changes.
+    views = list(list_templates(session, ctx, q=q, role_id=role_id))
+    if after_id is not None:
+        views = [v for v in views if v.id > after_id]
+    page = paginate(views, limit=limit, key_getter=lambda v: v.id)
+    return TaskTemplateListResponse(
+        data=[TaskTemplatePayload.from_view(v) for v in page.items],
+        next_cursor=page.next_cursor,
+        has_more=page.has_more,
+    )
+
+
+@router.post(
+    "/task_templates",
+    status_code=status.HTTP_201_CREATED,
+    response_model=TaskTemplatePayload,
+    operation_id="create_task_template",
+    summary="Create a task template",
+)
+def create_task_template_route(
+    body: TaskTemplateCreate,
+    ctx: _Ctx,
+    session: _Db,
+) -> TaskTemplatePayload:
+    """Insert a fresh template row."""
+    try:
+        view = create_template(session, ctx, body=body)
+    except ScopeInconsistent as exc:
+        raise _http_for_template_mutation(exc) from exc
+    return TaskTemplatePayload.from_view(view)
+
+
+@router.get(
+    "/task_templates/{template_id}",
+    response_model=TaskTemplatePayload,
+    operation_id="get_task_template",
+    summary="Read a task template",
+)
+def get_task_template_route(
+    template_id: str,
+    ctx: _Ctx,
+    session: _Db,
+) -> TaskTemplatePayload:
+    """Return the template identified by ``template_id``."""
+    try:
+        view = read_template(session, ctx, template_id=template_id)
+    except TaskTemplateNotFound as exc:
+        raise _template_not_found() from exc
+    return TaskTemplatePayload.from_view(view)
+
+
+@router.patch(
+    "/task_templates/{template_id}",
+    response_model=TaskTemplatePayload,
+    operation_id="update_task_template",
+    summary="Replace the mutable body of a task template",
+)
+def patch_task_template_route(
+    template_id: str,
+    body: TaskTemplateUpdate,
+    ctx: _Ctx,
+    session: _Db,
+) -> TaskTemplatePayload:
+    """PATCH = full-body replace per the v1 template contract."""
+    try:
+        view = update_template(session, ctx, template_id=template_id, body=body)
+    except (TaskTemplateNotFound, ScopeInconsistent) as exc:
+        raise _http_for_template_mutation(exc) from exc
+    return TaskTemplatePayload.from_view(view)
+
+
+@router.delete(
+    "/task_templates/{template_id}",
+    response_model=TaskTemplatePayload,
+    operation_id="delete_task_template",
+    summary="Soft-delete a task template",
+)
+def delete_task_template_route(
+    template_id: str,
+    ctx: _Ctx,
+    session: _Db,
+) -> TaskTemplatePayload:
+    """Soft-delete; 409 ``template_in_use`` when consumers remain."""
+    try:
+        view = delete_template(session, ctx, template_id=template_id)
+    except (TaskTemplateNotFound, TemplateInUseError) as exc:
+        raise _http_for_template_mutation(exc) from exc
+    return TaskTemplatePayload.from_view(view)
+
+
+# ---------------------------------------------------------------------------
+# Schedules
+# ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/schedules",
+    response_model=ScheduleListResponse,
+    operation_id="list_schedules",
+    summary="List schedules in the caller's workspace",
+)
+def list_schedules_route(
+    ctx: _Ctx,
+    session: _Db,
+    template_id: Annotated[str | None, Query(max_length=64)] = None,
+    property_id: Annotated[str | None, Query(max_length=64)] = None,
+    paused: Annotated[bool | None, Query()] = None,
+    cursor: PageCursorQuery = None,
+    limit: LimitQuery = DEFAULT_LIMIT,
+) -> ScheduleListResponse:
+    """Return a cursor-paginated page of live schedules."""
+    after_id = decode_cursor(cursor)
+    views = list(
+        list_schedules(
+            session,
+            ctx,
+            template_id=template_id,
+            property_id=property_id,
+            paused=paused,
+        )
+    )
+    if after_id is not None:
+        views = [v for v in views if v.id > after_id]
+    page = paginate(views, limit=limit, key_getter=lambda v: v.id)
+    return ScheduleListResponse(
+        data=[SchedulePayload.from_view(v) for v in page.items],
+        next_cursor=page.next_cursor,
+        has_more=page.has_more,
+    )
+
+
+@router.post(
+    "/schedules",
+    status_code=status.HTTP_201_CREATED,
+    response_model=SchedulePayload,
+    operation_id="create_schedule",
+    summary="Create a schedule",
+)
+def create_schedule_route(
+    body: ScheduleCreate,
+    ctx: _Ctx,
+    session: _Db,
+) -> SchedulePayload:
+    """Insert a fresh schedule row; validates RRULE + DTSTART."""
+    try:
+        view = create_schedule(session, ctx, body=body)
+    except (InvalidRRule, InvalidBackupWorkRole, ValueError) as exc:
+        raise _http_for_schedule_mutation(exc) from exc
+    return SchedulePayload.from_view(view)
+
+
+@router.get(
+    "/schedules/{schedule_id}",
+    response_model=SchedulePayload,
+    operation_id="get_schedule",
+    summary="Read a schedule",
+)
+def get_schedule_route(
+    schedule_id: str,
+    ctx: _Ctx,
+    session: _Db,
+) -> SchedulePayload:
+    """Return the schedule identified by ``schedule_id``."""
+    try:
+        view = read_schedule(session, ctx, schedule_id=schedule_id)
+    except ScheduleNotFound as exc:
+        raise _schedule_not_found() from exc
+    return SchedulePayload.from_view(view)
+
+
+@router.patch(
+    "/schedules/{schedule_id}",
+    response_model=SchedulePayload,
+    operation_id="update_schedule",
+    summary="Replace the mutable body of a schedule",
+)
+def patch_schedule_route(
+    schedule_id: str,
+    body: ScheduleUpdate,
+    ctx: _Ctx,
+    session: _Db,
+    apply_to_existing: Annotated[bool, Query()] = False,
+) -> SchedulePayload:
+    """PATCH = full-body replace; ``apply_to_existing`` cascades."""
+    try:
+        view = update_schedule(
+            session,
+            ctx,
+            schedule_id=schedule_id,
+            body=body,
+            apply_to_existing=apply_to_existing,
+        )
+    except (ScheduleNotFound, InvalidRRule, InvalidBackupWorkRole, ValueError) as exc:
+        raise _http_for_schedule_mutation(exc) from exc
+    return SchedulePayload.from_view(view)
+
+
+@router.delete(
+    "/schedules/{schedule_id}",
+    response_model=SchedulePayload,
+    operation_id="delete_schedule",
+    summary="Soft-delete a schedule and cancel scheduled occurrences",
+)
+def delete_schedule_route(
+    schedule_id: str,
+    ctx: _Ctx,
+    session: _Db,
+) -> SchedulePayload:
+    """Soft-delete the schedule."""
+    try:
+        view = delete_schedule(session, ctx, schedule_id=schedule_id)
+    except ScheduleNotFound as exc:
+        raise _schedule_not_found() from exc
+    return SchedulePayload.from_view(view)
+
+
+@router.get(
+    "/schedules/{schedule_id}/preview",
+    response_model=SchedulePreviewResponse,
+    operation_id="preview_schedule",
+    summary="Return the next N occurrences of a schedule",
+)
+def preview_schedule_route(
+    schedule_id: str,
+    ctx: _Ctx,
+    session: _Db,
+    n: Annotated[int, Query(ge=1, le=100)] = 5,
+) -> SchedulePreviewResponse:
+    """Return the next ``n`` local occurrences of the schedule's RRULE.
+
+    The spec's ``?for=30d`` shape is a future enhancement — the
+    current preview is ``n``-bounded so the UI's "next 5 occurrences"
+    panel lines up with the domain helper today. A window-based
+    ``?for=`` filter lands with the cd-schedule-preview-window
+    follow-up once the scheduler UI needs it.
+    """
+    try:
+        schedule = read_schedule(session, ctx, schedule_id=schedule_id)
+    except ScheduleNotFound as exc:
+        raise _schedule_not_found() from exc
+    try:
+        moments = preview_occurrences(
+            schedule.rrule,
+            schedule.dtstart_local,
+            n=n,
+            rdate_local=schedule.rdate_local,
+            exdate_local=schedule.exdate_local,
+        )
+    except InvalidRRule as exc:
+        raise _http_for_schedule_mutation(exc) from exc
+    return SchedulePreviewResponse(
+        occurrences=[
+            OccurrencePreviewItem(starts_local=m.isoformat(timespec="minutes"))
+            for m in moments
+        ]
+    )
+
+
+@router.post(
+    "/schedules/{schedule_id}/pause",
+    response_model=SchedulePayload,
+    operation_id="pause_schedule",
+    summary="Pause a schedule without cancelling materialised tasks",
+)
+def pause_schedule_route(
+    schedule_id: str,
+    ctx: _Ctx,
+    session: _Db,
+) -> SchedulePayload:
+    """Set ``paused_at``; no cascade."""
+    try:
+        view = pause_schedule(session, ctx, schedule_id=schedule_id)
+    except ScheduleNotFound as exc:
+        raise _schedule_not_found() from exc
+    return SchedulePayload.from_view(view)
+
+
+@router.post(
+    "/schedules/{schedule_id}/resume",
+    response_model=SchedulePayload,
+    operation_id="resume_schedule",
+    summary="Resume a paused schedule",
+)
+def resume_schedule_route(
+    schedule_id: str,
+    ctx: _Ctx,
+    session: _Db,
+) -> SchedulePayload:
+    """Clear ``paused_at``."""
+    try:
+        view = resume_schedule(session, ctx, schedule_id=schedule_id)
+    except ScheduleNotFound as exc:
+        raise _schedule_not_found() from exc
+    return SchedulePayload.from_view(view)
+
+
+# ---------------------------------------------------------------------------
+# Occurrences ("tasks")
+# ---------------------------------------------------------------------------
+
+
+_OccurrenceState = Literal[
+    "scheduled", "pending", "in_progress", "done", "skipped", "cancelled", "overdue"
+]
+
+
+@router.get(
+    "/tasks",
+    response_model=TaskListResponse,
+    operation_id="list_tasks",
+    summary="List occurrences (tasks) with filters",
+)
+def list_tasks_route(
+    ctx: _Ctx,
+    session: _Db,
+    state: Annotated[_OccurrenceState | None, Query()] = None,
+    assignee_user_id: Annotated[str | None, Query(max_length=64)] = None,
+    property_id: Annotated[str | None, Query(max_length=64)] = None,
+    scheduled_for_utc_gte: Annotated[datetime | None, Query()] = None,
+    scheduled_for_utc_lt: Annotated[datetime | None, Query()] = None,
+    cursor: PageCursorQuery = None,
+    limit: LimitQuery = DEFAULT_LIMIT,
+) -> TaskListResponse:
+    """Cursor-paginated list with workspace-scoped filters.
+
+    Personal tasks (``is_personal=True``) are visible to their creator
+    and to workspace owners only — the §15 read layer's personal-task
+    gate is applied inline so the §12 listing surface honours the same
+    rule.
+    """
+    after_id = decode_cursor(cursor)
+    now = datetime.now(tz=ZoneInfo("UTC"))
+    stmt = select(Occurrence).where(Occurrence.workspace_id == ctx.workspace_id)
+    if state is not None:
+        if state == "overdue":
+            # ``overdue`` is a derived projection (see
+            # :func:`_compute_overdue`) — the DB column never stores
+            # ``'overdue'``. Translate the query into the predicate
+            # the column understands so ``?state=overdue`` actually
+            # returns rows instead of collapsing to an empty page.
+            stmt = stmt.where(
+                Occurrence.state.in_(("pending", "in_progress")),
+                Occurrence.starts_at < now,
+            )
+        else:
+            stmt = stmt.where(Occurrence.state == state)
+    if assignee_user_id is not None:
+        stmt = stmt.where(Occurrence.assignee_user_id == assignee_user_id)
+    if property_id is not None:
+        stmt = stmt.where(Occurrence.property_id == property_id)
+    if scheduled_for_utc_gte is not None:
+        stmt = stmt.where(Occurrence.starts_at >= scheduled_for_utc_gte)
+    if scheduled_for_utc_lt is not None:
+        stmt = stmt.where(Occurrence.starts_at < scheduled_for_utc_lt)
+    if after_id is not None:
+        stmt = stmt.where(Occurrence.id > after_id)
+    stmt = stmt.order_by(Occurrence.id.asc()).limit(limit + 1)
+    rows = list(session.scalars(stmt).all())
+    # Personal-task visibility. Owners see everything; every other
+    # caller sees only the tasks they created.
+    if not ctx.actor_was_owner_member:
+        rows = [
+            r for r in rows if not r.is_personal or r.created_by_user_id == ctx.actor_id
+        ]
+    # Project and paginate. The domain read helper
+    # :func:`app.domain.tasks.oneoff.read_task` builds the view shape
+    # we want; re-using it keeps the projection path single-sourced.
+    views = [read_task(session, ctx, task_id=row.id) for row in rows]
+    zones = _resolve_zones_for_views(session, views)
+    page = paginate(views, limit=limit, key_getter=lambda v: v.id)
+    return TaskListResponse(
+        data=[
+            TaskPayload.from_view(
+                v,
+                property_timezone=zones.get(v.property_id)
+                if v.property_id is not None
+                else None,
+                now_utc=now,
+            )
+            for v in page.items
+        ],
+        next_cursor=page.next_cursor,
+        has_more=page.has_more,
+    )
+
+
+@router.post(
+    "/tasks",
+    status_code=status.HTTP_201_CREATED,
+    response_model=TaskPayload,
+    operation_id="create_task",
+    summary="Create a one-off task",
+)
+def create_task_route(
+    body: TaskCreate,
+    ctx: _Ctx,
+    session: _Db,
+) -> TaskPayload:
+    """Ad-hoc create — see :func:`app.domain.tasks.oneoff.create_oneoff`."""
+    try:
+        view = create_oneoff(session, ctx, payload=body)
+    except (
+        TaskTemplateNotFound,
+        PersonalAssignmentError,
+    ) as exc:
+        raise _http_for_task_mutation(exc) from exc
+    zone = _property_timezone(session, view.property_id)
+    return TaskPayload.from_view(view, property_timezone=zone)
+
+
+@router.get(
+    "/tasks/{task_id}",
+    response_model=TaskPayload,
+    operation_id="get_task",
+    summary="Read a single task",
+)
+def get_task_route(
+    task_id: str,
+    ctx: _Ctx,
+    session: _Db,
+) -> TaskPayload:
+    """Return the task identified by ``task_id``; 404 cross-tenant."""
+    try:
+        view = read_task(session, ctx, task_id=task_id)
+    except OneOffTaskNotFound as exc:
+        raise _task_not_found() from exc
+    zone = _property_timezone(session, view.property_id)
+    return TaskPayload.from_view(view, property_timezone=zone)
+
+
+@router.patch(
+    "/tasks/{task_id}",
+    response_model=TaskPayload,
+    operation_id="patch_task",
+    summary="Partial update of a task (title / description only in v1)",
+)
+def patch_task_route(
+    task_id: str,
+    body: TaskPatch,
+    ctx: _Ctx,
+    session: _Db,
+) -> TaskPayload:
+    """Narrow PATCH — see :class:`app.domain.tasks.oneoff.TaskPatch`.
+
+    The full mutable field set lands with cd-task-patch-wider; for now
+    the handler only writes the text fields that can't conflict with
+    the state machine or assignment algorithm.
+    """
+    try:
+        view = update_task(session, ctx, task_id=task_id, body=body)
+    except OneOffTaskNotFound as exc:
+        raise _task_not_found() from exc
+    zone = _property_timezone(session, view.property_id)
+    return TaskPayload.from_view(view, property_timezone=zone)
+
+
+@router.post(
+    "/tasks/{task_id}/assign",
+    response_model=AssignmentPayload,
+    operation_id="assign_task",
+    summary="Assign a task to a specific user",
+)
+def assign_task_route(
+    task_id: str,
+    body: AssignRequest,
+    ctx: _Ctx,
+    session: _Db,
+) -> AssignmentPayload:
+    """Write ``assigned_user_id=body.assignee_user_id`` through the algorithm.
+
+    Delegates to :func:`app.domain.tasks.assignment.assign_task` with
+    the override path (no auto-pool walk). The response echoes the
+    :class:`AssignmentResult` shape — ``assigned_user_id``,
+    ``assignment_source``, ``candidate_count``, ``backup_index``, and
+    the task's current ``state`` so the SPA can refresh the chip
+    without a follow-up GET.
+    """
+    try:
+        result = assign_task(
+            session, ctx, task_id, override_user_id=body.assignee_user_id
+        )
+    except AssignTaskNotFound as exc:
+        raise _task_not_found() from exc
+    current_state = session.scalar(
+        select(Occurrence.state).where(
+            Occurrence.id == result.task_id,
+            Occurrence.workspace_id == ctx.workspace_id,
+        )
+    )
+    return AssignmentPayload(
+        task_id=result.task_id,
+        assigned_user_id=result.assigned_user_id,
+        assignment_source=result.source,
+        candidate_count=result.candidate_count,
+        backup_index=result.backup_index,
+        state=current_state or "",
+    )
+
+
+@router.post(
+    "/tasks/{task_id}/start",
+    response_model=TaskStatePayload,
+    operation_id="start_task",
+    summary="Drive a task from pending to in_progress",
+)
+def start_task_route(
+    task_id: str,
+    ctx: _Ctx,
+    session: _Db,
+) -> TaskStatePayload:
+    """Delegate to :func:`app.domain.tasks.completion.start`."""
+    try:
+        view = start_task(session, ctx, task_id)
+    except (
+        CompletionTaskNotFound,
+        InvalidStateTransition,
+        CompletionPermissionDenied,
+    ) as exc:
+        raise _http_for_task_mutation(exc) from exc
+    return TaskStatePayload.from_view(view)
+
+
+@router.post(
+    "/tasks/{task_id}/complete",
+    response_model=TaskStatePayload,
+    operation_id="complete_task",
+    summary="Mark a task done — gated by evidence + checklist policy",
+)
+def complete_task_route(
+    task_id: str,
+    body: CompleteRequest,
+    ctx: _Ctx,
+    session: _Db,
+) -> TaskStatePayload:
+    """Delegate to :func:`app.domain.tasks.completion.complete`.
+
+    ``Idempotency-Key`` replay is handled by the process-wide
+    middleware; no per-route logic needed.
+    """
+    try:
+        view = complete_task(
+            session,
+            ctx,
+            task_id,
+            note_md=body.note_md,
+            photo_evidence_ids=body.photo_evidence_ids,
+        )
+    except (
+        CompletionTaskNotFound,
+        InvalidStateTransition,
+        PhotoForbidden,
+        EvidenceRequired,
+        RequiredChecklistIncomplete,
+        CompletionPermissionDenied,
+    ) as exc:
+        raise _http_for_task_mutation(exc) from exc
+    return TaskStatePayload.from_view(view)
+
+
+@router.post(
+    "/tasks/{task_id}/skip",
+    response_model=TaskStatePayload,
+    operation_id="skip_task",
+    summary="Skip a task with a reason",
+)
+def skip_task_route(
+    task_id: str,
+    body: ReasonRequest,
+    ctx: _Ctx,
+    session: _Db,
+) -> TaskStatePayload:
+    """Delegate to :func:`app.domain.tasks.completion.skip`."""
+    try:
+        view = skip_task(session, ctx, task_id, reason=body.reason_md)
+    except (
+        CompletionTaskNotFound,
+        InvalidStateTransition,
+        SkipNotPermitted,
+        CompletionPermissionDenied,
+    ) as exc:
+        raise _http_for_task_mutation(exc) from exc
+    return TaskStatePayload.from_view(view)
+
+
+@router.post(
+    "/tasks/{task_id}/cancel",
+    response_model=TaskStatePayload,
+    operation_id="cancel_task",
+    summary="Cancel a task with a reason (manager / owner only)",
+)
+def cancel_task_route(
+    task_id: str,
+    body: ReasonRequest,
+    ctx: _Ctx,
+    session: _Db,
+) -> TaskStatePayload:
+    """Delegate to :func:`app.domain.tasks.completion.cancel`."""
+    try:
+        view = cancel_task(session, ctx, task_id, reason=body.reason_md)
+    except (
+        CompletionTaskNotFound,
+        InvalidStateTransition,
+        CompletionPermissionDenied,
+    ) as exc:
+        raise _http_for_task_mutation(exc) from exc
+    return TaskStatePayload.from_view(view)
+
+
+# ---------------------------------------------------------------------------
+# Comments
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/tasks/{task_id}/comments",
+    status_code=status.HTTP_201_CREATED,
+    response_model=CommentPayload,
+    operation_id="post_task_comment",
+    summary="Append a comment to a task's agent thread",
+)
+def post_task_comment_route(
+    task_id: str,
+    body: CommentCreate,
+    ctx: _Ctx,
+    session: _Db,
+) -> CommentPayload:
+    """Delegate to :func:`app.domain.tasks.comments.post_comment`.
+
+    ``kind`` is inferred from ``ctx.actor_kind``: a user / system
+    actor posts ``kind='user'``; an agent token posts ``kind='agent'``.
+    The ``system`` kind is internal-only and not reachable through the
+    HTTP surface — state-change markers come from the completion /
+    assignment services with ``internal_caller=True``.
+    """
+    kind: Literal["user", "agent"] = "agent" if ctx.actor_kind == "agent" else "user"
+    try:
+        view = post_comment(session, ctx, task_id, body, kind=kind)
+    except CommentNotFound as exc:
+        # ``post_comment`` raises :class:`CommentNotFound` when the
+        # parent task is missing / cross-tenant / gated by the
+        # personal-task rule — *not* when a comment id is unknown
+        # (POST creates). Surface the actual missing entity so the
+        # 404 envelope is truthful.
+        raise _task_not_found() from exc
+    except (
+        CommentKindForbidden,
+        CommentMentionInvalid,
+        CommentMentionAmbiguous,
+        CommentAttachmentInvalid,
+    ) as exc:
+        raise _http_for_comment_mutation(exc) from exc
+    return CommentPayload.from_view(view)
+
+
+@router.get(
+    "/tasks/{task_id}/comments",
+    response_model=CommentListResponse,
+    operation_id="list_task_comments",
+    summary="List comments on a task (oldest-first, cursor-paginated)",
+)
+def list_task_comments_route(
+    task_id: str,
+    ctx: _Ctx,
+    session: _Db,
+    cursor: PageCursorQuery = None,
+    limit: LimitQuery = DEFAULT_LIMIT,
+) -> CommentListResponse:
+    """Return a cursor-paginated page of comments.
+
+    The cursor is a tuple ``(created_at, id)`` so two comments
+    sharing a clock tick still paginate deterministically.
+    """
+    try:
+        after_ts, after_id = _decode_comment_cursor(cursor)
+        views = list(
+            list_comments(
+                session,
+                ctx,
+                task_id,
+                after=after_ts,
+                after_id=after_id,
+                limit=limit + 1,
+            )
+        )
+    except CommentNotFound as exc:
+        raise _task_not_found() from exc
+    has_more = len(views) > limit
+    items = views[:limit]
+    next_cursor: str | None = None
+    if has_more and items:
+        last = items[-1]
+        next_cursor = _encode_comment_cursor(last.created_at, last.id)
+    return CommentListResponse(
+        data=[CommentPayload.from_view(v) for v in items],
+        next_cursor=next_cursor,
+        has_more=has_more,
+    )
+
+
+@router.patch(
+    "/tasks/{task_id}/comments/{comment_id}",
+    response_model=CommentPayload,
+    operation_id="patch_task_comment",
+    summary="Edit a comment within the author grace window",
+)
+def patch_task_comment_route(
+    task_id: str,
+    comment_id: str,
+    body: CommentEditRequest,
+    ctx: _Ctx,
+    session: _Db,
+) -> CommentPayload:
+    """Delegate to :func:`app.domain.tasks.comments.edit_comment`.
+
+    ``task_id`` in the URL is an addressing aid for the SPA / CLI —
+    the service loads the comment by id and re-asserts the parent
+    occurrence from the row, so a mismatched ``task_id`` does not
+    allow cross-task rewrites. We still enforce the pairing defensively
+    here so a caller that scraped the wrong id learns loudly.
+    """
+    try:
+        view = edit_comment(session, ctx, comment_id, body.body_md)
+    except (
+        CommentNotFound,
+        CommentKindForbidden,
+        CommentEditWindowExpired,
+        CommentNotEditable,
+        CommentMentionInvalid,
+        CommentMentionAmbiguous,
+    ) as exc:
+        raise _http_for_comment_mutation(exc) from exc
+    if view.occurrence_id != task_id:
+        # Cross-task request — collapse to 404 so we don't leak the
+        # existence of the comment on a different task.
+        raise _comment_not_found()
+    return CommentPayload.from_view(view)
+
+
+@router.delete(
+    "/tasks/{task_id}/comments/{comment_id}",
+    response_model=CommentPayload,
+    operation_id="delete_task_comment",
+    summary="Soft-delete a comment",
+)
+def delete_task_comment_route(
+    task_id: str,
+    comment_id: str,
+    ctx: _Ctx,
+    session: _Db,
+) -> CommentPayload:
+    """Delegate to :func:`app.domain.tasks.comments.delete_comment`."""
+    try:
+        view = delete_comment(session, ctx, comment_id)
+    except (
+        CommentNotFound,
+        CommentKindForbidden,
+        CommentNotEditable,
+    ) as exc:
+        raise _http_for_comment_mutation(exc) from exc
+    if view.occurrence_id != task_id:
+        raise _comment_not_found()
+    return CommentPayload.from_view(view)
+
+
+# ---------------------------------------------------------------------------
+# Evidence
+# ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/tasks/{task_id}/evidence",
+    response_model=EvidenceListResponse,
+    operation_id="list_task_evidence",
+    summary="List evidence rows on a task",
+)
+def list_task_evidence_route(
+    task_id: str,
+    ctx: _Ctx,
+    session: _Db,
+) -> EvidenceListResponse:
+    """Return every evidence row anchored to ``task_id``.
+
+    The response envelope carries ``next_cursor`` / ``has_more`` for
+    forward compatibility with cd-evidence-pagination; today the
+    helper returns the full set because the expected per-task
+    evidence count (template checklist + a handful of ad-hoc photos)
+    is well below a single page.
+    """
+    try:
+        views = list_evidence(session, ctx, task_id=task_id)
+    except CompletionTaskNotFound as exc:
+        raise _task_not_found() from exc
+    return EvidenceListResponse(
+        data=[EvidencePayload.from_view(v) for v in views],
+        next_cursor=None,
+        has_more=False,
+    )
+
+
+@router.post(
+    "/tasks/{task_id}/evidence",
+    status_code=status.HTTP_201_CREATED,
+    response_model=EvidencePayload,
+    operation_id="upload_task_evidence",
+    summary="Attach evidence to a task",
+)
+async def upload_task_evidence_route(
+    task_id: str,
+    ctx: _Ctx,
+    session: _Db,
+    kind: Annotated[str, Form(max_length=16)],
+    note_md: Annotated[str | None, Form(max_length=20_000)] = None,
+    file: Annotated[UploadFile | None, File()] = None,
+) -> EvidencePayload:
+    """Accept ``multipart/form-data``; wire ``kind=note`` end-to-end.
+
+    Photo / voice / gps uploads require the asset pipeline (content-
+    addressed blob store + virus scan). That seam lands with cd-assets;
+    for now this route rejects non-``note`` kinds with 501
+    ``not_implemented`` so the client receives a clear signal rather
+    than a silent drop. The follow-up is tracked in the cd-sn26
+    wrap-up notes.
+    """
+    if kind in {"photo", "voice", "gps"}:
+        # File-bearing kinds land with the asset pipeline follow-up.
+        # Explicitly consume the uploaded stream so the multipart
+        # parser doesn't leak a hanging tempfile on the server.
+        if file is not None:
+            await file.close()
+        raise _http(
+            status.HTTP_501_NOT_IMPLEMENTED,
+            "evidence_kind_not_implemented",
+            message=(
+                f"kind={kind!r} uploads require the asset pipeline; "
+                "only kind='note' is wired in cd-sn26"
+            ),
+        )
+    if kind != "note":
+        # Anything outside the §06 "Evidence" enum is caller error —
+        # 422, not 501. Consume any uploaded stream first so the
+        # multipart parser doesn't leak a tempfile.
+        if file is not None:
+            await file.close()
+        raise _http(
+            422,
+            "evidence_invalid_kind",
+            message=(
+                f"kind={kind!r} is not a valid evidence kind; expected "
+                "one of 'note', 'photo', 'voice', 'gps'"
+            ),
+        )
+    if note_md is None or not note_md.strip():
+        raise _http(
+            422,
+            "evidence_note_empty",
+            message="kind='note' evidence requires a non-empty note_md",
+        )
+    if file is not None:
+        # A note carries no binary payload; reject the mix so a
+        # confused client learns loudly.
+        await file.close()
+        raise _http(
+            422,
+            "evidence_note_with_file",
+            message="kind='note' evidence must not carry a file upload",
+        )
+    try:
+        view = add_note_evidence(session, ctx, task_id=task_id, note_md=note_md)
+    except CompletionTaskNotFound as exc:
+        raise _task_not_found() from exc
+    except ValueError as exc:
+        raise _http(422, "evidence_note_empty", message=str(exc)) from exc
+    return EvidencePayload.from_view(view)

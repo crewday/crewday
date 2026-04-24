@@ -131,6 +131,7 @@ __all__ = [
     "ChecklistRequiredResolver",
     "EvidencePolicyResolver",
     "EvidenceRequired",
+    "EvidenceView",
     "InvalidStateTransition",
     "InventoryApplyHook",
     "PermissionDenied",
@@ -141,8 +142,10 @@ __all__ = [
     "TaskNotFound",
     "TaskState",
     "TombstoneHook",
+    "add_note_evidence",
     "cancel",
     "complete",
+    "list_evidence",
     "revert_overdue",
     "skip",
     "start",
@@ -1083,3 +1086,136 @@ def revert_overdue(
         },
     )
     return _state_view(task, state=target_state)
+
+
+# ---------------------------------------------------------------------------
+# Evidence reads + ad-hoc writes (HTTP-layer seams for cd-sn26)
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class EvidenceView:
+    """Immutable read projection of one :class:`Evidence` row.
+
+    Surfaced by :func:`list_evidence` and :func:`add_note_evidence` so
+    the HTTP router can reflect a row without reaching into the ORM
+    class. Carries every column the §06 "Evidence" section mentions;
+    ``blob_hash`` is ``NULL`` for ``kind='note'`` rows (the body lives
+    in ``note_md``) and vice-versa for ``photo`` / ``voice`` / ``gps``.
+    """
+
+    id: str
+    workspace_id: str
+    occurrence_id: str
+    kind: Literal["photo", "note", "voice", "gps"]
+    blob_hash: str | None
+    note_md: str | None
+    created_at: datetime
+    created_by_user_id: str | None
+
+
+def _narrow_evidence_kind(value: str) -> Literal["photo", "note", "voice", "gps"]:
+    """Narrow a loaded DB string to the :class:`EvidenceView.kind` literal.
+
+    Parity with :func:`app.domain.tasks.templates._narrow_priority` and
+    friends: a CHECK constraint on the DB column rules out new values
+    in practice, but mypy's ``Literal`` narrowing requires a per-value
+    return so the projection escapes without a ``cast`` or
+    ``# type: ignore``.
+    """
+    if value == "photo":
+        return "photo"
+    if value == "note":
+        return "note"
+    if value == "voice":
+        return "voice"
+    if value == "gps":
+        return "gps"
+    raise ValueError(f"unknown evidence.kind {value!r} on loaded row")
+
+
+def _evidence_row_to_view(row: Evidence) -> EvidenceView:
+    """Project a loaded :class:`Evidence` row into an :class:`EvidenceView`."""
+    return EvidenceView(
+        id=row.id,
+        workspace_id=row.workspace_id,
+        occurrence_id=row.occurrence_id,
+        kind=_narrow_evidence_kind(row.kind),
+        blob_hash=row.blob_hash,
+        note_md=row.note_md,
+        created_at=row.created_at,
+        created_by_user_id=row.created_by_user_id,
+    )
+
+
+def list_evidence(
+    session: Session,
+    ctx: WorkspaceContext,
+    *,
+    task_id: str,
+) -> tuple[EvidenceView, ...]:
+    """Return every :class:`Evidence` row anchored to ``task_id``.
+
+    The tenant filter is applied by the ORM; we re-assert
+    ``workspace_id`` defensively so a mis-wired caller cannot leak
+    cross-tenant rows. :class:`TaskNotFound` fires when the parent
+    occurrence is unknown — the HTTP caller wants a 404 on the task,
+    not an empty list on a missing id.
+    """
+    task = _load_task(session, ctx, task_id)
+    rows = session.scalars(
+        select(Evidence)
+        .where(
+            Evidence.workspace_id == ctx.workspace_id,
+            Evidence.occurrence_id == task.id,
+        )
+        .order_by(Evidence.created_at.asc(), Evidence.id.asc())
+    ).all()
+    return tuple(_evidence_row_to_view(row) for row in rows)
+
+
+def add_note_evidence(
+    session: Session,
+    ctx: WorkspaceContext,
+    *,
+    task_id: str,
+    note_md: str,
+    clock: Clock | None = None,
+) -> EvidenceView:
+    """Persist ``note_md`` as a free-standing ``kind='note'`` evidence row.
+
+    Mirrors the inline :func:`_write_note_evidence` helper that runs
+    at completion time, exposed as a public service call so the
+    ``POST /tasks/{id}/evidence`` route can accept a note without
+    going through the full completion flow. The pipeline for
+    ``kind='photo'`` / ``voice`` / ``gps`` uploads goes through the
+    asset pipeline (cd-assets); that seam is not yet wired end-to-end
+    for tasks, and the router documents the gap (see cd-sn26 for the
+    follow-up).
+    """
+    resolved_clock = clock if clock is not None else SystemClock()
+    task = _load_task(session, ctx, task_id)
+    trimmed = note_md.strip()
+    if not trimmed:
+        raise ValueError("note_md must be non-empty for kind='note' evidence")
+    row = Evidence(
+        id=new_ulid(),
+        workspace_id=ctx.workspace_id,
+        occurrence_id=task.id,
+        kind="note",
+        blob_hash=None,
+        note_md=trimmed,
+        created_at=resolved_clock.now(),
+        created_by_user_id=ctx.actor_id,
+    )
+    session.add(row)
+    session.flush()
+    _audit(
+        session,
+        ctx,
+        resolved_clock,
+        task=task,
+        action="task.evidence.note.add",
+        diff={"after": {"evidence_id": row.id, "note_md": trimmed}},
+    )
+    return _evidence_row_to_view(row)
