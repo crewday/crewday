@@ -902,10 +902,21 @@ GET    /work_roles
 POST   /work_roles
 PATCH  /work_roles/{id}
 
-GET    /property_work_role_assignments
-POST   /property_work_role_assignments
-PATCH  /property_work_role_assignments/{id}
-DELETE /property_work_role_assignments/{id}
+GET    /property_work_role_assignments  # ?property_id=…&user_work_role_id=…
+                                         #   cursor-paginated. Both filters
+                                         #   optional and may be combined.
+POST   /property_work_role_assignments   # body: {user_work_role_id, property_id,
+                                         #        schedule_ruleset_id?,
+                                         #        property_pay_rule_id?}
+                                         #   workspace_id is derived from the
+                                         #   path and rejected from the body.
+                                         #   422 cross-workspace borrow / property
+                                         #   not in workspace; 409 duplicate
+                                         #   active row for (user_work_role,
+                                         #   property).
+PATCH  /property_work_role_assignments/{id}  # mutable: schedule_ruleset_id,
+                                              #   property_pay_rule_id.
+DELETE /property_work_role_assignments/{id}  # soft-delete; 204 / 404.
 
 GET    /user_leaves               # ?user_id=…&from=…&to=…&approved=true|false
 POST   /user_leaves

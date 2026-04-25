@@ -91,6 +91,9 @@ from app.api.v1.permission_groups import build_permission_groups_router
 from app.api.v1.permission_rules import build_permission_rules_router
 from app.api.v1.permissions import build_permissions_router
 from app.api.v1.places import build_properties_router
+from app.api.v1.property_work_role_assignments import (
+    build_property_work_role_assignments_router,
+)
 from app.api.v1.role_grants import (
     build_role_grants_router,
     build_users_role_grants_router,
@@ -535,6 +538,15 @@ def _mount_auth_routers(
     app.include_router(build_user_work_roles_router(), prefix=scoped_prefix)
     app.include_router(build_users_user_work_roles_router(), prefix=scoped_prefix)
     app.include_router(build_work_engagements_router(), prefix=scoped_prefix)
+    # Workspace-scoped per-property pinning of user_work_role rows
+    # (cd-za6n). URL sits at the top of the workspace tree per §12 —
+    # NOT under the ``/identity`` URL segment, same precedent as the
+    # sibling user_work_roles / work_engagements mounts above. The
+    # router tags ``identity`` + ``property_work_role_assignments``
+    # so OpenAPI clusters it with the rest of the identity context.
+    app.include_router(
+        build_property_work_role_assignments_router(), prefix=scoped_prefix
+    )
     # Workspace-scoped employees roster (cd-g6nf, cd-jtgo) — flat
     # ``Employee[]`` projection consumed by the SPA's manager pages.
     # See ``app/api/v1/employees.py`` for the join shape and the
