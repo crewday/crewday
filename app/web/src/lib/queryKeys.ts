@@ -65,6 +65,8 @@ export const qk = {
   expenses: (scope: "all" | "mine") => [...ws(), "expenses", scope] as const,
   expensesPendingReimbursement: (userId: "me" | string) =>
     [...ws(), "expenses", "pending_reimbursement", userId] as const,
+  workEngagementActive: (userId: string) =>
+    [...ws(), "work_engagements", "active", userId] as const,
   exchangeRates: () => [...ws(), "exchange_rates"] as const,
   issues: () => [...ws(), "issues"] as const,
   stays: () => [...ws(), "stays"] as const,

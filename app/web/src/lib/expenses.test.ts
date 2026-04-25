@@ -4,9 +4,12 @@ import {
   registerWorkspaceSlugGetter,
 } from "@/lib/api";
 import {
+  buildExpenseClaimCreatePayload,
+  fetchActiveEngagementId,
   fetchAllExpenseClaims,
   fetchExpenseClaimsPage,
   mapExpenseClaimPayload,
+  type ExpenseClaimFormInput,
   type ExpenseClaimPayload,
 } from "@/lib/expenses";
 import type { Expense } from "@/types/expense";
@@ -311,6 +314,216 @@ describe("fetchAllExpenseClaims", () => {
       );
       // Hit the cap and stopped — never made the 51st call.
       expect(env.calls).toHaveLength(50);
+    } finally {
+      env.restore();
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Create payload builder (cd-7mpx)
+// ---------------------------------------------------------------------------
+//
+// `buildExpenseClaimCreatePayload` is the single place the worker
+// form's local state is projected onto the wire shape from
+// `app/domain/expenses/claims.py:417`. The tests pin every conversion
+// rule (cents, ISO datetime, optional property pin, currency
+// uppercasing, validation) so a future tweak that drifts from the
+// server contract shows up here before it ships.
+
+function input(over: Partial<ExpenseClaimFormInput> = {}): ExpenseClaimFormInput {
+  return {
+    work_engagement_id: "we-1",
+    vendor: "Carrefour",
+    purchased_on: "2026-04-20",
+    amount: "12.50",
+    currency: "EUR",
+    category: "supplies",
+    property_id: "",
+    note_md: "Cleaning supplies",
+    ...over,
+  };
+}
+
+describe("buildExpenseClaimCreatePayload", () => {
+  it("projects the form state into the ExpenseClaimCreate wire shape", () => {
+    const out = buildExpenseClaimCreatePayload(input());
+    expect(out.work_engagement_id).toBe("we-1");
+    expect(out.vendor).toBe("Carrefour");
+    expect(out.currency).toBe("EUR");
+    expect(out.category).toBe("supplies");
+    expect(out.note_md).toBe("Cleaning supplies");
+    // `total_amount_cents` is integer cents: 12.50 → 1250.
+    expect(out.total_amount_cents).toBe(1250);
+    // `purchased_at` is a `Z`-suffixed ISO string — the server's
+    // DTO rejects naive timestamps. The anchor is local-noon of
+    // the picked calendar date, which round-trips back through
+    // `toLocaleDateString` in the worker's timezone without DST or
+    // ±12h tz drift.
+    expect(out.purchased_at).toMatch(/Z$/);
+    const round = new Date(out.purchased_at);
+    expect(round.getFullYear()).toBe(2026);
+    expect(round.getMonth()).toBe(3); // April (0-indexed)
+    expect(round.getDate()).toBe(20);
+    expect(round.getHours()).toBe(12);
+    // No property pin selected → the field is absent on the wire,
+    // not present-with-empty-string.
+    expect("property_id" in out).toBe(false);
+    // Locks the full key set so a future drift is loud here.
+    expect(Object.keys(out).sort()).toEqual([
+      "category",
+      "currency",
+      "note_md",
+      "purchased_at",
+      "total_amount_cents",
+      "vendor",
+      "work_engagement_id",
+    ]);
+  });
+
+  it("rounds to the nearest cent rather than truncating", () => {
+    // `Math.round` is half-away-from-zero on positive reals, so a
+    // worker who types "12.567" lands on 1257 — the closest cent —
+    // not 1256 (truncation) or a 1.000000001-style float artefact.
+    expect(buildExpenseClaimCreatePayload(input({ amount: "12.567" })).total_amount_cents)
+      .toBe(1257);
+    expect(buildExpenseClaimCreatePayload(input({ amount: "12.564" })).total_amount_cents)
+      .toBe(1256);
+  });
+
+  it("uppercases lowercase currency input so the server sees the canonical 3-letter code", () => {
+    const out = buildExpenseClaimCreatePayload(input({ currency: "usd" }));
+    expect(out.currency).toBe("USD");
+  });
+
+  it("includes property_id when the form selected a property", () => {
+    const out = buildExpenseClaimCreatePayload(input({ property_id: "prop-7" }));
+    expect(out.property_id).toBe("prop-7");
+  });
+
+  it("trims a whitespace-only property_id back to omitted (treats it as 'unset')", () => {
+    const out = buildExpenseClaimCreatePayload(input({ property_id: "   " }));
+    expect("property_id" in out).toBe(false);
+  });
+
+  it("forwards note_md verbatim, including an empty string", () => {
+    const out = buildExpenseClaimCreatePayload(input({ note_md: "" }));
+    expect(out.note_md).toBe("");
+  });
+
+  it("rejects an empty vendor — the server's min_length=1 would otherwise 422", () => {
+    expect(() => buildExpenseClaimCreatePayload(input({ vendor: "   " })))
+      .toThrow(/vendor/);
+  });
+
+  it("rejects a missing work_engagement_id so the form surfaces it locally", () => {
+    expect(() => buildExpenseClaimCreatePayload(input({ work_engagement_id: "" })))
+      .toThrow(/work_engagement_id/);
+  });
+
+  it("rejects a non-positive amount — the server's gt=0 would otherwise fire", () => {
+    expect(() => buildExpenseClaimCreatePayload(input({ amount: "0" })))
+      .toThrow(/positive/);
+    expect(() => buildExpenseClaimCreatePayload(input({ amount: "-5" })))
+      .toThrow(/positive/);
+  });
+
+  it("rejects an unparseable amount", () => {
+    expect(() => buildExpenseClaimCreatePayload(input({ amount: "not-a-number" })))
+      .toThrow(/number/);
+  });
+
+  it("rejects a malformed purchased_on so a typo doesn't reach the server", () => {
+    expect(() => buildExpenseClaimCreatePayload(input({ purchased_on: "2026/04/20" })))
+      .toThrow(/YYYY-MM-DD/);
+  });
+
+  it("rejects a non-3-letter currency (the server enforces ISO-3 length)", () => {
+    expect(() => buildExpenseClaimCreatePayload(input({ currency: "EU" })))
+      .toThrow(/3-letter/);
+    expect(() => buildExpenseClaimCreatePayload(input({ currency: "EURO" })))
+      .toThrow(/3-letter/);
+  });
+
+  it("trims vendor surrounding whitespace before sending", () => {
+    const out = buildExpenseClaimCreatePayload(input({ vendor: "  Carrefour  " }));
+    expect(out.vendor).toBe("Carrefour");
+  });
+});
+
+describe("fetchActiveEngagementId", () => {
+  it("returns the first non-archived engagement id", async () => {
+    const env = installFetch([
+      {
+        body: {
+          data: [
+            {
+              id: "we-1",
+              user_id: "u-1",
+              workspace_id: "ws-1",
+              archived_on: null,
+            },
+          ],
+          next_cursor: null,
+          has_more: false,
+        },
+      },
+    ]);
+    try {
+      const id = await fetchActiveEngagementId("u-1");
+      expect(id).toBe("we-1");
+      // The helper passes both filters so the server returns the
+      // narrowest possible page.
+      expect(env.calls[0]!.url).toBe(
+        "/w/acme/api/v1/work_engagements?user_id=u-1&active=true",
+      );
+    } finally {
+      env.restore();
+    }
+  });
+
+  it("skips archived rows even when the server returns one", async () => {
+    // Defence-in-depth: the `active=true` filter should already
+    // exclude archived rows server-side, but the SPA double-checks
+    // so a server bug doesn't bind a worker's expense claim to a
+    // wound-down engagement.
+    const env = installFetch([
+      {
+        body: {
+          data: [
+            {
+              id: "we-old",
+              user_id: "u-1",
+              workspace_id: "ws-1",
+              archived_on: "2026-01-01",
+            },
+            {
+              id: "we-new",
+              user_id: "u-1",
+              workspace_id: "ws-1",
+              archived_on: null,
+            },
+          ],
+          next_cursor: null,
+          has_more: false,
+        },
+      },
+    ]);
+    try {
+      const id = await fetchActiveEngagementId("u-1");
+      expect(id).toBe("we-new");
+    } finally {
+      env.restore();
+    }
+  });
+
+  it("returns null when the user has no active engagement", async () => {
+    const env = installFetch([
+      { body: { data: [], next_cursor: null, has_more: false } },
+    ]);
+    try {
+      const id = await fetchActiveEngagementId("u-1");
+      expect(id).toBeNull();
     } finally {
       env.restore();
     }

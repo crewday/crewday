@@ -1,16 +1,25 @@
 import { useCallback, useState } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
+import {
+  buildExpenseClaimCreatePayload,
+  fetchActiveEngagementId,
+  type ExpenseClaimCreatePayload,
+} from "@/lib/expenses";
 import AutoGrowTextarea from "@/components/AutoGrowTextarea";
-import type { Expense, ExpenseScanResult } from "@/types/api";
+import type {
+  Expense,
+  ExpenseScanResult,
+  Me,
+  Property,
+} from "@/types/api";
 import AgentQuestionPrompt from "./AgentQuestionPrompt";
 import ConfidenceChip from "./ConfidenceChip";
 import { CATEGORIES, confidenceClass } from "./lib/expenseHelpers";
 import {
   deriveConfidences,
   deriveValues,
-  minConfidence,
   type FieldConfidences,
   type FieldValues,
 } from "./lib/scanDerivation";
@@ -35,6 +44,15 @@ import {
 // state via `useEffect` — that would clobber a partially-typed value if
 // a future parent ever swapped the scan reference mid-review (and would
 // also fire a redundant extra render on every mount).
+//
+// **Wire contract.** The submit POST matches `ExpenseClaimCreate`
+// (`app/domain/expenses/claims.py:417`) — `vendor`, `purchased_at`,
+// `total_amount_cents`, `currency`, `category`, optional `property_id`,
+// optional `note_md`, plus a `work_engagement_id` resolved from the
+// caller's active engagement via `/api/v1/work_engagements`. The
+// projection from form state to wire shape lives in
+// `buildExpenseClaimCreatePayload` so the test suite can pin the
+// boundary without spinning up a React tree.
 
 interface Props {
   initialScan: ExpenseScanResult | null;
@@ -65,20 +83,49 @@ export default function SubmitExpenseForm({
   const [conf] = useState<FieldConfidences>(() => deriveConfidences(initialScan));
   const [agentReply, setAgentReply] = useState("");
   const [questionDismissed, setQuestionDismissed] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+
+  // The wire contract requires `work_engagement_id`. The `/me`
+  // payload deliberately omits it (a user with multiple workspaces
+  // shouldn't pay the join cost on every page load), so we fetch the
+  // caller's active engagement on mount. The form is unsubmittable
+  // until the lookup resolves; `null` (no active engagement) flips
+  // the form into a read-only "no engagement" state rather than
+  // surfacing an opaque 422 from the server.
+  const meQ = useQuery({
+    queryKey: qk.me(),
+    queryFn: () => fetchJson<Me>("/api/v1/me"),
+  });
+  const myUserId = meQ.data?.user_id ?? null;
+  const engagementQ = useQuery({
+    enabled: myUserId !== null,
+    queryKey: qk.workEngagementActive(myUserId ?? ""),
+    queryFn: () =>
+      fetchActiveEngagementId(
+        // Narrowed by `enabled` above; the cast keeps strict-mode happy
+        // without a non-null assertion mid-call.
+        myUserId as string,
+      ),
+  });
+  const workEngagementId = engagementQ.data ?? null;
+
+  // Properties drive the optional `property_id` dropdown. Worker pages
+  // already use `qk.properties()` (HistoryPage, mocks parity) so the
+  // cache hit is shared.
+  const propsQ = useQuery({
+    queryKey: qk.properties(),
+    queryFn: () => fetchJson<Property[]>("/api/v1/properties"),
+  });
 
   const create = useMutation({
-    mutationFn: (payload: {
-      merchant: string;
-      amount: string;
-      currency: string;
-      category: string;
-      note: string;
-      ocr_confidence: number | null;
-    }) =>
+    mutationFn: (payload: ExpenseClaimCreatePayload) =>
       fetchJson<Expense>("/api/v1/expenses", { method: "POST", body: payload }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: qk.expenses("mine") });
       onSubmitted();
+    },
+    onError: (err: Error) => {
+      setSubmitError(err.message);
     },
   });
 
@@ -90,32 +137,53 @@ export default function SubmitExpenseForm({
   }, []);
 
   const dismissQuestion = useCallback(() => {
-    setValues((prev) => ({ ...prev, note: foldReply(prev.note, agentReply) }));
+    setValues((prev) => ({ ...prev, note_md: foldReply(prev.note_md, agentReply) }));
     setQuestionDismissed(true);
   }, [agentReply]);
 
   const handleSubmit = useCallback(
     (e: React.FormEvent) => {
       e.preventDefault();
+      setSubmitError(null);
+      if (!workEngagementId) {
+        setSubmitError(
+          "No active work engagement — ask a manager to seed one before submitting expenses.",
+        );
+        return;
+      }
       // Fold an outstanding agent-question reply into the note before
       // the network call so the server stores the worker's full
       // context. Mirrors the mock.
-      const finalNote =
-        questionDismissed ? values.note : foldReply(values.note, agentReply);
-      create.mutate({
-        merchant: values.merchant,
-        amount: values.amount,
-        currency: values.currency,
-        category: values.category,
-        note: finalNote,
-        ocr_confidence: minConfidence(conf),
-      });
+      const finalNote = questionDismissed
+        ? values.note_md
+        : foldReply(values.note_md, agentReply);
+      let payload: ExpenseClaimCreatePayload;
+      try {
+        payload = buildExpenseClaimCreatePayload({
+          work_engagement_id: workEngagementId,
+          vendor: values.vendor,
+          purchased_on: values.purchased_on,
+          amount: values.amount,
+          currency: values.currency,
+          category: values.category,
+          property_id: values.property_id,
+          note_md: finalNote,
+        });
+      } catch (err) {
+        setSubmitError(err instanceof Error ? err.message : String(err));
+        return;
+      }
+      create.mutate(payload);
     },
-    [values, conf, agentReply, questionDismissed, create],
+    [values, agentReply, questionDismissed, create, workEngagementId],
   );
 
   const agentQuestion = initialScan?.agent_question ?? null;
   const showQuestion = agentQuestion && !questionDismissed;
+  const engagementResolving = meQ.isPending || engagementQ.isPending;
+  const engagementLookupFailed = meQ.isError || engagementQ.isError;
+  const noActiveEngagement =
+    !engagementResolving && !engagementLookupFailed && workEngagementId === null;
 
   return (
     <>
@@ -133,17 +201,17 @@ export default function SubmitExpenseForm({
       )}
 
       <form className="form" onSubmit={handleSubmit}>
-        <label className={`field ${confidenceClass(conf.merchant)}`}>
+        <label className={`field ${confidenceClass(conf.vendor)}`}>
           <span>
-            Merchant
-            <ConfidenceChip isScanned={isScanned} confidence={conf.merchant} />
+            Vendor
+            <ConfidenceChip isScanned={isScanned} confidence={conf.vendor} />
           </span>
           <input
-            name="merchant"
+            name="vendor"
             placeholder="e.g. Carrefour"
             required
-            value={values.merchant}
-            onChange={(e) => setField("merchant", e.target.value)}
+            value={values.vendor}
+            onChange={(e) => setField("vendor", e.target.value)}
           />
         </label>
 
@@ -173,6 +241,39 @@ export default function SubmitExpenseForm({
           </label>
         </div>
 
+        <label className={`field ${confidenceClass(conf.purchased_on)}`}>
+          <span>
+            Purchase date
+            <ConfidenceChip
+              isScanned={isScanned}
+              confidence={conf.purchased_on}
+            />
+          </span>
+          <input
+            name="purchased_on"
+            type="date"
+            required
+            value={values.purchased_on}
+            onChange={(e) => setField("purchased_on", e.target.value)}
+          />
+        </label>
+
+        <label className="field">
+          <span>Property (optional)</span>
+          <select
+            name="property_id"
+            value={values.property_id}
+            onChange={(e) => setField("property_id", e.target.value)}
+          >
+            <option value="">— No property —</option>
+            {(propsQ.data ?? []).map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name}
+              </option>
+            ))}
+          </select>
+        </label>
+
         <div className={`field ${confidenceClass(conf.category)}`}>
           <span>
             Category
@@ -194,18 +295,35 @@ export default function SubmitExpenseForm({
           </div>
         </div>
 
-        <label className={`field ${confidenceClass(conf.note)}`}>
+        <label className={`field ${confidenceClass(conf.note_md)}`}>
           <span>
             Note
-            <ConfidenceChip isScanned={isScanned} confidence={conf.note} />
+            <ConfidenceChip isScanned={isScanned} confidence={conf.note_md} />
           </span>
           <AutoGrowTextarea
-            name="note"
+            name="note_md"
             placeholder="What it was for"
-            value={values.note}
-            onChange={(e) => setField("note", e.target.value)}
+            value={values.note_md}
+            onChange={(e) => setField("note_md", e.target.value)}
           />
         </label>
+
+        {noActiveEngagement && (
+          <p className="form__error" role="alert">
+            No active work engagement found in this workspace. Ask a manager to
+            set one up before submitting expenses.
+          </p>
+        )}
+        {engagementLookupFailed && (
+          <p className="form__error" role="alert">
+            Couldn't look up your active work engagement. Refresh to try again.
+          </p>
+        )}
+        {submitError && (
+          <p className="form__error" role="alert">
+            {submitError}
+          </p>
+        )}
 
         <div className="form__row">
           <button type="button" className="btn btn--ghost" onClick={onBack}>
@@ -214,7 +332,12 @@ export default function SubmitExpenseForm({
           <button
             type="submit"
             className="btn btn--moss"
-            disabled={create.isPending}
+            disabled={
+              create.isPending
+              || engagementResolving
+              || engagementLookupFailed
+              || noActiveEngagement
+            }
           >
             Submit expense
           </button>

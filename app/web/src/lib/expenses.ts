@@ -220,3 +220,219 @@ export async function fetchAllExpenseClaims(
     `fetchAllExpenseClaims: exceeded ${MAX_PAGES} pages while walking /api/v1/expenses`,
   );
 }
+
+// ---------------------------------------------------------------------------
+// Create
+// ---------------------------------------------------------------------------
+
+/**
+ * Wire shape of `POST /api/v1/expenses` — 1:1 with the server's
+ * `ExpenseClaimCreate` Pydantic model
+ * (`app/domain/expenses/claims.py:417`).
+ *
+ * Required at the boundary except `property_id` (optional pin) and
+ * `note_md` (defaults to `""`). `purchased_at` MUST be a timezone-
+ * aware ISO-8601 string — the DTO rejects naive timestamps.
+ */
+export interface ExpenseClaimCreatePayload {
+  work_engagement_id: string;
+  vendor: string;
+  /** ISO-8601 with timezone (`Z` or `±HH:MM`); naive strings 422. */
+  purchased_at: string;
+  currency: string;
+  /** Strictly positive integer — the server CHECK is `> 0`. */
+  total_amount_cents: number;
+  category: string;
+  property_id?: string;
+  note_md?: string;
+}
+
+/**
+ * Inputs the worker form collects, before currency / cents / ISO
+ * normalisation. Kept separate from the wire type so the projection
+ * step in `buildExpenseClaimCreatePayload` is the sole place that
+ * encodes the conversion rules.
+ */
+export interface ExpenseClaimFormInput {
+  work_engagement_id: string;
+  vendor: string;
+  /** `YYYY-MM-DD` from a native date picker (browser locale). */
+  purchased_on: string;
+  /** Decimal string from the amount input, e.g. "12.50". */
+  amount: string;
+  currency: string;
+  category: string;
+  /** Empty string means "unset"; the wire field is then omitted. */
+  property_id: string;
+  note_md: string;
+}
+
+/**
+ * Project a worker form snapshot into the `ExpenseClaimCreate` body
+ * shape.
+ *
+ * - `vendor` is trimmed; an empty trim throws so the caller surfaces
+ *   the validation locally rather than forwarding a 422.
+ * - `purchased_on` (the date-picker's `YYYY-MM-DD`) is interpreted as
+ *   the worker's *local-noon* and converted to a UTC-`Z` ISO string.
+ *   The server rejects naive timestamps, so the trailing `Z` is the
+ *   contract; anchoring on local-noon (rather than local-midnight)
+ *   keeps the receipt's calendar date stable when the row is read
+ *   back via `Date#toLocaleDateString` from any timezone within
+ *   ±12 h of the worker's, and avoids the DST-edge case where
+ *   local-midnight crosses into the previous calendar day on the
+ *   server.
+ * - `amount` is parsed as a decimal and multiplied by 100; rounding
+ *   is `Math.round` so a `0.005` rounding artefact never silently
+ *   shaves a cent off the worker. Non-positive / non-finite amounts
+ *   throw — the server's `gt=0` would otherwise fire 422.
+ * - `property_id` is omitted when blank ("no property pin"); the
+ *   server treats omission and `null` identically.
+ * - `note_md` is forwarded verbatim (empty string is fine — the
+ *   server defaults to `""` and we keep the column NOT NULL contract
+ *   honest by sending what the worker typed).
+ */
+export function buildExpenseClaimCreatePayload(
+  input: ExpenseClaimFormInput,
+): ExpenseClaimCreatePayload {
+  const vendor = input.vendor.trim();
+  if (!vendor) {
+    throw new Error("vendor is required");
+  }
+  const eng = input.work_engagement_id.trim();
+  if (!eng) {
+    throw new Error("work_engagement_id is required");
+  }
+  const purchased_at = isoFromDateInput(input.purchased_on);
+  const total_amount_cents = centsFromAmountInput(input.amount);
+  const currency = input.currency.trim().toUpperCase();
+  if (currency.length !== 3) {
+    throw new Error("currency must be a 3-letter ISO code");
+  }
+
+  const payload: ExpenseClaimCreatePayload = {
+    work_engagement_id: eng,
+    vendor,
+    purchased_at,
+    currency,
+    total_amount_cents,
+    category: input.category,
+    note_md: input.note_md,
+  };
+  const propertyId = input.property_id.trim();
+  if (propertyId) {
+    payload.property_id = propertyId;
+  }
+  return payload;
+}
+
+/**
+ * Convert a date picker's `YYYY-MM-DD` value into the `Z`-suffixed
+ * ISO string the server expects.
+ *
+ * The picker collects a calendar date with no time-of-day; the wire
+ * needs an aware datetime. We anchor on **local-noon** of the picked
+ * date so:
+ *
+ * 1. Round-tripping through `new Date(iso).toLocaleDateString(...)`
+ *    in the worker's timezone always lands on the same calendar
+ *    date, even at DST boundaries (local-midnight is on the edge
+ *    and can flip to the previous day; local-noon is well inside).
+ * 2. Any other-timezone viewer within ±12 h of the worker's wall
+ *    clock — i.e. the entire useful tz band for a single workspace
+ *    — also reads back the same calendar date.
+ *
+ * `new Date(year, month-1, day, 12)` constructs the local-noon
+ * `Date`; `.toISOString()` then serialises in UTC so the server
+ * sees the canonical aware form.
+ */
+function isoFromDateInput(value: string): string {
+  const m = value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) {
+    throw new Error(`purchased_on must be YYYY-MM-DD; got ${value}`);
+  }
+  const year = Number(m[1]);
+  const month = Number(m[2]);
+  const day = Number(m[3]);
+  const local = new Date(year, month - 1, day, 12, 0, 0, 0);
+  if (Number.isNaN(local.getTime())) {
+    throw new Error(`purchased_on is not a valid date: ${value}`);
+  }
+  return local.toISOString();
+}
+
+/**
+ * Parse the decimal-string amount input into a strictly-positive
+ * integer cent count. Anything non-finite or `<= 0` throws — the
+ * server's `total_amount_cents > 0` check would otherwise fire 422
+ * and the worker would lose context on which field was wrong.
+ */
+function centsFromAmountInput(value: string): number {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    throw new Error("amount is required");
+  }
+  const parsed = Number(trimmed);
+  if (!Number.isFinite(parsed)) {
+    throw new Error(`amount is not a number: ${value}`);
+  }
+  const cents = Math.round(parsed * 100);
+  if (cents <= 0) {
+    throw new Error("amount must be strictly positive");
+  }
+  return cents;
+}
+
+// ---------------------------------------------------------------------------
+// Active engagement lookup
+// ---------------------------------------------------------------------------
+
+/**
+ * Wire shape of one `/api/v1/work_engagements` row (the
+ * `WorkEngagementResponse` Pydantic model). Only the fields the SPA
+ * uses are pinned here — adding more later doesn't require a wire-
+ * shape change in this module.
+ */
+interface WorkEngagementRow {
+  id: string;
+  user_id: string;
+  workspace_id: string;
+  archived_on: string | null;
+}
+
+interface WorkEngagementListEnvelope {
+  data: WorkEngagementRow[];
+  next_cursor: string | null;
+  has_more: boolean;
+}
+
+/**
+ * Resolve the caller's active engagement in the current workspace, or
+ * `null` when none exists.
+ *
+ * Used by the worker expense-submit flow — `POST /expenses` requires
+ * a `work_engagement_id` bound to the caller, and the SPA has no
+ * other place to source it (the `/me` payload deliberately omits
+ * engagement state so a user with multiple workspaces doesn't have
+ * to pay the join cost on every page load).
+ *
+ * Picks the first non-archived engagement returned by
+ * `GET /work_engagements?user_id=<me>&active=true`. The schema's
+ * partial UNIQUE on `(user_id, workspace_id) WHERE archived_on IS
+ * NULL` (§02) guarantees at most one such row per worker per
+ * workspace, so "first" is also "the only one". Returning `null`
+ * (rather than throwing) lets the caller render a friendly "no
+ * active engagement" message instead of an opaque error.
+ */
+export async function fetchActiveEngagementId(
+  userId: string,
+): Promise<string | null> {
+  const params = new URLSearchParams({ user_id: userId, active: "true" });
+  const env = await fetchJson<WorkEngagementListEnvelope>(
+    `/api/v1/work_engagements?${params.toString()}`,
+  );
+  for (const row of env.data) {
+    if (row.archived_on === null) return row.id;
+  }
+  return null;
+}
