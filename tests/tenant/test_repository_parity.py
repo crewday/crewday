@@ -356,6 +356,32 @@ COVERED_METHODS: frozenset[str] = frozenset(
         "app.domain.identity.user_work_roles.get_user_work_role",
         "app.domain.identity.user_work_roles.list_user_work_roles",
         "app.domain.identity.user_work_roles.update_user_work_role",
+        # cd-147o: user_leaves + user_availability_overrides — every
+        # public function loads the row through ``_load_row`` (which
+        # scopes the SELECT by ``ctx.workspace_id``) and ``list_*`` /
+        # ``create_*`` SELECTs filter by ``workspace_id`` directly;
+        # creates set ``workspace_id = ctx.workspace_id`` on the new
+        # row. Covered end-to-end by the ORM-filter seam.
+        "app.domain.identity.user_availability_overrides.approve_override",
+        "app.domain.identity.user_availability_overrides.create_override",
+        "app.domain.identity.user_availability_overrides.delete_override",
+        "app.domain.identity.user_availability_overrides.get_override",
+        "app.domain.identity.user_availability_overrides.list_overrides",
+        "app.domain.identity.user_availability_overrides.reject_override",
+        "app.domain.identity.user_availability_overrides.update_override",
+        "app.domain.identity.user_leaves.approve_leave",
+        "app.domain.identity.user_leaves.create_leave",
+        "app.domain.identity.user_leaves.delete_leave",
+        "app.domain.identity.user_leaves.get_leave",
+        "app.domain.identity.user_leaves.list_leaves",
+        "app.domain.identity.user_leaves.reject_leave",
+        "app.domain.identity.user_leaves.update_leave",
+        # cd-147o: me_schedule.aggregate_schedule — read-only aggregate
+        # of weekly availability + occurrences + leaves + overrides for
+        # ``ctx.actor_id``. Every sibling SELECT is scoped by
+        # ``workspace_id == ctx.workspace_id``, so the ORM-filter seam
+        # covers the surface.
+        "app.domain.identity.me_schedule.aggregate_schedule",
         "app.domain.identity.work_engagements.archive_work_engagement",
         "app.domain.identity.work_engagements.get_work_engagement",
         "app.domain.identity.work_engagements.list_work_engagements",
@@ -367,6 +393,12 @@ COVERED_METHODS: frozenset[str] = frozenset(
         "app.domain.identity.work_roles.update_work_role",
         # tasks context
         "app.domain.tasks.templates.read",
+        # cd-147o: ``read_many`` is the bulk-read sidecar used by
+        # collection endpoints (``GET /schedules`` returns templates by
+        # id alongside the schedules); the SELECT filters by
+        # ``workspace_id == ctx.workspace_id`` so cross-tenant ids drop
+        # out via the ORM-filter seam.
+        "app.domain.tasks.templates.read_many",
         "app.domain.tasks.templates.list_templates",
         "app.domain.tasks.templates.create",
         "app.domain.tasks.templates.update",
@@ -437,6 +469,17 @@ COVERED_METHODS: frozenset[str] = frozenset(
         "app.domain.places.property_service.list_properties",
         "app.domain.places.property_service.soft_delete_property",
         "app.domain.places.property_service.update_property",
+        # cd-147o: property_work_role_assignments CRUD — every entry
+        # point loads the row through ``_load_row`` (workspace-scoped
+        # SELECT) and ``list_*`` filters by ``workspace_id`` directly;
+        # creates set ``workspace_id = ctx.workspace_id`` and pre-flight
+        # the ``user_work_role`` / ``property`` workspace-membership
+        # invariants. Covered end-to-end by the ORM-filter seam.
+        "app.domain.places.property_work_role_assignments.create_property_work_role_assignment",
+        "app.domain.places.property_work_role_assignments.delete_property_work_role_assignment",
+        "app.domain.places.property_work_role_assignments.get_property_work_role_assignment",
+        "app.domain.places.property_work_role_assignments.list_property_work_role_assignments",
+        "app.domain.places.property_work_role_assignments.update_property_work_role_assignment",
         # llm context (cd-irng, cd-ybrt, cd-pd0e): router + budget +
         # usage recorder all scope their reads through
         # ``workspace_id = ctx.workspace_id`` (inheritance chain walk
@@ -477,6 +520,17 @@ COVERED_METHODS: frozenset[str] = frozenset(
         "app.domain.expenses.claims.get_claim",
         "app.domain.expenses.claims.list_for_user",
         "app.domain.expenses.claims.list_for_workspace",
+        # cd-147o: ``pending_reimbursement`` aggregates approved-but-not-
+        # reimbursed claims for ``user_id`` (or workspace-wide). The
+        # claim SELECT filters by ``workspace_id == ctx.workspace_id``
+        # via ``_load_pending_claims``; the engagement-id breakdown
+        # SELECT (``WorkEngagement.id, user_id``) is also workspace-
+        # scoped. The ``User.display_name`` lookup is by-id only —
+        # ``User`` is deployment-scoped (no ``workspace_id`` column),
+        # but the user-id set is derived from the workspace-filtered
+        # engagement join, so no peer-workspace user can leak in.
+        # Covered by the ORM-filter seam.
+        "app.domain.expenses.claims.pending_reimbursement",
         "app.domain.expenses.claims.submit_claim",
         "app.domain.expenses.claims.update_claim",
         # cd-5l5f: messaging push tokens — register / unregister /
