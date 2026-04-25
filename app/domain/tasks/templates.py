@@ -83,6 +83,7 @@ __all__ = [
     "delete",
     "list_templates",
     "read",
+    "read_many",
     "update",
 ]
 
@@ -634,6 +635,38 @@ def read(
         session, ctx, template_id=template_id, include_deleted=include_deleted
     )
     return _row_to_view(row)
+
+
+def read_many(
+    session: Session,
+    ctx: WorkspaceContext,
+    *,
+    template_ids: Sequence[str],
+    include_deleted: bool = False,
+) -> list[TaskTemplateView]:
+    """Return live templates for every id in ``template_ids`` in one query.
+
+    Used by collection endpoints that piggy-back referenced templates
+    onto the response (e.g. ``GET /schedules`` returns the schedules
+    plus a ``templates_by_id`` sidecar — see ``docs/specs/12-rest-api.md``
+    §"Tasks / templates / schedules"). Unknown ids and soft-deleted rows
+    are silently skipped (the sidecar is best-effort: a stale schedule
+    row referencing a now-deleted template should still render, with
+    the UI falling back to ``"—"``). Cross-tenant ids are filtered out
+    by the workspace predicate. Returns an empty list when
+    ``template_ids`` is empty.
+    """
+    unique_ids = list(set(template_ids))
+    if not unique_ids:
+        return []
+    stmt = select(TaskTemplate).where(
+        TaskTemplate.id.in_(unique_ids),
+        TaskTemplate.workspace_id == ctx.workspace_id,
+    )
+    if not include_deleted:
+        stmt = stmt.where(TaskTemplate.deleted_at.is_(None))
+    rows = session.scalars(stmt).all()
+    return [_row_to_view(row) for row in rows]
 
 
 def list_templates(

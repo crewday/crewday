@@ -434,6 +434,146 @@ class TestSchedules:
             r = client.get(f"/api/v1/schedules/{sid}")
             assert r.status_code == 404, r.text
 
+    def test_list_envelope_carries_templates_by_id(
+        self,
+        session_factory: sessionmaker[Session],
+        seeded: dict[str, Any],
+    ) -> None:
+        """``GET /schedules`` returns ``{data, next_cursor, has_more,
+        templates_by_id}`` (cd-dzte sidecar shape)."""
+        with _client_for(session_factory, seeded["owner_ctx"]) as client:
+            template_id = self._create_template(client, name="With sidecar")
+            client.post(
+                "/api/v1/schedules",
+                json={
+                    "name": "Daily",
+                    "template_id": template_id,
+                    "rrule": "RRULE:FREQ=DAILY;COUNT=3",
+                    "dtstart_local": "2026-04-20T09:00",
+                    "active_from": "2026-04-20",
+                },
+            )
+
+            r = client.get("/api/v1/schedules")
+            assert r.status_code == 200, r.text
+            body = r.json()
+            # The four-key envelope: cursor trio + sidecar.
+            assert set(body.keys()) == {
+                "data",
+                "next_cursor",
+                "has_more",
+                "templates_by_id",
+            }
+            # Sidecar is keyed by template id and carries every
+            # template referenced on this page.
+            assert template_id in body["templates_by_id"]
+            assert body["templates_by_id"][template_id]["id"] == template_id
+            assert body["templates_by_id"][template_id]["name"] == "With sidecar"
+            # Every page schedule's template_id resolves through the
+            # sidecar — no SPA-side fan-out fetch needed.
+            for row in body["data"]:
+                assert row["template_id"] in body["templates_by_id"]
+
+    def test_list_sidecar_only_carries_referenced_templates(
+        self,
+        session_factory: sessionmaker[Session],
+        seeded: dict[str, Any],
+    ) -> None:
+        """An unreferenced template doesn't bloat the sidecar."""
+        with _client_for(session_factory, seeded["owner_ctx"]) as client:
+            referenced = self._create_template(client, name="Referenced")
+            unreferenced = self._create_template(client, name="Lonely")
+            client.post(
+                "/api/v1/schedules",
+                json={
+                    "name": "Pull",
+                    "template_id": referenced,
+                    "rrule": "RRULE:FREQ=DAILY;COUNT=1",
+                    "dtstart_local": "2026-04-20T09:00",
+                    "active_from": "2026-04-20",
+                },
+            )
+
+            r = client.get("/api/v1/schedules")
+            body = r.json()
+            assert referenced in body["templates_by_id"]
+            assert unreferenced not in body["templates_by_id"]
+
+    def test_list_sidecar_pagination_scoped(
+        self,
+        session_factory: sessionmaker[Session],
+        seeded: dict[str, Any],
+    ) -> None:
+        """Each page only carries the templates referenced on that page.
+
+        Two schedules referencing two different templates, served with
+        ``limit=1`` — page A's sidecar holds template A only; page B's
+        holds template B only. Stops a small page from dragging the
+        whole template table along.
+        """
+        with _client_for(session_factory, seeded["owner_ctx"]) as client:
+            tpl_a = self._create_template(client, name="Page A template")
+            tpl_b = self._create_template(client, name="Page B template")
+            client.post(
+                "/api/v1/schedules",
+                json={
+                    "name": "Sched A",
+                    "template_id": tpl_a,
+                    "rrule": "RRULE:FREQ=DAILY;COUNT=1",
+                    "dtstart_local": "2026-04-20T09:00",
+                    "active_from": "2026-04-20",
+                },
+            )
+            client.post(
+                "/api/v1/schedules",
+                json={
+                    "name": "Sched B",
+                    "template_id": tpl_b,
+                    "rrule": "RRULE:FREQ=DAILY;COUNT=1",
+                    "dtstart_local": "2026-04-20T09:00",
+                    "active_from": "2026-04-20",
+                },
+            )
+
+            seen_pairs: list[tuple[str, set[str]]] = []
+            cursor: str | None = None
+            for _ in range(4):
+                params: dict[str, str] = {"limit": "1"}
+                if cursor is not None:
+                    params["cursor"] = cursor
+                r = client.get("/api/v1/schedules", params=params)
+                body = r.json()
+                assert len(body["data"]) == 1
+                seen_pairs.append(
+                    (
+                        body["data"][0]["template_id"],
+                        set(body["templates_by_id"].keys()),
+                    )
+                )
+                if not body["has_more"]:
+                    break
+                cursor = body["next_cursor"]
+
+            for ref_id, sidecar_ids in seen_pairs:
+                # The sidecar carries exactly this page's reference —
+                # no broader workspace bleed-through.
+                assert sidecar_ids == {ref_id}
+
+    def test_list_empty_workspace_envelope(
+        self,
+        session_factory: sessionmaker[Session],
+        seeded: dict[str, Any],
+    ) -> None:
+        """Empty result still serialises the envelope with an empty sidecar."""
+        with _client_for(session_factory, seeded["foreign_ctx"]) as client:
+            r = client.get("/api/v1/schedules")
+            assert r.status_code == 200, r.text
+            body = r.json()
+            assert body["data"] == []
+            assert body["templates_by_id"] == {}
+            assert body["has_more"] is False
+            assert body["next_cursor"] is None
+
 
 # ---------------------------------------------------------------------------
 # Tests — occurrences (tasks)

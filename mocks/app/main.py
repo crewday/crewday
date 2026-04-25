@@ -1859,9 +1859,19 @@ def api_templates() -> Response:
 
 @app.get("/api/v1/schedules")
 def api_schedules() -> Response:
+    # Mirror the production envelope exactly (cd-dzte): the standard
+    # `{data, next_cursor, has_more}` cursor shape plus a `templates_by_id`
+    # sidecar holding every task_template the page's schedules reference.
+    # The mock returns the full list in one page, so `has_more=false` and
+    # `next_cursor=null`; sidecar is keyed by template id.
+    referenced_template_ids = {s.template_id for s in md.SCHEDULES}
     return ok({
-        "schedules": md.SCHEDULES,
-        "templates_by_id": {t.id: t for t in md.TEMPLATES},
+        "data": md.SCHEDULES,
+        "next_cursor": None,
+        "has_more": False,
+        "templates_by_id": {
+            t.id: t for t in md.TEMPLATES if t.id in referenced_template_ids
+        },
     })
 
 

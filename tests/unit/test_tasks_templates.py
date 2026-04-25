@@ -56,6 +56,7 @@ from app.domain.tasks.templates import (
     delete,
     list_templates,
     read,
+    read_many,
     update,
 )
 from app.tenancy.context import WorkspaceContext
@@ -712,6 +713,75 @@ class TestRead:
         loaded = read(session, ctx, template_id=view.id, include_deleted=True)
         assert loaded.id == view.id
         assert loaded.deleted_at is not None
+
+
+class TestReadMany:
+    """:func:`read_many` bulk-fetches ids for sidecar payloads (cd-dzte)."""
+
+    def test_empty_input_returns_empty(self, session: Session) -> None:
+        ws = _bootstrap_workspace(session, slug="rm-empty")
+        ctx = _ctx(ws, slug="rm-empty")
+        assert read_many(session, ctx, template_ids=[]) == []
+
+    def test_returns_only_requested_ids(self, session: Session) -> None:
+        ws = _bootstrap_workspace(session, slug="rm-subset")
+        ctx = _ctx(ws, slug="rm-subset")
+        clock = FrozenClock(_PINNED)
+        a = create(session, ctx, body=_minimal_body(name="A"), clock=clock)
+        b = create(session, ctx, body=_minimal_body(name="B"), clock=clock)
+        create(session, ctx, body=_minimal_body(name="C"), clock=clock)
+
+        rows = read_many(session, ctx, template_ids=[a.id, b.id])
+        assert {r.id for r in rows} == {a.id, b.id}
+
+    def test_unknown_id_silently_skipped(self, session: Session) -> None:
+        """A stale schedule pointing at an unknown id leaves a hole, not a 404."""
+        ws = _bootstrap_workspace(session, slug="rm-unknown")
+        ctx = _ctx(ws, slug="rm-unknown")
+        clock = FrozenClock(_PINNED)
+        a = create(session, ctx, body=_minimal_body(name="Live"), clock=clock)
+
+        rows = read_many(session, ctx, template_ids=[a.id, "01HWA00000000000000NONE01"])
+        assert [r.id for r in rows] == [a.id]
+
+    def test_cross_workspace_hidden(self, session: Session) -> None:
+        """Workspace A's id is invisible from workspace B even when bulk-fetched."""
+        ws_a = _bootstrap_workspace(session, slug="rm-a")
+        ws_b = _bootstrap_workspace(session, slug="rm-b")
+        ctx_a = _ctx(ws_a, slug="rm-a")
+        ctx_b = _ctx(ws_b, slug="rm-b")
+        a = create(session, ctx_a, body=_minimal_body(), clock=FrozenClock(_PINNED))
+
+        rows = read_many(session, ctx_b, template_ids=[a.id])
+        assert rows == []
+
+    def test_soft_deleted_hidden_by_default(self, session: Session) -> None:
+        ws = _bootstrap_workspace(session, slug="rm-deleted")
+        ctx = _ctx(ws, slug="rm-deleted")
+        a = create(session, ctx, body=_minimal_body(), clock=FrozenClock(_PINNED))
+        delete(session, ctx, template_id=a.id, clock=FrozenClock(_PINNED))
+
+        rows = read_many(session, ctx, template_ids=[a.id])
+        assert rows == []
+
+    def test_soft_deleted_surfaced_with_flag(self, session: Session) -> None:
+        ws = _bootstrap_workspace(session, slug="rm-deleted-flag")
+        ctx = _ctx(ws, slug="rm-deleted-flag")
+        a = create(session, ctx, body=_minimal_body(), clock=FrozenClock(_PINNED))
+        delete(session, ctx, template_id=a.id, clock=FrozenClock(_PINNED))
+
+        rows = read_many(session, ctx, template_ids=[a.id], include_deleted=True)
+        assert [r.id for r in rows] == [a.id]
+        assert rows[0].deleted_at is not None
+
+    def test_duplicate_ids_collapse(self, session: Session) -> None:
+        """Asking for the same id twice returns one row (set semantics)."""
+        ws = _bootstrap_workspace(session, slug="rm-dup")
+        ctx = _ctx(ws, slug="rm-dup")
+        a = create(session, ctx, body=_minimal_body(), clock=FrozenClock(_PINNED))
+
+        rows = read_many(session, ctx, template_ids=[a.id, a.id, a.id])
+        assert [r.id for r in rows] == [a.id]
 
 
 class TestList:

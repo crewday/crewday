@@ -891,6 +891,26 @@ POST   /tasks/{id}/evidence        # multipart/form-data; kind=note wired
 
 GET    /schedules                        # cursor paginated; filters:
                                          #   ?template_id=&property_id=&paused=
+                                         # Envelope carries the standard
+                                         #   `{data, next_cursor, has_more}`
+                                         #   shape PLUS a `templates_by_id`
+                                         #   sidecar (Record<id, TaskTemplate>)
+                                         #   holding every `task_template` the
+                                         #   page's schedules reference — bundled
+                                         #   in one SELECT so the SPA's manager
+                                         #   Schedules page can join template
+                                         #   metadata (name, role, …) without a
+                                         #   second round-trip to /task_templates.
+                                         #   Pagination-scoped: each page only
+                                         #   carries the templates referenced
+                                         #   on that page (size scales with the
+                                         #   page, not the workspace). Decision:
+                                         #   option (a) — verbatim-port parity
+                                         #   with the mock that already returned
+                                         #   the sidecar (cd-dzte; mock updated
+                                         #   to mirror the production envelope
+                                         #   `{data, next_cursor, has_more,
+                                         #   templates_by_id}` exactly).
 POST   /schedules
 GET    /schedules/{id}
 PATCH  /schedules/{id}                   # full-body replace; optional

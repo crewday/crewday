@@ -217,6 +217,9 @@ from app.domain.tasks.templates import (
     read as read_template,
 )
 from app.domain.tasks.templates import (
+    read_many as read_many_templates,
+)
+from app.domain.tasks.templates import (
     update as update_template,
 )
 from app.tenancy import WorkspaceContext
@@ -553,11 +556,23 @@ class TaskTemplateListResponse(BaseModel):
 
 
 class ScheduleListResponse(BaseModel):
-    """Collection envelope for ``GET /schedules``."""
+    """Collection envelope for ``GET /schedules``.
+
+    Carries the standard cursor-paginated ``{data, next_cursor, has_more}``
+    envelope plus a ``templates_by_id`` sidecar — a one-call shape the
+    SPA's manager Schedules page joins against without a second
+    ``GET /task_templates`` round-trip. Schedules and their parent
+    templates are tightly coupled (a Schedule rotates a template), so
+    bundling them is semantically appropriate; the sidecar only carries
+    templates referenced on *this page* (pagination-respecting), so the
+    payload size scales with the page, not the workspace. See
+    ``docs/specs/12-rest-api.md`` §"Tasks / templates / schedules".
+    """
 
     data: list[SchedulePayload]
     next_cursor: str | None = None
     has_more: bool = False
+    templates_by_id: dict[str, TaskTemplatePayload] = Field(default_factory=dict)
 
 
 class TaskListResponse(BaseModel):
@@ -1036,7 +1051,15 @@ def list_schedules_route(
     cursor: PageCursorQuery = None,
     limit: LimitQuery = DEFAULT_LIMIT,
 ) -> ScheduleListResponse:
-    """Return a cursor-paginated page of live schedules."""
+    """Return a cursor-paginated page of live schedules.
+
+    Each page also carries a ``templates_by_id`` sidecar holding every
+    ``task_template`` the page's schedules reference — bundled in one
+    SELECT so the SPA's Schedules page can join template metadata
+    (name, role, …) without a second round-trip. The sidecar is
+    pagination-scoped (only this page's templates), so payload size
+    scales with the page rather than the workspace.
+    """
     after_id = decode_cursor(cursor)
     views = list(
         list_schedules(
@@ -1050,10 +1073,17 @@ def list_schedules_route(
     if after_id is not None:
         views = [v for v in views if v.id > after_id]
     page = paginate(views, limit=limit, key_getter=lambda v: v.id)
+    schedule_payloads = [SchedulePayload.from_view(v) for v in page.items]
+    template_ids = [s.template_id for s in schedule_payloads]
+    templates_by_id = {
+        view.id: TaskTemplatePayload.from_view(view)
+        for view in read_many_templates(session, ctx, template_ids=template_ids)
+    }
     return ScheduleListResponse(
-        data=[SchedulePayload.from_view(v) for v in page.items],
+        data=schedule_payloads,
         next_cursor=page.next_cursor,
         has_more=page.has_more,
+        templates_by_id=templates_by_id,
     )
 
 

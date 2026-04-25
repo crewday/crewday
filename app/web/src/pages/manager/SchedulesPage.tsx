@@ -6,7 +6,9 @@ import { Avatar, Chip, Loading } from "@/components/common";
 import type { Employee, Property, Schedule, TaskTemplate } from "@/types/api";
 
 interface SchedulesPayload {
-  schedules: Schedule[];
+  data: Schedule[];
+  next_cursor: string | null;
+  has_more: boolean;
   templates_by_id: Record<string, TaskTemplate>;
 }
 
@@ -40,7 +42,7 @@ export default function SchedulesPage() {
 
   const propsById = new Map(propsQ.data.map((p) => [p.id, p]));
   const empsById = new Map(empsQ.data.map((e) => [e.id, e]));
-  const { schedules, templates_by_id } = schedQ.data;
+  const { data: schedules, templates_by_id } = schedQ.data;
 
   return (
     <DeskPage title="Schedules" sub={sub} actions={actions}>
