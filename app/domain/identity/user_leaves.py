@@ -580,6 +580,7 @@ def create_leave(
     ctx: WorkspaceContext,
     *,
     body: UserLeaveCreate,
+    force_pending: bool = False,
     clock: Clock | None = None,
 ) -> UserLeaveView:
     """Insert a new ``user_leave`` row.
@@ -596,6 +597,14 @@ def create_leave(
     auto-approved (a manager retroactive entry is implicitly an
     approval — anything else would force the manager to approve their
     own decision, which the worker would never see otherwise).
+
+    **``force_pending``.** Set by the ``POST /me/leaves`` self-service
+    shortcut (cd-6uij): per ``docs/specs/12-rest-api.md``
+    §"Self-service shortcuts" that surface always lands the row
+    pending, even when the caller would otherwise auto-approve. A
+    manager wanting to retroactively log+approve their own leave
+    uses the generic ``POST /user_leaves`` endpoint (which keeps
+    the auto-approve default).
     """
     resolved_clock = clock if clock is not None else SystemClock()
     now = resolved_clock.now()
@@ -619,7 +628,7 @@ def create_leave(
             f"starts_on {body.starts_on.isoformat()!r}"
         )
 
-    auto_approve = _can_edit_others(session, ctx)
+    auto_approve = (not force_pending) and _can_edit_others(session, ctx)
     approved_at: datetime | None = now if auto_approve else None
     approved_by: str | None = ctx.actor_id if auto_approve else None
 

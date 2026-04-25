@@ -87,6 +87,7 @@ from app.api.v1.auth import recovery as recovery_module
 from app.api.v1.auth import signup as signup_module
 from app.api.v1.auth import tokens as tokens_module
 from app.api.v1.employees import build_employees_router
+from app.api.v1.me_schedule import build_me_schedule_router
 from app.api.v1.permission_groups import build_permission_groups_router
 from app.api.v1.permission_rules import build_permission_rules_router
 from app.api.v1.permissions import build_permissions_router
@@ -574,6 +575,18 @@ def _mount_auth_routers(
     # §06 "Approval logic (hybrid model)" by comparing the override
     # against the user's weekly availability pattern.
     app.include_router(build_user_availability_overrides_router(), prefix=scoped_prefix)
+    # Workspace-scoped self-service shortcuts (cd-6uij). Mounted at
+    # the top of the workspace tree per §12 "Self-service shortcuts"
+    # — the router carries the ``/me`` prefix so the final paths read
+    # ``/w/<slug>/api/v1/me/{schedule,leaves,availability_overrides}``.
+    # Tags ``identity`` + ``me`` so OpenAPI clusters the verbs with
+    # the rest of the identity context. The aggregator + POST
+    # delegates are self-only by construction: every read keys on
+    # ``ctx.actor_id`` and the request bodies forbid an explicit
+    # ``user_id`` field at the schema layer (Pydantic
+    # ``extra="forbid"``), so a worker cannot use these surfaces to
+    # author requests for another user.
+    app.include_router(build_me_schedule_router(), prefix=scoped_prefix)
     # Workspace-scoped employees roster (cd-g6nf, cd-jtgo) — flat
     # ``Employee[]`` projection consumed by the SPA's manager pages.
     # See ``app/api/v1/employees.py`` for the join shape and the
