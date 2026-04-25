@@ -62,7 +62,8 @@ RUN pip install --no-cache-dir \
     "itsdangerous" \
     "click" \
     "argon2-cffi>=23" \
-    "aiosqlite"
+    "aiosqlite" \
+    "jinja2"
 
 # The data dir is a named compose volume by default, so the mount
 # point itself needs to exist (Docker creates it) but the volume's
