@@ -89,6 +89,7 @@ from app.api.v1.employees import build_employees_router
 from app.api.v1.permission_groups import build_permission_groups_router
 from app.api.v1.permission_rules import build_permission_rules_router
 from app.api.v1.permissions import build_permissions_router
+from app.api.v1.places import build_properties_router
 from app.api.v1.role_grants import (
     build_role_grants_router,
     build_users_role_grants_router,
@@ -519,6 +520,14 @@ def _mount_auth_routers(
     # decision to keep ``/employees`` rather than refactor every
     # call site onto ``/users + /work_engagements``.
     app.include_router(build_employees_router(), prefix=scoped_prefix)
+    # Workspace-scoped properties roster (cd-lzh1) — flat
+    # ``Property[]`` projection consumed by the SPA's manager pages
+    # (SchedulesPage, PropertiesPage, PropertyDetailPage,
+    # EmployeesPage). Mounted at the top of the workspace tree (NOT
+    # under the ``/places`` URL segment) because the SPA hits
+    # ``/api/v1/properties`` verbatim — same precedent as
+    # ``/employees`` above.
+    app.include_router(build_properties_router(), prefix=scoped_prefix)
 
     # Workspace-scoped identity-governance routers (cd-jinb) — role
     # grants, permission groups, permission rules, and the read-only

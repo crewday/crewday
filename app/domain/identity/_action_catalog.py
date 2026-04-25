@@ -477,6 +477,23 @@ _RULE_DRIVEN: tuple[ActionSpec, ...] = (
         root_protected_deny=False,
     ),
     ActionSpec(
+        key="properties.read",
+        # cd-lzh1 — SPA properties roster endpoint. Manager-only
+        # (owners + managers) by analogy with ``employees.read``: the
+        # workspace-wide property roster is a manager view that
+        # surfaces governance-adjacent fields (``client_org_id`` /
+        # ``owner_user_id`` per §22, ``settings_override``) which
+        # workers should not enumerate. Property-pinned worker access
+        # to a specific property's data lives in the property-scoped
+        # surfaces (``/tasks``, ``/stays``, …) gated on their own
+        # property-scope rules; this read gates only the cross-roster
+        # listing.
+        valid_scope_kinds=("workspace",),
+        default_allow=("owners", "managers"),
+        root_only=False,
+        root_protected_deny=False,
+    ),
+    ActionSpec(
         key="properties.view_access_codes",
         valid_scope_kinds=("workspace", "property"),
         default_allow=("owners", "managers"),

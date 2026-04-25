@@ -502,6 +502,7 @@ configuration.
 | `properties.create`                     | `workspace`                    | `owners, managers`            | —  | §04 |
 | `properties.archive`                    | `workspace`, `property`        | `owners, managers`            | ✅ | §04 |
 | `properties.edit`                       | `workspace`, `property`        | `owners, managers`            | —  | §04 |
+| `properties.read`                       | `workspace`                    | `owners, managers`            | —  | §12 — gates the workspace properties roster (`GET /properties`). Workers access property-pinned data via the property-scoped surfaces (`/tasks`, `/stays`, …); the cross-roster listing is manager-only because it surfaces governance-adjacent fields (`client_org_id`, `owner_user_id`, `settings_override`). |
 | `properties.view_access_codes`          | `workspace`, `property`        | `owners, managers`            | —  | §04 |
 | `work_roles.manage`                     | `workspace`                    | `owners, managers`            | —  | §05 |
 | `tasks.create`                          | `workspace`, `property`        | `owners, managers, all_workers` | — | §06 |

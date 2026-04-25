@@ -654,7 +654,31 @@ deployment audit worth exposing.
 ### Properties / areas / stays
 
 ```
-GET    /properties
+GET    /properties                # workspace properties roster (cd-lzh1).
+                                   # Returns a bare `Property[]` JSON array
+                                   # — NOT the `{data, next_cursor, has_more}`
+                                   # envelope — because the SPA's manager
+                                   # pages (SchedulesPage, PropertiesPage,
+                                   # PropertyDetailPage, EmployeesPage)
+                                   # consume it as a flat list via
+                                   # `fetchJson<Property[]>`. Pagination is
+                                   # tracked as a separate follow-up that
+                                   # pairs the envelope shape with an SPA
+                                   # call-site migration. The `Property`
+                                   # projection joins `property ×
+                                   # property_workspace × area` and carries
+                                   # the fields declared in
+                                   # `app/web/src/types/property.ts` (id,
+                                   # name, city, timezone, color, kind,
+                                   # areas, evidence_policy, country,
+                                   # locale, settings_override,
+                                   # client_org_id, owner_user_id). Gated
+                                   # by `properties.read` (manager+);
+                                   # workers fall through to 403.
+                                   # Workspace-scoped via the
+                                   # `property_workspace` junction;
+                                   # soft-deleted rows (`deleted_at IS NOT
+                                   # NULL`) are excluded.
 POST   /properties
 GET    /properties/{id}
 PATCH  /properties/{id}
