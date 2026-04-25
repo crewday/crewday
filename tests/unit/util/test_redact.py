@@ -180,8 +180,18 @@ class TestCredentialRedaction:
         assert "<redacted:credential>" in out
 
     def test_jwt(self) -> None:
-        out = redact("got jwt eyJhbG.abcDEF.ghi123 here", scope="log")
-        assert "eyJhbG.abcDEF.ghi123" not in out
+        # Real-shape JWT: each segment is well above the 16-char floor
+        # the regex now requires, so legitimate dotted identifiers
+        # (event names, module paths) survive while real tokens still
+        # get scrubbed. See ``app.util.redact._JWT_RE`` for the
+        # rationale.
+        jwt = (
+            "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9"
+            ".eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIn0"
+            ".SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c"
+        )
+        out = redact(f"got jwt {jwt} here", scope="log")
+        assert jwt not in out
         assert "<redacted:credential>" in out
 
     def test_long_hex(self) -> None:

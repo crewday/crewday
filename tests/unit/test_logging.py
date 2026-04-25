@@ -231,9 +231,19 @@ class TestRedactionValues:
     def test_jwt_shape_in_message(
         self, configured_logger: logging.Logger, stream: io.StringIO
     ) -> None:
-        configured_logger.info("got jwt eyJhbG.abc.def here")
+        # Real-shape JWT: each segment is comfortably above the
+        # 16-char floor the redact regex now enforces. The previous
+        # ``eyJhbG.abc.def`` fixture is below that floor on purpose —
+        # the tightening exists so dotted event names like
+        # ``worker.tick.start`` survive (see ``cd-pzr1``).
+        jwt = (
+            "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9"
+            ".eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIn0"
+            ".SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c"
+        )
+        configured_logger.info(f"got jwt {jwt} here")
         msg = _as_str(_lines(stream)[0]["msg"])
-        assert "eyJhbG.abc.def" not in msg
+        assert jwt not in msg
         assert "<redacted:credential>" in msg
 
     def test_64_char_hex_in_message(

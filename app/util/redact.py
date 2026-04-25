@@ -320,8 +320,27 @@ def _key_is_sensitive(key: object) -> bool:
 # callers across scopes share a single regex set. The logging module
 # re-imports the wrapper below.
 _BEARER_RE: Final[re.Pattern[str]] = re.compile(r"Bearer\s+[A-Za-z0-9._\-]+")
+# JWT shape: three base64url segments separated by dots. Each segment
+# must be ≥ 16 chars to avoid swallowing legitimate dotted identifiers
+# (structured-log event names like ``worker.tick.start`` /
+# ``idempotency.sweep``, dotted module paths, OTel span attributes).
+# Real RFC 7519 JWTs are well above this floor:
+#
+# * Header — minimum ``{"alg":"HS256","typ":"JWT"}`` base64url-encodes
+#   to ~36 chars; in practice 30+.
+# * Payload — claims push this to 50+ chars in even the smallest
+#   real token.
+# * Signature — HS256 yields 256 bits = 43 base64url chars; RS256 /
+#   ES256 are longer.
+#
+# The 16-char floor is comfortably below the smallest realistic JWT
+# segment but well above any sensible event-name component, so it
+# preserves the credential-scrubbing intent without the
+# false-positive class that bug ``cd-pzr1`` reported (event names
+# like ``worker.tick.end`` arriving at log assertions as
+# ``<redacted:credential>``).
 _JWT_RE: Final[re.Pattern[str]] = re.compile(
-    r"\b[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+\b"
+    r"\b[A-Za-z0-9_\-]{16,}\.[A-Za-z0-9_\-]{16,}\.[A-Za-z0-9_\-]{16,}\b"
 )
 # Hex threshold: 32+ chars. The SHA-256 convention is 64, but MD5 +
 # SHA-1 + op-specific 32-char fingerprints all cluster at 32. Hashes
