@@ -170,7 +170,15 @@ asyncio_mode = "auto"
 # trade-off is that pytest no longer injects the project root into
 # sys.path implicitly, so we set ``pythonpath`` to make ``app`` and
 # ``tests._fakes``/``tests.factories`` importable.
-addopts = "--import-mode=importlib"
+#
+# ``-n auto --dist worksteal`` runs the suite across one xdist worker
+# per CPU; worksteal rebalances when one worker hits a long-tail test
+# (~7s outlier in tests/unit/test_tenancy_orm_filter.py). Per-worker
+# DB isolation is handled by tests/integration/conftest.py::db_url
+# (per-worker SQLite file / Postgres testcontainer). To debug a single
+# test serially, override the worker count: ``uv run pytest -n0 <path>``
+# (xdist itself accepts ``-n0`` and skips the worker fork).
+addopts = "--import-mode=importlib -n auto --dist worksteal"
 pythonpath = ["."]
 markers = [
     "integration: marks tests as integration (deselect with '-m \"not integration\"')",

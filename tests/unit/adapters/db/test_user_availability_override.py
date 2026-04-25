@@ -245,7 +245,15 @@ class TestModelShape:
 
 
 class TestRegistryMembership:
+    """``user_availability_override`` is registered as scoped.
+
+    See :class:`tests.unit.adapters.db.test_user_leave.TestRegistryMembership`
+    for the rationale behind calling :func:`registry.register` directly
+    rather than asserting the import-time side effect.
+    """
+
     def test_user_availability_override_registered(self) -> None:
+        registry.register("user_availability_override")
         assert registry.is_scoped("user_availability_override")
 
 

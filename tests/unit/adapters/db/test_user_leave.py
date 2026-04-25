@@ -244,9 +244,19 @@ class TestUserLeaveModelShape:
 
 
 class TestRegistryMembership:
-    """``user_leave`` is registered as scoped."""
+    """``user_leave`` is registered as scoped.
+
+    Mirrors the pattern in :class:`tests.unit.test_db_messaging.TestRegistryIntent`:
+    we call :func:`registry.register` directly rather than relying on the
+    import-time side effect, because sibling tests (e.g.
+    :mod:`tests.unit.test_tenancy_orm_filter`) wipe the process-wide
+    registry via an autouse ``_reset_for_tests`` fixture. Under
+    pytest-xdist the test order across workers is non-deterministic,
+    so a reset can land between collection and this assertion.
+    """
 
     def test_user_leave_registered(self) -> None:
+        registry.register("user_leave")
         assert registry.is_scoped("user_leave")
 
 

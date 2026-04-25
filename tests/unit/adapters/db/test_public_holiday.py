@@ -259,7 +259,15 @@ class TestModelShape:
 
 
 class TestRegistryMembership:
+    """``public_holiday`` is registered as scoped.
+
+    See :class:`tests.unit.adapters.db.test_user_leave.TestRegistryMembership`
+    for the rationale behind calling :func:`registry.register` directly
+    rather than asserting the import-time side effect.
+    """
+
     def test_public_holiday_registered(self) -> None:
+        registry.register("public_holiday")
         assert registry.is_scoped("public_holiday")
 
 

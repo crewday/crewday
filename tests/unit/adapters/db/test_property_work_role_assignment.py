@@ -382,14 +382,22 @@ class TestPropertyWorkRoleAssignmentModelShape:
 
 
 class TestRegistryMembership:
-    """``property_work_role_assignment`` is registered as scoped."""
+    """``property_work_role_assignment`` is registered as scoped.
+
+    See :class:`tests.unit.adapters.db.test_user_leave.TestRegistryMembership`
+    for the rationale behind calling :func:`registry.register` directly
+    rather than asserting the import-time side effect.
+    """
 
     def test_assignment_registered(self) -> None:
+        registry.register("property_work_role_assignment")
         assert registry.is_scoped("property_work_role_assignment")
 
     def test_property_table_still_not_registered(self) -> None:
         """Sanity: the existing tenancy-agnostic shape on ``property``
-        survives the cd-e4m3 registration."""
+        survives the cd-e4m3 registration. No test or production code
+        calls ``register("property")`` — verified at audit time — so the
+        absence assertion is robust to test ordering under xdist."""
         assert not registry.is_scoped("property")
 
 
