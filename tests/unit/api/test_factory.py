@@ -139,13 +139,14 @@ class TestOpenapiShape:
         targets the still-empty scaffolds so an accidental route
         leakage anywhere else still fails the test.
         """
-        # ``time`` carries routes as of cd-whl; ``tasks`` as of cd-sn26.
+        # ``time`` carries routes as of cd-whl; ``tasks`` as of cd-sn26;
+        # ``expenses`` as of cd-t6y2; ``messaging`` as of cd-0bnz.
         # Add any further implemented contexts here as they land. Every
         # name in this set must still appear in :data:`CONTEXT_ROUTERS`
         # so the tag seed check above keeps firing. The workspace-scoped
         # admin aggregator (cd-g1ay) does NOT belong here — it lives
         # outside ``CONTEXT_ROUTERS`` and mounts through its own seam.
-        implemented_contexts = {"tasks", "time"}
+        implemented_contexts = {"expenses", "messaging", "tasks", "time"}
         client = _client(create_app(settings=_settings()))
         schema = client.get("/api/openapi.json").json()
         # None of the empty context prefixes should be in ``paths``.

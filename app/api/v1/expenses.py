@@ -78,15 +78,29 @@ See ``docs/specs/12-rest-api.md`` §"Time, payroll, expenses",
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import datetime
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    Form,
+    HTTPException,
+    Query,
+    Request,
+    Response,
+    UploadFile,
+    status,
+)
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
+from app.adapters.db.llm.models import LlmUsage as LlmUsageRow
+from app.adapters.llm.ports import LLMClient
 from app.adapters.storage.ports import Storage
-from app.api.deps import current_workspace_context, db_session, get_storage
+from app.api.deps import current_workspace_context, db_session, get_llm, get_storage
 from app.api.pagination import (
     DEFAULT_LIMIT,
     LimitQuery,
@@ -94,6 +108,7 @@ from app.api.pagination import (
     decode_cursor,
     encode_cursor,
 )
+from app.config import Settings, get_settings
 from app.domain.expenses import (
     ApprovalEdits,
     ApprovalPermissionDenied,
@@ -131,7 +146,20 @@ from app.domain.expenses import (
     submit_claim,
     update_claim,
 )
+from app.domain.expenses.autofill import (
+    AUTOFILL_CAPABILITY,
+    ExtractionMetrics,
+    ExtractionParseError,
+    ExtractionProviderError,
+    ExtractionRateLimited,
+    ExtractionTimeout,
+    ReceiptExtraction,
+    extract_from_bytes,
+    overall_confidence,
+)
 from app.tenancy import WorkspaceContext
+from app.util.clock import SystemClock
+from app.util.ulid import new_ulid
 
 __all__ = ["router"]
 
@@ -139,9 +167,39 @@ __all__ = ["router"]
 router = APIRouter(tags=["expenses"])
 
 
+def _optional_llm(request: Request) -> LLMClient | None:
+    """Like :func:`app.api.deps.get_llm` but returns ``None`` instead of 503.
+
+    Used by the attach route, where the LLM is optional — autofill
+    is a "best effort" extra rather than a hard requirement, so a
+    deployment without an LLM still serves attaches normally.
+
+    See :func:`app.api.deps.get_llm` for the strict variant the
+    preview ``POST /expenses/autofill`` endpoint uses.
+    """
+    llm: LLMClient | None = getattr(request.app.state, "llm", None)
+    return llm
+
+
 _Ctx = Annotated[WorkspaceContext, Depends(current_workspace_context)]
 _Db = Annotated[Session, Depends(db_session)]
 _Storage = Annotated[Storage, Depends(get_storage)]
+_Llm = Annotated[LLMClient, Depends(get_llm)]
+_AppSettings = Annotated[Settings, Depends(get_settings)]
+
+
+# Mime types accepted by ``POST /expenses/autofill``. Mirrors the
+# attach allow-list (image/jpeg / png / webp / heic / pdf) so the
+# preview endpoint and the actual attach path agree on what counts
+# as a receipt. PDF is included because vendors mail invoice PDFs;
+# the LLM port handles the multi-page case via its OCR step.
+_AUTOFILL_ALLOWED_MIME: frozenset[str] = frozenset(
+    {"image/jpeg", "image/png", "image/webp", "image/heic", "application/pdf"}
+)
+# Cap on a single preview upload — matches the attach-side cap so a
+# caller can't smuggle a 50 MB image through the preview endpoint to
+# burn LLM tokens.
+_AUTOFILL_MAX_BYTES: int = 10 * 1024 * 1024
 
 
 # ---------------------------------------------------------------------------
@@ -294,11 +352,23 @@ class AttachReceiptRequest(BaseModel):
 # branch, which is loud enough to catch in CI.
 
 
-def _http(status_code: int, error: str, **extra: object) -> HTTPException:
-    """Construct the ``{"error": "<code>", ...}`` detail envelope."""
+def _http(
+    status_code: int,
+    error: str,
+    *,
+    headers: dict[str, str] | None = None,
+    **extra: object,
+) -> HTTPException:
+    """Construct the ``{"error": "<code>", ...}`` detail envelope.
+
+    ``headers`` lets retry-aware paths attach ``Retry-After`` (or any
+    other response header) without bypassing the standard envelope —
+    FastAPI propagates the headers verbatim onto the
+    ``problem+json`` response.
+    """
     detail: dict[str, object] = {"error": error}
     detail.update(extra)
-    return HTTPException(status_code=status_code, detail=detail)
+    return HTTPException(status_code=status_code, detail=detail, headers=headers)
 
 
 def _http_for_claim_error(exc: Exception) -> HTTPException:
@@ -647,6 +717,8 @@ def attach_expense_receipt_route(
     ctx: _Ctx,
     session: _Db,
     storage: _Storage,
+    settings: _AppSettings,
+    llm: Annotated[LLMClient | None, Depends(_optional_llm)] = None,
 ) -> ExpenseAttachmentPayload:
     """Attach a blob to a draft claim.
 
@@ -654,7 +726,17 @@ def attach_expense_receipt_route(
     only registers the metadata row. The service revalidates the
     asserted mime / size against the receipt allow-list + 10 MB cap
     and confirms ``storage.exists(blob_hash)``.
+
+    cd-95zb: when ``settings.llm_ocr_model`` is set AND an LLM client
+    is wired, the attach pipeline injects the synchronous OCR /
+    autofill runner so the first-attachment flow auto-populates the
+    claim's worker-typed fields. The runner is gated on both knobs
+    so a deployment can disable autofill by clearing either side
+    without booting a half-wired state machine. ``llm`` is an
+    optional dep so the route still works when no LLM client is
+    wired (the runner is just ``None``).
     """
+    runner = _build_attach_runner(llm=llm, settings=settings, storage=storage)
     try:
         view = attach_receipt(
             session,
@@ -666,6 +748,7 @@ def attach_expense_receipt_route(
             storage=storage,
             kind=body.kind,
             pages=body.pages,
+            extraction_runner=runner,
         )
     except (
         ClaimNotFound,
@@ -678,6 +761,64 @@ def attach_expense_receipt_route(
     ) as exc:
         raise _http_for_claim_error(exc) from exc
     return ExpenseAttachmentPayload.from_view(view)
+
+
+def _build_attach_runner(
+    *,
+    llm: LLMClient | None,
+    settings: Settings,
+    storage: Storage,
+) -> Callable[..., None] | None:
+    """Return an extraction runner closure, or ``None`` to skip autofill.
+
+    Both knobs must be set for the runner to fire:
+
+    * ``llm`` — a usable :class:`LLMClient` (the factory wires
+      :class:`OpenRouterClient` only when
+      ``settings.openrouter_api_key`` is present).
+    * ``settings.llm_ocr_model`` — the deployment-level capability
+      gate. ``None`` disables autofill.
+
+    When either is missing the helper returns ``None`` — the
+    :func:`~app.domain.expenses.claims.attach_receipt` seam treats
+    that as the "no autofill" path and skips the runner entirely.
+
+    The closure captures ``llm`` / ``settings`` / ``storage`` from
+    the request scope so the domain layer never has to reach back
+    through ``app.state`` for adapter handles.
+    """
+    if llm is None or settings.llm_ocr_model is None:
+        return None
+
+    from app.worker.tasks.receipt_ocr import run_receipt_ocr
+
+    captured_llm = llm
+    captured_settings = settings
+    captured_storage = storage
+
+    def runner(
+        session: Session,
+        ctx: WorkspaceContext,
+        *,
+        claim_id: str,
+        attachment_id: str,
+    ) -> None:
+        # The runner runs in the same UoW as the attach. If it
+        # raises, ``attach_receipt`` swallows the exception so the
+        # attach + the runner's audit / usage rows survive the
+        # commit; see the ``attach_receipt`` docstring for the
+        # contract.
+        run_receipt_ocr(
+            session,
+            ctx,
+            claim_id=claim_id,
+            attachment_id=attachment_id,
+            llm=captured_llm,
+            storage=captured_storage,
+            settings=captured_settings,
+        )
+
+    return runner
 
 
 @router.delete(
@@ -851,29 +992,262 @@ def reimburse_expense_claim_route(
 
 
 # ---------------------------------------------------------------------------
-# OCR autofill placeholder (cd-95zb)
+# OCR autofill (cd-95zb)
 # ---------------------------------------------------------------------------
+
+
+class ReceiptExtractionPayload(BaseModel):
+    """HTTP projection of :class:`ReceiptExtraction`.
+
+    The extra ``overall_confidence`` field carries the derived
+    ``min(confidence.values())`` quantised to 2 decimals so the SPA
+    doesn't have to recompute the rule client-side. Datetimes round-
+    trip in ISO-8601; ``confidence`` is the raw per-field map the
+    LLM emitted (post-validation).
+    """
+
+    vendor: str
+    amount_cents: int
+    currency: str
+    purchased_at: datetime
+    category: str
+    confidence: dict[str, float]
+    overall_confidence: str
+
+    @classmethod
+    def from_extraction(cls, extraction: ReceiptExtraction) -> ReceiptExtractionPayload:
+        """Render :class:`ReceiptExtraction` into its HTTP shape."""
+        return cls(
+            vendor=extraction.vendor,
+            amount_cents=extraction.amount_cents,
+            currency=extraction.currency,
+            purchased_at=extraction.purchased_at,
+            category=extraction.category,
+            confidence=dict(extraction.confidence),
+            overall_confidence=str(overall_confidence(extraction)),
+        )
 
 
 @router.post(
     "/autofill",
+    response_model=ReceiptExtractionPayload,
     operation_id="autofill_expense_claim",
-    summary="OCR-autofill an expense claim from receipt images (placeholder)",
+    summary="OCR-autofill: preview structured fields from a receipt image",
 )
-def autofill_expense_claim_route() -> None:
-    """Return 501 until cd-95zb wires the OCR pipeline.
+async def autofill_expense_claim_route(
+    ctx: _Ctx,
+    session: _Db,
+    settings: _AppSettings,
+    llm: _Llm,
+    image: Annotated[UploadFile, File()],
+    image_2: Annotated[UploadFile | None, File()] = None,
+    hint_currency: Annotated[str | None, Form(min_length=3, max_length=3)] = None,
+    hint_vendor: Annotated[str | None, Form(min_length=1, max_length=200)] = None,
+) -> ReceiptExtractionPayload:
+    """Run a receipt blob through the LLM and return parsed fields.
 
-    The mocks already chain "upload receipt" → "autofill claim" via
-    this URL; the placeholder gives them a stable target while the
-    real implementation lands. No body is consumed today — the
-    follow-up will accept ``multipart/form-data`` per spec §12
-    "Time, payroll, expenses".
+    "Preview" semantic: the route does NOT create a claim, attach a
+    blob, or write any DB row apart from the workspace-scoped
+    :class:`~app.adapters.db.llm.models.LlmUsage` ledger row that
+    every LLM call costs. It exists for the SPA to surface extracted
+    suggestions on the upload screen before the worker commits to a
+    claim. To persist the same result, the SPA chains ``POST
+    /uploads`` → ``POST /expenses`` → ``POST /expenses/{id}/
+    attachments`` and lets the wired ``extraction_runner`` re-run
+    the same extraction inside the attach transaction.
+
+    Disabled at the deployment level when ``settings.llm_ocr_model``
+    is unset — the response is 503 ``autofill_not_configured`` so a
+    caller can distinguish "no model assigned" from "transient
+    provider error".
+
+    The hint fields (``hint_currency``, ``hint_vendor``) are reserved
+    for the v1 endpoint surface; the current pipeline does not yet
+    feed them into the prompt. Wiring is tracked alongside cd-e626's
+    prompt-tuning work — surfacing them here keeps the contract
+    stable for the SPA. **Crucially the prompt body still carries
+    only the OCR text** — these hints are never forwarded to the
+    LLM, so an attacker who supplies a doctored ``hint_vendor``
+    cannot inject prompt content the model sees today.
+
+    Every successful or failed LLM call lands one
+    :class:`~app.adapters.db.llm.models.LlmUsage` row (capability
+    ``expenses.autofill``) so the workspace usage budget envelope
+    stays honest even when callers exercise the preview surface.
     """
-    raise _http(
-        status.HTTP_501_NOT_IMPLEMENTED,
-        "autofill_not_implemented",
-        message=(
-            "OCR-autofill is wired in cd-95zb; until then upload receipts "
-            "via POST /expenses/{id}/attachments and fill the fields manually."
-        ),
+    if settings.llm_ocr_model is None:
+        # Drain the upload so the multipart parser doesn't leak
+        # tempfiles on the disabled-feature path.
+        await image.close()
+        if image_2 is not None:
+            await image_2.close()
+        raise _http(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "autofill_not_configured",
+            message=(
+                "OCR autofill is disabled in this deployment "
+                "(settings.llm_ocr_model is unset)"
+            ),
+        )
+
+    # v1 single-image: the second image slot is reserved for the
+    # multi-page batch follow-up (a tip-receipt + a meal-receipt
+    # pair, etc.). Until cd-* lands the multi-image batching, drain
+    # it without hitting the LLM so the caller's contract still
+    # accepts the field but the cost stays bounded.
+    if image_2 is not None:
+        await image_2.close()
+
+    if image.content_type not in _AUTOFILL_ALLOWED_MIME:
+        await image.close()
+        raise _http(
+            422,
+            "blob_mime_not_allowed",
+            message=(
+                f"content_type={image.content_type!r} is not in the receipt "
+                f"allow-list ({sorted(_AUTOFILL_ALLOWED_MIME)!r})"
+            ),
+        )
+
+    image_bytes = await image.read()
+    await image.close()
+
+    if len(image_bytes) > _AUTOFILL_MAX_BYTES:
+        raise _http(
+            422,
+            "blob_too_large",
+            message=(
+                f"size_bytes={len(image_bytes)} exceeds the "
+                f"{_AUTOFILL_MAX_BYTES} byte cap"
+            ),
+        )
+    if not image_bytes:
+        raise _http(
+            422,
+            "blob_empty",
+            message="image upload is empty",
+        )
+
+    try:
+        metrics = extract_from_bytes(image_bytes, llm=llm, settings=settings)
+    except ExtractionParseError as exc:
+        # Chat call may have landed before the parse failed — record
+        # the spent tokens so /admin/usage stays honest. The burnt
+        # metrics ride :attr:`ExtractionParseError.burnt_metrics`.
+        _record_preview_usage(
+            session,
+            ctx,
+            burnt=exc.burnt_metrics,
+            fallback_model_id=settings.llm_ocr_model,
+            status="error",
+        )
+        raise _http(422, "extraction_parse_error", message=str(exc)) from exc
+    except ExtractionTimeout as exc:
+        _record_preview_usage(
+            session,
+            ctx,
+            burnt=None,
+            fallback_model_id=settings.llm_ocr_model,
+            status="timeout",
+        )
+        raise _http(504, "extraction_timeout", message=str(exc)) from exc
+    except ExtractionRateLimited as exc:
+        _record_preview_usage(
+            session,
+            ctx,
+            burnt=None,
+            fallback_model_id=settings.llm_ocr_model,
+            status="error",
+        )
+        # ``Retry-After: 60`` mirrors the §11 fallback-chain hint
+        # (60 s window for the next attempt). The exact value is the
+        # adapter's responsibility once the §12 model router lands;
+        # until then the conservative one-minute floor keeps the SPA
+        # from hammering the provider.
+        raise _http(
+            503,
+            "extraction_rate_limited",
+            message=str(exc),
+            headers={"Retry-After": "60"},
+        ) from exc
+    except ExtractionProviderError as exc:
+        _record_preview_usage(
+            session,
+            ctx,
+            burnt=None,
+            fallback_model_id=settings.llm_ocr_model,
+            status="error",
+        )
+        raise _http(503, "extraction_provider_error", message=str(exc)) from exc
+
+    extraction = metrics.extraction
+    if extraction is None:  # pragma: no cover - defensive invariant
+        # ``extract_from_bytes`` always populates ``extraction`` on
+        # the happy path; a ``None`` here implies a future helper
+        # bypassed the parse step but didn't raise.
+        _record_preview_usage(
+            session,
+            ctx,
+            burnt=metrics,
+            fallback_model_id=settings.llm_ocr_model,
+            status="error",
+        )
+        raise _http(
+            500,
+            "extraction_invariant",
+            message="extract_from_bytes returned metrics with no extraction",
+        )
+
+    _record_preview_usage(
+        session,
+        ctx,
+        burnt=metrics,
+        fallback_model_id=settings.llm_ocr_model,
+        status="ok",
     )
+    return ReceiptExtractionPayload.from_extraction(extraction)
+
+
+def _record_preview_usage(
+    session: Session,
+    ctx: WorkspaceContext,
+    *,
+    burnt: ExtractionMetrics | None,
+    fallback_model_id: str,
+    status: str,
+) -> None:
+    """Insert one :class:`LlmUsageRow` for a preview-endpoint call.
+
+    Mirrors :func:`app.domain.expenses.autofill._record_llm_usage`
+    but lives here because the preview route has no claim id to
+    audit and the autofill module's helper insists on an ``ok |
+    error | timeout`` status enum that the persist path uses.
+
+    ``burnt`` is the metrics snapshot when the LLM call returned a
+    body (parse error AFTER the chat reply landed; the success path
+    obviously); ``None`` when the call failed before any usage data
+    came back (timeout / rate-limit / non-2xx provider error). The
+    workspace-scoped ``LlmUsage`` shape backs the §11 budget
+    envelope, so a row lands on every outcome.
+    """
+    row = LlmUsageRow(
+        id=new_ulid(),
+        workspace_id=ctx.workspace_id,
+        capability=AUTOFILL_CAPABILITY,
+        model_id=burnt.model_id if burnt is not None else fallback_model_id,
+        tokens_in=burnt.prompt_tokens if burnt is not None else 0,
+        tokens_out=burnt.completion_tokens if burnt is not None else 0,
+        cost_cents=0,
+        latency_ms=burnt.latency_ms if burnt is not None else 0,
+        status=status,
+        correlation_id=new_ulid(),
+        attempt=0,
+        assignment_id=None,
+        fallback_attempts=0,
+        finish_reason=None,
+        actor_user_id=ctx.actor_id,
+        token_id=None,
+        agent_label=None,
+        created_at=SystemClock().now(),
+    )
+    session.add(row)

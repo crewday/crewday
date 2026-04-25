@@ -63,6 +63,8 @@ from fastapi.responses import FileResponse, HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.cors import CORSMiddleware
 
+from app.adapters.llm.openrouter import OpenRouterClient
+from app.adapters.llm.ports import LLMClient
 from app.adapters.mail.ports import Mailer
 from app.adapters.mail.smtp import SMTPMailer
 from app.adapters.storage.localfs import LocalFsStorage
@@ -283,12 +285,41 @@ def _wire_services(
             bounce_domain=settings.smtp_bounce_domain,
         )
     storage = _build_storage(settings)
+    llm = _build_llm(settings)
     app.state.settings = settings
     app.state.throttle = throttle
     app.state.capabilities = capabilities
     app.state.mailer = mailer
     app.state.storage = storage
+    app.state.llm = llm
     return mailer, throttle, capabilities
+
+
+def _build_llm(settings: Settings) -> LLMClient | None:
+    """Return the configured :class:`LLMClient`, or ``None``.
+
+    The v1 wiring instantiates :class:`OpenRouterClient` when
+    ``settings.openrouter_api_key`` is set; otherwise the LLM seam is
+    unwired and :func:`app.api.deps.get_llm` returns 503
+    ``llm_unavailable`` on the first request that asks for it. This
+    matches the storage / mailer pattern: deployment misconfig
+    surfaces as a request-time 503 rather than refusing to boot, so
+    ``/healthz`` and the non-LLM routes still serve.
+
+    The OCR-autofill capability layers an additional gate on
+    :attr:`Settings.llm_ocr_model` — both the API key AND a model id
+    must be present for ``POST /expenses/autofill`` to actually run
+    the LLM. The two gates compose so a deployment can disable the
+    capability by clearing either side without booting a half-wired
+    state machine.
+    """
+    if settings.openrouter_api_key is None:
+        _log.info(
+            "LLM client unavailable: CREWDAY_OPENROUTER_API_KEY is unset",
+            extra={"event": "llm.unwired", "reason": "missing_api_key"},
+        )
+        return None
+    return OpenRouterClient(settings.openrouter_api_key)
 
 
 def _build_storage(settings: Settings) -> Storage | None:

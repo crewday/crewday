@@ -100,6 +100,8 @@ See ``docs/specs/02-domain-model.md`` §"expense_claim" /
 
 from __future__ import annotations
 
+import logging
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Literal
@@ -158,6 +160,9 @@ __all__ = [
     "submit_claim",
     "update_claim",
 ]
+
+
+_log = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -1227,6 +1232,7 @@ def attach_receipt(
     kind: ReceiptKind = "receipt",
     pages: int | None = None,
     clock: Clock | None = None,
+    extraction_runner: Callable[..., Any] | None = None,
 ) -> ExpenseAttachmentView:
     """Attach a receipt blob to a draft claim.
 
@@ -1247,6 +1253,18 @@ def attach_receipt(
     audit diff so a malicious caller's claim is preserved for
     forensics. We do NOT re-stream the blob to confirm the mime
     sniff — see the module docstring for the rationale.
+
+    ``extraction_runner`` is the cd-95zb DI seam: when non-``None``
+    AND the claim is still ``draft`` after the attach lands, the
+    callable is invoked synchronously with
+    ``(session, ctx, claim_id=..., attachment_id=...)`` so the LLM
+    OCR / autofill pipeline can write back to the same UoW. Pass
+    ``None`` (the default) when no autofill is desired — tests, the
+    legacy call sites that predate cd-95zb, and any deployment
+    where ``settings.llm_ocr_model`` is unset. The runner contract
+    matches :func:`app.worker.tasks.receipt_ocr.run_receipt_ocr` so
+    a future async-queue scaffolding can swap the call site without
+    a domain-layer change.
     """
     resolved_clock = clock if clock is not None else SystemClock()
     row = _load_row(session, ctx, claim_id=claim_id, for_update=True)
@@ -1341,6 +1359,52 @@ def attach_receipt(
         },
         clock=resolved_clock,
     )
+
+    # cd-95zb: run the OCR / autofill pipeline synchronously when a
+    # runner is wired AND the claim is still draft. Passing ``None``
+    # (the default) keeps every existing test + the manual-entry
+    # path untouched.
+    #
+    # The runner writes its own ``receipt.ocr_failed`` audit row +
+    # :class:`LlmUsageRow` BEFORE re-raising on every failure mode
+    # (timeout, rate-limit, parse error, provider error). If we let
+    # those exceptions propagate here, the surrounding UoW would
+    # rollback — wiping out the attach row, the attach audit row,
+    # AND the failure-mode rows the runner just wrote — leaving the
+    # caller with a 5xx and a stranded blob in storage.
+    #
+    # The cd-95zb contract explicitly says "failure modes leave the
+    # claim untouched and audit the failure". "Untouched" means the
+    # attach DID happen; the worker can retry the OCR offline. We
+    # therefore swallow the runner's exception, keep the attach +
+    # audit + usage rows, and surface the failure through the
+    # already-persisted audit trail. Operators see the failure on
+    # /admin/usage and the SPA polls ``llm_autofill_json`` (which
+    # stays NULL) to know to fall back to manual entry.
+    if extraction_runner is not None and row.state == "draft":
+        try:
+            extraction_runner(
+                session, ctx, claim_id=claim_id, attachment_id=view.id
+            )
+        except Exception as exc:
+            # The runner has already written its own audit row +
+            # ``LlmUsage`` row before raising; we want those rows
+            # to survive the commit. A bare ``Exception`` catch is
+            # the right shape here precisely because we do not want
+            # an unexpected runner crash to corrupt the attach UoW.
+            _log.warning(
+                "expense.claim.receipt_attached: extraction runner failed",
+                extra={
+                    "event": "expense.autofill.runner_failed",
+                    "claim_id": claim_id,
+                    "attachment_id": view.id,
+                    "error_kind": type(exc).__name__,
+                    # ``str(exc)`` could leak provider-side detail —
+                    # rely on the runner's own audit row for the
+                    # full message; this log line stays terse.
+                },
+            )
+
     return view
 
 

@@ -415,6 +415,13 @@ COVERED_METHODS: frozenset[str] = frozenset(
         "app.domain.llm.router.resolve_model",
         "app.domain.llm.router.resolve_primary",
         "app.domain.llm.usage_recorder.record",
+        # cd-95zb: receipt OCR / autofill. Loads claim + attachment
+        # through ``_load_claim`` / ``_load_attachment`` which scope
+        # the SELECT by ``ctx.workspace_id``; the persist path
+        # mutates fields on the loaded row and writes a new
+        # :class:`LlmUsage` row keyed on ``ctx.workspace_id``. The
+        # ORM-filter seam covers the whole surface.
+        "app.domain.expenses.autofill.run_extraction",
     }
 )
 

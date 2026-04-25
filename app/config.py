@@ -88,6 +88,20 @@ class Settings(BaseSettings):
 
     # --- LLM (optional; see §11 llm-and-agents) ---
     openrouter_api_key: SecretStr | None = None
+    # Model id used by :mod:`app.domain.expenses.autofill` for receipt
+    # OCR + structured extraction. ``None`` disables the capability at
+    # the deployment level: :func:`~app.domain.expenses.claims.attach_receipt`
+    # skips the runner entirely (the fields stay empty for manual
+    # entry) and ``POST /expenses/autofill`` returns 503
+    # ``autofill_not_configured``. Set this to the wire model id the
+    # caller's :class:`~app.adapters.llm.ports.LLMClient` is willing to
+    # serve (``google/gemma-3-27b-it``, ``openai/gpt-4o-mini``, …).
+    # The capability→model registry (§11 "Model assignment") is the
+    # authoritative source once it lands; this setting is the v1
+    # short-circuit while the §11 model router is still being plumbed
+    # through (see cd-95zb's spec note on the schema remap from
+    # ``Receipt.ocr_json`` to ``ExpenseClaim.llm_autofill_json``).
+    llm_ocr_model: str | None = None
 
     # --- Signing / tokens ---
     root_key: SecretStr | None = None

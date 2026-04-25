@@ -801,13 +801,277 @@ class TestPendingQueue:
 
 
 class TestAutofillPlaceholder:
-    def test_returns_501(
+    def test_unconfigured_returns_503(
         self,
         session_factory: sessionmaker[Session],
         storage: InMemoryStorage,
         seeded: dict[str, Any],
     ) -> None:
+        """cd-95zb: when ``settings.llm_ocr_model`` is unset (the
+        default in the test harness), ``POST /expenses/autofill``
+        returns 503 ``autofill_not_configured`` so callers can
+        distinguish "feature disabled" from "transient error".
+
+        We override :func:`app.api.deps.get_llm` with a do-nothing
+        stub so the dep doesn't 503 on the missing client first; the
+        new gate then fires on the missing model id.
+        """
+        from app.api.deps import get_llm
+
         with _client_for(session_factory, seeded["worker_ctx"], storage) as client:
-            r = client.post("/api/v1/expenses/autofill")
-            assert r.status_code == 501, r.text
-            assert r.json()["detail"]["error"] == "autofill_not_implemented"
+            client.app.dependency_overrides[get_llm] = _build_stub_llm()
+            # multipart upload — FastAPI's multipart parser requires at
+            # least one field even though the route gates on the
+            # disabled-feature flag first.
+            r = client.post(
+                "/api/v1/expenses/autofill",
+                files={"image": ("r.jpg", b"x", "image/jpeg")},
+            )
+            assert r.status_code == 503, r.text
+            assert r.json()["detail"]["error"] == "autofill_not_configured"
+
+    def test_happy_path_records_usage_row(
+        self,
+        session_factory: sessionmaker[Session],
+        storage: InMemoryStorage,
+        seeded: dict[str, Any],
+    ) -> None:
+        """A happy preview-path call lands one ``LlmUsage`` row keyed
+        on the workspace + ``capability='expenses.autofill'`` so the
+        §11 budget envelope sees the spend even though the route
+        does not write a claim row.
+        """
+        from app.adapters.db.llm.models import LlmUsage as LlmUsageRow
+        from app.api.deps import get_llm
+        from app.config import Settings, get_settings
+
+        settings = Settings(
+            database_url="sqlite:///:memory:",
+            llm_ocr_model="test/gemma-vision",
+        )
+        payload = {
+            "vendor": "Bistro 42",
+            "amount": "27.50",
+            "currency": "EUR",
+            "purchased_at": "2026-04-17T12:30:00+00:00",
+            "category": "food",
+            "confidence": {
+                "vendor": 0.95,
+                "amount": 0.95,
+                "currency": 0.95,
+                "purchased_at": 0.95,
+                "category": 0.95,
+            },
+        }
+
+        with _client_for(session_factory, seeded["worker_ctx"], storage) as client:
+            client.app.dependency_overrides[get_llm] = _build_stub_llm(
+                chat_payload=payload
+            )
+            client.app.dependency_overrides[get_settings] = lambda: settings
+            r = client.post(
+                "/api/v1/expenses/autofill",
+                files={"image": ("r.jpg", b"\x89PNG\x00bytes", "image/jpeg")},
+            )
+            assert r.status_code == 200, r.text
+            body = r.json()
+            assert body["vendor"] == "Bistro 42"
+            assert body["amount_cents"] == 2750
+            assert body["currency"] == "EUR"
+            assert body["category"] == "food"
+
+        # One usage row landed under the workspace.
+        with session_factory() as s, tenant_agnostic():
+            from sqlalchemy import select as sa_select
+
+            rows = list(
+                s.scalars(
+                    sa_select(LlmUsageRow).where(
+                        LlmUsageRow.workspace_id == seeded["workspace_id"]
+                    )
+                )
+            )
+            assert len(rows) == 1
+            assert rows[0].capability == "expenses.autofill"
+            assert rows[0].status == "ok"
+            assert rows[0].tokens_in == 42
+            assert rows[0].tokens_out == 17
+
+    def test_attach_route_runs_autofill_when_llm_wired(
+        self,
+        session_factory: sessionmaker[Session],
+        storage: InMemoryStorage,
+        seeded: dict[str, Any],
+    ) -> None:
+        """cd-95zb: when ``settings.llm_ocr_model`` is set AND the
+        LLM dep returns a usable client, the attach route plumbs
+        the runner through to ``attach_receipt`` so the first
+        attachment auto-populates the claim's worker-typed fields.
+        """
+        from app.adapters.db.expenses.models import ExpenseClaim
+        from app.api.v1.expenses import _optional_llm
+        from app.config import Settings, get_settings
+
+        settings = Settings(
+            database_url="sqlite:///:memory:",
+            llm_ocr_model="test/gemma-vision",
+        )
+        payload = {
+            "vendor": "Bistro 42",
+            "amount": "27.50",
+            "currency": "EUR",
+            "purchased_at": "2026-04-17T12:30:00+00:00",
+            "category": "food",
+            "confidence": {
+                "vendor": 0.95,
+                "amount": 0.95,
+                "currency": 0.95,
+                "purchased_at": 0.95,
+                "category": 0.95,
+            },
+        }
+
+        with _client_for(session_factory, seeded["worker_ctx"], storage) as client:
+            client.app.dependency_overrides[_optional_llm] = _build_stub_llm(
+                chat_payload=payload
+            )
+            client.app.dependency_overrides[get_settings] = lambda: settings
+
+            # Create claim with manual placeholder values.
+            r = client.post(
+                "/api/v1/expenses",
+                json=_create_body(work_engagement_id=seeded["worker_eng_id"]),
+            )
+            assert r.status_code == 201, r.text
+            claim_id = r.json()["id"]
+
+            # Attach a blob — runner fires inside the same UoW.
+            blob = _push_blob(storage)
+            r = client.post(
+                f"/api/v1/expenses/{claim_id}/attachments",
+                json={
+                    "blob_hash": blob,
+                    "content_type": "image/jpeg",
+                    "size_bytes": 16,
+                },
+            )
+            assert r.status_code == 201, r.text
+
+        # Re-read the claim — the runner overwrote the worker-typed
+        # fields with the LLM's high-confidence extraction.
+        from sqlalchemy import select as sa_select
+
+        with session_factory() as s, tenant_agnostic():
+            claim = s.scalars(
+                sa_select(ExpenseClaim).where(ExpenseClaim.id == claim_id)
+            ).one()
+            assert claim.vendor == "Bistro 42"
+            assert claim.total_amount_cents == 2750
+            assert claim.category == "food"
+
+    def test_rate_limited_emits_retry_after(
+        self,
+        session_factory: sessionmaker[Session],
+        storage: InMemoryStorage,
+        seeded: dict[str, Any],
+    ) -> None:
+        """A 429-equivalent surfaces as 503 ``extraction_rate_limited``
+        with a ``Retry-After`` header so the SPA backs off.
+        """
+        from app.api.deps import get_llm
+        from app.config import Settings, get_settings
+
+        settings = Settings(
+            database_url="sqlite:///:memory:",
+            llm_ocr_model="test/gemma-vision",
+        )
+
+        # Define a stub that raises an LlmRateLimited-shaped exception
+        # (the autofill module routes by class name, not import).
+        class LlmRateLimited(RuntimeError):
+            pass
+
+        with _client_for(session_factory, seeded["worker_ctx"], storage) as client:
+            client.app.dependency_overrides[get_llm] = _build_stub_llm(
+                chat_error=LlmRateLimited("rate limited"),
+            )
+            client.app.dependency_overrides[get_settings] = lambda: settings
+            r = client.post(
+                "/api/v1/expenses/autofill",
+                files={"image": ("r.jpg", b"x", "image/jpeg")},
+            )
+            assert r.status_code == 503, r.text
+            assert r.json()["detail"]["error"] == "extraction_rate_limited"
+            assert r.headers.get("retry-after") == "60"
+
+
+# ---------------------------------------------------------------------------
+# Stub LLM client used by the autofill tests
+# ---------------------------------------------------------------------------
+
+
+def _build_stub_llm(
+    *,
+    chat_payload: dict[str, Any] | str | None = None,
+    chat_error: Exception | None = None,
+) -> Any:
+    """Return a callable suitable for ``app.dependency_overrides[get_llm]``.
+
+    The returned closure mints a fresh stub per request so per-test
+    state doesn't leak.
+    """
+    import json as _json
+
+    from app.adapters.llm.ports import LLMCapabilityMissing, LLMResponse, LLMUsage
+
+    class _StubLLM:
+        def complete(  # pragma: no cover
+            self,
+            *,
+            model_id: str,
+            prompt: str,
+            max_tokens: int = 1024,
+            temperature: float = 0.0,
+        ) -> LLMResponse:
+            raise NotImplementedError
+
+        def chat(
+            self,
+            *,
+            model_id: str,
+            messages: Any,
+            max_tokens: int = 1024,
+            temperature: float = 0.0,
+        ) -> LLMResponse:
+            if chat_error is not None:
+                raise chat_error
+            text = (
+                _json.dumps(chat_payload)
+                if isinstance(chat_payload, dict)
+                else (chat_payload if isinstance(chat_payload, str) else "{}")
+            )
+            return LLMResponse(
+                text=text,
+                usage=LLMUsage(
+                    prompt_tokens=42,
+                    completion_tokens=17,
+                    total_tokens=59,
+                ),
+                model_id=model_id,
+                finish_reason="stop",
+            )
+
+        def ocr(self, *, model_id: str, image_bytes: bytes) -> str:
+            return "Vendor: Stub\nTotal: 27.50 EUR\n2026-04-17"
+
+        def stream_chat(  # pragma: no cover
+            self,
+            *,
+            model_id: str,
+            messages: Any,
+            max_tokens: int = 1024,
+            temperature: float = 0.0,
+        ) -> Any:
+            raise LLMCapabilityMissing("stream_chat")
+
+    return lambda: _StubLLM()

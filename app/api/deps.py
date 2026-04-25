@@ -19,6 +19,7 @@ from fastapi import HTTPException, Request, status
 from sqlalchemy.orm import Session
 
 from app.adapters.db.session import make_uow
+from app.adapters.llm.ports import LLMClient
 from app.adapters.storage.ports import Storage
 from app.tenancy import WorkspaceContext
 from app.tenancy.current import get_current
@@ -26,6 +27,7 @@ from app.tenancy.current import get_current
 __all__ = [
     "current_workspace_context",
     "db_session",
+    "get_llm",
     "get_storage",
 ]
 
@@ -91,3 +93,26 @@ def get_storage(request: Request) -> Storage:
             detail={"error": "storage_unavailable"},
         )
     return storage
+
+
+def get_llm(request: Request) -> LLMClient:
+    """FastAPI dep — return the configured :class:`LLMClient`.
+
+    Reads :attr:`app.state.llm`, populated by the app factory at boot
+    when ``settings.openrouter_api_key`` is set (and otherwise left
+    as ``None``). Raises :class:`HTTPException` 503 when no client is
+    wired — the absence is a deployment-level misconfiguration (the
+    receipt-OCR / autofill capability is gated by
+    ``settings.llm_ocr_model`` AND requires a usable adapter behind
+    the port).
+
+    Tests override via ``app.dependency_overrides[get_llm] = …`` to
+    inject :class:`tests._fakes.llm.EchoLLMClient` or a stub.
+    """
+    llm: LLMClient | None = getattr(request.app.state, "llm", None)
+    if llm is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"error": "llm_unavailable"},
+        )
+    return llm
