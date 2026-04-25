@@ -270,10 +270,9 @@ class TestContextRouterMount:
         swap the ``admin_router`` reference mid-factory — the
         downstream admin Beads tasks (cd-jlms et al.) will import
         ``admin_router`` from the same module and add routes to it,
-        expecting those to reach the live app. cd-xgmu landed a
-        single throwaway ``GET /_ping`` probe used by the auth-dep
-        integration tests; the route is hidden from OpenAPI and
-        does not change the public surface.
+        expecting those to reach the live app. cd-yj4k landed
+        ``GET /me`` + ``GET /me/admins`` as the minimal admin
+        surface; both routes carry the public OpenAPI tag ``admin``.
         """
         # Defensive: ensure the module-level admin_router is still an
         # APIRouter (not replaced by the factory).
@@ -283,17 +282,23 @@ class TestContextRouterMount:
         from app.api.admin import admin_router as admin_router_module
 
         assert isinstance(admin_router_module, APIRouter)
-        # The throwaway cd-xgmu probe route is the only route on the
-        # admin_router today. Pin its presence + hidden-schema flag
-        # so a future regression that exposes it on /api/openapi.json
-        # trips this test loudly.
-        ping_routes = [
-            r
-            for r in admin_router_module.routes
-            if isinstance(r, APIRoute) and r.path == "/_ping"
-        ]
-        assert len(ping_routes) == 1
-        assert ping_routes[0].include_in_schema is False
+        # cd-yj4k pins the minimal admin surface — ``GET /me`` plus
+        # ``GET /me/admins``. Both are visible in OpenAPI (no hidden
+        # routes on the admin tree today). A future regression that
+        # drops either trips this test loudly.
+        admin_paths = {
+            r.path for r in admin_router_module.routes if isinstance(r, APIRoute)
+        }
+        assert "/me" in admin_paths
+        assert "/me/admins" in admin_paths
+        # Every public admin route should be in the OpenAPI schema —
+        # the surface that lands today is operator-visible, not a
+        # private probe.
+        for route in admin_router_module.routes:
+            if isinstance(route, APIRoute):
+                assert route.include_in_schema is True, (
+                    f"unexpected hidden admin route: {route.path}"
+                )
 
     def test_unknown_admin_api_path_returns_json_404(self) -> None:
         """The admin mount answers 404 with the RFC 7807 envelope (§12)."""

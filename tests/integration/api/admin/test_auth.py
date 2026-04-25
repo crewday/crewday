@@ -1,19 +1,26 @@
 """Integration test for the deployment-admin auth dep (cd-xgmu).
 
 Boots the full :func:`app.api.factory.create_app` against the
-integration harness's DB and drives the throwaway
-``GET /admin/api/v1/_ping`` probe (mounted by
-:mod:`app.api.admin.__init__`) end-to-end. Verifies the dep wires
+integration harness's DB and drives ``GET /admin/api/v1/me`` (the
+cd-yj4k caller-identity route) end-to-end. Verifies the dep wires
 through every middleware (CORS, security headers, workspace tenancy
 skip-paths, idempotency, CSRF) and that the SKIP_PATHS contract
 holds — ``/admin/api/v1/...`` does NOT try to resolve a workspace
 slug, the dep alone authorises the request.
 
+The cd-xgmu probe ``/admin/api/v1/_ping`` was retired by cd-yj4k;
+the dep contract is now exercised through ``/me``. The
+``actor_kind`` discriminator the original probe surfaced is
+indirectly observable via the capabilities map (full catalogue for
+session / delegated principals; row-scoped subset for agent
+tokens) and the response status code (404 for every "not
+authorised" case).
+
 Coverage:
 
 * Session principal — deployment admin → 200, full catalogue;
 * Token principal — scoped token with ``deployment.audit:read`` →
-  200, scope set narrowed to the row's keys;
+  200, capabilities narrowed to the row's keys;
 * No auth → 404;
 * Non-admin session → 404;
 * Mixed-scope token → 422 ``deployment_scope_conflict``.
@@ -272,8 +279,8 @@ def _wipe(session_factory: sessionmaker[Session]) -> None:
 # ---------------------------------------------------------------------------
 
 
-class TestAdminPingDep:
-    """``GET /admin/api/v1/_ping`` end-to-end through the production factory."""
+class TestAdminMeDep:
+    """``GET /admin/api/v1/me`` end-to-end through the production factory."""
 
     def test_admin_session_returns_200_with_full_catalogue(
         self,
@@ -288,12 +295,12 @@ class TestAdminPingDep:
             )
             client.cookies.set(SESSION_COOKIE_NAME, cookie_value)
 
-            resp = client.get("/admin/api/v1/_ping")
+            resp = client.get("/admin/api/v1/me")
             assert resp.status_code == 200, resp.text
             body = resp.json()
-            assert body["actor_kind"] == "user"
             assert body["user_id"] == user_id
-            assert set(body["scopes"]) == DEPLOYMENT_SCOPE_CATALOG
+            # Session principals carry the full catalogue.
+            assert set(body["capabilities"].keys()) == DEPLOYMENT_SCOPE_CATALOG
         finally:
             _wipe(session_factory)
 
@@ -315,19 +322,19 @@ class TestAdminPingDep:
             )
 
             resp = client.get(
-                "/admin/api/v1/_ping",
+                "/admin/api/v1/me",
                 headers={"Authorization": f"Bearer {token}"},
             )
             assert resp.status_code == 200, resp.text
             body = resp.json()
-            assert body["actor_kind"] == "agent"
-            assert body["scopes"] == ["deployment.audit:read"]
+            # Scoped tokens carry only the row's scope set.
+            assert body["capabilities"] == {"deployment.audit:read": True}
         finally:
             _wipe(session_factory)
 
     def test_no_auth_returns_404(self, client: TestClient) -> None:
-        """A ping request with no auth material 404s through the canonical envelope."""
-        resp = client.get("/admin/api/v1/_ping")
+        """A request with no auth material 404s through the canonical envelope."""
+        resp = client.get("/admin/api/v1/me")
         assert resp.status_code == 404, resp.text
         body = resp.json()
         # The factory wires :func:`add_exception_handlers` so the
@@ -350,7 +357,7 @@ class TestAdminPingDep:
             )
             client.cookies.set(SESSION_COOKIE_NAME, cookie_value)
 
-            resp = client.get("/admin/api/v1/_ping")
+            resp = client.get("/admin/api/v1/me")
             assert resp.status_code == 404, resp.text
             assert resp.json().get("error") == "not_found"
         finally:
@@ -378,7 +385,7 @@ class TestAdminPingDep:
             )
 
             resp = client.get(
-                "/admin/api/v1/_ping",
+                "/admin/api/v1/me",
                 headers={"Authorization": f"Bearer {token}"},
             )
             assert resp.status_code == 422, resp.text

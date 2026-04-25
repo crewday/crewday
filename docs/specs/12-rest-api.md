@@ -607,10 +607,80 @@ flat.
 
 The dep is mounted per-route; the `/admin/api/v1` prefix stays in
 the workspace tenancy middleware's `SKIP_PATHS` so no slug
-resolution runs for an admin-tree request. A throwaway
-`GET /admin/api/v1/_ping` route is the cd-xgmu integration probe
-(hidden from OpenAPI; superseded by `GET /admin/api/v1/me`,
-cd-yj4k).
+resolution runs for an admin-tree request.
+
+**Caller identity (cd-yj4k).** Two routes carry the minimal
+deployment-admin shell. Both use the dep above; both 404 for every
+non-admin caller.
+
+`GET /admin/api/v1/me` — caller's identity + capability map:
+
+```json
+{
+  "user_id": "01HKPNRZ...",
+  "display_name": "Ada Lovelace",
+  "email": "ada@example.com",
+  "is_owner": false,
+  "capabilities": {
+    "deployment.audit:read": true,
+    "deployment.llm:read": true,
+    "deployment.llm:write": true,
+    "...": "..."
+  }
+}
+```
+
+* `user_id` is the human (or delegating human for delegated
+  tokens) the dep resolved.
+* `display_name` / `email` are read off the `user` row verbatim
+  (the email is the display value, not the canonicalised lookup
+  form).
+* `is_owner` is `true` iff the user belongs to the deployment
+  `owners` permission group. The deployment owners group lands
+  with cd-zkr; until then this field is always `false`.
+* `capabilities` is a flat `{scope_key: true}` map — one entry
+  per `deployment.*` scope key the caller currently holds, sorted
+  by key. Session / delegated principals carry every key from the
+  catalog above; scoped tokens carry only the subset their row
+  pins. Absent keys mean "not granted" — there are no `false`
+  entries.
+
+`GET /admin/api/v1/me/admins` — listing of every active deployment
+admin grant:
+
+```json
+{
+  "admins": [
+    {
+      "id": "01HKPNRZ...",                  // role_grant.id
+      "user_id": "01HKPRX...",
+      "display_name": "Ada Lovelace",
+      "email": "ada@example.com",
+      "is_owner": false,
+      "granted_at": "2026-04-25T12:00:00+00:00",
+      "granted_by": "system"                 // user.id, or "system"
+                                             // when the column is NULL
+    }
+  ],
+  "groups": []
+}
+```
+
+* Listing covers every `role_grant` row with
+  `scope_kind='deployment'`, joined to the `user` row, ordered by
+  `created_at` ascending (oldest admins first).
+* `granted_by` surfaces the actor that planted the grant
+  (`role_grant.created_by_user_id`); the column is NULL for the
+  bootstrap row seeded at deployment creation, which surfaces as
+  the literal string `"system"` so the SPA's table can render the
+  cell without a defensive nullish-coalesce.
+* `is_owner` is forward-reserved for the deployment `owners`
+  permission group (cd-zkr); until that group lands every entry
+  emits `false`.
+* `groups` is reserved for the deployment owners + managers group
+  listings (cd-zkr / cd-79r). The wrapper envelope is shipped
+  today so consumers can stay forward-compatible without a shape
+  break when the field starts populating.
 
 ```
 # Caller identity

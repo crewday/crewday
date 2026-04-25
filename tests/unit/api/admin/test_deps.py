@@ -2,21 +2,26 @@
 
 Exercises :func:`current_deployment_admin_principal` end-to-end against
 an in-memory SQLite engine with :class:`Base.metadata` schema. The dep
-is mounted on a throwaway FastAPI app whose only route is the cd-xgmu
-``GET /admin/api/v1/_ping`` probe carried by
-:mod:`app.api.admin.__init__`; we drive the dep through that route
-rather than calling the function directly so the test exercises the
-production wiring (cookie aliases, header lookup, ``request.headers``
-read) verbatim.
+is mounted on a throwaway FastAPI app whose only mounted routes are
+``GET /admin/api/v1/me`` + ``GET /admin/api/v1/me/admins`` (cd-yj4k);
+we drive the dep through ``/me`` rather than calling the function
+directly so the test exercises the production wiring (cookie aliases,
+header lookup, ``request.headers`` read) verbatim.
 
-Coverage matches the cd-xgmu acceptance criteria:
+Coverage matches the cd-xgmu acceptance criteria. The cd-xgmu probe
+:`GET /admin/api/v1/_ping` it originally drove was retired by cd-yj4k;
+we now read the dep's ``actor_kind`` discriminator indirectly through
+the size of :attr:`AdminMeResponse.capabilities` — a session /
+delegated principal carries the full
+:data:`DEPLOYMENT_SCOPE_CATALOG`, while a scoped agent token carries
+only the keys its row pins.
 
 * Session principal — admin grant present → 200, full
-  :data:`DEPLOYMENT_SCOPE_CATALOG` returned;
+  :data:`DEPLOYMENT_SCOPE_CATALOG` reflected in the capabilities map;
 * Session principal — non-admin user → 404;
 * Session principal — invalid / unknown cookie → 404;
 * Token principal — scoped token with ``deployment.llm:read`` → 200,
-  scope set narrowed to the row's keys;
+  capabilities narrowed to the row's keys;
 * Token principal — scoped token with workspace-only scopes → 404;
 * Token principal — scoped token mixing ``deployment:*`` with workspace
   scopes → 422 ``deployment_scope_conflict``;
@@ -315,14 +320,14 @@ class TestSessionPrincipal:
         )
         client.cookies.set(SESSION_COOKIE_NAME, cookie_value)
 
-        resp = client.get("/admin/api/v1/_ping")
+        resp = client.get("/admin/api/v1/me")
         assert resp.status_code == 200, resp.text
         body = resp.json()
-        assert body["ok"] is True
-        assert body["actor_kind"] == "user"
         assert body["user_id"] == user_id
-        # Session principals carry the full catalogue.
-        assert set(body["scopes"]) == DEPLOYMENT_SCOPE_CATALOG
+        # Session principals carry the full catalogue — the
+        # capabilities map's keyset is the dep's scope set.
+        assert set(body["capabilities"].keys()) == DEPLOYMENT_SCOPE_CATALOG
+        assert all(value is True for value in body["capabilities"].values())
 
     def test_non_admin_session_returns_404(
         self,
@@ -340,7 +345,7 @@ class TestSessionPrincipal:
         )
         client.cookies.set(SESSION_COOKIE_NAME, cookie_value)
 
-        resp = client.get("/admin/api/v1/_ping")
+        resp = client.get("/admin/api/v1/me")
         assert resp.status_code == 404, resp.text
         body = resp.json()
         # Problem+json envelope from the registered error handler.
@@ -354,13 +359,13 @@ class TestSessionPrincipal:
         """A cookie value that does not match any row 404s."""
         client.cookies.set(SESSION_COOKIE_NAME, "not-a-real-cookie-value")
 
-        resp = client.get("/admin/api/v1/_ping")
+        resp = client.get("/admin/api/v1/me")
         assert resp.status_code == 404
         assert resp.json().get("error") == "not_found"
 
     def test_no_auth_material_returns_404(self, client: TestClient) -> None:
         """A request with neither cookie nor header 404s."""
-        resp = client.get("/admin/api/v1/_ping")
+        resp = client.get("/admin/api/v1/me")
         assert resp.status_code == 404
         assert resp.json().get("error") == "not_found"
 
@@ -393,16 +398,15 @@ class TestTokenPrincipal:
         )
 
         resp = client.get(
-            "/admin/api/v1/_ping",
+            "/admin/api/v1/me",
             headers={"Authorization": f"Bearer {token}"},
         )
         assert resp.status_code == 200, resp.text
         body = resp.json()
-        assert body["actor_kind"] == "agent"
         assert body["user_id"] == user_id
         # Scoped tokens carry only the row's scope set, not the
-        # full catalogue.
-        assert body["scopes"] == ["deployment.llm:read"]
+        # full catalogue — the capabilities map mirrors that subset.
+        assert body["capabilities"] == {"deployment.llm:read": True}
 
     def test_scoped_token_with_only_workspace_scopes_returns_404(
         self,
@@ -424,7 +428,7 @@ class TestTokenPrincipal:
         )
 
         resp = client.get(
-            "/admin/api/v1/_ping",
+            "/admin/api/v1/me",
             headers={"Authorization": f"Bearer {token}"},
         )
         assert resp.status_code == 404, resp.text
@@ -450,7 +454,7 @@ class TestTokenPrincipal:
         )
 
         resp = client.get(
-            "/admin/api/v1/_ping",
+            "/admin/api/v1/me",
             headers={"Authorization": f"Bearer {token}"},
         )
         assert resp.status_code == 422, resp.text
@@ -463,7 +467,7 @@ class TestTokenPrincipal:
     def test_unknown_bearer_token_returns_404(self, client: TestClient) -> None:
         """A malformed / unknown bearer token 404s."""
         resp = client.get(
-            "/admin/api/v1/_ping",
+            "/admin/api/v1/me",
             headers={"Authorization": "Bearer mip_notreal_notreal"},
         )
         assert resp.status_code == 404
@@ -489,14 +493,15 @@ class TestTokenPrincipal:
         )
 
         resp = client.get(
-            "/admin/api/v1/_ping",
+            "/admin/api/v1/me",
             headers={"Authorization": f"Bearer {token}"},
         )
         assert resp.status_code == 200, resp.text
         body = resp.json()
-        assert body["actor_kind"] == "delegated"
         assert body["user_id"] == admin_id
-        assert set(body["scopes"]) == DEPLOYMENT_SCOPE_CATALOG
+        # Delegated principals inherit the human's authority — the
+        # capabilities map carries the full catalogue.
+        assert set(body["capabilities"].keys()) == DEPLOYMENT_SCOPE_CATALOG
 
     def test_delegated_token_for_non_admin_returns_404(
         self,
@@ -518,7 +523,7 @@ class TestTokenPrincipal:
         )
 
         resp = client.get(
-            "/admin/api/v1/_ping",
+            "/admin/api/v1/me",
             headers={"Authorization": f"Bearer {token}"},
         )
         assert resp.status_code == 404, resp.text
@@ -553,7 +558,7 @@ class TestBearerHeaderParsing:
         )
 
         resp = client.get(
-            "/admin/api/v1/_ping",
+            "/admin/api/v1/me",
             headers={"Authorization": f"bearer {token}"},
         )
         assert resp.status_code == 200, resp.text
@@ -576,10 +581,12 @@ class TestBearerHeaderParsing:
         client.cookies.set(SESSION_COOKIE_NAME, cookie_value)
 
         resp = client.get(
-            "/admin/api/v1/_ping",
+            "/admin/api/v1/me",
             headers={"Authorization": "Bearer "},
         )
         # Empty bearer → fallthrough to session cookie → admin session
-        # → 200.
+        # → 200. A session principal carries the full catalogue, so
+        # the capabilities keyset is a load-bearing proxy for the dep
+        # picking the cookie arm rather than rejecting the call.
         assert resp.status_code == 200, resp.text
-        assert resp.json()["actor_kind"] == "user"
+        assert set(resp.json()["capabilities"].keys()) == DEPLOYMENT_SCOPE_CATALOG
