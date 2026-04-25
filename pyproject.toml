@@ -285,6 +285,18 @@ ignore_imports = [
     # adapters" contract honest without forcing every auth domain
     # call to route through a port.
     "app.domain.identity.membership -> app.auth.magic_link",
+    # v1 stopgap (cd-dv2): the existing
+    # ``app.services.employees.service`` reads
+    # :class:`UserWorkspace` / :class:`WorkEngagement` /
+    # :class:`UserWorkRole` from ``app.adapters.db.workspace.models``
+    # (and identity models via existing seams). The transitive edge
+    # surfaces now that ``app.domain.identity.membership`` imports
+    # the seed-pending helper from
+    # ``app.services.employees.service``. Same Protocol-seam pattern
+    # as the other identity stopgaps; tracked by cd-duv6 — drops
+    # once the workspace + identity repositories land.
+    "app.services.employees.service -> app.adapters.db.workspace.models",
+    "app.domain.identity.membership -> app.services.employees.service",
     # v1 stopgap (cd-ckr): the owners-membership check lives under
     # ``app.authz.owners`` so the tenancy middleware (cd-7y4) and
     # the identity domain share one SELECT shape. ``app.authz``
@@ -368,6 +380,17 @@ ignore_imports = [
     # repositories land.
     "app.domain.messaging.notifications -> app.adapters.db.messaging.models",
     "app.domain.messaging.notifications -> app.adapters.db.identity.models",
+    # v1 stopgap (cd-0bnz): ``app.domain.messaging.push_tokens``
+    # reads :class:`PushToken` from
+    # ``app.adapters.db.messaging.models`` (register / list / revoke
+    # rows) and :class:`Workspace` from
+    # ``app.adapters.db.workspace.models`` (settings_json caps for
+    # per-tenant token limits). Same Protocol-seam pattern as the
+    # notifications service above; tracked by cd-duv6 (extended
+    # scope) — drops once the messaging + workspace repositories
+    # land.
+    "app.domain.messaging.push_tokens -> app.adapters.db.messaging.models",
+    "app.domain.messaging.push_tokens -> app.adapters.db.workspace.models",
     # v1 stopgap (cd-k0qf): ``app.domain.llm.router`` reads
     # :class:`ModelAssignment` / :class:`LlmCapabilityInheritance`
     # from ``app.adapters.db.llm.models`` directly. Same Protocol-
@@ -400,6 +423,49 @@ ignore_imports = [
     # the tasks + inventory repositories land.
     "app.domain.tasks.completion -> app.adapters.db.tasks.models",
     "app.domain.tasks.completion -> app.adapters.db.inventory.models",
+    # v1 stopgap (cd-cfe4): ``app.domain.tasks.comments`` reads
+    # :class:`Comment` / :class:`Occurrence` / :class:`Evidence` from
+    # ``app.adapters.db.tasks.models``, :class:`User` from
+    # ``app.adapters.db.identity.models`` and
+    # :class:`UserWorkspace` from ``app.adapters.db.workspace.models``
+    # (author resolution + workspace-membership filter). It also
+    # invokes :func:`app.authz.require` for the moderator-delete
+    # capability check — same transitive-walk reasoning as the
+    # ``app.domain.tasks.oneoff -> app.authz`` stopgap above. Same
+    # Protocol-seam pattern as the other tasks services; tracked by
+    # cd-duv6 — drops once the tasks / identity / workspace
+    # repositories land.
+    "app.domain.tasks.comments -> app.adapters.db.tasks.models",
+    "app.domain.tasks.comments -> app.adapters.db.identity.models",
+    "app.domain.tasks.comments -> app.adapters.db.workspace.models",
+    "app.domain.tasks.comments -> app.authz",
+    # v1 stopgap (cd-7rfu, cd-9guk, cd-95zb):
+    # ``app.domain.expenses.claims`` reads :class:`ExpenseClaim` /
+    # :class:`ExpenseAttachment` and ``app.domain.expenses.approval``
+    # reads :class:`ExpenseClaim` from
+    # ``app.adapters.db.expenses.models`` (plus the module-private
+    # ``_STATE_VALUES`` / ``_CATEGORY_VALUES`` /
+    # ``_ATTACHMENT_KIND_VALUES`` / ``_REIMBURSED_VIA_VALUES`` value
+    # tuples). Both also read :class:`WorkEngagement` from
+    # ``app.adapters.db.workspace.models`` (per-engagement budget +
+    # routing). Both also call :func:`app.authz.require` for the
+    # ``expenses.create`` / ``expenses.approve`` defence-in-depth
+    # checks — same transitive-walk reasoning as the
+    # ``app.domain.tasks.oneoff -> app.authz`` stopgap above.
+    # ``app.domain.expenses.autofill`` additionally reads
+    # :class:`LlmUsage` from ``app.adapters.db.llm.models`` to
+    # record post-flight token spend (same envelope as the LLM
+    # router/budget stopgaps). Same Protocol-seam pattern as the
+    # tasks / messaging services; tracked by cd-duv6 — drops once
+    # the expenses + workspace + llm repositories land.
+    "app.domain.expenses.claims -> app.adapters.db.expenses.models",
+    "app.domain.expenses.claims -> app.adapters.db.workspace.models",
+    "app.domain.expenses.claims -> app.authz",
+    "app.domain.expenses.approval -> app.adapters.db.expenses.models",
+    "app.domain.expenses.approval -> app.adapters.db.workspace.models",
+    "app.domain.expenses.approval -> app.authz",
+    "app.domain.expenses.autofill -> app.adapters.db.expenses.models",
+    "app.domain.expenses.autofill -> app.adapters.db.llm.models",
     # v1 stopgap (cd-dcfw): ``app.domain.identity.work_roles`` /
     # ``user_work_roles`` / ``work_engagements`` read
     # :class:`WorkRole` / :class:`UserWorkRole` /
@@ -437,6 +503,35 @@ ignore_imports = [
     # ``tasks.create`` defence-in-depth check, which transitively
     # pulls the FastAPI-dep seam. Drops with the same cleanup.
     "app.domain.tasks.oneoff -> app.authz",
+    # v1 stopgap (cd-cfe4): same reasoning as the
+    # ``app.domain.tasks.oneoff -> app.authz`` entry above —
+    # ``app.domain.tasks.comments`` delegates the moderator-delete
+    # capability check to :func:`app.authz.require`, which
+    # transitively pulls the FastAPI-dep seam through
+    # :mod:`app.authz.enforce`. Drops with the same cleanup
+    # (cd-duv6).
+    "app.domain.tasks.comments -> app.authz",
+    # v1 stopgap (cd-7rfu, cd-9guk): same reasoning as the
+    # ``app.domain.tasks.oneoff -> app.authz`` entry above —
+    # ``app.domain.expenses.claims`` and
+    # ``app.domain.expenses.approval`` call
+    # :func:`app.authz.require` for the ``expenses.create`` /
+    # ``expenses.approve`` defence-in-depth checks, which
+    # transitively pulls the FastAPI-dep seam through
+    # :mod:`app.authz.enforce`. Drops with the same cleanup
+    # (cd-duv6).
+    "app.domain.expenses.claims -> app.authz",
+    "app.domain.expenses.approval -> app.authz",
+    # v1 stopgap (cd-dv2): ``app.domain.identity.membership``
+    # delegates seed-pending logic to
+    # :mod:`app.services.employees.service`, which itself calls
+    # :func:`app.authz.require` and thereby pulls the FastAPI-dep
+    # seam through :mod:`app.authz.enforce` — same chain as the
+    # other ``-> app.authz`` stopgaps above. Whitelisting the
+    # initiating domain → service edge short-circuits the walk
+    # without forcing membership to duplicate the employee-seed
+    # body. Drops with cd-duv6 (extended scope).
+    "app.domain.identity.membership -> app.services.employees.service",
 ]
 unmatched_ignore_imports_alerting = "none"
 
