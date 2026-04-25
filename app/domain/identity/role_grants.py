@@ -53,22 +53,26 @@ transaction as the INSERT / DELETE. The caller owns the
 transaction boundary — the service never calls
 ``session.commit()`` (§01 "Key runtime invariants" #3).
 
-**Architecture note.** This module imports SQLAlchemy model classes
-from :mod:`app.adapters.db.authz.models` and
-:mod:`app.adapters.db.places.models` directly. Contract 1 of the
-import-linter (``app.domain → app.adapters``) forbids that in
-principle, so the pyproject carries two narrow ``ignore_imports``
-stopgaps for this path and the follow-up refactor is tracked by
-cd-duv6 (extended scope: covers both ``permission_groups`` and
-``role_grants``). The interim coupling keeps this v1 slice
-shippable without blocking on a broader Protocol-seam refactor of
-every domain context.
+**Architecture.** The module talks to a
+:class:`~app.adapters.db.authz.ports.RoleGrantRepository` Protocol
+(cd-duv6) — never to the SQLAlchemy model classes directly. The
+SA-backed concretion at
+:class:`app.adapters.db.authz.repositories.SqlAlchemyRoleGrantRepository`
+covers both the ``role_grant`` rows and the ``property_workspace``
+junction the cross-workspace property-scope check needs (those
+adapters can import each other; only ``app.domain → app.adapters``
+is forbidden). The repo also threads its open
+:class:`~sqlalchemy.orm.Session` through ``repo.session`` so the
+audit writer (``app.audit.write_audit``), the locking primitive
+(:func:`app.domain.identity._owner_guard.count_owner_members_locked`),
+and the owners-membership lookup
+(:func:`app.authz.owners.is_owner_member`) keep using the same UoW.
 
 The owners-membership lookup is delegated to
 :func:`app.authz.owners.is_owner_member` so the tenancy middleware
-(cd-7y4) and this module share one SELECT shape. Same DB coupling
-under the hood; the shared helper just keeps the definition of
-"owner" in one place.
+(cd-7y4) and this module share one SELECT shape. That helper still
+takes a raw ``Session`` today; once it gains its own Protocol seam
+the ``repo.session`` accessor here can drop.
 """
 
 from __future__ import annotations
@@ -77,11 +81,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
 
-from sqlalchemy import exists, select
-from sqlalchemy.orm import Session
-
-from app.adapters.db.authz.models import RoleGrant
-from app.adapters.db.places.models import PropertyWorkspace
+from app.adapters.db.authz.ports import RoleGrantRepository, RoleGrantRow
 from app.audit import write_audit
 from app.authz.owners import is_owner_member
 from app.domain.identity._owner_guard import count_owner_members_locked
@@ -192,25 +192,14 @@ class LastOwnerGrantProtected(ValueError):
 # ---------------------------------------------------------------------------
 
 
-def _to_ref(row: RoleGrant) -> RoleGrantRef:
-    """Project a loaded ORM row into an immutable :class:`RoleGrantRef`.
+def _row_to_ref(row: RoleGrantRow) -> RoleGrantRef:
+    """Project a seam-level :class:`RoleGrantRow` into the public ref.
 
-    The :class:`RoleGrant` model widened ``workspace_id`` to nullable
-    in cd-wchi to fit the ``scope_kind = 'deployment'`` partition, but
-    every code path in this **workspace-scoped** domain service either
-    reads via :func:`_load_grant` (filters on
-    ``RoleGrant.workspace_id == ctx.workspace_id``) or writes a row
-    with ``workspace_id=ctx.workspace_id`` explicitly. The biconditional
-    CHECK then enforces ``scope_kind='workspace'`` ⇒ ``workspace_id IS
-    NOT NULL`` at the DB level. The assertion narrows the static type
-    without papering over the new invariant — a deployment-scope row
-    must never reach this service.
+    The repo already returned an immutable, frozen value object; we
+    re-pack it into the public :class:`RoleGrantRef` shape so callers
+    continue to receive the dataclass they were already typing
+    against. Same field-by-field projection — no behaviour change.
     """
-    assert row.workspace_id is not None, (
-        "role_grant row reached the workspace-scoped service with "
-        f"workspace_id IS NULL (id={row.id!r}, scope_kind={row.scope_kind!r}); "
-        "deployment-scope rows must use the admin surface helpers"
-    )
     return RoleGrantRef(
         id=row.id,
         workspace_id=row.workspace_id,
@@ -222,50 +211,24 @@ def _to_ref(row: RoleGrant) -> RoleGrantRef:
     )
 
 
-def _load_grant(session: Session, ctx: WorkspaceContext, *, grant_id: str) -> RoleGrant:
+def _load_grant(
+    repo: RoleGrantRepository, ctx: WorkspaceContext, *, grant_id: str
+) -> RoleGrantRow:
     """Load ``grant_id`` scoped to the caller's workspace or raise.
 
     The ORM tenant filter already constrains SELECTs to the active
-    :class:`~app.tenancy.WorkspaceContext`, but we also assert
+    :class:`~app.tenancy.WorkspaceContext`, but the repo also asserts
     ``workspace_id`` explicitly so a misconfigured context fails
     loudly instead of silently returning a sibling workspace's row.
     """
-    row = session.scalars(
-        select(RoleGrant).where(
-            RoleGrant.id == grant_id,
-            RoleGrant.workspace_id == ctx.workspace_id,
-        )
-    ).one_or_none()
+    row = repo.get_grant(workspace_id=ctx.workspace_id, grant_id=grant_id)
     if row is None:
         raise RoleGrantNotFound(grant_id)
     return row
 
 
-def _has_active_manager_grant(
-    session: Session, ctx: WorkspaceContext, *, user_id: str
-) -> bool:
-    """Return ``True`` iff ``user_id`` holds a ``manager`` grant here.
-
-    v1 slice has no ``revoked_at`` column on ``role_grant`` (§02's
-    full schema is deferred to a follow-up migration). Any row with
-    ``grant_role = 'manager'`` in the caller's workspace counts as
-    an active manager grant for the purpose of mint-authority
-    checks.
-    """
-    stmt = (
-        select(RoleGrant)
-        .where(
-            RoleGrant.workspace_id == ctx.workspace_id,
-            RoleGrant.user_id == user_id,
-            RoleGrant.grant_role == "manager",
-        )
-        .limit(1)
-    )
-    return session.scalars(stmt).first() is not None
-
-
 def _assert_authorized_to_grant(
-    session: Session, ctx: WorkspaceContext, *, grant_role: str
+    repo: RoleGrantRepository, ctx: WorkspaceContext, *, grant_role: str
 ) -> None:
     """Raise :class:`NotAuthorizedForRole` if the caller can't mint ``grant_role``.
 
@@ -275,14 +238,18 @@ def _assert_authorized_to_grant(
     * ``worker`` / ``client`` / ``guest`` — ``owners@<workspace>`` OR
       an active ``manager`` role grant in the workspace.
     """
-    if is_owner_member(session, workspace_id=ctx.workspace_id, user_id=ctx.actor_id):
+    if is_owner_member(
+        repo.session, workspace_id=ctx.workspace_id, user_id=ctx.actor_id
+    ):
         return
     if grant_role == "manager":
         raise NotAuthorizedForRole(
             "only members of 'owners' may grant the manager role"
         )
     # Non-owner: still OK if they already hold the manager surface.
-    if _has_active_manager_grant(session, ctx, user_id=ctx.actor_id):
+    if repo.has_active_manager_grant(
+        workspace_id=ctx.workspace_id, user_id=ctx.actor_id
+    ):
         return
     raise NotAuthorizedForRole(
         f"caller is not authorized to mint a {grant_role!r} grant"
@@ -290,7 +257,7 @@ def _assert_authorized_to_grant(
 
 
 def _assert_scope_property_in_workspace(
-    session: Session,
+    repo: RoleGrantRepository,
     ctx: WorkspaceContext,
     *,
     scope_property_id: str,
@@ -304,13 +271,9 @@ def _assert_scope_property_in_workspace(
     through the ORM tenant filter directly; the junction is
     workspace-scoped, so its own tenant predicate runs automatically.
     """
-    stmt = select(
-        exists().where(
-            PropertyWorkspace.property_id == scope_property_id,
-            PropertyWorkspace.workspace_id == ctx.workspace_id,
-        )
-    )
-    if not session.scalar(stmt):
+    if not repo.is_property_in_workspace(
+        workspace_id=ctx.workspace_id, property_id=scope_property_id
+    ):
         raise CrossWorkspaceProperty(
             f"property {scope_property_id!r} is not linked to this workspace"
         )
@@ -322,7 +285,7 @@ def _assert_scope_property_in_workspace(
 
 
 def list_grants(
-    session: Session,
+    repo: RoleGrantRepository,
     ctx: WorkspaceContext,
     *,
     user_id: str | None = None,
@@ -341,14 +304,12 @@ def list_grants(
     regardless of user" pass ``scope_property_id`` alone; passing
     both narrows to the intersection.
     """
-    stmt = select(RoleGrant).where(RoleGrant.workspace_id == ctx.workspace_id)
-    if user_id is not None:
-        stmt = stmt.where(RoleGrant.user_id == user_id)
-    if scope_property_id is not None:
-        stmt = stmt.where(RoleGrant.scope_property_id == scope_property_id)
-    stmt = stmt.order_by(RoleGrant.created_at.asc(), RoleGrant.id.asc())
-    rows = session.scalars(stmt).all()
-    return [_to_ref(row) for row in rows]
+    rows = repo.list_grants(
+        workspace_id=ctx.workspace_id,
+        user_id=user_id,
+        scope_property_id=scope_property_id,
+    )
+    return [_row_to_ref(row) for row in rows]
 
 
 # ---------------------------------------------------------------------------
@@ -357,7 +318,7 @@ def list_grants(
 
 
 def grant(
-    session: Session,
+    repo: RoleGrantRepository,
     ctx: WorkspaceContext,
     *,
     user_id: str,
@@ -389,16 +350,16 @@ def grant(
     if grant_role not in _VALID_GRANT_ROLES:
         raise GrantRoleInvalid(grant_role)
 
-    _assert_authorized_to_grant(session, ctx, grant_role=grant_role)
+    _assert_authorized_to_grant(repo, ctx, grant_role=grant_role)
 
     if scope_property_id is not None:
         _assert_scope_property_in_workspace(
-            session, ctx, scope_property_id=scope_property_id
+            repo, ctx, scope_property_id=scope_property_id
         )
 
     now = (clock if clock is not None else SystemClock()).now()
-    row = RoleGrant(
-        id=new_ulid(),
+    row = repo.insert_grant(
+        grant_id=new_ulid(),
         workspace_id=ctx.workspace_id,
         user_id=user_id,
         grant_role=grant_role,
@@ -406,11 +367,9 @@ def grant(
         created_at=now,
         created_by_user_id=ctx.actor_id,
     )
-    session.add(row)
-    session.flush()
 
     write_audit(
-        session,
+        repo.session,
         ctx,
         entity_kind="role_grant",
         entity_id=row.id,
@@ -422,11 +381,11 @@ def grant(
         },
         clock=clock,
     )
-    return _to_ref(row)
+    return _row_to_ref(row)
 
 
 def revoke(
-    session: Session,
+    repo: RoleGrantRepository,
     ctx: WorkspaceContext,
     *,
     grant_id: str,
@@ -450,19 +409,21 @@ def revoke(
     ``clock`` is optional; tests pin the audit row's ``created_at``
     via a :class:`~app.util.clock.FrozenClock`.
     """
-    row = _load_grant(session, ctx, grant_id=grant_id)
+    row = _load_grant(repo, ctx, grant_id=grant_id)
 
     # V1 pragmatic rule (see module docstring): only ``manager`` revokes
     # interact with owners-membership. Worker / client / guest revokes
     # never affect the owners governance anchor, so they always pass.
     if row.grant_role == "manager" and is_owner_member(
-        session, workspace_id=ctx.workspace_id, user_id=row.user_id
+        repo.session, workspace_id=ctx.workspace_id, user_id=row.user_id
     ):
         # :func:`count_owner_members_locked` takes a write lock on the
         # owners-group row before counting so a concurrent
         # ``remove_member`` / ``revoke`` can't observe the pre-change
         # count and race us to an empty governance seat (cd-mb5n).
-        owner_count = count_owner_members_locked(session, workspace_id=ctx.workspace_id)
+        owner_count = count_owner_members_locked(
+            repo.session, workspace_id=ctx.workspace_id
+        )
         # The caller's workspace always has ≥ 1 owner (§02
         # "permission_group" §"Invariants"); the count check protects
         # against the ``owner_count == 1`` lockout specifically.
@@ -472,21 +433,19 @@ def revoke(
                 "transfer owners-membership first"
             )
 
-    # Snapshot the fields the audit row needs before the DELETE; once the
-    # row is gone SQLAlchemy may expire the instance and a later
-    # attribute read would issue a SELECT against a missing row. We
-    # also carry ``scope_property_id`` into the audit payload so
-    # operational forensics ("which property grant was removed?") can
-    # reconstruct the deleted row without walking back to the earlier
-    # ``granted`` entry.
+    # Snapshot the fields the audit row needs before the DELETE; once
+    # the row is gone we cannot read it again. We also carry
+    # ``scope_property_id`` into the audit payload so operational
+    # forensics ("which property grant was removed?") can reconstruct
+    # the deleted row without walking back to the earlier ``granted``
+    # entry.
     user_id = row.user_id
     grant_role = row.grant_role
     scope_property_id = row.scope_property_id
-    session.delete(row)
-    session.flush()
+    repo.delete_grant(workspace_id=ctx.workspace_id, grant_id=grant_id)
 
     write_audit(
-        session,
+        repo.session,
         ctx,
         entity_kind="role_grant",
         entity_id=grant_id,

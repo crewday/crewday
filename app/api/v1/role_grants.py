@@ -51,6 +51,7 @@ from sqlalchemy import exists, select
 from sqlalchemy.orm import Session
 
 from app.adapters.db.authz.models import RoleGrant
+from app.adapters.db.authz.repositories import SqlAlchemyRoleGrantRepository
 from app.adapters.db.places.models import PropertyWorkspace
 from app.api.deps import current_workspace_context, db_session
 from app.api.pagination import (
@@ -308,7 +309,7 @@ def build_role_grants_router() -> APIRouter:
         """
         try:
             ref = grant(
-                session,
+                SqlAlchemyRoleGrantRepository(session),
                 ctx,
                 user_id=body.user_id,
                 grant_role=body.grant_role,
@@ -455,7 +456,7 @@ def build_role_grants_router() -> APIRouter:
         prompt the operator to transfer owners-membership first.
         """
         try:
-            revoke(session, ctx, grant_id=grant_id)
+            revoke(SqlAlchemyRoleGrantRepository(session), ctx, grant_id=grant_id)
         except RoleGrantNotFound as exc:
             raise _http_for_not_found() from exc
         except LastOwnerGrantProtected as exc:
@@ -517,7 +518,7 @@ def build_users_role_grants_router() -> APIRouter:
         # :func:`list_grants` with an ``after_id`` kwarg in lockstep.
         after_id = decode_cursor(cursor)
         refs = list_grants(
-            session,
+            SqlAlchemyRoleGrantRepository(session),
             ctx,
             user_id=user_id,
             scope_property_id=scope_property_id,

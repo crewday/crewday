@@ -29,6 +29,7 @@ from sqlalchemy.orm import Session
 
 from app.adapters.db.audit.models import AuditLog
 from app.adapters.db.authz.models import PermissionGroupMember
+from app.adapters.db.authz.repositories import SqlAlchemyPermissionGroupRepository
 from app.domain.identity.permission_groups import (
     PermissionGroupNotFound,
     PermissionGroupRef,
@@ -50,6 +51,17 @@ from app.tenancy.current import reset_current, set_current
 from app.tenancy.orm_filter import install_tenant_filter
 from app.util.clock import FrozenClock
 from tests.factories.identity import bootstrap_user, bootstrap_workspace
+
+
+def _repo(session: Session) -> SqlAlchemyPermissionGroupRepository:
+    """Wrap ``session`` in the SA-backed ``PermissionGroupRepository``.
+
+    The domain services accept the repository Protocol (cd-duv6); the
+    integration tests wire the production SA-backed concretion so the
+    full SQL round-trip is exercised on every assertion.
+    """
+    return SqlAlchemyPermissionGroupRepository(session)
+
 
 pytestmark = pytest.mark.integration
 
@@ -164,7 +176,7 @@ class TestCreateAndRead:
     def test_create_then_get(self, env: tuple[Session, WorkspaceContext]) -> None:
         session, ctx = env
         ref = create_group(
-            session,
+            _repo(session),
             ctx,
             slug="family",
             name="Family",
@@ -176,7 +188,7 @@ class TestCreateAndRead:
         assert ref.system is False
         assert ref.capabilities == {"tasks.create": True}
 
-        fetched = get_group(session, ctx, group_id=ref.id)
+        fetched = get_group(_repo(session), ctx, group_id=ref.id)
         assert fetched.id == ref.id
         assert fetched.slug == ref.slug
         assert fetched.name == ref.name
@@ -188,14 +200,14 @@ class TestCreateAndRead:
     ) -> None:
         session, ctx = env
         family = create_group(
-            session,
+            _repo(session),
             ctx,
             slug="family",
             name="Family",
             capabilities={},
             clock=FrozenClock(_PINNED),
         )
-        rows = list_groups(session, ctx)
+        rows = list_groups(_repo(session), ctx)
         slugs = {r.slug for r in rows}
         assert "owners" in slugs
         assert "family" in slugs
@@ -204,7 +216,7 @@ class TestCreateAndRead:
     def test_get_missing_raises(self, env: tuple[Session, WorkspaceContext]) -> None:
         session, ctx = env
         with pytest.raises(PermissionGroupNotFound):
-            get_group(session, ctx, group_id="01HWA00000000000000000NONE")
+            get_group(_repo(session), ctx, group_id="01HWA00000000000000000NONE")
 
 
 class TestDuplicateSlug:
@@ -213,7 +225,7 @@ class TestDuplicateSlug:
     def test_duplicate_slug_raises(self, env: tuple[Session, WorkspaceContext]) -> None:
         session, ctx = env
         first = create_group(
-            session,
+            _repo(session),
             ctx,
             slug="family",
             name="Family",
@@ -222,7 +234,7 @@ class TestDuplicateSlug:
         )
         with pytest.raises(PermissionGroupSlugTaken) as exc:
             create_group(
-                session,
+                _repo(session),
                 ctx,
                 slug="family",
                 name="Family II",
@@ -235,7 +247,7 @@ class TestDuplicateSlug:
         # ``create_group`` implementation must wrap its flush in a
         # SAVEPOINT so an IntegrityError can't poison the outer
         # transaction.
-        surviving = get_group(session, ctx, group_id=first.id)
+        surviving = get_group(_repo(session), ctx, group_id=first.id)
         assert surviving.slug == "family"
         assert surviving.name == "Family"
 
@@ -248,7 +260,7 @@ class TestDuplicateSlug:
         session, ctx = env
         with pytest.raises(PermissionGroupSlugTaken):
             create_group(
-                session,
+                _repo(session),
                 ctx,
                 slug="owners",
                 name="Fake Owners",
@@ -270,7 +282,7 @@ class TestUpdateGroup:
     ) -> None:
         session, ctx = env
         ref = create_group(
-            session,
+            _repo(session),
             ctx,
             slug="family",
             name="Family",
@@ -278,7 +290,7 @@ class TestUpdateGroup:
             clock=FrozenClock(_PINNED),
         )
         updated = update_group(
-            session,
+            _repo(session),
             ctx,
             group_id=ref.id,
             name="Family (renamed)",
@@ -297,7 +309,7 @@ class TestUpdateGroup:
         session, ctx = env
         owners = _owners_group(session, ctx)
         updated = update_group(
-            session,
+            _repo(session),
             ctx,
             group_id=owners.id,
             name="Custodians",
@@ -313,7 +325,7 @@ class TestUpdateGroup:
         owners = _owners_group(session, ctx)
         with pytest.raises(SystemGroupProtected):
             update_group(
-                session,
+                _repo(session),
                 ctx,
                 group_id=owners.id,
                 capabilities={"tasks.create": True},
@@ -333,17 +345,17 @@ class TestDeleteGroup:
     ) -> None:
         session, ctx = env
         ref = create_group(
-            session,
+            _repo(session),
             ctx,
             slug="family",
             name="Family",
             capabilities={},
             clock=FrozenClock(_PINNED),
         )
-        delete_group(session, ctx, group_id=ref.id)
+        delete_group(_repo(session), ctx, group_id=ref.id)
 
         with pytest.raises(PermissionGroupNotFound):
-            get_group(session, ctx, group_id=ref.id)
+            get_group(_repo(session), ctx, group_id=ref.id)
 
     def test_delete_cascades_members(
         self, env: tuple[Session, WorkspaceContext]
@@ -351,7 +363,7 @@ class TestDeleteGroup:
         """Members are swept by the FK cascade when the group goes."""
         session, ctx = env
         ref = create_group(
-            session,
+            _repo(session),
             ctx,
             slug="family",
             name="Family",
@@ -359,14 +371,14 @@ class TestDeleteGroup:
             clock=FrozenClock(_PINNED),
         )
         add_member(
-            session,
+            _repo(session),
             ctx,
             group_id=ref.id,
             user_id=ctx.actor_id,
             clock=FrozenClock(_PINNED),
         )
 
-        delete_group(session, ctx, group_id=ref.id)
+        delete_group(_repo(session), ctx, group_id=ref.id)
 
         # No member rows linger for that group.
         rows = session.scalars(
@@ -382,7 +394,7 @@ class TestDeleteGroup:
         session, ctx = env
         owners = _owners_group(session, ctx)
         with pytest.raises(SystemGroupProtected):
-            delete_group(session, ctx, group_id=owners.id)
+            delete_group(_repo(session), ctx, group_id=owners.id)
 
 
 # ---------------------------------------------------------------------------
@@ -396,7 +408,7 @@ class TestMembers:
     def test_add_list_remove(self, env: tuple[Session, WorkspaceContext]) -> None:
         session, ctx = env
         ref = create_group(
-            session,
+            _repo(session),
             ctx,
             slug="family",
             name="Family",
@@ -404,7 +416,7 @@ class TestMembers:
             clock=FrozenClock(_PINNED),
         )
         member = add_member(
-            session,
+            _repo(session),
             ctx,
             group_id=ref.id,
             user_id=ctx.actor_id,
@@ -414,12 +426,12 @@ class TestMembers:
         assert member.user_id == ctx.actor_id
         assert member.added_by_user_id == ctx.actor_id
 
-        listed = list_members(session, ctx, group_id=ref.id)
+        listed = list_members(_repo(session), ctx, group_id=ref.id)
         assert [m.user_id for m in listed] == [ctx.actor_id]
 
-        remove_member(session, ctx, group_id=ref.id, user_id=ctx.actor_id)
+        remove_member(_repo(session), ctx, group_id=ref.id, user_id=ctx.actor_id)
 
-        listed = list_members(session, ctx, group_id=ref.id)
+        listed = list_members(_repo(session), ctx, group_id=ref.id)
         assert listed == []
 
     def test_list_members_missing_group_raises(
@@ -427,7 +439,7 @@ class TestMembers:
     ) -> None:
         session, ctx = env
         with pytest.raises(PermissionGroupNotFound):
-            list_members(session, ctx, group_id="01HWA00000000000000000NONE")
+            list_members(_repo(session), ctx, group_id="01HWA00000000000000000NONE")
 
     def test_add_member_is_idempotent(
         self, env: tuple[Session, WorkspaceContext]
@@ -443,7 +455,7 @@ class TestMembers:
         """
         session, ctx = env
         ref = create_group(
-            session,
+            _repo(session),
             ctx,
             slug="family",
             name="Family",
@@ -451,14 +463,14 @@ class TestMembers:
             clock=FrozenClock(_PINNED),
         )
         first = add_member(
-            session,
+            _repo(session),
             ctx,
             group_id=ref.id,
             user_id=ctx.actor_id,
             clock=FrozenClock(_PINNED),
         )
         second = add_member(
-            session,
+            _repo(session),
             ctx,
             group_id=ref.id,
             user_id=ctx.actor_id,
@@ -475,7 +487,7 @@ class TestMembers:
         assert second.added_by_user_id == first.added_by_user_id
 
         # Exactly one membership row persisted.
-        listed = list_members(session, ctx, group_id=ref.id)
+        listed = list_members(_repo(session), ctx, group_id=ref.id)
         assert len(listed) == 1
 
         # Two ``member_added`` audit rows — admin intent is recorded
@@ -495,7 +507,7 @@ class TestMembers:
         """
         session, ctx = env
         ref = create_group(
-            session,
+            _repo(session),
             ctx,
             slug="family",
             name="Family",
@@ -503,16 +515,16 @@ class TestMembers:
             clock=FrozenClock(_PINNED),
         )
         add_member(
-            session,
+            _repo(session),
             ctx,
             group_id=ref.id,
             user_id=ctx.actor_id,
             clock=FrozenClock(_PINNED),
         )
         # First remove deletes the row.
-        remove_member(session, ctx, group_id=ref.id, user_id=ctx.actor_id)
+        remove_member(_repo(session), ctx, group_id=ref.id, user_id=ctx.actor_id)
         # Second remove is a pure no-op write — no row, still an audit.
-        remove_member(session, ctx, group_id=ref.id, user_id=ctx.actor_id)
+        remove_member(_repo(session), ctx, group_id=ref.id, user_id=ctx.actor_id)
 
         member_entity = f"{ref.id}:{ctx.actor_id}"
         rows = _all_audit_for(session, entity_id=member_entity)
@@ -534,7 +546,7 @@ class TestUnknownCapability:
         session, ctx = env
         with pytest.raises(UnknownCapability) as exc:
             create_group(
-                session,
+                _repo(session),
                 ctx,
                 slug="broken",
                 name="Broken",
@@ -544,7 +556,7 @@ class TestUnknownCapability:
         assert str(exc.value) == "does.not_exist"
 
         # Nothing persisted — listing by slug finds no row.
-        rows = list_groups(session, ctx)
+        rows = list_groups(_repo(session), ctx)
         assert "broken" not in {r.slug for r in rows}
 
     def test_update_with_unknown_key(
@@ -552,7 +564,7 @@ class TestUnknownCapability:
     ) -> None:
         session, ctx = env
         ref = create_group(
-            session,
+            _repo(session),
             ctx,
             slug="family",
             name="Family",
@@ -561,14 +573,14 @@ class TestUnknownCapability:
         )
         with pytest.raises(UnknownCapability):
             update_group(
-                session,
+                _repo(session),
                 ctx,
                 group_id=ref.id,
                 capabilities={"bogus.key": True},
             )
 
         # Row still carries the original capabilities payload.
-        again = get_group(session, ctx, group_id=ref.id)
+        again = get_group(_repo(session), ctx, group_id=ref.id)
         assert again.capabilities == {"tasks.create": True}
 
 
@@ -583,7 +595,7 @@ class TestAuditEmission:
     def test_create_emits_audit(self, env: tuple[Session, WorkspaceContext]) -> None:
         session, ctx = env
         ref = create_group(
-            session,
+            _repo(session),
             ctx,
             slug="family",
             name="Family",
@@ -605,7 +617,7 @@ class TestAuditEmission:
     ) -> None:
         session, ctx = env
         ref = create_group(
-            session,
+            _repo(session),
             ctx,
             slug="family",
             name="Family",
@@ -613,7 +625,7 @@ class TestAuditEmission:
             clock=FrozenClock(_PINNED),
         )
         update_group(
-            session,
+            _repo(session),
             ctx,
             group_id=ref.id,
             name="Family v2",
@@ -634,14 +646,14 @@ class TestAuditEmission:
     def test_delete_emits_audit(self, env: tuple[Session, WorkspaceContext]) -> None:
         session, ctx = env
         ref = create_group(
-            session,
+            _repo(session),
             ctx,
             slug="family",
             name="Family",
             capabilities={},
             clock=FrozenClock(_PINNED),
         )
-        delete_group(session, ctx, group_id=ref.id)
+        delete_group(_repo(session), ctx, group_id=ref.id)
 
         rows = _all_audit_for(session, entity_id=ref.id)
         actions = [r.action for r in rows]
@@ -655,7 +667,7 @@ class TestAuditEmission:
     ) -> None:
         session, ctx = env
         ref = create_group(
-            session,
+            _repo(session),
             ctx,
             slug="family",
             name="Family",
@@ -663,13 +675,13 @@ class TestAuditEmission:
             clock=FrozenClock(_PINNED),
         )
         add_member(
-            session,
+            _repo(session),
             ctx,
             group_id=ref.id,
             user_id=ctx.actor_id,
             clock=FrozenClock(_PINNED),
         )
-        remove_member(session, ctx, group_id=ref.id, user_id=ctx.actor_id)
+        remove_member(_repo(session), ctx, group_id=ref.id, user_id=ctx.actor_id)
 
         member_entity = f"{ref.id}:{ctx.actor_id}"
         rows = _all_audit_for(session, entity_id=member_entity)
@@ -687,7 +699,7 @@ class TestAuditEmission:
 
 def _owners_group(session: Session, ctx: WorkspaceContext) -> PermissionGroupRef:
     """Return the caller's seeded ``owners`` group as a dataclass ref."""
-    for ref in list_groups(session, ctx):
+    for ref in list_groups(_repo(session), ctx):
         if ref.slug == "owners":
             return ref
     raise AssertionError("owners group missing — bootstrap should have seeded it")

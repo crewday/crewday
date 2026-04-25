@@ -31,6 +31,10 @@ from sqlalchemy.orm import Session
 
 from app.adapters.db.audit.models import AuditLog
 from app.adapters.db.authz.models import RoleGrant
+from app.adapters.db.authz.repositories import (
+    SqlAlchemyPermissionGroupRepository,
+    SqlAlchemyRoleGrantRepository,
+)
 from app.adapters.db.places.models import Property, PropertyWorkspace
 from app.adapters.db.workspace.models import UserWorkspace
 from app.domain.identity.permission_groups import add_member, list_groups
@@ -51,6 +55,24 @@ from app.tenancy.orm_filter import install_tenant_filter
 from app.util.clock import FrozenClock
 from app.util.ulid import new_ulid
 from tests.factories.identity import bootstrap_user, bootstrap_workspace
+
+
+def _pg_repo(session: Session) -> SqlAlchemyPermissionGroupRepository:
+    """SA-backed ``PermissionGroupRepository`` for ``add_member`` /
+    ``list_groups`` calls in this module's seeding helpers.
+    """
+    return SqlAlchemyPermissionGroupRepository(session)
+
+
+def _rg_repo(session: Session) -> SqlAlchemyRoleGrantRepository:
+    """SA-backed ``RoleGrantRepository`` for the role-grants service calls.
+
+    The domain services accept the repository Protocol (cd-duv6); the
+    integration tests wire the production SA-backed concretion so the
+    full SQL round-trip is exercised on every assertion.
+    """
+    return SqlAlchemyRoleGrantRepository(session)
+
 
 pytestmark = pytest.mark.integration
 
@@ -150,7 +172,7 @@ def env(
 
 def _owners_group_id(session: Session, ctx: WorkspaceContext) -> str:
     """Return the caller's seeded ``owners`` group id."""
-    for ref in list_groups(session, ctx):
+    for ref in list_groups(_pg_repo(session), ctx):
         if ref.slug == "owners":
             return ref.id
     raise AssertionError("owners group missing — bootstrap should have seeded it")
@@ -253,7 +275,7 @@ class TestGrantRoleValidation:
         target = _add_second_user(session, suffix="bad", clock=FrozenClock(_PINNED))
         with pytest.raises(GrantRoleInvalid) as exc:
             grant(
-                session,
+                _rg_repo(session),
                 ctx,
                 user_id=target,
                 grant_role="bogus",
@@ -269,7 +291,7 @@ class TestGrantRoleValidation:
         session, ctx = env
         target = _add_second_user(session, suffix=role, clock=FrozenClock(_PINNED))
         ref = grant(
-            session,
+            _rg_repo(session),
             ctx,
             user_id=target,
             grant_role=role,
@@ -293,7 +315,7 @@ class TestOwnerAuthority:
         session, ctx = env
         target = _add_second_user(session, suffix="mgr", clock=FrozenClock(_PINNED))
         ref = grant(
-            session,
+            _rg_repo(session),
             ctx,
             user_id=target,
             grant_role="manager",
@@ -322,7 +344,7 @@ class TestOwnerAuthority:
             target = _add_second_user(session, suffix="target", clock=clock)
             with pytest.raises(NotAuthorizedForRole):
                 grant(
-                    session,
+                    _rg_repo(session),
                     outsider_ctx,
                     user_id=target,
                     grant_role="worker",
@@ -343,7 +365,7 @@ class TestOwnerAuthority:
         )
         # Owner mints them a ``manager`` grant.
         grant(
-            session,
+            _rg_repo(session),
             ctx,
             user_id=manager,
             grant_role="manager",
@@ -356,7 +378,7 @@ class TestOwnerAuthority:
             target = _add_second_user(session, suffix="mgr-target", clock=clock)
             with pytest.raises(NotAuthorizedForRole) as exc:
                 grant(
-                    session,
+                    _rg_repo(session),
                     manager_ctx,
                     user_id=target,
                     grant_role="manager",
@@ -378,7 +400,7 @@ class TestOwnerAuthority:
             session, user_id=manager, workspace_id=ctx.workspace_id, clock=clock
         )
         grant(
-            session,
+            _rg_repo(session),
             ctx,
             user_id=manager,
             grant_role="manager",
@@ -391,7 +413,7 @@ class TestOwnerAuthority:
             for role in ("worker", "client", "guest"):
                 target = _add_second_user(session, suffix=f"w-{role}", clock=clock)
                 ref = grant(
-                    session,
+                    _rg_repo(session),
                     manager_ctx,
                     user_id=target,
                     grant_role=role,
@@ -421,7 +443,7 @@ class TestPropertyScope:
         )
         target = _add_second_user(session, suffix="prop-ok", clock=clock)
         ref = grant(
-            session,
+            _rg_repo(session),
             ctx,
             user_id=target,
             grant_role="worker",
@@ -453,7 +475,7 @@ class TestPropertyScope:
         target = _add_second_user(session, suffix="prop-bad", clock=clock)
         with pytest.raises(CrossWorkspaceProperty):
             grant(
-                session,
+                _rg_repo(session),
                 ctx,
                 user_id=target,
                 grant_role="worker",
@@ -478,7 +500,7 @@ class TestPropertyScope:
         )
         with pytest.raises(CrossWorkspaceProperty):
             grant(
-                session,
+                _rg_repo(session),
                 ctx,
                 user_id=target,
                 grant_role="worker",
@@ -502,13 +524,13 @@ class TestListGrants:
         clock = FrozenClock(_PINNED)
         worker = _add_second_user(session, suffix="ls-w", clock=clock)
         grant(
-            session,
+            _rg_repo(session),
             ctx,
             user_id=worker,
             grant_role="worker",
             clock=clock,
         )
-        rows = list_grants(session, ctx)
+        rows = list_grants(_rg_repo(session), ctx)
         # Bootstrap emits a single ``manager`` grant for the workspace
         # creator; adding one worker grant brings the total to two.
         assert len(rows) == 2
@@ -520,13 +542,13 @@ class TestListGrants:
         clock = FrozenClock(_PINNED)
         worker = _add_second_user(session, suffix="flt-w", clock=clock)
         grant(
-            session,
+            _rg_repo(session),
             ctx,
             user_id=worker,
             grant_role="worker",
             clock=clock,
         )
-        rows = list_grants(session, ctx, user_id=worker)
+        rows = list_grants(_rg_repo(session), ctx, user_id=worker)
         assert [r.grant_role for r in rows] == ["worker"]
         assert all(r.user_id == worker for r in rows)
 
@@ -540,7 +562,7 @@ class TestListGrants:
         )
         worker = _add_second_user(session, suffix="flt-p", clock=clock)
         grant(
-            session,
+            _rg_repo(session),
             ctx,
             user_id=worker,
             grant_role="worker",
@@ -550,13 +572,13 @@ class TestListGrants:
         # Workspace-wide grant for the same user — must not appear in
         # the property-filtered list.
         grant(
-            session,
+            _rg_repo(session),
             ctx,
             user_id=worker,
             grant_role="client",
             clock=clock,
         )
-        rows = list_grants(session, ctx, scope_property_id=property_id)
+        rows = list_grants(_rg_repo(session), ctx, scope_property_id=property_id)
         assert [r.grant_role for r in rows] == ["worker"]
         assert all(r.scope_property_id == property_id for r in rows)
 
@@ -576,13 +598,13 @@ class TestRevoke:
         clock = FrozenClock(_PINNED)
         target = _add_second_user(session, suffix="rvk-w", clock=clock)
         ref = grant(
-            session,
+            _rg_repo(session),
             ctx,
             user_id=target,
             grant_role="worker",
             clock=clock,
         )
-        revoke(session, ctx, grant_id=ref.id, clock=clock)
+        revoke(_rg_repo(session), ctx, grant_id=ref.id, clock=clock)
 
         remaining = session.scalars(
             select(RoleGrant).where(RoleGrant.id == ref.id)
@@ -594,13 +616,13 @@ class TestRevoke:
         clock = FrozenClock(_PINNED)
         target = _add_second_user(session, suffix="rvk-a", clock=clock)
         ref = grant(
-            session,
+            _rg_repo(session),
             ctx,
             user_id=target,
             grant_role="client",
             clock=clock,
         )
-        revoke(session, ctx, grant_id=ref.id, clock=clock)
+        revoke(_rg_repo(session), ctx, grant_id=ref.id, clock=clock)
 
         rows = _all_audit_for(session, entity_id=ref.id)
         actions = [r.action for r in rows]
@@ -632,14 +654,14 @@ class TestRevoke:
         )
         target = _add_second_user(session, suffix="rvk-prop", clock=clock)
         ref = grant(
-            session,
+            _rg_repo(session),
             ctx,
             user_id=target,
             grant_role="worker",
             scope_property_id=property_id,
             clock=clock,
         )
-        revoke(session, ctx, grant_id=ref.id, clock=clock)
+        revoke(_rg_repo(session), ctx, grant_id=ref.id, clock=clock)
 
         rows = _all_audit_for(session, entity_id=ref.id)
         revoked = next(r for r in rows if r.action == "revoked")
@@ -655,7 +677,7 @@ class TestRevoke:
         session, ctx = env
         with pytest.raises(RoleGrantNotFound):
             revoke(
-                session,
+                _rg_repo(session),
                 ctx,
                 grant_id="01HWA00000000000000000NONE",
                 clock=FrozenClock(_PINNED),
@@ -674,14 +696,14 @@ class TestRevoke:
         """
         session, ctx = env
         # The bootstrap grant is the one to revoke.
-        grants = list_grants(session, ctx, user_id=ctx.actor_id)
+        grants = list_grants(_rg_repo(session), ctx, user_id=ctx.actor_id)
         manager_grants = [g for g in grants if g.grant_role == "manager"]
         assert len(manager_grants) == 1
         bootstrap_grant = manager_grants[0]
 
         with pytest.raises(LastOwnerGrantProtected):
             revoke(
-                session,
+                _rg_repo(session),
                 ctx,
                 grant_id=bootstrap_grant.id,
                 clock=FrozenClock(_PINNED),
@@ -709,7 +731,7 @@ class TestRevoke:
         )
         owners_group_id = _owners_group_id(session, ctx)
         add_member(
-            session,
+            _pg_repo(session),
             ctx,
             group_id=owners_group_id,
             user_id=second_owner,
@@ -718,7 +740,7 @@ class TestRevoke:
         # Mint a manager grant for the new owner so the revoke has a
         # target that's owner-adjacent.
         second_grant = grant(
-            session,
+            _rg_repo(session),
             ctx,
             user_id=second_owner,
             grant_role="manager",
@@ -727,7 +749,7 @@ class TestRevoke:
 
         # With two owners, we may safely revoke the second's manager
         # grant — the workspace still has an owner with a manager grant.
-        revoke(session, ctx, grant_id=second_grant.id, clock=clock)
+        revoke(_rg_repo(session), ctx, grant_id=second_grant.id, clock=clock)
         remaining = session.scalars(
             select(RoleGrant).where(RoleGrant.id == second_grant.id)
         ).all()
@@ -746,13 +768,13 @@ class TestRevoke:
         clock = FrozenClock(_PINNED)
         # Give the bootstrap owner a second (non-manager) grant.
         extra = grant(
-            session,
+            _rg_repo(session),
             ctx,
             user_id=ctx.actor_id,
             grant_role="client",
             clock=clock,
         )
-        revoke(session, ctx, grant_id=extra.id, clock=clock)
+        revoke(_rg_repo(session), ctx, grant_id=extra.id, clock=clock)
 
         remaining = session.scalars(
             select(RoleGrant).where(RoleGrant.id == extra.id)
@@ -773,7 +795,7 @@ class TestGrantAudit:
         clock = FrozenClock(_PINNED)
         target = _add_second_user(session, suffix="audit", clock=clock)
         ref = grant(
-            session,
+            _rg_repo(session),
             ctx,
             user_id=target,
             grant_role="worker",
@@ -801,7 +823,7 @@ class TestGrantAudit:
         )
         target = _add_second_user(session, suffix="prop-audit", clock=clock)
         ref = grant(
-            session,
+            _rg_repo(session),
             ctx,
             user_id=target,
             grant_role="worker",

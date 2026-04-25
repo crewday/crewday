@@ -41,15 +41,16 @@ invoking these functions (see cd-dzp / cd-rpxd) is where
 take a :class:`~app.tenancy.WorkspaceContext` purely so audit rows
 carry the right actor / correlation fields.
 
-**Architecture note.** This module imports SQLAlchemy model classes
-from :mod:`app.adapters.db.authz.models` directly. Contract 1 of the
-import-linter (``app.domain → app.adapters``) forbids that in
-principle, so the pyproject carries a narrow ``ignore_imports``
-stopgap for this path and a follow-up Beads task is filed to replace
-the direct import with a Protocol seam (``PermissionGroupRepository``
-in :mod:`app.adapters.db.authz.repositories`). The interim coupling
-keeps this v1 slice shippable without blocking on a broader
-refactor of every domain context.
+**Architecture.** The module talks to a
+:class:`~app.adapters.db.authz.ports.PermissionGroupRepository`
+Protocol (cd-duv6) — never to the SQLAlchemy model classes
+directly. The SA-backed concretion lives at
+:class:`app.adapters.db.authz.repositories.SqlAlchemyPermissionGroupRepository`;
+unit tests inject a fake. The repo also threads its open
+:class:`~sqlalchemy.orm.Session` through ``repo.session`` so the
+audit writer (``app.audit.write_audit``) and the locking primitive
+(``app.domain.identity._owner_guard.count_owner_members_locked``)
+can keep using the same UoW.
 """
 
 from __future__ import annotations
@@ -59,11 +60,14 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, ClassVar
 
-from sqlalchemy import select
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.adapters.db.authz.models import PermissionGroup, PermissionGroupMember
+from app.adapters.db.authz.ports import (
+    PermissionGroupMemberRow,
+    PermissionGroupRepository,
+    PermissionGroupRow,
+    PermissionGroupSlugTakenError,
+)
 from app.audit import write_audit
 from app.domain.errors import Validation
 from app.domain.identity._action_catalog import ACTION_CATALOG
@@ -181,25 +185,27 @@ class LastOwnerMember(Validation):
 # ---------------------------------------------------------------------------
 
 
-def _to_ref(row: PermissionGroup) -> PermissionGroupRef:
-    """Project a loaded ORM row into an immutable :class:`PermissionGroupRef`.
+def _row_to_ref(row: PermissionGroupRow) -> PermissionGroupRef:
+    """Project a seam-level :class:`PermissionGroupRow` into the public ref.
 
-    Copying ``capabilities_json`` into a fresh ``dict`` severs the
-    reference to SQLAlchemy's mutable JSON payload so a caller who
-    mutates the returned mapping doesn't poison the identity map.
+    The repo already returned an immutable, frozen value object; we
+    re-pack it into the public :class:`PermissionGroupRef` shape so
+    callers continue to receive the dataclass they were already
+    typing against. Same field-by-field projection — no behaviour
+    change.
     """
     return PermissionGroupRef(
         id=row.id,
         slug=row.slug,
         name=row.name,
         system=row.system,
-        capabilities=dict(row.capabilities_json),
+        capabilities=dict(row.capabilities),
         created_at=row.created_at,
     )
 
 
-def _member_to_ref(row: PermissionGroupMember) -> PermissionGroupMemberRef:
-    """Project a member row into an immutable :class:`PermissionGroupMemberRef`."""
+def _member_row_to_ref(row: PermissionGroupMemberRow) -> PermissionGroupMemberRef:
+    """Project a seam-level :class:`PermissionGroupMemberRow` into the public ref."""
     return PermissionGroupMemberRef(
         group_id=row.group_id,
         user_id=row.user_id,
@@ -225,21 +231,16 @@ def _validate_capabilities(capabilities: dict[str, Any]) -> None:
 
 
 def _load_group(
-    session: Session, ctx: WorkspaceContext, *, group_id: str
-) -> PermissionGroup:
+    repo: PermissionGroupRepository, ctx: WorkspaceContext, *, group_id: str
+) -> PermissionGroupRow:
     """Load ``group_id`` scoped to the caller's workspace or raise.
 
     The ORM tenant filter already constrains SELECTs to the active
-    :class:`~app.tenancy.WorkspaceContext`, but we also assert
+    :class:`~app.tenancy.WorkspaceContext`, but the repo also asserts
     ``workspace_id`` explicitly so a misconfigured context fails
     loudly instead of silently returning a sibling workspace's row.
     """
-    row = session.scalars(
-        select(PermissionGroup).where(
-            PermissionGroup.id == group_id,
-            PermissionGroup.workspace_id == ctx.workspace_id,
-        )
-    ).one_or_none()
+    row = repo.get_group(workspace_id=ctx.workspace_id, group_id=group_id)
     if row is None:
         raise PermissionGroupNotFound(group_id)
     return row
@@ -251,7 +252,7 @@ def _load_group(
 
 
 def list_groups(
-    session: Session, ctx: WorkspaceContext
+    repo: PermissionGroupRepository, ctx: WorkspaceContext
 ) -> Sequence[PermissionGroupRef]:
     """Return every permission group in the caller's workspace.
 
@@ -259,16 +260,12 @@ def list_groups(
     workspace creation come first and user-defined groups appear in
     the order the owner added them.
     """
-    rows = session.scalars(
-        select(PermissionGroup)
-        .where(PermissionGroup.workspace_id == ctx.workspace_id)
-        .order_by(PermissionGroup.created_at.asc(), PermissionGroup.id.asc())
-    ).all()
-    return [_to_ref(row) for row in rows]
+    rows = repo.list_groups(workspace_id=ctx.workspace_id)
+    return [_row_to_ref(row) for row in rows]
 
 
 def get_group(
-    session: Session, ctx: WorkspaceContext, *, group_id: str
+    repo: PermissionGroupRepository, ctx: WorkspaceContext, *, group_id: str
 ) -> PermissionGroupRef:
     """Return the single group identified by ``group_id`` or raise.
 
@@ -277,11 +274,11 @@ def get_group(
     missing thanks to the explicit ``workspace_id`` filter in
     :func:`_load_group`.
     """
-    return _to_ref(_load_group(session, ctx, group_id=group_id))
+    return _row_to_ref(_load_group(repo, ctx, group_id=group_id))
 
 
 def create_group(
-    session: Session,
+    repo: PermissionGroupRepository,
     ctx: WorkspaceContext,
     *,
     slug: str,
@@ -292,10 +289,14 @@ def create_group(
     """Insert a new non-system group in the caller's workspace.
 
     The unique ``(workspace_id, slug)`` constraint is enforced by the
-    DB; an :class:`~sqlalchemy.exc.IntegrityError` from the flush is
-    caught and re-raised as :class:`PermissionGroupSlugTaken`.
-    Unknown capability keys raise :class:`UnknownCapability` before
-    the insert is attempted.
+    DB; the repo wraps the insert in a SAVEPOINT so an
+    :class:`~sqlalchemy.exc.IntegrityError` rolls back only the
+    failed mint, preserving the caller's outer transaction. The repo
+    surfaces the conflict as
+    :class:`~app.adapters.db.authz.ports.PermissionGroupSlugTakenError`,
+    which we re-raise as the public-surface
+    :class:`PermissionGroupSlugTaken`. Unknown capability keys raise
+    :class:`UnknownCapability` before the insert is attempted.
 
     ``system=True`` groups are only created by the workspace
     bootstrap (:mod:`app.adapters.db.authz.bootstrap`); the public
@@ -304,40 +305,24 @@ def create_group(
     _validate_capabilities(capabilities)
 
     now = (clock if clock is not None else SystemClock()).now()
-    group = PermissionGroup(
-        id=new_ulid(),
-        workspace_id=ctx.workspace_id,
-        slug=slug,
-        name=name,
-        system=False,
-        # Snapshot the payload so a later mutation on the caller's
-        # dict doesn't bleed into the persisted row.
-        capabilities_json=dict(capabilities),
-        created_at=now,
-    )
-    # Wrap the flush in a SAVEPOINT so an IntegrityError rolls back
-    # only the failed INSERT — the caller's outer transaction (and
-    # any prior successful writes inside it) stays intact. A bare
-    # ``session.rollback()`` on IntegrityError would nuke the whole
-    # transaction, including earlier successful ``create_group``
-    # calls in the same request.
-    nested = session.begin_nested()
-    session.add(group)
     try:
-        session.flush()
-    except IntegrityError as exc:
-        # The only unique constraint on ``permission_group`` in v1
-        # is ``(workspace_id, slug)`` — any other IntegrityError is
-        # unexpected and should propagate as-is.
-        nested.rollback()
+        row = repo.insert_group(
+            group_id=new_ulid(),
+            workspace_id=ctx.workspace_id,
+            slug=slug,
+            name=name,
+            system=False,
+            capabilities=capabilities,
+            created_at=now,
+        )
+    except PermissionGroupSlugTakenError as exc:
         raise PermissionGroupSlugTaken(slug) from exc
-    nested.commit()
 
     write_audit(
-        session,
+        repo.session,
         ctx,
         entity_kind="permission_group",
-        entity_id=group.id,
+        entity_id=row.id,
         action="created",
         diff={
             "slug": slug,
@@ -346,11 +331,11 @@ def create_group(
         },
         clock=clock,
     )
-    return _to_ref(group)
+    return _row_to_ref(row)
 
 
 def update_group(
-    session: Session,
+    repo: PermissionGroupRepository,
     ctx: WorkspaceContext,
     *,
     group_id: str,
@@ -372,46 +357,47 @@ def update_group(
     ``clock`` is optional; tests pin the audit row's ``created_at``
     via a :class:`~app.util.clock.FrozenClock`.
     """
-    row = _load_group(session, ctx, group_id=group_id)
+    existing = _load_group(repo, ctx, group_id=group_id)
 
-    if row.system and capabilities is not None:
+    if existing.system and capabilities is not None:
         raise SystemGroupProtected(
-            f"permission_group {row.slug!r} is a system group; capabilities are frozen."
+            f"permission_group {existing.slug!r} is a system group; "
+            "capabilities are frozen."
         )
 
     if capabilities is not None:
         _validate_capabilities(capabilities)
 
     before: dict[str, Any] = {
-        "name": row.name,
-        "capabilities": dict(row.capabilities_json),
+        "name": existing.name,
+        "capabilities": dict(existing.capabilities),
     }
 
-    if name is not None:
-        row.name = name
-    if capabilities is not None:
-        row.capabilities_json = dict(capabilities)
-
-    session.flush()
+    updated = repo.update_group(
+        workspace_id=ctx.workspace_id,
+        group_id=group_id,
+        name=name,
+        capabilities=capabilities,
+    )
 
     after: dict[str, Any] = {
-        "name": row.name,
-        "capabilities": dict(row.capabilities_json),
+        "name": updated.name,
+        "capabilities": dict(updated.capabilities),
     }
     write_audit(
-        session,
+        repo.session,
         ctx,
         entity_kind="permission_group",
-        entity_id=row.id,
+        entity_id=updated.id,
         action="updated",
         diff={"before": before, "after": after},
         clock=clock,
     )
-    return _to_ref(row)
+    return _row_to_ref(updated)
 
 
 def delete_group(
-    session: Session,
+    repo: PermissionGroupRepository,
     ctx: WorkspaceContext,
     *,
     group_id: str,
@@ -430,7 +416,7 @@ def delete_group(
     ``clock`` is optional; tests pin the audit row's ``created_at``
     via a :class:`~app.util.clock.FrozenClock`.
     """
-    row = _load_group(session, ctx, group_id=group_id)
+    row = _load_group(repo, ctx, group_id=group_id)
     if row.system:
         raise SystemGroupProtected(
             f"permission_group {row.slug!r} is a system group; it cannot be deleted."
@@ -438,11 +424,10 @@ def delete_group(
 
     slug = row.slug
     name = row.name
-    session.delete(row)
-    session.flush()
+    repo.delete_group(workspace_id=ctx.workspace_id, group_id=group_id)
 
     write_audit(
-        session,
+        repo.session,
         ctx,
         entity_kind="permission_group",
         entity_id=group_id,
@@ -458,7 +443,7 @@ def delete_group(
 
 
 def list_members(
-    session: Session, ctx: WorkspaceContext, *, group_id: str
+    repo: PermissionGroupRepository, ctx: WorkspaceContext, *, group_id: str
 ) -> Sequence[PermissionGroupMemberRef]:
     """List every explicit member of ``group_id``.
 
@@ -471,23 +456,13 @@ def list_members(
     schema yet — cd-zkr proper will land it as a follow-up migration
     per :mod:`app.adapters.db.authz.models` module docstring).
     """
-    _load_group(session, ctx, group_id=group_id)
-    rows = session.scalars(
-        select(PermissionGroupMember)
-        .where(
-            PermissionGroupMember.group_id == group_id,
-            PermissionGroupMember.workspace_id == ctx.workspace_id,
-        )
-        .order_by(
-            PermissionGroupMember.added_at.asc(),
-            PermissionGroupMember.user_id.asc(),
-        )
-    ).all()
-    return [_member_to_ref(row) for row in rows]
+    _load_group(repo, ctx, group_id=group_id)
+    rows = repo.list_members(workspace_id=ctx.workspace_id, group_id=group_id)
+    return [_member_row_to_ref(row) for row in rows]
 
 
 def add_member(
-    session: Session,
+    repo: PermissionGroupRepository,
     ctx: WorkspaceContext,
     *,
     group_id: str,
@@ -510,17 +485,17 @@ def add_member(
     ``clock`` is optional; tests pin the audit row's ``created_at``
     via a :class:`~app.util.clock.FrozenClock`.
     """
-    _load_group(session, ctx, group_id=group_id)
+    _load_group(repo, ctx, group_id=group_id)
 
     # Idempotency check: a duplicate ``(group_id, user_id)`` INSERT
     # would trip the composite PK and raise :class:`IntegrityError`,
     # poisoning the outer transaction. Looking up the row first keeps
     # the happy path cheap and matches :func:`remove_member`'s
     # no-throw behaviour on a missing row.
-    existing = session.get(PermissionGroupMember, (group_id, user_id))
+    existing = repo.get_member(group_id=group_id, user_id=user_id)
     if existing is not None:
         write_audit(
-            session,
+            repo.session,
             ctx,
             entity_kind="permission_group_member",
             entity_id=f"{group_id}:{user_id}",
@@ -528,21 +503,19 @@ def add_member(
             diff={"group_id": group_id, "user_id": user_id},
             clock=clock,
         )
-        return _member_to_ref(existing)
+        return _member_row_to_ref(existing)
 
     now = (clock if clock is not None else SystemClock()).now()
-    member = PermissionGroupMember(
+    member = repo.insert_member(
         group_id=group_id,
         user_id=user_id,
         workspace_id=ctx.workspace_id,
         added_at=now,
         added_by_user_id=ctx.actor_id,
     )
-    session.add(member)
-    session.flush()
 
     write_audit(
-        session,
+        repo.session,
         ctx,
         entity_kind="permission_group_member",
         entity_id=f"{group_id}:{user_id}",
@@ -550,11 +523,11 @@ def add_member(
         diff={"group_id": group_id, "user_id": user_id},
         clock=clock,
     )
-    return _member_to_ref(member)
+    return _member_row_to_ref(member)
 
 
 def remove_member(
-    session: Session,
+    repo: PermissionGroupRepository,
     ctx: WorkspaceContext,
     *,
     group_id: str,
@@ -585,9 +558,9 @@ def remove_member(
     ``clock`` is optional; tests pin the audit row's ``created_at``
     via a :class:`~app.util.clock.FrozenClock`.
     """
-    group = _load_group(session, ctx, group_id=group_id)
+    group = _load_group(repo, ctx, group_id=group_id)
 
-    row = session.get(PermissionGroupMember, (group_id, user_id))
+    member = repo.get_member(group_id=group_id, user_id=user_id)
 
     # Last-owner guard: fire only when the target is the system
     # ``owners`` group, the member row actually exists (otherwise
@@ -597,8 +570,10 @@ def remove_member(
     # owners-group row BEFORE counting so a concurrent ``remove_member``
     # on the same workspace can't observe the pre-delete count and
     # race us to zero (cd-mb5n).
-    if row is not None and group.slug == "owners" and group.system:
-        owner_count = count_owner_members_locked(session, workspace_id=ctx.workspace_id)
+    if member is not None and group.slug == "owners" and group.system:
+        owner_count = count_owner_members_locked(
+            repo.session, workspace_id=ctx.workspace_id
+        )
         if owner_count <= 1:
             # Do NOT write an audit row on the caller's UoW — the
             # typed exception rolls back the outer transaction and
@@ -610,12 +585,11 @@ def remove_member(
                 f"({group.id!r}); transfer owners membership first"
             )
 
-    if row is not None:
-        session.delete(row)
-        session.flush()
+    if member is not None:
+        repo.delete_member(group_id=group_id, user_id=user_id)
 
     write_audit(
-        session,
+        repo.session,
         ctx,
         entity_kind="permission_group_member",
         entity_id=f"{group_id}:{user_id}",
@@ -649,7 +623,11 @@ def write_member_remove_rejected_audit(
     ``user_id``. No PII — the payload is ULID-only.
 
     The helper never commits or flushes; the router's fresh UoW
-    owns that.
+    owns that. It takes a raw :class:`~sqlalchemy.orm.Session` (not a
+    :class:`PermissionGroupRepository`) because the rescue UoW is
+    opened by the router via :func:`app.adapters.db.session.make_uow`
+    and its only job is to land one audit row — wrapping it in a
+    repo would add ceremony without value.
     """
     write_audit(
         session,

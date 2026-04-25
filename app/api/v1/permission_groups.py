@@ -56,6 +56,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
+from app.adapters.db.authz.repositories import SqlAlchemyPermissionGroupRepository
 from app.adapters.db.session import make_uow
 from app.api.deps import current_workspace_context, db_session
 from app.api.pagination import (
@@ -262,7 +263,9 @@ def _is_owners_group(session: Session, ctx: WorkspaceContext, *, group_id: str) 
     targeted *row*, not the route shape).
     """
     try:
-        ref = get_group(session, ctx, group_id=group_id)
+        ref = get_group(
+            SqlAlchemyPermissionGroupRepository(session), ctx, group_id=group_id
+        )
     except PermissionGroupNotFound:
         return False
     return ref.slug == "owners" and ref.system
@@ -378,7 +381,7 @@ def build_permission_groups_router() -> APIRouter:
             )
 
         after_id = decode_cursor(cursor)
-        refs = list_groups(session, ctx)
+        refs = list_groups(SqlAlchemyPermissionGroupRepository(session), ctx)
         if after_id is not None:
             refs = [r for r in refs if r.id > after_id]
         sliced = refs[: limit + 1]
@@ -417,7 +420,7 @@ def build_permission_groups_router() -> APIRouter:
         """Insert a non-system group; (workspace, slug) unique."""
         try:
             ref = create_group(
-                session,
+                SqlAlchemyPermissionGroupRepository(session),
                 ctx,
                 slug=body.slug,
                 name=body.name,
@@ -451,7 +454,9 @@ def build_permission_groups_router() -> APIRouter:
     ) -> PermissionGroupResponse:
         """Return one group view or 404."""
         try:
-            ref = get_group(session, ctx, group_id=group_id)
+            ref = get_group(
+                SqlAlchemyPermissionGroupRepository(session), ctx, group_id=group_id
+            )
         except PermissionGroupNotFound as exc:
             raise _http_for_not_found() from exc
         return _ref_to_response(ref)
@@ -487,7 +492,7 @@ def build_permission_groups_router() -> APIRouter:
         """
         try:
             ref = update_group(
-                session,
+                SqlAlchemyPermissionGroupRepository(session),
                 ctx,
                 group_id=group_id,
                 name=body.name,
@@ -523,7 +528,9 @@ def build_permission_groups_router() -> APIRouter:
     ) -> Response:
         """Hard-delete a non-system group. Members cascade via FK."""
         try:
-            delete_group(session, ctx, group_id=group_id)
+            delete_group(
+                SqlAlchemyPermissionGroupRepository(session), ctx, group_id=group_id
+            )
         except PermissionGroupNotFound as exc:
             raise _http_for_not_found() from exc
         except SystemGroupProtected as exc:
@@ -560,7 +567,9 @@ def build_permission_groups_router() -> APIRouter:
         domain service walks the same SELECT regardless).
         """
         try:
-            members = list_members(session, ctx, group_id=group_id)
+            members = list_members(
+                SqlAlchemyPermissionGroupRepository(session), ctx, group_id=group_id
+            )
         except PermissionGroupNotFound as exc:
             raise _http_for_not_found() from exc
         # Cursor on ``user_id`` (composite PK is ``(group_id, user_id)``;
@@ -609,7 +618,12 @@ def build_permission_groups_router() -> APIRouter:
         """
         _gate_member_write(session, ctx, group_id=group_id)
         try:
-            ref = add_member(session, ctx, group_id=group_id, user_id=body.user_id)
+            ref = add_member(
+                SqlAlchemyPermissionGroupRepository(session),
+                ctx,
+                group_id=group_id,
+                user_id=body.user_id,
+            )
         except PermissionGroupNotFound as exc:
             raise _http_for_not_found() from exc
         return _member_to_response(ref)
@@ -644,7 +658,12 @@ def build_permission_groups_router() -> APIRouter:
         """
         _gate_member_write(session, ctx, group_id=group_id)
         try:
-            remove_member(session, ctx, group_id=group_id, user_id=user_id)
+            remove_member(
+                SqlAlchemyPermissionGroupRepository(session),
+                ctx,
+                group_id=group_id,
+                user_id=user_id,
+            )
         except PermissionGroupNotFound as exc:
             raise _http_for_not_found() from exc
         except LastOwnerMember as exc:

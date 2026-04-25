@@ -26,6 +26,7 @@ from app.adapters.db.authz.models import (
     PermissionGroupMember,
     RoleGrant,
 )
+from app.adapters.db.authz.repositories import SqlAlchemyPermissionGroupRepository
 from app.adapters.db.identity.models import (
     Invite,
     PasskeyCredential,
@@ -71,6 +72,11 @@ _TEST_SETTINGS = Settings(
     root_key=SecretStr("test-root-key-for-hash-pepper-0123456789abcdef"),
     public_url=_BASE_URL,
 )
+
+
+def _repo(session: Session) -> SqlAlchemyPermissionGroupRepository:
+    """SA-backed ``PermissionGroupRepository`` for cd-duv6 wiring."""
+    return SqlAlchemyPermissionGroupRepository(session)
 
 
 @pytest.fixture(autouse=True)
@@ -893,8 +899,10 @@ class TestRemoveMember:
                 )
             )
             session.flush()
-        owners_group = next(g for g in list_groups(session, ctx) if g.slug == "owners")
-        add_member(session, ctx, group_id=owners_group.id, user_id=second.id)
+        owners_group = next(
+            g for g in list_groups(_repo(session), ctx) if g.slug == "owners"
+        )
+        add_member(_repo(session), ctx, group_id=owners_group.id, user_id=second.id)
         session.add(
             RoleGrant(
                 id=new_ulid(),

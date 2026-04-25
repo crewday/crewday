@@ -40,6 +40,7 @@ from sqlalchemy.orm import Session
 from app.adapters.db.audit.models import AuditLog
 from app.adapters.db.authz.bootstrap import seed_system_permission_groups
 from app.adapters.db.authz.models import PermissionGroupMember
+from app.adapters.db.authz.repositories import SqlAlchemyPermissionGroupRepository
 from app.adapters.db.workspace.models import UserWorkspace, Workspace
 from app.authz import resolve_is_owner
 from app.domain.identity.permission_groups import (
@@ -57,6 +58,12 @@ from app.tenancy.orm_filter import install_tenant_filter
 from app.util.clock import FrozenClock
 from app.util.ulid import new_ulid
 from tests.factories.identity import bootstrap_user, bootstrap_workspace
+
+
+def _repo(session: Session) -> SqlAlchemyPermissionGroupRepository:
+    """SA-backed ``PermissionGroupRepository`` for cd-duv6 wiring."""
+    return SqlAlchemyPermissionGroupRepository(session)
+
 
 pytestmark = pytest.mark.integration
 
@@ -187,7 +194,7 @@ def _second_user_with_membership(
 
 def _owners_group_id(session: Session, ctx: WorkspaceContext) -> str:
     """Return the caller's seeded ``owners`` group id."""
-    for ref in list_groups(session, ctx):
+    for ref in list_groups(_repo(session), ctx):
         if ref.slug == "owners":
             return ref.id
     raise AssertionError("owners group missing — bootstrap should have seeded it")
@@ -295,7 +302,7 @@ class TestFourSystemGroups:
         self, env: tuple[Session, WorkspaceContext, str]
     ) -> None:
         session, ctx, _ = env
-        groups = list_groups(session, ctx)
+        groups = list_groups(_repo(session), ctx)
         system_slugs = {g.slug for g in groups if g.system}
         assert system_slugs == self._EXPECTED_SYSTEM_SLUGS
 
@@ -309,11 +316,11 @@ class TestFourSystemGroups:
         resolver time (cd-zkr), not at seed time.
         """
         session, ctx, user_id = env
-        groups = list_groups(session, ctx)
+        groups = list_groups(_repo(session), ctx)
         for g in groups:
             if not g.system:
                 continue
-            members = list_members(session, ctx, group_id=g.id)
+            members = list_members(_repo(session), ctx, group_id=g.id)
             member_ids = {m.user_id for m in members}
             if g.slug == "owners":
                 assert user_id in member_ids
@@ -455,7 +462,7 @@ class TestLastOwnerMemberGuard:
         owners_id = _owners_group_id(session, ctx)
         with pytest.raises(LastOwnerMember) as exc:
             remove_member(
-                session,
+                _repo(session),
                 ctx,
                 group_id=owners_id,
                 user_id=user_id,
@@ -472,7 +479,7 @@ class TestLastOwnerMemberGuard:
         owners_id = _owners_group_id(session, ctx)
         with pytest.raises(LastOwnerMember):
             remove_member(
-                session,
+                _repo(session),
                 ctx,
                 group_id=owners_id,
                 user_id=user_id,
@@ -500,7 +507,7 @@ class TestLastOwnerMemberGuard:
             clock=clock,
         )
         add_member(
-            session,
+            _repo(session),
             ctx,
             group_id=owners_id,
             user_id=co_owner,
@@ -509,7 +516,7 @@ class TestLastOwnerMemberGuard:
         # Now remove the second — first stays. The first is the
         # actor building ctx, so the service is authorised.
         remove_member(
-            session,
+            _repo(session),
             ctx,
             group_id=owners_id,
             user_id=co_owner,
@@ -539,13 +546,25 @@ class TestLastOwnerMemberGuard:
             suffix="co-then-block",
             clock=clock,
         )
-        add_member(session, ctx, group_id=owners_id, user_id=co_owner, clock=clock)
+        add_member(
+            _repo(session),
+            ctx,
+            group_id=owners_id,
+            user_id=co_owner,
+            clock=clock,
+        )
         # First removal succeeds (co-owner leaves).
-        remove_member(session, ctx, group_id=owners_id, user_id=co_owner, clock=clock)
+        remove_member(
+            _repo(session),
+            ctx,
+            group_id=owners_id,
+            user_id=co_owner,
+            clock=clock,
+        )
         # Now try to remove the original user → refused.
         with pytest.raises(LastOwnerMember):
             remove_member(
-                session, ctx, group_id=owners_id, user_id=user_id, clock=clock
+                _repo(session), ctx, group_id=owners_id, user_id=user_id, clock=clock
             )
 
     def test_guard_does_not_fire_on_user_defined_group(
@@ -562,16 +581,28 @@ class TestLastOwnerMemberGuard:
         from app.domain.identity.permission_groups import create_group
 
         custom = create_group(
-            session,
+            _repo(session),
             ctx,
             slug="family",
             name="Family",
             capabilities={},
             clock=clock,
         )
-        add_member(session, ctx, group_id=custom.id, user_id=user_id, clock=clock)
+        add_member(
+            _repo(session),
+            ctx,
+            group_id=custom.id,
+            user_id=user_id,
+            clock=clock,
+        )
         # Remove the sole member of the custom group — not blocked.
-        remove_member(session, ctx, group_id=custom.id, user_id=user_id, clock=clock)
+        remove_member(
+            _repo(session),
+            ctx,
+            group_id=custom.id,
+            user_id=user_id,
+            clock=clock,
+        )
         remaining = session.scalars(
             select(PermissionGroupMember).where(
                 PermissionGroupMember.group_id == custom.id
@@ -595,7 +626,7 @@ class TestLastOwnerMemberGuard:
         ghost_user = new_ulid()
         # Should not raise — idempotent remove on a non-member.
         remove_member(
-            session,
+            _repo(session),
             ctx,
             group_id=owners_id,
             user_id=ghost_user,
@@ -635,7 +666,7 @@ class TestRejectedAuditHelper:
         # Attempt removal, expect refusal.
         with pytest.raises(LastOwnerMember):
             remove_member(
-                session,
+                _repo(session),
                 ctx,
                 group_id=owners_id,
                 user_id=user_id,

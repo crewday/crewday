@@ -48,6 +48,10 @@ from app.adapters.db.authz.models import (
     PermissionGroupMember,
     RoleGrant,
 )
+from app.adapters.db.authz.repositories import (
+    SqlAlchemyPermissionGroupRepository,
+    SqlAlchemyRoleGrantRepository,
+)
 from app.adapters.db.identity.models import User
 from app.adapters.db.workspace.models import UserWorkspace, Workspace
 from app.domain.identity.permission_groups import (
@@ -69,6 +73,17 @@ from app.tenancy.orm_filter import install_tenant_filter
 from app.util.clock import FrozenClock
 from app.util.ulid import new_ulid
 from tests.factories.identity import bootstrap_user, bootstrap_workspace
+
+
+def _pg_repo(session: Session) -> SqlAlchemyPermissionGroupRepository:
+    """SA-backed ``PermissionGroupRepository`` for cd-duv6 wiring."""
+    return SqlAlchemyPermissionGroupRepository(session)
+
+
+def _rg_repo(session: Session) -> SqlAlchemyRoleGrantRepository:
+    """SA-backed ``RoleGrantRepository`` for cd-duv6 wiring."""
+    return SqlAlchemyRoleGrantRepository(session)
+
 
 pytestmark = pytest.mark.integration
 
@@ -206,24 +221,32 @@ def _bootstrap_two_owner_workspace(
             # manager grant — parity with owner A so the workspace
             # enters the race with 2 owners x 1 manager grant each.
             owners_group_id: str | None = None
-            for ref in list_groups(session, ctx):
+            for ref in list_groups(_pg_repo(session), ctx):
                 if ref.slug == "owners":
                     owners_group_id = ref.id
                     break
             assert owners_group_id is not None
 
             add_member(
-                session, ctx, group_id=owners_group_id, user_id=owner_b.id, clock=clock
+                _pg_repo(session),
+                ctx,
+                group_id=owners_group_id,
+                user_id=owner_b.id,
+                clock=clock,
             )
             grant_b = grant(
-                session, ctx, user_id=owner_b.id, grant_role="manager", clock=clock
+                _rg_repo(session),
+                ctx,
+                user_id=owner_b.id,
+                grant_role="manager",
+                clock=clock,
             )
 
             # Owner A already holds a manager grant from the bootstrap
             # path; look it up so the test can target it directly.
             a_manager_grants = [
                 g
-                for g in list_grants(session, ctx, user_id=owner_a.id)
+                for g in list_grants(_rg_repo(session), ctx, user_id=owner_a.id)
                 if g.grant_role == "manager"
             ]
             assert len(a_manager_grants) == 1
@@ -355,7 +378,7 @@ def _remove_member_worker(
                 start.wait()
                 try:
                     remove_member(
-                        session,
+                        _pg_repo(session),
                         ctx,
                         group_id=ws.owners_group_id,
                         user_id=target_user_id,
@@ -399,7 +422,7 @@ def _revoke_worker(
                 start.wait()
                 try:
                     revoke(
-                        session,
+                        _rg_repo(session),
                         ctx,
                         grant_id=grant_id,
                         clock=FrozenClock(_PINNED),
@@ -540,7 +563,7 @@ class TestRevokeSoloOwnerRace:
                 try:
                     a_manager_grants = [
                         g
-                        for g in list_grants(session, ctx, user_id=owner.id)
+                        for g in list_grants(_rg_repo(session), ctx, user_id=owner.id)
                         if g.grant_role == "manager"
                     ]
                     assert len(a_manager_grants) == 1
