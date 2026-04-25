@@ -267,10 +267,12 @@ catalog pair (see `permission_rule` below and the catalog in
 - **Work** (§06): `task_template`, `schedule`, `task`,
   `task_checklist_item`, `task_completion`, `task_evidence`,
   `task_comment`, `stay_lifecycle_rule`, `stay_task_bundle`,
-  `employee_leave`, `employee_availability_override`,
-  `public_holiday`, `property_closure`. (`employee_*` table names
-  are retained for historical continuity; they now store rows
-  keyed by `user_id` rather than a separate `employee_id`.)
+  `user_leave`, `user_weekly_availability`,
+  `user_availability_override`, `public_holiday`,
+  `property_closure`. (Pre-cd-l2r9 these availability tables were
+  named `employee_*`; the rename happens in the same change that
+  lands the SQLAlchemy models, since rows are keyed by `user_id`
+  rather than a separate `employee_id`.)
 - **Instructions / SOPs** (§07): `instruction`, `instruction_revision`,
   `instruction_link`.
 - **Inventory** (§08): `inventory_item`, `inventory_movement`.
