@@ -85,6 +85,13 @@ from app.api.v1.auth import passkey as passkey_module
 from app.api.v1.auth import recovery as recovery_module
 from app.api.v1.auth import signup as signup_module
 from app.api.v1.auth import tokens as tokens_module
+from app.api.v1.permission_groups import build_permission_groups_router
+from app.api.v1.permission_rules import build_permission_rules_router
+from app.api.v1.permissions import build_permissions_router
+from app.api.v1.role_grants import (
+    build_role_grants_router,
+    build_users_role_grants_router,
+)
 from app.api.v1.user_work_roles import (
     build_user_work_roles_router,
     build_users_user_work_roles_router,
@@ -505,6 +512,20 @@ def _mount_auth_routers(
     app.include_router(build_user_work_roles_router(), prefix=scoped_prefix)
     app.include_router(build_users_user_work_roles_router(), prefix=scoped_prefix)
     app.include_router(build_work_engagements_router(), prefix=scoped_prefix)
+
+    # Workspace-scoped identity-governance routers (cd-jinb) — role
+    # grants, permission groups, permission rules, and the read-only
+    # permission-resolution helpers. Their URLs sit at the top of the
+    # ``/w/<slug>/api/v1/`` tree per spec §12 (they are NOT nested
+    # under the ``/identity`` URL segment, same pattern as
+    # ``/work_engagements`` above). Each router tags its operations
+    # ``identity`` + a resource-specific tag so the OpenAPI schema
+    # clusters them under the identity context.
+    app.include_router(build_role_grants_router(), prefix=scoped_prefix)
+    app.include_router(build_users_role_grants_router(), prefix=scoped_prefix)
+    app.include_router(build_permission_groups_router(), prefix=scoped_prefix)
+    app.include_router(build_permission_rules_router(), prefix=scoped_prefix)
+    app.include_router(build_permissions_router(), prefix=scoped_prefix)
 
 
 def _mount_context_routers(app: FastAPI) -> None:
