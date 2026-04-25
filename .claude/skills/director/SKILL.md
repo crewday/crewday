@@ -27,27 +27,32 @@ main task is coupled to its selfreview; parallel implementation
 breaks that coupling (reviews would batch, context bleeds across
 changes, and failures can't be attributed cleanly).
 
-Pick the next task with **`bv --robot-next --format toon`** — returns
-the single highest-priority ready task. Use **`bv --robot-triage
---format toon`** instead when you want the full prioritised queue
-(e.g. planning ahead, or sanity-checking what's next). Both replace
-raw `bd ready` for task selection. (`--format json` works too if you
-prefer; toon is denser.)
+Get the prioritised queue with **`bv --robot-triage | jq .triage.recommendations`**
+— returns up to the top 10 ready tasks. Keep that list in your
+working memory and **pick the next task from the top of it** each
+iteration; do **not** re-run the command after every pair (the
+output is verbose and rarely changes mid-batch). Only refresh the
+list when you've worked through it (or when a graph edit you just
+made invalidates it). (Do **not** use `bv --robot-next`: it
+currently returns no task even when the queue has plenty left.)
+Replaces raw `bd ready` for task selection.
 
-**Neither `--robot-next` nor `--robot-triage` returns paired
-selfreview tasks.** For every main task you pick, locate its paired
-selfreview (search Beads for one that blocks / is blocked by the
-main task, e.g. `bd list --status open | rg -i selfreview`). If none
-exists, create one via `/beads` **before** closing the main task.
-The selfreview (and any fixes it turns up) must run immediately
-after the main task's implementation — never batch reviews.
+**`bv --robot-triage` does not return paired selfreview tasks.** For
+every main task you pick, locate its paired selfreview (search Beads
+for one that blocks / is blocked by the main task, e.g.
+`bd list --status open | rg -i selfreview`). If none exists, create
+one via `/beads` **before** closing the main task. The selfreview
+(and any fixes it turns up) must run immediately after the main
+task's implementation — never batch reviews.
 
-After each main+selfreview pair commits, re-run `bv --robot-next
---format toon`: closing a task often unblocks new ones.
+When the cached list is exhausted, re-run
+`bv --robot-triage | jq .triage.recommendations` to refresh it —
+closed tasks often unblock new ones.
 
 You only stop when:
 
-- `bv --robot-next` returns no actionable item, **or**
+- a refreshed `bv --robot-triage | jq .triage.recommendations`
+  returns no actionable item, **or**
 - a non-obvious decision with long-lasting impact appears — in that
   case use `AskUserQuestion` with enough context and a clear
   recommendation for the user to decide.
@@ -73,15 +78,17 @@ and ships implementation + review fixes + `.beads/` delta in a single
 signed-off commit. Closure and commit are atomic.
 
 ```
-DIRECTOR: pick top task with `bv --robot-next --format toon`
-    │
+DIRECTOR: pick top task from the cached recommendations list
+    │       (run `bv --robot-triage | jq .triage.recommendations`
+    │        once to seed the list; take the next entry each loop;
+    │        only refresh when the list runs out)
     ▼
 1. DIRECTOR: `bd show <id>` → sanity-check dependencies.
    • If a prerequisite is obviously missing (e.g. an API task whose
      schema migration is still open), add the link
      `bd dep <blocker> --blocks <picked>` → **the picked task is now
-     blocked; do NOT start it.** Loop back to `bv --robot-next` and
-     pick a different task. The graph fix ships with the next pair's
+     blocked; do NOT start it.** Drop it from your cached list and
+     pick the next entry. The graph fix ships with the next pair's
      commit (commiter's `bd sync`).
    • Otherwise, locate (or create via `/beads`) the paired selfreview
      task — triage does not return it — and continue.
@@ -105,8 +112,11 @@ DIRECTOR: pick top task with `bv --robot-next --format toon`
     │       Single atomic step: closure ships with the commit.
     │
     ▼
-5. DIRECTOR: `bv --robot-next --format toon` again — loop to step 1
-   until it returns nothing.
+5. DIRECTOR: pick the next entry from your cached recommendations
+   list and loop to step 1. Only re-run
+   `bv --robot-triage | jq .triage.recommendations` when the list
+   is empty (or stale because of a graph edit). Stop only when a
+   refreshed list returns nothing.
 ```
 
 **No Reviewer or Documenter agents.** Review = paired selfreview task
@@ -178,10 +188,12 @@ Read, in order:
   obviously depends on another open task (schema before API, API
   before CLI, foundational refactor before consumers), add the
   dependency *before* starting: `bd dep <blocker> --blocks <blocked>`.
-  Then **drop the picked task** — it's now blocked — and re-run
-  `bv --robot-next` for a different one. Wrong-order picks waste a
-  coder run and leave the graph misleading. The dep edit ships with
-  the next commit (commiter's `bd sync` covers it).
+  Then **drop the picked task** — it's now blocked — and pick the
+  next entry from your cached recommendations list (refresh via
+  `bv --robot-triage | jq .triage.recommendations` only if the list
+  is empty). Wrong-order picks waste a coder run and leave the
+  graph misleading. The dep edit ships with the next commit
+  (commiter's `bd sync` covers it).
 
 ## Invoking agents
 
@@ -258,9 +270,15 @@ Before delegating implementation:
 ## Beads workflow
 
 ```bash
-bv --robot-next  --format toon        # single highest-priority ready task
-bv --robot-triage --format toon       # full prioritised queue (planning view)
-                                      # both: --format json, or BV_OUTPUT_FORMAT
+bv --robot-triage | jq .triage.recommendations
+                                      # top ~10 prioritised ready tasks; cache
+                                      # the list and take entries off the top
+                                      # one at a time. Don't re-run after every
+                                      # pair — the output is verbose. Refresh
+                                      # only when the cached list runs out.
+                                      # (Avoid `bv --robot-next` — it currently
+                                      # returns no task even when the queue has
+                                      # plenty left.)
                                       # NB: selfreview tasks are NOT returned —
                                       # find or create the pair for each main
 bd show <id>                          # full context
