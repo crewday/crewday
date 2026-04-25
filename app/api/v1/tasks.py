@@ -160,8 +160,10 @@ from app.domain.tasks.completion import (
     start as start_task,
 )
 from app.domain.tasks.oneoff import (
+    InvalidLocalDatetime,
     PersonalAssignmentError,
     TaskCreate,
+    TaskFieldInvalid,
     TaskPatch,
     TaskView,
     create_oneoff,
@@ -1153,6 +1155,14 @@ def _http_for_task_mutation(exc: Exception) -> HTTPException:
         return _template_not_found()
     if isinstance(exc, PersonalAssignmentError):
         return _http(422, "personal_assignment_invalid", message=str(exc))
+    if isinstance(exc, TaskFieldInvalid):
+        return _http(
+            422,
+            "invalid_task_field",
+            field=exc.field,
+            value=exc.value,
+            message=str(exc),
+        )
     if isinstance(exc, InvalidStateTransition):
         return _http(
             status.HTTP_409_CONFLICT,
@@ -1683,7 +1693,7 @@ def get_task_route(
     "/tasks/{task_id}",
     response_model=TaskPayload,
     operation_id="patch_task",
-    summary="Partial update of a task (title / description only in v1)",
+    summary="Partial update of a task (full §06 mutable set)",
 )
 def patch_task_route(
     task_id: str,
@@ -1691,16 +1701,40 @@ def patch_task_route(
     ctx: _Ctx,
     session: _Db,
 ) -> TaskPayload:
-    """Narrow PATCH — see :class:`app.domain.tasks.oneoff.TaskPatch`.
+    """PATCH — see :class:`app.domain.tasks.oneoff.TaskPatch`.
 
-    The full mutable field set lands with cd-task-patch-wider; for now
-    the handler only writes the text fields that can't conflict with
-    the state machine or assignment algorithm.
+    Carries the full §06 "Task row" mutable set (cd-43wv): title,
+    description_md, scheduled_for_local, property_id, area_id,
+    unit_id, expected_role_id, priority, duration_minutes,
+    photo_evidence. Each field is independently validated; the
+    relationship checks (area / unit must belong to the resolved
+    property; property must belong to the workspace; role must be a
+    live workspace row) surface as ``422 invalid_task_field``. A
+    malformed ``scheduled_for_local`` lands as ``422 invalid_field``.
+
+    Reassignment / availability re-resolution after a property or
+    schedule change lives on the dedicated reschedule + reassign
+    verbs (``/scheduler/tasks/{id}/reschedule``,
+    ``/scheduler/tasks/{id}/reassign``). PATCH only writes through
+    and emits :class:`~app.events.types.TaskUpdated`; the SPA's SSE
+    reducer invalidates the affected caches.
     """
     try:
         view = update_task(session, ctx, task_id=task_id, body=body)
-    except OneOffTaskNotFound as exc:
-        raise _task_not_found() from exc
+    except (OneOffTaskNotFound, TaskFieldInvalid) as exc:
+        # ``_http_for_task_mutation`` is the single mapping table for
+        # task-domain exceptions; routing through it keeps the
+        # ``invalid_task_field`` envelope identical to every other
+        # task verb (start / complete / skip / cancel) so the SPA's
+        # error-toast renderer doesn't have to special-case PATCH.
+        raise _http_for_task_mutation(exc) from exc
+    except InvalidLocalDatetime as exc:
+        # ``_parse_local_datetime`` raises ``InvalidLocalDatetime`` on a
+        # malformed or tz-aware ``scheduled_for_local``. Distinct from
+        # other ``ValueError``s the service may raise (e.g. clock
+        # contract violations) so we don't accidentally squash an
+        # internal bug under a 422.
+        raise _http(422, "invalid_field", message=str(exc)) from exc
     zone = _property_timezone(session, view.property_id)
     return TaskPayload.from_view(view, property_timezone=zone)
 

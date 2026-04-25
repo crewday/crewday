@@ -220,6 +220,21 @@ range is evaluated only when `paused_at` is null.
 | created_at / updated_at      | tstz      |                                               |
 | deleted_at                   | tstz?     |                                               |
 
+**Mutable via `PATCH /tasks/{id}` (cd-43wv).** `title`,
+`description_md`, `scheduled_for_local`, `property_id`, `area_id`,
+`unit_id`, `expected_role_id`, `priority`, `duration_minutes`,
+`photo_evidence`. Each field is independently validated:
+`property_id` must be linked to the caller's workspace through
+`property_workspace`; `area_id` and `unit_id` must belong to the
+post-patch property; `expected_role_id` must be a live `work_role`
+in the workspace. State-machine columns (`state`, `overdue_since`,
+`completed_at`, `completed_by_user_id`, `completion_note_md`,
+`skipped_reason`, `cancellation_reason`) move only through the
+dedicated verbs (`/start`, `/complete`, `/skip`, `/cancel`);
+assignment columns (`assigned_user_id`) move through `/assign`.
+Successful PATCH emits `task.updated` SSE so subscribed clients
+refresh.
+
 ### State machine
 
 ```
@@ -239,7 +254,14 @@ The canonical enum lives in §02 (`task_state`, 7 values including
   immediately for one-offs created with a past `scheduled_for`). This
   is the "now actionable, on today's list" boundary used to separate
   `/today` from `/schedule` — for any user (worker or manager) who has
-  tasks assigned to them.
+  tasks assigned to them. A `PATCH /tasks/{id}` that moves
+  `scheduled_for_local` re-runs the `scheduled ↔ pending` gate at
+  `starts_at <= now` (a task pulled into the past flips to `pending`,
+  one pushed back into the future returns to `scheduled`); tasks
+  already past `pending` (`in_progress`, `done`, `skipped`,
+  `cancelled`, `overdue`) keep their state — the worker has either
+  started or closed the task and a passive PATCH must not undo a
+  deliberate move.
 - `pending` → `in_progress` is optional; workers may go directly
   to `completed`.
 - `completed` is terminal.

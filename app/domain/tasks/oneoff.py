@@ -88,8 +88,9 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.adapters.db.places.models import Property
+from app.adapters.db.places.models import Area, Property, PropertyWorkspace, Unit
 from app.adapters.db.tasks.models import Occurrence, TaskTemplate
+from app.adapters.db.workspace.models import WorkRole
 from app.audit import write_audit
 from app.authz import (
     EmptyPermissionRuleRepository,
@@ -105,7 +106,7 @@ from app.domain.tasks.templates import (
 )
 from app.events.bus import EventBus
 from app.events.bus import bus as default_event_bus
-from app.events.types import TaskAssigned, TaskCreated
+from app.events.types import TaskAssigned, TaskCreated, TaskUpdated
 from app.tenancy import WorkspaceContext
 from app.util.clock import Clock, SystemClock
 from app.util.ulid import new_ulid
@@ -113,8 +114,10 @@ from app.util.ulid import new_ulid
 __all__ = [
     "AssignmentHook",
     "ChecklistExpansionHook",
+    "InvalidLocalDatetime",
     "PersonalAssignmentError",
     "TaskCreate",
+    "TaskFieldInvalid",
     "TaskNotFound",
     "TaskPatch",
     "TaskTemplateNotFound",
@@ -213,6 +216,49 @@ class TaskNotFound(LookupError):
     decoupled, but cd-sn26's router needs one import site for the
     CRUD handlers — this alias.
     """
+
+
+class InvalidLocalDatetime(ValueError):
+    """A ``scheduled_for_local`` payload could not be parsed as ISO-8601.
+
+    Raised by :func:`_parse_local_datetime` when the string is
+    syntactically malformed or carries a timezone (the field is
+    documented as property-local, tz-naive). Distinct from
+    :class:`TaskFieldInvalid` (a referenced row failed validation) and
+    from a plain :class:`ValueError` raised by service-internal
+    invariants (e.g. the clock contract) — keeping a dedicated subclass
+    lets the router map "caller bug" to ``422 invalid_field`` without
+    swallowing other ``ValueError``s.
+    """
+
+
+class TaskFieldInvalid(ValueError):
+    """A :class:`TaskPatch` field references a row that fails validation.
+
+    Raised by :func:`update_task` when:
+
+    * ``property_id`` is not linked to the caller's workspace through
+      :class:`PropertyWorkspace` (cross-workspace borrowing forbidden).
+    * ``area_id`` does not belong to the task's resolved property.
+    * ``unit_id`` does not belong to the task's resolved property
+      (the v1 schema models units as ``unit.property_id``; the §04
+      "unit belongs to area or property" widening lands with
+      cd-8u5's ``unit.area_id`` column).
+    * ``expected_role_id`` is not a live :class:`WorkRole` row in
+      the caller's workspace.
+
+    The router maps the exception to ``422 invalid_task_field`` with
+    the offending field name + value so the SPA can pin the
+    validation error to the right input. Distinct from
+    :class:`TaskNotFound` (the row itself is missing) and
+    :class:`PersonalAssignmentError` (a different invariant on the
+    create path); each lands as its own HTTP code.
+    """
+
+    def __init__(self, field: str, value: str | None, message: str) -> None:
+        super().__init__(message)
+        self.field = field
+        self.value = value
 
 
 # ---------------------------------------------------------------------------
@@ -383,11 +429,11 @@ def _parse_local_datetime(value: str) -> datetime:
     try:
         parsed = datetime.fromisoformat(text)
     except ValueError as exc:
-        raise ValueError(
+        raise InvalidLocalDatetime(
             f"scheduled_for_local must be an ISO-8601 local timestamp; got {value!r}"
         ) from exc
     if parsed.tzinfo is not None:
-        raise ValueError(
+        raise InvalidLocalDatetime(
             "scheduled_for_local must be timezone-naive (property-local); "
             f"got tz-aware {value!r} — strip the zone and use the "
             "property's wall-clock time"
@@ -901,32 +947,73 @@ def _ensure_utc(value: datetime) -> datetime:
 class TaskPatch(BaseModel):
     """Partial update DTO for ``PATCH /api/v1/tasks/{id}``.
 
-    The scope of the cd-sn26 HTTP surface is deliberately narrow: the
-    full §06 "mutable task fields" set (``scheduled_for_local``,
-    ``property_id``, ``area_id``, …) is driven by dedicated verbs
-    (``/tasks/{id}/assign``, ``/scheduler/tasks/{id}/reschedule``)
-    that already carry the domain invariants. The catch-all ``PATCH``
-    handler today supports only the text fields a caller can safely
-    rewrite without crossing a state-machine or assignment boundary:
+    Carries the full §06 "Task row" mutable set (cd-43wv widened
+    cd-sn26's narrow title-only DTO):
 
-    * ``title`` — corrects the one-liner the worker reads in the card.
+    * ``title`` — the one-liner the worker reads in the card.
     * ``description_md`` — the long-form body rendered below it.
+    * ``scheduled_for_local`` — property-local ISO-8601 timestamp;
+      :func:`update_task` projects to ``scheduled_for_utc`` via the
+      property's IANA timezone and re-runs the §06
+      ``scheduled ↔ pending`` state gate so the row matches its
+      new clock. Dedicated reschedule paths
+      (``/scheduler/tasks/{id}/reschedule``) handle the cross-cutting
+      availability + rota re-resolution; the generic PATCH simply
+      moves the task and emits ``task.updated``.
+    * ``property_id`` / ``area_id`` / ``unit_id`` — the location
+      tuple. Each field is validated individually but their
+      relationship is also enforced (area must belong to the
+      resolved property; unit must belong to the resolved property).
+      Reassigning the task to the new property's worker pool is a
+      separate verb (``/scheduler/tasks/{id}/reassign``); PATCH
+      does not silently re-resolve the assignee.
+    * ``expected_role_id`` — must be a live :class:`WorkRole` in
+      the caller's workspace.
+    * ``priority`` — `low | normal | high | urgent`.
+    * ``duration_minutes`` — clamped to ``[1, 1440]``.
+    * ``photo_evidence`` — `disabled | optional | required`.
 
     Omitted fields keep their current value; an explicit ``null`` on a
     nullable column clears it. The ``model_fields_set`` introspection
     the router uses preserves "field not sent" vs "field sent as
     null", so the service can differentiate the two shapes.
-
-    A follow-up Beads task (cd-task-patch-wider) will open the body
-    up to the remaining spec fields once the cross-cutting checks
-    (availability for ``scheduled_for_local``, scope validity for
-    ``property_id`` / ``area_id``) are ready to ship alongside them.
     """
 
     model_config = ConfigDict(extra="forbid")
 
     title: str | None = Field(default=None, min_length=1, max_length=_MAX_TITLE_LEN)
     description_md: str | None = Field(default=None, max_length=_MAX_DESC_LEN)
+    # ISO-8601 property-local timestamp; ``min_length=1`` rejects an
+    # empty string. The service rejects tz-aware values via
+    # :func:`_parse_local_datetime`, matching the create path.
+    scheduled_for_local: str | None = Field(default=None, min_length=1, max_length=32)
+    # Each location id is nullable on the Occurrence row, so an
+    # explicit ``null`` clears the column.
+    property_id: str | None = Field(default=None, max_length=_MAX_ID_LEN)
+    area_id: str | None = Field(default=None, max_length=_MAX_ID_LEN)
+    unit_id: str | None = Field(default=None, max_length=_MAX_ID_LEN)
+    expected_role_id: str | None = Field(default=None, max_length=_MAX_ID_LEN)
+    priority: Priority | None = None
+    # Matches :class:`TaskCreate.duration_minutes`: same caps so a
+    # patched ad-hoc task carries the same field-length ceilings as
+    # a freshly created one.
+    duration_minutes: int | None = Field(default=None, ge=1, le=24 * 60)
+    photo_evidence: PhotoEvidence | None = None
+
+    @model_validator(mode="after")
+    def _validate_title_non_blank(self) -> TaskPatch:
+        """Reject a whitespace-only ``title`` patch.
+
+        Mirrors :meth:`TaskCreate._validate_branches`: an explicit
+        ``title="   "`` would survive ``min_length=1`` (three chars)
+        and the service would then ``.strip()`` it down to an empty
+        string, silently overwriting the row's title with ``''``.
+        Raise here so the SPA pins the validation to the input
+        rather than the row landing in an unrenderable state.
+        """
+        if self.title is not None and not self.title.strip():
+            raise ValueError("title must be a non-blank string when provided")
+        return self
 
 
 def read_task(
@@ -968,22 +1055,63 @@ def update_task(
     task_id: str,
     body: TaskPatch,
     clock: Clock | None = None,
+    event_bus: EventBus | None = None,
 ) -> TaskView:
-    """Rewrite the text fields on ``task_id`` and audit the delta.
+    """Rewrite the §06 mutable fields on ``task_id``, audit, and emit.
 
-    Mirrors the :func:`app.domain.identity.users.update_profile`
-    shape: walk ``body.model_fields_set`` to distinguish "omit" from
-    "null", apply only the sent fields, write one
-    ``task.update`` audit row. Permission gating is the router's job;
-    the service defends against cross-tenant reads via the loader
-    below.
+    Walks ``body.model_fields_set`` to distinguish "omit" from "null",
+    applies the sent fields under per-field validation, recomputes
+    ``scheduled_for_utc`` + the ``scheduled ↔ pending`` state gate
+    when the local timestamp moves, and publishes
+    :class:`TaskUpdated` on every successful row mutation so SSE
+    subscribers refresh.
 
-    Raises :class:`TaskNotFound` when the id is not visible in the
-    caller's workspace. Does not publish an event — cd-sn26 does not
-    yet have a :class:`TaskChanged` shape on the bus; the follow-up
-    that adds per-field PATCH widens this seam.
+    The §06 mutable set covered here:
+
+    * ``title`` / ``description_md`` — text fields (cd-sn26 narrow
+      slice; preserved verbatim for callers that only patch text).
+    * ``scheduled_for_local`` — recomputed against the resolved
+      property's timezone (the row's existing ``property_id`` if the
+      patch leaves it unset, else the patch's new ``property_id``).
+      The §06 state gate runs after the recompute: a task whose new
+      local timestamp is past now flips to ``pending``; a task
+      moved into the future flips back to ``scheduled``. Tasks that
+      have left the auto-flip range (``in_progress`` / ``done`` /
+      ``skipped`` / ``cancelled``) keep their state — the worker
+      already started or the task is closed; a passive PATCH must
+      not undo a deliberate state move.
+    * ``property_id`` / ``area_id`` / ``unit_id`` — validated
+      against :class:`PropertyWorkspace` (workspace linkage),
+      :class:`Area.property_id`, and :class:`Unit.property_id`.
+      Reassignment / availability re-resolution lives on the
+      dedicated reschedule + reassign verbs (§12); PATCH only
+      validates and writes through.
+    * ``expected_role_id`` — must reference a live
+      :class:`WorkRole` in the caller's workspace.
+    * ``priority`` / ``duration_minutes`` / ``photo_evidence`` —
+      direct column writes; pydantic narrows the enum and clamps
+      the duration on the DTO.
+
+    Raises:
+
+    * :class:`TaskNotFound` when the id is not visible in the
+      caller's workspace.
+    * :class:`TaskFieldInvalid` on a field-level violation
+      (cross-workspace property, area outside property, unit
+      outside property, role outside workspace). The router maps
+      this to ``422 invalid_task_field``.
+    * :class:`ValueError` (from the local-datetime parser) on a
+      malformed ``scheduled_for_local`` payload — preserved as a
+      separate exception so the router can branch.
+
+    Permission gating is the router's job; the service defends
+    against cross-tenant reads via the loader below.
     """
     resolved_clock = clock if clock is not None else SystemClock()
+    now = resolved_clock.now()
+    if now.tzinfo is None:
+        raise ValueError("clock.now() must return an aware UTC datetime")
+    resolved_bus = event_bus if event_bus is not None else default_event_bus
 
     row = session.scalar(
         select(Occurrence).where(
@@ -996,10 +1124,96 @@ def update_task(
 
     before = _row_to_view(row)
     sent = body.model_fields_set
+
+    # --- Resolve the location tuple first. The downstream area /
+    # unit checks need the *post-patch* property_id (else patching
+    # property + area in one call would validate the area against
+    # the OLD property and silently let through a mismatch).
+    if "property_id" in sent:
+        new_property_id = body.property_id
+        if new_property_id is not None:
+            _assert_property_in_workspace(session, ctx, property_id=new_property_id)
+    else:
+        new_property_id = row.property_id
+
+    # Resolve the post-patch area / unit too — a property-only PATCH
+    # must not strand an existing area_id / unit_id pointing at the
+    # *old* property. The caller has to either clear them in the same
+    # call or repoint them to a row under the new property; either is
+    # OK, silent inconsistency is not.
+    new_area_id = body.area_id if "area_id" in sent else row.area_id
+    new_unit_id = body.unit_id if "unit_id" in sent else row.unit_id
+
+    if new_area_id is not None and ("area_id" in sent or "property_id" in sent):
+        _assert_area_belongs_to_property(
+            session, area_id=new_area_id, property_id=new_property_id
+        )
+    if new_unit_id is not None and ("unit_id" in sent or "property_id" in sent):
+        _assert_unit_belongs_to_property(
+            session, unit_id=new_unit_id, property_id=new_property_id
+        )
+
+    # --- expected_role_id validation (§05 work_role catalogue is
+    # workspace-scoped; cross-workspace borrowing is forbidden).
+    if "expected_role_id" in sent and body.expected_role_id is not None:
+        _assert_work_role_in_workspace(session, ctx, work_role_id=body.expected_role_id)
+
+    # --- Apply the writes. ---------------------------------------
     if "title" in sent and body.title is not None:
         row.title = body.title.strip()
     if "description_md" in sent:
         row.description_md = body.description_md
+    if "property_id" in sent:
+        row.property_id = body.property_id
+    if "area_id" in sent:
+        row.area_id = body.area_id
+    if "unit_id" in sent:
+        row.unit_id = body.unit_id
+    if "expected_role_id" in sent:
+        row.expected_role_id = body.expected_role_id
+    if "priority" in sent and body.priority is not None:
+        row.priority = body.priority
+    if "photo_evidence" in sent and body.photo_evidence is not None:
+        row.photo_evidence = body.photo_evidence
+    if "duration_minutes" in sent:
+        row.duration_minutes = body.duration_minutes
+
+    # --- Schedule-related recompute. ``scheduled_for_local`` drives
+    # both the row's local string and the UTC mirror; the state
+    # machine flips between ``scheduled`` and ``pending`` based on
+    # the new UTC anchor. A property change without a
+    # ``scheduled_for_local`` patch ALSO has to recompute the UTC
+    # mirror because the timezone the local string projects through
+    # has moved (a task at "2026-04-19T14:00 local" reads 13:00 UTC
+    # under Europe/London but 12:00 UTC under Europe/Paris).
+    schedule_recomputed = False
+    if "scheduled_for_local" in sent and body.scheduled_for_local is not None:
+        candidate_local = _parse_local_datetime(body.scheduled_for_local)
+        zone = _resolve_property_zone(session, new_property_id)
+        new_starts_at = _to_utc(candidate_local, zone)
+        new_local_iso = _iso_local(candidate_local)
+        row.scheduled_for_local = new_local_iso
+        _apply_starts_at(row, new_starts_at)
+        schedule_recomputed = True
+    elif "property_id" in sent and row.scheduled_for_local:
+        # Property changed without a scheduled_for_local patch — the
+        # local wall-clock string stays put but the UTC mirror has
+        # to follow the new timezone. Bypass the parser failure
+        # branch: the row's existing ``scheduled_for_local`` was
+        # validated when it was first written, so a parse error here
+        # is a data bug, not a caller bug.
+        try:
+            existing_local = _parse_local_datetime(row.scheduled_for_local)
+        except ValueError:
+            existing_local = None
+        if existing_local is not None:
+            zone = _resolve_property_zone(session, new_property_id)
+            _apply_starts_at(row, _to_utc(existing_local, zone))
+            schedule_recomputed = True
+
+    if schedule_recomputed:
+        _maybe_flip_schedule_state(row, now=now)
+
     session.flush()
     after = _row_to_view(row)
 
@@ -1026,7 +1240,232 @@ def update_task(
         },
         clock=resolved_clock,
     )
+
+    changed = _changed_fields(before_dict, after_dict)
+    resolved_bus.publish(
+        TaskUpdated(
+            workspace_id=ctx.workspace_id,
+            actor_id=ctx.actor_id,
+            correlation_id=ctx.audit_correlation_id,
+            occurred_at=resolved_clock.now(),
+            task_id=row.id,
+            changed_fields=changed,
+        )
+    )
     return after
+
+
+# ---------------------------------------------------------------------------
+# update_task helpers
+# ---------------------------------------------------------------------------
+
+
+# §06 mutable columns surfaced on :class:`TaskUpdated.changed_fields`.
+# The set excludes derived / read-only fields (``id``, ``workspace_id``,
+# ``created_at``, ``created_by``) so a no-op caller-driven PATCH that
+# happens to round-trip a derived value cannot pollute the SSE
+# payload.
+_MUTABLE_DIFF_FIELDS: tuple[str, ...] = (
+    "title",
+    "description_md",
+    "scheduled_for_local",
+    "scheduled_for_utc",
+    "property_id",
+    "area_id",
+    "unit_id",
+    "expected_role_id",
+    "priority",
+    "duration_minutes",
+    "photo_evidence",
+    "state",
+)
+
+
+def _changed_fields(before: dict[str, Any], after: dict[str, Any]) -> tuple[str, ...]:
+    """Return the §06 mutable columns whose value moved during the patch."""
+    return tuple(
+        field for field in _MUTABLE_DIFF_FIELDS if before.get(field) != after.get(field)
+    )
+
+
+def _apply_starts_at(row: Occurrence, new_starts_at: datetime) -> None:
+    """Move ``starts_at`` and slide ``ends_at`` to preserve duration.
+
+    The DB CHECK ``ends_at > starts_at`` rejects an out-of-order pair,
+    so we re-derive ``ends_at`` from the row's existing duration
+    (falling back to the create-path's 30-minute placeholder when
+    ``duration_minutes`` is unset). Rewriting ``ends_at`` from the new
+    UTC anchor keeps the window length stable across reschedules.
+    """
+    if row.duration_minutes is not None and row.duration_minutes > 0:
+        effective_duration = row.duration_minutes
+    else:
+        effective_duration = 30
+    row.starts_at = new_starts_at
+    row.ends_at = new_starts_at + timedelta(minutes=effective_duration)
+
+
+def _maybe_flip_schedule_state(row: Occurrence, *, now: datetime) -> None:
+    """Re-run the §06 ``scheduled ↔ pending`` gate after a reschedule.
+
+    The state machine only auto-flips between ``scheduled`` and
+    ``pending`` on the schedule axis: a task that has moved to
+    ``in_progress`` / ``done`` / ``skipped`` / ``cancelled`` /
+    ``overdue`` keeps its state across a PATCH (the worker has
+    started it, the task is closed, or the sweeper soft-flipped it).
+    A ``scheduled`` task whose new ``starts_at`` is past now becomes
+    ``pending``; a ``pending`` task whose new ``starts_at`` is in
+    the future returns to ``scheduled`` so the SPA sorts it back
+    into the schedule view.
+
+    Per §06: "``scheduled`` → ``pending`` happens at
+    ``scheduled_for_utc - 1h`` (or immediately for one-offs created
+    with a past ``scheduled_for``)". Reproducing the 1-hour lead
+    time on a generic PATCH would couple the route to the
+    scheduler-worker's tick cadence; we keep the boundary at
+    ``starts_at <= now`` here (matching the create path) and rely
+    on the scheduler tick to do the lead-time flip on un-patched
+    tasks.
+    """
+    if row.state == "scheduled" and row.starts_at <= now:
+        row.state = "pending"
+    elif row.state == "pending" and row.starts_at > now:
+        row.state = "scheduled"
+
+
+def _assert_property_in_workspace(
+    session: Session,
+    ctx: WorkspaceContext,
+    *,
+    property_id: str,
+) -> None:
+    """Raise :class:`TaskFieldInvalid` if the property isn't workspace-linked.
+
+    Mirrors
+    :func:`app.domain.identity.role_grants._assert_scope_property_in_workspace`
+    and
+    :func:`app.domain.places.property_work_role_assignments._assert_property_in_workspace`
+    but lifts to the task-domain exception so the router can map
+    every per-field failure under one HTTP shape.
+    """
+    row = session.scalar(
+        select(PropertyWorkspace).where(
+            PropertyWorkspace.property_id == property_id,
+            PropertyWorkspace.workspace_id == ctx.workspace_id,
+        )
+    )
+    if row is None:
+        raise TaskFieldInvalid(
+            field="property_id",
+            value=property_id,
+            message=(f"property {property_id!r} is not linked to this workspace"),
+        )
+
+
+def _assert_area_belongs_to_property(
+    session: Session,
+    *,
+    area_id: str,
+    property_id: str | None,
+) -> None:
+    """Raise :class:`TaskFieldInvalid` when the area is for a different property.
+
+    A patch that sets ``area_id`` without a resolved property is a
+    domain bug — areas are scoped to a property in the v1 schema
+    (``area.property_id`` is NOT NULL). Surface the violation as a
+    422 with the offending ``area_id`` rather than letting the row
+    write a dangling reference.
+    """
+    if property_id is None:
+        raise TaskFieldInvalid(
+            field="area_id",
+            value=area_id,
+            message=(
+                "area_id requires a resolved property_id; the task has none "
+                "and the patch did not set one"
+            ),
+        )
+    row = session.scalar(
+        select(Area).where(
+            Area.id == area_id,
+            Area.property_id == property_id,
+        )
+    )
+    if row is None:
+        raise TaskFieldInvalid(
+            field="area_id",
+            value=area_id,
+            message=(f"area {area_id!r} does not belong to property {property_id!r}"),
+        )
+
+
+def _assert_unit_belongs_to_property(
+    session: Session,
+    *,
+    unit_id: str,
+    property_id: str | None,
+) -> None:
+    """Raise :class:`TaskFieldInvalid` when the unit is for a different property.
+
+    The §04 spec leaves room for ``unit.area_id`` (cd-8u5) and the
+    PATCH spec wording reads "unit belongs to area or property"; the
+    v1 schema only models ``unit.property_id``, so the property
+    membership check is the live invariant. When the area-scoped
+    units land we extend this helper rather than introducing a
+    parallel one.
+    """
+    if property_id is None:
+        raise TaskFieldInvalid(
+            field="unit_id",
+            value=unit_id,
+            message=(
+                "unit_id requires a resolved property_id; the task has none "
+                "and the patch did not set one"
+            ),
+        )
+    row = session.scalar(
+        select(Unit).where(
+            Unit.id == unit_id,
+            Unit.property_id == property_id,
+        )
+    )
+    if row is None:
+        raise TaskFieldInvalid(
+            field="unit_id",
+            value=unit_id,
+            message=(f"unit {unit_id!r} does not belong to property {property_id!r}"),
+        )
+
+
+def _assert_work_role_in_workspace(
+    session: Session,
+    ctx: WorkspaceContext,
+    *,
+    work_role_id: str,
+) -> None:
+    """Raise :class:`TaskFieldInvalid` when the role isn't a live workspace row.
+
+    Soft-deleted roles (``deleted_at IS NOT NULL``) are also rejected:
+    a patched task pointing at a retired role would never resolve an
+    assignee through the §06 algorithm and the SPA would render an
+    empty role chip indefinitely. The §05 archive flow leaves
+    historical tasks pointing at the retired role; opting NEW
+    references back into the row is what the workspace owner has to
+    explicitly avoid.
+    """
+    row = session.scalar(
+        select(WorkRole).where(
+            WorkRole.id == work_role_id,
+            WorkRole.workspace_id == ctx.workspace_id,
+            WorkRole.deleted_at.is_(None),
+        )
+    )
+    if row is None:
+        raise TaskFieldInvalid(
+            field="expected_role_id",
+            value=work_role_id,
+            message=(f"work_role {work_role_id!r} is not a live row in this workspace"),
+        )
 
 
 def _view_to_diff_dict(view: TaskView) -> dict[str, Any]:

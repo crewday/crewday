@@ -675,6 +675,7 @@ def _format_sse_frame(*, event_id: str, kind: str, payload: dict[str, Any]) -> b
 _INVALIDATIONS: Final[dict[str, tuple[tuple[str, ...], ...]]] = {
     "task.created": (("tasks",),),
     "task.assigned": (("tasks",),),
+    "task.updated": (("tasks",),),
     "task.completed": (("tasks",),),
     "task.overdue": (("tasks",),),
     "stay.upcoming": (("stays",),),

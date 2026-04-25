@@ -24,6 +24,7 @@ from app.events.types import (
     TaskCompleted,
     TaskCreated,
     TaskOverdue,
+    TaskUpdated,
 )
 
 __all__ = [
@@ -45,6 +46,7 @@ __all__ = [
     "TaskCompleted",
     "TaskCreated",
     "TaskOverdue",
+    "TaskUpdated",
     "bus",
     "get_event_type",
     "register",

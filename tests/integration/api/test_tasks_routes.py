@@ -39,8 +39,9 @@ from fastapi.testclient import TestClient
 from sqlalchemy import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
-from app.adapters.db.places.models import Property
+from app.adapters.db.places.models import Area, Property, PropertyWorkspace, Unit
 from app.adapters.db.tasks.models import Occurrence
+from app.adapters.db.workspace.models import WorkRole
 from app.api.deps import current_workspace_context
 from app.api.deps import db_session as _db_session_dep
 from app.api.v1.tasks import router as tasks_router
@@ -1130,6 +1131,260 @@ class TestPatchTask:
             )
             assert r.status_code == 404, r.text
             assert r.json()["detail"]["error"] == "task_not_found"
+
+    # --- cd-43wv widened set ---------------------------------------
+
+    def test_patch_priority_and_duration_and_photo_evidence(
+        self,
+        session_factory: sessionmaker[Session],
+        seeded: dict[str, Any],
+    ) -> None:
+        with _client_for(session_factory, seeded["owner_ctx"]) as client:
+            r = client.patch(
+                f"/api/v1/tasks/{seeded['task_id']}",
+                json={
+                    "priority": "urgent",
+                    "duration_minutes": 90,
+                    "photo_evidence": "required",
+                },
+            )
+            assert r.status_code == 200, r.text
+            body = r.json()
+            assert body["priority"] == "urgent"
+            assert body["duration_minutes"] == 90
+            assert body["photo_evidence"] == "required"
+
+    def test_patch_scheduled_for_local_recomputes_utc(
+        self,
+        session_factory: sessionmaker[Session],
+        seeded: dict[str, Any],
+    ) -> None:
+        with _client_for(session_factory, seeded["owner_ctx"]) as client:
+            r = client.patch(
+                f"/api/v1/tasks/{seeded['task_id']}",
+                # Europe/Paris in late April → UTC+2; 18:00 local = 16:00Z.
+                json={"scheduled_for_local": "2026-04-19T18:00"},
+            )
+            assert r.status_code == 200, r.text
+            body = r.json()
+            assert body["scheduled_for_local"] == "2026-04-19T18:00:00"
+            assert body["scheduled_for_utc"].startswith("2026-04-19T16:00:00")
+
+    def test_patch_scheduled_for_local_invalid_iso_is_422(
+        self,
+        session_factory: sessionmaker[Session],
+        seeded: dict[str, Any],
+    ) -> None:
+        with _client_for(session_factory, seeded["owner_ctx"]) as client:
+            r = client.patch(
+                f"/api/v1/tasks/{seeded['task_id']}",
+                json={"scheduled_for_local": "not-an-iso"},
+            )
+            assert r.status_code == 422, r.text
+            assert r.json()["detail"]["error"] == "invalid_field"
+
+    def test_patch_property_id_cross_workspace_is_422(
+        self,
+        session_factory: sessionmaker[Session],
+        seeded: dict[str, Any],
+    ) -> None:
+        """A property never linked to the workspace is rejected as
+        ``invalid_task_field`` — the row write would silently bind a
+        cross-tenant property without this gate."""
+        # Seed a foreign property — never bound to ``workspace_id``.
+        with session_factory() as s:
+            with tenant_agnostic():
+                foreign_prop_id = new_ulid()
+                s.add(
+                    Property(
+                        id=foreign_prop_id,
+                        address="999 Foreign Way",
+                        timezone="Europe/London",
+                        tags_json=[],
+                        created_at=_PINNED,
+                    )
+                )
+                s.flush()
+            s.commit()
+        with _client_for(session_factory, seeded["owner_ctx"]) as client:
+            r = client.patch(
+                f"/api/v1/tasks/{seeded['task_id']}",
+                json={"property_id": foreign_prop_id},
+            )
+            assert r.status_code == 422, r.text
+            detail = r.json()["detail"]
+            assert detail["error"] == "invalid_task_field"
+            assert detail["field"] == "property_id"
+
+    def test_patch_area_for_other_property_is_422(
+        self,
+        session_factory: sessionmaker[Session],
+        seeded: dict[str, Any],
+    ) -> None:
+        # Seed a separate property + area; the area belongs to that
+        # other property, not the seeded task's property.
+        with session_factory() as s:
+            with tenant_agnostic():
+                other_prop_id = new_ulid()
+                s.add(
+                    Property(
+                        id=other_prop_id,
+                        address="2 Other Way",
+                        timezone="Europe/London",
+                        tags_json=[],
+                        created_at=_PINNED,
+                    )
+                )
+                s.flush()
+                area_id = new_ulid()
+                s.add(
+                    Area(
+                        id=area_id,
+                        property_id=other_prop_id,
+                        label="Patio",
+                        icon=None,
+                        ordering=0,
+                        created_at=_PINNED,
+                    )
+                )
+                s.flush()
+            s.commit()
+        with _client_for(session_factory, seeded["owner_ctx"]) as client:
+            r = client.patch(
+                f"/api/v1/tasks/{seeded['task_id']}",
+                json={"area_id": area_id},
+            )
+            assert r.status_code == 422, r.text
+            detail = r.json()["detail"]
+            assert detail["error"] == "invalid_task_field"
+            assert detail["field"] == "area_id"
+
+    def test_patch_unit_for_other_property_is_422(
+        self,
+        session_factory: sessionmaker[Session],
+        seeded: dict[str, Any],
+    ) -> None:
+        with session_factory() as s:
+            with tenant_agnostic():
+                other_prop_id = new_ulid()
+                s.add(
+                    Property(
+                        id=other_prop_id,
+                        address="3 Other Way",
+                        timezone="Europe/London",
+                        tags_json=[],
+                        created_at=_PINNED,
+                    )
+                )
+                s.flush()
+                unit_id = new_ulid()
+                s.add(
+                    Unit(
+                        id=unit_id,
+                        property_id=other_prop_id,
+                        label="Apt 9",
+                        type="apartment",
+                        capacity=2,
+                        created_at=_PINNED,
+                    )
+                )
+                s.flush()
+            s.commit()
+        with _client_for(session_factory, seeded["owner_ctx"]) as client:
+            r = client.patch(
+                f"/api/v1/tasks/{seeded['task_id']}",
+                json={"unit_id": unit_id},
+            )
+            assert r.status_code == 422, r.text
+            detail = r.json()["detail"]
+            assert detail["error"] == "invalid_task_field"
+            assert detail["field"] == "unit_id"
+
+    def test_patch_expected_role_id_cross_workspace_is_422(
+        self,
+        session_factory: sessionmaker[Session],
+        seeded: dict[str, Any],
+    ) -> None:
+        # Seed a role in the foreign workspace.
+        with session_factory() as s:
+            with tenant_agnostic():
+                role_id = new_ulid()
+                s.add(
+                    WorkRole(
+                        id=role_id,
+                        workspace_id=seeded["foreign_workspace_id"],
+                        key="maid",
+                        name="Maid",
+                        description_md="",
+                        default_settings_json={},
+                        icon_name="",
+                        created_at=_PINNED,
+                    )
+                )
+                s.flush()
+            s.commit()
+        with _client_for(session_factory, seeded["owner_ctx"]) as client:
+            r = client.patch(
+                f"/api/v1/tasks/{seeded['task_id']}",
+                json={"expected_role_id": role_id},
+            )
+            assert r.status_code == 422, r.text
+            detail = r.json()["detail"]
+            assert detail["error"] == "invalid_task_field"
+            assert detail["field"] == "expected_role_id"
+
+    def test_patch_property_area_combo_validates_against_new_property(
+        self,
+        session_factory: sessionmaker[Session],
+        seeded: dict[str, Any],
+    ) -> None:
+        """A single PATCH that moves property + area succeeds when the
+        area belongs to the NEW property — the validator runs against
+        the post-patch property_id, not the original."""
+        with session_factory() as s:
+            with tenant_agnostic():
+                new_prop_id = new_ulid()
+                s.add(
+                    Property(
+                        id=new_prop_id,
+                        address="42 Combo Way",
+                        timezone="Europe/London",
+                        tags_json=[],
+                        created_at=_PINNED,
+                    )
+                )
+                s.flush()
+                s.add(
+                    PropertyWorkspace(
+                        property_id=new_prop_id,
+                        workspace_id=seeded["workspace_id"],
+                        label="combo",
+                        membership_role="owner_workspace",
+                        created_at=_PINNED,
+                    )
+                )
+                area_id = new_ulid()
+                s.add(
+                    Area(
+                        id=area_id,
+                        property_id=new_prop_id,
+                        label="Garden",
+                        icon=None,
+                        ordering=0,
+                        created_at=_PINNED,
+                    )
+                )
+                s.flush()
+            s.commit()
+        with _client_for(session_factory, seeded["owner_ctx"]) as client:
+            r = client.patch(
+                f"/api/v1/tasks/{seeded['task_id']}",
+                json={"property_id": new_prop_id, "area_id": area_id},
+            )
+            assert r.status_code == 200, r.text
+            body = r.json()
+            assert body["property_id"] == new_prop_id
+            assert body["area_id"] == area_id
 
 
 # ---------------------------------------------------------------------------

@@ -51,13 +51,15 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app.adapters.db.audit.models import AuditLog
 from app.adapters.db.base import Base
-from app.adapters.db.places.models import Property
+from app.adapters.db.places.models import Area, Property, PropertyWorkspace, Unit
 from app.adapters.db.session import make_engine
 from app.adapters.db.tasks.models import Occurrence, TaskTemplate
-from app.adapters.db.workspace.models import Workspace
+from app.adapters.db.workspace.models import WorkRole, Workspace
 from app.domain.tasks.oneoff import (
+    InvalidLocalDatetime,
     PersonalAssignmentError,
     TaskCreate,
+    TaskFieldInvalid,
     TaskNotFound,
     TaskPatch,
     TaskTemplateNotFound,
@@ -67,7 +69,7 @@ from app.domain.tasks.oneoff import (
     update_task,
 )
 from app.events.bus import EventBus
-from app.events.types import TaskAssigned, TaskCreated
+from app.events.types import TaskAssigned, TaskCreated, TaskUpdated
 from app.tenancy.context import WorkspaceContext
 from app.util.clock import FrozenClock
 from app.util.ulid import new_ulid
@@ -185,6 +187,95 @@ def _bootstrap_property(session: Session, *, timezone: str = "Europe/Paris") -> 
     )
     session.flush()
     return prop_id
+
+
+def _link_property_to_workspace(
+    session: Session, *, property_id: str, workspace_id: str
+) -> None:
+    """Bind a property to a workspace via :class:`PropertyWorkspace`.
+
+    The PATCH-time validation ``_assert_property_in_workspace``
+    queries the junction table — a property without the link is a
+    cross-tenant reference and rejected as
+    :class:`TaskFieldInvalid`. Tests that exercise the happy
+    property-patch path bootstrap the link explicitly through this
+    helper.
+    """
+    session.add(
+        PropertyWorkspace(
+            property_id=property_id,
+            workspace_id=workspace_id,
+            label="test",
+            membership_role="owner_workspace",
+            created_at=_PINNED,
+        )
+    )
+    session.flush()
+
+
+def _bootstrap_area(session: Session, *, property_id: str, label: str = "Pool") -> str:
+    """Insert an :class:`Area` row scoped to ``property_id``."""
+    area_id = new_ulid()
+    session.add(
+        Area(
+            id=area_id,
+            property_id=property_id,
+            label=label,
+            icon=None,
+            ordering=0,
+            created_at=_PINNED,
+        )
+    )
+    session.flush()
+    return area_id
+
+
+def _bootstrap_unit(
+    session: Session,
+    *,
+    property_id: str,
+    label: str = "Apt 1",
+    type_: str = "apartment",
+) -> str:
+    """Insert a :class:`Unit` row scoped to ``property_id``."""
+    unit_id = new_ulid()
+    session.add(
+        Unit(
+            id=unit_id,
+            property_id=property_id,
+            label=label,
+            type=type_,
+            capacity=2,
+            created_at=_PINNED,
+        )
+    )
+    session.flush()
+    return unit_id
+
+
+def _bootstrap_work_role(
+    session: Session,
+    *,
+    workspace_id: str,
+    key: str = "maid",
+    name: str = "Maid",
+) -> str:
+    """Insert a live :class:`WorkRole` row in the workspace."""
+    role_id = new_ulid()
+    session.add(
+        WorkRole(
+            id=role_id,
+            workspace_id=workspace_id,
+            key=key,
+            name=name,
+            description_md="",
+            default_settings_json={},
+            icon_name="",
+            created_at=_PINNED,
+        )
+    )
+    session.flush()
+    return role_id
 
 
 def _bootstrap_user(session: Session, *, email: str, user_id: str | None = None) -> str:
@@ -1802,3 +1893,1029 @@ class TestUpdateTask:
         """``TaskPatch`` uses ``extra='forbid'`` — a stray key is 422."""
         with pytest.raises(ValidationError):
             TaskPatch.model_validate({"title": "ok", "extra": "nope"})
+
+
+class TestUpdateTaskWiderFields:
+    """cd-43wv — PATCH widens to the §06 mutable set.
+
+    Each new field flows through individually plus a few cross-field
+    combinations. The existing :class:`TestUpdateTask` keeps the
+    cd-sn26 narrow-slice happy path; this class layers the new
+    coverage so a regression on either set is local to its block.
+    """
+
+    # --- priority / duration_minutes / photo_evidence — single-shot
+    # column writes; no cross-resource validation needed. -----------
+
+    def test_priority_update(
+        self,
+        session: Session,
+        bus: EventBus,
+        clock: FrozenClock,
+    ) -> None:
+        ws = _bootstrap_workspace(session, slug="upd-pri")
+        _bootstrap_actor(session, workspace_id=ws)
+        prop_id = _bootstrap_property(session)
+        ctx = _ctx(ws, slug="upd-pri")
+        view = create_oneoff(
+            session,
+            ctx,
+            payload=TaskCreate.model_validate(
+                {
+                    "title": "Pri",
+                    "property_id": prop_id,
+                    "scheduled_for_local": _future_local(),
+                }
+            ),
+            clock=clock,
+            event_bus=bus,
+        )
+        updated = update_task(
+            session,
+            ctx,
+            task_id=view.id,
+            body=TaskPatch(priority="urgent"),
+            clock=clock,
+            event_bus=bus,
+        )
+        assert updated.priority == "urgent"
+
+    def test_duration_minutes_update(
+        self,
+        session: Session,
+        bus: EventBus,
+        clock: FrozenClock,
+    ) -> None:
+        ws = _bootstrap_workspace(session, slug="upd-dur")
+        _bootstrap_actor(session, workspace_id=ws)
+        prop_id = _bootstrap_property(session)
+        ctx = _ctx(ws, slug="upd-dur")
+        view = create_oneoff(
+            session,
+            ctx,
+            payload=TaskCreate.model_validate(
+                {
+                    "title": "Dur",
+                    "property_id": prop_id,
+                    "scheduled_for_local": _future_local(),
+                    "duration_minutes": 30,
+                }
+            ),
+            clock=clock,
+            event_bus=bus,
+        )
+        updated = update_task(
+            session,
+            ctx,
+            task_id=view.id,
+            body=TaskPatch(duration_minutes=90),
+            clock=clock,
+            event_bus=bus,
+        )
+        assert updated.duration_minutes == 90
+
+    def test_photo_evidence_update(
+        self,
+        session: Session,
+        bus: EventBus,
+        clock: FrozenClock,
+    ) -> None:
+        ws = _bootstrap_workspace(session, slug="upd-phev")
+        _bootstrap_actor(session, workspace_id=ws)
+        prop_id = _bootstrap_property(session)
+        ctx = _ctx(ws, slug="upd-phev")
+        view = create_oneoff(
+            session,
+            ctx,
+            payload=TaskCreate.model_validate(
+                {
+                    "title": "Photo",
+                    "property_id": prop_id,
+                    "scheduled_for_local": _future_local(),
+                }
+            ),
+            clock=clock,
+            event_bus=bus,
+        )
+        updated = update_task(
+            session,
+            ctx,
+            task_id=view.id,
+            body=TaskPatch(photo_evidence="required"),
+            clock=clock,
+            event_bus=bus,
+        )
+        assert updated.photo_evidence == "required"
+
+    def test_duration_clear_via_explicit_null(
+        self,
+        session: Session,
+        bus: EventBus,
+        clock: FrozenClock,
+    ) -> None:
+        """``duration_minutes`` is nullable — explicit null clears the column."""
+        ws = _bootstrap_workspace(session, slug="upd-dur-null")
+        _bootstrap_actor(session, workspace_id=ws)
+        prop_id = _bootstrap_property(session)
+        ctx = _ctx(ws, slug="upd-dur-null")
+        view = create_oneoff(
+            session,
+            ctx,
+            payload=TaskCreate.model_validate(
+                {
+                    "title": "DurNull",
+                    "property_id": prop_id,
+                    "scheduled_for_local": _future_local(),
+                    "duration_minutes": 45,
+                }
+            ),
+            clock=clock,
+            event_bus=bus,
+        )
+        updated = update_task(
+            session,
+            ctx,
+            task_id=view.id,
+            body=TaskPatch.model_validate({"duration_minutes": None}),
+            clock=clock,
+            event_bus=bus,
+        )
+        assert updated.duration_minutes is None
+
+    # --- expected_role_id — workspace scoping required. ------------
+
+    def test_expected_role_id_update(
+        self,
+        session: Session,
+        bus: EventBus,
+        clock: FrozenClock,
+    ) -> None:
+        ws = _bootstrap_workspace(session, slug="upd-role")
+        _bootstrap_actor(session, workspace_id=ws)
+        prop_id = _bootstrap_property(session)
+        role_id = _bootstrap_work_role(session, workspace_id=ws)
+        ctx = _ctx(ws, slug="upd-role")
+        view = create_oneoff(
+            session,
+            ctx,
+            payload=TaskCreate.model_validate(
+                {
+                    "title": "Role",
+                    "property_id": prop_id,
+                    "scheduled_for_local": _future_local(),
+                }
+            ),
+            clock=clock,
+            event_bus=bus,
+        )
+        updated = update_task(
+            session,
+            ctx,
+            task_id=view.id,
+            body=TaskPatch(expected_role_id=role_id),
+            clock=clock,
+            event_bus=bus,
+        )
+        assert updated.expected_role_id == role_id
+
+    def test_expected_role_id_cross_workspace_rejected(
+        self,
+        session: Session,
+        bus: EventBus,
+        clock: FrozenClock,
+    ) -> None:
+        ws_a = _bootstrap_workspace(session, slug="upd-role-a")
+        ws_b = _bootstrap_workspace(session, slug="upd-role-b")
+        _bootstrap_actor(session, workspace_id=ws_a)
+        prop_id = _bootstrap_property(session)
+        # Role lives in workspace B; the patch fires under workspace A.
+        foreign_role_id = _bootstrap_work_role(session, workspace_id=ws_b)
+        ctx = _ctx(ws_a, slug="upd-role-a")
+        view = create_oneoff(
+            session,
+            ctx,
+            payload=TaskCreate.model_validate(
+                {
+                    "title": "RoleX",
+                    "property_id": prop_id,
+                    "scheduled_for_local": _future_local(),
+                }
+            ),
+            clock=clock,
+            event_bus=bus,
+        )
+        with pytest.raises(TaskFieldInvalid) as exc:
+            update_task(
+                session,
+                ctx,
+                task_id=view.id,
+                body=TaskPatch(expected_role_id=foreign_role_id),
+                clock=clock,
+                event_bus=bus,
+            )
+        assert exc.value.field == "expected_role_id"
+
+    def test_expected_role_id_soft_deleted_rejected(
+        self,
+        session: Session,
+        bus: EventBus,
+        clock: FrozenClock,
+    ) -> None:
+        """A retired role can't be patched onto a fresh task — §05 archive."""
+        ws = _bootstrap_workspace(session, slug="upd-role-del")
+        _bootstrap_actor(session, workspace_id=ws)
+        prop_id = _bootstrap_property(session)
+        role_id = _bootstrap_work_role(session, workspace_id=ws)
+        ctx = _ctx(ws, slug="upd-role-del")
+        view = create_oneoff(
+            session,
+            ctx,
+            payload=TaskCreate.model_validate(
+                {
+                    "title": "RoleDel",
+                    "property_id": prop_id,
+                    "scheduled_for_local": _future_local(),
+                }
+            ),
+            clock=clock,
+            event_bus=bus,
+        )
+        # Soft-delete the role.
+        role_row = session.scalar(select(WorkRole).where(WorkRole.id == role_id))
+        assert role_row is not None
+        role_row.deleted_at = _PINNED
+        session.flush()
+
+        with pytest.raises(TaskFieldInvalid) as exc:
+            update_task(
+                session,
+                ctx,
+                task_id=view.id,
+                body=TaskPatch(expected_role_id=role_id),
+                clock=clock,
+                event_bus=bus,
+            )
+        assert exc.value.field == "expected_role_id"
+
+    # --- property_id / area_id / unit_id — chain of validation. ----
+
+    def test_property_id_update_with_workspace_link(
+        self,
+        session: Session,
+        bus: EventBus,
+        clock: FrozenClock,
+    ) -> None:
+        ws = _bootstrap_workspace(session, slug="upd-prop")
+        _bootstrap_actor(session, workspace_id=ws)
+        prop_id_a = _bootstrap_property(session)
+        prop_id_b = _bootstrap_property(session, timezone="America/New_York")
+        _link_property_to_workspace(session, property_id=prop_id_b, workspace_id=ws)
+        ctx = _ctx(ws, slug="upd-prop")
+        view = create_oneoff(
+            session,
+            ctx,
+            payload=TaskCreate.model_validate(
+                {
+                    "title": "Prop",
+                    "property_id": prop_id_a,
+                    "scheduled_for_local": _future_local(),
+                }
+            ),
+            clock=clock,
+            event_bus=bus,
+        )
+        updated = update_task(
+            session,
+            ctx,
+            task_id=view.id,
+            body=TaskPatch(property_id=prop_id_b),
+            clock=clock,
+            event_bus=bus,
+        )
+        assert updated.property_id == prop_id_b
+
+    def test_property_id_cross_workspace_rejected(
+        self,
+        session: Session,
+        bus: EventBus,
+        clock: FrozenClock,
+    ) -> None:
+        ws = _bootstrap_workspace(session, slug="upd-prop-x")
+        _bootstrap_actor(session, workspace_id=ws)
+        prop_id_a = _bootstrap_property(session)
+        # Foreign property — never linked to ``ws``.
+        prop_id_foreign = _bootstrap_property(session, timezone="UTC")
+        ctx = _ctx(ws, slug="upd-prop-x")
+        view = create_oneoff(
+            session,
+            ctx,
+            payload=TaskCreate.model_validate(
+                {
+                    "title": "PropX",
+                    "property_id": prop_id_a,
+                    "scheduled_for_local": _future_local(),
+                }
+            ),
+            clock=clock,
+            event_bus=bus,
+        )
+        with pytest.raises(TaskFieldInvalid) as exc:
+            update_task(
+                session,
+                ctx,
+                task_id=view.id,
+                body=TaskPatch(property_id=prop_id_foreign),
+                clock=clock,
+                event_bus=bus,
+            )
+        assert exc.value.field == "property_id"
+
+    def test_area_id_belongs_to_property(
+        self,
+        session: Session,
+        bus: EventBus,
+        clock: FrozenClock,
+    ) -> None:
+        ws = _bootstrap_workspace(session, slug="upd-area")
+        _bootstrap_actor(session, workspace_id=ws)
+        prop_id = _bootstrap_property(session)
+        area_id = _bootstrap_area(session, property_id=prop_id, label="Kitchen")
+        ctx = _ctx(ws, slug="upd-area")
+        view = create_oneoff(
+            session,
+            ctx,
+            payload=TaskCreate.model_validate(
+                {
+                    "title": "Area",
+                    "property_id": prop_id,
+                    "scheduled_for_local": _future_local(),
+                }
+            ),
+            clock=clock,
+            event_bus=bus,
+        )
+        updated = update_task(
+            session,
+            ctx,
+            task_id=view.id,
+            body=TaskPatch(area_id=area_id),
+            clock=clock,
+            event_bus=bus,
+        )
+        assert updated.area_id == area_id
+
+    def test_area_id_for_other_property_rejected(
+        self,
+        session: Session,
+        bus: EventBus,
+        clock: FrozenClock,
+    ) -> None:
+        ws = _bootstrap_workspace(session, slug="upd-area-x")
+        _bootstrap_actor(session, workspace_id=ws)
+        prop_id_a = _bootstrap_property(session)
+        prop_id_b = _bootstrap_property(session, timezone="Europe/London")
+        # Area is on property B; task is on property A.
+        foreign_area = _bootstrap_area(session, property_id=prop_id_b)
+        ctx = _ctx(ws, slug="upd-area-x")
+        view = create_oneoff(
+            session,
+            ctx,
+            payload=TaskCreate.model_validate(
+                {
+                    "title": "AreaX",
+                    "property_id": prop_id_a,
+                    "scheduled_for_local": _future_local(),
+                }
+            ),
+            clock=clock,
+            event_bus=bus,
+        )
+        with pytest.raises(TaskFieldInvalid) as exc:
+            update_task(
+                session,
+                ctx,
+                task_id=view.id,
+                body=TaskPatch(area_id=foreign_area),
+                clock=clock,
+                event_bus=bus,
+            )
+        assert exc.value.field == "area_id"
+
+    def test_unit_id_for_other_property_rejected(
+        self,
+        session: Session,
+        bus: EventBus,
+        clock: FrozenClock,
+    ) -> None:
+        ws = _bootstrap_workspace(session, slug="upd-unit-x")
+        _bootstrap_actor(session, workspace_id=ws)
+        prop_id_a = _bootstrap_property(session)
+        prop_id_b = _bootstrap_property(session, timezone="Europe/London")
+        foreign_unit = _bootstrap_unit(session, property_id=prop_id_b)
+        ctx = _ctx(ws, slug="upd-unit-x")
+        view = create_oneoff(
+            session,
+            ctx,
+            payload=TaskCreate.model_validate(
+                {
+                    "title": "UnitX",
+                    "property_id": prop_id_a,
+                    "scheduled_for_local": _future_local(),
+                }
+            ),
+            clock=clock,
+            event_bus=bus,
+        )
+        with pytest.raises(TaskFieldInvalid) as exc:
+            update_task(
+                session,
+                ctx,
+                task_id=view.id,
+                body=TaskPatch(unit_id=foreign_unit),
+                clock=clock,
+                event_bus=bus,
+            )
+        assert exc.value.field == "unit_id"
+
+    def test_property_area_unit_combo_validates_against_new_property(
+        self,
+        session: Session,
+        bus: EventBus,
+        clock: FrozenClock,
+    ) -> None:
+        """Cross-field check: area / unit are validated against the
+        post-patch property, not the original. A combo PATCH that
+        moves all three at once must succeed when they are mutually
+        consistent under the NEW property."""
+        ws = _bootstrap_workspace(session, slug="upd-combo")
+        _bootstrap_actor(session, workspace_id=ws)
+        prop_id_a = _bootstrap_property(session)
+        prop_id_b = _bootstrap_property(session, timezone="Europe/London")
+        _link_property_to_workspace(session, property_id=prop_id_b, workspace_id=ws)
+        new_area = _bootstrap_area(session, property_id=prop_id_b, label="Garden")
+        new_unit = _bootstrap_unit(session, property_id=prop_id_b)
+        ctx = _ctx(ws, slug="upd-combo")
+        view = create_oneoff(
+            session,
+            ctx,
+            payload=TaskCreate.model_validate(
+                {
+                    "title": "Combo",
+                    "property_id": prop_id_a,
+                    "scheduled_for_local": _future_local(),
+                }
+            ),
+            clock=clock,
+            event_bus=bus,
+        )
+        updated = update_task(
+            session,
+            ctx,
+            task_id=view.id,
+            body=TaskPatch(
+                property_id=prop_id_b,
+                area_id=new_area,
+                unit_id=new_unit,
+            ),
+            clock=clock,
+            event_bus=bus,
+        )
+        assert updated.property_id == prop_id_b
+        assert updated.area_id == new_area
+        assert updated.unit_id == new_unit
+
+    # --- scheduled_for_local — recompute + state flip. -------------
+
+    def test_scheduled_for_local_recomputes_utc(
+        self,
+        session: Session,
+        bus: EventBus,
+        clock: FrozenClock,
+    ) -> None:
+        """Patching the local timestamp slides the UTC mirror via the
+        property timezone."""
+        ws = _bootstrap_workspace(session, slug="upd-sched-utc")
+        _bootstrap_actor(session, workspace_id=ws)
+        # Europe/Paris in late April is UTC+2 — local 18:00 → 16:00Z.
+        prop_id = _bootstrap_property(session, timezone="Europe/Paris")
+        ctx = _ctx(ws, slug="upd-sched-utc")
+        view = create_oneoff(
+            session,
+            ctx,
+            payload=TaskCreate.model_validate(
+                {
+                    "title": "SchedUtc",
+                    "property_id": prop_id,
+                    "scheduled_for_local": "2026-04-19T18:00",
+                }
+            ),
+            clock=clock,
+            event_bus=bus,
+        )
+        # Move the local stamp forward by one hour; UTC must follow.
+        updated = update_task(
+            session,
+            ctx,
+            task_id=view.id,
+            body=TaskPatch(scheduled_for_local="2026-04-19T19:00"),
+            clock=clock,
+            event_bus=bus,
+        )
+        assert updated.scheduled_for_local == "2026-04-19T19:00:00"
+        # 19:00 Europe/Paris on 2026-04-19 is 17:00 UTC.
+        assert updated.scheduled_for_utc == datetime(2026, 4, 19, 17, 0, tzinfo=UTC)
+
+    def test_scheduled_for_local_pushed_past_flips_to_pending(
+        self,
+        session: Session,
+        bus: EventBus,
+        clock: FrozenClock,
+    ) -> None:
+        """A scheduled task moved to the past becomes ``pending`` immediately."""
+        ws = _bootstrap_workspace(session, slug="upd-flip-pending")
+        _bootstrap_actor(session, workspace_id=ws)
+        prop_id = _bootstrap_property(session, timezone="Europe/Paris")
+        ctx = _ctx(ws, slug="upd-flip-pending")
+        view = create_oneoff(
+            session,
+            ctx,
+            payload=TaskCreate.model_validate(
+                {
+                    "title": "Flip",
+                    "property_id": prop_id,
+                    # +4h in the future → state == "scheduled".
+                    "scheduled_for_local": _future_local(),
+                }
+            ),
+            clock=clock,
+            event_bus=bus,
+        )
+        assert view.state == "scheduled"
+        updated = update_task(
+            session,
+            ctx,
+            task_id=view.id,
+            # Past local timestamp → starts_at <= now → "pending".
+            body=TaskPatch(scheduled_for_local=_past_local()),
+            clock=clock,
+            event_bus=bus,
+        )
+        assert updated.state == "pending"
+
+    def test_scheduled_for_local_pushed_future_flips_back_to_scheduled(
+        self,
+        session: Session,
+        bus: EventBus,
+        clock: FrozenClock,
+    ) -> None:
+        """A pending task moved to the future flips back to ``scheduled``."""
+        ws = _bootstrap_workspace(session, slug="upd-flip-sched")
+        _bootstrap_actor(session, workspace_id=ws)
+        prop_id = _bootstrap_property(session, timezone="Europe/Paris")
+        ctx = _ctx(ws, slug="upd-flip-sched")
+        view = create_oneoff(
+            session,
+            ctx,
+            payload=TaskCreate.model_validate(
+                {
+                    "title": "FlipBack",
+                    "property_id": prop_id,
+                    # Past — lands directly in "pending".
+                    "scheduled_for_local": _past_local(),
+                }
+            ),
+            clock=clock,
+            event_bus=bus,
+        )
+        assert view.state == "pending"
+        updated = update_task(
+            session,
+            ctx,
+            task_id=view.id,
+            body=TaskPatch(scheduled_for_local=_future_local()),
+            clock=clock,
+            event_bus=bus,
+        )
+        assert updated.state == "scheduled"
+
+    def test_in_progress_state_preserved_across_reschedule(
+        self,
+        session: Session,
+        bus: EventBus,
+        clock: FrozenClock,
+    ) -> None:
+        """An ``in_progress`` task keeps its state across a reschedule
+        — the worker has already started the task; the auto-flip
+        gate must not undo their move."""
+        ws = _bootstrap_workspace(session, slug="upd-flip-ip")
+        _bootstrap_actor(session, workspace_id=ws)
+        prop_id = _bootstrap_property(session, timezone="Europe/Paris")
+        ctx = _ctx(ws, slug="upd-flip-ip")
+        view = create_oneoff(
+            session,
+            ctx,
+            payload=TaskCreate.model_validate(
+                {
+                    "title": "IP",
+                    "property_id": prop_id,
+                    "scheduled_for_local": _past_local(),
+                }
+            ),
+            clock=clock,
+            event_bus=bus,
+        )
+        # Move the row into ``in_progress`` directly on the ORM —
+        # the create path stamped it ``pending``; the assignment /
+        # completion services would move it from there. Skipping
+        # those layers keeps this test focused on the PATCH gate.
+        row = session.scalar(select(Occurrence).where(Occurrence.id == view.id))
+        assert row is not None
+        row.state = "in_progress"
+        session.flush()
+
+        updated = update_task(
+            session,
+            ctx,
+            task_id=view.id,
+            body=TaskPatch(scheduled_for_local=_future_local()),
+            clock=clock,
+            event_bus=bus,
+        )
+        assert updated.state == "in_progress"
+
+    def test_property_change_reprojects_local_to_new_zone(
+        self,
+        session: Session,
+        bus: EventBus,
+        clock: FrozenClock,
+    ) -> None:
+        """Patching ``property_id`` without a ``scheduled_for_local``
+        update re-projects the existing local clock through the new
+        property's timezone."""
+        ws = _bootstrap_workspace(session, slug="upd-tz")
+        _bootstrap_actor(session, workspace_id=ws)
+        prop_id_paris = _bootstrap_property(session, timezone="Europe/Paris")
+        prop_id_london = _bootstrap_property(session, timezone="Europe/London")
+        _link_property_to_workspace(
+            session, property_id=prop_id_london, workspace_id=ws
+        )
+        ctx = _ctx(ws, slug="upd-tz")
+        view = create_oneoff(
+            session,
+            ctx,
+            payload=TaskCreate.model_validate(
+                {
+                    "title": "Tz",
+                    "property_id": prop_id_paris,
+                    # Paris UTC+2 → 18:00 local = 16:00 UTC.
+                    "scheduled_for_local": "2026-04-19T18:00",
+                }
+            ),
+            clock=clock,
+            event_bus=bus,
+        )
+        assert view.scheduled_for_utc == datetime(2026, 4, 19, 16, 0, tzinfo=UTC)
+        updated = update_task(
+            session,
+            ctx,
+            task_id=view.id,
+            body=TaskPatch(property_id=prop_id_london),
+            clock=clock,
+            event_bus=bus,
+        )
+        # London UTC+1 in April → 18:00 local = 17:00 UTC.
+        assert updated.scheduled_for_utc == datetime(2026, 4, 19, 17, 0, tzinfo=UTC)
+        assert updated.scheduled_for_local == "2026-04-19T18:00:00"
+
+    def test_invalid_scheduled_for_local_raises_value_error(
+        self,
+        session: Session,
+        bus: EventBus,
+        clock: FrozenClock,
+    ) -> None:
+        ws = _bootstrap_workspace(session, slug="upd-bad-iso")
+        _bootstrap_actor(session, workspace_id=ws)
+        prop_id = _bootstrap_property(session)
+        ctx = _ctx(ws, slug="upd-bad-iso")
+        view = create_oneoff(
+            session,
+            ctx,
+            payload=TaskCreate.model_validate(
+                {
+                    "title": "BadIso",
+                    "property_id": prop_id,
+                    "scheduled_for_local": _future_local(),
+                }
+            ),
+            clock=clock,
+            event_bus=bus,
+        )
+        with pytest.raises(ValueError):
+            update_task(
+                session,
+                ctx,
+                task_id=view.id,
+                body=TaskPatch(scheduled_for_local="not-an-iso"),
+                clock=clock,
+                event_bus=bus,
+            )
+
+    # --- Event emission. -------------------------------------------
+
+    def test_task_updated_event_published_with_changed_fields(
+        self,
+        session: Session,
+        bus: EventBus,
+        clock: FrozenClock,
+    ) -> None:
+        """A successful PATCH publishes :class:`TaskUpdated` carrying the
+        sorted list of fields that genuinely moved."""
+        captured: list[TaskUpdated] = []
+
+        @bus.subscribe(TaskUpdated)
+        def _on(event: TaskUpdated) -> None:
+            captured.append(event)
+
+        ws = _bootstrap_workspace(session, slug="upd-evt")
+        _bootstrap_actor(session, workspace_id=ws)
+        prop_id = _bootstrap_property(session)
+        ctx = _ctx(ws, slug="upd-evt")
+        view = create_oneoff(
+            session,
+            ctx,
+            payload=TaskCreate.model_validate(
+                {
+                    "title": "Evt",
+                    "property_id": prop_id,
+                    "scheduled_for_local": _future_local(),
+                }
+            ),
+            clock=clock,
+            event_bus=bus,
+        )
+        update_task(
+            session,
+            ctx,
+            task_id=view.id,
+            body=TaskPatch(title="Renamed", priority="high"),
+            clock=clock,
+            event_bus=bus,
+        )
+        assert len(captured) == 1
+        evt = captured[0]
+        assert evt.task_id == view.id
+        assert "title" in evt.changed_fields
+        assert "priority" in evt.changed_fields
+
+    def test_no_event_on_zero_delta_patch(
+        self,
+        session: Session,
+        bus: EventBus,
+        clock: FrozenClock,
+    ) -> None:
+        """A PATCH that doesn't move any value must not publish
+        :class:`TaskUpdated` — the audit row is also skipped."""
+        captured: list[TaskUpdated] = []
+
+        @bus.subscribe(TaskUpdated)
+        def _on(event: TaskUpdated) -> None:
+            captured.append(event)
+
+        ws = _bootstrap_workspace(session, slug="upd-noevt")
+        _bootstrap_actor(session, workspace_id=ws)
+        prop_id = _bootstrap_property(session)
+        ctx = _ctx(ws, slug="upd-noevt")
+        view = create_oneoff(
+            session,
+            ctx,
+            payload=TaskCreate.model_validate(
+                {
+                    "title": "NoEvt",
+                    "property_id": prop_id,
+                    "scheduled_for_local": _future_local(),
+                }
+            ),
+            clock=clock,
+            event_bus=bus,
+        )
+        update_task(
+            session,
+            ctx,
+            task_id=view.id,
+            body=TaskPatch(),
+            clock=clock,
+            event_bus=bus,
+        )
+        assert captured == []
+
+    def test_audit_row_carries_before_and_after_for_widened_fields(
+        self,
+        session: Session,
+        bus: EventBus,
+        clock: FrozenClock,
+    ) -> None:
+        ws = _bootstrap_workspace(session, slug="upd-audit")
+        _bootstrap_actor(session, workspace_id=ws)
+        prop_id = _bootstrap_property(session)
+        role_id = _bootstrap_work_role(session, workspace_id=ws)
+        ctx = _ctx(ws, slug="upd-audit")
+        view = create_oneoff(
+            session,
+            ctx,
+            payload=TaskCreate.model_validate(
+                {
+                    "title": "Audit",
+                    "property_id": prop_id,
+                    "scheduled_for_local": _future_local(),
+                }
+            ),
+            clock=clock,
+            event_bus=bus,
+        )
+        update_task(
+            session,
+            ctx,
+            task_id=view.id,
+            body=TaskPatch(expected_role_id=role_id, priority="urgent"),
+            clock=clock,
+            event_bus=bus,
+        )
+        diffs = session.scalars(
+            select(AuditLog.diff).where(
+                AuditLog.entity_id == view.id,
+                AuditLog.action == "task.update",
+            )
+        ).all()
+        assert len(diffs) == 1
+        diff = diffs[0]
+        assert diff["before"]["expected_role_id"] is None
+        assert diff["after"]["expected_role_id"] == role_id
+        assert diff["before"]["priority"] == "normal"
+        assert diff["after"]["priority"] == "urgent"
+
+    # --- Edge cases the cd-43wv selfreview surfaced. ---------------
+
+    def test_whitespace_only_title_rejected(self) -> None:
+        """A whitespace-only ``title`` would survive ``min_length=1``
+        but ``.strip()`` empty in the service — reject at DTO so the
+        row never lands with an empty title."""
+        with pytest.raises(ValidationError):
+            TaskPatch.model_validate({"title": "   "})
+
+    def test_property_clear_rejects_dangling_area(
+        self,
+        session: Session,
+        bus: EventBus,
+        clock: FrozenClock,
+    ) -> None:
+        """Patching ``property_id=null`` while the row still has an
+        ``area_id`` (pointing at the old property) must be rejected —
+        the area would otherwise be a cross-property orphan. The
+        caller has to clear ``area_id`` in the same patch."""
+        ws = _bootstrap_workspace(session, slug="upd-prop-orphan-area")
+        _bootstrap_actor(session, workspace_id=ws)
+        prop_id = _bootstrap_property(session)
+        area_id = _bootstrap_area(session, property_id=prop_id, label="Pool")
+        ctx = _ctx(ws, slug="upd-prop-orphan-area")
+        view = create_oneoff(
+            session,
+            ctx,
+            payload=TaskCreate.model_validate(
+                {
+                    "title": "Orphan",
+                    "property_id": prop_id,
+                    "area_id": area_id,
+                    "scheduled_for_local": _future_local(),
+                }
+            ),
+            clock=clock,
+            event_bus=bus,
+        )
+        with pytest.raises(TaskFieldInvalid) as exc:
+            update_task(
+                session,
+                ctx,
+                task_id=view.id,
+                body=TaskPatch.model_validate({"property_id": None}),
+                clock=clock,
+                event_bus=bus,
+            )
+        assert exc.value.field == "area_id"
+
+    def test_property_clear_with_simultaneous_area_clear_succeeds(
+        self,
+        session: Session,
+        bus: EventBus,
+        clock: FrozenClock,
+    ) -> None:
+        """Clearing property and area together is the right way to
+        scrub the location tuple — the patch stands."""
+        ws = _bootstrap_workspace(session, slug="upd-loc-clear")
+        _bootstrap_actor(session, workspace_id=ws)
+        prop_id = _bootstrap_property(session)
+        area_id = _bootstrap_area(session, property_id=prop_id, label="Pool")
+        ctx = _ctx(ws, slug="upd-loc-clear")
+        view = create_oneoff(
+            session,
+            ctx,
+            payload=TaskCreate.model_validate(
+                {
+                    "title": "Clear",
+                    "property_id": prop_id,
+                    "area_id": area_id,
+                    "scheduled_for_local": _future_local(),
+                }
+            ),
+            clock=clock,
+            event_bus=bus,
+        )
+        updated = update_task(
+            session,
+            ctx,
+            task_id=view.id,
+            body=TaskPatch.model_validate(
+                {"property_id": None, "area_id": None}
+            ),
+            clock=clock,
+            event_bus=bus,
+        )
+        assert updated.property_id is None
+        assert updated.area_id is None
+
+    def test_property_change_rejects_dangling_unit(
+        self,
+        session: Session,
+        bus: EventBus,
+        clock: FrozenClock,
+    ) -> None:
+        """Moving the task to a new property without repointing the
+        existing ``unit_id`` (still on the old property) must be
+        rejected — silent inconsistency would leak to readers."""
+        ws = _bootstrap_workspace(session, slug="upd-prop-orphan-unit")
+        _bootstrap_actor(session, workspace_id=ws)
+        prop_id_a = _bootstrap_property(session)
+        prop_id_b = _bootstrap_property(session, timezone="Europe/London")
+        _link_property_to_workspace(session, property_id=prop_id_b, workspace_id=ws)
+        unit_id_a = _bootstrap_unit(session, property_id=prop_id_a)
+        ctx = _ctx(ws, slug="upd-prop-orphan-unit")
+        view = create_oneoff(
+            session,
+            ctx,
+            payload=TaskCreate.model_validate(
+                {
+                    "title": "OrphanUnit",
+                    "property_id": prop_id_a,
+                    "unit_id": unit_id_a,
+                    "scheduled_for_local": _future_local(),
+                }
+            ),
+            clock=clock,
+            event_bus=bus,
+        )
+        with pytest.raises(TaskFieldInvalid) as exc:
+            update_task(
+                session,
+                ctx,
+                task_id=view.id,
+                body=TaskPatch(property_id=prop_id_b),
+                clock=clock,
+                event_bus=bus,
+            )
+        assert exc.value.field == "unit_id"
+
+    def test_invalid_scheduled_for_local_raises_typed_subclass(
+        self,
+        session: Session,
+        bus: EventBus,
+        clock: FrozenClock,
+    ) -> None:
+        """``_parse_local_datetime`` raises :class:`InvalidLocalDatetime`,
+        a ``ValueError`` subclass — keeping the type distinct from
+        clock-contract / generic ``ValueError`` paths the router
+        catches separately."""
+        ws = _bootstrap_workspace(session, slug="upd-bad-iso-typed")
+        _bootstrap_actor(session, workspace_id=ws)
+        prop_id = _bootstrap_property(session)
+        ctx = _ctx(ws, slug="upd-bad-iso-typed")
+        view = create_oneoff(
+            session,
+            ctx,
+            payload=TaskCreate.model_validate(
+                {
+                    "title": "BadIsoTyped",
+                    "property_id": prop_id,
+                    "scheduled_for_local": _future_local(),
+                }
+            ),
+            clock=clock,
+            event_bus=bus,
+        )
+        with pytest.raises(InvalidLocalDatetime):
+            update_task(
+                session,
+                ctx,
+                task_id=view.id,
+                body=TaskPatch(scheduled_for_local="2026-04-19T18:00+02:00"),
+                clock=clock,
+                event_bus=bus,
+            )

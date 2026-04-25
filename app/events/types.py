@@ -59,6 +59,7 @@ __all__ = [
     "TaskReassigned",
     "TaskSkipped",
     "TaskUnassigned",
+    "TaskUpdated",
 ]
 
 
@@ -125,6 +126,57 @@ class TaskCreated(Event):
     name: ClassVar[str] = "task.created"
 
     task_id: str
+
+
+@register
+class TaskUpdated(Event):
+    """A task occurrence's mutable fields were rewritten by ``update_task``.
+
+    Fired by :func:`app.domain.tasks.oneoff.update_task` after the row
+    write + audit lands, regardless of which §06 mutable field
+    changed (title, description_md, scheduled_for_local, property /
+    area / unit, expected_role_id, priority, duration_minutes,
+    photo_evidence). The §14 SSE dispatcher invalidates the affected
+    SPA caches (the ``/tasks`` list, ``/today``, the manager
+    dashboard, the worker schedule) so the rename / reschedule /
+    re-property surfaces without a reload.
+
+    Distinct from :class:`TaskCreated` (insertion), :class:`TaskCompleted`
+    / :class:`TaskSkipped` / :class:`TaskCancelled` (state-machine
+    edges), and :class:`TaskAssigned` / :class:`TaskReassigned`
+    (assignment edges) — those carry their own semantics and the
+    SPA dispatchers branch on them. ``task.updated`` is the
+    catch-all "row mutated, refresh your view" signal for the spec
+    §06 mutable set.
+
+    **Payload posture.** Foreign-key identifier (``task_id``) plus a
+    short ``changed_fields`` tuple naming the §06 mutable columns
+    that actually moved. No free-text payload — subscribers fetch
+    the rendered title / description via REST under the normal
+    per-row authz path. ``changed_fields`` lets the SPA narrow the
+    invalidation when it can: a ``title``-only change does not
+    have to drop the manager dashboard's KPI counters, where a
+    ``state``-flip via ``scheduled_for_local`` does.
+
+    **Role scope.** Defaults to :data:`ALL_ROLES` because every
+    grant role (manager, worker, client, guest) may legitimately
+    observe a task it has visibility into — the SPA's reducers
+    already filter by membership at render time. The
+    ``DEFAULT_ROLE_EVENTS_ALLOWLIST`` review gate confirms this
+    posture is conscious.
+    """
+
+    name: ClassVar[str] = "task.updated"
+
+    task_id: str
+    # §06 mutable column names that genuinely changed during the
+    # patch, in the canonical declaration order pinned by
+    # :data:`app.domain.tasks.oneoff._MUTABLE_DIFF_FIELDS` — stable
+    # across releases so the SPA can pattern-match without re-sorting.
+    # Empty on a no-op PATCH (``update_task`` skips the publish in
+    # that branch so SSE never fans a zero-delta event). The values
+    # are a closed set; the SPA can switch on them without surprises.
+    changed_fields: tuple[str, ...]
 
 
 @register

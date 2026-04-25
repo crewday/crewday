@@ -1079,9 +1079,28 @@ POST   /tasks                      # ad-hoc; body: {title, scheduled_start?,
 POST   /tasks/from_nl              # natural language intake
 POST   /tasks/from_nl/commit       # commit a preview
 GET    /tasks/{id}
-PATCH  /tasks/{id}                 # partial update (v1: title +
-                                   #   description_md only; wider mutable
-                                   #   set lands with cd-task-patch-wider).
+PATCH  /tasks/{id}                 # partial update — full §06 mutable set:
+                                   #   title, description_md,
+                                   #   scheduled_for_local, property_id,
+                                   #   area_id, unit_id, expected_role_id,
+                                   #   priority, duration_minutes,
+                                   #   photo_evidence. Patching
+                                   #   scheduled_for_local recomputes
+                                   #   scheduled_for_utc via the property
+                                   #   timezone and re-runs the §06
+                                   #   `scheduled ↔ pending` state gate;
+                                   #   patching property_id without a new
+                                   #   local timestamp re-projects the
+                                   #   existing wall-clock through the new
+                                   #   timezone. Cross-resource validation
+                                   #   surfaces as 422 `invalid_task_field`
+                                   #   ({field, value, message}); a malformed
+                                   #   `scheduled_for_local` lands as 422
+                                   #   `invalid_field`. Successful PATCH
+                                   #   emits `task.updated` SSE.
+                                   #   Reassignment / availability re-resolve
+                                   #   live on the dedicated reschedule +
+                                   #   reassign verbs below.
 POST   /tasks/{id}/assign
 POST   /tasks/{id}/start
 POST   /tasks/{id}/complete

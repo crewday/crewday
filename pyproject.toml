@@ -342,6 +342,7 @@ ignore_imports = [
     # scope) — drops once the repositories land.
     "app.domain.tasks.oneoff -> app.adapters.db.tasks.models",
     "app.domain.tasks.oneoff -> app.adapters.db.places.models",
+    "app.domain.tasks.oneoff -> app.adapters.db.workspace.models",
     "app.domain.tasks.oneoff -> app.authz",
     # v1 stopgap (cd-8u5): ``app.domain.places.property_service``
     # reads :class:`Property` and :class:`PropertyWorkspace` from
