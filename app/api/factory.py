@@ -68,7 +68,8 @@ from app.adapters.llm.ports import LLMClient
 from app.adapters.mail.ports import Mailer
 from app.adapters.mail.smtp import SMTPMailer
 from app.adapters.storage.localfs import LocalFsStorage
-from app.adapters.storage.ports import Storage
+from app.adapters.storage.mime import FiletypeMimeSniffer
+from app.adapters.storage.ports import MimeSniffer, Storage
 from app.api.admin import admin_router
 from app.api.errors import add_exception_handlers
 from app.api.health import router as health_router
@@ -304,12 +305,14 @@ def _wire_services(
         )
     storage = _build_storage(settings)
     llm = _build_llm(settings)
+    mime_sniffer: MimeSniffer = FiletypeMimeSniffer()
     app.state.settings = settings
     app.state.throttle = throttle
     app.state.capabilities = capabilities
     app.state.mailer = mailer
     app.state.storage = storage
     app.state.llm = llm
+    app.state.mime_sniffer = mime_sniffer
     return mailer, throttle, capabilities
 
 

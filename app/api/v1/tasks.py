@@ -51,10 +51,12 @@ completion,assignment,comments}``
   every §06 evidence kind (``note`` / ``photo`` / ``voice`` / ``gps``)
   is wired end-to-end. ``note`` rides the inline ``note_md`` form
   field; ``photo`` / ``voice`` / ``gps`` route through the
-  content-addressed :class:`Storage` port (SHA-256 blob hash + virus
-  scan + per-kind MIME / size cap per spec §15 "Input validation").
-  ``gps`` carries a small JSON document with ``lat`` / ``lon`` /
-  optional ``accuracy_m``.
+  content-addressed :class:`Storage` port (SHA-256 blob hash +
+  server-side MIME sniff + virus scan + per-kind size cap per spec
+  §15 "Input validation"). The sniffed MIME (not the multipart
+  header) is what the per-kind allow-list rejects against; ``gps``
+  carries a small JSON document with ``lat`` / ``lon`` / optional
+  ``accuracy_m``.
 
 **Idempotency.** The replay cache on ``POST`` routes is driven by the
 process-wide :mod:`app.api.middleware.idempotency` middleware — no
@@ -104,8 +106,13 @@ from sqlalchemy.orm import Session
 
 from app.adapters.db.places.models import Property
 from app.adapters.db.tasks.models import Occurrence
-from app.adapters.storage.ports import Storage
-from app.api.deps import current_workspace_context, db_session, get_storage
+from app.adapters.storage.ports import MimeSniffer, Storage
+from app.api.deps import (
+    current_workspace_context,
+    db_session,
+    get_mime_sniffer,
+    get_storage,
+)
 from app.api.pagination import (
     DEFAULT_LIMIT,
     LimitQuery,
@@ -248,6 +255,7 @@ router = APIRouter(tags=["tasks"])
 _Ctx = Annotated[WorkspaceContext, Depends(current_workspace_context)]
 _Db = Annotated[Session, Depends(db_session)]
 _Storage = Annotated[Storage, Depends(get_storage)]
+_MimeSniffer = Annotated[MimeSniffer, Depends(get_mime_sniffer)]
 
 
 # ---------------------------------------------------------------------------
@@ -2200,6 +2208,7 @@ async def upload_task_evidence_route(
     ctx: _Ctx,
     session: _Db,
     storage: _Storage,
+    mime_sniffer: _MimeSniffer,
     _: _EvidenceContentLengthGuard,
     kind: Annotated[str, Form(max_length=16)],
     note_md: Annotated[str | None, Form(max_length=20_000)] = None,
@@ -2217,15 +2226,22 @@ async def upload_task_evidence_route(
       add_file_evidence`; the upload body is hashed (SHA-256), handed
       to the content-addressed :class:`Storage` port, and an
       :class:`Evidence` row points at the resulting blob. Per spec
-      §15 "Input validation": MIME allow-list per kind, size cap per
-      kind, virus scan via the injectable :class:`VirusScanner`
-      (currently a logged "no scanner configured" stub — follow-up
-      Beads task tracks the real wiring).
+      §15 "Input validation": the body is sniffed server-side via
+      the injectable :class:`MimeSniffer` and the **sniffed** type
+      is validated against the per-kind allow-list (the multipart
+      header is informational only). Size cap per kind, virus scan
+      via the injectable :class:`VirusScanner` (currently a logged
+      "no scanner configured" stub — follow-up Beads task tracks the
+      real wiring).
     * ``gps`` — :func:`~app.domain.tasks.completion.add_file_evidence`
-      with ``content_type='application/json'``; the upload body MUST
-      be a small JSON document carrying ``lat`` / ``lon`` / optional
-      ``accuracy_m``. Routes through Storage so every evidence row
-      shares the same content-addressed pipeline.
+      with the multipart-declared ``Content-Type`` (which the client
+      MUST set to ``application/json`` per spec §06 "Evidence" — the
+      §15 sniffer's JSON structural fallback is gated on a JSON-shaped
+      hint, so a non-JSON declared type closes the gate and earns
+      415). The upload body MUST be a small JSON document carrying
+      ``lat`` / ``lon`` / optional ``accuracy_m``. Routes through
+      Storage so every evidence row shares the same content-addressed
+      pipeline.
     """
     if kind == "note":
         if file is not None:
@@ -2323,15 +2339,27 @@ async def upload_task_evidence_route(
             payload=payload,
             content_type=declared_type,
             storage=storage,
+            mime_sniffer=mime_sniffer,
         )
     except CompletionTaskNotFound as exc:
         raise _task_not_found() from exc
     except EvidenceContentTypeNotAllowed as exc:
+        # ``exc.content_type`` carries the **sniffed** type per spec
+        # §15 ("MIME sniffed server-side; we trust the sniff, not the
+        # header"). Surface both ``content_type`` (the sniff) and
+        # ``sniffed_type`` (an explicit alias) so the operator
+        # inspecting the audit envelope sees the actual shape of the
+        # bytes — ``application/x-msdownload`` for a PE smuggled as
+        # ``image/png`` — rather than the multipart-form lie.
+        # ``declared_type`` is preserved alongside for the forensic
+        # "client claimed X, sniff said Y" trail.
         raise _http(
             status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
             "evidence_content_type_rejected",
             kind=exc.kind,
             content_type=exc.content_type,
+            sniffed_type=exc.content_type,
+            declared_type=declared_type,
             message=str(exc),
         ) from exc
     except EvidenceTooLarge as exc:

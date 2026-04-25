@@ -1511,13 +1511,22 @@ class TestAddFileEvidence:
     def test_gps_rejects_non_object_payload(
         self, session: Session, clock: FrozenClock
     ) -> None:
+        """A non-object JSON payload is rejected by the sniffer (cd-ba5c).
+
+        Under the sniff-first model the GPS structural-fallback inside
+        :class:`FiletypeMimeSniffer` requires an object with ``lat`` /
+        ``lon`` to vouch for ``application/json``. A bare array gets
+        a ``None`` verdict, which the per-kind allow-list rejects with
+        :class:`EvidenceContentTypeNotAllowed` before the inner GPS
+        validator (:func:`_validate_gps_payload`) ever runs.
+        """
         from tests._fakes.storage import InMemoryStorage
 
         ws = _bootstrap_workspace(session)
         prop = _bootstrap_property(session)
         occ = _bootstrap_occurrence(session, workspace_id=ws, property_id=prop)
         author = _bootstrap_user(session)
-        with pytest.raises(EvidenceGpsPayloadInvalid):
+        with pytest.raises(EvidenceContentTypeNotAllowed) as excinfo:
             add_file_evidence(
                 session,
                 _ctx(ws, actor_id=author),
@@ -1529,6 +1538,8 @@ class TestAddFileEvidence:
                 virus_scanner=_StubScanner(),
                 clock=clock,
             )
+        assert excinfo.value.kind == "gps"
+        assert excinfo.value.content_type is None
 
     def test_gps_rejects_boolean_lat(
         self, session: Session, clock: FrozenClock
@@ -1579,24 +1590,38 @@ class TestAddFileEvidence:
     def test_rejects_disallowed_mime(
         self, session: Session, clock: FrozenClock
     ) -> None:
+        """Bytes that sniff outside the per-kind allow-list are rejected.
+
+        Under cd-ba5c the validation key is the **sniffed** type, not
+        the declared header. SVG is not in the photo allow-list **and**
+        ``filetype`` doesn't recognise it (it's text-shaped, not
+        magic-byte detectable), so the sniffer returns ``None`` and the
+        upload is rejected with the sniffed type (``None``) on the
+        envelope.
+        """
         from tests._fakes.storage import InMemoryStorage
 
         ws = _bootstrap_workspace(session)
         prop = _bootstrap_property(session)
         occ = _bootstrap_occurrence(session, workspace_id=ws, property_id=prop)
         author = _bootstrap_user(session)
-        with pytest.raises(EvidenceContentTypeNotAllowed):
+        with pytest.raises(EvidenceContentTypeNotAllowed) as excinfo:
             add_file_evidence(
                 session,
                 _ctx(ws, actor_id=author),
                 task_id=occ,
                 kind="photo",
-                payload=_TINY_PNG,
+                payload=b'<svg xmlns="http://www.w3.org/2000/svg"/>',
                 content_type="image/svg+xml",  # SVG never allowed for photos.
                 storage=InMemoryStorage(),
                 virus_scanner=_StubScanner(),
                 clock=clock,
             )
+        # Sniffer didn't recognise the bytes — surfaces ``None`` so the
+        # operator sees "we couldn't tell what this was" rather than
+        # the (potentially malicious) declared header.
+        assert excinfo.value.content_type is None
+        assert excinfo.value.kind == "photo"
 
     def test_rejects_oversize(self, session: Session, clock: FrozenClock) -> None:
         from tests._fakes.storage import InMemoryStorage
@@ -1787,3 +1812,431 @@ class TestAddFileEvidence:
         assert after["content_type"] == "image/png"
         assert after["size_bytes"] == len(_TINY_PNG)
         assert after["scan_status"] == "clean"
+
+
+# ---------------------------------------------------------------------------
+# add_file_evidence — server-side MIME sniffing (cd-ba5c)
+# ---------------------------------------------------------------------------
+
+
+# Smallest valid PE — the 'MZ' magic bytes plus enough of an MS-DOS
+# stub for ``filetype`` to recognise it as a Windows PE executable.
+# Exact length of the stub doesn't matter to the sniffer, only the
+# leading magic, so we pad to a few bytes.
+_TINY_EXE: bytes = b"MZ\x90\x00\x03\x00\x00\x00\x04\x00\x00\x00" + b"\x00" * 32
+
+
+class _PinnedSniffer:
+    """In-memory :class:`MimeSniffer` stub that returns a pinned verdict.
+
+    Lets a test pin the sniff to a specific value (``image/png``,
+    ``application/x-msdownload``, ``None``) without going through the
+    real :mod:`filetype` library — useful for the "undetectable bytes"
+    branch where we want to assert what happens when the sniffer can't
+    classify a payload regardless of what the bytes actually are.
+    """
+
+    def __init__(self, verdict: str | None) -> None:
+        self._verdict = verdict
+        self.calls: list[tuple[bytes, str | None]] = []
+
+    def sniff(self, payload: bytes, *, hint: str | None = None) -> str | None:
+        self.calls.append((payload, hint))
+        return self._verdict
+
+
+class TestAddFileEvidenceMimeSniff:
+    """Spec §15: "MIME sniffed server-side; we trust the sniff, not the header"."""
+
+    def test_evil_exe_declared_as_png_rejected(
+        self, session: Session, clock: FrozenClock
+    ) -> None:
+        """A Windows PE executable smuggled as ``image/png`` is rejected.
+
+        Sniff returns ``application/x-msdownload`` (or similar PE
+        media type); not in the photo allow-list, so the upload is
+        rejected with the **sniffed** type on the envelope. The
+        operator inspecting the audit row sees the actual shape of
+        the bytes, not the multipart-form lie.
+        """
+        from tests._fakes.storage import InMemoryStorage
+
+        ws = _bootstrap_workspace(session)
+        prop = _bootstrap_property(session)
+        occ = _bootstrap_occurrence(session, workspace_id=ws, property_id=prop)
+        author = _bootstrap_user(session)
+        storage = InMemoryStorage()
+
+        with pytest.raises(EvidenceContentTypeNotAllowed) as excinfo:
+            add_file_evidence(
+                session,
+                _ctx(ws, actor_id=author),
+                task_id=occ,
+                kind="photo",
+                payload=_TINY_EXE,
+                content_type="image/png",  # the lie.
+                storage=storage,
+                virus_scanner=_StubScanner(),
+                clock=clock,
+            )
+        # Sniff returned a non-image type — the envelope carries the
+        # sniffed verdict, not the declared header. We accept any
+        # ``application/x-...`` PE label; the exact label depends on
+        # the ``filetype`` library's vocabulary.
+        assert excinfo.value.kind == "photo"
+        assert excinfo.value.content_type is not None
+        assert "image" not in excinfo.value.content_type
+        # The malicious payload never landed in the blob store.
+        assert not storage._blobs
+
+    def test_gps_json_misdeclared_as_image_rejected(
+        self, session: Session, clock: FrozenClock
+    ) -> None:
+        """Valid GPS JSON declared as ``image/jpeg`` is rejected.
+
+        The JSON structural-check fallback only runs when the hint
+        advertises JSON, so a JSON-shaped payload declared as
+        ``image/jpeg`` sniffs to ``None`` (no magic match, fallback
+        gate closed). ``None`` is not in the photo allow-list →
+        rejection. This closes the "use the photo route to seed
+        arbitrary text into the blob store" vector.
+        """
+        from tests._fakes.storage import InMemoryStorage
+
+        ws = _bootstrap_workspace(session)
+        prop = _bootstrap_property(session)
+        occ = _bootstrap_occurrence(session, workspace_id=ws, property_id=prop)
+        author = _bootstrap_user(session)
+        storage = InMemoryStorage()
+
+        with pytest.raises(EvidenceContentTypeNotAllowed) as excinfo:
+            add_file_evidence(
+                session,
+                _ctx(ws, actor_id=author),
+                task_id=occ,
+                kind="photo",
+                payload=_GPS_PAYLOAD,
+                content_type="image/jpeg",  # the lie.
+                storage=storage,
+                virus_scanner=_StubScanner(),
+                clock=clock,
+            )
+        assert excinfo.value.kind == "photo"
+        # Sniff returned ``None`` (JSON fallback gated by hint, hint is
+        # an image type → fallback skipped).
+        assert excinfo.value.content_type is None
+        assert not storage._blobs
+
+    def test_tiny_png_declared_correctly_passes(
+        self, session: Session, clock: FrozenClock
+    ) -> None:
+        """Regression: a real PNG declared as ``image/png`` still works.
+
+        The sniffer returns ``image/png`` (matches declared); the
+        upload lands. Persisted ``content_type`` on the audit row is
+        the sniffed verdict.
+        """
+        from tests._fakes.storage import InMemoryStorage
+
+        ws = _bootstrap_workspace(session)
+        prop = _bootstrap_property(session)
+        occ = _bootstrap_occurrence(session, workspace_id=ws, property_id=prop)
+        author = _bootstrap_user(session)
+        storage = InMemoryStorage()
+
+        view = add_file_evidence(
+            session,
+            _ctx(ws, actor_id=author),
+            task_id=occ,
+            kind="photo",
+            payload=_TINY_PNG,
+            content_type="image/png",
+            storage=storage,
+            virus_scanner=_StubScanner(),
+            clock=clock,
+        )
+        assert view.kind == "photo"
+        assert view.blob_hash is not None
+        assert storage.exists(view.blob_hash)
+
+        row = session.scalars(
+            select(AuditLog).where(
+                AuditLog.entity_id == occ,
+                AuditLog.action == "task.evidence.photo.add",
+            )
+        ).one()
+        diff = row.diff
+        assert isinstance(diff, dict)
+        # Audit carries the sniffed content_type and the declared one
+        # alongside, so a forensic walk can spot a sniff/declared
+        # disagreement on a non-rejected upload.
+        assert diff["after"]["content_type"] == "image/png"
+        assert diff["after"]["declared_content_type"] == "image/png"
+
+    def test_tiny_wav_declared_correctly_passes(
+        self, session: Session, clock: FrozenClock
+    ) -> None:
+        """Regression: a real WAV declared as ``audio/wav`` still works.
+
+        ``filetype`` sniffs WAV bytes as ``audio/x-wav`` (the legacy
+        name) — both labels are in the voice allow-list per spec
+        §15, so the sniff/declared disagreement does not trip the
+        rejection. The audit row carries the sniffed verdict
+        (``audio/x-wav``) so a later walk knows what bytes landed.
+        """
+        from tests._fakes.storage import InMemoryStorage
+
+        ws = _bootstrap_workspace(session)
+        prop = _bootstrap_property(session)
+        occ = _bootstrap_occurrence(session, workspace_id=ws, property_id=prop)
+        author = _bootstrap_user(session)
+        storage = InMemoryStorage()
+
+        view = add_file_evidence(
+            session,
+            _ctx(ws, actor_id=author),
+            task_id=occ,
+            kind="voice",
+            payload=_TINY_WAV,
+            content_type="audio/wav",
+            storage=storage,
+            virus_scanner=_StubScanner(),
+            clock=clock,
+        )
+        assert view.kind == "voice"
+        assert view.blob_hash is not None
+        assert storage.exists(view.blob_hash)
+
+        row = session.scalars(
+            select(AuditLog).where(
+                AuditLog.entity_id == occ,
+                AuditLog.action == "task.evidence.voice.add",
+            )
+        ).one()
+        diff = row.diff
+        assert isinstance(diff, dict)
+        # The two labels are both in the allow-list; sniff wins on
+        # the persisted ``content_type``.
+        assert diff["after"]["content_type"] in {"audio/wav", "audio/x-wav"}
+        assert diff["after"]["declared_content_type"] == "audio/wav"
+
+    def test_gps_payload_passes_with_correct_declared_type(
+        self, session: Session, clock: FrozenClock
+    ) -> None:
+        """Regression: a GPS JSON declared as ``application/json`` works.
+
+        The sniffer's JSON structural fallback fires (the hint
+        advertises JSON, the bytes parse, the object carries
+        ``lat`` / ``lon``) and returns ``application/json``. That
+        matches the gps allow-list, so the upload lands.
+        """
+        from tests._fakes.storage import InMemoryStorage
+
+        ws = _bootstrap_workspace(session)
+        prop = _bootstrap_property(session)
+        occ = _bootstrap_occurrence(session, workspace_id=ws, property_id=prop)
+        author = _bootstrap_user(session)
+        storage = InMemoryStorage()
+
+        view = add_file_evidence(
+            session,
+            _ctx(ws, actor_id=author),
+            task_id=occ,
+            kind="gps",
+            payload=_GPS_PAYLOAD,
+            content_type="application/json",
+            storage=storage,
+            virus_scanner=_StubScanner(),
+            clock=clock,
+        )
+        assert view.kind == "gps"
+        assert view.blob_hash is not None
+
+    def test_undetectable_bytes_rejected_not_falling_back_to_header(
+        self, session: Session, clock: FrozenClock
+    ) -> None:
+        """Spec §15: bytes the sniffer can't classify are REJECTED.
+
+        Falling back to the declared header is the very vector the
+        sniff seam closes — an attacker who can't fake magic bytes
+        still controls the multipart-declared type. With a pinned
+        ``None`` verdict from the sniffer, the upload is rejected
+        even when the declared type is in the allow-list.
+        """
+        from tests._fakes.storage import InMemoryStorage
+
+        ws = _bootstrap_workspace(session)
+        prop = _bootstrap_property(session)
+        occ = _bootstrap_occurrence(session, workspace_id=ws, property_id=prop)
+        author = _bootstrap_user(session)
+        storage = InMemoryStorage()
+
+        # Pinned-None sniffer; bytes themselves are valid PNG so the
+        # only thing under test is the "no verdict → reject" branch.
+        sniffer = _PinnedSniffer(verdict=None)
+
+        with pytest.raises(EvidenceContentTypeNotAllowed) as excinfo:
+            add_file_evidence(
+                session,
+                _ctx(ws, actor_id=author),
+                task_id=occ,
+                kind="photo",
+                payload=_TINY_PNG,
+                content_type="image/png",  # in the allow-list — but ignored.
+                storage=storage,
+                virus_scanner=_StubScanner(),
+                mime_sniffer=sniffer,
+                clock=clock,
+            )
+        assert excinfo.value.kind == "photo"
+        assert excinfo.value.content_type is None
+        # Sniff was consulted; no fallback to the header.
+        assert sniffer.calls
+        assert not storage._blobs
+
+    def test_sniff_overrides_declared_on_audit_row(
+        self, session: Session, clock: FrozenClock
+    ) -> None:
+        """The persisted ``content_type`` is the sniff, not the header.
+
+        A WAV-declared upload whose bytes sniff to ``audio/x-wav`` (a
+        sibling MIME label both in the allow-list) lands successfully
+        — and the audit row carries the sniffed type, with the
+        declared header preserved alongside. This is the mechanism
+        that makes the "operator sees the actual bytes, not the lie"
+        invariant observable.
+        """
+        from tests._fakes.storage import InMemoryStorage
+
+        ws = _bootstrap_workspace(session)
+        prop = _bootstrap_property(session)
+        occ = _bootstrap_occurrence(session, workspace_id=ws, property_id=prop)
+        author = _bootstrap_user(session)
+
+        # Pin the sniff to ``image/jpeg`` while declaring ``image/png``;
+        # both are in the photo allow-list, so the upload lands and we
+        # can assert the audit row stores the sniff (not the declared).
+        sniffer = _PinnedSniffer(verdict="image/jpeg")
+
+        view = add_file_evidence(
+            session,
+            _ctx(ws, actor_id=author),
+            task_id=occ,
+            kind="photo",
+            payload=_TINY_PNG,
+            content_type="image/png",
+            storage=InMemoryStorage(),
+            virus_scanner=_StubScanner(),
+            mime_sniffer=sniffer,
+            clock=clock,
+        )
+        row = session.scalars(
+            select(AuditLog).where(
+                AuditLog.entity_id == occ,
+                AuditLog.action == "task.evidence.photo.add",
+            )
+        ).one()
+        diff = row.diff
+        assert isinstance(diff, dict)
+        assert diff["after"]["content_type"] == "image/jpeg"  # sniff wins.
+        assert diff["after"]["declared_content_type"] == "image/png"
+        assert view.blob_hash is not None
+
+    def test_voice_webm_container_label_accepted(
+        self, session: Session, clock: FrozenClock
+    ) -> None:
+        """A browser-recorded WebM voice memo (sniffs to ``video/webm``) lands.
+
+        Regression for the cd-ba5c selfreview: the default
+        :class:`FiletypeMimeSniffer` matches WebM by EBML magic alone
+        and unconditionally returns ``video/webm`` even for an
+        audio-only Opus stream — Chrome / Firefox MediaRecorder's
+        default voice format. The voice allow-list MUST therefore
+        accept the container label alongside ``audio/webm``;
+        otherwise every browser voice memo earns 415 in production.
+        """
+        from tests._fakes.storage import InMemoryStorage
+
+        ws = _bootstrap_workspace(session)
+        prop = _bootstrap_property(session)
+        occ = _bootstrap_occurrence(session, workspace_id=ws, property_id=prop)
+        author = _bootstrap_user(session)
+        # Pin the sniff to ``video/webm`` — what the real
+        # ``FiletypeMimeSniffer`` returns for any WebM container.
+        # Declared header is the audio-named MIME a browser sets.
+        sniffer = _PinnedSniffer(verdict="video/webm")
+        storage = InMemoryStorage()
+
+        view = add_file_evidence(
+            session,
+            _ctx(ws, actor_id=author),
+            task_id=occ,
+            kind="voice",
+            payload=b"\x1a\x45\xdf\xa3" + b"\x00" * 60,  # WebM EBML magic
+            content_type="audio/webm",
+            storage=storage,
+            virus_scanner=_StubScanner(),
+            mime_sniffer=sniffer,
+            clock=clock,
+        )
+        assert view.kind == "voice"
+        assert view.blob_hash is not None
+        assert storage.exists(view.blob_hash)
+
+        row = session.scalars(
+            select(AuditLog).where(
+                AuditLog.entity_id == occ,
+                AuditLog.action == "task.evidence.voice.add",
+            )
+        ).one()
+        diff = row.diff
+        assert isinstance(diff, dict)
+        # Container label persists on the audit row (sniff wins),
+        # declared-audio header preserved alongside for forensics.
+        assert diff["after"]["content_type"] == "video/webm"
+        assert diff["after"]["declared_content_type"] == "audio/webm"
+
+    def test_voice_mp4_container_label_accepted(
+        self, session: Session, clock: FrozenClock
+    ) -> None:
+        """A browser-recorded MP4 voice memo (sniffs to ``video/mp4``) lands.
+
+        Sibling regression to ``test_voice_webm_container_label_accepted``
+        — generic ``ftyp/isom`` MP4 boxes (Chromium MediaRecorder's
+        MP4 fallback) sniff as ``video/mp4`` in ``filetype``'s
+        vocabulary, even when the stream is audio-only. The voice
+        allow-list MUST accept the container label.
+        """
+        from tests._fakes.storage import InMemoryStorage
+
+        ws = _bootstrap_workspace(session)
+        prop = _bootstrap_property(session)
+        occ = _bootstrap_occurrence(session, workspace_id=ws, property_id=prop)
+        author = _bootstrap_user(session)
+        sniffer = _PinnedSniffer(verdict="video/mp4")
+        storage = InMemoryStorage()
+
+        view = add_file_evidence(
+            session,
+            _ctx(ws, actor_id=author),
+            task_id=occ,
+            kind="voice",
+            payload=b"\x00\x00\x00\x20ftypisom" + b"\x00" * 50,
+            content_type="audio/mp4",
+            storage=storage,
+            virus_scanner=_StubScanner(),
+            mime_sniffer=sniffer,
+            clock=clock,
+        )
+        assert view.kind == "voice"
+        assert view.blob_hash is not None
+        row = session.scalars(
+            select(AuditLog).where(
+                AuditLog.entity_id == occ,
+                AuditLog.action == "task.evidence.voice.add",
+            )
+        ).one()
+        diff = row.diff
+        assert isinstance(diff, dict)
+        assert diff["after"]["content_type"] == "video/mp4"
+        assert diff["after"]["declared_content_type"] == "audio/mp4"

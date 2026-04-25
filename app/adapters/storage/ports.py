@@ -21,6 +21,7 @@ __all__ = [
     "BlobNotFound",
     "EnvelopeDecryptError",
     "EnvelopeEncryptor",
+    "MimeSniffer",
     "Storage",
     "VirusScanResult",
     "VirusScanner",
@@ -74,6 +75,40 @@ class VirusScanner(Protocol):
         :class:`VirusScanResult`; the caller decides whether to write
         the blob or surface a rejection.
         """
+        ...
+
+
+class MimeSniffer(Protocol):
+    """Port: detect a payload's MIME type from its bytes, not its header.
+
+    Spec §15 "Input validation": "MIME sniffed server-side; we trust
+    the sniff, not the header." A multipart-form ``Content-Type`` is
+    informational — an attacker can claim ``image/png`` for a Windows
+    PE executable. The sniffer reads the magic bytes (and, for the
+    text-shaped formats we accept, applies a small structural check)
+    and returns the IANA media type the bytes themselves describe.
+
+    A ``None`` return means the payload's shape is not in the
+    sniffer's vocabulary. Callers MUST treat that as "unknown bytes,
+    reject" rather than falling back to the declared header — the
+    fallback is the very vector the sniff seam is supposed to close.
+
+    The ``hint`` parameter is the multipart-declared content type and
+    is passed through purely so a structural-check sniffer can decide
+    whether to invest in a parse (e.g. attempt JSON only when the
+    hint is ``application/json``-shaped). It is **never** the
+    decision-maker — the returned MIME is what the caller validates
+    against the per-purpose allow-list.
+
+    The default implementation lives at
+    :mod:`app.adapters.storage.mime`
+    (:class:`FiletypeMimeSniffer`).
+
+    See ``docs/specs/15-security-privacy.md`` §"Input validation".
+    """
+
+    def sniff(self, payload: bytes, *, hint: str | None = None) -> str | None:
+        """Return the sniffed IANA media type, or ``None`` when undetectable."""
         ...
 
 

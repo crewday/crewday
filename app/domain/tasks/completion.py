@@ -117,7 +117,9 @@ from sqlalchemy.orm import Session
 
 from app.adapters.db.inventory.models import Item, Movement
 from app.adapters.db.tasks.models import ChecklistItem, Evidence, Occurrence
+from app.adapters.storage.mime import FiletypeMimeSniffer
 from app.adapters.storage.ports import (
+    MimeSniffer,
     Storage,
     VirusScanner,
 )
@@ -340,13 +342,24 @@ class SkipNotPermitted(PermissionError):
 
 
 class EvidenceContentTypeNotAllowed(ValueError):
-    """Asserted ``content_type`` is outside the per-kind allow-list.
+    """Server-sniffed ``content_type`` is outside the per-kind allow-list.
 
     415-equivalent. The §15 "Input validation" allow-lists are pinned
     per kind: photos accept the common phone-camera image set, voice
     notes accept the browser's MediaRecorder output set, and gps
     accepts ``application/json`` only. Anything else is a client bug
     or a malicious upload (an executable masquerading as media).
+
+    The :attr:`content_type` carried on the exception is the
+    **sniffed** type — the IANA media type the bytes themselves
+    describe, as returned by :class:`MimeSniffer`. The header the
+    multipart-form part advertised is informational; the rejection
+    envelope MUST surface the sniff so an operator inspecting the
+    audit row sees the actual shape (``application/x-msdownload``
+    for a PE smuggled as ``image/png``) rather than the lie. A
+    ``None`` value carries the "sniffer could not classify" verdict;
+    spec §15 is explicit that the caller MUST reject in that case
+    rather than fall back to the header.
     """
 
     def __init__(self, *, kind: str, content_type: str | None) -> None:
@@ -1323,6 +1336,15 @@ FileEvidenceKind = Literal["photo", "voice", "gps"]
 #   container types a worker recording from a native app might
 #   produce. WAV is doubly-spelled because Safari emits
 #   ``audio/x-wav`` while every other engine emits ``audio/wav``.
+#   ``video/webm`` and ``video/mp4`` are listed alongside the
+#   ``audio/*`` siblings because magic-byte sniffers (the §15
+#   :class:`MimeSniffer` seam) match the container's EBML / ftyp
+#   signature and cannot introspect the codec — a Chrome / Firefox
+#   MediaRecorder Opus-in-WebM voice memo sniffs as ``video/webm``,
+#   not ``audio/webm``, even though the stream is audio-only. Same
+#   reasoning for ``video/mp4`` (a generic ``ftyp/isom`` box).
+#   Excluding the container labels would reject every browser-
+#   recorded WebM / MP4 voice upload.
 # * ``gps`` — ``application/json`` only. The payload is a small
 #   coordinate document, not a binary file; pinning JSON keeps the
 #   contract auditable and the parser narrow.
@@ -1338,6 +1360,10 @@ _VOICE_ALLOWED_MIME: frozenset[str] = frozenset(
         "audio/aac",
         "audio/wav",
         "audio/x-wav",
+        # Container labels the magic-byte sniffer returns for an
+        # audio-only payload (cd-ba5c). See module-comment above.
+        "video/webm",
+        "video/mp4",
     }
 )
 _GPS_ALLOWED_MIME: frozenset[str] = frozenset({"application/json"})
@@ -1430,6 +1456,7 @@ def add_file_evidence(
     content_type: str,
     storage: Storage,
     virus_scanner: VirusScanner | None = None,
+    mime_sniffer: MimeSniffer | None = None,
     clock: Clock | None = None,
 ) -> EvidenceView:
     """Persist a file-bearing evidence row (photo / voice / gps).
@@ -1439,9 +1466,17 @@ def add_file_evidence(
     1. Loads the task through the ``ctx.workspace_id``-scoped seam
        (mirrors :func:`add_note_evidence` for tenant isolation).
     2. Validates ``kind`` is in :data:`FileEvidenceKind`.
-    3. Validates ``content_type`` against the per-kind allow-list
-       (§15 "Input validation").
-    4. Validates ``len(payload)`` against the per-kind cap.
+    3. Validates ``len(payload)`` against the per-kind cap.
+    4. **Sniffs** the payload via the injectable :class:`MimeSniffer`
+       and validates the **sniffed** type against the per-kind
+       allow-list (§15 "Input validation": "MIME sniffed server-side;
+       we trust the sniff, not the header"). The multipart-declared
+       ``content_type`` is informational — an attacker who claims
+       ``image/png`` for a Windows PE executable is rejected here
+       because the bytes sniff to ``application/x-msdownload``.
+       A ``None`` sniff verdict (bytes the sniffer can't classify) is
+       a hard reject — falling back to the declared header is exactly
+       the vector the seam closes.
     5. For ``kind='gps'``, parses + validates the JSON coordinate
        document so the stored bytes carry a known shape.
     6. Runs the injectable :class:`VirusScanner`; ``infected`` →
@@ -1449,24 +1484,36 @@ def add_file_evidence(
        allow the upload (the default :class:`NullVirusScanner` logs
        a one-shot warning so operators learn the deployment shipped
        without scanning).
-    7. SHA-256 the bytes, hand them to :meth:`Storage.put` (idempotent;
-       same hash → same blob).
+    7. SHA-256 the bytes, hand them to :meth:`Storage.put` with the
+       **sniffed** type (idempotent; same hash → same blob). The
+       declared header never reaches storage — only the sniff does,
+       so the persisted ``content_type`` matches what's actually in
+       the blob.
     8. Inserts the :class:`Evidence` row with the resolved
        ``blob_hash``, flushes, audits ``task.evidence.<kind>.add``.
 
-    The audit row carries ``content_type`` and ``size_bytes`` so a
-    later forensic walk can reconstruct what landed without re-reading
-    the blob.
+    The audit row carries the **sniffed** ``content_type``, the
+    declared header (for forensic comparison), and ``size_bytes`` so
+    a later walk can reconstruct what landed without re-reading the
+    blob.
 
     ``virus_scanner`` defaults to :class:`NullVirusScanner` — the
     "no scanner configured" stub that logs a one-shot warning. The
     real wiring lands with a follow-up Beads task; the seam is the
     Protocol-port pattern every other adapter follows so swap-in is
     a constructor change, not a domain edit.
+
+    ``mime_sniffer`` defaults to :class:`FiletypeMimeSniffer` (cd-ba5c)
+    — the pure-Python magic-byte sniff backed by ``filetype`` + a
+    narrow JSON structural check for the GPS branch. Tests override
+    with a fake to pin the verdict.
     """
     resolved_clock = clock if clock is not None else SystemClock()
     resolved_scanner = (
         virus_scanner if virus_scanner is not None else NullVirusScanner()
+    )
+    resolved_sniffer = (
+        mime_sniffer if mime_sniffer is not None else FiletypeMimeSniffer()
     )
 
     if kind not in _MIME_ALLOWLIST_BY_KIND:
@@ -1476,10 +1523,6 @@ def add_file_evidence(
         )
 
     task = _load_task(session, ctx, task_id)
-
-    allowed = _MIME_ALLOWLIST_BY_KIND[kind]
-    if content_type not in allowed:
-        raise EvidenceContentTypeNotAllowed(kind=kind, content_type=content_type)
 
     cap = _MAX_BYTES_BY_KIND[kind]
     size_bytes = len(payload)
@@ -1491,13 +1534,28 @@ def add_file_evidence(
     if size_bytes > cap:
         raise EvidenceTooLarge(kind=kind, size_bytes=size_bytes, cap_bytes=cap)
 
+    # Spec §15: sniff the bytes, validate the sniff (not the header)
+    # against the per-kind allow-list. The declared ``content_type``
+    # is passed as a hint only so the JSON structural-check fallback
+    # is gated on a JSON-shaped declaration — it is **never** the
+    # decision-maker.
+    sniffed_type = resolved_sniffer.sniff(payload, hint=content_type)
+    allowed = _MIME_ALLOWLIST_BY_KIND[kind]
+    if sniffed_type is None or sniffed_type not in allowed:
+        # Either the sniffer could not classify the bytes (None) or
+        # the sniff disagrees with the allow-list. Either way the
+        # upload never lands in storage. The exception carries the
+        # sniffed type so the operator inspecting the audit envelope
+        # sees the actual shape, not the multipart-form lie.
+        raise EvidenceContentTypeNotAllowed(kind=kind, content_type=sniffed_type)
+
     if kind == "gps":
         # Parse + validate BEFORE storage so a malformed payload never
         # lands in the blob store (and the audit row carries the
         # rejection reason instead of an opaque blob hash).
         _validate_gps_payload(payload)
 
-    scan_result = resolved_scanner.scan(payload, content_type=content_type)
+    scan_result = resolved_scanner.scan(payload, content_type=sniffed_type)
     if scan_result.status == "infected":
         # Spec §15 "Input validation": infected uploads are rejected
         # outright. Carry the signature into the typed exception so
@@ -1512,8 +1570,10 @@ def add_file_evidence(
     # re-writing. We do NOT short-circuit the audit row on a dedupe —
     # the Evidence row is a per-task pointer, not a per-blob one, so
     # a worker who attaches the same photo to two tasks gets two rows.
+    # The persisted ``content_type`` is the sniffed verdict, not the
+    # declared header — what the bytes are, not what the client claimed.
     blob_hash = hashlib.sha256(payload).hexdigest()
-    storage.put(blob_hash, io.BytesIO(payload), content_type=content_type)
+    storage.put(blob_hash, io.BytesIO(payload), content_type=sniffed_type)
 
     row = Evidence(
         id=new_ulid(),
@@ -1537,7 +1597,15 @@ def add_file_evidence(
             "after": {
                 "evidence_id": row.id,
                 "blob_hash": blob_hash,
-                "content_type": content_type,
+                # Persist the sniffed verdict on the audit row so a
+                # later forensic walk knows what bytes actually landed.
+                "content_type": sniffed_type,
+                # Declared header preserved alongside for the
+                # "client claimed X, sniff said Y" forensic case —
+                # useful when the two disagree on a non-rejected
+                # upload (e.g. ``audio/wav`` declared, ``audio/x-wav``
+                # sniffed; both in the allow-list).
+                "declared_content_type": content_type,
                 "size_bytes": size_bytes,
                 "scan_status": scan_result.status,
             }

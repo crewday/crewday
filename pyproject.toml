@@ -62,6 +62,19 @@ dependencies = [
     # pin it directly so a future shake-up of those deps does not
     # silently break ``python -m crewday._codegen``.
     "pyyaml>=6.0",
+    # Pure-Python magic-byte MIME sniffer (cd-ba5c). Powers the
+    # ``MimeSniffer`` port at :mod:`app.adapters.storage.mime` so the
+    # task evidence pipeline can reject an EXE declared as ``image/png``
+    # before it lands in the blob store (spec §15 "Input validation":
+    # "MIME sniffed server-side; we trust the sniff, not the header").
+    # Picked over ``python-magic`` to avoid pulling a libmagic system
+    # dependency — matches the project's "no system dep where avoidable"
+    # posture. ``filetype`` covers the formats we accept on the evidence
+    # surface (PNG / JPEG / WEBP / HEIC / WAV / MP3 / WebM / OGG / MP4 /
+    # AAC) plus the executable formats an attacker is most likely to
+    # smuggle through (PE / ELF / Mach-O). JSON is text and not
+    # magic-byte detectable; the GPS branch wraps a structural check.
+    "filetype>=1.2",
 ]
 
 # ``crewday`` is the sole console-script entry point. The target is
@@ -159,6 +172,19 @@ mypy_path = "cli"
 [[tool.mypy.overrides]]
 module = [
     "apscheduler.*",
+]
+ignore_missing_imports = true
+
+# ``filetype`` (cd-ba5c) ships no ``py.typed`` marker. The wrapper in
+# :mod:`app.adapters.storage.mime` narrows the surface we depend on to
+# :func:`filetype.guess` (returns ``filetype.types.Type | None`` whose
+# ``.mime`` is a ``str``); the ``ignore_missing_imports`` keeps
+# ``mypy --strict`` quiet without masking type issues in our own code.
+# Drops if upstream ships a typed release.
+[[tool.mypy.overrides]]
+module = [
+    "filetype",
+    "filetype.*",
 ]
 ignore_missing_imports = true
 
@@ -444,6 +470,16 @@ ignore_imports = [
     # implementation at boot and the domain caller stops needing the
     # default.
     "app.domain.tasks.completion -> app.adapters.storage.virus",
+    # cd-ba5c: ``app.domain.tasks.completion.add_file_evidence`` uses
+    # :class:`FiletypeMimeSniffer` as the default MIME sniffer so the
+    # seam is opt-in (callers pass a fake via DI in tests). Same
+    # rationale as the ``virus_scanner`` stopgap above — the Protocol
+    # port (:class:`MimeSniffer`) reaches through
+    # ``app.adapters.storage.ports`` and is already permitted by the
+    # ``app.domain.** -> app.adapters.*.ports.*`` exception; this
+    # entry covers the concrete fallback. Drops when a sniffer factory
+    # is wired at boot.
+    "app.domain.tasks.completion -> app.adapters.storage.mime",
     # v1 stopgap (cd-cfe4): ``app.domain.tasks.comments`` reads
     # :class:`Comment` / :class:`Occurrence` / :class:`Evidence` from
     # ``app.adapters.db.tasks.models``, :class:`User` from

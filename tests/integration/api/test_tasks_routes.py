@@ -42,7 +42,9 @@ from sqlalchemy.orm import Session, sessionmaker
 from app.adapters.db.places.models import Area, Property, PropertyWorkspace, Unit
 from app.adapters.db.tasks.models import Occurrence
 from app.adapters.db.workspace.models import WorkRole
-from app.api.deps import current_workspace_context, get_storage
+from app.adapters.storage.mime import FiletypeMimeSniffer
+from app.adapters.storage.ports import MimeSniffer
+from app.api.deps import current_workspace_context, get_mime_sniffer, get_storage
 from app.api.deps import db_session as _db_session_dep
 from app.api.v1.tasks import router as tasks_router
 from app.tenancy import WorkspaceContext, tenant_agnostic
@@ -221,6 +223,7 @@ def _client_for(
     ctx: WorkspaceContext,
     *,
     storage: InMemoryStorage | None = None,
+    mime_sniffer: MimeSniffer | None = None,
 ) -> TestClient:
     """Return a TestClient pinned to ``ctx`` (and optionally ``storage``).
 
@@ -233,6 +236,13 @@ def _client_for(
     instance is constructed so the dep resolves without requiring
     ``app.state.storage`` — tests that need to inspect the stored bytes
     pass their own instance and assert on it after the call.
+
+    ``mime_sniffer`` is the :class:`MimeSniffer` the file-evidence
+    route consults for the §15 sniff verdict. The default
+    :class:`FiletypeMimeSniffer` exercises the real magic-byte path
+    end-to-end (the production wiring); tests that need to pin a
+    specific verdict (e.g. force ``None`` for the
+    "undetectable bytes" branch) pass a stub.
     """
     app = FastAPI()
     app.include_router(tasks_router, prefix="/api/v1")
@@ -256,9 +266,17 @@ def _client_for(
     def _storage() -> InMemoryStorage:
         return resolved_storage
 
+    resolved_sniffer = (
+        mime_sniffer if mime_sniffer is not None else FiletypeMimeSniffer()
+    )
+
+    def _mime_sniffer() -> MimeSniffer:
+        return resolved_sniffer
+
     app.dependency_overrides[_db_session_dep] = _session
     app.dependency_overrides[current_workspace_context] = _ctx
     app.dependency_overrides[get_storage] = _storage
+    app.dependency_overrides[get_mime_sniffer] = _mime_sniffer
     return TestClient(app)
 
 
@@ -1264,6 +1282,114 @@ class TestEvidence:
             )
             assert r.status_code == 422, r.text
             assert r.json()["detail"]["error"] == "evidence_file_with_note"
+
+    # cd-ba5c: server-side MIME sniffing — spec §15 "Input validation"
+    # ("MIME sniffed server-side; we trust the sniff, not the header").
+    # The PE header below is the smallest fragment ``filetype`` will
+    # recognise as a Windows executable — enough to assert the seam
+    # rejects it under the photo allow-list.
+    _TINY_EXE: bytes = (
+        b"MZ\x90\x00\x03\x00\x00\x00\x04\x00\x00\x00" + b"\x00" * 32
+    )
+
+    def test_evil_exe_declared_as_png_rejected(
+        self,
+        session_factory: sessionmaker[Session],
+        seeded: dict[str, Any],
+    ) -> None:
+        """Spec §15: a Windows PE smuggled as ``image/png`` is rejected.
+
+        The route hands the bytes to the sniffer, the sniffer returns
+        a PE-shaped MIME, the per-kind allow-list rejects the upload
+        with the **sniffed** type on the envelope.
+        """
+        storage = InMemoryStorage()
+        with _client_for(session_factory, seeded["owner_ctx"], storage=storage) as c:
+            r = c.post(
+                f"/api/v1/tasks/{seeded['task_id']}/evidence",
+                data={"kind": "photo"},
+                files={"file": ("evidence.png", self._TINY_EXE, "image/png")},
+            )
+            assert r.status_code == 415, r.text
+            body = r.json()["detail"]
+            assert body["error"] == "evidence_content_type_rejected"
+            assert body["kind"] == "photo"
+            # The envelope surfaces the sniffed type so the operator
+            # sees the actual shape (a PE label), not the declared lie.
+            assert body["sniffed_type"] is not None
+            assert "image" not in body["sniffed_type"]
+            # Forensic trail: the declared header is preserved alongside
+            # the sniff so the operator can spot the discrepancy.
+            assert body["declared_type"] == "image/png"
+            # The malicious payload never landed.
+            assert not storage._blobs
+
+    def test_gps_json_misdeclared_as_image_rejected(
+        self,
+        session_factory: sessionmaker[Session],
+        seeded: dict[str, Any],
+    ) -> None:
+        """Spec §15: a GPS JSON smuggled as ``image/jpeg`` is rejected.
+
+        The JSON structural fallback only fires when the hint
+        advertises JSON; an ``image/jpeg`` hint closes the fallback
+        gate, so the sniff returns ``None``, ``None`` is not in the
+        photo allow-list → 415.
+        """
+        storage = InMemoryStorage()
+        gps_payload = b'{"lat": 48.8566, "lon": 2.3522}'
+        with _client_for(session_factory, seeded["owner_ctx"], storage=storage) as c:
+            r = c.post(
+                f"/api/v1/tasks/{seeded['task_id']}/evidence",
+                data={"kind": "photo"},
+                files={"file": ("coords.json", gps_payload, "image/jpeg")},
+            )
+            assert r.status_code == 415, r.text
+            body = r.json()["detail"]
+            assert body["error"] == "evidence_content_type_rejected"
+            assert body["kind"] == "photo"
+            assert body["sniffed_type"] is None  # sniffer couldn't classify.
+            assert body["declared_type"] == "image/jpeg"
+            assert not storage._blobs
+
+    def test_undetectable_bytes_rejected_via_sniff(
+        self,
+        session_factory: sessionmaker[Session],
+        seeded: dict[str, Any],
+    ) -> None:
+        """Spec §15: random bytes the sniffer can't classify are REJECTED.
+
+        Even when the declared type is in the allow-list, a sniffer
+        that can't classify the bytes returns ``None`` and the upload
+        is rejected. The fallback to the declared header is the very
+        vector the seam closes.
+
+        Uses a pinned-``None`` sniffer to assert this is the seam's
+        contract independent of which payload happens to be in the
+        sniffer's vocabulary.
+        """
+        storage = InMemoryStorage()
+
+        class _PinnedNoneSniffer:
+            def sniff(self, payload: bytes, *, hint: str | None = None) -> str | None:
+                return None
+
+        with _client_for(
+            session_factory,
+            seeded["owner_ctx"],
+            storage=storage,
+            mime_sniffer=_PinnedNoneSniffer(),
+        ) as c:
+            r = c.post(
+                f"/api/v1/tasks/{seeded['task_id']}/evidence",
+                data={"kind": "photo"},
+                files={"file": ("p.png", self._TINY_PNG, "image/png")},
+            )
+            assert r.status_code == 415, r.text
+            body = r.json()["detail"]
+            assert body["error"] == "evidence_content_type_rejected"
+            assert body["sniffed_type"] is None
+            assert not storage._blobs
 
     def test_invalid_kind_returns_422(
         self,

@@ -20,7 +20,7 @@ from sqlalchemy.orm import Session
 
 from app.adapters.db.session import make_uow
 from app.adapters.llm.ports import LLMClient
-from app.adapters.storage.ports import Storage
+from app.adapters.storage.ports import MimeSniffer, Storage
 from app.tenancy import WorkspaceContext
 from app.tenancy.current import get_current
 
@@ -28,6 +28,7 @@ __all__ = [
     "current_workspace_context",
     "db_session",
     "get_llm",
+    "get_mime_sniffer",
     "get_storage",
 ]
 
@@ -93,6 +94,30 @@ def get_storage(request: Request) -> Storage:
             detail={"error": "storage_unavailable"},
         )
     return storage
+
+
+def get_mime_sniffer(request: Request) -> MimeSniffer:
+    """FastAPI dep — return the configured :class:`MimeSniffer`.
+
+    Reads :attr:`app.state.mime_sniffer`, populated by the app factory
+    at boot. The sniffer port is the §15 "Input validation" seam:
+    every upload that touches the blob store routes through it so we
+    validate the bytes themselves, not the multipart-form header an
+    attacker controls. Tests override via
+    ``app.dependency_overrides[get_mime_sniffer] = …`` to inject a
+    deterministic stub (no library dependency, pinned verdicts).
+
+    Mirrors :func:`get_storage` — read lazily from ``app.state`` so a
+    deployment that booted without a sniffer surfaces a 503 at request
+    time, not a boot-time crash that takes ``/healthz`` down.
+    """
+    sniffer: MimeSniffer | None = getattr(request.app.state, "mime_sniffer", None)
+    if sniffer is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"error": "mime_sniffer_unavailable"},
+        )
+    return sniffer
 
 
 def get_llm(request: Request) -> LLMClient:

@@ -377,9 +377,19 @@ See §03 for ceremonies. Additional hardening:
   - Max size configurable per purpose (default 10 MB images, 25 MB
     PDFs).
   - MIME sniffed server-side; we trust the sniff, not the header.
-    *(cd-jl0g status: header-trust on the task evidence route is the
-    current stopgap; a follow-up wires a real sniffer through the
-    same domain seam.)*
+    The `MimeSniffer` Protocol port at
+    `app.adapters.storage.ports` is the seam every upload route
+    consults; the default `FiletypeMimeSniffer` wraps the pure-Python
+    `filetype` library (no libmagic system dep) for magic-byte
+    detection and falls back to a narrow JSON structural check
+    (object carrying `lat` / `lon`) for the GPS evidence kind. The
+    persisted `content_type` and the audit envelope carry the
+    **sniffed** verdict, not the declared header — an EXE smuggled
+    as `image/png` is rejected with `application/x-msdownload` (or
+    similar PE label) on the envelope so the operator sees the
+    actual shape, not the lie. Bytes the sniffer cannot classify
+    (`None` verdict) are **rejected**, never falling back to the
+    header — the fallback would be the very vector the seam closes.
   - Image re-encoding: uploaded JPEGs are re-encoded to strip EXIF
     and GPS unless the workspace sets `retain_exif=true` on that
     purpose. **Avatars (`users.avatar_file_id`) always strip EXIF,
@@ -397,7 +407,7 @@ taxonomy to a narrow per-kind contract:
 | kind  | MIME allow-list                                                    | size cap |
 |-------|--------------------------------------------------------------------|----------|
 | photo | `image/jpeg`, `image/png`, `image/webp`, `image/heic`              | 10 MiB   |
-| voice | `audio/webm`, `audio/ogg`, `audio/mpeg`, `audio/mp4`, `audio/aac`, `audio/wav`, `audio/x-wav` | 25 MiB   |
+| voice | `audio/webm`, `audio/ogg`, `audio/mpeg`, `audio/mp4`, `audio/aac`, `audio/wav`, `audio/x-wav`, `video/webm`, `video/mp4` | 25 MiB   |
 | gps   | `application/json` (small `{lat, lon, accuracy_m?}` document)      | 4 KiB    |
 
 Off-allowlist MIME → `415 evidence_content_type_rejected`. Past the
@@ -405,6 +415,29 @@ cap → `413 evidence_too_large`. Both gates are router-level
 (`Content-Length` short-circuit) **and** domain-level (per-kind
 re-check after streaming) so a chunked / lying client still can't
 exhaust memory. Spec §06 "Evidence" carries the wire-shape detail.
+
+The allow-list match is on the **sniffed** MIME (per the `MimeSniffer`
+seam above), not on the multipart-form `Content-Type` the client
+declared. The 415 envelope carries `sniffed_type` (the verdict) and
+`declared_type` (the header) alongside `kind` and `error`, so an
+operator inspecting the rejection sees both the actual shape of the
+bytes and what the client claimed they were. The persisted
+`Evidence.content_type` and the `task.evidence.<kind>.add` audit row
+both record the sniffed verdict; the declared header is preserved on
+the audit row's `declared_content_type` field for the forensic
+"client claimed X, sniff said Y" trail.
+
+The voice allow-list intentionally lists both audio-named MIMEs
+(`audio/webm`, `audio/mp4`) and their container-named siblings
+(`video/webm`, `video/mp4`) because magic-byte sniffers (the default
+`FiletypeMimeSniffer`) match the EBML / ftyp container signature and
+cannot introspect the codec — a Chrome / Firefox MediaRecorder
+Opus-in-WebM voice memo sniffs as `video/webm`, not `audio/webm`,
+even though the stream is audio-only. Excluding the container labels
+would reject every browser-recorded WebM / MP4 voice upload. The
+size cap and the rest of the validation chain still apply; the
+widening is a sniffer-vocabulary concession, not a content
+concession.
 
 ### Virus scanning
 
