@@ -317,7 +317,7 @@ def _build_llm(settings: Settings) -> LLMClient | None:
 
     The OCR-autofill capability layers an additional gate on
     :attr:`Settings.llm_ocr_model` — both the API key AND a model id
-    must be present for ``POST /expenses/autofill`` to actually run
+    must be present for ``POST /expenses/scan`` to actually run
     the LLM. The two gates compose so a deployment can disable the
     capability by clearing either side without booting a half-wired
     state machine.

@@ -1226,7 +1226,7 @@ POST   /expenses                   # multipart for receipts
 POST   /expenses/{id}/submit
 POST   /expenses/{id}/approve      # snaps owed_* fields; see §09 "Amount owed to the employee"
 POST   /expenses/{id}/reject
-POST   /expenses/autofill          # multipart/form-data; image in → structured JSON out
+POST   /expenses/scan              # multipart/form-data; receipt image in → ExpenseScanResult out (cd-65ib)
 
 GET    /exchange_rates                              # ?as_of=…&quote=…&source=…
 GET    /exchange_rates/{base}/{quote}?as_of=YYYY-MM-DD   # single row; as_of defaults to today
@@ -1234,9 +1234,23 @@ POST   /exchange_rates/refresh                       # manager-only; force a ref
 POST   /exchange_rates/manual                        # manager-only; body {base, quote, as_of_date, rate}; 409 if ecb row exists
 ```
 
-`POST /expenses/autofill` accepts `multipart/form-data` with
-`images[]` (1..2, ≤ 5 MB total), optional `hint_currency` /
-`hint_vendor`; response shape is `llm_autofill_json` (§09).
+`POST /expenses/scan` accepts `multipart/form-data` with `image`
+(required) and an optional second `image_2` slot (reserved for the
+multi-page batch follow-up; drained without hitting the LLM today),
+plus optional `hint_currency` / `hint_vendor` strings. The response
+mirrors the SPA's `ExpenseScanResult` type
+(`app/web/src/types/expense.ts`): each parsed field is a
+`{value, confidence}` pair (`vendor`, `purchased_at`, `currency`,
+`total_amount_cents`, `category`, `note_md`) plus an optional
+free-text `agent_question` the model can use to nudge the worker on
+an ambiguous receipt. Returns 503 `scan_not_configured` when the
+deployment has no OCR model wired (`settings.llm_ocr_model` unset),
+422 `blob_mime_not_allowed` for a non-receipt mime, 422
+`blob_too_large` past the 10 MB cap, 422 `blob_empty` on an empty
+upload, and 504 `extraction_timeout` / 503
+`extraction_rate_limited` / 503 `extraction_provider_error` for the
+LLM-side failure modes (the rate-limit response carries a
+`Retry-After: 60` header).
 
 `GET /expenses/pending_reimbursement` returns the approved-but-not-yet-
 reimbursed pool that drives the worker "Owed to you" panel (§09 §"Amount

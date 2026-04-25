@@ -23,7 +23,7 @@ Public surface:
   ``Numeric(3, 2)`` column without precision loss.
 * :func:`extract_from_bytes` — pure helper: image bytes in, parsed
   :class:`ReceiptExtraction` out. No DB. Used by the persist path
-  and by the ``POST /expenses/autofill`` preview endpoint that runs
+  and by the ``POST /expenses/scan`` preview endpoint that runs
   extraction without creating a claim.
 * :func:`run_extraction` — full persist path. Loads the claim +
   attachment, calls :func:`extract_from_bytes`, writes the autofill
@@ -425,7 +425,7 @@ class ExtractionResult:
 
 # ---------------------------------------------------------------------------
 # Pure extraction helper (used by both the persist path and the
-# preview ``POST /expenses/autofill`` route).
+# preview ``POST /expenses/scan`` route).
 # ---------------------------------------------------------------------------
 
 
@@ -489,7 +489,7 @@ def extract_from_bytes(
     model_id = resolved_settings.llm_ocr_model
     if model_id is None:
         # Defensive — callers are expected to gate on this themselves
-        # (the API endpoint returns 503 ``autofill_not_configured`` and
+        # (the API endpoint returns 503 ``scan_not_configured`` and
         # :func:`~app.domain.expenses.claims.attach_receipt` skips the
         # runner). Surfacing the misconfig as a typed error keeps the
         # bypass path traceable.

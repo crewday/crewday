@@ -92,8 +92,8 @@ class Settings(BaseSettings):
     # OCR + structured extraction. ``None`` disables the capability at
     # the deployment level: :func:`~app.domain.expenses.claims.attach_receipt`
     # skips the runner entirely (the fields stay empty for manual
-    # entry) and ``POST /expenses/autofill`` returns 503
-    # ``autofill_not_configured``. Set this to the wire model id the
+    # entry) and ``POST /expenses/scan`` returns 503
+    # ``scan_not_configured``. Set this to the wire model id the
     # caller's :class:`~app.adapters.llm.ports.LLMClient` is willing to
     # serve (``google/gemma-3-27b-it``, ``openai/gpt-4o-mini``, …).
     # The capability→model registry (§11 "Model assignment") is the

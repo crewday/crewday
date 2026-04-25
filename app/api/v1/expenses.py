@@ -50,17 +50,20 @@ Surface (spec §12 "Time, payroll, expenses"):
   ``by_user`` breakdown for the manager Pay page; the per-user form
   leaves it ``null``.
 
-**OCR autofill (placeholder)**
+**OCR scan**
 
-* ``POST /autofill`` — returns 501 ``autofill_not_implemented``
-  until cd-95zb wires the OCR pipeline.
+* ``POST /scan`` — multipart receipt image in, structured
+  ``ExpenseScanResult`` out (each parsed field as
+  ``{value, confidence}`` plus an optional ``agent_question``).
+  503 ``scan_not_configured`` when the deployment has no OCR
+  model wired (``settings.llm_ocr_model`` unset).
 
 The flat shape mirrors spec §12's "Time, payroll, expenses" REST
 table verbatim — ``POST /expenses``, ``GET /expenses``, ``POST
 /expenses/{id}/submit``, etc. — so the SPA's ``fetchJson("/api/v1/
 expenses")`` and ``fetchJson("/api/v1/expenses/" + id + "/" +
 decision)`` calls match the router 1:1. ``/pending``,
-``/pending_reimbursement``, and ``/autofill`` are sibling literal
+``/pending_reimbursement``, and ``/scan`` are sibling literal
 segments under the same prefix; each is registered before
 ``/{claim_id}`` so FastAPI's ordered route table matches the
 literal first.
@@ -165,7 +168,6 @@ from app.domain.expenses.autofill import (
     ExtractionTimeout,
     ReceiptExtraction,
     extract_from_bytes,
-    overall_confidence,
 )
 from app.tenancy import WorkspaceContext
 from app.util.clock import SystemClock
@@ -185,7 +187,7 @@ def _optional_llm(request: Request) -> LLMClient | None:
     deployment without an LLM still serves attaches normally.
 
     See :func:`app.api.deps.get_llm` for the strict variant the
-    preview ``POST /expenses/autofill`` endpoint uses.
+    preview ``POST /expenses/scan`` endpoint uses.
     """
     llm: LLMClient | None = getattr(request.app.state, "llm", None)
     return llm
@@ -198,18 +200,18 @@ _Llm = Annotated[LLMClient, Depends(get_llm)]
 _AppSettings = Annotated[Settings, Depends(get_settings)]
 
 
-# Mime types accepted by ``POST /expenses/autofill``. Mirrors the
+# Mime types accepted by ``POST /expenses/scan``. Mirrors the
 # attach allow-list (image/jpeg / png / webp / heic / pdf) so the
 # preview endpoint and the actual attach path agree on what counts
 # as a receipt. PDF is included because vendors mail invoice PDFs;
 # the LLM port handles the multi-page case via its OCR step.
-_AUTOFILL_ALLOWED_MIME: frozenset[str] = frozenset(
+_SCAN_ALLOWED_MIME: frozenset[str] = frozenset(
     {"image/jpeg", "image/png", "image/webp", "image/heic", "application/pdf"}
 )
 # Cap on a single preview upload — matches the attach-side cap so a
 # caller can't smuggle a 50 MB image through the preview endpoint to
 # burn LLM tokens.
-_AUTOFILL_MAX_BYTES: int = 10 * 1024 * 1024
+_SCAN_MAX_BYTES: int = 10 * 1024 * 1024
 
 
 # ---------------------------------------------------------------------------
@@ -1159,49 +1161,118 @@ def reimburse_expense_claim_route(
 
 
 # ---------------------------------------------------------------------------
-# OCR autofill (cd-95zb)
+# OCR scan (cd-95zb / cd-65ib)
 # ---------------------------------------------------------------------------
+#
+# The wire shape mirrors the SPA's ``ExpenseScanResult`` type
+# (``app/web/src/types/expense.ts``) verbatim: each parsed field is an
+# ``{value, confidence}`` pair, plus an optional free-text
+# ``agent_question`` the upstream model can use to nudge the worker on
+# an ambiguous receipt. The route is named ``/scan`` per spec §09's
+# "scan a receipt" wording (cd-65ib renamed it from the earlier
+# ``/autofill`` path, cd-95zb).
 
 
-class ReceiptExtractionPayload(BaseModel):
-    """HTTP projection of :class:`ReceiptExtraction`.
+class _AutofillField(BaseModel):
+    """One ``{value, confidence}`` cell of an :class:`ExpenseScanResult`.
 
-    The extra ``overall_confidence`` field carries the derived
-    ``min(confidence.values())`` quantised to 2 decimals so the SPA
-    doesn't have to recompute the rule client-side. Datetimes round-
-    trip in ISO-8601; ``confidence`` is the raw per-field map the
-    LLM emitted (post-validation).
+    ``value`` is generic over the parsed type but pydantic + FastAPI
+    OpenAPI only emits a stable schema when the field types are
+    concrete; we therefore use one concrete subclass per field below
+    rather than a generic ``AutofillField[T]``. The wire shape is
+    identical (``{value, confidence}``) across all of them.
     """
 
-    vendor: str
-    amount_cents: int
-    currency: str
-    purchased_at: datetime
-    category: str
-    confidence: dict[str, float]
-    overall_confidence: str
+    confidence: float = Field(ge=0.0, le=1.0)
+
+
+class _AutofillFieldStr(_AutofillField):
+    value: str
+
+
+class _AutofillFieldInt(_AutofillField):
+    value: int
+
+
+class ExpenseScanResultPayload(BaseModel):
+    """Wire shape for ``POST /expenses/scan``.
+
+    Mirrors the SPA's ``ExpenseScanResult`` type 1:1 — each parsed
+    field carries its own ``{value, confidence}`` pair so the worker
+    UI can grey out / highlight low-confidence fields without
+    recomputing a global threshold. ``agent_question`` is the
+    optional free-text nudge the model emits when it cannot resolve
+    an ambiguity from the image alone (e.g. "Was this a tip or part
+    of the total?"); ``null`` when the model is confident.
+
+    The v1 prompt extracts vendor / amount / currency / purchased_at
+    / category. ``note_md`` is reserved for a future prompt revision
+    that summarises the receipt; today the route returns an empty
+    value with confidence 0.0 so the SPA's review form sees a
+    well-formed cell and falls back to its empty-state. Same for
+    ``agent_question`` — the v1 prompt does not emit it, so the
+    field is always ``null`` until the prompt grows the slot. The
+    contract is stable; the data fills in as the prompt evolves.
+    """
+
+    vendor: _AutofillFieldStr
+    purchased_at: _AutofillFieldStr
+    currency: _AutofillFieldStr
+    total_amount_cents: _AutofillFieldInt
+    category: _AutofillFieldStr
+    note_md: _AutofillFieldStr
+    agent_question: str | None = None
 
     @classmethod
-    def from_extraction(cls, extraction: ReceiptExtraction) -> ReceiptExtractionPayload:
-        """Render :class:`ReceiptExtraction` into its HTTP shape."""
+    def from_extraction(cls, extraction: ReceiptExtraction) -> ExpenseScanResultPayload:
+        """Project a :class:`ReceiptExtraction` into the SPA wire shape.
+
+        The LLM emits a per-field ``confidence`` map keyed under the
+        prompt's slot names (``vendor``, ``amount``, ``currency``,
+        ``purchased_at``, ``category``); the validator already enforces
+        the keys are present (see
+        :meth:`ReceiptExtraction._confidence_shape`). The ``amount`` /
+        ``total_amount_cents`` rename is intentional — the prompt asks
+        for an amount in the receipt's minor unit, the claim's column
+        is ``total_amount_cents`` and the SPA review form keys off
+        that name.
+        """
+        conf = extraction.confidence
         return cls(
-            vendor=extraction.vendor,
-            amount_cents=extraction.amount_cents,
-            currency=extraction.currency,
-            purchased_at=extraction.purchased_at,
-            category=extraction.category,
-            confidence=dict(extraction.confidence),
-            overall_confidence=str(overall_confidence(extraction)),
+            vendor=_AutofillFieldStr(
+                value=extraction.vendor, confidence=conf["vendor"]
+            ),
+            purchased_at=_AutofillFieldStr(
+                value=extraction.purchased_at.isoformat(),
+                confidence=conf["purchased_at"],
+            ),
+            currency=_AutofillFieldStr(
+                value=extraction.currency, confidence=conf["currency"]
+            ),
+            total_amount_cents=_AutofillFieldInt(
+                value=extraction.amount_cents, confidence=conf["amount"]
+            ),
+            category=_AutofillFieldStr(
+                value=extraction.category, confidence=conf["category"]
+            ),
+            # ``note_md`` and ``agent_question`` are reserved slots —
+            # see the class docstring. The empty-string + 0.0 cell keeps
+            # the SPA's confidence-gate (`fillIf` in
+            # ``app/web/src/pages/employee/expenses/lib/scanDerivation.ts``)
+            # happy: it falls below every threshold and the form leaves
+            # the note blank for the worker to fill in.
+            note_md=_AutofillFieldStr(value="", confidence=0.0),
+            agent_question=None,
         )
 
 
 @router.post(
-    "/autofill",
-    response_model=ReceiptExtractionPayload,
-    operation_id="autofill_expense_claim",
-    summary="OCR-autofill: preview structured fields from a receipt image",
+    "/scan",
+    response_model=ExpenseScanResultPayload,
+    operation_id="scan_expense_receipt",
+    summary="Scan a receipt image and return autofill suggestions",
 )
-async def autofill_expense_claim_route(
+async def scan_expense_receipt_route(
     ctx: _Ctx,
     session: _Db,
     settings: _AppSettings,
@@ -1210,7 +1281,7 @@ async def autofill_expense_claim_route(
     image_2: Annotated[UploadFile | None, File()] = None,
     hint_currency: Annotated[str | None, Form(min_length=3, max_length=3)] = None,
     hint_vendor: Annotated[str | None, Form(min_length=1, max_length=200)] = None,
-) -> ReceiptExtractionPayload:
+) -> ExpenseScanResultPayload:
     """Run a receipt blob through the LLM and return parsed fields.
 
     "Preview" semantic: the route does NOT create a claim, attach a
@@ -1224,7 +1295,7 @@ async def autofill_expense_claim_route(
     the same extraction inside the attach transaction.
 
     Disabled at the deployment level when ``settings.llm_ocr_model``
-    is unset — the response is 503 ``autofill_not_configured`` so a
+    is unset — the response is 503 ``scan_not_configured`` so a
     caller can distinguish "no model assigned" from "transient
     provider error".
 
@@ -1250,9 +1321,9 @@ async def autofill_expense_claim_route(
             await image_2.close()
         raise _http(
             status.HTTP_503_SERVICE_UNAVAILABLE,
-            "autofill_not_configured",
+            "scan_not_configured",
             message=(
-                "OCR autofill is disabled in this deployment "
+                "Receipt scan is disabled in this deployment "
                 "(settings.llm_ocr_model is unset)"
             ),
         )
@@ -1265,27 +1336,26 @@ async def autofill_expense_claim_route(
     if image_2 is not None:
         await image_2.close()
 
-    if image.content_type not in _AUTOFILL_ALLOWED_MIME:
+    if image.content_type not in _SCAN_ALLOWED_MIME:
         await image.close()
         raise _http(
             422,
             "blob_mime_not_allowed",
             message=(
                 f"content_type={image.content_type!r} is not in the receipt "
-                f"allow-list ({sorted(_AUTOFILL_ALLOWED_MIME)!r})"
+                f"allow-list ({sorted(_SCAN_ALLOWED_MIME)!r})"
             ),
         )
 
     image_bytes = await image.read()
     await image.close()
 
-    if len(image_bytes) > _AUTOFILL_MAX_BYTES:
+    if len(image_bytes) > _SCAN_MAX_BYTES:
         raise _http(
             422,
             "blob_too_large",
             message=(
-                f"size_bytes={len(image_bytes)} exceeds the "
-                f"{_AUTOFILL_MAX_BYTES} byte cap"
+                f"size_bytes={len(image_bytes)} exceeds the {_SCAN_MAX_BYTES} byte cap"
             ),
         )
     if not image_bytes:
@@ -1372,7 +1442,7 @@ async def autofill_expense_claim_route(
         fallback_model_id=settings.llm_ocr_model,
         status="ok",
     )
-    return ReceiptExtractionPayload.from_extraction(extraction)
+    return ExpenseScanResultPayload.from_extraction(extraction)
 
 
 def _record_preview_usage(

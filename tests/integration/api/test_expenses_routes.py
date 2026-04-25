@@ -13,7 +13,9 @@ Coverage:
   reject (empty reason / happy), reimburse (happy / replay).
 * Cross-tenant 404.
 * Manager queue — worker probe → 403, manager → only submitted.
-* Autofill placeholder → 501.
+* Receipt scan (``POST /expenses/scan``) — disabled-feature 503,
+  happy path returns ``ExpenseScanResult``, oversize / non-image /
+  anonymous / cross-workspace error paths.
 
 See ``docs/specs/12-rest-api.md`` §"Time, payroll, expenses",
 ``docs/specs/09-time-payroll-expenses.md`` §"Expense claims".
@@ -1426,7 +1428,36 @@ class TestPendingReimbursement:
         assert r_me.json()["user_id"] == seeded["worker_id"]
 
 
-class TestAutofillPlaceholder:
+class TestReceiptScan:
+    """Coverage for ``POST /expenses/scan`` (cd-65ib, was cd-95zb's
+    ``/autofill``). The wire shape mirrors the SPA's
+    ``ExpenseScanResult`` type:
+    ``{vendor, purchased_at, currency, total_amount_cents, category,
+    note_md}`` each as ``{value, confidence}``, plus an optional
+    free-text ``agent_question``.
+    """
+
+    @staticmethod
+    def _high_confidence_payload() -> dict[str, Any]:
+        """Return a stub-LLM chat payload that round-trips through the
+        :class:`ReceiptExtraction` validator with every field above
+        :data:`AUTOFILL_CONFIDENCE_THRESHOLD` (0.85) so the persist
+        path's first-attachment autofill rule fires."""
+        return {
+            "vendor": "Bistro 42",
+            "amount": "27.50",
+            "currency": "EUR",
+            "purchased_at": "2026-04-17T12:30:00+00:00",
+            "category": "food",
+            "confidence": {
+                "vendor": 0.95,
+                "amount": 0.92,
+                "currency": 0.99,
+                "purchased_at": 0.88,
+                "category": 0.91,
+            },
+        }
+
     def test_unconfigured_returns_503(
         self,
         session_factory: sessionmaker[Session],
@@ -1434,8 +1465,8 @@ class TestAutofillPlaceholder:
         seeded: dict[str, Any],
     ) -> None:
         """cd-95zb: when ``settings.llm_ocr_model`` is unset (the
-        default in the test harness), ``POST /expenses/autofill``
-        returns 503 ``autofill_not_configured`` so callers can
+        default in the test harness), ``POST /expenses/scan``
+        returns 503 ``scan_not_configured`` so callers can
         distinguish "feature disabled" from "transient error".
 
         We override :func:`app.api.deps.get_llm` with a do-nothing
@@ -1450,22 +1481,23 @@ class TestAutofillPlaceholder:
             # least one field even though the route gates on the
             # disabled-feature flag first.
             r = client.post(
-                "/api/v1/expenses/autofill",
+                "/api/v1/expenses/scan",
                 files={"image": ("r.jpg", b"x", "image/jpeg")},
             )
             assert r.status_code == 503, r.text
-            assert r.json()["detail"]["error"] == "autofill_not_configured"
+            assert r.json()["detail"]["error"] == "scan_not_configured"
 
-    def test_happy_path_records_usage_row(
+    def test_happy_path_returns_expense_scan_result_shape(
         self,
         session_factory: sessionmaker[Session],
         storage: InMemoryStorage,
         seeded: dict[str, Any],
     ) -> None:
-        """A happy preview-path call lands one ``LlmUsage`` row keyed
-        on the workspace + ``capability='expenses.autofill'`` so the
-        §11 budget envelope sees the spend even though the route
-        does not write a claim row.
+        """A happy scan returns the ``ExpenseScanResult`` shape the SPA
+        consumes (``{value, confidence}`` cells per field plus
+        optional ``agent_question``) and lands one ``LlmUsage`` row
+        under capability ``expenses.autofill`` so the §11 budget
+        envelope sees the spend.
         """
         from app.adapters.db.llm.models import LlmUsage as LlmUsageRow
         from app.api.deps import get_llm
@@ -1475,36 +1507,58 @@ class TestAutofillPlaceholder:
             database_url="sqlite:///:memory:",
             llm_ocr_model="test/gemma-vision",
         )
-        payload = {
-            "vendor": "Bistro 42",
-            "amount": "27.50",
-            "currency": "EUR",
-            "purchased_at": "2026-04-17T12:30:00+00:00",
-            "category": "food",
-            "confidence": {
-                "vendor": 0.95,
-                "amount": 0.95,
-                "currency": 0.95,
-                "purchased_at": 0.95,
-                "category": 0.95,
-            },
-        }
 
         with _client_for(session_factory, seeded["worker_ctx"], storage) as client:
             client.app.dependency_overrides[get_llm] = _build_stub_llm(
-                chat_payload=payload
+                chat_payload=TestReceiptScan._high_confidence_payload()
             )
             client.app.dependency_overrides[get_settings] = lambda: settings
             r = client.post(
-                "/api/v1/expenses/autofill",
+                "/api/v1/expenses/scan",
                 files={"image": ("r.jpg", b"\x89PNG\x00bytes", "image/jpeg")},
             )
             assert r.status_code == 200, r.text
             body = r.json()
-            assert body["vendor"] == "Bistro 42"
-            assert body["amount_cents"] == 2750
-            assert body["currency"] == "EUR"
-            assert body["category"] == "food"
+
+        # Top-level keys mirror app/web/src/types/expense.ts exactly —
+        # if either side drifts, this assertion catches it before the
+        # SPA review form silently breaks.
+        assert set(body.keys()) == {
+            "vendor",
+            "purchased_at",
+            "currency",
+            "total_amount_cents",
+            "category",
+            "note_md",
+            "agent_question",
+        }
+        # Each parsed field is an ``{value, confidence}`` pair.
+        for key in (
+            "vendor",
+            "purchased_at",
+            "currency",
+            "total_amount_cents",
+            "category",
+            "note_md",
+        ):
+            cell = body[key]
+            assert set(cell.keys()) == {"value", "confidence"}
+            assert isinstance(cell["confidence"], (int, float))
+            assert 0.0 <= cell["confidence"] <= 1.0
+
+        assert body["vendor"] == {"value": "Bistro 42", "confidence": 0.95}
+        assert body["currency"] == {"value": "EUR", "confidence": 0.99}
+        assert body["total_amount_cents"] == {"value": 2750, "confidence": 0.92}
+        assert body["category"] == {"value": "food", "confidence": 0.91}
+        # ``purchased_at`` round-trips as ISO-8601 with the offset
+        # preserved (the SPA's ``deriveValues`` slices off the date).
+        assert body["purchased_at"]["value"].startswith("2026-04-17T12:30:00")
+        assert body["purchased_at"]["confidence"] == 0.88
+        # v1 prompt does not extract ``note_md`` or ``agent_question``;
+        # the route returns the reserved-slot defaults so the SPA's
+        # confidence-gated review form falls back to its empty-state.
+        assert body["note_md"] == {"value": "", "confidence": 0.0}
+        assert body["agent_question"] is None
 
         # One usage row landed under the workspace.
         with session_factory() as s, tenant_agnostic():
@@ -1522,6 +1576,132 @@ class TestAutofillPlaceholder:
             assert rows[0].status == "ok"
             assert rows[0].tokens_in == 42
             assert rows[0].tokens_out == 17
+
+    def test_oversize_image_returns_422(
+        self,
+        session_factory: sessionmaker[Session],
+        storage: InMemoryStorage,
+        seeded: dict[str, Any],
+    ) -> None:
+        """An image past the 10 MB cap surfaces 422 ``blob_too_large``.
+
+        The route caps the upload to mirror the attach-side limit so a
+        caller can't smuggle a 50 MB payload through the preview surface
+        to burn LLM tokens.
+        """
+        from app.api.deps import get_llm
+        from app.api.v1.expenses import _SCAN_MAX_BYTES
+        from app.config import Settings, get_settings
+
+        settings = Settings(
+            database_url="sqlite:///:memory:",
+            llm_ocr_model="test/gemma-vision",
+        )
+        oversize = b"\x00" * (_SCAN_MAX_BYTES + 1)
+        with _client_for(session_factory, seeded["worker_ctx"], storage) as client:
+            client.app.dependency_overrides[get_llm] = _build_stub_llm()
+            client.app.dependency_overrides[get_settings] = lambda: settings
+            r = client.post(
+                "/api/v1/expenses/scan",
+                files={"image": ("big.jpg", oversize, "image/jpeg")},
+            )
+            assert r.status_code == 422, r.text
+            assert r.json()["detail"]["error"] == "blob_too_large"
+
+    def test_non_image_mime_returns_422(
+        self,
+        session_factory: sessionmaker[Session],
+        storage: InMemoryStorage,
+        seeded: dict[str, Any],
+    ) -> None:
+        """A non-receipt mime surfaces 422 ``blob_mime_not_allowed``.
+
+        The allow-list is the same as the attach path
+        (``image/jpeg|png|webp|heic`` + ``application/pdf``); anything
+        else rejects before the LLM is called.
+        """
+        from app.api.deps import get_llm
+        from app.config import Settings, get_settings
+
+        settings = Settings(
+            database_url="sqlite:///:memory:",
+            llm_ocr_model="test/gemma-vision",
+        )
+        with _client_for(session_factory, seeded["worker_ctx"], storage) as client:
+            client.app.dependency_overrides[get_llm] = _build_stub_llm()
+            client.app.dependency_overrides[get_settings] = lambda: settings
+            r = client.post(
+                "/api/v1/expenses/scan",
+                files={"image": ("r.svg", b"<svg/>", "image/svg+xml")},
+            )
+            assert r.status_code == 422, r.text
+            assert r.json()["detail"]["error"] == "blob_mime_not_allowed"
+
+    def test_anonymous_caller_returns_401(
+        self,
+        session_factory: sessionmaker[Session],
+        storage: InMemoryStorage,
+    ) -> None:
+        """An unauthenticated caller (no ambient :class:`WorkspaceContext`)
+        surfaces 401 ``not_authenticated`` from the
+        :func:`app.api.deps.current_workspace_context` dep — the scan
+        route never reaches its body.
+
+        We mount the router on a fresh :class:`FastAPI` app without
+        overriding ``current_workspace_context`` so the production dep
+        runs and raises 401 (the test-helper ``_client_for`` always
+        injects a context, which would shadow this path).
+        """
+        from app.api.deps import get_llm
+
+        app = FastAPI()
+        app.include_router(expenses_router, prefix="/api/v1/expenses")
+
+        def _session() -> Iterator[Session]:
+            s = session_factory()
+            try:
+                yield s
+            finally:
+                s.close()
+
+        def _storage() -> InMemoryStorage:
+            return storage
+
+        app.dependency_overrides[db_session] = _session
+        app.dependency_overrides[get_storage] = _storage
+        app.dependency_overrides[get_llm] = _build_stub_llm()
+        with TestClient(app) as client:
+            r = client.post(
+                "/api/v1/expenses/scan",
+                files={"image": ("r.jpg", b"x", "image/jpeg")},
+            )
+            assert r.status_code == 401, r.text
+            assert r.json()["detail"]["error"] == "not_authenticated"
+
+    def test_cross_workspace_blocked_for_disabled_deployment(
+        self,
+        session_factory: sessionmaker[Session],
+        storage: InMemoryStorage,
+        seeded: dict[str, Any],
+    ) -> None:
+        """A foreign-workspace caller hits the same ``scan_not_configured``
+        gate as the home workspace when the deployment hasn't wired an
+        OCR model — the dep gate is workspace-agnostic, but the test
+        confirms a foreign context is not granted bonus access (no
+        leakage of model assignment between tenants).
+        """
+        from app.api.deps import get_llm
+
+        with _client_for(session_factory, seeded["foreign_ctx"], storage) as client:
+            client.app.dependency_overrides[get_llm] = _build_stub_llm()
+            r = client.post(
+                "/api/v1/expenses/scan",
+                files={"image": ("r.jpg", b"x", "image/jpeg")},
+            )
+            # Same gate as the home workspace — no implicit elevation
+            # for the foreign actor.
+            assert r.status_code == 503, r.text
+            assert r.json()["detail"]["error"] == "scan_not_configured"
 
     def test_attach_route_runs_autofill_when_llm_wired(
         self,
@@ -1542,24 +1722,10 @@ class TestAutofillPlaceholder:
             database_url="sqlite:///:memory:",
             llm_ocr_model="test/gemma-vision",
         )
-        payload = {
-            "vendor": "Bistro 42",
-            "amount": "27.50",
-            "currency": "EUR",
-            "purchased_at": "2026-04-17T12:30:00+00:00",
-            "category": "food",
-            "confidence": {
-                "vendor": 0.95,
-                "amount": 0.95,
-                "currency": 0.95,
-                "purchased_at": 0.95,
-                "category": 0.95,
-            },
-        }
 
         with _client_for(session_factory, seeded["worker_ctx"], storage) as client:
             client.app.dependency_overrides[_optional_llm] = _build_stub_llm(
-                chat_payload=payload
+                chat_payload=TestReceiptScan._high_confidence_payload()
             )
             client.app.dependency_overrides[get_settings] = lambda: settings
 
@@ -1623,7 +1789,7 @@ class TestAutofillPlaceholder:
             )
             client.app.dependency_overrides[get_settings] = lambda: settings
             r = client.post(
-                "/api/v1/expenses/autofill",
+                "/api/v1/expenses/scan",
                 files={"image": ("r.jpg", b"x", "image/jpeg")},
             )
             assert r.status_code == 503, r.text
