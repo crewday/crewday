@@ -539,9 +539,9 @@ membership in that scope's `owners` permission group.
 |--------------------|-----------|-----------------------------------------------------------------------|
 | id                 | ULID PK   |                                                                       |
 | user_id            | ULID FK   |                                                                       |
-| scope_kind         | text      | `workspace \| property \| organization`                               |
-| scope_id           | ULID      | references `workspace.id` / `property.id` / `organization.id`         |
-| grant_role         | text      | `manager \| worker \| client \| guest` (see note on dropped `owner`)  |
+| scope_kind         | text      | `workspace \| deployment \| property \| organization` — `workspace` is the legacy default; `deployment` (cd-wchi) authorises bare-host admin (§12); `property` / `organization` are reserved (the v1 storage carries property scope on the sibling `scope_property_id` column, organization scope is not yet materialised) |
+| scope_id           | ULID      | references `workspace.id` / `property.id` / `organization.id`. Stored in v1 as `workspace_id` (workspace scope) / `scope_property_id` (property narrowing); `deployment` rows have neither (`workspace_id IS NULL`, `scope_property_id IS NULL`) |
+| grant_role         | text      | `manager \| worker \| client \| guest` (see note on dropped `owner`). Applies uniformly across scope kinds — a deployment admin holds `grant_role = 'manager'` at `scope_kind = 'deployment'`; deployment-owner authority lives on the deployment `owners` permission group. |
 | binding_org_id     | ULID FK?  | only meaningful when `scope_kind = 'workspace'` and `grant_role = 'client'`; narrows the client's visibility to data billed to this organization within the workspace |
 | started_on         | date      | when the grant takes effect                                           |
 | ended_on           | date?     | when it expired (null = active)                                       |
@@ -554,6 +554,30 @@ membership in that scope's `owners` permission group.
 Primary key `(user_id, scope_kind, scope_id, grant_role)` with
 `revoked_at IS NULL` (partial index; revoked rows are kept for
 audit and a user may be re-granted the same role later).
+
+**Scope-kind invariants (cd-wchi).**
+
+A DB-level CHECK pins the storage shape across the two scope kinds
+that ship in v1:
+
+```text
+(scope_kind = 'deployment' AND workspace_id IS NULL)
+OR
+(scope_kind = 'workspace'  AND workspace_id IS NOT NULL)
+```
+
+A deployment grant carries no `workspace_id` (the row lives at the
+bare-host level); a workspace grant must carry one. Deployment-grant
+reads opt out of the ORM tenant filter via `tenant_agnostic()`
+because there is no tenant to pin to — every other read continues to
+flow through the workspace-scoped filter. A partial UNIQUE on
+`(user_id, grant_role) WHERE scope_kind = 'deployment'` enforces "at
+most one active deployment grant per `(user, role)`"; workspace-side
+re-grants stay history-preserving (§"Revocation"). The `property`
+and `organization` scope kinds are reserved values not yet
+materialised in v1 — `scope_kind = 'property'` would today be
+expressed as `scope_kind = 'workspace'` plus a non-NULL
+`scope_property_id`.
 
 Note: v1 drops the `owner` grant_role and the per-row
 `capability_override` column that existed in earlier drafts.

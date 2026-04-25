@@ -18,6 +18,10 @@ Public surface:
 
 * :func:`is_owner_member` / :func:`resolve_is_owner` — explicit
   owners-group membership lookup (cd-ckr).
+* :func:`is_deployment_admin` — bare-host admin-surface gate
+  (cd-wchi). Returns True iff the user holds any deployment-scoped
+  ``role_grant``; consumed by the admin auth dep at cd-xgmu and by
+  ``/auth/me`` to populate the ``is_deployment_admin`` flag.
 * :func:`is_member_of` — dispatch on system-group slug, derived-vs-
   explicit (cd-dzp).
 * :class:`Permission` / :func:`require` — the canonical permission
@@ -34,6 +38,7 @@ groups, and action catalog" and
 
 from __future__ import annotations
 
+from app.authz.deployment_admin import is_deployment_admin
 from app.authz.enforce import (
     CatalogDrift,
     EmptyPermissionRuleRepository,
@@ -63,6 +68,7 @@ __all__ = [
     "RuleRow",
     "UnknownActionKey",
     "UnknownSystemGroup",
+    "is_deployment_admin",
     "is_member_of",
     "is_owner_member",
     "require",

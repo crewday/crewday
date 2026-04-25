@@ -145,6 +145,24 @@ class TestRoleGrantModel:
         assert grant.created_by_user_id is None
         assert grant.created_at == _PINNED
 
+    def test_deployment_construction(self) -> None:
+        """A deployment-scope grant constructs with ``workspace_id=None``.
+
+        cd-wchi: deployment grants live at the bare-host level —
+        ``scope_kind='deployment'`` is required (no Python default for
+        the deployment partition); ``workspace_id`` is None.
+        """
+        grant = RoleGrant(
+            id="01HWA00000000000000000RGRD",
+            workspace_id=None,
+            user_id="01HWA00000000000000000USRD",
+            grant_role="manager",
+            scope_kind="deployment",
+            created_at=_PINNED,
+        )
+        assert grant.workspace_id is None
+        assert grant.scope_kind == "deployment"
+
     def test_property_scoped_grant_construction(self) -> None:
         """A property-scoped grant carries the FK ``scope_property_id``."""
         grant = RoleGrant(
@@ -163,13 +181,58 @@ class TestRoleGrantModel:
     def test_grant_role_check_constraint_present(self) -> None:
         """``__table_args__`` carries the ``grant_role`` CHECK constraint."""
         checks = [c for c in RoleGrant.__table_args__ if isinstance(c, CheckConstraint)]
-        assert len(checks) == 1
-        sql = str(checks[0].sqltext)
+        # cd-wchi adds ``scope_kind`` + ``scope_kind_workspace_pairing``
+        # CHECKs. Constraint names render under the shared naming
+        # convention as ``ck_role_grant_<body>``.
+        names = {c.name for c in checks}
+        assert "ck_role_grant_grant_role" in names
+        grant_role_check = next(
+            c for c in checks if c.name == "ck_role_grant_grant_role"
+        )
+        sql = str(grant_role_check.sqltext)
         for role in ("manager", "worker", "client", "guest"):
             assert role in sql, f"{role} missing from CHECK constraint"
         # v0 ``owner`` value must not appear — governance is on the
         # permission group in v1 (see §02 "role_grants").
         assert "'owner'" not in sql.replace("'owners'", "")
+
+    def test_scope_kind_check_constraint_present(self) -> None:
+        """cd-wchi adds the ``scope_kind`` enum CHECK."""
+        checks = [c for c in RoleGrant.__table_args__ if isinstance(c, CheckConstraint)]
+        names = {c.name for c in checks}
+        assert "ck_role_grant_scope_kind" in names
+        scope_kind_check = next(
+            c for c in checks if c.name == "ck_role_grant_scope_kind"
+        )
+        sql = str(scope_kind_check.sqltext)
+        for value in ("workspace", "deployment"):
+            assert value in sql, f"{value} missing from scope_kind CHECK"
+
+    def test_scope_kind_workspace_pairing_check_present(self) -> None:
+        """The biconditional CHECK on ``(scope_kind, workspace_id)`` is wired."""
+        checks = [c for c in RoleGrant.__table_args__ if isinstance(c, CheckConstraint)]
+        names = {c.name for c in checks}
+        assert "ck_role_grant_scope_kind_workspace_pairing" in names
+        pairing_check = next(
+            c for c in checks if c.name == "ck_role_grant_scope_kind_workspace_pairing"
+        )
+        sql = str(pairing_check.sqltext)
+        # Both directions must be expressed.
+        assert "deployment" in sql
+        assert "workspace" in sql
+        assert "IS NULL" in sql
+        assert "IS NOT NULL" in sql
+
+    def test_deployment_partial_unique_index_present(self) -> None:
+        """cd-wchi adds the partial UNIQUE on ``(user_id, grant_role)``."""
+        indexes = [i for i in RoleGrant.__table_args__ if isinstance(i, Index)]
+        names = [i.name for i in indexes]
+        assert "uq_role_grant_deployment_user_role" in names
+        target = next(
+            i for i in indexes if i.name == "uq_role_grant_deployment_user_role"
+        )
+        assert [c.name for c in target.columns] == ["user_id", "grant_role"]
+        assert target.unique is True
 
     def test_workspace_user_index_present(self) -> None:
         indexes = [i for i in RoleGrant.__table_args__ if isinstance(i, Index)]

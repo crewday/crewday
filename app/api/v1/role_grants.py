@@ -172,6 +172,32 @@ def _ref_to_response(ref: RoleGrantRef) -> RoleGrantResponse:
     )
 
 
+def _row_to_ref(row: RoleGrant) -> RoleGrantRef:
+    """Project a workspace-scoped ORM row into an immutable :class:`RoleGrantRef`.
+
+    cd-wchi widened :class:`RoleGrant.workspace_id` to nullable so the
+    deployment-scope partition can omit it. Every PATCH/GET path on
+    this router filters on ``RoleGrant.workspace_id == ctx.workspace_id``
+    before reaching this helper, so a deployment-scope row can never
+    surface here. The assertion narrows the static type without papering
+    over the new invariant.
+    """
+    assert row.workspace_id is not None, (
+        "role_grant row reached the workspace router with workspace_id "
+        f"IS NULL (id={row.id!r}, scope_kind={row.scope_kind!r}); "
+        "deployment-scope rows must use the admin surface helpers"
+    )
+    return RoleGrantRef(
+        id=row.id,
+        workspace_id=row.workspace_id,
+        user_id=row.user_id,
+        grant_role=row.grant_role,
+        scope_property_id=row.scope_property_id,
+        created_at=row.created_at,
+        created_by_user_id=row.created_by_user_id,
+    )
+
+
 def _http_for_not_found() -> HTTPException:
     return HTTPException(
         status_code=status.HTTP_404_NOT_FOUND,
@@ -340,17 +366,7 @@ def build_role_grants_router() -> APIRouter:
             ).one_or_none()
             if row is None:
                 raise _http_for_not_found()
-            return _ref_to_response(
-                RoleGrantRef(
-                    id=row.id,
-                    workspace_id=row.workspace_id,
-                    user_id=row.user_id,
-                    grant_role=row.grant_role,
-                    scope_property_id=row.scope_property_id,
-                    created_at=row.created_at,
-                    created_by_user_id=row.created_by_user_id,
-                )
-            )
+            return _ref_to_response(_row_to_ref(row))
 
         row = session.scalars(
             select(RoleGrant).where(
@@ -408,17 +424,7 @@ def build_role_grants_router() -> APIRouter:
                 "after": {"scope_property_id": new_scope},
             },
         )
-        return _ref_to_response(
-            RoleGrantRef(
-                id=row.id,
-                workspace_id=row.workspace_id,
-                user_id=row.user_id,
-                grant_role=row.grant_role,
-                scope_property_id=row.scope_property_id,
-                created_at=row.created_at,
-                created_by_user_id=row.created_by_user_id,
-            )
-        )
+        return _ref_to_response(_row_to_ref(row))
 
     @api.delete(
         "/{grant_id}",

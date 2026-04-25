@@ -214,14 +214,17 @@ class TestMigrationShape:
             "workspace_id",
             "user_id",
             "grant_role",
+            "scope_kind",
             "scope_property_id",
             "created_at",
             "created_by_user_id",
         }
         assert set(cols) == expected
-        # ``scope_property_id`` (property-scope narrowing) and
-        # ``created_by_user_id`` (self-bootstrap rows) are nullable.
-        nullable = {"scope_property_id", "created_by_user_id"}
+        # ``scope_property_id`` (property-scope narrowing),
+        # ``created_by_user_id`` (self-bootstrap rows), and
+        # ``workspace_id`` (NULL on deployment-scope grants per
+        # cd-wchi) are nullable.
+        nullable = {"scope_property_id", "created_by_user_id", "workspace_id"}
         for name in nullable:
             assert cols[name]["nullable"] is True, f"{name} must be nullable"
         for name in expected - nullable:
@@ -252,6 +255,23 @@ class TestMigrationShape:
         assert indexes["ix_role_grant_scope_property"]["column_names"] == [
             "scope_property_id"
         ]
+
+    def test_role_grant_deployment_partial_unique_index(self, engine: Engine) -> None:
+        """cd-wchi lands a partial UNIQUE on ``(user_id, grant_role)``.
+
+        Pins the index name + column ordering + uniqueness — the
+        partial WHERE predicate's body is dialect-specific (CHECK
+        bodies in :class:`Inspector` are not always normalised) so we
+        compare on the structural shape that round-trips cleanly.
+        """
+        indexes = {ix["name"]: ix for ix in inspect(engine).get_indexes("role_grant")}
+        assert "uq_role_grant_deployment_user_role" in indexes
+        ix = indexes["uq_role_grant_deployment_user_role"]
+        assert ix["column_names"] == ["user_id", "grant_role"]
+        # SQLite reflects ``unique`` as the integer ``1``; PG returns
+        # ``True``. Normalise via ``bool`` so the assertion works on
+        # both backends.
+        assert bool(ix.get("unique")) is True
 
 
 class TestAuthzRoundtrip:
@@ -835,6 +855,159 @@ class TestSeedOwnersSystemGroup:
             db_session.rollback()
         finally:
             reset_current(token)
+
+
+class TestDeploymentScopeGrants:
+    """cd-wchi: ``scope_kind='deployment'`` grants live without a workspace.
+
+    Integration coverage of the cd-wchi widening — the unit slice
+    (:mod:`tests.unit.adapters.db.test_db_authz`) pins the ORM
+    contract on an in-memory engine; this class re-verifies the same
+    invariants against the migration-built schema where the CHECKs
+    and partial UNIQUE actually fire on SQLite *and* Postgres.
+
+    Deployment grants are inserted under :func:`tenant_agnostic` so
+    the ORM tenant filter does not inject ``workspace_id = :ctx`` on
+    the Insert path — and verified back on the deployment partition
+    via the same opt-out, mirroring how
+    :func:`app.authz.deployment_admin.is_deployment_admin` reads.
+    """
+
+    def test_deployment_grant_round_trip(self, db_session: Session) -> None:
+        """A deployment-scope grant persists with ``workspace_id IS NULL``."""
+        from app.tenancy import tenant_agnostic
+
+        clock = FrozenClock(_PINNED)
+        admin = bootstrap_user(
+            db_session,
+            email="depl-admin@example.com",
+            display_name="DeploymentAdmin",
+            clock=clock,
+        )
+        with tenant_agnostic():
+            db_session.add(
+                RoleGrant(
+                    id="01HWA00000000000000000RDA",
+                    workspace_id=None,
+                    user_id=admin.id,
+                    grant_role="manager",
+                    scope_kind="deployment",
+                    created_at=_PINNED,
+                )
+            )
+            db_session.flush()
+            loaded = db_session.scalars(
+                select(RoleGrant).where(RoleGrant.id == "01HWA00000000000000000RDA")
+            ).one()
+        assert loaded.scope_kind == "deployment"
+        assert loaded.workspace_id is None
+        assert loaded.user_id == admin.id
+
+    def test_deployment_grant_with_workspace_id_rejected(
+        self, db_session: Session
+    ) -> None:
+        """Pairing CHECK fires when ``scope_kind='deployment'`` carries a workspace_id.
+
+        Mirrors the unit-slice assertion against the migration-built
+        schema so the CHECK is materialised on both SQLite and PG —
+        not just on the in-memory ORM round-trip.
+        """
+        clock = FrozenClock(_PINNED)
+        admin = bootstrap_user(
+            db_session,
+            email="depl-mismatch@example.com",
+            display_name="DeploymentMismatch",
+            clock=clock,
+        )
+        ws = bootstrap_workspace(
+            db_session,
+            slug="depl-mismatch-ws",
+            name="DeploymentMismatchWS",
+            owner_user_id=admin.id,
+            clock=clock,
+        )
+        token = set_current(_ctx_for(ws, admin.id))
+        try:
+            db_session.add(
+                RoleGrant(
+                    id="01HWA00000000000000000RDM",
+                    workspace_id=ws.id,
+                    user_id=admin.id,
+                    grant_role="manager",
+                    scope_kind="deployment",
+                    created_at=_PINNED,
+                )
+            )
+            with pytest.raises(IntegrityError):
+                db_session.flush()
+            db_session.rollback()
+        finally:
+            reset_current(token)
+
+    def test_workspace_grant_without_workspace_id_rejected(
+        self, db_session: Session
+    ) -> None:
+        """Pairing CHECK fires when ``scope_kind='workspace'`` omits workspace_id."""
+        from app.tenancy import tenant_agnostic
+
+        clock = FrozenClock(_PINNED)
+        user = bootstrap_user(
+            db_session,
+            email="ws-mismatch@example.com",
+            display_name="WsMismatch",
+            clock=clock,
+        )
+        with tenant_agnostic():
+            db_session.add(
+                RoleGrant(
+                    id="01HWA00000000000000000RWM",
+                    workspace_id=None,
+                    user_id=user.id,
+                    grant_role="manager",
+                    scope_kind="workspace",
+                    created_at=_PINNED,
+                )
+            )
+            with pytest.raises(IntegrityError):
+                db_session.flush()
+            db_session.rollback()
+
+    def test_partial_unique_deployment_user_role(self, db_session: Session) -> None:
+        """Two deployment grants with the same ``(user, role)`` are rejected."""
+        from app.tenancy import tenant_agnostic
+
+        clock = FrozenClock(_PINNED)
+        admin = bootstrap_user(
+            db_session,
+            email="depl-dup@example.com",
+            display_name="DeploymentDup",
+            clock=clock,
+        )
+        with tenant_agnostic():
+            db_session.add(
+                RoleGrant(
+                    id="01HWA00000000000000000RU1",
+                    workspace_id=None,
+                    user_id=admin.id,
+                    grant_role="manager",
+                    scope_kind="deployment",
+                    created_at=_PINNED,
+                )
+            )
+            db_session.flush()
+            db_session.add(
+                RoleGrant(
+                    id="01HWA00000000000000000RU2",
+                    workspace_id=None,
+                    user_id=admin.id,
+                    grant_role="manager",
+                    scope_kind="deployment",
+                    created_at=_PINNED,
+                )
+            )
+            with pytest.raises(IntegrityError):
+                db_session.flush()
+            db_session.rollback()
 
 
 class TestBootstrapWorkspaceSeedsOwners:

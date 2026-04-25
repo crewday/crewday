@@ -35,6 +35,7 @@ from sqlalchemy import (
     Index,
     String,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -49,6 +50,14 @@ __all__ = ["PermissionGroup", "PermissionGroupMember", "RoleGrant"]
 # §"permission_group"). ``guest`` is reserved but allowed in the
 # schema for forward-compat.
 _GRANT_ROLE_VALUES: tuple[str, ...] = ("manager", "worker", "client", "guest")
+
+
+# Allowed ``role_grant.scope_kind`` values, enforced by a CHECK
+# constraint installed by the cd-wchi migration. The v1 admin surface
+# (§12 "Admin") authorises its callers via *any active* ``role_grant``
+# row with ``scope_kind = 'deployment'``; every other row is
+# ``scope_kind = 'workspace'`` (the legacy default).
+_SCOPE_KIND_VALUES: tuple[str, ...] = ("workspace", "deployment")
 
 
 class PermissionGroup(Base):
@@ -139,19 +148,49 @@ class RoleGrant(Base):
     column is a **soft reference** for now; the ``property`` table
     lands with cd-i6u, whose migration promotes this into a real FK.
 
+    ``scope_kind`` partitions grants into two universes:
+
+    * ``'workspace'`` (legacy default) — the row is workspace-scoped,
+      ``workspace_id`` is NOT NULL, and the ORM tenant filter pins
+      reads to the active :class:`WorkspaceContext`.
+    * ``'deployment'`` — the row authorises its holder on the bare-host
+      admin surface (§12 "Admin"). ``workspace_id`` is NULL; reads run
+      under :func:`~app.tenancy.tenant_agnostic` because there is no
+      tenant to pin to.
+
+    The pairing CHECK ``(scope_kind='deployment' AND workspace_id IS
+    NULL) OR (scope_kind='workspace' AND workspace_id IS NOT NULL)``
+    is enforced at the DB level — the model class declares it as a
+    biconditional invariant on construction, and the cd-wchi migration
+    materialises it as ``ck_role_grant_scope_kind_workspace_pairing``.
+
     The ``grant_role`` CHECK constraint (``manager | worker | client
     | guest``) matches §02's v1 enum and replaces the v0 ``owner``
     value — governance now lives on the ``owners`` permission group
-    (see :class:`PermissionGroup`).
+    (see :class:`PermissionGroup`). It applies uniformly across both
+    scope kinds: a deployment admin holds ``grant_role='manager'`` at
+    ``scope_kind='deployment'``; deployment-owner authority comes
+    from membership in the deployment ``owners`` permission group.
+
+    The partial UNIQUE ``uq_role_grant_deployment_user_role`` on
+    ``(user_id, grant_role) WHERE scope_kind='deployment'`` enforces
+    "at most one active deployment grant per ``(user, role)``" —
+    workspace-scope re-grants stay history-preserving (a new row per
+    re-grant) per §02 "Revocation".
     """
 
     __tablename__ = "role_grant"
 
     id: Mapped[str] = mapped_column(String, primary_key=True)
-    workspace_id: Mapped[str] = mapped_column(
+    # ``workspace_id`` is NULL for deployment-scoped grants and
+    # non-NULL for workspace-scoped grants — the pairing CHECK below
+    # enforces the biconditional invariant. The cd-wchi migration
+    # widened the column from NOT NULL; the new biconditional CHECK
+    # closes the hole that widening would otherwise open.
+    workspace_id: Mapped[str | None] = mapped_column(
         String,
         ForeignKey("workspace.id", ondelete="CASCADE"),
-        nullable=False,
+        nullable=True,
     )
     user_id: Mapped[str] = mapped_column(
         String,
@@ -159,6 +198,13 @@ class RoleGrant(Base):
         nullable=False,
     )
     grant_role: Mapped[str] = mapped_column(String, nullable=False)
+    # ``scope_kind`` partitions grants into ``workspace`` (legacy
+    # default) and ``deployment`` (admin surface). Defaulted to
+    # ``'workspace'`` on the Python side so existing call sites that
+    # only set ``workspace_id`` keep working — every legacy
+    # ``RoleGrant(workspace_id=..., ...)`` is implicitly a
+    # workspace-scoped grant.
+    scope_kind: Mapped[str] = mapped_column(String, nullable=False, default="workspace")
     scope_property_id: Mapped[str | None] = mapped_column(String, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
@@ -177,6 +223,32 @@ class RoleGrant(Base):
             "grant_role IN ('" + "', '".join(_GRANT_ROLE_VALUES) + "')",
             name="grant_role",
         ),
+        CheckConstraint(
+            "scope_kind IN ('" + "', '".join(_SCOPE_KIND_VALUES) + "')",
+            name="scope_kind",
+        ),
+        # Biconditional: a deployment grant carries no workspace_id;
+        # a workspace grant must carry one. The DB-level CHECK is
+        # defence-in-depth — the domain service is the first line of
+        # defence.
+        CheckConstraint(
+            "(scope_kind = 'deployment' AND workspace_id IS NULL) "
+            "OR (scope_kind = 'workspace' AND workspace_id IS NOT NULL)",
+            name="scope_kind_workspace_pairing",
+        ),
         Index("ix_role_grant_workspace_user", "workspace_id", "user_id"),
         Index("ix_role_grant_scope_property", "scope_property_id"),
+        # Partial UNIQUE — at most one active deployment grant per
+        # ``(user, role)``. Workspace-scope re-grants stay
+        # history-preserving (no app-level uniqueness on the
+        # workspace partition; §02 "Revocation"). Dialect kwargs
+        # match the migration's ``sqlite_where`` / ``postgresql_where``.
+        Index(
+            "uq_role_grant_deployment_user_role",
+            "user_id",
+            "grant_role",
+            unique=True,
+            sqlite_where=text("scope_kind = 'deployment'"),
+            postgresql_where=text("scope_kind = 'deployment'"),
+        ),
     )

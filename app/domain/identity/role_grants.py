@@ -193,7 +193,24 @@ class LastOwnerGrantProtected(ValueError):
 
 
 def _to_ref(row: RoleGrant) -> RoleGrantRef:
-    """Project a loaded ORM row into an immutable :class:`RoleGrantRef`."""
+    """Project a loaded ORM row into an immutable :class:`RoleGrantRef`.
+
+    The :class:`RoleGrant` model widened ``workspace_id`` to nullable
+    in cd-wchi to fit the ``scope_kind = 'deployment'`` partition, but
+    every code path in this **workspace-scoped** domain service either
+    reads via :func:`_load_grant` (filters on
+    ``RoleGrant.workspace_id == ctx.workspace_id``) or writes a row
+    with ``workspace_id=ctx.workspace_id`` explicitly. The biconditional
+    CHECK then enforces ``scope_kind='workspace'`` ⇒ ``workspace_id IS
+    NOT NULL`` at the DB level. The assertion narrows the static type
+    without papering over the new invariant — a deployment-scope row
+    must never reach this service.
+    """
+    assert row.workspace_id is not None, (
+        "role_grant row reached the workspace-scoped service with "
+        f"workspace_id IS NULL (id={row.id!r}, scope_kind={row.scope_kind!r}); "
+        "deployment-scope rows must use the admin surface helpers"
+    )
     return RoleGrantRef(
         id=row.id,
         workspace_id=row.workspace_id,
