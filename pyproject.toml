@@ -486,6 +486,77 @@ ignore_imports = [
     "app.domain.identity.work_roles -> app.adapters.db.workspace.models",
     "app.domain.identity.user_work_roles -> app.adapters.db.workspace.models",
     "app.domain.identity.work_engagements -> app.adapters.db.workspace.models",
+    # v1 stopgap (cd-7qxh): ``app.domain.expenses.claims`` reads
+    # :class:`User.id` / :class:`User.display_name` from
+    # ``app.adapters.db.identity.models`` for the per-user breakdown
+    # in ``pending_reimbursement`` (the manager UI surfaces "Maya's
+    # outstanding"). Same Protocol-seam pattern as the
+    # other ``expenses.*`` stopgaps above; tracked by cd-duv6
+    # (extended scope) — drops once the identity repository lands.
+    "app.domain.expenses.claims -> app.adapters.db.identity.models",
+    # v1 stopgap (cd-7qxh): ``app.domain.identity.email_change``
+    # reads :class:`EmailChangePending` / :class:`PasskeyCredential`
+    # / :class:`User` and :func:`canonicalise_email` from
+    # ``app.adapters.db.identity.models`` directly — the self-service
+    # email-change flow constructs / mutates these rows inline. Same
+    # Protocol-seam pattern as the other ``app.domain.identity``
+    # stopgaps above; tracked by cd-duv6 (extended scope) — drops
+    # once the identity repository lands.
+    "app.domain.identity.email_change -> app.adapters.db.identity.models",
+    # v1 stopgap (cd-7qxh): ``app.domain.identity.email_change``
+    # delegates token mint + consume to :mod:`app.auth.magic_link`,
+    # which itself reads identity ORM models directly (cd-4zz
+    # stopgap at the auth-layer level). Mirrors the existing
+    # ``app.domain.identity.membership -> app.auth.magic_link``
+    # whitelist for the invite flow. Drops with cd-duv6.
+    "app.domain.identity.email_change -> app.auth.magic_link",
+    # v1 stopgap (cd-7qxh): ``app.domain.identity.me_schedule``
+    # reads :class:`UserAvailabilityOverride` / :class:`UserLeave`
+    # / :class:`UserWeeklyAvailability` from
+    # ``app.adapters.db.availability.models``, :class:`PublicHoliday`
+    # from ``app.adapters.db.holidays.models``, and
+    # :class:`Occurrence` from ``app.adapters.db.tasks.models`` to
+    # render the worker's per-day schedule (§04 "Me schedule"). Same
+    # Protocol-seam pattern as the other ``app.domain.identity``
+    # stopgaps above; tracked by cd-duv6 (extended scope) — drops
+    # once the availability / holidays / tasks repositories land.
+    "app.domain.identity.me_schedule -> app.adapters.db.availability.models",
+    "app.domain.identity.me_schedule -> app.adapters.db.holidays.models",
+    "app.domain.identity.me_schedule -> app.adapters.db.tasks.models",
+    # v1 stopgap (cd-7qxh):
+    # ``app.domain.identity.user_availability_overrides`` reads
+    # :class:`UserAvailabilityOverride` from
+    # ``app.adapters.db.availability.models`` directly (CRUD on the
+    # per-day override rows). It also imports the pure-domain
+    # :func:`app.authz.require`; the transitive walk via
+    # :mod:`app.authz.membership` / :mod:`app.authz.owners` reaches
+    # ``app.adapters.db.authz.models`` — same intermediate-edge
+    # reasoning as the existing ``role_grants -> app.authz.owners``
+    # stopgap. Both edges drop with cd-duv6.
+    "app.domain.identity.user_availability_overrides -> app.adapters.db.availability.models",
+    "app.domain.identity.user_availability_overrides -> app.authz",
+    # v1 stopgap (cd-7qxh): ``app.domain.identity.user_leaves`` reads
+    # :class:`UserLeave` from ``app.adapters.db.availability.models``
+    # directly (hybrid-approval state machine). It also imports
+    # :func:`app.authz.require`; the transitive walk via
+    # :mod:`app.authz.deployment_admin` (in addition to ``owners`` /
+    # ``membership``) reaches ``app.adapters.db.authz.models`` —
+    # same intermediate-edge reasoning as the sibling
+    # ``user_availability_overrides`` stopgap. Both edges drop with
+    # cd-duv6.
+    "app.domain.identity.user_leaves -> app.adapters.db.availability.models",
+    "app.domain.identity.user_leaves -> app.authz",
+    # v1 stopgap (cd-7qxh):
+    # ``app.domain.places.property_work_role_assignments`` reads
+    # :class:`PropertyWorkRoleAssignment` / :class:`PropertyWorkspace`
+    # from ``app.adapters.db.places.models`` (assignment CRUD +
+    # workspace tie-in) and :class:`UserWorkRole` from
+    # ``app.adapters.db.workspace.models`` (work-role validity
+    # lookup). Same Protocol-seam pattern as the other ``places.*``
+    # stopgaps above; tracked by cd-duv6 (extended scope) — drops
+    # once the places + workspace repositories land.
+    "app.domain.places.property_work_role_assignments -> app.adapters.db.places.models",
+    "app.domain.places.property_work_role_assignments -> app.adapters.db.workspace.models",
 ]
 unmatched_ignore_imports_alerting = "none"
 
@@ -494,54 +565,16 @@ name = "Domain forbids handlers (api/web/cli/worker)"
 type = "forbidden"
 source_modules = ["app.domain"]
 forbidden_modules = ["app.api", "app.web", "app.cli", "cli", "app.worker"]
-ignore_imports = [
-    # v1 stopgap (cd-whl): ``app.domain.time.shifts`` imports
-    # :func:`app.authz.require`; ``app.authz.enforce`` pulls
-    # :func:`app.api.deps.current_workspace_context` purely as a
-    # FastAPI-dep seam for :func:`Permission`. The seam is on the
-    # HTTP-router surface and is not referenced from the shift
-    # service path, but the linter walks every transitive edge.
-    # Whitelist the intermediate chain so the contract stays honest
-    # without forcing the service to duplicate the enforcement body.
-    # Drops when the enforcement body moves to a pure-domain seam
-    # (or when app.authz.enforce stops reaching into app.api.deps).
-    "app.domain.time.shifts -> app.authz",
-    # v1 stopgap (cd-0rf): same reasoning as
-    # ``app.domain.time.shifts -> app.authz`` — the one-off
-    # service calls :func:`app.authz.enforce.require` for the
-    # ``tasks.create`` defence-in-depth check, which transitively
-    # pulls the FastAPI-dep seam. Drops with the same cleanup.
-    "app.domain.tasks.oneoff -> app.authz",
-    # v1 stopgap (cd-cfe4): same reasoning as the
-    # ``app.domain.tasks.oneoff -> app.authz`` entry above —
-    # ``app.domain.tasks.comments`` delegates the moderator-delete
-    # capability check to :func:`app.authz.require`, which
-    # transitively pulls the FastAPI-dep seam through
-    # :mod:`app.authz.enforce`. Drops with the same cleanup
-    # (cd-duv6).
-    "app.domain.tasks.comments -> app.authz",
-    # v1 stopgap (cd-7rfu, cd-9guk): same reasoning as the
-    # ``app.domain.tasks.oneoff -> app.authz`` entry above —
-    # ``app.domain.expenses.claims`` and
-    # ``app.domain.expenses.approval`` call
-    # :func:`app.authz.require` for the ``expenses.create`` /
-    # ``expenses.approve`` defence-in-depth checks, which
-    # transitively pulls the FastAPI-dep seam through
-    # :mod:`app.authz.enforce`. Drops with the same cleanup
-    # (cd-duv6).
-    "app.domain.expenses.claims -> app.authz",
-    "app.domain.expenses.approval -> app.authz",
-    # v1 stopgap (cd-dv2): ``app.domain.identity.membership``
-    # delegates seed-pending logic to
-    # :mod:`app.services.employees.service`, which itself calls
-    # :func:`app.authz.require` and thereby pulls the FastAPI-dep
-    # seam through :mod:`app.authz.enforce` — same chain as the
-    # other ``-> app.authz`` stopgaps above. Whitelisting the
-    # initiating domain → service edge short-circuits the walk
-    # without forcing membership to duplicate the employee-seed
-    # body. Drops with cd-duv6 (extended scope).
-    "app.domain.identity.membership -> app.services.employees.service",
-]
+# No ignore_imports needed today: cd-7qxh moved the FastAPI-dep
+# :func:`Permission` factory out of :mod:`app.authz.enforce` into a
+# dedicated :mod:`app.authz.dep` module that is **not** re-exported
+# from :mod:`app.authz`'s ``__init__``. As a result, domain modules
+# importing ``from app.authz import require`` no longer reach
+# :mod:`app.api.deps` transitively — the previous ``-> app.authz``
+# stopgaps for ``time.shifts`` / ``tasks.oneoff`` / ``tasks.comments``
+# / ``expenses.claims`` / ``expenses.approval`` / ``identity.membership
+# -> app.services.employees.service`` all dropped together.
+ignore_imports = []
 unmatched_ignore_imports_alerting = "none"
 
 [[tool.importlinter.contracts]]

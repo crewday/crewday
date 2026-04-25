@@ -39,12 +39,12 @@ from app.api.deps import current_workspace_context, db_session
 from app.authz import (
     EmptyPermissionRuleRepository,
     InvalidScope,
-    Permission,
     PermissionRuleRepository,
     UnknownActionKey,
     is_member_of,
     is_owner_member,
 )
+from app.authz.dep import Permission
 from app.authz.membership import UnknownSystemGroup
 from app.domain.identity._action_catalog import ACTION_CATALOG, ActionSpec
 from app.tenancy import WorkspaceContext

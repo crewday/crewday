@@ -53,7 +53,7 @@ from app.api.pagination import (
     PageCursorQuery,
     decode_cursor,
 )
-from app.authz import Permission
+from app.authz.dep import Permission
 from app.tenancy import WorkspaceContext
 
 __all__ = [

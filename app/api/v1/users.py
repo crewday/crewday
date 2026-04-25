@@ -64,7 +64,8 @@ from app.api.deps import current_workspace_context, db_session
 from app.audit import write_audit
 from app.auth import magic_link as magic_link_module
 from app.auth._throttle import Throttle
-from app.authz import Permission, PermissionDenied, require
+from app.authz import PermissionDenied, require
+from app.authz.dep import Permission
 from app.config import Settings, get_settings
 from app.domain.identity import membership
 from app.domain.identity.permission_groups import (

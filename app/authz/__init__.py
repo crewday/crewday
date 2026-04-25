@@ -14,7 +14,16 @@ Unlike ``app.domain`` modules, ``app.authz`` modules MAY import from
 are thin DB shims; when the proper ``PermissionGroupRepository``
 lands (cd-duv6) the body moves behind a Protocol seam.
 
-Public surface:
+The :class:`~app.authz.dep.Permission` FastAPI dependency factory is
+deliberately **not** re-exported here. It lives in
+:mod:`app.authz.dep` and is imported by routers via
+``from app.authz.dep import Permission``. Keeping it off the public
+``app.authz`` surface means domain modules importing
+``from app.authz import require`` do not transitively pull in
+:mod:`app.api.deps`, which would otherwise break the import-linter
+"Domain forbids handlers (api/web/cli/worker)" contract.
+
+Public surface (pure-domain — safe for ``app.domain`` callers):
 
 * :func:`is_owner_member` / :func:`resolve_is_owner` — explicit
   owners-group membership lookup (cd-ckr).
@@ -24,9 +33,10 @@ Public surface:
   ``/auth/me`` to populate the ``is_deployment_admin`` flag.
 * :func:`is_member_of` — dispatch on system-group slug, derived-vs-
   explicit (cd-dzp).
-* :class:`Permission` / :func:`require` — the canonical permission
-  check (cd-dzp). Routers wire the former, service callers the
-  latter.
+* :func:`require` — the canonical permission check (cd-dzp). Service
+  callers use this directly; routers go through
+  :func:`app.authz.dep.Permission` (which itself calls
+  :func:`require`).
 * :class:`PermissionRuleRepository` / :class:`EmptyPermissionRuleRepository`
   — v1 seam so the resolver is complete before the
   ``permission_rule`` table ships (cd-dzp).
@@ -43,7 +53,6 @@ from app.authz.enforce import (
     CatalogDrift,
     EmptyPermissionRuleRepository,
     InvalidScope,
-    Permission,
     PermissionCheck,
     PermissionDenied,
     PermissionRuleRepository,
@@ -60,7 +69,6 @@ __all__ = [
     "CatalogDrift",
     "EmptyPermissionRuleRepository",
     "InvalidScope",
-    "Permission",
     "PermissionCheck",
     "PermissionDenied",
     "PermissionRuleRepository",

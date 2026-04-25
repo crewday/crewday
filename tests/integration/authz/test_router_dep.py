@@ -39,7 +39,7 @@ from app.adapters.db.identity.models import User, canonicalise_email
 from app.adapters.db.session import UnitOfWorkImpl, make_engine
 from app.adapters.db.workspace.models import Workspace
 from app.api.deps import current_workspace_context, db_session
-from app.authz import Permission
+from app.authz.dep import Permission
 from app.tenancy.context import ActorGrantRole, WorkspaceContext
 from app.util.ulid import new_ulid
 

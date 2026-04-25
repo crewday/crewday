@@ -28,7 +28,7 @@ Public surface:
   ``(workspace_id, key)``).
 
 **Authorisation.** The router owns the authz gate via
-:func:`~app.authz.Permission` with ``work_roles.manage`` on
+:func:`~app.authz.dep.Permission` with ``work_roles.manage`` on
 ``scope_kind='workspace'`` — §05 action catalog default-allow is
 ``owners, managers``. The service itself does not run the gate so it
 remains re-usable from tests and seeders that bypass HTTP.

@@ -225,7 +225,7 @@ def _http_for_shift_error(exc: Exception) -> HTTPException:
         # ``HTTP_422_UNPROCESSABLE_CONTENT`` in 2024 and emits a
         # deprecation warning on the old name. The integer is stable
         # across versions. (Same trick used in
-        # :mod:`app.authz.enforce._misuse_to_http`.)
+        # :mod:`app.authz.dep._misuse_to_http`.)
         return HTTPException(
             status_code=422,
             detail={"error": "invalid_window", "message": str(exc)},

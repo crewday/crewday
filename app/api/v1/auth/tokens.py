@@ -84,7 +84,7 @@ from app.auth.tokens import (
     mint,
     revoke,
 )
-from app.authz import Permission
+from app.authz.dep import Permission
 from app.tenancy import WorkspaceContext
 from app.util.clock import SystemClock
 

@@ -61,7 +61,8 @@ from app.api.pagination import (
     paginate,
 )
 from app.audit import write_audit
-from app.authz import Permission, is_owner_member
+from app.authz import is_owner_member
+from app.authz.dep import Permission
 from app.domain.identity.role_grants import (
     CrossWorkspaceProperty,
     GrantRoleInvalid,

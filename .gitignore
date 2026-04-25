@@ -16,6 +16,11 @@ __pycache__/
 htmlcov/
 coverage.xml
 
+# Cross-process flock used by tests/boundary/test_import_gate.py to
+# serialise the two parallel ``lint-imports`` invocations under
+# pytest-xdist (see the module docstring for the why).
+.pytest-import-gate.lock
+
 # Editors / OS
 .DS_Store
 *.swp

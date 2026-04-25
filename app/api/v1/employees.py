@@ -81,7 +81,7 @@ from app.adapters.db.workspace.models import (
     WorkRole,
 )
 from app.api.deps import current_workspace_context, db_session
-from app.authz import Permission
+from app.authz.dep import Permission
 from app.tenancy import WorkspaceContext, tenant_agnostic
 
 __all__ = [

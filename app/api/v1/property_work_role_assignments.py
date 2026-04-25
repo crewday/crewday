@@ -52,7 +52,7 @@ from app.api.pagination import (
     decode_cursor,
     paginate,
 )
-from app.authz import Permission
+from app.authz.dep import Permission
 from app.domain.places.property_work_role_assignments import (
     PropertyWorkRoleAssignmentCreate,
     PropertyWorkRoleAssignmentInvariantViolated,

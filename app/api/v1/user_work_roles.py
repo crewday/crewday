@@ -37,7 +37,7 @@ from app.api.pagination import (
     decode_cursor,
     paginate,
 )
-from app.authz import Permission
+from app.authz.dep import Permission
 from app.domain.identity.user_work_roles import (
     UserWorkRoleCreate,
     UserWorkRoleInvariantViolated,

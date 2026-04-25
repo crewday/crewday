@@ -65,7 +65,8 @@ from app.api.pagination import (
     decode_cursor,
     paginate,
 )
-from app.authz import Permission, require
+from app.authz import require
+from app.authz.dep import Permission
 from app.authz.enforce import PermissionDenied
 from app.domain.identity.permission_groups import (
     LastOwnerMember,

@@ -29,7 +29,7 @@ Public surface:
   caller).
 
 **Permission.** The router already gates the endpoint with the
-``tasks.create`` :class:`app.authz.enforce.Permission` dependency;
+``tasks.create`` :class:`app.authz.dep.Permission` dependency;
 this service re-asserts the check as defence-in-depth (§01
 "Handlers are thin" forbids routers-as-authority, but a service
 that silently skips the check would be a trust-the-caller anti-
@@ -813,7 +813,7 @@ def _assert_can_create(
 ) -> None:
     """Re-assert the ``tasks.create`` action catalog entry.
 
-    The router's :class:`app.authz.enforce.Permission` dependency
+    The router's :class:`app.authz.dep.Permission` dependency
     already gates the endpoint; this re-check is defence-in-depth
     for service-layer callers (CLI, agent runtime, tests) that
     don't flow through the router. Scope is ``property`` when the

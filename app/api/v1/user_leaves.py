@@ -281,7 +281,7 @@ def _http_for_permission_denied(exc: UserLeavePermissionDenied) -> HTTPException
     """Map a domain :class:`UserLeavePermissionDenied` to 403.
 
     The detail body matches the §12 envelope shape used by the
-    :func:`app.authz.Permission` dependency: ``{"error":
+    :func:`app.authz.dep.Permission` dependency: ``{"error":
     "permission_denied", "action_key": "<key>"}``. The action key is
     pulled from the underlying exception message (the service raises
     ``UserLeavePermissionDenied(str(PermissionDenied))`` which

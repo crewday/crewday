@@ -48,7 +48,7 @@ from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
 
 from app.api.deps import current_workspace_context
-from app.authz import Permission
+from app.authz.dep import Permission
 from app.tenancy import WorkspaceContext
 
 __all__ = [

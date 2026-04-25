@@ -310,7 +310,7 @@ def _http_for_permission_denied(
     """Map a domain :class:`UserAvailabilityOverridePermissionDenied` to 403.
 
     The detail body matches the §12 envelope shape used by the
-    :func:`app.authz.Permission` dependency: ``{"error":
+    :func:`app.authz.dep.Permission` dependency: ``{"error":
     "permission_denied", "action_key": "<key>"}``.
     """
     return HTTPException(
