@@ -11,6 +11,17 @@ escape the seam.
 Stress target: 500 examples per run. The acceptance criterion on
 cd-a469 names 1000; we start at 500 to keep CI under a second and
 upgrade if the fuzzer surfaces something that 500 missed.
+
+**Hash-key carve-out contract.** :mod:`app.util.redact` deliberately
+preserves hash-shaped strings under keys whose normalised name carries
+``hash`` / ``hashed`` / ``fingerprint`` as a word component (§15 PII
+minimisation: magic-link / recovery audit rows store ``email_hash`` /
+``ip_hash`` so forensic lookup survives plaintext purge). A 64-char
+hex literal landing under a randomly-generated ``hashed`` key would
+therefore *correctly* survive — and that is not a leak the redactor
+should fix. The dict-key strategy below filters out any key matching
+that contract so the fuzzer measures unconditional-redaction coverage
+without false-flagging the documented exemption.
 """
 
 from __future__ import annotations
@@ -20,7 +31,7 @@ import json
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from app.util.redact import redact
+from app.util.redact import _key_is_hash, redact
 
 # Injected literals we demand the redactor hide. Each is valid under
 # its respective rule (email RFC-ish, E.164, mod-97 IBAN, Luhn PAN,
@@ -56,6 +67,27 @@ def _leaf_strategy() -> st.SearchStrategy[object]:
     )
 
 
+def _safe_key_strategy() -> st.SearchStrategy[str]:
+    """Lowercase a-z keys, filtered to skip the hash-carve-out contract.
+
+    The redactor's hash-pass-through (§15 PII minimisation, see
+    module docstring) preserves hash-shaped string values under any
+    key matching :func:`app.util.redact._key_is_hash`. The 64-char
+    hex literal in :data:`_PII_LITERALS` is hash-shaped by
+    construction, so a randomly-generated ``hashed`` / ``hash`` key
+    would let it survive *correctly* — and the assertion below would
+    misread that as a leak. We filter the alphabet here once so every
+    nested dict in the tree respects the same contract; the
+    sensitive-key shapes (``token`` / ``secret`` / …) need no filter
+    because they redact wholesale and erase the literal regardless.
+    """
+    return st.text(
+        alphabet=st.characters(min_codepoint=0x61, max_codepoint=0x7A),
+        min_size=1,
+        max_size=8,
+    ).filter(lambda key: not _key_is_hash(key))
+
+
 def _tree_strategy(max_depth: int = 4) -> st.SearchStrategy[object]:
     """Recursive dict / list strategy, capped at ``max_depth`` levels."""
 
@@ -63,11 +95,7 @@ def _tree_strategy(max_depth: int = 4) -> st.SearchStrategy[object]:
         return st.one_of(
             st.lists(children, max_size=4),
             st.dictionaries(
-                keys=st.text(
-                    alphabet=st.characters(min_codepoint=0x61, max_codepoint=0x7A),
-                    min_size=1,
-                    max_size=8,
-                ),
+                keys=_safe_key_strategy(),
                 values=children,
                 max_size=4,
             ),

@@ -226,6 +226,13 @@ _SENSITIVE_KEY_RE: Final[re.Pattern[str]] = re.compile(
 #: PII-minimisation), so fields like ``email_hash`` or
 #: ``ip_hash_at_request`` must survive the free-text regex sweep —
 #: which would otherwise redact a sha256 as a credential.
+#
+# Contract for fuzz / property testing: a hash-shaped string under
+# any key matching :data:`_HASH_KEY_RE` is preserved verbatim by
+# design. Property tests that inject arbitrary literals MUST exclude
+# these key shapes from their dict-key strategy or they will
+# (correctly) observe the literal surviving — see
+# ``tests/property/test_redact_fuzz.py``'s ``_safe_key_strategy``.
 _HASH_KEY_TOKENS: Final[tuple[str, ...]] = ("hash", "hashed", "fingerprint")
 
 
@@ -252,6 +259,16 @@ def _key_is_hash(key: object) -> bool:
     return _HASH_KEY_RE.search(normalised) is not None
 
 
+#: Alphabet sets for the hash-shape sniff in :func:`_looks_like_hash`.
+#: Pulled out as ``frozenset`` constants so the per-character ``in``
+#: check stays O(1) and the intent ("hex digits" / "base64url alphabet,
+#: no padding") is named once instead of inlined as a magic string.
+_HEX_ALPHABET: Final[frozenset[str]] = frozenset("0123456789abcdefABCDEF")
+_BASE64URL_ALPHABET: Final[frozenset[str]] = frozenset(
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+)
+
+
 def _looks_like_hash(value: str) -> bool:
     """Return ``True`` if ``value`` looks like a minimised hash or fingerprint.
 
@@ -266,15 +283,13 @@ def _looks_like_hash(value: str) -> bool:
     caller is responsible for ensuring that genuine hashes land under
     hash-named keys.
     """
-    if len(value) < 16:  # Too short to be a meaningful hash
+    if len(value) < 16:  # Too short to be a meaningful hash.
         return False
-    # Check if it looks like hex (32+ hex digits, no whitespace or special chars)
-    if len(value) >= 32 and all(c in "0123456789abcdefABCDEF" for c in value):
+    # Hex: 32+ hex digits, no whitespace or special chars.
+    if len(value) >= 32 and all(c in _HEX_ALPHABET for c in value):
         return True
-    # Check if it looks like base64url (40+ base64url chars, no padding)
-    if len(value) >= 40 and all(c in "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_" for c in value):
-        return True
-    return False
+    # Base64url: 40+ chars from the URL-safe alphabet, no padding.
+    return len(value) >= 40 and all(c in _BASE64URL_ALPHABET for c in value)
 
 
 def _key_is_sensitive(key: object) -> bool:
