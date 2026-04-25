@@ -29,10 +29,15 @@ from app.adapters.db.places.models import (
     Area,
     Property,
     PropertyClosure,
+    PropertyWorkRoleAssignment,
     PropertyWorkspace,
     Unit,
 )
-from app.adapters.db.workspace.models import Workspace
+from app.adapters.db.workspace.models import (
+    UserWorkRole,
+    WorkRole,
+    Workspace,
+)
 from app.tenancy import registry, tenant_agnostic
 from app.tenancy.context import WorkspaceContext
 from app.tenancy.current import reset_current, set_current
@@ -75,10 +80,10 @@ def _reset_ctx() -> Iterator[None]:
 
 @pytest.fixture(autouse=True)
 def _ensure_places_registered() -> None:
-    """Re-register the places junction as workspace-scoped before each test.
+    """Re-register the workspace-scoped places tables before each test.
 
-    ``app.adapters.db.places.__init__`` registers the junction at
-    import time, but a sibling unit test
+    ``app.adapters.db.places.__init__`` registers them at import
+    time, but a sibling unit test
     (``tests/unit/test_tenancy_orm_filter.py``) calls
     :func:`registry._reset_for_tests` in an autouse fixture, which
     wipes the process-wide registry. Without this fixture the
@@ -89,6 +94,10 @@ def _ensure_places_registered() -> None:
     the package docstring.
     """
     registry.register("property_workspace")
+    # cd-e4m3 — the per-property pinning of a ``user_work_role``
+    # carries a denormalised ``workspace_id`` column and rides the
+    # tenant filter directly (same pattern as ``work_engagement``).
+    registry.register("property_work_role_assignment")
 
 
 def _ctx_for(workspace: Workspace, actor_id: str) -> WorkspaceContext:
@@ -274,6 +283,102 @@ class TestMigrationShape:
             "property_id",
             "starts_at",
         ]
+
+    # ------------------------------------------------------------------
+    # cd-e4m3 — property_work_role_assignment
+    # ------------------------------------------------------------------
+
+    def test_property_work_role_assignment_table_exists(self, engine: Engine) -> None:
+        assert "property_work_role_assignment" in inspect(engine).get_table_names()
+
+    def test_property_work_role_assignment_columns(self, engine: Engine) -> None:
+        cols = {
+            c["name"]: c
+            for c in inspect(engine).get_columns("property_work_role_assignment")
+        }
+        expected = {
+            "id",
+            "workspace_id",
+            "user_work_role_id",
+            "property_id",
+            "schedule_ruleset_id",
+            "property_pay_rule_id",
+            "created_at",
+            "updated_at",
+            "deleted_at",
+        }
+        assert set(cols) == expected
+        nullable = {
+            "schedule_ruleset_id",
+            "property_pay_rule_id",
+            "deleted_at",
+        }
+        for name in nullable:
+            assert cols[name]["nullable"] is True, f"{name} must be nullable"
+        for name in expected - nullable:
+            assert cols[name]["nullable"] is False, f"{name} must be NOT NULL"
+        pk = inspect(engine).get_pk_constraint("property_work_role_assignment")
+        assert pk["constrained_columns"] == ["id"]
+
+    def test_property_work_role_assignment_fks(self, engine: Engine) -> None:
+        fks = {
+            tuple(fk["constrained_columns"]): fk
+            for fk in inspect(engine).get_foreign_keys("property_work_role_assignment")
+        }
+        # Hard-deletes on every parent except ``pay_rule`` cascade
+        # the assignment row away. ``pay_rule`` SET NULLs so the
+        # assignment outlives a pay-rule rotation.
+        assert (
+            fks[("workspace_id",)]["referred_table"] == "workspace"
+            and fks[("workspace_id",)]["options"].get("ondelete") == "CASCADE"
+        )
+        assert (
+            fks[("user_work_role_id",)]["referred_table"] == "user_work_role"
+            and fks[("user_work_role_id",)]["options"].get("ondelete") == "CASCADE"
+        )
+        assert (
+            fks[("property_id",)]["referred_table"] == "property"
+            and fks[("property_id",)]["options"].get("ondelete") == "CASCADE"
+        )
+        assert (
+            fks[("property_pay_rule_id",)]["referred_table"] == "pay_rule"
+            and fks[("property_pay_rule_id",)]["options"].get("ondelete") == "SET NULL"
+        )
+
+    def test_property_work_role_assignment_indexes(self, engine: Engine) -> None:
+        indexes = {
+            ix["name"]: ix
+            for ix in inspect(engine).get_indexes("property_work_role_assignment")
+        }
+        # Partial UNIQUE — identity key on the live row. SQLite's
+        # inspector returns ``1`` / ``0`` for ``unique``; PG returns
+        # ``True`` / ``False``. Cast through ``bool`` so the
+        # assertion holds across backends.
+        assert "uq_property_work_role_assignment_role_property_active" in indexes
+        unique_ix = indexes["uq_property_work_role_assignment_role_property_active"]
+        assert bool(unique_ix["unique"]) is True
+        assert unique_ix["column_names"] == [
+            "user_work_role_id",
+            "property_id",
+        ]
+        # Three non-unique hot-path indexes leading on workspace_id.
+        for name, columns in (
+            (
+                "ix_property_work_role_assignment_workspace_deleted",
+                ["workspace_id", "deleted_at"],
+            ),
+            (
+                "ix_property_work_role_assignment_workspace_user_work_role",
+                ["workspace_id", "user_work_role_id"],
+            ),
+            (
+                "ix_property_work_role_assignment_workspace_property",
+                ["workspace_id", "property_id"],
+            ),
+        ):
+            assert name in indexes, f"missing index {name}"
+            assert indexes[name]["column_names"] == columns
+            assert bool(indexes[name]["unique"]) is False
 
 
 class TestPropertyRoundTrip:
@@ -849,3 +954,193 @@ class TestTenantFilter:
         with filtered_factory() as session:
             result = session.scalars(select(PropertyClosure)).all()
             assert isinstance(result, list)
+
+    def test_property_work_role_assignment_read_without_ctx_raises(
+        self, filtered_factory: sessionmaker[Session]
+    ) -> None:
+        """``property_work_role_assignment`` IS registered (cd-e4m3).
+
+        A bare SELECT without a :class:`WorkspaceContext` raises
+        :class:`TenantFilterMissing` — the table carries a
+        denormalised ``workspace_id`` and rides the filter directly,
+        same pattern as ``work_engagement`` / ``user_work_role``.
+        """
+        with (
+            filtered_factory() as session,
+            pytest.raises(TenantFilterMissing) as exc,
+        ):
+            session.execute(select(PropertyWorkRoleAssignment))
+        assert exc.value.table == "property_work_role_assignment"
+
+
+class TestPropertyWorkRoleAssignmentRoundTrip:
+    """Round-trip + partial UNIQUE behaviour against a migrated DB.
+
+    Complements the in-memory unit suite
+    (:mod:`tests.unit.adapters.db.test_property_work_role_assignment`)
+    by exercising the **migration-emitted** schema (FKs, partial
+    UNIQUE, indexes) rather than a ``Base.metadata.create_all``
+    snapshot. The two slices catch different drifts: the unit suite
+    pins ORM-side declarations, this one pins the Alembic op output.
+    """
+
+    def test_partial_unique_blocks_duplicate_live_row(
+        self, db_session: Session
+    ) -> None:
+        clock = FrozenClock(_PINNED)
+        user = bootstrap_user(
+            db_session,
+            email="pwra-uniq@example.com",
+            display_name="PWRAUniq",
+            clock=clock,
+        )
+        ws = bootstrap_workspace(
+            db_session,
+            slug="pwra-uniq-ws",
+            name="PWRAUniqWS",
+            owner_user_id=user.id,
+            clock=clock,
+        )
+        prop = _seed_property(db_session, property_id="01HWA00000000000000000PRPQ")
+        token = set_current(_ctx_for(ws, user.id))
+        try:
+            db_session.add(
+                PropertyWorkspace(
+                    property_id=prop.id,
+                    workspace_id=ws.id,
+                    label="PWRAUniqLink",
+                    membership_role="owner_workspace",
+                    created_at=_PINNED,
+                )
+            )
+            db_session.add(
+                WorkRole(
+                    id="01HWA00000000000000000WRQQ",
+                    workspace_id=ws.id,
+                    key="maid",
+                    name="Maid",
+                    created_at=_PINNED,
+                )
+            )
+            db_session.flush()
+            db_session.add(
+                UserWorkRole(
+                    id="01HWA00000000000000000UWQQ",
+                    user_id=user.id,
+                    workspace_id=ws.id,
+                    work_role_id="01HWA00000000000000000WRQQ",
+                    started_on=_PINNED.date(),
+                    created_at=_PINNED,
+                )
+            )
+            db_session.flush()
+
+            db_session.add(
+                PropertyWorkRoleAssignment(
+                    id="01HWA00000000000000000PWQ1",
+                    workspace_id=ws.id,
+                    user_work_role_id="01HWA00000000000000000UWQQ",
+                    property_id=prop.id,
+                    created_at=_PINNED,
+                    updated_at=_PINNED,
+                )
+            )
+            db_session.flush()
+
+            # Second live row for the same (uwr, property) — must
+            # fail under the partial UNIQUE.
+            db_session.add(
+                PropertyWorkRoleAssignment(
+                    id="01HWA00000000000000000PWQ2",
+                    workspace_id=ws.id,
+                    user_work_role_id="01HWA00000000000000000UWQQ",
+                    property_id=prop.id,
+                    created_at=_PINNED,
+                    updated_at=_PINNED,
+                )
+            )
+            with pytest.raises(IntegrityError):
+                db_session.flush()
+            db_session.rollback()
+        finally:
+            reset_current(token)
+
+    def test_archive_then_re_pin_accepted(self, db_session: Session) -> None:
+        """Soft-deleting the live row lets a fresh re-pin land."""
+        clock = FrozenClock(_PINNED)
+        user = bootstrap_user(
+            db_session,
+            email="pwra-rehire@example.com",
+            display_name="PWRARehire",
+            clock=clock,
+        )
+        ws = bootstrap_workspace(
+            db_session,
+            slug="pwra-rehire-ws",
+            name="PWRARehireWS",
+            owner_user_id=user.id,
+            clock=clock,
+        )
+        prop = _seed_property(db_session, property_id="01HWA00000000000000000PRPH")
+        token = set_current(_ctx_for(ws, user.id))
+        try:
+            db_session.add(
+                PropertyWorkspace(
+                    property_id=prop.id,
+                    workspace_id=ws.id,
+                    label="PWRARehireLink",
+                    membership_role="owner_workspace",
+                    created_at=_PINNED,
+                )
+            )
+            db_session.add(
+                WorkRole(
+                    id="01HWA00000000000000000WRHH",
+                    workspace_id=ws.id,
+                    key="maid",
+                    name="Maid",
+                    created_at=_PINNED,
+                )
+            )
+            db_session.flush()
+            db_session.add(
+                UserWorkRole(
+                    id="01HWA00000000000000000UWHH",
+                    user_id=user.id,
+                    workspace_id=ws.id,
+                    work_role_id="01HWA00000000000000000WRHH",
+                    started_on=_PINNED.date(),
+                    created_at=_PINNED,
+                )
+            )
+            db_session.flush()
+
+            first = PropertyWorkRoleAssignment(
+                id="01HWA00000000000000000PWH1",
+                workspace_id=ws.id,
+                user_work_role_id="01HWA00000000000000000UWHH",
+                property_id=prop.id,
+                created_at=_PINNED,
+                updated_at=_PINNED,
+            )
+            db_session.add(first)
+            db_session.flush()
+
+            # Soft-delete the first row — the partial predicate now
+            # excludes it from the UNIQUE.
+            first.deleted_at = _PINNED + timedelta(hours=1)
+            db_session.flush()
+
+            db_session.add(
+                PropertyWorkRoleAssignment(
+                    id="01HWA00000000000000000PWH2",
+                    workspace_id=ws.id,
+                    user_work_role_id="01HWA00000000000000000UWHH",
+                    property_id=prop.id,
+                    created_at=_PINNED,
+                    updated_at=_PINNED,
+                )
+            )
+            db_session.flush()  # No IntegrityError — re-pin accepted.
+        finally:
+            reset_current(token)

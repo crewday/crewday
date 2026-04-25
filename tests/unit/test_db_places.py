@@ -21,6 +21,7 @@ from app.adapters.db.places import (
     Area,
     Property,
     PropertyClosure,
+    PropertyWorkRoleAssignment,
     PropertyWorkspace,
     Unit,
 )
@@ -258,14 +259,21 @@ class TestPackageReExports:
         assert Unit is places_models.Unit
         assert Area is places_models.Area
         assert PropertyClosure is places_models.PropertyClosure
+        # cd-e4m3 added the per-property pinning of a ``user_work_role``.
+        assert PropertyWorkRoleAssignment is places_models.PropertyWorkRoleAssignment
 
 
 class TestRegistryIntent:
-    """Only ``property_workspace`` is registered as workspace-scoped.
+    """``property_workspace`` and ``property_work_role_assignment``
+    are the only places tables registered as workspace-scoped.
 
     ``property`` is shared across workspaces via the junction, and
     ``unit`` / ``area`` / ``property_closure`` reach the boundary
     through their parent property (see the package docstring).
+    ``property_work_role_assignment`` (cd-e4m3) carries its own
+    denormalised ``workspace_id`` column, so it joins
+    ``property_workspace`` as the second registered places table —
+    same pattern as ``work_engagement`` / ``user_work_role``.
 
     The assertions call :func:`app.tenancy.registry.register` directly
     rather than relying on the import-time side effect of
@@ -273,29 +281,47 @@ class TestRegistryIntent:
     autouse fixture calls ``registry._reset_for_tests()`` which wipes
     the process-wide set, so asserting presence after that reset would
     be flaky. The tests below encode the invariant — "the only places
-    table we scope is the junction" — without over-coupling to import
-    ordering.
+    tables we scope are the junction and the assignment" — without
+    over-coupling to import ordering.
     """
 
-    def test_property_workspace_is_the_registered_places_table(self) -> None:
-        """Registering ``property_workspace`` flips :func:`is_scoped` on."""
+    def test_registered_places_tables(self) -> None:
+        """Registering both scoped places tables flips :func:`is_scoped`."""
         from app.tenancy import registry
 
         registry.register("property_workspace")
+        registry.register("property_work_role_assignment")
         assert registry.is_scoped("property_workspace") is True
+        assert registry.is_scoped("property_work_role_assignment") is True
 
     def test_other_places_tables_not_registered_by_default(self) -> None:
-        """The other four places tables are absent from a fresh registry.
+        """The remaining places tables stay absent from a fresh registry.
 
         We reset the registry, re-apply the package's import-time
-        policy (``register("property_workspace")`` only), and confirm
-        the other four remain unregistered.
+        policy, and confirm only the two scoped tables remain. The
+        snapshot / restore around the reset keeps the per-suite
+        registrations from sibling packages (``work_engagement``,
+        ``user_work_role``, ``user_workspace``, …) intact for the
+        rest of the suite — without it, a sibling test running later
+        in the file order would observe a wiped registry and fail
+        ``is_scoped`` checks that pass in isolation.
         """
         from app.tenancy import registry
 
-        registry._reset_for_tests()
-        registry.register("property_workspace")
-        scoped = registry.scoped_tables()
-        assert "property_workspace" in scoped
-        for table in ("property", "unit", "area", "property_closure"):
-            assert table not in scoped, f"{table} must not be scoped in v1"
+        snapshot = registry.scoped_tables()
+        try:
+            registry._reset_for_tests()
+            registry.register("property_workspace")
+            registry.register("property_work_role_assignment")
+            scoped = registry.scoped_tables()
+            assert "property_workspace" in scoped
+            assert "property_work_role_assignment" in scoped
+            for table in ("property", "unit", "area", "property_closure"):
+                assert table not in scoped, f"{table} must not be scoped in v1"
+        finally:
+            # Restore the original registration set so sibling tests
+            # (e.g. ``test_work_engagement_registered``) keep observing
+            # their tables as scoped.
+            registry._reset_for_tests()
+            for table in snapshot:
+                registry.register(table)

@@ -1,4 +1,5 @@
-"""places — property / unit / area / property_workspace / property_closure.
+"""places — property / unit / area / property_workspace / property_closure
++ property_work_role_assignment.
 
 Importing this package registers per-table tenancy behaviour:
 
@@ -7,6 +8,11 @@ Importing this package registers per-table tenancy behaviour:
   ``workspace_id`` predicate on every SELECT / UPDATE / DELETE, so a
   bare read without a :class:`~app.tenancy.WorkspaceContext` raises
   :class:`~app.tenancy.orm_filter.TenantFilterMissing`.
+* ``property_work_role_assignment``: **IS** workspace-scoped (cd-e4m3).
+  Carries a denormalised ``workspace_id`` column so the tenant
+  filter rides a local column without threading a join through
+  ``user_work_role`` on every read — same pattern as
+  :class:`~app.adapters.db.workspace.models.WorkEngagement`.
 * ``property``: intentionally **NOT** registered. The same physical
   property can belong to multiple workspaces via ``property_workspace``
   (§02 "Villa belongs to many workspaces"), so pinning a single
@@ -33,8 +39,9 @@ Importing this package registers per-table tenancy behaviour:
 
 See ``docs/specs/02-domain-model.md`` §"property_workspace",
 ``docs/specs/04-properties-and-stays.md`` §"Property" / §"Unit" /
-§"Area" and ``docs/specs/01-architecture.md`` §"Tenant filter
-enforcement".
+§"Area", ``docs/specs/05-employees-and-roles.md`` §"Property work
+role assignment", and ``docs/specs/01-architecture.md`` §"Tenant
+filter enforcement".
 """
 
 from __future__ import annotations
@@ -43,15 +50,24 @@ from app.adapters.db.places.models import (
     Area,
     Property,
     PropertyClosure,
+    PropertyWorkRoleAssignment,
     PropertyWorkspace,
     Unit,
 )
 from app.tenancy.registry import register
 
 register("property_workspace")
+register("property_work_role_assignment")
 # ``property`` is intentionally NOT registered — a property can belong
 # to multiple workspaces via ``property_workspace``. See module
 # docstring for the full rationale; unit / area / property_closure
 # follow the same "service-layer joins the junction" contract.
 
-__all__ = ["Area", "Property", "PropertyClosure", "PropertyWorkspace", "Unit"]
+__all__ = [
+    "Area",
+    "Property",
+    "PropertyClosure",
+    "PropertyWorkRoleAssignment",
+    "PropertyWorkspace",
+    "Unit",
+]

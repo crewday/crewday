@@ -872,6 +872,43 @@ The pay-pipeline rows in §09 (`pay_rule`, `payslip`, `booking`,
 reference `user_id` directly, so the same person in different
 workspaces accrues and bills independently.
 
+### `property_work_role_assignment`
+
+Per-property pinning of a `user_work_role`. A
+`user_work_role` with **zero** assignment rows is a "generalist" —
+eligible for every property in the workspace; **one or more** rows
+narrow the role to those properties only (§05 "Property work role
+assignment"). Variation in *when* the user works that property
+(weekday morning vs. afternoon) is expressed by the multi-slot
+`schedule_ruleset` referenced via `schedule_ruleset_id` (§06), not
+by stacking multiple assignment rows.
+
+| column                 | type      | notes                                                              |
+|------------------------|-----------|--------------------------------------------------------------------|
+| id                     | ULID PK   |                                                                    |
+| workspace_id           | ULID FK   | denormalised tenancy column; equals `user_work_role.workspace_id`  |
+| user_work_role_id      | ULID FK   | the role this row pins                                             |
+| property_id            | ULID FK   | the property the role is pinned to                                 |
+| schedule_ruleset_id    | ULID FK?  | recurring weekly rota (§06); null = no rota declared, eligibility falls back to `user_weekly_availability` alone |
+| property_pay_rule_id   | ULID FK?  | per-property rate override; null = inherit the engagement-level rule |
+| created_at / updated_at | tstz     |                                                                    |
+| deleted_at             | tstz?     | soft-delete tombstone                                              |
+
+Partial unique: `(user_work_role_id, property_id) WHERE deleted_at
+IS NULL` — one live row per (user_work_role, property). Tombstoned
+rows are excluded so an archive + re-pin works.
+
+**Invariants** (write-path; not expressed in DDL):
+
+1. `workspace_id` must equal the parent `user_work_role`'s
+   `workspace_id`. The redundancy is explicit so a future
+   bulk-loader can't slip a cross-workspace borrow through.
+2. `property_id` must point at a property that is linked to
+   `workspace_id` through a live `property_workspace` row — a
+   workspace cannot pin a role to a property it doesn't operate.
+
+(In v0 this entity was called `property_role_assignment`.)
+
 ### `audit_log`
 
 Append-only. Written in the same transaction as every mutation.

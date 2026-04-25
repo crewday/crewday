@@ -37,12 +37,20 @@ from sqlalchemy import (
     Index,
     Integer,
     String,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.adapters.db.base import Base
 
-__all__ = ["Area", "Property", "PropertyClosure", "PropertyWorkspace", "Unit"]
+__all__ = [
+    "Area",
+    "Property",
+    "PropertyClosure",
+    "PropertyWorkRoleAssignment",
+    "PropertyWorkspace",
+    "Unit",
+]
 
 
 # Allowed ``property_workspace.membership_role`` values, enforced by a
@@ -350,4 +358,167 @@ class PropertyClosure(Base):
     __table_args__ = (
         CheckConstraint("ends_at > starts_at", name="ends_after_starts"),
         Index("ix_property_closure_property_starts", "property_id", "starts_at"),
+    )
+
+
+class PropertyWorkRoleAssignment(Base):
+    """Per-property pinning of a :class:`UserWorkRole` (cd-e4m3).
+
+    Pins a :class:`~app.adapters.db.workspace.models.UserWorkRole` to
+    a specific :class:`Property`. The absence of any assignment row
+    leaves the user's role **workspace-wide** (a "generalist" —
+    eligible for every property in the workspace, per §05 "Property
+    work role assignment"). One or more rows narrow eligibility to
+    those properties only.
+
+    A single (user_work_role, property) pair is **uniquely
+    identified** by an active row here — variation in *when* the
+    user works that property (e.g. Mon mornings vs. Mon afternoons)
+    is expressed by the multi-slot :ref:`schedule_ruleset`
+    referenced via :attr:`schedule_ruleset_id`, not by stacking
+    multiple ``property_work_role_assignment`` rows. That makes the
+    partial ``UNIQUE (user_work_role_id, property_id) WHERE
+    deleted_at IS NULL`` the natural identity key.
+
+    **Tenancy.** The table carries a denormalised ``workspace_id``
+    column even though the parent ``user_work_role`` already encodes
+    the workspace. This matches the
+    :class:`~app.adapters.db.workspace.models.WorkEngagement` /
+    :class:`~app.adapters.db.workspace.models.UserWorkRole`
+    pattern — the ORM tenant filter rides a local column rather
+    than threading a join through the parent on every read. The
+    package's ``__init__`` registers the table so a bare SELECT
+    without a :class:`~app.tenancy.WorkspaceContext` raises
+    :class:`~app.tenancy.orm_filter.TenantFilterMissing`.
+
+    **Domain-enforced invariants** (write-path; not expressed in
+    DDL):
+
+    1. ``workspace_id`` must equal the parent ``user_work_role``'s
+       ``workspace_id``. Cross-workspace borrowing is already
+       blocked by §05 "User work role"; the redundancy is explicit
+       here so a future bulk-loader can't slip a row through.
+    2. ``property_id`` must point at a property that is linked to
+       ``workspace_id`` through a live ``property_workspace`` row —
+       a workspace cannot pin a role to a property it doesn't
+       operate. Validated at write time by the future API service
+       (cd-za6n).
+
+    **Soft references** (no FK declared):
+
+    * ``schedule_ruleset_id`` — the ``schedule_ruleset`` table
+      does not yet exist (§06 "Schedule ruleset (per-property
+      rota)"; landing in a sibling task). Plain :class:`str` until
+      the table lands; a follow-up migration may promote it into a
+      real FK without disturbing domain callers (same pattern as
+      :attr:`~app.adapters.db.workspace.models.UserWorkRole.pay_rule_id`).
+
+    **Real foreign keys** (already in the schema):
+
+    * ``user_work_role_id`` → ``user_work_role.id`` ``ON DELETE
+      CASCADE`` — hard-deleting a user_work_role sweeps every
+      assignment row.
+    * ``property_id`` → ``property.id`` ``ON DELETE CASCADE`` —
+      hard-deleting the property sweeps the row (matching the
+      sibling :class:`Unit` / :class:`Area` / :class:`PropertyClosure`
+      cascade).
+    * ``workspace_id`` → ``workspace.id`` ``ON DELETE CASCADE``.
+    * ``property_pay_rule_id`` → ``pay_rule.id`` ``ON DELETE SET
+      NULL`` — losing the pay rule drops the override but keeps the
+      assignment alive (the engagement-level rule re-applies).
+
+    See ``docs/specs/05-employees-and-roles.md`` §"Property work
+    role assignment", ``docs/specs/02-domain-model.md`` §"People,
+    work roles, engagements", and
+    ``docs/specs/06-tasks-and-scheduling.md`` §"Schedule ruleset
+    (per-property rota)".
+    """
+
+    __tablename__ = "property_work_role_assignment"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    # Denormalised tenancy column — the ORM tenant filter rides this
+    # local column rather than threading a join through
+    # ``user_work_role`` on every read. Always equal to the parent
+    # ``user_work_role.workspace_id`` (write-path invariant; see the
+    # class docstring).
+    workspace_id: Mapped[str] = mapped_column(
+        String,
+        ForeignKey("workspace.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    user_work_role_id: Mapped[str] = mapped_column(
+        String,
+        ForeignKey("user_work_role.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    property_id: Mapped[str] = mapped_column(
+        String,
+        ForeignKey("property.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    # Soft reference to the future ``schedule_ruleset`` table (§06).
+    # NULL = no rota declared — eligibility falls back to
+    # ``user_weekly_availability`` alone (§05 "Property work role
+    # assignment").
+    schedule_ruleset_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    # Per-property rate override. NULL = inherit the engagement-level
+    # rule. ``ON DELETE SET NULL`` so losing the pay rule doesn't
+    # nuke the assignment — the engagement rule re-applies.
+    property_pay_rule_id: Mapped[str | None] = mapped_column(
+        String,
+        ForeignKey("pay_rule.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    # Soft-delete tombstone; live rows carry NULL. The partial UNIQUE
+    # below excludes tombstoned rows so a re-pin after an archive
+    # mints a fresh row without colliding with the historical one.
+    deleted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    __table_args__ = (
+        # Identity key — one live row per (user_work_role, property).
+        # Variation in *when* the user works the property is
+        # expressed by ``schedule_ruleset_slot`` rows under the
+        # referenced ruleset, not by stacking multiple assignments.
+        # Tombstoned rows are excluded so an archive + re-pin works.
+        Index(
+            "uq_property_work_role_assignment_role_property_active",
+            "user_work_role_id",
+            "property_id",
+            unique=True,
+            sqlite_where=text("deleted_at IS NULL"),
+            postgresql_where=text("deleted_at IS NULL"),
+        ),
+        # "List live assignments for this workspace" hot path —
+        # leading ``workspace_id`` carries the tenant filter;
+        # trailing ``deleted_at`` lets the planner skip tombstones.
+        Index(
+            "ix_property_work_role_assignment_workspace_deleted",
+            "workspace_id",
+            "deleted_at",
+        ),
+        # "Every assignment of this user_work_role" — the employees
+        # surface walks this index to display per-user property
+        # narrowings.
+        Index(
+            "ix_property_work_role_assignment_workspace_user_work_role",
+            "workspace_id",
+            "user_work_role_id",
+        ),
+        # "Every assignment at this property" — the property's
+        # workforce panel walks this index to list the workers
+        # operating the place.
+        Index(
+            "ix_property_work_role_assignment_workspace_property",
+            "workspace_id",
+            "property_id",
+        ),
     )
