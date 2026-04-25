@@ -193,8 +193,9 @@ class TestRegisterJobs:
         assert job.misfire_grace_time >= 3600
 
         # ``max_instances=1`` + ``coalesce=True`` — a stuck tick
-        # must not stack up. Matches the convention the heartbeat
-        # and generator placeholders use.
+        # must not stack up. Matches the convention every other
+        # registered job (heartbeat, generator fan-out, LLM-budget
+        # refresh) uses.
         assert job.max_instances == 1
         assert job.coalesce is True
 

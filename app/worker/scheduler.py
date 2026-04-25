@@ -1,9 +1,9 @@
 """APScheduler bootstrap + ``register_jobs`` hook.
 
 The single seam through which downstream tasks (cd-j9l7 idempotency
-sweep, cd-yqm4 user_workspace derive-refresh, the future occurrence
-generator fan-out tick) plug into the shared scheduler. Two
-entry-points exercise the same ``register_jobs`` call:
+sweep, cd-ca1k LLM-budget refresh, cd-dcl2 occurrence-generator fan-out,
+cd-yqm4 user_workspace derive-refresh) plug into the shared scheduler.
+Two entry-points exercise the same ``register_jobs`` call:
 
 * **Inline (default)** — the FastAPI factory's lifespan hook starts
   the scheduler inside the web process when
@@ -55,17 +55,23 @@ import contextlib
 import inspect
 import logging
 from collections.abc import Awaitable, Callable, Coroutine
-from typing import Any, Final
+from typing import TYPE_CHECKING, Any, Final
 
 from apscheduler.jobstores.base import JobLookupError
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
+from sqlalchemy import select
 
 from app.adapters.db.session import make_uow
 from app.tenancy import WorkspaceContext
 from app.util.clock import Clock, SystemClock
 from app.worker.heartbeat import upsert_heartbeat
+
+if TYPE_CHECKING:
+    from datetime import datetime
+
+    from sqlalchemy.orm import Session
 
 __all__ = [
     "GENERATOR_JOB_ID",
@@ -99,10 +105,12 @@ HEARTBEAT_JOB_ID: str = "scheduler_heartbeat"
 # with :mod:`app.api.health`'s ``_HEARTBEAT_STALE_AFTER`` comment.
 HEARTBEAT_JOB_INTERVAL_SECONDS: int = 30
 
-# Stable job id for the hourly generator tick. Real fan-out across
-# workspaces lands with cd-p5's follow-up (the generator itself is a
-# single-workspace callable); the registration here seats the hook in
-# the scheduler so the cron cadence is observable immediately.
+# Stable job id for the hourly generator tick (cd-dcl2). The
+# per-workspace fan-out is built by
+# :func:`_make_generator_fanout_body` and registered on the cron
+# cadence ``CronTrigger(minute=0)`` — every workspace gets a
+# :func:`~app.worker.tasks.generator.generate_task_occurrences` call
+# under a system-actor :class:`WorkspaceContext`.
 GENERATOR_JOB_ID: str = "generate_task_occurrences"
 
 # Stable job id for the daily ``idempotency_key`` TTL sweep (cd-j9l7).
@@ -361,16 +369,17 @@ def register_jobs(
         misfire_grace_time=HEARTBEAT_JOB_INTERVAL_SECONDS,
     )
 
-    # --- Hourly occurrence generator fan-out ---
-    # The generator itself is a single-workspace callable (see
-    # ``app/worker/tasks/generator.py``). The cross-workspace fan-out
-    # lands with the downstream follow-up (tracked as a Beads task
-    # by this change). We register the hook now so the cadence is
-    # observable and the fan-out task has a seam to plug into —
-    # today the body is a no-op that just bumps the heartbeat.
+    # --- Hourly occurrence generator fan-out (cd-dcl2) ---
+    # Single-workspace callable in ``app/worker/tasks/generator.py``;
+    # the per-tick fan-out across workspaces is built by
+    # :func:`_make_generator_fanout_body`. Cron-anchored at the top
+    # of every hour for the same operator-dashboard reasons cited in
+    # the idempotency-sweep block (cron cadence is stable across
+    # container restarts; an interval trigger would re-anchor on
+    # every ``scheduler.start()``).
     scheduler.add_job(
         wrap_job(
-            _generator_fanout_placeholder,
+            _make_generator_fanout_body(resolved_clock),
             job_id=GENERATOR_JOB_ID,
             clock=resolved_clock,
         ),
@@ -464,23 +473,6 @@ def _heartbeat_only_body() -> None:
     """
 
 
-def _generator_fanout_placeholder() -> None:
-    """Placeholder for the per-workspace fan-out of the generator tick.
-
-    The real body iterates every active workspace, builds a
-    :class:`~app.tenancy.WorkspaceContext` per workspace (with a
-    system-actor identity), opens a fresh UoW, and calls
-    :func:`app.worker.tasks.generator.generate_task_occurrences`.
-    Until the fan-out seam lands, this placeholder logs once per
-    tick so operators can see the job cadence in logs. The heartbeat
-    still advances, so the job-level readiness signal is honest.
-    """
-    _log.info(
-        "generator fan-out placeholder — real fan-out lands with follow-up",
-        extra={"event": "worker.generator.placeholder"},
-    )
-
-
 def _make_idempotency_sweep_body(clock: Clock) -> Callable[[], None]:
     """Build the daily ``idempotency_key`` TTL-sweep body (cd-j9l7).
 
@@ -521,30 +513,36 @@ def _make_idempotency_sweep_body(clock: Clock) -> Callable[[], None]:
     return _body
 
 
-# Pinned system-actor identifiers for worker-initiated LLM-budget
-# refreshes. ``WorkspaceContext`` requires non-empty ULIDs on
-# ``actor_id`` + ``audit_correlation_id``, but the refresh path writes
-# zero audit rows — :func:`~app.domain.llm.budget.refresh_aggregate`
-# only issues an ``UPDATE budget_ledger ...`` and emits structured
-# logs. A zero-ULID string satisfies the dataclass invariant without
-# lying about provenance: any downstream seam that eventually reads
-# these fields (e.g. a future worker-audit writer) sees an all-zero
+# Pinned system-actor identifiers for worker-initiated fan-outs
+# (LLM-budget refresh, occurrence-generator tick, future tenant-
+# scoped sweeps). ``WorkspaceContext`` requires non-empty ULIDs on
+# ``actor_id`` + ``audit_correlation_id``; the fan-out paths write
+# either zero audit rows (refresh_aggregate) or workspace-anchored
+# audit rows whose provenance the spec already pins by
+# ``actor_kind = 'system'`` (generator's
+# ``schedules.generation_tick``, ``schedules.skipped_for_closure``).
+# A zero-ULID string satisfies the dataclass invariant without lying
+# about provenance: any downstream seam that eventually reads these
+# fields (e.g. a future worker-audit writer) sees an all-zero
 # sentinel that operators can pattern-match on.
 #
 # Matches the convention in :func:`app.auth.signup._agnostic_audit_ctx`
 # (system actor with zero-ULID ids) — kept module-private so callers
 # don't accidentally construct the sentinel outside the scheduler's
-# fan-out loop.
+# fan-out loops.
 _SYSTEM_ACTOR_ZERO_ULID: Final[str] = "00000000000000000000000000"
 
 
-def _system_refresh_context(
+def _system_actor_context(
     *,
     workspace_id: str,
     workspace_slug: str,
 ) -> WorkspaceContext:
-    """Build the system-actor :class:`WorkspaceContext` for the refresh fan-out.
+    """Build a system-actor :class:`WorkspaceContext` for a worker fan-out.
 
+    Shared by every worker fan-out body that needs a per-workspace
+    context the tenant filter will accept (LLM-budget refresh,
+    occurrence-generator tick, future tenant-scoped sweeps).
     ``actor_grant_role`` uses ``"manager"`` to mirror the established
     system-actor convention in the auth modules
     (:func:`app.auth.signup._agnostic_audit_ctx`,
@@ -564,6 +562,293 @@ def _system_refresh_context(
         actor_was_owner_member=False,
         audit_correlation_id=_SYSTEM_ACTOR_ZERO_ULID,
     )
+
+
+def _demo_expired_workspace_ids(
+    session: Session,
+    workspace_ids: list[str],
+    *,
+    now: datetime,
+) -> set[str]:
+    """Return the subset of ``workspace_ids`` whose demo TTL has passed.
+
+    §24 "Demo mode" / "Garbage collection" is the spec of record:
+    every ``demo_workspace`` row carries an ``expires_at``; once it
+    is in the past the workspace is awaiting GC and the generator
+    must skip it (running materialisation on a soon-to-be-purged
+    tenant is wasted work and would race with the ``demo_gc`` sweep).
+
+    The :class:`DemoWorkspace` table does not exist yet — cd-otv3 +
+    cd-h0ja are the open follow-ups that land it. Until then this
+    helper returns an empty set, the fan-out treats every workspace
+    as live, and the count surfaced in the tick summary stays at
+    zero. Once the model is in place the missing-module branch falls
+    away and the SELECT below picks up the filter without further
+    work in the fan-out.
+
+    Resolved via :mod:`importlib` rather than a static ``from ...
+    import ...`` because the demo package does not exist on disk
+    today — a static import would either hard-fail at module load
+    time or force ``# type: ignore`` to placate ``mypy --strict``.
+    Both are worse than this seam: ``importlib.import_module`` raises
+    :class:`ModuleNotFoundError` at call time (a subclass of
+    :class:`ImportError`, narrowed below), no other exception class
+    is swallowed, and the helper stays type-safe.
+    """
+    if not workspace_ids:
+        return set()
+
+    import importlib
+
+    try:
+        demo_module = importlib.import_module("app.adapters.db.demo.models")
+    except ModuleNotFoundError:
+        return set()
+
+    # The model class itself stays attribute-resolved — ``getattr``
+    # is the only safe form for a runtime-only import. The
+    # ``DemoWorkspace`` mapper is mandatory once the package
+    # exists; an :class:`AttributeError` here would be a packaging
+    # bug we want to surface, not swallow.
+    demo_workspace = demo_module.DemoWorkspace
+
+    # ``demo_workspace.id`` is a 1:1 FK to ``workspace.id`` (§24
+    # "Entity"), so the predicate is a simple ``id IN ...`` plus the
+    # ``expires_at`` cutoff. ``demo_workspace`` is the demo tenancy
+    # anchor — it carries no ``workspace_id`` of its own — so the
+    # SELECT runs inside ``tenant_agnostic`` (the caller already
+    # holds that bracket via the Workspace enumeration).
+    stmt = (
+        select(demo_workspace.id)
+        .where(demo_workspace.id.in_(workspace_ids))
+        .where(demo_workspace.expires_at < now)
+    )
+    # ``demo_workspace`` came in via :mod:`importlib`, so the column
+    # type stays ``Any`` from mypy's view. Belt-and-braces filter the
+    # scalars to the input set: we promise a ``set[str]`` whose every
+    # element appears in ``workspace_ids``, so a future schema change
+    # that returned a wrapped type (e.g. a ULID dataclass) cannot
+    # silently flag a live workspace as expired through equality
+    # surprise. A string that fails the membership check is dropped
+    # — fail-open is the right default for a sweep skip filter.
+    candidate_set = set(workspace_ids)
+    return {
+        candidate_id
+        for candidate_id in session.scalars(stmt).all()
+        if isinstance(candidate_id, str) and candidate_id in candidate_set
+    }
+
+
+def _make_generator_fanout_body(clock: Clock) -> Callable[[], None]:
+    """Build the hourly occurrence-generator fan-out body (cd-dcl2).
+
+    Factory rather than a bare module-level function so the body
+    closes over the scheduler's injected :class:`Clock` — the same
+    rationale the sibling :func:`_make_llm_budget_refresh_body` and
+    :func:`_make_idempotency_sweep_body` cite. The generator's
+    ``now`` is derived from ``clock.now()`` inside each per-workspace
+    call; reusing the scheduler's clock keeps the heartbeat timestamp
+    and the generation horizon aligned under :class:`FrozenClock`.
+
+    The returned body:
+
+    1. Opens its own UoW (one per tick) via
+       :func:`app.adapters.db.session.make_uow`. Sibling bodies do
+       the same (``_make_idempotency_sweep_body``,
+       ``_make_llm_budget_refresh_body``). The outer UoW commits on
+       clean exit and rolls back on any uncaught exception; the
+       per-workspace ``begin_nested`` SAVEPOINT below scopes the
+       rollback so a broken tenant does not lose successful sibling
+       writes.
+    2. Enumerates every :class:`~app.adapters.db.workspace.models.Workspace`
+       under :func:`tenant_agnostic`; the ``workspace`` table is the
+       tenancy anchor and carries no ``workspace_id`` of its own.
+       Demo-expired tenants (§24 "Garbage collection") are filtered
+       upfront via :func:`_demo_expired_workspace_ids` so the per-
+       workspace loop only touches live tenants.
+    3. For each live workspace, binds a system-actor
+       :class:`WorkspaceContext` to the ``current`` ContextVar and
+       calls :func:`~app.worker.tasks.generator.generate_task_occurrences`.
+       Wrapped in ``try / except Exception`` + ``begin_nested`` so a
+       single raising workspace logs at WARNING and the loop
+       continues — the spec's "per-workspace errors must not abort
+       the tick" invariant.
+    4. Emits structured log events:
+
+       * ``event="worker.generator.workspace.tick"`` (INFO) — per
+         workspace, with ``workspace_id``, ``workspace_slug``,
+         ``schedules_walked``, ``tasks_created``,
+         ``skipped_duplicate``, ``skipped_for_closure``. The
+         per-workspace payload the cd-dcl2 acceptance criteria
+         pin for log-based attribution.
+       * ``event="worker.generator.workspace.failed"`` (WARNING) —
+         per workspace, with ``workspace_id`` + the exception class
+         name. Full traceback would be noisy at hourly cadence;
+         operators can re-run with DEBUG logging if the root cause
+         needs deeper plumbing.
+       * ``event="worker.generator.tick.summary"`` (INFO) — once per
+         tick, with ``total_workspaces`` (live + demo-expired
+         enumerated), ``total_workspaces_skipped`` (demo-expired,
+         not walked), ``total_workspaces_failed``,
+         ``total_schedules_walked`` (sum of
+         :attr:`GenerationReport.schedules_walked`),
+         ``total_tasks_created`` (sum of
+         :attr:`GenerationReport.tasks_created`),
+         ``total_skipped_duplicate`` and ``total_skipped_for_closure``
+         (sums of the matching :class:`GenerationReport` fields). The
+         per-component split is the reason the per-workspace event
+         pins the same shape — operator dashboards plot rate of
+         duplicate skips (idempotency proof) separately from closure
+         skips (suppression proof).
+
+    The import of :func:`generate_task_occurrences` is deferred into
+    the closure body so module import order stays robust: the
+    generator drags in :mod:`dateutil.rrule`,
+    :mod:`app.adapters.db.tasks.models`, and the audit writer, none
+    of which the standalone ``python -m app.worker`` entrypoint
+    needs to start the heartbeat-only deployment.
+    """
+
+    def _body() -> None:
+        # Deferred imports — see factory docstring rationale. Keep
+        # them narrow so a worker process whose generator path fails
+        # to import still boots the heartbeat + idempotency-sweep
+        # ticks (the standalone worker's import surface stays lean).
+        from sqlalchemy.orm import Session as _Session
+
+        from app.adapters.db.workspace.models import Workspace
+        from app.tenancy import tenant_agnostic
+        from app.tenancy.current import reset_current, set_current
+        from app.worker.tasks.generator import generate_task_occurrences
+
+        now = clock.now()
+
+        total_workspaces = 0
+        total_workspaces_skipped = 0
+        total_workspaces_failed = 0
+        total_schedules_walked = 0
+        total_tasks_created = 0
+        total_skipped_duplicate = 0
+        total_skipped_for_closure = 0
+
+        with make_uow() as session:
+            # Same isinstance narrowing the LLM-budget body uses —
+            # ``UnitOfWorkImpl.__enter__`` returns a ``DbSession``
+            # protocol; the fan-out hands the concrete ``Session``
+            # to :func:`generate_task_occurrences`.
+            assert isinstance(session, _Session)
+
+            with tenant_agnostic():
+                # ``workspace`` is NOT in the tenant-filter registry
+                # (it is the tenancy anchor; see
+                # ``app/adapters/db/workspace/__init__.py``); the
+                # ``tenant_agnostic`` block is belt-and-braces in
+                # case a future migration registers the table.
+                rows = list(session.execute(select(Workspace.id, Workspace.slug)).all())
+                workspace_ids = [row.id for row in rows]
+                expired_ids = _demo_expired_workspace_ids(
+                    session, workspace_ids, now=now
+                )
+
+            for row in rows:
+                workspace_id = row.id
+                workspace_slug = row.slug
+                total_workspaces += 1
+
+                if workspace_id in expired_ids:
+                    # §24 "Garbage collection" — workspaces past
+                    # ``expires_at`` are awaiting the ``demo_gc``
+                    # sweep; running materialisation on them is
+                    # wasted work and would race the GC. Counted
+                    # toward ``total_workspaces_skipped`` so the
+                    # tick summary keeps the demo-fleet attrition
+                    # observable.
+                    total_workspaces_skipped += 1
+                    continue
+
+                ctx = _system_actor_context(
+                    workspace_id=workspace_id,
+                    workspace_slug=workspace_slug,
+                )
+                # Tenant filter reads the ``current`` ContextVar on
+                # every scoped SELECT; the generator's ``Schedule``
+                # / ``TaskTemplate`` / ``Occurrence`` reads + writes
+                # would raise
+                # :class:`~app.tenancy.orm_filter.TenantFilterMissing`
+                # without an active context. ``try / finally``
+                # guarantees the token is reset even if the body
+                # raises before the SAVEPOINT catches — without it
+                # the ContextVar would leak into the next iteration
+                # and the next workspace's run would see a stale
+                # ctx.
+                token = set_current(ctx)
+                try:
+                    try:
+                        # Per-workspace SAVEPOINT scopes the rollback
+                        # of any partial occurrence inserts to this
+                        # tenant — sibling workspaces' successful
+                        # writes ride the outer transaction unharmed.
+                        # The same pattern the LLM-budget refresh
+                        # body uses.
+                        with session.begin_nested():
+                            report = generate_task_occurrences(
+                                ctx,
+                                session=session,
+                                clock=clock,
+                            )
+                    except Exception as exc:
+                        # SAVEPOINT already rolled back by the context
+                        # manager; the outer transaction is still
+                        # usable. Log at WARNING with the exception
+                        # class name — full traceback would be noisy
+                        # at hourly cadence.
+                        total_workspaces_failed += 1
+                        _log.warning(
+                            "worker.generator.workspace.failed",
+                            extra={
+                                "event": "worker.generator.workspace.failed",
+                                "workspace_id": workspace_id,
+                                "workspace_slug": workspace_slug,
+                                "error": type(exc).__name__,
+                            },
+                        )
+                        continue
+                finally:
+                    reset_current(token)
+
+                total_schedules_walked += report.schedules_walked
+                total_tasks_created += report.tasks_created
+                total_skipped_duplicate += report.skipped_duplicate
+                total_skipped_for_closure += report.skipped_for_closure
+
+                _log.info(
+                    "worker.generator.workspace.tick",
+                    extra={
+                        "event": "worker.generator.workspace.tick",
+                        "workspace_id": workspace_id,
+                        "workspace_slug": workspace_slug,
+                        "schedules_walked": report.schedules_walked,
+                        "tasks_created": report.tasks_created,
+                        "skipped_duplicate": report.skipped_duplicate,
+                        "skipped_for_closure": report.skipped_for_closure,
+                    },
+                )
+
+        _log.info(
+            "worker.generator.tick.summary",
+            extra={
+                "event": "worker.generator.tick.summary",
+                "total_workspaces": total_workspaces,
+                "total_workspaces_skipped": total_workspaces_skipped,
+                "total_workspaces_failed": total_workspaces_failed,
+                "total_schedules_walked": total_schedules_walked,
+                "total_tasks_created": total_tasks_created,
+                "total_skipped_duplicate": total_skipped_duplicate,
+                "total_skipped_for_closure": total_skipped_for_closure,
+            },
+        )
+
+    return _body
 
 
 def _make_llm_budget_refresh_body(clock: Clock) -> Callable[[], None]:
@@ -671,7 +956,7 @@ def _make_llm_budget_refresh_body(clock: Clock) -> Callable[[], None]:
                 workspace_id = row.id
                 workspace_slug = row.slug
                 workspaces_attempted += 1
-                ctx = _system_refresh_context(
+                ctx = _system_actor_context(
                     workspace_id=workspace_id,
                     workspace_slug=workspace_slug,
                 )

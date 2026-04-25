@@ -560,8 +560,7 @@ class TestRegisteredBodyDrivesRefresh:
 
     Not strictly necessary — the unit suite already asserts the job
     lands in the scheduler — but cheap at integration depth, and a
-    regression that swapped the factory for a placeholder body
-    (like the current ``_generator_fanout_placeholder``) would slip
+    regression that swapped the factory for a no-op body would slip
     past the unit tests while still satisfying the "job exists"
     assertion. Driving the real engine through the registered path
     closes that gap.
