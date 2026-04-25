@@ -49,6 +49,7 @@ from app.adapters.db.base import Base
 
 __all__ = [
     "ApiToken",
+    "EmailChangePending",
     "Invite",
     "MagicLinkNonce",
     "PasskeyCredential",
@@ -447,19 +448,21 @@ class MagicLinkNonce(Base):
     **Tenant-agnostic.** Like :class:`User`, :class:`WebAuthnChallenge`,
     this row has no ``workspace_id``: magic-link purposes span
     ``signup_verify`` (pre-workspace), ``recover_passkey``,
-    ``email_change_confirm``, and ``grant_invite``, and the first
-    two exist before any :class:`~app.tenancy.WorkspaceContext` has
-    been resolved. The domain layer (:mod:`app.auth.magic_link`)
-    wraps every read/write in :func:`app.tenancy.tenant_agnostic`.
+    ``email_change_confirm``, ``email_change_revert``, and
+    ``grant_invite``, and the first two exist before any
+    :class:`~app.tenancy.WorkspaceContext` has been resolved. The
+    domain layer (:mod:`app.auth.magic_link`) wraps every read/write
+    in :func:`app.tenancy.tenant_agnostic`.
 
-    **``subject_id`` is soft-typed.** For ``recover_passkey`` and
-    ``email_change_confirm`` it's a ``user.id`` ULID; for
-    ``signup_verify`` it points at a future ``signup_session`` row
-    (cd-3i5) that doesn't exist yet; for ``grant_invite`` it points at
-    an ``invite.id``. We store the bare string and let the consuming
-    service interpret it per its ``purpose`` — adding the FKs would
-    force the column to be nullable-per-FK and the row to exist
-    pre-commit in one particular subject space.
+    **``subject_id`` is soft-typed.** For ``recover_passkey``,
+    ``email_change_confirm``, and ``email_change_revert`` it's a
+    ``user.id`` ULID; for ``signup_verify`` it points at a future
+    ``signup_session`` row (cd-3i5) that doesn't exist yet; for
+    ``grant_invite`` it points at an ``invite.id``. We store the bare
+    string and let the consuming service interpret it per its
+    ``purpose`` — adding the FKs would force the column to be
+    nullable-per-FK and the row to exist pre-commit in one
+    particular subject space.
     """
 
     __tablename__ = "magic_link_nonce"
@@ -686,6 +689,94 @@ class Invite(Base):
         Index("ix_invite_workspace", "workspace_id"),
         Index("ix_invite_email_lower", "pending_email_lower"),
         Index("ix_invite_expires", "expires_at"),
+    )
+
+
+class EmailChangePending(Base):
+    """Self-service email-change ledger row — one per ``change_request`` mint.
+
+    Pairs the magic-link nonce (``request_jti`` → ``magic_link_nonce.jti``,
+    purpose ``email_change_confirm``) with the plaintext addresses the
+    confirm + revert flows need. The token payload itself stays
+    minimal (``purpose``, ``subject_id``, ``jti``, ``exp``); the
+    plaintext lives here so the §03 confirm step can swap
+    ``users.email`` and the §03 revert step can restore it.
+
+    Lifecycle:
+
+    * born ``verified_at IS NULL`` + ``reverted_at IS NULL`` at
+      :func:`app.domain.identity.email_change.request_change`. The
+      paired :class:`MagicLinkNonce` row holds the consume contract;
+      this row holds the data the confirm flow needs.
+    * flips to ``verified_at = now`` + ``revert_jti`` set at
+      :func:`app.domain.identity.email_change.verify_change`. The new
+      :class:`MagicLinkNonce` row (purpose ``email_change_revert``,
+      72-hour TTL) is the revert anchor; ``revert_expires_at`` mirrors
+      its ``expires_at`` for fast-path lookups without joining.
+    * flips to ``reverted_at = now`` at
+      :func:`app.domain.identity.email_change.revert_change`. The
+      revert nonce row's ``consumed_at`` is also flipped — the two
+      operations land in the same UoW.
+
+    **PII minimisation (§15).** Plaintext emails round-trip from this
+    row to the SMTP send (notice / confirmation / revert) and to the
+    ``users.email`` swap; they are NEVER copied into audit diffs —
+    audit rows carry ``email_hash`` only via the same SHA-256 + HKDF
+    pepper pattern every other identity row uses. The plaintext
+    columns are scoped to this row's lifecycle (nonce row TTL, then
+    revert TTL) so a sweeper can hard-delete after both windows
+    elapse.
+
+    **Tenant-agnostic.** No ``workspace_id`` column — email is the
+    identity anchor and changes apply globally. The domain service
+    wraps every read/write in :func:`app.tenancy.tenant_agnostic`.
+
+    **No FK on ``request_jti`` / ``revert_jti``** because
+    :class:`MagicLinkNonce` rows can be swept once consumed; carrying
+    a hard FK would force this row to be deleted alongside, which
+    would lose the ``previous_email`` snapshot the revert flow
+    depends on for up to 72 hours after the swap.
+    """
+
+    __tablename__ = "email_change_pending"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    user_id: Mapped[str] = mapped_column(
+        String,
+        ForeignKey("user.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    # ``request_jti`` is the ``magic_link_nonce.jti`` of the
+    # ``email_change_confirm`` token sent to ``new_email``. Unique so
+    # a buggy retry can't double-bind a jti to two pending rows.
+    request_jti: Mapped[str] = mapped_column(String, nullable=False, unique=True)
+    # Set at verify-time to the ``magic_link_nonce.jti`` of the
+    # ``email_change_revert`` token mailed to ``previous_email``.
+    revert_jti: Mapped[str | None] = mapped_column(String, nullable=True, unique=True)
+    # Plaintext snapshots — scoped to this row's lifecycle. Audit
+    # rows carry the hashed forms only.
+    previous_email: Mapped[str] = mapped_column(String, nullable=False)
+    previous_email_lower: Mapped[str] = mapped_column(String, nullable=False)
+    new_email: Mapped[str] = mapped_column(String, nullable=False)
+    new_email_lower: Mapped[str] = mapped_column(String, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    verified_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    revert_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    reverted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    __table_args__ = (
+        Index("ix_email_change_pending_user", "user_id"),
+        Index("ix_email_change_pending_request_jti", "request_jti"),
+        Index("ix_email_change_pending_revert_jti", "revert_jti"),
+        Index("ix_email_change_pending_revert_expires", "revert_expires_at"),
     )
 
 

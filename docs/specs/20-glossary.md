@@ -250,8 +250,9 @@ fix the offender.
   (`open | in_progress | resolved | wont_fix`) and possibly converted
   to a task.
 - **Magic link.** Single-use, signed URL that is **never** a session
-  credential by itself — it carries a purpose (`enroll`, `accept`,
-  `recover`, `email_change`) and is only honoured by the matching
+  credential by itself — it carries a purpose (`signup_verify`,
+  `recover_passkey`, `grant_invite`, `email_change_confirm`,
+  `email_change_revert`) and is only honoured by the matching
   endpoint. Consumes a break-glass code (if that's the source)
   regardless of whether the link is later clicked.
 - **Click-to-accept invite.** Unified invitation flow (§03):
@@ -270,9 +271,13 @@ fix the offender.
   request; missing or invalid codes fail silently to prevent role
   enumeration.
 - **Email change verification.** Self-service swap of `users.email`
-  (§03): magic link of purpose `email_change` sent to the new
-  address, informational notice + 72-h revert link sent to the
-  old address, atomic swap on redemption.
+  (§03): magic link of purpose `email_change_confirm` sent to the
+  new address, informational notice sent to the old address; on
+  redemption a second magic link of purpose `email_change_revert`
+  (72-hour TTL) is sent to the old address so the swap can be
+  rolled back. All three routes (`change_request`, `verify`,
+  `revert`) are passkey-session-only and refuse Bearer tokens at
+  the auth dep edge.
 - **Grant role (surface).** The UI-shell / data-filter persona
   a user holds on a scope: `manager | worker | client | guest`.
   Stored on

@@ -15,7 +15,7 @@ Token format (§03 "Magic link format"):
 ```
 {
   "purpose": "signup_verify | recover_passkey | email_change_confirm |
-              grant_invite",
+              email_change_revert | grant_invite",
   "subject_id": "<ULID>",
   "jti":        "<ULID>",
   "exp":        <unix_timestamp>,
@@ -123,6 +123,7 @@ __all__ = [
     "Throttle",
     "TokenExpired",
     "consume_link",
+    "inspect_token_jti",
     "peek_link",
     "reason_for_exception",
     "request_link",
@@ -142,6 +143,7 @@ MagicLinkPurpose = Literal[
     "signup_verify",
     "recover_passkey",
     "email_change_confirm",
+    "email_change_revert",
     "grant_invite",
 ]
 
@@ -151,6 +153,7 @@ _VALID_PURPOSES: Final[frozenset[str]] = frozenset(
         "signup_verify",
         "recover_passkey",
         "email_change_confirm",
+        "email_change_revert",
         "grant_invite",
     }
 )
@@ -160,11 +163,15 @@ _VALID_PURPOSES: Final[frozenset[str]] = frozenset(
 # ``grant_invite`` ceiling is 24 hours per §03 "Additional users
 # (invite → click-to-accept)" — invitees often discover the email
 # the morning after, and a tighter cap would force managers to
-# re-send constantly.
+# re-send constantly. The ``email_change_revert`` ceiling is 72
+# hours per §03 "Self-service email change" "Revert window" — the
+# old-mailbox notice carries a revert link with that TTL so the
+# rightful owner has the weekend to spot a hijack and roll back.
 _TTL_BY_PURPOSE: Final[dict[str, timedelta]] = {
     "signup_verify": timedelta(minutes=15),
     "recover_passkey": timedelta(minutes=10),
-    "email_change_confirm": timedelta(minutes=10),
+    "email_change_confirm": timedelta(minutes=15),
+    "email_change_revert": timedelta(hours=72),
     "grant_invite": timedelta(hours=24),
 }
 
@@ -364,10 +371,13 @@ def _resolve_subject_id(
     this point in the flow, and the signup service (cd-3i5) / invite
     accept service will persist under the same id when it lands.
 
-    For ``recover_passkey`` / ``email_change_confirm`` we resolve the
-    existing :class:`User` row by email; if no row exists we return
-    ``None`` and the caller short-circuits silently (still sending
-    a 202 response to preserve the enumeration guard).
+    For ``recover_passkey`` / ``email_change_confirm`` /
+    ``email_change_revert`` we resolve the existing :class:`User` row
+    by email; if no row exists we return ``None`` and the caller
+    short-circuits silently (still sending a 202 response to preserve
+    the enumeration guard). Email-change callers (cd-601a) typically
+    hand a pre-resolved ``subject_id`` to :func:`request_link` so this
+    branch is bypassed entirely.
     """
     if purpose in ("signup_verify", "grant_invite"):
         # Fresh subject id; the downstream flow owns the row creation.
@@ -774,6 +784,39 @@ def peek_link(
         email_hash=row.created_email_hash,
         ip_hash=row.created_ip_hash,
     )
+
+
+# ---------------------------------------------------------------------------
+# Public surface — inspect (signature-verified peek at the jti)
+# ---------------------------------------------------------------------------
+
+
+def inspect_token_jti(token: str, *, settings: Settings | None = None) -> str:
+    """Return the ``jti`` claim of a signature-verified ``token``.
+
+    Cheap, read-only helper used by callers that have just minted a
+    token via :func:`request_link` and need to bind their own ledger
+    row to the magic-link nonce id (cd-601a's
+    :func:`app.domain.identity.email_change.request_change` /
+    :func:`verify_change` are the first users). Verifies the
+    signature using the same serializer as :func:`peek_link` /
+    :func:`consume_link` so a caller cannot accidentally trust a
+    payload that was tampered with in transit, but does **not**
+    touch the nonce row, expiry gates, or audit log — those are
+    :func:`peek_link` / :func:`consume_link`'s job.
+
+    Raises :class:`InvalidToken` on any signature / shape failure.
+    """
+    try:
+        data = _serializer(settings).loads(token)
+    except BadSignature as exc:
+        raise InvalidToken("token signature is invalid") from exc
+    if not isinstance(data, dict):
+        raise InvalidToken("token payload is not an object")
+    raw_jti = data.get("jti")
+    if not isinstance(raw_jti, str):
+        raise InvalidToken("token payload jti is not a string")
+    return raw_jti
 
 
 # ---------------------------------------------------------------------------

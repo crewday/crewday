@@ -1,12 +1,13 @@
 """Magic-link email template.
 
 One template covers every purpose (``signup_verify``,
-``recover_passkey``, ``email_change_confirm``, ``grant_invite``) —
-the caller hands in a ``purpose_label`` that reads naturally inside
-the subject and body ("verify your email", "recover your account",
-...). Keeping the variants in one file avoids a per-purpose
-proliferation while the template surface is still minimal; swapping
-in Jinja later is a whole-file rewrite, not a fan-out.
+``recover_passkey``, ``email_change_confirm``, ``email_change_revert``,
+``grant_invite``) — the caller hands in a ``purpose_label`` that
+reads naturally inside the subject and body ("verify your email",
+"recover your account", ...). Keeping the variants in one file
+avoids a per-purpose proliferation while the template surface is
+still minimal; swapping in Jinja later is a whole-file rewrite, not
+a fan-out.
 
 Placeholders:
 
@@ -49,6 +50,7 @@ _PURPOSE_LABELS: dict[str, str] = {
     "signup_verify": "verify your email and finish signing up",
     "recover_passkey": "recover your account and enrol a new passkey",
     "email_change_confirm": "confirm your new email address",
+    "email_change_revert": "revert the recent email change on your account",
     "grant_invite": "accept the invite to join a workspace",
 }
 

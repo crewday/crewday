@@ -75,6 +75,7 @@ from app.api.health import router as health_router
 from app.api.middleware import IdempotencyMiddleware, SecurityHeadersMiddleware
 from app.api.transport.sse import router as sse_router
 from app.api.v1 import CONTEXT_ROUTERS, WORKSPACE_ADMIN_ROUTER
+from app.api.v1.auth import email_change as email_change_module
 from app.api.v1.auth import invite as invite_module
 from app.api.v1.auth import logout as logout_module
 from app.api.v1.auth import magic as magic_module
@@ -480,6 +481,19 @@ def _mount_auth_routers(
         )
         app.include_router(
             recovery_module.build_recovery_router(
+                mailer=mailer,
+                throttle=throttle,
+                settings=settings,
+            ),
+            prefix=bare_prefix,
+        )
+        # Self-service email change (cd-601a). Bare-host because email
+        # is the identity anchor and the swap applies globally across
+        # every workspace the user belongs to. Reads the session
+        # cookie itself (passkey-session-only per §03 "Self-service
+        # email change") and refuses Bearer tokens at the dep edge.
+        app.include_router(
+            email_change_module.build_email_change_router(
                 mailer=mailer,
                 throttle=throttle,
                 settings=settings,

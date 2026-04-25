@@ -502,22 +502,31 @@ only). The server:
    — this bounds the window in which an attacker who just hijacked
    the account via a compromised magic link could pivot to a new
    mailbox.
-4. Issues a magic link of purpose `email_change` to the **new**
-   address only. The token payload carries `user_id` and
-   `pending_new_email`; 15-min TTL; single-use.
+4. Issues a magic link of purpose `email_change_confirm` to the
+   **new** address only. The token payload carries the standard
+   four claims (`purpose`, `subject_id` = `user.id`, `jti`, `exp`);
+   the new address itself lives on a server-side
+   `email_change_pending` row keyed by `jti`, **not** in the signed
+   token (the token URL stays free of plaintext PII). 15-min TTL;
+   single-use.
 5. Sends an informational, link-free notice to the **old** address
    ("Someone requested changing the email on your crew.day account
    to <masked-new>. If this wasn't you, contact your manager.")
    with the caller's IP prefix for provenance.
-6. Writes `auth.email_change_requested` with `actor_id`,
-   `old_email_hash`, `new_email_hash`, `ip_hash`.
+6. Writes `email.change_requested` (entity_kind=`user`,
+   entity_id=`user.id`) with `user_id`, `old_email_hash`,
+   `new_email_hash`, `ip_hash`, `request_jti`, `pending_id`. The
+   action follows the `<entity>.<action>` convention used by
+   sibling identity flows (`recovery.requested`, `signup.verified`,
+   `passkey.registered`); the prose grouping under "auth.*" is a
+   doc-level summary, not the literal action symbol.
 
 **Confirmation.** The recipient clicks the link on the new
 address, which calls
 `POST /api/v1/auth/email/verify { token }`. The server:
 
-1. Validates the signature, purpose (`email_change`), expiry, and
-   single-use `jti`.
+1. Validates the signature, purpose (`email_change_confirm`),
+   expiry, and single-use `jti`.
 2. Requires an active passkey session for the same
    `user_id` — opening the link on a signed-out browser prompts
    a passkey sign-in (on any device that still has a passkey)
@@ -525,16 +534,21 @@ address, which calls
    complete the swap.
 3. Re-checks uniqueness and swaps `users.email` atomically with
    the `jti` consumption.
-4. Writes `auth.email_changed` with the old/new hashes; sends a
-   notice to **both** addresses ("Your email was changed to
-   <masked-new>").
+4. Writes `email.change_verified` (entity_kind=`user`) with
+   `user_id`, `old_email_hash`, `new_email_hash`, `ip_hash`,
+   `request_jti`, `revert_jti`, `pending_id`. Sends notices to
+   **both** addresses — informational confirmation to the new
+   address (no link), 72-hour revert link to the old address.
 
 **Revert window.** The notice to the old address includes a link
 to `POST /api/v1/auth/email/revert { token }` signed with a
-72-hour TTL. Redemption reverts `users.email` to the old value
-and logs `auth.email_change_reverted`. The revert link is the
-only flow that consumes a magic link against the **old** address
-after the swap — it is not an authentication primitive.
+72-hour TTL (magic-link purpose `email_change_revert`). Redemption
+reverts `users.email` to the old value and logs
+`email.change_reverted` (entity_kind=`user`). The revert link is
+the only flow that consumes a magic link against the **old**
+address after the swap — it is not an authentication primitive,
+and the route refuses any `Authorization: Bearer …` header at the
+auth dep edge alongside the change_request / verify routes.
 
 ## Login
 

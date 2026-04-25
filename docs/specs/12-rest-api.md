@@ -377,11 +377,37 @@ GET    /api/v1/me/workspaces                     # cd-y5z3 — switcher payload 
                                                   # only workspace metadata + the
                                                   # caller's own role + last_seen_at.
 
-# Self-service email change (§03 "Self-service email change"). Passkey
-# session only; PATs and delegated tokens cannot touch email.
+# Self-service email change (§03 "Self-service email change", cd-601a).
+# Passkey session only; PATs / delegated / agent tokens are refused at
+# the auth dep edge with 403 ``forbidden`` even when a session cookie
+# is also present. The flow lives on the bare host because email is
+# the identity anchor — a swap applies globally across every workspace
+# the user belongs to.
+#
+# Mailing pattern (§03):
+#  * change_request — magic link to NEW (15-min, single-use) +
+#    informational notice to OLD (no link).
+#  * verify        — confirmation to NEW (no link) + 72h revert
+#    link to OLD.
+#  * revert        — single-use, no session needed (the token alone
+#    is the auth via mailbox control).
+#
+# Error vocabulary:
+#  * 403 ``forbidden``               — Authorization: Bearer header
+#                                      present (PAT / delegated / agent).
+#  * 401 ``session_required``         — change_request / verify without cookie.
+#  * 401 ``session_invalid``          — cookie does not resolve.
+#  * 422 ``invalid_email``            — change_request syntax fail.
+#  * 409 ``email_in_use``             — another user holds the address.
+#  * 409 ``recent_reenrollment``      — caller's newest passkey < 15 min old.
+#  * 403 ``session_user_mismatch``    — verify session != token user.
+#  * 410 ``expired``                  — token TTL lapsed (verify / revert).
+#  * 409 ``already_consumed``         — single-use token replayed.
+#  * 400 ``invalid_token``            — signature / shape failure.
+#  * 400 ``purpose_mismatch``         — wrong purpose code.
 POST   /api/v1/me/email/change_request           # body: {new_email}; emails a magic link to new address, notice to old address.
 POST   /api/v1/auth/email/verify                 # body: {token}; requires passkey session on same user; swaps users.email atomically.
-POST   /api/v1/auth/email/revert                 # body: {token}; 72h revert link from the original old-address notice.
+POST   /api/v1/auth/email/revert                 # body: {token}; 72h revert link from the original old-address notice; no session required.
 
 # Click-to-accept invite (§03 "Additional users (invite)"). Identity-
 # scoped; same token lands new users in a passkey ceremony and existing

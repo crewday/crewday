@@ -872,12 +872,14 @@ whether or not self-serve signup is enabled:
   address carries a revert link whose token reverts the
   `users.email` swap once; after redemption or TTL, the notice is
   inert.
-- **Audit always written.** `auth.recover.*` and
-  `auth.email_change_*` events land in `audit_log` on every
-  request (including misses and rate-limit trips), with
-  `email_hash` and `ip_hash` only — no plaintext addresses — so
-  the trail is usable for abuse response without leaking PII on
-  export.
+- **Audit always written.** `recovery.*` and `email.change_*`
+  events land in `audit_log` on every request (including misses
+  and rate-limit trips), with `email_hash` and `ip_hash` only —
+  no plaintext addresses — so the trail is usable for abuse
+  response without leaking PII on export. The `auth.*` prose
+  grouping in §03 is a doc-level summary; the literal action
+  symbols follow the `<entity>.<action>` convention used by
+  every other identity flow.
 - **Step-up bypass is not a fallback.** If the user holds a
   `manager` or `owners` position anywhere and does not supply a
   valid break-glass code, no email is sent. The user is expected
