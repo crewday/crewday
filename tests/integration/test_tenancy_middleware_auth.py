@@ -359,3 +359,193 @@ class TestCrossTenantConstantTime:
             f"timing branches diverged: slug_miss={mean_slug:.4f}s, "
             f"member_miss={mean_member:.4f}s, delta={delta:.4f}s"
         )
+
+
+class TestArchivedDelegatingSubjectUser:
+    """cd-et6y — middleware emits 401 with a typed error code.
+
+    §03 "Delegated tokens" / "Personal access tokens": when the
+    delegating / subject user is archived, the bearer-token request
+    returns ``401`` with a typed code, NOT the constant-time 404
+    that "unknown slug / not a member" branches collapse into.
+    """
+
+    def test_delegated_token_archived_user_returns_401(
+        self,
+        session_factory: sessionmaker[Session],
+        settings: Settings,
+        wire_default_uow: None,
+    ) -> None:
+        """Archiving the delegating user gates the delegated token at 401."""
+        ws_id, user_id = _seed(
+            session_factory,
+            slug="int-del-arch",
+            email="del-archived@example.com",
+        )
+        with session_factory() as s:
+            ctx = WorkspaceContext(
+                workspace_id=ws_id,
+                workspace_slug="int-del-arch",
+                actor_id=user_id,
+                actor_kind="user",
+                actor_grant_role="manager",
+                actor_was_owner_member=True,
+                audit_correlation_id=new_ulid(),
+            )
+            minted = mint_token(
+                s,
+                ctx,
+                user_id=user_id,
+                label="del-int",
+                scopes={},
+                expires_at=None,
+                kind="delegated",
+                delegate_for_user_id=user_id,
+                now=_PINNED,
+            )
+            s.commit()
+
+        # Archive the delegating user out-of-band.
+        with session_factory() as s:
+            from app.adapters.db.identity.models import User
+            from app.tenancy import tenant_agnostic
+
+            with tenant_agnostic():
+                row = s.get(User, user_id)
+                assert row is not None
+                row.archived_at = _PINNED
+                s.commit()
+
+        app = _build_app()
+        with TestClient(app, raise_server_exceptions=False) as client:
+            response = client.get(
+                "/w/int-del-arch/api/v1/ping",
+                headers={"Authorization": f"Bearer {minted.token}"},
+            )
+        # 401 with the typed error code — distinct from the 404
+        # "unknown / not-a-member" envelope.
+        assert response.status_code == 401
+        assert response.json() == {
+            "error": "delegating_user_archived",
+            "detail": None,
+        }
+        assert CORRELATION_ID_HEADER in response.headers
+
+    def test_personal_token_archived_user_returns_401(
+        self,
+        session_factory: sessionmaker[Session],
+        settings: Settings,
+        wire_default_uow: None,
+    ) -> None:
+        """Archiving the subject user gates the PAT at 401.
+
+        PATs carry ``workspace_id = NULL`` so the bearer-token + slug
+        URL must point at a workspace the user IS a member of for the
+        404 collision check to be meaningful — otherwise membership
+        miss would already 404 for unrelated reasons. Mint the PAT
+        for the same user that owns ``int-pat-arch``.
+        """
+        _ws_id, user_id = _seed(
+            session_factory,
+            slug="int-pat-arch",
+            email="pat-archived@example.com",
+        )
+        with session_factory() as s:
+            minted = mint_token(
+                s,
+                None,
+                user_id=user_id,
+                label="pat-int",
+                scopes={"me.tasks:read": True},
+                expires_at=None,
+                kind="personal",
+                subject_user_id=user_id,
+                now=_PINNED,
+            )
+            s.commit()
+
+        with session_factory() as s:
+            from app.adapters.db.identity.models import User
+            from app.tenancy import tenant_agnostic
+
+            with tenant_agnostic():
+                row = s.get(User, user_id)
+                assert row is not None
+                row.archived_at = _PINNED
+                s.commit()
+
+        app = _build_app()
+        with TestClient(app, raise_server_exceptions=False) as client:
+            response = client.get(
+                "/w/int-pat-arch/api/v1/ping",
+                headers={"Authorization": f"Bearer {minted.token}"},
+            )
+        assert response.status_code == 401
+        assert response.json() == {
+            "error": "subject_user_archived",
+            "detail": None,
+        }
+        assert CORRELATION_ID_HEADER in response.headers
+
+    def test_scoped_token_unaffected_by_user_archive(
+        self,
+        session_factory: sessionmaker[Session],
+        settings: Settings,
+        wire_default_uow: None,
+    ) -> None:
+        """Scoped tokens still resolve when the minting user is archived.
+
+        Scoped tokens carry their authority on ``scope_json``, not on
+        a delegating user — archive must not retroactively gate them
+        (revocation is the only valid kill path). Asserts the
+        middleware does not over-fire 401 on this path.
+        """
+        ws_id, user_id = _seed(
+            session_factory,
+            slug="int-scoped-arch",
+            email="scoped-archived@example.com",
+        )
+        with session_factory() as s:
+            ctx = WorkspaceContext(
+                workspace_id=ws_id,
+                workspace_slug="int-scoped-arch",
+                actor_id=user_id,
+                actor_kind="user",
+                actor_grant_role="manager",
+                actor_was_owner_member=True,
+                audit_correlation_id=new_ulid(),
+            )
+            minted = mint_token(
+                s,
+                ctx,
+                user_id=user_id,
+                label="scoped-int",
+                scopes={"tasks:read": True},
+                expires_at=None,
+                now=_PINNED,
+            )
+            s.commit()
+
+        with session_factory() as s:
+            from app.adapters.db.identity.models import User
+            from app.tenancy import tenant_agnostic
+
+            with tenant_agnostic():
+                row = s.get(User, user_id)
+                assert row is not None
+                row.archived_at = _PINNED
+                s.commit()
+
+        app = _build_app()
+        with TestClient(app, raise_server_exceptions=False) as client:
+            response = client.get(
+                "/w/int-scoped-arch/api/v1/ping",
+                headers={"Authorization": f"Bearer {minted.token}"},
+            )
+        # The scoped token still resolves a ctx — archive does not
+        # gate scoped tokens (the user-archive cascade for scoped
+        # tokens lives at user.archive time, not at verify time).
+        assert response.status_code == 200
+        body = response.json()
+        assert body["bound"] is True
+        assert body["workspace_id"] == ws_id

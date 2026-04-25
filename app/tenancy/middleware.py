@@ -74,7 +74,9 @@ from app.auth.session import (
     validate as validate_session,
 )
 from app.auth.tokens import (
+    DelegatingUserArchived,
     InvalidToken,
+    SubjectUserArchived,
     TokenExpired,
     TokenRevoked,
 )
@@ -296,6 +298,31 @@ def _not_found() -> JSONResponse:
     return JSONResponse(status_code=404, content={"error": "not_found", "detail": None})
 
 
+def _archived_user_401(error_code: str) -> JSONResponse:
+    """Return the canonical 401 shape for an archived delegating / subject user.
+
+    §03 "Delegated tokens" / "Personal access tokens" both pin a
+    ``401`` with a clear message when the delegating / subject user
+    is archived — distinct from the constant-time 404 the middleware
+    emits for "unknown slug / not a member" so a token holder sees
+    "you ARE authenticated but the human you act for is gone" rather
+    than the opaque enumeration shield. The error code is the typed
+    discriminator (``delegating_user_archived`` /
+    ``subject_user_archived``) the agent / SDK surfaces in its own UI.
+
+    The envelope mirrors :func:`_not_found`: a single-key ``error`` +
+    ``detail`` shape so the OpenAPI surface and clients share one
+    parser. We do not carry the user_id in ``detail`` — even though
+    a token holder already proved knowledge of the secret, a non-
+    enumerable error keeps the audit trail (and any inadvertent log
+    capture) PII-clean.
+    """
+    return JSONResponse(
+        status_code=401,
+        content={"error": error_code, "detail": None},
+    )
+
+
 # ---------------------------------------------------------------------------
 # Actor resolution
 # ---------------------------------------------------------------------------
@@ -318,17 +345,28 @@ def resolve_actor(
        user_id on success; ``workspace_id`` is left ``None`` because
        the session itself is tenant-agnostic at issue time.
 
-    Every failure (malformed token, unknown token, revoked token,
-    expired token, bad session cookie, expired session, …) returns
-    ``None``. The middleware then emits a 404 — per spec §01 we do
-    not distinguish "bad credential" from "good credential but not a
-    member" at the wire. ``settings`` is accepted to keep the
+    Most failure paths (malformed token, unknown token, revoked
+    token, expired token, bad session cookie, expired session, …)
+    return ``None``. The middleware then emits a 404 — per spec §01
+    we do not distinguish "bad credential" from "good credential but
+    not a member" at the wire. ``settings`` is accepted to keep the
     resolver plumb-testable (``session.validate`` uses it for the
     pepper subkey).
 
-    Raises nothing: unhandled exceptions bubble; the
-    :class:`InvalidToken` / :class:`SessionInvalid` / ... tree is
-    caught narrowly.
+    **Raises** :class:`DelegatingUserArchived` or
+    :class:`SubjectUserArchived` (cd-et6y) when a delegated /
+    personal-access token verifies cleanly but its delegating /
+    subject :class:`User` row carries a non-NULL ``archived_at``.
+    Spec §03 "Delegated tokens" / "Personal access tokens" pin a
+    ``401`` with a typed error code for that case — distinct from
+    the constant-time 404 the other failure paths collapse into,
+    because the agent has proven knowledge of the secret and needs
+    a clear "the human you act for is archived; reinstate them"
+    signal. The middleware catches both at :meth:`dispatch` and
+    emits the matching 401 envelope.
+
+    Other exceptions bubble; the :class:`InvalidToken` /
+    :class:`SessionInvalid` / ... tree is caught narrowly.
     """
     auth_header = request.headers.get("Authorization")
     if auth_header is not None and auth_header.lower().startswith(_BEARER_PREFIX):
@@ -337,8 +375,13 @@ def resolve_actor(
             try:
                 verified = verify_token(db_session, token=token_value)
             except (InvalidToken, TokenExpired, TokenRevoked):
-                # Every failure collapses to "no actor" — the middleware
-                # cannot distinguish them at the wire without leaking.
+                # Every "is this a real token?" failure collapses to
+                # "no actor" — the middleware cannot distinguish them
+                # at the wire without leaking. Liveness errors
+                # (DelegatingUserArchived / SubjectUserArchived) are
+                # NOT caught here on purpose: they propagate so the
+                # middleware can emit the spec-mandated 401 with a
+                # typed error code (cd-et6y, §03).
                 return None
             return ActorIdentity(
                 user_id=verified.user_id,
@@ -718,7 +761,49 @@ class WorkspaceContextMiddleware(BaseHTTPMiddleware):
 
         # 2) Scoped request — build the context or 404.
         settings = get_settings()
-        ctx, actor, outcome = self._resolve_context(request, settings, correlation_id)
+        try:
+            ctx, actor, outcome = self._resolve_context(
+                request, settings, correlation_id
+            )
+        except DelegatingUserArchived:
+            # cd-et6y / §03 "Delegated tokens": the agent proved
+            # knowledge of the secret and verified cleanly at the row
+            # level, but the human they act for is archived. Return
+            # 401 with a typed error code instead of the constant-
+            # time 404 — the agent needs a clear "your principal is
+            # gone" signal, not the opaque enumeration shield.
+            _log_tenancy_event(
+                slug=_parse_scoped_path(path),
+                workspace_id=None,
+                actor_id=None,
+                actor_kind=None,
+                token_id=None,
+                session_id=None,
+                correlation_id=correlation_id,
+                skip_path=False,
+                outcome="delegating_user_archived",
+            )
+            response = _archived_user_401("delegating_user_archived")
+            response.headers[CORRELATION_ID_HEADER] = correlation_id
+            return response
+        except SubjectUserArchived:
+            # Same shape as the delegated branch above for personal
+            # access tokens. Spec §03 "Personal access tokens" —
+            # archived subject ⇒ 401, reinstating clears the gate.
+            _log_tenancy_event(
+                slug=_parse_scoped_path(path),
+                workspace_id=None,
+                actor_id=None,
+                actor_kind=None,
+                token_id=None,
+                session_id=None,
+                correlation_id=correlation_id,
+                skip_path=False,
+                outcome="subject_user_archived",
+            )
+            response = _archived_user_401("subject_user_archived")
+            response.headers[CORRELATION_ID_HEADER] = correlation_id
+            return response
 
         if ctx is None:
             _log_tenancy_event(

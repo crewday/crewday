@@ -637,7 +637,15 @@ Key properties:
   immediately.
 - If the delegating user is archived, globally deactivated, or loses
   every non-revoked grant, requests with the token return `401`
-  with a clear message.
+  with `error = "delegating_user_archived"`. The verifier
+  (`app.auth.tokens.verify`) reads `users.archived_at` on every
+  request and raises a typed `DelegatingUserArchived` error which
+  the tenancy middleware maps to the 401 envelope; reinstating the
+  user (clearing `archived_at` back to NULL) restores the token.
+  The "loses every non-revoked grant" half lands when the
+  `role_grant` table grows a `revoked_at` column (see §02
+  follow-ups); until then "non-archived grant" == "row exists" and
+  the verifier only enforces the archive half.
 - A delegated token can only be created by a **passkey session** — it
   cannot be created by another token (no transitive delegation).
 - Default TTL: **30 days** (shorter than the 90-day default for scoped
@@ -711,10 +719,17 @@ Key properties:
   actions"), not an action-catalog entry.
 - If the subject user is archived, globally deactivated, or loses
   every non-revoked grant in every workspace, PAT requests return
-  `401` with a clear message. Reinstating the user reinstates
-  their PATs only if they survived archive (spec is
-  archive-preserves-rows; `users.archived_at` is set, the token
-  stays but returns 401 until the archive flag clears).
+  `401` with `error = "subject_user_archived"`. The verifier
+  (`app.auth.tokens.verify`) reads `users.archived_at` on every
+  request and raises a typed `SubjectUserArchived` error which the
+  tenancy middleware maps to the 401 envelope. Reinstating the
+  user reinstates their PATs only if they survived archive (spec
+  is archive-preserves-rows; `users.archived_at` is set, the
+  token stays but returns 401 until the archive flag clears). The
+  "loses every non-revoked grant" half lands when `role_grant`
+  grows a `revoked_at` column (same follow-up as the delegated
+  case above); until then the verifier enforces only the archive
+  half.
 - A PAT scoped to a workspace the user is no longer a member of
   returns `404 workspace_out_of_scope` — matching the behaviour
   of a scoped standalone token used against the wrong workspace.

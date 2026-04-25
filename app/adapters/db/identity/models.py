@@ -81,6 +81,16 @@ class User(Base):
     to. ``email`` is the display value; ``email_lower`` carries the
     unique-index lookup form so the case-insensitive contract holds
     on both SQLite and Postgres without dialect-specific types.
+
+    **Archive tombstone (cd-et6y).** ``archived_at`` is a soft-delete
+    timestamp: NULL for a live identity, non-NULL for an archived
+    one. The token verifier (:func:`app.auth.tokens.verify`) reads
+    this column to fail-closed on delegated / personal-access tokens
+    whose delegating / subject user has been archived (§03
+    "Delegated tokens" / "Personal access tokens" — "requests with
+    the token return 401 with a clear message"). Reinstate flips it
+    back to NULL; the row itself is preserved so audit trails and
+    foreign keys stay intact.
     """
 
     __tablename__ = "user"
@@ -98,6 +108,14 @@ class User(Base):
         DateTime(timezone=True), nullable=False
     )
     last_login_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    # Soft-delete tombstone. NULL = live identity; non-NULL = archived
+    # at that instant. The token verifier consults this column to
+    # return 401 for delegated / PAT requests whose delegating /
+    # subject user is no longer active. Reinstate clears it back to
+    # NULL; the row stays in place to preserve audit + FK joins.
+    archived_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
 

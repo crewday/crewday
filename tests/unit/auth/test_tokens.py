@@ -37,8 +37,10 @@ from app.adapters.db.session import make_engine
 from app.adapters.db.workspace.models import Workspace
 from app.auth.tokens import (
     _AGNOSTIC_WORKSPACE_ID,
+    DelegatingUserArchived,
     InvalidToken,
     MintedToken,
+    SubjectUserArchived,
     TokenExpired,
     TokenKindInvalid,
     TokenRevoked,
@@ -1481,3 +1483,280 @@ class TestPatAuditSeam:
         # updated alongside the redactor change.
         assert scrubbed["kind"] == "personal"
         assert scrubbed["scopes"] == ["me.tasks:read"]
+
+
+# ---------------------------------------------------------------------------
+# cd-et6y — verify-time delegating / subject user liveness check
+# ---------------------------------------------------------------------------
+
+
+class TestVerifyArchivedUser:
+    """``verify`` returns 401-equivalents when delegating / subject user is archived.
+
+    §03 "Delegated tokens" / "Personal access tokens": a delegated
+    token whose delegating user is archived returns 401 with a clear
+    message; same shape for a PAT whose subject user is archived.
+    The token row itself stays live (archive-preserves-rows per
+    §05) — only the user-side tombstone gates verification.
+    """
+
+    def test_delegated_verify_succeeds_for_live_user(
+        self, db_session: Session, ctx: WorkspaceContext, user: object
+    ) -> None:
+        """Sanity floor: a live (non-archived) delegating user verifies cleanly."""
+        result = mint(
+            db_session,
+            ctx,
+            user_id=ctx.actor_id,
+            label="chat-live",
+            scopes={},
+            expires_at=_PINNED + timedelta(days=30),
+            kind="delegated",
+            delegate_for_user_id=ctx.actor_id,
+            now=_PINNED,
+        )
+        # ``user.archived_at`` is NULL by default — explicit assertion
+        # so a future schema change doesn't silently flip the gate.
+        assert user.archived_at is None  # type: ignore[attr-defined]
+        verified = verify(db_session, token=result.token, now=_PINNED)
+        assert verified.kind == "delegated"
+        assert verified.delegate_for_user_id == ctx.actor_id
+
+    def test_pat_verify_succeeds_for_live_user(
+        self, db_session: Session, user: object
+    ) -> None:
+        """Sanity floor: a live (non-archived) subject user verifies cleanly."""
+        user_id = user.id  # type: ignore[attr-defined]
+        result = mint(
+            db_session,
+            None,
+            user_id=user_id,
+            label="pat-live",
+            scopes={"me.tasks:read": True},
+            expires_at=_PINNED + timedelta(days=90),
+            kind="personal",
+            subject_user_id=user_id,
+            now=_PINNED,
+        )
+        assert user.archived_at is None  # type: ignore[attr-defined]
+        verified = verify(db_session, token=result.token, now=_PINNED)
+        assert verified.kind == "personal"
+        assert verified.subject_user_id == user_id
+
+    def test_delegated_verify_rejects_archived_delegating_user(
+        self, db_session: Session, ctx: WorkspaceContext, user: object
+    ) -> None:
+        """Token row is otherwise live — only ``user.archived_at`` flips the gate."""
+        result = mint(
+            db_session,
+            ctx,
+            user_id=ctx.actor_id,
+            label="chat-archived",
+            scopes={},
+            expires_at=_PINNED + timedelta(days=30),
+            kind="delegated",
+            delegate_for_user_id=ctx.actor_id,
+            now=_PINNED,
+        )
+        # Archive the delegating user — token row stays untouched.
+        user.archived_at = _PINNED + timedelta(hours=1)  # type: ignore[attr-defined]
+        db_session.flush()
+        with pytest.raises(DelegatingUserArchived):
+            verify(
+                db_session,
+                token=result.token,
+                now=_PINNED + timedelta(hours=2),
+            )
+        # Token row itself never got revoked / expired — confirm.
+        row = db_session.get(ApiToken, result.key_id)
+        assert row is not None
+        assert row.revoked_at is None
+
+    def test_pat_verify_rejects_archived_subject_user(
+        self, db_session: Session, user: object
+    ) -> None:
+        """PAT verification respects ``user.archived_at`` on the subject."""
+        user_id = user.id  # type: ignore[attr-defined]
+        result = mint(
+            db_session,
+            None,
+            user_id=user_id,
+            label="pat-archived",
+            scopes={"me.tasks:read": True},
+            expires_at=_PINNED + timedelta(days=90),
+            kind="personal",
+            subject_user_id=user_id,
+            now=_PINNED,
+        )
+        user.archived_at = _PINNED + timedelta(hours=1)  # type: ignore[attr-defined]
+        db_session.flush()
+        with pytest.raises(SubjectUserArchived):
+            verify(
+                db_session,
+                token=result.token,
+                now=_PINNED + timedelta(hours=2),
+            )
+        row = db_session.get(ApiToken, result.key_id)
+        assert row is not None
+        assert row.revoked_at is None
+
+    def test_scoped_token_unaffected_by_user_archive(
+        self, db_session: Session, ctx: WorkspaceContext, user: object
+    ) -> None:
+        """``scoped`` tokens inherit no user authority; archive doesn't block them.
+
+        The §03 archive gate is delegated / PAT specific — a scoped
+        token's authority is the explicit ``scope_json`` set, not a
+        delegating user's grants. Archiving the user who happened to
+        mint the scoped token must not retroactively disable the
+        token: revocation is the only valid kill path.
+        """
+        result = mint(
+            db_session,
+            ctx,
+            user_id=ctx.actor_id,
+            label="scoped-archive",
+            scopes={"tasks:read": True},
+            expires_at=_PINNED + timedelta(days=90),
+            now=_PINNED,
+        )
+        user.archived_at = _PINNED + timedelta(hours=1)  # type: ignore[attr-defined]
+        db_session.flush()
+        verified = verify(
+            db_session,
+            token=result.token,
+            now=_PINNED + timedelta(hours=2),
+        )
+        assert verified.kind == "scoped"
+        assert verified.scopes == {"tasks:read": True}
+
+    def test_archived_user_with_revoked_token_collapses_to_revoked(
+        self, db_session: Session, ctx: WorkspaceContext, user: object
+    ) -> None:
+        """Revocation precedes the liveness gate.
+
+        When the token is BOTH revoked AND the delegating user is
+        archived, the verifier surfaces ``TokenRevoked`` — the
+        revocation is the older / lower-level fact, and the spec's
+        own ordering "revoked → 401" leads the agent to the same
+        recovery path either way.
+        """
+        result = mint(
+            db_session,
+            ctx,
+            user_id=ctx.actor_id,
+            label="del-revoked-archived",
+            scopes={},
+            expires_at=_PINNED + timedelta(days=30),
+            kind="delegated",
+            delegate_for_user_id=ctx.actor_id,
+            now=_PINNED,
+        )
+        revoke(db_session, ctx, token_id=result.key_id, now=_PINNED)
+        user.archived_at = _PINNED + timedelta(hours=1)  # type: ignore[attr-defined]
+        db_session.flush()
+        with pytest.raises(TokenRevoked):
+            verify(
+                db_session,
+                token=result.token,
+                now=_PINNED + timedelta(hours=2),
+            )
+
+    def test_archived_user_with_expired_token_collapses_to_expired(
+        self, db_session: Session, ctx: WorkspaceContext, user: object
+    ) -> None:
+        """Expiry also precedes the liveness gate — same reasoning as revoke above."""
+        result = mint(
+            db_session,
+            ctx,
+            user_id=ctx.actor_id,
+            label="del-expired-archived",
+            scopes={},
+            expires_at=_PINNED + timedelta(days=1),
+            kind="delegated",
+            delegate_for_user_id=ctx.actor_id,
+            now=_PINNED,
+        )
+        user.archived_at = _PINNED + timedelta(hours=1)  # type: ignore[attr-defined]
+        db_session.flush()
+        with pytest.raises(TokenExpired):
+            verify(
+                db_session,
+                token=result.token,
+                now=_PINNED + timedelta(days=2),
+            )
+
+    def test_bad_secret_with_archived_user_collapses_to_invalid(
+        self, db_session: Session, ctx: WorkspaceContext, user: object
+    ) -> None:
+        """A wrong secret never reaches the liveness gate.
+
+        We must not leak "this token belongs to an archived user" to
+        a probe that does NOT prove knowledge of the secret. The
+        verifier runs the argon2 check before the archive gate so a
+        tampered secret collapses into the opaque
+        :class:`InvalidToken` shape, identical to a probe against an
+        unknown ``key_id``.
+        """
+        result = mint(
+            db_session,
+            ctx,
+            user_id=ctx.actor_id,
+            label="del-tamper-archived",
+            scopes={},
+            expires_at=_PINNED + timedelta(days=30),
+            kind="delegated",
+            delegate_for_user_id=ctx.actor_id,
+            now=_PINNED,
+        )
+        user.archived_at = _PINNED + timedelta(hours=1)  # type: ignore[attr-defined]
+        db_session.flush()
+        # Tamper with the secret so argon2 mismatches.
+        _mip, key_id, secret = result.token.split("_", 2)
+        tampered_secret = ("A" if secret[0] != "A" else "B") + secret[1:]
+        tampered = f"mip_{key_id}_{tampered_secret}"
+        with pytest.raises(InvalidToken):
+            verify(
+                db_session,
+                token=tampered,
+                now=_PINNED + timedelta(hours=2),
+            )
+
+    def test_reinstating_user_clears_archive_gate(
+        self, db_session: Session, ctx: WorkspaceContext, user: object
+    ) -> None:
+        """Setting ``archived_at`` back to NULL re-enables the token (§03 reinstate).
+
+        Spec §03 "Personal access tokens": "Reinstating the user
+        reinstates their PATs only if they survived archive (spec is
+        archive-preserves-rows)" — once ``archived_at`` clears, the
+        token verifies cleanly again. Same shape for delegated.
+        """
+        result = mint(
+            db_session,
+            ctx,
+            user_id=ctx.actor_id,
+            label="del-reinstate",
+            scopes={},
+            expires_at=_PINNED + timedelta(days=30),
+            kind="delegated",
+            delegate_for_user_id=ctx.actor_id,
+            now=_PINNED,
+        )
+        user.archived_at = _PINNED + timedelta(hours=1)  # type: ignore[attr-defined]
+        db_session.flush()
+        with pytest.raises(DelegatingUserArchived):
+            verify(
+                db_session,
+                token=result.token,
+                now=_PINNED + timedelta(hours=2),
+            )
+        # Reinstate.
+        user.archived_at = None  # type: ignore[attr-defined]
+        db_session.flush()
+        verified = verify(
+            db_session,
+            token=result.token,
+            now=_PINNED + timedelta(hours=3),
+        )
+        assert verified.kind == "delegated"

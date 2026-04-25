@@ -103,7 +103,7 @@ from argon2.exceptions import Argon2Error, VerifyMismatchError
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.adapters.db.identity.models import ApiToken
+from app.adapters.db.identity.models import ApiToken, User
 from app.audit import write_audit
 from app.tenancy import WorkspaceContext, tenant_agnostic
 from app.util.clock import Clock, SystemClock
@@ -114,8 +114,10 @@ __all__ = [
     "PERSONAL_DEFAULT_TTL_DAYS",
     "PERSONAL_SCOPE_PREFIX",
     "SCOPED_DEFAULT_TTL_DAYS",
+    "DelegatingUserArchived",
     "InvalidToken",
     "MintedToken",
+    "SubjectUserArchived",
     "TokenExpired",
     "TokenKind",
     "TokenKindInvalid",
@@ -413,6 +415,42 @@ class TokenShapeError(ValueError):
     (``me_scope_conflict`` / ``scopes_required`` / ``kind_conflict``);
     the service layer collapses them into one error type with a
     human message so the router owns the code taxonomy in one place.
+    """
+
+
+class DelegatingUserArchived(ValueError):
+    """Delegated token's :attr:`ApiToken.delegate_for_user_id` is archived.
+
+    401-equivalent. Raised by :func:`verify` when the row's
+    ``kind == 'delegated'`` and the delegating user's
+    :attr:`User.archived_at` is non-NULL (§03 "Delegated tokens": "If
+    the delegating user is archived, globally deactivated, or loses
+    every non-revoked grant, requests with the token return 401 with
+    a clear message"). Distinct from :class:`InvalidToken` /
+    :class:`TokenRevoked` / :class:`TokenExpired` so the HTTP layer
+    can return ``error = "delegating_user_archived"`` instead of the
+    opaque "not a real token" 404 — the agent gets a clear signal
+    that re-minting won't help; the human owner has to be reinstated.
+    """
+
+
+class SubjectUserArchived(ValueError):
+    """Personal-access token's :attr:`ApiToken.subject_user_id` is archived.
+
+    401-equivalent. Raised by :func:`verify` when the row's
+    ``kind == 'personal'`` and the subject user's
+    :attr:`User.archived_at` is non-NULL (§03 "Personal access
+    tokens": "If the subject user is archived, globally deactivated,
+    or loses every non-revoked grant in every workspace, PAT
+    requests return 401 with a clear message. Reinstating the user
+    reinstates their PATs only if they survived archive (spec is
+    archive-preserves-rows; ``users.archived_at`` is set, the token
+    stays but returns 401 until the archive flag clears)"). Distinct
+    from :class:`InvalidToken` / :class:`TokenRevoked` /
+    :class:`TokenExpired` so the HTTP layer can return
+    ``error = "subject_user_archived"`` instead of the opaque "not a
+    real token" 404 — the user needs to be reinstated, not re-mint
+    a fresh token.
     """
 
 
@@ -1173,6 +1211,34 @@ def revoke_personal(
 # ---------------------------------------------------------------------------
 
 
+def _user_is_archived(session: Session, *, user_id: str) -> bool:
+    """Return ``True`` iff ``user.archived_at`` is set for ``user_id``.
+
+    Single-column probe — we don't materialise the whole :class:`User`
+    row. The verifier is on the per-request hot path and the only
+    field it needs is ``archived_at``; an explicit ``SELECT
+    archived_at`` keeps the read O(1) on the PK index without
+    pulling display name / email / ... into the ORM cache.
+
+    Missing rows (FK target hard-deleted out from under the token —
+    the FK is ``ON DELETE SET NULL`` for both ``delegate_for_user_id``
+    and ``subject_user_id``, so this should not normally happen on a
+    live token, but defensive readers belong here) return ``False``;
+    the caller's PK lookup of the token would have already collapsed
+    that case to :class:`InvalidToken` upstream.
+
+    Runs under :func:`tenant_agnostic` to mirror the ``api_token``
+    accessors above — :class:`User` is not registered as workspace-
+    scoped either, but the other reads in this module pay the same
+    gate so the pattern stays uniform across the verifier.
+    """
+    # justification: user is identity-scoped (no workspace_id column);
+    # the verifier runs before any WorkspaceContext exists.
+    with tenant_agnostic():
+        archived_at = session.scalar(select(User.archived_at).where(User.id == user_id))
+    return archived_at is not None
+
+
 def verify(
     session: Session,
     *,
@@ -1192,7 +1258,32 @@ def verify(
        :class:`InvalidToken` — wrapping argon2's
        :class:`VerifyMismatchError` so the caller sees the domain
        vocabulary only.
-    6. Debounced ``last_used_at`` bump — see module docstring.
+    6. **Delegating / subject liveness** (cd-et6y, §03 "Delegated
+       tokens" / "Personal access tokens"):
+
+       * ``kind == 'delegated'`` and
+         :attr:`User.archived_at` is set on the row's
+         ``delegate_for_user_id`` → :class:`DelegatingUserArchived`.
+       * ``kind == 'personal'`` and
+         :attr:`User.archived_at` is set on the row's
+         ``subject_user_id`` → :class:`SubjectUserArchived`.
+
+       The HTTP layer maps both to 401 with a typed error code
+       (``delegating_user_archived`` / ``subject_user_archived``) so
+       the agent gets a clear signal that re-minting won't help —
+       the human owner / subject has to be reinstated. Run AFTER
+       the secret verification so a probe with a random secret
+       still collapses to :class:`InvalidToken` (we don't leak
+       "this user is archived" to a caller who never proved
+       knowledge of the secret).
+
+       The "loses every non-revoked grant" half of the §03 rule
+       lands in a follow-up — the v1 ``role_grant`` schema has no
+       ``revoked_at`` column (revocation is a hard DELETE today,
+       see :mod:`app.adapters.db.authz.models`), so "no live
+       grants" today is "no rows" and is materially different from
+       the soft-retire shape the spec eventually wants.
+    7. Debounced ``last_used_at`` bump — see module docstring.
 
     Caller's UoW owns the transaction; this function never commits.
     A successful verify returns the ``user_id``, ``workspace_id``,
@@ -1208,18 +1299,6 @@ def verify(
     is enforced at the router seam). Keeping the match at the
     router keeps the domain service usable from contexts that don't
     yet have a tenancy middleware (CLI, worker).
-
-    .. note:: **Delegator / subject liveness gap (cd-et6y).** §03
-       "Delegated tokens" requires a 401 when the delegating user
-       is archived, globally deactivated, or has lost every
-       non-revoked grant; §03 "Personal access tokens" carries the
-       same rule against the subject user. This function does NOT
-       implement that check today — :class:`User` does not yet
-       carry an ``archived_at`` column (landing under cd-65kn /
-       the Users identity hardening follow-up). Until cd-et6y is
-       closed a delegated token continues to verify after the
-       user is archived; this is a known spec gap and is a
-       **blocker on any prod release**.
     """
     resolved_now = now if now is not None else _now(clock)
 
@@ -1248,6 +1327,29 @@ def verify(
         # an unknown ``key_id`` at the wire.
         raise InvalidToken(f"token {key_id!r} secret did not verify") from exc
 
+    # Liveness gate (cd-et6y). Run AFTER the secret check so a probe
+    # with a random secret still collapses to :class:`InvalidToken`
+    # rather than leaking that "this token's user is archived".
+    # ``scoped`` tokens do not consult either FK — their authority is
+    # the explicit scope set on the row, not a delegating user.
+    kind = _narrow_kind(row.kind)
+    if (
+        kind == "delegated"
+        and row.delegate_for_user_id is not None
+        and _user_is_archived(session, user_id=row.delegate_for_user_id)
+    ):
+        raise DelegatingUserArchived(
+            f"token {key_id!r} delegates for archived user {row.delegate_for_user_id!r}"
+        )
+    if (
+        kind == "personal"
+        and row.subject_user_id is not None
+        and _user_is_archived(session, user_id=row.subject_user_id)
+    ):
+        raise SubjectUserArchived(
+            f"token {key_id!r} subject user {row.subject_user_id!r} is archived"
+        )
+
     # Debounced best-effort update. We don't write to audit for this
     # — the /tokens UI reads ``last_used_at`` directly from the row
     # and the audit trail already captures the high-value events
@@ -1261,7 +1363,7 @@ def verify(
         workspace_id=row.workspace_id,
         scopes=dict(row.scope_json),
         key_id=row.id,
-        kind=_narrow_kind(row.kind),
+        kind=kind,
         delegate_for_user_id=row.delegate_for_user_id,
         subject_user_id=row.subject_user_id,
     )

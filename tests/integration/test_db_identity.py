@@ -85,11 +85,22 @@ class TestMigrationShape:
             "avatar_blob_hash",
             "created_at",
             "last_login_at",
+            # Soft-delete tombstone (cd-et6y): NULL = live identity,
+            # non-NULL = archived. The token verifier reads this column
+            # to fail-closed on delegated / personal-access tokens whose
+            # delegating / subject user has been archived.
+            "archived_at",
         }
         assert set(cols) == expected
         # NOT NULL surface: everything except the optional profile + last-login
-        # fields.
-        nullable = {"locale", "timezone", "avatar_blob_hash", "last_login_at"}
+        # fields. ``archived_at`` is the tombstone — NULL on a live row.
+        nullable = {
+            "locale",
+            "timezone",
+            "avatar_blob_hash",
+            "last_login_at",
+            "archived_at",
+        }
         for name in expected - nullable:
             assert cols[name]["nullable"] is False, f"{name} must be NOT NULL"
         for name in nullable:
