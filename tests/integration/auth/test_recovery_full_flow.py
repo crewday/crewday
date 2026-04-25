@@ -601,6 +601,233 @@ def _seed_user_with_killswitch(
         return user.id
 
 
+class TestRecoveryStepUp:
+    """Spec §03 "Self-service lost-device recovery" step 3 + §15
+    "Step-up bypass is not a fallback" — break-glass code gate over
+    the HTTP surface.
+
+    Three branches mirroring the unit tests but driven through the
+    real router so the Pydantic schema, dispatch ordering, and audit
+    persistence on a fresh UoW are exercised end-to-end.
+    """
+
+    def test_manager_no_code_returns_202_no_mail(
+        self,
+        client: TestClient,
+        engine: Engine,
+        mailer: _RecordingMailer,
+    ) -> None:
+        """A manager who omits the code → 202 (enumeration guard) +
+        no mail + ``recovery.stepup_missing`` audit.
+        """
+        factory = sessionmaker(bind=engine, expire_on_commit=False, class_=Session)
+        with factory() as s:
+            user = bootstrap_user(s, email="m@example.com", display_name="M")
+            workspace_id = new_ulid()
+            s.add(
+                Workspace(
+                    id=workspace_id,
+                    slug=f"ws-{workspace_id[:8].lower()}",
+                    name="W",
+                    plan="free",
+                    quota_json={},
+                    created_at=user.created_at,
+                )
+            )
+            s.flush()
+            s.add(
+                RoleGrant(
+                    id=new_ulid(),
+                    workspace_id=workspace_id,
+                    user_id=user.id,
+                    grant_role="manager",
+                    scope_property_id=None,
+                    created_at=user.created_at,
+                    created_by_user_id=None,
+                )
+            )
+            s.commit()
+            user_id = user.id
+
+        r = client.post(
+            "/api/v1/recover/passkey/request",
+            json={"email": "m@example.com"},
+        )
+        assert r.status_code == 202
+        assert r.json()["status"] == "accepted"
+        # No mail leaves the host — step-up gate refused.
+        assert mailer.sent == []
+
+        with factory() as s:
+            assert s.scalars(select(MagicLinkNonce)).all() == []
+            stepup = s.scalars(
+                select(AuditLog).where(AuditLog.action == "recovery.stepup_missing")
+            ).one()
+            assert stepup.entity_id == user_id
+            # No ``recovery.requested`` row — the step-up gate
+            # short-circuits before the primary UoW audit.
+            assert (
+                s.scalars(
+                    select(AuditLog).where(AuditLog.action == "recovery.requested")
+                ).all()
+                == []
+            )
+
+    def test_manager_valid_code_burns_and_mails(
+        self,
+        client: TestClient,
+        engine: Engine,
+        mailer: _RecordingMailer,
+    ) -> None:
+        """A manager with a valid code → mail + code burnt +
+        ``consumed_magic_link_id`` stamped + audit ``stepup=True``.
+        """
+        from app.adapters.db.identity.models import BreakGlassCode
+        from app.auth import break_glass as bg_module
+
+        factory = sessionmaker(bind=engine, expire_on_commit=False, class_=Session)
+        plaintext = "valid-int-code"
+        with factory() as s:
+            user = bootstrap_user(s, email="mv@example.com", display_name="MV")
+            workspace_id = new_ulid()
+            s.add(
+                Workspace(
+                    id=workspace_id,
+                    slug=f"ws-{workspace_id[:8].lower()}",
+                    name="MV",
+                    plan="free",
+                    quota_json={},
+                    created_at=user.created_at,
+                )
+            )
+            s.flush()
+            s.add(
+                RoleGrant(
+                    id=new_ulid(),
+                    workspace_id=workspace_id,
+                    user_id=user.id,
+                    grant_role="manager",
+                    scope_property_id=None,
+                    created_at=user.created_at,
+                    created_by_user_id=None,
+                )
+            )
+            code_id = new_ulid()
+            s.add(
+                BreakGlassCode(
+                    id=code_id,
+                    workspace_id=workspace_id,
+                    user_id=user.id,
+                    hash=bg_module._HASHER.hash(plaintext),
+                    hash_params={
+                        "time_cost": 3,
+                        "memory_cost": 65536,
+                        "parallelism": 4,
+                    },
+                    created_at=user.created_at,
+                    used_at=None,
+                    consumed_magic_link_id=None,
+                )
+            )
+            s.commit()
+
+        r = client.post(
+            "/api/v1/recover/passkey/request",
+            json={"email": "mv@example.com", "break_glass_code": plaintext},
+        )
+        assert r.status_code == 202
+        # Mail sent (step-up gate cleared, normal hit branch).
+        assert len(mailer.sent) == 1
+
+        with factory() as s:
+            nonce = s.scalars(select(MagicLinkNonce)).one()
+            burnt = s.get(BreakGlassCode, code_id)
+            assert burnt is not None
+            assert burnt.used_at is not None
+            assert burnt.consumed_magic_link_id == nonce.jti
+            audit = s.scalars(
+                select(AuditLog).where(AuditLog.action == "recovery.requested")
+            ).one()
+            assert isinstance(audit.diff, dict)
+            assert audit.diff["hit"] is True
+            assert audit.diff["stepup"] is True
+
+    def test_worker_with_code_does_not_burn(
+        self,
+        client: TestClient,
+        engine: Engine,
+        mailer: _RecordingMailer,
+    ) -> None:
+        """Non-step-up worker with a code → code IGNORED, mail still sent.
+
+        §03 step 4 — the code field is silently dropped for workers /
+        clients / guests.
+        """
+        from app.adapters.db.identity.models import BreakGlassCode
+        from app.auth import break_glass as bg_module
+
+        factory = sessionmaker(bind=engine, expire_on_commit=False, class_=Session)
+        plaintext = "untouched-code"
+        with factory() as s:
+            user = bootstrap_user(s, email="wc@example.com", display_name="WC")
+            workspace_id = new_ulid()
+            s.add(
+                Workspace(
+                    id=workspace_id,
+                    slug=f"ws-{workspace_id[:8].lower()}",
+                    name="WC",
+                    plan="free",
+                    quota_json={},
+                    created_at=user.created_at,
+                )
+            )
+            s.flush()
+            s.add(
+                RoleGrant(
+                    id=new_ulid(),
+                    workspace_id=workspace_id,
+                    user_id=user.id,
+                    grant_role="worker",
+                    scope_property_id=None,
+                    created_at=user.created_at,
+                    created_by_user_id=None,
+                )
+            )
+            code_id = new_ulid()
+            s.add(
+                BreakGlassCode(
+                    id=code_id,
+                    workspace_id=workspace_id,
+                    user_id=user.id,
+                    hash=bg_module._HASHER.hash(plaintext),
+                    hash_params={
+                        "time_cost": 3,
+                        "memory_cost": 65536,
+                        "parallelism": 4,
+                    },
+                    created_at=user.created_at,
+                    used_at=None,
+                    consumed_magic_link_id=None,
+                )
+            )
+            s.commit()
+
+        r = client.post(
+            "/api/v1/recover/passkey/request",
+            json={"email": "wc@example.com", "break_glass_code": plaintext},
+        )
+        assert r.status_code == 202
+        # Mail sent — normal hit branch for non-step-up users.
+        assert len(mailer.sent) == 1
+
+        with factory() as s:
+            row = s.get(BreakGlassCode, code_id)
+            assert row is not None
+            # Code untouched — non-step-up flow ignores it.
+            assert row.used_at is None
+            assert row.consumed_magic_link_id is None
+
+
 class TestRecoveryKillSwitch:
     """Spec §03 "Workspace kill-switch" end-to-end."""
 
@@ -775,6 +1002,107 @@ class TestRecoveryKillSwitch:
                     select(AuditLog).where(
                         AuditLog.action == "recovery.disabled_by_workspace"
                     )
+                ).all()
+                == []
+            )
+
+    def test_kill_switched_step_up_user_does_not_burn_code(
+        self,
+        client: TestClient,
+        engine: Engine,
+        mailer: _RecordingMailer,
+    ) -> None:
+        """A step-up user who lands in a kill-switched workspace must
+        NOT have their break-glass code burnt.
+
+        Kill-switch fires *before* the step-up gate (recovery refused
+        for an operator-disabled workspace), so the redeem walk
+        never runs. Burning a captured code on a refused request
+        would let an attacker grind a step-up user's code-set down
+        to zero by repeatedly submitting against a kill-switched
+        workspace — the §03 redemption ordering is what protects
+        against it.
+        """
+        from app.adapters.db.identity.models import BreakGlassCode
+        from app.auth import break_glass as bg_module
+
+        factory = sessionmaker(bind=engine, expire_on_commit=False, class_=Session)
+        plaintext = "captured-code"
+        with factory() as s:
+            user = bootstrap_user(s, email="ksm@example.com", display_name="KSM")
+            workspace_id = new_ulid()
+            s.add(
+                Workspace(
+                    id=workspace_id,
+                    slug=f"ws-{workspace_id[:8].lower()}",
+                    name="KSManager",
+                    plan="free",
+                    quota_json={},
+                    settings_json={
+                        "auth.self_service_recovery_enabled": False,
+                    },
+                    created_at=user.created_at,
+                )
+            )
+            s.flush()
+            s.add(
+                RoleGrant(
+                    id=new_ulid(),
+                    workspace_id=workspace_id,
+                    user_id=user.id,
+                    grant_role="manager",
+                    scope_property_id=None,
+                    created_at=user.created_at,
+                    created_by_user_id=None,
+                )
+            )
+            code_id = new_ulid()
+            s.add(
+                BreakGlassCode(
+                    id=code_id,
+                    workspace_id=workspace_id,
+                    user_id=user.id,
+                    hash=bg_module._HASHER.hash(plaintext),
+                    hash_params={
+                        "time_cost": 3,
+                        "memory_cost": 65536,
+                        "parallelism": 4,
+                    },
+                    created_at=user.created_at,
+                    used_at=None,
+                    consumed_magic_link_id=None,
+                )
+            )
+            s.commit()
+
+        r = client.post(
+            "/api/v1/recover/passkey/request",
+            json={
+                "email": "ksm@example.com",
+                "break_glass_code": plaintext,
+            },
+        )
+        # Wire-identical 202; the kill-switch refused before the
+        # step-up gate even classified the user.
+        assert r.status_code == 202
+        assert mailer.sent == []
+
+        with factory() as s:
+            row = s.get(BreakGlassCode, code_id)
+            assert row is not None
+            # Code untouched — the kill-switch branch returned before
+            # the redeem walk.
+            assert row.used_at is None
+            assert row.consumed_magic_link_id is None
+            # The kill-switch audit landed; no step-up audit.
+            assert s.scalars(
+                select(AuditLog).where(
+                    AuditLog.action == "recovery.disabled_by_workspace"
+                )
+            ).all()
+            assert (
+                s.scalars(
+                    select(AuditLog).where(AuditLog.action.like("recovery.stepup_%"))
                 ).all()
                 == []
             )

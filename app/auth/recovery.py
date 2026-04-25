@@ -66,6 +66,19 @@ the enumeration guard: nothing the caller can practically observe
 (status, latency on a real network, mail cadence) tells them
 whether their email was known to the deployment.
 
+**Step-up status hardening (§15 line 957).** §15 forbids leaking
+**step-up status** as well as user existence. The step-up gate's
+no-code and locked-out branches would otherwise be observably
+faster than the redeem branches (no argon2id walk, no HMAC
+sign). :func:`_burn_cpu_for_stepup_refusal` collapses those onto
+roughly the same baseline by paying one argon2id verify + one
+HMAC sign before the early return, so a network attacker who
+submits ``email + dummy-code`` cannot distinguish "step-up user
+who hasn't issued codes" from "step-up user with a wrong code".
+The residual leak is the *N-verify* asymmetry on the redeem
+branches (1..8 codes), which cannot be balanced without
+leaking the code-set size in the other direction.
+
 **Audit.** Every entry point emits one row under an agnostic
 :class:`WorkspaceContext` (recovery runs strictly before a workspace
 context is resolved — the user may belong to any number of
@@ -95,6 +108,7 @@ import logging
 import secrets
 import threading
 from collections.abc import Mapping, Sequence
+from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any, Final
@@ -104,6 +118,7 @@ from sqlalchemy.orm import Session as SqlaSession
 
 from app.adapters.db.authz.models import RoleGrant
 from app.adapters.db.identity.models import (
+    BreakGlassCode,
     PasskeyCredential,
     User,
     canonicalise_email,
@@ -112,7 +127,7 @@ from app.adapters.db.session import make_uow
 from app.adapters.db.workspace.models import Workspace
 from app.adapters.mail.ports import Mailer
 from app.audit import write_audit
-from app.auth import magic_link, passkey
+from app.auth import break_glass, magic_link, passkey
 from app.auth import session as session_module
 from app.auth._hashing import hash_with_pepper
 from app.auth._throttle import RecoveryRateLimited, Throttle
@@ -475,6 +490,67 @@ def _send_unknown_email(
     mailer.send(to=[to_email], subject=subject, body_text=body_text)
 
 
+def _audit_recovery_stepup_refused(
+    *,
+    user_id: str,
+    email_hash: str,
+    ip_hash: str,
+    reason: str,
+    clock: Clock | None = None,
+) -> None:
+    """Write one ``audit.recovery.stepup_*`` refusal row on a fresh UoW.
+
+    Spec §03 "Self-service lost-device recovery" step 3 + §15
+    "Step-up bypass is not a fallback": when a step-up user submits a
+    recovery request without a valid break-glass code (no code at
+    all, a code that doesn't match any unused row, or after the
+    24-hour redemption lockout has flipped), the recovery service
+    neither mints nor mails anything.
+
+    The forensic trail lives on a fresh UoW for the same reason
+    :func:`_audit_recovery_disabled_by_workspace` uses one — the
+    primary UoW has no domain row to commit on this branch (no
+    nonce, no mailer queue), and pinning the audit on a sibling
+    transaction keeps the refusal visible even if the caller's UoW
+    later rolls back for an unrelated reason.
+
+    ``reason`` is one of ``stepup_missing`` / ``stepup_invalid`` /
+    ``stepup_locked_out``; the audit ``action`` is namespaced as
+    ``recovery.<reason>`` so a single SELECT on
+    ``action LIKE 'recovery.stepup_%'`` aggregates the three at the
+    operator's leisure.
+
+    Failures of the audit UoW are logged and swallowed: the caller
+    is about to return 202 per the §15 enumeration guard, and a
+    shadowing 500 here would leak the step-up state on the wire.
+    The catch is deliberately broad (``Exception``) so a transient
+    DB / config hiccup still logs-and-drops; ``BaseException``
+    propagates so operator aborts aren't swallowed.
+    """
+    diff = {
+        "email_hash": email_hash,
+        "ip_hash": ip_hash,
+        "reason": reason,
+    }
+    try:
+        with make_uow() as uow_session:
+            assert isinstance(uow_session, SqlaSession)
+            write_audit(
+                uow_session,
+                _agnostic_audit_ctx(),
+                entity_kind="user",
+                entity_id=user_id,
+                action=f"recovery.{reason}",
+                diff=diff,
+                clock=clock,
+            )
+    except Exception:
+        _log.exception(
+            "recovery step-up refusal audit write failed on fresh UoW (reason=%s)",
+            reason,
+        )
+
+
 def _audit_recovery_disabled_by_workspace(
     *,
     user_id: str,
@@ -549,6 +625,51 @@ def _burn_cpu_for_miss_branch(pepper: bytes) -> None:
     # 48 bytes to match the token size :func:`magic_link.request_link`
     # signs (see ``_TOKEN_ENTROPY_BYTES`` there). ``hmac.digest`` is
     # the fast single-shot form — no stateful object allocation.
+    throwaway = secrets.token_bytes(48)
+    hmac.digest(pepper, throwaway, "sha256")
+
+
+def _burn_cpu_for_stepup_refusal(pepper: bytes) -> None:
+    """Match the redeem-walk + HMAC-sign cost on a step-up refusal.
+
+    §15 line 957 requires the response shape to leak neither user
+    existence nor **step-up status**. Without this burn, three
+    branches diverge sharply on the wire:
+
+    * step-up + no code: short-circuits before ``redeem_code`` walks
+      any argon2id verify and before ``magic_link.request_link``
+      pays its HMAC-sign cost — the fastest branch by far.
+    * step-up + locked out: same shape as missing — short-circuit.
+    * step-up + correct/incorrect code: pays N argon2id verifies +
+      one HMAC sign.
+
+    A network adversary who submits ``email + dummy-code`` can
+    measure a few hundred milliseconds of gap and learn that the
+    user **is in the step-up population** (manager / owners-group
+    member). That probes step-up status — the exact bit §15
+    forbids.
+
+    Mitigation: on the missing-code and locked-out refusal paths,
+    burn one argon2id verify against a throwaway hash + one HMAC
+    sign. This collapses the three step-up branches onto roughly
+    the same baseline. The residual leak is the *N-verify* cost
+    asymmetry on the redeem branches (1..8 codes, ~50ms each), which
+    cannot be balanced without leaking the code-set size in the
+    other direction; a single argon2id verify of fixed cost is the
+    pragmatic floor that makes "step-up user with no code" no
+    cheaper than "step-up user with one code".
+    """
+    # One argon2id verify against a throwaway hash. Mismatch is the
+    # expected outcome — we only care about the CPU work the verify
+    # performed. Suppressing ``Exception`` (rather than the specific
+    # argon2 errors) keeps this resilient to a future hasher swap
+    # (e.g. argon2id parameter bump producing a different exception
+    # subclass on a corrupted hash).
+    throwaway_plaintext = secrets.token_hex(8)
+    throwaway_hash = break_glass._HASHER.hash(throwaway_plaintext)
+    with suppress(Exception):
+        break_glass._HASHER.verify(throwaway_hash, "definitely-not-the-plaintext")
+    # Match the magic-link HMAC-sign cost.
     throwaway = secrets.token_bytes(48)
     hmac.digest(pepper, throwaway, "sha256")
 
@@ -649,6 +770,7 @@ def request_recovery(
     mailer: Mailer,
     base_url: str,
     throttle: Throttle,
+    break_glass_code: str | None = None,
     now: datetime | None = None,
     settings: Settings | None = None,
     clock: Clock | None = None,
@@ -672,25 +794,54 @@ def request_recovery(
        downstream step and write one
        ``audit.recovery.disabled_by_workspace`` row on a fresh UoW.
        Wire contract (202) is unchanged.
-    5. **Hit branch** (user exists + not kill-switched): hand off to
-       :func:`magic_link.request_link` with purpose
-       ``recover_passkey``. The magic-link service mints the token,
-       inserts the nonce row, and sends the mail via the
-       :data:`recovery_new_link_template` template — which we pass
-       as the caller-owned ``mailer_template`` parameter. ``subject_id``
-       is pinned to the user's id so the verify step binds directly to
-       the row without trusting the browser.
-    6. **Miss branch** (no user): send the ``recovery_unknown``
+    5. **Step-up gate** (§03 "Self-service lost-device recovery"
+       step 3 + §15 "Step-up bypass is not a fallback"): for a
+       matched user, classify their step-up status via
+       :func:`app.auth.break_glass.is_step_up_user`. If they hold
+       any active ``manager`` grant or membership in any
+       ``owners`` permission group:
+
+       * the per-user 24h redemption lockout
+         (3 failed attempts / 1h rolling window) is consulted via
+         :func:`break_glass.check_redeem_allowed`; a locked-out
+         user gets a ``recovery.stepup_locked_out`` audit and no
+         mail.
+       * a :func:`break_glass.redeem_code` walk verifies any
+         submitted ``break_glass_code`` against the user's unused
+         rows; a match burns the row and proceeds to the normal
+         hit branch (its id is captured so the magic-link nonce's
+         jti can stamp ``consumed_magic_link_id`` once minted),
+         a miss / missing code records a failure attempt and
+         writes ``recovery.stepup_invalid`` /
+         ``recovery.stepup_missing``. Either refusal short-
+         circuits — no nonce, no mail.
+
+       For the **non-step-up** population (workers, clients,
+       guests with no manager / owners membership), any submitted
+       ``break_glass_code`` is silently ignored — the spec is
+       explicit that a code is never burnt for a user outside the
+       step-up population.
+    6. **Hit branch** (user exists + not kill-switched + step-up
+       gate cleared): hand off to :func:`magic_link.request_link`
+       with purpose ``recover_passkey``. The magic-link service
+       mints the token, inserts the nonce row, and sends the mail
+       via the :data:`recovery_new_link_template` template — which
+       we pass as the caller-owned ``mailer_template`` parameter.
+       ``subject_id`` is pinned to the user's id so the verify
+       step binds directly to the row without trusting the
+       browser.
+    7. **Miss branch** (no user): send the ``recovery_unknown``
        template to the typed address so a legitimate owner who
        typo'd sees "we couldn't find you" instead of a silent
        no-op.
-    7. In the hit + miss branches (but NOT the kill-switch branch),
-       write one ``audit.recovery.requested`` row with ``hit``
-       discriminator — the spec AC requires audit to distinguish
-       hit vs miss even though the caller's response is identical.
-       The kill-switch branch has a dedicated audit action so
-       operators see the refusal distinctly from a normal "no
-       recovery happened yet" row.
+    8. In the hit + miss branches (but NOT the kill-switch /
+       step-up branches), write one ``audit.recovery.requested``
+       row with ``hit`` discriminator — the spec AC requires
+       audit to distinguish hit vs miss even though the caller's
+       response is identical. When the step-up gate fired and the
+       user redeemed a valid code, the audit ``diff`` carries
+       ``stepup=True`` so operators can join the burnt code row
+       to the request.
 
     Returns a :class:`PendingDispatch` carrying every deferred SMTP
     send queued for the request — the recovery-flavoured magic-link
@@ -700,9 +851,9 @@ def request_recovery(
     ``db_session`` FastAPI dep) and invokes
     :meth:`PendingDispatch.deliver` only after the ``with`` exits —
     a commit failure short-circuits every queued send (cd-9slq).
-    The dispatch is empty when the kill-switch branch fires (the
-    forensic audit row already landed on a fresh UoW; nothing to
-    send to the user).
+    The dispatch is empty when the kill-switch / step-up branches
+    fire (the forensic audit row already landed on a fresh UoW;
+    nothing to send to the user).
 
     Note: the magic-link service's own ``recovery_new_link`` template
     selection lives inside :func:`_send_recovery_link`, not in
@@ -755,6 +906,100 @@ def request_recovery(
         # in :func:`_audit_recovery_disabled_by_workspace`.
         return dispatch
 
+    # Step-up gate (§03 "Self-service lost-device recovery" step 3
+    # + §15 "Step-up bypass is not a fallback"): managers / owners
+    # need a valid unused break-glass code. ``stepup_burnt_code_id``
+    # threads the burnt-row id through to the magic-link mint so we
+    # can stamp ``consumed_magic_link_id`` once the nonce lands.
+    stepup_required = False
+    stepup_burnt_code_id: str | None = None
+    if user is not None:
+        stepup_required = break_glass.is_step_up_user(session, user_id=user.id)
+        if stepup_required:
+            # Lockout check first — a locked-out user never even
+            # touches the BreakGlassCode index. The lockout state is
+            # process-local (cd-7huk absorbs it into the shared store
+            # alongside the throttle); the helper raises so the
+            # refusal path is single-source.
+            try:
+                break_glass.check_redeem_allowed(user_id=user.id, now=resolved_now)
+            except break_glass.BreakGlassLockedOut:
+                # Pay matching CPU before returning so the lockout
+                # branch is not observably faster than a step-up user
+                # who submitted a wrong code (§15 step-up-status leak
+                # — see :func:`_burn_cpu_for_stepup_refusal`).
+                _burn_cpu_for_stepup_refusal(pepper)
+                _audit_recovery_stepup_refused(
+                    user_id=user.id,
+                    email_hash=email_hash,
+                    ip_hash=ip_hash,
+                    reason="stepup_locked_out",
+                    clock=clock,
+                )
+                return dispatch
+
+            if break_glass_code is None or not break_glass_code.strip():
+                # No code submitted — ``recovery.stepup_missing``,
+                # no mail, no nonce. The audit lives on a FRESH UoW
+                # so the trail survives even if the caller's UoW
+                # later rolls back; the recording matches the
+                # kill-switch refusal shape.
+                # Pay matching CPU first so this branch isn't
+                # observably faster than a step-up user who
+                # submitted a (wrong) code — the timing asymmetry
+                # would otherwise leak step-up status, which §15
+                # explicitly forbids.
+                _burn_cpu_for_stepup_refusal(pepper)
+                _audit_recovery_stepup_refused(
+                    user_id=user.id,
+                    email_hash=email_hash,
+                    ip_hash=ip_hash,
+                    reason="stepup_missing",
+                    clock=clock,
+                )
+                # Missing code does NOT count toward the redemption
+                # rate-limit — the §03 cap is on *failed verification
+                # attempts*, not on "submitted nothing". A future
+                # enumeration scanner that submits empty codes
+                # wouldn't be punished by the 24h lockout, which is
+                # the intended shape (the recover-start throttle
+                # already caps the request rate per IP / email /
+                # global). Mirrors how an absent password isn't
+                # treated as a failed login attempt.
+                return dispatch
+
+            # A code was submitted — verify against the user's unused
+            # rows. ``redeem_code`` walks every unused row and tries
+            # an argon2id verify; the first match burns the row and
+            # returns its id. ``None`` means no row matched (every
+            # code wrong, every code already burnt, no codes ever
+            # issued).
+            stepup_burnt_code_id = break_glass.redeem_code(
+                session,
+                user_id=user.id,
+                plaintext_code=break_glass_code,
+                now=resolved_now,
+            )
+            if stepup_burnt_code_id is None:
+                # Wrong / spent code — record a failure attempt
+                # against the §03 redemption rate limit (3 fails /
+                # 1h → 24h lockout) and audit
+                # ``recovery.stepup_invalid``. No nonce, no mail.
+                break_glass.record_redeem_failure(user_id=user.id, now=resolved_now)
+                _audit_recovery_stepup_refused(
+                    user_id=user.id,
+                    email_hash=email_hash,
+                    ip_hash=ip_hash,
+                    reason="stepup_invalid",
+                    clock=clock,
+                )
+                return dispatch
+
+            # Hit — code burnt, redemption-failure counter cleared.
+            # The id is in ``stepup_burnt_code_id`` for the
+            # ``consumed_magic_link_id`` stamp below.
+            break_glass.record_redeem_success(user_id=user.id)
+
     # Enumeration guard (§15 "constant-time responses"): both branches
     # must produce an identical observable response regardless of
     # mailer outcome. The hit-branch sends are queued onto the
@@ -772,6 +1017,11 @@ def request_recovery(
         # seam — the magic-link send is intercepted in-process to
         # extract the token, so only the outer recovery template
         # actually leaves the host post-commit.
+        #
+        # ``stepup_burnt_code_id`` (if any) is the id of the
+        # break-glass code row burnt by the redemption walk above;
+        # the helper stamps it with the magic-link nonce's jti so
+        # operators can join the burnt code to the link it minted.
         _mint_and_send_recovery_link(
             session,
             user=user,
@@ -783,6 +1033,7 @@ def request_recovery(
             settings=settings,
             clock=clock,
             dispatch=dispatch,
+            stepup_burnt_code_id=stepup_burnt_code_id,
         )
     else:
         # Miss branch — burn matching CPU so the HMAC-sign cost the hit
@@ -808,17 +1059,23 @@ def request_recovery(
     # with the rest of the request's state. The ``hit`` discriminator
     # is the forensic bit that tells operators whether the inbound
     # email matched a user without recording the plaintext address.
+    # ``stepup`` is set when the step-up branch fired and the user
+    # redeemed a valid code — it's the forensic join key against the
+    # burnt :class:`BreakGlassCode` row.
+    audit_diff: dict[str, Any] = {
+        "hit": hit,
+        "email_hash": email_hash,
+        "ip_hash": ip_hash,
+    }
+    if stepup_required and stepup_burnt_code_id is not None:
+        audit_diff["stepup"] = True
     write_audit(
         session,
         _agnostic_audit_ctx(),
         entity_kind="user",
         entity_id=user.id if user is not None else "00000000000000000000000000",
         action="recovery.requested",
-        diff={
-            "hit": hit,
-            "email_hash": email_hash,
-            "ip_hash": ip_hash,
-        },
+        diff=audit_diff,
         clock=clock,
     )
 
@@ -885,6 +1142,7 @@ def _mint_and_send_recovery_link(
     settings: Settings | None,
     clock: Clock | None,
     dispatch: PendingDispatch,
+    stepup_burnt_code_id: str | None = None,
 ) -> None:
     """Mint the recovery magic link + queue the recovery-specific template.
 
@@ -911,6 +1169,14 @@ def _mint_and_send_recovery_link(
     the recovery flow; magic-link's limit bounds abuse of the
     underlying mail-send primitive — both applying is correct
     layering (signup already does the same).
+
+    ``stepup_burnt_code_id`` (when set) is the id of the
+    :class:`BreakGlassCode` row burnt by the step-up gate above;
+    after the magic-link nonce row lands, we stamp its jti onto
+    that row's ``consumed_magic_link_id`` so operators can trace
+    "which code minted which magic link" without re-deriving the
+    pairing. Both writes land in the caller's UoW so the burn,
+    the stamp, and the nonce commit together.
     """
     capture = _CapturingMailer(base_url=base_url)
     # The capturing mailer is a synchronous in-process intercept (no
@@ -942,6 +1208,29 @@ def _mint_and_send_recovery_link(
         # Kept as a belt-and-braces guard against a future refactor
         # that changes the mailer's send semantics.
         raise RuntimeError("recovery: magic-link service produced no token")
+
+    # Stamp the burnt break-glass code with the freshly-minted
+    # magic-link nonce's jti so the audit trail joins back. The jti
+    # is encoded inside the signed token we just captured — extract
+    # it deterministically rather than re-querying the nonce table.
+    # A re-query keyed on ``(subject_id, purpose, created_at)`` would
+    # be race-fragile: two concurrent step-up redemptions for the
+    # same user at the same ``now`` value would both pick the
+    # lexicographically-largest matching jti and cross-stamp each
+    # other's burnt rows.
+    if stepup_burnt_code_id is not None:
+        jti, _ = magic_link._best_effort_unseal(
+            capture.captured_token, settings=settings
+        )
+        if jti is not None:
+            # justification: break_glass_code is workspace-scoped but
+            # the recovery flow runs outside any tenant ctx — same
+            # tenant_agnostic posture used by the rest of this module.
+            with tenant_agnostic():
+                burnt_row = session.get(BreakGlassCode, stepup_burnt_code_id)
+                if burnt_row is not None:
+                    burnt_row.consumed_magic_link_id = jti
+                    session.flush()
 
     # Magic-link's per-purpose TTL ceiling wins if it's tighter than
     # the recovery session TTL — the user sees the magic-link TTL in

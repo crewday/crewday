@@ -42,6 +42,7 @@ from sqlalchemy import (
     String,
     UniqueConstraint,
     event,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -55,6 +56,7 @@ from app.adapters.db.workspace import models as _workspace_models  # noqa: F401
 
 __all__ = [
     "ApiToken",
+    "BreakGlassCode",
     "EmailChangePending",
     "Invite",
     "MagicLinkNonce",
@@ -801,6 +803,131 @@ class EmailChangePending(Base):
         Index("ix_email_change_pending_request_jti", "request_jti"),
         Index("ix_email_change_pending_revert_jti", "revert_jti"),
         Index("ix_email_change_pending_revert_expires", "revert_expires_at"),
+    )
+
+
+class BreakGlassCode(Base):
+    """One break-glass recovery code, argon2id-hashed at rest.
+
+    Spec §03 "Break-glass codes" + "Self-service lost-device recovery"
+    step 3. Codes are issued in sets to users who hold a ``manager``
+    surface grant or membership in any ``owners`` permission group; a
+    member of the **step-up population** must submit one unused code
+    alongside their email at ``POST /recover/passkey/request`` for the
+    server to mint a recovery magic link. A matching code is burnt
+    immediately (``used_at = now()``) so a captured code cannot replay
+    even within the magic link's TTL window. The plaintext code is
+    only ever shown once — at issue time — and never reaches the
+    ``audit_log`` table.
+
+    **Hashing.** ``hash`` is the full PHC-encoded argon2id digest
+    (``$argon2id$v=19$m=...,t=...,p=...$<salt>$<digest>``) produced by
+    :class:`argon2.PasswordHasher` — same family the API-token verifier
+    uses (:mod:`app.auth.tokens`). ``hash_params`` carries a structured
+    snapshot of the parameters so a future cost-bump can rehash lazily
+    on next verify without losing audit linkability of the original
+    issue.
+
+    **``workspace_id`` is informational, not a redemption gate.** The
+    spec column reflects "the workspace the code was issued under"
+    (e.g. the workspace whose post-bootstrap ritual minted the set);
+    redemption runs at the identity scope during recovery — there is
+    no :class:`~app.tenancy.WorkspaceContext` to pin to. The redemption
+    helper looks up unused rows by ``user_id`` only and ignores
+    ``workspace_id``. The column is registered with the tenancy
+    registry so workspace-scoped surfaces (e.g. "list my codes" on
+    ``/me/security``, future re-mint UI) can rely on the standard
+    filter, but the recovery path explicitly opts out via
+    :func:`app.tenancy.tenant_agnostic`.
+
+    **Lifecycle.**
+
+    * born ``used_at IS NULL`` + ``consumed_magic_link_id IS NULL``
+      at :func:`app.auth.break_glass.issue_codes` (future task);
+    * flips to ``used_at = now`` on a successful redemption inside
+      :func:`app.auth.recovery.request_recovery`. The matched row's
+      id is captured before the magic link is minted so the helper
+      can stamp ``consumed_magic_link_id`` with the freshly-issued
+      jti once the magic-link service returns. Both writes land in
+      the same Unit of Work as the recovery audit row.
+    * **Old codes remain valid** until explicitly replaced via
+      `/me/security` (§03 "Re-minting"). Successful redemption burns
+      one row but does NOT regenerate the set — the user must visit
+      the security page to re-mint by hand.
+
+    **Tenant-agnostic redemption.** Recovery executes outside any
+    workspace ctx (the user may belong to any number of workspaces
+    and we don't pick one at recovery time), so the redemption
+    helper wraps its read/write in :func:`tenant_agnostic` even
+    though this table is registered as workspace-scoped — same
+    pattern as :class:`Invite` on the bare-host accept flow.
+
+    See ``docs/specs/03-auth-and-tokens.md`` §"Break-glass codes" /
+    §"Self-service lost-device recovery" and
+    ``docs/specs/15-security-privacy.md`` §"Step-up bypass is not a
+    fallback".
+    """
+
+    __tablename__ = "break_glass_code"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    workspace_id: Mapped[str] = mapped_column(
+        String,
+        ForeignKey("workspace.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    user_id: Mapped[str] = mapped_column(
+        String,
+        ForeignKey("user.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    # Full PHC-encoded argon2id digest. Carries salt + parameters
+    # inline so the verifier reads everything it needs from this one
+    # column. Mirrors :attr:`ApiToken.hash`.
+    hash: Mapped[str] = mapped_column(String, nullable=False)
+    # Snapshot of the argon2id parameters at issue time. Carried as a
+    # JSON blob so a future cost-bump can rehash lazily without
+    # forcing a schema change. Today it stores the
+    # ``{time_cost, memory_cost, parallelism}`` triple
+    # :class:`argon2.PasswordHasher` was instantiated with.
+    hash_params: Mapped[dict[str, Any]] = mapped_column(
+        JSON, nullable=False, default=dict
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    # Flipped to ``now()`` on a successful redemption. NULL means
+    # "still spendable". Indexed by the partial-unused index below for
+    # fast lookup on the redemption path.
+    used_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    # The ``magic_link_nonce.jti`` minted on successful redemption.
+    # NULL until the matching magic link is created; populated within
+    # the same UoW that flips ``used_at``. Soft reference (no FK)
+    # because :class:`MagicLinkNonce` rows can be GC-swept once
+    # consumed; carrying a hard FK would force this row to be deleted
+    # alongside, which would lose the forensic trail of "which code
+    # produced which magic link".
+    consumed_magic_link_id: Mapped[str | None] = mapped_column(String, nullable=True)
+
+    __table_args__ = (
+        Index(
+            "ix_break_glass_code_workspace_user",
+            "workspace_id",
+            "user_id",
+        ),
+        # Partial index: hot path is "find an unused code for this
+        # user". Restricting to ``used_at IS NULL`` keeps the index
+        # tiny — burnt rows are forensic baggage, not lookup keys.
+        # Dialect kwargs match the cd-wchi / cd-4saj idiom for
+        # cross-dialect partial indexes.
+        Index(
+            "ix_break_glass_code_user_unused",
+            "user_id",
+            sqlite_where=text("used_at IS NULL"),
+            postgresql_where=text("used_at IS NULL"),
+        ),
     )
 
 

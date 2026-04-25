@@ -343,15 +343,15 @@ field: **"Break-glass code"**. Workers, clients, and guests see
 only the email field. The UI copy makes clear that the code
 field is required for owners and managers.
 
-**Request.** `POST /api/v1/auth/recover/start` with
+**Request.** `POST /api/v1/recover/passkey/request` with
 `{ email, break_glass_code? }`. The server:
 
 1. Applies per-email and per-IP rate limits (§15 self-serve abuse
    mitigations — same family used on `signup/start`).
 2. Looks up `users.email` case-insensitively. If no match, logs
    `auth.recover.miss` with `ip_hash` and `email_hash`. **Always
-   returns 200** with the generic body
-   `{ "status": "sent_if_exists" }` regardless of the lookup
+   returns 202** with the generic body
+   `{ "status": "accepted" }` regardless of the lookup
    outcome — the response does not reveal which emails map to a
    user, nor which users require step-up.
 3. If the user holds a `manager` surface grant anywhere **or** is

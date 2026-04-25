@@ -822,3 +822,85 @@ class TestBootstrapUserHelper:
         # SQLite's ``DateTime(timezone=True)`` loses tzinfo on reload;
         # mirror the workspace test's wall-clock comparison.
         assert user.created_at.replace(tzinfo=None) == _PINNED.replace(tzinfo=None)
+
+
+class TestBreakGlassCodeMigration:
+    """The cd-gh7l migration lands ``break_glass_code`` with its indexes.
+
+    Spec §03 "Break-glass codes": the table holds one argon2id-hashed
+    recovery code per user, with a partial unused-row index for fast
+    redemption-path lookup.
+    """
+
+    def test_break_glass_code_table_exists(self, engine: Engine) -> None:
+        assert "break_glass_code" in inspect(engine).get_table_names()
+
+    def test_break_glass_code_columns_match_spec(self, engine: Engine) -> None:
+        cols = {c["name"]: c for c in inspect(engine).get_columns("break_glass_code")}
+        expected = {
+            "id",
+            "workspace_id",
+            "user_id",
+            "hash",
+            "hash_params",
+            "created_at",
+            "used_at",
+            "consumed_magic_link_id",
+        }
+        assert set(cols) == expected
+        # ``used_at`` and ``consumed_magic_link_id`` are nullable; every
+        # other column is NOT NULL.
+        nullable = {name for name, col in cols.items() if col.get("nullable", False)}
+        assert nullable == {"used_at", "consumed_magic_link_id"}
+
+    def test_break_glass_code_indexes(self, engine: Engine) -> None:
+        names = {ix["name"] for ix in inspect(engine).get_indexes("break_glass_code")}
+        assert "ix_break_glass_code_workspace_user" in names
+        assert "ix_break_glass_code_user_unused" in names
+
+    def test_break_glass_code_user_fk_cascades(self, db_session: SaSession) -> None:
+        """Deleting the user cascades to their break-glass codes."""
+        from app.adapters.db.identity.models import BreakGlassCode
+        from app.tenancy import tenant_agnostic
+        from app.util.ulid import new_ulid
+
+        clock = FrozenClock(_PINNED)
+        user = bootstrap_user(
+            db_session,
+            email="bgcasc@example.com",
+            display_name="BGCASC",
+            clock=clock,
+        )
+        ws = bootstrap_workspace(
+            db_session,
+            slug=f"bgcasc-{user.id[:8].lower()}",
+            name="BGCASC",
+            owner_user_id=user.id,
+            clock=clock,
+        )
+        code_id = new_ulid()
+        with tenant_agnostic():
+            db_session.add(
+                BreakGlassCode(
+                    id=code_id,
+                    workspace_id=ws.id,
+                    user_id=user.id,
+                    hash="$argon2id$v=19$m=65536,t=3,p=4$x$y",
+                    hash_params={
+                        "time_cost": 3,
+                        "memory_cost": 65536,
+                        "parallelism": 4,
+                    },
+                    created_at=_PINNED,
+                    used_at=None,
+                    consumed_magic_link_id=None,
+                )
+            )
+            db_session.flush()
+            # Sanity: the row is present.
+            assert db_session.get(BreakGlassCode, code_id) is not None
+        # Drop the user — the FK cascade should remove the code.
+        db_session.delete(user)
+        db_session.flush()
+        with tenant_agnostic():
+            assert db_session.get(BreakGlassCode, code_id) is None

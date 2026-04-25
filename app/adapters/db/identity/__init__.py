@@ -26,6 +26,7 @@ from __future__ import annotations
 
 from app.adapters.db.identity.models import (
     ApiToken,
+    BreakGlassCode,
     Invite,
     MagicLinkNonce,
     PasskeyCredential,
@@ -45,8 +46,20 @@ from app.tenancy.registry import register
 # because the redeemed token has not yet resolved a workspace ctx.
 register("invite")
 
+# ``break_glass_code`` is workspace-scoped at *management* time (a
+# future ``/me/security`` panel + the workspace bootstrap ritual mint
+# codes under the active :class:`~app.tenancy.WorkspaceContext`) but
+# tenant-agnostic at *redemption* time. The recovery flow runs before
+# any workspace ctx is resolved (the user may belong to any number of
+# workspaces and we don't pick one at recovery time), so the
+# redemption helper in :mod:`app.auth.break_glass` wraps its
+# read/write in :func:`app.tenancy.tenant_agnostic` — same pattern
+# the invite-accept flow uses on the bare host.
+register("break_glass_code")
+
 __all__ = [
     "ApiToken",
+    "BreakGlassCode",
     "Invite",
     "MagicLinkNonce",
     "PasskeyCredential",

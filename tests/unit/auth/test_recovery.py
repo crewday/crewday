@@ -1931,3 +1931,719 @@ class TestRequestRecoveryKillSwitch:
             ).all()
             == []
         )
+
+
+# ---------------------------------------------------------------------------
+# Step-up gate (cd-gh7l) — break-glass code is required for managers /
+# owners-group members. Workers / clients / guests bypass the gate
+# entirely; the gate runs AFTER the kill-switch check.
+# ---------------------------------------------------------------------------
+
+
+def _seed_break_glass_code_for_user(
+    session: Session,
+    *,
+    user_id: str,
+    workspace_id: str,
+    plaintext: str,
+    used_at: datetime | None = None,
+) -> str:
+    """Seed one :class:`BreakGlassCode` row hashed under the live argon2id.
+
+    Returns the row id. Wrapping in ``tenant_agnostic`` mirrors the
+    redemption-path posture inside :mod:`app.auth.break_glass`.
+    """
+    from app.adapters.db.identity.models import BreakGlassCode
+    from app.auth import break_glass as bg_module
+    from app.tenancy import tenant_agnostic
+
+    code_id = new_ulid()
+    code_hash = bg_module._HASHER.hash(plaintext)
+    with tenant_agnostic():
+        session.add(
+            BreakGlassCode(
+                id=code_id,
+                workspace_id=workspace_id,
+                user_id=user_id,
+                hash=code_hash,
+                hash_params={
+                    "time_cost": 3,
+                    "memory_cost": 65536,
+                    "parallelism": 4,
+                },
+                created_at=_PINNED,
+                used_at=used_at,
+                consumed_magic_link_id=None,
+            )
+        )
+        session.flush()
+    return code_id
+
+
+def _seed_owners_group_for_user(
+    session: Session,
+    *,
+    workspace_id: str,
+    user_id: str,
+) -> None:
+    """Seed an ``owners``-group row + membership in one workspace."""
+    from app.adapters.db.authz.models import (
+        PermissionGroup,
+        PermissionGroupMember,
+    )
+
+    group_id = new_ulid()
+    session.add(
+        PermissionGroup(
+            id=group_id,
+            workspace_id=workspace_id,
+            slug="owners",
+            name="Owners",
+            system=True,
+            capabilities_json={},
+            created_at=_PINNED,
+        )
+    )
+    session.flush()
+    session.add(
+        PermissionGroupMember(
+            group_id=group_id,
+            user_id=user_id,
+            workspace_id=workspace_id,
+            added_at=_PINNED,
+            added_by_user_id=None,
+        )
+    )
+    session.flush()
+
+
+@pytest.fixture(autouse=True)
+def reset_break_glass_rate_limit() -> Iterator[None]:
+    """Clear the per-user break-glass redemption counters between cases.
+
+    The lockout state is process-local; without this fixture a test
+    that lands a user in lockout would bleed the state into the next
+    case.
+    """
+    from app.auth.break_glass import reset_rate_limit_for_tests
+
+    reset_rate_limit_for_tests()
+    yield
+    reset_rate_limit_for_tests()
+
+
+class TestRequestRecoveryStepUp:
+    """Spec §03 step 3 + §15 "Step-up bypass is not a fallback".
+
+    Five branches:
+
+    * non-step-up + no code → normal hit branch.
+    * non-step-up + code → code IGNORED (never burnt) + normal hit.
+    * step-up + no code → ``stepup_missing`` audit, no mail, no nonce.
+    * step-up + wrong code → ``stepup_invalid`` audit, no mail, no nonce.
+    * step-up + valid code → mail + code burnt + audit ``stepup=True``.
+    """
+
+    def test_worker_with_no_code_takes_happy_path(
+        self,
+        session: Session,
+        mailer: _RecordingMailer,
+        throttle: Throttle,
+        settings: Settings,
+    ) -> None:
+        user = bootstrap_user(session, email="w@example.com", display_name="W")
+        ws_id = _seed_workspace(session, slug="w-ws")
+        _seed_role_grant(
+            session, workspace_id=ws_id, user_id=user.id, grant_role="worker"
+        )
+        request_recovery(
+            session,
+            email="w@example.com",
+            ip="127.0.0.1",
+            mailer=mailer,
+            base_url="https://crew.day",
+            now=_PINNED,
+            throttle=throttle,
+            settings=settings,
+        )
+        # Normal hit branch: nonce + mail + recovery.requested audit
+        # WITHOUT a stepup flag.
+        assert len(session.scalars(select(MagicLinkNonce)).all()) == 1
+        assert len(mailer.sent) == 1
+        audit = session.scalars(
+            select(AuditLog).where(AuditLog.action == "recovery.requested")
+        ).one()
+        assert isinstance(audit.diff, dict)
+        assert audit.diff["hit"] is True
+        # ``stepup`` is only emitted on the step-up redeem branch.
+        assert "stepup" not in audit.diff
+
+    def test_worker_with_code_does_not_burn(
+        self,
+        session: Session,
+        mailer: _RecordingMailer,
+        throttle: Throttle,
+        settings: Settings,
+    ) -> None:
+        """A worker who submits a code → code IGNORED (never burnt).
+
+        §03 step 4: "For the non-step-up population (workers, clients,
+        guests with no manager or owners membership anywhere), the
+        code field is ignored and never burnt".
+        """
+        from app.adapters.db.identity.models import BreakGlassCode
+
+        user = bootstrap_user(session, email="wc@example.com", display_name="WC")
+        ws_id = _seed_workspace(session, slug="wc-ws")
+        _seed_role_grant(
+            session, workspace_id=ws_id, user_id=user.id, grant_role="worker"
+        )
+        # Even if the worker happens to have a code in the DB (e.g.
+        # legacy from when they were a manager), the redemption walk
+        # is never invoked for non-step-up users, so the code stays
+        # unused.
+        code_id = _seed_break_glass_code_for_user(
+            session,
+            user_id=user.id,
+            workspace_id=ws_id,
+            plaintext="legacy-code",
+        )
+        request_recovery(
+            session,
+            email="wc@example.com",
+            ip="127.0.0.1",
+            mailer=mailer,
+            base_url="https://crew.day",
+            break_glass_code="legacy-code",
+            now=_PINNED,
+            throttle=throttle,
+            settings=settings,
+        )
+        # Hit path executed (mail + nonce).
+        assert len(mailer.sent) == 1
+        # Code NOT burnt — non-step-up flow ignores it entirely.
+        from app.tenancy import tenant_agnostic
+
+        with tenant_agnostic():
+            row = session.get(BreakGlassCode, code_id)
+        assert row is not None
+        assert row.used_at is None
+
+    def test_manager_no_code_writes_stepup_missing_audit(
+        self,
+        engine: Engine,
+        session: Session,
+        mailer: _RecordingMailer,
+        throttle: Throttle,
+        settings: Settings,
+        redirect_default_engine: None,
+    ) -> None:
+        """Step-up user without a code → ``recovery.stepup_missing`` on
+        a fresh UoW, no mail, no nonce.
+        """
+        user = bootstrap_user(session, email="mn@example.com", display_name="MN")
+        ws_id = _seed_workspace(session, slug="mn-ws")
+        _seed_role_grant(
+            session, workspace_id=ws_id, user_id=user.id, grant_role="manager"
+        )
+        session.commit()
+
+        request_recovery(
+            session,
+            email="mn@example.com",
+            ip="198.51.100.1",
+            mailer=mailer,
+            base_url="https://crew.day",
+            now=_PINNED,
+            throttle=throttle,
+            settings=settings,
+        )
+        # No mail, no nonce, no recovery.requested.
+        assert mailer.sent == []
+        assert session.scalars(select(MagicLinkNonce)).all() == []
+        assert (
+            session.scalars(
+                select(AuditLog).where(AuditLog.action == "recovery.requested")
+            ).all()
+            == []
+        )
+        # Audit row landed on the fresh UoW.
+        factory = sessionmaker(bind=engine, expire_on_commit=False, class_=Session)
+        with factory() as reader:
+            row = reader.scalars(
+                select(AuditLog).where(AuditLog.action == "recovery.stepup_missing")
+            ).one()
+        assert row.entity_kind == "user"
+        assert row.entity_id == user.id
+        assert isinstance(row.diff, dict)
+        assert row.diff["reason"] == "stepup_missing"
+        assert len(row.diff["email_hash"]) == 64
+        assert len(row.diff["ip_hash"]) == 64
+        # No PII in the audit payload.
+        assert "mn@example.com" not in str(row.diff)
+        assert "198.51.100.1" not in str(row.diff)
+
+    def test_manager_empty_code_is_treated_as_missing(
+        self,
+        engine: Engine,
+        session: Session,
+        mailer: _RecordingMailer,
+        throttle: Throttle,
+        settings: Settings,
+        redirect_default_engine: None,
+    ) -> None:
+        """A whitespace-only / empty code is the same as no code at all.
+
+        Treats it as ``stepup_missing`` rather than counting against
+        the redemption rate-limit (which is gated on *failed verify
+        attempts*, not "submitted nothing").
+        """
+        user = bootstrap_user(session, email="me@example.com", display_name="ME")
+        ws_id = _seed_workspace(session, slug="me-ws")
+        _seed_role_grant(
+            session, workspace_id=ws_id, user_id=user.id, grant_role="manager"
+        )
+        session.commit()
+
+        request_recovery(
+            session,
+            email="me@example.com",
+            ip="127.0.0.1",
+            mailer=mailer,
+            base_url="https://crew.day",
+            break_glass_code="   ",  # whitespace-only
+            now=_PINNED,
+            throttle=throttle,
+            settings=settings,
+        )
+        assert mailer.sent == []
+        factory = sessionmaker(bind=engine, expire_on_commit=False, class_=Session)
+        with factory() as reader:
+            assert reader.scalars(
+                select(AuditLog).where(AuditLog.action == "recovery.stepup_missing")
+            ).all()
+            # NOT recorded as stepup_invalid (no fail-counter increment).
+            assert (
+                reader.scalars(
+                    select(AuditLog).where(AuditLog.action == "recovery.stepup_invalid")
+                ).all()
+                == []
+            )
+
+    def test_manager_wrong_code_writes_stepup_invalid_audit(
+        self,
+        engine: Engine,
+        session: Session,
+        mailer: _RecordingMailer,
+        throttle: Throttle,
+        settings: Settings,
+        redirect_default_engine: None,
+    ) -> None:
+        user = bootstrap_user(session, email="mi@example.com", display_name="MI")
+        ws_id = _seed_workspace(session, slug="mi-ws")
+        _seed_role_grant(
+            session, workspace_id=ws_id, user_id=user.id, grant_role="manager"
+        )
+        # User has codes — but the submitted code doesn't match any.
+        _seed_break_glass_code_for_user(
+            session,
+            user_id=user.id,
+            workspace_id=ws_id,
+            plaintext="real-code",
+        )
+        session.commit()
+
+        request_recovery(
+            session,
+            email="mi@example.com",
+            ip="127.0.0.1",
+            mailer=mailer,
+            base_url="https://crew.day",
+            break_glass_code="WRONG",
+            now=_PINNED,
+            throttle=throttle,
+            settings=settings,
+        )
+        # No mail, no nonce.
+        assert mailer.sent == []
+        assert session.scalars(select(MagicLinkNonce)).all() == []
+        # Audit row on the fresh UoW.
+        factory = sessionmaker(bind=engine, expire_on_commit=False, class_=Session)
+        with factory() as reader:
+            row = reader.scalars(
+                select(AuditLog).where(AuditLog.action == "recovery.stepup_invalid")
+            ).one()
+        assert row.entity_id == user.id
+        assert isinstance(row.diff, dict)
+        assert row.diff["reason"] == "stepup_invalid"
+
+    def test_manager_valid_code_burns_and_proceeds(
+        self,
+        session: Session,
+        mailer: _RecordingMailer,
+        throttle: Throttle,
+        settings: Settings,
+    ) -> None:
+        """Step-up user with a valid code → burn code, send mail, audit
+        ``stepup=True`` on ``recovery.requested``, ``consumed_magic_link_id``
+        stamped with the magic-link nonce's jti.
+        """
+        from app.adapters.db.identity.models import BreakGlassCode
+
+        user = bootstrap_user(session, email="mv@example.com", display_name="MV")
+        ws_id = _seed_workspace(session, slug="mv-ws")
+        _seed_role_grant(
+            session, workspace_id=ws_id, user_id=user.id, grant_role="manager"
+        )
+        code_id = _seed_break_glass_code_for_user(
+            session,
+            user_id=user.id,
+            workspace_id=ws_id,
+            plaintext="valid-code",
+        )
+        request_recovery(
+            session,
+            email="mv@example.com",
+            ip="127.0.0.1",
+            mailer=mailer,
+            base_url="https://crew.day",
+            break_glass_code="valid-code",
+            now=_PINNED,
+            throttle=throttle,
+            settings=settings,
+        )
+        # Mail + nonce landed.
+        assert len(mailer.sent) == 1
+        nonce = session.scalars(select(MagicLinkNonce)).one()
+        # Code burnt + ``consumed_magic_link_id`` stamped with the
+        # nonce's jti.
+        from app.tenancy import tenant_agnostic
+
+        with tenant_agnostic():
+            burnt = session.get(BreakGlassCode, code_id)
+        assert burnt is not None
+        assert burnt.used_at is not None
+        assert burnt.consumed_magic_link_id == nonce.jti
+        # Audit row carries ``stepup=True`` on the success branch.
+        audit = session.scalars(
+            select(AuditLog).where(AuditLog.action == "recovery.requested")
+        ).one()
+        assert isinstance(audit.diff, dict)
+        assert audit.diff["hit"] is True
+        assert audit.diff["stepup"] is True
+
+    def test_owners_group_member_requires_code(
+        self,
+        engine: Engine,
+        session: Session,
+        mailer: _RecordingMailer,
+        throttle: Throttle,
+        settings: Settings,
+        redirect_default_engine: None,
+    ) -> None:
+        """An ``owners``-group member without a manager grant is still
+        in the step-up population (§03 step 3).
+        """
+        user = bootstrap_user(session, email="og@example.com", display_name="OG")
+        ws_id = _seed_workspace(session, slug="og-ws")
+        # Owners-group membership only — no role_grant at all.
+        _seed_owners_group_for_user(session, workspace_id=ws_id, user_id=user.id)
+        session.commit()
+
+        request_recovery(
+            session,
+            email="og@example.com",
+            ip="127.0.0.1",
+            mailer=mailer,
+            base_url="https://crew.day",
+            # No code submitted.
+            now=_PINNED,
+            throttle=throttle,
+            settings=settings,
+        )
+        # No mail (step-up gate refused).
+        assert mailer.sent == []
+        factory = sessionmaker(bind=engine, expire_on_commit=False, class_=Session)
+        with factory() as reader:
+            assert reader.scalars(
+                select(AuditLog).where(AuditLog.action == "recovery.stepup_missing")
+            ).all()
+
+    def test_lockout_after_three_failures_blocks_subsequent_requests(
+        self,
+        engine: Engine,
+        session: Session,
+        mailer: _RecordingMailer,
+        throttle: Throttle,
+        settings: Settings,
+        redirect_default_engine: None,
+    ) -> None:
+        """3 failed code attempts → 24h lockout. Subsequent requests
+        write ``stepup_locked_out`` on the fresh UoW, no mail, no
+        nonce.
+
+        Spec §03 "Break-glass codes" → "Redemption rate limit" + §15
+        "Step-up bypass is not a fallback".
+        """
+        # The recover-start throttle would trip on the 4th request
+        # (3/email/hour), so we use 3 wrong attempts to land in
+        # lockout, then a 4th request that the recover-start cap
+        # would refuse anyway. To exercise the LOCKOUT branch
+        # specifically, we use a fresh ``Throttle`` instance and pin
+        # the requests at distinct ``now`` values so the recover-start
+        # cap doesn't preempt.
+        user = bootstrap_user(session, email="lo@example.com", display_name="LO")
+        ws_id = _seed_workspace(session, slug="lo-ws")
+        _seed_role_grant(
+            session, workspace_id=ws_id, user_id=user.id, grant_role="manager"
+        )
+        _seed_break_glass_code_for_user(
+            session,
+            user_id=user.id,
+            workspace_id=ws_id,
+            plaintext="real",
+        )
+        session.commit()
+
+        # 3 wrong-code attempts — each writes ``stepup_invalid`` and
+        # increments the redemption-failure counter.
+        for i in range(3):
+            request_recovery(
+                session,
+                email="lo@example.com",
+                ip="127.0.0.1",
+                mailer=mailer,
+                base_url="https://crew.day",
+                break_glass_code=f"wrong-{i}",
+                now=_PINNED + timedelta(seconds=i),
+                throttle=throttle,
+                settings=settings,
+            )
+
+        # 4th attempt (now within lockout) — even with a *correct*
+        # code, the lockout check refuses BEFORE the redeem walk.
+        # The recover-start throttle would have tripped here; we
+        # construct a NEW throttle so we exercise the lockout, not
+        # the recover-start cap.
+        fresh_throttle = Throttle()
+        request_recovery(
+            session,
+            email="lo@example.com",
+            ip="127.0.0.1",
+            mailer=mailer,
+            base_url="https://crew.day",
+            break_glass_code="real",
+            now=_PINNED + timedelta(seconds=4),
+            throttle=fresh_throttle,
+            settings=settings,
+        )
+
+        # No mail at all — every attempt was refused.
+        assert mailer.sent == []
+        # Locked-out audit row landed on the fresh UoW.
+        factory = sessionmaker(bind=engine, expire_on_commit=False, class_=Session)
+        with factory() as reader:
+            locked = reader.scalars(
+                select(AuditLog).where(AuditLog.action == "recovery.stepup_locked_out")
+            ).all()
+            invalid = reader.scalars(
+                select(AuditLog).where(AuditLog.action == "recovery.stepup_invalid")
+            ).all()
+        assert len(locked) >= 1
+        assert len(invalid) == 3
+
+    def test_unknown_email_with_code_takes_miss_branch(
+        self,
+        session: Session,
+        mailer: _RecordingMailer,
+        throttle: Throttle,
+        settings: Settings,
+    ) -> None:
+        """Unknown email + a submitted code → normal miss branch.
+
+        The step-up gate runs AFTER user lookup; an unknown email
+        never reaches the gate (no user → no step-up classifier
+        call) and falls through to the no-account notice.
+        """
+        request_recovery(
+            session,
+            email="ghost@example.com",
+            ip="127.0.0.1",
+            mailer=mailer,
+            base_url="https://crew.day",
+            break_glass_code="anything",
+            now=_PINNED,
+            throttle=throttle,
+            settings=settings,
+        )
+        # Normal miss: one mail (no-account notice), no nonce, audit
+        # hit=False with NO stepup flag.
+        assert len(mailer.sent) == 1
+        assert session.scalars(select(MagicLinkNonce)).all() == []
+        audit = session.scalars(
+            select(AuditLog).where(AuditLog.action == "recovery.requested")
+        ).one()
+        assert isinstance(audit.diff, dict)
+        assert audit.diff["hit"] is False
+        assert "stepup" not in audit.diff
+
+
+# ---------------------------------------------------------------------------
+# Step-up timing-leak hardening (§15 line 957: "neither a user's
+# existence nor their step-up status can be probed").
+# ---------------------------------------------------------------------------
+
+
+class TestStepUpTimingBurn:
+    """The step-up refusal branches must pay matching CPU.
+
+    §15 forbids the response shape from leaking step-up status. Without
+    a CPU burn on the missing / locked-out branches, a network adversary
+    submitting ``email + dummy-code`` could distinguish "step-up user
+    with no code-set" (instant return) from "step-up user with a wrong
+    code" (~50ms argon2id verify + HMAC sign). The burn collapses
+    those two onto roughly the same baseline.
+    """
+
+    def test_missing_code_burns_argon2_and_hmac(
+        self,
+        engine: Engine,
+        session: Session,
+        mailer: _RecordingMailer,
+        throttle: Throttle,
+        settings: Settings,
+        redirect_default_engine: None,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Step-up + missing code → ``_burn_cpu_for_stepup_refusal`` fires.
+
+        We monkeypatch the burn helper so the test runs in millisecond
+        time and we can assert it was invoked exactly once on the
+        refusal path.
+        """
+        from app.auth import recovery as recovery_module
+
+        burn_calls: list[bytes] = []
+
+        def _spy(pepper: bytes) -> None:
+            burn_calls.append(pepper)
+
+        monkeypatch.setattr(recovery_module, "_burn_cpu_for_stepup_refusal", _spy)
+
+        user = bootstrap_user(session, email="bm@example.com", display_name="BM")
+        ws_id = _seed_workspace(session, slug="bm-ws")
+        _seed_role_grant(
+            session, workspace_id=ws_id, user_id=user.id, grant_role="manager"
+        )
+        session.commit()
+
+        request_recovery(
+            session,
+            email="bm@example.com",
+            ip="127.0.0.1",
+            mailer=mailer,
+            base_url="https://crew.day",
+            now=_PINNED,
+            throttle=throttle,
+            settings=settings,
+        )
+        assert len(burn_calls) == 1
+
+    def test_locked_out_burns_argon2_and_hmac(
+        self,
+        engine: Engine,
+        session: Session,
+        mailer: _RecordingMailer,
+        throttle: Throttle,
+        settings: Settings,
+        redirect_default_engine: None,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Step-up + locked-out → ``_burn_cpu_for_stepup_refusal`` fires.
+
+        Trip the lockout via three failed redeem attempts, then assert
+        the next request (which short-circuits on ``check_redeem_allowed``)
+        also pays the burn.
+        """
+        from app.auth import break_glass as bg_module
+        from app.auth import recovery as recovery_module
+
+        # Land the user in lockout state directly.
+        for _ in range(3):
+            bg_module.record_redeem_failure(user_id="will-be-set", now=_PINNED)
+
+        burn_calls: list[bytes] = []
+
+        def _spy(pepper: bytes) -> None:
+            burn_calls.append(pepper)
+
+        monkeypatch.setattr(recovery_module, "_burn_cpu_for_stepup_refusal", _spy)
+
+        user = bootstrap_user(session, email="lk@example.com", display_name="LK")
+        ws_id = _seed_workspace(session, slug="lk-ws")
+        _seed_role_grant(
+            session, workspace_id=ws_id, user_id=user.id, grant_role="manager"
+        )
+        session.commit()
+
+        # Land THIS user in lockout — the canned counters above used
+        # a placeholder id; the helper is keyed on user_id.
+        for _ in range(3):
+            bg_module.record_redeem_failure(user_id=user.id, now=_PINNED)
+
+        request_recovery(
+            session,
+            email="lk@example.com",
+            ip="127.0.0.1",
+            mailer=mailer,
+            base_url="https://crew.day",
+            break_glass_code="anything",
+            now=_PINNED + timedelta(seconds=1),
+            throttle=throttle,
+            settings=settings,
+        )
+        assert len(burn_calls) == 1
+        assert mailer.sent == []
+
+    def test_non_step_up_user_does_not_pay_burn(
+        self,
+        session: Session,
+        mailer: _RecordingMailer,
+        throttle: Throttle,
+        settings: Settings,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Workers / clients / guests bypass the step-up gate entirely.
+
+        The CPU burn is a step-up hardening — non-step-up users pay
+        the normal hit branch (mail + nonce + magic-link HMAC), not
+        the burn. Otherwise we'd be paying twice the cost on the
+        common case.
+        """
+        from app.auth import recovery as recovery_module
+
+        burn_calls: list[bytes] = []
+
+        def _spy(pepper: bytes) -> None:
+            burn_calls.append(pepper)
+
+        monkeypatch.setattr(recovery_module, "_burn_cpu_for_stepup_refusal", _spy)
+
+        user = bootstrap_user(session, email="ww@example.com", display_name="WW")
+        ws_id = _seed_workspace(session, slug="ww-ws")
+        _seed_role_grant(
+            session, workspace_id=ws_id, user_id=user.id, grant_role="worker"
+        )
+        request_recovery(
+            session,
+            email="ww@example.com",
+            ip="127.0.0.1",
+            mailer=mailer,
+            base_url="https://crew.day",
+            now=_PINNED,
+            throttle=throttle,
+            settings=settings,
+        )
+        # Worker → normal hit branch, no step-up burn.
+        assert burn_calls == []
+        assert len(mailer.sent) == 1

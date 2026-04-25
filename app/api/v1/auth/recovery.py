@@ -100,9 +100,19 @@ class RecoveryRequestBody(BaseModel):
     before use, and the recovery service deliberately avoids pulling in
     :class:`pydantic.EmailStr` for the same reason the magic-link router
     doesn't (see :mod:`app.api.v1.auth.magic`).
+
+    ``break_glass_code`` is the spec §03 step-up secondary credential
+    for users in the step-up population (``manager`` grant or
+    ``owners``-group membership). ``None`` for the worker / client /
+    guest population — the domain layer ignores it on those branches
+    so a code is never burnt for a user outside the step-up
+    population. Trimmed by the domain layer before use; the field
+    accepts up to 64 characters which is comfortably above the spec's
+    8x10-char code shape (§03 line 80).
     """
 
     email: str = Field(..., min_length=3, max_length=320)
+    break_glass_code: str | None = Field(default=None, max_length=64)
 
 
 class RecoveryRequestResponse(BaseModel):
@@ -407,6 +417,7 @@ def build_recovery_router(
                     mailer=mailer,
                     base_url=resolved_base_url,
                     throttle=throttle,
+                    break_glass_code=body.break_glass_code,
                     settings=cfg,
                 )
         except RecoveryRateLimited as exc:
