@@ -827,6 +827,7 @@ behaviour; fj2 ships the same shape under the name `LLMAssignment`.
 ```
 llm_assignment
 ├── id                          ULID PK
+├── workspace_id                ULID FK workspace ON DELETE CASCADE  -- per-workspace override row
 ├── capability                  text            -- key from the catalog above
 ├── priority                    int             -- lower = tried first; 0 = primary
 ├── provider_model_id           ULID FK llm_provider_model ON DELETE PROTECT
@@ -839,12 +840,20 @@ llm_assignment
 ├── last_used_at                tstz?
 ├── created_at / updated_at
 ├── updated_by_user_id          ULID?
-└── UNIQUE(capability, priority)
+└── UNIQUE(workspace_id, capability, priority)
 ```
 
-- The `UNIQUE(capability, priority)` constraint replaces the prior
+`llm_assignment` is **workspace-scoped**: rows are operator overrides
+for a single workspace's capability/priority slot. Deployment-level
+defaults live in code (the `app/domain/llm/` capability catalogue + seed
+chains); a workspace's resolved chain is "deployment seed, then any
+overriding `llm_assignment` rows for `(workspace_id, capability)` walked
+in priority order". Cascade on `workspace_id` keeps a workspace
+deletion clean.
+
+- The `UNIQUE(workspace_id, capability, priority)` constraint replaces the prior
   `UNIQUE(capability)` rule — a capability can now have
-  `(priority=0, primary)`, `(priority=1, fallback)`, etc. Reordering is
+  `(priority=0, primary)`, `(priority=1, fallback)`, etc. per workspace. Reordering is
   a `PATCH /admin/api/v1/llm/assignments/reorder` bulk operation (the
   CLI exposes `llm assignment reorder`).
 - **Retryable errors** that advance the chain: HTTP 5xx from the
