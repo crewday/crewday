@@ -274,20 +274,27 @@ class TestRegister:
         assert row.url != "https://www.airbnb.com/ical/abc.ics"
         assert row.url.startswith("fake-envelope::ical-feed-url::")
         assert row.enabled is True
-        # Audit row written, URL redacted to host-only.
+        # Audit row written. The path-stripping happens at the domain
+        # layer (``view.url_preview`` is host-only by construction in
+        # :mod:`app.domain.stays.ical_service`), and the plaintext URL
+        # is encrypted at rest via the envelope. Hostnames are NOT
+        # credentials — leaving the host visible in the audit diff is
+        # operationally useful (an operator triaging a feed registration
+        # can see *which* upstream the row came from without unwrapping
+        # the envelope).
         audit = session_stays.scalars(
             select(AuditLog).where(AuditLog.entity_id == view.id)
         ).one()
         assert audit.action == "register"
         assert audit.entity_kind == "ical_feed"
         audit_after = audit.diff["after"]
-        # The redactor scrubs the URL host as a "credential" (the
-        # shared redactor keys off "looks like a high-entropy
-        # string"). We only assert the plaintext URL never surfaces;
-        # the exact redaction token is :mod:`app.util.redact`'s
-        # business, not this test's.
+        # The full path-bearing URL never appears in the diff: only the
+        # host-only preview lands there.
+        assert "https://www.airbnb.com/ical/abc.ics" not in repr(audit.diff)
         assert "abc.ics" not in repr(audit.diff)
-        assert "airbnb.com" not in audit_after["url_preview"]
+        # The host-only preview IS present — that's the intended audit
+        # field (path/query stripped at the domain layer).
+        assert audit_after["url_preview"] == "https://www.airbnb.com"
 
     def test_register_disabled_when_not_parseable(
         self,
