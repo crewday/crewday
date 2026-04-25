@@ -1,16 +1,17 @@
-"""Authz adapter ports.
+"""Identity context — repository ports for permission groups + role grants.
 
-Defines the seam :mod:`app.domain.identity.permission_groups` and
+Defines the seams :mod:`app.domain.identity.permission_groups` and
 :mod:`app.domain.identity.role_grants` use to read and write
 ``permission_group`` / ``permission_group_member`` / ``role_grant``
 without importing SQLAlchemy model classes directly.
 
-Spec: ``docs/specs/01-architecture.md`` §"Adapters" — domain code
-depends on adapter Protocols, never on the SQLAlchemy model classes
-behind them. The two SA-backed concretions live in
-:mod:`app.adapters.db.authz.repositories`; tests substitute fakes.
+Spec: ``docs/specs/01-architecture.md`` §"Boundary rules" rule 4 —
+each context defines its own repository port in its public surface and
+a SQLAlchemy adapter under ``app/adapters/db/<context>/``. The two
+SA-backed concretions live in :mod:`app.adapters.db.authz.repositories`;
+tests substitute fakes.
 
-Three repositories live here:
+Two repositories live here:
 
 * :class:`PermissionGroupRepository` — group + member CRUD
   (``permission_group`` and ``permission_group_member``).
@@ -25,14 +26,16 @@ to thread the same UoW through a sibling helper (``app.audit.write_audit``,
 ``app.authz.owners.is_owner_member``) can do so without holding a
 second seam.
 
-Repositories project ORM rows through the matching domain refs
-:class:`~app.domain.identity.permission_groups.PermissionGroupRef` /
-:class:`~app.domain.identity.permission_groups.PermissionGroupMemberRef`
-/ :class:`~app.domain.identity.role_grants.RoleGrantRef`. Importing
-those refs from a domain module would invert the layering, so we
-declare repo-shaped value objects in this module instead and the
-domain re-exports the same shapes via its own surface — the SA
-concretions adapt between the two.
+The repo-shaped value objects (:class:`PermissionGroupRow`,
+:class:`PermissionGroupMemberRow`, :class:`RoleGrantRow`) mirror the
+domain's matching refs (``PermissionGroupRef`` /
+``PermissionGroupMemberRef`` / ``RoleGrantRef`` on
+:mod:`app.domain.identity.permission_groups` and
+:mod:`app.domain.identity.role_grants`). They live on the seam so
+the SA adapter has a domain-owned shape to project ORM rows into
+without importing the service modules that produce the refs (which
+would create a circular dependency between ``permission_groups`` /
+``role_grants`` and this module).
 
 Protocols are deliberately **not** ``runtime_checkable``:
 structural compatibility is checked statically by mypy. Runtime
@@ -71,7 +74,7 @@ class PermissionGroupRow:
     Mirrors the shape of
     :class:`app.domain.identity.permission_groups.PermissionGroupRef`;
     declared here so the Protocol surface does not depend on the
-    domain module.
+    service module (which itself imports this seam).
     """
 
     id: str
@@ -295,7 +298,7 @@ class RoleGrantRepository(Protocol):
     (:meth:`is_property_in_workspace`) lives on this repo because
     :mod:`app.domain.identity.role_grants` is the only domain module
     that needs it; pulling it out into a sibling
-    :mod:`app.adapters.db.places.ports` would force two repos through
+    :mod:`app.domain.places.ports` would force two repos through
     every call site for one boolean. The SA concretion in
     :mod:`app.adapters.db.authz.repositories` reaches into
     :mod:`app.adapters.db.places.models` directly — adapter-to-adapter

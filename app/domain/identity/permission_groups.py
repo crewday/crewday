@@ -42,8 +42,8 @@ take a :class:`~app.tenancy.WorkspaceContext` purely so audit rows
 carry the right actor / correlation fields.
 
 **Architecture.** The module talks to a
-:class:`~app.adapters.db.authz.ports.PermissionGroupRepository`
-Protocol (cd-duv6) — never to the SQLAlchemy model classes
+:class:`~app.domain.identity.ports.PermissionGroupRepository`
+Protocol (cd-duv6 / cd-jzfc) — never to the SQLAlchemy model classes
 directly. The SA-backed concretion lives at
 :class:`app.adapters.db.authz.repositories.SqlAlchemyPermissionGroupRepository`;
 unit tests inject a fake. The repo also threads its open
@@ -62,16 +62,16 @@ from typing import Any, ClassVar
 
 from sqlalchemy.orm import Session
 
-from app.adapters.db.authz.ports import (
+from app.audit import write_audit
+from app.domain.errors import Validation
+from app.domain.identity._action_catalog import ACTION_CATALOG
+from app.domain.identity._owner_guard import count_owner_members_locked
+from app.domain.identity.ports import (
     PermissionGroupMemberRow,
     PermissionGroupRepository,
     PermissionGroupRow,
     PermissionGroupSlugTakenError,
 )
-from app.audit import write_audit
-from app.domain.errors import Validation
-from app.domain.identity._action_catalog import ACTION_CATALOG
-from app.domain.identity._owner_guard import count_owner_members_locked
 from app.tenancy import WorkspaceContext
 from app.util.clock import Clock, SystemClock
 from app.util.ulid import new_ulid
@@ -293,7 +293,7 @@ def create_group(
     :class:`~sqlalchemy.exc.IntegrityError` rolls back only the
     failed mint, preserving the caller's outer transaction. The repo
     surfaces the conflict as
-    :class:`~app.adapters.db.authz.ports.PermissionGroupSlugTakenError`,
+    :class:`~app.domain.identity.ports.PermissionGroupSlugTakenError`,
     which we re-raise as the public-surface
     :class:`PermissionGroupSlugTaken`. Unknown capability keys raise
     :class:`UnknownCapability` before the insert is attempted.

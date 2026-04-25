@@ -1,4 +1,4 @@
-"""SA-backed repositories implementing :mod:`app.adapters.db.authz.ports`.
+"""SA-backed repositories implementing :mod:`app.domain.identity.ports`.
 
 The two concrete classes here adapt SQLAlchemy ``Session`` work to
 the Protocol surface :mod:`app.domain.identity.permission_groups`
@@ -34,7 +34,8 @@ from app.adapters.db.authz.models import (
     PermissionGroupMember,
     RoleGrant,
 )
-from app.adapters.db.authz.ports import (
+from app.adapters.db.places.models import PropertyWorkspace
+from app.domain.identity.ports import (
     PermissionGroupMemberRow,
     PermissionGroupRepository,
     PermissionGroupRow,
@@ -42,7 +43,6 @@ from app.adapters.db.authz.ports import (
     RoleGrantRepository,
     RoleGrantRow,
 )
-from app.adapters.db.places.models import PropertyWorkspace
 
 __all__ = [
     "SqlAlchemyPermissionGroupRepository",

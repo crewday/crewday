@@ -280,16 +280,11 @@ forbidden_modules = ["app.adapters"]
 ignore_imports = [
     "app.domain.** -> app.adapters.*.ports",
     "app.domain.** -> app.adapters.*.ports.*",
-    # The cd-duv6 PermissionGroupRepository / RoleGrantRepository
-    # ports live at ``app.adapters.db.authz.ports`` — a sub-package
-    # under ``app.adapters.db``. The single-``*`` patterns above
-    # only match one path segment past ``app.adapters``, so we
-    # spell the deeper layout out explicitly. New repository ports
-    # under ``app.adapters.db.<context>.ports`` should add a sibling
-    # entry here (or a future ``**`` rule once the contract gains
-    # multi-segment support).
-    "app.domain.** -> app.adapters.db.*.ports",
-    "app.domain.** -> app.adapters.db.*.ports.*",
+    # Per-context repository ports live in the domain's public surface
+    # (``app/domain/<context>/ports.py``) per
+    # ``docs/specs/01-architecture.md`` §"Boundary rules" rule 4 —
+    # cd-duv6's ``app.adapters.db.<context>.ports`` placement was
+    # reconciled by cd-jzfc, so no extra wildcard is needed here.
     # v1 stopgap (cd-mb5n): ``app.domain.identity._owner_guard`` is the
     # shared cross-dialect locking primitive for the last-owner
     # invariant; both ``remove_member`` and ``revoke`` delegate their

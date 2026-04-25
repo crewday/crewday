@@ -54,9 +54,9 @@ transaction boundary — the service never calls
 ``session.commit()`` (§01 "Key runtime invariants" #3).
 
 **Architecture.** The module talks to a
-:class:`~app.adapters.db.authz.ports.RoleGrantRepository` Protocol
-(cd-duv6) — never to the SQLAlchemy model classes directly. The
-SA-backed concretion at
+:class:`~app.domain.identity.ports.RoleGrantRepository` Protocol
+(cd-duv6 / cd-jzfc) — never to the SQLAlchemy model classes directly.
+The SA-backed concretion at
 :class:`app.adapters.db.authz.repositories.SqlAlchemyRoleGrantRepository`
 covers both the ``role_grant`` rows and the ``property_workspace``
 junction the cross-workspace property-scope check needs (those
@@ -81,10 +81,10 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
 
-from app.adapters.db.authz.ports import RoleGrantRepository, RoleGrantRow
 from app.audit import write_audit
 from app.authz.owners import is_owner_member
 from app.domain.identity._owner_guard import count_owner_members_locked
+from app.domain.identity.ports import RoleGrantRepository, RoleGrantRow
 from app.tenancy import WorkspaceContext
 from app.util.clock import Clock, SystemClock
 from app.util.ulid import new_ulid

@@ -26,7 +26,7 @@ from typing import Any
 
 import pytest
 
-from app.adapters.db.authz.ports import RoleGrantRepository, RoleGrantRow
+from app.domain.identity.ports import RoleGrantRepository, RoleGrantRow
 from app.domain.identity.role_grants import (
     CrossWorkspaceProperty,
     GrantRoleInvalid,

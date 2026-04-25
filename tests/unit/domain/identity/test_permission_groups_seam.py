@@ -22,12 +22,6 @@ from typing import Any
 
 import pytest
 
-from app.adapters.db.authz.ports import (
-    PermissionGroupMemberRow,
-    PermissionGroupRepository,
-    PermissionGroupRow,
-    PermissionGroupSlugTakenError,
-)
 from app.domain.identity.permission_groups import (
     PermissionGroupNotFound,
     PermissionGroupSlugTaken,
@@ -41,6 +35,12 @@ from app.domain.identity.permission_groups import (
     list_members,
     remove_member,
     update_group,
+)
+from app.domain.identity.ports import (
+    PermissionGroupMemberRow,
+    PermissionGroupRepository,
+    PermissionGroupRow,
+    PermissionGroupSlugTakenError,
 )
 from app.tenancy import WorkspaceContext
 from app.util.clock import FrozenClock
