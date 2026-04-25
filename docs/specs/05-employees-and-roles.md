@@ -493,6 +493,7 @@ configuration.
 | `users.invite`                          | `workspace`, `property`, `organization` | `owners, managers`            | ✅ | §03 |
 | `users.archive`                         | `workspace`, `property`, `organization` | `owners, managers`            | ✅ | §05 |
 | `users.edit_profile_other`              | `workspace`, `property`        | `owners, managers`            | —  | §02 |
+| `employees.read`                        | `workspace`                    | `owners, managers`            | —  | §12 — gates the manager roster surface (`GET /employees`). Workers read their own profile via `/auth/me`; the cross-roster view is manager-only by design. |
 | `role_grants.create`                    | `workspace`, `property`, `organization` | `owners, managers`            | ✅ | §02 |
 | `role_grants.revoke`                    | `workspace`, `property`, `organization` | `owners, managers`            | ✅ | §02 |
 | `groups.create`                         | `workspace`, `organization`    | `owners, managers`            | ✅ | §02 |

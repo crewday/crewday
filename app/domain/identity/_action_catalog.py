@@ -288,6 +288,20 @@ _RULE_DRIVEN: tuple[ActionSpec, ...] = (
         root_protected_deny=False,
     ),
     ActionSpec(
+        key="employees.read",
+        # cd-g6nf — SPA roster endpoint. Manager-only (owners + managers)
+        # because the projection collates identity-level fields
+        # (display_name, email, locale, timezone) with the workspace-
+        # scoped engagement + role-grant + property assignments. Workers
+        # see their own profile via :func:`/auth/me` + the worker
+        # surfaces; the roster is a manager view by design (§05 "User
+        # (as worker)" — workers do not see other workers' rosters).
+        valid_scope_kinds=("workspace",),
+        default_allow=("owners", "managers"),
+        root_only=False,
+        root_protected_deny=False,
+    ),
+    ActionSpec(
         key="expenses.approve",
         valid_scope_kinds=("workspace", "property"),
         default_allow=("owners", "managers"),

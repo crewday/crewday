@@ -714,6 +714,31 @@ POST   /users/{id}/reset_passkey   # owner-initiated worker passkey reset (§03)
                                    # mails the enrolment link to the worker AND a
                                    # non-consumable notification copy to the owner
 
+GET    /employees                 # manager roster (cd-g6nf, cd-jtgo). Returns a
+                                   # bare `Employee[]` JSON array — NOT the
+                                   # `{data, next_cursor, has_more}` envelope —
+                                   # because the SPA's manager pages
+                                   # (ExpensesApprovalsPage, SchedulesPage,
+                                   # EmployeesPage, …) consume it as a flat list
+                                   # via `fetchJson<Employee[]>`. Pagination is
+                                   # tracked as a separate follow-up that pairs
+                                   # the envelope shape with an SPA call-site
+                                   # migration. The `Employee` projection joins
+                                   # `users × work_engagement × role_grant ×
+                                   # user_work_role × property_workspace` and
+                                   # carries the fields declared in
+                                   # `app/web/src/types/employee.ts` (id, name,
+                                   # roles, properties, avatar_url,
+                                   # avatar_initials, capabilities, …). Gated by
+                                   # `employees.read` (manager+); workers fall
+                                   # through to 403. Decision: option (a) — keep
+                                   # `/employees` as the manager roster surface
+                                   # rather than refactoring every SPA page onto
+                                   # `/users + /work_engagements`. Option (b)
+                                   # would have broken verbatim-port parity with
+                                   # the mock layer for no observable benefit
+                                   # while the SPA is still being built.
+
 POST   /me/avatar                 # multipart; self-only; replaces users.avatar_file_id
 DELETE /me/avatar                 # self-only; clears avatar_file_id → initials fallback
 
