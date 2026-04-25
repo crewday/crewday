@@ -731,10 +731,13 @@ fix the offender.
   chain on retryable failures; `fallback_attempts` on `llm_call`
   records how deep the chain was traversed before success. See §11
   "Model assignment".
-- **Capability inheritance.** One row in `llm_capability_inheritance`
-  names a parent capability whose assignment chain and prompt
-  template serve the child when the child has none of its own. v1
-  ships one row: `chat.admin → chat.manager`. See §11.
+- **Capability inheritance.** A workspace-scoped override row in
+  `llm_capability_inheritance` (unique on `(workspace_id,
+  capability)`) names a parent capability whose assignment chain and
+  prompt template serve the child when the child has none of its
+  own. The resolver layers the workspace row over the deployment-
+  level seed at read time; v1 ships one deployment seed,
+  `chat.admin → chat.manager`. See §11.
 - **Prompt library.** DB-backed system-prompt store
   (`llm_prompt_template`) with full version history
   (`llm_prompt_template_revision`). One of the **hash-self-seeded

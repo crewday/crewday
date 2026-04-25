@@ -868,25 +868,38 @@ llm_assignment
 
 ### Capability inheritance
 
-Modelled on fj2's `LLMUseCaseInheritance`:
+Modelled on fj2's `LLMUseCaseInheritance`, but scoped per-workspace
+so an operator's edge does not leak into a sibling workspace's chain:
 
 ```
 llm_capability_inheritance
-├── capability         text PK         -- child
-├── inherits_from      text            -- parent; must also be a key in the catalog
-└── created_at
+├── id                 ULID PK
+├── workspace_id       ULID FK workspace.id ON DELETE CASCADE
+├── capability         text             -- child
+├── inherits_from      text             -- parent; must also be a key in the catalog
+├── created_at         tstz
+└── UNIQUE(workspace_id, capability)
 ```
 
 The resolver walks children to parents: when `chat.admin` has no
 enabled assignments of its own, it falls through to `chat.manager`'s
 chain. Inheritance also applies to `llm_prompt_template` (below) — a
 child capability without a custom prompt uses the parent's. A cycle is
-rejected on save with `422 capability_inheritance_cycle`. Child
-assignments **override** the parent when present (not merged).
+rejected on save with `422 capability_inheritance_cycle`; a self-loop
+(`capability = inherits_from`) is rejected by a CHECK at the DB layer.
+Child assignments **override** the parent when present (not merged).
 
-v1 seeds one inheritance row: `chat.admin → chat.manager`. Others
-stay flat so operators can reason about their chain in isolation;
-new ties are introduced surgically as sub-capabilities appear.
+The unique on `(workspace_id, capability)` pins one parent per child
+per workspace — a child has either a single parent or none. Workspace
+edges **compose over** the deployment-level seed (below) at read time:
+the resolver consults the workspace row first, then falls through to
+the deployment seed when the workspace has no override for that child.
+
+v1 seeds one inheritance edge at the deployment level:
+`chat.admin → chat.manager`. Others stay flat so operators can reason
+about their chain in isolation; new ties are introduced surgically as
+sub-capabilities appear, either as deployment seeds or per-workspace
+overrides written from `/admin/llm`.
 
 ### Capability defaults (seeds)
 
@@ -899,8 +912,16 @@ At first boot the deployment is seeded with:
 | `voice.transcribe`      | **No seed** — capability is disabled until an admin assigns an audio model  | No default audio-input model ships. |
 | `documents.ocr`         | **No seed** — capability is disabled until an admin assigns a vision model  | Local extractors handle the common cases; the LLM fallback is opt-in per deployment because every call charges the workspace 30-day budget. See §21 "Document text extraction". |
 
-Deployment admins override any chain from `/admin/llm` without a
-redeploy. Overrides are deployment-wide.
+The capability catalogue itself (the closed enum of keys —
+`chat.manager`, `expenses.autofill`, `receipt_ocr`,
+`voice.transcribe`, …) and the **deployment-level seed edges** (the
+`chat.admin → chat.manager` inheritance row) are declared in code
+under `app/domain/llm/` and applied at boot. Deployment admins
+override the chain from `/admin/llm` without a redeploy by writing
+**workspace-scoped rows** into `llm_assignment` and
+`llm_capability_inheritance`; the resolver layers those workspace
+rows over the deployment seeds at read time. A workspace with no
+overrides sees the deployment defaults verbatim.
 
 ## Prompt library
 
