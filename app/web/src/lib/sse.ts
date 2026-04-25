@@ -88,6 +88,9 @@ export type EventKind =
   | "approval.decided"
   | "approval.resolved"
   // Expenses (§09).
+  | "expense.created"
+  | "expense.submitted"
+  | "expense.cancelled"
   | "expense.approved"
   | "expense.rejected"
   | "expense.reimbursed"
@@ -406,9 +409,39 @@ export const INVALIDATIONS: Record<EventKind, InvalidationHandler> = {
     invalidate(qc, qk.history("expenses"));
   },
 
+  "expense.created": (_event, qc) => {
+    // Worker just filed a draft (or the agent / manager filed one for
+    // them). Only the worker's own list and dashboard care; the
+    // workspace-wide `all` list isn't user-visible until the claim is
+    // submitted, so we leave it alone to keep the cache cheap.
+    invalidate(qc, qk.expenses("mine"));
+    invalidate(qc, qk.dashboard());
+  },
+
+  "expense.submitted": (_event, qc) => {
+    // Draft → submitted: the claim now appears in the manager's
+    // approval queue and on the worker's "mine" list with an updated
+    // status chip. `expenses("all")` is the manager-side list.
+    invalidate(qc, qk.expenses("all"));
+    invalidate(qc, qk.expenses("mine"));
+    invalidate(qc, qk.dashboard());
+  },
+
+  "expense.cancelled": (_event, qc) => {
+    // Worker withdrew a draft / submitted claim. Worker's own list
+    // updates (the row disappears or moves to a cancelled chip) and
+    // the dashboard recomputes its pending count.
+    invalidate(qc, qk.expenses("all"));
+    invalidate(qc, qk.expenses("mine"));
+    invalidate(qc, qk.dashboard());
+  },
+
   "expense.approved": (_event, qc) => {
     invalidate(qc, qk.expenses("all"));
     invalidate(qc, qk.expenses("mine"));
+    // Approval is the moment the claim lands in "Owed to you" — refresh
+    // the per-user pending-reimbursement total alongside the list.
+    invalidate(qc, qk.expensesPendingReimbursement("me"));
     invalidate(qc, qk.dashboard());
     invalidate(qc, qk.history("expenses"));
   },
@@ -416,6 +449,11 @@ export const INVALIDATIONS: Record<EventKind, InvalidationHandler> = {
   "expense.rejected": (_event, qc) => {
     invalidate(qc, qk.expenses("all"));
     invalidate(qc, qk.expenses("mine"));
+    // A reject doesn't change "Owed to you" itself, but if the claim
+    // had previously bounced through approved → rejected (rare, but
+    // possible on amend) the cached total would be stale. Cheap to
+    // invalidate; safer than a divergent number on screen.
+    invalidate(qc, qk.expensesPendingReimbursement("me"));
     invalidate(qc, qk.dashboard());
     invalidate(qc, qk.history("expenses"));
   },
@@ -423,6 +461,10 @@ export const INVALIDATIONS: Record<EventKind, InvalidationHandler> = {
   "expense.reimbursed": (_event, qc) => {
     invalidate(qc, qk.expenses("all"));
     invalidate(qc, qk.expenses("mine"));
+    // Reimbursement removes the claim from the pending pool — refresh
+    // the worker's "Owed to you" total so it shrinks the moment the
+    // payslip lands.
+    invalidate(qc, qk.expensesPendingReimbursement("me"));
     invalidate(qc, qk.dashboard());
     invalidate(qc, qk.history("expenses"));
   },
@@ -432,6 +474,7 @@ export const INVALIDATIONS: Record<EventKind, InvalidationHandler> = {
     // emits the bundled kind invalidates the same surfaces.
     invalidate(qc, qk.expenses("all"));
     invalidate(qc, qk.expenses("mine"));
+    invalidate(qc, qk.expensesPendingReimbursement("me"));
     invalidate(qc, qk.dashboard());
     invalidate(qc, qk.history("expenses"));
   },

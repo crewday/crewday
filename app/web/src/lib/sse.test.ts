@@ -93,6 +93,9 @@ describe("INVALIDATIONS — coverage", () => {
     "stay_task_bundle.deleted",
     "approval.decided",
     "approval.resolved",
+    "expense.created",
+    "expense.submitted",
+    "expense.cancelled",
     "expense.approved",
     "expense.rejected",
     "expense.reimbursed",
@@ -145,6 +148,60 @@ describe("INVALIDATIONS — per-kind behaviour", () => {
     // `refetchType: "active"` keeps idle queries cheap.
     for (const call of spy.mock.calls) {
       expect(call[0]?.refetchType).toBe("active");
+    }
+  });
+
+  it("task.assigned invalidates tasks, today, dashboard", () => {
+    // §06 — a task assignment lands on the worker's Today list, the
+    // task list filter, and the dashboard counter; per-kind assertion
+    // to guard against drift in the handler key set.
+    const qc = makeClient();
+    const spy = vi.spyOn(qc, "invalidateQueries");
+    INVALIDATIONS["task.assigned"](makeEvent("task.assigned"), qc);
+    const called = spy.mock.calls.map((c) => c[0]?.queryKey);
+    expect(called).toEqual(
+      expect.arrayContaining([qk.tasks(), qk.today(), qk.dashboard()]),
+    );
+  });
+
+  it("task.overdue invalidates tasks, today, dashboard", () => {
+    // §06 — an overdue transition flips the chip + reshuffles the
+    // dashboard "needs attention" tile. Per-kind assertion.
+    const qc = makeClient();
+    const spy = vi.spyOn(qc, "invalidateQueries");
+    INVALIDATIONS["task.overdue"](makeEvent("task.overdue"), qc);
+    const called = spy.mock.calls.map((c) => c[0]?.queryKey);
+    expect(called).toEqual(
+      expect.arrayContaining([qk.tasks(), qk.today(), qk.dashboard()]),
+    );
+  });
+
+  it("stay.upcoming invalidates stays + dashboard", () => {
+    // §04 — a freshly synced upcoming stay refreshes the stays list
+    // and the dashboard's upcoming-stays tile.
+    const qc = makeClient();
+    const spy = vi.spyOn(qc, "invalidateQueries");
+    INVALIDATIONS["stay.upcoming"](makeEvent("stay.upcoming"), qc);
+    const called = spy.mock.calls.map((c) => c[0]?.queryKey);
+    expect(called).toEqual(
+      expect.arrayContaining([qk.stays(), qk.dashboard()]),
+    );
+  });
+
+  it("stay_task_bundle.{upserted,deleted} invalidates the scheduler calendar + stays", () => {
+    // §14 scheduler — bundle changes ripple into the calendar feed
+    // (any mounted window) and the stays list. Per-kind assertion.
+    for (const kind of [
+      "stay_task_bundle.upserted",
+      "stay_task_bundle.deleted",
+    ] as const) {
+      const qc = makeClient();
+      const spy = vi.spyOn(qc, "invalidateQueries");
+      INVALIDATIONS[kind](makeEvent(kind, { bundle: { id: "b1" } }), qc);
+      const called = spy.mock.calls.map((c) => c[0]?.queryKey);
+      expect(called).toEqual(
+        expect.arrayContaining([["scheduler-calendar"], qk.stays()]),
+      );
     }
   });
 
@@ -262,6 +319,85 @@ describe("INVALIDATIONS — per-kind behaviour", () => {
         ]),
       );
     }
+  });
+
+  it("expense.{approved,rejected,reimbursed,decided} also invalidates the worker's pending-reimbursement total", () => {
+    // §09 "Amount owed to the employee" — the worker's
+    // pending-reimbursement total has to shrink/grow the instant a
+    // claim crosses any decision boundary, so the four decision-side
+    // kinds all refresh `expensesPendingReimbursement("me")`.
+    for (const kind of [
+      "expense.approved",
+      "expense.rejected",
+      "expense.reimbursed",
+      "expense.decided",
+    ] as const) {
+      const qc = makeClient();
+      const spy = vi.spyOn(qc, "invalidateQueries");
+      INVALIDATIONS[kind](makeEvent(kind, { id: "e1", status: "approved" }), qc);
+      const called = spy.mock.calls.map((c) => c[0]?.queryKey);
+      expect(called).toEqual(
+        expect.arrayContaining([qk.expensesPendingReimbursement("me")]),
+      );
+    }
+  });
+
+  it("expense.created invalidates the worker's `mine` list + dashboard only", () => {
+    // Drafting a claim shouldn't churn the workspace-wide list
+    // (which only shows submitted+ claims) — keep the cache cheap.
+    const qc = makeClient();
+    const spy = vi.spyOn(qc, "invalidateQueries");
+    INVALIDATIONS["expense.created"](
+      makeEvent("expense.created", { id: "e1", status: "draft" }),
+      qc,
+    );
+    const called = spy.mock.calls.map((c) => c[0]?.queryKey);
+    expect(called).toEqual(
+      expect.arrayContaining([qk.expenses("mine"), qk.dashboard()]),
+    );
+    // The `all` list and the per-user pending total are not touched.
+    expect(called).not.toContainEqual(qk.expenses("all"));
+    expect(called).not.toContainEqual(qk.expensesPendingReimbursement("me"));
+  });
+
+  it("expense.submitted invalidates `mine` + `all` + dashboard", () => {
+    // Submission moves the claim into the manager queue, so the
+    // workspace-wide list has to refresh too.
+    const qc = makeClient();
+    const spy = vi.spyOn(qc, "invalidateQueries");
+    INVALIDATIONS["expense.submitted"](
+      makeEvent("expense.submitted", { id: "e1", status: "submitted" }),
+      qc,
+    );
+    const called = spy.mock.calls.map((c) => c[0]?.queryKey);
+    expect(called).toEqual(
+      expect.arrayContaining([
+        qk.expenses("mine"),
+        qk.expenses("all"),
+        qk.dashboard(),
+      ]),
+    );
+  });
+
+  it("expense.cancelled invalidates `mine` + `all` + dashboard", () => {
+    // Withdrawal can affect either the worker's own list or the
+    // manager queue depending on whether the claim was still draft;
+    // refreshing both is the cheapest way to stay correct without
+    // peeking at the prior status.
+    const qc = makeClient();
+    const spy = vi.spyOn(qc, "invalidateQueries");
+    INVALIDATIONS["expense.cancelled"](
+      makeEvent("expense.cancelled", { id: "e1", status: "cancelled" }),
+      qc,
+    );
+    const called = spy.mock.calls.map((c) => c[0]?.queryKey);
+    expect(called).toEqual(
+      expect.arrayContaining([
+        qk.expenses("mine"),
+        qk.expenses("all"),
+        qk.dashboard(),
+      ]),
+    );
   });
 
   it("task.{completed,skipped} also invalidates the history `tasks` tab", () => {
