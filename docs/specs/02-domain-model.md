@@ -468,10 +468,30 @@ queries stay fast and auditable.
 | source        | text    | `workspace_grant \| property_grant \| org_grant \| work_engagement` |
 | added_at      | tstz    |                                                             |
 
-Primary key `(user_id, workspace_id)`. A worker job refreshes the
-rows whenever an upstream `role_grants`, `work_engagement`, or
-`property_workspace` row changes, in the same transaction. Rows
-persist until every upstream source is revoked.
+Primary key `(user_id, workspace_id)`. A worker job
+(`user_workspace_refresh`, every 5 min by default) reconciles the
+junction against every active upstream — workspace-scoped
+`role_grants`, property-scoped `role_grants` resolved through
+`property_workspace`, organisation-scoped `role_grants` resolved
+through `org_workspace`, and active `work_engagement` rows. The
+reconciliation is **eventually consistent**: the upstream write
+returns first, the worker's next tick brings the junction in line,
+and a brief lag between the two is expected. Domain services that
+mutate membership (signup, grant, invite/accept, member removal)
+write the upstream rows and do **not** insert into `user_workspace`
+inline. The two flows whose post-write redirect cannot tolerate a
+tick's lag (signup → `/w/<slug>/today`; invite-accept and member
+removal → the tenancy resolver fails closed on a missing or stale
+row) call a *scoped* reconcile for the affected `(user, workspace)`
+pair in the same transaction; the helper is the same algorithm as
+the worker tick narrowed to one cell, so the eventual-consistency
+contract still holds — these flows just close the gap to zero for
+their own request rather than waiting on the cadence. Rows persist
+until every upstream source is revoked. When more than one upstream
+is live the row records the dominant source by precedence
+`workspace_grant > property_grant > org_grant > work_engagement`;
+`added_at` records when the user *first* became visible in the
+workspace and is preserved across source flips.
 
 ### `users`
 

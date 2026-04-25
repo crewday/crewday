@@ -538,7 +538,13 @@ class TestAcceptNewUser:
         assert len(grants) == 1
         assert grants[0].grant_role == "worker"
 
-        # Derived user_workspace row landed (TODO cd-yqm4).
+        # ``complete_invite`` calls the scoped reconciler inline (see
+        # ``user_workspace_refresh.reconcile_user_workspace_for``) so
+        # the post-accept redirect target finds an up-to-date junction
+        # without waiting on the worker tick. Asserting against the
+        # row directly proves the inline reconcile path; the worker
+        # tick is exercised separately in
+        # ``tests/integration/worker/test_user_workspace_refresh_fanout.py``.
         uw = session.get(UserWorkspace, (outcome.user_id, ctx.workspace_id))
         assert uw is not None
 
@@ -813,6 +819,11 @@ class TestRemoveMember:
             select(RoleGrant).where(RoleGrant.user_id == worker.id)
         ).all()
         assert remaining_grants == []
+        # ``remove_member`` calls the scoped reconciler inline (see
+        # ``user_workspace_refresh.reconcile_user_workspace_for``) so
+        # the removed user does not keep a stale guest-fallback ctx
+        # for up to one worker tick. Asserting against the row
+        # directly proves the inline drop path.
         uw = session.get(UserWorkspace, (worker.id, ctx.workspace_id))
         assert uw is None
         # Sessions for the workspace are revoked.

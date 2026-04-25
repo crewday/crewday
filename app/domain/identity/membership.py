@@ -23,18 +23,21 @@ High-level surface:
   so the SPA can prompt sign-in first.
 * :func:`complete_invite` — second leg of acceptance for a brand-new
   invitee, called by the passkey-finish hook. One transaction:
-  insert the ``role_grant`` + ``permission_group_member`` rows plus
-  the derived ``user_workspace`` pointer (see TODO(cd-yqm4) in-line),
-  flip the invite to ``accepted``, emit ``user.enrolled`` audit.
+  insert the ``role_grant`` + ``permission_group_member`` rows, flip
+  the invite to ``accepted``, emit ``user.enrolled`` audit. The
+  derived :class:`UserWorkspace` row materialises on the next
+  worker tick (see "derived junction" below).
 * :func:`confirm_invite` — second leg of acceptance for an existing
   user who clicked Accept on the card. Same downstream inserts as
   :func:`complete_invite`, audited as ``user.grant_accepted``.
 * :func:`remove_member` — delete every ``role_grant`` +
   ``permission_group_member`` row the user holds in the caller's
-  workspace, plus the derived ``user_workspace`` pointer, plus every
-  live :class:`Session` scoped to that workspace. Refuses the
-  operation if it would empty the ``owners`` group (reuses
+  workspace, plus every live :class:`Session` scoped to that
+  workspace. Refuses the operation if it would empty the ``owners``
+  group (reuses
   :class:`app.domain.identity.permission_groups.LastOwnerMember`).
+  The derived :class:`UserWorkspace` row drops on the next worker
+  tick (see "derived junction" below).
 * :func:`list_workspaces_for_user` — what the workspace switcher
   reads.
 * :func:`switch_session_workspace` — verify membership + update
@@ -46,13 +49,20 @@ every downstream insert — the invite either activates all its
 targeted grants or none.
 
 **derived junction.** ``user_workspace`` is documented as a derived
-junction (§02) refreshed by a worker that reconciles from the
-upstream ``role_grant`` / ``work_engagement`` / ``property_grant``
-rows. That worker does not exist yet (cd-yqm4 tracked as follow-up);
-until it lands we write ``user_workspace`` inline alongside the
-other rows so the tenancy resolver sees a live membership. Every
-inline touch is flagged ``TODO(cd-yqm4): remove when refresh worker
-lands`` so the cleanup is mechanical.
+junction (§02). The canonical reconciler lives in
+:func:`app.domain.identity.user_workspace_refresh.reconcile_user_workspace`
+and runs on the worker (cd-yqm4) every
+:data:`~app.worker.scheduler.USER_WORKSPACE_REFRESH_INTERVAL_SECONDS`
+seconds; the membership service writes the upstream rows
+(``role_grant`` / ``permission_group_member``) and then drives the
+*scoped* reconciler
+(:func:`app.domain.identity.user_workspace_refresh.reconcile_user_workspace_for`)
+in the same transaction so the post-accept / post-remove redirect
+sees the up-to-date junction without waiting on the worker tick.
+Steady-state churn (workspaces that grow / shrink between ticks
+because of out-of-band writes) is still recovered by the worker's
+fan-out — the inline call closes the latency gap on the redirect
+target only.
 
 **Audit.** Every mutation emits one :mod:`app.audit` row in the
 same transaction as the write; audit diffs carry hashed email only
@@ -1170,9 +1180,13 @@ def _activate_invite(
 
     * one :class:`RoleGrant` per ``grants_json`` entry;
     * one :class:`PermissionGroupMember` per
-      ``group_memberships_json`` entry (idempotent on duplicates);
-    * one :class:`UserWorkspace` row mirroring the derived
-      junction. **TODO(cd-yqm4): remove when refresh worker lands.**
+      ``group_memberships_json`` entry (idempotent on duplicates).
+
+    The derived :class:`UserWorkspace` row is then materialised inline
+    via :func:`reconcile_user_workspace_for` so the post-accept
+    redirect to ``/w/<slug>/today`` finds an up-to-date junction;
+    steady-state churn is still recovered by the worker (cd-yqm4),
+    but the redirect target cannot tolerate the tick's lag.
 
     Flips the invite row's ``state`` to ``accepted`` and fills
     ``accepted_at``.
@@ -1241,22 +1255,6 @@ def _activate_invite(
         session.add(member)
         activated_group_members.append(group_id)
 
-    # TODO(cd-yqm4): remove when refresh worker lands. Until the
-    # derive worker reconciles ``user_workspace`` from upstream
-    # grants, we write the row inline so the tenancy resolver sees
-    # a live membership.
-    existing_uw = session.get(UserWorkspace, (user_id, workspace_id))
-    if existing_uw is None:
-        session.add(
-            UserWorkspace(
-                user_id=user_id,
-                workspace_id=workspace_id,
-                source="workspace_grant",
-                added_at=now,
-            )
-        )
-        session.flush()
-
     # §03 "Additional users": seed a minimal pending
     # :class:`WorkEngagement` at accept time, never at invite-create
     # time — nothing workspace-scoped exists for the invitee until
@@ -1289,6 +1287,25 @@ def _activate_invite(
     invite_row.state = "accepted"
     invite_row.accepted_at = now
     session.flush()
+
+    # The accept handler returns a redirect to ``/w/<slug>/today``;
+    # the tenancy resolver fails closed on a missing ``user_workspace``
+    # row, and the cd-yqm4 derive-refresh worker only catches up on
+    # its own cadence (5 min by default). Without a synchronous
+    # scoped reconcile here the post-accept GET would 404 for up to
+    # one tick. Deferred imports avoid a domain → domain circular
+    # import at module load time (membership and user_workspace_refresh
+    # both live under ``app.domain.identity``).
+    from app.domain.identity.user_workspace_refresh import (
+        reconcile_user_workspace_for,
+    )
+
+    reconcile_user_workspace_for(
+        session,
+        user_id=user_id,
+        workspace_id=workspace_id,
+        now=now,
+    )
 
     write_audit(
         session,
@@ -1475,10 +1492,15 @@ def remove_member(
        ``(workspace, user)``. If the user is the sole owner, the
        guard refuses BEFORE the DELETE; the caller's UoW keeps the
        rows intact.
-    3. TODO(cd-yqm4): remove when refresh worker lands. Delete the
-       derived :class:`UserWorkspace` row for the pair.
-    4. Delete every :class:`Session` row whose ``workspace_id``
+    3. Delete every :class:`Session` row whose ``workspace_id``
        matches the caller's workspace.
+
+    The derived :class:`UserWorkspace` row is dropped inline via
+    :func:`reconcile_user_workspace_for` so a removed user does not
+    keep a stale ``guest``-fallback :class:`WorkspaceContext` for up
+    to one worker tick; the cd-yqm4 worker still owns steady-state
+    reconciliation but the security-critical drop on the removal
+    path runs synchronously.
 
     Audit: one ``user.removed`` row with the list of deleted grant
     ids + group memberships + session count (PII-hash only). On the
@@ -1580,17 +1602,6 @@ def remove_member(
         .execution_options(synchronize_session="fetch")
     )
 
-    # TODO(cd-yqm4): remove when refresh worker lands. The derived
-    # junction row is deleted inline until the worker exists.
-    session.execute(
-        delete(UserWorkspace)
-        .where(
-            UserWorkspace.user_id == user_id,
-            UserWorkspace.workspace_id == ctx.workspace_id,
-        )
-        .execution_options(synchronize_session="fetch")
-    )
-
     # Revoke every session scoped to this workspace. A session with
     # ``workspace_id IS NULL`` (user is signed in but hasn't picked
     # a workspace) stays — it's identity-level, not membership-level.
@@ -1625,6 +1636,23 @@ def remove_member(
 
     session.flush()
 
+    # Drop the derived ``user_workspace`` row synchronously — without
+    # this the removed user keeps a stale membership for up to one
+    # cd-yqm4 worker tick (5 min by default), and the tenancy resolver
+    # would happily build a ``guest``-fallback :class:`WorkspaceContext`
+    # against the now-empty ``role_grant`` set. Deferred import —
+    # see the matching note in :func:`_activate_invite`.
+    from app.domain.identity.user_workspace_refresh import (
+        reconcile_user_workspace_for,
+    )
+
+    reconcile_user_workspace_for(
+        session,
+        user_id=user_id,
+        workspace_id=ctx.workspace_id,
+        now=resolved_now,
+    )
+
     write_audit(
         session,
         ctx,
@@ -1645,11 +1673,6 @@ def remove_member(
         clock=clock,
     )
 
-    # ``resolved_now`` is reserved for a future ``removed_at`` tombstone
-    # row; today we hard-delete. Keeping the variable in scope here
-    # means the cleanup is mechanical once the tombstone lands.
-    del resolved_now
-
 
 # ---------------------------------------------------------------------------
 # list_workspaces_for_user + switch_session_workspace
@@ -1665,10 +1688,8 @@ def list_workspaces_for_user(
 
     Drives the workspace switcher UI (§14) and the
     ``GET /api/v1/me/workspaces`` route. Reads the derived
-    :class:`UserWorkspace` junction directly — the production
-    refresh worker keeps it in sync; until that lands, the
-    :func:`complete_invite` / :func:`confirm_invite` inline writes
-    are the source of truth.
+    :class:`UserWorkspace` junction directly — the user_workspace
+    derive-refresh worker (cd-yqm4) keeps it in sync.
 
     No tenant filter: the user spans multiple workspaces and this
     call deliberately aggregates across them. We run it under

@@ -592,6 +592,21 @@ ignore_imports = [
     # once the places + workspace repositories land.
     "app.domain.places.property_work_role_assignments -> app.adapters.db.places.models",
     "app.domain.places.property_work_role_assignments -> app.adapters.db.workspace.models",
+    # v1 stopgap (cd-yqm4):
+    # ``app.domain.identity.user_workspace_refresh`` is the canonical
+    # reconciler for the derived ``user_workspace`` junction. It reads
+    # :class:`RoleGrant` from ``app.adapters.db.authz.models`` (every
+    # workspace + property-scoped grant), :class:`PropertyWorkspace`
+    # from ``app.adapters.db.places.models`` (resolves a property
+    # grant to its workspace), and :class:`UserWorkspace` /
+    # :class:`WorkEngagement` from ``app.adapters.db.workspace.models``
+    # (the derived junction itself + the work_engagement upstream).
+    # Same Protocol-seam pattern as the other ``app.domain.identity``
+    # stopgaps; tracked by cd-duv6 — drops once the identity / authz /
+    # places / workspace repositories land.
+    "app.domain.identity.user_workspace_refresh -> app.adapters.db.authz.models",
+    "app.domain.identity.user_workspace_refresh -> app.adapters.db.places.models",
+    "app.domain.identity.user_workspace_refresh -> app.adapters.db.workspace.models",
 ]
 unmatched_ignore_imports_alerting = "none"
 

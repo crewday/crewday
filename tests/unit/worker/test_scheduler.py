@@ -32,6 +32,8 @@ from app.worker.scheduler import (
     IDEMPOTENCY_SWEEP_JOB_ID,
     LLM_BUDGET_REFRESH_INTERVAL_SECONDS,
     LLM_BUDGET_REFRESH_JOB_ID,
+    USER_WORKSPACE_REFRESH_INTERVAL_SECONDS,
+    USER_WORKSPACE_REFRESH_JOB_ID,
     create_scheduler,
     register_jobs,
     registered_job_ids,
@@ -66,14 +68,14 @@ class TestCreateScheduler:
 
 class TestRegisterJobs:
     def test_registers_expected_ids(self) -> None:
-        """Standard job set: heartbeat + generator + idempotency-sweep + llm-budget."""
+        """Standard job set: heartbeat + generator + idempotency-sweep
+        + llm-budget + user_workspace-refresh.
+        """
         sched = create_scheduler()
         register_jobs(sched)
-        # Compare as a set so inserting a future job (cd-yqm4
-        # user_workspace derive-refresh, the generator fan-out, any
-        # other daily sweep) doesn't break this assertion just by
-        # landing a new alphabetical neighbour. The
-        # ``registered_job_ids`` helper already returns a sorted
+        # Compare as a set so inserting a future job doesn't break
+        # this assertion just by landing a new alphabetical neighbour.
+        # The ``registered_job_ids`` helper already returns a sorted
         # tuple, so duplicates would still surface via the companion
         # ``test_is_idempotent_under_replace_existing`` path.
         assert set(registered_job_ids(sched)) == {
@@ -81,6 +83,7 @@ class TestRegisterJobs:
             IDEMPOTENCY_SWEEP_JOB_ID,
             HEARTBEAT_JOB_ID,
             LLM_BUDGET_REFRESH_JOB_ID,
+            USER_WORKSPACE_REFRESH_JOB_ID,
         }
 
     def test_is_idempotent_under_replace_existing(self) -> None:
@@ -113,9 +116,10 @@ class TestRegisterJobs:
             IDEMPOTENCY_SWEEP_JOB_ID,
             HEARTBEAT_JOB_ID,
             LLM_BUDGET_REFRESH_JOB_ID,
+            USER_WORKSPACE_REFRESH_JOB_ID,
         }
-        assert len(ids) == 4
-        assert len(sched.get_jobs()) == 4
+        assert len(ids) == 5
+        assert len(sched.get_jobs()) == 5
 
 
 # ---------------------------------------------------------------------------
@@ -306,6 +310,119 @@ class TestLlmBudgetRefreshJob:
         # handed the patched clock through.
         assert len(seen_clocks) == 1
         assert seen_clocks[0] is clock
+
+
+# ---------------------------------------------------------------------------
+# user_workspace derive-refresh job (cd-yqm4)
+# ---------------------------------------------------------------------------
+
+
+class TestUserWorkspaceRefreshJob:
+    """Registration shape + clock propagation for the cd-yqm4 derive-refresh job.
+
+    The body's reconciliation behaviour (insert / delete / source-flip)
+    is covered end-to-end against a real engine in the integration
+    suite under ``tests/integration/identity/test_user_workspace_refresh.py``;
+    the unit layer only asserts what can be proven without a DB:
+    registration metadata, idempotent re-registration, and that the
+    injected clock reaches the closure.
+    """
+
+    def test_adds_job_at_5min_interval(self) -> None:
+        """Registered with the pinned interval + coalesce settings."""
+        from apscheduler.triggers.interval import IntervalTrigger
+
+        sched = create_scheduler()
+        register_jobs(sched)
+
+        job = sched.get_job(USER_WORKSPACE_REFRESH_JOB_ID)
+        assert job is not None, (
+            f"{USER_WORKSPACE_REFRESH_JOB_ID} not registered by register_jobs"
+        )
+
+        # Trigger: IntervalTrigger at the pinned cadence.
+        assert isinstance(job.trigger, IntervalTrigger)
+        assert (
+            job.trigger.interval.total_seconds()
+            == USER_WORKSPACE_REFRESH_INTERVAL_SECONDS
+        )
+
+        # Wrapper knobs: misfire grace == one full interval, coalesce
+        # on, single instance. One tick late is tolerated (idempotent
+        # reconcile); two ticks late skip rather than stack.
+        assert job.misfire_grace_time == USER_WORKSPACE_REFRESH_INTERVAL_SECONDS
+        assert job.coalesce is True
+        assert job.max_instances == 1
+
+    def test_is_idempotent(self) -> None:
+        """Re-registering keeps exactly one user_workspace_refresh job."""
+        sched = create_scheduler()
+        register_jobs(sched)
+        register_jobs(sched)
+
+        matching = [
+            j for j in sched.get_jobs() if j.id == USER_WORKSPACE_REFRESH_JOB_ID
+        ]
+        assert len(matching) == 1
+
+    def test_uses_resolved_clock(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Injected :class:`FrozenClock` propagates into the refresh body.
+
+        The factory closes over the scheduler's clock at registration
+        time (matches the LLM-budget-refresh / idempotency-sweep
+        pattern). A regression that reached for
+        :class:`~app.util.clock.SystemClock` inside the body would
+        silently trip every FrozenClock-driven test by falling back to
+        the OS clock; we prove propagation by patching
+        :func:`reconcile_user_workspace` and observing the ``now`` arg.
+        """
+        clock = FrozenClock(datetime(2026, 4, 24, 12, 0, tzinfo=UTC))
+
+        seen_now: list[object] = []
+
+        def fake_reconcile(session: object, *, now: object) -> object:
+            seen_now.append(now)
+
+            class _Report:
+                rows_inserted = 0
+                rows_deleted = 0
+                rows_source_flipped = 0
+                upstream_pairs_seen = 0
+
+            return _Report()
+
+        # Patch the deferred import target — the body imports
+        # ``reconcile_user_workspace`` from the domain module, so we
+        # patch it there.
+        monkeypatch.setattr(
+            "app.domain.identity.user_workspace_refresh.reconcile_user_workspace",
+            fake_reconcile,
+        )
+
+        # Fake UoW + Session so the body never reaches a real DB.
+        class _FakeSession:
+            pass
+
+        class _FakeUow:
+            def __enter__(self) -> _FakeSession:
+                return _FakeSession()
+
+            def __exit__(self, *exc: object) -> None:
+                return None
+
+        monkeypatch.setattr(scheduler_mod, "make_uow", lambda: _FakeUow())
+        import sqlalchemy.orm as _orm_mod
+
+        # Flip ``Session`` to ``_FakeSession`` so the body's
+        # ``isinstance(session, Session)`` narrowing accepts the fake.
+        monkeypatch.setattr(_orm_mod, "Session", _FakeSession)
+
+        body = scheduler_mod._make_user_workspace_refresh_body(clock)
+        body()
+
+        # The body dispatched one ``reconcile_user_workspace`` call
+        # and handed the patched clock's ``now()`` through.
+        assert seen_now == [clock.now()]
 
 
 # ---------------------------------------------------------------------------

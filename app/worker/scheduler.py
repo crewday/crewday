@@ -2,7 +2,8 @@
 
 The single seam through which downstream tasks (cd-j9l7 idempotency
 sweep, cd-ca1k LLM-budget refresh, cd-dcl2 occurrence-generator fan-out,
-cd-yqm4 user_workspace derive-refresh) plug into the shared scheduler.
+cd-yqm4 user_workspace derive-refresh — all live) plug into the shared
+scheduler.
 Two entry-points exercise the same ``register_jobs`` call:
 
 * **Inline (default)** — the FastAPI factory's lifespan hook starts
@@ -80,6 +81,8 @@ __all__ = [
     "IDEMPOTENCY_SWEEP_JOB_ID",
     "LLM_BUDGET_REFRESH_INTERVAL_SECONDS",
     "LLM_BUDGET_REFRESH_JOB_ID",
+    "USER_WORKSPACE_REFRESH_INTERVAL_SECONDS",
+    "USER_WORKSPACE_REFRESH_JOB_ID",
     "create_scheduler",
     "register_jobs",
     "start",
@@ -135,6 +138,26 @@ LLM_BUDGET_REFRESH_JOB_ID: str = "llm_budget_refresh_aggregate"
 # within 60 s"). Pulled out as a module-level constant so tests can
 # import it rather than re-derive the number from the spec.
 LLM_BUDGET_REFRESH_INTERVAL_SECONDS: int = 60
+
+# Stable job id for the ``user_workspace`` derive-refresh tick (cd-yqm4).
+# The reconciler in
+# :mod:`app.domain.identity.user_workspace_refresh` walks every active
+# upstream (workspace-scoped role_grants, property-scoped role_grants
+# resolved through ``property_workspace``, work_engagements; plus the
+# forward-compat seams for ``org_workspace``) and brings the derived
+# junction in line. Spec §02 "user_workspace" pins the table as
+# derived; this job is the canonical reconciler.
+USER_WORKSPACE_REFRESH_JOB_ID: str = "user_workspace_refresh"
+
+# Interval for the user_workspace derive-refresh tick. The §02 spec
+# does not pin a specific cadence — only that the worker keeps the
+# junction reconciled. Five minutes is the default: small enough that
+# a worker tick is the next thing the user sees after a grant is
+# minted in the API (login redirect lands within one tick), large
+# enough that the fan-out's full-table scan does not dominate the
+# workload on a fleet with thousands of workspaces. Tests can pin
+# this constant if they want to exercise the cadence boundary.
+USER_WORKSPACE_REFRESH_INTERVAL_SECONDS: int = 300
 
 
 # Job-body type. Downstream tasks supply either a synchronous callable
@@ -342,6 +365,7 @@ def register_jobs(
         GENERATOR_JOB_ID,
         IDEMPOTENCY_SWEEP_JOB_ID,
         LLM_BUDGET_REFRESH_JOB_ID,
+        USER_WORKSPACE_REFRESH_JOB_ID,
     ):
         with contextlib.suppress(JobLookupError):
             scheduler.remove_job(pending_id)
@@ -461,6 +485,35 @@ def register_jobs(
         max_instances=1,
         coalesce=True,
         misfire_grace_time=90,
+    )
+
+    # --- 5 min user_workspace derive-refresh (cd-yqm4) ---
+    # The reconciler in
+    # :mod:`app.domain.identity.user_workspace_refresh` is the
+    # canonical writer for the derived junction (§02
+    # "user_workspace"). Domain services (signup, grant, invite,
+    # remove_member) write the upstream rows; this tick brings
+    # ``user_workspace`` in line.
+    #
+    # ``misfire_grace_time = USER_WORKSPACE_REFRESH_INTERVAL_SECONDS``
+    # — one tick late is fine (the reconciler is idempotent: it
+    # rewrites the same set), but two-ticks-late is a signal the
+    # scheduler is stuck and a skip is preferable to a stacked
+    # catch-up. ``coalesce=True`` + ``max_instances=1`` keep a slow
+    # reconcile from stacking ticks on an overloaded DB.
+    scheduler.add_job(
+        wrap_job(
+            _make_user_workspace_refresh_body(resolved_clock),
+            job_id=USER_WORKSPACE_REFRESH_JOB_ID,
+            clock=resolved_clock,
+        ),
+        trigger=IntervalTrigger(seconds=USER_WORKSPACE_REFRESH_INTERVAL_SECONDS),
+        id=USER_WORKSPACE_REFRESH_JOB_ID,
+        name=USER_WORKSPACE_REFRESH_JOB_ID,
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=USER_WORKSPACE_REFRESH_INTERVAL_SECONDS,
     )
 
 
@@ -1082,6 +1135,83 @@ def _make_llm_budget_refresh_body(clock: Clock) -> Callable[[], None]:
                 "workspaces": workspaces_attempted,
                 "failures": failures,
                 "total_cents": total_cents,
+            },
+        )
+
+    return _body
+
+
+def _make_user_workspace_refresh_body(clock: Clock) -> Callable[[], None]:
+    """Build the user_workspace derive-refresh body (cd-yqm4).
+
+    Factory rather than a bare module-level function so the body
+    closes over the scheduler's injected :class:`Clock` — same
+    rationale the sibling :func:`_make_llm_budget_refresh_body` and
+    :func:`_make_idempotency_sweep_body` cite. The reconciler stamps
+    new ``user_workspace.added_at`` rows with ``clock.now()``; under
+    a :class:`~app.util.clock.FrozenClock` the heartbeat timestamp
+    and the freshly-inserted ``added_at`` MUST line up so test
+    fixtures can assert on the exact pair.
+
+    The returned body:
+
+    1. Opens its own UoW (one per tick) via
+       :func:`app.adapters.db.session.make_uow`. Sibling bodies do
+       the same (idempotency sweep, LLM-budget refresh, generator
+       fan-out). The UoW commits on clean exit.
+    2. Calls :func:`reconcile_user_workspace`, which runs under
+       :func:`tenant_agnostic` internally — the reconciler operates
+       across every workspace in a single pass, not per-workspace,
+       so there is no fan-out loop here.
+    3. Emits one structured-log event per tick:
+       ``event="worker.identity.user_workspace.tick.summary"`` (INFO),
+       carrying ``rows_inserted`` / ``rows_deleted`` /
+       ``rows_source_flipped`` / ``upstream_pairs_seen``. Operator
+       dashboards plot insert + delete rates separately so a sudden
+       spike in deletes (mass revoke) is distinguishable from a
+       backfill.
+
+    Per-tenant SAVEPOINT isolation is unnecessary here because the
+    reconciler is a single SQL pass — there is no per-workspace work
+    that could fail in isolation. A SQL error fails the whole tick
+    (the outer UoW rolls back), the next tick retries, and the
+    heartbeat staleness window catches a permanently-stuck
+    reconcile.
+
+    The :func:`reconcile_user_workspace` import is deferred into the
+    closure body so module import order stays robust: the
+    reconciler drags in :mod:`app.adapters.db.places.models` and
+    :mod:`app.adapters.db.workspace.models`, neither of which the
+    standalone ``python -m app.worker`` entrypoint otherwise needs
+    to start the heartbeat-only deployment.
+    """
+
+    def _body() -> None:
+        # Deferred imports — see factory docstring rationale.
+        from sqlalchemy.orm import Session as _Session
+
+        from app.domain.identity.user_workspace_refresh import (
+            reconcile_user_workspace,
+        )
+
+        now = clock.now()
+
+        with make_uow() as session:
+            # ``UnitOfWorkImpl.__enter__`` returns a ``DbSession``
+            # protocol; the reconciler wants the concrete ``Session``.
+            # Same isinstance narrowing the LLM-budget and generator
+            # fan-out bodies use.
+            assert isinstance(session, _Session)
+            report = reconcile_user_workspace(session, now=now)
+
+        _log.info(
+            "worker.identity.user_workspace.tick.summary",
+            extra={
+                "event": "worker.identity.user_workspace.tick.summary",
+                "rows_inserted": report.rows_inserted,
+                "rows_deleted": report.rows_deleted,
+                "rows_source_flipped": report.rows_source_flipped,
+                "upstream_pairs_seen": report.upstream_pairs_seen,
             },
         )
 

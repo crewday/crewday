@@ -16,7 +16,8 @@ from sqlalchemy.orm import Session
 
 from app.adapters.db.authz.bootstrap import seed_owners_system_group
 from app.adapters.db.identity.models import User, canonicalise_email
-from app.adapters.db.workspace.models import UserWorkspace, Workspace
+from app.adapters.db.workspace.models import Workspace
+from app.domain.identity.user_workspace_refresh import reconcile_user_workspace
 from app.tenancy import WorkspaceContext, tenant_agnostic
 from app.util.clock import Clock, SystemClock
 from app.util.ulid import new_ulid
@@ -190,15 +191,6 @@ def bootstrap_workspace(
         )
         session.add(workspace)
         session.flush()
-        session.add(
-            UserWorkspace(
-                user_id=owner_user_id,
-                workspace_id=workspace_id,
-                source="workspace_grant",
-                added_at=now,
-            )
-        )
-        session.flush()
         seed_owners_system_group(
             session,
             ctx,
@@ -206,4 +198,15 @@ def bootstrap_workspace(
             owner_user_id=owner_user_id,
             clock=clock,
         )
+    # The derived ``user_workspace`` row materialises through
+    # :func:`reconcile_user_workspace` (cd-yqm4): the production
+    # worker runs this reconciler every
+    # :data:`~app.worker.scheduler.USER_WORKSPACE_REFRESH_INTERVAL_SECONDS`
+    # seconds, but the test harness has no worker — so we drive the
+    # reconciler synchronously here so downstream tests see the
+    # owner's membership row immediately, the same way they did
+    # before cd-yqm4 removed the inline write. The reconciler runs
+    # ``tenant_agnostic`` internally so this call is safe outside
+    # the bracket above.
+    reconcile_user_workspace(session, now=now)
     return workspace
