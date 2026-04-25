@@ -1,3 +1,8 @@
+---
+name: ai-slop
+description: Strip AI-generated slop from a branch before it ships — over-commented code, defensive paranoia, type-safety bypasses, premature abstractions, compat shims, and bullet-list bloat in prose.
+---
+
 # Remove AI code slop
 
 Check the diff against `main` and remove all AI-generated slop introduced
@@ -16,8 +21,8 @@ on this branch. Slop includes:
 - Backwards-compatibility shims, re-exports, or `# removed` comment stubs
   for code that has in fact been deleted on this branch.
 - Any style or naming that is inconsistent with the file or project
-  patterns (see [`AGENTS.md`](../../AGENTS.md) §"Code quality bar" and
-  §"Editing constraints").
+  patterns (see [`AGENTS.md`](../../../AGENTS.md) §"Code quality bar" and
+  §"Git and editing rules").
 
 Treat specs the same way — overly hedged wording, bullet-list bloat, and
 "this section summarises the above" paragraphs are slop in prose too.
@@ -26,8 +31,8 @@ Treat specs the same way — overly hedged wording, bullet-list bloat, and
 
 1. `git diff main...HEAD` to see everything introduced on the branch.
 2. Strip slop in place; keep behaviour identical.
-3. Re-run `/pre-commit-check` (or the relevant quality gates) to confirm
-   nothing broke.
+3. Re-run the relevant quality gates (`ruff`, `mypy`, `pytest <scope>`) to
+   confirm nothing broke.
 
 ## Output
 

@@ -178,8 +178,7 @@ update in your wrap-up.
 
 ## Skill triggers (repo slash-commands)
 
-Procedures live in `.claude/skills/<name>/` (except `/ai-slop`,
-which is `.claude/commands/ai-slop.md`).
+Procedures live in `.claude/skills/<name>/`.
 
 | Skill | When |
 |-------|------|
