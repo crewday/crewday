@@ -24,21 +24,13 @@
 // - `docs/specs/12-rest-api.md` §"Time, payroll, expenses".
 
 import { fetchJson } from "@/lib/api";
+import { type ListEnvelope } from "@/lib/listResponse";
 import type { Expense, ExpenseStatus } from "@/types/expense";
 
-/**
- * Cursor-paginated list response shape emitted by every `/api/v1/`
- * endpoint that uses `app.api.pagination` (spec §12).
- *
- * Generic over the row type so a future helper for `/expenses/pending`
- * (`ExpenseClaimPendingListResponse`) can reuse the same envelope
- * without redeclaring its own.
- */
-export interface ListEnvelope<T> {
-  data: T[];
-  next_cursor: string | null;
-  has_more: boolean;
-}
+// Re-export so existing call-sites that import `ListEnvelope` from
+// `@/lib/expenses` keep resolving while new code imports the canonical
+// shape from `@/lib/listResponse`.
+export type { ListEnvelope };
 
 /**
  * Wire shape of a single row returned by `GET /api/v1/expenses` /

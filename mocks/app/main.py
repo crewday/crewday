@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import math
 import random
 from dataclasses import asdict, is_dataclass
 from datetime import date, datetime, time, timedelta, timezone
@@ -1169,7 +1170,14 @@ def api_work_roles(workspace_id: str = "") -> Response:
     rows = md.WORK_ROLES
     if workspace_id:
         rows = [r for r in rows if r.workspace_id == workspace_id]
-    return ok(rows)
+    # Mirror the production cursor envelope (§12) so the SPA can decode
+    # `ListEnvelope<WorkRole>` without a mock-only branch. Single page —
+    # the seed roster fits in one round-trip.
+    return ok({
+        "data": [_project_work_role(r) for r in rows],
+        "next_cursor": None,
+        "has_more": False,
+    })
 
 
 @app.get("/api/v1/user_work_roles")
@@ -1852,9 +1860,116 @@ def api_property_closures(property_id: str) -> Response:
     })
 
 
+def _project_task_template(tpl: md.TaskTemplate) -> dict[str, Any]:
+    """Project the legacy mock :class:`TaskTemplate` onto the canonical wire shape.
+
+    The mock dataclass keeps the v0 fields the seed data was written
+    against (``description``, ``role`` (a name), ``checklist`` with
+    ``label``); the production API exposes the spec-canonical
+    authoring shape (``description_md``, ``role_id``,
+    ``checklist_template_json`` with ``key`` + ``text``). Projecting
+    here lets the seed data stay readable while the SPA sees the
+    same wire shape it sees in production. See
+    :class:`app.api.v1.tasks.TaskTemplatePayload`.
+    """
+    role = next((r for r in md.WORK_ROLES if r.name == tpl.role), None)
+    checklist: list[dict[str, Any]] = []
+    for idx, item in enumerate(tpl.checklist):
+        # The mock seeds either `{label}` (legacy) or `{key, label, …}`
+        # (the home-maintenance template); normalise both onto the
+        # spec-canonical `{key, text, required, …}` shape.
+        key = str(item.get("key") or f"item-{idx}")
+        checklist.append(
+            {
+                "key": key,
+                "text": str(item.get("label") or item.get("text") or ""),
+                "required": bool(item.get("required", False)),
+                "guest_visible": bool(item.get("guest_visible", False)),
+                "rrule": item.get("rrule"),
+                "dtstart_local": item.get("dtstart_local"),
+            }
+        )
+    inventory_effects = [dict(eff) for eff in tpl.inventory_effects]
+    # The v1 storage column is consume-only with positive-integer qty
+    # (`app.api.v1.tasks.TaskTemplatePayload` / `_assert_inventory_positive`).
+    # The mock seeds carry decimals (0.25 bottles of pool chlorine, 0.5
+    # rolls of TP) so a naive `int(qty)` would project them as 0 and
+    # land a contract-violating value on the wire. Round up to the
+    # nearest positive integer instead — keeps the storage shape honest
+    # while the richer ``inventory_effects`` array (still float-aware)
+    # is what the SPA renders.
+    inventory_consumption: dict[str, int] = {}
+    for eff in inventory_effects:
+        if eff.get("kind") != "consume":
+            continue
+        qty = eff.get("qty", 0)
+        rounded = max(1, math.ceil(float(qty))) if float(qty) > 0 else 0
+        if rounded > 0:
+            inventory_consumption[str(eff["item_ref"])] = rounded
+    # The legacy mock dataclass does not bind a template to specific
+    # properties; the production payload requires
+    # ``len(listed_property_ids) == 1`` for ``property_scope="one"``
+    # and ``>= 1`` for ``"listed"``. Normalise unbound seeds to
+    # ``"any"`` so the projection stays consistent and the SPA's
+    # "Listed properties (N)" rendering doesn't display a misleading
+    # ``(0)`` count.
+    property_scope: str = tpl.property_scope
+    listed_property_ids: list[str] = []
+    if property_scope in ("one", "listed"):
+        property_scope = "any"
+    return {
+        "id": tpl.id,
+        "workspace_id": role.workspace_id if role is not None else "ws-bernard",
+        "name": tpl.name,
+        "description_md": tpl.description,
+        "role_id": role.id if role is not None else None,
+        "duration_minutes": tpl.duration_minutes,
+        "property_scope": property_scope,
+        "listed_property_ids": listed_property_ids,
+        "area_scope": "any",
+        "listed_area_ids": [],
+        "checklist_template_json": checklist,
+        "photo_evidence": tpl.photo_evidence,
+        "linked_instruction_ids": [],
+        "priority": tpl.priority,
+        "inventory_consumption_json": inventory_consumption,
+        "inventory_effects": inventory_effects,
+        "llm_hints_md": None,
+        "created_at": "2026-01-01T00:00:00+00:00",
+        "deleted_at": None,
+    }
+
+
+def _project_work_role(role: md.WorkRole) -> dict[str, Any]:
+    """Project the legacy mock :class:`WorkRole` onto the canonical wire shape.
+
+    Adds the production fields the SPA expects but the seed dataclass
+    does not carry — ``default_settings_json``, ``created_at``, and
+    ``deleted_at``. See :class:`app.api.v1.work_roles.WorkRoleResponse`.
+    """
+    return {
+        "id": role.id,
+        "workspace_id": role.workspace_id,
+        "key": role.key,
+        "name": role.name,
+        "description_md": role.description_md,
+        "default_settings_json": dict(role.default_capabilities),
+        "icon_name": role.icon_name,
+        "created_at": "2026-01-01T00:00:00+00:00",
+        "deleted_at": None,
+    }
+
+
 @app.get("/api/v1/task_templates")
 def api_templates() -> Response:
-    return ok(md.TEMPLATES)
+    # Mirror the production cursor envelope (§12) — `{data, next_cursor,
+    # has_more}` — so the SPA's `ListEnvelope<TaskTemplate>` decode
+    # works against the mock without a transport-shape branch.
+    return ok({
+        "data": [_project_task_template(t) for t in md.TEMPLATES],
+        "next_cursor": None,
+        "has_more": False,
+    })
 
 
 @app.get("/api/v1/schedules")
@@ -1870,7 +1985,9 @@ def api_schedules() -> Response:
         "next_cursor": None,
         "has_more": False,
         "templates_by_id": {
-            t.id: t for t in md.TEMPLATES if t.id in referenced_template_ids
+            t.id: _project_task_template(t)
+            for t in md.TEMPLATES
+            if t.id in referenced_template_ids
         },
     })
 

@@ -71,6 +71,7 @@ export const qk = {
   issues: () => [...ws(), "issues"] as const,
   stays: () => [...ws(), "stays"] as const,
   taskTemplates: () => [...ws(), "task_templates"] as const,
+  workRoles: () => [...ws(), "work_roles"] as const,
   schedules: () => [...ws(), "schedules"] as const,
   scheduleRulesets: () => [...ws(), "schedule_rulesets"] as const,
   schedulerCalendar: (fromIso: string, toIso: string) =>

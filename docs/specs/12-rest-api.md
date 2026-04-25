@@ -901,7 +901,17 @@ POST   /me/availability_overrides         # body: {date, available, starts_local
 ### Tasks / templates / schedules
 
 ```
-GET    /task_templates
+GET    /task_templates                   # cursor paginated; envelope is the
+                                         #   standard `{data, next_cursor,
+                                         #   has_more}` shape. Each row
+                                         #   carries the spec-canonical
+                                         #   `inventory_effects: list[
+                                         #   {item_ref, kind, qty}]`
+                                         #   projection (§08) alongside the
+                                         #   v1 storage column
+                                         #   `inventory_consumption_json`
+                                         #   (consume-only int map). Wire
+                                         #   shape: `TaskTemplatePayload`.
 POST   /task_templates
 GET    /task_templates/{id}
 PATCH  /task_templates/{id}              # full-body replace

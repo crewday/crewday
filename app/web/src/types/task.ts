@@ -72,17 +72,40 @@ export interface TaskComment {
   created_at: string;
 }
 
+// §06 / §12 — canonical wire shape of `task_template`. Mirrors
+// :class:`app.api.v1.tasks.TaskTemplatePayload` exactly. `description`,
+// `role`, and `checklist` (the legacy mock shape) gave way to the
+// authoring-side fields the backend persists: `description_md`,
+// `role_id`, and `checklist_template_json` (with per-item RRULE
+// filters). `inventory_consumption_json` is the v1 storage column
+// (consume-only, integer qty), retained on the wire for round-trip
+// authoring; `inventory_effects` is the spec-canonical projection
+// (§08) the SPA renders.
+export type PropertyScope = "any" | "one" | "listed";
+export type AreaScope = "any" | "one" | "listed";
+
 export interface TaskTemplate {
   id: string;
+  workspace_id: string;
   name: string;
-  description: string;
-  role: string;
+  description_md: string;
+  role_id: string | null;
   duration_minutes: number;
-  property_scope: "any" | "one" | "listed";
+  property_scope: PropertyScope;
+  listed_property_ids: string[];
+  area_scope: AreaScope;
+  listed_area_ids: string[];
+  checklist_template_json: ChecklistTemplateItem[];
   photo_evidence: PhotoEvidence;
+  linked_instruction_ids: string[];
   priority: TaskPriority;
-  checklist: ChecklistItem[];
+  inventory_consumption_json: Record<string, number>;
   inventory_effects: InventoryEffect[];
+  llm_hints_md: string | null;
+  /** ISO-8601 UTC. */
+  created_at: string;
+  /** ISO-8601 UTC; non-null when the row is soft-deleted. */
+  deleted_at: string | null;
 }
 
 export interface Schedule {

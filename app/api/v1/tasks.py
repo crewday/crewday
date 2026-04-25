@@ -245,6 +245,23 @@ _Db = Annotated[Session, Depends(db_session)]
 # TS types stay readable.
 
 
+class InventoryEffectPayload(BaseModel):
+    """One entry of a task template's :attr:`TaskTemplatePayload.inventory_effects`.
+
+    Mirrors §08 "Inventory effects on task completion" — a list of
+    ``{item_ref, kind, qty}`` declaring what the task **uses** and what
+    it **produces**. The wire shape is the canonical projection per the
+    spec; the v1 storage column (``inventory_consumption_json``, a flat
+    SKU → positive int map) is a consume-only subset and is preserved on
+    the wire alongside this richer projection while the storage migration
+    lands. See :func:`TaskTemplatePayload.from_view` for the derivation.
+    """
+
+    item_ref: str
+    kind: Literal["consume", "produce"]
+    qty: int
+
+
 class TaskTemplatePayload(BaseModel):
     """HTTP projection of :class:`TaskTemplateView`.
 
@@ -253,6 +270,25 @@ class TaskTemplatePayload(BaseModel):
     matches the shape the caller POSTed — a round-trip-identical wire
     format means the SPA can post a template and echo the response
     back on PATCH without a reshape step.
+
+    ``inventory_effects`` is the spec-canonical projection of the
+    template's inventory rules — a list of ``{item_ref, kind, qty}``
+    entries (§08). Today the v1 storage column is a flat
+    ``inventory_consumption_json`` map (consume-only, integer qty); the
+    derived array re-projects each entry as ``kind="consume"`` so the
+    SPA can render the spec shape directly. ``inventory_consumption_json``
+    is kept on the wire as the authoring shape until the storage widens
+    to ``inventory_effects_json`` per spec §06.
+
+    Round-trip note: the request bodies (:class:`TaskTemplateCreate` /
+    :class:`TaskTemplateUpdate`) accept ``inventory_consumption_json``
+    only — ``inventory_effects`` is read-only on the wire. A SPA that
+    POSTs back the response shape must drop ``inventory_effects`` (and
+    the audit fields ``id``, ``workspace_id``, ``created_at``,
+    ``deleted_at``) before sending; ``model_config = extra="forbid"``
+    on the body rejects the fuller projection. Once storage widens to
+    ``inventory_effects_json`` the request body will accept the array
+    directly and the asymmetry resolves.
     """
 
     id: str
@@ -270,6 +306,7 @@ class TaskTemplatePayload(BaseModel):
     linked_instruction_ids: list[str]
     priority: str
     inventory_consumption_json: dict[str, int]
+    inventory_effects: list[InventoryEffectPayload]
     llm_hints_md: str | None
     created_at: datetime
     deleted_at: datetime | None
@@ -277,6 +314,11 @@ class TaskTemplatePayload(BaseModel):
     @classmethod
     def from_view(cls, view: TaskTemplateView) -> TaskTemplatePayload:
         """Copy a :class:`TaskTemplateView` into its HTTP payload."""
+        consumption = dict(view.inventory_consumption_json)
+        effects = [
+            InventoryEffectPayload(item_ref=sku, kind="consume", qty=qty)
+            for sku, qty in consumption.items()
+        ]
         return cls(
             id=view.id,
             workspace_id=view.workspace_id,
@@ -294,7 +336,8 @@ class TaskTemplatePayload(BaseModel):
             photo_evidence=view.photo_evidence,
             linked_instruction_ids=list(view.linked_instruction_ids),
             priority=view.priority,
-            inventory_consumption_json=dict(view.inventory_consumption_json),
+            inventory_consumption_json=consumption,
+            inventory_effects=effects,
             llm_hints_md=view.llm_hints_md,
             created_at=view.created_at,
             deleted_at=view.deleted_at,

@@ -1,5 +1,25 @@
 // crewday — JSON API types: employees, leave, payroll.
 
+// §05 — Workspace-scoped work-role catalogue. Mirrors
+// :class:`app.api.v1.work_roles.WorkRoleResponse` exactly. `key` is the
+// workspace-unique slug ("housekeeping", "pool"); `name` is the
+// human-readable label; `icon_name` is a Lucide icon name (free string
+// in v1). Used to resolve the `role_id` foreign key carried on
+// `task_template`, `task`, and `user_work_role`.
+export interface WorkRole {
+  id: string;
+  workspace_id: string;
+  key: string;
+  name: string;
+  description_md: string;
+  default_settings_json: Record<string, unknown>;
+  icon_name: string;
+  /** ISO-8601 UTC. */
+  created_at: string;
+  /** ISO-8601 UTC; non-null when soft-deleted. */
+  deleted_at: string | null;
+}
+
 export interface Employee {
   id: string;
   name: string;

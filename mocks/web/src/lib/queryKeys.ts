@@ -26,6 +26,7 @@ export const qk = {
   issues: () => ["issues"] as const,
   stays: () => ["stays"] as const,
   taskTemplates: () => ["task_templates"] as const,
+  workRoles: () => ["work_roles"] as const,
   schedules: () => ["schedules"] as const,
   scheduleRulesets: () => ["schedule_rulesets"] as const,
   schedulerCalendar: (fromIso: string, toIso: string) =>

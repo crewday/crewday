@@ -17,6 +17,7 @@ import pytest
 
 from app.api.v1.tasks import (
     TaskPayload,
+    TaskTemplatePayload,
     _compute_overdue,
     _compute_time_window_local,
     _decode_comment_cursor,
@@ -24,6 +25,7 @@ from app.api.v1.tasks import (
     _humanize_rrule,
 )
 from app.domain.tasks.oneoff import TaskView
+from app.domain.tasks.templates import TaskTemplateView
 
 
 def _view(
@@ -426,3 +428,92 @@ class TestHumanizeRrule:
             _humanize_rrule("RRULE:FREQ=DAILY", "2026-04-20T09:00+02:00")
             == "Every day at 09:00"
         )
+
+
+# ---------------------------------------------------------------------------
+# TaskTemplatePayload — inventory_effects derivation
+# ---------------------------------------------------------------------------
+
+
+def _template_view(
+    *,
+    inventory_consumption: dict[str, int] | None = None,
+) -> TaskTemplateView:
+    """Return a deterministic :class:`TaskTemplateView` for projection tests."""
+    return TaskTemplateView(
+        id="tpl-01",
+        workspace_id="ws-01",
+        name="Sample",
+        description_md="",
+        role_id=None,
+        duration_minutes=30,
+        property_scope="any",
+        listed_property_ids=(),
+        area_scope="any",
+        listed_area_ids=(),
+        checklist_template_json=(),
+        photo_evidence="disabled",
+        linked_instruction_ids=(),
+        priority="normal",
+        inventory_consumption_json=dict(inventory_consumption or {}),
+        llm_hints_md=None,
+        created_at=datetime(2026, 1, 1, tzinfo=UTC),
+        deleted_at=None,
+    )
+
+
+class TestTaskTemplatePayloadInventoryEffects:
+    """``inventory_effects`` mirrors §08's canonical ``{item_ref, kind, qty}``.
+
+    The v1 storage column is the consume-only ``inventory_consumption_json``
+    (``dict[str, int]``); the wire payload re-projects each entry under
+    ``kind="consume"`` so the SPA can render the spec shape directly
+    while the storage migration to ``inventory_effects_json`` is pending.
+    """
+
+    def test_empty_consumption_yields_empty_effects(self) -> None:
+        view = _template_view()
+        payload = TaskTemplatePayload.from_view(view)
+        assert payload.inventory_effects == []
+        assert payload.inventory_consumption_json == {}
+
+    def test_single_entry_projects_as_consume(self) -> None:
+        view = _template_view(inventory_consumption={"TP-12": 2})
+        payload = TaskTemplatePayload.from_view(view)
+        assert len(payload.inventory_effects) == 1
+        effect = payload.inventory_effects[0]
+        assert effect.item_ref == "TP-12"
+        assert effect.kind == "consume"
+        assert effect.qty == 2
+        # Storage column is still emitted on the wire for round-trip
+        # authoring until the storage widens to inventory_effects_json.
+        assert payload.inventory_consumption_json == {"TP-12": 2}
+
+    def test_multiple_entries_keep_all_skus(self) -> None:
+        view = _template_view(
+            inventory_consumption={"TP-12": 1, "DETERGENT": 3, "POOL-CL": 1}
+        )
+        payload = TaskTemplatePayload.from_view(view)
+        assert {e.item_ref for e in payload.inventory_effects} == {
+            "TP-12",
+            "DETERGENT",
+            "POOL-CL",
+        }
+        assert all(e.kind == "consume" for e in payload.inventory_effects)
+        qty_by_ref = {e.item_ref: e.qty for e in payload.inventory_effects}
+        assert qty_by_ref == {"TP-12": 1, "DETERGENT": 3, "POOL-CL": 1}
+
+    def test_consumption_is_decoupled_from_effects_payload(self) -> None:
+        """Mutating the wire payload's effects must not touch the storage map.
+
+        The factory produces a fresh `dict` for ``inventory_consumption_json``
+        and a fresh list for ``inventory_effects`` so a downstream consumer
+        cannot accidentally mutate the source view.
+        """
+        source = {"TP-12": 4}
+        view = _template_view(inventory_consumption=source)
+        payload = TaskTemplatePayload.from_view(view)
+        payload.inventory_consumption_json["TP-12"] = 999
+        # Source map (and the view it backs) stay untouched.
+        assert source == {"TP-12": 4}
+        assert view.inventory_consumption_json == {"TP-12": 4}
