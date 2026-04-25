@@ -440,6 +440,12 @@ COVERED_METHODS: frozenset[str] = frozenset(
         # touching :class:`Evidence` rows.
         "app.domain.tasks.completion.add_note_evidence",
         "app.domain.tasks.completion.list_evidence",
+        # cd-jl0g: photo / voice / gps evidence. ``add_file_evidence``
+        # also loads through ``_load_task`` (workspace-scoped) before
+        # writing the :class:`Evidence` row + audit; the storage seam
+        # is content-addressed and tenant-agnostic by design (the
+        # ``workspace_id`` lands on the Evidence row, not on the blob).
+        "app.domain.tasks.completion.add_file_evidence",
         # time context
         "app.domain.time.shifts.open_shift",
         "app.domain.time.shifts.close_shift",

@@ -48,9 +48,13 @@ completion,assignment,comments}``
 * ``DELETE /tasks/{id}/comments/{comment_id}``
 * ``GET    /tasks/{id}/evidence``
 * ``POST   /tasks/{id}/evidence`` — accepts ``multipart/form-data``;
-  ``kind=note`` is wired end-to-end. Photo / voice / gps uploads
-  require the asset pipeline (tracked separately); the route returns
-  ``501 not_implemented`` for those kinds until the seam lands.
+  every §06 evidence kind (``note`` / ``photo`` / ``voice`` / ``gps``)
+  is wired end-to-end. ``note`` rides the inline ``note_md`` form
+  field; ``photo`` / ``voice`` / ``gps`` route through the
+  content-addressed :class:`Storage` port (SHA-256 blob hash + virus
+  scan + per-kind MIME / size cap per spec §15 "Input validation").
+  ``gps`` carries a small JSON document with ``lat`` / ``lon`` /
+  optional ``accuracy_m``.
 
 **Idempotency.** The replay cache on ``POST`` routes is driven by the
 process-wide :mod:`app.api.middleware.idempotency` middleware — no
@@ -90,6 +94,7 @@ from fastapi import (
     Form,
     HTTPException,
     Query,
+    Request,
     UploadFile,
     status,
 )
@@ -99,7 +104,8 @@ from sqlalchemy.orm import Session
 
 from app.adapters.db.places.models import Property
 from app.adapters.db.tasks.models import Occurrence
-from app.api.deps import current_workspace_context, db_session
+from app.adapters.storage.ports import Storage
+from app.api.deps import current_workspace_context, db_session, get_storage
 from app.api.pagination import (
     DEFAULT_LIMIT,
     LimitQuery,
@@ -131,13 +137,19 @@ from app.domain.tasks.comments import (
     post_comment,
 )
 from app.domain.tasks.completion import (
+    EvidenceContentTypeNotAllowed,
+    EvidenceGpsPayloadInvalid,
+    EvidenceInfected,
     EvidenceRequired,
+    EvidenceTooLarge,
     EvidenceView,
+    FileEvidenceKind,
     InvalidStateTransition,
     PhotoForbidden,
     RequiredChecklistIncomplete,
     SkipNotPermitted,
     TaskState,
+    add_file_evidence,
     add_note_evidence,
     list_evidence,
 )
@@ -235,6 +247,7 @@ router = APIRouter(tags=["tasks"])
 
 _Ctx = Annotated[WorkspaceContext, Depends(current_workspace_context)]
 _Db = Annotated[Session, Depends(db_session)]
+_Storage = Annotated[Storage, Depends(get_storage)]
 
 
 # ---------------------------------------------------------------------------
@@ -2082,6 +2095,99 @@ def list_task_evidence_route(
     )
 
 
+_FILE_EVIDENCE_KINDS: frozenset[str] = frozenset({"photo", "voice", "gps"})
+
+# Hard ceiling on the file part the multipart parser will ever buffer
+# in memory before this route's domain seam runs the per-kind cap.
+# Pinned at the largest per-kind cap (voice — 25 MiB per spec §15
+# "Input validation") + 1 byte so a 25 MiB voice memo lands but a
+# pathological 1 GiB upload short-circuits before we hash it. The
+# domain seam re-enforces the per-kind cap so this is defence in depth,
+# not the only gate.
+_MAX_FILE_EVIDENCE_BYTES: int = 25 * 1024 * 1024 + 1
+
+
+def _check_evidence_content_length(request: Request) -> None:
+    """Raise 413 when the client advertises an oversized body.
+
+    Mirrors :func:`app.api.v1.auth.me_avatar._check_content_length`.
+    Exposed as a FastAPI dep (not an inline call) so it runs **before**
+    Starlette's multipart body parser — otherwise FastAPI would buffer
+    the entire upload to a :class:`SpooledTemporaryFile` to populate
+    the :class:`UploadFile` parameter before the handler body could
+    look at the header. Dependencies are resolved ahead of body
+    params, so this dep is the first gate the router opens.
+
+    Content-Length can be absent (chunked transfer) or lie; the
+    streaming guard in :func:`_read_file_capped` is the authoritative
+    check. This fast-path saves the buffering cost when the client
+    admits to an oversized upload — the common well-behaved rejection
+    shape.
+    """
+    cl = request.headers.get("content-length")
+    if cl is None:
+        return
+    try:
+        size = int(cl)
+    except ValueError:
+        # Malformed Content-Length — let Starlette's normal parsing
+        # surface the underlying error rather than translating it
+        # here. A non-numeric header isn't specifically a "too large"
+        # condition.
+        return
+    if size > _MAX_FILE_EVIDENCE_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+            detail={
+                "error": "evidence_too_large",
+                "message": (
+                    f"upload exceeds the {_MAX_FILE_EVIDENCE_BYTES - 1}-byte "
+                    "router-level cap"
+                ),
+            },
+        )
+
+
+_EvidenceContentLengthGuard = Annotated[None, Depends(_check_evidence_content_length)]
+
+
+async def _read_file_capped(upload: UploadFile, *, kind: str) -> bytes:
+    """Buffer the upload body, raising 413 past :data:`_MAX_FILE_EVIDENCE_BYTES`.
+
+    Mirrors :func:`app.api.v1.auth.me_avatar._read_capped` — streams in
+    64 KiB chunks so a client that lies about ``Content-Length`` can't
+    exhaust memory. The per-kind cap re-checks inside the domain seam
+    so a misconfigured router still can't admit a 30 MiB GPS payload.
+
+    This is the second of the two router-level gates: the
+    :func:`_check_evidence_content_length` dep rejects an oversized
+    advertised body **before** the multipart parser runs; this
+    function bounds an unadvertised / lying body during the read.
+    """
+    chunk_size = 64 * 1024
+    total = 0
+    pieces: list[bytes] = []
+    while True:
+        chunk = await upload.read(chunk_size)
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > _MAX_FILE_EVIDENCE_BYTES:
+            await upload.close()
+            raise _http(
+                status.HTTP_413_CONTENT_TOO_LARGE,
+                "evidence_too_large",
+                kind=kind,
+                message=(
+                    f"upload exceeds the {_MAX_FILE_EVIDENCE_BYTES - 1}-byte "
+                    "router-level cap"
+                ),
+            )
+        pieces.append(chunk)
+    await upload.close()
+    return b"".join(pieces)
+
+
 @router.post(
     "/tasks/{task_id}/evidence",
     status_code=status.HTTP_201_CREATED,
@@ -2093,37 +2199,62 @@ async def upload_task_evidence_route(
     task_id: str,
     ctx: _Ctx,
     session: _Db,
+    storage: _Storage,
+    _: _EvidenceContentLengthGuard,
     kind: Annotated[str, Form(max_length=16)],
     note_md: Annotated[str | None, Form(max_length=20_000)] = None,
     file: Annotated[UploadFile | None, File()] = None,
 ) -> EvidencePayload:
-    """Accept ``multipart/form-data``; wire ``kind=note`` end-to-end.
+    """Accept ``multipart/form-data``; wire every §06 evidence kind end-to-end.
 
-    Photo / voice / gps uploads require the asset pipeline (content-
-    addressed blob store + virus scan). That seam lands with cd-assets;
-    for now this route rejects non-``note`` kinds with 501
-    ``not_implemented`` so the client receives a clear signal rather
-    than a silent drop. The follow-up is tracked in the cd-sn26
-    wrap-up notes.
+    Routing by ``kind``:
+
+    * ``note`` — :func:`~app.domain.tasks.completion.add_note_evidence`;
+      the ``note_md`` form field is required and the upload body MUST
+      be empty. Bridge until the ``completion_note_md`` task column
+      lands.
+    * ``photo`` / ``voice`` — :func:`~app.domain.tasks.completion.
+      add_file_evidence`; the upload body is hashed (SHA-256), handed
+      to the content-addressed :class:`Storage` port, and an
+      :class:`Evidence` row points at the resulting blob. Per spec
+      §15 "Input validation": MIME allow-list per kind, size cap per
+      kind, virus scan via the injectable :class:`VirusScanner`
+      (currently a logged "no scanner configured" stub — follow-up
+      Beads task tracks the real wiring).
+    * ``gps`` — :func:`~app.domain.tasks.completion.add_file_evidence`
+      with ``content_type='application/json'``; the upload body MUST
+      be a small JSON document carrying ``lat`` / ``lon`` / optional
+      ``accuracy_m``. Routes through Storage so every evidence row
+      shares the same content-addressed pipeline.
     """
-    if kind in {"photo", "voice", "gps"}:
-        # File-bearing kinds land with the asset pipeline follow-up.
-        # Explicitly consume the uploaded stream so the multipart
-        # parser doesn't leak a hanging tempfile on the server.
+    if kind == "note":
         if file is not None:
+            # A note carries no binary payload; reject the mix so a
+            # confused client learns loudly.
             await file.close()
-        raise _http(
-            status.HTTP_501_NOT_IMPLEMENTED,
-            "evidence_kind_not_implemented",
-            message=(
-                f"kind={kind!r} uploads require the asset pipeline; "
-                "only kind='note' is wired in cd-sn26"
-            ),
-        )
-    if kind != "note":
+            raise _http(
+                422,
+                "evidence_note_with_file",
+                message="kind='note' evidence must not carry a file upload",
+            )
+        if note_md is None or not note_md.strip():
+            raise _http(
+                422,
+                "evidence_note_empty",
+                message="kind='note' evidence requires a non-empty note_md",
+            )
+        try:
+            view = add_note_evidence(session, ctx, task_id=task_id, note_md=note_md)
+        except CompletionTaskNotFound as exc:
+            raise _task_not_found() from exc
+        except ValueError as exc:
+            raise _http(422, "evidence_note_empty", message=str(exc)) from exc
+        return EvidencePayload.from_view(view)
+
+    if kind not in _FILE_EVIDENCE_KINDS:
         # Anything outside the §06 "Evidence" enum is caller error —
-        # 422, not 501. Consume any uploaded stream first so the
-        # multipart parser doesn't leak a tempfile.
+        # 422 ``evidence_invalid_kind``. Consume any uploaded stream
+        # first so the multipart parser doesn't leak a tempfile.
         if file is not None:
             await file.close()
         raise _http(
@@ -2134,25 +2265,101 @@ async def upload_task_evidence_route(
                 "one of 'note', 'photo', 'voice', 'gps'"
             ),
         )
-    if note_md is None or not note_md.strip():
+
+    # File-bearing kind. The upload body is required.
+    if file is None:
         raise _http(
             422,
-            "evidence_note_empty",
-            message="kind='note' evidence requires a non-empty note_md",
+            "evidence_file_required",
+            message=f"kind={kind!r} evidence requires a multipart file upload",
         )
-    if file is not None:
-        # A note carries no binary payload; reject the mix so a
-        # confused client learns loudly.
+    if note_md is not None:
+        # A photo / voice / gps payload carries the body, not the
+        # field. Any ``note_md`` (including whitespace-only) signals a
+        # confused client; reject so the contract stays narrow and a
+        # misuse never silently slips past as an empty string.
         await file.close()
         raise _http(
             422,
-            "evidence_note_with_file",
-            message="kind='note' evidence must not carry a file upload",
+            "evidence_file_with_note",
+            message=(
+                f"kind={kind!r} evidence must not carry a 'note_md' form field; "
+                "use kind='note' for notes"
+            ),
         )
+    declared_type = file.content_type
+    if declared_type is None or declared_type == "":
+        await file.close()
+        raise _http(
+            status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            "evidence_content_type_missing",
+            kind=kind,
+            message=(
+                f"kind={kind!r} evidence requires a 'Content-Type' header on the "
+                "uploaded file part"
+            ),
+        )
+
+    payload = await _read_file_capped(file, kind=kind)
+    # Narrow ``kind`` from the loose ``str`` form field to the typed
+    # :data:`FileEvidenceKind` Literal the domain seam expects. The
+    # earlier ``in _FILE_EVIDENCE_KINDS`` check guarantees membership;
+    # the per-branch ``cast`` keeps mypy --strict honest without an
+    # explicit ``cast(...)`` call.
+    file_kind: FileEvidenceKind
+    if kind == "photo":
+        file_kind = "photo"
+    elif kind == "voice":
+        file_kind = "voice"
+    else:
+        file_kind = "gps"
+
     try:
-        view = add_note_evidence(session, ctx, task_id=task_id, note_md=note_md)
+        view = add_file_evidence(
+            session,
+            ctx,
+            task_id=task_id,
+            kind=file_kind,
+            payload=payload,
+            content_type=declared_type,
+            storage=storage,
+        )
     except CompletionTaskNotFound as exc:
         raise _task_not_found() from exc
+    except EvidenceContentTypeNotAllowed as exc:
+        raise _http(
+            status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            "evidence_content_type_rejected",
+            kind=exc.kind,
+            content_type=exc.content_type,
+            message=str(exc),
+        ) from exc
+    except EvidenceTooLarge as exc:
+        raise _http(
+            status.HTTP_413_CONTENT_TOO_LARGE,
+            "evidence_too_large",
+            kind=exc.kind,
+            size_bytes=exc.size_bytes,
+            cap_bytes=exc.cap_bytes,
+            message=str(exc),
+        ) from exc
+    except EvidenceInfected as exc:
+        raise _http(
+            status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            "evidence_infected",
+            kind=exc.kind,
+            signature=exc.signature,
+            message=str(exc),
+        ) from exc
+    except EvidenceGpsPayloadInvalid as exc:
+        raise _http(
+            422,
+            "evidence_gps_payload_invalid",
+            message=str(exc),
+        ) from exc
     except ValueError as exc:
-        raise _http(422, "evidence_note_empty", message=str(exc)) from exc
+        # Remaining ValueErrors (empty payload, unknown kind that the
+        # earlier branch let through somehow) collapse to 422 with a
+        # generic envelope so the client still learns the rejection.
+        raise _http(422, "evidence_invalid", message=str(exc)) from exc
     return EvidencePayload.from_view(view)

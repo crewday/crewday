@@ -103,6 +103,9 @@ See ``docs/specs/06-tasks-and-scheduling.md`` §"State machine",
 
 from __future__ import annotations
 
+import hashlib
+import io
+import json
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import datetime
@@ -114,6 +117,11 @@ from sqlalchemy.orm import Session
 
 from app.adapters.db.inventory.models import Item, Movement
 from app.adapters.db.tasks.models import ChecklistItem, Evidence, Occurrence
+from app.adapters.storage.ports import (
+    Storage,
+    VirusScanner,
+)
+from app.adapters.storage.virus import NullVirusScanner
 from app.audit import write_audit
 from app.events.bus import EventBus
 from app.events.bus import bus as default_event_bus
@@ -129,9 +137,14 @@ from app.util.ulid import new_ulid
 __all__ = [
     "AssetActionHook",
     "ChecklistRequiredResolver",
+    "EvidenceContentTypeNotAllowed",
+    "EvidenceGpsPayloadInvalid",
+    "EvidenceInfected",
     "EvidencePolicyResolver",
     "EvidenceRequired",
+    "EvidenceTooLarge",
     "EvidenceView",
+    "FileEvidenceKind",
     "InvalidStateTransition",
     "InventoryApplyHook",
     "PermissionDenied",
@@ -142,6 +155,7 @@ __all__ = [
     "TaskNotFound",
     "TaskState",
     "TombstoneHook",
+    "add_file_evidence",
     "add_note_evidence",
     "cancel",
     "complete",
@@ -322,6 +336,74 @@ class SkipNotPermitted(PermissionError):
     403-equivalent. Owners / managers bypass this check; only
     workers reach it. The API layer's permission pass returns a
     403 so workers learn the workspace is locked down.
+    """
+
+
+class EvidenceContentTypeNotAllowed(ValueError):
+    """Asserted ``content_type`` is outside the per-kind allow-list.
+
+    415-equivalent. The §15 "Input validation" allow-lists are pinned
+    per kind: photos accept the common phone-camera image set, voice
+    notes accept the browser's MediaRecorder output set, and gps
+    accepts ``application/json`` only. Anything else is a client bug
+    or a malicious upload (an executable masquerading as media).
+    """
+
+    def __init__(self, *, kind: str, content_type: str | None) -> None:
+        super().__init__(
+            f"content_type {content_type!r} is not allowed for evidence kind {kind!r}"
+        )
+        self.kind = kind
+        self.content_type = content_type
+
+
+class EvidenceTooLarge(ValueError):
+    """Payload size exceeds the per-kind cap.
+
+    413-equivalent. Caps are pinned per kind so a legitimate phone
+    photo (10 MB), a short voice memo (25 MB) and a tiny GPS coordinate
+    (4 KiB) each surface a clear rejection rather than collapsing to a
+    generic body-too-large error.
+    """
+
+    def __init__(self, *, kind: str, size_bytes: int, cap_bytes: int) -> None:
+        super().__init__(
+            f"evidence kind {kind!r} payload of {size_bytes} bytes exceeds "
+            f"the {cap_bytes}-byte cap"
+        )
+        self.kind = kind
+        self.size_bytes = size_bytes
+        self.cap_bytes = cap_bytes
+
+
+class EvidenceInfected(ValueError):
+    """Virus scanner rejected the payload.
+
+    415-equivalent. The scanner's vendor-specific signature label
+    rides on the exception so the audit row + the HTTP envelope can
+    surface the diagnosis without re-scanning. Mirrors §15 "Input
+    validation" — uploads MUST be scanned before they land in the
+    blob store.
+    """
+
+    def __init__(self, *, kind: str, signature: str) -> None:
+        super().__init__(
+            f"evidence kind {kind!r} payload rejected by virus scanner: {signature!r}"
+        )
+        self.kind = kind
+        self.signature = signature
+
+
+class EvidenceGpsPayloadInvalid(ValueError):
+    """The ``kind='gps'`` payload is not a valid coordinate JSON document.
+
+    422-equivalent. GPS evidence rides through the same content-
+    addressed pipeline as photo / voice but the payload format is
+    constrained: a JSON object with numeric ``lat`` (-90..90), numeric
+    ``lon`` (-180..180), optional non-negative numeric ``accuracy_m``
+    (metres), and an optional ISO-8601 ``captured_at``. The narrow
+    contract keeps the stored bytes auditable and prevents abuse of
+    the gps kind as a generic JSON drop box.
     """
 
 
@@ -1217,5 +1299,248 @@ def add_note_evidence(
         task=task,
         action="task.evidence.note.add",
         diff={"after": {"evidence_id": row.id, "note_md": trimmed}},
+    )
+    return _evidence_row_to_view(row)
+
+
+# ---------------------------------------------------------------------------
+# File-bearing evidence (cd-jl0g — photo / voice / gps)
+# ---------------------------------------------------------------------------
+
+
+# The §02 / §06 evidence taxonomy minus ``note`` — the file-bearing
+# kinds that route through :class:`Storage`. ``FileEvidenceKind`` is
+# the public alias so callers can type-narrow without re-declaring.
+FileEvidenceKind = Literal["photo", "voice", "gps"]
+
+
+# Per-kind MIME allow-list. Pinned per spec §15 "Input validation":
+#
+# * ``photo`` — the common phone-camera + screenshot set. No SVG
+#   (script-execution vector), no GIF (no legitimate task evidence
+#   is animated), no generic ``application/octet-stream``.
+# * ``voice`` — the browser MediaRecorder defaults plus the common
+#   container types a worker recording from a native app might
+#   produce. WAV is doubly-spelled because Safari emits
+#   ``audio/x-wav`` while every other engine emits ``audio/wav``.
+# * ``gps`` — ``application/json`` only. The payload is a small
+#   coordinate document, not a binary file; pinning JSON keeps the
+#   contract auditable and the parser narrow.
+_PHOTO_ALLOWED_MIME: frozenset[str] = frozenset(
+    {"image/jpeg", "image/png", "image/webp", "image/heic"}
+)
+_VOICE_ALLOWED_MIME: frozenset[str] = frozenset(
+    {
+        "audio/webm",
+        "audio/ogg",
+        "audio/mpeg",  # MP3
+        "audio/mp4",
+        "audio/aac",
+        "audio/wav",
+        "audio/x-wav",
+    }
+)
+_GPS_ALLOWED_MIME: frozenset[str] = frozenset({"application/json"})
+
+_MIME_ALLOWLIST_BY_KIND: dict[FileEvidenceKind, frozenset[str]] = {
+    "photo": _PHOTO_ALLOWED_MIME,
+    "voice": _VOICE_ALLOWED_MIME,
+    "gps": _GPS_ALLOWED_MIME,
+}
+
+
+# Per-kind size cap. Pinned per spec §15 "Input validation": "default
+# 10 MB images, 25 MB PDFs". Voice uses the PDF tier (a few minutes of
+# voice memo at modest bitrate); GPS is a small coordinate JSON so
+# 4 KiB is plenty (a maximalist payload with timestamps + accuracy +
+# heading is well under 1 KiB).
+_PHOTO_MAX_BYTES: int = 10 * 1024 * 1024  # 10 MiB
+_VOICE_MAX_BYTES: int = 25 * 1024 * 1024  # 25 MiB
+_GPS_MAX_BYTES: int = 4 * 1024  # 4 KiB
+
+_MAX_BYTES_BY_KIND: dict[FileEvidenceKind, int] = {
+    "photo": _PHOTO_MAX_BYTES,
+    "voice": _VOICE_MAX_BYTES,
+    "gps": _GPS_MAX_BYTES,
+}
+
+
+def _validate_gps_payload(payload: bytes) -> dict[str, Any]:
+    """Parse + validate a ``kind='gps'`` JSON document.
+
+    Returns the parsed coordinate dict. Raises
+    :class:`EvidenceGpsPayloadInvalid` for any structural or numeric
+    problem — the bytes never reach the storage layer when the format
+    is wrong, so an attacker can't seed the blob store with arbitrary
+    JSON under the gps kind.
+    """
+    try:
+        document = json.loads(payload.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise EvidenceGpsPayloadInvalid(
+            f"gps payload is not valid UTF-8 JSON: {exc!s}"
+        ) from exc
+    if not isinstance(document, dict):
+        raise EvidenceGpsPayloadInvalid(
+            f"gps payload must be a JSON object; got {type(document).__name__}"
+        )
+    if "lat" not in document or "lon" not in document:
+        raise EvidenceGpsPayloadInvalid(
+            "gps payload must carry 'lat' and 'lon' numeric fields"
+        )
+    lat_raw = document["lat"]
+    lon_raw = document["lon"]
+    # Reject bool first — ``isinstance(True, int)`` is True in Python,
+    # which would silently accept ``{"lat": true, "lon": false}``.
+    if isinstance(lat_raw, bool) or not isinstance(lat_raw, int | float):
+        raise EvidenceGpsPayloadInvalid(
+            f"gps payload 'lat' must be numeric; got {type(lat_raw).__name__}"
+        )
+    if isinstance(lon_raw, bool) or not isinstance(lon_raw, int | float):
+        raise EvidenceGpsPayloadInvalid(
+            f"gps payload 'lon' must be numeric; got {type(lon_raw).__name__}"
+        )
+    lat = float(lat_raw)
+    lon = float(lon_raw)
+    if not -90.0 <= lat <= 90.0:
+        raise EvidenceGpsPayloadInvalid(f"gps payload 'lat'={lat!r} out of range")
+    if not -180.0 <= lon <= 180.0:
+        raise EvidenceGpsPayloadInvalid(f"gps payload 'lon'={lon!r} out of range")
+    accuracy = document.get("accuracy_m")
+    if accuracy is not None:
+        if isinstance(accuracy, bool) or not isinstance(accuracy, int | float):
+            raise EvidenceGpsPayloadInvalid(
+                f"gps payload 'accuracy_m' must be numeric; "
+                f"got {type(accuracy).__name__}"
+            )
+        if float(accuracy) < 0:
+            raise EvidenceGpsPayloadInvalid(
+                f"gps payload 'accuracy_m'={accuracy!r} must be non-negative"
+            )
+    return document
+
+
+def add_file_evidence(
+    session: Session,
+    ctx: WorkspaceContext,
+    *,
+    task_id: str,
+    kind: FileEvidenceKind,
+    payload: bytes,
+    content_type: str,
+    storage: Storage,
+    virus_scanner: VirusScanner | None = None,
+    clock: Clock | None = None,
+) -> EvidenceView:
+    """Persist a file-bearing evidence row (photo / voice / gps).
+
+    Drives the asset pipeline end-to-end:
+
+    1. Loads the task through the ``ctx.workspace_id``-scoped seam
+       (mirrors :func:`add_note_evidence` for tenant isolation).
+    2. Validates ``kind`` is in :data:`FileEvidenceKind`.
+    3. Validates ``content_type`` against the per-kind allow-list
+       (§15 "Input validation").
+    4. Validates ``len(payload)`` against the per-kind cap.
+    5. For ``kind='gps'``, parses + validates the JSON coordinate
+       document so the stored bytes carry a known shape.
+    6. Runs the injectable :class:`VirusScanner`; ``infected`` →
+       :class:`EvidenceInfected`. ``unknown`` and ``clean`` both
+       allow the upload (the default :class:`NullVirusScanner` logs
+       a one-shot warning so operators learn the deployment shipped
+       without scanning).
+    7. SHA-256 the bytes, hand them to :meth:`Storage.put` (idempotent;
+       same hash → same blob).
+    8. Inserts the :class:`Evidence` row with the resolved
+       ``blob_hash``, flushes, audits ``task.evidence.<kind>.add``.
+
+    The audit row carries ``content_type`` and ``size_bytes`` so a
+    later forensic walk can reconstruct what landed without re-reading
+    the blob.
+
+    ``virus_scanner`` defaults to :class:`NullVirusScanner` — the
+    "no scanner configured" stub that logs a one-shot warning. The
+    real wiring lands with a follow-up Beads task; the seam is the
+    Protocol-port pattern every other adapter follows so swap-in is
+    a constructor change, not a domain edit.
+    """
+    resolved_clock = clock if clock is not None else SystemClock()
+    resolved_scanner = (
+        virus_scanner if virus_scanner is not None else NullVirusScanner()
+    )
+
+    if kind not in _MIME_ALLOWLIST_BY_KIND:
+        raise ValueError(
+            f"kind {kind!r} is not a file-bearing evidence kind; expected one of "
+            f"{sorted(_MIME_ALLOWLIST_BY_KIND)!r}"
+        )
+
+    task = _load_task(session, ctx, task_id)
+
+    allowed = _MIME_ALLOWLIST_BY_KIND[kind]
+    if content_type not in allowed:
+        raise EvidenceContentTypeNotAllowed(kind=kind, content_type=content_type)
+
+    cap = _MAX_BYTES_BY_KIND[kind]
+    size_bytes = len(payload)
+    if size_bytes == 0:
+        # Empty file is always a client bug — a zero-byte photo / voice
+        # memo / GPS payload carries no information. Same envelope as
+        # :func:`add_note_evidence`'s empty-note rejection.
+        raise ValueError(f"kind={kind!r} evidence payload must not be empty")
+    if size_bytes > cap:
+        raise EvidenceTooLarge(kind=kind, size_bytes=size_bytes, cap_bytes=cap)
+
+    if kind == "gps":
+        # Parse + validate BEFORE storage so a malformed payload never
+        # lands in the blob store (and the audit row carries the
+        # rejection reason instead of an opaque blob hash).
+        _validate_gps_payload(payload)
+
+    scan_result = resolved_scanner.scan(payload, content_type=content_type)
+    if scan_result.status == "infected":
+        # Spec §15 "Input validation": infected uploads are rejected
+        # outright. Carry the signature into the typed exception so
+        # the audit row + the HTTP envelope can surface the diagnosis.
+        raise EvidenceInfected(
+            kind=kind,
+            signature=scan_result.signature or "unknown",
+        )
+
+    # Hash + store. The Storage port is idempotent: the same hash on a
+    # repeat upload returns the existing blob's metadata without
+    # re-writing. We do NOT short-circuit the audit row on a dedupe —
+    # the Evidence row is a per-task pointer, not a per-blob one, so
+    # a worker who attaches the same photo to two tasks gets two rows.
+    blob_hash = hashlib.sha256(payload).hexdigest()
+    storage.put(blob_hash, io.BytesIO(payload), content_type=content_type)
+
+    row = Evidence(
+        id=new_ulid(),
+        workspace_id=ctx.workspace_id,
+        occurrence_id=task.id,
+        kind=kind,
+        blob_hash=blob_hash,
+        note_md=None,
+        created_at=resolved_clock.now(),
+        created_by_user_id=ctx.actor_id,
+    )
+    session.add(row)
+    session.flush()
+    _audit(
+        session,
+        ctx,
+        resolved_clock,
+        task=task,
+        action=f"task.evidence.{kind}.add",
+        diff={
+            "after": {
+                "evidence_id": row.id,
+                "blob_hash": blob_hash,
+                "content_type": content_type,
+                "size_bytes": size_bytes,
+                "scan_status": scan_result.status,
+            }
+        },
     )
     return _evidence_row_to_view(row)

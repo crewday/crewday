@@ -42,11 +42,12 @@ from sqlalchemy.orm import Session, sessionmaker
 from app.adapters.db.places.models import Area, Property, PropertyWorkspace, Unit
 from app.adapters.db.tasks.models import Occurrence
 from app.adapters.db.workspace.models import WorkRole
-from app.api.deps import current_workspace_context
+from app.api.deps import current_workspace_context, get_storage
 from app.api.deps import db_session as _db_session_dep
 from app.api.v1.tasks import router as tasks_router
 from app.tenancy import WorkspaceContext, tenant_agnostic
 from app.util.ulid import new_ulid
+from tests._fakes.storage import InMemoryStorage
 from tests.factories.identity import (
     bootstrap_user,
     bootstrap_workspace,
@@ -218,12 +219,20 @@ def seeded(
 def _client_for(
     session_factory: sessionmaker[Session],
     ctx: WorkspaceContext,
+    *,
+    storage: InMemoryStorage | None = None,
 ) -> TestClient:
-    """Return a TestClient pinned to ``ctx``.
+    """Return a TestClient pinned to ``ctx`` (and optionally ``storage``).
 
     Mounts the tasks router at ``/api/v1`` (sans the workspace-slug
     prefix the factory adds in prod) and overrides the session + ctx
     deps so the router reads the ambient seeded workspace.
+
+    ``storage`` is the :class:`InMemoryStorage` the file-evidence route
+    writes blobs into. When ``None`` (the default), a throwaway
+    instance is constructed so the dep resolves without requiring
+    ``app.state.storage`` — tests that need to inspect the stored bytes
+    pass their own instance and assert on it after the call.
     """
     app = FastAPI()
     app.include_router(tasks_router, prefix="/api/v1")
@@ -242,8 +251,14 @@ def _client_for(
     def _ctx() -> WorkspaceContext:
         return ctx
 
+    resolved_storage = storage if storage is not None else InMemoryStorage()
+
+    def _storage() -> InMemoryStorage:
+        return resolved_storage
+
     app.dependency_overrides[_db_session_dep] = _session
     app.dependency_overrides[current_workspace_context] = _ctx
+    app.dependency_overrides[get_storage] = _storage
     return TestClient(app)
 
 
@@ -1055,26 +1070,208 @@ class TestEvidence:
             rows = r.json()["data"]
             assert any(e["note_md"] == "Smells like chlorine" for e in rows)
 
-    def test_unsupported_kind_returns_501(
+    # cd-jl0g: photo / voice / gps end-to-end. The PNG and WAV fixtures
+    # are pre-rendered constant bytes (no runtime encoder dependency)
+    # so the test stays deterministic.
+    _TINY_PNG: bytes = bytes.fromhex(
+        "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4"
+        "8900000010494441541857636060f80f0000010101003e6b40fb000000004949"
+        "454e44ae426082"
+    )
+    _TINY_WAV: bytes = (
+        b"RIFF" + (36 + 16).to_bytes(4, "little") + b"WAVE"
+        b"fmt "
+        + (16).to_bytes(4, "little")
+        + (1).to_bytes(2, "little")  # PCM
+        + (1).to_bytes(2, "little")  # mono
+        + (8000).to_bytes(4, "little")  # 8 kHz
+        + (16000).to_bytes(4, "little")
+        + (2).to_bytes(2, "little")
+        + (16).to_bytes(2, "little")
+        + b"data"
+        + (16).to_bytes(4, "little")
+        + (b"\x00" * 16)
+    )
+
+    def test_photo_evidence_round_trips(
         self,
         session_factory: sessionmaker[Session],
         seeded: dict[str, Any],
     ) -> None:
-        with _client_for(session_factory, seeded["owner_ctx"]) as client:
-            r = client.post(
+        storage = InMemoryStorage()
+        with _client_for(session_factory, seeded["owner_ctx"], storage=storage) as c:
+            r = c.post(
+                f"/api/v1/tasks/{seeded['task_id']}/evidence",
+                data={"kind": "photo"},
+                files={"file": ("evidence.png", self._TINY_PNG, "image/png")},
+            )
+            assert r.status_code == 201, r.text
+            body = r.json()
+            assert body["kind"] == "photo"
+            assert body["note_md"] is None
+            assert body["blob_hash"] is not None
+            assert len(body["blob_hash"]) == 64  # SHA-256 hex.
+            assert storage.exists(body["blob_hash"])
+
+            r = c.get(f"/api/v1/tasks/{seeded['task_id']}/evidence")
+            assert r.status_code == 200, r.text
+            ids = [row["id"] for row in r.json()["data"]]
+            assert body["id"] in ids
+
+    def test_voice_evidence_round_trips(
+        self,
+        session_factory: sessionmaker[Session],
+        seeded: dict[str, Any],
+    ) -> None:
+        storage = InMemoryStorage()
+        with _client_for(session_factory, seeded["owner_ctx"], storage=storage) as c:
+            r = c.post(
+                f"/api/v1/tasks/{seeded['task_id']}/evidence",
+                data={"kind": "voice"},
+                files={"file": ("memo.wav", self._TINY_WAV, "audio/wav")},
+            )
+            assert r.status_code == 201, r.text
+            body = r.json()
+            assert body["kind"] == "voice"
+            assert body["blob_hash"] is not None
+            assert storage.exists(body["blob_hash"])
+
+    def test_gps_evidence_round_trips(
+        self,
+        session_factory: sessionmaker[Session],
+        seeded: dict[str, Any],
+    ) -> None:
+        storage = InMemoryStorage()
+        gps_payload = b'{"lat": 48.8566, "lon": 2.3522, "accuracy_m": 5}'
+        with _client_for(session_factory, seeded["owner_ctx"], storage=storage) as c:
+            r = c.post(
+                f"/api/v1/tasks/{seeded['task_id']}/evidence",
+                data={"kind": "gps"},
+                files={
+                    "file": ("coords.json", gps_payload, "application/json"),
+                },
+            )
+            assert r.status_code == 201, r.text
+            body = r.json()
+            assert body["kind"] == "gps"
+            assert body["blob_hash"] is not None
+            with storage.get(body["blob_hash"]) as fh:
+                assert fh.read() == gps_payload
+
+    def test_gps_payload_invalid_returns_422(
+        self,
+        session_factory: sessionmaker[Session],
+        seeded: dict[str, Any],
+    ) -> None:
+        with _client_for(session_factory, seeded["owner_ctx"]) as c:
+            r = c.post(
+                f"/api/v1/tasks/{seeded['task_id']}/evidence",
+                data={"kind": "gps"},
+                files={
+                    "file": ("coords.json", b'{"lat": 48.8566}', "application/json"),
+                },
+            )
+            assert r.status_code == 422, r.text
+            assert r.json()["detail"]["error"] == "evidence_gps_payload_invalid"
+
+    def test_size_cap_returns_413(
+        self,
+        session_factory: sessionmaker[Session],
+        seeded: dict[str, Any],
+    ) -> None:
+        # GPS cap is 4 KiB — easiest to exceed deterministically.
+        oversize = b'{"lat": 0, "lon": 0, "filler": "' + b"x" * 4096 + b'"}'
+        with _client_for(session_factory, seeded["owner_ctx"]) as c:
+            r = c.post(
+                f"/api/v1/tasks/{seeded['task_id']}/evidence",
+                data={"kind": "gps"},
+                files={"file": ("big.json", oversize, "application/json")},
+            )
+            assert r.status_code == 413, r.text
+            body = r.json()
+            assert body["detail"]["error"] == "evidence_too_large"
+            assert body["detail"]["kind"] == "gps"
+
+    def test_bad_mime_returns_415(
+        self,
+        session_factory: sessionmaker[Session],
+        seeded: dict[str, Any],
+    ) -> None:
+        with _client_for(session_factory, seeded["owner_ctx"]) as c:
+            r = c.post(
+                f"/api/v1/tasks/{seeded['task_id']}/evidence",
+                data={"kind": "photo"},
+                files={
+                    "file": ("evidence.svg", b"<svg/>", "image/svg+xml"),
+                },
+            )
+            assert r.status_code == 415, r.text
+            body = r.json()
+            assert body["detail"]["error"] == "evidence_content_type_rejected"
+            assert body["detail"]["kind"] == "photo"
+
+    def test_file_kind_without_file_returns_422(
+        self,
+        session_factory: sessionmaker[Session],
+        seeded: dict[str, Any],
+    ) -> None:
+        """A photo / voice / gps post without the file part is a client
+        bug — 422 instead of silently writing an empty Evidence row."""
+        with _client_for(session_factory, seeded["owner_ctx"]) as c:
+            r = c.post(
                 f"/api/v1/tasks/{seeded['task_id']}/evidence",
                 data={"kind": "photo"},
             )
-            assert r.status_code == 501, r.text
-            assert r.json()["detail"]["error"] == "evidence_kind_not_implemented"
+            assert r.status_code == 422, r.text
+            assert r.json()["detail"]["error"] == "evidence_file_required"
+
+    def test_oversized_content_length_short_circuits(
+        self,
+        session_factory: sessionmaker[Session],
+        seeded: dict[str, Any],
+    ) -> None:
+        """A client that *advertises* an oversized body is rejected at
+        the dep layer — before Starlette's multipart parser buffers
+        anything. Mirrors :func:`me_avatar._check_content_length`'s
+        contract: the dep is the first gate, the in-handler streaming
+        cap is the backup for chunked / lying clients.
+        """
+        with _client_for(session_factory, seeded["owner_ctx"]) as c:
+            # 26 MiB advertised body > the 25 MiB + 1 router cap.
+            r = c.post(
+                f"/api/v1/tasks/{seeded['task_id']}/evidence",
+                headers={"Content-Length": str(26 * 1024 * 1024)},
+                data={"kind": "photo"},
+                files={"file": ("p.png", b"\x00" * 8, "image/png")},
+            )
+            assert r.status_code == 413, r.text
+            assert r.json()["detail"]["error"] == "evidence_too_large"
+
+    def test_file_kind_with_whitespace_only_note_md_returns_422(
+        self,
+        session_factory: sessionmaker[Session],
+        seeded: dict[str, Any],
+    ) -> None:
+        """A photo / voice / gps upload that also carries a non-None
+        ``note_md`` (even whitespace) is a confused client; reject it
+        explicitly so the contract stays narrow.
+        """
+        with _client_for(session_factory, seeded["owner_ctx"]) as c:
+            r = c.post(
+                f"/api/v1/tasks/{seeded['task_id']}/evidence",
+                data={"kind": "photo", "note_md": "   "},
+                files={"file": ("p.png", self._TINY_PNG, "image/png")},
+            )
+            assert r.status_code == 422, r.text
+            assert r.json()["detail"]["error"] == "evidence_file_with_note"
 
     def test_invalid_kind_returns_422(
         self,
         session_factory: sessionmaker[Session],
         seeded: dict[str, Any],
     ) -> None:
-        """A kind outside the §06 enum is caller error, not a deferred
-        feature — 422 ``evidence_invalid_kind`` instead of 501."""
+        """A kind outside the §06 enum is caller error — 422
+        ``evidence_invalid_kind``."""
         with _client_for(session_factory, seeded["owner_ctx"]) as client:
             r = client.post(
                 f"/api/v1/tasks/{seeded['task_id']}/evidence",

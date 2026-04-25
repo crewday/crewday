@@ -750,14 +750,35 @@ items never consult the RRULE afterwards).
 
 ## Evidence
 
-Photos, optional notes, and — for backwards compatibility with the
-v0 spec — checklist state snapshots. Stored per completion as
-`task_evidence {kind: photo|note|checklist_snapshot, file_id?,
-text?, checklist_snapshot_json?}`. `checklist_snapshot` is written
-once at completion time from the current `task_checklist_item` rows
-so reports can reconstruct exactly what was ticked even if items are
-later edited. Files go through the `file` entity (§02) backed by the
-`storage` abstraction (local disk by default, §15).
+Photos, voice memos, GPS coordinates, and free-form notes. Stored per
+completion as `task_evidence {kind: photo|note|voice|gps, blob_hash?,
+note_md?}`:
+
+- `kind=note` carries the body inline in `note_md` (markdown). No
+  blob, no upload.
+- `kind=photo` / `voice` / `gps` carry a content-addressed
+  `blob_hash` (SHA-256 hex) pointing into the `storage` abstraction
+  (local disk by default, §15). `note_md` is `NULL` for these.
+- `gps` is a small JSON document with `{lat, lon, accuracy_m?}`
+  (decimal degrees; `accuracy_m` non-negative metres). Routes
+  through the same content-addressed pipeline as photo / voice so
+  every file-bearing evidence row shares one storage seam.
+
+Per-kind input validation (MIME allow-list, size cap, virus scan)
+lives in §15 "Input validation" — the domain layer rejects
+`kind=photo` with `Content-Type: image/svg+xml`, anything past the
+per-kind cap (10 MiB photo / 25 MiB voice / 4 KiB gps), and any
+infected payload before the bytes reach the blob store.
+
+The worker can attach evidence at any point through
+`POST /tasks/{id}/evidence` (multipart/form-data); see §12 "REST
+API" for the wire shape and error envelopes.
+
+> Pre-cd-jl0g, an early draft of this spec listed
+> `kind: checklist_snapshot` as a third evidence kind for v0
+> backwards compatibility. v1 dropped that — the snapshot lives on
+> `task.checklist_snapshot_json` (see "Snapshot at completion time"
+> in §02 "Data model"), not on a separate `task_evidence` row.
 
 **The worker UI exposes the photo picker only.** There is no
 free-form "note" textarea on the task detail page. Observations

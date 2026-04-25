@@ -1230,10 +1230,24 @@ PATCH  /tasks/{id}/comments/{comment_id} # author only; 409
 DELETE /tasks/{id}/comments/{comment_id} # author any time; moderators gated
                                          #   on `tasks.comment_moderate`.
 GET    /tasks/{id}/evidence
-POST   /tasks/{id}/evidence        # multipart/form-data; kind=note wired
-                                   #   end-to-end. Photo / voice / gps
-                                   #   uploads return 501 until the asset
-                                   #   pipeline lands (tracked separately).
+POST   /tasks/{id}/evidence        # multipart/form-data. Every §06 kind
+                                   #   (note / photo / voice / gps) wired
+                                   #   end-to-end. note carries the body
+                                   #   in `note_md`; photo / voice / gps
+                                   #   route through the content-addressed
+                                   #   `Storage` port — SHA-256 blob hash,
+                                   #   virus scan, per-kind MIME / size
+                                   #   cap (§15 "Input validation"). gps
+                                   #   payload is a small JSON document
+                                   #   with `lat` / `lon` / optional
+                                   #   `accuracy_m`. 413 evidence_too_large
+                                   #   past the per-kind cap; 415
+                                   #   evidence_content_type_rejected for
+                                   #   off-allowlist MIME; 415
+                                   #   evidence_infected when the scanner
+                                   #   blocks; 422
+                                   #   evidence_gps_payload_invalid for a
+                                   #   malformed coordinate document.
 
 GET    /schedules                        # cursor paginated; filters:
                                          #   ?template_id=&property_id=&paused=

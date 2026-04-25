@@ -60,8 +60,13 @@ from app.adapters.db.tasks.models import (
     Occurrence,
 )
 from app.adapters.db.workspace.models import Workspace
+from app.adapters.storage.ports import VirusScanResult
 from app.domain.tasks.completion import (
+    EvidenceContentTypeNotAllowed,
+    EvidenceGpsPayloadInvalid,
+    EvidenceInfected,
     EvidenceRequired,
+    EvidenceTooLarge,
     InvalidStateTransition,
     PermissionDenied,
     PhotoForbidden,
@@ -69,6 +74,7 @@ from app.domain.tasks.completion import (
     SkipNotPermitted,
     TaskNotFound,
     _assert_transition,
+    add_file_evidence,
     add_note_evidence,
     cancel,
     complete,
@@ -1310,3 +1316,474 @@ class TestAddNoteEvidence:
                 note_md="hijack",
                 clock=clock,
             )
+
+
+# ---------------------------------------------------------------------------
+# add_file_evidence — photo / voice / gps via the asset pipeline (cd-jl0g)
+# ---------------------------------------------------------------------------
+
+
+# Smallest valid PNG: a 1x1 transparent pixel. Pre-rendered hex so the
+# tests don't depend on a runtime PNG encoder. ~67 bytes — comfortably
+# under the photo cap, comfortably above the empty-payload guard.
+_TINY_PNG: bytes = bytes.fromhex(
+    "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4"
+    "8900000010494441541857636060f80f0000010101003e6b40fb0000000049454"
+    "e44ae426082"
+)
+
+# Smallest valid WAV: a 0.1 s silent mono file with a 44-byte RIFF
+# header + 8 zero samples (16-bit PCM). Same rationale as the PNG —
+# constant bytes keep the fixture deterministic and small.
+_TINY_WAV: bytes = (
+    b"RIFF" + (36 + 16).to_bytes(4, "little") + b"WAVE"
+    b"fmt " + (16).to_bytes(4, "little")
+    + (1).to_bytes(2, "little")  # PCM
+    + (1).to_bytes(2, "little")  # mono
+    + (8000).to_bytes(4, "little")  # 8 kHz
+    + (16000).to_bytes(4, "little")  # byte rate
+    + (2).to_bytes(2, "little")
+    + (16).to_bytes(2, "little")
+    + b"data" + (16).to_bytes(4, "little")
+    + (b"\x00" * 16)
+)
+
+_GPS_PAYLOAD: bytes = (
+    b'{"lat": 48.8566, "lon": 2.3522, "accuracy_m": 5}'
+)
+
+
+class _StubScanner:
+    """In-memory :class:`VirusScanner` stub for unit tests."""
+
+    def __init__(self, *, status: str = "clean", signature: str | None = None) -> None:
+        self._status = status
+        self._signature = signature
+        self.calls: list[tuple[bytes, str | None]] = []
+
+    def scan(self, payload: bytes, *, content_type: str | None) -> VirusScanResult:
+        self.calls.append((payload, content_type))
+        return VirusScanResult(status=self._status, signature=self._signature)
+
+
+class TestAddFileEvidence:
+    """``add_file_evidence`` writes :class:`Evidence` rows + audits per kind."""
+
+    def test_photo_happy_path(self, session: Session, clock: FrozenClock) -> None:
+        from tests._fakes.storage import InMemoryStorage
+
+        ws = _bootstrap_workspace(session)
+        prop = _bootstrap_property(session)
+        occ = _bootstrap_occurrence(session, workspace_id=ws, property_id=prop)
+        author = _bootstrap_user(session)
+        storage = InMemoryStorage()
+        scanner = _StubScanner(status="clean")
+
+        view = add_file_evidence(
+            session,
+            _ctx(ws, actor_id=author),
+            task_id=occ,
+            kind="photo",
+            payload=_TINY_PNG,
+            content_type="image/png",
+            storage=storage,
+            virus_scanner=scanner,
+            clock=clock,
+        )
+        assert view.kind == "photo"
+        assert view.note_md is None
+        assert view.blob_hash is not None
+        assert len(view.blob_hash) == 64  # SHA-256 hex.
+        assert storage.exists(view.blob_hash)
+        assert scanner.calls and scanner.calls[0][1] == "image/png"
+
+        row = session.scalars(select(Evidence).where(Evidence.id == view.id)).one()
+        assert row.workspace_id == ws
+        assert row.occurrence_id == occ
+        assert row.kind == "photo"
+        assert row.blob_hash == view.blob_hash
+
+        actions = session.scalars(
+            select(AuditLog.action).where(AuditLog.entity_id == occ)
+        ).all()
+        assert "task.evidence.photo.add" in actions
+
+    def test_voice_happy_path(self, session: Session, clock: FrozenClock) -> None:
+        from tests._fakes.storage import InMemoryStorage
+
+        ws = _bootstrap_workspace(session)
+        prop = _bootstrap_property(session)
+        occ = _bootstrap_occurrence(session, workspace_id=ws, property_id=prop)
+        author = _bootstrap_user(session)
+        storage = InMemoryStorage()
+
+        view = add_file_evidence(
+            session,
+            _ctx(ws, actor_id=author),
+            task_id=occ,
+            kind="voice",
+            payload=_TINY_WAV,
+            content_type="audio/wav",
+            storage=storage,
+            virus_scanner=_StubScanner(),
+            clock=clock,
+        )
+        assert view.kind == "voice"
+        assert view.blob_hash is not None
+        assert storage.exists(view.blob_hash)
+
+    def test_gps_happy_path(self, session: Session, clock: FrozenClock) -> None:
+        from tests._fakes.storage import InMemoryStorage
+
+        ws = _bootstrap_workspace(session)
+        prop = _bootstrap_property(session)
+        occ = _bootstrap_occurrence(session, workspace_id=ws, property_id=prop)
+        author = _bootstrap_user(session)
+        storage = InMemoryStorage()
+
+        view = add_file_evidence(
+            session,
+            _ctx(ws, actor_id=author),
+            task_id=occ,
+            kind="gps",
+            payload=_GPS_PAYLOAD,
+            content_type="application/json",
+            storage=storage,
+            virus_scanner=_StubScanner(),
+            clock=clock,
+        )
+        assert view.kind == "gps"
+        assert view.blob_hash is not None
+        # The stored bytes round-trip exactly so a viewer can re-parse
+        # them later.
+        with storage.get(view.blob_hash) as fh:
+            assert fh.read() == _GPS_PAYLOAD
+
+    def test_gps_rejects_missing_lat(
+        self, session: Session, clock: FrozenClock
+    ) -> None:
+        from tests._fakes.storage import InMemoryStorage
+
+        ws = _bootstrap_workspace(session)
+        prop = _bootstrap_property(session)
+        occ = _bootstrap_occurrence(session, workspace_id=ws, property_id=prop)
+        author = _bootstrap_user(session)
+        storage = InMemoryStorage()
+
+        with pytest.raises(EvidenceGpsPayloadInvalid, match="lat"):
+            add_file_evidence(
+                session,
+                _ctx(ws, actor_id=author),
+                task_id=occ,
+                kind="gps",
+                payload=b'{"lon": 2.3522}',
+                content_type="application/json",
+                storage=storage,
+                virus_scanner=_StubScanner(),
+                clock=clock,
+            )
+        # Malformed payload never reaches storage.
+        assert not storage._blobs  # testing the side-effect.
+
+    def test_gps_rejects_out_of_range_lat(
+        self, session: Session, clock: FrozenClock
+    ) -> None:
+        from tests._fakes.storage import InMemoryStorage
+
+        ws = _bootstrap_workspace(session)
+        prop = _bootstrap_property(session)
+        occ = _bootstrap_occurrence(session, workspace_id=ws, property_id=prop)
+        author = _bootstrap_user(session)
+
+        with pytest.raises(EvidenceGpsPayloadInvalid, match="lat"):
+            add_file_evidence(
+                session,
+                _ctx(ws, actor_id=author),
+                task_id=occ,
+                kind="gps",
+                payload=b'{"lat": 91, "lon": 2.0}',
+                content_type="application/json",
+                storage=InMemoryStorage(),
+                virus_scanner=_StubScanner(),
+                clock=clock,
+            )
+
+    def test_gps_rejects_non_object_payload(
+        self, session: Session, clock: FrozenClock
+    ) -> None:
+        from tests._fakes.storage import InMemoryStorage
+
+        ws = _bootstrap_workspace(session)
+        prop = _bootstrap_property(session)
+        occ = _bootstrap_occurrence(session, workspace_id=ws, property_id=prop)
+        author = _bootstrap_user(session)
+        with pytest.raises(EvidenceGpsPayloadInvalid):
+            add_file_evidence(
+                session,
+                _ctx(ws, actor_id=author),
+                task_id=occ,
+                kind="gps",
+                payload=b"[1, 2, 3]",
+                content_type="application/json",
+                storage=InMemoryStorage(),
+                virus_scanner=_StubScanner(),
+                clock=clock,
+            )
+
+    def test_gps_rejects_boolean_lat(
+        self, session: Session, clock: FrozenClock
+    ) -> None:
+        """``True`` is an ``int`` in Python — reject explicitly so the
+        type-narrowing isn't silently accepted."""
+        from tests._fakes.storage import InMemoryStorage
+
+        ws = _bootstrap_workspace(session)
+        prop = _bootstrap_property(session)
+        occ = _bootstrap_occurrence(session, workspace_id=ws, property_id=prop)
+        author = _bootstrap_user(session)
+        with pytest.raises(EvidenceGpsPayloadInvalid, match="lat"):
+            add_file_evidence(
+                session,
+                _ctx(ws, actor_id=author),
+                task_id=occ,
+                kind="gps",
+                payload=b'{"lat": true, "lon": false}',
+                content_type="application/json",
+                storage=InMemoryStorage(),
+                virus_scanner=_StubScanner(),
+                clock=clock,
+            )
+
+    def test_rejects_invalid_kind(
+        self, session: Session, clock: FrozenClock
+    ) -> None:
+        from tests._fakes.storage import InMemoryStorage
+
+        ws = _bootstrap_workspace(session)
+        prop = _bootstrap_property(session)
+        occ = _bootstrap_occurrence(session, workspace_id=ws, property_id=prop)
+        author = _bootstrap_user(session)
+        with pytest.raises(ValueError, match="file-bearing"):
+            add_file_evidence(
+                session,
+                _ctx(ws, actor_id=author),
+                task_id=occ,
+                kind="note",  # type: ignore[arg-type]  # deliberate boundary violation.
+                payload=b"abc",
+                content_type="image/png",
+                storage=InMemoryStorage(),
+                virus_scanner=_StubScanner(),
+                clock=clock,
+            )
+
+    def test_rejects_disallowed_mime(
+        self, session: Session, clock: FrozenClock
+    ) -> None:
+        from tests._fakes.storage import InMemoryStorage
+
+        ws = _bootstrap_workspace(session)
+        prop = _bootstrap_property(session)
+        occ = _bootstrap_occurrence(session, workspace_id=ws, property_id=prop)
+        author = _bootstrap_user(session)
+        with pytest.raises(EvidenceContentTypeNotAllowed):
+            add_file_evidence(
+                session,
+                _ctx(ws, actor_id=author),
+                task_id=occ,
+                kind="photo",
+                payload=_TINY_PNG,
+                content_type="image/svg+xml",  # SVG never allowed for photos.
+                storage=InMemoryStorage(),
+                virus_scanner=_StubScanner(),
+                clock=clock,
+            )
+
+    def test_rejects_oversize(self, session: Session, clock: FrozenClock) -> None:
+        from tests._fakes.storage import InMemoryStorage
+
+        ws = _bootstrap_workspace(session)
+        prop = _bootstrap_property(session)
+        occ = _bootstrap_occurrence(session, workspace_id=ws, property_id=prop)
+        author = _bootstrap_user(session)
+        oversize = b"\x00" * (4 * 1024 + 1)
+        with pytest.raises(EvidenceTooLarge) as excinfo:
+            add_file_evidence(
+                session,
+                _ctx(ws, actor_id=author),
+                task_id=occ,
+                kind="gps",
+                payload=oversize,
+                content_type="application/json",
+                storage=InMemoryStorage(),
+                virus_scanner=_StubScanner(),
+                clock=clock,
+            )
+        assert excinfo.value.kind == "gps"
+        assert excinfo.value.cap_bytes == 4 * 1024
+
+    def test_rejects_empty_payload(
+        self, session: Session, clock: FrozenClock
+    ) -> None:
+        from tests._fakes.storage import InMemoryStorage
+
+        ws = _bootstrap_workspace(session)
+        prop = _bootstrap_property(session)
+        occ = _bootstrap_occurrence(session, workspace_id=ws, property_id=prop)
+        author = _bootstrap_user(session)
+        with pytest.raises(ValueError, match="must not be empty"):
+            add_file_evidence(
+                session,
+                _ctx(ws, actor_id=author),
+                task_id=occ,
+                kind="photo",
+                payload=b"",
+                content_type="image/png",
+                storage=InMemoryStorage(),
+                virus_scanner=_StubScanner(),
+                clock=clock,
+            )
+
+    def test_infected_payload_is_rejected(
+        self, session: Session, clock: FrozenClock
+    ) -> None:
+        """A scanner verdict of ``infected`` blocks the upload before
+        the bytes touch the blob store."""
+        from tests._fakes.storage import InMemoryStorage
+
+        ws = _bootstrap_workspace(session)
+        prop = _bootstrap_property(session)
+        occ = _bootstrap_occurrence(session, workspace_id=ws, property_id=prop)
+        author = _bootstrap_user(session)
+        storage = InMemoryStorage()
+
+        with pytest.raises(EvidenceInfected) as excinfo:
+            add_file_evidence(
+                session,
+                _ctx(ws, actor_id=author),
+                task_id=occ,
+                kind="photo",
+                payload=_TINY_PNG,
+                content_type="image/png",
+                storage=storage,
+                virus_scanner=_StubScanner(
+                    status="infected", signature="EICAR-Test-File"
+                ),
+                clock=clock,
+            )
+        assert excinfo.value.kind == "photo"
+        assert excinfo.value.signature == "EICAR-Test-File"
+        assert not storage._blobs
+
+    def test_unknown_scanner_status_allows_upload(
+        self, session: Session, clock: FrozenClock
+    ) -> None:
+        """The default :class:`NullVirusScanner` returns ``unknown``; the
+        upload still lands so the deployment isn't down on missing scanner."""
+        from tests._fakes.storage import InMemoryStorage
+
+        ws = _bootstrap_workspace(session)
+        prop = _bootstrap_property(session)
+        occ = _bootstrap_occurrence(session, workspace_id=ws, property_id=prop)
+        author = _bootstrap_user(session)
+        storage = InMemoryStorage()
+
+        view = add_file_evidence(
+            session,
+            _ctx(ws, actor_id=author),
+            task_id=occ,
+            kind="photo",
+            payload=_TINY_PNG,
+            content_type="image/png",
+            storage=storage,
+            virus_scanner=_StubScanner(status="unknown"),
+            clock=clock,
+        )
+        assert view.blob_hash is not None
+        assert storage.exists(view.blob_hash)
+
+    def test_default_scanner_warns_once(
+        self, session: Session, clock: FrozenClock, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """The default :class:`NullVirusScanner` emits one WARNING per
+        process so operators learn the deployment shipped without
+        antivirus protection."""
+        from tests._fakes.storage import InMemoryStorage
+
+        ws = _bootstrap_workspace(session)
+        prop = _bootstrap_property(session)
+        occ = _bootstrap_occurrence(session, workspace_id=ws, property_id=prop)
+        author = _bootstrap_user(session)
+        storage = InMemoryStorage()
+
+        with caplog.at_level("WARNING", logger="app.adapters.storage.virus"):
+            add_file_evidence(
+                session,
+                _ctx(ws, actor_id=author),
+                task_id=occ,
+                kind="photo",
+                payload=_TINY_PNG,
+                content_type="image/png",
+                storage=storage,
+                clock=clock,
+            )
+        # One warning row mentioning the gap.
+        warnings = [r for r in caplog.records if r.levelname == "WARNING"]
+        assert any("virus scanner" in r.getMessage() for r in warnings)
+
+    def test_cross_tenant_raises_not_found(
+        self, session: Session, clock: FrozenClock
+    ) -> None:
+        from tests._fakes.storage import InMemoryStorage
+
+        ws_a = _bootstrap_workspace(session, slug="file-a")
+        ws_b = _bootstrap_workspace(session, slug="file-b")
+        prop = _bootstrap_property(session)
+        occ = _bootstrap_occurrence(session, workspace_id=ws_a, property_id=prop)
+        author = _bootstrap_user(session)
+        with pytest.raises(TaskNotFound):
+            add_file_evidence(
+                session,
+                _ctx(ws_b, slug="file-b", actor_id=author),
+                task_id=occ,
+                kind="photo",
+                payload=_TINY_PNG,
+                content_type="image/png",
+                storage=InMemoryStorage(),
+                virus_scanner=_StubScanner(),
+                clock=clock,
+            )
+
+    def test_audit_diff_carries_size_and_content_type(
+        self, session: Session, clock: FrozenClock
+    ) -> None:
+        from tests._fakes.storage import InMemoryStorage
+
+        ws = _bootstrap_workspace(session)
+        prop = _bootstrap_property(session)
+        occ = _bootstrap_occurrence(session, workspace_id=ws, property_id=prop)
+        author = _bootstrap_user(session)
+
+        view = add_file_evidence(
+            session,
+            _ctx(ws, actor_id=author),
+            task_id=occ,
+            kind="photo",
+            payload=_TINY_PNG,
+            content_type="image/png",
+            storage=InMemoryStorage(),
+            virus_scanner=_StubScanner(),
+            clock=clock,
+        )
+        row = session.scalars(
+            select(AuditLog).where(
+                AuditLog.entity_id == occ,
+                AuditLog.action == "task.evidence.photo.add",
+            )
+        ).one()
+        diff = row.diff
+        assert isinstance(diff, dict)
+        after = diff["after"]
+        assert after["evidence_id"] == view.id
+        assert after["content_type"] == "image/png"
+        assert after["size_bytes"] == len(_TINY_PNG)
+        assert after["scan_status"] == "clean"

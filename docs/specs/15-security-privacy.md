@@ -377,6 +377,9 @@ See §03 for ceremonies. Additional hardening:
   - Max size configurable per purpose (default 10 MB images, 25 MB
     PDFs).
   - MIME sniffed server-side; we trust the sniff, not the header.
+    *(cd-jl0g status: header-trust on the task evidence route is the
+    current stopgap; a follow-up wires a real sniffer through the
+    same domain seam.)*
   - Image re-encoding: uploaded JPEGs are re-encoded to strip EXIF
     and GPS unless the workspace sets `retain_exif=true` on that
     purpose. **Avatars (`users.avatar_file_id`) always strip EXIF,
@@ -385,6 +388,39 @@ See §03 for ceremonies. Additional hardening:
   - PDFs are not re-encoded but are scanned for embedded scripts via
     a small `pdfid` wrapper; scripted PDFs are rejected.
 - SQL via SQLAlchemy ORM; no string concat.
+
+### Task evidence — per-kind caps and allow-lists
+
+The `POST /tasks/{id}/evidence` route (§12) pins the §06 evidence
+taxonomy to a narrow per-kind contract:
+
+| kind  | MIME allow-list                                                    | size cap |
+|-------|--------------------------------------------------------------------|----------|
+| photo | `image/jpeg`, `image/png`, `image/webp`, `image/heic`              | 10 MiB   |
+| voice | `audio/webm`, `audio/ogg`, `audio/mpeg`, `audio/mp4`, `audio/aac`, `audio/wav`, `audio/x-wav` | 25 MiB   |
+| gps   | `application/json` (small `{lat, lon, accuracy_m?}` document)      | 4 KiB    |
+
+Off-allowlist MIME → `415 evidence_content_type_rejected`. Past the
+cap → `413 evidence_too_large`. Both gates are router-level
+(`Content-Length` short-circuit) **and** domain-level (per-kind
+re-check after streaming) so a chunked / lying client still can't
+exhaust memory. Spec §06 "Evidence" carries the wire-shape detail.
+
+### Virus scanning
+
+Uploads MUST be scanned before they land in the blob store. The
+domain layer takes a `VirusScanner` Protocol port; the production
+wiring (ClamAV daemon, vendor REST API, …) is selected by
+`settings.virus_scanner_backend`.
+
+**Default fallback (`NullVirusScanner`) is fail-open with a
+single-warning per process.** The default returns
+`VirusScanResult(status="unknown")` and emits one `WARNING` log row
+the first time it's hit so an operator notices the deployment
+shipped without antivirus protection — the upload still lands so
+self-hosters can boot the stack with the bare minimum config.
+A deployment that wants fail-closed semantics MUST wire a real
+scanner; cd-v0iz tracks the production wiring.
 
 ### Blob download authorization
 
