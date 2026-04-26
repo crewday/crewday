@@ -37,6 +37,9 @@ from app.adapters.db.places.models import (
     PropertyWorkRoleAssignment,
     PropertyWorkspace,
 )
+from app.adapters.db.places.repositories import (
+    SqlAlchemyPropertyWorkRoleAssignmentRepository,
+)
 from app.adapters.db.workspace.models import UserWorkRole, WorkRole
 from app.domain.places.property_work_role_assignments import (
     PropertyWorkRoleAssignmentCreate,
@@ -97,6 +100,17 @@ def _ensure_tables_registered() -> None:
     registry.register("user_work_role")
     registry.register("work_role")
     registry.register("audit_log")
+
+
+def _repo(session: Session) -> SqlAlchemyPropertyWorkRoleAssignmentRepository:
+    """Wrap ``session`` in the SA-backed repository (cd-kezq).
+
+    The domain services accept the repository Protocol; integration
+    tests wire the production SA-backed concretion so the in-memory
+    SQLite round-trip + the partial-UNIQUE / FK behaviour are
+    exercised on every assertion.
+    """
+    return SqlAlchemyPropertyWorkRoleAssignmentRepository(session)
 
 
 def _ctx_for(workspace_id: str, workspace_slug: str, actor_id: str) -> WorkspaceContext:
@@ -267,7 +281,7 @@ class TestCreate:
         clock = FrozenClock(_PINNED)
 
         view = create_property_work_role_assignment(
-            session,
+            _repo(session),
             ctx,
             body=PropertyWorkRoleAssignmentCreate(
                 user_work_role_id=uwr_id,
@@ -324,7 +338,7 @@ class TestCreate:
 
         with pytest.raises(PropertyWorkRoleAssignmentInvariantViolated) as exc_info:
             create_property_work_role_assignment(
-                session,
+                _repo(session),
                 ctx,
                 body=PropertyWorkRoleAssignmentCreate(
                     user_work_role_id=uwr_id,
@@ -341,7 +355,7 @@ class TestCreate:
 
         with pytest.raises(PropertyWorkRoleAssignmentInvariantViolated) as exc_info:
             create_property_work_role_assignment(
-                session,
+                _repo(session),
                 ctx,
                 body=PropertyWorkRoleAssignmentCreate(
                     user_work_role_id="01HWUNKNOWN000000000000000",
@@ -365,7 +379,7 @@ class TestCreate:
 
         with pytest.raises(PropertyWorkRoleAssignmentInvariantViolated) as exc_info:
             create_property_work_role_assignment(
-                session,
+                _repo(session),
                 ctx,
                 body=PropertyWorkRoleAssignmentCreate(
                     user_work_role_id=uwr_id,
@@ -388,7 +402,7 @@ class TestCreate:
         clock = FrozenClock(_PINNED)
 
         create_property_work_role_assignment(
-            session,
+            _repo(session),
             ctx,
             body=PropertyWorkRoleAssignmentCreate(
                 user_work_role_id=uwr_id,
@@ -399,7 +413,7 @@ class TestCreate:
 
         with pytest.raises(PropertyWorkRoleAssignmentInvariantViolated) as exc_info:
             create_property_work_role_assignment(
-                session,
+                _repo(session),
                 ctx,
                 body=PropertyWorkRoleAssignmentCreate(
                     user_work_role_id=uwr_id,
@@ -420,7 +434,7 @@ class TestUpdate:
         session, ctx, prop_id, uwr_id = env
         clock = FrozenClock(_PINNED)
         view = create_property_work_role_assignment(
-            session,
+            _repo(session),
             ctx,
             body=PropertyWorkRoleAssignmentCreate(
                 user_work_role_id=uwr_id,
@@ -437,7 +451,7 @@ class TestUpdate:
         )
         later = FrozenClock(_PINNED.replace(hour=13))
         updated = update_property_work_role_assignment(
-            session,
+            _repo(session),
             ctx,
             assignment_id=view.id,
             body=PropertyWorkRoleAssignmentUpdate(
@@ -465,7 +479,7 @@ class TestUpdate:
         session, ctx, prop_id, uwr_id = env
         clock = FrozenClock(_PINNED)
         view = create_property_work_role_assignment(
-            session,
+            _repo(session),
             ctx,
             body=PropertyWorkRoleAssignmentCreate(
                 user_work_role_id=uwr_id,
@@ -476,7 +490,7 @@ class TestUpdate:
         )
 
         update_property_work_role_assignment(
-            session,
+            _repo(session),
             ctx,
             assignment_id=view.id,
             body=PropertyWorkRoleAssignmentUpdate(
@@ -502,7 +516,7 @@ class TestUpdate:
         session, ctx, prop_id, uwr_id = env
         clock = FrozenClock(_PINNED)
         view = create_property_work_role_assignment(
-            session,
+            _repo(session),
             ctx,
             body=PropertyWorkRoleAssignmentCreate(
                 user_work_role_id=uwr_id,
@@ -513,7 +527,7 @@ class TestUpdate:
 
         with pytest.raises(PropertyWorkRoleAssignmentInvariantViolated) as exc_info:
             update_property_work_role_assignment(
-                session,
+                _repo(session),
                 ctx,
                 assignment_id=view.id,
                 body=PropertyWorkRoleAssignmentUpdate(
@@ -529,7 +543,7 @@ class TestUpdate:
         session, ctx, _prop_id, _uwr_id = env
         with pytest.raises(PropertyWorkRoleAssignmentNotFound):
             update_property_work_role_assignment(
-                session,
+                _repo(session),
                 ctx,
                 assignment_id="01HWUNKNOWN000000000000000",
                 body=PropertyWorkRoleAssignmentUpdate(
@@ -548,7 +562,7 @@ class TestSoftDelete:
         session, ctx, prop_id, uwr_id = env
         clock = FrozenClock(_PINNED)
         view = create_property_work_role_assignment(
-            session,
+            _repo(session),
             ctx,
             body=PropertyWorkRoleAssignmentCreate(
                 user_work_role_id=uwr_id,
@@ -559,17 +573,19 @@ class TestSoftDelete:
 
         later = FrozenClock(_PINNED.replace(hour=14))
         delete_property_work_role_assignment(
-            session, ctx, assignment_id=view.id, clock=later
+            _repo(session), ctx, assignment_id=view.id, clock=later
         )
 
         # Hidden from the default get + list paths.
         with pytest.raises(PropertyWorkRoleAssignmentNotFound):
-            get_property_work_role_assignment(session, ctx, assignment_id=view.id)
-        assert list_property_work_role_assignments(session, ctx, limit=10) == []
+            get_property_work_role_assignment(
+                _repo(session), ctx, assignment_id=view.id
+            )
+        assert list_property_work_role_assignments(_repo(session), ctx, limit=10) == []
 
         # Re-pin succeeds — partial UNIQUE excludes tombstones.
         repin = create_property_work_role_assignment(
-            session,
+            _repo(session),
             ctx,
             body=PropertyWorkRoleAssignmentCreate(
                 user_work_role_id=uwr_id,
@@ -601,7 +617,7 @@ class TestListFilters:
         prop_b = _seed_property(session, workspace_id=ctx.workspace_id, name="Apt 3B")
 
         first = create_property_work_role_assignment(
-            session,
+            _repo(session),
             ctx,
             body=PropertyWorkRoleAssignmentCreate(
                 user_work_role_id=uwr_id,
@@ -610,7 +626,7 @@ class TestListFilters:
             clock=clock,
         )
         second = create_property_work_role_assignment(
-            session,
+            _repo(session),
             ctx,
             body=PropertyWorkRoleAssignmentCreate(
                 user_work_role_id=uwr_id,
@@ -620,12 +636,12 @@ class TestListFilters:
         )
 
         listed_a = list_property_work_role_assignments(
-            session, ctx, limit=10, property_id=prop_id
+            _repo(session), ctx, limit=10, property_id=prop_id
         )
         assert [v.id for v in listed_a] == [first.id]
 
         listed_b = list_property_work_role_assignments(
-            session, ctx, limit=10, property_id=prop_b
+            _repo(session), ctx, limit=10, property_id=prop_b
         )
         assert [v.id for v in listed_b] == [second.id]
 
@@ -645,7 +661,7 @@ class TestListFilters:
         )
 
         first = create_property_work_role_assignment(
-            session,
+            _repo(session),
             ctx,
             body=PropertyWorkRoleAssignmentCreate(
                 user_work_role_id=uwr_id,
@@ -654,7 +670,7 @@ class TestListFilters:
             clock=clock,
         )
         second = create_property_work_role_assignment(
-            session,
+            _repo(session),
             ctx,
             body=PropertyWorkRoleAssignmentCreate(
                 user_work_role_id=uwr_b,
@@ -664,11 +680,11 @@ class TestListFilters:
         )
 
         listed_a = list_property_work_role_assignments(
-            session, ctx, limit=10, user_work_role_id=uwr_id
+            _repo(session), ctx, limit=10, user_work_role_id=uwr_id
         )
         assert [v.id for v in listed_a] == [first.id]
         listed_b = list_property_work_role_assignments(
-            session, ctx, limit=10, user_work_role_id=uwr_b
+            _repo(session), ctx, limit=10, user_work_role_id=uwr_b
         )
         assert [v.id for v in listed_b] == [second.id]
 
@@ -684,7 +700,7 @@ class TestCrossWorkspace:
         session, ctx_a, prop_id, uwr_id = env
         clock = FrozenClock(_PINNED)
         view = create_property_work_role_assignment(
-            session,
+            _repo(session),
             ctx_a,
             body=PropertyWorkRoleAssignmentCreate(
                 user_work_role_id=uwr_id,
@@ -712,12 +728,17 @@ class TestCrossWorkspace:
 
         token = set_current(ctx_b)
         try:
-            assert list_property_work_role_assignments(session, ctx_b, limit=10) == []
+            assert (
+                list_property_work_role_assignments(_repo(session), ctx_b, limit=10)
+                == []
+            )
             with pytest.raises(PropertyWorkRoleAssignmentNotFound):
-                get_property_work_role_assignment(session, ctx_b, assignment_id=view.id)
+                get_property_work_role_assignment(
+                    _repo(session), ctx_b, assignment_id=view.id
+                )
             with pytest.raises(PropertyWorkRoleAssignmentNotFound):
                 update_property_work_role_assignment(
-                    session,
+                    _repo(session),
                     ctx_b,
                     assignment_id=view.id,
                     body=PropertyWorkRoleAssignmentUpdate(
@@ -730,7 +751,7 @@ class TestCrossWorkspace:
                 )
             with pytest.raises(PropertyWorkRoleAssignmentNotFound):
                 delete_property_work_role_assignment(
-                    session,
+                    _repo(session),
                     ctx_b,
                     assignment_id=view.id,
                     clock=clock,

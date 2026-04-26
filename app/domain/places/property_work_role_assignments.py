@@ -43,15 +43,28 @@ Public surface:
 3. ``(user_work_role_id, property_id)`` must be unique among live
    rows — the partial UNIQUE
    ``uq_property_work_role_assignment_role_property_active`` enforces
-   this; the service catches the IntegrityError and surfaces it as
+   this; the SA repo catches the IntegrityError and surfaces it as
+   :class:`~app.domain.places.ports.DuplicateActiveAssignment`, which
+   the service re-raises as
    :class:`PropertyWorkRoleAssignmentInvariantViolated` so the HTTP
    layer can return a 409.
 
 **Tenancy.** The ``property_work_role_assignment`` table carries a
 denormalised ``workspace_id`` column and is registered as
 workspace-scoped, so the ORM tenant filter narrows every SELECT to the
-caller's workspace. Each function re-asserts the predicate explicitly
-as defence-in-depth.
+caller's workspace. The repo re-asserts the predicate explicitly as
+defence-in-depth.
+
+**Architecture (cd-kezq).** The module talks to a
+:class:`~app.domain.places.ports.PropertyWorkRoleAssignmentRepository`
+Protocol — never to the SQLAlchemy model classes directly. The
+SA-backed concretion lives at
+:class:`app.adapters.db.places.repositories.SqlAlchemyPropertyWorkRoleAssignmentRepository`;
+unit tests inject a fake or wire the SA repo over an in-memory
+SQLite session. The repo also threads its open
+:class:`~sqlalchemy.orm.Session` through ``repo.session`` so the
+audit writer (``app.audit.write_audit``) — which still takes a
+concrete ``Session`` today — can keep using the same UoW.
 
 **Transaction boundary.** The service never calls ``session.commit()``;
 the caller's Unit-of-Work owns transaction boundaries. Every mutation
@@ -72,13 +85,14 @@ from datetime import datetime
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import select
-from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session
 
-from app.adapters.db.places.models import PropertyWorkRoleAssignment, PropertyWorkspace
-from app.adapters.db.workspace.models import UserWorkRole
 from app.audit import write_audit
+from app.domain.places.ports import (
+    AssignmentIntegrityError,
+    DuplicateActiveAssignment,
+    PropertyWorkRoleAssignmentRepository,
+    PropertyWorkRoleAssignmentRow,
+)
 from app.tenancy import WorkspaceContext
 from app.util.clock import Clock, SystemClock
 from app.util.ulid import new_ulid
@@ -125,8 +139,9 @@ class PropertyWorkRoleAssignmentInvariantViolated(ValueError):
       workspace through a live ``property_workspace`` row;
     * a live row already exists for ``(user_work_role_id,
       property_id)`` (partial UNIQUE — collapsed from
-      :class:`IntegrityError`). The HTTP router translates this
-      duplicate flavour into 409, the rest into 422.
+      :class:`~app.domain.places.ports.DuplicateActiveAssignment`).
+      The HTTP router translates this duplicate flavour into 409, the
+      rest into 422.
     """
 
 
@@ -188,12 +203,18 @@ class PropertyWorkRoleAssignmentView:
 
 
 # ---------------------------------------------------------------------------
-# Helpers
+# Row ↔ view projection
 # ---------------------------------------------------------------------------
 
 
-def _row_to_view(row: PropertyWorkRoleAssignment) -> PropertyWorkRoleAssignmentView:
-    """Project a SQLAlchemy row into :class:`PropertyWorkRoleAssignmentView`."""
+def _row_to_view(row: PropertyWorkRoleAssignmentRow) -> PropertyWorkRoleAssignmentView:
+    """Project a seam-level row into the public view.
+
+    The repo already returned an immutable, frozen value object; we
+    re-pack it into the public :class:`PropertyWorkRoleAssignmentView`
+    shape so callers keep the dataclass they were already typing
+    against.
+    """
     return PropertyWorkRoleAssignmentView(
         id=row.id,
         workspace_id=row.workspace_id,
@@ -207,28 +228,31 @@ def _row_to_view(row: PropertyWorkRoleAssignment) -> PropertyWorkRoleAssignmentV
     )
 
 
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
 def _load_row(
-    session: Session,
+    repo: PropertyWorkRoleAssignmentRepository,
     ctx: WorkspaceContext,
     *,
     assignment_id: str,
     include_deleted: bool = False,
-) -> PropertyWorkRoleAssignment:
+) -> PropertyWorkRoleAssignmentRow:
     """Return the row or raise :class:`PropertyWorkRoleAssignmentNotFound`."""
-    stmt = select(PropertyWorkRoleAssignment).where(
-        PropertyWorkRoleAssignment.id == assignment_id,
-        PropertyWorkRoleAssignment.workspace_id == ctx.workspace_id,
+    row = repo.get(
+        workspace_id=ctx.workspace_id,
+        assignment_id=assignment_id,
+        include_deleted=include_deleted,
     )
-    if not include_deleted:
-        stmt = stmt.where(PropertyWorkRoleAssignment.deleted_at.is_(None))
-    row = session.scalars(stmt).one_or_none()
     if row is None:
         raise PropertyWorkRoleAssignmentNotFound(assignment_id)
     return row
 
 
 def _assert_user_work_role_in_workspace(
-    session: Session,
+    repo: PropertyWorkRoleAssignmentRepository,
     ctx: WorkspaceContext,
     *,
     user_work_role_id: str,
@@ -241,21 +265,17 @@ def _assert_user_work_role_in_workspace(
     ``workspace_id`` predicate is defence-in-depth and matches the
     convention in :mod:`app.domain.identity.user_work_roles`.
     """
-    row = session.scalar(
-        select(UserWorkRole).where(
-            UserWorkRole.id == user_work_role_id,
-            UserWorkRole.workspace_id == ctx.workspace_id,
-            UserWorkRole.deleted_at.is_(None),
-        )
-    )
-    if row is None:
+    if not repo.user_work_role_exists_in_workspace(
+        workspace_id=ctx.workspace_id,
+        user_work_role_id=user_work_role_id,
+    ):
         raise PropertyWorkRoleAssignmentInvariantViolated(
             f"user_work_role {user_work_role_id!r} does not exist in this workspace"
         )
 
 
 def _assert_property_in_workspace(
-    session: Session,
+    repo: PropertyWorkRoleAssignmentRepository,
     ctx: WorkspaceContext,
     *,
     property_id: str,
@@ -267,38 +287,13 @@ def _assert_property_in_workspace(
     to a property it does not operate (§02
     "property_work_role_assignment" invariant 2).
     """
-    row = session.scalar(
-        select(PropertyWorkspace).where(
-            PropertyWorkspace.property_id == property_id,
-            PropertyWorkspace.workspace_id == ctx.workspace_id,
-        )
-    )
-    if row is None:
+    if not repo.property_in_workspace(
+        workspace_id=ctx.workspace_id,
+        property_id=property_id,
+    ):
         raise PropertyWorkRoleAssignmentInvariantViolated(
             f"property {property_id!r} is not linked to this workspace"
         )
-
-
-def _is_role_property_unique_violation(exc: IntegrityError) -> bool:
-    """Return ``True`` iff ``exc`` is the partial UNIQUE on (role, property).
-
-    Tightens the integrity-error classification so a stray PK
-    collision (vanishingly unlikely with ULIDs but still distinct
-    on the wire) is not mis-tagged as a duplicate-active row.
-    Postgres surfaces the index name; SQLite the column tuple. We
-    accept either signature.
-    """
-    message = str(exc).lower()
-    if "uq_property_work_role_assignment_role_property_active" in message:
-        return True
-    # SQLite text shape: ``UNIQUE constraint failed:
-    # property_work_role_assignment.user_work_role_id,
-    # property_work_role_assignment.property_id``.
-    return (
-        "unique constraint" in message
-        and "user_work_role_id" in message
-        and "property_id" in message
-    )
 
 
 # ---------------------------------------------------------------------------
@@ -307,7 +302,7 @@ def _is_role_property_unique_violation(exc: IntegrityError) -> bool:
 
 
 def list_property_work_role_assignments(
-    session: Session,
+    repo: PropertyWorkRoleAssignmentRepository,
     ctx: WorkspaceContext,
     *,
     limit: int,
@@ -327,33 +322,26 @@ def list_property_work_role_assignments(
     independently — the spec §12 "Users / work roles / settings"
     surface accepts both filters on the same call.
     """
-    stmt = select(PropertyWorkRoleAssignment).where(
-        PropertyWorkRoleAssignment.workspace_id == ctx.workspace_id,
+    rows = repo.list(
+        workspace_id=ctx.workspace_id,
+        limit=limit,
+        after_id=after_id,
+        property_id=property_id,
+        user_work_role_id=user_work_role_id,
+        include_deleted=include_deleted,
     )
-    if not include_deleted:
-        stmt = stmt.where(PropertyWorkRoleAssignment.deleted_at.is_(None))
-    if property_id is not None:
-        stmt = stmt.where(PropertyWorkRoleAssignment.property_id == property_id)
-    if user_work_role_id is not None:
-        stmt = stmt.where(
-            PropertyWorkRoleAssignment.user_work_role_id == user_work_role_id
-        )
-    if after_id is not None:
-        stmt = stmt.where(PropertyWorkRoleAssignment.id > after_id)
-    stmt = stmt.order_by(PropertyWorkRoleAssignment.id.asc()).limit(limit + 1)
-    rows = session.scalars(stmt).all()
     return [_row_to_view(r) for r in rows]
 
 
 def get_property_work_role_assignment(
-    session: Session,
+    repo: PropertyWorkRoleAssignmentRepository,
     ctx: WorkspaceContext,
     *,
     assignment_id: str,
 ) -> PropertyWorkRoleAssignmentView:
     """Return a single view or raise on miss."""
     return _row_to_view(
-        _load_row(session, ctx, assignment_id=assignment_id),
+        _load_row(repo, ctx, assignment_id=assignment_id),
     )
 
 
@@ -363,7 +351,7 @@ def get_property_work_role_assignment(
 
 
 def create_property_work_role_assignment(
-    session: Session,
+    repo: PropertyWorkRoleAssignmentRepository,
     ctx: WorkspaceContext,
     *,
     body: PropertyWorkRoleAssignmentCreate,
@@ -373,34 +361,36 @@ def create_property_work_role_assignment(
 
     Runs both §02 / §05 invariants (user_work_role belongs to
     workspace; property reachable via ``property_workspace``) before
-    attempting the flush. An :class:`IntegrityError` on the partial
-    UNIQUE ``uq_property_work_role_assignment_role_property_active``
-    is collapsed into
-    :class:`PropertyWorkRoleAssignmentInvariantViolated` so the HTTP
-    layer can map it to 409.
+    attempting the flush. A
+    :class:`~app.domain.places.ports.DuplicateActiveAssignment` raised
+    by the repo on the partial UNIQUE
+    ``uq_property_work_role_assignment_role_property_active`` is
+    collapsed into :class:`PropertyWorkRoleAssignmentInvariantViolated`
+    so the HTTP layer can map it to 409. Other integrity violations
+    (FK miss on ``property_pay_rule_id``) surface via
+    :class:`~app.domain.places.ports.AssignmentIntegrityError` and map
+    to a non-duplicate invariant message → 422.
     """
     resolved_clock = clock if clock is not None else SystemClock()
     now = resolved_clock.now()
 
     _assert_user_work_role_in_workspace(
-        session, ctx, user_work_role_id=body.user_work_role_id
+        repo, ctx, user_work_role_id=body.user_work_role_id
     )
-    _assert_property_in_workspace(session, ctx, property_id=body.property_id)
+    _assert_property_in_workspace(repo, ctx, property_id=body.property_id)
 
     # Pre-flight the partial-UNIQUE check so the duplicate-row case
     # surfaces with the canonical "already exists" message *before*
     # any IntegrityError from another constraint (e.g. the FK on
     # ``property_pay_rule_id``) muddies the surface. The flush-time
-    # ``IntegrityError`` catch below stays as defence-in-depth against
-    # a parallel insert race; it surfaces with the same message so the
-    # HTTP layer's substring check keeps mapping to 409.
-    existing_live = session.scalar(
-        select(PropertyWorkRoleAssignment).where(
-            PropertyWorkRoleAssignment.workspace_id == ctx.workspace_id,
-            PropertyWorkRoleAssignment.user_work_role_id == body.user_work_role_id,
-            PropertyWorkRoleAssignment.property_id == body.property_id,
-            PropertyWorkRoleAssignment.deleted_at.is_(None),
-        )
+    # :class:`DuplicateActiveAssignment` catch below stays as
+    # defence-in-depth against a parallel insert race; it surfaces
+    # with the same message so the HTTP layer's substring check keeps
+    # mapping to 409.
+    existing_live = repo.find_active_for_role_property(
+        workspace_id=ctx.workspace_id,
+        user_work_role_id=body.user_work_role_id,
+        property_id=body.property_id,
     )
     if existing_live is not None:
         raise PropertyWorkRoleAssignmentInvariantViolated(
@@ -409,63 +399,41 @@ def create_property_work_role_assignment(
             f"property={body.property_id!r} already exists"
         )
 
-    row_id = new_ulid(clock=clock)
-    row = PropertyWorkRoleAssignment(
-        id=row_id,
-        workspace_id=ctx.workspace_id,
-        user_work_role_id=body.user_work_role_id,
-        property_id=body.property_id,
-        schedule_ruleset_id=body.schedule_ruleset_id,
-        property_pay_rule_id=body.property_pay_rule_id,
-        created_at=now,
-        updated_at=now,
-        deleted_at=None,
-    )
-    session.add(row)
+    assignment_id = new_ulid(clock=clock)
     try:
-        session.flush()
-    except IntegrityError as exc:
-        session.rollback()
-        # Two flavours of integrity violation can land here:
-        #
-        # 1. The partial UNIQUE
-        #    ``uq_property_work_role_assignment_role_property_active``
-        #    fires if a parallel insert beat us between the pre-flight
-        #    SELECT above and the flush. The HTTP layer keys on the
-        #    ``"already exists"`` substring → 409.
-        # 2. The real FK on ``property_pay_rule_id`` (cascading from a
-        #    ``pay_rule`` row) fires when the caller supplies a pointer
-        #    that does not exist. We surface the FK miss verbatim so
-        #    the HTTP layer maps it to a generic 422 invariant
-        #    violation.
-        #
-        # Distinguishing the two across SQLite + Postgres is
-        # driver-dependent. Postgres surfaces the constraint name
-        # (``uq_property_work_role_assignment_role_property_active``);
-        # SQLite surfaces only the column tuple
-        # (``user_work_role_id, property_id``). Matching on either
-        # signature avoids the false-positive a bare
-        # ``"unique constraint"`` substring would have on a PK
-        # collision (extremely unlikely with ULIDs, but the matcher
-        # should still be tight). The tests assert the wire mapping
-        # rather than the SQLite text.
-        if _is_role_property_unique_violation(exc):
-            raise PropertyWorkRoleAssignmentInvariantViolated(
-                f"property_work_role_assignment for "
-                f"user_work_role={body.user_work_role_id!r} "
-                f"property={body.property_id!r} already exists"
-            ) from exc
+        row = repo.insert(
+            assignment_id=assignment_id,
+            workspace_id=ctx.workspace_id,
+            user_work_role_id=body.user_work_role_id,
+            property_id=body.property_id,
+            schedule_ruleset_id=body.schedule_ruleset_id,
+            property_pay_rule_id=body.property_pay_rule_id,
+            now=now,
+        )
+    except DuplicateActiveAssignment as exc:
+        # Parallel insert race that beat the pre-flight SELECT — re-raise
+        # with the canonical message the HTTP layer keys on for 409.
+        raise PropertyWorkRoleAssignmentInvariantViolated(
+            f"property_work_role_assignment for "
+            f"user_work_role={body.user_work_role_id!r} "
+            f"property={body.property_id!r} already exists"
+        ) from exc
+    except AssignmentIntegrityError as exc:
+        # Realistic flavour: FK miss on ``property_pay_rule_id``. The
+        # message is non-duplicate so the HTTP layer maps it to 422
+        # (not 409). We surface the driver text so the operator sees
+        # which constraint actually fired.
         raise PropertyWorkRoleAssignmentInvariantViolated(
             f"property_work_role_assignment write rejected by the database "
-            f"({exc.orig}); check that property_pay_rule_id and "
+            f"({exc.db_message}); check that property_pay_rule_id and "
             f"schedule_ruleset_id reference live rows"
         ) from exc
 
     write_audit(
-        session,
+        repo.session,
         ctx,
         entity_kind="property_work_role_assignment",
-        entity_id=row_id,
+        entity_id=row.id,
         action="property_work_role_assignment.created",
         diff={
             "user_work_role_id": body.user_work_role_id,
@@ -479,7 +447,7 @@ def create_property_work_role_assignment(
 
 
 def update_property_work_role_assignment(
-    session: Session,
+    repo: PropertyWorkRoleAssignmentRepository,
     ctx: WorkspaceContext,
     *,
     assignment_id: str,
@@ -495,7 +463,7 @@ def update_property_work_role_assignment(
     resolved_clock = clock if clock is not None else SystemClock()
     now = resolved_clock.now()
 
-    row = _load_row(session, ctx, assignment_id=assignment_id)
+    row = _load_row(repo, ctx, assignment_id=assignment_id)
 
     sent = body.model_fields_set
     if not sent:
@@ -503,6 +471,8 @@ def update_property_work_role_assignment(
 
     before: dict[str, Any] = {}
     after: dict[str, Any] = {}
+    new_schedule_ruleset_id = row.schedule_ruleset_id
+    new_property_pay_rule_id = row.property_pay_rule_id
 
     if (
         "schedule_ruleset_id" in sent
@@ -510,7 +480,7 @@ def update_property_work_role_assignment(
     ):
         before["schedule_ruleset_id"] = row.schedule_ruleset_id
         after["schedule_ruleset_id"] = body.schedule_ruleset_id
-        row.schedule_ruleset_id = body.schedule_ruleset_id
+        new_schedule_ruleset_id = body.schedule_ruleset_id
 
     if (
         "property_pay_rule_id" in sent
@@ -518,43 +488,47 @@ def update_property_work_role_assignment(
     ):
         before["property_pay_rule_id"] = row.property_pay_rule_id
         after["property_pay_rule_id"] = body.property_pay_rule_id
-        row.property_pay_rule_id = body.property_pay_rule_id
+        new_property_pay_rule_id = body.property_pay_rule_id
 
     if not after:
         return _row_to_view(row)
 
-    row.updated_at = now
     try:
-        session.flush()
-    except IntegrityError as exc:
+        updated = repo.update_pointers(
+            workspace_id=ctx.workspace_id,
+            assignment_id=assignment_id,
+            schedule_ruleset_id=new_schedule_ruleset_id,
+            property_pay_rule_id=new_property_pay_rule_id,
+            now=now,
+        )
+    except AssignmentIntegrityError as exc:
         # The only realistic flush-time failure here is the FK on
         # ``property_pay_rule_id`` — a caller pointing at a pay_rule
-        # row that does not exist or was hard-deleted. Surface it as
-        # a 422 invariant violation so the HTTP layer doesn't leak a
+        # row that does not exist or was hard-deleted. Surface as a
+        # 422 invariant violation so the HTTP layer doesn't leak a
         # 500. The partial UNIQUE cannot fire on update because the
         # identity columns ``user_work_role_id`` + ``property_id``
         # are frozen at the DTO boundary.
-        session.rollback()
         raise PropertyWorkRoleAssignmentInvariantViolated(
             f"property_work_role_assignment update rejected by the database "
-            f"({exc.orig}); check that property_pay_rule_id references a "
+            f"({exc.db_message}); check that property_pay_rule_id references a "
             f"live pay_rule row"
         ) from exc
 
     write_audit(
-        session,
+        repo.session,
         ctx,
         entity_kind="property_work_role_assignment",
-        entity_id=row.id,
+        entity_id=updated.id,
         action="property_work_role_assignment.updated",
         diff={"before": before, "after": after},
         clock=resolved_clock,
     )
-    return _row_to_view(row)
+    return _row_to_view(updated)
 
 
 def delete_property_work_role_assignment(
-    session: Session,
+    repo: PropertyWorkRoleAssignmentRepository,
     ctx: WorkspaceContext,
     *,
     assignment_id: str,
@@ -576,14 +550,18 @@ def delete_property_work_role_assignment(
     resolved_clock = clock if clock is not None else SystemClock()
     now = resolved_clock.now()
 
-    row = _load_row(session, ctx, assignment_id=assignment_id)
-
-    row.deleted_at = now
-    row.updated_at = now
-    session.flush()
+    # Defensive existence check so the SA repo's ``soft_delete`` can
+    # assume the row is live — keeps the seam shape simple (no
+    # NotFound path inside the adapter).
+    _load_row(repo, ctx, assignment_id=assignment_id)
+    row = repo.soft_delete(
+        workspace_id=ctx.workspace_id,
+        assignment_id=assignment_id,
+        now=now,
+    )
 
     write_audit(
-        session,
+        repo.session,
         ctx,
         entity_kind="property_work_role_assignment",
         entity_id=row.id,

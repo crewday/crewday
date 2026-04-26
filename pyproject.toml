@@ -579,17 +579,6 @@ ignore_imports = [
     # cd-duv6.
     "app.domain.identity.user_leaves -> app.adapters.db.availability.models",
     "app.domain.identity.user_leaves -> app.authz",
-    # v1 stopgap (cd-7qxh):
-    # ``app.domain.places.property_work_role_assignments`` reads
-    # :class:`PropertyWorkRoleAssignment` / :class:`PropertyWorkspace`
-    # from ``app.adapters.db.places.models`` (assignment CRUD +
-    # workspace tie-in) and :class:`UserWorkRole` from
-    # ``app.adapters.db.workspace.models`` (work-role validity
-    # lookup). Same Protocol-seam pattern as the other ``places.*``
-    # stopgaps above; tracked by cd-duv6 (extended scope) — drops
-    # once the places + workspace repositories land.
-    "app.domain.places.property_work_role_assignments -> app.adapters.db.places.models",
-    "app.domain.places.property_work_role_assignments -> app.adapters.db.workspace.models",
     # v1 stopgap (cd-yqm4):
     # ``app.domain.identity.user_workspace_refresh`` is the canonical
     # reconciler for the derived ``user_workspace`` junction. It reads

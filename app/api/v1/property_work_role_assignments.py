@@ -44,6 +44,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
+from app.adapters.db.places.repositories import (
+    SqlAlchemyPropertyWorkRoleAssignmentRepository,
+)
 from app.api.deps import current_workspace_context, db_session
 from app.api.pagination import (
     DEFAULT_LIMIT,
@@ -266,7 +269,7 @@ def build_property_work_role_assignments_router() -> APIRouter:
         ``user_work_role_id`` filters."""
         after_id = decode_cursor(cursor)
         views = list_property_work_role_assignments(
-            session,
+            SqlAlchemyPropertyWorkRoleAssignmentRepository(session),
             ctx,
             limit=limit,
             after_id=after_id,
@@ -308,7 +311,11 @@ def build_property_work_role_assignments_router() -> APIRouter:
             body.model_dump()
         )
         try:
-            view = create_property_work_role_assignment(session, ctx, body=service_body)
+            view = create_property_work_role_assignment(
+                SqlAlchemyPropertyWorkRoleAssignmentRepository(session),
+                ctx,
+                body=service_body,
+            )
         except PropertyWorkRoleAssignmentInvariantViolated as exc:
             raise _http_for_invariant(exc) from exc
         return _view_to_response(view)
@@ -333,7 +340,10 @@ def build_property_work_role_assignments_router() -> APIRouter:
         )
         try:
             view = update_property_work_role_assignment(
-                session, ctx, assignment_id=assignment_id, body=service_body
+                SqlAlchemyPropertyWorkRoleAssignmentRepository(session),
+                ctx,
+                assignment_id=assignment_id,
+                body=service_body,
             )
         except PropertyWorkRoleAssignmentNotFound as exc:
             raise _http_for_not_found() from exc
@@ -356,7 +366,9 @@ def build_property_work_role_assignments_router() -> APIRouter:
         """Stamp ``deleted_at``; no response body per §12 "Deletion"."""
         try:
             delete_property_work_role_assignment(
-                session, ctx, assignment_id=assignment_id
+                SqlAlchemyPropertyWorkRoleAssignmentRepository(session),
+                ctx,
+                assignment_id=assignment_id,
             )
         except PropertyWorkRoleAssignmentNotFound as exc:
             raise _http_for_not_found() from exc
