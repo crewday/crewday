@@ -43,6 +43,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy.orm import Session
 
+from app.adapters.db.identity.repositories import (
+    SqlAlchemyMeScheduleQueryRepository,
+)
 from app.api.deps import current_workspace_context, db_session
 from app.api.pagination import (
     DEFAULT_LIMIT,
@@ -373,8 +376,9 @@ def build_me_schedule_router() -> APIRouter:
         """
         if from_ is not None and to is not None and to < from_:
             raise _http_for_window()
+        repo = SqlAlchemyMeScheduleQueryRepository(session)
         payload = aggregate_schedule(
-            session,
+            repo,
             ctx,
             from_date=from_,
             to_date=to,

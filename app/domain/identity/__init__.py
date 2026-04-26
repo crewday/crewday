@@ -10,7 +10,9 @@ contexts and the SA-backed adapter both pull
 ``PermissionGroupRepository`` / ``RoleGrantRepository`` from here, plus
 the :class:`UserAvailabilityOverrideRepository` /
 :class:`UserLeaveRepository` / :class:`CapabilityChecker` seams the
-availability services consume (cd-r5j2, cd-2upg).
+availability services consume (cd-r5j2, cd-2upg) and the read-only
+:class:`MeScheduleQueryRepository` the §12 worker calendar feed uses
+(cd-lot5).
 """
 
 from __future__ import annotations
@@ -24,6 +26,11 @@ from app.domain.identity.availability_ports import (
     UserLeaveRow,
     UserWeeklyAvailabilityRow,
 )
+from app.domain.identity.me_schedule_ports import (
+    MeScheduleQueryRepository,
+    OccurrenceRefRow,
+    PublicHolidayRow,
+)
 from app.domain.identity.ports import (
     PermissionGroupMemberRow,
     PermissionGroupRepository,
@@ -35,10 +42,13 @@ from app.domain.identity.ports import (
 
 __all__ = [
     "CapabilityChecker",
+    "MeScheduleQueryRepository",
+    "OccurrenceRefRow",
     "PermissionGroupMemberRow",
     "PermissionGroupRepository",
     "PermissionGroupRow",
     "PermissionGroupSlugTakenError",
+    "PublicHolidayRow",
     "RoleGrantRepository",
     "RoleGrantRow",
     "SeamPermissionDenied",

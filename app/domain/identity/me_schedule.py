@@ -17,8 +17,9 @@ Public surface:
   :class:`PublicHolidayView`, :class:`PendingItems`,
   :class:`SchedulePayload`.
 * **Aggregator** — :func:`aggregate_schedule`. Takes a
-  :class:`WorkspaceContext` plus optional ``from_date`` / ``to_date``
-  (defaults to the §12 ``[today, today+14d]`` window) and returns a
+  :class:`MeScheduleQueryRepository` plus a :class:`WorkspaceContext`
+  plus optional ``from_date`` / ``to_date`` (defaults to the §12
+  ``[today, today+14d]`` window) and returns a
   :class:`SchedulePayload`.
 
 **Self-only by construction.** Every read predicate is keyed on
@@ -38,21 +39,33 @@ not-yet-approved row as live in the precedence stack.
 :class:`WorkspaceContext` carries the actor id we filter on; no
 ``write_audit`` call lands.
 
-**Tenancy.** The ORM tenant filter auto-narrows every SELECT in this
-module on ``workspace_id``; the aggregator re-asserts the
-``workspace_id = ctx.workspace_id`` predicate explicitly as
-defence-in-depth (matches the sibling
+**Tenancy.** The ORM tenant filter auto-narrows every SELECT issued
+by the SA-backed
+:class:`~app.adapters.db.identity.repositories.SqlAlchemyMeScheduleQueryRepository`;
+the repo also re-asserts the ``workspace_id = ctx.workspace_id``
+predicate explicitly as defence-in-depth (matches the sibling
 :mod:`app.domain.identity.user_leaves` /
 :mod:`app.domain.identity.user_availability_overrides` shape).
 
 **Holiday country matching is intentionally simple in v1.** The
-aggregator returns every :class:`PublicHoliday` whose calendar date
-falls in the window, regardless of ``country``. Country narrowing per
-the user's primary property requires the Stay/Property join the
-``/me/schedule`` page does not yet drive — a follow-up Beads task
-lands the country-aware filter once the property timezone surface
-catches up. Annual recurrence is also deferred: v1 surfaces the
-literal calendar date the row carries, not the recurring anchor.
+aggregator returns every :class:`PublicHolidayRow` whose calendar
+date falls in the window, regardless of ``country``. Country
+narrowing per the user's primary property requires the
+Stay/Property join the ``/me/schedule`` page does not yet drive — a
+follow-up Beads task lands the country-aware filter once the
+property timezone surface catches up. Annual recurrence is also
+deferred: v1 surfaces the literal calendar date the row carries,
+not the recurring anchor.
+
+**Architecture (cd-lot5).** The module talks to a
+:class:`~app.domain.identity.me_schedule_ports.MeScheduleQueryRepository`
+Protocol — never to the SQLAlchemy model classes. The SA-backed
+concretion lives in
+:mod:`app.adapters.db.identity.repositories`; unit tests inject
+fakes or wire the SA repo over an in-memory SQLite session. Mirrors
+the cd-r5j2 / cd-2upg pattern shipped for the sibling
+:mod:`app.domain.identity.user_availability_overrides` /
+:mod:`app.domain.identity.user_leaves` services.
 
 See ``docs/specs/12-rest-api.md`` §"Self-service shortcuts";
 ``docs/specs/06-tasks-and-scheduling.md`` §"user_leave",
@@ -66,20 +79,31 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, timedelta
 from decimal import Decimal
 
-from sqlalchemy import select
-from sqlalchemy.orm import Session
-
-from app.adapters.db.availability.models import (
-    UserAvailabilityOverride,
-    UserLeave,
-    UserWeeklyAvailability,
+from app.domain.identity.me_schedule_ports import (
+    MeScheduleQueryRepository,
+    OccurrenceRefRow,
+    PublicHolidayRow,
 )
-from app.adapters.db.holidays.models import PublicHoliday
-from app.adapters.db.tasks.models import Occurrence
 from app.domain.identity.user_availability_overrides import (
     UserAvailabilityOverrideView,
 )
-from app.domain.identity.user_leaves import UserLeaveView, _narrow_category
+
+# Reuse the sibling services' seam-Row → View projections rather than
+# duplicating them here (cd-lot5 dropped the inlined ``_override_row_to_view``
+# / ``_leave_row_to_view`` shipped by cd-r5j2 / cd-2upg). The underscore
+# crossing is intentional: both helpers are stable per-row projections of
+# the same seam Row shape this module already imports, and inlining a third
+# copy would invite drift between the three sites the moment a column
+# lands.
+from app.domain.identity.user_availability_overrides import (
+    _row_to_view as _override_row_to_view,
+)
+from app.domain.identity.user_leaves import (
+    UserLeaveView,
+)
+from app.domain.identity.user_leaves import (
+    _row_to_view as _leave_row_to_view,
+)
 from app.tenancy import WorkspaceContext
 from app.util.clock import Clock, SystemClock
 
@@ -131,9 +155,9 @@ class TaskRefView:
     drop a marker on the calendar.
 
     ``scheduled_for_local`` is the property-local ISO-8601 string the
-    scheduler worker stamped at generation time; falls back to the
-    UTC ``starts_at`` ISO when the column is null (legacy rows
-    pre-cd-22e).
+    scheduler worker stamped at generation time; the SA adapter falls
+    back to the UTC ``starts_at`` ISO when the column is null (legacy
+    rows pre-cd-22e).
     """
 
     id: str
@@ -142,7 +166,7 @@ class TaskRefView:
 
 @dataclass(frozen=True, slots=True)
 class PublicHolidayView:
-    """Read projection of a :class:`PublicHoliday` row covering the window.
+    """Read projection of a :class:`PublicHolidayRow` covering the window.
 
     Pared down to the columns the worker calendar needs — the manager
     configuration screen at ``/public_holidays`` carries the full
@@ -184,15 +208,18 @@ class SchedulePayload:
     description verbatim:
 
     * ``rota`` — the caller's seven-row weekly pattern (Mon..Sun).
-    * ``tasks`` — :class:`Occurrence` rows assigned to the caller
-      whose ``starts_at`` falls inside the window.
-    * ``leaves`` — approved :class:`UserLeave` rows overlapping the
-      window.
-    * ``overrides`` — approved :class:`UserAvailabilityOverride` rows
-      inside the window.
-    * ``holidays`` — :class:`PublicHoliday` rows whose calendar date
-      falls in the window.
-    * ``pending`` — pending :class:`UserLeave` + :class:`UserAvailabilityOverride`
+    * ``tasks`` — :class:`~app.adapters.db.tasks.models.Occurrence`
+      rows assigned to the caller whose ``starts_at`` falls inside
+      the window.
+    * ``leaves`` — approved :class:`~app.adapters.db.availability.models.UserLeave`
+      rows overlapping the window.
+    * ``overrides`` — approved
+      :class:`~app.adapters.db.availability.models.UserAvailabilityOverride`
+      rows inside the window.
+    * ``holidays`` — :class:`~app.adapters.db.holidays.models.PublicHoliday`
+      rows whose calendar date falls in the window.
+    * ``pending`` — pending :class:`~app.adapters.db.availability.models.UserLeave`
+      + :class:`~app.adapters.db.availability.models.UserAvailabilityOverride`
       rows; explicitly bucketed so the UI does not promote them into
       the live precedence stack.
 
@@ -216,72 +243,8 @@ class SchedulePayload:
 # ---------------------------------------------------------------------------
 
 
-def _override_row_to_view(
-    row: UserAvailabilityOverride,
-) -> UserAvailabilityOverrideView:
-    """Project a SQLAlchemy ``UserAvailabilityOverride`` row into the public view.
-
-    Inlined here (cd-r5j2) because
-    :mod:`app.domain.identity.user_availability_overrides` no longer
-    accepts ORM rows on its private ``_row_to_view`` helper — that
-    helper now consumes the seam-shaped
-    :class:`~app.domain.identity.availability_ports.UserAvailabilityOverrideRow`.
-    :mod:`app.domain.identity.me_schedule` still walks the ORM directly
-    until its own seam refactor lands (covered by the
-    ``me_schedule -> app.adapters.db.availability.models`` cd-7qxh
-    ignore-import), so the conversion stays adjacent to the SQL that
-    produces it.
-    """
-    return UserAvailabilityOverrideView(
-        id=row.id,
-        workspace_id=row.workspace_id,
-        user_id=row.user_id,
-        date=row.date,
-        available=row.available,
-        starts_local=row.starts_local,
-        ends_local=row.ends_local,
-        reason=row.reason,
-        approval_required=row.approval_required,
-        approved_at=row.approved_at,
-        approved_by=row.approved_by,
-        created_at=row.created_at,
-        updated_at=row.updated_at,
-        deleted_at=row.deleted_at,
-    )
-
-
-def _leave_row_to_view(row: UserLeave) -> UserLeaveView:
-    """Project a SQLAlchemy ``UserLeave`` row into the public view.
-
-    Inlined here (cd-2upg) because
-    :mod:`app.domain.identity.user_leaves` no longer accepts ORM rows
-    on its private ``_row_to_view`` helper — that helper now consumes
-    the seam-shaped
-    :class:`~app.domain.identity.availability_ports.UserLeaveRow`.
-    :mod:`app.domain.identity.me_schedule` still walks the ORM directly
-    until its own seam refactor lands (covered by the
-    ``me_schedule -> app.adapters.db.availability.models`` cd-7qxh
-    ignore-import), so the conversion stays adjacent to the SQL that
-    produces it.
-    """
-    return UserLeaveView(
-        id=row.id,
-        workspace_id=row.workspace_id,
-        user_id=row.user_id,
-        starts_on=row.starts_on,
-        ends_on=row.ends_on,
-        category=_narrow_category(row.category),
-        approved_at=row.approved_at,
-        approved_by=row.approved_by,
-        note_md=row.note_md,
-        created_at=row.created_at,
-        updated_at=row.updated_at,
-        deleted_at=row.deleted_at,
-    )
-
-
-def _holiday_row_to_view(row: PublicHoliday) -> PublicHolidayView:
-    """Project a :class:`PublicHoliday` ORM row into :class:`PublicHolidayView`."""
+def _holiday_row_to_view(row: PublicHolidayRow) -> PublicHolidayView:
+    """Project a seam-level :class:`PublicHolidayRow` into the public view."""
     return PublicHolidayView(
         id=row.id,
         name=row.name,
@@ -294,21 +257,15 @@ def _holiday_row_to_view(row: PublicHoliday) -> PublicHolidayView:
     )
 
 
-def _occurrence_row_to_view(row: Occurrence) -> TaskRefView:
-    """Project an :class:`Occurrence` ORM row into :class:`TaskRefView`.
+def _occurrence_ref_to_view(row: OccurrenceRefRow) -> TaskRefView:
+    """Project a seam-level :class:`OccurrenceRefRow` into :class:`TaskRefView`.
 
-    Falls back to ``starts_at.isoformat()`` when ``scheduled_for_local``
-    is null. The cd-22e generator always populates the local column,
-    so this fallback only fires for legacy rows (or hand-seeded test
-    fixtures that skip the column); keeping it deterministic avoids a
-    JSON ``null`` leaking into a UI that expects a renderable
-    timestamp.
+    The seam already resolved the
+    :attr:`OccurrenceRefRow.scheduled_for_local` fallback (UTC
+    ``starts_at`` when the property-local column is null), so this
+    re-pack is field-for-field.
     """
-    if row.scheduled_for_local is not None:
-        local = row.scheduled_for_local
-    else:
-        local = row.starts_at.isoformat()
-    return TaskRefView(id=row.id, scheduled_for_local=local)
+    return TaskRefView(id=row.id, scheduled_for_local=row.scheduled_for_local)
 
 
 def _resolve_window(
@@ -340,7 +297,7 @@ def _resolve_window(
 
 
 def aggregate_schedule(
-    session: Session,
+    repo: MeScheduleQueryRepository,
     ctx: WorkspaceContext,
     *,
     from_date: date | None = None,
@@ -350,10 +307,10 @@ def aggregate_schedule(
     """Return the caller's :class:`SchedulePayload` for the requested window.
 
     See the module docstring for the full contract. The aggregator is
-    deliberately small: each sibling :class:`select` runs a single
-    table scan keyed on ``(workspace_id, user_id)`` (the indexes the
-    cd-l2r9 migration installed) so the whole feed lands in one
-    transaction without N+1 surprises.
+    deliberately small: each repo call runs a single table scan keyed
+    on ``(workspace_id, user_id)`` (the indexes the cd-l2r9 migration
+    installed) so the whole feed lands in one transaction without
+    N+1 surprises.
 
     A backwards window (``to_date < from_date``) returns an empty
     feed in every list except ``rota`` (the weekly pattern is always
@@ -373,15 +330,10 @@ def aggregate_schedule(
     workspace_id = ctx.workspace_id
 
     # --- Rota (weekly pattern) ------------------------------------------
-    weekly_stmt = (
-        select(UserWeeklyAvailability)
-        .where(
-            UserWeeklyAvailability.workspace_id == workspace_id,
-            UserWeeklyAvailability.user_id == user_id,
-        )
-        .order_by(UserWeeklyAvailability.weekday.asc())
+    weekly_rows = repo.list_weekly_pattern(
+        workspace_id=workspace_id,
+        user_id=user_id,
     )
-    weekly_rows = session.scalars(weekly_stmt).all()
     rota = [
         WeeklySlotView(
             weekday=row.weekday,
@@ -392,43 +344,26 @@ def aggregate_schedule(
     ]
 
     # --- Assigned tasks --------------------------------------------------
-    # Walks the ``ix_occurrence_workspace_assignee_starts`` composite
-    # index — leading ``workspace_id`` carries the tenant filter, and
-    # ``starts_at`` ranges inside the index. Bound the window in UTC
-    # using the start of ``from_date`` and the end of ``to_date`` so a
-    # task scheduled at 23:30 on the last day of the window still
-    # matches.
+    # Bound the window in UTC using the start of ``from_date`` and the
+    # end of ``to_date`` so a task scheduled at 23:30 on the last day of
+    # the window still matches.
     window_start_utc = datetime.combine(resolved_from, time.min, tzinfo=UTC)
     window_end_utc = datetime.combine(resolved_to, time.max, tzinfo=UTC)
-    task_stmt = (
-        select(Occurrence)
-        .where(
-            Occurrence.workspace_id == workspace_id,
-            Occurrence.assignee_user_id == user_id,
-            Occurrence.starts_at >= window_start_utc,
-            Occurrence.starts_at <= window_end_utc,
-        )
-        .order_by(Occurrence.starts_at.asc())
+    occurrence_rows = repo.list_assigned_occurrences_in_window(
+        workspace_id=workspace_id,
+        user_id=user_id,
+        window_start_utc=window_start_utc,
+        window_end_utc=window_end_utc,
     )
-    task_rows = session.scalars(task_stmt).all()
-    tasks = [_occurrence_row_to_view(row) for row in task_rows]
+    tasks = [_occurrence_ref_to_view(row) for row in occurrence_rows]
 
     # --- Leaves (approved + pending) ------------------------------------
-    # Overlap predicate: a leave covers the window iff
-    # ``starts_on <= window_end`` AND ``ends_on >= window_start`` —
-    # standard interval overlap, matches §06 "user_leave" semantics.
-    leaves_stmt = (
-        select(UserLeave)
-        .where(
-            UserLeave.workspace_id == workspace_id,
-            UserLeave.user_id == user_id,
-            UserLeave.deleted_at.is_(None),
-            UserLeave.starts_on <= resolved_to,
-            UserLeave.ends_on >= resolved_from,
-        )
-        .order_by(UserLeave.starts_on.asc())
+    leave_rows = repo.list_leaves_in_window(
+        workspace_id=workspace_id,
+        user_id=user_id,
+        from_date=resolved_from,
+        to_date=resolved_to,
     )
-    leave_rows = session.scalars(leaves_stmt).all()
     approved_leaves: list[UserLeaveView] = []
     pending_leaves: list[UserLeaveView] = []
     for leave_row in leave_rows:
@@ -439,18 +374,12 @@ def aggregate_schedule(
             pending_leaves.append(leave_view)
 
     # --- Overrides (approved + pending) ---------------------------------
-    overrides_stmt = (
-        select(UserAvailabilityOverride)
-        .where(
-            UserAvailabilityOverride.workspace_id == workspace_id,
-            UserAvailabilityOverride.user_id == user_id,
-            UserAvailabilityOverride.deleted_at.is_(None),
-            UserAvailabilityOverride.date >= resolved_from,
-            UserAvailabilityOverride.date <= resolved_to,
-        )
-        .order_by(UserAvailabilityOverride.date.asc())
+    override_rows = repo.list_overrides_in_window(
+        workspace_id=workspace_id,
+        user_id=user_id,
+        from_date=resolved_from,
+        to_date=resolved_to,
     )
-    override_rows = session.scalars(overrides_stmt).all()
     approved_overrides: list[UserAvailabilityOverrideView] = []
     pending_overrides: list[UserAvailabilityOverrideView] = []
     for override_row in override_rows:
@@ -470,21 +399,12 @@ def aggregate_schedule(
             pending_overrides.append(override_view)
 
     # --- Holidays --------------------------------------------------------
-    # No country narrowing in v1 — see module docstring. Tombstones are
-    # filtered explicitly because the live-list filter on
-    # :class:`PublicHoliday` is service-layer (the table carries
-    # ``deleted_at`` for the manager configuration screen).
-    holidays_stmt = (
-        select(PublicHoliday)
-        .where(
-            PublicHoliday.workspace_id == workspace_id,
-            PublicHoliday.deleted_at.is_(None),
-            PublicHoliday.date >= resolved_from,
-            PublicHoliday.date <= resolved_to,
-        )
-        .order_by(PublicHoliday.date.asc())
+    # No country narrowing in v1 — see module docstring.
+    holiday_rows = repo.list_holidays_in_window(
+        workspace_id=workspace_id,
+        from_date=resolved_from,
+        to_date=resolved_to,
     )
-    holiday_rows = session.scalars(holidays_stmt).all()
     holidays = [_holiday_row_to_view(row) for row in holiday_rows]
 
     return SchedulePayload(

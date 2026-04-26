@@ -543,19 +543,6 @@ ignore_imports = [
     # ``app.domain.identity.membership -> app.auth.magic_link``
     # whitelist for the invite flow. Drops with cd-duv6.
     "app.domain.identity.email_change -> app.auth.magic_link",
-    # v1 stopgap (cd-7qxh): ``app.domain.identity.me_schedule``
-    # reads :class:`UserAvailabilityOverride` / :class:`UserLeave`
-    # / :class:`UserWeeklyAvailability` from
-    # ``app.adapters.db.availability.models``, :class:`PublicHoliday`
-    # from ``app.adapters.db.holidays.models``, and
-    # :class:`Occurrence` from ``app.adapters.db.tasks.models`` to
-    # render the worker's per-day schedule (§04 "Me schedule"). Same
-    # Protocol-seam pattern as the other ``app.domain.identity``
-    # stopgaps above; tracked by cd-duv6 (extended scope) — drops
-    # once the availability / holidays / tasks repositories land.
-    "app.domain.identity.me_schedule -> app.adapters.db.availability.models",
-    "app.domain.identity.me_schedule -> app.adapters.db.holidays.models",
-    "app.domain.identity.me_schedule -> app.adapters.db.tasks.models",
     # v1 stopgap (cd-yqm4):
     # ``app.domain.identity.user_workspace_refresh`` is the canonical
     # reconciler for the derived ``user_workspace`` junction. It reads
