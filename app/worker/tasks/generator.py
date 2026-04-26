@@ -566,7 +566,7 @@ def _resolve_zone(name: str) -> ZoneInfo:
     """
     try:
         return ZoneInfo(name)
-    except (ZoneInfoNotFoundError, ValueError):
+    except ZoneInfoNotFoundError, ValueError:
         return ZoneInfo("UTC")
 
 
@@ -681,7 +681,7 @@ def _expand_rule(
     anchor_aware = anchor_local.replace(tzinfo=zone)
     try:
         parsed = rrulestr(rrule_body, dtstart=anchor_aware)
-    except (ValueError, TypeError):
+    except ValueError, TypeError:
         # A malformed rule is a data bug — the CRUD service rejects
         # these at write time, but a pre-cd-k4l row could still be
         # degenerate. Skip the schedule rather than abort the tick.
@@ -712,7 +712,7 @@ def _expand_rule(
         rrule_hits: list[datetime] = list(
             parsed.between(window_start_aware, horizon_end_aware, inc=True)
         )
-    except (ValueError, TypeError):
+    except ValueError, TypeError:
         return []
 
     for occ in rrule_hits[:_MAX_OCCURRENCES_PER_SCHEDULE]:

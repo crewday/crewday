@@ -210,7 +210,7 @@ def canonical_body_hash(body: bytes) -> str:
         return hashlib.sha256(b"").hexdigest()
     try:
         data = json.loads(body)
-    except (json.JSONDecodeError, UnicodeDecodeError):
+    except json.JSONDecodeError, UnicodeDecodeError:
         # Not valid JSON (or not decodable as text). Fall back to
         # hashing the raw bytes — the client must send byte-
         # identical bodies for the retry to match.

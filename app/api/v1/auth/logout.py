@@ -149,7 +149,7 @@ def build_logout_router() -> APIRouter:
                     session,
                     cookie_value=cookie_value,
                 )
-            except (auth_session.SessionInvalid, auth_session.SessionExpired):
+            except auth_session.SessionInvalid, auth_session.SessionExpired:
                 user_id = None
 
             if user_id is not None:

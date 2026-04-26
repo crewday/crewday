@@ -518,7 +518,7 @@ def _invalidate_for_credential_fresh_uow(
     """
     try:
         credential_id = base64url_to_bytes(credential_id_b64)
-    except (ValueError, TypeError):
+    except ValueError, TypeError:
         _log.exception(
             "clone invalidate: credential id %r not base64url", credential_id_b64
         )
@@ -580,7 +580,7 @@ def _auto_revoke_credential_fresh_uow(
     """
     try:
         credential_id = base64url_to_bytes(credential_id_b64)
-    except (ValueError, TypeError):
+    except ValueError, TypeError:
         _log.exception(
             "clone auto-revoke: credential id %r not base64url",
             credential_id_b64,

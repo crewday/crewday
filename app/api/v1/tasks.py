@@ -789,7 +789,7 @@ def _compute_time_window_local(
         return None
     try:
         zone = ZoneInfo(property_timezone)
-    except (ZoneInfoNotFoundError, ValueError):
+    except ZoneInfoNotFoundError, ValueError:
         return None
     anchor = view.scheduled_for_utc
     if anchor.tzinfo is None:
@@ -930,7 +930,7 @@ def _humanize_rrule(rrule_text: str, dtstart_local: str) -> str:
     parse_anchor = anchor if anchor is not None else _SENTINEL_ANCHOR
     try:
         rule = rrulestr(rrule_text, dtstart=parse_anchor)
-    except (ValueError, TypeError):
+    except ValueError, TypeError:
         return "Custom recurrence"
 
     has_byday = _rrule_has_clause(rrule_text, "BYDAY")

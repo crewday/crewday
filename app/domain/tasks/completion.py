@@ -551,7 +551,7 @@ def _default_inventory_apply(
             continue
         try:
             delta = Decimal(str(qty))
-        except (ArithmeticError, ValueError):
+        except ArithmeticError, ValueError:
             # Non-numeric value in the consumption map — skip for the
             # same reason as unknown-sku above. Data hygiene is a CRUD
             # concern, not a completion-time hard error.

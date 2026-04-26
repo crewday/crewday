@@ -169,7 +169,7 @@ def _resolve_session_principal(
             ua=ua,
             accept_language=accept_language,
         )
-    except (auth_session.SessionInvalid, auth_session.SessionExpired):
+    except auth_session.SessionInvalid, auth_session.SessionExpired:
         return None
     if not is_deployment_admin(session, user_id=user_id):
         return None

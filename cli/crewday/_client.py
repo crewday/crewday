@@ -214,7 +214,7 @@ def _parse_error_body(
     raw_text = response.text
     try:
         body: Any = response.json()
-    except (ValueError, UnicodeDecodeError):
+    except ValueError, UnicodeDecodeError:
         return _FALLBACK_ERROR_CODE, (raw_text or response.reason_phrase)[:200], None
 
     if not isinstance(body, dict):

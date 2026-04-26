@@ -374,7 +374,7 @@ def resolve_actor(
         if token_value:
             try:
                 verified = verify_token(db_session, token=token_value)
-            except (InvalidToken, TokenExpired, TokenRevoked):
+            except InvalidToken, TokenExpired, TokenRevoked:
                 # Every "is this a real token?" failure collapses to
                 # "no actor" — the middleware cannot distinguish them
                 # at the wire without leaking. Liveness errors
@@ -410,7 +410,7 @@ def resolve_actor(
                 accept_language=accept_language,
                 settings=settings,
             )
-        except (SessionInvalid, SessionExpired):
+        except SessionInvalid, SessionExpired:
             return None
         # The session row's PK is the sha256 of the cookie value; we
         # re-derive it locally so ``session_id`` carries the same

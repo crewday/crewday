@@ -466,7 +466,7 @@ def _resolve_property_zone(session: Session, property_id: str | None) -> ZoneInf
         return ZoneInfo("UTC")
     try:
         return ZoneInfo(row.timezone)
-    except (ZoneInfoNotFoundError, ValueError):
+    except ZoneInfoNotFoundError, ValueError:
         return ZoneInfo("UTC")
 
 

@@ -224,7 +224,7 @@ class RedactionFilter(logging.Filter):
         #    so the record still survives.
         try:
             formatted = record.getMessage()
-        except (TypeError, ValueError, KeyError, IndexError):
+        except TypeError, ValueError, KeyError, IndexError:
             formatted = str(record.msg)
         record.msg = scrub_string(formatted)
         record.args = None
@@ -290,7 +290,7 @@ class JsonFormatter(logging.Formatter):
         # crashes the formatter either.
         try:
             message = record.getMessage()
-        except (TypeError, ValueError, KeyError, IndexError):
+        except TypeError, ValueError, KeyError, IndexError:
             message = str(record.msg)
 
         payload: dict[str, object] = {
