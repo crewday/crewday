@@ -3,15 +3,29 @@
 Exposes :data:`admin_router` — the :class:`APIRouter` the app
 factory mounts under ``/admin/api/v1`` (spec §12 "Base URL",
 "Admin surface"). Real admin routes attach their handlers to this
-router; today the wired surface is the cd-yj4k minimum:
+router; the wired surface today is:
 
-* ``GET /admin/api/v1/me`` — caller identity + capabilities;
-* ``GET /admin/api/v1/me/admins`` — deployment admin team listing.
+* :mod:`app.api.admin.me` — caller identity + admin team listing
+  (cd-yj4k).
+* :mod:`app.api.admin.workspaces` — workspace lifecycle:
+  ``GET /workspaces`` / ``GET /workspaces/{id}`` /
+  ``POST /workspaces/{id}/trust`` / ``POST /workspaces/{id}/archive``.
+* :mod:`app.api.admin.signup` — self-serve signup settings:
+  ``GET /signup/settings`` / ``PUT /signup/settings``.
+* :mod:`app.api.admin.settings` — deployment settings:
+  ``GET /settings`` / ``PUT /settings/{key}``.
+* :mod:`app.api.admin.admins` — admin team CRUD + groups:
+  ``GET /admins`` / ``POST /admins`` / ``POST /admins/{id}/revoke``
+  + ``GET /admins/groups`` + owners-group add / revoke.
+* :mod:`app.api.admin.audit` — deployment audit feed:
+  ``GET /audit`` + ``GET /audit/tail``.
+* :mod:`app.api.admin.usage` — usage aggregates:
+  ``GET /usage/summary`` / ``GET /usage/workspaces`` /
+  ``PUT /usage/workspaces/{id}/cap``.
 
-Both routes live in :mod:`app.api.admin.me`. Subsequent admin
-families (LLM graph, usage, workspace lifecycle, signup, audit, …
-per spec §12 "Admin surface") will add their own routers and
-register them here.
+Subsequent admin families (LLM graph, chat gateway, admin chat
+agent — per spec §12 "Admin surface") will add their own routers
+and register them here.
 
 Authorisation lives on the per-route deps. Every route gates on
 :func:`app.api.admin.deps.current_deployment_admin_principal`
@@ -28,10 +42,22 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
+from app.api.admin.admins import build_admin_admins_router
+from app.api.admin.audit import build_admin_audit_router
 from app.api.admin.me import build_admin_me_router
+from app.api.admin.settings import build_admin_settings_router
+from app.api.admin.signup import build_admin_signup_router
+from app.api.admin.usage import build_admin_usage_router
+from app.api.admin.workspaces import build_admin_workspaces_router
 
 __all__ = ["admin_router"]
 
 
 admin_router = APIRouter(tags=["admin"])
 admin_router.include_router(build_admin_me_router())
+admin_router.include_router(build_admin_workspaces_router())
+admin_router.include_router(build_admin_signup_router())
+admin_router.include_router(build_admin_settings_router())
+admin_router.include_router(build_admin_admins_router())
+admin_router.include_router(build_admin_audit_router())
+admin_router.include_router(build_admin_usage_router())

@@ -246,10 +246,18 @@ def build_admin_me_router() -> APIRouter:
             capabilities=_capabilities_payload(ctx),
         )
 
+    # ``operation_id`` is namespaced under ``admin.me.*`` so it does
+    # not collide with the dedicated ``GET /admin/api/v1/admins``
+    # listing route owned by :mod:`app.api.admin.admins`. Both
+    # endpoints project the same wire shape — the ``/me`` variant is
+    # the legacy "caller's view" entry point that ships with cd-yj4k;
+    # the ``/admins`` variant is the canonical surface from cd-jlms.
+    # Generated OpenAPI clients (and Schemathesis) require unique
+    # operation ids, so the two surfaces split the namespace here.
     @router.get(
         "/me/admins",
         response_model=AdminTeamResponse,
-        operation_id="admin.admins.list",
+        operation_id="admin.me.admins.list",
         summary="List every active deployment admin grant",
         openapi_extra={
             "x-cli": {
