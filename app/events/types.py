@@ -49,6 +49,9 @@ __all__ = [
     "ExpenseSubmitted",
     "LlmAssignmentChanged",
     "NotificationCreated",
+    "PropertyClosureCreated",
+    "ReservationChangeKind",
+    "ReservationUpserted",
     "ShiftChanged",
     "ShiftChangedAction",
     "ShiftEnded",
@@ -495,6 +498,90 @@ class StayUpcoming(Event):
     @classmethod
     def _arrives_at_is_utc(cls, value: datetime) -> datetime:
         return _require_aware_utc(value)
+
+
+# §04 "iCal feed" §"Polling behavior" — the three change kinds the
+# poller (cd-d48) emits per upserted reservation. ``created`` is a
+# fresh row landing on first sight of the VEVENT; ``updated`` is the
+# stable UID re-ingested with at least one mutated field; ``cancelled``
+# is the upstream :rfc:`5545` ``METHOD:CANCEL`` (or ``STATUS:CANCELLED``)
+# applied to a previously-seen UID. The closed set lets SPA reducers
+# branch without parsing payloads.
+ReservationChangeKind = Literal["created", "updated", "cancelled"]
+
+
+@register
+class ReservationUpserted(Event):
+    """The poller materialised a VEVENT into a reservation row (cd-d48).
+
+    Fired by :func:`app.worker.tasks.poll_ical.poll_ical` once per
+    reservation the tick touched (insert, update, or upstream
+    cancellation). The §14 SSE dispatcher invalidates the manager
+    calendar + the property's stay timeline; the §10 notification
+    pipeline keys on ``change_kind="created"`` to queue a "new booking"
+    digest entry.
+
+    **Payload posture.** Foreign-key identifiers + the closed
+    ``change_kind`` discriminator only — no guest-name, no dates, no
+    rate. The stay row carries those fields under the per-row authz
+    path; subscribers fetch via REST. ``feed_id`` is nullable because
+    a manual ``DELETE FROM ical_feed`` after the upsert (the SET NULL
+    cascade on :class:`Reservation`) leaves the reservation pointing
+    at no feed; the poller still emits the event with ``feed_id`` set
+    to the polling feed's id at flush time, but the schema admits a
+    ``None`` for forward-compat with non-poll callers (manual stays,
+    API ingest).
+
+    **Role scope.** Defaults to :data:`ALL_ROLES` because reservations
+    are workspace-wide context that every grant role legitimately
+    observes (manager calendar, worker prep checklist, client digest,
+    guest welcome page). The ``DEFAULT_ROLE_EVENTS_ALLOWLIST`` review
+    gate confirms this posture is conscious — the payload carries no
+    guest PII.
+    """
+
+    name: ClassVar[str] = "reservation.upserted"
+
+    reservation_id: str
+    feed_id: str | None
+    change_kind: ReservationChangeKind
+
+
+@register
+class PropertyClosureCreated(Event):
+    """A property closure window has been opened (cd-d48).
+
+    Fired by :func:`app.worker.tasks.poll_ical.poll_ical` when a
+    Blocked-pattern VEVENT (Airbnb "Not available", VRBO "Blocked",
+    Google Calendar "Reserved") translates into a fresh
+    :class:`~app.adapters.db.places.models.PropertyClosure` row with
+    ``reason='ical_unavailable'`` and ``source_ical_feed_id`` set to
+    the polling feed (§04 "iCal feed" §"Polling behavior"). The §06
+    occurrence-generator subscribes to this event to skip task
+    materialisation across the closed window.
+
+    **Payload posture.** Foreign-key identifiers only — no
+    timestamps on the wire. Subscribers needing the window's
+    ``starts_at`` / ``ends_at`` call ``GET /closures/{id}`` under
+    the normal per-row authz path. ``source_ical_feed_id`` is
+    populated when the closure originated from a VEVENT (the
+    poller's only emission path today); manual closures created
+    through a future ``POST /properties/{id}/closures`` set it to
+    ``None``.
+
+    **Role scope.** Defaults to :data:`ALL_ROLES`. A closure affects
+    the manager calendar, the worker schedule (no turnover that
+    week), the client digest, and the guest welcome page (a unit
+    blocked for owner-stay reads as "currently unavailable"). The
+    ``DEFAULT_ROLE_EVENTS_ALLOWLIST`` review gate confirms this
+    posture is conscious — the payload carries no free text.
+    """
+
+    name: ClassVar[str] = "property.closure.created"
+
+    closure_id: str
+    property_id: str
+    source_ical_feed_id: str | None
 
 
 @register

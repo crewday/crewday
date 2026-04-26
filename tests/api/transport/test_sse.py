@@ -1286,6 +1286,14 @@ DEFAULT_ROLE_EVENTS_ALLOWLIST: frozenset[str] = frozenset(
         "task.completed",
         "task.overdue",
         "stay.upcoming",
+        # ``reservation.upserted`` and ``property.closure.created`` ride
+        # the ``ALL_ROLES`` default because reservations + closure
+        # windows are workspace-wide context every grant role
+        # legitimately observes (manager calendar, worker prep, client
+        # digest, guest welcome). Payloads carry FK ids only — no guest
+        # PII, no free text. cd-d48.
+        "reservation.upserted",
+        "property.closure.created",
         "shift.ended",
         "time.shift.changed",
         # ``notification.created`` keeps every role on ``allowed_roles``

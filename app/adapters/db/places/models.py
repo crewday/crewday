@@ -52,6 +52,7 @@ from app.adapters.db.base import Base
 # effect.
 from app.adapters.db.identity import models as _identity_models  # noqa: F401
 from app.adapters.db.payroll import models as _payroll_models  # noqa: F401
+from app.adapters.db.stays import models as _stays_models  # noqa: F401
 from app.adapters.db.workspace import models as _workspace_models  # noqa: F401
 
 __all__ = [
@@ -366,14 +367,17 @@ class PropertyClosure(Base):
     """Blackout window on a property — renovation, owner-stay, etc.
 
     v1 slice: ``id`` / ``property_id`` / ``starts_at`` / ``ends_at``
-    / ``reason`` / ``created_by_user_id`` / ``created_at``. The
-    CHECK ``ends_after_starts`` guards against zero-or-negative-
-    length windows (a closure that covers no time is a data bug,
-    not a legitimate operational state).
+    / ``reason`` / ``source_ical_feed_id`` / ``created_by_user_id`` /
+    ``created_at``. The CHECK ``ends_after_starts`` guards against
+    zero-or-negative-length windows (a closure that covers no time
+    is a data bug, not a legitimate operational state).
 
     ``created_by_user_id`` is nullable + ``ON DELETE SET NULL`` so
-    history survives the actor's deletion; every other FK cascades
-    on the parent property's delete.
+    history survives the actor's deletion. ``source_ical_feed_id``
+    is nullable + ``ON DELETE SET NULL`` so iCal-sourced closures
+    survive a feed delete; manual closures (owner-stay, renovation)
+    leave the column ``NULL``. Every remaining FK cascades on the
+    parent property's delete.
     """
 
     __tablename__ = "property_closure"
@@ -387,6 +391,16 @@ class PropertyClosure(Base):
     starts_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     ends_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     reason: Mapped[str] = mapped_column(String, nullable=False)
+    # Attribution back to the upstream ``ical_feed`` row when the
+    # closure was minted from a Blocked-pattern VEVENT (§04 "iCal
+    # feed" §"Polling behavior"). NULL for manual closures.
+    # ``SET NULL`` on feed delete so closure history survives a
+    # feed swap / disable / delete.
+    source_ical_feed_id: Mapped[str | None] = mapped_column(
+        String,
+        ForeignKey("ical_feed.id", ondelete="SET NULL"),
+        nullable=True,
+    )
     created_by_user_id: Mapped[str | None] = mapped_column(
         String,
         ForeignKey("user.id", ondelete="SET NULL"),
@@ -399,6 +413,7 @@ class PropertyClosure(Base):
     __table_args__ = (
         CheckConstraint("ends_at > starts_at", name="ends_after_starts"),
         Index("ix_property_closure_property_starts", "property_id", "starts_at"),
+        Index("ix_property_closure_source_ical_feed", "source_ical_feed_id"),
     )
 
 

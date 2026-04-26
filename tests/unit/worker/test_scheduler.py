@@ -34,6 +34,7 @@ from app.worker.scheduler import (
     LLM_BUDGET_REFRESH_JOB_ID,
     OVERDUE_DETECT_INTERVAL_SECONDS,
     OVERDUE_DETECT_JOB_ID,
+    POLL_ICAL_JOB_ID,
     USER_WORKSPACE_REFRESH_INTERVAL_SECONDS,
     USER_WORKSPACE_REFRESH_JOB_ID,
     create_scheduler,
@@ -86,6 +87,7 @@ class TestRegisterJobs:
             HEARTBEAT_JOB_ID,
             LLM_BUDGET_REFRESH_JOB_ID,
             OVERDUE_DETECT_JOB_ID,
+            POLL_ICAL_JOB_ID,
             USER_WORKSPACE_REFRESH_JOB_ID,
         }
 
@@ -120,10 +122,11 @@ class TestRegisterJobs:
             HEARTBEAT_JOB_ID,
             LLM_BUDGET_REFRESH_JOB_ID,
             OVERDUE_DETECT_JOB_ID,
+            POLL_ICAL_JOB_ID,
             USER_WORKSPACE_REFRESH_JOB_ID,
         }
-        assert len(ids) == 6
-        assert len(sched.get_jobs()) == 6
+        assert len(ids) == 7
+        assert len(sched.get_jobs()) == 7
 
 
 # ---------------------------------------------------------------------------

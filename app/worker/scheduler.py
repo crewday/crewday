@@ -89,6 +89,9 @@ __all__ = [
     "LLM_BUDGET_REFRESH_JOB_ID",
     "OVERDUE_DETECT_INTERVAL_SECONDS",
     "OVERDUE_DETECT_JOB_ID",
+    "POLL_ICAL_INTERVAL_SECONDS",
+    "POLL_ICAL_JOB_ID",
+    "POLL_ICAL_MISFIRE_GRACE_SECONDS",
     "USER_WORKSPACE_REFRESH_INTERVAL_SECONDS",
     "USER_WORKSPACE_REFRESH_JOB_ID",
     "create_scheduler",
@@ -159,6 +162,33 @@ OVERDUE_DETECT_JOB_ID: str = "detect_overdue"
 # module-level constant so tests and the scheduler-wiring code share
 # the same number without re-deriving it from the spec.
 OVERDUE_DETECT_INTERVAL_SECONDS: int = 300
+
+
+# Stable job id for the 15 min iCal poller fan-out (cd-d48). The
+# per-tick fan-out across workspaces is built by
+# :func:`_make_poll_ical_fanout_body` and registered on the interval
+# cadence ``IntervalTrigger(seconds=900)`` — every workspace gets a
+# :func:`~app.worker.tasks.poll_ical.poll_ical` call under a system-actor
+# :class:`WorkspaceContext`.
+POLL_ICAL_JOB_ID: str = "stays.poll_ical"
+
+# Interval for the iCal poller. Spec §04 "iCal feed" §"Polling
+# behavior" pins the default ``poll_cadence`` at ``*/15 * * * *``;
+# the worker tick fires every 15 min and the per-feed cadence guard
+# inside :func:`poll_ical` skips feeds whose ``last_polled_at`` has
+# not yet aged past the cadence window. Pulled out as a module-level
+# constant so tests can pin the cadence boundary without re-deriving
+# it from the spec.
+POLL_ICAL_INTERVAL_SECONDS: int = 900
+
+# Misfire grace window for the iCal poller. Spec brief pins 600 s:
+# a scheduler restart that misses the firing instant by up to 10 min
+# still gets to run the catch-up tick (the poll body is idempotent —
+# unchanged feeds are 304 short-circuits and Blocked / cancelled
+# VEVENTs upsert in-place). A two-tick-late firing is the staleness
+# signal an operator dashboard wants to alert on, not a tick the
+# scheduler should backfill.
+POLL_ICAL_MISFIRE_GRACE_SECONDS: int = 600
 
 
 # Stable job id for the ``user_workspace`` derive-refresh tick (cd-yqm4).
@@ -412,6 +442,7 @@ def register_jobs(
         IDEMPOTENCY_SWEEP_JOB_ID,
         LLM_BUDGET_REFRESH_JOB_ID,
         OVERDUE_DETECT_JOB_ID,
+        POLL_ICAL_JOB_ID,
         USER_WORKSPACE_REFRESH_JOB_ID,
     ):
         with contextlib.suppress(JobLookupError):
@@ -565,6 +596,39 @@ def register_jobs(
         # preferable to a stacked catch-up that hammers the DB on an
         # already-strained host.
         misfire_grace_time=OVERDUE_DETECT_INTERVAL_SECONDS,
+    )
+
+    # --- 15 min iCal poller fan-out (cd-d48) ---
+    # Single-workspace callable in ``app/worker/tasks/poll_ical.py``;
+    # the per-tick fan-out across workspaces is built by
+    # :func:`_make_poll_ical_fanout_body`. Interval-anchored at 15 min;
+    # the cadence matches the spec §04 default ``*/15 * * * *`` and
+    # the per-feed cadence guard inside :func:`poll_ical` filters
+    # feeds whose ``last_polled_at`` has not yet aged past the
+    # window — so a tick on a workspace whose feeds have all been
+    # polled inside the last 15 min is a near-no-op.
+    #
+    # ``misfire_grace_time = POLL_ICAL_MISFIRE_GRACE_SECONDS`` (10 min):
+    # a scheduler restart that misses the firing instant by up to
+    # 10 min still gets to run the catch-up tick (the body is
+    # idempotent — unchanged feeds are 304 short-circuits, Blocked
+    # / cancelled VEVENTs upsert in-place). Past 10 min a skip is
+    # preferable to a stacked catch-up that hammers upstream iCal
+    # endpoints + the per-host rate-limit on a fleet returning from
+    # a long pause.
+    scheduler.add_job(
+        wrap_job(
+            _make_poll_ical_fanout_body(resolved_clock),
+            job_id=POLL_ICAL_JOB_ID,
+            clock=resolved_clock,
+        ),
+        trigger=IntervalTrigger(seconds=POLL_ICAL_INTERVAL_SECONDS),
+        id=POLL_ICAL_JOB_ID,
+        name=POLL_ICAL_JOB_ID,
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=POLL_ICAL_MISFIRE_GRACE_SECONDS,
     )
 
     # --- 5 min user_workspace derive-refresh (cd-yqm4) ---
@@ -1103,6 +1167,197 @@ def _make_overdue_fanout_body(clock: Clock) -> Callable[[], None]:
                 "total_workspaces_failed": total_workspaces_failed,
                 "total_flipped": total_flipped,
                 "total_skipped_manual_transition": total_skipped_manual_transition,
+            },
+        )
+
+    return _body
+
+
+def _make_poll_ical_fanout_body(clock: Clock) -> Callable[[], None]:
+    """Build the 15 min iCal poller fan-out body (cd-d48).
+
+    Mirror of :func:`_make_overdue_fanout_body` for the iCal poller:
+    enumerate every live workspace, bind a system-actor
+    :class:`WorkspaceContext`, run
+    :func:`~app.worker.tasks.poll_ical.poll_ical` per tenant inside a
+    SAVEPOINT so a single broken workspace does not roll back its
+    siblings' updates. Demo-expired workspaces are skipped (same §24
+    rationale the generator fan-out cites).
+
+    The body lazily constructs a single
+    :class:`~app.adapters.storage.envelope.Aes256GcmEnvelope` per tick
+    from :attr:`Settings.root_key`. The encryptor is purpose-keyed at
+    every call site (``ical_feed.url``), so reuse across workspaces is
+    safe and the construction cost is negligible — but a tick where
+    no workspace owns an iCal feed never builds the encryptor at all.
+    A deployment running without ``CREWDAY_ROOT_KEY`` (the dev /
+    test default) skips the tick at WARN level and lets the next
+    tick try again — the same posture the budget refresh + idempotency
+    sweep take when they cannot reach a required dependency.
+
+    Structured-log emission:
+
+    * ``event="worker.poll_ical.workspace.tick"`` (INFO) — per workspace,
+      with ``workspace_id``, ``workspace_slug``, plus every
+      ``feeds_*`` / ``reservations_*`` / ``closures_created`` counter
+      from :class:`~app.worker.tasks.poll_ical.PollReport`. The
+      per-workspace payload operator dashboards key on for "which
+      tenants are accumulating iCal errors / not-modified hits?".
+    * ``event="worker.poll_ical.workspace.failed"`` (WARNING) — per
+      workspace, with ``workspace_id`` + the exception class name.
+    * ``event="worker.poll_ical.tick.summary"`` (INFO) — once per tick,
+      with ``total_workspaces``, ``total_workspaces_skipped`` (demo-
+      expired), ``total_workspaces_failed``, plus the same
+      ``total_feeds_*`` / ``total_reservations_*`` / ``total_closures_created``
+      sums of the per-workspace :class:`PollReport` counters.
+
+    The :func:`poll_ical` import is deferred into the closure body so
+    module import order stays robust — same pattern the sibling
+    overdue / generator fan-outs use. The
+    :class:`Aes256GcmEnvelope` import is likewise deferred so the
+    standalone worker entrypoint still boots when the cryptography
+    extras are present but the iCal feature is disabled.
+    """
+
+    def _body() -> None:
+        from sqlalchemy.orm import Session as _Session
+
+        from app.adapters.db.workspace.models import Workspace
+        from app.adapters.storage.envelope import Aes256GcmEnvelope
+        from app.config import get_settings
+        from app.tenancy import tenant_agnostic
+        from app.tenancy.current import reset_current, set_current
+        from app.worker.tasks.poll_ical import poll_ical
+
+        now = clock.now()
+
+        settings = get_settings()
+        if settings.root_key is None:
+            # No root key wired — the iCal feed URLs encrypted at rest
+            # cannot be decrypted, so the poller would emit
+            # ``ical_url_malformed`` for every feed. Skip the tick at
+            # WARNING so a misconfigured deployment is loud (the
+            # heartbeat still bumps because the wrap_job wrapper sees
+            # this body return cleanly), and let the next tick retry
+            # once the operator wires ``CREWDAY_ROOT_KEY``.
+            _log.warning(
+                "worker.poll_ical.skipped_no_root_key",
+                extra={"event": "worker.poll_ical.skipped_no_root_key"},
+            )
+            return
+
+        envelope = Aes256GcmEnvelope(settings.root_key)
+
+        total_workspaces = 0
+        total_workspaces_skipped = 0
+        total_workspaces_failed = 0
+        total_feeds_walked = 0
+        total_feeds_polled = 0
+        total_feeds_not_modified = 0
+        total_feeds_rate_limited = 0
+        total_feeds_errored = 0
+        total_feeds_skipped = 0
+        total_reservations_created = 0
+        total_reservations_updated = 0
+        total_reservations_cancelled = 0
+        total_closures_created = 0
+
+        with make_uow() as session:
+            assert isinstance(session, _Session)
+
+            with tenant_agnostic():
+                rows = list(session.execute(select(Workspace.id, Workspace.slug)).all())
+                workspace_ids = [row.id for row in rows]
+                expired_ids = _demo_expired_workspace_ids(
+                    session, workspace_ids, now=now
+                )
+
+            for row in rows:
+                workspace_id = row.id
+                workspace_slug = row.slug
+                total_workspaces += 1
+
+                if workspace_id in expired_ids:
+                    total_workspaces_skipped += 1
+                    continue
+
+                ctx = _system_actor_context(
+                    workspace_id=workspace_id,
+                    workspace_slug=workspace_slug,
+                )
+                token = set_current(ctx)
+                try:
+                    try:
+                        with session.begin_nested():
+                            report = poll_ical(
+                                ctx,
+                                session=session,
+                                envelope=envelope,
+                                now=now,
+                                clock=clock,
+                            )
+                    except Exception as exc:
+                        total_workspaces_failed += 1
+                        _log.warning(
+                            "worker.poll_ical.workspace.failed",
+                            extra={
+                                "event": "worker.poll_ical.workspace.failed",
+                                "workspace_id": workspace_id,
+                                "workspace_slug": workspace_slug,
+                                "error": type(exc).__name__,
+                            },
+                        )
+                        continue
+                finally:
+                    reset_current(token)
+
+                total_feeds_walked += report.feeds_walked
+                total_feeds_polled += report.feeds_polled
+                total_feeds_not_modified += report.feeds_not_modified
+                total_feeds_rate_limited += report.feeds_rate_limited
+                total_feeds_errored += report.feeds_errored
+                total_feeds_skipped += report.feeds_skipped
+                total_reservations_created += report.reservations_created
+                total_reservations_updated += report.reservations_updated
+                total_reservations_cancelled += report.reservations_cancelled
+                total_closures_created += report.closures_created
+
+                _log.info(
+                    "worker.poll_ical.workspace.tick",
+                    extra={
+                        "event": "worker.poll_ical.workspace.tick",
+                        "workspace_id": workspace_id,
+                        "workspace_slug": workspace_slug,
+                        "feeds_walked": report.feeds_walked,
+                        "feeds_polled": report.feeds_polled,
+                        "feeds_not_modified": report.feeds_not_modified,
+                        "feeds_rate_limited": report.feeds_rate_limited,
+                        "feeds_errored": report.feeds_errored,
+                        "feeds_skipped": report.feeds_skipped,
+                        "reservations_created": report.reservations_created,
+                        "reservations_updated": report.reservations_updated,
+                        "reservations_cancelled": report.reservations_cancelled,
+                        "closures_created": report.closures_created,
+                    },
+                )
+
+        _log.info(
+            "worker.poll_ical.tick.summary",
+            extra={
+                "event": "worker.poll_ical.tick.summary",
+                "total_workspaces": total_workspaces,
+                "total_workspaces_skipped": total_workspaces_skipped,
+                "total_workspaces_failed": total_workspaces_failed,
+                "total_feeds_walked": total_feeds_walked,
+                "total_feeds_polled": total_feeds_polled,
+                "total_feeds_not_modified": total_feeds_not_modified,
+                "total_feeds_rate_limited": total_feeds_rate_limited,
+                "total_feeds_errored": total_feeds_errored,
+                "total_feeds_skipped": total_feeds_skipped,
+                "total_reservations_created": total_reservations_created,
+                "total_reservations_updated": total_reservations_updated,
+                "total_reservations_cancelled": total_reservations_cancelled,
+                "total_closures_created": total_closures_created,
             },
         )
 
