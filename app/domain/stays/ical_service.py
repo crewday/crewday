@@ -70,7 +70,7 @@ from app.adapters.ical.ports import (
     IcalValidator,
     ProviderDetector,
 )
-from app.adapters.storage.ports import EnvelopeEncryptor
+from app.adapters.storage.ports import EnvelopeEncryptor, EnvelopeOwner
 from app.audit import write_audit
 from app.tenancy import WorkspaceContext
 from app.util.clock import Clock, SystemClock
@@ -293,10 +293,15 @@ def register_feed(
         else detector.detect(validation.url)
     )
 
-    ciphertext = envelope.encrypt(validation.url.encode("utf-8"), purpose=_URL_PURPOSE)
+    feed_id = new_ulid()
+    ciphertext = envelope.encrypt(
+        validation.url.encode("utf-8"),
+        purpose=_URL_PURPOSE,
+        owner=_owner_for_feed(feed_id),
+    )
 
     row = IcalFeed(
-        id=new_ulid(),
+        id=feed_id,
         workspace_id=ctx.workspace_id,
         property_id=body.property_id,
         unit_id=body.unit_id,
@@ -368,7 +373,9 @@ def update_feed(
         except IcalValidationError as exc:
             raise IcalUrlInvalid(exc.code, str(exc)) from exc
         ciphertext = envelope.encrypt(
-            validation.url.encode("utf-8"), purpose=_URL_PURPOSE
+            validation.url.encode("utf-8"),
+            purpose=_URL_PURPOSE,
+            owner=_owner_for_feed(row.id),
         )
         row.url = _ciphertext_to_str(ciphertext)
         row.last_polled_at = now
@@ -622,13 +629,29 @@ def _load_row(session: Session, ctx: WorkspaceContext, *, feed_id: str) -> IcalF
 def _ciphertext_to_str(ciphertext: bytes) -> str:
     """Encode ciphertext bytes for the ``ical_feed.url`` TEXT column.
 
-    The column is TEXT (v1 slice — §02 adds a real ``BYTEA`` column
-    once the full ``secret_envelope`` row lands). We latin-1 encode
-    the raw bytes, which is the canonical "1:1 byte-to-codepoint"
-    text mapping — every byte value ``0..255`` maps to exactly one
-    Unicode codepoint so round-tripping through TEXT is lossless.
+    The column is TEXT (v1 slice — §02 ``secret_envelope`` carries
+    the canonical bytes; the inline blob lives here for back-compat).
+    We latin-1 encode the raw bytes, which is the canonical "1:1
+    byte-to-codepoint" text mapping — every byte value ``0..255``
+    maps to exactly one Unicode codepoint so round-tripping through
+    TEXT is lossless. cd-znv4 row-backed pointers are short ASCII
+    (``0x02 || ULID``) so the encoding is identity-on-the-wire for
+    the new format too.
     """
     return ciphertext.decode("latin-1")
+
+
+def _owner_for_feed(feed_id: str) -> EnvelopeOwner:
+    """Build the §15 owner pointer for an iCal feed's URL secret.
+
+    cd-znv4 row-backed mode stamps every persisted ``secret_envelope``
+    row with ``(owner_entity_kind, owner_entity_id)`` so the rotation
+    worker can scope a re-encrypt sweep to "every secret for this
+    feed" and so a future delete-cascade helper can sweep the row
+    when the iCal feed is hard-deleted. The kind slug matches the
+    §02 entity name verbatim.
+    """
+    return EnvelopeOwner(kind="ical_feed", id=feed_id)
 
 
 def _str_to_ciphertext(stored: str) -> bytes:

@@ -1255,9 +1255,17 @@ primitive).
 
 ### `secret_envelope`
 
-Per-workspace AES-GCM-encrypted blobs for secret values we must store
-(OpenRouter API key, SMTP password, iCal feed URLs that carry tokens).
-See §15.
+AES-GCM-encrypted blobs for secret values we must store at rest
+(OpenRouter API key, SMTP password, iCal feed URLs that carry tokens,
+property wifi passwords, full payout account numbers — see §09).
+Each row carries `(owner_entity_kind, owner_entity_id)` as a
+free-form pointer at the entity that owns the secret; an iCal feed
+URL has `owner_entity_kind='ical_feed'`, a deployment-wide SMTP
+password points at a `deployment_setting` slot, etc. The table is
+**not** workspace-scoped — different owner kinds live in different
+tables (some workspace-scoped, some deployment-wide), and rotation
+walks every row regardless of tenant. See §15 for the on-the-wire
+shape, the `key_fp` invariant, and the rotation playbook.
 
 ### `root_key_slot`
 

@@ -1320,6 +1320,9 @@ def _make_poll_ical_fanout_body(clock: Clock) -> Callable[[], None]:
     def _body() -> None:
         from sqlalchemy.orm import Session as _Session
 
+        from app.adapters.db.secrets.repositories import (
+            SqlAlchemySecretEnvelopeRepository,
+        )
         from app.adapters.db.workspace.models import Workspace
         from app.adapters.storage.envelope import Aes256GcmEnvelope
         from app.config import get_settings
@@ -1344,7 +1347,13 @@ def _make_poll_ical_fanout_body(clock: Clock) -> Callable[[], None]:
             )
             return
 
-        envelope = Aes256GcmEnvelope(settings.root_key)
+        # Cipher is constructed inside the session block below so the
+        # cd-znv4 row-backed mode can wire the
+        # ``SqlAlchemySecretEnvelopeRepository`` against the live
+        # session. Decrypt-only callsites (the iCal poller's
+        # ``get_plaintext_url`` walk) need the repository on the
+        # cipher to resolve ``0x02`` pointer-tagged blobs; legacy
+        # ``0x01`` inline blobs decrypt without it.
 
         total_workspaces = 0
         total_workspaces_skipped = 0
@@ -1362,6 +1371,12 @@ def _make_poll_ical_fanout_body(clock: Clock) -> Callable[[], None]:
 
         with make_uow() as session:
             assert isinstance(session, _Session)
+
+            envelope = Aes256GcmEnvelope(
+                settings.root_key,
+                repository=SqlAlchemySecretEnvelopeRepository(session),
+                clock=clock,
+            )
 
             with tenant_agnostic():
                 rows = list(session.execute(select(Workspace.id, Workspace.slug)).all())

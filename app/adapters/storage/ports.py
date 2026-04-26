@@ -21,6 +21,8 @@ __all__ = [
     "BlobNotFound",
     "EnvelopeDecryptError",
     "EnvelopeEncryptor",
+    "EnvelopeOwner",
+    "KeyFingerprintMismatch",
     "MimeSniffer",
     "Storage",
 ]
@@ -67,15 +69,89 @@ class MimeSniffer(Protocol):
 class EnvelopeDecryptError(Exception):
     """Raised by :class:`EnvelopeEncryptor` when a ciphertext can't decrypt.
 
-    Ciphertext shape mismatch, wrong version byte, wrong purpose, or
-    AEAD tag mismatch — every failure mode collapses to this single
-    error. Callers treat it as "the bytes on disk are not decipherable
-    under the current key for this purpose": fail loudly rather than
-    silently return garbage. Mirrors the §15 ``KeyFingerprintMismatch``
-    surface for the simpler inline-envelope case.
+    Ciphertext shape mismatch, wrong version byte, wrong purpose,
+    AEAD tag mismatch, or a row-backed pointer that no longer
+    resolves — every failure mode that is *not* a key-fingerprint
+    issue collapses to this single error. Callers treat it as "the
+    bytes on disk are not decipherable under the current key for
+    this purpose": fail loudly rather than silently return garbage.
+
+    Key-fingerprint mismatches surface separately as
+    :class:`KeyFingerprintMismatch` so the operator-facing message
+    can name both fingerprints explicitly (the §15 actionable shape).
 
     See ``docs/specs/15-security-privacy.md`` §"Secret envelope".
     """
+
+
+class KeyFingerprintMismatch(EnvelopeDecryptError):
+    """Raised when a row's ``key_fp`` does not match the active key.
+
+    §15 "Key fingerprint" pins the actionable message shape:
+
+        envelope encrypted with key fingerprint <old>; current key
+        is <new>. Restore the correct key or re-encrypt.
+
+    Subclassing :class:`EnvelopeDecryptError` keeps the single
+    upstream ``except EnvelopeDecryptError`` branch the cipher's
+    callers already use, while letting an operator-facing layer
+    (CLI, audit, /healthz once rotation lands) match on the
+    narrower type.
+
+    The ``expected`` / ``actual`` attributes carry the two raw
+    8-byte fingerprints so the operator-facing surface can render
+    them however it likes (hex, base64, ...) without re-parsing
+    the message string.
+
+    See ``docs/specs/15-security-privacy.md`` §"Key fingerprint" and
+    §"Root key compromise playbook" — once
+    :func:`crewday admin rotate-root-key` lands, the cipher will
+    consult a list of legacy keys before raising.
+    """
+
+    __slots__ = ("actual", "expected")
+
+    def __init__(self, *, expected: bytes, actual: bytes) -> None:
+        self.expected = expected
+        self.actual = actual
+        super().__init__(
+            f"envelope encrypted with key fingerprint {expected.hex()}; "
+            f"current key is {actual.hex()}. "
+            f"Restore the correct key or re-encrypt."
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class EnvelopeOwner:
+    """Owner pointer for a row-backed envelope (cd-znv4).
+
+    The cipher writes ``(kind, id)`` to the persisted ``secret_envelope``
+    row so the rotation worker can scope a re-encrypt sweep ("re-encrypt
+    every secret owned by this property") and so a future delete-cascade
+    helper can sweep orphaned rows when an owner row is removed.
+
+    Free-form strings — different owner kinds live in different tables
+    (and some don't exist as ORM rows at all, e.g. deployment-wide
+    settings carried in env / files), so a hard FK is impossible at
+    the storage layer.
+
+    Lives on the port (not the concrete cipher module) so domain
+    callers can construct one without crossing the
+    ``app.domain → app.adapters`` boundary — every reachable name on
+    ``app.adapters.storage.ports`` is whitelisted by the
+    ``app.domain.** -> app.adapters.*.ports.*`` ignore_imports rule.
+
+    See ``docs/specs/15-security-privacy.md`` §"Secret envelope".
+    """
+
+    kind: str
+    id: str
+
+    def __post_init__(self) -> None:
+        if not self.kind or not self.kind.strip():
+            raise ValueError("envelope owner kind must be a non-blank slug")
+        if not self.id or not self.id.strip():
+            raise ValueError("envelope owner id must be a non-blank value")
 
 
 class EnvelopeEncryptor(Protocol):
@@ -91,6 +167,15 @@ class EnvelopeEncryptor(Protocol):
     decrypt each other's ciphertexts. Callers pin one purpose per
     column / per owner-entity kind.
 
+    ``owner`` (cd-znv4) is an optional pointer at the entity that
+    owns the secret — its kind + id land on the persisted
+    ``secret_envelope`` row when the cipher is wired in row-backed
+    mode (§15 "Secret envelope"). Inline-mode ciphers ignore it; a
+    row-backed cipher requires it because the row's ``owner_entity_*``
+    columns are NOT NULL. Callers in row-backed mode (e.g. iCal
+    feed registration after cd-znv4) always pass an owner; legacy
+    callers that still target inline mode pass ``None``.
+
     Concrete implementation: :class:`app.adapters.storage.envelope.
     Aes256GcmEnvelope` (AES-256-GCM, HKDF-derived subkey). Tests
     wire :class:`tests._fakes.envelope.FakeEnvelope`, a deterministic
@@ -99,8 +184,21 @@ class EnvelopeEncryptor(Protocol):
     See ``docs/specs/15-security-privacy.md`` §"Secret envelope".
     """
 
-    def encrypt(self, plaintext: bytes, *, purpose: str) -> bytes:
-        """Return an opaque ciphertext blob. Format is implementation-defined."""
+    def encrypt(
+        self,
+        plaintext: bytes,
+        *,
+        purpose: str,
+        owner: object | None = ...,
+    ) -> bytes:
+        """Return an opaque ciphertext blob. Format is implementation-defined.
+
+        ``owner`` is :class:`app.adapters.storage.envelope.EnvelopeOwner`
+        for row-backed ciphers (cd-znv4); inline-mode ciphers leave it
+        :data:`None`. The Protocol declares it as :class:`object` so
+        the storage seam stays free of the secrets-context import; the
+        concrete cipher narrows on read.
+        """
         ...
 
     def decrypt(self, ciphertext: bytes, *, purpose: str) -> bytes:

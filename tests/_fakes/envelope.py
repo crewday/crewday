@@ -27,7 +27,16 @@ class FakeEnvelope:
     Not cryptographically secure — do not use outside tests.
     """
 
-    def encrypt(self, plaintext: bytes, *, purpose: str) -> bytes:
+    def encrypt(
+        self,
+        plaintext: bytes,
+        *,
+        purpose: str,
+        owner: object | None = None,
+    ) -> bytes:
+        # ``owner`` is accepted for cd-znv4 Protocol parity but
+        # ignored — the fake never persists rows.
+        del owner
         return _PREFIX + purpose.encode("utf-8") + b"::" + plaintext
 
     def decrypt(self, ciphertext: bytes, *, purpose: str) -> bytes:
