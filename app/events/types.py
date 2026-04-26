@@ -39,6 +39,10 @@ from pydantic import field_validator
 from app.events.registry import Event, EventRole, register
 
 __all__ = [
+    "AgentTurnFinished",
+    "AgentTurnOutcome",
+    "AgentTurnScope",
+    "AgentTurnStarted",
     "ExpenseApproved",
     "ExpenseReimbursed",
     "ExpenseRejected",
@@ -61,6 +65,16 @@ __all__ = [
     "TaskUnassigned",
     "TaskUpdated",
 ]
+
+
+# §11 "Agent turn lifecycle" closed enums. Defined as module-level
+# ``Literal`` aliases so domain callers (the agent runtime) and tests
+# can import the union alongside the event classes without re-declaring
+# it. ``scope=task`` is reserved for the in-task agent surface
+# (cd-cfe4 follow-up); the v1 runtime emits ``employee | manager |
+# admin`` only.
+AgentTurnScope = Literal["employee", "manager", "admin", "task"]
+AgentTurnOutcome = Literal["replied", "action", "error", "timeout"]
 
 
 # Values the ``ShiftChanged.action`` field narrows to. Kept as a
@@ -773,3 +787,117 @@ class ShiftChanged(Event):
     shift_id: str
     user_id: str
     action: ShiftChangedAction
+
+
+@register
+class AgentTurnStarted(Event):
+    """The agent runtime accepted a user message and started a turn (cd-nyvm).
+
+    Published from :func:`app.domain.agent.runtime.run_turn` as the very
+    first observable side-effect of a turn — before the LLM is called,
+    before any tool runs, before any audit row lands. Paired with
+    :class:`AgentTurnFinished` (exactly one ``finished`` per
+    ``started`` — the runtime is responsible for pairing).
+
+    Used by the §14 "Agent turn indicator" rendered in the chat
+    surfaces — every connected tab and device of the delegating user
+    flips to a "working on it" state without polling. The event is
+    **user-scoped**: only the delegating user's tabs see it. The
+    manager watching the workspace stream does not learn that a
+    worker's chat fired off a turn.
+
+    **Payload posture.** Foreign-key identifiers + the ``scope`` /
+    ``trigger`` discriminators only — no message body, no tool name,
+    no model id. The ``thread_id`` is nullable because a scheduled
+    trigger (``trigger="schedule"``) may run without a chat thread
+    (a daily digest fires under a synthetic system-message turn).
+    ``correlation_id`` is the single tie-id shared with
+    :class:`AgentTurnFinished` so a subscriber that drops a frame
+    can still pair the survivor.
+
+    **Role scope.** ``user_scoped=True`` — the SSE transport filters
+    to the delegating user's tabs. ``allowed_roles`` keeps the full
+    workspace tuple because every grant role can host an embedded
+    agent (manager, worker, client are all legitimate; guest is
+    out-of-scope today but the role gate is the wrong place to
+    encode that — the user-scope filter already pins the recipient).
+
+    See ``docs/specs/11-llm-and-agents.md`` §"Agent turn lifecycle".
+    """
+
+    name: ClassVar[str] = "agent.turn.started"
+    user_scoped: ClassVar[bool] = True
+
+    # ``actor_user_id`` is the **delegating user** — the human the
+    # agent is acting on behalf of. Required by ``user_scoped=True``;
+    # the SSE transport compares it against the subscriber's
+    # ``WorkspaceContext.actor_id``.
+    actor_user_id: str
+    scope: AgentTurnScope
+    # ``thread_id`` is the chat-channel id when the trigger fired
+    # against a chat thread (``trigger="event"``); ``None`` for a
+    # scheduled-trigger turn that has no thread (the daily digest's
+    # synthetic turn carries no chat surface).
+    thread_id: str | None
+    # ``trigger="event"`` for a chat-gateway / message-arrived turn
+    # (a user message exists); ``trigger="schedule"`` for a cron
+    # capability (no thread necessarily). The runtime's two trigger
+    # modes per §11 "Embedded agents".
+    trigger: Literal["event", "schedule"]
+    started_at: datetime
+
+    @field_validator("started_at")
+    @classmethod
+    def _started_at_is_utc(cls, value: datetime) -> datetime:
+        return _require_aware_utc(value)
+
+
+@register
+class AgentTurnFinished(Event):
+    """The agent runtime produced the next observable outcome (cd-nyvm).
+
+    Published from :func:`app.domain.agent.runtime.run_turn` as the
+    last side-effect of a turn — after the chat-message reply has
+    landed, after any approval row has been created, or after the
+    iteration / wall-clock cap has fired. Exactly one ``finished``
+    per ``started``; the runtime owns the pairing.
+
+    ``outcome`` partitions the four terminal states the runtime can
+    reach (§11 "Agent turn lifecycle"):
+
+    * ``replied`` — an :class:`~app.adapters.db.messaging.models.
+      ChatMessage` was appended for the same scope; the SPA picks
+      this up via ``agent.message.appended`` (cd-i6ox follow-up)
+      and renders the reply.
+    * ``action`` — an :class:`~app.adapters.db.llm.models.
+      ApprovalRequest` was created and the turn paused; the SPA
+      picks this up via ``agent.action.pending`` (cd-9ghv) and
+      renders the approval card.
+    * ``error`` — the runtime raised (capability unassigned, budget
+      exceeded, transport failure after retries). The SPA renders
+      a friendly error toast.
+    * ``timeout`` — the iteration cap or wall-clock cap fired.
+      A friendly "the request was too large" reply is also written
+      as a chat-message row, so a subscriber that only watches
+      ``finished`` events can still surface a clean fallback.
+
+    **Role scope** matches :class:`AgentTurnStarted` — user-scoped to
+    the delegating user, full role tuple on the coarse first pass.
+
+    See ``docs/specs/11-llm-and-agents.md`` §"Agent turn lifecycle".
+    """
+
+    name: ClassVar[str] = "agent.turn.finished"
+    user_scoped: ClassVar[bool] = True
+
+    actor_user_id: str
+    scope: AgentTurnScope
+    thread_id: str | None
+    trigger: Literal["event", "schedule"]
+    finished_at: datetime
+    outcome: AgentTurnOutcome
+
+    @field_validator("finished_at")
+    @classmethod
+    def _finished_at_is_utc(cls, value: datetime) -> datetime:
+        return _require_aware_utc(value)

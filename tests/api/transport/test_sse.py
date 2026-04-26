@@ -1296,6 +1296,17 @@ DEFAULT_ROLE_EVENTS_ALLOWLIST: frozenset[str] = frozenset(
         # watching the workspace stream does not see another user's
         # notifications.
         "notification.created",
+        # ``agent.turn.*`` follow the same posture as
+        # ``notification.created`` — every grant role can host an
+        # embedded chat agent (manager, worker, client legitimately;
+        # guest is out-of-scope today but the role gate is the wrong
+        # place to encode that). The real narrowing is
+        # ``user_scoped=True`` — the SSE transport only delivers the
+        # frame to the delegating user's tabs, so a manager watching
+        # the workspace stream does not see another user's turn
+        # indicator. cd-nyvm.
+        "agent.turn.started",
+        "agent.turn.finished",
     }
 )
 
