@@ -10,9 +10,11 @@ contexts and the SA-backed adapter both pull
 ``PermissionGroupRepository`` / ``RoleGrantRepository`` from here, plus
 the :class:`UserAvailabilityOverrideRepository` /
 :class:`UserLeaveRepository` / :class:`CapabilityChecker` seams the
-availability services consume (cd-r5j2, cd-2upg) and the read-only
+availability services consume (cd-r5j2, cd-2upg), the read-only
 :class:`MeScheduleQueryRepository` the §12 worker calendar feed uses
-(cd-lot5).
+(cd-lot5), and the :class:`EmailChangeRepository` /
+:class:`MagicLinkPort` seams the self-service email-change flow
+consumes (cd-24im).
 """
 
 from __future__ import annotations
@@ -25,6 +27,19 @@ from app.domain.identity.availability_ports import (
     UserLeaveRepository,
     UserLeaveRow,
     UserWeeklyAvailabilityRow,
+)
+from app.domain.identity.email_change_ports import (
+    EmailChangePendingRow,
+    EmailChangeRepository,
+    MagicLinkAlreadyConsumed,
+    MagicLinkDispatch,
+    MagicLinkHandle,
+    MagicLinkInvalidToken,
+    MagicLinkOutcome,
+    MagicLinkPort,
+    MagicLinkPurposeMismatch,
+    MagicLinkTokenExpired,
+    UserIdentityRow,
 )
 from app.domain.identity.me_schedule_ports import (
     MeScheduleQueryRepository,
@@ -42,6 +57,16 @@ from app.domain.identity.ports import (
 
 __all__ = [
     "CapabilityChecker",
+    "EmailChangePendingRow",
+    "EmailChangeRepository",
+    "MagicLinkAlreadyConsumed",
+    "MagicLinkDispatch",
+    "MagicLinkHandle",
+    "MagicLinkInvalidToken",
+    "MagicLinkOutcome",
+    "MagicLinkPort",
+    "MagicLinkPurposeMismatch",
+    "MagicLinkTokenExpired",
     "MeScheduleQueryRepository",
     "OccurrenceRefRow",
     "PermissionGroupMemberRow",
@@ -54,6 +79,7 @@ __all__ = [
     "SeamPermissionDenied",
     "UserAvailabilityOverrideRepository",
     "UserAvailabilityOverrideRow",
+    "UserIdentityRow",
     "UserLeaveRepository",
     "UserLeaveRow",
     "UserWeeklyAvailabilityRow",

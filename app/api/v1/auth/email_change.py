@@ -48,37 +48,33 @@ from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from app.adapters.db.identity.models import User
+from app.adapters.db.identity.repositories import SqlAlchemyEmailChangeRepository
 from app.adapters.db.session import make_uow
 from app.adapters.mail.ports import Mailer
 from app.api.deps import db_session
 from app.auth import session as auth_session
-from app.auth._throttle import Throttle
-from app.auth.magic_link import (
-    AlreadyConsumed,
-    ConsumeLockout,
-    InvalidToken,
-    PendingDispatch,
-    PurposeMismatch,
-    RateLimited,
-    TokenExpired,
-)
+from app.auth._throttle import ConsumeLockout, RateLimited, Throttle
+from app.auth.magic_link import PendingDispatch
+from app.auth.magic_link_port import MagicLinkAdapter
 from app.auth.session_cookie import DEV_SESSION_COOKIE_NAME
 from app.config import Settings, get_settings
 from app.domain.identity.email_change import (
+    AlreadyConsumed,
     EmailChangeOutcome,
     EmailInUse,
     EmailRevertOutcome,
     EmailVerifyOutcome,
     InvalidEmail,
+    InvalidToken,
     PendingNotFound,
+    PurposeMismatch,
     RecentReenrollment,
     SessionUserMismatch,
+    TokenExpired,
     request_change,
     revert_change,
     verify_change,
 )
-from app.tenancy import tenant_agnostic
 
 __all__ = [
     "EmailChangeRequestBody",
@@ -368,8 +364,9 @@ def build_email_change_router(
                     cookie_dev=session_cookie_dev,
                 )
 
-                with tenant_agnostic():
-                    user = session.get(User, user_id)
+                repo = SqlAlchemyEmailChangeRepository(session)
+                link_port = MagicLinkAdapter(session)
+                user = repo.get_user(user_id=user_id)
                 if user is None:
                     # Session row points at a hard-deleted user — treat
                     # as unauth, mirroring :mod:`app.api.v1.auth.me`.
@@ -379,7 +376,8 @@ def build_email_change_router(
                     )
 
                 outcome = request_change(
-                    session,
+                    repo=repo,
+                    link_port=link_port,
                     user=user,
                     new_email=body.new_email,
                     ip=_client_ip(request),
@@ -478,8 +476,11 @@ def build_email_change_router(
                     cookie_dev=session_cookie_dev,
                 )
 
+                repo = SqlAlchemyEmailChangeRepository(session)
+                link_port = MagicLinkAdapter(session)
                 outcome = verify_change(
-                    session,
+                    repo=repo,
+                    link_port=link_port,
                     token=body.token,
                     session_user_id=user_id,
                     ip=_client_ip(request),
@@ -559,9 +560,12 @@ def build_email_change_router(
         on the request is at best a bug.
         """
         _refuse_bearer_token(request)
+        repo = SqlAlchemyEmailChangeRepository(session)
+        link_port = MagicLinkAdapter(session)
         try:
             outcome: EmailRevertOutcome = revert_change(
-                session,
+                repo=repo,
+                link_port=link_port,
                 token=body.token,
                 ip=_client_ip(request),
                 throttle=throttle,

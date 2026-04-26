@@ -154,6 +154,7 @@ from app.auth._hashing import hash_with_pepper
 from app.auth._throttle import ConsumeLockout, RateLimited, Throttle
 from app.auth.keys import derive_subkey
 from app.config import Settings, get_settings
+from app.domain.identity.email_change_ports import MagicLinkHandle
 from app.mail.templates import magic_link as magic_link_template
 from app.mail.templates import render as render_template
 from app.tenancy import WorkspaceContext, tenant_agnostic
@@ -436,15 +437,24 @@ class PendingDispatch:
         """
         self._entries.append(callback)
 
-    def add_pending(self, pending: PendingMagicLink | None) -> None:
-        """Register a :class:`PendingMagicLink` for post-commit delivery.
+    def add_pending(self, pending: MagicLinkHandle | None) -> None:
+        """Register a magic-link handle for post-commit delivery.
 
         ``None`` is a no-op so callers can pipe the
         :func:`request_link` return value directly without a guard
         (the enumeration-guard short-circuit returns ``None``).
-        :meth:`deliver` invokes the pending's own
-        :meth:`PendingMagicLink.deliver` so the idempotency + token-
-        redacting repr + MailDeliveryError swallow on that class apply.
+        :meth:`deliver` invokes the handle's own ``deliver()`` so the
+        idempotency + token-redacting repr + MailDeliveryError
+        swallow on that class apply.
+
+        The parameter is typed as
+        :class:`~app.domain.identity.email_change_ports.MagicLinkHandle`
+        (the seam-level Protocol satisfied by
+        :class:`PendingMagicLink`) so this dispatch can be passed as
+        a :class:`~app.domain.identity.email_change_ports.MagicLinkDispatch`
+        wherever the email-change service expects one — the cd-24im
+        Protocol seam is structural and the wider parameter is what
+        keeps the structural match honest.
         """
         if pending is None:
             return

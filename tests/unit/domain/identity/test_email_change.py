@@ -1,4 +1,4 @@
-"""Unit tests for :mod:`app.domain.identity.email_change` (cd-9slq).
+"""Unit tests for :mod:`app.domain.identity.email_change` (cd-9slq, cd-24im).
 
 Covers the cd-9slq outbox invariant on the email-change domain
 service: ``request_change`` and ``verify_change`` queue every SMTP
@@ -6,6 +6,13 @@ send onto the caller-supplied :class:`PendingDispatch` so a commit
 failure short-circuits the deliveries. Mirrors
 :class:`tests.unit.auth.test_magic_link.TestRequestLinkOutboxOrdering`
 at the email-change layer.
+
+Wires the cd-24im Protocol seams over an in-memory SQLite session:
+:class:`SqlAlchemyEmailChangeRepository` for the identity-row CRUD,
+:class:`MagicLinkAdapter` for the magic-link mint / consume bridge.
+The fake-based seam tests (``test_email_change_seam.py``) drive the
+domain service against in-memory fakes so the seam's contract is
+exercised without an SQLAlchemy roundtrip.
 
 Router-level coverage of error envelopes lives in
 ``tests/unit/api/v1/auth/test_email_change.py``; this file owns the
@@ -30,11 +37,14 @@ from sqlalchemy.orm import Session, sessionmaker
 from app.adapters.db.audit.models import AuditLog
 from app.adapters.db.base import Base
 from app.adapters.db.identity.models import EmailChangePending, MagicLinkNonce, User
+from app.adapters.db.identity.repositories import SqlAlchemyEmailChangeRepository
 from app.adapters.db.session import make_engine
 from app.auth._throttle import Throttle
 from app.auth.magic_link import PendingDispatch
+from app.auth.magic_link_port import MagicLinkAdapter
 from app.config import Settings
 from app.domain.identity import email_change
+from app.domain.identity.email_change_ports import UserIdentityRow
 from tests._fakes.mailer import InMemoryMailer
 from tests.factories.identity import bootstrap_user
 
@@ -87,6 +97,16 @@ def user(session: Session) -> User:
     )
 
 
+def _user_row(user: User) -> UserIdentityRow:
+    """Project the ORM ``User`` into the seam-level row the domain expects."""
+    return UserIdentityRow(
+        id=user.id,
+        email=user.email,
+        email_lower=user.email_lower,
+        display_name=user.display_name,
+    )
+
+
 class TestRequestChangeOutboxOrdering:
     """cd-9slq: ``request_change`` defers SMTP sends until commit.
 
@@ -108,10 +128,13 @@ class TestRequestChangeOutboxOrdering:
         throttle: Throttle,
         settings: Settings,
     ) -> None:
+        repo = SqlAlchemyEmailChangeRepository(session)
+        link_port = MagicLinkAdapter(session)
         dispatch = PendingDispatch()
         outcome = email_change.request_change(
-            session,
-            user=user,
+            repo=repo,
+            link_port=link_port,
+            user=_user_row(user),
             new_email="alice.new@example.com",
             ip="127.0.0.1",
             mailer=mailer,
@@ -145,6 +168,8 @@ class TestRequestChangeOutboxOrdering:
         """The cd-t2jz repro on the email-change request path: commit
         fails → no email goes out.
         """
+        repo = SqlAlchemyEmailChangeRepository(session)
+        link_port = MagicLinkAdapter(session)
         dispatch = PendingDispatch()
         original_commit = session.commit
 
@@ -155,8 +180,9 @@ class TestRequestChangeOutboxOrdering:
         session.commit = _failing_commit  # type: ignore[method-assign]
         try:
             email_change.request_change(
-                session,
-                user=user,
+                repo=repo,
+                link_port=link_port,
+                user=_user_row(user),
                 new_email="alice.new@example.com",
                 ip="127.0.0.1",
                 mailer=mailer,
@@ -215,10 +241,13 @@ class TestVerifyChangeOutboxOrdering:
         mint-and-deliver pipeline matches what the router does and
         keeps this test on the production path.
         """
+        repo = SqlAlchemyEmailChangeRepository(session)
+        link_port = MagicLinkAdapter(session)
         dispatch = PendingDispatch()
         email_change.request_change(
-            session,
-            user=user,
+            repo=repo,
+            link_port=link_port,
+            user=_user_row(user),
             new_email="alice.new@example.com",
             ip="127.0.0.1",
             mailer=mailer,
@@ -266,6 +295,8 @@ class TestVerifyChangeOutboxOrdering:
         # messages above).
         mailer.sent.clear()
 
+        repo = SqlAlchemyEmailChangeRepository(session)
+        link_port = MagicLinkAdapter(session)
         dispatch = PendingDispatch()
         original_commit = session.commit
 
@@ -276,7 +307,8 @@ class TestVerifyChangeOutboxOrdering:
         session.commit = _failing_commit  # type: ignore[method-assign]
         try:
             email_change.verify_change(
-                session,
+                repo=repo,
+                link_port=link_port,
                 token=token,
                 session_user_id=user.id,
                 ip="127.0.0.1",

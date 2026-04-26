@@ -527,22 +527,6 @@ ignore_imports = [
     # other ``expenses.*`` stopgaps above; tracked by cd-duv6
     # (extended scope) — drops once the identity repository lands.
     "app.domain.expenses.claims -> app.adapters.db.identity.models",
-    # v1 stopgap (cd-7qxh): ``app.domain.identity.email_change``
-    # reads :class:`EmailChangePending` / :class:`PasskeyCredential`
-    # / :class:`User` and :func:`canonicalise_email` from
-    # ``app.adapters.db.identity.models`` directly — the self-service
-    # email-change flow constructs / mutates these rows inline. Same
-    # Protocol-seam pattern as the other ``app.domain.identity``
-    # stopgaps above; tracked by cd-duv6 (extended scope) — drops
-    # once the identity repository lands.
-    "app.domain.identity.email_change -> app.adapters.db.identity.models",
-    # v1 stopgap (cd-7qxh): ``app.domain.identity.email_change``
-    # delegates token mint + consume to :mod:`app.auth.magic_link`,
-    # which itself reads identity ORM models directly (cd-4zz
-    # stopgap at the auth-layer level). Mirrors the existing
-    # ``app.domain.identity.membership -> app.auth.magic_link``
-    # whitelist for the invite flow. Drops with cd-duv6.
-    "app.domain.identity.email_change -> app.auth.magic_link",
     # v1 stopgap (cd-yqm4):
     # ``app.domain.identity.user_workspace_refresh`` is the canonical
     # reconciler for the derived ``user_workspace`` junction. It reads

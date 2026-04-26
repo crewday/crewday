@@ -15,7 +15,7 @@ change" flow (cd-601a):
      mitigations" — bounds the post-recovery hijack window);
    * mints an ``email_change_confirm`` magic link to the **new**
      address (15-min TTL, single-use);
-   * persists an :class:`EmailChangePending` row with both plaintext
+   * persists an ``email_change_pending`` row with both plaintext
      addresses so the verify step can swap and the revert step
      (later) can restore;
    * emails an informational notice to the **old** address (no
@@ -33,7 +33,7 @@ change" flow (cd-601a):
      ``email_lower`` in sync);
    * mints an ``email_change_revert`` magic link to the **old**
      address (72-hour TTL) and stamps it onto the same
-     :class:`EmailChangePending` row;
+     ``email_change_pending`` row;
    * emails the new address (informational confirmation) and the
      old address (revert link);
    * writes ``audit.email.change_verified``.
@@ -46,32 +46,51 @@ change" flow (cd-601a):
 
    * consumes the ``email_change_revert`` token;
    * restores ``users.email`` to the snapshot stored on the
-     :class:`EmailChangePending` row;
+     ``email_change_pending`` row;
    * stamps ``reverted_at`` so the row terminates;
    * writes ``audit.email.change_reverted``.
 
 **Atomicity.** Each entry point runs in the caller's
-:class:`~sqlalchemy.orm.Session` UoW. The caller commits or rolls
-back; the service never calls ``session.commit()``. The magic-link
-single-use guarantee (cd-4zz) plus a row-level lookup of the
-:class:`EmailChangePending` row keyed by ``request_jti`` /
+:class:`~sqlalchemy.orm.Session` UoW threaded through the
+:class:`~app.domain.identity.email_change_ports.EmailChangeRepository`
+seam. The caller commits or rolls back; the service never calls
+``session.commit()``. The magic-link single-use guarantee (cd-4zz)
+plus a row-level lookup of the pending row keyed by ``request_jti`` /
 ``revert_jti`` provides the atomicity contract — a concurrent verify
 or revert resolves through the conditional ``UPDATE`` on the nonce
 row.
 
 **PII minimisation (§15).** The service handles plaintext addresses
 only at three seams: the inbound request body, the
-:class:`EmailChangePending` row, and the outbound :class:`Mailer`
-send. Audit diffs carry the SHA-256 + HKDF-pepper hashed forms only,
-matching the magic-link / recovery / signup pattern.
+:class:`~app.domain.identity.email_change_ports.EmailChangePendingRow`
+projection, and the outbound :class:`Mailer` send. Audit diffs carry
+the SHA-256 + HKDF-pepper hashed forms only, matching the magic-link
+/ recovery / signup pattern.
 
 **Mailer outage tolerance.** A :class:`MailDeliveryError` on the
 notice-to-old send is swallowed-and-logged, mirroring the
 enumeration-guard pattern in :mod:`app.auth.recovery` — the
 domain-level row + audit still commit so an operator can re-render
 or the user can retry. The new-address magic-link send goes through
-:func:`app.auth.magic_link.request_link` which already handles its
-own outage.
+:meth:`MagicLinkPort.request_link` which already handles its own
+outage.
+
+**Architecture (cd-24im).** The module talks to an
+:class:`~app.domain.identity.email_change_ports.EmailChangeRepository`
+Protocol + a
+:class:`~app.domain.identity.email_change_ports.MagicLinkPort`
+Protocol — never to the SQLAlchemy model classes or
+:mod:`app.auth.magic_link` directly. Both seams' SA-backed
+concretions live alongside their auth / adapter siblings
+(:class:`~app.adapters.db.identity.repositories.SqlAlchemyEmailChangeRepository`
+and :class:`~app.auth.magic_link_port.MagicLinkAdapter`); unit tests
+inject fakes or wire the SA pair over an in-memory SQLite session.
+The repo also threads its open :class:`~sqlalchemy.orm.Session`
+through ``repo.session`` so the audit writer
+(:func:`app.audit.write_audit`) — which still takes a concrete
+``Session`` today — can keep using the same UoW. Mirrors the cd-r5j2
+/ cd-2upg / cd-lot5 pattern shipped for the sibling identity-context
+services.
 
 See ``docs/specs/03-auth-and-tokens.md`` §"Self-service email change",
 ``docs/specs/12-rest-api.md`` §"Auth", and
@@ -83,48 +102,45 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Final
 
-from sqlalchemy import select
-from sqlalchemy.orm import Session
-
-from app.adapters.db.identity.models import (
-    EmailChangePending,
-    PasskeyCredential,
-    User,
-    canonicalise_email,
-)
 from app.adapters.mail.ports import MailDeliveryError, Mailer
 from app.audit import write_audit
-from app.auth import magic_link
 from app.auth._hashing import hash_with_pepper
 from app.auth._throttle import Throttle
 from app.auth.keys import derive_subkey
-from app.auth.magic_link import (
-    AlreadyConsumed,
-    InvalidToken,
-    PendingDispatch,
-    PurposeMismatch,
-    TokenExpired,
-)
 from app.config import Settings, get_settings
+from app.domain.identity.email_change_ports import (
+    EmailChangeRepository,
+    MagicLinkAlreadyConsumed,
+    MagicLinkDispatch,
+    MagicLinkInvalidToken,
+    MagicLinkPort,
+    MagicLinkPurposeMismatch,
+    MagicLinkTokenExpired,
+    UserIdentityRow,
+)
 from app.mail.templates import email_change_confirmed, email_change_notice
 from app.mail.templates import email_change_revert as revert_template
 from app.mail.templates import render as render_template
-from app.tenancy import WorkspaceContext, tenant_agnostic
+from app.tenancy import WorkspaceContext
 from app.util.clock import Clock, SystemClock
 from app.util.ulid import new_ulid
 
 __all__ = [
+    "AlreadyConsumed",
     "EmailChangeOutcome",
     "EmailInUse",
     "EmailRevertOutcome",
     "EmailVerifyOutcome",
     "InvalidEmail",
+    "InvalidToken",
     "PendingNotFound",
+    "PurposeMismatch",
     "RecentReenrollment",
     "SessionUserMismatch",
+    "TokenExpired",
     "request_change",
     "revert_change",
     "verify_change",
@@ -132,6 +148,21 @@ __all__ = [
 
 
 _log = logging.getLogger(__name__)
+
+
+# Re-export the seam-level magic-link exceptions under the legacy
+# names the email-change router has historically caught. Keeps the
+# router-side error mapping unchanged across the cd-24im refactor —
+# the names land on the same exception types as before from the
+# router's perspective; what changed is that the type hierarchy is
+# now the seam's, not :mod:`app.auth.magic_link`'s. Throttle-layer
+# errors (:class:`RateLimited` / :class:`ConsumeLockout`) propagate
+# verbatim from the throttle module and are imported by the router
+# from :mod:`app.auth._throttle` directly.
+InvalidToken = MagicLinkInvalidToken
+PurposeMismatch = MagicLinkPurposeMismatch
+TokenExpired = MagicLinkTokenExpired
+AlreadyConsumed = MagicLinkAlreadyConsumed
 
 
 # ---------------------------------------------------------------------------
@@ -216,8 +247,8 @@ class EmailInUse(ValueError):
     """The submitted ``new_email`` already belongs to another :class:`User`.
 
     409-equivalent. Comparison is case-insensitive — we use
-    :func:`canonicalise_email` for the lookup, matching the magic-
-    link / signup convention.
+    :meth:`EmailChangeRepository.canonicalise_email` for the lookup,
+    matching the magic-link / signup convention.
     """
 
 
@@ -231,7 +262,7 @@ class RecentReenrollment(ValueError):
 
 
 class PendingNotFound(ValueError):
-    """No live :class:`EmailChangePending` row matches the consumed nonce.
+    """No live ``email_change_pending`` row matches the consumed nonce.
 
     410-equivalent for the verify path; the magic-link service
     already burnt the jti by the time we reach this branch, so we
@@ -267,8 +298,8 @@ def _pepper(settings: Settings | None) -> bytes:
     return derive_subkey(s.root_key, purpose=_HKDF_PURPOSE)
 
 
-def _email_hash(email: str, pepper: bytes) -> str:
-    return hash_with_pepper(canonicalise_email(email), pepper)
+def _email_hash(email: str, *, pepper: bytes, repo: EmailChangeRepository) -> str:
+    return hash_with_pepper(repo.canonicalise_email(email), pepper)
 
 
 def _ip_hash(ip: str, pepper: bytes) -> str:
@@ -350,7 +381,9 @@ def _ip_prefix(ip: str) -> str:
     return "unknown"
 
 
-def _user_has_recent_passkey(session: Session, *, user_id: str, now: datetime) -> bool:
+def _user_has_recent_passkey(
+    repo: EmailChangeRepository, *, user_id: str, now: datetime
+) -> bool:
     """Return ``True`` iff ``user_id`` has a passkey younger than the cool-off.
 
     The cool-off looks at the most-recently-created credential — the
@@ -363,32 +396,17 @@ def _user_has_recent_passkey(session: Session, *, user_id: str, now: datetime) -
     flow.
     """
     cutoff = now - _REENROLLMENT_COOLOFF
-    with tenant_agnostic():
-        stmt = (
-            select(PasskeyCredential.created_at)
-            .where(PasskeyCredential.user_id == user_id)
-            .order_by(PasskeyCredential.created_at.desc())
-            .limit(1)
-        )
-        latest = session.scalar(stmt)
+    latest = repo.latest_passkey_created_at(user_id=user_id)
     if latest is None:
         return False
+    # The repo normalises tzinfo for us — see the
+    # :meth:`SqlAlchemyEmailChangeRepository.latest_passkey_created_at`
+    # docstring. A defensive UTC fallback covers fakes that skip the
+    # normalisation; pinning to UTC (not ``now.tzinfo``) keeps the
+    # comparison sound even if a caller threads in a non-UTC ``now``.
     if latest.tzinfo is None:
-        latest = latest.replace(tzinfo=now.tzinfo)
+        latest = latest.replace(tzinfo=UTC)
     return latest > cutoff
-
-
-def _email_taken_by_other(
-    session: Session, *, new_email_lower: str, current_user_id: str
-) -> bool:
-    """Return ``True`` iff another :class:`User` already holds ``new_email_lower``."""
-    with tenant_agnostic():
-        existing = session.scalars(
-            select(User).where(User.email_lower == new_email_lower)
-        ).first()
-    if existing is None:
-        return False
-    return existing.id != current_user_id
 
 
 def _send_notice_to_old(
@@ -491,9 +509,10 @@ def _send_revert_link_to_old(
 
 
 def request_change(
-    session: Session,
     *,
-    user: User,
+    repo: EmailChangeRepository,
+    link_port: MagicLinkPort,
+    user: UserIdentityRow,
     new_email: str,
     ip: str,
     mailer: Mailer,
@@ -502,7 +521,7 @@ def request_change(
     now: datetime | None = None,
     settings: Settings | None = None,
     clock: Clock | None = None,
-    dispatch: PendingDispatch | None = None,
+    dispatch: MagicLinkDispatch | None = None,
 ) -> EmailChangeOutcome:
     """Mint the magic link for ``new_email``; persist + notify; audit.
 
@@ -513,48 +532,48 @@ def request_change(
     3. Reject :class:`RecentReenrollment` if the caller's newest
        passkey is too young.
     4. Mint the ``email_change_confirm`` magic link via
-       :func:`app.auth.magic_link.request_link` (the throttle, nonce
+       :meth:`MagicLinkPort.request_link` (the throttle, nonce
        insert, and SMTP send all happen there). The mailed body
        carries the canonical ``/auth/magic/<token>`` URL — landing
        on the SPA's ``/me/email/verify`` page is the SPA's job; the
        domain layer does not need to invent a parallel URL surface.
-    5. Persist the :class:`EmailChangePending` row with both
-       plaintext addresses so verify + revert can act later.
+    5. Persist the ``email_change_pending`` row with both plaintext
+       addresses so verify + revert can act later.
     6. Send the informational notice to the old address.
     7. Audit ``email.change_requested`` with hashed addresses + IP.
 
     Raises :class:`InvalidEmail`, :class:`EmailInUse`,
     :class:`RecentReenrollment`. Magic-link rate-limit /
-    consume-lockout errors propagate verbatim from
-    :func:`request_link` (already typed).
+    consume-lockout errors propagate verbatim from the throttle.
 
-    The caller's UoW owns the transaction; this function never
-    calls ``session.commit()``.
+    The caller's UoW (threaded through ``repo``) owns the
+    transaction; this function never calls ``session.commit()``.
 
     **Outbox ordering (cd-9slq).** When ``dispatch`` is supplied
     every SMTP send (the magic-link template to the new address +
     the informational notice to the old one) is queued onto it for
     post-commit delivery, mirroring the cd-9i7z pattern. The
     calling HTTP router runs this function inside ``with make_uow()
-    as session:`` and invokes :meth:`PendingDispatch.deliver` only
+    as session:`` and invokes :meth:`MagicLinkDispatch.deliver` only
     after the ``with`` exits, so a commit failure short-circuits
     every queued send. When ``dispatch`` is ``None`` the function
     falls back to the legacy synchronous behaviour for tests /
     direct callers that own the commit boundary themselves;
-    production wiring always supplies a :class:`PendingDispatch`.
+    production wiring always supplies a
+    :class:`~app.auth.magic_link.PendingDispatch`.
     """
     resolved_now = now if now is not None else _now(clock)
     pepper = _pepper(settings)
 
     new_email_clean = _validate_email_syntax(new_email)
-    new_email_lower = canonicalise_email(new_email_clean)
+    new_email_lower = repo.canonicalise_email(new_email_clean)
 
-    if _email_taken_by_other(
-        session, new_email_lower=new_email_lower, current_user_id=user.id
+    if repo.email_taken_by_other(
+        new_email_lower=new_email_lower, current_user_id=user.id
     ):
         raise EmailInUse(f"email {new_email_lower!r} already held by another user")
 
-    if _user_has_recent_passkey(session, user_id=user.id, now=resolved_now):
+    if _user_has_recent_passkey(repo, user_id=user.id, now=resolved_now):
         raise RecentReenrollment(
             f"user {user.id!r} re-enrolled a passkey inside the cool-off window"
         )
@@ -564,10 +583,9 @@ def request_change(
     # ``subject_id=user.id`` short-circuits its own user-lookup
     # branch (which would otherwise key off ``new_email`` that has
     # no matching ``User`` row). The SMTP send is deferred via the
-    # returned :class:`PendingMagicLink` and queued onto
-    # ``dispatch`` below for post-commit delivery (cd-9slq).
-    confirm_link = magic_link.request_link(
-        session,
+    # returned :class:`MagicLinkHandle` and queued onto ``dispatch``
+    # below for post-commit delivery (cd-9slq).
+    confirm_link = link_port.request_link(
         email=new_email_clean,
         purpose="email_change_confirm",
         ip=ip,
@@ -597,26 +615,19 @@ def request_change(
     # from a captured mail body) but is even cheaper because we
     # already own the URL.
     token = confirm_url.rsplit("/", 1)[-1]
-    request_jti = magic_link.inspect_token_jti(token, settings=settings)
+    request_jti = link_port.inspect_token_jti(token, settings=settings)
 
     pending_id = new_ulid(clock=clock)
-    pending = EmailChangePending(
-        id=pending_id,
+    repo.insert_pending(
+        pending_id=pending_id,
         user_id=user.id,
         request_jti=request_jti,
-        revert_jti=None,
         previous_email=user.email,
         previous_email_lower=user.email_lower,
         new_email=new_email_clean,
         new_email_lower=new_email_lower,
         created_at=resolved_now,
-        verified_at=None,
-        revert_expires_at=None,
-        reverted_at=None,
     )
-    with tenant_agnostic():
-        session.add(pending)
-        session.flush()
 
     # Capture the inputs the notice send needs at mint time so the
     # deferred entry is parameter-free.
@@ -649,11 +660,11 @@ def request_change(
         confirm_link.deliver()
         _deferred_notice_send()
 
-    new_hash = _email_hash(new_email_clean, pepper)
-    old_hash = _email_hash(user.email, pepper)
+    new_hash = _email_hash(new_email_clean, pepper=pepper, repo=repo)
+    old_hash = _email_hash(user.email, pepper=pepper, repo=repo)
 
     write_audit(
-        session,
+        repo.session,
         _agnostic_audit_ctx(),
         entity_kind="user",
         entity_id=user.id,
@@ -683,8 +694,9 @@ def request_change(
 
 
 def verify_change(
-    session: Session,
     *,
+    repo: EmailChangeRepository,
+    link_port: MagicLinkPort,
     token: str,
     session_user_id: str,
     ip: str,
@@ -694,7 +706,7 @@ def verify_change(
     now: datetime | None = None,
     settings: Settings | None = None,
     clock: Clock | None = None,
-    dispatch: PendingDispatch | None = None,
+    dispatch: MagicLinkDispatch | None = None,
 ) -> EmailVerifyOutcome:
     """Consume the new-address magic link; swap ``users.email``; mint revert.
 
@@ -706,7 +718,7 @@ def verify_change(
        commit to consuming, so an attacker who phished the link but
        holds a session bound to a different user cannot DoS the swap
        by burning the token from their own session.
-    2. Look up the :class:`EmailChangePending` row by ``request_jti``.
+    2. Look up the ``email_change_pending`` row by ``request_jti``.
     3. Reject :class:`SessionUserMismatch` if the caller's session
        user differs from the pending row's user_id (and from the
        nonce's subject_id — both must agree).
@@ -734,7 +746,7 @@ def verify_change(
     confirmation-to-new and revert-link-to-old SMTP sends are queued
     onto it for post-commit delivery. The calling HTTP router runs
     this function inside ``with make_uow() as session:`` and invokes
-    :meth:`PendingDispatch.deliver` only after the ``with`` exits,
+    :meth:`MagicLinkDispatch.deliver` only after the ``with`` exits,
     so a commit failure short-circuits both sends — no working
     revert token reaches the old mailbox without the matching
     revert nonce + verified-pending row durable on disk. When
@@ -751,8 +763,7 @@ def verify_change(
     # for a different user can DoS the legit user's swap by submitting
     # the phished confirm link from their own session, burning the
     # nonce, and forcing the legit user to start over.
-    peek_outcome = magic_link.peek_link(
-        session,
+    peek_outcome = link_port.peek_link(
         token=token,
         expected_purpose="email_change_confirm",
         ip=ip,
@@ -762,14 +773,9 @@ def verify_change(
         clock=clock,
     )
 
-    request_jti = magic_link.inspect_token_jti(token, settings=settings)
+    request_jti = link_port.inspect_token_jti(token, settings=settings)
 
-    with tenant_agnostic():
-        pending = session.scalars(
-            select(EmailChangePending).where(
-                EmailChangePending.request_jti == request_jti
-            )
-        ).first()
+    pending = repo.find_pending_by_request_jti(request_jti=request_jti)
     if pending is None or pending.verified_at is not None:
         # Either the pending row was hard-deleted out from under us
         # (a sweeper, an admin clean-up) or a sibling verify already
@@ -790,12 +796,12 @@ def verify_change(
         )
 
     # Session matched — now burn the nonce. The conditional UPDATE
-    # in :func:`consume_link` is the single-use chokepoint; if a
-    # concurrent same-user verify won the race between peek and
-    # consume, we'll surface :class:`AlreadyConsumed` and the caller
-    # gets a 409 (which is honest — the swap landed once already).
-    magic_link.consume_link(
-        session,
+    # in :meth:`MagicLinkPort.consume_link` is the single-use
+    # chokepoint; if a concurrent same-user verify won the race
+    # between peek and consume, we'll surface :class:`AlreadyConsumed`
+    # and the caller gets a 409 (which is honest — the swap landed
+    # once already).
+    link_port.consume_link(
         token=token,
         expected_purpose="email_change_confirm",
         ip=ip,
@@ -807,8 +813,7 @@ def verify_change(
 
     # Re-check uniqueness inside the same UoW as the swap. A sibling
     # user who just claimed the address would otherwise win silently.
-    if _email_taken_by_other(
-        session,
+    if repo.email_taken_by_other(
         new_email_lower=pending.new_email_lower,
         current_user_id=pending.user_id,
     ):
@@ -816,8 +821,7 @@ def verify_change(
             f"email {pending.new_email_lower!r} already held by another user"
         )
 
-    with tenant_agnostic():
-        user = session.get(User, pending.user_id)
+    user = repo.get_user(user_id=pending.user_id)
     if user is None:
         # The user row vanished between request and verify — the
         # CASCADE on ``email_change_pending.user_id`` should have
@@ -830,16 +834,15 @@ def verify_change(
     old_email = pending.previous_email
     new_email = pending.new_email
 
-    # Atomic swap. The :func:`_user_before_update` ORM listener
-    # rewrites ``email_lower`` from ``email`` so we don't have to
-    # do it manually.
-    user.email = new_email
+    # Atomic swap. The ``before_update`` ORM listener on
+    # :class:`User` rewrites ``email_lower`` from ``email`` so we
+    # don't have to do it manually.
+    user_after_swap = repo.update_user_email(user_id=user.id, new_email=new_email)
 
     # Mint the revert magic link (72-hour TTL). Same throttle bucket
     # as the confirm flow — abuse via repeated revert attempts
     # against a hijacked old mailbox cannot bypass the lockout.
-    revert_link = magic_link.request_link(
-        session,
+    revert_link = link_port.request_link(
         email=old_email,
         purpose="email_change_revert",
         ip=ip,
@@ -856,7 +859,7 @@ def verify_change(
         throttle=throttle,
         settings=settings,
         clock=clock,
-        subject_id=user.id,
+        subject_id=user_after_swap.id,
         send_email=False,
     )
     if revert_link is None:  # pragma: no cover - defensive
@@ -868,14 +871,15 @@ def verify_change(
     revert_link.deliver()
     revert_url = revert_link.url
     revert_token = revert_url.rsplit("/", 1)[-1]
-    revert_jti = magic_link.inspect_token_jti(revert_token, settings=settings)
+    revert_jti = link_port.inspect_token_jti(revert_token, settings=settings)
     revert_expires_at = resolved_now + timedelta(hours=72)
 
-    pending.revert_jti = revert_jti
-    pending.revert_expires_at = revert_expires_at
-    pending.verified_at = resolved_now
-    with tenant_agnostic():
-        session.flush()
+    repo.mark_verified(
+        pending_id=pending.id,
+        revert_jti=revert_jti,
+        revert_expires_at=revert_expires_at,
+        verified_at=resolved_now,
+    )
 
     # Capture every input the deferred sends need at mint time so
     # the dispatch entries are parameter-free closures. Each send
@@ -885,7 +889,7 @@ def verify_change(
     captured_verify_mailer = mailer
     captured_new_email = new_email
     captured_old_email = old_email
-    captured_display_name = user.display_name
+    captured_display_name = user_after_swap.display_name
     captured_masked_old_email = _mask_email(old_email)
     captured_masked_new_email = _mask_email(new_email)
     captured_base_url = base_url
@@ -923,17 +927,17 @@ def verify_change(
         _deferred_confirmation_send()
         _deferred_revert_send()
 
-    old_hash = _email_hash(old_email, pepper)
-    new_hash = _email_hash(new_email, pepper)
+    old_hash = _email_hash(old_email, pepper=pepper, repo=repo)
+    new_hash = _email_hash(new_email, pepper=pepper, repo=repo)
 
     write_audit(
-        session,
+        repo.session,
         _agnostic_audit_ctx(),
         entity_kind="user",
-        entity_id=user.id,
+        entity_id=user_after_swap.id,
         action="email.change_verified",
         diff={
-            "user_id": user.id,
+            "user_id": user_after_swap.id,
             "old_email_hash": old_hash,
             "new_email_hash": new_hash,
             "ip_hash": _ip_hash(ip, pepper),
@@ -946,7 +950,7 @@ def verify_change(
 
     return EmailVerifyOutcome(
         pending_id=pending.id,
-        user_id=user.id,
+        user_id=user_after_swap.id,
         revert_jti=revert_jti,
         old_email_hash=old_hash,
         new_email_hash=new_hash,
@@ -959,12 +963,13 @@ def verify_change(
 
 
 def revert_change(
-    session: Session,
     *,
+    repo: EmailChangeRepository,
+    link_port: MagicLinkPort,
     token: str,
     ip: str,
-    now: datetime | None = None,
     throttle: Throttle,
+    now: datetime | None = None,
     settings: Settings | None = None,
     clock: Clock | None = None,
 ) -> EmailRevertOutcome:
@@ -973,7 +978,7 @@ def revert_change(
     Steps (matches §03 "Revert window"):
 
     1. Consume the ``email_change_revert`` magic link.
-    2. Look up the :class:`EmailChangePending` row by ``revert_jti``.
+    2. Look up the ``email_change_pending`` row by ``revert_jti``.
     3. Restore ``users.email`` to the snapshot
        (``pending.previous_email``).
     4. Stamp ``reverted_at`` so the row terminates.
@@ -990,8 +995,7 @@ def revert_change(
     resolved_now = now if now is not None else _now(clock)
     pepper = _pepper(settings)
 
-    outcome = magic_link.consume_link(
-        session,
+    outcome = link_port.consume_link(
         token=token,
         expected_purpose="email_change_revert",
         ip=ip,
@@ -1001,14 +1005,9 @@ def revert_change(
         clock=clock,
     )
 
-    revert_jti = magic_link.inspect_token_jti(token, settings=settings)
+    revert_jti = link_port.inspect_token_jti(token, settings=settings)
 
-    with tenant_agnostic():
-        pending = session.scalars(
-            select(EmailChangePending).where(
-                EmailChangePending.revert_jti == revert_jti
-            )
-        ).first()
+    pending = repo.find_pending_by_revert_jti(revert_jti=revert_jti)
     if (
         pending is None
         or pending.reverted_at is not None
@@ -1024,8 +1023,7 @@ def revert_change(
     if outcome.subject_id != pending.user_id:  # pragma: no cover - defensive
         raise InvalidToken("nonce subject_id does not match pending row user_id")
 
-    with tenant_agnostic():
-        user = session.get(User, pending.user_id)
+    user = repo.get_user(user_id=pending.user_id)
     if user is None:
         raise PendingNotFound(f"user {pending.user_id!r} no longer exists")
 
@@ -1033,22 +1031,27 @@ def revert_change(
     # the audit row — we lose it the moment we assign the swap-back.
     new_email = user.email
     old_email = pending.previous_email
-    user.email = old_email
+    user_after_swap = repo.update_user_email(user_id=user.id, new_email=old_email)
 
-    pending.reverted_at = resolved_now
-    with tenant_agnostic():
-        session.flush()
+    repo.mark_reverted(pending_id=pending.id, reverted_at=resolved_now)
+
+    # Compute the address hashes once and reuse them for both the audit
+    # diff and the outcome — mirrors the request_change / verify_change
+    # shape and avoids two extra HKDF + SHA256 roundtrips on the hot
+    # path.
+    old_hash = _email_hash(old_email, pepper=pepper, repo=repo)
+    new_hash = _email_hash(new_email, pepper=pepper, repo=repo)
 
     write_audit(
-        session,
+        repo.session,
         _agnostic_audit_ctx(),
         entity_kind="user",
-        entity_id=user.id,
+        entity_id=user_after_swap.id,
         action="email.change_reverted",
         diff={
-            "user_id": user.id,
-            "old_email_hash": _email_hash(old_email, pepper),
-            "new_email_hash": _email_hash(new_email, pepper),
+            "user_id": user_after_swap.id,
+            "old_email_hash": old_hash,
+            "new_email_hash": new_hash,
             "ip_hash": _ip_hash(ip, pepper),
             "revert_jti": revert_jti,
             "pending_id": pending.id,
@@ -1058,18 +1061,7 @@ def revert_change(
 
     return EmailRevertOutcome(
         pending_id=pending.id,
-        user_id=user.id,
-        old_email_hash=_email_hash(old_email, pepper),
-        new_email_hash=_email_hash(new_email, pepper),
+        user_id=user_after_swap.id,
+        old_email_hash=old_hash,
+        new_email_hash=new_hash,
     )
-
-
-# Re-export the magic-link errors the router needs to import
-# alongside the email-change ones, so the wiring layer doesn't have
-# to dual-import.
-__all__ += [
-    "AlreadyConsumed",
-    "InvalidToken",
-    "PurposeMismatch",
-    "TokenExpired",
-]
