@@ -588,6 +588,17 @@ def resolve_workspace(
             is_owner=is_owner,
         )
 
+    # ``principal_kind`` records the transport that authenticated this
+    # caller — ``"token"`` when the bearer-header branch fired (the
+    # :class:`ActorIdentity` carries ``token_id``), ``"session"`` when
+    # the cookie branch fired. The dataclass default is ``"session"``;
+    # we set it explicitly here so the middleware's branch is the
+    # single source of truth and a future refactor that drops the
+    # explicit kwarg trips the assertion in :class:`ActorIdentity`'s
+    # invariant rather than silently mislabelling token traffic.
+    principal_kind: Literal["session", "token"] = (
+        "token" if actor.token_id is not None else "session"
+    )
     return WorkspaceContext(
         workspace_id=ws.id,
         workspace_slug=slug,
@@ -596,6 +607,7 @@ def resolve_workspace(
         actor_grant_role=grant_role,
         actor_was_owner_member=is_owner,
         audit_correlation_id=audit_correlation_id,
+        principal_kind=principal_kind,
     )
 
 
@@ -662,6 +674,10 @@ def _phase0_stub_context(
         actor_grant_role="manager",
         actor_was_owner_member=False,
         audit_correlation_id=correlation_id,
+        # Phase-0 stub mirrors a session-presented request; the route
+        # guards that gate on transport (e.g. delegated-mint refusal)
+        # treat the synthetic caller as the most-permissive arm.
+        principal_kind="session",
     )
 
 

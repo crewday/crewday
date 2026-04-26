@@ -332,6 +332,7 @@ def _agnostic_audit_ctx() -> WorkspaceContext:
         actor_grant_role="manager",
         actor_was_owner_member=False,
         audit_correlation_id=new_ulid(),
+        principal_kind="system",
     )
 
 
@@ -1022,6 +1023,20 @@ def provision_workspace_and_owner_seat(
         # minted tenancy from the very first audit emission. Returned
         # so callers can reuse the same ``audit_correlation_id`` on
         # follow-up audits in the same transaction.
+        #
+        # ``principal_kind="system"``: signup runs from a public
+        # ``POST /signup/passkey/finish`` with no session cookie yet
+        # (the user is being created right now). The audit row's
+        # ``actor_kind`` is ``"user"`` (the freshly-minted owner is
+        # who the row is attributed to), but the *transport* has no
+        # live session — matches the cd-tvh field docstring on
+        # :class:`PrincipalKind`'s ``"system"`` arm
+        # ("synthesised by a worker / job / signup helper that has no
+        # live caller"). Sibling helpers in this module
+        # (:func:`_agnostic_audit_ctx`) already pin ``"system"``;
+        # keep the bootstrap ctx in lockstep so a future
+        # delegated-mint-style guard can't be sidestepped by
+        # routing through the signup-finish hook.
         real_ctx = WorkspaceContext(
             workspace_id=workspace_id,
             workspace_slug=slug,
@@ -1030,6 +1045,7 @@ def provision_workspace_and_owner_seat(
             actor_grant_role="manager",
             actor_was_owner_member=True,
             audit_correlation_id=new_ulid(),
+            principal_kind="system",
         )
         # Seed the four system groups. The owners seed also emits the
         # member + role-grant rows + the ``owners_bootstrapped`` audit

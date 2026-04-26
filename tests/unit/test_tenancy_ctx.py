@@ -187,6 +187,90 @@ def test_context_scopes_per_asyncio_task() -> None:
     assert seen_b is ctx_b
 
 
+# ---------------------------------------------------------------------------
+# WorkspaceContext.principal_kind (cd-tvh)
+# ---------------------------------------------------------------------------
+
+
+class TestPrincipalKind:
+    """``WorkspaceContext.principal_kind`` defaults + kwargs round-trip.
+
+    cd-tvh introduces ``principal_kind`` so route-layer guards (e.g.
+    delegated-mint refusal of token callers per §03 "Delegated tokens")
+    can branch on the transport that authenticated the caller — even
+    though :attr:`actor_kind` collapses session + token into ``"user"``.
+    """
+
+    def test_defaults_to_session(self) -> None:
+        """Existing kwargs without ``principal_kind`` get the conservative default.
+
+        The migration is backwards-compatible: every test fixture and
+        domain helper that builds a :class:`WorkspaceContext` without
+        passing ``principal_kind`` continues to behave as if it were a
+        session-presented request. The default is the most-permissive
+        transport, so a misconfigured caller errs on usable rather than
+        silently locked out — see the field docstring.
+        """
+        ctx = WorkspaceContext(
+            workspace_id="01HWA00000000000000000WSPA",
+            workspace_slug="ws-a",
+            actor_id="01HWA00000000000000000USRA",
+            actor_kind="user",
+            actor_grant_role="manager",
+            actor_was_owner_member=False,
+            audit_correlation_id="01HWA00000000000000000CRLA",
+        )
+        assert ctx.principal_kind == "session"
+
+    def test_explicit_token_kind_round_trips(self) -> None:
+        """``principal_kind="token"`` is preserved on construction."""
+        ctx = WorkspaceContext(
+            workspace_id="01HWA00000000000000000WSPB",
+            workspace_slug="ws-b",
+            actor_id="01HWA00000000000000000USRB",
+            actor_kind="user",
+            actor_grant_role="manager",
+            actor_was_owner_member=False,
+            audit_correlation_id="01HWA00000000000000000CRLB",
+            principal_kind="token",
+        )
+        assert ctx.principal_kind == "token"
+
+    def test_explicit_system_kind_round_trips(self) -> None:
+        ctx = WorkspaceContext(
+            workspace_id="01HWA00000000000000000WSPC",
+            workspace_slug="ws-c",
+            actor_id="01HWA00000000000000000USRC",
+            actor_kind="system",
+            actor_grant_role="manager",
+            actor_was_owner_member=False,
+            audit_correlation_id="01HWA00000000000000000CRLC",
+            principal_kind="system",
+        )
+        assert ctx.principal_kind == "system"
+
+    def test_principal_kind_is_part_of_equality(self) -> None:
+        """Two contexts that differ only on transport must NOT compare equal.
+
+        The frozen / slots dataclass auto-generated ``__eq__`` walks
+        every field; :attr:`principal_kind` is normative state because
+        downstream guards (e.g. delegated-mint refusal) branch on it,
+        so equality has to disagree when the transport disagrees.
+        """
+        common = {
+            "workspace_id": "01HWA00000000000000000WSPD",
+            "workspace_slug": "ws-d",
+            "actor_id": "01HWA00000000000000000USRD",
+            "actor_kind": "user",
+            "actor_grant_role": "manager",
+            "actor_was_owner_member": False,
+            "audit_correlation_id": "01HWA00000000000000000CRLD",
+        }
+        as_session = WorkspaceContext(**common, principal_kind="session")  # type: ignore[arg-type]
+        as_token = WorkspaceContext(**common, principal_kind="token")  # type: ignore[arg-type]
+        assert as_session != as_token
+
+
 def test_tenant_agnostic_scopes_per_asyncio_task() -> None:
     async def _flip_and_peek(
         *,

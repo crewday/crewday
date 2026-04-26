@@ -51,6 +51,10 @@ class WorkspaceContextFactory(factory.Factory):
     actor_grant_role = "manager"
     actor_was_owner_member = True
     audit_correlation_id = factory.LazyFunction(new_ulid)
+    # Most tests model a session-presented request — override
+    # explicitly when exercising token-presented or system flows
+    # (e.g. cd-tvh's delegated-mint refusal).
+    principal_kind = "session"
 
 
 def build_workspace_context(**overrides: object) -> WorkspaceContext:

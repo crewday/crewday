@@ -1408,6 +1408,16 @@ def complete_invite(
 
     # Build a user-scoped ctx attributing the audit row to the
     # freshly-enrolled user (same pattern as :func:`app.auth.signup.complete_signup`).
+    #
+    # ``principal_kind="system"``: ``POST /invite/complete`` is the
+    # public new-user passkey-finish hook — the invitee has no
+    # session cookie yet (they were just created), so the request
+    # carries neither cookie nor bearer header. The audit row keeps
+    # ``actor_kind="user"`` (attributing the enrolment to the
+    # invitee) but the transport is system-driven. Mirrors
+    # :func:`app.auth.signup.complete_signup`'s ``real_ctx`` so a
+    # future guard that branches on ``principal_kind`` treats both
+    # invite-complete and signup-finish symmetrically.
     real_ctx = WorkspaceContext(
         workspace_id=invite_row.workspace_id,
         workspace_slug="",  # router fills this on response; audit only uses ids
@@ -1416,6 +1426,7 @@ def complete_invite(
         actor_grant_role="manager",  # overwritten per grant on subsequent writes
         actor_was_owner_member=False,
         audit_correlation_id=new_ulid(clock=clock),
+        principal_kind="system",
     )
 
     _activate_invite(

@@ -488,6 +488,15 @@ def _login_audit_ctx() -> WorkspaceContext:
         actor_grant_role="manager",
         actor_was_owner_member=False,
         audit_correlation_id="00000000000000000000000000",
+        # Login runs *before* a session exists — the request reaches us
+        # without ``__Host-crewday_session`` and without an
+        # ``Authorization: Bearer`` header. Mark the transport as
+        # ``"system"`` so any future delegated-mint-style guard that
+        # branches on ``ctx.principal_kind`` treats this pre-session
+        # write the same way it treats worker / signup-helper rows
+        # (cd-tvh §03 "Delegated tokens"). Mirrors
+        # :func:`app.auth.passkey._tenant_agnostic_login_audit_ctx`.
+        principal_kind="system",
     )
 
 

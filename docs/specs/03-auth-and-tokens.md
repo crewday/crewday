@@ -647,7 +647,13 @@ Key properties:
   follow-ups); until then "non-archived grant" == "row exists" and
   the verifier only enforces the archive half.
 - A delegated token can only be created by a **passkey session** — it
-  cannot be created by another token (no transitive delegation).
+  cannot be created by another token (no transitive delegation). The
+  mint route refuses every non-session caller (token-presented or
+  system) with `422 delegated_requires_session`. The route inspects
+  the `principal_kind` field on the request's `WorkspaceContext`
+  (populated by the tenancy middleware: `"session"` for cookie
+  callers, `"token"` for bearer callers, `"system"` for worker /
+  helper actors).
 - Default TTL: **30 days** (shorter than the 90-day default for scoped
   tokens). A workspace-level setting can raise it, with the same
   noisy warning as for scoped tokens.

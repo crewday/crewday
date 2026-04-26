@@ -389,6 +389,7 @@ def _agnostic_audit_ctx() -> WorkspaceContext:
         actor_grant_role="manager",
         actor_was_owner_member=False,
         audit_correlation_id=new_ulid(),
+        principal_kind="system",
     )
 
 

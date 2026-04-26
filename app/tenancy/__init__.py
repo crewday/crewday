@@ -6,7 +6,12 @@ current-context helpers, and the scoped-table registry.
 See ``docs/specs/01-architecture.md`` §"Multi-tenancy runtime".
 """
 
-from app.tenancy.context import ActorGrantRole, ActorKind, WorkspaceContext
+from app.tenancy.context import (
+    ActorGrantRole,
+    ActorKind,
+    PrincipalKind,
+    WorkspaceContext,
+)
 from app.tenancy.current import (
     get_current,
     is_tenant_agnostic,
@@ -42,6 +47,7 @@ __all__ = [
     "DeploymentActorKind",
     "DeploymentContext",
     "InvalidSlug",
+    "PrincipalKind",
     "WorkspaceContext",
     "get_current",
     "is_homoglyph_collision",

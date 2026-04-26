@@ -40,7 +40,7 @@ from app.api.deps import current_workspace_context
 from app.api.deps import db_session as _db_session_dep
 from app.api.v1.auth.tokens import build_tokens_router
 from app.auth.tokens import verify as verify_token
-from app.tenancy import WorkspaceContext, tenant_agnostic
+from app.tenancy import PrincipalKind, WorkspaceContext, tenant_agnostic
 from tests.factories.identity import (
     bootstrap_user,
     bootstrap_workspace,
@@ -419,3 +419,178 @@ class TestDelegatedTokensHttp:
         now = datetime.now(tz=expires.tzinfo or UTC)
         delta = expires - now
         assert timedelta(days=89, hours=23) <= delta <= timedelta(days=90, hours=1)
+
+
+# ---------------------------------------------------------------------------
+# cd-tvh — refuse delegated mint from a non-session caller
+# ---------------------------------------------------------------------------
+
+
+class TestDelegatedRequiresSession:
+    """§03 "Delegated tokens" + §11 "no transitive delegation".
+
+    A delegated token can only be minted by a passkey **session**:
+    the spec text reads "A delegated token can only be created by a
+    passkey session — it cannot be created by another token (no
+    transitive delegation)". The route guard inspects
+    :attr:`WorkspaceContext.principal_kind` and rejects any caller
+    that didn't authenticate via the session-cookie branch.
+
+    This suite drives a parallel client whose
+    :func:`current_workspace_context` override stamps
+    ``principal_kind="token"`` (and a sibling ``principal_kind="system"``)
+    so the route can branch deterministically without standing up the
+    real bearer-token middleware. The actual middleware → route
+    integration is exercised by
+    :class:`tests.integration.test_tenancy_middleware_auth.TestBearerTokenEndToEnd`
+    — what we pin here is the refusal logic at the routing seam.
+    """
+
+    @staticmethod
+    def _build_client(
+        engine: Engine,
+        session_factory: sessionmaker[Session],
+        seeded_ctx: WorkspaceContext,
+        *,
+        principal_kind: PrincipalKind,
+    ) -> TestClient:
+        """Mount the tokens router with a ctx that pins ``principal_kind``."""
+        from dataclasses import replace
+
+        from app.api.v1.auth.tokens import build_tokens_router
+
+        token_ctx = replace(seeded_ctx, principal_kind=principal_kind)
+
+        app = FastAPI()
+        app.include_router(build_tokens_router(), prefix="/api/v1")
+
+        def _session() -> Iterator[Session]:
+            s = session_factory()
+            try:
+                yield s
+                s.commit()
+            except Exception:
+                s.rollback()
+                raise
+            finally:
+                s.close()
+
+        def _ctx() -> WorkspaceContext:
+            return token_ctx
+
+        from app.api.deps import db_session as _db_session_dep
+
+        app.dependency_overrides[_db_session_dep] = _session
+        app.dependency_overrides[current_workspace_context] = _ctx
+
+        return TestClient(app)
+
+    def test_delegated_mint_from_token_caller_is_422(
+        self,
+        engine: Engine,
+        session_factory: sessionmaker[Session],
+        seeded_ctx: WorkspaceContext,
+    ) -> None:
+        """Token-presented delegated mint → 422 ``delegated_requires_session``."""
+        with self._build_client(
+            engine,
+            session_factory,
+            seeded_ctx,
+            principal_kind="token",
+        ) as client:
+            r = client.post(
+                "/api/v1/auth/tokens",
+                json={
+                    "label": "transitive",
+                    "delegate": True,
+                    "scopes": {},
+                    "expires_at_days": 30,
+                },
+            )
+        assert r.status_code == 422, r.text
+        assert r.json()["detail"]["error"] == "delegated_requires_session"
+
+    def test_delegated_mint_from_system_caller_is_422(
+        self,
+        engine: Engine,
+        session_factory: sessionmaker[Session],
+        seeded_ctx: WorkspaceContext,
+    ) -> None:
+        """System-presented mint also refused — only sessions can mint delegated.
+
+        No production caller mints a delegated token from a system
+        actor today, but the guard is symmetric on purpose: every
+        non-session arm refuses, so a future worker that drifts into
+        minting on behalf of a user is caught at the seam.
+        """
+        with self._build_client(
+            engine,
+            session_factory,
+            seeded_ctx,
+            principal_kind="system",
+        ) as client:
+            r = client.post(
+                "/api/v1/auth/tokens",
+                json={
+                    "label": "system-mint",
+                    "delegate": True,
+                    "scopes": {},
+                    "expires_at_days": 30,
+                },
+            )
+        assert r.status_code == 422, r.text
+        assert r.json()["detail"]["error"] == "delegated_requires_session"
+
+    def test_scoped_mint_from_token_caller_is_allowed(
+        self,
+        engine: Engine,
+        session_factory: sessionmaker[Session],
+        seeded_ctx: WorkspaceContext,
+    ) -> None:
+        """The guard is **delegated-only** — scoped mints from tokens still succeed.
+
+        §03 reserves the no-transitive-delegation rule for delegated
+        tokens specifically; a workspace-management agent legitimately
+        needs to mint scoped tokens via API automation. Pin the
+        non-regression here so a future tightening of the guard fails
+        loudly instead of silently breaking the automation surface.
+        """
+        with self._build_client(
+            engine,
+            session_factory,
+            seeded_ctx,
+            principal_kind="token",
+        ) as client:
+            r = client.post(
+                "/api/v1/auth/tokens",
+                json={
+                    "label": "scoped-from-token",
+                    "scopes": {"tasks:read": True},
+                    "expires_at_days": 30,
+                },
+            )
+        assert r.status_code == 201, r.text
+        body = r.json()
+        assert body["kind"] == "scoped"
+
+    def test_delegated_mint_from_session_caller_still_allowed(
+        self,
+        client: TestClient,
+    ) -> None:
+        """Regression guard — the default fixture stamps ``principal_kind="session"``.
+
+        The sibling :class:`TestDelegatedTokensHttp` already exercises
+        the happy path; we re-pin it here next to the refusal cases so
+        future readers see the allow / deny pair side by side.
+        """
+        r = client.post(
+            "/api/v1/auth/tokens",
+            json={
+                "label": "from-session",
+                "delegate": True,
+                "scopes": {},
+                "expires_at_days": 30,
+            },
+        )
+        assert r.status_code == 201, r.text
+        assert r.json()["kind"] == "delegated"

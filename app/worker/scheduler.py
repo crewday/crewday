@@ -644,6 +644,7 @@ def _system_actor_context(
         actor_grant_role="manager",
         actor_was_owner_member=False,
         audit_correlation_id=_SYSTEM_ACTOR_ZERO_ULID,
+        principal_kind="system",
     )
 
 

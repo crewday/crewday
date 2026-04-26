@@ -47,6 +47,11 @@ Error shapes:
   on this workspace.
 * 422 ``delegated_requires_empty_scopes`` — delegated mint with a
   non-empty ``scopes`` body.
+* 422 ``delegated_requires_session`` — delegated mint attempted by
+  a non-session caller (token-presented or system). §03 "Delegated
+  tokens" + §11 "no transitive delegation": a delegated token can
+  only be created by a passkey session, so a token-presented mint
+  request is refused at the seam.
 * 422 ``me_scope_conflict`` — scoped mint with a ``me:*`` key in
   ``scopes``.
 * 422 ``invalid_kind`` — body carried an unknown ``kind`` literal.
@@ -308,6 +313,26 @@ def build_tokens_router() -> APIRouter:
         expires_at = _resolve_expires_at(body, now)
 
         kind: TokenKind = "delegated" if body.delegate else "scoped"
+
+        # §03 "Delegated tokens" + §11 "no transitive delegation": a
+        # delegated token can only be minted by a passkey session.
+        # Reject every non-session caller (a bearer-token-presented
+        # request or a system-driven helper) at the route seam — the
+        # domain layer can't tell them apart from a real session caller
+        # without the transport bit on ``ctx``. The 422 envelope mirrors
+        # the rest of the mint-shape error taxonomy so the SPA's form
+        # error rendering keys off a stable ``error`` code.
+        if kind == "delegated" and ctx.principal_kind != "session":
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "error": "delegated_requires_session",
+                    "message": (
+                        "delegated tokens can only be minted from a "
+                        "passkey session — no transitive delegation"
+                    ),
+                },
+            )
 
         try:
             result: MintedToken = mint(
