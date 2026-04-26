@@ -295,6 +295,41 @@ def _narrow_output(value: str) -> OutputMode:
             )
 
 
+_surface_registered: bool = False
+
+
+def _register_surface_commands_once() -> None:
+    """Mount the codegen-driven command tree on :data:`root`.
+
+    Done lazily on first :func:`main` invocation so importing
+    :mod:`crewday._main` (e.g. from tests that only need
+    :class:`CrewdayError`) does not pay the descriptor-load + Click
+    registration cost. Idempotent: a second call is a cache hit on
+    :func:`crewday._runtime.load_surface` but the registration would
+    silently shadow previously-mounted commands, so the
+    :data:`_surface_registered` module-level flag keeps a single
+    registration site.
+
+    The import is local to keep :mod:`crewday._main` importable even
+    when the descriptor file is missing — the cost of a missing
+    surface is then a clear runtime error from :func:`main`, not an
+    import-time failure that would also break unrelated test imports.
+
+    The flag is module-state rather than an attribute stamped on the
+    Click :class:`~click.Group` because Click's typed shape does not
+    expose user-defined attributes — adding one would force a
+    ``# type: ignore`` that AGENTS.md's "no type: ignore" rule
+    forbids.
+    """
+    global _surface_registered
+    if _surface_registered:
+        return
+    from crewday._runtime import register_generated_commands
+
+    register_generated_commands(root)
+    _surface_registered = True
+
+
 @handle_errors
 def main() -> None:
     """Console-script entry point (``[project.scripts] crewday``).
@@ -305,6 +340,7 @@ def main() -> None:
     unhandled :class:`Exception` (which should not happen — every
     CLI error path raises a :class:`CrewdayError`).
     """
+    _register_surface_commands_once()
     root(prog_name="crewday")
 
 
