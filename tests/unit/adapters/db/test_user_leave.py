@@ -379,6 +379,30 @@ class TestCategoryCheck:
         session.flush()  # No IntegrityError — every enum value valid.
 
 
+class TestCategoryLiteralPinned:
+    """The domain :data:`UserLeaveCategory` literal mirrors the DB CHECK set.
+
+    Post-cd-2upg the domain :mod:`app.domain.identity.user_leaves` no
+    longer imports :data:`_LEAVE_CATEGORY_VALUES` from the adapter (the
+    Protocol seam forbids the cross), so the previous import-time
+    ``assert`` lives here instead. A schema migration that widens the
+    enum without updating the domain literal trips this test before
+    the next request can land an unknown value.
+    """
+
+    def test_literal_matches_db_check(self) -> None:
+        from typing import get_args
+
+        from app.adapters.db.availability.models import _LEAVE_CATEGORY_VALUES
+        from app.domain.identity.user_leaves import UserLeaveCategory
+
+        assert set(_LEAVE_CATEGORY_VALUES) == set(get_args(UserLeaveCategory)), (
+            "UserLeaveCategory literal diverged from DB CHECK set "
+            f"(literal={sorted(get_args(UserLeaveCategory))!r}, "
+            f"db={sorted(_LEAVE_CATEGORY_VALUES)!r})"
+        )
+
+
 class TestRangeCheck:
     """``ends_on >= starts_on`` rejects backwards ranges."""
 

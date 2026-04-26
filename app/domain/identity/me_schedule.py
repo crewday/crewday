@@ -79,10 +79,7 @@ from app.adapters.db.tasks.models import Occurrence
 from app.domain.identity.user_availability_overrides import (
     UserAvailabilityOverrideView,
 )
-from app.domain.identity.user_leaves import UserLeaveView
-from app.domain.identity.user_leaves import (
-    _row_to_view as _leave_row_to_view,
-)
+from app.domain.identity.user_leaves import UserLeaveView, _narrow_category
 from app.tenancy import WorkspaceContext
 from app.util.clock import Clock, SystemClock
 
@@ -247,6 +244,36 @@ def _override_row_to_view(
         approval_required=row.approval_required,
         approved_at=row.approved_at,
         approved_by=row.approved_by,
+        created_at=row.created_at,
+        updated_at=row.updated_at,
+        deleted_at=row.deleted_at,
+    )
+
+
+def _leave_row_to_view(row: UserLeave) -> UserLeaveView:
+    """Project a SQLAlchemy ``UserLeave`` row into the public view.
+
+    Inlined here (cd-2upg) because
+    :mod:`app.domain.identity.user_leaves` no longer accepts ORM rows
+    on its private ``_row_to_view`` helper — that helper now consumes
+    the seam-shaped
+    :class:`~app.domain.identity.availability_ports.UserLeaveRow`.
+    :mod:`app.domain.identity.me_schedule` still walks the ORM directly
+    until its own seam refactor lands (covered by the
+    ``me_schedule -> app.adapters.db.availability.models`` cd-7qxh
+    ignore-import), so the conversion stays adjacent to the SQL that
+    produces it.
+    """
+    return UserLeaveView(
+        id=row.id,
+        workspace_id=row.workspace_id,
+        user_id=row.user_id,
+        starts_on=row.starts_on,
+        ends_on=row.ends_on,
+        category=_narrow_category(row.category),
+        approved_at=row.approved_at,
+        approved_by=row.approved_by,
+        note_md=row.note_md,
         created_at=row.created_at,
         updated_at=row.updated_at,
         deleted_at=row.deleted_at,

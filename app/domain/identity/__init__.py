@@ -9,8 +9,8 @@ repository port plus any context-specific adapter Protocols". Sibling
 contexts and the SA-backed adapter both pull
 ``PermissionGroupRepository`` / ``RoleGrantRepository`` from here, plus
 the :class:`UserAvailabilityOverrideRepository` /
-:class:`CapabilityChecker` seams the availability services consume
-(cd-r5j2).
+:class:`UserLeaveRepository` / :class:`CapabilityChecker` seams the
+availability services consume (cd-r5j2, cd-2upg).
 """
 
 from __future__ import annotations
@@ -20,6 +20,8 @@ from app.domain.identity.availability_ports import (
     SeamPermissionDenied,
     UserAvailabilityOverrideRepository,
     UserAvailabilityOverrideRow,
+    UserLeaveRepository,
+    UserLeaveRow,
     UserWeeklyAvailabilityRow,
 )
 from app.domain.identity.ports import (
@@ -42,5 +44,7 @@ __all__ = [
     "SeamPermissionDenied",
     "UserAvailabilityOverrideRepository",
     "UserAvailabilityOverrideRow",
+    "UserLeaveRepository",
+    "UserLeaveRow",
     "UserWeeklyAvailabilityRow",
 ]

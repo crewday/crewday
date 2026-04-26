@@ -50,6 +50,10 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy.orm import Session
 
+from app.adapters.db.availability.repositories import (
+    SqlAlchemyCapabilityChecker,
+    SqlAlchemyUserLeaveRepository,
+)
 from app.api.deps import current_workspace_context, db_session
 from app.api.pagination import (
     DEFAULT_LIMIT,
@@ -84,6 +88,7 @@ __all__ = [
     "UserLeaveResponse",
     "UserLeaveUpdateRequest",
     "build_user_leaves_router",
+    "make_seam_pair",
     "router",
 ]
 
@@ -309,6 +314,36 @@ def _approved_to_status(
     return "approved" if approved else "pending"
 
 
+def make_seam_pair(
+    session: Session, ctx: WorkspaceContext
+) -> tuple[
+    SqlAlchemyUserLeaveRepository,
+    SqlAlchemyCapabilityChecker,
+]:
+    """Construct the SA-backed repo + capability checker for the request.
+
+    Both seams (cd-2upg) wrap the same ``(session, ctx)`` pair the
+    rest of the route would otherwise pass through to the service.
+    Bundling them in one helper keeps every endpoint's wiring to a
+    single line and pins the cross-seam contract: the audit writer
+    rides ``repo.session`` (same UoW), and the checker honours
+    ``ctx.workspace_id`` for every action key the service touches.
+
+    Public (no leading underscore) so the sibling
+    :mod:`app.api.v1.me_schedule` router — which dispatches a self-only
+    subset of the same surface — can reuse the wiring without taking
+    a dependency on a conventionally module-private name. Mirrors the
+    cd-r5j2 :func:`app.api.v1.user_availability_overrides.make_seam_pair`
+    helper; both share the ``(session, ctx)`` shape because the
+    underlying :class:`SqlAlchemyCapabilityChecker` is the one piece
+    that crosses both surfaces.
+    """
+    return (
+        SqlAlchemyUserLeaveRepository(session),
+        SqlAlchemyCapabilityChecker(session, ctx),
+    )
+
+
 # ---------------------------------------------------------------------------
 # Router factory
 # ---------------------------------------------------------------------------
@@ -347,9 +382,11 @@ def build_user_leaves_router() -> APIRouter:
             starts_after=from_,
             ends_before=to,
         )
+        repo, checker = make_seam_pair(session, ctx)
         try:
             views = list_leaves(
-                session,
+                repo,
+                checker,
                 ctx,
                 filters=filters,
                 limit=limit,
@@ -385,8 +422,9 @@ def build_user_leaves_router() -> APIRouter:
         ``leaves.edit_others`` and always lands auto-approved.
         """
         service_body = UserLeaveCreate.model_validate(body.model_dump())
+        repo, checker = make_seam_pair(session, ctx)
         try:
-            view = create_leave(session, ctx, body=service_body)
+            view = create_leave(repo, checker, ctx, body=service_body)
         except UserLeavePermissionDenied as exc:
             raise _http_for_permission_denied(exc) from exc
         except UserLeaveInvariantViolated as exc:
@@ -414,8 +452,11 @@ def build_user_leaves_router() -> APIRouter:
         service_body = UserLeaveUpdate.model_validate(
             {f: getattr(body, f) for f in sent}
         )
+        repo, checker = make_seam_pair(session, ctx)
         try:
-            view = update_leave(session, ctx, leave_id=leave_id, body=service_body)
+            view = update_leave(
+                repo, checker, ctx, leave_id=leave_id, body=service_body
+            )
         except UserLeaveNotFound as exc:
             raise _http_for_not_found() from exc
         except UserLeavePermissionDenied as exc:
@@ -442,8 +483,9 @@ def build_user_leaves_router() -> APIRouter:
         Always requires ``leaves.edit_others``. An already-approved
         row collapses to 409.
         """
+        repo, checker = make_seam_pair(session, ctx)
         try:
-            view = approve_leave(session, ctx, leave_id=leave_id)
+            view = approve_leave(repo, checker, ctx, leave_id=leave_id)
         except UserLeaveNotFound as exc:
             raise _http_for_not_found() from exc
         except UserLeavePermissionDenied as exc:
@@ -473,8 +515,9 @@ def build_user_leaves_router() -> APIRouter:
         Always requires ``leaves.edit_others``.
         """
         reason = body.reason_md if body is not None else None
+        repo, checker = make_seam_pair(session, ctx)
         try:
-            view = reject_leave(session, ctx, leave_id=leave_id, reason_md=reason)
+            view = reject_leave(repo, checker, ctx, leave_id=leave_id, reason_md=reason)
         except UserLeaveNotFound as exc:
             raise _http_for_not_found() from exc
         except UserLeavePermissionDenied as exc:
@@ -504,8 +547,9 @@ def build_user_leaves_router() -> APIRouter:
         a UI bug doesn't silently mint multiple
         ``user_leave.deleted`` audit rows.
         """
+        repo, checker = make_seam_pair(session, ctx)
         try:
-            delete_leave(session, ctx, leave_id=leave_id)
+            delete_leave(repo, checker, ctx, leave_id=leave_id)
         except UserLeaveNotFound as exc:
             raise _http_for_not_found() from exc
         except UserLeavePermissionDenied as exc:

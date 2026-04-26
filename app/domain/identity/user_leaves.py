@@ -23,7 +23,11 @@ Public surface:
   :class:`UserLeaveInvariantViolated`, :class:`UserLeavePermissionDenied`,
   :class:`UserLeaveTransitionForbidden`.
 
-**Capabilities.** Writes gate through :func:`app.authz.require`:
+**Capabilities.** Writes gate through the injected
+:class:`~app.domain.identity.availability_ports.CapabilityChecker`
+(SA-backed by
+:class:`~app.adapters.db.availability.repositories.SqlAlchemyCapabilityChecker`,
+which itself wraps :func:`app.authz.require`):
 
 * ``leaves.create_self`` — self-submit (auto-allowed to all_workers).
 * ``leaves.edit_others`` — manager retroactive create / edit / delete
@@ -42,8 +46,8 @@ catalog from drifting toward one key per verb.
 :func:`create_leave` stamps ``approved_at`` + ``approved_by`` at
 insert time so the row lands directly in "approved" — a manager
 scheduling their own time off shouldn't have to walk through their
-own approval queue. The check routes through
-:func:`app.authz.require` so the auto-approve trigger and every
+own approval queue. The check routes through the
+:class:`CapabilityChecker` seam so the auto-approve trigger and every
 other ``leaves.edit_others`` gate share the same authority
 (``actor_grant_role`` is "audit-shape hint, not the authority" per
 §02). Workers self-submitting always land pending, even if a
@@ -60,13 +64,28 @@ complaints inbox; the soft-deleted row is invisible to the live-list
 filter, matching the spec's "pending leaves do not affect assignment;
 rejected ones are forever invisible" stance.
 
+**Architecture (cd-2upg).** The module talks to a
+:class:`~app.domain.identity.availability_ports.UserLeaveRepository`
+Protocol + a
+:class:`~app.domain.identity.availability_ports.CapabilityChecker`
+Protocol — never to the SQLAlchemy model classes or :mod:`app.authz`
+directly. Both seams' SA-backed concretions live in
+:mod:`app.adapters.db.availability.repositories`; unit tests inject
+fakes or wire the SA pair over an in-memory SQLite session. The
+leave repo also threads its open :class:`~sqlalchemy.orm.Session`
+through ``repo.session`` so the audit writer
+(:func:`app.audit.write_audit`) — which still takes a concrete
+``Session`` today — can keep using the same UoW. Mirrors the cd-r5j2
+pattern shipped for the sibling
+:mod:`app.domain.identity.user_availability_overrides` service.
+
 **Transaction boundary.** The service never calls
 ``session.commit()``; the caller's Unit-of-Work owns transaction
 boundaries (§01 "Key runtime invariants" #3). Every mutation writes
 one :mod:`app.audit` row in the same transaction.
 
 **Tenancy.** The ORM tenant filter auto-narrows every SELECT on
-``user_leave``; the service re-asserts the
+``user_leave``; the SA repo re-asserts the
 ``workspace_id = ctx.workspace_id`` predicate explicitly as
 defence-in-depth.
 
@@ -85,16 +104,13 @@ from datetime import date, datetime
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
-from sqlalchemy import select
-from sqlalchemy.orm import Session
 
-from app.adapters.db.availability.models import UserLeave
 from app.audit import write_audit
-from app.authz import (
-    InvalidScope,
-    PermissionDenied,
-    UnknownActionKey,
-    require,
+from app.domain.identity.availability_ports import (
+    CapabilityChecker,
+    SeamPermissionDenied,
+    UserLeaveRepository,
+    UserLeaveRow,
 )
 from app.tenancy import WorkspaceContext
 from app.util.clock import Clock, SystemClock
@@ -127,9 +143,13 @@ __all__ = [
 
 # Mirrors the ``user_leave.category`` CHECK in
 # :mod:`app.adapters.db.availability.models`. Kept as a Literal so
-# mypy sees the closed set; the import-time guard at the bottom of
-# this module pins it to the DB tuple so a schema widening trips the
-# assert before a request can land an out-of-set value.
+# mypy sees the closed set; the
+# :class:`~tests.unit.adapters.db.test_user_leave.TestCategoryLiteralPinned`
+# adapter test pins the literal to the DB tuple so a schema widening
+# trips the assert before a request can land an out-of-set value
+# (the previous import-time assertion was lifted out of this module
+# at cd-2upg because the Protocol seam forbids the
+# ``app.domain → app.adapters`` import that fed it).
 UserLeaveCategory = Literal["vacation", "sick", "personal", "bereavement", "other"]
 
 
@@ -162,7 +182,8 @@ class UserLeaveInvariantViolated(ValueError):
 class UserLeavePermissionDenied(PermissionError):
     """Caller lacks the capability for the attempted action.
 
-    403-equivalent. Wraps the underlying :class:`~app.authz.PermissionDenied`
+    403-equivalent. Wraps the underlying
+    :class:`~app.domain.identity.availability_ports.SeamPermissionDenied`
     so the router maps a single domain exception to the
     ``user_leave``-specific 403 envelope.
     """
@@ -308,8 +329,16 @@ def _narrow_category(value: str) -> UserLeaveCategory:
     raise ValueError(f"unknown user_leave.category {value!r} on loaded row")
 
 
-def _row_to_view(row: UserLeave) -> UserLeaveView:
-    """Project a SQLAlchemy row into :class:`UserLeaveView`."""
+def _row_to_view(row: UserLeaveRow) -> UserLeaveView:
+    """Project a seam-level :class:`UserLeaveRow` into the public view.
+
+    The repo already returned an immutable, frozen value object; we
+    re-pack it into the public :class:`UserLeaveView` shape so callers
+    keep the dataclass they were already typing against. The seam-
+    level row carries ``category`` as a plain :class:`str`; this is
+    where the open-typed value is narrowed to the
+    :data:`UserLeaveCategory` Literal closed set.
+    """
     return UserLeaveView(
         id=row.id,
         workspace_id=row.workspace_id,
@@ -349,20 +378,18 @@ def _view_to_diff_dict(view: UserLeaveView) -> dict[str, Any]:
 
 
 def _load_row(
-    session: Session,
+    repo: UserLeaveRepository,
     ctx: WorkspaceContext,
     *,
     leave_id: str,
     include_deleted: bool = False,
-) -> UserLeave:
+) -> UserLeaveRow:
     """Return the row or raise :class:`UserLeaveNotFound`."""
-    stmt = select(UserLeave).where(
-        UserLeave.id == leave_id,
-        UserLeave.workspace_id == ctx.workspace_id,
+    row = repo.get(
+        workspace_id=ctx.workspace_id,
+        leave_id=leave_id,
+        include_deleted=include_deleted,
     )
-    if not include_deleted:
-        stmt = stmt.where(UserLeave.deleted_at.is_(None))
-    row = session.scalars(stmt).one_or_none()
     if row is None:
         raise UserLeaveNotFound(leave_id)
     return row
@@ -373,39 +400,8 @@ def _load_row(
 # ---------------------------------------------------------------------------
 
 
-def _require_capability(
-    session: Session,
-    ctx: WorkspaceContext,
-    *,
-    action_key: str,
-) -> None:
-    """Enforce ``action_key`` on the caller's workspace or raise.
-
-    Wraps :func:`app.authz.require` and translates a caller-bug
-    (unknown key / invalid scope) into :class:`RuntimeError` so the
-    router can surface it as 500 without confusing it with the 403
-    that a genuine :class:`~app.authz.PermissionDenied` produces.
-
-    Mirrors :func:`app.services.leave.service._require_capability` —
-    once a third caller wants the same shape we extract it into
-    :mod:`app.authz`.
-    """
-    try:
-        require(
-            session,
-            ctx,
-            action_key=action_key,
-            scope_kind="workspace",
-            scope_id=ctx.workspace_id,
-        )
-    except (UnknownActionKey, InvalidScope) as exc:
-        raise RuntimeError(
-            f"authz catalog misconfigured for {action_key!r}: {exc!s}"
-        ) from exc
-
-
 def _gate_or_self(
-    session: Session,
+    checker: CapabilityChecker,
     ctx: WorkspaceContext,
     *,
     target_user_id: str,
@@ -415,58 +411,16 @@ def _gate_or_self(
 
     Centralises the "requester-or-manager" rule shared by every
     cross-user write in this service. Raising
-    :class:`UserLeavePermissionDenied` (not the bare
-    :class:`~app.authz.PermissionDenied`) lets the router's error
-    map stay narrow — one domain exception type per 403 shape.
+    :class:`UserLeavePermissionDenied` (not the bare seam
+    :class:`SeamPermissionDenied`) lets the router's error map stay
+    narrow — one domain exception type per 403 shape.
     """
     if target_user_id == ctx.actor_id:
         return
     try:
-        _require_capability(session, ctx, action_key=cross_user_action)
-    except PermissionDenied as exc:
+        checker.require(cross_user_action)
+    except SeamPermissionDenied as exc:
         raise UserLeavePermissionDenied(str(exc)) from exc
-
-
-def _can_edit_others(session: Session, ctx: WorkspaceContext) -> bool:
-    """Return ``True`` iff the caller holds ``leaves.edit_others``.
-
-    The canonical "is this caller a manager / owner" question routes
-    through the action catalog so the auto-approve trigger shares its
-    authority with every other ``leaves.edit_others`` gate in this
-    module. §05 "Action catalog" pins the default to
-    ``{owners, managers}``; consulting :func:`require` ensures the
-    decision honours catalog overrides (a deployment that grants
-    ``leaves.edit_others`` to ``all_workers`` via ``permission_rule``
-    would auto-approve those workers' self-submissions, which is
-    exactly the consistent behaviour ops would expect).
-
-    Reading ``ctx.actor_grant_role`` directly was the previous
-    implementation, but §05 + the middleware comment ("audit-shape
-    hint, not the authority") flag that field as deliberately
-    advisory. A property-scoped ``manager`` grant pushes
-    ``actor_grant_role='manager'`` onto the context but does **not**
-    confer workspace-scope ``managers`` group membership (§02
-    "Derived group membership"), so the previous shape would have
-    auto-approved a property-only manager creating a workspace-wide
-    leave for themselves. The catalog gate filters that case out
-    because :func:`app.authz.membership.is_member_of` requires
-    ``scope_property_id IS NULL`` for the ``managers`` derived group.
-    """
-    try:
-        require(
-            session,
-            ctx,
-            action_key="leaves.edit_others",
-            scope_kind="workspace",
-            scope_id=ctx.workspace_id,
-        )
-    except PermissionDenied:
-        return False
-    except (UnknownActionKey, InvalidScope) as exc:
-        raise RuntimeError(
-            f"authz catalog misconfigured for 'leaves.edit_others': {exc!s}"
-        ) from exc
-    return True
 
 
 # ---------------------------------------------------------------------------
@@ -475,7 +429,8 @@ def _can_edit_others(session: Session, ctx: WorkspaceContext) -> bool:
 
 
 def list_leaves(
-    session: Session,
+    repo: UserLeaveRepository,
+    checker: CapabilityChecker,
     ctx: WorkspaceContext,
     *,
     filters: UserLeaveListFilter | None = None,
@@ -513,41 +468,32 @@ def list_leaves(
     if target_user_id is None:
         # Manager inbox — no per-user filter means cross-user surface.
         try:
-            _require_capability(session, ctx, action_key="leaves.view_others")
-        except PermissionDenied as exc:
+            checker.require("leaves.view_others")
+        except SeamPermissionDenied as exc:
             raise UserLeavePermissionDenied(str(exc)) from exc
     else:
         _gate_or_self(
-            session,
+            checker,
             ctx,
             target_user_id=target_user_id,
             cross_user_action="leaves.view_others",
         )
 
-    stmt = select(UserLeave).where(
-        UserLeave.workspace_id == ctx.workspace_id,
-        UserLeave.deleted_at.is_(None),
+    rows = repo.list(
+        workspace_id=ctx.workspace_id,
+        limit=limit,
+        after_id=after_id,
+        user_id=target_user_id,
+        status=resolved.status,
+        starts_after=resolved.starts_after,
+        ends_before=resolved.ends_before,
     )
-    if target_user_id is not None:
-        stmt = stmt.where(UserLeave.user_id == target_user_id)
-    if resolved.status == "approved":
-        stmt = stmt.where(UserLeave.approved_at.is_not(None))
-    elif resolved.status == "pending":
-        stmt = stmt.where(UserLeave.approved_at.is_(None))
-    if resolved.starts_after is not None:
-        stmt = stmt.where(UserLeave.starts_on >= resolved.starts_after)
-    if resolved.ends_before is not None:
-        stmt = stmt.where(UserLeave.ends_on <= resolved.ends_before)
-    if after_id is not None:
-        stmt = stmt.where(UserLeave.id > after_id)
-    stmt = stmt.order_by(UserLeave.id.asc()).limit(limit + 1)
-
-    rows = session.scalars(stmt).all()
     return [_row_to_view(r) for r in rows]
 
 
 def get_leave(
-    session: Session,
+    repo: UserLeaveRepository,
+    checker: CapabilityChecker,
     ctx: WorkspaceContext,
     *,
     leave_id: str,
@@ -560,9 +506,9 @@ def get_leave(
     already narrowed the SELECT so a foreign-workspace row never
     surfaces here.
     """
-    row = _load_row(session, ctx, leave_id=leave_id)
+    row = _load_row(repo, ctx, leave_id=leave_id)
     _gate_or_self(
-        session,
+        checker,
         ctx,
         target_user_id=row.user_id,
         cross_user_action="leaves.view_others",
@@ -576,7 +522,8 @@ def get_leave(
 
 
 def create_leave(
-    session: Session,
+    repo: UserLeaveRepository,
+    checker: CapabilityChecker,
     ctx: WorkspaceContext,
     *,
     body: UserLeaveCreate,
@@ -612,10 +559,10 @@ def create_leave(
 
     try:
         if target_user_id != ctx.actor_id:
-            _require_capability(session, ctx, action_key="leaves.edit_others")
+            checker.require("leaves.edit_others")
         else:
-            _require_capability(session, ctx, action_key="leaves.create_self")
-    except PermissionDenied as exc:
+            checker.require("leaves.create_self")
+    except SeamPermissionDenied as exc:
         raise UserLeavePermissionDenied(str(exc)) from exc
 
     # Defence-in-depth: the DTO already enforces this, but a Python
@@ -628,31 +575,27 @@ def create_leave(
             f"starts_on {body.starts_on.isoformat()!r}"
         )
 
-    auto_approve = (not force_pending) and _can_edit_others(session, ctx)
+    auto_approve = (not force_pending) and checker.has("leaves.edit_others")
     approved_at: datetime | None = now if auto_approve else None
     approved_by: str | None = ctx.actor_id if auto_approve else None
 
     row_id = new_ulid(clock=clock)
-    row = UserLeave(
-        id=row_id,
+    row = repo.insert(
+        leave_id=row_id,
         workspace_id=ctx.workspace_id,
         user_id=target_user_id,
         starts_on=body.starts_on,
         ends_on=body.ends_on,
         category=body.category,
+        note_md=body.note_md,
         approved_at=approved_at,
         approved_by=approved_by,
-        note_md=body.note_md,
-        created_at=now,
-        updated_at=now,
-        deleted_at=None,
+        now=now,
     )
-    session.add(row)
-    session.flush()
 
     view = _row_to_view(row)
     write_audit(
-        session,
+        repo.session,
         ctx,
         entity_kind="user_leave",
         entity_id=row.id,
@@ -664,7 +607,8 @@ def create_leave(
 
 
 def update_leave(
-    session: Session,
+    repo: UserLeaveRepository,
+    checker: CapabilityChecker,
     ctx: WorkspaceContext,
     *,
     leave_id: str,
@@ -689,10 +633,10 @@ def update_leave(
     """
     resolved_clock = clock if clock is not None else SystemClock()
     now = resolved_clock.now()
-    row = _load_row(session, ctx, leave_id=leave_id)
+    row = _load_row(repo, ctx, leave_id=leave_id)
 
     _gate_or_self(
-        session,
+        checker,
         ctx,
         target_user_id=row.user_id,
         cross_user_action="leaves.edit_others",
@@ -708,7 +652,7 @@ def update_leave(
     if not sent:
         return _row_to_view(row)
 
-    # Compute the post-update window before we mutate the row so the
+    # Compute the post-update window before invoking the repo so the
     # DTO's ``starts_on`` / ``ends_on`` validator (which only sees
     # both edges when both are sent) extends to the row state when
     # only one edge is sent. A field that's in ``model_fields_set``
@@ -731,42 +675,63 @@ def update_leave(
             f"starts_on {new_starts.isoformat()!r}"
         )
 
-    before = _row_to_view(row)
-    changed = False
-
-    if (
+    # Detect deltas before invoking the repo — a zero-delta PATCH
+    # skips both the SA write and the audit row. ``starts_on`` /
+    # ``ends_on`` / ``category`` are non-nullable; a sent ``None``
+    # is treated as "unchanged". For the nullable ``note_md`` we
+    # distinguish "send JSON null to clear" from "field omitted";
+    # the repo's ``clear_note_md`` flag carries it through to the SQL.
+    starts_changed = (
         "starts_on" in sent
         and body.starts_on is not None
         and body.starts_on != row.starts_on
-    ):
-        row.starts_on = body.starts_on
-        changed = True
-    if "ends_on" in sent and body.ends_on is not None and body.ends_on != row.ends_on:
-        row.ends_on = body.ends_on
-        changed = True
-    if (
+    )
+    ends_changed = (
+        "ends_on" in sent and body.ends_on is not None and body.ends_on != row.ends_on
+    )
+    category_changed = (
         "category" in sent
         and body.category is not None
         and body.category != row.category
-    ):
-        row.category = body.category
-        changed = True
-    if "note_md" in sent and body.note_md != row.note_md:
-        row.note_md = body.note_md
-        changed = True
+    )
+    note_clear = "note_md" in sent and body.note_md is None
+    note_set = (
+        "note_md" in sent and body.note_md is not None and body.note_md != row.note_md
+    )
 
+    # ``clear`` flag only meaningful when the row currently holds a
+    # value — otherwise a "clear None over None" is not a delta.
+    note_clear_effective = note_clear and row.note_md is not None
+
+    changed = (
+        starts_changed
+        or ends_changed
+        or category_changed
+        or note_clear_effective
+        or note_set
+    )
+
+    before = _row_to_view(row)
     if not changed:
         return before
 
-    row.updated_at = now
-    session.flush()
-    after = _row_to_view(row)
+    after_row = repo.update_fields(
+        workspace_id=ctx.workspace_id,
+        leave_id=leave_id,
+        starts_on=body.starts_on if starts_changed else None,
+        ends_on=body.ends_on if ends_changed else None,
+        category=body.category if category_changed else None,
+        note_md=body.note_md if note_set else None,
+        clear_note_md=note_clear_effective,
+        now=now,
+    )
+    after = _row_to_view(after_row)
 
     write_audit(
-        session,
+        repo.session,
         ctx,
         entity_kind="user_leave",
-        entity_id=row.id,
+        entity_id=after.id,
         action="user_leave.updated",
         diff={
             "before": _view_to_diff_dict(before),
@@ -778,7 +743,8 @@ def update_leave(
 
 
 def approve_leave(
-    session: Session,
+    repo: UserLeaveRepository,
+    checker: CapabilityChecker,
     ctx: WorkspaceContext,
     *,
     leave_id: str,
@@ -802,28 +768,30 @@ def approve_leave(
     """
     resolved_clock = clock if clock is not None else SystemClock()
     now = resolved_clock.now()
-    row = _load_row(session, ctx, leave_id=leave_id)
+    row = _load_row(repo, ctx, leave_id=leave_id)
 
     try:
-        _require_capability(session, ctx, action_key="leaves.edit_others")
-    except PermissionDenied as exc:
+        checker.require("leaves.edit_others")
+    except SeamPermissionDenied as exc:
         raise UserLeavePermissionDenied(str(exc)) from exc
 
     if row.approved_at is not None:
         raise UserLeaveTransitionForbidden(f"leave {leave_id!r} is already approved")
 
     before = _row_to_view(row)
-    row.approved_at = now
-    row.approved_by = ctx.actor_id
-    row.updated_at = now
-    session.flush()
-    after = _row_to_view(row)
+    after_row = repo.stamp_approved(
+        workspace_id=ctx.workspace_id,
+        leave_id=leave_id,
+        approved_by=ctx.actor_id,
+        now=now,
+    )
+    after = _row_to_view(after_row)
 
     write_audit(
-        session,
+        repo.session,
         ctx,
         entity_kind="user_leave",
-        entity_id=row.id,
+        entity_id=after.id,
         action="user_leave.approved",
         diff={
             "before": _view_to_diff_dict(before),
@@ -835,7 +803,8 @@ def approve_leave(
 
 
 def reject_leave(
-    session: Session,
+    repo: UserLeaveRepository,
+    checker: CapabilityChecker,
     ctx: WorkspaceContext,
     *,
     leave_id: str,
@@ -863,11 +832,11 @@ def reject_leave(
     """
     resolved_clock = clock if clock is not None else SystemClock()
     now = resolved_clock.now()
-    row = _load_row(session, ctx, leave_id=leave_id)
+    row = _load_row(repo, ctx, leave_id=leave_id)
 
     try:
-        _require_capability(session, ctx, action_key="leaves.edit_others")
-    except PermissionDenied as exc:
+        checker.require("leaves.edit_others")
+    except SeamPermissionDenied as exc:
         raise UserLeavePermissionDenied(str(exc)) from exc
 
     if row.approved_at is not None:
@@ -877,22 +846,28 @@ def reject_leave(
         )
 
     before = _row_to_view(row)
-    row.deleted_at = now
-    row.updated_at = now
+
+    folded_note: str | None = None
     if reason_md is not None and reason_md.strip():
         # Concatenate rather than overwrite so the worker's original
         # request stays visible alongside the rejection rationale.
         # An empty / whitespace-only reason is treated as no reason.
         prefix = f"{row.note_md}\n\n" if row.note_md else ""
-        row.note_md = f"{prefix}Rejected: {reason_md}"
-    session.flush()
-    after = _row_to_view(row)
+        folded_note = f"{prefix}Rejected: {reason_md}"
+
+    after_row = repo.soft_delete(
+        workspace_id=ctx.workspace_id,
+        leave_id=leave_id,
+        note_md=folded_note,
+        now=now,
+    )
+    after = _row_to_view(after_row)
 
     write_audit(
-        session,
+        repo.session,
         ctx,
         entity_kind="user_leave",
-        entity_id=row.id,
+        entity_id=after.id,
         action="user_leave.rejected",
         diff={
             "before": _view_to_diff_dict(before),
@@ -905,7 +880,8 @@ def reject_leave(
 
 
 def delete_leave(
-    session: Session,
+    repo: UserLeaveRepository,
+    checker: CapabilityChecker,
     ctx: WorkspaceContext,
     *,
     leave_id: str,
@@ -927,26 +903,31 @@ def delete_leave(
     """
     resolved_clock = clock if clock is not None else SystemClock()
     now = resolved_clock.now()
-    row = _load_row(session, ctx, leave_id=leave_id)
+    row = _load_row(repo, ctx, leave_id=leave_id)
 
     _gate_or_self(
-        session,
+        checker,
         ctx,
         target_user_id=row.user_id,
         cross_user_action="leaves.edit_others",
     )
 
     before = _row_to_view(row)
-    row.deleted_at = now
-    row.updated_at = now
-    session.flush()
-    after = _row_to_view(row)
+    after_row = repo.soft_delete(
+        workspace_id=ctx.workspace_id,
+        leave_id=leave_id,
+        # No note_md mutation on the canonical withdraw path — the
+        # worker's original explanation survives intact.
+        note_md=None,
+        now=now,
+    )
+    after = _row_to_view(after_row)
 
     write_audit(
-        session,
+        repo.session,
         ctx,
         entity_kind="user_leave",
-        entity_id=row.id,
+        entity_id=after.id,
         action="user_leave.deleted",
         diff={
             "before": _view_to_diff_dict(before),
@@ -962,19 +943,11 @@ def delete_leave(
 # ---------------------------------------------------------------------------
 
 
-# Pin the assumptions this module makes about the DB CHECK enum.
-# Importing the private tuple keeps the assert honest: a future
-# migration that widens the category set without updating the
-# Literal here trips at module-import time, before any request can
-# land an unknown value.
-from app.adapters.db.availability.models import (  # noqa: E402
-    _LEAVE_CATEGORY_VALUES as _DB_CATEGORY_VALUES,
-)
-
-assert set(_DB_CATEGORY_VALUES) == {
-    "vacation",
-    "sick",
-    "personal",
-    "bereavement",
-    "other",
-}, "UserLeaveCategory literal diverged from DB CHECK set"
+# Pin against schema drift lives in
+# :mod:`tests.unit.adapters.db.test_user_leave` post-cd-2upg — the
+# domain layer can no longer import the adapter's private tuple now
+# that the Protocol seam forbids the ``app.domain → app.adapters``
+# edge. The test imports both sides (which is allowed in the test
+# layer) and asserts the literal mirrors the DB CHECK set, fulfilling
+# the same "trip on a schema widening" guarantee the previous
+# module-import assert provided.

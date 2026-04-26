@@ -364,7 +364,7 @@ def make_seam_pair(
     :mod:`app.api.v1.me_schedule` router — which dispatches a self-only
     subset of the same surface — can reuse the wiring without taking
     a dependency on a conventionally module-private name. The cd-2upg
-    leaves seam will land its own ``make_seam_pair`` adjacent to the
+    leaves seam ships its own ``make_seam_pair`` adjacent to the
     leaves router; both share the ``(session, ctx)`` shape because the
     underlying :class:`SqlAlchemyCapabilityChecker` is the one piece
     that crosses both surfaces.

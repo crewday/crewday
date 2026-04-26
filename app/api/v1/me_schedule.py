@@ -71,6 +71,9 @@ from app.api.v1.user_leaves import (
     _http_for_invariant as _http_for_leave_invariant,
 )
 from app.api.v1.user_leaves import _view_to_response as _leave_view_to_response
+from app.api.v1.user_leaves import (
+    make_seam_pair as make_leave_seam_pair,
+)
 from app.domain.identity.me_schedule import (
     PendingItems,
     PublicHolidayView,
@@ -406,8 +409,11 @@ def build_me_schedule_router() -> APIRouter:
             category=body.category,
             note_md=body.note_md,
         )
+        repo, checker = make_leave_seam_pair(session, ctx)
         try:
-            view = create_leave(session, ctx, body=service_body, force_pending=True)
+            view = create_leave(
+                repo, checker, ctx, body=service_body, force_pending=True
+            )
         except UserLeavePermissionDenied as exc:
             # ``leaves.create_self`` is auto-allowed to ``all_workers``
             # in the default catalog; a 403 here implies a deployment

@@ -1,11 +1,10 @@
 """Identity context — repository + capability seams for availability rows (cd-r5j2).
 
 Defines the seams :mod:`app.domain.identity.user_availability_overrides`
-(and, transitively cd-2upg, :mod:`app.domain.identity.user_leaves`) use
-to read and write availability rows in
-:mod:`app.adapters.db.availability.models` plus to enforce action-catalog
-capabilities — without importing SQLAlchemy model classes or
-:mod:`app.authz`.
+and :mod:`app.domain.identity.user_leaves` (cd-2upg) use to read and
+write availability rows in :mod:`app.adapters.db.availability.models`
+plus to enforce action-catalog capabilities — without importing
+SQLAlchemy model classes or :mod:`app.authz`.
 
 Spec: ``docs/specs/01-architecture.md`` §"Boundary rules" rule 4 —
 each context defines its own repository port in its public surface
@@ -14,7 +13,7 @@ each context defines its own repository port in its public surface
 focused on the authz primitives it already declares
 (:class:`PermissionGroupRepository` / :class:`RoleGrantRepository`)).
 
-Two seams live here:
+Three seams live here:
 
 * :class:`UserAvailabilityOverrideRepository` — CRUD on the
   ``user_availability_override`` table plus the per-user weekly
@@ -22,12 +21,15 @@ Two seams live here:
   immutable :class:`UserAvailabilityOverrideRow` /
   :class:`UserWeeklyAvailabilityRow` projections so the domain never
   sees an ORM row.
+* :class:`UserLeaveRepository` — CRUD on the ``user_leave`` table
+  for the date-range leave state machine. Returns immutable
+  :class:`UserLeaveRow` projections.
 * :class:`CapabilityChecker` — workspace-scoped authz probe for the
-  `availability_overrides.*` (and, with cd-2upg, ``leaves.*``) action
-  keys. Wraps :func:`app.authz.require` at the adapter layer so the
-  domain service does not transitively pull
-  :mod:`app.adapters.db.authz.models` via :mod:`app.authz.membership`
-  / :mod:`app.authz.owners` (the cd-7qxh stopgap rationale).
+  ``availability_overrides.*`` and ``leaves.*`` action keys. Wraps
+  :func:`app.authz.require` at the adapter layer so the domain
+  service does not transitively pull :mod:`app.adapters.db.authz.models`
+  via :mod:`app.authz.membership` / :mod:`app.authz.owners` (the
+  cd-7qxh stopgap rationale).
 
 **Why a separate repo per table (not one shared
 ``AvailabilityRepository``).** ``user_availability_override`` and
@@ -37,8 +39,8 @@ state machines (override carries ``approval_required`` + the weekly-
 pattern lookup; leave carries date-range + category filters). Per-
 table repos keep each Protocol surface focused — the override repo
 exposes the weekly-pattern lookup the approval calculator needs, and
-the future leave repo (cd-2upg) keeps its own filter shape. Both SA
-concretions live side-by-side in
+the leave repo keeps its own date-range / category filter shape.
+Both SA concretions live side-by-side in
 :mod:`app.adapters.db.availability.repositories` so the file count
 does not balloon.
 
@@ -80,6 +82,8 @@ __all__ = [
     "SeamPermissionDenied",
     "UserAvailabilityOverrideRepository",
     "UserAvailabilityOverrideRow",
+    "UserLeaveRepository",
+    "UserLeaveRow",
     "UserWeeklyAvailabilityRow",
 ]
 
@@ -161,6 +165,38 @@ class UserWeeklyAvailabilityRow:
     starts_local: time | None
     ends_local: time | None
     updated_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class UserLeaveRow:
+    """Immutable projection of a ``user_leave`` row.
+
+    Mirrors the shape of
+    :class:`app.domain.identity.user_leaves.UserLeaveView`; declared
+    here so the Protocol surface does not depend on the service module
+    (which itself imports this seam).
+
+    ``category`` is held as a plain :class:`str` on the seam — the DB
+    CHECK constrains the closed set, and the service narrows the
+    loaded value into its :data:`~app.domain.identity.user_leaves.UserLeaveCategory`
+    Literal in :func:`~app.domain.identity.user_leaves._row_to_view`.
+    Keeping the seam open-typed avoids re-asserting the same Literal
+    in two places (and the import-time guard in the service still
+    pins the literal to the DB tuple).
+    """
+
+    id: str
+    workspace_id: str
+    user_id: str
+    starts_on: date
+    ends_on: date
+    category: str
+    approved_at: datetime | None
+    approved_by: str | None
+    note_md: str | None
+    created_at: datetime
+    updated_at: datetime
+    deleted_at: datetime | None
 
 
 # ---------------------------------------------------------------------------
@@ -354,6 +390,179 @@ class UserAvailabilityOverrideRepository(Protocol):
         already confirmed the row exists via :meth:`get`.
 
         The SA concretion only writes ``reason`` when the caller
+        passes a non-``None`` value — this matches the service-layer
+        "preserve the worker's original explanation" rule.
+        """
+        ...
+
+
+# ---------------------------------------------------------------------------
+# UserLeaveRepository
+# ---------------------------------------------------------------------------
+
+
+class UserLeaveRepository(Protocol):
+    """Read + write seam for the ``user_leave`` table.
+
+    The repo carries an open SQLAlchemy ``Session`` so domain callers
+    that also need :func:`app.audit.write_audit` (which still takes a
+    concrete ``Session`` today) can thread the same UoW without
+    holding a second seam. The accessor drops once the audit writer
+    gains its own Protocol port.
+
+    Every method honours the workspace-scoping invariant: the SA
+    concretion always pins reads + writes to the ``workspace_id``
+    passed by the caller, mirroring the ORM tenant filter as
+    defence-in-depth (a misconfigured filter must fail loud).
+
+    The repo never commits outside what the underlying statements
+    require — the caller's UoW owns the transaction boundary (§01
+    "Key runtime invariants" #3). Mutating methods flush so the
+    caller's next read (and the audit writer's FK reference to
+    ``entity_id``) sees the new row.
+    """
+
+    @property
+    def session(self) -> Session:
+        """Return the underlying SQLAlchemy session.
+
+        Exposed for callers that need to thread the same UoW through
+        :func:`app.audit.write_audit` (which still takes a concrete
+        ``Session`` today). Drops when the audit writer gains its
+        own Protocol port.
+        """
+        ...
+
+    # -- Reads -----------------------------------------------------------
+
+    def get(
+        self,
+        *,
+        workspace_id: str,
+        leave_id: str,
+        include_deleted: bool = False,
+    ) -> UserLeaveRow | None:
+        """Return the row or ``None`` when invisible to the caller.
+
+        Defence-in-depth pins the lookup to ``workspace_id`` even
+        though the ORM tenant filter already narrows the read; a
+        misconfigured filter must fail loud, not silently.
+        ``include_deleted=True`` skips the ``deleted_at IS NULL``
+        predicate.
+        """
+        ...
+
+    def list(
+        self,
+        *,
+        workspace_id: str,
+        limit: int,
+        after_id: str | None = None,
+        user_id: str | None = None,
+        status: Literal["approved", "pending"] | None = None,
+        starts_after: date | None = None,
+        ends_before: date | None = None,
+    ) -> Sequence[UserLeaveRow]:
+        """Return up to ``limit + 1`` live rows for the workspace, ``id ASC``.
+
+        The caller (a cursor-paginated router) asks for ``limit + 1``
+        so the :func:`~app.api.pagination.paginate` helper can compute
+        ``has_more`` without a second query. Tombstones (``deleted_at
+        IS NOT NULL``) are always filtered out — the live-list path
+        is the only consumer of this method.
+
+        ``status='approved'`` narrows to ``approved_at IS NOT NULL``;
+        ``status='pending'`` narrows to ``approved_at IS NULL``.
+        ``starts_after`` filters rows with ``starts_on >= starts_after``;
+        ``ends_before`` filters rows with ``ends_on <= ends_before``.
+        """
+        ...
+
+    # -- Writes ----------------------------------------------------------
+
+    def insert(
+        self,
+        *,
+        leave_id: str,
+        workspace_id: str,
+        user_id: str,
+        starts_on: date,
+        ends_on: date,
+        category: str,
+        note_md: str | None,
+        approved_at: datetime | None,
+        approved_by: str | None,
+        now: datetime,
+    ) -> UserLeaveRow:
+        """Insert a new ``user_leave`` row and return its projection.
+
+        Flushes so the caller's next read (and the audit writer's
+        FK reference to ``entity_id``) sees the new row. ``now`` is
+        the caller's clock-resolved insertion time — used for both
+        ``created_at`` and ``updated_at``.
+        """
+        ...
+
+    def update_fields(
+        self,
+        *,
+        workspace_id: str,
+        leave_id: str,
+        starts_on: date | None = None,
+        ends_on: date | None = None,
+        category: str | None = None,
+        note_md: str | None = None,
+        clear_note_md: bool = False,
+        now: datetime,
+    ) -> UserLeaveRow:
+        """Apply the explicit-sparse partial update and return the refreshed projection.
+
+        ``starts_on`` / ``ends_on`` / ``category`` are non-nullable
+        columns; ``None`` means "unchanged". ``note_md`` is nullable;
+        ``clear_note_md=True`` distinguishes "send JSON null to
+        clear" from "field omitted from PATCH". Stamps ``updated_at
+        = now`` and flushes when something actually changed.
+
+        Caller has already confirmed the row exists, applied the
+        ``ends_on >= starts_on`` invariant, and filtered zero-delta
+        calls — this method is a pure SA write.
+        """
+        ...
+
+    def stamp_approved(
+        self,
+        *,
+        workspace_id: str,
+        leave_id: str,
+        approved_by: str,
+        now: datetime,
+    ) -> UserLeaveRow:
+        """Stamp ``approved_at`` + ``approved_by`` + ``updated_at`` and flush.
+
+        Caller is responsible for the state-machine guard (the row
+        must be pending). Returns the refreshed projection.
+        """
+        ...
+
+    def soft_delete(
+        self,
+        *,
+        workspace_id: str,
+        leave_id: str,
+        note_md: str | None = None,
+        now: datetime,
+    ) -> UserLeaveRow:
+        """Stamp ``deleted_at`` + ``updated_at`` and return the tombstoned projection.
+
+        ``note_md`` is set to the post-rejection text when the caller
+        is :func:`~app.domain.identity.user_leaves.reject_leave`
+        (which folds the rejection rationale into the existing
+        ``note_md``); set to ``None`` for the canonical
+        :func:`~app.domain.identity.user_leaves.delete_leave`
+        withdraw path which leaves ``note_md`` intact. Caller has
+        already confirmed the row exists via :meth:`get`.
+
+        The SA concretion only writes ``note_md`` when the caller
         passes a non-``None`` value — this matches the service-layer
         "preserve the worker's original explanation" rule.
         """

@@ -7,14 +7,17 @@ Protocol surfaces the availability domain services consume (cd-r5j2):
   ``user_availability_override`` table plus the ``user_weekly_availability``
   lookup the §06 hybrid-approval calculator needs. Consumed by
   :mod:`app.domain.identity.user_availability_overrides`.
+* :class:`SqlAlchemyUserLeaveRepository` — wraps the ``user_leave``
+  table for the leave state machine. Consumed by
+  :mod:`app.domain.identity.user_leaves` (cd-2upg).
 * :class:`SqlAlchemyCapabilityChecker` — wraps :func:`app.authz.require`
   so the availability domain services don't transitively pull
   :mod:`app.adapters.db.authz.models` via :mod:`app.authz.membership`
-  / :mod:`app.authz.owners` (the cd-7qxh stopgap rationale). Re-used
-  by the future ``user_leaves`` seam (cd-2upg).
+  / :mod:`app.authz.owners` (the cd-7qxh stopgap rationale). Shared
+  by both the override and leave services.
 
 Reaches into :mod:`app.adapters.db.availability.models` (for the
-override + weekly-pattern rows) and :mod:`app.authz` (for the
+override + leave + weekly-pattern rows) and :mod:`app.authz` (for the
 underlying :func:`require` enforcement). Adapter-to-adapter +
 adapter-to-app.authz imports are allowed by the import-linter — only
 ``app.domain → app.adapters`` is forbidden.
@@ -38,6 +41,7 @@ from sqlalchemy.orm import Session
 
 from app.adapters.db.availability.models import (
     UserAvailabilityOverride,
+    UserLeave,
     UserWeeklyAvailability,
 )
 from app.authz import (
@@ -51,6 +55,8 @@ from app.domain.identity.availability_ports import (
     SeamPermissionDenied,
     UserAvailabilityOverrideRepository,
     UserAvailabilityOverrideRow,
+    UserLeaveRepository,
+    UserLeaveRow,
     UserWeeklyAvailabilityRow,
 )
 from app.tenancy import WorkspaceContext
@@ -58,6 +64,7 @@ from app.tenancy import WorkspaceContext
 __all__ = [
     "SqlAlchemyCapabilityChecker",
     "SqlAlchemyUserAvailabilityOverrideRepository",
+    "SqlAlchemyUserLeaveRepository",
 ]
 
 
@@ -330,6 +337,234 @@ class SqlAlchemyUserAvailabilityOverrideRepository(UserAvailabilityOverrideRepos
             row.reason = reason
         self._session.flush()
         return _to_override_row(row)
+
+
+# ---------------------------------------------------------------------------
+# Leave repository
+# ---------------------------------------------------------------------------
+
+
+def _to_leave_row(row: UserLeave) -> UserLeaveRow:
+    """Project an ORM ``UserLeave`` into the seam-level row.
+
+    Field-by-field copy — :class:`UserLeaveRow` is frozen so the
+    domain never mutates the ORM-managed instance through a shared
+    reference.
+    """
+    return UserLeaveRow(
+        id=row.id,
+        workspace_id=row.workspace_id,
+        user_id=row.user_id,
+        starts_on=row.starts_on,
+        ends_on=row.ends_on,
+        category=row.category,
+        approved_at=row.approved_at,
+        approved_by=row.approved_by,
+        note_md=row.note_md,
+        created_at=row.created_at,
+        updated_at=row.updated_at,
+        deleted_at=row.deleted_at,
+    )
+
+
+class SqlAlchemyUserLeaveRepository(UserLeaveRepository):
+    """SA-backed concretion of :class:`UserLeaveRepository`.
+
+    Wraps an open :class:`~sqlalchemy.orm.Session` and never commits
+    outside what the underlying statements require — the caller's
+    UoW owns the transaction boundary (§01 "Key runtime invariants"
+    #3).
+    """
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    @property
+    def session(self) -> Session:
+        return self._session
+
+    # -- Reads -----------------------------------------------------------
+
+    def get(
+        self,
+        *,
+        workspace_id: str,
+        leave_id: str,
+        include_deleted: bool = False,
+    ) -> UserLeaveRow | None:
+        stmt = select(UserLeave).where(
+            UserLeave.id == leave_id,
+            UserLeave.workspace_id == workspace_id,
+        )
+        if not include_deleted:
+            stmt = stmt.where(UserLeave.deleted_at.is_(None))
+        row = self._session.scalars(stmt).one_or_none()
+        return _to_leave_row(row) if row is not None else None
+
+    def list(
+        self,
+        *,
+        workspace_id: str,
+        limit: int,
+        after_id: str | None = None,
+        user_id: str | None = None,
+        status: Literal["approved", "pending"] | None = None,
+        starts_after: _date_cls | None = None,
+        ends_before: _date_cls | None = None,
+    ) -> Sequence[UserLeaveRow]:
+        stmt = select(UserLeave).where(
+            UserLeave.workspace_id == workspace_id,
+            UserLeave.deleted_at.is_(None),
+        )
+        if user_id is not None:
+            stmt = stmt.where(UserLeave.user_id == user_id)
+        if status == "approved":
+            stmt = stmt.where(UserLeave.approved_at.is_not(None))
+        elif status == "pending":
+            stmt = stmt.where(UserLeave.approved_at.is_(None))
+        if starts_after is not None:
+            stmt = stmt.where(UserLeave.starts_on >= starts_after)
+        if ends_before is not None:
+            stmt = stmt.where(UserLeave.ends_on <= ends_before)
+        if after_id is not None:
+            stmt = stmt.where(UserLeave.id > after_id)
+        stmt = stmt.order_by(UserLeave.id.asc()).limit(limit + 1)
+        rows = self._session.scalars(stmt).all()
+        return [_to_leave_row(r) for r in rows]
+
+    # -- Writes ----------------------------------------------------------
+
+    def insert(
+        self,
+        *,
+        leave_id: str,
+        workspace_id: str,
+        user_id: str,
+        starts_on: _date_cls,
+        ends_on: _date_cls,
+        category: str,
+        note_md: str | None,
+        approved_at: datetime | None,
+        approved_by: str | None,
+        now: datetime,
+    ) -> UserLeaveRow:
+        row = UserLeave(
+            id=leave_id,
+            workspace_id=workspace_id,
+            user_id=user_id,
+            starts_on=starts_on,
+            ends_on=ends_on,
+            category=category,
+            approved_at=approved_at,
+            approved_by=approved_by,
+            note_md=note_md,
+            created_at=now,
+            updated_at=now,
+            deleted_at=None,
+        )
+        self._session.add(row)
+        self._session.flush()
+        return _to_leave_row(row)
+
+    def update_fields(
+        self,
+        *,
+        workspace_id: str,
+        leave_id: str,
+        starts_on: _date_cls | None = None,
+        ends_on: _date_cls | None = None,
+        category: str | None = None,
+        note_md: str | None = None,
+        clear_note_md: bool = False,
+        now: datetime,
+    ) -> UserLeaveRow:
+        # Caller has just confirmed the row exists via :meth:`get`;
+        # use the same workspace-scoped SELECT shape so the caller's
+        # UoW reuses the identity-map entry rather than spawning a
+        # second instance for the same primary key. Tombstoned rows
+        # are excluded — the caller's state-machine guard already
+        # rejects approved / deleted rows from this path.
+        row = self._session.scalars(
+            select(UserLeave).where(
+                UserLeave.id == leave_id,
+                UserLeave.workspace_id == workspace_id,
+                UserLeave.deleted_at.is_(None),
+            )
+        ).one()
+
+        # Caller has already filtered the deltas (zero-delta calls
+        # never reach us); apply each sent field. ``clear_note_md``
+        # distinguishes "send JSON null to clear" from "field omitted"
+        # for the only nullable column. The other three are
+        # non-nullable; a ``None`` argument is "unchanged".
+        changed = False
+        if starts_on is not None and starts_on != row.starts_on:
+            row.starts_on = starts_on
+            changed = True
+        if ends_on is not None and ends_on != row.ends_on:
+            row.ends_on = ends_on
+            changed = True
+        if category is not None and category != row.category:
+            row.category = category
+            changed = True
+        if clear_note_md and row.note_md is not None:
+            row.note_md = None
+            changed = True
+        elif note_md is not None and note_md != row.note_md:
+            row.note_md = note_md
+            changed = True
+
+        if changed:
+            row.updated_at = now
+            self._session.flush()
+        return _to_leave_row(row)
+
+    def stamp_approved(
+        self,
+        *,
+        workspace_id: str,
+        leave_id: str,
+        approved_by: str,
+        now: datetime,
+    ) -> UserLeaveRow:
+        row = self._session.scalars(
+            select(UserLeave).where(
+                UserLeave.id == leave_id,
+                UserLeave.workspace_id == workspace_id,
+                UserLeave.deleted_at.is_(None),
+            )
+        ).one()
+        row.approved_at = now
+        row.approved_by = approved_by
+        row.updated_at = now
+        self._session.flush()
+        return _to_leave_row(row)
+
+    def soft_delete(
+        self,
+        *,
+        workspace_id: str,
+        leave_id: str,
+        note_md: str | None = None,
+        now: datetime,
+    ) -> UserLeaveRow:
+        row = self._session.scalars(
+            select(UserLeave).where(
+                UserLeave.id == leave_id,
+                UserLeave.workspace_id == workspace_id,
+                UserLeave.deleted_at.is_(None),
+            )
+        ).one()
+        row.deleted_at = now
+        row.updated_at = now
+        if note_md is not None:
+            # Only overwrite ``note_md`` when the caller (reject path)
+            # has already prepared the post-rejection text. The
+            # canonical ``delete_leave`` withdraw path passes ``None``
+            # so the worker's original explanation survives.
+            row.note_md = note_md
+        self._session.flush()
+        return _to_leave_row(row)
 
 
 # ---------------------------------------------------------------------------
