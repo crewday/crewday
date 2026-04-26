@@ -9,7 +9,7 @@ Pilot scope: hard-coded route list
 because the SPA does not yet emit a runtime sitemap; the follow-up
 Beads task wires the walker to a generated ``_surface.json``.
 
-**Two tests in this file**, each pinning a different invariant:
+**Three tests in this file**, each pinning a different invariant:
 
 * :func:`test_walker_detects_known_horizontal_scroll_regression` —
   loads a synthetic page that *deliberately* overflows the 360 px
@@ -17,14 +17,17 @@ Beads task wires the walker to a generated ``_surface.json``.
   Pins the cd-ndmv acceptance criterion "fails on a deliberately
   introduced horizontal scroll".
 * :func:`test_authenticated_sitemap_at_360_walks_pilot_routes` —
-  smoke-runs the walker against the live SPA. Today the SPA does
-  not yet meet the 44x44 floor on the manager nav (the nav links
-  render at 32 px tall on /properties / /employees / etc.); the
-  walker correctly reports those as findings, so the test
-  ``xfail``\\s with ``strict=True`` until the SPA fix lands. The
-  walker is still exercised on every CI run; flipping ``xfail`` →
-  ``passes`` is the signal that the SPA has caught up to the spec.
-  See follow-up Beads task for the SPA work.
+  smoke-runs the walker against the live SPA. The manager-shell
+  off-canvas drawer, side-nav rows, and PreviewShell pills all hold
+  the 44x44 floor at 360 px (cd-jptt). Any regression here re-surfaces
+  the original cd-ndmv finding shape: one line per (route, kind,
+  selector) tuple under a single aggregate :class:`AssertionError`.
+* :func:`test_closed_drawer_removes_nav_from_focus_order` — pins the
+  ``visibility: hidden`` + ``transition-delay`` trick that closes the
+  off-canvas drawer at <=720px (cd-jptt). The closed drawer must NOT
+  be reachable via Tab — a future refactor that swaps the trick for a
+  pure ``transform`` would silently regress focus order; this test
+  fails loudly if it does.
 
 Auth via the dev_login fast path — the walk only needs a session
 cookie, not the full passkey ceremony.
@@ -34,7 +37,6 @@ from __future__ import annotations
 
 from typing import Final
 
-import pytest
 from playwright.sync_api import BrowserContext
 
 from tests.e2e._helpers.auth import login_with_dev_session
@@ -93,24 +95,14 @@ def test_walker_detects_known_horizontal_scroll_regression(
     )
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "SPA does not yet meet the 44x44 tap-target floor at 360px on the "
-        "manager nav (text-link rows render at ~32px tall). Tracked in a "
-        "follow-up Beads task; remove this xfail when the SPA fix lands."
-    ),
-)
 def test_authenticated_sitemap_at_360_walks_pilot_routes(
     context: BrowserContext, base_url: str
 ) -> None:
     """Walk the pilot routes at 360x780 and assert the full check passes.
 
-    Currently expected to fail on tap-target regressions in the
-    manager-shell navigation; the ``strict=True`` xfail flips to a
-    real pass once the SPA closes the gaps. Findings (horizontal
-    scroll, sub-floor tap targets, missing nav) surface as a single
-    aggregate :class:`AssertionError` with one line per regression.
+    Findings (horizontal scroll, sub-floor tap targets, missing nav)
+    surface as a single aggregate :class:`AssertionError` with one
+    line per regression.
 
     Routes come from the pilot constant; the follow-up Beads task
     swaps in a runtime ``_surface.json`` walker.
@@ -129,3 +121,99 @@ def test_authenticated_sitemap_at_360_walks_pilot_routes(
         routes=PILOT_AUTHENTICATED_ROUTES,
     )
     assert_no_findings(result)
+
+
+def test_closed_drawer_removes_nav_from_focus_order(
+    context: BrowserContext, base_url: str
+) -> None:
+    """The off-canvas drawer must not be tabbable while closed (cd-jptt).
+
+    The phone-mode rule
+    ``.desk__nav { visibility: hidden; transition: visibility 0s
+    linear 200ms; }`` removes the closed drawer's descendants from
+    the focus tree (and from the §17 walker's tappable surface). A
+    future refactor that drops ``visibility: hidden`` in favour of
+    just ``transform: translateX(-100%)`` would silently regress —
+    translated-off-screen elements stay focusable, so ``Tab`` from
+    the page would reach the hidden nav links and the user would
+    lose focus into invisible chrome.
+
+    The assertion: at 360x780 with the drawer closed, every
+    ``.desk__nav`` descendant matching the walker's tappable
+    selector reports ``visibility: hidden`` via getComputedStyle —
+    which is exactly what removes them from the focus order per
+    https://www.w3.org/TR/css-display-3/#visibility (and what
+    Chromium / WebKit / Firefox all enforce).
+
+    Sanity-checked with a real ``Tab`` press: focus must NOT land on
+    a ``.desk__nav`` descendant.
+    """
+    login_with_dev_session(
+        context,
+        base_url=base_url,
+        email=WALK_EMAIL,
+        workspace_slug=WALK_SLUG,
+        role="owner",
+    )
+    page = context.new_page()
+    page.set_viewport_size({"width": 360, "height": 780})
+    page.goto(f"{base_url.rstrip('/')}/dashboard", wait_until="networkidle")
+
+    # Confirm the drawer is in its closed state — a stray
+    # data-nav-open="true" elsewhere would invalidate the test.
+    nav_open = page.evaluate(
+        "() => document.querySelector('.desk')?.getAttribute('data-nav-open')"
+    )
+    assert nav_open in (None, "false"), (
+        f"closed-drawer focus test requires data-nav-open!='true'; got {nav_open!r}"
+    )
+
+    # 1. Computed visibility check — every nav tappable must inherit
+    #    visibility:hidden from the .desk__nav root, which removes them
+    #    from the tabbable surface per CSS Display 3.
+    visible_descendants = page.evaluate(
+        """
+        () => {
+          const nav = document.querySelector('.desk__nav');
+          if (!nav) return { error: 'no .desk__nav found' };
+          const tappables = nav.querySelectorAll(
+            '[data-tappable], button, a[href], [role="button"], [role="link"]'
+          );
+          const visible = [];
+          for (const el of tappables) {
+            const cs = getComputedStyle(el);
+            if (cs.visibility !== 'hidden') {
+              visible.push({
+                tag: el.tagName,
+                cls: (el.className?.toString() || '').slice(0, 50),
+                visibility: cs.visibility,
+              });
+            }
+          }
+          return { total: tappables.length, visible };
+        }
+        """
+    )
+    assert "error" not in visible_descendants, visible_descendants
+    assert visible_descendants["total"] > 0, (
+        "expected the drawer to render at least one tappable in the DOM "
+        "(it's hidden, not unmounted); got 0 — selector or layout drift"
+    )
+    assert visible_descendants["visible"] == [], (
+        "closed drawer leaks focusable descendants — "
+        "visibility:hidden must propagate to every tappable: "
+        f"{visible_descendants['visible']!r}"
+    )
+
+    # 2. Sanity tab-press — pressing Tab from a fresh page focus must
+    #    NOT land on a .desk__nav descendant. Catches the case where
+    #    a nav link explicitly opted out of the inherited visibility
+    #    (visibility: visible, tabindex=0, etc.).
+    page.evaluate("() => document.body.focus()")
+    page.keyboard.press("Tab")
+    in_nav = page.evaluate("() => !!document.activeElement?.closest('.desk__nav')")
+    assert not in_nav, (
+        "Tab from page body landed inside .desk__nav while drawer "
+        "was closed — focus order regressed; the visibility:hidden "
+        "trick may have been replaced with a translate-only animation"
+    )
