@@ -81,6 +81,8 @@ if TYPE_CHECKING:
     from sqlalchemy.orm import Session
 
 __all__ = [
+    "APPROVAL_TTL_INTERVAL_SECONDS",
+    "APPROVAL_TTL_JOB_ID",
     "GENERATOR_JOB_ID",
     "HEARTBEAT_JOB_ID",
     "HEARTBEAT_JOB_INTERVAL_SECONDS",
@@ -210,6 +212,31 @@ USER_WORKSPACE_REFRESH_JOB_ID: str = "user_workspace_refresh"
 # workload on a fleet with thousands of workspaces. Tests can pin
 # this constant if they want to exercise the cadence boundary.
 USER_WORKSPACE_REFRESH_INTERVAL_SECONDS: int = 300
+
+
+# Stable job id for the approval-request TTL expiry sweep (cd-9ghv).
+# The sweep callable in
+# :mod:`app.worker.tasks.approval_ttl.sweep_expired_approvals` flips
+# every ``approval_request`` row past its ``expires_at`` from
+# ``status='pending'`` to ``status='timed_out'`` and re-emits one
+# :class:`~app.events.types.ApprovalDecided` per row. Cross-tenant by
+# design — the sweep is deployment-scope, not per-workspace, so the
+# domain layer reads under ``tenant_agnostic`` and the SSE transport
+# routes the per-row event to the right subscribers.
+APPROVAL_TTL_JOB_ID: str = "approval_ttl_sweep"
+
+# Interval for the approval-request TTL sweep. Spec §11 "TTL" defaults
+# the row's ``expires_at`` to ``created_at + 7 days``; once a row has
+# slipped past that boundary the queue depth on the desk surface
+# should converge within one tick. 15 min matches the cron cadence
+# pinned in the §11 prose (``*/15 * * * *``). The current cd-9ghv
+# slice rides the existing ``ix_approval_request_workspace_status_
+# created`` index for the per-tenant queue path; the cross-tenant
+# TTL sweep falls back to a status-filtered scan (acceptable for
+# v1 — pending counts are workspace-bounded). A future
+# ``(status, expires_at)`` covering index is a Beads follow-up
+# (cd-approval-ttl-index) for fleets with sustained pending depth.
+APPROVAL_TTL_INTERVAL_SECONDS: int = 900
 
 
 # Job-body type. Downstream tasks supply either a synchronous callable
@@ -444,6 +471,7 @@ def register_jobs(
         OVERDUE_DETECT_JOB_ID,
         POLL_ICAL_JOB_ID,
         USER_WORKSPACE_REFRESH_JOB_ID,
+        APPROVAL_TTL_JOB_ID,
     ):
         with contextlib.suppress(JobLookupError):
             scheduler.remove_job(pending_id)
@@ -660,6 +688,37 @@ def register_jobs(
         misfire_grace_time=USER_WORKSPACE_REFRESH_INTERVAL_SECONDS,
     )
 
+    # --- 15 min approval-request TTL sweep (cd-9ghv) ---
+    # The sweep callable in
+    # :mod:`app.worker.tasks.approval_ttl.sweep_expired_approvals`
+    # flips every ``approval_request`` row past its ``expires_at``
+    # from ``status='pending'`` to ``status='timed_out'`` and emits
+    # one :class:`~app.events.types.ApprovalDecided` per row. The
+    # sweep is deployment-scope (NOT per-workspace) — see the module
+    # docstring for the cross-tenant rationale.
+    #
+    # ``misfire_grace_time = APPROVAL_TTL_INTERVAL_SECONDS`` — one
+    # tick late is fine (the sweep is idempotent: rows in terminal
+    # state fall out of the predicate), two-ticks-late is a signal
+    # the scheduler is stuck and a skip is preferable to a stacked
+    # catch-up that hammers the DB on a fleet returning from a long
+    # pause. ``coalesce=True`` + ``max_instances=1`` keep a slow
+    # sweep from stacking ticks on an overloaded DB.
+    scheduler.add_job(
+        wrap_job(
+            _make_approval_ttl_body(resolved_clock),
+            job_id=APPROVAL_TTL_JOB_ID,
+            clock=resolved_clock,
+        ),
+        trigger=IntervalTrigger(seconds=APPROVAL_TTL_INTERVAL_SECONDS),
+        id=APPROVAL_TTL_JOB_ID,
+        name=APPROVAL_TTL_JOB_ID,
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=APPROVAL_TTL_INTERVAL_SECONDS,
+    )
+
 
 def _heartbeat_only_body() -> None:
     """No-op job body — the heartbeat upsert runs after it returns.
@@ -668,6 +727,45 @@ def _heartbeat_only_body() -> None:
     the scheduler's log output shows the module-qualified name in
     stack traces if something upstream instruments the call.
     """
+
+
+def _make_approval_ttl_body(clock: Clock) -> Callable[[], None]:
+    """Build the 15-min approval-request TTL sweep body (cd-9ghv).
+
+    Factory rather than a bare module-level function so the body
+    closes over the scheduler's injected :class:`Clock` — the
+    cutoff (``expires_at <= clock.now()``) MUST be driven by the
+    same clock the heartbeat uses. A
+    :class:`~app.util.clock.FrozenClock` under test (or a future
+    simulated-time deployment) would otherwise have a deterministic
+    heartbeat timestamp and a non-deterministic sweep cutoff —
+    easy to mis-diagnose, pointless to tolerate given how cheap
+    the closure is.
+
+    The returned body is a thin adapter around
+    :func:`app.worker.tasks.approval_ttl.sweep_expired_approvals`,
+    which opens its own UoW (the worker has no ambient session) and
+    commits at the end. The sibling
+    :func:`_make_idempotency_sweep_body` cites the same rationale.
+
+    The task import is deferred into the closure body so module
+    import order stays robust — the task module pulls in
+    :mod:`app.domain.agent.approval` (which itself drags in the
+    LLM models + the event bus), none of which the standalone
+    ``python -m app.worker`` entrypoint otherwise needs at import
+    time.
+    """
+
+    def _body() -> None:
+        from app.worker.tasks.approval_ttl import sweep_expired_approvals
+
+        # The task itself logs the per-tick summary at INFO with
+        # ``event=approval.ttl.sweep``; the wrapper does not need to
+        # re-emit. Discard the returned report — operators read it
+        # off the structured-log stream, not the wrapper's return.
+        sweep_expired_approvals(clock=clock)
+
+    return _body
 
 
 def _make_idempotency_sweep_body(clock: Clock) -> Callable[[], None]:

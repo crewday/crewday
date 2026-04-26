@@ -200,9 +200,15 @@ def seed_user(session: Session) -> str:
     from app.adapters.db.identity.models import User
 
     user_id = new_ulid()
+    # Use the **trailing** chars of the ULID to derive the email
+    # local-part. Under :class:`FrozenClock` the leading bytes encode
+    # the (pinned) timestamp, so two ``seed_user`` calls inside one
+    # test would share the leading slice and collide on the
+    # ``user.email_lower`` UNIQUE constraint. The trailing slice is
+    # the random/monotonic tail, which stays distinct between calls.
     user = User(
         id=user_id,
-        email=f"agent-{user_id.lower()[:8]}@example.com",
+        email=f"agent-{user_id.lower()[-12:]}@example.com",
         display_name="Agent User",
         created_at=_PINNED,
     )
@@ -414,10 +420,14 @@ class CapturedEvents:
     events: list[Event] = field(default_factory=list)
 
     def __post_init__(self) -> None:
-        # Subscribe a catch-all by registering to each agent-turn
+        # Subscribe a catch-all by registering to each runtime-emitted
         # event individually — the bus dispatches by event class
         # name, so we wire one shim per concrete subclass.
-        from app.events.types import AgentTurnFinished, AgentTurnStarted
+        from app.events.types import (
+            AgentActionPending,
+            AgentTurnFinished,
+            AgentTurnStarted,
+        )
 
         @self.bus.subscribe(AgentTurnStarted)
         def _on_started(event: AgentTurnStarted) -> None:
@@ -425,6 +435,10 @@ class CapturedEvents:
 
         @self.bus.subscribe(AgentTurnFinished)
         def _on_finished(event: AgentTurnFinished) -> None:
+            self.events.append(event)
+
+        @self.bus.subscribe(AgentActionPending)
+        def _on_pending(event: AgentActionPending) -> None:
             self.events.append(event)
 
     def names(self) -> list[str]:

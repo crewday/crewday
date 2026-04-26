@@ -39,10 +39,13 @@ from pydantic import field_validator
 from app.events.registry import Event, EventRole, register
 
 __all__ = [
+    "AgentActionPending",
     "AgentTurnFinished",
     "AgentTurnOutcome",
     "AgentTurnScope",
     "AgentTurnStarted",
+    "ApprovalDecided",
+    "ApprovalDecision",
     "ExpenseApproved",
     "ExpenseReimbursed",
     "ExpenseRejected",
@@ -988,3 +991,112 @@ class AgentTurnFinished(Event):
     @classmethod
     def _finished_at_is_utc(cls, value: datetime) -> datetime:
         return _require_aware_utc(value)
+
+
+# §11 "TTL" closed enum on the ``approval.decided`` decision payload:
+# ``approved | rejected | expired``. ``approved`` covers a HITL grant
+# (the runtime replays the recorded tool call); ``rejected`` covers a
+# manager / owner deny; ``expired`` covers the TTL worker flipping a
+# pending row past its ``expires_at``.
+ApprovalDecision = Literal["approved", "rejected", "expired"]
+
+
+@register
+class AgentActionPending(Event):
+    """An ``ApprovalRequest`` was just minted (cd-9ghv).
+
+    Published from
+    :func:`app.domain.agent.runtime._write_approval_request` after the
+    pending row's INSERT lands. The §11 "Inline approval UX" SSE
+    contract: subscribers on the delegating user's tabs render the
+    inline approval card without polling /approvals; the desk surface
+    refreshes its pending queue from the same signal.
+
+    **Payload posture.** Foreign-key ids + the closed-enum scope only:
+    no card_summary, no rendered fields, no tool input. The client
+    fetches the rendered envelope through ``GET /approvals/{id}``
+    where the per-row authorisation gate applies. Carrying free-text
+    on the wire would silently widen the role boundary; the spec
+    pins the SSE filter to ``user_scoped=True`` so only the
+    delegating user's own tabs see the event, but the payload posture
+    additionally keeps the leak surface to the row's ULID.
+
+    **Role scope.** ``user_scoped=True`` — the SSE transport filters
+    to the delegating user's tabs (``actor_user_id`` rides
+    :attr:`ApprovalRequest.for_user_id`). ``allowed_roles`` keeps
+    the full workspace tuple because every grant role can host an
+    embedded agent. A row with no delegating user (``for_user_id``
+    NULL — desk-only approvals) does not publish this event; the
+    desk-side ``approval.pending`` webhook (cd-6bcl follow-up) is
+    the channel for those.
+
+    See ``docs/specs/11-llm-and-agents.md`` §"Inline approval UX",
+    §"Flow" #5.
+    """
+
+    name: ClassVar[str] = "agent.action.pending"
+    user_scoped: ClassVar[bool] = True
+
+    # Delegating user the approval belongs to — drives the SSE
+    # filter. Required by ``user_scoped=True``.
+    actor_user_id: str
+    # The approval row's id; the SPA fetches the full envelope
+    # through ``GET /approvals/{id}`` to render the card.
+    approval_request_id: str
+    # ``employee | manager | admin | task`` — same closed enum the
+    # turn lifecycle events carry. Drives where the inline card
+    # surfaces in the SPA (worker chat / manager chat / etc.).
+    scope: AgentTurnScope
+    # The chat thread the agent was running against, if any. NULL
+    # for scheduled-trigger turns that have no chat surface — the
+    # desk-only path covers those.
+    thread_id: str | None
+
+
+@register
+class ApprovalDecided(Event):
+    """A pending :class:`ApprovalRequest` left ``pending`` state (cd-9ghv).
+
+    Published from
+    :func:`app.domain.agent.approval.approve` /
+    :func:`~app.domain.agent.approval.deny` /
+    :func:`~app.domain.agent.approval.expire_due` (the latter via
+    the :func:`~app.worker.tasks.approval_ttl.sweep_expired_approvals`
+    worker tick) when the row transitions to ``approved`` /
+    ``rejected`` / ``timed_out``. Subscribers refresh their
+    /approvals queue and drop the inline card from the chat surface.
+
+    **Decision shape.** :data:`ApprovalDecision` is a closed enum:
+    ``approved | rejected | expired``. ``approved`` covers a HITL
+    grant (the runtime replayed the recorded tool call); ``rejected``
+    covers a deny; ``expired`` covers the TTL worker flipping the row.
+
+    **Role scope.** Defaults to :data:`ALL_ROLES` because every grant
+    role's /approvals desk view (or its inline chat) needs to refresh
+    on a decision they care about — the SPA's reducers filter by
+    membership at render time. The :attr:`actor_user_id` field still
+    rides the row's :attr:`ApprovalRequest.for_user_id` so the inline
+    chat surface drops the card on the right tabs; we deliberately do
+    not gate the *event* on user-scope because owners and managers
+    watching /approvals must see decisions on rows they did not
+    originate.
+
+    See ``docs/specs/11-llm-and-agents.md`` §"Approval decisions
+    travel through the human session, not the agent token",
+    §"TTL".
+    """
+
+    name: ClassVar[str] = "approval.decided"
+
+    # The approval row's id; the SPA fetches the full envelope
+    # through ``GET /approvals/{id}`` to render the executed result
+    # or the rejection note.
+    approval_request_id: str
+    # ``approved | rejected | expired`` — see :data:`ApprovalDecision`.
+    decision: ApprovalDecision
+    # Delegating user the approval belonged to (``for_user_id`` on
+    # the row). NULL for desk-only approvals minted with no
+    # delegating user — kept on the wire so a tab subscribed to the
+    # event can decide whether to drop its inline card without a
+    # follow-up REST round-trip.
+    for_user_id: str | None

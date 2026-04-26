@@ -31,6 +31,7 @@ from collections.abc import Sequence
 from fastapi import APIRouter
 
 from .admin import router as _workspace_admin_router
+from .approvals import router as _approvals_router
 from .assets import router as assets_router
 from .billing import router as billing_router
 from .expenses import router as expenses_router
@@ -75,4 +76,18 @@ CONTEXT_ROUTERS: Sequence[tuple[str, APIRouter]] = (
 # :mod:`app.api.v1.admin` module docstring for the full rationale.
 WORKSPACE_ADMIN_ROUTER: APIRouter = _workspace_admin_router
 
-__all__ = ["CONTEXT_ROUTERS", "WORKSPACE_ADMIN_ROUTER"]
+# Approvals consumer — HITL desk + inline approval HTTP surface.
+# Mounted as a sibling of :data:`CONTEXT_ROUTERS` (NOT inside it) so
+# the §12 path contract — ``GET /approvals``, ``POST
+# /approvals/{id}/approve``, ``POST /approvals/{id}/reject`` — lands
+# at the bare path the desk + inline-card SPA fetches expect, not
+# nested under ``/llm/approvals``. The router is conceptually owned
+# by the LLM context but mounting it under ``/llm`` would dilute the
+# bare-path contract; mounting it inside :data:`CONTEXT_ROUTERS` as
+# its own context would dilute the §01 13-context invariant. Same
+# rationale as :data:`WORKSPACE_ADMIN_ROUTER`. The router tags its
+# operations ``approvals`` so the OpenAPI tag list keeps it
+# co-located with the LLM context's operations alphabetically.
+APPROVALS_ROUTER: APIRouter = _approvals_router
+
+__all__ = ["APPROVALS_ROUTER", "CONTEXT_ROUTERS", "WORKSPACE_ADMIN_ROUTER"]

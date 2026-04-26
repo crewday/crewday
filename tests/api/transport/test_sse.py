@@ -1315,6 +1315,24 @@ DEFAULT_ROLE_EVENTS_ALLOWLIST: frozenset[str] = frozenset(
         # indicator. cd-nyvm.
         "agent.turn.started",
         "agent.turn.finished",
+        # ``agent.action.pending`` (cd-9ghv) follows the same posture
+        # as the sibling ``agent.turn.*`` events — every grant role
+        # can host an embedded chat agent. ``user_scoped=True`` is
+        # the real narrowing: the SSE transport delivers the frame
+        # only to the delegating user's tabs (the row's
+        # ``for_user_id``). The payload carries FK ids only (the
+        # approval row's id + the closed-enum scope); the SPA fetches
+        # the rendered card via ``GET /approvals/{id}`` where the
+        # per-row authorisation gate applies.
+        "agent.action.pending",
+        # ``approval.decided`` (cd-9ghv) is workspace-wide on
+        # purpose: owners and managers watching ``/approvals`` must
+        # see decisions on rows they did not originate, and the
+        # payload carries no PII (FK ids + a closed-enum decision).
+        # The inline-chat surface uses the ``for_user_id`` field on
+        # the wire to drop its own card; that's a client-side
+        # narrowing on top of the role allowlist.
+        "approval.decided",
     }
 )
 

@@ -440,17 +440,48 @@ class ApprovalRequest(Base):
     payload_json``. Storing it as JSON here lets the spec evolve
     without a migration per field addition.
 
-    ``rationale_md`` is the reviewer's optional free-form note
-    attached to a decision; mirrors §11's ``decision_note_md``.
+    ``rationale_md`` (legacy) and the cd-9ghv ``decision_note_md``
+    column carry the reviewer's optional free-form note. The
+    consumer pipeline writes to ``decision_note_md`` going forward;
+    ``rationale_md`` stays on the row so cd-cm5-era data is still
+    readable. A future cleanup folds the two columns once every
+    codepath reads from the new name.
+
+    cd-9ghv column promotions (all nullable so cd-cm5-era rows
+    survive without a backfill):
+
+    * ``expires_at`` — TTL anchor (§11 "TTL"). The 15-min
+      :func:`~app.worker.tasks.approval_ttl.sweep_expired_approvals`
+      worker tick walks rows past this stamp and flips them to
+      ``status='timed_out'``. NULL means "no TTL recorded; do not
+      auto-expire".
+    * ``result_json`` — populated on approve when the runtime re-
+      dispatches the recorded tool call. The /approvals desk
+      surfaces this so the operator can confirm the action landed.
+    * ``decision_note_md`` — reviewer's free-form note (markdown);
+      the cd-9ghv consumer writes this column and reads it back
+      from the desk surface. Mirrors §11 "Model".
+    * ``inline_channel`` — originating chat channel from the
+      ``X-Agent-Channel`` request header (``desk_only |
+      web_owner_sidebar | web_worker_chat | offapp_whatsapp``).
+      Drives whether the SSE ``agent.action.pending`` event lands
+      on the inline-chat surface or the desk only.
+    * ``for_user_id`` — FK to :class:`User.id` (SET NULL). The
+      delegating user the approval ultimately belongs to. The SSE
+      transport filters the inline-channel event on this column.
+    * ``resolved_user_mode`` — snapshot of the delegating user's
+      per-user agent approval mode (``bypass | auto | strict``) at
+      request time. NULL if the request did not come from a
+      delegated agent token.
 
     FK hygiene:
 
     * ``workspace_id`` CASCADE — sweeping a workspace sweeps its
       approval queue.
-    * ``requester_actor_id`` / ``decided_by`` SET NULL — a user
-      hard-delete must not nuke approval history. The denormalised
-      fields on the audit_log row downstream of the decision
-      preserve the identity for display.
+    * ``requester_actor_id`` / ``decided_by`` / ``for_user_id``
+      SET NULL — a user hard-delete must not nuke approval history.
+      The denormalised fields on the audit_log row downstream of
+      the decision preserve the identity for display.
     """
 
     __tablename__ = "approval_request"
@@ -485,11 +516,39 @@ class ApprovalRequest(Base):
     decided_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
-    # Optional reviewer note — markdown per the sibling convention.
+    # Legacy reviewer-note column (cd-cm5). Kept for backwards
+    # compatibility on rows written before the cd-9ghv consumer; new
+    # writes target :attr:`decision_note_md` per the spec name.
     rationale_md: Mapped[str | None] = mapped_column(String, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
     )
+    # cd-9ghv: TTL anchor. NULL on cd-cm5-era rows.
+    expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    # cd-9ghv: replay result captured on approve. NULL until the
+    # consumer flips the row to ``approved`` and records the
+    # dispatched tool-call result.
+    result_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    # cd-9ghv: reviewer's optional free-form markdown note (the §11
+    # "Model" column name — see class docstring's note on the
+    # legacy ``rationale_md`` column).
+    decision_note_md: Mapped[str | None] = mapped_column(String, nullable=True)
+    # cd-9ghv: ``X-Agent-Channel`` header value at request time.
+    # Free-form (no CHECK clamp); the spec's enum widens additively.
+    inline_channel: Mapped[str | None] = mapped_column(String, nullable=True)
+    # cd-9ghv: delegating user the approval belongs to. SET NULL on
+    # user delete keeps history joinable on a hard-delete.
+    for_user_id: Mapped[str | None] = mapped_column(
+        String,
+        ForeignKey("user.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    # cd-9ghv: snapshot of the delegating user's mode at request
+    # time. NULL when the request did not come from a delegated
+    # agent token.
+    resolved_user_mode: Mapped[str | None] = mapped_column(String, nullable=True)
 
     __table_args__ = (
         CheckConstraint(

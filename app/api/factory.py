@@ -80,7 +80,7 @@ from app.api.middleware import (
     SecurityHeadersMiddleware,
 )
 from app.api.transport.sse import router as sse_router
-from app.api.v1 import CONTEXT_ROUTERS, WORKSPACE_ADMIN_ROUTER
+from app.api.v1 import APPROVALS_ROUTER, CONTEXT_ROUTERS, WORKSPACE_ADMIN_ROUTER
 from app.api.v1.auth import email_change as email_change_module
 from app.api.v1.auth import invite as invite_module
 from app.api.v1.auth import logout as logout_module
@@ -177,6 +177,17 @@ _NON_CONTEXT_OPENAPI_TAGS: Final[tuple[tuple[str, str], ...]] = (
             "read-only surfaces spanning multiple contexts (abuse "
             "signals, security posture). See §15 'Self-serve abuse "
             "mitigations'."
+        ),
+    ),
+    (
+        "approvals",
+        (
+            "Human-in-the-loop approvals consumer (§11 'Approval "
+            "pipeline', §12 'LLM and approvals'). Pending-queue list "
+            "+ per-approval approve/reject endpoints feeding the desk "
+            "and the inline-card surfaces. Mounted at the bare path "
+            "``/approvals`` (not under ``/llm``) to honour the §12 "
+            "path contract."
         ),
     ),
     (
@@ -634,7 +645,7 @@ def _mount_context_routers(app: FastAPI) -> None:
     Beads tasks (cd-rpxd, cd-75wp, cd-sn26, ...) fill in the real
     routes without having to re-wire this seam.
 
-    Three non-context routers also mount here alongside the §01
+    Four non-context routers also mount here alongside the §01
     contexts — they're neither bounded contexts nor part of the
     context-map invariant, but they share the workspace or
     deployment URL prefix so keeping them co-located with the
@@ -646,6 +657,13 @@ def _mount_context_routers(app: FastAPI) -> None:
       Declares its own ``workspace_admin`` tag so the OpenAPI
       tag list stays distinct from the deployment admin tree's
       ``admin`` tag.
+    * :data:`app.api.v1.APPROVALS_ROUTER` under
+      ``/w/{slug}/api/v1/approvals`` — HITL approvals consumer
+      (§12 "LLM and approvals", cd-9ghv). Conceptually owned by the
+      LLM context but mounted at the bare ``/approvals`` path the
+      §12 spec contract pins, NOT under ``/llm``. Carries its own
+      ``approvals`` tag so the desk + inline-card endpoints render
+      as a distinct Swagger section.
     * :data:`app.api.admin.admin_router` under ``/admin/api/v1`` —
       deployment-scoped admin tree, empty for now and gated by
       the admin authz middleware (cd-jlms) when real routes land.
@@ -666,6 +684,14 @@ def _mount_context_routers(app: FastAPI) -> None:
     # isn't in §01. The router's own ``tags=["workspace_admin"]``
     # drives the tag that appears in the schema.
     app.include_router(WORKSPACE_ADMIN_ROUTER, prefix=f"{scoped_prefix}/admin")
+
+    # Approvals consumer (HITL desk + inline-card decisions). Same
+    # rationale as the admin aggregator above — kept OUT of
+    # ``CONTEXT_ROUTERS`` so the §01 13-context invariant survives,
+    # but mounted at the bare ``/approvals`` path the §12 spec
+    # contract pins (not nested under ``/llm``). The router's own
+    # ``tags=["approvals"]`` drives the schema tag.
+    app.include_router(APPROVALS_ROUTER, prefix=f"{scoped_prefix}/approvals")
 
     # Workspace-scoped SSE transport (``/w/<slug>/events``, cd-clz9).
     # Mounted outside the ``/api/v1`` tree because the SPA talks to

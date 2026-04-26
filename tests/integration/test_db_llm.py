@@ -365,6 +365,11 @@ class TestMigrationShape:
 
     def test_approval_request_columns(self, engine: Engine) -> None:
         cols = {c["name"]: c for c in inspect(engine).get_columns("approval_request")}
+        # cd-cm5 baseline columns + the cd-9ghv consumer's column
+        # promotions (``expires_at`` / ``result_json`` /
+        # ``decision_note_md`` / ``inline_channel`` / ``for_user_id`` /
+        # ``resolved_user_mode``). All cd-9ghv additions are nullable
+        # so cd-cm5-era rows survive without a backfill.
         expected = {
             "id",
             "workspace_id",
@@ -375,9 +380,26 @@ class TestMigrationShape:
             "decided_at",
             "rationale_md",
             "created_at",
+            "expires_at",
+            "result_json",
+            "decision_note_md",
+            "inline_channel",
+            "for_user_id",
+            "resolved_user_mode",
         }
         assert set(cols) == expected
-        nullable = {"requester_actor_id", "decided_by", "decided_at", "rationale_md"}
+        nullable = {
+            "requester_actor_id",
+            "decided_by",
+            "decided_at",
+            "rationale_md",
+            "expires_at",
+            "result_json",
+            "decision_note_md",
+            "inline_channel",
+            "for_user_id",
+            "resolved_user_mode",
+        }
         for col in nullable:
             assert cols[col]["nullable"] is True, f"{col} must be NULLABLE"
         for notnull in expected - nullable:
@@ -394,6 +416,10 @@ class TestMigrationShape:
         assert fks[("requester_actor_id",)]["options"].get("ondelete") == "SET NULL"
         assert fks[("decided_by",)]["referred_table"] == "user"
         assert fks[("decided_by",)]["options"].get("ondelete") == "SET NULL"
+        # cd-9ghv: ``for_user_id`` FK to ``user.id`` with SET NULL
+        # so the row survives a hard-delete of the delegating user.
+        assert fks[("for_user_id",)]["referred_table"] == "user"
+        assert fks[("for_user_id",)]["options"].get("ondelete") == "SET NULL"
 
     def test_approval_request_pending_queue_index(self, engine: Engine) -> None:
         indexes = {

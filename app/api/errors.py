@@ -286,15 +286,55 @@ def _format_validation_errors(
     return tuple(out)
 
 
+def _resolve_domain_status(exc: DomainError) -> int | None:
+    """Look up the HTTP status for ``exc``'s class or any ancestor.
+
+    Walking the MRO (rather than ``_DOMAIN_STATUS_MAP.get(type(exc))``)
+    keeps a domain subclass like
+    :class:`~app.api.v1.approvals.ApprovalRequiresSession` (a
+    ``Forbidden``) rendered as 403 without forcing every new subclass
+    to add its own map entry. Stops at the first hit so a subclass
+    can still **override** an ancestor's status by registering its
+    own row (e.g. :class:`LastOwnerMember` overrides ``Validation``'s
+    422 only because it's listed explicitly — the order is
+    "registered class wins, otherwise nearest ancestor").
+
+    Returns ``None`` only when neither :class:`DomainError` itself
+    nor any subclass between ``type(exc)`` and :class:`DomainError`
+    is registered, which is a programming error (the base class is
+    abstract — unmapped subclasses should reach this fallback only
+    when a developer added a :class:`DomainError` ancestor without
+    a row).
+    """
+    for cls in type(exc).__mro__:
+        if not isinstance(cls, type):  # defensive — MRO entries are classes
+            continue
+        if cls in _DOMAIN_STATUS_MAP:
+            return _DOMAIN_STATUS_MAP[cls]
+        if cls is DomainError:
+            # Hit the abstract base without a match — stop walking;
+            # the ``object`` / ``Exception`` ancestors above us are
+            # not domain-error rows by construction.
+            return None
+    return None
+
+
 def _handle_domain_error(request: Request, exc: DomainError) -> JSONResponse:
     """Render a :class:`DomainError` subclass as a problem+json response.
 
     Unknown subclasses (a new :class:`DomainError` added without a
-    status-map entry) fall back to 500 with ``type=internal`` so the
-    response is still shaped per §12 — a loud 500 is better than a
-    silent bypass to the default error handler.
+    status-map entry, and whose ancestors aren't either) fall back
+    to 500 with ``type=internal`` so the response is still shaped
+    per §12 — a loud 500 is better than a silent bypass to the
+    default error handler.
+
+    Status lookup walks the MRO via :func:`_resolve_domain_status`
+    so a subclass like :class:`~app.api.v1.approvals.ApprovalRequiresSession`
+    (a ``Forbidden``) renders as 403 without forcing every new
+    domain-layer subclass to register itself in
+    :data:`_DOMAIN_STATUS_MAP`.
     """
-    status = _DOMAIN_STATUS_MAP.get(type(exc))
+    status = _resolve_domain_status(exc)
     if status is None:
         _log.error(
             "unmapped domain error",

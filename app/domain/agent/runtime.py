@@ -149,6 +149,7 @@ from app.domain.llm.usage_recorder import AgentAttribution, record
 from app.events.bus import EventBus
 from app.events.bus import bus as default_event_bus
 from app.events.types import (
+    AgentActionPending,
     AgentTurnFinished,
     AgentTurnOutcome,
     AgentTurnScope,
@@ -159,6 +160,7 @@ from app.util.clock import Clock, SystemClock
 from app.util.ulid import new_ulid
 
 __all__ = [
+    "APPROVAL_REQUEST_TTL",
     "DEFAULT_HISTORY_CAP",
     "DEFAULT_MAX_ITERATIONS",
     "DEFAULT_WALL_CLOCK_TIMEOUT_S",
@@ -206,6 +208,14 @@ DEFAULT_HISTORY_CAP: Final[int] = 30
 # stalls. Out-of-band revocation is per-token via
 # :func:`app.auth.tokens.revoke`.
 DELEGATED_TOKEN_TTL: Final[timedelta] = timedelta(minutes=10)
+
+# Default TTL for an :class:`ApprovalRequest` row the runtime mints.
+# Pinned to 7 days per §11 "TTL"; the cd-9ghv worker (`approval_ttl`)
+# walks the table every 15 min and flips a row whose ``expires_at``
+# has passed to ``status='timed_out'``. Lifted to a module-level
+# constant so the worker test + the runtime test agree on the value
+# without re-reading the spec.
+APPROVAL_REQUEST_TTL: Final[timedelta] = timedelta(days=7)
 
 # Budget pre-flight projection. The router doesn't yet expose a
 # per-capability default ``max_tokens`` — until cd-um36 surfaces the
@@ -744,16 +754,57 @@ def run_turn(
             tool_calls_made += 1
             decision = tool_dispatcher.is_gated(tool_call)
             if decision.gated:
-                approval_id = _write_approval_request(
+                # The chat-trigger turn always has a delegating user
+                # (``ctx.actor_id``) the inline approval card belongs
+                # to; a scheduled-trigger turn has no chat surface
+                # but still routes to the delegating user the cron
+                # capability runs as. Both paths set ``for_user_id``
+                # to ``ctx.actor_id`` — desk-only approvals (no
+                # delegating user at all) are a follow-up surface
+                # (cd-6bcl) that does not currently mint rows
+                # through this path. Per-user agent approval mode
+                # (§11 "Per-user agent approval mode") is not yet
+                # threaded into the runtime; ``resolved_user_mode``
+                # stays ``None`` until that column lands on
+                # :class:`User`.
+                # The returned ``expires_at`` is recorded on the row
+                # but not surfaced through :class:`TurnOutcome` today —
+                # callers that need it (e.g. an HTTP handler that
+                # wants to put it in the 409 envelope) re-read the
+                # row. A future TurnOutcome extension can carry it
+                # if a hot path emerges; bind to ``_`` so the pair-
+                # return contract stays explicit at the call site.
+                approval_id, _ = _write_approval_request(
                     session,
                     ctx=ctx,
                     tool_call=tool_call,
                     decision=decision,
                     correlation_id=correlation_id,
                     requester_actor_id=ctx.actor_id,
+                    inline_channel=_channel_header_value(scope),
+                    for_user_id=ctx.actor_id,
+                    resolved_user_mode=None,
                     clock=eff_clock,
                 )
                 ended_at = eff_clock.now()
+                # Publish the inline approval-card SSE event to the
+                # delegating user's tabs. ``AgentActionPending`` is
+                # ``user_scoped=True`` so the SSE transport filters
+                # the fan-out to the actor whose ``actor_user_id``
+                # matches; the §11 inline-card surface drops the
+                # card on the wrong tabs without this event.
+                bus.publish(
+                    AgentActionPending(
+                        workspace_id=ctx.workspace_id,
+                        actor_id=ctx.actor_id,
+                        actor_user_id=ctx.actor_id,
+                        correlation_id=correlation_id,
+                        occurred_at=ended_at,
+                        approval_request_id=approval_id,
+                        scope=scope,
+                        thread_id=thread_id,
+                    )
+                )
                 bus.publish(
                     AgentTurnFinished(
                         workspace_id=ctx.workspace_id,
@@ -1341,34 +1392,54 @@ def _write_approval_request(
     decision: GateDecision,
     correlation_id: str,
     requester_actor_id: str,
+    inline_channel: str,
+    for_user_id: str | None,
+    resolved_user_mode: str | None,
     clock: Clock,
-) -> str:
-    """Persist a ``pending`` approval row and return the id.
+) -> tuple[str, datetime]:
+    """Persist a ``pending`` approval row and return ``(id, expires_at)``.
 
-    The cd-9ghv consumer will pick up rows in this state and walk
-    them through the full HITL pipeline (notification fanout,
-    decision capture, executed transition). The runtime's
-    responsibility ends at writing the row; the turn pauses with
-    ``outcome=action`` and the caller surfaces the approval card
-    via the existing ``agent.action.pending`` SSE event the
-    consumer publishes.
+    The cd-9ghv consumer picks up rows in this state and walks them
+    through the full HITL pipeline (notification fanout, decision
+    capture, executed transition, TTL expiry). The runtime's
+    responsibility ends at writing the row + publishing the inline-
+    channel SSE event; the turn pauses with ``outcome=action``.
 
     ``action_json`` carries the resolved tool call, the gate
-    decision metadata, and the turn's correlation id — the
-    consumer needs all three to render the inline card and to
-    re-dispatch the call after approval. Today the runtime is
-    DB-only on this path (it doesn't materialise the
-    inline-channel SSE event itself); cd-9ghv lands that step.
+    decision metadata, and the turn's correlation id — the consumer
+    needs all three to render the inline card and to re-dispatch
+    the call after approval. The §11 column-promoted fields land as
+    first-class columns:
+
+    * ``expires_at`` — :data:`APPROVAL_REQUEST_TTL` from now
+      (7 days). The cd-9ghv ``approval_ttl`` worker auto-flips a
+      row past its expiry to ``status='timed_out'``.
+    * ``inline_channel`` — the ``X-Agent-Channel`` value derived
+      from the turn's :class:`AgentTurnScope`. Selects the SPA
+      surface that renders the inline card.
+    * ``for_user_id`` — the delegating user. NULL for desk-only
+      approvals (no inline surface, the row only shows on the
+      /approvals desk). The SSE filter on
+      :class:`AgentActionPending` rides this column so the card
+      lands only on the right user's tabs.
+    * ``resolved_user_mode`` — snapshot of the delegating user's
+      per-user agent approval mode at the instant the row was
+      minted. NULL when the column has not yet been threaded down
+      from the turn caller (the per-user mode column itself is a
+      future cd-cm5 follow-up; the column is ready for the
+      promotion).
 
     The :class:`ApprovalRequest` row is written under
-    :func:`tenant_agnostic` because the new row's
-    ``workspace_id`` matches ``ctx.workspace_id`` already; the
-    tenant filter is there for defensive *reads* on workspace-
-    scoped tables, not for inserts whose row already carries the
-    right column. The pattern matches the workspace-create call
-    sites in ``app.auth.signup``.
+    :func:`tenant_agnostic` because the new row's ``workspace_id``
+    matches ``ctx.workspace_id`` already; the tenant filter is
+    there for defensive *reads* on workspace-scoped tables, not
+    for inserts whose row already carries the right column. The
+    pattern matches the workspace-create call sites in
+    ``app.auth.signup``.
     """
     row_id = new_ulid(clock=clock)
+    created_at = clock.now()
+    expires_at = created_at + APPROVAL_REQUEST_TTL
     row = ApprovalRequest(
         id=row_id,
         workspace_id=ctx.workspace_id,
@@ -1386,9 +1457,15 @@ def _write_approval_request(
         decided_by=None,
         decided_at=None,
         rationale_md=None,
-        created_at=clock.now(),
+        decision_note_md=None,
+        result_json=None,
+        expires_at=expires_at,
+        inline_channel=inline_channel,
+        for_user_id=for_user_id,
+        resolved_user_mode=resolved_user_mode,
+        created_at=created_at,
     )
     with tenant_agnostic():
         session.add(row)
         session.flush()
-    return row_id
+    return row_id, expires_at

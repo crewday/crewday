@@ -31,11 +31,12 @@ from app.adapters.db.audit.models import AuditLog
 from app.adapters.db.llm.models import ApprovalRequest, LlmUsage
 from app.adapters.db.messaging.models import ChatMessage
 from app.domain.agent.runtime import (
+    APPROVAL_REQUEST_TTL,
     GateDecision,
     ToolResult,
     run_turn,
 )
-from app.events.types import AgentTurnFinished, AgentTurnStarted
+from app.events.types import AgentActionPending, AgentTurnFinished, AgentTurnStarted
 from app.tenancy.current import set_current
 from app.util.clock import FrozenClock
 from tests.domain.agent.conftest import (
@@ -331,7 +332,34 @@ def test_gated_write_tool_creates_approval_request_and_pauses(
     assert payload["pre_approval_source"] == "workspace_always"
     assert payload["agent_correlation_id"] == outcome.correlation_id
 
-    # Started + finished(action) on the wire.
+    # cd-9ghv column-promoted fields land on the row at insert time.
+    # ``expires_at`` rides ``APPROVAL_REQUEST_TTL`` from the row's
+    # ``created_at`` (the same instant the runtime stamped on the
+    # SSE events). ``inline_channel`` follows the manager scope's
+    # X-Agent-Channel value. ``for_user_id`` snapshots the
+    # delegating user; ``resolved_user_mode`` is None until the
+    # per-user mode column lands on :class:`User`.
+    assert approval.created_at is not None
+    assert approval.expires_at is not None
+    assert approval.expires_at - approval.created_at == APPROVAL_REQUEST_TTL
+    assert approval.inline_channel == "web_owner_sidebar"
+    assert approval.for_user_id == ctx.actor_id
+    assert approval.resolved_user_mode is None
+    assert approval.decision_note_md is None
+    assert approval.result_json is None
+
+    # Inline-card SSE event for the delegating user, then the turn
+    # lifecycle finished(action) event.
+    pending_events = [
+        e for e in captured_events.events if isinstance(e, AgentActionPending)
+    ]
+    assert len(pending_events) == 1
+    pending = pending_events[0]
+    assert pending.approval_request_id == outcome.approval_request_id
+    assert pending.actor_user_id == ctx.actor_id
+    assert pending.scope == "manager"
+    assert pending.thread_id == channel_id
+
     finished = captured_events.events[-1]
     assert isinstance(finished, AgentTurnFinished)
     assert finished.outcome == "action"
