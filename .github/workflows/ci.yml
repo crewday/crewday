@@ -1,9 +1,10 @@
-# CI — lint, type, import boundaries, unit, integration.
+# CI — lint, type, import boundaries, unit, integration, e2e.
 #
 # Task: cd-4al (spec: docs/specs/17-testing-quality.md §"Quality gates",
-# docs/specs/01-architecture.md §"Enforcement").
+# docs/specs/01-architecture.md §"Enforcement"). The e2e job is cd-asvl
+# (spec: docs/specs/17-testing-quality.md §"End-to-end").
 #
-# Five jobs:
+# Six jobs:
 #   * lint         — ruff check + ruff format --check
 #   * type         — mypy --strict on app/ (extends to cli/ via cd-j202
 #                    once that tree exists)
@@ -18,8 +19,14 @@
 #                    container inside the test process; no workflow-
 #                    level services block is needed because the runner
 #                    (ubuntu-latest) ships Docker preinstalled.
+#   * e2e          — pytest tests/e2e against the dev stack (compose
+#                    bring-up + Playwright Chromium/WebKit). Single
+#                    Python (3.12) — browser tests don't benefit from
+#                    a version matrix and CI minutes are precious.
+#                    Uploads tests/e2e/_artifacts and tests/e2e/_diff
+#                    on failure for post-mortem.
 #
-# Matrix over Python 3.12 and 3.13 on every job.
+# Matrix over Python 3.12 and 3.13 on every job except e2e.
 # integration additionally matrices database = [sqlite, postgres]
 # (4 shards total on that job).
 
@@ -154,3 +161,127 @@ jobs:
         run: echo "CREWDAY_TEST_DB=postgres" >> "$GITHUB_ENV"
       - name: pytest (integration)
         run: uv run pytest tests/integration -x -q
+
+  e2e:
+    # Browser-driven journeys (cd-asvl, spec
+    # docs/specs/17-testing-quality.md §"End-to-end"). Brings up the
+    # full dev stack via mocks/docker-compose.yml, then runs
+    # tests/e2e/ headless on Chromium + WebKit. Single Python — the
+    # version matrix on browser tests buys nothing and roughly doubles
+    # CI minutes. Failure artefacts (trace.zip, video, screenshots,
+    # pixel diffs) are uploaded for post-mortem.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install deps
+        run: uv sync --group dev
+      - name: Cache Playwright browsers
+        # Browser binaries (~250 MB for Chromium + WebKit) live under
+        # ``~/.cache/ms-playwright`` and only change when the
+        # ``playwright`` package version moves. Keying on ``uv.lock``
+        # invalidates exactly when that pin shifts. The system-deps
+        # apt packages (``--with-deps`` below) can't be cached as
+        # easily — apt installs are fast enough that the win is the
+        # browser download, not the library install.
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('uv.lock') }}
+          restore-keys: |
+            playwright-${{ runner.os }}-
+      - name: Install Playwright browsers + system deps
+        # ``--with-deps`` chains ``playwright install-deps`` so libicu,
+        # libnss3, libwebpdemux2, … land via apt. Without it WebKit
+        # SKIPs locally with a missing-shared-library trace; the §17
+        # acceptance criteria requires WebKit to actually run on CI.
+        # Two browsers only — Firefox isn't in the §17 surface. When
+        # the browser cache hits, ``install`` becomes a no-op for the
+        # browser binaries themselves and ``install-deps`` still runs
+        # the apt step (system libs are not cached).
+        run: uv run playwright install --with-deps chromium webkit
+      - name: Pre-create traefik-proxy network
+        # ``mocks/docker-compose.yml`` declares ``traefik-proxy`` as an
+        # external network (the dev box's shared Traefik lives there).
+        # GHA runners don't have it, so compose would refuse to bring
+        # the stack up with ``network … declared as external, but could
+        # not be found``. The web-dev / mocks-web-dev containers join it
+        # for hostname routing; in CI we just need the network to
+        # exist — Traefik itself isn't running. ``|| true`` lets the
+        # step idempotent on re-runs (``network create`` errors if the
+        # name already exists).
+        run: docker network create traefik-proxy || true
+      - name: Bring up dev stack
+        run: docker compose -f mocks/docker-compose.yml up -d --build
+      - name: Wait for app-api healthz
+        # The compose healthcheck has start_period=30s and retries=3;
+        # we poll the loopback port the web-dev Vite container
+        # publishes (127.0.0.1:8100) which proxies /healthz through to
+        # app-api. The cold-start path on a hosted runner stacks four
+        # slow phases:
+        #   * Docker image build for app-api (pip install ~30 deps)
+        #   * alembic upgrade head against a fresh SQLite file
+        #   * ``npm install`` inside both web-dev *and* mocks-web-dev
+        #     (no node_modules cache; ``--no-package-lock`` forces
+        #     a full resolve), then Vite startup
+        #   * proxy /healthz round-trip
+        # 240s gives that path comfortable headroom — empirically the
+        # cold path is ~2-3 min on ubuntu-latest. If the dev stack
+        # still isn't green, dump compose state + tail logs for triage
+        # and fail.
+        run: |
+          set -euo pipefail
+          deadline=$(( SECONDS + 240 ))
+          until curl -fsS http://127.0.0.1:8100/healthz >/dev/null; do
+            if (( SECONDS >= deadline )); then
+              echo "::error::dev stack not healthy after 240s"
+              docker compose -f mocks/docker-compose.yml ps
+              docker compose -f mocks/docker-compose.yml logs --tail=200
+              exit 1
+            fi
+            sleep 2
+          done
+          echo "dev stack healthy after ${SECONDS}s"
+      - name: pytest (e2e)
+        # ``-v`` because failures here drive a slower triage loop than
+        # unit/integration; per-test names in the log are worth the
+        # noise. ``--tracing=retain-on-failure`` /
+        # ``--video=retain-on-failure`` / ``--screenshot=only-on-failure``
+        # match the AGENTS.md §"End-to-end Playwright suite" pinned
+        # invocation. ``-n0`` overrides the project-wide
+        # ``addopts = "… -n auto …"`` (pyproject.toml
+        # ``[tool.pytest.ini_options]``) — xdist would otherwise fork
+        # one pytest worker per CPU, each racing for the same
+        # ``127.0.0.1:8100`` dev stack and the shared
+        # ``tests/e2e/_artifacts/`` output dir. The conftest already
+        # routes artefacts under that dir via ``--output``.
+        run: uv run pytest tests/e2e -v -n0 --tracing=retain-on-failure --video=retain-on-failure --screenshot=only-on-failure
+      - name: Upload e2e artefacts
+        # Failure-only — green runs would otherwise upload empty
+        # (or near-empty) directories. ``if-no-files-found: ignore``
+        # because tests/e2e/_diff/ is only populated when a visual
+        # baseline drifts; absence on a Chromium-only failure is fine.
+        # Retention 7d — long enough to triage a Monday-morning red
+        # build, short enough to keep storage costs sane.
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-artefacts
+          path: |
+            tests/e2e/_artifacts/
+            tests/e2e/_diff/
+          retention-days: 7
+          if-no-files-found: ignore
+      - name: Tear down dev stack
+        # Always run — leaked containers between jobs would chew
+        # through the runner disk and confuse a re-run on the same
+        # ephemeral VM. ``-v`` wipes the SQLite volume so subsequent
+        # runs start from a clean slate.
+        if: always()
+        run: docker compose -f mocks/docker-compose.yml down -v
