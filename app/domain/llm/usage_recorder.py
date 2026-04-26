@@ -80,6 +80,13 @@ from sqlalchemy.orm import Session
 
 from app.domain.llm.budget import LlmUsage, UsageStatus, record_usage
 from app.domain.llm.router import ModelPick
+from app.observability.metrics import (
+    LLM_CALLS_TOTAL,
+    LLM_COST_USD_TOTAL,
+    cents_to_usd,
+    sanitize_label,
+    sanitize_workspace_label,
+)
 from app.tenancy import WorkspaceContext
 from app.util.clock import Clock
 
@@ -282,4 +289,42 @@ def record(
         agent_label=attribution.agent_label,
     )
     record_usage(session, ctx, usage, clock=clock)
+    _record_metrics(ctx, capability=capability, usage=usage)
     return RecordedCall(usage=usage)
+
+
+def _record_metrics(
+    ctx: WorkspaceContext,
+    *,
+    capability: str,
+    usage: LlmUsage,
+) -> None:
+    """Bump the §16 LLM metrics from a recorded usage row.
+
+    Runs after :func:`record_usage` so a constraint violation /
+    budget invariant trip never leaks a phantom counter increment.
+    Workspace labels run through
+    :func:`~app.observability.metrics.sanitize_workspace_label` to
+    enforce the §15 "no PII in metric labels" invariant; capability
+    + status / model are non-PII by construction.
+
+    Cost only flows into ``crewday_llm_cost_usd_total`` for
+    successful (``status="ok"``) calls because the §11 spec bills
+    only those — a terminal error / timeout carries
+    ``cost_cents=0`` (the :class:`LlmUsage` invariant). Skipping
+    the bump on non-OK statuses also keeps the counter reset-free:
+    a counter that observed ``0.0`` increments would Prometheus-
+    correctly stay flat, but the noise on a `rate()` query against
+    a sparse series is worse than not emitting at all.
+    """
+    workspace = sanitize_workspace_label(ctx.workspace_id)
+    LLM_CALLS_TOTAL.labels(
+        workspace_id=workspace,
+        capability=sanitize_label(capability),
+        status=sanitize_label(usage.status),
+    ).inc()
+    if usage.status == "ok" and usage.cost_cents > 0:
+        LLM_COST_USD_TOTAL.labels(
+            workspace_id=workspace,
+            model=sanitize_label(usage.api_model_id),
+        ).inc(cents_to_usd(usage.cost_cents))

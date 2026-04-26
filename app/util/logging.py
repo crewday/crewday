@@ -34,6 +34,7 @@ from __future__ import annotations
 import json
 import logging
 import sys
+import uuid
 from contextvars import ContextVar, Token
 from datetime import UTC, datetime
 from typing import Final, TextIO
@@ -47,8 +48,12 @@ from app.util.redact import (
 __all__ = [
     "JsonFormatter",
     "RedactionFilter",
+    "get_request_id",
+    "new_request_id",
     "reset_correlation_id",
+    "reset_request_id",
     "set_correlation_id",
+    "set_request_id",
     "setup_logging",
 ]
 
@@ -86,13 +91,35 @@ _RESERVED_RECORD_ATTRS: Final[frozenset[str]] = frozenset(
 # Keys reserved by our JSON envelope. If the caller's ``extra=`` tries
 # to use one, it is namespaced with a leading underscore on output.
 _RESERVED_OUTPUT_KEYS: Final[frozenset[str]] = frozenset(
-    {"time", "level", "logger", "msg", "correlation_id", "exc_info"}
+    {
+        "time",
+        "level",
+        "logger",
+        "msg",
+        "correlation_id",
+        "request_id",
+        "workspace_id",
+        "exc_info",
+    }
 )
 
 
 _CORRELATION_ID: ContextVar[str | None] = ContextVar(
     "crewday_audit_correlation_id", default=None
 )
+
+# Per-request id, distinct from ``correlation_id`` (which is
+# audit-scoped and travels with the audit-trail chain). The request
+# id is a per-HTTP-request UUID; the §16 spec calls it ``request_id``
+# in the JSON-log key list. The middleware in
+# :mod:`app.api.middleware.request_id` accepts an inbound
+# ``X-Request-Id`` header so a client correlating across services
+# can pin the same id end-to-end. Without an inbound header, the
+# middleware mints a fresh UUID4. Worker / scheduler ticks bind a
+# request id of their own (the wrap-job seam in
+# :mod:`app.worker.scheduler`) so a structured-log scrape can
+# correlate every line a single tick emits.
+_REQUEST_ID: ContextVar[str | None] = ContextVar("crewday_request_id", default=None)
 
 
 def set_correlation_id(correlation_id: str) -> Token[str | None]:
@@ -110,6 +137,64 @@ def reset_correlation_id(token: Token[str | None]) -> None:
     """Unbind the correlation id previously set via
     :func:`set_correlation_id`."""
     _CORRELATION_ID.reset(token)
+
+
+def set_request_id(request_id: str) -> Token[str | None]:
+    """Bind ``request_id`` to the current context (per-request).
+
+    Symmetric to :func:`set_correlation_id`. The HTTP middleware
+    pairs every :func:`set_request_id` with a
+    :func:`reset_request_id` in a ``finally`` block; subprocess /
+    worker callers use the same idiom around their tick body.
+    """
+    return _REQUEST_ID.set(request_id)
+
+
+def reset_request_id(token: Token[str | None]) -> None:
+    """Unbind the request id previously set via :func:`set_request_id`."""
+    _REQUEST_ID.reset(token)
+
+
+def get_request_id() -> str | None:
+    """Return the request id bound to the current context, or ``None``.
+
+    Used by :class:`JsonFormatter` to stamp every record with the
+    active request id; also exported so call sites that need to
+    propagate the id across an out-of-process boundary (subprocess
+    spawn, message queue) can read it without reaching into the
+    private :data:`_REQUEST_ID` ContextVar.
+    """
+    return _REQUEST_ID.get()
+
+
+def new_request_id() -> str:
+    """Return a fresh UUID4 string suitable for ``X-Request-Id``.
+
+    Centralised here so the HTTP middleware, the worker's tick
+    wrapper, and any future subprocess seam all mint the same shape
+    without duplicating the :mod:`uuid` import.
+    """
+    return str(uuid.uuid4())
+
+
+def _get_workspace_id() -> str | None:
+    """Return the workspace id from the current :class:`WorkspaceContext`.
+
+    Imported lazily so the logging module stays importable from
+    boot-time code paths that run before tenancy wiring is in place
+    (the bind guard, settings validation, ``app.main``'s pre-
+    factory imports). The :class:`WorkspaceContext` lookup itself
+    is a single ContextVar read — cheap enough to hit on every log
+    record.
+    """
+    # Lazy import: ``app.tenancy.current`` pulls in the dataclass
+    # that depends on no DB seam, but we still defer to avoid a
+    # circular dependency once the tenancy package grows
+    # logging-aware diagnostics of its own.
+    from app.tenancy.current import get_current
+
+    ctx = get_current()
+    return ctx.workspace_id if ctx is not None else None
 
 
 class RedactionFilter(logging.Filter):
@@ -183,9 +268,17 @@ class JsonFormatter(logging.Formatter):
     Fields: ``time`` (ISO-8601 UTC with ``+00:00``), ``level``,
     ``logger``, ``msg``, plus any caller-supplied ``extra=`` keys
     flattened onto the top level. A bound correlation id (see
-    :func:`set_correlation_id`) appears as ``correlation_id``; an
-    exception, when present, is rendered as a single string under
-    ``exc_info``.
+    :func:`set_correlation_id`) appears as ``correlation_id``; the
+    per-request id bound by the HTTP middleware (see
+    :func:`set_request_id`) appears as ``request_id``; the active
+    :class:`WorkspaceContext`'s workspace id (when one is in scope)
+    appears as ``workspace_id``. An exception, when present, is
+    rendered as a single string under ``exc_info``.
+
+    The §16 spec ("Observability / Logs") names ``request_id`` and
+    ``workspace_id`` as standard keys; emitting them at the
+    formatter rather than at every call site keeps the contract
+    single-sourced — a new caller cannot forget to stamp them.
     """
 
     def format(self, record: logging.LogRecord) -> str:
@@ -210,6 +303,14 @@ class JsonFormatter(logging.Formatter):
         correlation_id = _CORRELATION_ID.get()
         if correlation_id is not None:
             payload["correlation_id"] = correlation_id
+
+        request_id = _REQUEST_ID.get()
+        if request_id is not None:
+            payload["request_id"] = request_id
+
+        workspace_id = _get_workspace_id()
+        if workspace_id is not None:
+            payload["workspace_id"] = workspace_id
 
         for attr, value in record.__dict__.items():
             if attr in _RESERVED_RECORD_ATTRS or attr.startswith("_"):

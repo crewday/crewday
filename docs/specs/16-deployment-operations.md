@@ -676,23 +676,169 @@ A full env reference lives in `deploy/.env.example`.
 ### Logs
 
 - JSON-lines to stdout. Captured by Docker.
-- Key fields: `at`, `level`, `event`, `correlation_id`, `actor_*`,
-  `token_id`, `path`, `status`, `duration_ms`.
+- Key fields: `time`, `level`, `logger`, `msg`, `event`,
+  `correlation_id` (audit-trail scope, populated by the audit
+  writer), `request_id` (per-HTTP-request UUID stamped by
+  `RequestIdMiddleware`; worker tick equivalents stamp their own),
+  `workspace_id` (sourced from the active `WorkspaceContext` —
+  bare-host requests omit it), `actor_*`, `token_id`, `path`,
+  `status`, `duration_ms`.
+- The `X-Request-Id` HTTP header is honoured on inbound (must
+  parse as a UUID — non-UUID strings are rejected to close the
+  log-injection vector) and echoed on every response so a
+  chained caller can correlate end-to-end.
 - Log level controlled via `CREWDAY_LOG_LEVEL`.
 
 ### Metrics
 
-- Prometheus-format at `GET /metrics` (owner/manager-scope API token
-  required; not public).
-- Included: HTTP histograms, DB pool gauges, worker-job durations,
-  LLM cost counter, email delivery counters, webhook delivery
-  histogram.
+- Prometheus-format at top-level `GET /metrics` (NOT versioned —
+  this is an ops endpoint, not part of the §12 REST API).
+- **Two gates** (cd-24tp):
+  1. `CREWDAY_METRICS_ENABLED` (default `false` self-host, flipped
+     `true` in Recipe D). When `false` the route returns 404 (not
+     403) so a scanner cannot distinguish "metrics off" from "no
+     such endpoint".
+  2. `CREWDAY_METRICS_ALLOW_CIDR` — comma-separated CIDR
+     allowlist matched against the request's TCP source IP (NOT
+     `X-Forwarded-For`, which is spoofable). Empty falls back to
+     `127.0.0.0/8,100.64.0.0/10` (loopback + Tailscale CGNAT). A
+     non-allowed source returns 403.
+- The §15 "Logging and redaction" no-PII contract extends to
+  metric labels: workspace label values pass through the central
+  redactor (`app.observability.metrics.sanitize_workspace_label`)
+  before reaching `Counter.labels`. Workspace IDs (ULIDs) and
+  slugs are public identifiers and pass through; emails / IBANs
+  / Bearer tokens that mistakenly reach this seam are masked.
+- Included counters / histograms (cd-24tp):
+  - `crewday_http_requests_total{workspace_id, route, status}`
+  - `crewday_http_request_duration_seconds{route}`
+  - `crewday_llm_calls_total{workspace_id, capability, status}`
+  - `crewday_llm_cost_usd_total{workspace_id, model}`
+  - `crewday_worker_jobs_total{job, status}`
+  - `crewday_worker_job_duration_seconds{job}`
+- Future additions: DB pool gauges, email delivery counters,
+  webhook delivery histogram. Each lands as a Beads task with
+  the same label-hygiene gate.
 - Default scrape interval: 30s.
+
+#### Reverse-proxy caveat
+
+`CREWDAY_METRICS_ALLOW_CIDR` matches the **TCP peer**, not the
+original client. In any deployment that fronts the app with a
+reverse proxy (Caddy / nginx / Traefik / Pangolin), `request.client.host`
+is the proxy's IP. Recipe A puts Caddy on the host and proxies
+to `127.0.0.1:8000`, so EVERY inbound request appears to come
+from loopback once it reaches the app — the default
+`127.0.0.0/8` allowlist is wide open through the proxy.
+
+Operators behind a reverse proxy MUST do **one** of:
+
+1. Keep `CREWDAY_METRICS_ENABLED=false` (the default) and run
+   the Prometheus scraper as a sidecar that talks to the app
+   directly, bypassing the reverse proxy.
+2. Configure the reverse proxy to refuse external traffic to
+   `/metrics`. Caddy:
+
+   ```
+   crew.day {
+     @metrics path /metrics
+     handle @metrics {
+       @scraper remote_ip 10.0.0.0/8 100.64.0.0/10
+       handle @scraper {
+         reverse_proxy app:8000
+       }
+       respond 404
+     }
+     reverse_proxy app:8000
+   }
+   ```
+
+   nginx:
+
+   ```
+   location = /metrics {
+     allow 10.0.0.0/8;
+     deny all;
+     proxy_pass http://app:8000;
+   }
+   ```
+
+3. Set `CREWDAY_METRICS_ALLOW_CIDR` to a tight, proxy-aware
+   range that excludes loopback (e.g. just the scraper's
+   internal Docker bridge CIDR) — only safe when the proxy
+   forwards the unmodified peer IP, which Docker compose
+   networking does **not** do without
+   `network_mode: host`.
+
+We deliberately do not honour `X-Forwarded-For` here — without
+a trusted-proxy registry an attacker can spoof the header. A
+trusted-proxy seam can land later if a real deployment needs
+it; until then the safe posture is "metrics off behind a
+proxy, scrape direct".
+
+#### Cardinality budget
+
+`workspace_id` appears on three counters
+(`crewday_http_requests_total`, `crewday_llm_calls_total`,
+`crewday_llm_cost_usd_total`). Multi-tenant deployments must
+budget the resulting series count. A SaaS with `W` workspaces
+× `R` routes × `S` statuses produces `W × R × S` series for
+the HTTP counter alone — for `W=1000, R=50, S=5` that is
+~250k series, well within Prometheus's comfort zone but worth
+sizing the storage backend for. Single-tenant self-host runs
+with `W=1` and pays no cardinality tax.
+
+Workspace **slugs** are NOT used as label values — only
+ULID-shaped workspace IDs — so a deployment that recycles
+slugs across deletions cannot inflate cardinality by reusing
+a name. The 64-char hard cap on every label value
+(`_LABEL_MAX_LENGTH` in `app/observability/metrics.py`)
+backstops a hostile-input cardinality blow-up.
 
 ### Traces
 
-- Optional OTLP exporter (`OTEL_EXPORTER_OTLP_ENDPOINT`). Off by
-  default; turning it on adds HTTP spans and DB span auto-instrument.
+- Optional OTLP exporter, controlled by the upstream OTel env
+  var `OTEL_EXPORTER_OTLP_ENDPOINT` (full URL — gRPC by
+  default, set `OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf` for
+  HTTP transport).
+- When unset, `app.observability.tracing.setup_tracing` is a
+  documented no-op — zero overhead on the hot path.
+- When set, the bootstrap (`app/observability/tracing.py`)
+  installs:
+  - The OTLP `BatchSpanProcessor` pointed at the configured
+    endpoint, marked with `service.name=crewday`.
+  - FastAPI auto-instrumentation (HTTP request spans).
+  - SQLAlchemy auto-instrumentation (DB query spans).
+  - httpx auto-instrumentation (outbound HTTP / LLM call spans).
+
+#### Verifying tracing locally with Jaeger
+
+Bring up a Jaeger all-in-one container next to the dev stack and
+point the app at it:
+
+```bash
+docker run --rm -d --name jaeger \
+  -p 16686:16686 \
+  -p 4317:4317 \
+  jaegertracing/all-in-one:latest
+
+OTEL_EXPORTER_OTLP_ENDPOINT="http://localhost:4317" \
+  CREWDAY_METRICS_ENABLED=true \
+  docker compose -f mocks/docker-compose.yml up -d --build
+
+# Drive some traffic through the dev stack:
+curl -s http://127.0.0.1:8100/healthz
+curl -s -b "$cookie" http://127.0.0.1:8100/w/smoke/api/v1/properties
+
+# Open the Jaeger UI at http://localhost:16686 and pick the
+# "crewday" service — every HTTP / SQL / outbound httpx hop
+# should appear as a span.
+```
+
+Stop with `docker rm -f jaeger` when done. The exporter is a
+batch span processor; spans land within the configured flush
+interval (default 5s) so a fresh request shows up almost
+immediately.
 
 ### Dashboards
 

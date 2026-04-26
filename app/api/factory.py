@@ -73,7 +73,12 @@ from app.adapters.storage.ports import MimeSniffer, Storage
 from app.api.admin import admin_router
 from app.api.errors import add_exception_handlers
 from app.api.health import router as health_router
-from app.api.middleware import IdempotencyMiddleware, SecurityHeadersMiddleware
+from app.api.middleware import (
+    HttpMetricsMiddleware,
+    IdempotencyMiddleware,
+    RequestIdMiddleware,
+    SecurityHeadersMiddleware,
+)
 from app.api.transport.sse import router as sse_router
 from app.api.v1 import CONTEXT_ROUTERS, WORKSPACE_ADMIN_ROUTER
 from app.api.v1.auth import email_change as email_change_module
@@ -117,6 +122,7 @@ from app.auth.keys import KeyDerivationError, derive_subkey
 from app.capabilities import Capabilities
 from app.capabilities import probe as probe_capabilities
 from app.config import Settings, get_settings
+from app.observability import build_metrics_router, setup_tracing
 from app.security import BindGuardError, assert_bind_allowed
 from app.tenancy.middleware import WorkspaceContextMiddleware
 from app.util.logging import setup_logging
@@ -985,16 +991,30 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # thing to see the request, last thing to see the response"):
     #
     # 1. CORS — reject cross-origin preflights before any stateful work.
-    # 2. SecurityHeaders — stamp every response, even middleware rejects.
-    # 3. WorkspaceContextMiddleware — bind the tenancy ctx + stash the
+    # 2. RequestIdMiddleware — bind the per-request id ContextVar so
+    #    every downstream log line (including the tenancy middleware's
+    #    own) stamps ``request_id`` (§16 "Observability / Logs").
+    # 3. SecurityHeaders — stamp every response, even middleware rejects.
+    # 4. WorkspaceContextMiddleware — bind the tenancy ctx + stash the
     #    resolved :class:`~app.tenancy.middleware.ActorIdentity` on
     #    ``request.state`` (so the idempotency middleware can read
     #    ``token_id`` without re-verifying the bearer token).
-    # 4. IdempotencyMiddleware — replay cache for ``POST`` retries
+    # 5. HttpMetricsMiddleware — bump the §16 HTTP counter / histogram.
+    #    Mounted **inside** WorkspaceContext so it can read the
+    #    workspace_id from the active :class:`WorkspaceContext` after
+    #    ``call_next`` returns. ``BaseHTTPMiddleware`` resets the
+    #    inner middleware's ContextVar in ``finally`` before control
+    #    returns to the outer middleware, so a metrics middleware
+    #    above WorkspaceContext would always see ``ctx is None`` and
+    #    emit an empty ``workspace_id`` label (cd-24tp self-review
+    #    bug fix). The histogram now excludes the brief
+    #    auth/tenancy resolution time, which is fine — operators
+    #    care about handler latency, not tenancy lookup overhead.
+    # 6. IdempotencyMiddleware — replay cache for ``POST`` retries
     #    carrying ``Idempotency-Key``. Runs AFTER auth (so
     #    ``token_id`` is known) and BEFORE the handler. Spec §12
     #    "Idempotency".
-    # 5. CSRFMiddleware — double-submit check on mutation verbs.
+    # 7. CSRFMiddleware — double-submit check on mutation verbs.
     #
     # To get that layout we register INNER → OUTER: CSRF first (ends up
     # innermost), CORS last (ends up outermost). CORS defaults to
@@ -1005,8 +1025,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # ``CREWDAY_CORS_ALLOW_ORIGINS`` with an explicit list.
     app.add_middleware(CSRFMiddleware)
     app.add_middleware(IdempotencyMiddleware)
+    app.add_middleware(HttpMetricsMiddleware)
     app.add_middleware(WorkspaceContextMiddleware)
     app.add_middleware(SecurityHeadersMiddleware, settings=cfg)
+    app.add_middleware(RequestIdMiddleware)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=list(cfg.cors_allow_origins),
@@ -1019,6 +1041,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     mailer, throttle, capabilities = _wire_services(app, cfg)
 
     _register_ops_routes(app)
+    # Prometheus ``GET /metrics`` — gated by ``settings.metrics_enabled``
+    # + the source-IP CIDR allowlist. Mounted before the auth /
+    # context routers so a 404 from the gate cannot accidentally
+    # match a workspace-scoped path that happens to share the
+    # ``/metrics`` segment (none today, but the order keeps the
+    # intent clear). See ``app/observability/endpoint.py``.
+    app.include_router(build_metrics_router(settings=cfg))
     _mount_auth_routers(
         app,
         settings=cfg,
@@ -1045,6 +1074,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         register_vite_proxy(app, vite_dev_url=cfg.vite_dev_url)
     else:
         _register_spa_catch_all(app)
+
+    # OpenTelemetry tracing is opt-in via ``OTEL_EXPORTER_OTLP_ENDPOINT``
+    # — a no-op when the env var is unset (the §16 default). Wiring
+    # AFTER middleware + routers ensures the FastAPI auto-instrument
+    # sees the fully composed app; wiring BEFORE the SPA catch-all
+    # because the catch-all replaces ``app.openapi`` and would
+    # otherwise hide the route table the OTel hook walks.
+    setup_tracing(app)
 
     # Worker mode lands via the lifespan hook built at the top of
     # this factory (``_build_worker_lifespan``). The log line here

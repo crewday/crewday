@@ -65,8 +65,14 @@ from apscheduler.triggers.interval import IntervalTrigger
 from sqlalchemy import select
 
 from app.adapters.db.session import make_uow
+from app.observability.metrics import (
+    WORKER_JOB_DURATION_SECONDS,
+    WORKER_JOBS_TOTAL,
+    sanitize_label,
+)
 from app.tenancy import WorkspaceContext
 from app.util.clock import Clock, SystemClock
+from app.util.logging import new_request_id, reset_request_id, set_request_id
 from app.worker.heartbeat import upsert_heartbeat
 
 if TYPE_CHECKING:
@@ -255,62 +261,86 @@ def wrap_job(
     to propagate so the scheduler can run its own cleanup.
     """
     import asyncio  # local import — asyncio is only needed when called
+    import time as _time
 
     is_coroutine = inspect.iscoroutinefunction(func)
+    job_label = sanitize_label(job_id)
 
     async def _runner() -> None:
+        # Bind a fresh request_id per tick so structured-log records
+        # the body emits get correlated end-to-end (the §16
+        # "Observability / Logs" key contract). Worker ticks are the
+        # subprocess-equivalent of an HTTP request — they need the
+        # same id discipline so an operator scraping the JSON stream
+        # can isolate one tick's lines from another's.
+        request_id_token = set_request_id(new_request_id())
+        start = _time.perf_counter()
         _log.info(
             "worker tick starting",
             extra={"event": "worker.tick.start", "job_id": job_id},
         )
         ok = False
         try:
-            if is_coroutine:
-                # ``func`` is ``async def`` — invoke and await on the
-                # event loop. ``asyncio.to_thread`` would call the
-                # coroutine function, hand back an un-awaited coroutine
-                # object, and silently skip the body.
-                result = func()
-                if inspect.isawaitable(result):
-                    await result
-            else:
-                # Sync body — offload to the default executor so a
-                # blocking DB op does not pin the event loop.
-                await asyncio.to_thread(func)
-            ok = True
-        except Exception:
-            # The job body's own logging (if any) fires first; this
-            # backstop guarantees a record even if the body swallowed.
-            _log.exception(
-                "worker tick failed",
-                extra={"event": "worker.tick.error", "job_id": job_id},
-            )
-
-        if ok and heartbeat:
             try:
-                await asyncio.to_thread(_write_heartbeat, job_id, clock)
+                if is_coroutine:
+                    # ``func`` is ``async def`` — invoke and await on
+                    # the event loop. ``asyncio.to_thread`` would call
+                    # the coroutine function, hand back an un-awaited
+                    # coroutine object, and silently skip the body.
+                    result = func()
+                    if inspect.isawaitable(result):
+                        await result
+                else:
+                    # Sync body — offload to the default executor so a
+                    # blocking DB op does not pin the event loop.
+                    await asyncio.to_thread(func)
+                ok = True
             except Exception:
-                # A heartbeat write failure is itself a signal — log
-                # and move on. The next successful tick will try
-                # again; if every tick fails the heartbeat goes
-                # stale and ``/readyz`` catches it.
+                # The job body's own logging (if any) fires first;
+                # this backstop guarantees a record even if the body
+                # swallowed.
                 _log.exception(
-                    "worker heartbeat write failed",
-                    extra={
-                        "event": "worker.heartbeat.error",
-                        "job_id": job_id,
-                    },
+                    "worker tick failed",
+                    extra={"event": "worker.tick.error", "job_id": job_id},
                 )
-                ok = False
 
-        _log.info(
-            "worker tick finished",
-            extra={
-                "event": "worker.tick.end",
-                "job_id": job_id,
-                "ok": ok,
-            },
-        )
+            if ok and heartbeat:
+                try:
+                    await asyncio.to_thread(_write_heartbeat, job_id, clock)
+                except Exception:
+                    # A heartbeat write failure is itself a signal —
+                    # log and move on. The next successful tick will
+                    # try again; if every tick fails the heartbeat
+                    # goes stale and ``/readyz`` catches it.
+                    _log.exception(
+                        "worker heartbeat write failed",
+                        extra={
+                            "event": "worker.heartbeat.error",
+                            "job_id": job_id,
+                        },
+                    )
+                    ok = False
+
+            duration = _time.perf_counter() - start
+            WORKER_JOB_DURATION_SECONDS.labels(job=job_label).observe(duration)
+            WORKER_JOBS_TOTAL.labels(
+                job=job_label,
+                status="ok" if ok else "error",
+            ).inc()
+
+            _log.info(
+                "worker tick finished",
+                extra={
+                    "event": "worker.tick.end",
+                    "job_id": job_id,
+                    "ok": ok,
+                },
+            )
+        finally:
+            # Always restore — even if the heartbeat / metric path
+            # raised — so the request id ContextVar does not leak
+            # into the next tick scheduled on the same task.
+            reset_request_id(request_id_token)
 
     return _runner
 

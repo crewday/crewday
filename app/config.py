@@ -195,6 +195,24 @@ class Settings(BaseSettings):
     # sandbox where every caller is trusted.
     phase0_stub_enabled: bool = False
 
+    # --- Observability (§16 "Observability / Metrics", cd-24tp) ---
+    # Hard kill switch for the ``GET /metrics`` Prometheus endpoint.
+    # Default **off** so a self-hosted box does not expose a metrics
+    # surface unless the operator opts in. Recipe D's compose flips
+    # it on alongside the in-cluster Prometheus scraper. When ``False``
+    # the route returns 404 (not 403) so a scanner cannot distinguish
+    # "metrics off" from "no such image".
+    metrics_enabled: bool = False
+    # CIDR allowlist for ``/metrics``. The endpoint matches the
+    # request's TCP source IP against every entry; a non-match
+    # returns 403. Empty falls back to the loopback + Tailscale CGNAT
+    # default in :func:`app.observability.endpoint._resolve_allow_cidrs`.
+    # Comma-separated at the env layer (see
+    # :meth:`_split_metrics_allow_cidr`).
+    metrics_allow_cidr: Annotated[list[str], NoDecode] = Field(
+        default_factory=list,
+    )
+
     @field_validator("trusted_interfaces", mode="before")
     @classmethod
     def _split_trusted_interfaces(cls, value: object) -> object:
@@ -213,6 +231,14 @@ class Settings(BaseSettings):
     @field_validator("cors_allow_origins", mode="before")
     @classmethod
     def _split_cors_origins(cls, value: object) -> object:
+        """Parse comma-separated env input into a list (see above)."""
+        if isinstance(value, str):
+            return [item.strip() for item in value.split(",") if item.strip()]
+        return value
+
+    @field_validator("metrics_allow_cidr", mode="before")
+    @classmethod
+    def _split_metrics_allow_cidr(cls, value: object) -> object:
         """Parse comma-separated env input into a list (see above)."""
         if isinstance(value, str):
             return [item.strip() for item in value.split(",") if item.strip()]
