@@ -422,19 +422,18 @@ and `work_engagement.*` covers employment/pay-pipeline lifecycle.
 ```
 
 Headers:
-- `X-CrewDay-Signature: v1=<hex>` where `hex` is the lowercase
-  hex encoding of `HMAC-SHA256(subscription_secret,
-  "<iso8601_timestamp>.<request_body>")`. The signing payload is
-  the ISO-8601 UTC timestamp (second precision, suffixed `Z`),
-  a literal `.`, and the raw request body bytes; no trailing
-  newline, no whitespace normalisation.
-- `X-CrewDay-Timestamp: <iso8601_timestamp>` — the same
-  timestamp used in the signing payload. Receivers MUST verify
-  the timestamp is within a **5-minute** drift window relative
-  to their own clock, rejecting outside the window to block
-  replay. A 30-second clock-skew tolerance is recommended for
-  receivers that can't guarantee perfect sync.
-- `X-CrewDay-Event`, `X-CrewDay-Delivery`.
+- `X-Crewday-Signature: t=<unix>,v1=<hex>` (Stripe-style; cd-q885)
+  where `<unix>` is the unix epoch second the signature was minted
+  and `<hex>` is the lowercase hex encoding of
+  `HMAC-SHA256(subscription_secret, f"{t}.{request_body}")`. The
+  signing payload is the unix timestamp, a literal `.`, and the raw
+  request body bytes; no trailing newline, no whitespace
+  normalisation. Receivers MUST verify `abs(now - t) <= 300` (5
+  minutes) to block replay; a 30-second clock-skew tolerance is
+  recommended for receivers that can't guarantee perfect sync.
+  Header names are case-insensitive (RFC 7230 §3.2); the canonical
+  on-the-wire form is `X-Crewday-Signature`.
+- `X-Crewday-Event`, `X-Crewday-Delivery`.
 
 ### Secret rotation
 
@@ -445,26 +444,38 @@ and holds the previous secret in a `previous` slot for **24
 hours**. During that window each outbound delivery is sent
 **twice** in a single HTTP POST by presenting the signature
 computed under both secrets — concatenated as
-`X-CrewDay-Signature: v1=<hex_current>, v1=<hex_previous>`;
+`X-Crewday-Signature: t=<unix>,v1=<hex_current>,v1=<hex_previous>`;
 compliant receivers accept a POST if either `v1=...` value
 matches their configured secret. After 24 hours the
 `previous` slot is discarded and only `current` signs;
 receivers still holding the old secret fail with
 `401 signature_mismatch` until they rotate too. The rotation
-verb is a first-class CLI entry in §13.
+verb is a first-class CLI entry in §13. The cd-q885 dispatcher
+ships the single-secret path; the rotation surface lands as a
+follow-up.
 
 ### Retries
 
-- On 2xx → delivered.
-- On non-2xx or timeout (10s): exponential backoff (1m, 5m, 30m, 2h,
-  12h), with a per-delivery cap of 48h. After 48h the delivery is
-  marked `failed` and dropped.
-- A subscription whose last 24h of deliveries are all non-2xx is
+- On 2xx → `webhook_delivery.status='succeeded'`.
+- On 4xx other than 408 / 429 → permanent failure. The row flips to
+  `webhook_delivery.status='dead_lettered'` immediately, with no
+  further attempts; one `audit.webhook_delivery.dead_lettered` row
+  lands. The receiver said "no", not "try again later".
+- On 408 / 429 / 5xx / network error / timeout (10 s) → transient.
+  The retry schedule is `[0s, 30s, 5m, 1h, 6h, 24h]` — six attempts
+  total (cd-q885). Each transient response stamps
+  `next_attempt_at = last_attempted_at + RETRY_SCHEDULE_SECONDS[attempt]`
+  and the dispatcher's 30 s tick refires the row when the window
+  opens. After the 6th attempt the row dead-letters with audit; the
+  full delivery window is ~31 h.
+- A subscription whose last 24 h of deliveries are all non-2xx is
   marked `unhealthy` and **paused** (no new deliveries enqueued). The
   manager is notified. A manager or a token with
   `messaging:write` can call `POST /webhooks/{id}/enable` to resume;
   enabling re-opens the queue but does not replay the dropped
-  deliveries (use `/replay` for that).
+  deliveries (use `/replay` for that). The cd-q885 dispatcher does
+  not yet implement the auto-pause heuristic; it lands as a
+  follow-up.
 
 ### Delivery log retention
 

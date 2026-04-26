@@ -1761,6 +1761,20 @@ POST   /webhooks/{id}/disable
 POST   /webhooks/{id}/enable
 POST   /webhooks/{id}/replay
 
+# Outbound webhook envelope (§10 "Webhooks (outbound)") — every
+# delivery POST carries Stripe-style headers minted by the cd-q885
+# dispatcher:
+#
+#   X-Crewday-Signature: t=<unix>,v1=<hex>
+#   X-Crewday-Event:     <event-name>
+#   X-Crewday-Delivery:  <delivery-id>
+#
+# `<hex>` is HMAC-SHA256(secret, f"{t}.{request_body}") in lowercase
+# hex. Receivers MUST verify `abs(now - t) <= 300` (seconds) to block
+# replay. The signing payload is the unix epoch second, a literal
+# `.`, and the raw request body bytes — no whitespace normalisation,
+# no trailing newline. Header names are case-insensitive (RFC 7230).
+
 # Web-push subscription surface (§10 "Web push registration surface").
 # Self-scoped: the caller registers / un-registers their own browser
 # subscription; no manager cross-user path. The VAPID public key lives

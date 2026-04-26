@@ -96,6 +96,8 @@ __all__ = [
     "POLL_ICAL_MISFIRE_GRACE_SECONDS",
     "USER_WORKSPACE_REFRESH_INTERVAL_SECONDS",
     "USER_WORKSPACE_REFRESH_JOB_ID",
+    "WEBHOOK_DISPATCH_INTERVAL_SECONDS",
+    "WEBHOOK_DISPATCH_JOB_ID",
     "create_scheduler",
     "register_jobs",
     "start",
@@ -237,6 +239,29 @@ APPROVAL_TTL_JOB_ID: str = "approval_ttl_sweep"
 # ``(status, expires_at)`` covering index is a Beads follow-up
 # (cd-approval-ttl-index) for fleets with sustained pending depth.
 APPROVAL_TTL_INTERVAL_SECONDS: int = 900
+
+
+# Stable job id for the outbound webhook dispatcher tick (cd-q885).
+# The tick callable in
+# :mod:`app.worker.tasks.webhook_dispatch.dispatch_due_webhooks` walks
+# every ``webhook_delivery`` row whose ``status='pending'`` and
+# ``next_attempt_at <= now`` and fires one HTTP POST attempt. Cross-
+# tenant by design — like the approval-TTL sweep, the dispatcher is
+# deployment-scope (NOT per-workspace) because the retry schedule is
+# a global policy and per-workspace fan-out would scale linearly with
+# workspace count.
+WEBHOOK_DISPATCH_JOB_ID: str = "webhook_dispatch"
+
+# Interval for the webhook dispatcher. Spec §10 "Retries" pins the
+# six-step retry schedule at ``[0s, 30s, 5m, 1h, 6h, 24h]``; the
+# dispatcher tick must fire often enough that a 30 s retry slot is
+# honoured without a long lag, but not so often that an idle fleet
+# burns CPU on every wakeup. 30 s matches the smallest non-zero
+# retry interval — a tick hitting at the right boundary picks up
+# the row exactly when its retry window opens. The deliver call is
+# itself a no-op on rows in terminal state, so a tick that fires
+# while no rows are due is cheap.
+WEBHOOK_DISPATCH_INTERVAL_SECONDS: int = 30
 
 
 # Job-body type. Downstream tasks supply either a synchronous callable
@@ -472,6 +497,7 @@ def register_jobs(
         POLL_ICAL_JOB_ID,
         USER_WORKSPACE_REFRESH_JOB_ID,
         APPROVAL_TTL_JOB_ID,
+        WEBHOOK_DISPATCH_JOB_ID,
     ):
         with contextlib.suppress(JobLookupError):
             scheduler.remove_job(pending_id)
@@ -719,6 +745,38 @@ def register_jobs(
         misfire_grace_time=APPROVAL_TTL_INTERVAL_SECONDS,
     )
 
+    # --- 30 s outbound webhook dispatcher tick (cd-q885) ---
+    # The tick callable in
+    # :mod:`app.worker.tasks.webhook_dispatch.dispatch_due_webhooks`
+    # walks every ``webhook_delivery`` row whose ``status='pending'``
+    # and ``next_attempt_at <= now`` and fires one HTTP POST attempt.
+    # The §10 retry schedule is ``[0s, 30s, 5m, 1h, 6h, 24h]`` so the
+    # tick fires every 30 s — small enough to honour the smallest
+    # non-zero retry slot without a long lag, large enough that an
+    # idle fleet doesn't burn CPU on every wakeup.
+    #
+    # ``misfire_grace_time = WEBHOOK_DISPATCH_INTERVAL_SECONDS`` —
+    # one tick late is fine (the dispatcher is idempotent on rows in
+    # terminal state and re-attempts pending rows that were due);
+    # two-ticks-late is a signal the scheduler is stuck and a skip
+    # is preferable to a stacked catch-up. ``coalesce=True`` +
+    # ``max_instances=1`` keep a slow dispatcher run from stacking
+    # ticks on a long upstream timeout.
+    scheduler.add_job(
+        wrap_job(
+            _make_webhook_dispatch_body(resolved_clock),
+            job_id=WEBHOOK_DISPATCH_JOB_ID,
+            clock=resolved_clock,
+        ),
+        trigger=IntervalTrigger(seconds=WEBHOOK_DISPATCH_INTERVAL_SECONDS),
+        id=WEBHOOK_DISPATCH_JOB_ID,
+        name=WEBHOOK_DISPATCH_JOB_ID,
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=WEBHOOK_DISPATCH_INTERVAL_SECONDS,
+    )
+
 
 def _heartbeat_only_body() -> None:
     """No-op job body — the heartbeat upsert runs after it returns.
@@ -764,6 +822,40 @@ def _make_approval_ttl_body(clock: Clock) -> Callable[[], None]:
         # re-emit. Discard the returned report — operators read it
         # off the structured-log stream, not the wrapper's return.
         sweep_expired_approvals(clock=clock)
+
+    return _body
+
+
+def _make_webhook_dispatch_body(clock: Clock) -> Callable[[], None]:
+    """Build the 30 s outbound webhook dispatcher body (cd-q885).
+
+    Factory rather than a bare module-level function so the body
+    closes over the scheduler's injected :class:`Clock` — every retry
+    cutoff and signature timestamp must be driven by the same clock
+    the heartbeat uses, otherwise a :class:`~app.util.clock.FrozenClock`
+    under test would have a deterministic heartbeat and a
+    non-deterministic dispatch decision.
+
+    The dispatcher itself is the canonical writer for
+    ``webhook_delivery`` row state machines (§10 "Retries"); the
+    wrapper opens its own UoWs per row, so the body is a thin
+    adapter.
+
+    The task import is deferred into the closure body so module
+    import order stays robust — the dispatcher pulls in the cipher,
+    the secret_envelope repository, and the integrations repository,
+    none of which the standalone ``python -m app.worker`` entrypoint
+    otherwise needs at import time.
+    """
+
+    def _body() -> None:
+        from app.worker.tasks.webhook_dispatch import dispatch_due_webhooks
+
+        # The task itself logs the per-tick summary at INFO with
+        # ``event=webhook.dispatch.tick``; the wrapper does not need
+        # to re-emit. Discard the report — operators read it off the
+        # structured-log stream, not the wrapper's return.
+        dispatch_due_webhooks(clock=clock)
 
     return _body
 
