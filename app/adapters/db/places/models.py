@@ -296,13 +296,38 @@ class PropertyWorkspace(Base):
 class Unit(Base):
     """Bookable subdivision of a property.
 
-    v1 slice: ``id`` / ``property_id`` / ``label`` / ``type`` /
-    ``capacity`` / ``created_at``. The richer §04 columns
-    (``default_checkin_time``, ``welcome_overrides_json``,
-    ``settings_override_json``, ``ordinal``) land with cd-8u5.
-    Workspace isolation is enforced by joining through
+    The v1 slice (cd-i6u) landed ``id`` / ``property_id`` /
+    ``label`` / ``type`` / ``capacity`` / ``created_at`` — the
+    minimum a downstream context might want to know about a sub-
+    property bookable. cd-y62 added the richer §02 / §04 surface
+    the manager UI and the unit domain service need:
+
+    * ``name`` — human-visible name ("Room 1", "Apt 3B"). The new
+      domain service writes a non-blank value on every insert.
+    * ``ordinal`` — display order among siblings.
+    * ``default_checkin_time`` / ``default_checkout_time`` — per-
+      unit override of the property's check-in/out window. Stored
+      as ``HH:MM`` text; nullable = inherit.
+    * ``max_guests`` — bookable cap surfaced on the guest welcome
+      page. Distinct from the v1 ``capacity`` column (physical-
+      kind cap).
+    * ``welcome_overrides_json`` — per-unit overrides that merge
+      over the property's ``welcome_defaults_json`` at render time
+      (§04 "Welcome overrides merge").
+    * ``settings_override_json`` — per-unit cascade layer between
+      property and work_engagement (§02 "Settings cascade").
+    * ``notes_md`` — internal staff-visible notes.
+    * ``updated_at`` / ``deleted_at`` — mutation + soft-delete
+      timestamps.
+
+    The legacy ``label`` / ``type`` / ``capacity`` columns survive
+    for back-compat (``label`` was relaxed to nullable). Workspace
+    isolation is enforced by joining through
     :class:`PropertyWorkspace` — the package docstring spells out
-    why ``unit`` itself stays unregistered.
+    why ``unit`` itself stays unregistered. The partial UNIQUE
+    ``uq_unit_property_name_active`` enforces "one live name per
+    property" while letting a soft-deleted row coexist with a re-
+    created sibling.
     """
 
     __tablename__ = "unit"
@@ -313,21 +338,77 @@ class Unit(Base):
         ForeignKey("property.id", ondelete="CASCADE"),
         nullable=False,
     )
-    label: Mapped[str] = mapped_column(String, nullable=False)
-    # Physical-kind taxonomy; a tighter spec-matched enum lands with
-    # cd-8u5. CHECK enforces the v1 set.
-    type: Mapped[str] = mapped_column(String, nullable=False)
+    # Human-visible name. Nullable at the DB layer so the cd-y62
+    # migration could backfill from ``label``; the domain service
+    # always writes a non-blank value on insert + update.
+    name: Mapped[str | None] = mapped_column(String, nullable=True)
+    # Display order among siblings (lower = earlier). Server default
+    # ``0`` keeps legacy rows readable.
+    ordinal: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # Per-unit check-in/out overrides as ``HH:MM`` text. Nullable =
+    # inherit from property. Text storage keeps SQLite + Postgres in
+    # sync (SQLite's TIME affinity is a thin layer over TEXT).
+    default_checkin_time: Mapped[str | None] = mapped_column(String, nullable=True)
+    default_checkout_time: Mapped[str | None] = mapped_column(String, nullable=True)
+    # Bookable cap surfaced on the guest welcome page.
+    max_guests: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Welcome overrides — merged over property ``welcome_defaults_json``
+    # at render time (§04 "Welcome overrides merge").
+    welcome_overrides_json: Mapped[dict[str, Any]] = mapped_column(
+        JSON, nullable=False, default=dict
+    )
+    # Per-unit settings cascade layer (§02 "Settings cascade").
+    settings_override_json: Mapped[dict[str, Any]] = mapped_column(
+        JSON, nullable=False, default=dict
+    )
+    # Internal staff-visible notes (markdown).
+    notes_md: Mapped[str] = mapped_column(String, nullable=False, default="")
+    # Legacy v1 columns — relaxed to nullable in cd-y62 so the new
+    # domain service can write rows without populating them. They
+    # survive so existing adapters keep reading; a future cleanup
+    # may drop them.
+    label: Mapped[str | None] = mapped_column(String, nullable=True)
+    # Physical-kind taxonomy. CHECK still enforces the v1 set when
+    # the column carries a value; nullable allows the new service to
+    # skip it on insert.
+    type: Mapped[str | None] = mapped_column(String, nullable=True)
     capacity: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
     )
+    # Mutation timestamp — bumped on every domain-service update.
+    # Nullable for the cd-y62 migration's cheap backfill path; the
+    # service always writes it on insert + update.
+    updated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    # Soft-delete marker; live rows carry ``NULL``. The service's
+    # default list excludes non-null rows; the partial UNIQUE on
+    # ``(property_id, name)`` excludes tombstoned rows so a re-
+    # create after a soft-delete works.
+    deleted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
     __table_args__ = (
         CheckConstraint(
-            "type IN ('" + "', '".join(_UNIT_TYPE_VALUES) + "')",
+            "type IS NULL OR type IN ('" + "', '".join(_UNIT_TYPE_VALUES) + "')",
             name="type",
         ),
         Index("ix_unit_property", "property_id"),
+        Index("ix_unit_deleted", "deleted_at"),
+        # Partial UNIQUE on ``(property_id, name)`` excluding tomb-
+        # stoned rows — enforces "one live name per property" while
+        # letting a re-create after soft-delete mint a fresh row
+        # without colliding with the historical one.
+        Index(
+            "uq_unit_property_name_active",
+            "property_id",
+            "name",
+            unique=True,
+            sqlite_where=text("deleted_at IS NULL"),
+            postgresql_where=text("deleted_at IS NULL"),
+        ),
     )
 
 

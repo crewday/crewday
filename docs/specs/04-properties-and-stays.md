@@ -168,8 +168,7 @@ unit-scoped.
 | field                   | type      | notes                              |
 |-------------------------|-----------|-------------------------------------|
 | id                      | ULID PK   |                                    |
-| workspace_id            | ULID FK   |                                    |
-| property_id             | ULID FK   |                                    |
+| property_id             | ULID FK   | workspace scoping flows through the parent property's `property_workspace` junction (§"Multi-belonging") — the table itself does not carry `workspace_id` because a property may belong to several workspaces at once |
 | name                    | text      | "Room 1", "Apt 3B", "Main house". For single-unit properties: property name (hidden in UI) |
 | ordinal                 | int       | display order among siblings       |
 | default_checkin_time    | time?     | nullable = inherit from property; e.g. `16:00` |
@@ -184,14 +183,23 @@ unit-scoped.
 ### Invariants
 
 - Every property has >= 1 unit (enforced by application, not DB
-  constraint).
+  constraint). The default unit is **not renamed** when the parent
+  property's name changes — units are independent rows after the
+  bootstrap flush, so a manager who renames a property keeps the
+  pre-existing unit name (managers can rename the unit explicitly if
+  they want the two to stay in sync).
 - When a property is created, a **default unit** is auto-created with
   `name = property.name` and `ordinal = 0`.
 - Single-unit properties: UI hides the unit layer entirely (unit
   selector, unit management). The unit exists in the data model but
   is invisible.
-- `UNIQUE(workspace_id, property_id, name)` — no two units in the
-  same property share a name.
+- `UNIQUE(property_id, name) WHERE deleted_at IS NULL` — no two
+  *live* units in the same property share a name. The window is
+  intentionally per-property, not per-(workspace, property): a
+  property may belong to several workspaces (§"Multi-belonging") and
+  every linked workspace sees the same unit list, so a workspace-
+  scoped uniqueness window would be ambiguous. Tombstoned rows are
+  excluded so a re-create after a soft-delete works.
 
 ### Welcome overrides merge
 

@@ -29,13 +29,28 @@ Public surface:
   message).
 
 **Multi-belonging bootstrap.** :func:`create_property` inserts one
-``property`` row and one ``property_workspace`` row with
-``membership_role = 'owner_workspace'`` in a single flush. The
-junction row's ``label`` defaults to ``property.name`` but may be
-overridden per call. Subsequent workspaces attach to the property
-via the :mod:`property_workspace` invite flow (cd-hsk) — this
-service never mints ``managed_workspace`` / ``observer_workspace``
-rows directly.
+``property`` row, one ``property_workspace`` row with
+``membership_role = 'owner_workspace'``, and one default
+:class:`~app.adapters.db.places.models.Unit` row (§04 "Unit" —
+"every property has >= 1 unit") in a single flush. The junction
+row's ``label`` defaults to ``property.name`` but may be
+overridden per call. The bootstrap unit is named after the
+property (``name = property.name``, ``ordinal = 0``) so single-
+unit properties (the common case) do not surface a unit picker
+in the UI. Subsequent workspaces attach to the property via the
+:mod:`property_workspace` invite flow (cd-hsk) — this service
+never mints ``managed_workspace`` / ``observer_workspace`` rows
+directly.
+
+**Property rename does not cascade to the default unit.**
+:func:`update_property` rewrites ``property.name`` only — the
+default unit's ``name`` is **not** auto-followed. Per §04 "Unit"
+"Invariants", units are independent rows after the bootstrap flush;
+a manager who renames a property keeps the pre-existing unit name
+and can rename the unit explicitly if they want the two to stay in
+sync. The hidden-unit-layer UX (single-unit properties) reads
+``unit.name`` for display, so a manager will see the stale name
+and can decide.
 
 **Workspace scoping.** Reads and writes filter via
 ``property_workspace`` joined on ``workspace_id = ctx.workspace_id``.
@@ -79,6 +94,7 @@ from sqlalchemy.orm import Session
 
 from app.adapters.db.places.models import Property, PropertyWorkspace
 from app.audit import write_audit
+from app.domain.places.unit_service import create_default_unit_for_property
 from app.tenancy import WorkspaceContext
 from app.util.clock import Clock, SystemClock
 from app.util.ulid import new_ulid
@@ -719,6 +735,19 @@ def create_property(
         entity_id=row.id,
         action="create",
         diff={"after": _view_to_diff_dict(view)},
+        clock=resolved_clock,
+    )
+
+    # §04 "Unit" — every property has >= 1 unit. Auto-create a
+    # default unit named after the property in the same flush so the
+    # invariant is observable from the moment the property is
+    # readable. The unit service writes its own audit row.
+    create_default_unit_for_property(
+        session,
+        ctx,
+        property_id=row.id,
+        name=body.name,
+        now=now,
         clock=resolved_clock,
     )
     return view
