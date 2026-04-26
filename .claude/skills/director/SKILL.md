@@ -27,9 +27,9 @@ main task is coupled to its selfreview; parallel implementation
 breaks that coupling (reviews would batch, context bleeds across
 changes, and failures can't be attributed cleanly).
 
-Get the prioritised queue with **`bd ready`** — returns the
-unblocked tasks in priority order. Keep that list in your working
-memory and **pick the next task from the top of it** each iteration;
+Prefer the prioritised queue from **`bv --robot-triage | jq '.triage.quick_ref.top_picks[:3]'`**;
+it ranks the next issues better than raw `bd ready`. Keep that list
+in your working memory and **pick the next task from the top of it** each iteration;
 do **not** re-run the command after every pair (the output is
 verbose and rarely changes mid-batch). Only refresh the list when
 you've worked through it (or when a graph edit you just made
@@ -44,12 +44,12 @@ create one via `/beads` **before** closing the main task. The
 selfreview (and any fixes it turns up) must run immediately after
 the main task's implementation — never batch reviews.
 
-When the cached list is exhausted, re-run `bd ready` to refresh it
+When the cached list is exhausted, re-run the triage command to refresh it
 — closed tasks often unblock new ones.
 
 You only stop when:
 
-- a refreshed `bd ready` returns no actionable item, **or**
+- a refreshed triage result returns no actionable item, **or**
 - a non-obvious decision with long-lasting impact appears — in that
   case use `AskUserQuestion` with enough context and a clear
   recommendation for the user to decide.
@@ -76,7 +76,8 @@ signed-off commit. Closure and commit are atomic.
 
 ```
 DIRECTOR: pick top task from the cached ready list
-    │       (run `bd ready` once to seed the list; take the next
+    │       (run `bv --robot-triage | jq '.triage.quick_ref.top_picks[:3]'`
+    │        once to seed the list; take the next
     │        entry each loop; only refresh when the list runs out)
     ▼
 1. DIRECTOR: `bd show <id>` → sanity-check dependencies.
@@ -109,7 +110,7 @@ DIRECTOR: pick top task from the cached ready list
     │
     ▼
 5. DIRECTOR: pick the next entry from your cached ready list and
-   loop to step 1. Only re-run `bd ready` when the list is empty
+   loop to step 1. Only re-run triage when the list is empty
    (or stale because of a graph edit). Stop only when a refreshed
    list returns nothing.
 ```
@@ -184,7 +185,7 @@ Read, in order:
   before CLI, foundational refactor before consumers), add the
   dependency *before* starting: `bd dep <blocker> --blocks <blocked>`.
   Then **drop the picked task** — it's now blocked — and pick the
-  next entry from your cached ready list (refresh via `bd ready`
+  next entry from your cached ready list (refresh via triage
   only if the list is empty). Wrong-order picks waste a coder run
   and leave the graph misleading. The dep edit ships with the next
   commit (commiter's `bd sync` covers it).
@@ -264,7 +265,8 @@ Before delegating implementation:
 ## Beads workflow
 
 ```bash
-bd ready                              # unblocked tasks in priority order;
+bv --robot-triage | jq '.triage.quick_ref.top_picks[:3]'
+                                      # preferred prioritized top picks;
                                       # cache the list and take entries off
                                       # the top one at a time. Don't re-run
                                       # after every pair — the output is
