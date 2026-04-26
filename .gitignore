@@ -50,3 +50,13 @@ coverage.xml
 
 # Local runtime data (SQLite DBs, etc.)
 /data/
+
+# Playwright e2e diff captures + tracing artefacts (cd-ndmv).
+# ``_baselines/`` is committed (the visual-regression source of
+# truth); ``_diff/`` and ``_artifacts/`` are the per-run output the
+# walker / pytest-playwright drop on failure. Keep the directory
+# stub via ``.gitkeep`` so a ``ls`` after ``git clean`` still
+# resolves; ignore everything else inside.
+tests/e2e/_diff/*
+!tests/e2e/_diff/.gitkeep
+tests/e2e/_artifacts/

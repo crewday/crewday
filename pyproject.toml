@@ -114,6 +114,19 @@ dev = [
     "pytest-xdist",
     "schemathesis",
     "playwright",
+    # Pytest plugin that exposes ``page`` / ``context`` / ``browser`` /
+    # ``browser_type`` fixtures + ``--browser`` / ``--headed`` /
+    # ``--video`` / ``--tracing`` CLI flags. The :file:`tests/e2e/`
+    # suite (cd-ndmv) consumes ``page`` + ``browser`` directly and the
+    # tracing flag is what gates trace.zip on failure (§17 "End-to-end").
+    "pytest-playwright",
+    # Pure-Python port of Mapbox's pixelmatch — drives the visual
+    # regression harness in ``tests/e2e/_helpers/visual.py``. §17 sets
+    # the contract: ``/styleguide`` fails on > 0.1 % diff, every other
+    # route on > 0.5 %. Pillow is already in the venv (transitive of
+    # ``locust``); pixelmatch + Pillow give us pixel-level diff +
+    # ``_diff/<name>.png`` artefacts when a baseline drifts.
+    "pixelmatch",
     "ruff",
     "mypy",
     "import-linter",

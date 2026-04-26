@@ -306,6 +306,27 @@ Plain text to the user; CLI handles styling.
   `filename` under that directory with a descriptive name (see
   `.playwright-mcp/README.md`). Close the browser
   (`mcp__playwright__browser_close`) when done.
+- **End-to-end Playwright suite (`tests/e2e/`)** runs against the
+  dev compose stack. Bring it up first; the suite skips with a
+  focused message if `/healthz` is unreachable. Default origin is
+  `http://127.0.0.1:8100` — override via `CREWDAY_E2E_BASE_URL`.
+  Browsers must be installed once (`uv run playwright install
+  chromium webkit`); WebKit auto-skips on hosts missing libicu74.
+  ```
+  docker compose -f mocks/docker-compose.yml up -d
+  uv run playwright install chromium webkit
+  uv run pytest tests/e2e -v -n0 \
+      --tracing=retain-on-failure \
+      --video=retain-on-failure \
+      --screenshot=only-on-failure
+  ```
+  The full pilot suite is fast (~10 s on Chromium); the
+  `pytest-playwright` flags above are what gate the artefact drops
+  — without them no trace.zip / video / screenshot is captured (the
+  CLI defaults are `off`). Artefacts land in `tests/e2e/_artifacts/`,
+  visual-regression diffs in `tests/e2e/_diff/`. Both directories are
+  gitignored. The visual baseline at `tests/e2e/_baselines/` is
+  committed and reviewed manually.
 
 ## Session wrap-up
 
