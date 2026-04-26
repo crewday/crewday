@@ -171,10 +171,8 @@ class TestSessionEndToEnd:
 
         app = _build_app()
         with TestClient(app, raise_server_exceptions=False) as client:
-            response = client.get(
-                "/w/int-owner/api/v1/ping",
-                cookies={SESSION_COOKIE_NAME: issued.cookie_value},
-            )
+            client.cookies.set(SESSION_COOKIE_NAME, issued.cookie_value)
+            response = client.get("/w/int-owner/api/v1/ping")
 
         assert response.status_code == 200
         body = response.json()
@@ -266,14 +264,9 @@ class TestCrossTenantConstantTime:
 
         app = _build_app()
         with TestClient(app, raise_server_exceptions=False) as client:
-            slug_miss = client.get(
-                "/w/never-existed/api/v1/ping",
-                cookies={SESSION_COOKIE_NAME: issued.cookie_value},
-            )
-            member_miss = client.get(
-                "/w/real-ct-ws/api/v1/ping",
-                cookies={SESSION_COOKIE_NAME: issued.cookie_value},
-            )
+            client.cookies.set(SESSION_COOKIE_NAME, issued.cookie_value)
+            slug_miss = client.get("/w/never-existed/api/v1/ping")
+            member_miss = client.get("/w/real-ct-ws/api/v1/ping")
 
         assert slug_miss.status_code == 404
         assert member_miss.status_code == 404
@@ -322,27 +315,16 @@ class TestCrossTenantConstantTime:
         with TestClient(app, raise_server_exceptions=False) as client:
             # Warmup so lazy import + sqlite page cache don't skew the
             # first sample of whichever branch runs first.
-            client.get(
-                "/w/warmup/api/v1/ping",
-                cookies={SESSION_COOKIE_NAME: issued.cookie_value},
-            )
-            client.get(
-                "/w/timing-ws/api/v1/ping",
-                cookies={SESSION_COOKIE_NAME: issued.cookie_value},
-            )
+            client.cookies.set(SESSION_COOKIE_NAME, issued.cookie_value)
+            client.get("/w/warmup/api/v1/ping")
+            client.get("/w/timing-ws/api/v1/ping")
             for _ in range(samples):
                 t0 = time.perf_counter()
-                client.get(
-                    "/w/never-exists/api/v1/ping",
-                    cookies={SESSION_COOKIE_NAME: issued.cookie_value},
-                )
+                client.get("/w/never-exists/api/v1/ping")
                 slug_times.append(time.perf_counter() - t0)
 
                 t0 = time.perf_counter()
-                client.get(
-                    "/w/timing-ws/api/v1/ping",
-                    cookies={SESSION_COOKIE_NAME: issued.cookie_value},
-                )
+                client.get("/w/timing-ws/api/v1/ping")
                 member_times.append(time.perf_counter() - t0)
 
         mean_slug = sum(slug_times) / samples

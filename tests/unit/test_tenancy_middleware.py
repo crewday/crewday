@@ -874,10 +874,8 @@ class TestRealResolverHTTP:
 
         app = _build_app()
         with _client(app) as client:
-            response = client.get(
-                "/w/session-path/api/v1/ping",
-                cookies={SESSION_COOKIE_NAME: issued.cookie_value},
-            )
+            client.cookies.set(SESSION_COOKIE_NAME, issued.cookie_value)
+            response = client.get("/w/session-path/api/v1/ping")
         assert response.status_code == 200
         body = response.json()
         assert body["bound"] is True
@@ -1030,10 +1028,8 @@ class TestRealResolverHTTP:
 
         app = _build_app()
         with _client(app) as client:
-            response = client.get(
-                "/w/expired-path/api/v1/ping",
-                cookies={SESSION_COOKIE_NAME: issued.cookie_value},
-            )
+            client.cookies.set(SESSION_COOKIE_NAME, issued.cookie_value)
+            response = client.get("/w/expired-path/api/v1/ping")
         assert response.status_code == 404
 
     def test_session_for_non_member_returns_404(
@@ -1063,10 +1059,8 @@ class TestRealResolverHTTP:
 
         app = _build_app()
         with _client(app) as client:
-            response = client.get(
-                "/w/only-members/api/v1/ping",
-                cookies={SESSION_COOKIE_NAME: issued.cookie_value},
-            )
+            client.cookies.set(SESSION_COOKIE_NAME, issued.cookie_value)
+            response = client.get("/w/only-members/api/v1/ping")
         assert response.status_code == 404
         assert response.json() == {"error": "not_found", "detail": None}
 
@@ -1238,14 +1232,9 @@ class TestConstantTimeEnvelope:
 
         app = _build_app()
         with _client(app) as client:
-            slug_miss = client.get(
-                "/w/unknown-slug/api/v1/ping",
-                cookies={SESSION_COOKIE_NAME: issued.cookie_value},
-            )
-            member_miss = client.get(
-                "/w/members-club/api/v1/ping",
-                cookies={SESSION_COOKIE_NAME: issued.cookie_value},
-            )
+            client.cookies.set(SESSION_COOKIE_NAME, issued.cookie_value)
+            slug_miss = client.get("/w/unknown-slug/api/v1/ping")
+            member_miss = client.get("/w/members-club/api/v1/ping")
 
         assert slug_miss.status_code == 404
         assert member_miss.status_code == 404

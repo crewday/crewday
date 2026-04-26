@@ -303,23 +303,17 @@ class TestHttpCrossTenantMatrix:
         match the slug-miss branch byte-for-byte.
         """
         sample = _sample_endpoints(app, min_count=100)
+        client.cookies.set(SESSION_COOKIE_NAME, tenant_a.owner_session_cookie)
 
         slug_miss_path = "/w/never-existed-slug/api/v1/ping"
-        slug_miss = client.get(
-            slug_miss_path,
-            cookies={SESSION_COOKIE_NAME: tenant_a.owner_session_cookie},
-        )
+        slug_miss = client.get(slug_miss_path)
         assert slug_miss.status_code == 404
         assert slug_miss.content == _EXPECTED_ENVELOPE_BODY
         baseline_headers = _header_set(slug_miss)
 
         for path_template, verb in sample:
             target_path = _instantiate_path(path_template, slug=tenant_b.slug)
-            response = client.request(
-                verb,
-                target_path,
-                cookies={SESSION_COOKIE_NAME: tenant_a.owner_session_cookie},
-            )
+            response = client.request(verb, target_path)
             assert response.status_code == 404, (
                 f"{verb} {target_path} returned {response.status_code}; "
                 f"cross-tenant probe must always be 404 "
@@ -350,10 +344,8 @@ class TestHttpCrossTenantMatrix:
         must be identical to the session-cookie branch's envelope.
         """
         # Session cookie baseline for comparison.
-        baseline = client.get(
-            f"/w/{tenant_b.slug}/api/v1/time/shifts",
-            cookies={SESSION_COOKIE_NAME: tenant_a.owner_session_cookie},
-        )
+        client.cookies.set(SESSION_COOKIE_NAME, tenant_a.owner_session_cookie)
+        baseline = client.get(f"/w/{tenant_b.slug}/api/v1/time/shifts")
         token_probe = client.get(
             f"/w/{tenant_b.slug}/api/v1/time/shifts",
             headers={"Authorization": f"Bearer {tenant_a.owner_token}"},
@@ -388,18 +380,13 @@ class TestHttpCrossTenantMatrix:
         the always-on sanity check.
         """
         samples = 25
+        client.cookies.set(SESSION_COOKIE_NAME, tenant_a.owner_session_cookie)
         # Warmup both branches — the first request amortises lazy
         # imports + SQLite page cache fills that would otherwise
         # land on the first measured sample.
         for _ in range(5):
-            client.get(
-                "/w/warmup-slug/api/v1/ping",
-                cookies={SESSION_COOKIE_NAME: tenant_a.owner_session_cookie},
-            )
-            client.get(
-                f"/w/{tenant_b.slug}/api/v1/ping",
-                cookies={SESSION_COOKIE_NAME: tenant_a.owner_session_cookie},
-            )
+            client.get("/w/warmup-slug/api/v1/ping")
+            client.get(f"/w/{tenant_b.slug}/api/v1/ping")
 
         slug_times: list[int] = []
         member_times: list[int] = []
@@ -407,17 +394,11 @@ class TestHttpCrossTenantMatrix:
             # Interleave so any transient system load (GC, page
             # cache warm) affects both sides symmetrically.
             t0 = time.perf_counter_ns()
-            client.get(
-                "/w/never-exists-now/api/v1/ping",
-                cookies={SESSION_COOKIE_NAME: tenant_a.owner_session_cookie},
-            )
+            client.get("/w/never-exists-now/api/v1/ping")
             slug_times.append(time.perf_counter_ns() - t0)
 
             t0 = time.perf_counter_ns()
-            client.get(
-                f"/w/{tenant_b.slug}/api/v1/ping",
-                cookies={SESSION_COOKIE_NAME: tenant_a.owner_session_cookie},
-            )
+            client.get(f"/w/{tenant_b.slug}/api/v1/ping")
             member_times.append(time.perf_counter_ns() - t0)
 
         # perf_counter_ns → milliseconds. Median over 25 samples is

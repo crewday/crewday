@@ -42,6 +42,7 @@ from typing import TYPE_CHECKING, Final
 
 if TYPE_CHECKING:
     from fastapi import FastAPI
+    from opentelemetry.sdk.trace import SpanProcessor
 
 __all__ = ["OTEL_ENDPOINT_ENV", "setup_tracing"]
 
@@ -134,18 +135,29 @@ def _install_provider(endpoint: str) -> None:
     endpoint.
     """
     from opentelemetry import trace
-    from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import (
-        OTLPSpanExporter,
-    )
     from opentelemetry.sdk.resources import SERVICE_NAME, Resource
     from opentelemetry.sdk.trace import TracerProvider
-    from opentelemetry.sdk.trace.export import BatchSpanProcessor
 
     resource = Resource.create({SERVICE_NAME: "crewday"})
     provider = TracerProvider(resource=resource)
-    exporter = OTLPSpanExporter(endpoint=endpoint)
-    provider.add_span_processor(BatchSpanProcessor(exporter))
+    provider.add_span_processor(_build_span_processor(endpoint))
     trace.set_tracer_provider(provider)
+
+
+def _build_span_processor(endpoint: str) -> SpanProcessor:
+    """Build the production span processor.
+
+    Tests monkeypatch this seam to avoid starting an OTLP exporter
+    thread that retries against ``localhost:4317`` after pytest has
+    already closed its captured streams.
+    """
+    from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import (
+        OTLPSpanExporter,
+    )
+    from opentelemetry.sdk.trace.export import BatchSpanProcessor
+
+    exporter = OTLPSpanExporter(endpoint=endpoint)
+    return BatchSpanProcessor(exporter)
 
 
 def _instrument_globals() -> None:

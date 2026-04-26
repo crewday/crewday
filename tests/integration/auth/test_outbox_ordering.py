@@ -646,10 +646,10 @@ class TestEmailChangeRequestCommitFailureNoEmailLeak:
             },
             raise_server_exceptions=False,
         ) as c:
+            c.cookies.set(SESSION_COOKIE_NAME, seed.cookie_value)
             r = c.post(
                 "/api/v1/me/email/change_request",
                 json={"new_email": "alice.new@example.com"},
-                cookies={SESSION_COOKIE_NAME: seed.cookie_value},
             )
 
         assert r.status_code == 500, r.text

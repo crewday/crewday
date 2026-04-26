@@ -17,16 +17,30 @@ for the Jaeger recipe.
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from typing import Literal
 
 import pytest
+from opentelemetry.sdk.trace import ReadableSpan
+from opentelemetry.sdk.trace.export import (
+    SimpleSpanProcessor,
+    SpanExporter,
+    SpanExportResult,
+)
 from pydantic import SecretStr
 
 from app.api.factory import create_app
 from app.config import Settings
 from app.observability import tracing as tracing_mod
 from app.observability.tracing import OTEL_ENDPOINT_ENV
+
+
+class _NoopSpanExporter(SpanExporter):
+    def export(self, spans: Sequence[ReadableSpan]) -> SpanExportResult:
+        return SpanExportResult.SUCCESS
+
+    def shutdown(self) -> None:
+        return None
 
 
 def _settings(*, profile: Literal["prod", "dev"] = "prod") -> Settings:
@@ -54,6 +68,11 @@ def _settings(*, profile: Literal["prod", "dev"] = "prod") -> Settings:
 def _reset_tracing(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     tracing_mod._reset_for_tests()
     monkeypatch.delenv(OTEL_ENDPOINT_ENV, raising=False)
+    monkeypatch.setattr(
+        tracing_mod,
+        "_build_span_processor",
+        lambda _endpoint: SimpleSpanProcessor(_NoopSpanExporter()),
+    )
     yield
     tracing_mod._reset_for_tests()
 

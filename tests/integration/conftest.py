@@ -5,10 +5,9 @@ Per ``docs/specs/17-testing-quality.md`` §"Integration":
 * Each test gets a session bound to a per-test transaction that is
   rolled back at teardown — no ``TRUNCATE`` dance needed because the
   rollback naturally reverts every insert/update/delete.
-* Migrations run once per session via ``alembic upgrade head`` against
-  the test engine. A worker that never reaches a real DB (for
-  example, the smoke test below) pays only the fixture's setup cost;
-  subsequent tests share it.
+* SQLite migrations run once into a shared template DB and each xdist
+  worker gets a file copy. Non-SQLite and explicit URL overrides still
+  run ``alembic upgrade head`` against the test engine.
 * Two backend-selection knobs (cd-rhaj):
     - ``CREWDAY_TEST_DB={sqlite,postgres}`` picks the backend.
       ``sqlite`` (default) returns a per-session temp-file SQLite
@@ -34,7 +33,10 @@ See ``docs/specs/17-testing-quality.md`` §"Integration".
 from __future__ import annotations
 
 import os
+import shutil
+import time
 from collections.abc import Iterator
+from contextlib import contextmanager, suppress
 from pathlib import Path
 
 import pytest
@@ -45,6 +47,8 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app.adapters.db.session import make_engine, normalise_sync_url
 from app.config import get_settings
+
+_PREMIGRATED_URL_ENV = "CREWDAY_TEST_DB_PREMIGRATED_URL"
 
 
 def _alembic_ini() -> Path:
@@ -60,6 +64,76 @@ def _backend() -> str:
     fixture-time paths agree on the value.
     """
     return os.environ.get("CREWDAY_TEST_DB", "sqlite").lower()
+
+
+def _sqlite_url(path: Path) -> str:
+    return f"sqlite:///{path}"
+
+
+@contextmanager
+def _override_database_url(url: str) -> Iterator[None]:
+    """Point Alembic's settings lookup at ``url`` for one operation."""
+    original = os.environ.get("CREWDAY_DATABASE_URL")
+    os.environ["CREWDAY_DATABASE_URL"] = url
+    get_settings.cache_clear()
+    try:
+        yield
+    finally:
+        if original is None:
+            os.environ.pop("CREWDAY_DATABASE_URL", None)
+        else:
+            os.environ["CREWDAY_DATABASE_URL"] = original
+        get_settings.cache_clear()
+
+
+def _run_migrations(url: str) -> None:
+    with _override_database_url(url):
+        cfg = AlembicConfig(str(_alembic_ini()))
+        cfg.set_main_option("sqlalchemy.url", url)
+        command.upgrade(cfg, "head")
+
+
+def _shared_tmp_root(tmp_path_factory: pytest.TempPathFactory, worker_id: str) -> Path:
+    """Return a temp directory shared by all xdist workers in this run."""
+    base = tmp_path_factory.getbasetemp()
+    if worker_id == "master":
+        return base
+    return base.parent
+
+
+def _sqlite_template_path(
+    tmp_path_factory: pytest.TempPathFactory, worker_id: str
+) -> Path:
+    """Build a migrated SQLite template once, then reuse it per worker."""
+    root = _shared_tmp_root(tmp_path_factory, worker_id)
+    template_dir = root / "crewday-sqlite-template"
+    template_db = template_dir / "template.db"
+    ready = template_dir / "ready"
+    lock = template_dir / "lock"
+
+    template_dir.mkdir(exist_ok=True)
+    try:
+        lock.mkdir()
+    except FileExistsError:
+        deadline = time.monotonic() + 120
+        while not ready.exists():
+            if time.monotonic() >= deadline:
+                raise TimeoutError(
+                    f"Timed out waiting for migrated SQLite template at {template_db}"
+                ) from None
+            time.sleep(0.05)
+        return template_db
+
+    try:
+        if not ready.exists():
+            if template_db.exists():
+                template_db.unlink()
+            _run_migrations(_sqlite_url(template_db))
+            ready.write_text("ok\n", encoding="utf-8")
+        return template_db
+    finally:
+        with suppress(OSError):
+            lock.rmdir()
 
 
 def pytest_collection_modifyitems(
@@ -116,7 +190,16 @@ def db_url(
     backend = _backend()
     if backend == "sqlite":
         root = tmp_path_factory.mktemp("crewday-db")
-        yield f"sqlite:///{root / f'test-{worker_id}.db'}"
+        db_path = root / f"test-{worker_id}.db"
+        template = _sqlite_template_path(tmp_path_factory, worker_id)
+        shutil.copy2(template, db_path)
+        url = _sqlite_url(db_path)
+        os.environ[_PREMIGRATED_URL_ENV] = url
+        try:
+            yield url
+        finally:
+            if os.environ.get(_PREMIGRATED_URL_ENV) == url:
+                os.environ.pop(_PREMIGRATED_URL_ENV, None)
         return
 
     if backend == "postgres":
@@ -171,20 +254,12 @@ def migrate_once(engine: Engine, db_url: str) -> Iterator[None]:
     so the first real migration (cd-w7h successors) lights up tests
     immediately.
     """
-    original = os.environ.get("CREWDAY_DATABASE_URL")
-    os.environ["CREWDAY_DATABASE_URL"] = db_url
-    get_settings.cache_clear()
-    try:
-        cfg = AlembicConfig(str(_alembic_ini()))
-        cfg.set_main_option("sqlalchemy.url", db_url)
-        command.upgrade(cfg, "head")
+    if os.environ.get(_PREMIGRATED_URL_ENV) == db_url:
         yield
-    finally:
-        if original is None:
-            os.environ.pop("CREWDAY_DATABASE_URL", None)
-        else:
-            os.environ["CREWDAY_DATABASE_URL"] = original
-        get_settings.cache_clear()
+        return
+
+    _run_migrations(db_url)
+    yield
 
 
 @pytest.fixture

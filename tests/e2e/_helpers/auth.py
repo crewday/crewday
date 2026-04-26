@@ -101,6 +101,7 @@ DEFAULT_DEV_PASSKEY_NAME: Final[str] = "e2e-virtual-authenticator"
 _COMPOSE_FILE: Final[Path] = (
     Path(__file__).resolve().parents[3] / "mocks" / "docker-compose.yml"
 )
+_DEV_LOGIN_CACHE: dict[tuple[str, str, str, str, str, str], str] = {}
 
 # Dev-only cookie alias that the FastAPI routers accept in addition to
 # the canonical ``__Host-crewday_session`` — see
@@ -224,49 +225,61 @@ def login_with_dev_session(
     the User / Workspace rows and mint fresh sessions; see
     :func:`scripts.dev_login.mint_session` for the row lifecycle.
     """
-    cmd = [
-        "docker",
-        "compose",
-        "-f",
-        str(compose_file),
-        "exec",
-        "-T",
-        service,
-        "python",
-        "-m",
-        "scripts.dev_login",
-        "--email",
+    cache_key = (
+        base_url,
         email,
-        "--workspace",
         workspace_slug,
-        "--role",
         role,
-        "--output",
-        "cookie",
-    ]
-    proc = subprocess.run(
-        cmd,
-        capture_output=True,
-        text=True,
-        check=True,
-        timeout=30,
+        service,
+        str(compose_file),
     )
-    line = proc.stdout.strip()
-    if "=" not in line:
-        raise RuntimeError(
-            f"dev_login output missing '=' separator: {line!r}; stderr={proc.stderr!r}"
+    value = _DEV_LOGIN_CACHE.get(cache_key)
+    if value is None:
+        cmd = [
+            "docker",
+            "compose",
+            "-f",
+            str(compose_file),
+            "exec",
+            "-T",
+            service,
+            "python",
+            "-m",
+            "scripts.dev_login",
+            "--email",
+            email,
+            "--workspace",
+            workspace_slug,
+            "--role",
+            role,
+            "--output",
+            "cookie",
+        ]
+        proc = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=30,
         )
-    name, _, value = line.partition("=")
-    # ``scripts.dev_login --output cookie`` always emits the deployment-
-    # canonical ``__Host-crewday_session`` name (prod shape). Surfacing
-    # a drift here points at a compose-file regression — usually a
-    # stale ``CREWDAY_PROFILE`` / ``CREWDAY_DEV_AUTH`` env that flipped
-    # the script into a different output mode.
-    if name != SESSION_COOKIE_NAME:
-        raise RuntimeError(
-            f"unexpected cookie name {name!r} from dev_login (expected "
-            f"{SESSION_COOKIE_NAME!r}); compose file may be out of date"
-        )
+        line = proc.stdout.strip()
+        if "=" not in line:
+            raise RuntimeError(
+                f"dev_login output missing '=' separator: {line!r}; "
+                f"stderr={proc.stderr!r}"
+            )
+        name, _, value = line.partition("=")
+        # ``scripts.dev_login --output cookie`` always emits the deployment-
+        # canonical ``__Host-crewday_session`` name (prod shape). Surfacing
+        # a drift here points at a compose-file regression — usually a
+        # stale ``CREWDAY_PROFILE`` / ``CREWDAY_DEV_AUTH`` env that flipped
+        # the script into a different output mode.
+        if name != SESSION_COOKIE_NAME:
+            raise RuntimeError(
+                f"unexpected cookie name {name!r} from dev_login (expected "
+                f"{SESSION_COOKIE_NAME!r}); compose file may be out of date"
+            )
+        _DEV_LOGIN_CACHE[cache_key] = value
 
     parsed = urllib.parse.urlparse(base_url)
     host = parsed.hostname or "127.0.0.1"

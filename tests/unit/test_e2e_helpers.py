@@ -20,13 +20,20 @@ helpers themselves are infrastructure for §17's GA journey suite).
 
 from __future__ import annotations
 
+import subprocess
+from collections.abc import Iterator
+from pathlib import Path
+from types import SimpleNamespace
+
 import pytest
 
 from tests.e2e._helpers.auth import (
+    _DEV_LOGIN_CACHE,
     MailpitMessage,
     _envelope_matches_recipient,
     _extract_to_addresses,
     extract_magic_link_token,
+    login_with_dev_session,
 )
 
 
@@ -182,3 +189,59 @@ class TestExtractToAddresses:
             {"Address": "bob@example.com"},
         ]
         assert _extract_to_addresses(raw) == ("bob@example.com",)
+
+
+class _FakeContext:
+    def __init__(self) -> None:
+        self.cookies: list[dict[str, object]] = []
+
+    def add_cookies(self, cookies: list[dict[str, object]]) -> None:
+        self.cookies.extend(cookies)
+
+
+class TestLoginWithDevSessionCache:
+    @pytest.fixture(autouse=True)
+    def _clear_cache(self) -> Iterator[None]:
+        _DEV_LOGIN_CACHE.clear()
+        yield
+        _DEV_LOGIN_CACHE.clear()
+
+    def test_reuses_dev_login_cookie_for_same_identity(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Repeated calls avoid another ``docker compose exec`` round-trip."""
+        calls: list[list[str]] = []
+
+        def fake_run(
+            cmd: list[str],
+            *,
+            capture_output: bool,
+            text: bool,
+            check: bool,
+            timeout: int,
+        ) -> SimpleNamespace:
+            calls.append(cmd)
+            return SimpleNamespace(
+                stdout="__Host-crewday_session=cached-value\n",
+                stderr="",
+            )
+
+        monkeypatch.setattr(subprocess, "run", fake_run)
+
+        first = _FakeContext()
+        second = _FakeContext()
+        kwargs = {
+            "base_url": "http://127.0.0.1:8100",
+            "email": "same@dev.local",
+            "workspace_slug": "same",
+            "role": "owner",
+            "service": "app-api",
+            "compose_file": Path("compose.yml"),
+        }
+
+        login_with_dev_session(first, **kwargs)
+        login_with_dev_session(second, **kwargs)
+
+        assert len(calls) == 1
+        assert first.cookies[0]["value"] == "cached-value"
+        assert second.cookies[0]["value"] == "cached-value"

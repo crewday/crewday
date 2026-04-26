@@ -16,13 +16,27 @@ documented in ``docs/specs/16-deployment-operations.md``.
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 
 import pytest
 from fastapi import FastAPI
+from opentelemetry.sdk.trace import ReadableSpan
+from opentelemetry.sdk.trace.export import (
+    SimpleSpanProcessor,
+    SpanExporter,
+    SpanExportResult,
+)
 
 from app.observability import tracing as tracing_mod
 from app.observability.tracing import OTEL_ENDPOINT_ENV, setup_tracing
+
+
+class _NoopSpanExporter(SpanExporter):
+    def export(self, spans: Sequence[ReadableSpan]) -> SpanExportResult:
+        return SpanExportResult.SUCCESS
+
+    def shutdown(self) -> None:
+        return None
 
 
 @pytest.fixture(autouse=True)
@@ -30,6 +44,11 @@ def _reset_tracing_state(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     """Drop the install-once guard and clear the env var between tests."""
     tracing_mod._reset_for_tests()
     monkeypatch.delenv(OTEL_ENDPOINT_ENV, raising=False)
+    monkeypatch.setattr(
+        tracing_mod,
+        "_build_span_processor",
+        lambda _endpoint: SimpleSpanProcessor(_NoopSpanExporter()),
+    )
     yield
     tracing_mod._reset_for_tests()
 
