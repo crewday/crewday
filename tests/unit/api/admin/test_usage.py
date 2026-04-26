@@ -62,9 +62,7 @@ def client(
     yield from build_client(settings, session_factory, monkeypatch)
 
 
-def _admin_cookie(
-    session_factory: sessionmaker[Session], settings: Settings
-) -> str:
+def _admin_cookie(session_factory: sessionmaker[Session], settings: Settings) -> str:
     with session_factory() as s:
         user_id = seed_user(s, email="ada@example.com", display_name="Ada")
         grant_deployment_admin(s, user_id=user_id)

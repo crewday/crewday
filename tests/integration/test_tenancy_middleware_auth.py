@@ -164,7 +164,7 @@ class TestSessionEndToEnd:
                 ua="testclient",
                 ip="127.0.0.1",
                 accept_language="",
-                now=_PINNED,
+                now=datetime.now(UTC),
                 settings=settings,
             )
             s.commit()
@@ -212,7 +212,7 @@ class TestBearerTokenEndToEnd:
                 label="int",
                 scopes={"tasks.read": True},
                 expires_at=None,
-                now=_PINNED,
+                now=datetime.now(UTC),
             )
             s.commit()
 
@@ -257,7 +257,7 @@ class TestCrossTenantConstantTime:
                 has_owner_grant=False,
                 ua="curl",
                 ip="127.0.0.1",
-                now=_PINNED,
+                now=datetime.now(UTC),
                 settings=settings,
             )
             s.commit()
@@ -303,7 +303,7 @@ class TestCrossTenantConstantTime:
                 has_owner_grant=False,
                 ua="curl",
                 ip="127.0.0.1",
-                now=_PINNED,
+                now=datetime.now(UTC),
                 settings=settings,
             )
             s.commit()
@@ -383,7 +383,7 @@ class TestArchivedDelegatingSubjectUser:
                 expires_at=None,
                 kind="delegated",
                 delegate_for_user_id=user_id,
-                now=_PINNED,
+                now=datetime.now(UTC),
             )
             s.commit()
 
@@ -442,7 +442,7 @@ class TestArchivedDelegatingSubjectUser:
                 expires_at=None,
                 kind="personal",
                 subject_user_id=user_id,
-                now=_PINNED,
+                now=datetime.now(UTC),
             )
             s.commit()
 
@@ -504,7 +504,7 @@ class TestArchivedDelegatingSubjectUser:
                 label="scoped-int",
                 scopes={"tasks:read": True},
                 expires_at=None,
-                now=_PINNED,
+                now=datetime.now(UTC),
             )
             s.commit()
 

@@ -157,8 +157,7 @@ def _coerce_str_int_dict(value: Any) -> dict[str, int]:
 # so the registry stays a single source of truth without
 # tripping mypy's ``__slots__`` conflict diagnostic.
 _DEPLOYMENT_DEFAULTS: Final[dict[str, Any]] = {
-    field.name: field.default
-    for field in fields(DeploymentSettings)
+    field.name: field.default for field in fields(DeploymentSettings)
 }
 
 
@@ -367,8 +366,7 @@ def build_admin_settings_router() -> APIRouter:
         """
         with tenant_agnostic():
             rows = {
-                row.key: row
-                for row in session.scalars(select(DeploymentSetting)).all()
+                row.key: row for row in session.scalars(select(DeploymentSetting)).all()
             }
         items: list[DeploymentSettingResponse] = []
         for definition in _REGISTRY:

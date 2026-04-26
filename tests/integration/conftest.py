@@ -155,9 +155,7 @@ def pytest_collection_modifyitems(
 
 
 @pytest.fixture(scope="session")
-def db_url(
-    tmp_path_factory: pytest.TempPathFactory, worker_id: str
-) -> Iterator[str]:
+def db_url(tmp_path_factory: pytest.TempPathFactory, worker_id: str) -> Iterator[str]:
     """Session-scoped test DB URL.
 
     Honours ``CREWDAY_TEST_DATABASE_URL`` (explicit URL override, used

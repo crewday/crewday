@@ -558,6 +558,65 @@ COVERED_METHODS: frozenset[str] = frozenset(
         "app.domain.stays.ical_service.probe_feed",
         "app.domain.stays.ical_service.register_feed",
         "app.domain.stays.ical_service.update_feed",
+        # cd-9ghv: approval rows are workspace-scoped and every public
+        # entry point loads or lists through ``workspace_id == ctx.workspace_id``
+        # before mutating state. Covered by the ORM-filter seam.
+        "app.domain.agent.approval.approve",
+        "app.domain.agent.approval.deny",
+        "app.domain.agent.approval.get",
+        "app.domain.agent.approval.list_pending",
+        # cd-4btd / cd-9ghv: runtime turn execution resolves prompts,
+        # budgets, approvals, and conversation rows through the actor's
+        # workspace context; DB reads/writes are scoped by
+        # ``ctx.workspace_id`` at the repository boundary.
+        "app.domain.agent.runtime.run_turn",
+        # cd-q885: outbound webhook subscriptions and delivery replay
+        # are workspace resources. CRUD/list/replay paths filter by
+        # ``workspace_id == ctx.workspace_id`` before returning or
+        # mutating rows.
+        "app.domain.integrations.webhooks.create_subscription",
+        "app.domain.integrations.webhooks.delete_subscription",
+        "app.domain.integrations.webhooks.list_subscriptions",
+        "app.domain.integrations.webhooks.replay_delivery",
+        "app.domain.integrations.webhooks.update_subscription",
+        # cd-7rvx: payroll pay-rule CRUD. Rules are keyed by
+        # workspace/user/effective window; every load/list path scopes
+        # by ``ctx.workspace_id`` and writes stamp the same workspace.
+        "app.domain.payroll.rules.create_rule",
+        "app.domain.payroll.rules.get_rule",
+        "app.domain.payroll.rules.list_rules",
+        "app.domain.payroll.rules.soft_delete_rule",
+        "app.domain.payroll.rules.update_rule",
+        # cd-hsk: property-workspace membership service. Cross-workspace
+        # semantics are represented by explicit junction rows; each
+        # operation first resolves the target property membership under
+        # the caller's workspace context before changing the row.
+        "app.domain.places.membership_service.accept_invite",
+        "app.domain.places.membership_service.invite_workspace",
+        "app.domain.places.membership_service.list_memberships",
+        "app.domain.places.membership_service.revoke_workspace",
+        "app.domain.places.membership_service.transfer_ownership",
+        "app.domain.places.membership_service.update_membership_role",
+        "app.domain.places.membership_service.update_share_guest_identity",
+        # cd-y62: units are property-scoped under a workspace-visible
+        # property. Loads/lists join through the caller's workspace
+        # membership and writes stamp/update rows under that scope.
+        "app.domain.places.unit_service.create_default_unit_for_property",
+        "app.domain.places.unit_service.create_unit",
+        "app.domain.places.unit_service.get_unit",
+        "app.domain.places.unit_service.list_units",
+        "app.domain.places.unit_service.soft_delete_unit",
+        "app.domain.places.unit_service.update_unit",
+        # cd-l0k: guest links are stay/workspace-scoped. Mint/revoke
+        # load the reservation under ``ctx.workspace_id``; access
+        # recording only writes against the resolved link's workspace.
+        "app.domain.stays.guest_link_service.mint_link",
+        "app.domain.stays.guest_link_service.record_access",
+        "app.domain.stays.guest_link_service.revoke_link",
+        # cd-d48: turnover generation handles a workspace-scoped
+        # reservation event and loads downstream task/stay state through
+        # the same workspace context.
+        "app.domain.stays.turnover_generator.handle_reservation_upserted",
     }
 )
 

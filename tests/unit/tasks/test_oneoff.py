@@ -2833,9 +2833,7 @@ class TestUpdateTaskWiderFields:
             session,
             ctx,
             task_id=view.id,
-            body=TaskPatch.model_validate(
-                {"property_id": None, "area_id": None}
-            ),
+            body=TaskPatch.model_validate({"property_id": None, "area_id": None}),
             clock=clock,
             event_bus=bus,
         )

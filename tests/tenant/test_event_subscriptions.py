@@ -32,6 +32,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from datetime import UTC, datetime
+from typing import Literal, get_args, get_origin
 
 import pytest
 
@@ -161,6 +162,12 @@ def _sentinel_value_for(field_name: str, annotation: object) -> object:
     # event in :mod:`app.domain.expenses.approval`.
     if annotation is bool:
         return False
+    # Closed enums on event payloads are expressed as ``Literal`` aliases
+    # (agent scope / outcome / trigger, reservation change_kind,
+    # approval decision, and similar). Any declared member is valid for
+    # the cross-tenant routing assertion, so use the first one.
+    if get_origin(annotation) is Literal:
+        return get_args(annotation)[0]
     # ``reason`` on :class:`TaskUnassigned` / :class:`TaskSkipped` /
     # :class:`TaskCancelled` is guarded by ``_REASON_CODE_RE``
     # (``^[a-z][a-z0-9_]{0,63}$``) — a ULID sentinel fails the regex.

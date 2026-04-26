@@ -36,9 +36,7 @@ def _permissions_client(
     )
 
 
-def _rules_client(
-    ctx: WorkspaceContext, factory: sessionmaker[Session]
-) -> TestClient:
+def _rules_client(ctx: WorkspaceContext, factory: sessionmaker[Session]) -> TestClient:
     return build_client(
         [("", build_permission_rules_router())],
         factory,

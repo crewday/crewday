@@ -264,6 +264,8 @@ class TestWebSocketPathGuard:
         app = _dev_app_with_ws(upstream, captured_urls=captured)
         client = _client(app)
 
+        upstream.incoming.put_nowait(None)
+
         with client.websocket_connect("/"):
             pass
 
@@ -303,6 +305,8 @@ class TestSchemeRewrite:
         captured: list[str] = []
         app = _dev_app_with_ws(upstream, captured_urls=captured)
         client = _client(app)
+
+        upstream.incoming.put_nowait(None)
 
         with client.websocket_connect("/@vite/client?token=abc"):
             pass

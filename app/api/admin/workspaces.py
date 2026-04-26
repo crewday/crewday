@@ -481,5 +481,3 @@ def build_admin_workspaces_router() -> APIRouter:
         return WorkspaceArchiveResponse(id=workspace.id, archived_at=formatted)
 
     return router
-
-

@@ -239,6 +239,7 @@ class TestMigrationShape:
             "source",
             "raw_summary",
             "raw_description",
+            "guest_link_id",
             "created_at",
         }
         assert set(cols) == expected
@@ -248,6 +249,7 @@ class TestMigrationShape:
             "guest_count",
             "raw_summary",
             "raw_description",
+            "guest_link_id",
         ):
             assert cols[nullable]["nullable"] is True, f"{nullable} must be nullable"
 

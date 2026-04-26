@@ -58,9 +58,7 @@ def client(
     yield from build_client(settings, session_factory, monkeypatch)
 
 
-def _admin_cookie(
-    session_factory: sessionmaker[Session], settings: Settings
-) -> str:
+def _admin_cookie(session_factory: sessionmaker[Session], settings: Settings) -> str:
     with session_factory() as s:
         user_id = seed_user(s, email="ada@example.com", display_name="Ada")
         grant_deployment_admin(s, user_id=user_id)
@@ -83,9 +81,7 @@ class TestReadSignupSettings:
         body = resp.json()
         assert body["signup_enabled"] is True
         assert body["signup_throttle_overrides"] == {}
-        assert body["signup_disposable_domains_path"].endswith(
-            "disposable_domains.txt"
-        )
+        assert body["signup_disposable_domains_path"].endswith("disposable_domains.txt")
 
     def test_reads_existing_rows(
         self,
@@ -160,8 +156,7 @@ class TestUpdateSignupSettings:
             assert row is not None
             assert row.value is False
             audits = s.scalars(
-                select(AuditLog)
-                .where(AuditLog.action == "signup_settings.updated")
+                select(AuditLog).where(AuditLog.action == "signup_settings.updated")
             ).all()
             assert len(audits) == 1
             assert audits[0].diff == {

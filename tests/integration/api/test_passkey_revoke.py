@@ -183,7 +183,7 @@ class TestDeletePasskeyIntegration:
             has_owner_grant=True,
             ua="integration-ua",
             ip="127.0.0.1",
-            now=_PINNED,
+            now=datetime.now(UTC),
             settings=pinned_settings,
         )
         db_session.flush()
@@ -221,7 +221,7 @@ class TestDeletePasskeyIntegration:
             session_validate(
                 db_session,
                 cookie_value=issued.cookie_value,
-                now=_PINNED,
+                now=datetime.now(UTC),
                 settings=pinned_settings,
             )
 

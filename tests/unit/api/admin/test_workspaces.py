@@ -151,9 +151,7 @@ class TestListWorkspaces:
         with session_factory() as s:
             stranger = seed_user(s, email="x@example.com", display_name="X")
             s.commit()
-        cookie = issue_session(
-            session_factory, user_id=stranger, settings=settings
-        )
+        cookie = issue_session(session_factory, user_id=stranger, settings=settings)
         client.cookies.set(SESSION_COOKIE_NAME, cookie)
         resp = client.get("/admin/api/v1/workspaces")
         assert resp.status_code == 404
@@ -291,9 +289,7 @@ class TestTrustWorkspace:
     ) -> None:
         _user, cookie = _admin_cookie(session_factory, settings)
         client.cookies.set(SESSION_COOKIE_NAME, cookie)
-        resp = client.post(
-            "/admin/api/v1/workspaces/01HBOGUS00000000000000000/trust"
-        )
+        resp = client.post("/admin/api/v1/workspaces/01HBOGUS00000000000000000/trust")
         assert resp.status_code == 404
         assert resp.json().get("error") == "not_found"
 
@@ -336,17 +332,11 @@ class TestArchiveWorkspace:
         # owner gate runs. The check matters because spec §12 says
         # the surface must not advertise its own existence.
         with session_factory() as s:
-            stranger = seed_user(
-                s, email="other@example.com", display_name="Other"
-            )
+            stranger = seed_user(s, email="other@example.com", display_name="Other")
             s.commit()
-        cookie = issue_session(
-            session_factory, user_id=stranger, settings=settings
-        )
+        cookie = issue_session(session_factory, user_id=stranger, settings=settings)
         client.cookies.set(SESSION_COOKIE_NAME, cookie)
 
-        resp = client.post(
-            "/admin/api/v1/workspaces/01HBOGUS00000000000000000/archive"
-        )
+        resp = client.post("/admin/api/v1/workspaces/01HBOGUS00000000000000000/archive")
         assert resp.status_code == 404
         assert resp.json().get("error") == "not_found"

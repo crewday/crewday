@@ -132,9 +132,7 @@ def _seed_admin(
         return user.id
 
 
-def _seed_workspace(
-    session_factory: sessionmaker[Session], *, slug: str
-) -> str:
+def _seed_workspace(session_factory: sessionmaker[Session], *, slug: str) -> str:
     workspace_id = new_ulid()
     with session_factory() as s, tenant_agnostic():
         s.add(

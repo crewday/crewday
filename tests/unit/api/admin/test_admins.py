@@ -75,9 +75,7 @@ def _admin_cookie(
         user_id = seed_user(s, email="ada@example.com", display_name="Ada")
         grant_deployment_admin(s, user_id=user_id)
         s.commit()
-    return user_id, issue_session(
-        session_factory, user_id=user_id, settings=settings
-    )
+    return user_id, issue_session(session_factory, user_id=user_id, settings=settings)
 
 
 class TestListAdmins:
@@ -228,9 +226,7 @@ class TestGrantAdmin:
         settings: Settings,
     ) -> None:
         with session_factory() as s, tenant_agnostic():
-            target = seed_user(
-                s, email="archived@example.com", display_name="Old"
-            )
+            target = seed_user(s, email="archived@example.com", display_name="Old")
             row = s.get(User, target)
             assert row is not None
             row.archived_at = datetime.now(UTC)

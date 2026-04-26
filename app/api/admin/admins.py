@@ -275,9 +275,7 @@ def _project_member(grant: RoleGrant, user: User) -> AdminTeamMemberResponse:
     )
 
 
-def _existing_grant(
-    session: Session, *, user_id: str
-) -> RoleGrant | None:
+def _existing_grant(session: Session, *, user_id: str) -> RoleGrant | None:
     """Return the user's active deployment grant, if any.
 
     The ``role_grant`` table carries a partial UNIQUE on
@@ -445,10 +443,7 @@ def build_admin_admins_router() -> APIRouter:
         """
         with tenant_agnostic():
             grant = session.get(RoleGrant, id)
-            if (
-                grant is None
-                or grant.scope_kind != "deployment"
-            ):
+            if grant is None or grant.scope_kind != "deployment":
                 raise _not_found()
             session.delete(grant)
             audit_admin(

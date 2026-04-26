@@ -199,9 +199,11 @@ def _resolved_cap(workspace: Workspace, *, deployment_default: int) -> int:
     default rather than raising — the table view must stay
     rendering.
     """
-    raw = workspace.quota_json.get(_QUOTA_CAP_KEY) if isinstance(
-        workspace.quota_json, dict
-    ) else None
+    raw = (
+        workspace.quota_json.get(_QUOTA_CAP_KEY)
+        if isinstance(workspace.quota_json, dict)
+        else None
+    )
     if isinstance(raw, int) and not isinstance(raw, bool) and raw >= 0:
         return raw
     return deployment_default

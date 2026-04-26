@@ -27,6 +27,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from app.util.clock import FrozenClock
 from app.worker import scheduler as scheduler_mod
 from app.worker.scheduler import (
+    APPROVAL_TTL_JOB_ID,
     GENERATOR_JOB_ID,
     HEARTBEAT_JOB_ID,
     IDEMPOTENCY_SWEEP_JOB_ID,
@@ -37,6 +38,7 @@ from app.worker.scheduler import (
     POLL_ICAL_JOB_ID,
     USER_WORKSPACE_REFRESH_INTERVAL_SECONDS,
     USER_WORKSPACE_REFRESH_JOB_ID,
+    WEBHOOK_DISPATCH_JOB_ID,
     create_scheduler,
     register_jobs,
     registered_job_ids,
@@ -72,7 +74,8 @@ class TestCreateScheduler:
 class TestRegisterJobs:
     def test_registers_expected_ids(self) -> None:
         """Standard job set: heartbeat + generator + idempotency-sweep
-        + llm-budget + user_workspace-refresh + overdue-detect.
+        + llm-budget + user_workspace-refresh + overdue-detect +
+        approval-ttl + webhook-dispatch.
         """
         sched = create_scheduler()
         register_jobs(sched)
@@ -82,6 +85,7 @@ class TestRegisterJobs:
         # tuple, so duplicates would still surface via the companion
         # ``test_is_idempotent_under_replace_existing`` path.
         assert set(registered_job_ids(sched)) == {
+            APPROVAL_TTL_JOB_ID,
             GENERATOR_JOB_ID,
             IDEMPOTENCY_SWEEP_JOB_ID,
             HEARTBEAT_JOB_ID,
@@ -89,6 +93,7 @@ class TestRegisterJobs:
             OVERDUE_DETECT_JOB_ID,
             POLL_ICAL_JOB_ID,
             USER_WORKSPACE_REFRESH_JOB_ID,
+            WEBHOOK_DISPATCH_JOB_ID,
         }
 
     def test_is_idempotent_under_replace_existing(self) -> None:
@@ -116,7 +121,8 @@ class TestRegisterJobs:
         # duplicate (a stale entry would make the list longer than
         # the set).
         ids = registered_job_ids(sched)
-        assert set(ids) == {
+        expected_ids = {
+            APPROVAL_TTL_JOB_ID,
             GENERATOR_JOB_ID,
             IDEMPOTENCY_SWEEP_JOB_ID,
             HEARTBEAT_JOB_ID,
@@ -124,9 +130,11 @@ class TestRegisterJobs:
             OVERDUE_DETECT_JOB_ID,
             POLL_ICAL_JOB_ID,
             USER_WORKSPACE_REFRESH_JOB_ID,
+            WEBHOOK_DISPATCH_JOB_ID,
         }
-        assert len(ids) == 7
-        assert len(sched.get_jobs()) == 7
+        assert set(ids) == expected_ids
+        assert len(ids) == len(expected_ids)
+        assert len(sched.get_jobs()) == len(expected_ids)
 
 
 # ---------------------------------------------------------------------------

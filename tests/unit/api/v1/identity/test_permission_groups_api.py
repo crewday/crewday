@@ -265,9 +265,11 @@ class TestReadUpdateDelete:
         ctx, factory, ws_id = owner_ctx
         client = _client(ctx, factory)
         with factory() as s:
-            row = s.query(PermissionGroup).filter_by(
-                workspace_id=ws_id, slug="owners"
-            ).one()
+            row = (
+                s.query(PermissionGroup)
+                .filter_by(workspace_id=ws_id, slug="owners")
+                .one()
+            )
             owners_id = row.id
         resp = client.patch(
             f"/permission_groups/{owners_id}",
@@ -284,13 +286,13 @@ class TestReadUpdateDelete:
         ctx, factory, ws_id = owner_ctx
         client = _client(ctx, factory)
         with factory() as s:
-            row = s.query(PermissionGroup).filter_by(
-                workspace_id=ws_id, slug="owners"
-            ).one()
+            row = (
+                s.query(PermissionGroup)
+                .filter_by(workspace_id=ws_id, slug="owners")
+                .one()
+            )
             owners_id = row.id
-        resp = client.patch(
-            f"/permission_groups/{owners_id}", json={"name": "Owners"}
-        )
+        resp = client.patch(f"/permission_groups/{owners_id}", json={"name": "Owners"})
         assert resp.status_code == 200
         assert resp.json()["name"] == "Owners"
 
@@ -329,9 +331,11 @@ class TestReadUpdateDelete:
         ctx, factory, ws_id = owner_ctx
         client = _client(ctx, factory)
         with factory() as s:
-            row = s.query(PermissionGroup).filter_by(
-                workspace_id=ws_id, slug="owners"
-            ).one()
+            row = (
+                s.query(PermissionGroup)
+                .filter_by(workspace_id=ws_id, slug="owners")
+                .one()
+            )
             owners_id = row.id
         resp = client.delete(f"/permission_groups/{owners_id}")
         assert resp.status_code == 409
@@ -422,9 +426,7 @@ class TestMembers:
             f"/permission_groups/{created['id']}/members",
             json={"user_id": target},
         )
-        resp = client.delete(
-            f"/permission_groups/{created['id']}/members/{target}"
-        )
+        resp = client.delete(f"/permission_groups/{created['id']}/members/{target}")
         assert resp.status_code == 204
 
     def test_remove_member_idempotent_for_missing_row(
@@ -469,13 +471,13 @@ class TestMembers:
         ctx, factory, ws_id = owner_ctx
         client = _client(ctx, factory)
         with factory() as s:
-            owners = s.query(PermissionGroup).filter_by(
-                workspace_id=ws_id, slug="owners"
-            ).one()
+            owners = (
+                s.query(PermissionGroup)
+                .filter_by(workspace_id=ws_id, slug="owners")
+                .one()
+            )
             owners_id = owners.id
-        resp = client.delete(
-            f"/permission_groups/{owners_id}/members/{ctx.actor_id}"
-        )
+        resp = client.delete(f"/permission_groups/{owners_id}/members/{ctx.actor_id}")
         assert resp.status_code == 422
         assert resp.json()["detail"]["error"] == "would_orphan_owners_group"
         # Membership stayed intact (the primary UoW rolled back).

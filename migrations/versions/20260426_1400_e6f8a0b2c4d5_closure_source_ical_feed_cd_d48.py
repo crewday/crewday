@@ -88,9 +88,7 @@ def downgrade() -> None:
     rollback; the closure itself survives — only its iCal-feed
     pointer is gone.
     """
-    op.drop_index(
-        "ix_property_closure_source_ical_feed", table_name="property_closure"
-    )
+    op.drop_index("ix_property_closure_source_ical_feed", table_name="property_closure")
     with op.batch_alter_table("property_closure", schema=None) as batch_op:
         batch_op.drop_constraint(
             "fk_property_closure_source_ical_feed", type_="foreignkey"

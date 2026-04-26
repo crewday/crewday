@@ -217,6 +217,8 @@ class TestMigrationShape:
             "workspace_id",
             "label",
             "membership_role",
+            "share_guest_identity",
+            "status",
             "created_at",
         }
         assert set(cols) == expected

@@ -25,7 +25,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from fastapi.testclient import TestClient
 from pydantic import SecretStr
-from sqlalchemy import Engine, delete, text
+from sqlalchemy import Engine, delete, insert
 from sqlalchemy.orm import Session, sessionmaker
 
 import app.adapters.db.session as _session_mod
@@ -104,11 +104,11 @@ def _insert_heartbeat(engine: Engine, *, at: datetime) -> None:
     """
     with engine.begin() as conn:
         conn.execute(
-            text(
-                "INSERT INTO worker_heartbeat (id, worker_name, heartbeat_at) "
-                "VALUES (:id, :name, :at)"
+            insert(WorkerHeartbeat).values(
+                id=new_ulid(),
+                worker_name="scheduler",
+                heartbeat_at=at,
             ),
-            {"id": new_ulid(), "name": "scheduler", "at": at},
         )
 
 

@@ -37,12 +37,12 @@ from sqlalchemy.orm import Session
 from app.adapters.db.audit.models import AuditLog
 from app.adapters.db.llm.models import ApprovalRequest
 from app.domain.agent.approval import (
+    EXPIRED_DECISION_NOTE,
+    MAX_PAGE_LIMIT,
     ApprovalNotFound,
     ApprovalNotPending,
     ApprovalReplayDispatcher,
     ApprovalView,
-    EXPIRED_DECISION_NOTE,
-    MAX_PAGE_LIMIT,
     approve,
     deny,
     expire_due,
@@ -58,17 +58,15 @@ from app.domain.agent.runtime import (
 from app.domain.errors import Validation
 from app.events.bus import EventBus
 from app.events.types import ApprovalDecided
-from app.tenancy import WorkspaceContext, tenant_agnostic
+from app.tenancy import tenant_agnostic
 from app.tenancy.current import set_current
 from app.util.clock import FrozenClock
 from app.util.ulid import new_ulid
-
 from tests.domain.agent.conftest import (
     build_context,
     seed_user,
     seed_workspace,
 )
-
 
 # ---------------------------------------------------------------------------
 # Local fixtures + helpers
@@ -741,9 +739,7 @@ def test_list_pending_returns_oldest_first_with_has_more_boundary(
     assert page.next_cursor == row_b.id
 
     # Walking the cursor returns the trailing row, has_more=False.
-    page2 = list_pending(
-        ctx, session=db_session, cursor=page.next_cursor, limit=2
-    )
+    page2 = list_pending(ctx, session=db_session, cursor=page.next_cursor, limit=2)
     assert [v.id for v in page2.data] == [row_c.id]
     assert page2.has_more is False
     assert page2.next_cursor is None

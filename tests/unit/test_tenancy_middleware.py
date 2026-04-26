@@ -867,7 +867,7 @@ class TestRealResolverHTTP:
                 ua="testclient",
                 ip="127.0.0.1",
                 accept_language="",
-                now=_PINNED,
+                now=datetime.now(UTC),
                 settings=real_settings,
             )
             db.commit()
@@ -912,7 +912,7 @@ class TestRealResolverHTTP:
                 label="bearer-test",
                 scopes={"tasks.read": True},
                 expires_at=None,
-                now=_PINNED,
+                now=datetime.now(UTC),
             )
             db.commit()
 
@@ -960,7 +960,7 @@ class TestRealResolverHTTP:
                 label="cross-ws",
                 scopes={"tasks.read": True},
                 expires_at=None,
-                now=_PINNED,
+                now=datetime.now(UTC),
             )
             db.commit()
 
@@ -1015,7 +1015,7 @@ class TestRealResolverHTTP:
                 has_owner_grant=False,
                 ua="test-ua",
                 ip="127.0.0.1",
-                now=_PINNED,
+                now=datetime.now(UTC),
                 settings=real_settings,
             )
             from app.adapters.db.identity.models import Session as SessionRow
@@ -1052,7 +1052,7 @@ class TestRealResolverHTTP:
                 has_owner_grant=False,
                 ua="test-ua",
                 ip="127.0.0.1",
-                now=_PINNED,
+                now=datetime.now(UTC),
                 settings=real_settings,
             )
             db.commit()
@@ -1130,7 +1130,7 @@ class TestResolveActor:
                 has_owner_grant=False,
                 ua="ua",
                 ip="ip",
-                now=_PINNED,
+                now=datetime.now(UTC),
                 settings=real_settings,
             )
             db.commit()
@@ -1177,7 +1177,7 @@ class TestResolveActor:
                 label="actor-tok",
                 scopes={"tasks.read": True},
                 expires_at=None,
-                now=_PINNED,
+                now=datetime.now(UTC),
             )
             db.commit()
         headers = Headers({"authorization": f"Bearer {minted.token}"})
@@ -1225,7 +1225,7 @@ class TestConstantTimeEnvelope:
                 has_owner_grant=False,
                 ua="ua",
                 ip="ip",
-                now=_PINNED,
+                now=datetime.now(UTC),
                 settings=real_settings,
             )
             db.commit()

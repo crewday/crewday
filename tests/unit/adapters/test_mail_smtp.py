@@ -557,11 +557,7 @@ class TestUnclassifiedFailure:
         import socket
 
         plain_factory.raise_on_connection.append(
-            {
-                "send_message": socket.gaierror(
-                    -2, "Name or service not known"
-                )
-            }
+            {"send_message": socket.gaierror(-2, "Name or service not known")}
         )
         mailer = _make_mailer(plain_factory, ssl_factory, sleeps)
         with pytest.raises(MailDeliveryError, match="transport failed"):
