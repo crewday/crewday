@@ -55,7 +55,7 @@ from app.adapters.db.base import Base
 from app.adapters.db.places import models as _places_models  # noqa: F401
 from app.adapters.db.workspace import models as _workspace_models  # noqa: F401
 
-__all__ = ["DEFAULT_POLL_CADENCE", "IcalFeed", "Reservation", "StayBundle"]
+__all__ = ["DEFAULT_POLL_CADENCE", "GuestLink", "IcalFeed", "Reservation", "StayBundle"]
 
 
 # Allowed ``ical_feed.provider`` values, enforced by a CHECK
@@ -261,6 +261,22 @@ class Reservation(Base):
     # without another HTTP fetch.
     raw_summary: Mapped[str | None] = mapped_column(String, nullable=True)
     raw_description: Mapped[str | None] = mapped_column(String, nullable=True)
+    # Back-pointer to the active :class:`GuestLink`. Nullable because
+    # most stays are minted without a guest welcome link until the
+    # manager (or a future auto-mint job) calls
+    # :func:`app.domain.stays.guest_link_service.mint_link`.
+    #
+    # Intentionally a **soft ref** — no SQLAlchemy ``ForeignKey``
+    # declared. The relationship is circular at the type level
+    # (``guest_link.stay_id → reservation.id`` and the reverse
+    # pointer here) and a hard FK would force SA's insert-ordering
+    # to ``use_alter=True`` + ``post_update=True``. The
+    # :class:`Instruction.current_version_id` precedent
+    # (:mod:`app.adapters.db.instructions`) takes the same line:
+    # the domain layer guards against dangling pointers, and the
+    # cleanup paths sweep this column on revoke / delete. cd-l0k
+    # landed the column.
+    guest_link_id: Mapped[str | None] = mapped_column(String, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
     )
@@ -330,3 +346,82 @@ class StayBundle(Base):
         ),
         Index("ix_stay_bundle_reservation", "reservation_id"),
     )
+
+
+class GuestLink(Base):
+    """Tokenised public welcome link for a single :class:`Reservation`.
+
+    See ``docs/specs/04-properties-and-stays.md`` §"Guest welcome
+    link" for the rendered surface; this model backs every minted
+    token. The ``token`` column is the signed ``itsdangerous`` blob
+    the public route resolves; the row stores no secret material on
+    its own — the signing key lives behind
+    :func:`app.auth.keys.derive_subkey` and isn't part of the
+    persistence shape.
+
+    Cascades follow §02:
+
+    * ``stay_id`` → ``reservation.id`` ``ON DELETE CASCADE`` —
+      cancelling the reservation sweeps the link.
+    * ``workspace_id`` → ``workspace.id`` ``ON DELETE CASCADE`` —
+      sweeping a workspace sweeps every link.
+
+    The reverse pointer lives on :attr:`Reservation.guest_link_id`
+    as a **soft ref** (no FK declared — the cycle-avoidance
+    rationale is documented on the migration). The domain layer
+    keeps it honest: :func:`app.domain.stays.guest_link_service.mint_link`
+    stamps the column on every mint;
+    :func:`app.domain.stays.guest_link_service.revoke_link` clears
+    it iff the column still points at the revoked row (compare-and-
+    clear, so a re-mint that overwrote the column with a newer
+    link's id keeps that newer pointer when an older sibling is
+    revoked).
+
+    ``access_log_json`` is an append-only ring buffer of the most
+    recent ten accesses (hashed IP prefix + UA family + timestamp).
+    The domain service truncates on every append so the column never
+    grows unbounded; §04 "Privacy" caps it explicitly. JSON rather
+    than a sibling table because the page render is no-cookie /
+    no-JS and the access log is read on every render — keeping it
+    inline is one SELECT, not two.
+    """
+
+    __tablename__ = "guest_link"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    workspace_id: Mapped[str] = mapped_column(
+        String,
+        ForeignKey("workspace.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    stay_id: Mapped[str] = mapped_column(
+        String,
+        ForeignKey("reservation.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    # Signed ``itsdangerous`` blob, unique so a re-mint with the same
+    # input would collide on the constraint rather than silently
+    # producing two rows. Tokens are short-lived and fresh each mint
+    # (the timestamp + jti embedded in the signature changes), so
+    # collisions never occur in practice.
+    token: Mapped[str] = mapped_column(String, nullable=False, unique=True)
+    expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    # ``NULL`` while the link is active; the domain service's revoke
+    # path stamps a non-null timestamp and the resolver treats any
+    # non-null value as "gone".
+    revoked_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    # Last 10 ``{ip_prefix_sha256, ua_family, at}`` records. List of
+    # dicts — the outer ``Any`` is a SQLAlchemy JSON-column quirk;
+    # callers writing typed payloads narrow locally.
+    access_log_json: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSON, nullable=False, default=list
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+
+    __table_args__ = (Index("ix_guest_link_workspace_stay", "workspace_id", "stay_id"),)

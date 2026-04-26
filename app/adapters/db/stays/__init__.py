@@ -23,17 +23,19 @@ from __future__ import annotations
 
 from app.adapters.db.stays.models import (
     DEFAULT_POLL_CADENCE,
+    GuestLink,
     IcalFeed,
     Reservation,
     StayBundle,
 )
 from app.tenancy.registry import register
 
-for _table in ("ical_feed", "reservation", "stay_bundle"):
+for _table in ("ical_feed", "reservation", "stay_bundle", "guest_link"):
     register(_table)
 
 __all__ = [
     "DEFAULT_POLL_CADENCE",
+    "GuestLink",
     "IcalFeed",
     "Reservation",
     "StayBundle",
