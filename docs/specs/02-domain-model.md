@@ -420,6 +420,7 @@ One row per `(property_id, workspace_id)` pair.
 | property_id           | ULID FK | references `property.id`                                 |
 | workspace_id          | ULID FK | references `workspace.id`                                |
 | membership_role       | text    | `owner_workspace \| managed_workspace \| observer_workspace` (see below) |
+| status                | text    | `invited \| active`. Owner-workspace bootstrap rows are always `active` (the seeding workspace consents implicitly by creating the property). Non-owner rows materialised through the §22 invite/accept flow start `invited` and flip to `active` on accept. CHECK-enforced; lands with the cd-hsk membership service. |
 | share_guest_identity  | bool    | `false` by default. When true, managers on this workspace see the stay's guest name, contact, and welcome-page fields otherwise redacted by the cross-workspace PII boundary (§15). Copied from the accepted `property_workspace_invite.initial_share_settings_json` (§22) at materialisation. Only editable on non-owner rows — the `owner_workspace` always sees everything at its own property. |
 | invite_id             | ULID FK?| `property_workspace_invite.id` that materialised this row; null for the bootstrap `owner_workspace` seed and for system seeds |
 | added_at              | tstz    |                                                          |

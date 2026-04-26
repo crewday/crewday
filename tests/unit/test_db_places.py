@@ -89,16 +89,42 @@ class TestPropertyWorkspaceModel:
         assert PropertyWorkspace.__tablename__ == "property_workspace"
 
     def test_membership_role_check_constraint_present(self) -> None:
-        """``__table_args__`` carries the ``membership_role`` CHECK."""
+        """``__table_args__`` carries the ``membership_role`` CHECK.
+
+        cd-hsk added a sibling ``status`` CHECK on the same table; both
+        constraints live in ``__table_args__`` and are asserted
+        independently. The SA naming convention prefixes constraint
+        names with ``ck_<table>_``.
+        """
         checks = [
             c
             for c in PropertyWorkspace.__table_args__
             if isinstance(c, CheckConstraint)
         ]
-        assert len(checks) == 1
-        sql = str(checks[0].sqltext)
+        membership_check = next(
+            (c for c in checks if c.name == "ck_property_workspace_membership_role"),
+            None,
+        )
+        assert membership_check is not None
+        sql = str(membership_check.sqltext)
         for role in ("owner_workspace", "managed_workspace", "observer_workspace"):
             assert role in sql, f"{role} missing from CHECK constraint"
+
+    def test_status_check_constraint_present(self) -> None:
+        """``__table_args__`` carries the cd-hsk ``status`` CHECK."""
+        checks = [
+            c
+            for c in PropertyWorkspace.__table_args__
+            if isinstance(c, CheckConstraint)
+        ]
+        status_check = next(
+            (c for c in checks if c.name == "ck_property_workspace_status"),
+            None,
+        )
+        assert status_check is not None
+        sql = str(status_check.sqltext)
+        for value in ("invited", "active"):
+            assert value in sql, f"{value} missing from status CHECK"
 
     def test_workspace_index_present(self) -> None:
         indexes = [i for i in PropertyWorkspace.__table_args__ if isinstance(i, Index)]

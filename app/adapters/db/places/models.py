@@ -30,6 +30,7 @@ from typing import Any
 
 from sqlalchemy import (
     JSON,
+    Boolean,
     CheckConstraint,
     DateTime,
     Float,
@@ -72,6 +73,17 @@ _MEMBERSHIP_ROLE_VALUES: tuple[str, ...] = (
     "owner_workspace",
     "managed_workspace",
     "observer_workspace",
+)
+
+# Allowed ``property_workspace.status`` values, enforced by a CHECK
+# constraint. ``invited`` covers a non-owner row the owner has minted
+# but the recipient workspace has not yet accepted; ``active`` covers
+# the live, in-force row. Owner-workspace bootstrap rows always carry
+# ``active`` (the seeding workspace consents implicitly by creating
+# the property). Lands with cd-hsk.
+_PROPERTY_WORKSPACE_STATUS_VALUES: tuple[str, ...] = (
+    "invited",
+    "active",
 )
 
 # Allowed ``property.kind`` values — drives default lifecycle rule +
@@ -245,6 +257,21 @@ class PropertyWorkspace(Base):
     membership_role: Mapped[str] = mapped_column(
         String, nullable=False, default="owner_workspace"
     )
+    # PII boundary widening flag (§15 "Cross-workspace visibility").
+    # ``False`` by default — non-owner workspaces see only the
+    # operational minimum unless the owner explicitly widens the share.
+    # The owner workspace's own row always behaves as if ``True`` at
+    # read time (it owns the data); the column is defaulted false there
+    # too so the CHECK on toggling stays simple. Lands with cd-hsk.
+    share_guest_identity: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False
+    )
+    # Invite-acceptance lifecycle. ``invited`` covers a non-owner row
+    # minted by the owner that the recipient workspace has not yet
+    # accepted; ``active`` covers the live, in-force row. Owner rows
+    # are always seeded ``active``. CHECK-enforced via ``ck_property_workspace_status``.
+    # Lands with cd-hsk.
+    status: Mapped[str] = mapped_column(String, nullable=False, default="active")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
     )
@@ -253,6 +280,10 @@ class PropertyWorkspace(Base):
         CheckConstraint(
             "membership_role IN ('" + "', '".join(_MEMBERSHIP_ROLE_VALUES) + "')",
             name="membership_role",
+        ),
+        CheckConstraint(
+            "status IN ('" + "', '".join(_PROPERTY_WORKSPACE_STATUS_VALUES) + "')",
+            name="status",
         ),
         # Composite PK already covers "workspaces for this property";
         # these indexes speed the sibling lookup directions.

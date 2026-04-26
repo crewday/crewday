@@ -697,6 +697,15 @@ def create_property(
             workspace_id=ctx.workspace_id,
             label=label,
             membership_role="owner_workspace",
+            # Owner-workspace seed: ``status`` is always ``active`` on
+            # bootstrap (the seeding workspace consents by creating the
+            # property), and ``share_guest_identity`` defaults ``False``
+            # — the owner sees its own data unconditionally regardless
+            # of this flag (§15), but pinning the column keeps the row
+            # symmetric with non-owner rows where the same flag carries
+            # weight.
+            share_guest_identity=False,
+            status="active",
             created_at=now,
         )
     )
