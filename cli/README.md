@@ -25,14 +25,17 @@ result with stable key ordering.
 # Rewrite both surface files from the live OpenAPI schema.
 uv run python -m crewday._codegen
 
-# CI parity gate — exit 1 if committed != fresh, with a unified diff.
+# Low-level freshness check — exit 1 if committed != fresh, with a unified diff.
 uv run python -m crewday._codegen --check
+
+# Full CI parity gate — freshness + Click tree + OpenAPI operation coverage.
+uv run python scripts/cli_parity_check.py
 
 # Preview what would be written to stdout without touching disk.
 uv run python -m crewday._codegen --dry-run
 ```
 
-Run `--check` in CI alongside the OpenAPI parity gate. Any drift is a
-blocker — either re-run the write mode and commit the updated JSON, or
-add a justified entry to `_exclusions.yaml` (every entry requires a
-`reason:` field; the loader rejects unjustified exclusions).
+CI runs `scripts/cli_parity_check.py`. Any drift is a blocker — either
+re-run the write mode and commit the updated JSON, or add a justified
+entry to `_exclusions.yaml` (every entry requires a `reason:` field; the
+loader rejects unjustified exclusions).

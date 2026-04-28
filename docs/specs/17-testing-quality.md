@@ -16,7 +16,7 @@
 | load                 | `locust`                  | nightly               | 30min          |
 | LLM regression       | `pytest` + fixtures       | on-demand + nightly   | varies         |
 | security             | `osv-scanner`, `bandit`   | every PR              | < 2min         |
-| CLI parity           | `scripts/check_cli_parity.py` | every PR         | < 10s          |
+| CLI parity           | `scripts/cli_parity_check.py` | every PR         | < 10s          |
 
 ## Unit
 

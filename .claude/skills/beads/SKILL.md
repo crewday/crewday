@@ -157,8 +157,10 @@ consequences before they ship — without waiting for a human to notice.
   once the main work is complete.
 - **Title**: `Self-review: <main task title>`.
 - **Body**: instruct the implementer to run `/selfreview` in autofix
-  mode — skip plan mode, skip user triage, apply fixes directly, commit,
-  close the task. See [`.claude/skills/selfreview/SKILL.md`](../selfreview/SKILL.md)
+  mode — skip plan mode, skip user triage, apply fixes directly, and
+  run the quality gates. Do not commit, push, or close Beads from
+  selfreview; `/commiter` bundles main + selfreview closure atomically.
+  See [`.claude/skills/selfreview/SKILL.md`](../selfreview/SKILL.md)
   for the autofix flow.
 
 ### Never pair a self-review with a self-review
@@ -179,14 +181,16 @@ missing pieces, and unintended consequences before they ship.
 **Depends on: bd-001** (main task must be complete first).
 
 ## How to run
-Run `/selfreview` in **autofix mode** against the commit(s) from bd-001.
+Run `/selfreview` in **autofix mode** against the working-tree changes
+from bd-001.
 
 - Do NOT enter plan mode.
 - Do NOT ask the user to triage findings — you are the triage.
 - Apply fixes for every BUGS, MISSING, and RISKY finding.
 - Skip NITPICKS unless trivially safe.
 - Run the quality gates after fixing.
-- Commit the fixes, push, and close this task.
+- Do NOT commit, push, or close Beads tasks; `/commiter` will close
+  bd-001 and this selfreview task in one commit.
 
 See [`.claude/skills/selfreview/SKILL.md`](../selfreview/SKILL.md).
 
@@ -195,7 +199,7 @@ See [`.claude/skills/selfreview/SKILL.md`](../selfreview/SKILL.md).
 - [ ] All MISSING pieces completed
 - [ ] All RISKY items mitigated (or justified in a task comment)
 - [ ] Linter, formatter, type checker, affected tests all pass
-- [ ] Fixes committed and pushed
+- [ ] Working tree ready for `/commiter`
 EOF
 )" --labels "selfreview" --type chore --silent
 # → bd-002

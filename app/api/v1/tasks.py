@@ -1273,6 +1273,7 @@ def _http_for_comment_mutation(exc: Exception) -> HTTPException:
     response_model=TaskTemplateListResponse,
     operation_id="list_task_templates",
     summary="List task templates in the caller's workspace",
+    openapi_extra={"x-cli": {"group": "tasks", "verb": "templates-list"}},
 )
 def list_task_templates_route(
     ctx: _Ctx,
@@ -1324,6 +1325,7 @@ def create_task_template_route(
     response_model=TaskTemplatePayload,
     operation_id="get_task_template",
     summary="Read a task template",
+    openapi_extra={"x-cli": {"group": "tasks", "verb": "template-show"}},
 )
 def get_task_template_route(
     template_id: str,
@@ -1343,6 +1345,7 @@ def get_task_template_route(
     response_model=TaskTemplatePayload,
     operation_id="update_task_template",
     summary="Replace the mutable body of a task template",
+    openapi_extra={"x-cli": {"group": "tasks", "verb": "template-update"}},
 )
 def patch_task_template_route(
     template_id: str,
@@ -1363,6 +1366,7 @@ def patch_task_template_route(
     response_model=TaskTemplatePayload,
     operation_id="delete_task_template",
     summary="Soft-delete a task template",
+    openapi_extra={"x-cli": {"group": "tasks", "verb": "template-delete"}},
 )
 def delete_task_template_route(
     template_id: str,
@@ -1387,6 +1391,7 @@ def delete_task_template_route(
     response_model=ScheduleListResponse,
     operation_id="list_schedules",
     summary="List schedules in the caller's workspace",
+    openapi_extra={"x-cli": {"group": "tasks", "verb": "schedules-list"}},
 )
 def list_schedules_route(
     ctx: _Ctx,
@@ -1458,6 +1463,7 @@ def create_schedule_route(
     response_model=SchedulePayload,
     operation_id="get_schedule",
     summary="Read a schedule",
+    openapi_extra={"x-cli": {"group": "tasks", "verb": "schedule-show"}},
 )
 def get_schedule_route(
     schedule_id: str,
@@ -1477,6 +1483,7 @@ def get_schedule_route(
     response_model=SchedulePayload,
     operation_id="update_schedule",
     summary="Replace the mutable body of a schedule",
+    openapi_extra={"x-cli": {"group": "tasks", "verb": "schedule-update"}},
 )
 def patch_schedule_route(
     schedule_id: str,
@@ -1504,6 +1511,7 @@ def patch_schedule_route(
     response_model=SchedulePayload,
     operation_id="delete_schedule",
     summary="Soft-delete a schedule and cancel scheduled occurrences",
+    openapi_extra={"x-cli": {"group": "tasks", "verb": "schedule-delete"}},
 )
 def delete_schedule_route(
     schedule_id: str,
@@ -1523,6 +1531,7 @@ def delete_schedule_route(
     response_model=SchedulePreviewResponse,
     operation_id="preview_schedule",
     summary="Return the next N occurrences of a schedule",
+    openapi_extra={"x-cli": {"group": "tasks", "verb": "schedule-preview"}},
 )
 def preview_schedule_route(
     schedule_id: str,
@@ -1613,6 +1622,7 @@ _OccurrenceState = Literal[
     response_model=TaskListResponse,
     operation_id="list_tasks",
     summary="List occurrences (tasks) with filters",
+    openapi_extra={"x-cli": {"group": "tasks", "verb": "list"}},
 )
 def list_tasks_route(
     ctx: _Ctx,
@@ -1725,6 +1735,7 @@ def create_task_route(
     response_model=TaskPayload,
     operation_id="get_task",
     summary="Read a single task",
+    openapi_extra={"x-cli": {"group": "tasks", "verb": "show"}},
 )
 def get_task_route(
     task_id: str,
@@ -1745,6 +1756,7 @@ def get_task_route(
     response_model=TaskPayload,
     operation_id="patch_task",
     summary="Partial update of a task (full §06 mutable set)",
+    openapi_extra={"x-cli": {"group": "tasks", "verb": "update"}},
 )
 def patch_task_route(
     task_id: str,
@@ -1993,6 +2005,7 @@ def post_task_comment_route(
     response_model=CommentListResponse,
     operation_id="list_task_comments",
     summary="List comments on a task (oldest-first, cursor-paginated)",
+    openapi_extra={"x-cli": {"group": "tasks", "verb": "comments-list"}},
 )
 def list_task_comments_route(
     task_id: str,
@@ -2038,6 +2051,7 @@ def list_task_comments_route(
     response_model=CommentPayload,
     operation_id="patch_task_comment",
     summary="Edit a comment within the author grace window",
+    openapi_extra={"x-cli": {"group": "tasks", "verb": "comment-update"}},
 )
 def patch_task_comment_route(
     task_id: str,
@@ -2077,6 +2091,7 @@ def patch_task_comment_route(
     response_model=CommentPayload,
     operation_id="delete_task_comment",
     summary="Soft-delete a comment",
+    openapi_extra={"x-cli": {"group": "tasks", "verb": "comment-delete"}},
 )
 def delete_task_comment_route(
     task_id: str,
@@ -2108,6 +2123,7 @@ def delete_task_comment_route(
     response_model=EvidenceListResponse,
     operation_id="list_task_evidence",
     summary="List evidence rows on a task",
+    openapi_extra={"x-cli": {"group": "tasks", "verb": "evidence-list"}},
 )
 def list_task_evidence_route(
     task_id: str,

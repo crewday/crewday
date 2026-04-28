@@ -612,6 +612,7 @@ def create_expense_claim_route(
     response_model=ExpenseClaimListResponse,
     operation_id="list_expense_claims",
     summary="List claims for the caller (or another user with the cap)",
+    openapi_extra={"x-cli": {"group": "expenses", "verb": "list"}},
 )
 def list_expense_claims_route(
     ctx: _Ctx,
@@ -690,6 +691,7 @@ def list_expense_claims_route(
     response_model=ExpenseClaimPendingListResponse,
     operation_id="list_pending_expense_claims",
     summary="Manager queue — submitted claims awaiting decision",
+    openapi_extra={"x-cli": {"group": "expenses", "verb": "list-pending"}},
 )
 def list_pending_expense_claims_route(
     ctx: _Ctx,
@@ -742,6 +744,7 @@ def list_pending_expense_claims_route(
     response_model=PendingReimbursementResponse,
     operation_id="get_pending_reimbursement",
     summary="Pending-reimbursement totals (per-user or workspace aggregate)",
+    openapi_extra={"x-cli": {"group": "expenses", "verb": "pending-reimbursement"}},
 )
 def get_pending_reimbursement_route(
     ctx: _Ctx,
@@ -846,6 +849,7 @@ def patch_expense_claim_route(
     response_class=Response,
     operation_id="cancel_expense_claim",
     summary="Cancel a claim (soft-delete draft, reject submitted)",
+    openapi_extra={"x-cli": {"group": "expenses", "verb": "cancel"}},
 )
 def cancel_expense_claim_route(
     claim_id: str,
@@ -1029,6 +1033,7 @@ def _build_attach_runner(
     response_class=Response,
     operation_id="detach_expense_receipt",
     summary="Remove an attachment from a draft claim",
+    openapi_extra={"x-cli": {"group": "expenses", "verb": "detach-receipt"}},
 )
 def detach_expense_receipt_route(
     claim_id: str,
@@ -1065,6 +1070,7 @@ def detach_expense_receipt_route(
     response_model=ExpenseAttachmentListResponse,
     operation_id="list_expense_attachments",
     summary="List receipts attached to a claim",
+    openapi_extra={"x-cli": {"group": "expenses", "verb": "list-attachments"}},
 )
 def list_expense_attachments_route(
     claim_id: str,

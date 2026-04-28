@@ -354,6 +354,7 @@ def post_close_shift(
     response_model=ShiftPayload,
     operation_id="time.edit_shift",
     summary="Manager edit of a shift",
+    openapi_extra={"x-cli": {"group": "time", "verb": "shift-update"}},
 )
 def patch_edit_shift(
     shift_id: str,
@@ -383,6 +384,7 @@ def patch_edit_shift(
     response_model=ShiftListResponse,
     operation_id="time.list_shifts",
     summary="List shifts in the workspace",
+    openapi_extra={"x-cli": {"group": "time", "verb": "shifts-list"}},
 )
 def get_list_shifts(
     ctx: _Ctx,
@@ -411,6 +413,7 @@ def get_list_shifts(
     response_model=ShiftPayload,
     operation_id="time.get_shift",
     summary="Read a single shift",
+    openapi_extra={"x-cli": {"group": "time", "verb": "shift-show"}},
 )
 def get_one_shift(
     shift_id: str,
@@ -503,6 +506,7 @@ def post_create_my_leave(
     response_model=LeaveListResponse,
     operation_id="time.list_my_leaves",
     summary="List the caller's own leaves",
+    openapi_extra={"x-cli": {"group": "time", "verb": "my-leaves-list"}},
 )
 def get_list_my_leaves(
     ctx: _Ctx,
@@ -563,6 +567,7 @@ def _load_owned_leave_or_404(
     response_model=LeavePayload,
     operation_id="time.update_my_leave_dates",
     summary="Rewrite dates on a pending leave the caller owns",
+    openapi_extra={"x-cli": {"group": "time", "verb": "my-leave-update"}},
 )
 def patch_update_my_leave(
     leave_id: str,
@@ -594,6 +599,7 @@ def patch_update_my_leave(
     response_model=LeavePayload,
     operation_id="time.cancel_my_leave",
     summary="Cancel a pending or upcoming leave the caller owns",
+    openapi_extra={"x-cli": {"group": "time", "verb": "my-leave-cancel"}},
 )
 def delete_cancel_my_leave(
     leave_id: str,
@@ -627,6 +633,7 @@ def delete_cancel_my_leave(
     response_model=LeaveListResponse,
     operation_id="time.list_leaves",
     summary="List leaves in the workspace",
+    openapi_extra={"x-cli": {"group": "time", "verb": "leaves-list"}},
 )
 def get_list_leaves(
     ctx: _Ctx,
@@ -665,6 +672,7 @@ def get_list_leaves(
     response_model=LeavePayload,
     operation_id="time.get_leave",
     summary="Read a single leave",
+    openapi_extra={"x-cli": {"group": "time", "verb": "leave-show"}},
 )
 def get_one_leave(
     leave_id: str,
@@ -684,6 +692,7 @@ def get_one_leave(
     response_model=LeavePayload,
     operation_id="time.cancel_leave",
     summary="Cancel a leave (manager path)",
+    openapi_extra={"x-cli": {"group": "time", "verb": "leave-cancel"}},
 )
 def delete_cancel_leave(
     leave_id: str,

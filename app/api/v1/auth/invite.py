@@ -332,6 +332,7 @@ def build_invite_router(
         response_model=AcceptResponse,
         operation_id="auth.invite.accept",
         summary="Redeem the invite magic link",
+        openapi_extra={"x-cli": {"group": "invite", "verb": "accept"}},
     )
     def post_accept(
         body: AcceptRequest,
@@ -634,6 +635,7 @@ def build_invites_router(
         response_model=AcceptResponse,
         operation_id="auth.invites.accept",
         summary="Redeem the invite magic link (token in path)",
+        openapi_extra={"x-cli": {"group": "invite", "verb": "accept-token"}},
     )
     def post_accept(
         token: str,

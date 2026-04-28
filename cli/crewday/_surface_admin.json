@@ -1,1 +1,770 @@
-[]
+[
+  {
+    "body_schema_ref": "#/components/schemas/AdminGrantRequest",
+    "group": "admin",
+    "http": {
+      "method": "POST",
+      "path": "/admin/api/v1/admins"
+    },
+    "idempotent": false,
+    "name": "admins-grant",
+    "operation_id": "admin.admins.grant",
+    "path_params": [],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/AdminGrantResponse",
+    "summary": "Grant deployment-admin to a user",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "admin",
+      "mutates": true,
+      "summary": "Grant deployment-admin to a user",
+      "verb": "admins-grant"
+    }
+  },
+  {
+    "body_schema_ref": null,
+    "group": "admin",
+    "http": {
+      "method": "GET",
+      "path": "/admin/api/v1/admins/groups"
+    },
+    "idempotent": true,
+    "name": "admins-groups-list",
+    "operation_id": "admin.admins.groups.list",
+    "path_params": [],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/GroupsListResponse",
+    "summary": "List the deployment owners + managers groups",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "admin",
+      "mutates": false,
+      "summary": "List the deployment owners + managers groups",
+      "verb": "admins-groups-list"
+    }
+  },
+  {
+    "body_schema_ref": null,
+    "group": "admin",
+    "http": {
+      "method": "GET",
+      "path": "/admin/api/v1/me/admins"
+    },
+    "idempotent": true,
+    "name": "admins-list",
+    "operation_id": "admin.me.admins.list",
+    "path_params": [],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/AdminTeamResponse",
+    "summary": "List every active deployment admin grant",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "admin",
+      "mutates": false,
+      "summary": "List deployment admins",
+      "verb": "admins-list"
+    }
+  },
+  {
+    "body_schema_ref": null,
+    "group": "admin",
+    "http": {
+      "method": "GET",
+      "path": "/admin/api/v1/admins"
+    },
+    "idempotent": true,
+    "name": "admins-list-all",
+    "operation_id": "admin.admins.list",
+    "path_params": [],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/AdminListResponse",
+    "summary": "List every deployment admin",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "admin",
+      "mutates": false,
+      "summary": "List every deployment admin",
+      "verb": "admins-list-all"
+    }
+  },
+  {
+    "body_schema_ref": "#/components/schemas/GroupMemberRequest",
+    "group": "admin",
+    "http": {
+      "method": "POST",
+      "path": "/admin/api/v1/admins/groups/owners/members"
+    },
+    "idempotent": false,
+    "name": "admins-owners-add",
+    "operation_id": "admin.admins.groups.owners.add",
+    "path_params": [],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/OwnersGroupResponse",
+    "summary": "Add a user to the deployment owners group (owners-only)",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "admin",
+      "mutates": true,
+      "summary": "Add a user to the deployment owners group",
+      "verb": "admins-owners-add"
+    }
+  },
+  {
+    "body_schema_ref": null,
+    "group": "admin",
+    "http": {
+      "method": "POST",
+      "path": "/admin/api/v1/admins/groups/owners/members/{user_id}/revoke"
+    },
+    "idempotent": false,
+    "name": "admins-owners-revoke",
+    "operation_id": "admin.admins.groups.owners.revoke",
+    "path_params": [
+      {
+        "name": "user_id",
+        "required": true,
+        "schema": {
+          "title": "User Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/OwnersGroupResponse",
+    "summary": "Remove a user from the deployment owners group (owners-only)",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "admin",
+      "mutates": true,
+      "summary": "Remove a user from the deployment owners group",
+      "verb": "admins-owners-revoke"
+    }
+  },
+  {
+    "body_schema_ref": null,
+    "group": "admin",
+    "http": {
+      "method": "POST",
+      "path": "/admin/api/v1/admins/{id}/revoke"
+    },
+    "idempotent": false,
+    "name": "admins-revoke",
+    "operation_id": "admin.admins.revoke",
+    "path_params": [
+      {
+        "name": "id",
+        "required": true,
+        "schema": {
+          "title": "Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/AdminRevokeResponse",
+    "summary": "Revoke a deployment-admin grant",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "admin",
+      "mutates": true,
+      "summary": "Revoke a deployment-admin grant",
+      "verb": "admins-revoke"
+    }
+  },
+  {
+    "body_schema_ref": null,
+    "group": "admin",
+    "http": {
+      "method": "GET",
+      "path": "/admin/api/v1/audit"
+    },
+    "idempotent": true,
+    "name": "audit-list",
+    "operation_id": "admin.audit.list",
+    "path_params": [],
+    "query_params": [
+      {
+        "name": "actor_id",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Actor Id"
+        }
+      },
+      {
+        "name": "action",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Action"
+        }
+      },
+      {
+        "name": "entity_kind",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Entity Kind"
+        }
+      },
+      {
+        "name": "entity_id",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Entity Id"
+        }
+      },
+      {
+        "name": "since",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Since"
+        }
+      },
+      {
+        "name": "until",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Until"
+        }
+      },
+      {
+        "name": "cursor",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Cursor"
+        }
+      },
+      {
+        "name": "limit",
+        "required": false,
+        "schema": {
+          "default": 50,
+          "maximum": 500,
+          "minimum": 1,
+          "title": "Limit",
+          "type": "integer"
+        }
+      }
+    ],
+    "response_schema_ref": "#/components/schemas/AuditListResponse",
+    "summary": "Page through deployment-scope audit rows",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "admin",
+      "mutates": false,
+      "summary": "Page through deployment-scope audit rows",
+      "verb": "audit-list"
+    }
+  },
+  {
+    "body_schema_ref": null,
+    "group": "admin",
+    "http": {
+      "method": "GET",
+      "path": "/admin/api/v1/audit/tail"
+    },
+    "idempotent": true,
+    "name": "audit-tail",
+    "operation_id": "admin.audit.tail",
+    "path_params": [],
+    "query_params": [
+      {
+        "name": "follow",
+        "required": false,
+        "schema": {
+          "default": 0,
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Follow",
+          "type": "integer"
+        }
+      },
+      {
+        "name": "actor_id",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Actor Id"
+        }
+      },
+      {
+        "name": "action",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Action"
+        }
+      },
+      {
+        "name": "entity_kind",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Entity Kind"
+        }
+      },
+      {
+        "name": "entity_id",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Entity Id"
+        }
+      },
+      {
+        "name": "since",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Since"
+        }
+      },
+      {
+        "name": "until",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Until"
+        }
+      },
+      {
+        "name": "limit",
+        "required": false,
+        "schema": {
+          "default": 50,
+          "maximum": 500,
+          "minimum": 1,
+          "title": "Limit",
+          "type": "integer"
+        }
+      }
+    ],
+    "response_schema_ref": null,
+    "summary": "NDJSON projection of the deployment audit feed",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "admin",
+      "mutates": false,
+      "summary": "NDJSON projection of the deployment audit feed",
+      "verb": "audit-tail"
+    }
+  },
+  {
+    "body_schema_ref": null,
+    "group": "admin",
+    "http": {
+      "method": "GET",
+      "path": "/admin/api/v1/settings"
+    },
+    "idempotent": true,
+    "name": "settings-list",
+    "operation_id": "admin.settings.list",
+    "path_params": [],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/DeploymentSettingsResponse",
+    "summary": "List every deployment setting + its current resolved value",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "admin",
+      "mutates": false,
+      "summary": "List deployment settings",
+      "verb": "settings-list"
+    }
+  },
+  {
+    "body_schema_ref": "#/components/schemas/DeploymentSettingPayload",
+    "group": "admin",
+    "http": {
+      "method": "PUT",
+      "path": "/admin/api/v1/settings/{key}"
+    },
+    "idempotent": true,
+    "name": "settings-update",
+    "operation_id": "admin.settings.update",
+    "path_params": [
+      {
+        "name": "key",
+        "required": true,
+        "schema": {
+          "title": "Key",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/DeploymentSettingResponse",
+    "summary": "Write a single deployment setting",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "admin",
+      "mutates": true,
+      "summary": "Write a single deployment setting",
+      "verb": "settings-update"
+    }
+  },
+  {
+    "body_schema_ref": null,
+    "group": "admin",
+    "http": {
+      "method": "GET",
+      "path": "/admin/api/v1/signup/settings"
+    },
+    "idempotent": true,
+    "name": "signup-settings",
+    "operation_id": "admin.signup.settings.read",
+    "path_params": [],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/SignupSettingsResponse",
+    "summary": "Read self-serve signup settings",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "admin",
+      "mutates": false,
+      "summary": "Read self-serve signup settings",
+      "verb": "signup-settings"
+    }
+  },
+  {
+    "body_schema_ref": "#/components/schemas/SignupSettingsPayload",
+    "group": "admin",
+    "http": {
+      "method": "PUT",
+      "path": "/admin/api/v1/signup/settings"
+    },
+    "idempotent": true,
+    "name": "signup-settings-update",
+    "operation_id": "admin.signup.settings.update",
+    "path_params": [],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/SignupSettingsResponse",
+    "summary": "Update self-serve signup settings",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "admin",
+      "mutates": true,
+      "summary": "Update self-serve signup settings",
+      "verb": "signup-settings-update"
+    }
+  },
+  {
+    "body_schema_ref": "#/components/schemas/UsageCapPayload",
+    "group": "admin",
+    "http": {
+      "method": "PUT",
+      "path": "/admin/api/v1/usage/workspaces/{id}/cap"
+    },
+    "idempotent": true,
+    "name": "usage-cap",
+    "operation_id": "admin.usage.workspaces.cap",
+    "path_params": [
+      {
+        "name": "id",
+        "required": true,
+        "schema": {
+          "title": "Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/UsageCapResponse",
+    "summary": "Raise or lower a workspace's LLM budget cap",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "admin",
+      "mutates": true,
+      "summary": "Raise or lower a workspace's LLM budget cap",
+      "verb": "usage-cap"
+    }
+  },
+  {
+    "body_schema_ref": null,
+    "group": "admin",
+    "http": {
+      "method": "GET",
+      "path": "/admin/api/v1/usage/summary"
+    },
+    "idempotent": true,
+    "name": "usage-summary",
+    "operation_id": "admin.usage.summary",
+    "path_params": [],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/UsageSummaryResponse",
+    "summary": "Deployment-wide rolling 30-day usage summary",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "admin",
+      "mutates": false,
+      "summary": "Deployment-wide rolling 30-day usage summary",
+      "verb": "usage-summary"
+    }
+  },
+  {
+    "body_schema_ref": null,
+    "group": "admin",
+    "http": {
+      "method": "GET",
+      "path": "/admin/api/v1/usage/workspaces"
+    },
+    "idempotent": true,
+    "name": "usage-workspaces",
+    "operation_id": "admin.usage.workspaces",
+    "path_params": [],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/UsageWorkspacesResponse",
+    "summary": "Per-workspace cap / spent / paused table",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "admin",
+      "mutates": false,
+      "summary": "Per-workspace cap / spent / paused table",
+      "verb": "usage-workspaces"
+    }
+  },
+  {
+    "body_schema_ref": null,
+    "group": "admin",
+    "http": {
+      "method": "GET",
+      "path": "/admin/api/v1/me"
+    },
+    "idempotent": true,
+    "name": "whoami",
+    "operation_id": "admin.me.read",
+    "path_params": [],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/AdminMeResponse",
+    "summary": "Return the deployment-admin caller's identity + capabilities",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "admin",
+      "mutates": false,
+      "summary": "Show the deployment-admin caller + capabilities",
+      "verb": "whoami"
+    }
+  },
+  {
+    "body_schema_ref": null,
+    "group": "admin",
+    "http": {
+      "method": "POST",
+      "path": "/admin/api/v1/workspaces/{id}/archive"
+    },
+    "idempotent": false,
+    "name": "workspaces-archive",
+    "operation_id": "admin.workspaces.archive",
+    "path_params": [
+      {
+        "name": "id",
+        "required": true,
+        "schema": {
+          "title": "Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/WorkspaceArchiveResponse",
+    "summary": "Soft-archive a workspace (deployment owners only)",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "admin",
+      "mutates": true,
+      "summary": "Soft-archive a workspace",
+      "verb": "workspaces-archive"
+    }
+  },
+  {
+    "body_schema_ref": null,
+    "group": "admin",
+    "http": {
+      "method": "GET",
+      "path": "/admin/api/v1/workspaces/{id}"
+    },
+    "idempotent": true,
+    "name": "workspaces-get",
+    "operation_id": "admin.workspaces.get",
+    "path_params": [
+      {
+        "name": "id",
+        "required": true,
+        "schema": {
+          "title": "Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/WorkspaceSummaryResponse",
+    "summary": "Return one workspace's detail card",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "admin",
+      "mutates": false,
+      "summary": "Return one workspace's detail card",
+      "verb": "workspaces-get"
+    }
+  },
+  {
+    "body_schema_ref": null,
+    "group": "admin",
+    "http": {
+      "method": "GET",
+      "path": "/admin/api/v1/workspaces"
+    },
+    "idempotent": true,
+    "name": "workspaces-list",
+    "operation_id": "admin.workspaces.list",
+    "path_params": [],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/WorkspaceListResponse",
+    "summary": "List every workspace on the deployment",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "admin",
+      "mutates": false,
+      "summary": "List every workspace on the deployment",
+      "verb": "workspaces-list"
+    }
+  },
+  {
+    "body_schema_ref": null,
+    "group": "admin",
+    "http": {
+      "method": "POST",
+      "path": "/admin/api/v1/workspaces/{id}/trust"
+    },
+    "idempotent": false,
+    "name": "workspaces-trust",
+    "operation_id": "admin.workspaces.trust",
+    "path_params": [
+      {
+        "name": "id",
+        "required": true,
+        "schema": {
+          "title": "Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/WorkspaceTrustResponse",
+    "summary": "Promote a workspace to verification_state=\"trusted\"",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "admin",
+      "mutates": true,
+      "summary": "Promote a workspace to trusted",
+      "verb": "workspaces-trust"
+    }
+  }
+]

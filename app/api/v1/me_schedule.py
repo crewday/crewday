@@ -360,6 +360,7 @@ def build_me_schedule_router() -> APIRouter:
         response_model=MeScheduleResponse,
         operation_id="me.schedule.get",
         summary="Aggregated calendar feed for the caller",
+        openapi_extra={"x-cli": {"group": "me", "verb": "schedule"}},
     )
     def get_schedule(
         ctx: _Ctx,
@@ -436,6 +437,7 @@ def build_me_schedule_router() -> APIRouter:
         response_model=UserAvailabilityOverrideListResponse,
         operation_id="me.availability_overrides.list",
         summary="List the caller's user_availability_override rows",
+        openapi_extra={"x-cli": {"group": "me", "verb": "availability-list"}},
     )
     def list_self_overrides(
         ctx: _Ctx,

@@ -1,6 +1,131 @@
 [
   {
     "body_schema_ref": null,
+    "group": "approvals",
+    "http": {
+      "method": "POST",
+      "path": "/w/{slug}/api/v1/approvals/{approval_request_id}/approve"
+    },
+    "idempotent": false,
+    "name": "approve",
+    "operation_id": "approve_approval_w__slug__api_v1_approvals__approval_request_id__approve_post",
+    "path_params": [
+      {
+        "name": "approval_request_id",
+        "required": true,
+        "schema": {
+          "title": "Approval Request Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/ApprovalPayload",
+    "summary": "Approve a pending action and replay it",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "approvals",
+    "http": {
+      "method": "GET",
+      "path": "/w/{slug}/api/v1/approvals"
+    },
+    "idempotent": true,
+    "name": "list",
+    "operation_id": "list_approvals_w__slug__api_v1_approvals_get",
+    "path_params": [],
+    "query_params": [
+      {
+        "name": "cursor",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Forward cursor from the previous page's ``next_cursor``; the row id of the last result returned. Omitted on the first page.",
+          "title": "Cursor"
+        }
+      },
+      {
+        "name": "limit",
+        "required": false,
+        "schema": {
+          "default": 25,
+          "description": "Max rows per page (default 25, cap 100). Spec \u00a712 'Pagination'.",
+          "maximum": 100,
+          "minimum": 1,
+          "title": "Limit",
+          "type": "integer"
+        }
+      }
+    ],
+    "response_schema_ref": "#/components/schemas/ApprovalsListResponse",
+    "summary": "List pending approvals",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "approvals",
+    "http": {
+      "method": "POST",
+      "path": "/w/{slug}/api/v1/approvals/{approval_request_id}/reject"
+    },
+    "idempotent": false,
+    "name": "reject",
+    "operation_id": "reject_approval_w__slug__api_v1_approvals__approval_request_id__reject_post",
+    "path_params": [
+      {
+        "name": "approval_request_id",
+        "required": true,
+        "schema": {
+          "title": "Approval Request Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/ApprovalPayload",
+    "summary": "Reject a pending action",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "approvals",
+    "http": {
+      "method": "GET",
+      "path": "/w/{slug}/api/v1/approvals/{approval_request_id}"
+    },
+    "idempotent": true,
+    "name": "show",
+    "operation_id": "get_approval_w__slug__api_v1_approvals__approval_request_id__get",
+    "path_params": [
+      {
+        "name": "approval_request_id",
+        "required": true,
+        "schema": {
+          "title": "Approval Request Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/ApprovalPayload",
+    "summary": "Get one approval by id",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
     "group": "auth",
     "http": {
       "method": "DELETE",
@@ -53,6 +178,589 @@
     }
   },
   {
+    "body_schema_ref": null,
+    "group": "auth",
+    "http": {
+      "method": "GET",
+      "path": "/api/v1/me/workspaces"
+    },
+    "idempotent": true,
+    "name": "workspaces",
+    "operation_id": "auth.me.workspaces.list",
+    "path_params": [],
+    "query_params": [],
+    "response_schema_ref": null,
+    "summary": "Return the caller's workspaces (switcher payload)",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "auth",
+      "mutates": false,
+      "summary": "List the workspaces the caller can switch into",
+      "verb": "workspaces"
+    }
+  },
+  {
+    "body_schema_ref": null,
+    "group": "employees",
+    "http": {
+      "method": "GET",
+      "path": "/w/{slug}/api/v1/employees"
+    },
+    "idempotent": true,
+    "name": "list",
+    "operation_id": "employees.list",
+    "path_params": [],
+    "query_params": [],
+    "response_schema_ref": null,
+    "summary": "List employees in the caller's workspace (manager roster)",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "employees",
+      "mutates": false,
+      "summary": "List employees in a workspace",
+      "verb": "list"
+    }
+  },
+  {
+    "body_schema_ref": null,
+    "group": "expenses",
+    "http": {
+      "method": "POST",
+      "path": "/w/{slug}/api/v1/expenses/{claim_id}/approve"
+    },
+    "idempotent": false,
+    "name": "approve",
+    "operation_id": "approve_expense_claim",
+    "path_params": [
+      {
+        "name": "claim_id",
+        "required": true,
+        "schema": {
+          "title": "Claim Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/ExpenseClaimPayload",
+    "summary": "Approve a submitted claim (optional inline edits)",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": "#/components/schemas/AttachReceiptRequest",
+    "group": "expenses",
+    "http": {
+      "method": "POST",
+      "path": "/w/{slug}/api/v1/expenses/{claim_id}/attachments"
+    },
+    "idempotent": false,
+    "name": "attachments",
+    "operation_id": "attach_expense_receipt",
+    "path_params": [
+      {
+        "name": "claim_id",
+        "required": true,
+        "schema": {
+          "title": "Claim Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/ExpenseAttachmentPayload",
+    "summary": "Register a previously-uploaded blob as a receipt",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "expenses",
+    "http": {
+      "method": "DELETE",
+      "path": "/w/{slug}/api/v1/expenses/{claim_id}"
+    },
+    "idempotent": true,
+    "name": "cancel",
+    "operation_id": "cancel_expense_claim",
+    "path_params": [
+      {
+        "name": "claim_id",
+        "required": true,
+        "schema": {
+          "title": "Claim Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": null,
+    "summary": "Cancel a claim (soft-delete draft, reject submitted)",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "expenses",
+      "verb": "cancel"
+    }
+  },
+  {
+    "body_schema_ref": "#/components/schemas/ExpenseClaimCreate",
+    "group": "expenses",
+    "http": {
+      "method": "POST",
+      "path": "/w/{slug}/api/v1/expenses"
+    },
+    "idempotent": false,
+    "name": "create",
+    "operation_id": "create_expense_claim",
+    "path_params": [],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/ExpenseClaimPayload",
+    "summary": "Create a draft expense claim",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "expenses",
+    "http": {
+      "method": "DELETE",
+      "path": "/w/{slug}/api/v1/expenses/{claim_id}/attachments/{attachment_id}"
+    },
+    "idempotent": true,
+    "name": "detach-receipt",
+    "operation_id": "detach_expense_receipt",
+    "path_params": [
+      {
+        "name": "claim_id",
+        "required": true,
+        "schema": {
+          "title": "Claim Id",
+          "type": "string"
+        }
+      },
+      {
+        "name": "attachment_id",
+        "required": true,
+        "schema": {
+          "title": "Attachment Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": null,
+    "summary": "Remove an attachment from a draft claim",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "expenses",
+      "verb": "detach-receipt"
+    }
+  },
+  {
+    "body_schema_ref": null,
+    "group": "expenses",
+    "http": {
+      "method": "GET",
+      "path": "/w/{slug}/api/v1/expenses"
+    },
+    "idempotent": true,
+    "name": "list",
+    "operation_id": "list_expense_claims",
+    "path_params": [],
+    "query_params": [
+      {
+        "name": "user_id",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "User Id"
+        }
+      },
+      {
+        "name": "mine",
+        "required": false,
+        "schema": {
+          "default": false,
+          "description": "When ``true``, narrow the result to the caller's own claims (equivalent to ``user_id=<caller>``) without requiring ``expenses.approve``. Mutually exclusive with an explicit ``user_id`` \u2014 supplying both surfaces 422 ``mine_user_id_conflict``. Defaults to ``false``.",
+          "title": "Mine",
+          "type": "boolean"
+        }
+      },
+      {
+        "name": "state",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "maxLength": 32,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "State"
+        }
+      },
+      {
+        "name": "cursor",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Opaque forward cursor from the previous page's ``next_cursor``. Omitted on the first call. Bounded to 256 chars to keep the URL below reverse-proxy header limits.",
+          "title": "Cursor"
+        }
+      },
+      {
+        "name": "limit",
+        "required": false,
+        "schema": {
+          "default": 50,
+          "description": "Maximum rows to return. Default 50, cap 500 per spec \u00a712 'Pagination'. Rejected with 422 outside ``[1, 500]``.",
+          "maximum": 500,
+          "minimum": 1,
+          "title": "Limit",
+          "type": "integer"
+        }
+      }
+    ],
+    "response_schema_ref": "#/components/schemas/ExpenseClaimListResponse",
+    "summary": "List claims for the caller (or another user with the cap)",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "expenses",
+      "verb": "list"
+    }
+  },
+  {
+    "body_schema_ref": null,
+    "group": "expenses",
+    "http": {
+      "method": "GET",
+      "path": "/w/{slug}/api/v1/expenses/{claim_id}/attachments"
+    },
+    "idempotent": true,
+    "name": "list-attachments",
+    "operation_id": "list_expense_attachments",
+    "path_params": [
+      {
+        "name": "claim_id",
+        "required": true,
+        "schema": {
+          "title": "Claim Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/ExpenseAttachmentListResponse",
+    "summary": "List receipts attached to a claim",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "expenses",
+      "verb": "list-attachments"
+    }
+  },
+  {
+    "body_schema_ref": null,
+    "group": "expenses",
+    "http": {
+      "method": "GET",
+      "path": "/w/{slug}/api/v1/expenses/pending"
+    },
+    "idempotent": true,
+    "name": "list-pending",
+    "operation_id": "list_pending_expense_claims",
+    "path_params": [],
+    "query_params": [
+      {
+        "name": "claimant_user_id",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Claimant User Id"
+        }
+      },
+      {
+        "name": "property_id",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Property Id"
+        }
+      },
+      {
+        "name": "category",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "maxLength": 32,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Category"
+        }
+      },
+      {
+        "name": "cursor",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Opaque forward cursor from the previous page's ``next_cursor``. Omitted on the first call. Bounded to 256 chars to keep the URL below reverse-proxy header limits.",
+          "title": "Cursor"
+        }
+      },
+      {
+        "name": "limit",
+        "required": false,
+        "schema": {
+          "default": 50,
+          "description": "Maximum rows to return. Default 50, cap 500 per spec \u00a712 'Pagination'. Rejected with 422 outside ``[1, 500]``.",
+          "maximum": 500,
+          "minimum": 1,
+          "title": "Limit",
+          "type": "integer"
+        }
+      }
+    ],
+    "response_schema_ref": "#/components/schemas/ExpenseClaimPendingListResponse",
+    "summary": "Manager queue \u2014 submitted claims awaiting decision",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "expenses",
+      "verb": "list-pending"
+    }
+  },
+  {
+    "body_schema_ref": null,
+    "group": "expenses",
+    "http": {
+      "method": "GET",
+      "path": "/w/{slug}/api/v1/expenses/pending_reimbursement"
+    },
+    "idempotent": true,
+    "name": "pending-reimbursement",
+    "operation_id": "get_pending_reimbursement",
+    "path_params": [],
+    "query_params": [
+      {
+        "name": "user_id",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Filter target. ``me`` resolves to the caller (no capability required). A different user id requires ``expenses.approve``. Omit the param entirely to get the workspace-wide aggregate (also gated on ``expenses.approve``); the response then carries a ``by_user`` breakdown.",
+          "title": "User Id"
+        }
+      }
+    ],
+    "response_schema_ref": "#/components/schemas/PendingReimbursementResponse",
+    "summary": "Pending-reimbursement totals (per-user or workspace aggregate)",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "expenses",
+      "verb": "pending-reimbursement"
+    }
+  },
+  {
+    "body_schema_ref": "#/components/schemas/ReimburseBody",
+    "group": "expenses",
+    "http": {
+      "method": "POST",
+      "path": "/w/{slug}/api/v1/expenses/{claim_id}/reimburse"
+    },
+    "idempotent": false,
+    "name": "reimburse",
+    "operation_id": "reimburse_expense_claim",
+    "path_params": [
+      {
+        "name": "claim_id",
+        "required": true,
+        "schema": {
+          "title": "Claim Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/ExpenseClaimPayload",
+    "summary": "Mark an approved claim as reimbursed",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": "#/components/schemas/RejectBody",
+    "group": "expenses",
+    "http": {
+      "method": "POST",
+      "path": "/w/{slug}/api/v1/expenses/{claim_id}/reject"
+    },
+    "idempotent": false,
+    "name": "reject",
+    "operation_id": "reject_expense_claim",
+    "path_params": [
+      {
+        "name": "claim_id",
+        "required": true,
+        "schema": {
+          "title": "Claim Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/ExpenseClaimPayload",
+    "summary": "Reject a submitted claim with a non-empty reason",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "expenses",
+    "http": {
+      "method": "POST",
+      "path": "/w/{slug}/api/v1/expenses/scan"
+    },
+    "idempotent": false,
+    "name": "scan",
+    "operation_id": "scan_expense_receipt",
+    "path_params": [],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/ExpenseScanResultPayload",
+    "summary": "Scan a receipt image and return autofill suggestions",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "expenses",
+    "http": {
+      "method": "GET",
+      "path": "/w/{slug}/api/v1/expenses/{claim_id}"
+    },
+    "idempotent": true,
+    "name": "show",
+    "operation_id": "get_expense_claim",
+    "path_params": [
+      {
+        "name": "claim_id",
+        "required": true,
+        "schema": {
+          "title": "Claim Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/ExpenseClaimPayload",
+    "summary": "Read a single expense claim",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "expenses",
+    "http": {
+      "method": "POST",
+      "path": "/w/{slug}/api/v1/expenses/{claim_id}/submit"
+    },
+    "idempotent": false,
+    "name": "submit",
+    "operation_id": "submit_expense_claim",
+    "path_params": [
+      {
+        "name": "claim_id",
+        "required": true,
+        "schema": {
+          "title": "Claim Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/ExpenseClaimPayload",
+    "summary": "Transition a draft claim to submitted",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": "#/components/schemas/ExpenseClaimUpdate",
+    "group": "expenses",
+    "http": {
+      "method": "PATCH",
+      "path": "/w/{slug}/api/v1/expenses/{claim_id}"
+    },
+    "idempotent": false,
+    "name": "update",
+    "operation_id": "patch_expense_claim",
+    "path_params": [
+      {
+        "name": "claim_id",
+        "required": true,
+        "schema": {
+          "title": "Claim Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/ExpenseClaimPayload",
+    "summary": "Partial update of a draft expense claim",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
     "body_schema_ref": "#/components/schemas/AcceptRequest",
     "group": "invite",
     "http": {
@@ -67,10 +775,42 @@
     "response_schema_ref": "#/components/schemas/AcceptResponse",
     "summary": "Redeem the invite magic link",
     "x_agent_confirm": null,
-    "x_cli": null
+    "x_cli": {
+      "group": "invite",
+      "verb": "accept"
+    }
   },
   {
-    "body_schema_ref": "#/components/schemas/CompleteRequest",
+    "body_schema_ref": null,
+    "group": "invite",
+    "http": {
+      "method": "POST",
+      "path": "/api/v1/invites/{token}/accept"
+    },
+    "idempotent": false,
+    "name": "accept-token",
+    "operation_id": "auth.invites.accept",
+    "path_params": [
+      {
+        "name": "token",
+        "required": true,
+        "schema": {
+          "title": "Token",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/AcceptResponse",
+    "summary": "Redeem the invite magic link (token in path)",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "invite",
+      "verb": "accept-token"
+    }
+  },
+  {
+    "body_schema_ref": "#/components/schemas/app__api__v1__auth__invite__CompleteRequest",
     "group": "invite",
     "http": {
       "method": "POST",
@@ -111,6 +851,244 @@
     "summary": "Confirm pending invite acceptance (existing-user branch)",
     "x_agent_confirm": null,
     "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "invite",
+    "http": {
+      "method": "GET",
+      "path": "/api/v1/invites/{token}"
+    },
+    "idempotent": true,
+    "name": "show",
+    "operation_id": "auth.invites.introspect",
+    "path_params": [
+      {
+        "name": "token",
+        "required": true,
+        "schema": {
+          "title": "Token",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/InviteIntrospectionResponse",
+    "summary": "Introspect an invite (read-only preview)",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "me",
+    "http": {
+      "method": "GET",
+      "path": "/w/{slug}/api/v1/me/availability_overrides"
+    },
+    "idempotent": true,
+    "name": "availability-list",
+    "operation_id": "me.availability_overrides.list",
+    "path_params": [],
+    "query_params": [
+      {
+        "name": "cursor",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Opaque forward cursor from the previous page's ``next_cursor``. Omitted on the first call. Bounded to 256 chars to keep the URL below reverse-proxy header limits.",
+          "title": "Cursor"
+        }
+      },
+      {
+        "name": "limit",
+        "required": false,
+        "schema": {
+          "default": 50,
+          "description": "Maximum rows to return. Default 50, cap 500 per spec \u00a712 'Pagination'. Rejected with 422 outside ``[1, 500]``.",
+          "maximum": 500,
+          "minimum": 1,
+          "title": "Limit",
+          "type": "integer"
+        }
+      }
+    ],
+    "response_schema_ref": "#/components/schemas/UserAvailabilityOverrideListResponse",
+    "summary": "List the caller's user_availability_override rows",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "me",
+      "verb": "availability-list"
+    }
+  },
+  {
+    "body_schema_ref": "#/components/schemas/MeAvailabilityOverrideCreateRequest",
+    "group": "me",
+    "http": {
+      "method": "POST",
+      "path": "/w/{slug}/api/v1/me/availability_overrides"
+    },
+    "idempotent": false,
+    "name": "availability_overrides",
+    "operation_id": "me.availability_overrides.create",
+    "path_params": [],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/UserAvailabilityOverrideResponse",
+    "summary": "Create an availability override for the caller (always self-target)",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "me",
+    "http": {
+      "method": "DELETE",
+      "path": "/api/v1/me/avatar"
+    },
+    "idempotent": true,
+    "name": "avatar-clear",
+    "operation_id": "auth.me.avatar.clear",
+    "path_params": [],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/AvatarResponse",
+    "summary": "Clear the caller's avatar image (self-only)",
+    "x_agent_confirm": true,
+    "x_cli": {
+      "group": "me",
+      "mutates": true,
+      "summary": "Clear your avatar image",
+      "verb": "avatar-clear"
+    }
+  },
+  {
+    "body_schema_ref": null,
+    "group": "me",
+    "http": {
+      "method": "POST",
+      "path": "/api/v1/me/export"
+    },
+    "idempotent": false,
+    "name": "export",
+    "operation_id": "me.export.request",
+    "path_params": [],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/PrivacyExportResponse",
+    "summary": "Request a privacy export for the current user",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "me",
+      "summary": "Request my privacy export",
+      "verb": "export"
+    }
+  },
+  {
+    "body_schema_ref": null,
+    "group": "me",
+    "http": {
+      "method": "GET",
+      "path": "/api/v1/me/export/{export_id}"
+    },
+    "idempotent": true,
+    "name": "export-status",
+    "operation_id": "me.export.get",
+    "path_params": [
+      {
+        "name": "export_id",
+        "required": true,
+        "schema": {
+          "title": "Export Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/PrivacyExportResponse",
+    "summary": "Poll a privacy export",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "me",
+      "summary": "Poll my privacy export",
+      "verb": "export-status"
+    }
+  },
+  {
+    "body_schema_ref": "#/components/schemas/MeLeaveCreateRequest",
+    "group": "me",
+    "http": {
+      "method": "POST",
+      "path": "/w/{slug}/api/v1/me/leaves"
+    },
+    "idempotent": false,
+    "name": "leaves",
+    "operation_id": "me.leaves.create",
+    "path_params": [],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/UserLeaveResponse",
+    "summary": "Create a leave for the caller (always self-target)",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "me",
+    "http": {
+      "method": "GET",
+      "path": "/w/{slug}/api/v1/me/schedule"
+    },
+    "idempotent": true,
+    "name": "schedule",
+    "operation_id": "me.schedule.get",
+    "path_params": [],
+    "query_params": [
+      {
+        "name": "from",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "format": "date",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Inclusive lower bound on the schedule window (ISO date). Defaults to today.",
+          "title": "From"
+        }
+      },
+      {
+        "name": "to",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "format": "date",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Inclusive upper bound on the schedule window (ISO date). Defaults to today + 14 days.",
+          "title": "To"
+        }
+      }
+    ],
+    "response_schema_ref": "#/components/schemas/MeScheduleResponse",
+    "summary": "Aggregated calendar feed for the caller",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "me",
+      "verb": "schedule"
+    }
   },
   {
     "body_schema_ref": "#/components/schemas/MintPersonalTokenBody",
@@ -188,6 +1166,2231 @@
     }
   },
   {
+    "body_schema_ref": null,
+    "group": "messaging",
+    "http": {
+      "method": "GET",
+      "path": "/w/{slug}/api/v1/messaging/notifications/push/vapid-key"
+    },
+    "idempotent": true,
+    "name": "list",
+    "operation_id": "messaging.get_vapid_public_key",
+    "path_params": [],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/VapidKeyPayload",
+    "summary": "Get the web-push VAPID public key for the workspace",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": "#/components/schemas/PushSubscribe",
+    "group": "messaging",
+    "http": {
+      "method": "POST",
+      "path": "/w/{slug}/api/v1/messaging/notifications/push/subscribe"
+    },
+    "idempotent": false,
+    "name": "subscribe",
+    "operation_id": "messaging.register_push_subscription",
+    "path_params": [],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/PushTokenPayload",
+    "summary": "Register (or refresh) the caller's web-push subscription",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": "#/components/schemas/PushUnsubscribe",
+    "group": "messaging",
+    "http": {
+      "method": "POST",
+      "path": "/w/{slug}/api/v1/messaging/notifications/push/unsubscribe"
+    },
+    "idempotent": false,
+    "name": "unsubscribe",
+    "operation_id": "messaging.unregister_push_subscription",
+    "path_params": [],
+    "query_params": [],
+    "response_schema_ref": null,
+    "summary": "Remove the caller's web-push subscription for a given endpoint",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "payroll",
+    "http": {
+      "method": "DELETE",
+      "path": "/w/{slug}/api/v1/payroll/pay-rules/{rule_id}"
+    },
+    "idempotent": true,
+    "name": "delete",
+    "operation_id": "payroll.pay_rules.delete",
+    "path_params": [
+      {
+        "name": "rule_id",
+        "required": true,
+        "schema": {
+          "description": "ULID of the target ``pay_rule`` row.",
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Rule Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": null,
+    "summary": "Soft-retire a pay rule (stamp effective_to = now)",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "payroll",
+    "http": {
+      "method": "GET",
+      "path": "/w/{slug}/api/v1/payroll/users/{user_id}/pay-rules"
+    },
+    "idempotent": true,
+    "name": "list",
+    "operation_id": "payroll.pay_rules.list",
+    "path_params": [
+      {
+        "name": "user_id",
+        "required": true,
+        "schema": {
+          "description": "Owner of the pay-rule chain \u2014 usually a ``user.id`` ULID.",
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "User Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [
+      {
+        "name": "cursor",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Opaque forward cursor from the previous page's ``next_cursor``. Omitted on the first call. Bounded to 256 chars to keep the URL below reverse-proxy header limits.",
+          "title": "Cursor"
+        }
+      },
+      {
+        "name": "limit",
+        "required": false,
+        "schema": {
+          "default": 50,
+          "description": "Maximum rows to return. Default 50, cap 500 per spec \u00a712 'Pagination'. Rejected with 422 outside ``[1, 500]``.",
+          "maximum": 500,
+          "minimum": 1,
+          "title": "Limit",
+          "type": "integer"
+        }
+      }
+    ],
+    "response_schema_ref": "#/components/schemas/PayRuleListResponse",
+    "summary": "List a user's pay rules \u2014 newest effective_from first",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": "#/components/schemas/PayRuleCreateRequest",
+    "group": "payroll",
+    "http": {
+      "method": "POST",
+      "path": "/w/{slug}/api/v1/payroll/users/{user_id}/pay-rules"
+    },
+    "idempotent": false,
+    "name": "pay-rules",
+    "operation_id": "payroll.pay_rules.create",
+    "path_params": [
+      {
+        "name": "user_id",
+        "required": true,
+        "schema": {
+          "description": "Owner of the pay-rule chain \u2014 usually a ``user.id`` ULID.",
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "User Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/PayRuleResponse",
+    "summary": "Create a pay rule for a user",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "payroll",
+    "http": {
+      "method": "POST",
+      "path": "/w/{slug}/api/v1/payroll/payslips/{payslip_id}/payout_manifest"
+    },
+    "idempotent": false,
+    "name": "payout_manifest",
+    "operation_id": "payroll.payslips.payout_manifest",
+    "path_params": [
+      {
+        "name": "payslip_id",
+        "required": true,
+        "schema": {
+          "description": "Payslip id.",
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Payslip Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/PayoutManifestResponse",
+    "summary": "Stream the payout manifest for a payslip",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "payroll",
+    "http": {
+      "method": "GET",
+      "path": "/w/{slug}/api/v1/payroll/pay-rules/{rule_id}"
+    },
+    "idempotent": true,
+    "name": "show",
+    "operation_id": "payroll.pay_rules.get",
+    "path_params": [
+      {
+        "name": "rule_id",
+        "required": true,
+        "schema": {
+          "description": "ULID of the target ``pay_rule`` row.",
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Rule Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/PayRuleResponse",
+    "summary": "Read a single pay rule",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": "#/components/schemas/PayRuleUpdateRequest",
+    "group": "payroll",
+    "http": {
+      "method": "PATCH",
+      "path": "/w/{slug}/api/v1/payroll/pay-rules/{rule_id}"
+    },
+    "idempotent": false,
+    "name": "update",
+    "operation_id": "payroll.pay_rules.update",
+    "path_params": [
+      {
+        "name": "rule_id",
+        "required": true,
+        "schema": {
+          "description": "ULID of the target ``pay_rule`` row.",
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Rule Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/PayRuleResponse",
+    "summary": "Replace the mutable body of a pay rule",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": "#/components/schemas/PermissionGroupCreateRequest",
+    "group": "permission-groups",
+    "http": {
+      "method": "POST",
+      "path": "/w/{slug}/api/v1/permission_groups"
+    },
+    "idempotent": false,
+    "name": "create",
+    "operation_id": "permission_groups.create",
+    "path_params": [],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/PermissionGroupResponse",
+    "summary": "Create a user-defined permission group",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "permission-groups",
+      "mutates": true,
+      "summary": "Create a permission group",
+      "verb": "create"
+    }
+  },
+  {
+    "body_schema_ref": null,
+    "group": "permission-groups",
+    "http": {
+      "method": "DELETE",
+      "path": "/w/{slug}/api/v1/permission_groups/{group_id}"
+    },
+    "idempotent": true,
+    "name": "delete",
+    "operation_id": "permission_groups.delete",
+    "path_params": [
+      {
+        "name": "group_id",
+        "required": true,
+        "schema": {
+          "title": "Group Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": null,
+    "summary": "Delete a user-defined permission group",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "permission-groups",
+      "mutates": true,
+      "summary": "Delete a user-defined permission group",
+      "verb": "delete"
+    }
+  },
+  {
+    "body_schema_ref": null,
+    "group": "permission-groups",
+    "http": {
+      "method": "GET",
+      "path": "/w/{slug}/api/v1/permission_groups"
+    },
+    "idempotent": true,
+    "name": "list",
+    "operation_id": "permission_groups.list",
+    "path_params": [],
+    "query_params": [
+      {
+        "name": "cursor",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Opaque forward cursor from the previous page's ``next_cursor``. Omitted on the first call. Bounded to 256 chars to keep the URL below reverse-proxy header limits.",
+          "title": "Cursor"
+        }
+      },
+      {
+        "name": "limit",
+        "required": false,
+        "schema": {
+          "default": 50,
+          "description": "Maximum rows to return. Default 50, cap 500 per spec \u00a712 'Pagination'. Rejected with 422 outside ``[1, 500]``.",
+          "maximum": 500,
+          "minimum": 1,
+          "title": "Limit",
+          "type": "integer"
+        }
+      },
+      {
+        "name": "scope_kind",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "enum": [
+                "workspace",
+                "organization"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Narrow the listing to groups of the named scope kind. v1 stores ``workspace`` rows only; ``organization`` returns an empty page.",
+          "title": "Scope Kind"
+        }
+      },
+      {
+        "name": "scope_id",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Narrow the listing to a specific scope id. Defaults to the caller's workspace; cross-workspace ids return empty.",
+          "title": "Scope Id"
+        }
+      }
+    ],
+    "response_schema_ref": "#/components/schemas/PermissionGroupListResponse",
+    "summary": "List permission groups in the caller's workspace",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "permission-groups",
+      "mutates": false,
+      "summary": "List permission groups",
+      "verb": "list"
+    }
+  },
+  {
+    "body_schema_ref": "#/components/schemas/AddMemberRequest",
+    "group": "permission-groups",
+    "http": {
+      "method": "POST",
+      "path": "/w/{slug}/api/v1/permission_groups/{group_id}/members"
+    },
+    "idempotent": false,
+    "name": "members-add",
+    "operation_id": "permission_groups.members.add",
+    "path_params": [
+      {
+        "name": "group_id",
+        "required": true,
+        "schema": {
+          "title": "Group Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/PermissionGroupMemberResponse",
+    "summary": "Add a member to a permission group \u2014 idempotent",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "permission-groups",
+      "mutates": true,
+      "summary": "Add a member to a permission group",
+      "verb": "members-add"
+    }
+  },
+  {
+    "body_schema_ref": null,
+    "group": "permission-groups",
+    "http": {
+      "method": "GET",
+      "path": "/w/{slug}/api/v1/permission_groups/{group_id}/members"
+    },
+    "idempotent": true,
+    "name": "members-list",
+    "operation_id": "permission_groups.members.list",
+    "path_params": [
+      {
+        "name": "group_id",
+        "required": true,
+        "schema": {
+          "title": "Group Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [
+      {
+        "name": "cursor",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Opaque forward cursor from the previous page's ``next_cursor``. Omitted on the first call. Bounded to 256 chars to keep the URL below reverse-proxy header limits.",
+          "title": "Cursor"
+        }
+      },
+      {
+        "name": "limit",
+        "required": false,
+        "schema": {
+          "default": 50,
+          "description": "Maximum rows to return. Default 50, cap 500 per spec \u00a712 'Pagination'. Rejected with 422 outside ``[1, 500]``.",
+          "maximum": 500,
+          "minimum": 1,
+          "title": "Limit",
+          "type": "integer"
+        }
+      }
+    ],
+    "response_schema_ref": "#/components/schemas/PermissionGroupMembersListResponse",
+    "summary": "List explicit members of a permission group",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "permission-groups",
+      "mutates": false,
+      "summary": "List members of a permission group",
+      "verb": "members-list"
+    }
+  },
+  {
+    "body_schema_ref": null,
+    "group": "permission-groups",
+    "http": {
+      "method": "DELETE",
+      "path": "/w/{slug}/api/v1/permission_groups/{group_id}/members/{user_id}"
+    },
+    "idempotent": true,
+    "name": "members-remove",
+    "operation_id": "permission_groups.members.remove",
+    "path_params": [
+      {
+        "name": "group_id",
+        "required": true,
+        "schema": {
+          "title": "Group Id",
+          "type": "string"
+        }
+      },
+      {
+        "name": "user_id",
+        "required": true,
+        "schema": {
+          "title": "User Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": null,
+    "summary": "Remove a member from a permission group \u2014 idempotent",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "permission-groups",
+      "mutates": true,
+      "summary": "Remove a member from a permission group",
+      "verb": "members-remove"
+    }
+  },
+  {
+    "body_schema_ref": null,
+    "group": "permission-groups",
+    "http": {
+      "method": "GET",
+      "path": "/w/{slug}/api/v1/permission_groups/{group_id}"
+    },
+    "idempotent": true,
+    "name": "show",
+    "operation_id": "permission_groups.read",
+    "path_params": [
+      {
+        "name": "group_id",
+        "required": true,
+        "schema": {
+          "title": "Group Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/PermissionGroupResponse",
+    "summary": "Read a permission group by id",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "permission-groups",
+      "mutates": false,
+      "summary": "Read a permission group",
+      "verb": "show"
+    }
+  },
+  {
+    "body_schema_ref": "#/components/schemas/PermissionGroupUpdateRequest",
+    "group": "permission-groups",
+    "http": {
+      "method": "PATCH",
+      "path": "/w/{slug}/api/v1/permission_groups/{group_id}"
+    },
+    "idempotent": false,
+    "name": "update",
+    "operation_id": "permission_groups.update",
+    "path_params": [
+      {
+        "name": "group_id",
+        "required": true,
+        "schema": {
+          "title": "Group Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/PermissionGroupResponse",
+    "summary": "Update a permission group",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "permission-groups",
+      "mutates": true,
+      "summary": "Rename / re-capability a permission group",
+      "verb": "update"
+    }
+  },
+  {
+    "body_schema_ref": "#/components/schemas/PermissionRuleCreateRequest",
+    "group": "permission-rules",
+    "http": {
+      "method": "POST",
+      "path": "/w/{slug}/api/v1/permission_rules"
+    },
+    "idempotent": false,
+    "name": "create",
+    "operation_id": "permission_rules.create",
+    "path_params": [],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/PermissionRuleResponse",
+    "summary": "Create a permission rule (root-only)",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "permission-rules",
+      "mutates": true,
+      "summary": "Create a permission rule",
+      "verb": "create"
+    }
+  },
+  {
+    "body_schema_ref": null,
+    "group": "permission-rules",
+    "http": {
+      "method": "GET",
+      "path": "/w/{slug}/api/v1/permission_rules"
+    },
+    "idempotent": true,
+    "name": "list",
+    "operation_id": "permission_rules.list",
+    "path_params": [],
+    "query_params": [
+      {
+        "name": "cursor",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Opaque forward cursor from the previous page's ``next_cursor``. Omitted on the first call. Bounded to 256 chars to keep the URL below reverse-proxy header limits.",
+          "title": "Cursor"
+        }
+      },
+      {
+        "name": "limit",
+        "required": false,
+        "schema": {
+          "default": 50,
+          "description": "Maximum rows to return. Default 50, cap 500 per spec \u00a712 'Pagination'. Rejected with 422 outside ``[1, 500]``.",
+          "maximum": 500,
+          "minimum": 1,
+          "title": "Limit",
+          "type": "integer"
+        }
+      },
+      {
+        "name": "scope_kind",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "enum": [
+                "workspace",
+                "property",
+                "organization",
+                "deployment"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Narrow the listing to rules of the given scope kind. Mirrors \u00a712 verbatim.",
+          "title": "Scope Kind"
+        }
+      },
+      {
+        "name": "scope_id",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Narrow the listing to rules with a specific ``scope_id``.",
+          "title": "Scope Id"
+        }
+      },
+      {
+        "name": "action_key",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Narrow the listing to rules for a specific ``action_key``.",
+          "title": "Action Key"
+        }
+      }
+    ],
+    "response_schema_ref": "#/components/schemas/PermissionRuleListResponse",
+    "summary": "List permission rules in the caller's workspace",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "permission-rules",
+      "mutates": false,
+      "summary": "List permission rules",
+      "verb": "list"
+    }
+  },
+  {
+    "body_schema_ref": null,
+    "group": "permission-rules",
+    "http": {
+      "method": "DELETE",
+      "path": "/w/{slug}/api/v1/permission_rules/{rule_id}"
+    },
+    "idempotent": true,
+    "name": "revoke",
+    "operation_id": "permission_rules.revoke",
+    "path_params": [
+      {
+        "name": "rule_id",
+        "required": true,
+        "schema": {
+          "title": "Rule Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": null,
+    "summary": "Revoke a permission rule (root-only)",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "permission-rules",
+      "mutates": true,
+      "summary": "Revoke a permission rule",
+      "verb": "revoke"
+    }
+  },
+  {
+    "body_schema_ref": null,
+    "group": "permissions",
+    "http": {
+      "method": "GET",
+      "path": "/w/{slug}/api/v1/permissions/action_catalog"
+    },
+    "idempotent": true,
+    "name": "action-catalog",
+    "operation_id": "permissions.action_catalog",
+    "path_params": [],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/ActionCatalogResponse",
+    "summary": "Read the static action catalog (\u00a705)",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "permissions",
+      "mutates": false,
+      "summary": "Read the action catalog",
+      "verb": "action-catalog"
+    }
+  },
+  {
+    "body_schema_ref": null,
+    "group": "permissions",
+    "http": {
+      "method": "GET",
+      "path": "/w/{slug}/api/v1/permissions/resolved"
+    },
+    "idempotent": true,
+    "name": "resolve",
+    "operation_id": "permissions.resolved",
+    "path_params": [],
+    "query_params": [
+      {
+        "name": "user_id",
+        "required": true,
+        "schema": {
+          "description": "User id whose permissions should be resolved.",
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "User Id",
+          "type": "string"
+        }
+      },
+      {
+        "name": "action_key",
+        "required": true,
+        "schema": {
+          "description": "Action key from \u00a705 to resolve against.",
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Action Key",
+          "type": "string"
+        }
+      },
+      {
+        "name": "scope_kind",
+        "required": true,
+        "schema": {
+          "description": "Scope kind on which to evaluate the action.",
+          "enum": [
+            "workspace",
+            "property",
+            "organization",
+            "deployment"
+          ],
+          "title": "Scope Kind",
+          "type": "string"
+        }
+      },
+      {
+        "name": "scope_id",
+        "required": true,
+        "schema": {
+          "description": "Scope id matching ``scope_kind``. For ``workspace`` this is typically the caller's workspace id; for ``property`` it is the property ULID.",
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Scope Id",
+          "type": "string"
+        }
+      }
+    ],
+    "response_schema_ref": "#/components/schemas/ResolvedPermissionResponse",
+    "summary": "\"Would user U be allowed action A on scope S?\"",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "permissions",
+      "mutates": false,
+      "summary": "Resolve a permission for a user / action / scope",
+      "verb": "resolve"
+    }
+  },
+  {
+    "body_schema_ref": null,
+    "group": "properties",
+    "http": {
+      "method": "GET",
+      "path": "/w/{slug}/api/v1/properties"
+    },
+    "idempotent": true,
+    "name": "list",
+    "operation_id": "properties.list",
+    "path_params": [],
+    "query_params": [],
+    "response_schema_ref": null,
+    "summary": "List properties visible to the caller",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "properties",
+      "mutates": false,
+      "summary": "List properties in a workspace",
+      "verb": "list"
+    }
+  },
+  {
+    "body_schema_ref": "#/components/schemas/PropertyWorkRoleAssignmentCreateRequest",
+    "group": "property_work_role_assignments",
+    "http": {
+      "method": "POST",
+      "path": "/w/{slug}/api/v1/property_work_role_assignments"
+    },
+    "idempotent": false,
+    "name": "create",
+    "operation_id": "property_work_role_assignments.create",
+    "path_params": [],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/PropertyWorkRoleAssignmentResponse",
+    "summary": "Pin a user_work_role to a property",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "property_work_role_assignments",
+    "http": {
+      "method": "DELETE",
+      "path": "/w/{slug}/api/v1/property_work_role_assignments/{assignment_id}"
+    },
+    "idempotent": true,
+    "name": "delete",
+    "operation_id": "property_work_role_assignments.delete",
+    "path_params": [
+      {
+        "name": "assignment_id",
+        "required": true,
+        "schema": {
+          "title": "Assignment Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": null,
+    "summary": "Soft-delete a property_work_role_assignment",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "property_work_role_assignments",
+    "http": {
+      "method": "GET",
+      "path": "/w/{slug}/api/v1/property_work_role_assignments"
+    },
+    "idempotent": true,
+    "name": "list",
+    "operation_id": "property_work_role_assignments.list",
+    "path_params": [],
+    "query_params": [
+      {
+        "name": "cursor",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Opaque forward cursor from the previous page's ``next_cursor``. Omitted on the first call. Bounded to 256 chars to keep the URL below reverse-proxy header limits.",
+          "title": "Cursor"
+        }
+      },
+      {
+        "name": "limit",
+        "required": false,
+        "schema": {
+          "default": 50,
+          "description": "Maximum rows to return. Default 50, cap 500 per spec \u00a712 'Pagination'. Rejected with 422 outside ``[1, 500]``.",
+          "maximum": 500,
+          "minimum": 1,
+          "title": "Limit",
+          "type": "integer"
+        }
+      },
+      {
+        "name": "property_id",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Narrow the listing to a single property. Combine with ``user_work_role_id`` to fetch the live row for a specific (role, property) pair.",
+          "title": "Property Id"
+        }
+      },
+      {
+        "name": "user_work_role_id",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Narrow the listing to one user_work_role. Useful when rendering the per-employee 'where do they work' panel.",
+          "title": "User Work Role Id"
+        }
+      }
+    ],
+    "response_schema_ref": "#/components/schemas/PropertyWorkRoleAssignmentListResponse",
+    "summary": "List property-work-role assignments in the caller's workspace",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": "#/components/schemas/PropertyWorkRoleAssignmentUpdateRequest",
+    "group": "property_work_role_assignments",
+    "http": {
+      "method": "PATCH",
+      "path": "/w/{slug}/api/v1/property_work_role_assignments/{assignment_id}"
+    },
+    "idempotent": false,
+    "name": "update",
+    "operation_id": "property_work_role_assignments.update",
+    "path_params": [
+      {
+        "name": "assignment_id",
+        "required": true,
+        "schema": {
+          "title": "Assignment Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/PropertyWorkRoleAssignmentResponse",
+    "summary": "Partial update of a property_work_role_assignment",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": "#/components/schemas/RoleGrantCreateRequest",
+    "group": "role-grants",
+    "http": {
+      "method": "POST",
+      "path": "/w/{slug}/api/v1/role_grants"
+    },
+    "idempotent": false,
+    "name": "create",
+    "operation_id": "role_grants.create",
+    "path_params": [],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/RoleGrantResponse",
+    "summary": "Mint a new role grant in the caller's workspace",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "role-grants",
+      "mutates": true,
+      "summary": "Mint a role grant for a user",
+      "verb": "create"
+    }
+  },
+  {
+    "body_schema_ref": null,
+    "group": "role-grants",
+    "http": {
+      "method": "GET",
+      "path": "/w/{slug}/api/v1/users/{user_id}/role_grants"
+    },
+    "idempotent": true,
+    "name": "list",
+    "operation_id": "role_grants.list_by_user",
+    "path_params": [
+      {
+        "name": "user_id",
+        "required": true,
+        "schema": {
+          "title": "User Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [
+      {
+        "name": "cursor",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Opaque forward cursor from the previous page's ``next_cursor``. Omitted on the first call. Bounded to 256 chars to keep the URL below reverse-proxy header limits.",
+          "title": "Cursor"
+        }
+      },
+      {
+        "name": "limit",
+        "required": false,
+        "schema": {
+          "default": 50,
+          "description": "Maximum rows to return. Default 50, cap 500 per spec \u00a712 'Pagination'. Rejected with 422 outside ``[1, 500]``.",
+          "maximum": 500,
+          "minimum": 1,
+          "title": "Limit",
+          "type": "integer"
+        }
+      },
+      {
+        "name": "scope_property_id",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Narrow the listing to grants pinned to this property. Omitted matches every grant (workspace + property scoped).",
+          "title": "Scope Property Id"
+        }
+      }
+    ],
+    "response_schema_ref": "#/components/schemas/RoleGrantListResponse",
+    "summary": "List a user's role grants in the caller's workspace",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "role-grants",
+      "mutates": false,
+      "summary": "List a user's role grants",
+      "verb": "list"
+    }
+  },
+  {
+    "body_schema_ref": null,
+    "group": "role-grants",
+    "http": {
+      "method": "DELETE",
+      "path": "/w/{slug}/api/v1/role_grants/{grant_id}"
+    },
+    "idempotent": true,
+    "name": "revoke",
+    "operation_id": "role_grants.revoke",
+    "path_params": [
+      {
+        "name": "grant_id",
+        "required": true,
+        "schema": {
+          "title": "Grant Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": null,
+    "summary": "Revoke a role grant",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "role-grants",
+      "mutates": true,
+      "summary": "Revoke a role grant",
+      "verb": "revoke"
+    }
+  },
+  {
+    "body_schema_ref": "#/components/schemas/RoleGrantPatchRequest",
+    "group": "role-grants",
+    "http": {
+      "method": "PATCH",
+      "path": "/w/{slug}/api/v1/role_grants/{grant_id}"
+    },
+    "idempotent": false,
+    "name": "update",
+    "operation_id": "role_grants.update",
+    "path_params": [
+      {
+        "name": "grant_id",
+        "required": true,
+        "schema": {
+          "title": "Grant Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/RoleGrantResponse",
+    "summary": "Partial update of a role grant \u2014 re-scope only",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "role-grants",
+      "mutates": true,
+      "summary": "Re-scope a role grant",
+      "verb": "update"
+    }
+  },
+  {
+    "body_schema_ref": "#/components/schemas/AssignRequest",
+    "group": "tasks",
+    "http": {
+      "method": "POST",
+      "path": "/w/{slug}/api/v1/tasks/tasks/{task_id}/assign"
+    },
+    "idempotent": false,
+    "name": "assign",
+    "operation_id": "assign_task",
+    "path_params": [
+      {
+        "name": "task_id",
+        "required": true,
+        "schema": {
+          "title": "Task Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/AssignmentPayload",
+    "summary": "Assign a task to a specific user",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": "#/components/schemas/ReasonRequest",
+    "group": "tasks",
+    "http": {
+      "method": "POST",
+      "path": "/w/{slug}/api/v1/tasks/tasks/{task_id}/cancel"
+    },
+    "idempotent": false,
+    "name": "cancel",
+    "operation_id": "cancel_task",
+    "path_params": [
+      {
+        "name": "task_id",
+        "required": true,
+        "schema": {
+          "title": "Task Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/TaskStatePayload",
+    "summary": "Cancel a task with a reason (manager / owner only)",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "tasks",
+    "http": {
+      "method": "DELETE",
+      "path": "/w/{slug}/api/v1/tasks/tasks/{task_id}/comments/{comment_id}"
+    },
+    "idempotent": true,
+    "name": "comment-delete",
+    "operation_id": "delete_task_comment",
+    "path_params": [
+      {
+        "name": "task_id",
+        "required": true,
+        "schema": {
+          "title": "Task Id",
+          "type": "string"
+        }
+      },
+      {
+        "name": "comment_id",
+        "required": true,
+        "schema": {
+          "title": "Comment Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/CommentPayload",
+    "summary": "Soft-delete a comment",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "tasks",
+      "verb": "comment-delete"
+    }
+  },
+  {
+    "body_schema_ref": "#/components/schemas/CommentEditRequest",
+    "group": "tasks",
+    "http": {
+      "method": "PATCH",
+      "path": "/w/{slug}/api/v1/tasks/tasks/{task_id}/comments/{comment_id}"
+    },
+    "idempotent": false,
+    "name": "comment-update",
+    "operation_id": "patch_task_comment",
+    "path_params": [
+      {
+        "name": "task_id",
+        "required": true,
+        "schema": {
+          "title": "Task Id",
+          "type": "string"
+        }
+      },
+      {
+        "name": "comment_id",
+        "required": true,
+        "schema": {
+          "title": "Comment Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/CommentPayload",
+    "summary": "Edit a comment within the author grace window",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "tasks",
+      "verb": "comment-update"
+    }
+  },
+  {
+    "body_schema_ref": "#/components/schemas/CommentCreate",
+    "group": "tasks",
+    "http": {
+      "method": "POST",
+      "path": "/w/{slug}/api/v1/tasks/tasks/{task_id}/comments"
+    },
+    "idempotent": false,
+    "name": "comments",
+    "operation_id": "post_task_comment",
+    "path_params": [
+      {
+        "name": "task_id",
+        "required": true,
+        "schema": {
+          "title": "Task Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/CommentPayload",
+    "summary": "Append a comment to a task's agent thread",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "tasks",
+    "http": {
+      "method": "GET",
+      "path": "/w/{slug}/api/v1/tasks/tasks/{task_id}/comments"
+    },
+    "idempotent": true,
+    "name": "comments-list",
+    "operation_id": "list_task_comments",
+    "path_params": [
+      {
+        "name": "task_id",
+        "required": true,
+        "schema": {
+          "title": "Task Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [
+      {
+        "name": "cursor",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Opaque forward cursor from the previous page's ``next_cursor``. Omitted on the first call. Bounded to 256 chars to keep the URL below reverse-proxy header limits.",
+          "title": "Cursor"
+        }
+      },
+      {
+        "name": "limit",
+        "required": false,
+        "schema": {
+          "default": 50,
+          "description": "Maximum rows to return. Default 50, cap 500 per spec \u00a712 'Pagination'. Rejected with 422 outside ``[1, 500]``.",
+          "maximum": 500,
+          "minimum": 1,
+          "title": "Limit",
+          "type": "integer"
+        }
+      }
+    ],
+    "response_schema_ref": "#/components/schemas/CommentListResponse",
+    "summary": "List comments on a task (oldest-first, cursor-paginated)",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "tasks",
+      "verb": "comments-list"
+    }
+  },
+  {
+    "body_schema_ref": "#/components/schemas/app__api__v1__tasks__CompleteRequest",
+    "group": "tasks",
+    "http": {
+      "method": "POST",
+      "path": "/w/{slug}/api/v1/tasks/tasks/{task_id}/complete"
+    },
+    "idempotent": false,
+    "name": "complete",
+    "operation_id": "complete_task",
+    "path_params": [
+      {
+        "name": "task_id",
+        "required": true,
+        "schema": {
+          "title": "Task Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/TaskStatePayload",
+    "summary": "Mark a task done \u2014 gated by evidence + checklist policy",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": "#/components/schemas/TaskCreate",
+    "group": "tasks",
+    "http": {
+      "method": "POST",
+      "path": "/w/{slug}/api/v1/tasks/tasks"
+    },
+    "idempotent": false,
+    "name": "create",
+    "operation_id": "create_task",
+    "path_params": [],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/TaskPayload",
+    "summary": "Create a one-off task",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "tasks",
+    "http": {
+      "method": "POST",
+      "path": "/w/{slug}/api/v1/tasks/tasks/{task_id}/evidence"
+    },
+    "idempotent": false,
+    "name": "evidence",
+    "operation_id": "upload_task_evidence",
+    "path_params": [
+      {
+        "name": "task_id",
+        "required": true,
+        "schema": {
+          "title": "Task Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/EvidencePayload",
+    "summary": "Attach evidence to a task",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "tasks",
+    "http": {
+      "method": "GET",
+      "path": "/w/{slug}/api/v1/tasks/tasks/{task_id}/evidence"
+    },
+    "idempotent": true,
+    "name": "evidence-list",
+    "operation_id": "list_task_evidence",
+    "path_params": [
+      {
+        "name": "task_id",
+        "required": true,
+        "schema": {
+          "title": "Task Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/EvidenceListResponse",
+    "summary": "List evidence rows on a task",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "tasks",
+      "verb": "evidence-list"
+    }
+  },
+  {
+    "body_schema_ref": null,
+    "group": "tasks",
+    "http": {
+      "method": "GET",
+      "path": "/w/{slug}/api/v1/tasks/tasks"
+    },
+    "idempotent": true,
+    "name": "list",
+    "operation_id": "list_tasks",
+    "path_params": [],
+    "query_params": [
+      {
+        "name": "state",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "enum": [
+                "scheduled",
+                "pending",
+                "in_progress",
+                "done",
+                "skipped",
+                "cancelled",
+                "overdue"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "State"
+        }
+      },
+      {
+        "name": "assignee_user_id",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Assignee User Id"
+        }
+      },
+      {
+        "name": "property_id",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Property Id"
+        }
+      },
+      {
+        "name": "scheduled_for_utc_gte",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Scheduled For Utc Gte"
+        }
+      },
+      {
+        "name": "scheduled_for_utc_lt",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Scheduled For Utc Lt"
+        }
+      },
+      {
+        "name": "cursor",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Opaque forward cursor from the previous page's ``next_cursor``. Omitted on the first call. Bounded to 256 chars to keep the URL below reverse-proxy header limits.",
+          "title": "Cursor"
+        }
+      },
+      {
+        "name": "limit",
+        "required": false,
+        "schema": {
+          "default": 50,
+          "description": "Maximum rows to return. Default 50, cap 500 per spec \u00a712 'Pagination'. Rejected with 422 outside ``[1, 500]``.",
+          "maximum": 500,
+          "minimum": 1,
+          "title": "Limit",
+          "type": "integer"
+        }
+      }
+    ],
+    "response_schema_ref": "#/components/schemas/TaskListResponse",
+    "summary": "List occurrences (tasks) with filters",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "tasks",
+      "verb": "list"
+    }
+  },
+  {
+    "body_schema_ref": null,
+    "group": "tasks",
+    "http": {
+      "method": "POST",
+      "path": "/w/{slug}/api/v1/tasks/schedules/{schedule_id}/pause"
+    },
+    "idempotent": false,
+    "name": "pause",
+    "operation_id": "pause_schedule",
+    "path_params": [
+      {
+        "name": "schedule_id",
+        "required": true,
+        "schema": {
+          "title": "Schedule Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/SchedulePayload",
+    "summary": "Pause a schedule without cancelling materialised tasks",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "tasks",
+    "http": {
+      "method": "POST",
+      "path": "/w/{slug}/api/v1/tasks/schedules/{schedule_id}/resume"
+    },
+    "idempotent": false,
+    "name": "resume",
+    "operation_id": "resume_schedule",
+    "path_params": [
+      {
+        "name": "schedule_id",
+        "required": true,
+        "schema": {
+          "title": "Schedule Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/SchedulePayload",
+    "summary": "Resume a paused schedule",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "tasks",
+    "http": {
+      "method": "DELETE",
+      "path": "/w/{slug}/api/v1/tasks/schedules/{schedule_id}"
+    },
+    "idempotent": true,
+    "name": "schedule-delete",
+    "operation_id": "delete_schedule",
+    "path_params": [
+      {
+        "name": "schedule_id",
+        "required": true,
+        "schema": {
+          "title": "Schedule Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/SchedulePayload",
+    "summary": "Soft-delete a schedule and cancel scheduled occurrences",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "tasks",
+      "verb": "schedule-delete"
+    }
+  },
+  {
+    "body_schema_ref": null,
+    "group": "tasks",
+    "http": {
+      "method": "GET",
+      "path": "/w/{slug}/api/v1/tasks/schedules/{schedule_id}/preview"
+    },
+    "idempotent": true,
+    "name": "schedule-preview",
+    "operation_id": "preview_schedule",
+    "path_params": [
+      {
+        "name": "schedule_id",
+        "required": true,
+        "schema": {
+          "title": "Schedule Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [
+      {
+        "name": "n",
+        "required": false,
+        "schema": {
+          "default": 5,
+          "maximum": 100,
+          "minimum": 1,
+          "title": "N",
+          "type": "integer"
+        }
+      }
+    ],
+    "response_schema_ref": "#/components/schemas/SchedulePreviewResponse",
+    "summary": "Return the next N occurrences of a schedule",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "tasks",
+      "verb": "schedule-preview"
+    }
+  },
+  {
+    "body_schema_ref": null,
+    "group": "tasks",
+    "http": {
+      "method": "GET",
+      "path": "/w/{slug}/api/v1/tasks/schedules/{schedule_id}"
+    },
+    "idempotent": true,
+    "name": "schedule-show",
+    "operation_id": "get_schedule",
+    "path_params": [
+      {
+        "name": "schedule_id",
+        "required": true,
+        "schema": {
+          "title": "Schedule Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/SchedulePayload",
+    "summary": "Read a schedule",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "tasks",
+      "verb": "schedule-show"
+    }
+  },
+  {
+    "body_schema_ref": "#/components/schemas/ScheduleUpdate",
+    "group": "tasks",
+    "http": {
+      "method": "PATCH",
+      "path": "/w/{slug}/api/v1/tasks/schedules/{schedule_id}"
+    },
+    "idempotent": false,
+    "name": "schedule-update",
+    "operation_id": "update_schedule",
+    "path_params": [
+      {
+        "name": "schedule_id",
+        "required": true,
+        "schema": {
+          "title": "Schedule Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [
+      {
+        "name": "apply_to_existing",
+        "required": false,
+        "schema": {
+          "default": false,
+          "title": "Apply To Existing",
+          "type": "boolean"
+        }
+      }
+    ],
+    "response_schema_ref": "#/components/schemas/SchedulePayload",
+    "summary": "Replace the mutable body of a schedule",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "tasks",
+      "verb": "schedule-update"
+    }
+  },
+  {
+    "body_schema_ref": "#/components/schemas/ScheduleCreate",
+    "group": "tasks",
+    "http": {
+      "method": "POST",
+      "path": "/w/{slug}/api/v1/tasks/schedules"
+    },
+    "idempotent": false,
+    "name": "schedules",
+    "operation_id": "create_schedule",
+    "path_params": [],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/SchedulePayload",
+    "summary": "Create a schedule",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "tasks",
+    "http": {
+      "method": "GET",
+      "path": "/w/{slug}/api/v1/tasks/schedules"
+    },
+    "idempotent": true,
+    "name": "schedules-list",
+    "operation_id": "list_schedules",
+    "path_params": [],
+    "query_params": [
+      {
+        "name": "template_id",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Template Id"
+        }
+      },
+      {
+        "name": "property_id",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Property Id"
+        }
+      },
+      {
+        "name": "paused",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Paused"
+        }
+      },
+      {
+        "name": "cursor",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Opaque forward cursor from the previous page's ``next_cursor``. Omitted on the first call. Bounded to 256 chars to keep the URL below reverse-proxy header limits.",
+          "title": "Cursor"
+        }
+      },
+      {
+        "name": "limit",
+        "required": false,
+        "schema": {
+          "default": 50,
+          "description": "Maximum rows to return. Default 50, cap 500 per spec \u00a712 'Pagination'. Rejected with 422 outside ``[1, 500]``.",
+          "maximum": 500,
+          "minimum": 1,
+          "title": "Limit",
+          "type": "integer"
+        }
+      }
+    ],
+    "response_schema_ref": "#/components/schemas/ScheduleListResponse",
+    "summary": "List schedules in the caller's workspace",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "tasks",
+      "verb": "schedules-list"
+    }
+  },
+  {
+    "body_schema_ref": null,
+    "group": "tasks",
+    "http": {
+      "method": "GET",
+      "path": "/w/{slug}/api/v1/tasks/tasks/{task_id}"
+    },
+    "idempotent": true,
+    "name": "show",
+    "operation_id": "get_task",
+    "path_params": [
+      {
+        "name": "task_id",
+        "required": true,
+        "schema": {
+          "title": "Task Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/TaskPayload",
+    "summary": "Read a single task",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "tasks",
+      "verb": "show"
+    }
+  },
+  {
+    "body_schema_ref": "#/components/schemas/ReasonRequest",
+    "group": "tasks",
+    "http": {
+      "method": "POST",
+      "path": "/w/{slug}/api/v1/tasks/tasks/{task_id}/skip"
+    },
+    "idempotent": false,
+    "name": "skip",
+    "operation_id": "skip_task",
+    "path_params": [
+      {
+        "name": "task_id",
+        "required": true,
+        "schema": {
+          "title": "Task Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/TaskStatePayload",
+    "summary": "Skip a task with a reason",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "tasks",
+    "http": {
+      "method": "POST",
+      "path": "/w/{slug}/api/v1/tasks/tasks/{task_id}/start"
+    },
+    "idempotent": false,
+    "name": "start",
+    "operation_id": "start_task",
+    "path_params": [
+      {
+        "name": "task_id",
+        "required": true,
+        "schema": {
+          "title": "Task Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/TaskStatePayload",
+    "summary": "Drive a task from pending to in_progress",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": "#/components/schemas/TaskTemplateCreate",
+    "group": "tasks",
+    "http": {
+      "method": "POST",
+      "path": "/w/{slug}/api/v1/tasks/task_templates"
+    },
+    "idempotent": false,
+    "name": "task_templates",
+    "operation_id": "create_task_template",
+    "path_params": [],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/TaskTemplatePayload",
+    "summary": "Create a task template",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "tasks",
+    "http": {
+      "method": "DELETE",
+      "path": "/w/{slug}/api/v1/tasks/task_templates/{template_id}"
+    },
+    "idempotent": true,
+    "name": "template-delete",
+    "operation_id": "delete_task_template",
+    "path_params": [
+      {
+        "name": "template_id",
+        "required": true,
+        "schema": {
+          "title": "Template Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/TaskTemplatePayload",
+    "summary": "Soft-delete a task template",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "tasks",
+      "verb": "template-delete"
+    }
+  },
+  {
+    "body_schema_ref": null,
+    "group": "tasks",
+    "http": {
+      "method": "GET",
+      "path": "/w/{slug}/api/v1/tasks/task_templates/{template_id}"
+    },
+    "idempotent": true,
+    "name": "template-show",
+    "operation_id": "get_task_template",
+    "path_params": [
+      {
+        "name": "template_id",
+        "required": true,
+        "schema": {
+          "title": "Template Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/TaskTemplatePayload",
+    "summary": "Read a task template",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "tasks",
+      "verb": "template-show"
+    }
+  },
+  {
+    "body_schema_ref": "#/components/schemas/TaskTemplateUpdate",
+    "group": "tasks",
+    "http": {
+      "method": "PATCH",
+      "path": "/w/{slug}/api/v1/tasks/task_templates/{template_id}"
+    },
+    "idempotent": false,
+    "name": "template-update",
+    "operation_id": "update_task_template",
+    "path_params": [
+      {
+        "name": "template_id",
+        "required": true,
+        "schema": {
+          "title": "Template Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/TaskTemplatePayload",
+    "summary": "Replace the mutable body of a task template",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "tasks",
+      "verb": "template-update"
+    }
+  },
+  {
+    "body_schema_ref": null,
+    "group": "tasks",
+    "http": {
+      "method": "GET",
+      "path": "/w/{slug}/api/v1/tasks/task_templates"
+    },
+    "idempotent": true,
+    "name": "templates-list",
+    "operation_id": "list_task_templates",
+    "path_params": [],
+    "query_params": [
+      {
+        "name": "q",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Q"
+        }
+      },
+      {
+        "name": "role_id",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Role Id"
+        }
+      },
+      {
+        "name": "cursor",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Opaque forward cursor from the previous page's ``next_cursor``. Omitted on the first call. Bounded to 256 chars to keep the URL below reverse-proxy header limits.",
+          "title": "Cursor"
+        }
+      },
+      {
+        "name": "limit",
+        "required": false,
+        "schema": {
+          "default": 50,
+          "description": "Maximum rows to return. Default 50, cap 500 per spec \u00a712 'Pagination'. Rejected with 422 outside ``[1, 500]``.",
+          "maximum": 500,
+          "minimum": 1,
+          "title": "Limit",
+          "type": "integer"
+        }
+      }
+    ],
+    "response_schema_ref": "#/components/schemas/TaskTemplateListResponse",
+    "summary": "List task templates in the caller's workspace",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "tasks",
+      "verb": "templates-list"
+    }
+  },
+  {
+    "body_schema_ref": "#/components/schemas/TaskPatch",
+    "group": "tasks",
+    "http": {
+      "method": "PATCH",
+      "path": "/w/{slug}/api/v1/tasks/tasks/{task_id}"
+    },
+    "idempotent": false,
+    "name": "update",
+    "operation_id": "patch_task",
+    "path_params": [
+      {
+        "name": "task_id",
+        "required": true,
+        "schema": {
+          "title": "Task Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/TaskPayload",
+    "summary": "Partial update of a task (full \u00a706 mutable set)",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "tasks",
+      "verb": "update"
+    }
+  },
+  {
     "body_schema_ref": "#/components/schemas/ShiftClose",
     "group": "time",
     "http": {
@@ -217,11 +3420,319 @@
     "body_schema_ref": null,
     "group": "time",
     "http": {
+      "method": "DELETE",
+      "path": "/w/{slug}/api/v1/time/leaves/{leave_id}"
+    },
+    "idempotent": true,
+    "name": "leave-cancel",
+    "operation_id": "time.cancel_leave",
+    "path_params": [
+      {
+        "name": "leave_id",
+        "required": true,
+        "schema": {
+          "title": "Leave Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/LeavePayload",
+    "summary": "Cancel a leave (manager path)",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "time",
+      "verb": "leave-cancel"
+    }
+  },
+  {
+    "body_schema_ref": null,
+    "group": "time",
+    "http": {
+      "method": "GET",
+      "path": "/w/{slug}/api/v1/time/leaves/{leave_id}"
+    },
+    "idempotent": true,
+    "name": "leave-show",
+    "operation_id": "time.get_leave",
+    "path_params": [
+      {
+        "name": "leave_id",
+        "required": true,
+        "schema": {
+          "title": "Leave Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/LeavePayload",
+    "summary": "Read a single leave",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "time",
+      "verb": "leave-show"
+    }
+  },
+  {
+    "body_schema_ref": "#/components/schemas/MeLeaveCreate",
+    "group": "time",
+    "http": {
+      "method": "POST",
+      "path": "/w/{slug}/api/v1/time/me/leaves"
+    },
+    "idempotent": false,
+    "name": "leaves",
+    "operation_id": "time.create_my_leave",
+    "path_params": [],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/LeavePayload",
+    "summary": "Create a pending leave request for the caller",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "time",
+    "http": {
+      "method": "GET",
+      "path": "/w/{slug}/api/v1/time/leaves"
+    },
+    "idempotent": true,
+    "name": "leaves-list",
+    "operation_id": "time.list_leaves",
+    "path_params": [],
+    "query_params": [
+      {
+        "name": "user_id",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "maxLength": 40,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "User Id"
+        }
+      },
+      {
+        "name": "status",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "enum": [
+                "pending",
+                "approved",
+                "rejected",
+                "cancelled"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Status"
+        }
+      }
+    ],
+    "response_schema_ref": "#/components/schemas/LeaveListResponse",
+    "summary": "List leaves in the workspace",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "time",
+      "verb": "leaves-list"
+    }
+  },
+  {
+    "body_schema_ref": null,
+    "group": "time",
+    "http": {
+      "method": "DELETE",
+      "path": "/w/{slug}/api/v1/time/me/leaves/{leave_id}"
+    },
+    "idempotent": true,
+    "name": "my-leave-cancel",
+    "operation_id": "time.cancel_my_leave",
+    "path_params": [
+      {
+        "name": "leave_id",
+        "required": true,
+        "schema": {
+          "title": "Leave Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/LeavePayload",
+    "summary": "Cancel a pending or upcoming leave the caller owns",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "time",
+      "verb": "my-leave-cancel"
+    }
+  },
+  {
+    "body_schema_ref": "#/components/schemas/LeaveUpdateDates",
+    "group": "time",
+    "http": {
+      "method": "PATCH",
+      "path": "/w/{slug}/api/v1/time/me/leaves/{leave_id}"
+    },
+    "idempotent": false,
+    "name": "my-leave-update",
+    "operation_id": "time.update_my_leave_dates",
+    "path_params": [
+      {
+        "name": "leave_id",
+        "required": true,
+        "schema": {
+          "title": "Leave Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/LeavePayload",
+    "summary": "Rewrite dates on a pending leave the caller owns",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "time",
+      "verb": "my-leave-update"
+    }
+  },
+  {
+    "body_schema_ref": null,
+    "group": "time",
+    "http": {
+      "method": "GET",
+      "path": "/w/{slug}/api/v1/time/me/leaves"
+    },
+    "idempotent": true,
+    "name": "my-leaves-list",
+    "operation_id": "time.list_my_leaves",
+    "path_params": [],
+    "query_params": [
+      {
+        "name": "status",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "enum": [
+                "pending",
+                "approved",
+                "rejected",
+                "cancelled"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Status"
+        }
+      }
+    ],
+    "response_schema_ref": "#/components/schemas/LeaveListResponse",
+    "summary": "List the caller's own leaves",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "time",
+      "verb": "my-leaves-list"
+    }
+  },
+  {
+    "body_schema_ref": "#/components/schemas/ShiftOpen",
+    "group": "time",
+    "http": {
+      "method": "POST",
+      "path": "/w/{slug}/api/v1/time/shifts/open"
+    },
+    "idempotent": false,
+    "name": "open",
+    "operation_id": "time.open_shift",
+    "path_params": [],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/ShiftPayload",
+    "summary": "Open (clock-in) a shift",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "time",
+    "http": {
+      "method": "GET",
+      "path": "/w/{slug}/api/v1/time/shifts/{shift_id}"
+    },
+    "idempotent": true,
+    "name": "shift-show",
+    "operation_id": "time.get_shift",
+    "path_params": [
+      {
+        "name": "shift_id",
+        "required": true,
+        "schema": {
+          "title": "Shift Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/ShiftPayload",
+    "summary": "Read a single shift",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "time",
+      "verb": "shift-show"
+    }
+  },
+  {
+    "body_schema_ref": "#/components/schemas/ShiftEdit",
+    "group": "time",
+    "http": {
+      "method": "PATCH",
+      "path": "/w/{slug}/api/v1/time/shifts/{shift_id}"
+    },
+    "idempotent": false,
+    "name": "shift-update",
+    "operation_id": "time.edit_shift",
+    "path_params": [
+      {
+        "name": "shift_id",
+        "required": true,
+        "schema": {
+          "title": "Shift Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/ShiftPayload",
+    "summary": "Manager edit of a shift",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "time",
+      "verb": "shift-update"
+    }
+  },
+  {
+    "body_schema_ref": null,
+    "group": "time",
+    "http": {
       "method": "GET",
       "path": "/w/{slug}/api/v1/time/shifts"
     },
     "idempotent": true,
-    "name": "list",
+    "name": "shifts-list",
     "operation_id": "time.list_shifts",
     "path_params": [],
     "query_params": [
@@ -286,76 +3797,10 @@
     "response_schema_ref": "#/components/schemas/ShiftListResponse",
     "summary": "List shifts in the workspace",
     "x_agent_confirm": null,
-    "x_cli": null
-  },
-  {
-    "body_schema_ref": "#/components/schemas/ShiftOpen",
-    "group": "time",
-    "http": {
-      "method": "POST",
-      "path": "/w/{slug}/api/v1/time/shifts/open"
-    },
-    "idempotent": false,
-    "name": "open",
-    "operation_id": "time.open_shift",
-    "path_params": [],
-    "query_params": [],
-    "response_schema_ref": "#/components/schemas/ShiftPayload",
-    "summary": "Open (clock-in) a shift",
-    "x_agent_confirm": null,
-    "x_cli": null
-  },
-  {
-    "body_schema_ref": null,
-    "group": "time",
-    "http": {
-      "method": "GET",
-      "path": "/w/{slug}/api/v1/time/shifts/{shift_id}"
-    },
-    "idempotent": true,
-    "name": "show",
-    "operation_id": "time.get_shift",
-    "path_params": [
-      {
-        "name": "shift_id",
-        "required": true,
-        "schema": {
-          "title": "Shift Id",
-          "type": "string"
-        }
-      }
-    ],
-    "query_params": [],
-    "response_schema_ref": "#/components/schemas/ShiftPayload",
-    "summary": "Read a single shift",
-    "x_agent_confirm": null,
-    "x_cli": null
-  },
-  {
-    "body_schema_ref": "#/components/schemas/ShiftEdit",
-    "group": "time",
-    "http": {
-      "method": "PATCH",
-      "path": "/w/{slug}/api/v1/time/shifts/{shift_id}"
-    },
-    "idempotent": false,
-    "name": "update",
-    "operation_id": "time.edit_shift",
-    "path_params": [
-      {
-        "name": "shift_id",
-        "required": true,
-        "schema": {
-          "title": "Shift Id",
-          "type": "string"
-        }
-      }
-    ],
-    "query_params": [],
-    "response_schema_ref": "#/components/schemas/ShiftPayload",
-    "summary": "Manager edit of a shift",
-    "x_agent_confirm": null,
-    "x_cli": null
+    "x_cli": {
+      "group": "time",
+      "verb": "shifts-list"
+    }
   },
   {
     "body_schema_ref": "#/components/schemas/MintTokenBody",
@@ -431,6 +3876,879 @@
       "summary": "Revoke a workspace API token",
       "verb": "revoke"
     }
+  },
+  {
+    "body_schema_ref": null,
+    "group": "user_availability_overrides",
+    "http": {
+      "method": "POST",
+      "path": "/w/{slug}/api/v1/user_availability_overrides/{override_id}/approve"
+    },
+    "idempotent": false,
+    "name": "approve",
+    "operation_id": "user_availability_overrides.approve",
+    "path_params": [
+      {
+        "name": "override_id",
+        "required": true,
+        "schema": {
+          "title": "Override Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/UserAvailabilityOverrideResponse",
+    "summary": "Approve a pending user_availability_override row",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": "#/components/schemas/UserAvailabilityOverrideCreateRequest",
+    "group": "user_availability_overrides",
+    "http": {
+      "method": "POST",
+      "path": "/w/{slug}/api/v1/user_availability_overrides"
+    },
+    "idempotent": false,
+    "name": "create",
+    "operation_id": "user_availability_overrides.create",
+    "path_params": [],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/UserAvailabilityOverrideResponse",
+    "summary": "Create a user_availability_override row",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "user_availability_overrides",
+    "http": {
+      "method": "DELETE",
+      "path": "/w/{slug}/api/v1/user_availability_overrides/{override_id}"
+    },
+    "idempotent": true,
+    "name": "delete",
+    "operation_id": "user_availability_overrides.delete",
+    "path_params": [
+      {
+        "name": "override_id",
+        "required": true,
+        "schema": {
+          "title": "Override Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": null,
+    "summary": "Soft-delete a user_availability_override row (worker withdraw / manager revoke)",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "user_availability_overrides",
+    "http": {
+      "method": "GET",
+      "path": "/w/{slug}/api/v1/user_availability_overrides"
+    },
+    "idempotent": true,
+    "name": "list",
+    "operation_id": "user_availability_overrides.list",
+    "path_params": [],
+    "query_params": [
+      {
+        "name": "cursor",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Opaque forward cursor from the previous page's ``next_cursor``. Omitted on the first call. Bounded to 256 chars to keep the URL below reverse-proxy header limits.",
+          "title": "Cursor"
+        }
+      },
+      {
+        "name": "limit",
+        "required": false,
+        "schema": {
+          "default": 50,
+          "description": "Maximum rows to return. Default 50, cap 500 per spec \u00a712 'Pagination'. Rejected with 422 outside ``[1, 500]``.",
+          "maximum": 500,
+          "minimum": 1,
+          "title": "Limit",
+          "type": "integer"
+        }
+      },
+      {
+        "name": "user_id",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Narrow the listing to one user. Omit for the manager inbox view (requires ``availability_overrides.view_others``).",
+          "title": "User Id"
+        }
+      },
+      {
+        "name": "from",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "format": "date",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Inclusive lower bound on ``date`` (ISO date). Combine with ``to`` to slice a date window.",
+          "title": "From"
+        }
+      },
+      {
+        "name": "to",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "format": "date",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Inclusive upper bound on ``date`` (ISO date). Combine with ``from`` to slice a date window.",
+          "title": "To"
+        }
+      },
+      {
+        "name": "approved",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "``true`` returns only approved overrides; ``false`` returns only pending overrides. Omit for both states.",
+          "title": "Approved"
+        }
+      }
+    ],
+    "response_schema_ref": "#/components/schemas/UserAvailabilityOverrideListResponse",
+    "summary": "List user_availability_override rows in the caller's workspace",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "user_availability_overrides",
+    "http": {
+      "method": "POST",
+      "path": "/w/{slug}/api/v1/user_availability_overrides/{override_id}/reject"
+    },
+    "idempotent": false,
+    "name": "reject",
+    "operation_id": "user_availability_overrides.reject",
+    "path_params": [
+      {
+        "name": "override_id",
+        "required": true,
+        "schema": {
+          "title": "Override Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/UserAvailabilityOverrideResponse",
+    "summary": "Reject (soft-delete) a pending user_availability_override row",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": "#/components/schemas/UserAvailabilityOverrideUpdateRequest",
+    "group": "user_availability_overrides",
+    "http": {
+      "method": "PATCH",
+      "path": "/w/{slug}/api/v1/user_availability_overrides/{override_id}"
+    },
+    "idempotent": false,
+    "name": "update",
+    "operation_id": "user_availability_overrides.update",
+    "path_params": [
+      {
+        "name": "override_id",
+        "required": true,
+        "schema": {
+          "title": "Override Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/UserAvailabilityOverrideResponse",
+    "summary": "Partial update of a pending user_availability_override row",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "user_leaves",
+    "http": {
+      "method": "POST",
+      "path": "/w/{slug}/api/v1/user_leaves/{leave_id}/approve"
+    },
+    "idempotent": false,
+    "name": "approve",
+    "operation_id": "user_leaves.approve",
+    "path_params": [
+      {
+        "name": "leave_id",
+        "required": true,
+        "schema": {
+          "title": "Leave Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/UserLeaveResponse",
+    "summary": "Approve a pending user_leave row",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": "#/components/schemas/UserLeaveCreateRequest",
+    "group": "user_leaves",
+    "http": {
+      "method": "POST",
+      "path": "/w/{slug}/api/v1/user_leaves"
+    },
+    "idempotent": false,
+    "name": "create",
+    "operation_id": "user_leaves.create",
+    "path_params": [],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/UserLeaveResponse",
+    "summary": "Create a user_leave row",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "user_leaves",
+    "http": {
+      "method": "DELETE",
+      "path": "/w/{slug}/api/v1/user_leaves/{leave_id}"
+    },
+    "idempotent": true,
+    "name": "delete",
+    "operation_id": "user_leaves.delete",
+    "path_params": [
+      {
+        "name": "leave_id",
+        "required": true,
+        "schema": {
+          "title": "Leave Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": null,
+    "summary": "Soft-delete a user_leave row (worker withdraw / manager revoke)",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "user_leaves",
+    "http": {
+      "method": "GET",
+      "path": "/w/{slug}/api/v1/user_leaves"
+    },
+    "idempotent": true,
+    "name": "list",
+    "operation_id": "user_leaves.list",
+    "path_params": [],
+    "query_params": [
+      {
+        "name": "cursor",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Opaque forward cursor from the previous page's ``next_cursor``. Omitted on the first call. Bounded to 256 chars to keep the URL below reverse-proxy header limits.",
+          "title": "Cursor"
+        }
+      },
+      {
+        "name": "limit",
+        "required": false,
+        "schema": {
+          "default": 50,
+          "description": "Maximum rows to return. Default 50, cap 500 per spec \u00a712 'Pagination'. Rejected with 422 outside ``[1, 500]``.",
+          "maximum": 500,
+          "minimum": 1,
+          "title": "Limit",
+          "type": "integer"
+        }
+      },
+      {
+        "name": "user_id",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Narrow the listing to one user. Omit for the manager inbox view (requires ``leaves.view_others``).",
+          "title": "User Id"
+        }
+      },
+      {
+        "name": "from",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "format": "date",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Inclusive lower bound on ``starts_on`` (ISO date). Combine with ``to`` to slice a date window.",
+          "title": "From"
+        }
+      },
+      {
+        "name": "to",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "format": "date",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Inclusive upper bound on ``ends_on`` (ISO date). Combine with ``from`` to slice a date window.",
+          "title": "To"
+        }
+      },
+      {
+        "name": "approved",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "``true`` returns only approved leaves; ``false`` returns only pending leaves. Omit for both states.",
+          "title": "Approved"
+        }
+      }
+    ],
+    "response_schema_ref": "#/components/schemas/UserLeaveListResponse",
+    "summary": "List user_leave rows in the caller's workspace",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "user_leaves",
+    "http": {
+      "method": "POST",
+      "path": "/w/{slug}/api/v1/user_leaves/{leave_id}/reject"
+    },
+    "idempotent": false,
+    "name": "reject",
+    "operation_id": "user_leaves.reject",
+    "path_params": [
+      {
+        "name": "leave_id",
+        "required": true,
+        "schema": {
+          "title": "Leave Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/UserLeaveResponse",
+    "summary": "Reject (soft-delete) a pending user_leave row",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": "#/components/schemas/UserLeaveUpdateRequest",
+    "group": "user_leaves",
+    "http": {
+      "method": "PATCH",
+      "path": "/w/{slug}/api/v1/user_leaves/{leave_id}"
+    },
+    "idempotent": false,
+    "name": "update",
+    "operation_id": "user_leaves.update",
+    "path_params": [
+      {
+        "name": "leave_id",
+        "required": true,
+        "schema": {
+          "title": "Leave Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/UserLeaveResponse",
+    "summary": "Partial update of a pending user_leave row",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": "#/components/schemas/UserWorkRoleCreateRequest",
+    "group": "user_work_roles",
+    "http": {
+      "method": "POST",
+      "path": "/w/{slug}/api/v1/user_work_roles"
+    },
+    "idempotent": false,
+    "name": "create",
+    "operation_id": "user_work_roles.create",
+    "path_params": [],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/UserWorkRoleResponse",
+    "summary": "Link a user to a work role inside the caller's workspace",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "user_work_roles",
+    "http": {
+      "method": "DELETE",
+      "path": "/w/{slug}/api/v1/user_work_roles/{user_work_role_id}"
+    },
+    "idempotent": true,
+    "name": "delete",
+    "operation_id": "user_work_roles.delete",
+    "path_params": [
+      {
+        "name": "user_work_role_id",
+        "required": true,
+        "schema": {
+          "title": "User Work Role Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": null,
+    "summary": "Soft-delete a user_work_role link \u2014 idempotent",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "user_work_roles",
+    "http": {
+      "method": "GET",
+      "path": "/w/{slug}/api/v1/users/{user_id}/user_work_roles"
+    },
+    "idempotent": true,
+    "name": "list",
+    "operation_id": "user_work_roles.list_by_user",
+    "path_params": [
+      {
+        "name": "user_id",
+        "required": true,
+        "schema": {
+          "title": "User Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [
+      {
+        "name": "cursor",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Opaque forward cursor from the previous page's ``next_cursor``. Omitted on the first call. Bounded to 256 chars to keep the URL below reverse-proxy header limits.",
+          "title": "Cursor"
+        }
+      },
+      {
+        "name": "limit",
+        "required": false,
+        "schema": {
+          "default": 50,
+          "description": "Maximum rows to return. Default 50, cap 500 per spec \u00a712 'Pagination'. Rejected with 422 outside ``[1, 500]``.",
+          "maximum": 500,
+          "minimum": 1,
+          "title": "Limit",
+          "type": "integer"
+        }
+      }
+    ],
+    "response_schema_ref": "#/components/schemas/UserWorkRoleListResponse",
+    "summary": "List a user's work-role links in the caller's workspace",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": "#/components/schemas/UserWorkRoleUpdateRequest",
+    "group": "user_work_roles",
+    "http": {
+      "method": "PATCH",
+      "path": "/w/{slug}/api/v1/user_work_roles/{user_work_role_id}"
+    },
+    "idempotent": false,
+    "name": "update",
+    "operation_id": "user_work_roles.update",
+    "path_params": [
+      {
+        "name": "user_work_role_id",
+        "required": true,
+        "schema": {
+          "title": "User Work Role Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/UserWorkRoleResponse",
+    "summary": "Partial update of a user_work_role link",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "work_engagements",
+    "http": {
+      "method": "POST",
+      "path": "/w/{slug}/api/v1/work_engagements/{engagement_id}/archive"
+    },
+    "idempotent": false,
+    "name": "archive",
+    "operation_id": "work_engagements.archive",
+    "path_params": [
+      {
+        "name": "engagement_id",
+        "required": true,
+        "schema": {
+          "title": "Engagement Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/WorkEngagementResponse",
+    "summary": "Archive a single engagement \u2014 idempotent",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "work_engagements",
+    "http": {
+      "method": "GET",
+      "path": "/w/{slug}/api/v1/work_engagements"
+    },
+    "idempotent": true,
+    "name": "list",
+    "operation_id": "work_engagements.list",
+    "path_params": [],
+    "query_params": [
+      {
+        "name": "cursor",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Opaque forward cursor from the previous page's ``next_cursor``. Omitted on the first call. Bounded to 256 chars to keep the URL below reverse-proxy header limits.",
+          "title": "Cursor"
+        }
+      },
+      {
+        "name": "limit",
+        "required": false,
+        "schema": {
+          "default": 50,
+          "description": "Maximum rows to return. Default 50, cap 500 per spec \u00a712 'Pagination'. Rejected with 422 outside ``[1, 500]``.",
+          "maximum": 500,
+          "minimum": 1,
+          "title": "Limit",
+          "type": "integer"
+        }
+      },
+      {
+        "name": "user_id",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Narrow the engagement listing to a specific user. Matches the spec \u00a712 '?user_id=\u2026' filter verbatim.",
+          "title": "User Id"
+        }
+      },
+      {
+        "name": "active",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "enum": [
+                "true",
+                "false"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "When ``true``, exclude archived engagements (``archived_on IS NOT NULL``). When ``false`` or omitted, include them. Mirrors the \u00a712 roster view boolean filter.",
+          "title": "Active"
+        }
+      }
+    ],
+    "response_schema_ref": "#/components/schemas/WorkEngagementListResponse",
+    "summary": "List work engagements in the caller's workspace",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "work_engagements",
+    "http": {
+      "method": "POST",
+      "path": "/w/{slug}/api/v1/work_engagements/{engagement_id}/reinstate"
+    },
+    "idempotent": false,
+    "name": "reinstate",
+    "operation_id": "work_engagements.reinstate",
+    "path_params": [
+      {
+        "name": "engagement_id",
+        "required": true,
+        "schema": {
+          "title": "Engagement Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/WorkEngagementResponse",
+    "summary": "Reverse archive on a single engagement \u2014 idempotent",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "work_engagements",
+    "http": {
+      "method": "GET",
+      "path": "/w/{slug}/api/v1/work_engagements/{engagement_id}"
+    },
+    "idempotent": true,
+    "name": "show",
+    "operation_id": "work_engagements.read",
+    "path_params": [
+      {
+        "name": "engagement_id",
+        "required": true,
+        "schema": {
+          "title": "Engagement Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/WorkEngagementResponse",
+    "summary": "Read a work engagement by id",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": "#/components/schemas/WorkEngagementUpdateRequest",
+    "group": "work_engagements",
+    "http": {
+      "method": "PATCH",
+      "path": "/w/{slug}/api/v1/work_engagements/{engagement_id}"
+    },
+    "idempotent": false,
+    "name": "update",
+    "operation_id": "work_engagements.update",
+    "path_params": [
+      {
+        "name": "engagement_id",
+        "required": true,
+        "schema": {
+          "title": "Engagement Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/WorkEngagementResponse",
+    "summary": "Partial update of a work engagement",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": "#/components/schemas/WorkRoleCreateRequest",
+    "group": "work_roles",
+    "http": {
+      "method": "POST",
+      "path": "/w/{slug}/api/v1/work_roles"
+    },
+    "idempotent": false,
+    "name": "create",
+    "operation_id": "work_roles.create",
+    "path_params": [],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/WorkRoleResponse",
+    "summary": "Create a new work role",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "work_roles",
+    "http": {
+      "method": "GET",
+      "path": "/w/{slug}/api/v1/work_roles"
+    },
+    "idempotent": true,
+    "name": "list",
+    "operation_id": "work_roles.list",
+    "path_params": [],
+    "query_params": [
+      {
+        "name": "cursor",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Opaque forward cursor from the previous page's ``next_cursor``. Omitted on the first call. Bounded to 256 chars to keep the URL below reverse-proxy header limits.",
+          "title": "Cursor"
+        }
+      },
+      {
+        "name": "limit",
+        "required": false,
+        "schema": {
+          "default": 50,
+          "description": "Maximum rows to return. Default 50, cap 500 per spec \u00a712 'Pagination'. Rejected with 422 outside ``[1, 500]``.",
+          "maximum": 500,
+          "minimum": 1,
+          "title": "Limit",
+          "type": "integer"
+        }
+      }
+    ],
+    "response_schema_ref": "#/components/schemas/WorkRoleListResponse",
+    "summary": "List work roles in the caller's workspace",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": "#/components/schemas/WorkRoleUpdateRequest",
+    "group": "work_roles",
+    "http": {
+      "method": "PATCH",
+      "path": "/w/{slug}/api/v1/work_roles/{work_role_id}"
+    },
+    "idempotent": false,
+    "name": "update",
+    "operation_id": "work_roles.update",
+    "path_params": [
+      {
+        "name": "work_role_id",
+        "required": true,
+        "schema": {
+          "title": "Work Role Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/WorkRoleResponse",
+    "summary": "Partial update of a work role",
+    "x_agent_confirm": null,
+    "x_cli": null
   },
   {
     "body_schema_ref": null,

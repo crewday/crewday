@@ -4,10 +4,12 @@
 # docs/specs/01-architecture.md §"Enforcement"). The e2e job is cd-asvl
 # (spec: docs/specs/17-testing-quality.md §"End-to-end").
 #
-# Six jobs:
+# Seven jobs:
 #   * lint         — ruff check + ruff format --check
 #   * type         — mypy --strict on app/ (extends to cli/ via cd-j202
 #                    once that tree exists)
+#   * cli-parity   — committed CLI surfaces match current OpenAPI and
+#                    the resolved Click command tree.
 #   * boundaries   — import-linter. Blocking check as of cd-ev0 — a
 #                    red result fails the build. Contracts live in
 #                    pyproject.toml under [tool.importlinter].
@@ -85,6 +87,22 @@ jobs:
       # tree exists. Until then mypy only sweeps app/.
       - name: mypy --strict app
         run: uv run mypy app
+
+  cli-parity:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - name: Install deps
+        run: uv sync --group dev
+      - name: CLI parity
+        run: uv run python scripts/cli_parity_check.py
 
   boundaries:
     # Blocking check as of cd-ev0. Contracts live in pyproject.toml
