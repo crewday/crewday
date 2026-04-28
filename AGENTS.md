@@ -188,24 +188,31 @@ Procedures live in `.claude/skills/<name>/`.
 | `/security-check` | Red-team pass on a feature or spec |
 | `/gap-finder` | Pre-implementation walk of a spec section, filing Beads tasks for gaps |
 | `/director` | Top-level planning across specs / modules |
+| `/coder` | Implementation workflow for scoped code, tests, and docs |
+| `/commiter` | Close Beads, sync/export, commit, and push |
+| `/oracle` | Deep research for hard decisions; no edits |
 | `/beads` | Create well-formed Beads tasks from a prompt |
 | `/frontend-design:frontend-design` | **Mandatory** before any frontend change under `mocks/web/` (or future `app/web/`) |
 | `/ai-slop` | Strip AI-generated noise from a branch before it ships |
 
-## Specialised agents
+## Role workflows and specialised agents
 
-For larger changes, split work across the agents in
-[`.claude/agents/`](.claude/agents/):
+For larger changes, split work across role workflows. The canonical
+instructions live in [`.claude/skills/`](.claude/skills/); files under
+[`.claude/agents/`](.claude/agents/) are Claude compatibility wrappers
+that load the matching skill.
 
-| Agent | Role |
-|-------|------|
+| Workflow | Role |
+|----------|------|
 | `director` (skill) | Plans, tracks via Beads, delegates |
-| `coder` | Implements within a narrow scope (code + docs); runs only its module's tests |
-| `commiter` | Stages, signs off, commits, pushes — nothing else |
-| `oracle` | Deep research for hard decisions; no edits, just advice |
+| `/coder` | Implements within a narrow scope (code + docs); runs only its module's tests |
+| `/commiter` | Stages, signs off, commits, pushes — nothing else |
+| `/oracle` | Deep research for hard decisions; no edits, just advice |
 
-Default flow: `director → coder → /selfreview → commiter`. Pull in
-`oracle` when a decision is genuinely hard.
+Default flow: `/director → /coder → /selfreview autofix → /commiter`.
+Pull in `/oracle` when a decision is genuinely hard. The Director may
+spin up subagents for implementation, selfreview, commit, or oracle work
+when the runtime supports it and the user has authorized delegation.
 See [`.claude/README.md`](.claude/README.md).
 
 **Every plan must end with `/selfreview`** — regardless of scope —
@@ -239,7 +246,7 @@ bd export                               # export jsonl to git
 - **Link dependencies** with `bd dep <blocker> --blocks <blocked>`
   only when one task literally cannot start before another.
 - **Commit the jsonl**: after any `bd` change, `bd export` and include
-  `.beads/` in the same commit (the `commiter` agent handles this).
+  `.beads/` in the same commit (the `/commiter` workflow handles this).
 - **Close what you claim** before handing off, so `bd ready` stays
   honest.
 
@@ -336,8 +343,7 @@ Plain text to the user; CLI handles styling.
   `bd update <id> --status blocked`); then `bd export`.
 - **Run the quality gates** that apply (`pytest <scope>`, `mypy`,
   `ruff`).
-- **Commit and push** via the `commiter` agent
-  (`.claude/agents/commiter.md`); include `.beads/` in the same
+- **Commit and push** via `/commiter`; include `.beads/` in the same
   commit. Push rules in §"Git and editing rules".
 - **Summarise briefly**: what changed, where, what's still open,
   what the next agent should pick up from `bd ready`.

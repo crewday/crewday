@@ -25,7 +25,7 @@ before the work ships.
 
 Selfreview never commits, pushes, or closes Beads tasks itself. It
 stops after Phase 6 quality gates and returns. The caller (director
-or the user) routes the result to the `commiter` subagent, which
+or the user) routes the result to the `/commiter` workflow, which
 closes both tasks and ships the bundled commit atomically.
 
 Autofix never creates another selfreview task for its own findings —
@@ -68,7 +68,7 @@ phase 5 (ask user), and stops after phase 6.
 
 **Empty findings are a valid outcome.** Phase 6 still runs the quality
 gates (they must be green). Return after Phase 6 — the caller's
-`commiter` subagent handles Beads closure and the bundled commit.
+`/commiter` workflow handles Beads closure and the bundled commit.
 
 ## Phase 1: Gather changes
 
@@ -287,8 +287,8 @@ pnpm -C <web-dir> test
 
 When green, return. Interactive mode hands the fixes to the user for
 review; autofix mode returns to the caller (director or user), who
-routes the result to the `commiter` subagent for Beads closure and
-the bundled commit.
+routes the result to the `/commiter` workflow for Beads closure and the
+bundled commit.
 
 Do NOT commit, push, or close Beads tasks from this skill — and do
 NOT create a new self-review task for the fixes you just applied

@@ -1,6 +1,6 @@
 ---
 name: director
-description: Top-level coordinator that plans work across crew.day's specs and app modules, tracks progress via Beads, and delegates to specialised agents.
+description: Top-level coordinator that plans work across crew.day's specs and app modules, tracks progress via Beads, and delegates to role workflows or subagents when authorized.
 ---
 
 # Director Skill
@@ -13,8 +13,9 @@ You are the **Director**, the planning and coordination agent.
    change the intent, or the implementation of already-decided intent?
 2. Plan work across the relevant spec sections and app modules.
 3. Track progress using Beads (`bd` CLI).
-4. Delegate to subagents (Coder, Commiter, Oracle) to keep your main
-   context clean.
+4. Route work through role workflows (`/coder`, `/selfreview`,
+   `/commiter`, `/oracle`) and delegate to subagents when the runtime
+   supports it and the user has authorized delegation.
 5. Ask clarifying questions with `AskUserQuestion` when a
    **non-obvious decision with long-lasting impact** is needed.
 
@@ -67,12 +68,13 @@ editing rules".
 
 ## Per-task workflow
 
-**One commit per main+selfreview pair, produced by the `commiter`.**
-Neither the implementing coder nor the selfreview-autofix coder commits
-or closes Beads tasks — both stop at quality gates and leave changes
-in the working tree. The commiter then closes both tasks, syncs Beads,
-and ships implementation + review fixes + `.beads/` delta in a single
-signed-off commit. Closure and commit are atomic.
+**One commit per main+selfreview pair, produced by the `/commiter`
+workflow.** Neither the implementing `/coder` workflow nor the
+selfreview-autofix coder workflow commits or closes Beads tasks — both
+stop at quality gates and leave changes in the working tree. The
+`/commiter` workflow then closes both tasks, syncs Beads, and ships
+implementation + review fixes + `.beads/` delta in a single signed-off
+commit. Closure and commit are atomic.
 
 ```
 DIRECTOR: pick top task from the cached ready list
@@ -86,24 +88,26 @@ DIRECTOR: pick top task from the cached ready list
      `bd dep <blocker> --blocks <picked>` → **the picked task is now
      blocked; do NOT start it.** Drop it from your cached list and
      pick the next entry. The graph fix ships with the next pair's
-     commit (commiter's `bd sync`).
+     commit (`/commiter`'s `bd sync`).
    • Otherwise, locate (or create via `/beads`) the paired selfreview
      task — triage does not return it — and continue.
     │
     ▼
-2. CODER: implement + run MODULE tests only.
+2. CODER WORKFLOW: implement + run MODULE tests only.
     │       **No commit, no `bd close`.** Leave changes in the working
-    │       tree. Delegated via subagent.
+    │       tree. Delegate to a subagent when authorized and useful.
     │
     ▼
-3. CODER: run paired selfreview in autofix mode (`/selfreview autofix`).
+3. SELFREVIEW WORKFLOW: run paired selfreview in autofix mode
+    │       (`/selfreview autofix`).
     │       Fixes every BUGS/MISSING/RISKY in place, runs quality
     │       gates. **No commit, no `bd close`.** Director-invoked
-    │       override (see selfreview SKILL §Modes). Delegated via
-    │       subagent; preserves the 1:1 main↔selfreview coupling.
+    │       override (see selfreview SKILL §Modes). Delegate to a
+    │       subagent when authorized and useful; preserve the 1:1
+    │       main↔selfreview coupling.
     │
     ▼
-4. COMMITER: `bd close <main>` → `bd close <sr>` → `bd sync` →
+4. COMMITER WORKFLOW: `bd close <main>` → `bd close <sr>` → `bd sync` →
     │       `git add` (in-scope code + `.beads/`) → signed-off
     │       Conventional Commit referencing both IDs → `git push`.
     │       Single atomic step: closure ships with the commit.
@@ -115,20 +119,21 @@ DIRECTOR: pick top task from the cached ready list
    list returns nothing.
 ```
 
-**No Reviewer or Documenter agents.** Review = paired selfreview task
+**No Reviewer or Documenter role.** Review = paired selfreview task
 in autofix mode. Doc updates happen inside the main or selfreview
-task — the Coder owns specs / README / OpenAPI for its scope.
+task — the `/coder` workflow owns specs / README / OpenAPI for its
+scope.
 
 **Never commit or close before step 4.** If the commit fails, nothing
 is closed and the work can be retried cleanly.
 
-For hard architectural decisions: invoke **ORACLE** for deep research
-before planning, not after.
+For hard architectural decisions: run `/oracle` for deep research before
+planning, not after.
 
 ## Test strategy (CRITICAL — system overload prevention)
 
-**Every Coder subagent (main task or selfreview) MUST only run tests
-for their own module:**
+**Every delegated coder or selfreview worker MUST only run tests for
+their own module:**
 
 ```bash
 # ✅ Scoped to the module under change
@@ -137,12 +142,12 @@ pytest tests/api/test_tasks.py -x -q
 # ✅ Multiple related modules
 pytest tests/api/test_tasks.py tests/domain/test_scheduling.py -x -q
 
-# ❌ Full suite from a subagent — overloads the system
+# ❌ Full suite from a delegated worker — overloads the system
 pytest
 ```
 
 **Always specify the `Test path`** in every delegation (main or
-selfreview) so the subagent knows what to run.
+selfreview) so the worker knows what to run.
 
 **When triage is empty**, the Director runs the full suite once:
 
@@ -188,17 +193,41 @@ Read, in order:
   next entry from your cached ready list (refresh via triage
   only if the list is empty). Wrong-order picks waste a coder run
   and leave the graph misleading. The dep edit ships with the next
-  commit (commiter's `bd sync` covers it).
+  commit (`/commiter`'s `bd sync` covers it).
 
-## Invoking agents
+## Role Workflows And Delegation
 
-Always include `Beads task` and `Test path` so subagents know what to
-run:
+The canonical role instructions are skills:
+
+- `/coder` — implementation, scoped tests, in-scope docs.
+- `/selfreview autofix` — skeptical review and direct fixes before
+  commit.
+- `/commiter` — close Beads, sync/export, stage, commit, push.
+- `/oracle` — deep research for hard decisions; no edits.
+
+Use the current agent for small or tightly coupled work. Spin up
+subagents for implementation, selfreview, commit, or oracle work when
+all of the following are true:
+
+- The user has authorized subagent/delegation use, or the active runtime
+  treats the director workflow itself as authorization.
+- The runtime supports subagents.
+- The delegated task has a concrete scope, disjoint ownership where
+  parallel edits are possible, and a named validation command.
+- Delegation will not obscure a decision that needs `AskUserQuestion`.
+
+Claude Code can invoke the wrappers in `.claude/agents/`; those wrappers
+defer to the skills above. Other runtimes should load the skill directly
+or pass `Read and follow: .claude/skills/<name>/SKILL.md` to the
+subagent.
+
+Always include `Beads task` and `Test path` so delegated workers know
+what to run:
 
 ```
 subagent_type: "general-purpose"
 prompt: |
-  Read and follow: .claude/agents/coder.md
+  Read and follow: .claude/skills/coder/SKILL.md
 
   Area: app/api/tasks
   Beads task: bd-042
@@ -208,14 +237,15 @@ prompt: |
 ```
 
 **Selfreview delegations instruct autofix mode.** The selfreview
-skill never commits, pushes, or closes Beads itself — it always stops
-at Phase 6 quality gates and returns. The commiter handles Beads
+skill never commits, pushes, or closes Beads itself — it always stops at
+Phase 6 quality gates and returns. The `/commiter` workflow handles Beads
 closure and the bundled commit atomically in step 4.
 
 ```
 subagent_type: "general-purpose"
 prompt: |
-  Read and follow: .claude/agents/coder.md
+  Read and follow: .claude/skills/coder/SKILL.md
+  Then run: /selfreview autofix
 
   Area: app/api/tasks  (same as the paired main task)
   Beads task: bd-042-sr   # selfreview task, labelled `selfreview`
@@ -224,8 +254,8 @@ prompt: |
     - No plan mode, no user prompt.
     - Fix every BUGS / MISSING / RISKY finding in place.
     - Run the repo's quality gates (lint, type, affected tests).
-    - Stop at Phase 6 and return — the commiter will close both tasks
-      and ship the bundled commit.
+    - Stop at Phase 6 and return — /commiter will close both tasks and
+      ship the bundled commit.
 ```
 
 ### Frontend work — load `/frontend-design:frontend-design`
@@ -278,9 +308,9 @@ bv --robot-triage | jq '.triage.quick_ref.top_picks[:3]'
 bd show <id>                          # full context
 bd update <id> --claim                # claim it (in_progress)
 # … implement …
-bd close <id>                         # done — commiter runs this in step 4
+bd close <id>                         # done — /commiter runs this in step 4
 bd sync                               # export jsonl after ANY bd mutation
-                                      # (close/create/update); commiter runs
+                                      # (close/create/update); /commiter runs
                                       # this before `git add` so the .beads/
                                       # delta ships in the same commit
 ```
