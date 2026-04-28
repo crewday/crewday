@@ -50,6 +50,7 @@ __all__ = [
     "ExpenseReimbursed",
     "ExpenseRejected",
     "ExpenseSubmitted",
+    "InventoryItemChanged",
     "LlmAssignmentChanged",
     "NotificationCreated",
     "PayPeriodLocked",
@@ -315,6 +316,23 @@ class TaskCompleted(Event):
 
     task_id: str
     completed_by: str
+
+
+@register
+class InventoryItemChanged(Event):
+    """An inventory item's ledger/cache changed.
+
+    Payload is intentionally identifier-only plus the closed reason code;
+    subscribers re-fetch the item or movement through REST under the
+    usual inventory permissions.
+    """
+
+    name: ClassVar[str] = "inventory.item_changed"
+    allowed_roles: ClassVar[tuple[EventRole, ...]] = ("manager", "worker")
+
+    item_id: str
+    movement_id: str
+    reason: str
 
 
 @register

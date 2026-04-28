@@ -115,7 +115,7 @@ from typing import Any, Literal
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.adapters.db.inventory.models import Item, Movement
+from app.adapters.db.inventory.models import Item
 from app.adapters.db.tasks.models import ChecklistItem, Evidence, Occurrence
 from app.adapters.storage.mime import FiletypeMimeSniffer
 from app.adapters.storage.ports import (
@@ -137,6 +137,7 @@ from app.events.types import (
     TaskCompleted,
     TaskSkipped,
 )
+from app.services.inventory import movement_service
 from app.tenancy import WorkspaceContext
 from app.util.clock import Clock, SystemClock
 from app.util.ulid import new_ulid
@@ -200,6 +201,15 @@ TaskStateName = Literal[
 # values; ``inherit`` never reaches the service — the resolver
 # collapses the cascade before answering.
 EvidencePolicy = Literal["forbid", "require", "optional"]
+
+
+@dataclass(frozen=True, slots=True)
+class _FixedClock:
+    instant: datetime
+
+    def now(self) -> datetime:
+        return self.instant
+
 
 EvidencePolicyResolver = Callable[
     [Session, WorkspaceContext, Occurrence], EvidencePolicy
@@ -521,7 +531,7 @@ def _default_skip_allowed(
 def _default_inventory_apply(
     session: Session, ctx: WorkspaceContext, task: Occurrence
 ) -> None:
-    """Write one :class:`Movement` row per SKU in the consumption map.
+    """Write one inventory consume movement per SKU in the consumption map.
 
     Reads :attr:`Occurrence.inventory_consumption_json` — a
     ``{sku: qty}`` mapping copied down from the template — and
@@ -547,7 +557,9 @@ def _default_inventory_apply(
     items = session.scalars(
         select(Item).where(
             Item.workspace_id == ctx.workspace_id,
+            Item.property_id == task.property_id,
             Item.sku.in_(skus),
+            Item.deleted_at.is_(None),
         )
     ).all()
     sku_to_id = {row.sku: row.id for row in items}
@@ -562,24 +574,27 @@ def _default_inventory_apply(
             continue
         try:
             delta = Decimal(str(qty))
-        except ArithmeticError, ValueError:
+        except (ArithmeticError, ValueError):
             # Non-numeric value in the consumption map — skip for the
             # same reason as unknown-sku above. Data hygiene is a CRUD
             # concern, not a completion-time hard error.
             continue
-        session.add(
-            Movement(
-                id=new_ulid(),
-                workspace_id=ctx.workspace_id,
+        try:
+            movement_service.consume(
+                session,
+                ctx,
                 item_id=item_id,
-                delta=-abs(delta),
-                reason="consume",
-                occurrence_id=task.id,
-                note_md=None,
-                created_at=now,
-                created_by=ctx.actor_id,
+                qty=abs(delta),
+                source_task_id=task.id,
+                clock=_FixedClock(now),
             )
-        )
+        except (
+            movement_service.InventoryItemNotFound,
+            movement_service.InventoryMovementValidationError,
+        ):
+            # Preserve the completion service's soft coupling: stale or
+            # malformed inventory metadata never blocks task completion.
+            continue
 
 
 def _default_asset_action(

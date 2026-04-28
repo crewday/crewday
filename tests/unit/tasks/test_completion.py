@@ -288,13 +288,19 @@ def _bootstrap_required_checklist(
 
 
 def _bootstrap_inventory_item(
-    session: Session, *, workspace_id: str, sku: str = "BLEACH-1L"
+    session: Session,
+    *,
+    workspace_id: str,
+    sku: str = "BLEACH-1L",
+    property_id: str | None = None,
+    deleted_at: datetime | None = None,
 ) -> str:
     iid = new_ulid()
     session.add(
         Item(
             id=iid,
             workspace_id=workspace_id,
+            property_id=property_id,
             sku=sku,
             name=sku,
             unit="l",
@@ -303,6 +309,7 @@ def _bootstrap_inventory_item(
             current_qty=Decimal("10"),
             min_qty=None,
             created_at=_PINNED,
+            deleted_at=deleted_at,
         )
     )
     session.flush()
@@ -735,7 +742,9 @@ class TestComplete:
         ws = _bootstrap_workspace(session)
         prop = _bootstrap_property(session)
         worker = _bootstrap_user(session)
-        item_id = _bootstrap_inventory_item(session, workspace_id=ws, sku="BLEACH-1L")
+        item_id = _bootstrap_inventory_item(
+            session, workspace_id=ws, property_id=prop, sku="BLEACH-1L"
+        )
         occ = _bootstrap_occurrence(
             session,
             workspace_id=ws,
@@ -765,7 +774,9 @@ class TestComplete:
         ws = _bootstrap_workspace(session)
         prop = _bootstrap_property(session)
         worker = _bootstrap_user(session)
-        _bootstrap_inventory_item(session, workspace_id=ws, sku="BLEACH-1L")
+        _bootstrap_inventory_item(
+            session, workspace_id=ws, property_id=prop, sku="BLEACH-1L"
+        )
         occ = _bootstrap_occurrence(
             session,
             workspace_id=ws,
@@ -790,6 +801,74 @@ class TestComplete:
             select(Movement).where(Movement.occurrence_id == occ)
         ).all()
         assert mov == []
+
+    def test_inventory_resolution_is_property_scoped(
+        self, session: Session, clock: FrozenClock, bus: EventBus
+    ) -> None:
+        ws = _bootstrap_workspace(session)
+        task_prop = _bootstrap_property(session)
+        other_prop = _bootstrap_property(session)
+        worker = _bootstrap_user(session)
+        task_item_id = _bootstrap_inventory_item(
+            session, workspace_id=ws, property_id=task_prop, sku="BLEACH-1L"
+        )
+        other_item_id = _bootstrap_inventory_item(
+            session, workspace_id=ws, property_id=other_prop, sku="BLEACH-1L"
+        )
+        occ = _bootstrap_occurrence(
+            session,
+            workspace_id=ws,
+            property_id=task_prop,
+            assignee_user_id=worker,
+            inventory={"BLEACH-1L": 2},
+        )
+
+        complete(
+            session,
+            _ctx(ws, role="worker", owner=False, actor_id=worker),
+            occ,
+            clock=clock,
+            event_bus=bus,
+        )
+
+        movements = session.scalars(select(Movement)).all()
+        assert [movement.item_id for movement in movements] == [task_item_id]
+        assert movements[0].item_id != other_item_id
+
+    def test_inventory_stale_or_malformed_payload_stays_soft_coupled(
+        self, session: Session, clock: FrozenClock, bus: EventBus
+    ) -> None:
+        ws = _bootstrap_workspace(session)
+        prop = _bootstrap_property(session)
+        worker = _bootstrap_user(session)
+        _bootstrap_inventory_item(
+            session,
+            workspace_id=ws,
+            property_id=prop,
+            sku="ARCHIVED",
+            deleted_at=_PINNED,
+        )
+        _bootstrap_inventory_item(
+            session, workspace_id=ws, property_id=prop, sku="BAD-QTY"
+        )
+        occ = _bootstrap_occurrence(
+            session,
+            workspace_id=ws,
+            property_id=prop,
+            assignee_user_id=worker,
+            inventory={"ARCHIVED": 1, "BAD-QTY": "not-a-number", "UNKNOWN": 2},
+        )
+
+        result = complete(
+            session,
+            _ctx(ws, role="worker", owner=False, actor_id=worker),
+            occ,
+            clock=clock,
+            event_bus=bus,
+        )
+
+        assert result.state == "done"
+        assert session.scalars(select(Movement)).all() == []
 
     def test_inventory_unknown_sku_skipped(
         self, session: Session, clock: FrozenClock, bus: EventBus
