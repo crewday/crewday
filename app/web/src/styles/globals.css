@@ -474,6 +474,25 @@
 .evidence__picker-cta { font-weight: 600; font-family: "Fraunces", serif; }
 .evidence__picker-sub { color: var(--ink-3); font-size: 12px; }
 .evidence__note-hint { margin: 4px 2px 0; font-size: 13px; line-height: 1.5; }
+.evidence__preview-list {
+  list-style: none; padding: 0; margin: 0;
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(92px, 1fr)); gap: 8px;
+}
+.evidence__preview {
+  min-height: 92px; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--card); overflow: hidden; position: relative;
+  display: flex; align-items: center; justify-content: center;
+}
+.evidence__preview-img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.evidence__preview-placeholder { color: var(--ink-3); }
+.evidence__preview-status {
+  position: absolute; left: 6px; right: 6px; bottom: 6px;
+  padding: 3px 7px; border-radius: 999px;
+  background: color-mix(in srgb, var(--card) 86%, transparent);
+  color: var(--ink-2); font-size: 11px; text-align: center;
+}
+.evidence__preview--uploaded .evidence__preview-status { color: var(--moss); }
+.evidence__preview--failed .evidence__preview-status { color: var(--rust); }
 /* Inline failure notice rendered above the picker after a failed
    /expenses/scan call — RFC 7807 `type` keys (blob_*, scan_not_configured,
    extraction_*) get mapped to plain-English lines in
@@ -566,6 +585,9 @@
 .btn--rust  { background: var(--rust); color: #fff; }
 .btn--ghost { background: transparent; border-color: var(--line-strong); color: var(--ink-2); }
 .btn--ghost:hover { background: var(--paper-2); }
+.btn:disabled {
+  opacity: 0.55; cursor: not-allowed; transform: none;
+}
 
 /* Full-width button. Pairs with any color + size modifier; guarantees
    a 44px minimum tap target (iOS HIG / Material) so even a .btn--sm

@@ -87,6 +87,8 @@ describe("INVALIDATIONS — coverage", () => {
     "task.updated",
     "task.completed",
     "task.skipped",
+    "task.comment_added",
+    "task.evidence_added",
     "task.overdue",
     "stay.upcoming",
     "stay_task_bundle.upserted",
@@ -516,6 +518,28 @@ describe("INVALIDATIONS — per-kind behaviour", () => {
       const called = spy.mock.calls.map((c) => c[0]?.queryKey);
       expect(called).toEqual(expect.arrayContaining([qk.task("t1")]));
     }
+  });
+
+  it("task.comment_added invalidates the task-scoped chat key by task_id", () => {
+    const qc = makeClient();
+    const spy = vi.spyOn(qc, "invalidateQueries");
+    INVALIDATIONS["task.comment_added"](
+      makeEvent("task.comment_added", { task_id: "t1" }),
+      qc,
+    );
+    const called = spy.mock.calls.map((c) => c[0]?.queryKey);
+    expect(called).toEqual(expect.arrayContaining([qk.agentTaskChat("t1")]));
+  });
+
+  it("task.evidence_added invalidates the task evidence key by task_id", () => {
+    const qc = makeClient();
+    const spy = vi.spyOn(qc, "invalidateQueries");
+    INVALIDATIONS["task.evidence_added"](
+      makeEvent("task.evidence_added", { task_id: "t1" }),
+      qc,
+    );
+    const called = spy.mock.calls.map((c) => c[0]?.queryKey);
+    expect(called).toEqual(expect.arrayContaining([[...qk.task("t1"), "evidence"]]));
   });
 
   it("expense.{approved,rejected,reimbursed,decided} also invalidates the history `expenses` tab", () => {

@@ -78,6 +78,8 @@ export type EventKind =
   | "task.updated"
   | "task.completed"
   | "task.skipped"
+  | "task.comment_added"
+  | "task.evidence_added"
   | "task.overdue"
   // Stays + stay task bundles (§04, §06).
   | "stay.upcoming"
@@ -401,6 +403,16 @@ export const INVALIDATIONS: Record<EventKind, InvalidationHandler> = {
     // §14 worker schedule — skipping flips the chip status; the cell
     // needs a refresh to recolor it.
     invalidate(qc, ["my-schedule"]);
+  },
+
+  "task.comment_added": (event, qc) => {
+    const payload = event.data as unknown as TaskRefPayload;
+    invalidate(qc, qk.agentTaskChat(payload.task_id));
+  },
+
+  "task.evidence_added": (event, qc) => {
+    const payload = event.data as unknown as TaskRefPayload;
+    invalidate(qc, [...qk.task(payload.task_id), "evidence"]);
   },
 
   "task.overdue": (_event, qc) => {
