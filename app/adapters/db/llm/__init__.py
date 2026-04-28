@@ -5,7 +5,8 @@ This package ships two tiers of tables:
 **Workspace-scoped** (``workspace_id`` column, registered in
 :mod:`app.tenancy.registry`): :class:`ModelAssignment`,
 :class:`AgentToken`, :class:`ApprovalRequest`, :class:`LlmUsage`,
-:class:`BudgetLedger`, :class:`LlmCapabilityInheritance`. The ORM
+:class:`BudgetLedger`, :class:`LlmCapabilityInheritance`,
+:class:`AgentPreference`, :class:`AgentPreferenceRevision`. The ORM
 tenant filter auto-injects a ``workspace_id`` predicate on every
 SELECT / UPDATE / DELETE. A bare read without a
 :class:`~app.tenancy.WorkspaceContext` raises
@@ -72,6 +73,8 @@ See ``docs/specs/02-domain-model.md`` §"LLM" and
 from __future__ import annotations
 
 from app.adapters.db.llm.models import (
+    AgentPreference,
+    AgentPreferenceRevision,
     AgentToken,
     ApprovalRequest,
     BudgetLedger,
@@ -96,10 +99,14 @@ for _table in (
     "llm_usage",
     "budget_ledger",
     "llm_capability_inheritance",
+    "agent_preference",
+    "agent_preference_revision",
 ):
     register(_table)
 
 __all__ = [
+    "AgentPreference",
+    "AgentPreferenceRevision",
     "AgentToken",
     "ApprovalRequest",
     "BudgetLedger",

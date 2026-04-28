@@ -133,6 +133,12 @@ from app.adapters.db.messaging.models import ChatChannel, ChatMessage
 from app.adapters.llm.ports import ChatMessage as LlmChatMessage
 from app.adapters.llm.ports import LLMClient, LLMResponse
 from app.audit import write_audit
+from app.domain.agent.preferences import (
+    PreferenceBundle,
+    blocked_action_result_body,
+    is_action_blocked,
+    resolve_preferences,
+)
 from app.domain.llm.budget import (
     BudgetExceeded,
     PricingTable,
@@ -679,6 +685,12 @@ def run_turn(
         agent_label=agent_label,
         agent_conversation_ref=agent_conversation_ref,
     )
+    preferences = resolve_preferences(
+        session,
+        ctx,
+        capability=capability,
+        user_id=ctx.actor_id,
+    )
 
     history = _assemble_history(
         session,
@@ -686,6 +698,7 @@ def run_turn(
         thread_id=thread_id,
         user_message=user_message,
         history_cap=history_cap,
+        preferences=preferences,
     )
 
     tool_calls_made = 0
@@ -752,6 +765,18 @@ def run_turn(
 
             # Tool-call branch: gate decision first.
             tool_calls_made += 1
+            if is_action_blocked(preferences, tool_call.name):
+                history = _append_tool_result_to_history(
+                    history,
+                    tool_call,
+                    ToolResult(
+                        call_id=tool_call.id,
+                        status_code=403,
+                        body=blocked_action_result_body(tool_call.name),
+                        mutated=False,
+                    ),
+                )
+                continue
             decision = tool_dispatcher.is_gated(tool_call)
             if decision.gated:
                 # The chat-trigger turn always has a delegating user
@@ -1017,6 +1042,7 @@ def _assemble_history(
     thread_id: str | None,
     user_message: str,
     history_cap: int,
+    preferences: PreferenceBundle,
 ) -> list[LlmChatMessage]:
     """Build the ``[system, …history, user]`` sequence the LLM sees.
 
@@ -1030,7 +1056,10 @@ def _assemble_history(
     sees only the system prompt + the synthetic user message.
     """
     messages: list[LlmChatMessage] = [
-        {"role": "system", "content": _default_system_prompt(scope)},
+        {
+            "role": "system",
+            "content": (f"{_default_system_prompt(scope)}\n\n{preferences.text}"),
+        },
     ]
     if thread_id is not None:
         messages.extend(_load_recent_history(session, thread_id, history_cap))

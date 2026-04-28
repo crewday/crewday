@@ -30,6 +30,7 @@ from sqlalchemy.orm import Session
 from app.adapters.db.audit.models import AuditLog
 from app.adapters.db.llm.models import ApprovalRequest, LlmUsage
 from app.adapters.db.messaging.models import ChatMessage
+from app.domain.agent.preferences import PreferenceUpdate, save_preference
 from app.domain.agent.runtime import (
     APPROVAL_REQUEST_TTL,
     GateDecision,
@@ -193,6 +194,98 @@ def test_one_read_tool_no_audit(
     # Exactly one llm_usage row per LLM call.
     usage_count = db_session.scalar(select(func.count()).select_from(LlmUsage))
     assert usage_count == 2
+
+
+def test_workspace_preferences_are_injected_into_system_prompt(
+    db_session: Session,
+    bus,  # type: ignore[no-untyped-def]
+    clock: FrozenClock,
+) -> None:
+    _ws, ctx, channel_id = _bind_and_seed(db_session)
+    save_preference(
+        db_session,
+        ctx,
+        scope_kind="workspace",
+        scope_id=ctx.workspace_id,
+        update=PreferenceUpdate(body_md="Use concise formal replies."),
+        actor_user_id=ctx.actor_id,
+        clock=clock,
+    )
+
+    llm = ScriptedLLMClient(replies=[make_text_response("Acknowledged.")])
+    run_turn(
+        ctx,
+        session=db_session,
+        scope="manager",
+        thread_id=channel_id,
+        user_message="Hi",
+        trigger="event",
+        llm_client=llm,
+        tool_dispatcher=FakeToolDispatcher(),
+        token_factory=FakeTokenFactory(),
+        agent_label=_AGENT_LABEL,
+        capability=_CAPABILITY,
+        event_bus=bus,
+        clock=clock,
+    )
+
+    assert llm.last_messages is not None
+    system = llm.last_messages[0]["content"]
+    assert "## Workspace preferences --" in system
+    assert "Use concise formal replies." in system
+
+
+def test_blocked_action_returns_403_without_dispatch_or_audit(
+    db_session: Session,
+    bus,  # type: ignore[no-untyped-def]
+    clock: FrozenClock,
+) -> None:
+    _ws, ctx, channel_id = _bind_and_seed(db_session)
+    save_preference(
+        db_session,
+        ctx,
+        scope_kind="workspace",
+        scope_id=ctx.workspace_id,
+        update=PreferenceUpdate(
+            body_md="",
+            blocked_actions=("tasks.create",),
+        ),
+        actor_user_id=ctx.actor_id,
+        clock=clock,
+    )
+
+    llm = ScriptedLLMClient(
+        replies=[
+            make_tool_call_response("tasks.create", {"title": "Blocked"}),
+            make_text_response("I can't run that action."),
+        ]
+    )
+    dispatcher = FakeToolDispatcher()
+    outcome = run_turn(
+        ctx,
+        session=db_session,
+        scope="manager",
+        thread_id=channel_id,
+        user_message="Create a task",
+        trigger="event",
+        llm_client=llm,
+        tool_dispatcher=dispatcher,
+        token_factory=FakeTokenFactory(),
+        agent_label=_AGENT_LABEL,
+        capability=_CAPABILITY,
+        event_bus=bus,
+        clock=clock,
+    )
+
+    assert outcome.outcome == "replied"
+    assert outcome.tool_calls_made == 1
+    assert dispatcher.is_gated_calls == []
+    assert dispatcher.captured == []
+    audit_rows = list(db_session.scalars(select(AuditLog)).all())
+    assert [row.action for row in audit_rows] == ["agent_preference.updated"]
+    assert llm.last_messages is not None
+    tool_result = llm.last_messages[-1]["content"]
+    assert "action_blocked_by_preferences" in tool_result
 
 
 # ---------------------------------------------------------------------------

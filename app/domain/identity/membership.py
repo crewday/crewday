@@ -126,6 +126,7 @@ from app.auth._throttle import Throttle
 from app.auth.keys import derive_subkey
 from app.auth.magic_link import PendingDispatch
 from app.config import Settings, get_settings
+from app.domain.agent.preferences import default_approval_mode_for_workspace
 from app.domain.identity.permission_groups import (
     LastOwnerMember,
     write_member_remove_rejected_audit,
@@ -659,6 +660,7 @@ def invite(
             email=email_lower,
             email_lower=email_lower,
             display_name=display_name,
+            agent_approval_mode=default_approval_mode_for_workspace(session, ctx),
             created_at=resolved_now,
         )
         with tenant_agnostic():

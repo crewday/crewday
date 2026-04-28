@@ -86,6 +86,8 @@ from app.adapters.db.identity import models as _identity_models  # noqa: F401
 from app.adapters.db.workspace import models as _workspace_models  # noqa: F401
 
 __all__ = [
+    "AgentPreference",
+    "AgentPreferenceRevision",
     "AgentToken",
     "ApprovalRequest",
     "BudgetLedger",
@@ -144,6 +146,12 @@ _LLM_USAGE_STATUS_VALUES: tuple[str, ...] = (
     "error",
     "refused",
     "timeout",
+)
+
+_AGENT_PREFERENCE_SCOPE_VALUES: tuple[str, ...] = (
+    "workspace",
+    "property",
+    "user",
 )
 
 
@@ -888,6 +896,119 @@ class LlmCapabilityInheritance(Base):
             "workspace_id",
             "capability",
             unique=True,
+        ),
+    )
+
+
+class AgentPreference(Base):
+    """Latest agent-preference layer for a workspace, property, or user.
+
+    The row is the read-optimised head for §11 "Agent preferences";
+    :class:`AgentPreferenceRevision` keeps the append-only body
+    history. Workspace-scope rows also carry the structured
+    preference controls that the dispatcher and user-creation paths
+    need without parsing Markdown: blocked action keys and the
+    workspace default approval mode for newly-created users.
+    """
+
+    __tablename__ = "agent_preference"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    workspace_id: Mapped[str] = mapped_column(
+        String,
+        ForeignKey("workspace.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    scope_kind: Mapped[str] = mapped_column(String, nullable=False)
+    scope_id: Mapped[str] = mapped_column(String, nullable=False)
+    body_md: Mapped[str] = mapped_column(String, nullable=False, default="")
+    token_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+    blocked_actions: Mapped[list[str]] = mapped_column(
+        JSON, nullable=False, default=list, server_default="[]"
+    )
+    default_approval_mode: Mapped[str] = mapped_column(
+        String, nullable=False, default="auto", server_default="auto"
+    )
+    updated_by_user_id: Mapped[str | None] = mapped_column(
+        String,
+        ForeignKey("user.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    archived_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "scope_kind IN (" + _in_clause(_AGENT_PREFERENCE_SCOPE_VALUES) + ")",
+            name="agent_preference_scope_kind",
+        ),
+        CheckConstraint(
+            "default_approval_mode IN ('bypass', 'auto', 'strict')",
+            name="agent_preference_default_approval_mode",
+        ),
+        CheckConstraint("token_count >= 0", name="agent_preference_token_count"),
+        UniqueConstraint(
+            "workspace_id",
+            "scope_kind",
+            "scope_id",
+            name="uq_agent_preference_workspace_scope",
+        ),
+        Index(
+            "ix_agent_preference_workspace_scope",
+            "workspace_id",
+            "scope_kind",
+            "scope_id",
+        ),
+    )
+
+
+class AgentPreferenceRevision(Base):
+    """Append-only history for :class:`AgentPreference` saves."""
+
+    __tablename__ = "agent_preference_revision"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    workspace_id: Mapped[str] = mapped_column(
+        String,
+        ForeignKey("workspace.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    preference_id: Mapped[str] = mapped_column(
+        String,
+        ForeignKey("agent_preference.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    body_md: Mapped[str] = mapped_column(String, nullable=False)
+    token_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    blocked_actions: Mapped[list[str]] = mapped_column(
+        JSON, nullable=False, default=list, server_default="[]"
+    )
+    default_approval_mode: Mapped[str] = mapped_column(String, nullable=False)
+    updated_by_user_id: Mapped[str | None] = mapped_column(
+        String,
+        ForeignKey("user.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    change_note: Mapped[str | None] = mapped_column(String, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+
+    __table_args__ = (
+        CheckConstraint("token_count >= 0", name="agent_preference_revision_tokens"),
+        Index(
+            "ix_agent_preference_revision_preference_created",
+            "preference_id",
+            "created_at",
         ),
     )
 

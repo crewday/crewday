@@ -112,6 +112,9 @@ class User(Base):
     locale: Mapped[str | None] = mapped_column(String, nullable=True)
     timezone: Mapped[str | None] = mapped_column(String, nullable=True)
     avatar_blob_hash: Mapped[str | None] = mapped_column(String, nullable=True)
+    agent_approval_mode: Mapped[str] = mapped_column(
+        String, nullable=False, default="strict", server_default="strict"
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
     )
@@ -125,6 +128,13 @@ class User(Base):
     # NULL; the row stays in place to preserve audit + FK joins.
     archived_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "agent_approval_mode IN ('bypass', 'auto', 'strict')",
+            name="user_agent_approval_mode",
+        ),
     )
 
 
