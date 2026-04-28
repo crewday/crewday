@@ -93,7 +93,7 @@ _MOVEMENT_REASON_ENUM = Enum(
     *_REASON_VALUES,
     name="inventory_movement_reason",
     native_enum=True,
-    create_constraint=True,
+    create_constraint=False,
 )
 
 
@@ -335,6 +335,10 @@ class Movement(Base):
         CheckConstraint(
             f"actor_kind IN ({_in_clause(_MOVEMENT_ACTOR_KIND_VALUES)})",
             name="actor_kind",
+        ),
+        CheckConstraint(
+            f"reason IN ({_in_clause(_REASON_VALUES)})",
+            name="inventory_movement_reason",
         ),
         # Per-acceptance: "ledger for this item, newest first" rides
         # the composite B-tree. Leading ``workspace_id`` lets the

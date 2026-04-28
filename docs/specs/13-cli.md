@@ -505,7 +505,12 @@ crewday audit
   export --from --to
 
 crewday admin
-  init --email <owner-email>                  # bootstrap (§16)
+  init [--data-dir /data] [--root-key-file <path>]
+                                              # first-boot deployment seed (§16)
+  user invite --email <email> --workspace <slug> [--role owner|manager|worker|client]
+                                              # mint invite magic link to stdout
+  workspace bootstrap --slug <slug> --name <name> --owner-email <email>
+                                              # create workspace + owner, emit invite link
   recover --email <owner-email>               # emit magic link to stdout
   rotate-root-key --new-key-file <path> | --new-key-stdin
                                               # also accepts --reencrypt, --finalize
@@ -542,11 +547,12 @@ intentionally separate groups with different security models.
 | `crewday deploy`   | HTTP → `/admin/api/v1/*`           | passkey session or deployment-scoped token | any deployment admin, from anywhere |
 
 `crewday admin` keeps its existing host-CLI-only verb list
-(`init`, `recover`, `rotate-root-key`, `backup`, `restore`,
-`purge`, `audit verify`, `audit export`, `allow-email-domain`,
-`signup set-ip-cap`, `signup allow-ip`, `webhook rotate`,
-`budget set-cap`, `llm sync-pricing`, `workspace create`,
-`workspace trust`, `settings set`, `version`).
+(`init`, `user invite`, `workspace bootstrap`, `recover`,
+`rotate-root-key`, `backup`, `restore`, `purge`, `audit verify`,
+`audit export`, `allow-email-domain`, `signup set-ip-cap`,
+`signup allow-ip`, `webhook rotate`, `budget set-cap`,
+`llm sync-pricing`, `workspace create`, `workspace trust`,
+`settings set`, `version`).
 The earlier `budget reload-pricing` verb is retired — pricing lives
 in the DB now (§11 "Price sync"), and the host-CLI sync helper is
 `crewday admin llm sync-pricing`.

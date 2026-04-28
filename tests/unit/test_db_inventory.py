@@ -214,7 +214,7 @@ class TestMovementModel:
         assert isinstance(reason_type, Enum)
         assert reason_type.name == "inventory_movement_reason"
         assert reason_type.native_enum is True
-        assert reason_type.create_constraint is True
+        assert reason_type.create_constraint is False
         for reason in (
             "restock",
             "consume",
@@ -230,6 +230,15 @@ class TestMovementModel:
             "adjust",
         ):
             assert reason in reason_type.enums
+        checks = [
+            c
+            for c in Movement.__table_args__
+            if isinstance(c, CheckConstraint)
+            and c.name is not None
+            and str(c.name).endswith("inventory_movement_reason")
+        ]
+        assert len(checks) == 1
+        assert "reason IN" in str(checks[0].sqltext)
 
     def test_delta_uses_spec_precision(self) -> None:
         column_type = Movement.__table__.c.delta.type

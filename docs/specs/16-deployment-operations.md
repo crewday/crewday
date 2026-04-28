@@ -573,14 +573,15 @@ remaps `workspace_id` — the slug is preserved unless it collides.
 ### Self-hosted (recipes A, B)
 
 ```
-# Generate a root key once and keep it SAFE.
-export CREWDAY_ROOT_KEY=$(python -c "import os,base64; print(base64.b64encode(os.urandom(32)).decode())")
-
 # First boot:
 docker compose up -d
-docker compose exec app crewday admin init --email owner@example.com --slug myhome
+docker compose exec app crewday admin init --data-dir /data
+docker compose exec app crewday admin workspace bootstrap \
+    --slug myhome --name "My Home" --owner-email owner@example.com
 
-# The command prints a magic link URL. Open on your phone to register.
+# If CREWDAY_ROOT_KEY was not already set, `admin init` prints it once.
+# Store it immediately; it is not persisted by the command.
+# `workspace bootstrap` prints a magic link URL. Open it on your phone.
 # The workspace is then reachable at https://<host>/w/myhome/today.
 ```
 
@@ -597,8 +598,8 @@ docker compose up -d
 
 # First operator workspace — same command as self-host, since
 # there is only one codepath.
-docker compose exec app crewday admin workspace create \
-    --slug ops --email ops@example.com
+docker compose exec app crewday admin workspace bootstrap \
+    --slug ops --name "Ops" --owner-email ops@example.com
 
 # Open the deployment to public signups:
 docker compose exec app crewday admin settings set signup_enabled true

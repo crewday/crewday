@@ -42,7 +42,7 @@ See ``docs/specs/01-architecture.md`` §"Key runtime invariants" #3,
 
 from __future__ import annotations
 
-from typing import Any, cast
+from typing import Any, Literal, cast
 
 from sqlalchemy.orm import Session
 
@@ -52,7 +52,9 @@ from app.util.clock import Clock, SystemClock
 from app.util.redact import redact
 from app.util.ulid import new_ulid
 
-__all__ = ["write_audit", "write_deployment_audit"]
+AuditVia = Literal["web", "api", "cli", "worker"]
+
+__all__ = ["AuditVia", "write_audit", "write_deployment_audit"]
 
 
 def _redacted_diff(
@@ -91,6 +93,7 @@ def write_audit(
     entity_id: str,
     action: str,
     diff: dict[str, Any] | list[Any] | None = None,
+    via: AuditVia = "web",
     clock: Clock | None = None,
 ) -> AuditLog:
     """Append one workspace-scoped audit row to the caller's open ``session``.
@@ -133,6 +136,7 @@ def write_audit(
         diff=_redacted_diff(diff),
         correlation_id=ctx.audit_correlation_id,
         scope_kind="workspace",
+        via=via,
         created_at=now,
     )
     session.add(row)
@@ -151,6 +155,7 @@ def write_deployment_audit(
     entity_id: str,
     action: str,
     diff: dict[str, Any] | list[Any] | None = None,
+    via: AuditVia = "api",
     clock: Clock | None = None,
 ) -> AuditLog:
     """Append one deployment-scoped audit row to the caller's open ``session``.
@@ -198,6 +203,7 @@ def write_deployment_audit(
         diff=_redacted_diff(diff),
         correlation_id=correlation_id,
         scope_kind="deployment",
+        via=via,
         created_at=now,
     )
     session.add(row)

@@ -149,7 +149,7 @@ from app.adapters.db.identity.models import (
     canonicalise_email,
 )
 from app.adapters.mail.ports import MailDeliveryError, Mailer
-from app.audit import write_audit
+from app.audit import AuditVia, write_audit
 from app.auth._hashing import hash_with_pepper
 from app.auth._throttle import ConsumeLockout, RateLimited, Throttle
 from app.auth.keys import derive_subkey
@@ -792,6 +792,7 @@ def request_link(
     clock: Clock | None = None,
     subject_id: str | None = None,
     send_email: bool = True,
+    via: AuditVia = "web",
 ) -> PendingMagicLink | None:
     """Mint one magic-link and queue its writes; return a deferred-send object.
 
@@ -909,6 +910,7 @@ def request_link(
             "ip_hash": ip_hash,
             "ttl_seconds": int(effective_ttl.total_seconds()),
         },
+        via=via,
         clock=clock,
     )
 

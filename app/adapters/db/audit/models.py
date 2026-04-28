@@ -58,6 +58,7 @@ __all__ = ["AuditLog"]
 # ``role_grant`` analogue (cd-wchi) so the two scope-tagged tables
 # share the same enum.
 _SCOPE_KIND_VALUES: tuple[str, ...] = ("workspace", "deployment")
+_VIA_VALUES: tuple[str, ...] = ("web", "api", "cli", "worker")
 
 
 class AuditLog(Base):
@@ -108,6 +109,7 @@ class AuditLog(Base):
     # ``AuditLog(workspace_id=..., ...)`` is implicitly a
     # workspace-scoped row.
     scope_kind: Mapped[str] = mapped_column(String, nullable=False, default="workspace")
+    via: Mapped[str] = mapped_column(String, nullable=False, default="web")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
     )
@@ -128,6 +130,10 @@ class AuditLog(Base):
         CheckConstraint(
             "scope_kind IN ('" + "', '".join(_SCOPE_KIND_VALUES) + "')",
             name="scope_kind",
+        ),
+        CheckConstraint(
+            "via IN ('" + "', '".join(_VIA_VALUES) + "')",
+            name="via",
         ),
         # Biconditional: a deployment row carries no workspace_id;
         # a workspace row must carry one. The DB-level CHECK is

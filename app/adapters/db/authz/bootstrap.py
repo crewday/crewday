@@ -43,7 +43,7 @@ from app.adapters.db.authz.models import (
     PermissionGroupMember,
     RoleGrant,
 )
-from app.audit import write_audit
+from app.audit import AuditVia, write_audit
 from app.tenancy import WorkspaceContext
 from app.util.clock import Clock, SystemClock
 from app.util.ulid import new_ulid
@@ -78,6 +78,7 @@ def seed_owners_system_group(
     *,
     workspace_id: str,
     owner_user_id: str,
+    via: AuditVia = "web",
     clock: Clock | None = None,
 ) -> tuple[PermissionGroup, PermissionGroupMember, RoleGrant]:
     """Seed the ``owners`` group + its sole member + the owner's role grant.
@@ -170,6 +171,7 @@ def seed_owners_system_group(
             "workspace_id": workspace_id,
             "owner_user_id": owner_user_id,
         },
+        via=via,
         clock=clock,
     )
     return group, member, grant

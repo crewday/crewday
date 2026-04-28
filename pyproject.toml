@@ -101,7 +101,7 @@ crewday = "crewday._main:main"
 # becomes ``crewday/foo.py`` in the built wheel — no symlinks, no
 # ``__init__.py`` redirects.
 [tool.hatch.build.targets.wheel]
-packages = ["app", "cli/crewday"]
+packages = ["app", "cli/crewday", "migrations"]
 
 [tool.hatch.build.targets.wheel.sources]
 "cli/crewday" = "crewday"

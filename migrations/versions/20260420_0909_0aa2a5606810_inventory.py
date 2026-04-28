@@ -44,7 +44,7 @@ _MOVEMENT_REASON_ENUM = sa.Enum(
     *_REASON_VALUES,
     name="inventory_movement_reason",
     native_enum=True,
-    create_constraint=True,
+    create_constraint=False,
 )
 
 
@@ -178,6 +178,10 @@ def upgrade() -> None:
         sa.CheckConstraint(
             f"actor_kind IN ({_in_clause(_MOVEMENT_ACTOR_KIND_VALUES)})",
             name=op.f("ck_inventory_movement_actor_kind"),
+        ),
+        sa.CheckConstraint(
+            f"reason IN ({_in_clause(_REASON_VALUES)})",
+            name=op.f("ck_inventory_movement_inventory_movement_reason"),
         ),
         sa.ForeignKeyConstraint(
             ["actor_id"],

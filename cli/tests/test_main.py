@@ -300,7 +300,7 @@ def test_overrides_registration_mounts_composite_commands() -> None:
     Verifies the auto-discovery walk in
     :func:`crewday._overrides.register_overrides`: the three
     hand-written verbs (``auth login``, ``tasks complete``,
-    ``expenses submit``) all land under their respective groups on
+    ``expenses submit``, ``admin init``) all land under their respective groups on
     the real Click root.
     """
     from crewday._main import _register_overrides_once, root
@@ -312,12 +312,17 @@ def test_overrides_registration_mounts_composite_commands() -> None:
     auth = root.commands.get("auth")
     tasks = root.commands.get("tasks")
     expenses = root.commands.get("expenses")
+    admin = root.commands.get("admin")
     assert isinstance(auth, click.Group), "auth group missing or wrong type"
     assert isinstance(tasks, click.Group), "tasks group missing or wrong type"
     assert isinstance(expenses, click.Group), "expenses group missing or wrong type"
+    assert isinstance(admin, click.Group), "admin group missing or wrong type"
     assert "login" in auth.commands
     assert "complete" in tasks.commands
     assert "submit" in expenses.commands
+    assert "init" in admin.commands
+    assert "user" in admin.commands
+    assert "workspace" in admin.commands
 
 
 def test_overrides_register_is_idempotent() -> None:
