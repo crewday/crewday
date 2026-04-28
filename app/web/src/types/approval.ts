@@ -39,6 +39,29 @@ export interface ApprovalRequest {
   resolved_user_mode: AgentApprovalMode | null;
 }
 
+export interface ApprovalRequestPayload {
+  id: string;
+  workspace_id: string;
+  requester_actor_id: string | null;
+  for_user_id: string | null;
+  inline_channel: InlineChannel | null;
+  resolved_user_mode: AgentApprovalMode | null;
+  status: "pending" | "approved" | "rejected" | "timed_out";
+  decided_by: string | null;
+  decided_at: string | null;
+  decision_note_md: string | null;
+  expires_at: string | null;
+  created_at: string;
+  action_json: Record<string, unknown>;
+  result_json: Record<string, unknown> | null;
+}
+
+export interface ApprovalsListResponse {
+  data: ApprovalRequestPayload[];
+  next_cursor: string | null;
+  has_more: boolean;
+}
+
 export interface AgentAction {
   id: string;
   title: string;
