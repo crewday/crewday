@@ -16,8 +16,9 @@ OpenClaw, etc.) operating on this repository.
   host can't pass badger and must use the loopback equivalent
   <http://127.0.0.1:8100> (same Vite container, paths 1:1). Point
   `curl`, Playwright, and scripted verification there.
-- **Production**: not yet deployed — only specs and mocks live in
-  this repo. See `docs/specs/19-roadmap.md`.
+- **Production**: not yet deployed. The production app code lives
+  under `app/`; high-fidelity mocks remain under `mocks/`. See
+  `docs/specs/19-roadmap.md`.
 - **Bring the dev stack up**: `docker compose -f mocks/docker-compose.yml up -d --build`.
 - **Never bind to the public interface.** Use `127.0.0.1` or the
   `tailscale0` interface only — a misbound port is a blocker bug.
@@ -25,31 +26,31 @@ OpenClaw, etc.) operating on this repository.
 
 ## Ask first
 
-- **Use `AskUserQuestion` for any non-obvious decision.** Batch
-  related questions, but never silently guess at ambiguous
+- **Ask before any non-obvious decision.** Use `AskUserQuestion` or
+  the current runtime's equivalent. Batch related questions, but
+  never silently guess at ambiguous
   requirements — especially in auth, privacy, payroll, and anything
   touching PII.
-- **Use `AskUserQuestion` before any irreversible operation** (delete,
-  purge, force-push, overwrite committed work or production data).
-  Confirmed per-invocation, not once-per-session.
+- **Ask before any irreversible operation** (delete, purge,
+  force-push, overwrite committed work or production data). Confirmed
+  per-invocation, not once-per-session.
 - **Shared worktree**: multiple agents may be working concurrently.
   Run `git status` before any destructive op; never discard changes
   you didn't make; stop and ask if you see unexpected edits mid-task.
 
 ## Session bootstrap
 
-1. Skim recent git log, open PRs and issues, uncommitted changes,
-   and active worktrees.
+1. Skim recent git log, uncommitted changes, and active worktrees.
 2. Read the relevant spec under `docs/specs/`. **Spec is the source
    of truth; code follows.** Default to updating code on divergence
    unless an ADR or postmortem says otherwise.
 3. If `bd` is on `PATH`, skim `bd ready` and claim
    (`bd update <id> --claim`) any task that covers what you're about
    to do. If not, skip — don't block on Beads availability.
-4. **Dev login** (smoke-test the real app at `127.0.0.1:8100` without
-   a passkey). Run inside the dev stack — the compose file pre-sets
-   `CREWDAY_DEV_AUTH=1` and `CREWDAY_PROFILE=dev` so the gates are
-   green by construction:
+4. For API/UI smoke tests, use **dev login** to exercise the real app
+   at `127.0.0.1:8100` without a passkey. Run inside the dev stack —
+   the compose file pre-sets `CREWDAY_DEV_AUTH=1` and
+   `CREWDAY_PROFILE=dev` so the gates are green by construction:
    ```
    docker compose -f mocks/docker-compose.yml exec app-api \
      python -m scripts.dev_login --email me@dev.local --workspace smoke
@@ -94,8 +95,9 @@ a request you disagree with.
 
 ## Keep this file fresh
 
-Treat `CLAUDE.md`, `.claude/skills/`, and `.claude/agents/` as living
-instructions. Update them in the same turn when:
+Treat `AGENTS.md`, `CLAUDE.md`, `.claude/skills/`, and
+`.claude/agents/` as living instructions. Update them in the same turn
+when:
 
 - An instruction was wrong, stale, or missing and cost you a retry.
 - A skill's procedure failed or produced the wrong output shape.
@@ -115,8 +117,8 @@ update in your wrap-up.
   slower — fix root causes, refactor the rough edge, write the
   missing test. Shortcuts rot the codebase; disciplined craft
   compounds into one that stays easy to change. Refactor when it
-  genuinely improves things — but **confirm intent via
-  `AskUserQuestion` before starting**, so scope creep is conscious.
+  genuinely improves things — but **confirm intent before starting**,
+  so scope creep is conscious.
 - **Fix what you find.** If you hit a broken test, stale type, dead
   import, or bit-rotted helper while working, fix it — don't route
   around it because "I didn't write this". The one exception is a
@@ -157,16 +159,17 @@ update in your wrap-up.
   for `git pull --rebase` if the push is rejected as
   non-fast-forward (an unconditional rebase can collide with another
   agent's in-progress work).
-- **Never force-push.** Commit directly to `main` by default; only
-  cut a branch + PR if the user asks for review or the change is
-  risky enough to warrant one.
+- **Never force-push.** Commit directly to the current branch by
+  default, even when it is `main`; only cut a branch + PR if the user
+  asks for review or the change is risky enough to warrant one.
 - If a push fails, diagnose the root cause; do not `--no-verify`,
   don't bypass hooks.
 
 ## Tooling conventions
 
-- **No `&&`** in tool calls. Run commands as separate calls; run
-  independent ones in parallel.
+- **No `&&` in agent tool calls.** Run commands as separate calls;
+  run independent ones in parallel. Existing shell scripts and
+  workflow YAML may use normal shell control flow.
 - **JSON with `jq`**, not Python. Use `gh`'s `--jq` for GitHub
   payloads.
 - **Modern CLI tools**: `rg` over `grep`, `fd` over `find`, `sd` over
@@ -215,9 +218,10 @@ spin up subagents for implementation, selfreview, commit, or oracle work
 when the runtime supports it and the user has authorized delegation.
 See [`.claude/README.md`](.claude/README.md).
 
-**Every plan must end with `/selfreview`** — regardless of scope —
-to catch bugs, missing pieces, and unintended consequences before
-pushing.
+**Every implementation plan must end with `/selfreview`** — regardless
+of scope — to catch bugs, missing pieces, and unintended consequences
+before pushing. Pure explanation, investigation, or brainstorming does
+not need a selfreview step unless it leads to edits.
 
 ## Issue tracking with Beads
 
@@ -225,10 +229,8 @@ crew.day uses **Beads** (`bd` CLI) as its task queue. Anything
 bigger than a typo or obvious same-file fix should have a Beads
 issue so follow-ups don't get lost between sessions.
 
-If `bd` isn't on `PATH`, install it via your package manager
-(system, Homebrew, `uv tool install`) — never `curl … | bash`.
-Until it's available, skip Beads steps and leave a note for a
-Beads-equipped agent.
+If `bd` isn't on `PATH`, skip Beads steps and leave a note for a
+Beads-equipped agent. Do not install tooling unless the user asks.
 
 ```bash
 bd ready                              # what's unblocked right now
@@ -300,9 +302,9 @@ Plain text to the user; CLI handles styling.
   and prose rationale below. Read it before any visual change.
   The living CSS implementation is `mocks/web/src/styles/tokens.css`
   and `mocks/web/src/styles/globals.css`. **If `DESIGN.md` and the
-  CSS disagree on any value, stop and resolve via `AskUserQuestion`**
-  — ask the user which side is correct, then fix the wrong side in
-  the same turn. Never silently match one to the other.
+  CSS disagree on any value, stop and ask the user which side is
+  correct, then fix the wrong side in the same turn. Never silently
+  match one to the other.
 - **No PII to upstream LLMs without explicit opt-in.** Use the
   model client's redaction layer.
 - **Time is UTC at rest, local for display.** Timestamp columns are
