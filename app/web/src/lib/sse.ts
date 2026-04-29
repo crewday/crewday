@@ -23,7 +23,7 @@
 //
 // Server emits (today): task.created, task.assigned, task.completed,
 // task.overdue, stay.upcoming, reservation.upserted,
-// property.closure.created, expense.approved, shift.ended,
+// property.closure.created, property.closure.updated, expense.approved, shift.ended,
 // time.shift.changed. Additional kinds here (agent.*, booking.*,
 // asset_action.*, schedule_ruleset.*, task.updated/skipped, approval.*,
 // ical.poll.completed) track the spec and the mock's dispatcher for
@@ -88,6 +88,7 @@ export type EventKind =
   | "stay.upcoming"
   | "reservation.upserted"
   | "property.closure.created"
+  | "property.closure.updated"
   | "property.workspace.changed"
   | "ical.poll.completed"
   | "stay_task_bundle.upserted"
@@ -465,6 +466,14 @@ export const INVALIDATIONS: Record<EventKind, InvalidationHandler> = {
   },
 
   "property.closure.created": (event, qc) => {
+    const payload = event.data as unknown as PropertyClosurePayload;
+    invalidate(qc, qk.stays());
+    invalidate(qc, qk.propertyClosures(payload.property_id));
+    invalidate(qc, ["scheduler-calendar"]);
+    invalidate(qc, ["my-schedule"]);
+  },
+
+  "property.closure.updated": (event, qc) => {
     const payload = event.data as unknown as PropertyClosurePayload;
     invalidate(qc, qk.stays());
     invalidate(qc, qk.propertyClosures(payload.property_id));

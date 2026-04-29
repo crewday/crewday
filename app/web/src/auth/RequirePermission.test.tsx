@@ -135,6 +135,12 @@ describe("<RequirePermission>", () => {
     );
   });
 
+  it("wraps the real property closures route before the manager shell", () => {
+    expect(appSource).toMatch(
+      /<Route element={<RequirePermission actionKey="properties\.read" \/>}>\s*<Route element={<ManagerLayout \/>}>[\s\S]*?<Route path="\/property\/:pid\/closures" element={<PropertyClosuresPage \/>} \/>/,
+    );
+  });
+
   it("wraps the real properties list route before the manager shell", () => {
     expect(appSource).toMatch(
       /<Route element={<RequirePermission actionKey="properties\.read" \/>}>\s*<Route element={<ManagerLayout \/>}>\s*<Route path="\/properties" element={<PropertiesPage \/>} \/>/,

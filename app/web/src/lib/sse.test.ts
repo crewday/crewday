@@ -94,6 +94,7 @@ describe("INVALIDATIONS — coverage", () => {
     "stay.upcoming",
     "reservation.upserted",
     "property.closure.created",
+    "property.closure.updated",
     "property.workspace.changed",
     "ical.poll.completed",
     "stay_task_bundle.upserted",
@@ -242,6 +243,28 @@ describe("INVALIDATIONS — per-kind behaviour", () => {
     const spy = vi.spyOn(qc, "invalidateQueries");
     INVALIDATIONS["property.closure.created"](
       makeEvent("property.closure.created", {
+        closure_id: "clos_1",
+        property_id: "prop_1",
+        source_ical_feed_id: "feed_1",
+      }),
+      qc,
+    );
+    const called = spy.mock.calls.map((c) => c[0]?.queryKey);
+    expect(called).toEqual(
+      expect.arrayContaining([
+        qk.stays(),
+        qk.propertyClosures("prop_1"),
+        ["scheduler-calendar"],
+        ["my-schedule"],
+      ]),
+    );
+  });
+
+  it("property.closure.updated invalidates stays + closure timeline + calendars", () => {
+    const qc = makeClient();
+    const spy = vi.spyOn(qc, "invalidateQueries");
+    INVALIDATIONS["property.closure.updated"](
+      makeEvent("property.closure.updated", {
         closure_id: "clos_1",
         property_id: "prop_1",
         source_ical_feed_id: "feed_1",
