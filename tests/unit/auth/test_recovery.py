@@ -640,7 +640,7 @@ class TestRequestRecoveryRateLimit:
 
 
 class TestRequestRecoveryEnumerationGuard:
-    """Both branches write an audit row and call the mailer once."""
+    """Both branches write audit; only known users receive mail."""
 
     def test_hit_and_miss_both_write_audit_but_only_hit_sends_mail(
         self,
