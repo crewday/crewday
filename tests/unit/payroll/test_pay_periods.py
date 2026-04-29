@@ -56,6 +56,7 @@ class _FakeRepo(PayPeriodRepository):
         self._session = _FakeSession()
         self.paid_payslip = False
         self.unpaid_payslip = False
+        self.unsettled_booking_ids: list[str] = []
         self.deleted: list[str] = []
 
     @property
@@ -168,6 +169,16 @@ class _FakeRepo(PayPeriodRepository):
     def has_unpaid_payslip(self, *, workspace_id: str, period_id: str) -> bool:
         return self.unpaid_payslip
 
+    def list_unsettled_booking_ids(
+        self,
+        *,
+        workspace_id: str,
+        starts_at: datetime,
+        ends_at: datetime,
+        limit: int,
+    ) -> Sequence[str]:
+        return self.unsettled_booking_ids[:limit]
+
 
 class _Scheduler:
     def __init__(self) -> None:
@@ -249,6 +260,25 @@ def test_lock_period_schedules_recompute_audits_and_emits_event() -> None:
     assert len(repo.session.added) == 1
     assert repo.session.added[0].action == "pay_period.locked"
     assert [e.pay_period_id for e in events] == [period.id]
+
+
+def test_lock_period_rejects_unsettled_bookings() -> None:
+    repo = _FakeRepo()
+    period = _seed(repo)
+    repo.unsettled_booking_ids = ["01HWA00000000000000000BKG1"]
+    scheduler = _Scheduler()
+
+    with pytest.raises(PayPeriodInvariantViolated, match="bookings_unsettled"):
+        lock_period(
+            repo,
+            _ctx(),
+            period_id=period.id,
+            recompute_scheduler=scheduler,
+            clock=FrozenClock(_PINNED),
+        )
+
+    assert scheduler.calls == []
+    assert repo.rows[period.id].state == "open"
 
 
 def test_bad_transitions_raise_conflict() -> None:

@@ -19,7 +19,7 @@ from decimal import Decimal
 
 from sqlalchemy import CheckConstraint, Index, UniqueConstraint
 
-from app.adapters.db.payroll import PayPeriod, PayRule, Payslip
+from app.adapters.db.payroll import Booking, PayPeriod, PayPeriodEntry, PayRule, Payslip
 from app.adapters.db.payroll import models as payroll_models
 
 _PINNED = datetime(2026, 4, 19, 12, 0, 0, tzinfo=UTC)
@@ -324,8 +324,10 @@ class TestPackageReExports:
     """``app.adapters.db.payroll`` re-exports every v1-slice model."""
 
     def test_models_re_exported(self) -> None:
+        assert Booking is payroll_models.Booking
         assert PayRule is payroll_models.PayRule
         assert PayPeriod is payroll_models.PayPeriod
+        assert PayPeriodEntry is payroll_models.PayPeriodEntry
         assert Payslip is payroll_models.Payslip
 
 
@@ -346,10 +348,18 @@ class TestRegistryIntent:
         from app.tenancy import registry
 
         registry._reset_for_tests()
-        for table in ("pay_rule", "pay_period", "payslip"):
+        tables = (
+            "booking",
+            "pay_rule",
+            "pay_period",
+            "pay_period_entry",
+            "payslip",
+            "payout_destination",
+        )
+        for table in tables:
             registry.register(table)
         scoped = registry.scoped_tables()
-        for table in ("pay_rule", "pay_period", "payslip"):
+        for table in tables:
             assert table in scoped, f"{table} must be scoped"
 
     def test_is_scoped_reports_true(self) -> None:
@@ -357,7 +367,15 @@ class TestRegistryIntent:
         from app.tenancy import registry
 
         registry._reset_for_tests()
-        for table in ("pay_rule", "pay_period", "payslip"):
+        tables = (
+            "booking",
+            "pay_rule",
+            "pay_period",
+            "pay_period_entry",
+            "payslip",
+            "payout_destination",
+        )
+        for table in tables:
             registry.register(table)
-        for table in ("pay_rule", "pay_period", "payslip"):
+        for table in tables:
             assert registry.is_scoped(table) is True

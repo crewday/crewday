@@ -19,19 +19,36 @@ from __future__ import annotations
 from collections.abc import Sequence
 from datetime import datetime
 from decimal import Decimal
+from typing import Literal
 
-from sqlalchemy import and_, exists, or_, select, update
+from sqlalchemy import and_, delete, exists, or_, select, update
 from sqlalchemy.orm import Session
+from sqlalchemy.sql.elements import ColumnElement
 
-from app.adapters.db.payroll.models import PayPeriod, PayRule, Payslip
+from app.adapters.db.payroll.models import (
+    Booking,
+    PayPeriod,
+    PayPeriodEntry,
+    PayRule,
+    Payslip,
+)
+from app.domain.payroll.bookings import (
+    derive_booking_pay_entry,
+    group_booking_entries_by_day,
+)
 from app.domain.payroll.ports import (
+    BookingPayRepository,
+    BookingPayRow,
+    PayPeriodEntryRow,
     PayPeriodRepository,
     PayPeriodRow,
     PayRuleRepository,
     PayRuleRow,
 )
+from app.util.ulid import new_ulid
 
 __all__ = [
+    "SqlAlchemyBookingPayRepository",
     "SqlAlchemyPayPeriodRepository",
     "SqlAlchemyPayRuleRepository",
 ]
@@ -41,6 +58,14 @@ __all__ = [
 # string and not a ULID character, so a single literal split is
 # unambiguous.
 _CURSOR_SEP = "|"
+_SETTLED_BOOKING_STATUSES: tuple[str, ...] = (
+    "completed",
+    "adjusted",
+    "cancelled_by_client",
+    "cancelled_by_agency",
+    "no_show_worker",
+)
+_UNSETTLED_BOOKING_STATUSES: tuple[str, ...] = ("scheduled", "pending_approval")
 
 
 def _split_cursor(cursor: str) -> tuple[datetime, str]:
@@ -92,6 +117,71 @@ def _period_to_row(row: PayPeriod) -> PayPeriodRow:
         locked_at=row.locked_at,
         locked_by=row.locked_by,
         created_at=row.created_at,
+    )
+
+
+def _pay_basis(value: str) -> Literal["scheduled", "actual"]:
+    if value == "scheduled":
+        return "scheduled"
+    if value == "actual":
+        return "actual"
+    raise ValueError(f"unknown booking pay_basis: {value!r}")
+
+
+def _booking_to_row(row: Booking) -> BookingPayRow:
+    return BookingPayRow(
+        id=row.id,
+        workspace_id=row.workspace_id,
+        work_engagement_id=row.work_engagement_id,
+        user_id=row.user_id,
+        property_id=row.property_id,
+        status=row.status,
+        kind=row.kind,
+        pay_basis=_pay_basis(row.pay_basis),
+        scheduled_start=row.scheduled_start,
+        scheduled_end=row.scheduled_end,
+        actual_minutes=row.actual_minutes,
+        actual_minutes_paid=row.actual_minutes_paid,
+        break_seconds=row.break_seconds,
+        adjusted=row.adjusted,
+        adjustment_reason=row.adjustment_reason,
+        pending_amend_minutes=row.pending_amend_minutes,
+        pending_amend_reason=row.pending_amend_reason,
+        cancelled_at=row.cancelled_at,
+        cancellation_window_hours=row.cancellation_window_hours,
+        cancellation_pay_to_worker=row.cancellation_pay_to_worker,
+        created_at=row.created_at,
+        updated_at=row.updated_at,
+    )
+
+
+def _entry_to_row(row: PayPeriodEntry) -> PayPeriodEntryRow:
+    return PayPeriodEntryRow(
+        id=row.id,
+        workspace_id=row.workspace_id,
+        pay_period_id=row.pay_period_id,
+        work_engagement_id=row.work_engagement_id,
+        user_id=row.user_id,
+        entry_date=row.entry_date,
+        minutes=row.minutes,
+        source_booking_ids=tuple(row.source_booking_ids_json),
+        source_details=tuple(row.source_details_json),
+        created_at=row.created_at,
+        updated_at=row.updated_at,
+    )
+
+
+def _booking_window_filters(
+    *,
+    workspace_id: str,
+    starts_at: datetime,
+    ends_at: datetime,
+) -> tuple[ColumnElement[bool], ...]:
+    return (
+        Booking.workspace_id == workspace_id,
+        Booking.deleted_at.is_(None),
+        Booking.scheduled_start < ends_at,
+        Booking.scheduled_end > starts_at,
     )
 
 
@@ -257,6 +347,161 @@ class SqlAlchemyPayPeriodRepository(PayPeriodRepository):
                 )
             )
         )
+
+    def list_unsettled_booking_ids(
+        self,
+        *,
+        workspace_id: str,
+        starts_at: datetime,
+        ends_at: datetime,
+        limit: int,
+    ) -> Sequence[str]:
+        rows = self._session.scalars(
+            select(Booking.id)
+            .where(
+                *_booking_window_filters(
+                    workspace_id=workspace_id,
+                    starts_at=starts_at,
+                    ends_at=ends_at,
+                ),
+                or_(
+                    Booking.status.in_(_UNSETTLED_BOOKING_STATUSES),
+                    Booking.pending_amend_minutes.is_not(None),
+                ),
+            )
+            .order_by(Booking.scheduled_start.asc(), Booking.id.asc())
+            .limit(limit)
+        ).all()
+        return list(rows)
+
+
+class SqlAlchemyBookingPayRepository(BookingPayRepository):
+    """SA-backed booking payroll ledger repository."""
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    @property
+    def session(self) -> Session:
+        return self._session
+
+    def list_pay_bearing_bookings(
+        self,
+        *,
+        workspace_id: str,
+        starts_at: datetime,
+        ends_at: datetime,
+        user_id: str | None = None,
+        work_engagement_id: str | None = None,
+    ) -> Sequence[BookingPayRow]:
+        stmt = (
+            select(Booking)
+            .where(
+                *_booking_window_filters(
+                    workspace_id=workspace_id,
+                    starts_at=starts_at,
+                    ends_at=ends_at,
+                ),
+                Booking.status.in_(_SETTLED_BOOKING_STATUSES),
+                Booking.pending_amend_minutes.is_(None),
+            )
+            .order_by(Booking.scheduled_start.asc(), Booking.id.asc())
+        )
+        if user_id is not None:
+            stmt = stmt.where(Booking.user_id == user_id)
+        if work_engagement_id is not None:
+            stmt = stmt.where(Booking.work_engagement_id == work_engagement_id)
+
+        rows = self._session.scalars(stmt).all()
+        return [_booking_to_row(row) for row in rows]
+
+    def list_unsettled_booking_ids(
+        self,
+        *,
+        workspace_id: str,
+        starts_at: datetime,
+        ends_at: datetime,
+        limit: int,
+    ) -> Sequence[str]:
+        rows = self._session.scalars(
+            select(Booking.id)
+            .where(
+                *_booking_window_filters(
+                    workspace_id=workspace_id,
+                    starts_at=starts_at,
+                    ends_at=ends_at,
+                ),
+                or_(
+                    Booking.status.in_(_UNSETTLED_BOOKING_STATUSES),
+                    Booking.pending_amend_minutes.is_not(None),
+                ),
+            )
+            .order_by(Booking.scheduled_start.asc(), Booking.id.asc())
+            .limit(limit)
+        ).all()
+        return list(rows)
+
+    def replace_period_entries(
+        self,
+        *,
+        workspace_id: str,
+        pay_period_id: str,
+        starts_at: datetime,
+        ends_at: datetime,
+        now: datetime,
+    ) -> Sequence[PayPeriodEntryRow]:
+        period_id = self._session.scalar(
+            select(PayPeriod.id).where(
+                PayPeriod.id == pay_period_id,
+                PayPeriod.workspace_id == workspace_id,
+            )
+        )
+        if period_id is None:
+            raise LookupError(f"pay period not found in workspace: {pay_period_id}")
+
+        booking_rows = self.list_pay_bearing_bookings(
+            workspace_id=workspace_id,
+            starts_at=starts_at,
+            ends_at=ends_at,
+        )
+        entries = [
+            derive_booking_pay_entry(row)
+            for row in booking_rows
+            if row.pending_amend_minutes is None
+        ]
+        grouped = group_booking_entries_by_day(entries)
+
+        self._session.execute(
+            delete(PayPeriodEntry).where(
+                PayPeriodEntry.workspace_id == workspace_id,
+                PayPeriodEntry.pay_period_id == pay_period_id,
+            )
+        )
+
+        rows: list[PayPeriodEntry] = []
+        for key, day_entries in sorted(grouped.items(), key=lambda item: item[0]):
+            work_engagement_id, user_id, entry_date = key
+            ordered_entries = sorted(day_entries, key=lambda entry: entry.booking_id)
+            row = PayPeriodEntry(
+                id=new_ulid(),
+                workspace_id=workspace_id,
+                pay_period_id=pay_period_id,
+                work_engagement_id=work_engagement_id,
+                user_id=user_id,
+                entry_date=entry_date,
+                minutes=sum(entry.minutes for entry in ordered_entries),
+                source_booking_ids_json=[entry.booking_id for entry in ordered_entries],
+                source_details_json=[
+                    entry.source_detail() for entry in ordered_entries
+                ],
+                created_at=now,
+                updated_at=now,
+            )
+            self._session.add(row)
+            rows.append(row)
+
+        self._session.flush()
+        return [_entry_to_row(row) for row in rows]
 
 
 class SqlAlchemyPayRuleRepository(PayRuleRepository):

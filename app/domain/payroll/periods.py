@@ -206,6 +206,15 @@ def lock_period(
     row = _load_row(repo, ctx, period_id=period_id)
     if row.state != "open":
         raise PayPeriodTransitionConflict("only open pay periods can be locked")
+    unsettled_booking_ids = repo.list_unsettled_booking_ids(
+        workspace_id=ctx.workspace_id,
+        starts_at=row.starts_at,
+        ends_at=row.ends_at,
+        limit=25,
+    )
+    if unsettled_booking_ids:
+        joined_ids = ", ".join(unsettled_booking_ids)
+        raise PayPeriodInvariantViolated(f"bookings_unsettled: {joined_ids}")
 
     resolved_clock = clock if clock is not None else SystemClock()
     before = _row_to_view(row)

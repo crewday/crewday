@@ -35,13 +35,16 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
-from typing import Protocol
+from typing import Literal, Protocol
 
 from sqlalchemy.orm import Session
 
 __all__ = [
+    "BookingPayRepository",
+    "BookingPayRow",
+    "PayPeriodEntryRow",
     "PayPeriodRecomputeScheduler",
     "PayPeriodRepository",
     "PayPeriodRow",
@@ -91,6 +94,51 @@ class PayPeriodRow:
     locked_at: datetime | None
     locked_by: str | None
     created_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class BookingPayRow:
+    """Immutable projection of a pay-bearing ``booking`` row."""
+
+    id: str
+    workspace_id: str
+    work_engagement_id: str
+    user_id: str
+    property_id: str | None
+    status: str
+    kind: str
+    pay_basis: Literal["scheduled", "actual"]
+    scheduled_start: datetime
+    scheduled_end: datetime
+    actual_minutes: int | None
+    actual_minutes_paid: int
+    break_seconds: int
+    adjusted: bool
+    adjustment_reason: str | None
+    pending_amend_minutes: int | None
+    pending_amend_reason: str | None
+    cancelled_at: datetime | None
+    cancellation_window_hours: int
+    cancellation_pay_to_worker: bool
+    created_at: datetime
+    updated_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class PayPeriodEntryRow:
+    """Immutable projection of a daily booking payroll ledger row."""
+
+    id: str
+    workspace_id: str
+    pay_period_id: str
+    work_engagement_id: str
+    user_id: str
+    entry_date: date
+    minutes: int
+    source_booking_ids: tuple[str, ...]
+    source_details: tuple[dict[str, object], ...]
+    created_at: datetime
+    updated_at: datetime
 
 
 class PayPeriodRecomputeScheduler(Protocol):
@@ -174,6 +222,61 @@ class PayPeriodRepository(Protocol):
 
     def has_unpaid_payslip(self, *, workspace_id: str, period_id: str) -> bool:
         """Return whether any contained payslip is not fully paid."""
+        ...
+
+    def list_unsettled_booking_ids(
+        self,
+        *,
+        workspace_id: str,
+        starts_at: datetime,
+        ends_at: datetime,
+        limit: int,
+    ) -> Sequence[str]:
+        """Return unsettled booking ids that block locking this period."""
+        ...
+
+
+class BookingPayRepository(Protocol):
+    """Read + write seam for booking-derived payroll ledger entries."""
+
+    @property
+    def session(self) -> Session:
+        """Return the underlying SQLAlchemy session."""
+        ...
+
+    def list_pay_bearing_bookings(
+        self,
+        *,
+        workspace_id: str,
+        starts_at: datetime,
+        ends_at: datetime,
+        user_id: str | None = None,
+        work_engagement_id: str | None = None,
+    ) -> Sequence[BookingPayRow]:
+        """Return settled pay-bearing bookings intersecting the period."""
+        ...
+
+    def list_unsettled_booking_ids(
+        self,
+        *,
+        workspace_id: str,
+        starts_at: datetime,
+        ends_at: datetime,
+        limit: int,
+    ) -> Sequence[str]:
+        """Return scheduled/pending/pending-amend bookings in the period."""
+        ...
+
+    def replace_period_entries(
+        self,
+        *,
+        workspace_id: str,
+        pay_period_id: str,
+        starts_at: datetime,
+        ends_at: datetime,
+        now: datetime,
+    ) -> Sequence[PayPeriodEntryRow]:
+        """Recompute daily pay-period entries from settled bookings."""
         ...
 
 

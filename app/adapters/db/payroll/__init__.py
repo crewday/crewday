@@ -1,7 +1,7 @@
-"""payroll — pay_rule / pay_period / payslip.
+"""payroll — workspace-scoped payroll tables.
 
-All three tables in this package are workspace-scoped: each row
-carries a ``workspace_id`` column and is registered in
+Every table in this package is workspace-scoped: each row carries a
+``workspace_id`` column and is registered in
 :mod:`app.tenancy.registry` so the ORM tenant filter auto-injects a
 ``workspace_id`` predicate on every SELECT / UPDATE / DELETE. A
 bare read without a :class:`~app.tenancy.WorkspaceContext` raises
@@ -26,10 +26,31 @@ rules", §"Pay period", §"Payslip".
 
 from __future__ import annotations
 
-from app.adapters.db.payroll.models import PayPeriod, PayRule, PayoutDestination, Payslip
+from app.adapters.db.payroll.models import (
+    Booking,
+    PayoutDestination,
+    PayPeriod,
+    PayPeriodEntry,
+    PayRule,
+    Payslip,
+)
 from app.tenancy.registry import register
 
-for _table in ("pay_rule", "pay_period", "payslip", "payout_destination"):
+for _table in (
+    "booking",
+    "pay_rule",
+    "pay_period",
+    "pay_period_entry",
+    "payslip",
+    "payout_destination",
+):
     register(_table)
 
-__all__ = ["PayPeriod", "PayRule", "PayoutDestination", "Payslip"]
+__all__ = [
+    "Booking",
+    "PayPeriod",
+    "PayPeriodEntry",
+    "PayRule",
+    "PayoutDestination",
+    "Payslip",
+]

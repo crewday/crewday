@@ -46,17 +46,19 @@ rules", §"Pay period", §"Payslip".
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
-from typing import Any
 
 from sqlalchemy import (
     JSON,
     BigInteger,
+    Boolean,
     CheckConstraint,
+    Date,
     DateTime,
     ForeignKey,
     Index,
+    Integer,
     Numeric,
     String,
     UniqueConstraint,
@@ -73,7 +75,14 @@ from app.adapters.db.base import Base
 from app.adapters.db.identity import models as _identity_models  # noqa: F401
 from app.adapters.db.workspace import models as _workspace_models  # noqa: F401
 
-__all__ = ["PayPeriod", "PayRule", "PayoutDestination", "Payslip"]
+__all__ = [
+    "Booking",
+    "PayPeriod",
+    "PayPeriodEntry",
+    "PayRule",
+    "PayoutDestination",
+    "Payslip",
+]
 
 
 # Allowed ``pay_period.state`` values — the v1 lifecycle matching
@@ -85,6 +94,17 @@ __all__ = ["PayPeriod", "PayRule", "PayoutDestination", "Payslip"]
 # layer — see §09 §"Transition to paid").
 _PAY_PERIOD_STATE_VALUES: tuple[str, ...] = ("open", "locked", "paid")
 _PAYSLIP_STATUS_VALUES: tuple[str, ...] = ("draft", "issued", "paid", "voided")
+_BOOKING_STATUS_VALUES: tuple[str, ...] = (
+    "pending_approval",
+    "scheduled",
+    "completed",
+    "cancelled_by_client",
+    "cancelled_by_agency",
+    "no_show_worker",
+    "adjusted",
+)
+_BOOKING_KIND_VALUES: tuple[str, ...] = ("work", "travel")
+_BOOKING_PAY_BASIS_VALUES: tuple[str, ...] = ("scheduled", "actual")
 
 
 def _in_clause(values: tuple[str, ...]) -> str:
@@ -95,6 +115,197 @@ def _in_clause(values: tuple[str, ...]) -> str:
     readable.
     """
     return "'" + "', '".join(values) + "'"
+
+
+class Booking(Base):
+    """A pay-bearing hourly booking used as the payroll atom.
+
+    This slice deliberately carries the resolved ``pay_basis`` on the
+    booking row so payroll can derive minutes without reading shifts or
+    re-running the settings cascade at period close. ``work_engagement_id``
+    is a real FK because the workspace package has shipped the table;
+    ``property_id`` remains a soft-ref, matching the time package until
+    the property/work-engagement intersection settles.
+    """
+
+    __tablename__ = "booking"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    workspace_id: Mapped[str] = mapped_column(
+        String,
+        ForeignKey("workspace.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    work_engagement_id: Mapped[str] = mapped_column(
+        String,
+        ForeignKey("work_engagement.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    user_id: Mapped[str] = mapped_column(
+        String,
+        ForeignKey("user.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    property_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    client_org_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    status: Mapped[str] = mapped_column(String, nullable=False)
+    kind: Mapped[str] = mapped_column(String, nullable=False, default="work")
+    pay_basis: Mapped[str] = mapped_column(String, nullable=False, default="scheduled")
+    scheduled_start: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    scheduled_end: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    actual_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    actual_minutes_paid: Mapped[int] = mapped_column(Integer, nullable=False)
+    break_seconds: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    notes_md: Mapped[str | None] = mapped_column(String, nullable=True)
+    adjusted: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    adjustment_reason: Mapped[str | None] = mapped_column(String, nullable=True)
+    pending_amend_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    pending_amend_reason: Mapped[str | None] = mapped_column(String, nullable=True)
+    declined_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    declined_reason: Mapped[str | None] = mapped_column(String, nullable=True)
+    cancelled_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    cancellation_window_hours: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=24
+    )
+    cancellation_pay_to_worker: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True
+    )
+    created_by_actor_kind: Mapped[str | None] = mapped_column(String, nullable=True)
+    created_by_actor_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    deleted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            f"status IN ({_in_clause(_BOOKING_STATUS_VALUES)})",
+            name="status",
+        ),
+        CheckConstraint(
+            f"kind IN ({_in_clause(_BOOKING_KIND_VALUES)})",
+            name="kind",
+        ),
+        CheckConstraint(
+            f"pay_basis IN ({_in_clause(_BOOKING_PAY_BASIS_VALUES)})",
+            name="pay_basis",
+        ),
+        CheckConstraint("scheduled_end > scheduled_start", name="scheduled_window"),
+        CheckConstraint(
+            "actual_minutes IS NULL OR actual_minutes >= 0",
+            name="actual_minutes_nonneg",
+        ),
+        CheckConstraint("actual_minutes_paid >= 0", name="actual_minutes_paid_nonneg"),
+        CheckConstraint("break_seconds >= 0", name="break_seconds_nonneg"),
+        CheckConstraint(
+            "pending_amend_minutes IS NULL OR pending_amend_minutes >= 0",
+            name="pending_amend_minutes_nonneg",
+        ),
+        CheckConstraint(
+            "(pending_amend_minutes IS NULL AND pending_amend_reason IS NULL) "
+            "OR (pending_amend_minutes IS NOT NULL "
+            "AND pending_amend_reason IS NOT NULL)",
+            name="pending_amend_pairing",
+        ),
+        CheckConstraint(
+            "NOT adjusted OR adjustment_reason IS NOT NULL",
+            name="adjusted_reason_required",
+        ),
+        CheckConstraint(
+            "cancellation_window_hours >= 0",
+            name="cancellation_window_hours_nonneg",
+        ),
+        Index(
+            "ix_booking_workspace_user_start",
+            "workspace_id",
+            "user_id",
+            "scheduled_start",
+        ),
+        Index(
+            "ix_booking_workspace_engagement_start",
+            "workspace_id",
+            "work_engagement_id",
+            "scheduled_start",
+        ),
+        Index(
+            "ix_booking_workspace_status_start",
+            "workspace_id",
+            "status",
+            "scheduled_start",
+        ),
+    )
+
+
+class PayPeriodEntry(Base):
+    """Daily payroll ledger entries derived from settled bookings."""
+
+    __tablename__ = "pay_period_entry"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    workspace_id: Mapped[str] = mapped_column(
+        String,
+        ForeignKey("workspace.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    pay_period_id: Mapped[str] = mapped_column(
+        String,
+        ForeignKey("pay_period.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    work_engagement_id: Mapped[str] = mapped_column(
+        String,
+        ForeignKey("work_engagement.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    user_id: Mapped[str] = mapped_column(
+        String,
+        ForeignKey("user.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    entry_date: Mapped[date] = mapped_column(Date, nullable=False)
+    minutes: Mapped[int] = mapped_column(Integer, nullable=False)
+    source_booking_ids_json: Mapped[list[str]] = mapped_column(
+        JSON, nullable=False, default=list
+    )
+    source_details_json: Mapped[list[dict[str, object]]] = mapped_column(
+        JSON, nullable=False, default=list
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+
+    __table_args__ = (
+        CheckConstraint("minutes >= 0", name="minutes_nonneg"),
+        UniqueConstraint(
+            "pay_period_id",
+            "work_engagement_id",
+            "entry_date",
+            name="uq_pay_period_entry_period_engagement_day",
+        ),
+        Index("ix_pay_period_entry_workspace_period", "workspace_id", "pay_period_id"),
+        Index(
+            "ix_pay_period_entry_workspace_user_day",
+            "workspace_id",
+            "user_id",
+            "entry_date",
+        ),
+    )
 
 
 class PayRule(Base):
@@ -334,11 +545,11 @@ class Payslip(Base):
     # for a monthly-salaried worker in a 3-dp currency can exceed
     # INT32 for a single period; INT64 is pragmatic future-proofing.
     gross_cents: Mapped[int] = mapped_column(BigInteger, nullable=False)
-    # ``Mapped[Any]`` is the documented exception for SQLAlchemy JSON
-    # columns — see :mod:`app.adapters.db.audit` / :mod:`workspace`.
-    # At the API boundary, callers type the payload as
-    # ``dict[str, int]`` locally and coerce in.
-    deductions_cents: Mapped[Any] = mapped_column(JSON, nullable=False, default=dict)
+    # At the API boundary, callers type the payload as ``dict[str, int]``
+    # locally and coerce in.
+    deductions_cents: Mapped[dict[str, int]] = mapped_column(
+        JSON, nullable=False, default=dict
+    )
     net_cents: Mapped[int] = mapped_column(BigInteger, nullable=False)
     # NULL until the payslip is issued; set to the PDF's content hash
     # once signed. The PDF itself lives in blob storage so a purge
@@ -351,7 +562,7 @@ class Payslip(Base):
     paid_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
-    payout_snapshot_json: Mapped[dict[str, Any] | None] = mapped_column(
+    payout_snapshot_json: Mapped[dict[str, object] | None] = mapped_column(
         JSON, nullable=True
     )
     payout_manifest_purged_at: Mapped[datetime | None] = mapped_column(
