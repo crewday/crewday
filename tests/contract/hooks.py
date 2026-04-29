@@ -43,6 +43,7 @@ __all__ = [
     "check_authorization_present",
     "check_etag_round_trip",
     "check_idempotency_round_trip",
+    "constrain_generated_workspace_slug",
     "constrain_workspace_slug",
 ]
 
@@ -296,6 +297,20 @@ def constrain_workspace_slug(
     if "slug" in path_parameters:
         path_parameters["slug"] = _WORKSPACE_SLUG
     return path_parameters
+
+
+@schemathesis.hook("before_generate_path_parameters")
+def constrain_generated_workspace_slug(
+    ctx: schemathesis.HookContext, strategy: Any
+) -> Any:
+    """Pin generated workspace slugs before coverage/negative-case checks run."""
+
+    def rewrite(path_parameters: dict[str, Any] | None) -> dict[str, Any] | None:
+        if path_parameters is not None and "slug" in path_parameters:
+            return {**path_parameters, "slug": _WORKSPACE_SLUG}
+        return path_parameters
+
+    return strategy.map(rewrite)
 
 
 # ---------------------------------------------------------------------------

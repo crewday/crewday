@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, model_validator
@@ -563,9 +563,13 @@ def _asset_reference_count(
     *,
     type_id: str,
 ) -> int:
-    stmt = select(func.count()).select_from(Asset).where(
-        Asset.workspace_id == ctx.workspace_id,
-        Asset.asset_type_id == type_id,
+    stmt = (
+        select(func.count())
+        .select_from(Asset)
+        .where(
+            Asset.workspace_id == ctx.workspace_id,
+            Asset.asset_type_id == type_id,
+        )
     )
     # justification: archive decisions must count only the caller's
     # workspace assets while bypassing any absent ambient context in tests.
@@ -584,8 +588,14 @@ def _row_to_view(row: AssetType) -> AssetTypeView:
         description_md=row.description_md,
         default_lifespan_years=row.default_lifespan_years,
         default_actions=list(row.default_actions_json),
-        created_at=row.created_at,
-        updated_at=row.updated_at,
-        deleted_at=row.deleted_at,
+        created_at=_as_utc(row.created_at),
+        updated_at=_as_utc(row.updated_at),
+        deleted_at=_as_utc(row.deleted_at) if row.deleted_at is not None else None,
         is_system=row.workspace_id is None,
     )
+
+
+def _as_utc(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -46,6 +46,12 @@ __all__ = [
 
 _Ctx = Annotated[WorkspaceContext, Depends(current_workspace_context)]
 _Db = Annotated[Session, Depends(db_session)]
+
+_ASSET_TYPE_ERROR_RESPONSES: dict[int | str, dict[str, Any]] = {
+    403: {"description": "Permission denied or read-only asset type"},
+    404: {"description": "Asset type not found"},
+    409: {"description": "Asset type key conflict"},
+}
 
 
 class DefaultAssetActionRequest(DefaultAssetAction):
@@ -140,10 +146,7 @@ class AssetTypeUpdateRequest(BaseModel):
             raise ValueError("send only one of key or slug")
         if self.icon_name is not None and self.icon is not None:
             raise ValueError("send only one of icon_name or icon")
-        if (
-            self.default_actions is not None
-            and self.default_actions_json is not None
-        ):
+        if self.default_actions is not None and self.default_actions_json is not None:
             raise ValueError("send only one of default_actions or default_actions_json")
         if not self.model_fields_set:
             raise ValueError("PATCH body must include at least one field")
@@ -163,9 +166,7 @@ class AssetTypeUpdateRequest(BaseModel):
             if field_name in sent:
                 payload[field_name] = getattr(self, field_name)
         if "icon_name" in sent or "icon" in sent:
-            payload["icon_name"] = (
-                self.icon_name if "icon_name" in sent else self.icon
-            )
+            payload["icon_name"] = self.icon_name if "icon_name" in sent else self.icon
         if "default_actions" in sent or "default_actions_json" in sent:
             payload["default_actions"] = (
                 self.default_actions
@@ -242,7 +243,11 @@ def _http_for_type_error(exc: Exception) -> HTTPException:
 
 
 def build_asset_types_router() -> APIRouter:
-    api = APIRouter(prefix="/asset_types", tags=["assets", "asset_types"])
+    api = APIRouter(
+        prefix="/asset_types",
+        tags=["assets", "asset_types"],
+        responses=_ASSET_TYPE_ERROR_RESPONSES,
+    )
 
     view_gate = Depends(Permission("scope.view", scope_kind="workspace"))
     manage_gate = Depends(Permission("assets.manage_types", scope_kind="workspace"))

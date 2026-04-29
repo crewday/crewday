@@ -841,9 +841,9 @@ def _row_to_view(row: Asset) -> AssetView:
         guest_instructions_md=row.guest_instructions_md,
         notes_md=row.notes_md,
         settings_override_json=row.settings_override_json,
-        created_at=row.created_at,
-        updated_at=row.updated_at,
-        deleted_at=row.deleted_at,
+        created_at=_as_utc(row.created_at),
+        updated_at=_as_utc(row.updated_at),
+        deleted_at=_as_utc(row.deleted_at) if row.deleted_at is not None else None,
     )
 
 

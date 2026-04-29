@@ -21364,6 +21364,18 @@
             },
             "description": "Successful Response"
           },
+          "403": {
+            "description": "Permission denied or CSRF mismatch"
+          },
+          "404": {
+            "description": "Asset resource not found"
+          },
+          "409": {
+            "description": "Asset conflict"
+          },
+          "410": {
+            "description": "Archived asset"
+          },
           "422": {
             "content": {
               "application/json": {
@@ -21549,6 +21561,18 @@
             },
             "description": "Successful Response"
           },
+          "403": {
+            "description": "Permission denied or CSRF mismatch"
+          },
+          "404": {
+            "description": "Asset resource not found"
+          },
+          "409": {
+            "description": "Asset conflict"
+          },
+          "410": {
+            "description": "Archived asset"
+          },
           "422": {
             "content": {
               "application/json": {
@@ -21601,6 +21625,18 @@
             },
             "description": "Successful Response"
           },
+          "403": {
+            "description": "Permission denied or CSRF mismatch"
+          },
+          "404": {
+            "description": "Asset resource not found"
+          },
+          "409": {
+            "description": "Asset conflict"
+          },
+          "410": {
+            "description": "Archived asset"
+          },
           "422": {
             "content": {
               "application/json": {
@@ -21636,6 +21672,18 @@
         "responses": {
           "204": {
             "description": "Successful Response"
+          },
+          "403": {
+            "description": "Permission denied or CSRF mismatch"
+          },
+          "404": {
+            "description": "Asset resource not found"
+          },
+          "409": {
+            "description": "Asset conflict"
+          },
+          "410": {
+            "description": "Archived asset"
           },
           "422": {
             "content": {
@@ -21699,6 +21747,18 @@
               }
             },
             "description": "Successful Response"
+          },
+          "403": {
+            "description": "Permission denied or CSRF mismatch"
+          },
+          "404": {
+            "description": "Asset resource not found"
+          },
+          "409": {
+            "description": "Asset conflict"
+          },
+          "410": {
+            "description": "Archived asset"
           },
           "422": {
             "content": {
@@ -21803,6 +21863,15 @@
             },
             "description": "Successful Response"
           },
+          "403": {
+            "description": "Permission denied or read-only asset type"
+          },
+          "404": {
+            "description": "Asset type not found"
+          },
+          "409": {
+            "description": "Asset type key conflict"
+          },
           "422": {
             "content": {
               "application/json": {
@@ -21856,6 +21925,15 @@
             },
             "description": "Successful Response"
           },
+          "403": {
+            "description": "Permission denied or read-only asset type"
+          },
+          "404": {
+            "description": "Asset type not found"
+          },
+          "409": {
+            "description": "Asset type key conflict"
+          },
           "422": {
             "content": {
               "application/json": {
@@ -21892,6 +21970,15 @@
         "responses": {
           "204": {
             "description": "Successful Response"
+          },
+          "403": {
+            "description": "Permission denied or read-only asset type"
+          },
+          "404": {
+            "description": "Asset type not found"
+          },
+          "409": {
+            "description": "Asset type key conflict"
           },
           "422": {
             "content": {
@@ -21934,6 +22021,15 @@
               }
             },
             "description": "Successful Response"
+          },
+          "403": {
+            "description": "Permission denied or read-only asset type"
+          },
+          "404": {
+            "description": "Asset type not found"
+          },
+          "409": {
+            "description": "Asset type key conflict"
           },
           "422": {
             "content": {
@@ -21999,6 +22095,15 @@
             },
             "description": "Successful Response"
           },
+          "403": {
+            "description": "Permission denied or read-only asset type"
+          },
+          "404": {
+            "description": "Asset type not found"
+          },
+          "409": {
+            "description": "Asset type key conflict"
+          },
           "422": {
             "content": {
               "application/json": {
@@ -22035,6 +22140,18 @@
         "responses": {
           "204": {
             "description": "Successful Response"
+          },
+          "403": {
+            "description": "Permission denied or CSRF mismatch"
+          },
+          "404": {
+            "description": "Asset resource not found"
+          },
+          "409": {
+            "description": "Asset conflict"
+          },
+          "410": {
+            "description": "Archived asset"
           },
           "422": {
             "content": {
@@ -22091,6 +22208,18 @@
             },
             "description": "Successful Response"
           },
+          "403": {
+            "description": "Permission denied or CSRF mismatch"
+          },
+          "404": {
+            "description": "Asset resource not found"
+          },
+          "409": {
+            "description": "Asset conflict"
+          },
+          "410": {
+            "description": "Archived asset"
+          },
           "422": {
             "content": {
               "application/json": {
@@ -22138,6 +22267,18 @@
         "responses": {
           "204": {
             "description": "Successful Response"
+          },
+          "403": {
+            "description": "Permission denied or CSRF mismatch"
+          },
+          "404": {
+            "description": "Asset resource not found"
+          },
+          "409": {
+            "description": "Asset conflict"
+          },
+          "410": {
+            "description": "Archived asset"
           },
           "422": {
             "content": {
@@ -22189,6 +22330,18 @@
               }
             },
             "description": "Successful Response"
+          },
+          "403": {
+            "description": "Permission denied or CSRF mismatch"
+          },
+          "404": {
+            "description": "Asset resource not found"
+          },
+          "409": {
+            "description": "Asset conflict"
+          },
+          "410": {
+            "description": "Archived asset"
           },
           "422": {
             "content": {
@@ -22252,6 +22405,18 @@
               }
             },
             "description": "Successful Response"
+          },
+          "403": {
+            "description": "Permission denied or CSRF mismatch"
+          },
+          "404": {
+            "description": "Asset resource not found"
+          },
+          "409": {
+            "description": "Asset conflict"
+          },
+          "410": {
+            "description": "Archived asset"
           },
           "422": {
             "content": {
@@ -22353,6 +22518,18 @@
             },
             "description": "Successful Response"
           },
+          "403": {
+            "description": "Permission denied or CSRF mismatch"
+          },
+          "404": {
+            "description": "Asset resource not found"
+          },
+          "409": {
+            "description": "Asset conflict"
+          },
+          "410": {
+            "description": "Archived asset"
+          },
           "422": {
             "content": {
               "application/json": {
@@ -22416,6 +22593,18 @@
             },
             "description": "Successful Response"
           },
+          "403": {
+            "description": "Permission denied or CSRF mismatch"
+          },
+          "404": {
+            "description": "Asset resource not found"
+          },
+          "409": {
+            "description": "Asset conflict"
+          },
+          "410": {
+            "description": "Archived asset"
+          },
           "422": {
             "content": {
               "application/json": {
@@ -22466,6 +22655,18 @@
               }
             },
             "description": "Successful Response"
+          },
+          "403": {
+            "description": "Permission denied or CSRF mismatch"
+          },
+          "404": {
+            "description": "Asset resource not found"
+          },
+          "409": {
+            "description": "Asset conflict"
+          },
+          "410": {
+            "description": "Archived asset"
           },
           "422": {
             "content": {
@@ -22550,6 +22751,18 @@
             },
             "description": "Successful Response"
           },
+          "403": {
+            "description": "Permission denied or CSRF mismatch"
+          },
+          "404": {
+            "description": "Asset resource not found"
+          },
+          "409": {
+            "description": "Asset conflict"
+          },
+          "410": {
+            "description": "Archived asset"
+          },
           "422": {
             "content": {
               "application/json": {
@@ -22612,6 +22825,18 @@
               }
             },
             "description": "Successful Response"
+          },
+          "403": {
+            "description": "Permission denied or CSRF mismatch"
+          },
+          "404": {
+            "description": "Asset resource not found"
+          },
+          "409": {
+            "description": "Asset conflict"
+          },
+          "410": {
+            "description": "Archived asset"
           },
           "422": {
             "content": {
@@ -22678,6 +22903,18 @@
             },
             "description": "Successful Response"
           },
+          "403": {
+            "description": "Permission denied or CSRF mismatch"
+          },
+          "404": {
+            "description": "Asset resource not found"
+          },
+          "409": {
+            "description": "Asset conflict"
+          },
+          "410": {
+            "description": "Archived asset"
+          },
           "422": {
             "content": {
               "application/json": {
@@ -22718,6 +22955,18 @@
               }
             },
             "description": "Successful Response"
+          },
+          "403": {
+            "description": "Permission denied or CSRF mismatch"
+          },
+          "404": {
+            "description": "Asset resource not found"
+          },
+          "409": {
+            "description": "Asset conflict"
+          },
+          "410": {
+            "description": "Archived asset"
           },
           "422": {
             "content": {
@@ -22786,6 +23035,18 @@
             },
             "description": "Successful Response"
           },
+          "403": {
+            "description": "Permission denied or CSRF mismatch"
+          },
+          "404": {
+            "description": "Asset resource not found"
+          },
+          "409": {
+            "description": "Asset conflict"
+          },
+          "410": {
+            "description": "Archived asset"
+          },
           "422": {
             "content": {
               "application/json": {
@@ -22840,6 +23101,18 @@
               }
             },
             "description": "Successful Response"
+          },
+          "403": {
+            "description": "Permission denied or CSRF mismatch"
+          },
+          "404": {
+            "description": "Asset resource not found"
+          },
+          "409": {
+            "description": "Asset conflict"
+          },
+          "410": {
+            "description": "Archived asset"
           },
           "422": {
             "content": {

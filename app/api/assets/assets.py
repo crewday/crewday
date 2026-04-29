@@ -7,7 +7,7 @@ import io
 from dataclasses import asdict
 from datetime import date, datetime
 from decimal import Decimal
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 from fastapi import (
     APIRouter,
@@ -99,6 +99,13 @@ _Ctx = Annotated[WorkspaceContext, Depends(current_workspace_context)]
 _Db = Annotated[Session, Depends(db_session)]
 _Storage = Annotated[Storage, Depends(get_storage)]
 _MimeSniffer = Annotated[MimeSniffer, Depends(get_mime_sniffer)]
+
+_ASSET_ERROR_RESPONSES: dict[int | str, dict[str, Any]] = {
+    403: {"description": "Permission denied or CSRF mismatch"},
+    404: {"description": "Asset resource not found"},
+    409: {"description": "Asset conflict"},
+    410: {"description": "Archived asset"},
+}
 
 _MAX_ASSET_DOCUMENT_BYTES = 25 * 1024 * 1024
 _ASSET_DOCUMENT_ALLOWED_MIME = {
@@ -481,17 +488,17 @@ def _http_for_asset_error(exc: Exception) -> HTTPException:
         )
     if isinstance(exc, AssetTypeUnavailable):
         return HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=422,
             detail={"error": "asset_type_unavailable", "message": str(exc)},
         )
     if isinstance(exc, AssetPlacementInvalid):
         return HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=422,
             detail={"error": "asset_placement_invalid", "message": str(exc)},
         )
     if isinstance(exc, AssetValidationError):
         return HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=422,
             detail={"error": exc.error, "field": exc.field},
         )
     if isinstance(exc, AssetQrTokenExhausted):
@@ -518,7 +525,7 @@ def _http_for_action_error(exc: Exception) -> HTTPException:
         )
     if isinstance(exc, AssetActionValidationError):
         return HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=422,
             detail={"error": exc.error, "field": exc.field},
         )
     return HTTPException(
@@ -535,7 +542,7 @@ def _http_for_document_error(exc: Exception) -> HTTPException:
         )
     if isinstance(exc, AssetDocumentValidationError):
         return HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=422,
             detail={"error": exc.error, "field": exc.field},
         )
     return HTTPException(
@@ -618,7 +625,7 @@ def _scan_asset(
 
 
 def build_asset_scan_router() -> APIRouter:
-    api = APIRouter(tags=["assets"])
+    api = APIRouter(tags=["assets"], responses=_ASSET_ERROR_RESPONSES)
     view_gate = Depends(Permission("scope.view", scope_kind="workspace"))
 
     @api.get(
@@ -636,7 +643,7 @@ def build_asset_scan_router() -> APIRouter:
 
 
 def build_assets_router() -> APIRouter:
-    api = APIRouter(tags=["assets"])
+    api = APIRouter(tags=["assets"], responses=_ASSET_ERROR_RESPONSES)
 
     view_gate = Depends(Permission("scope.view", scope_kind="workspace"))
     edit_gate = Depends(Permission("assets.edit", scope_kind="workspace"))
@@ -915,7 +922,7 @@ def build_assets_router() -> APIRouter:
     ) -> AssetDocumentResponse:
         if file is None:
             raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                status_code=422,
                 detail={"error": "asset_document_file_required"},
             )
         declared_type = file.content_type

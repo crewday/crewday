@@ -142,7 +142,7 @@ echo "schemathesis: uvicorn healthy" >&2
 # The session cookie covers bare-host paths the Bearer token can't
 # reach (``/api/v1/auth/me``, etc.) — those routes accept session
 # auth only, not Bearer.
-SLUG="schemathesis"
+SLUG="${CREWDAY_SCHEMATHESIS_SLUG:-schemathesis}"
 EMAIL="schemathesis@dev.local"
 
 TOKEN=$(${PYTHON_BIN} -m scripts._schemathesis_seed \
@@ -228,7 +228,8 @@ set +e
 ${SCHEMATHESIS_BIN} run \
     "http://${HOST}:${PORT}/api/openapi.json" \
     --header "Authorization: Bearer ${TOKEN}" \
-    --header "Cookie: __Host-crewday_session=${SESSION}" \
+    --header "Cookie: __Host-crewday_session=${SESSION}; crewday_csrf=schemathesis" \
+    --header "X-CSRF: schemathesis" \
     --checks all \
     --mode all \
     --max-examples "${MAX_EXAMPLES}" \

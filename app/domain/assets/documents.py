@@ -12,7 +12,12 @@ from sqlalchemy.orm import Session
 from app.adapters.db.assets.models import AssetDocument
 from app.adapters.storage.ports import Storage
 from app.audit import write_audit
-from app.domain.assets.assets import _load_asset, _pending_event, _queue_asset_changed
+from app.domain.assets.assets import (
+    _as_utc,
+    _load_asset,
+    _pending_event,
+    _queue_asset_changed,
+)
 from app.events.bus import EventBus
 from app.events.bus import bus as default_event_bus
 from app.tenancy import WorkspaceContext, tenant_agnostic
@@ -286,7 +291,7 @@ def _row_to_view(row: AssetDocument) -> AssetDocumentView:
         expires_on=row.expires_on,
         amount_cents=row.amount_cents,
         amount_currency=row.amount_currency,
-        created_at=row.created_at,
-        updated_at=row.updated_at,
-        deleted_at=row.deleted_at,
+        created_at=_as_utc(row.created_at),
+        updated_at=_as_utc(row.updated_at),
+        deleted_at=_as_utc(row.deleted_at) if row.deleted_at is not None else None,
     )

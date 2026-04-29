@@ -587,13 +587,21 @@ def _row_to_view(row: AssetAction) -> AssetActionView:
         label=row.label,
         description_md=row.description_md,
         interval_days=row.interval_days,
-        last_performed_at=row.last_performed_at,
-        performed_at=row.last_performed_at,
+        last_performed_at=(
+            _as_utc(row.last_performed_at)
+            if row.last_performed_at is not None
+            else None
+        ),
+        performed_at=(
+            _as_utc(row.last_performed_at)
+            if row.last_performed_at is not None
+            else None
+        ),
         performed_by=row.performed_by,
         notes_md=row.notes_md,
         meter_reading=row.meter_reading,
         evidence_blob_hash=row.evidence_blob_hash,
-        created_at=row.created_at,
-        updated_at=row.updated_at,
-        deleted_at=row.deleted_at,
+        created_at=_as_utc(row.created_at),
+        updated_at=_as_utc(row.updated_at),
+        deleted_at=_as_utc(row.deleted_at) if row.deleted_at is not None else None,
     )

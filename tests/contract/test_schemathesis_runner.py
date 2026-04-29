@@ -31,8 +31,11 @@ import sys
 import time
 from collections.abc import Iterator
 from pathlib import Path
+from typing import Any, cast
 
 import pytest
+from hypothesis import find
+from hypothesis import strategies as st
 
 pytestmark = pytest.mark.schemathesis
 
@@ -380,6 +383,18 @@ class TestPublicPathAllowlist:
 
         assert _is_public_path("/healthz/")
         assert _is_public_path("/api/openapi.json/")
+
+    def test_workspace_slug_path_parameter_is_pinned_in_generation(self) -> None:
+        from tests.contract.hooks import constrain_generated_workspace_slug
+
+        strategy = constrain_generated_workspace_slug(
+            cast(Any, None),
+            st.just({"slug": "0", "asset_id": "asset_123"}),
+        )
+        assert find(strategy, lambda _: True) == {
+            "slug": "schemathesis",
+            "asset_id": "asset_123",
+        }
 
 
 @pytest.mark.skipif(
