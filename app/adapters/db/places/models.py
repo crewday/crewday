@@ -497,8 +497,9 @@ class PropertyClosure(Base):
     """Blackout window on a property — renovation, owner-stay, etc.
 
     v1 slice: ``id`` / ``property_id`` / ``starts_at`` / ``ends_at``
-    / ``reason`` / ``source_ical_feed_id`` / ``created_by_user_id`` /
-    ``created_at``. The CHECK ``ends_after_starts`` guards against
+    / ``reason`` / ``source_ical_feed_id`` / ``source_external_uid`` /
+    ``source_last_seen_at`` / ``created_by_user_id`` / ``created_at`` /
+    ``deleted_at``. The CHECK ``ends_after_starts`` guards against
     zero-or-negative-length windows (a closure that covers no time
     is a data bug, not a legitimate operational state).
 
@@ -531,6 +532,10 @@ class PropertyClosure(Base):
         ForeignKey("ical_feed.id", ondelete="SET NULL"),
         nullable=True,
     )
+    source_external_uid: Mapped[str | None] = mapped_column(String, nullable=True)
+    source_last_seen_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     created_by_user_id: Mapped[str | None] = mapped_column(
         String,
         ForeignKey("user.id", ondelete="SET NULL"),
@@ -539,11 +544,20 @@ class PropertyClosure(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
     )
+    deleted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
     __table_args__ = (
         CheckConstraint("ends_at > starts_at", name="ends_after_starts"),
         Index("ix_property_closure_property_starts", "property_id", "starts_at"),
         Index("ix_property_closure_source_ical_feed", "source_ical_feed_id"),
+        Index(
+            "ix_property_closure_source_uid",
+            "source_ical_feed_id",
+            "source_external_uid",
+        ),
+        Index("ix_property_closure_deleted", "deleted_at"),
     )
 
 

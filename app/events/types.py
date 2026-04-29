@@ -34,7 +34,7 @@ import re
 from datetime import datetime, timedelta
 from typing import ClassVar, Final, Literal
 
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, field_validator, model_validator
 
 from app.events.registry import Event, EventRole, register
 
@@ -62,6 +62,8 @@ __all__ = [
     "PayrollExportReady",
     "PayslipComputed",
     "PropertyClosureCreated",
+    "PropertyClosureReason",
+    "PropertyClosureUpdated",
     "ReservationChangeKind",
     "ReservationUpserted",
     "ShiftChanged",
@@ -683,6 +685,13 @@ class StayUpcoming(Event):
 # applied to a previously-seen UID. The closed set lets SPA reducers
 # branch without parsing payloads.
 ReservationChangeKind = Literal["created", "updated", "cancelled"]
+PropertyClosureReason = Literal[
+    "renovation",
+    "owner_stay",
+    "seasonal",
+    "ical_unavailable",
+    "other",
+]
 
 
 @register
@@ -735,14 +744,9 @@ class PropertyClosureCreated(Event):
     occurrence-generator subscribes to this event to skip task
     materialisation across the closed window.
 
-    **Payload posture.** Foreign-key identifiers only — no
-    timestamps on the wire. Subscribers needing the window's
-    ``starts_at`` / ``ends_at`` call ``GET /closures/{id}`` under
-    the normal per-row authz path. ``source_ical_feed_id`` is
-    populated when the closure originated from a VEVENT (the
-    poller's only emission path today); manual closures created
-    through a future ``POST /properties/{id}/closures`` set it to
-    ``None``.
+    **Payload posture.** The event carries the closure id, property id,
+    bounded UTC window, reason enum, and optional iCal-feed lineage.
+    It intentionally carries no free-text notes.
 
     **Role scope.** Defaults to :data:`ALL_ROLES`. A closure affects
     the manager calendar, the worker schedule (no turnover that
@@ -756,7 +760,46 @@ class PropertyClosureCreated(Event):
 
     closure_id: str
     property_id: str
+    starts_at: datetime
+    ends_at: datetime
+    reason: PropertyClosureReason
     source_ical_feed_id: str | None
+
+    @field_validator("starts_at", "ends_at")
+    @classmethod
+    def _payload_datetimes_are_utc(cls, value: datetime) -> datetime:
+        return _require_aware_utc(value)
+
+    @model_validator(mode="after")
+    def _payload_window_is_positive(self) -> PropertyClosureCreated:
+        if self.ends_at <= self.starts_at:
+            raise ValueError("ends_at must be after starts_at")
+        return self
+
+
+@register
+class PropertyClosureUpdated(Event):
+    """A property closure window has been edited."""
+
+    name: ClassVar[str] = "property.closure.updated"
+
+    closure_id: str
+    property_id: str
+    starts_at: datetime
+    ends_at: datetime
+    reason: PropertyClosureReason
+    source_ical_feed_id: str | None
+
+    @field_validator("starts_at", "ends_at")
+    @classmethod
+    def _payload_datetimes_are_utc(cls, value: datetime) -> datetime:
+        return _require_aware_utc(value)
+
+    @model_validator(mode="after")
+    def _payload_window_is_positive(self) -> PropertyClosureUpdated:
+        if self.ends_at <= self.starts_at:
+            raise ValueError("ends_at must be after starts_at")
+        return self
 
 
 @register

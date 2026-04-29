@@ -29,9 +29,9 @@ the diff:
 rows + zero new events (the upsert path matches every existing
 ``(feed_id, external_uid)`` pair, sees no field changes, and
 short-circuits before publishing). The closure path keys on
-``(property_id, source_ical_feed_id, external_uid)`` via
-``raw_summary``-encoded UID lookup; the same Blocked VEVENT seen
-twice writes one closure.
+``(property_id, source_ical_feed_id, source_external_uid)`` and keeps
+soft-deleted tombstones so a manually deleted Blocked VEVENT is not
+recreated by the next identical poll.
 
 **Per-host rate limit.** A 1 s minimum gap between consecutive
 fetches against the same host applies inside one tick. Exceeding
@@ -60,7 +60,7 @@ import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
-from typing import Final
+from typing import Final, Literal
 from urllib.parse import SplitResult, urlsplit
 
 from icalendar import Calendar
@@ -85,6 +85,7 @@ from app.events.bus import EventBus
 from app.events.bus import bus as default_event_bus
 from app.events.types import (
     PropertyClosureCreated,
+    PropertyClosureUpdated,
     ReservationChangeKind,
     ReservationUpserted,
 )
@@ -1140,7 +1141,7 @@ def _apply_events(
     booked_uids_seen: set[str] = set()
     for ev in events:
         if _is_blocked_summary(ev.summary):
-            if _upsert_closure(
+            closure_change = _upsert_closure(
                 session,
                 ctx,
                 feed=feed,
@@ -1148,7 +1149,8 @@ def _apply_events(
                 event_bus=event_bus,
                 clock=clock,
                 resolved_now=resolved_now,
-            ):
+            )
+            if closure_change == "created":
                 counts.closures_created += 1
             continue
         # Track every Booked-pattern UID — including STATUS:CANCELLED
@@ -1427,26 +1429,89 @@ def _upsert_closure(
     event_bus: EventBus,
     clock: Clock,
     resolved_now: datetime,
-) -> bool:
-    """Insert a :class:`PropertyClosure` if not already present.
+) -> Literal["created", "updated"] | None:
+    """Insert or update an iCal-sourced :class:`PropertyClosure`.
 
-    Returns ``True`` on insert, ``False`` on no-op (a closure for the
-    same ``(property_id, source_ical_feed_id, starts_at, ends_at)``
-    already exists). We key on the time pair rather than the VEVENT
-    UID because closures are not currently UID-tracked at the
-    storage layer; widening the schema for that is out-of-scope (the
-    follow-up would land an ``external_uid`` column on
-    ``property_closure`` so a Blocked window's mutation is detected).
+    The source UID is the durable identity. A manually deleted closure
+    is a tombstone: repeated polls of the same upstream VEVENT refresh
+    ``source_last_seen_at`` but do not reopen the row. If a successful
+    poll observes the UID absent and a later poll sees it again, the
+    upstream has reasserted the block and the row is reopened.
     """
-    duplicate = session.scalars(
+    row = session.scalars(
         select(PropertyClosure)
         .where(PropertyClosure.property_id == feed.property_id)
         .where(PropertyClosure.source_ical_feed_id == feed.id)
-        .where(PropertyClosure.starts_at == ev.starts_at)
-        .where(PropertyClosure.ends_at == ev.ends_at)
+        .where(PropertyClosure.source_external_uid == ev.uid)
     ).first()
-    if duplicate is not None:
-        return False
+    if row is None:
+        row = session.scalars(
+            select(PropertyClosure)
+            .where(PropertyClosure.property_id == feed.property_id)
+            .where(PropertyClosure.source_ical_feed_id == feed.id)
+            .where(PropertyClosure.source_external_uid.is_(None))
+            .where(PropertyClosure.starts_at == ev.starts_at)
+            .where(PropertyClosure.ends_at == ev.ends_at)
+        ).first()
+
+    if row is not None:
+        if row.deleted_at is not None:
+            if _deleted_closure_reasserted(row, previous_poll_at=feed.last_polled_at):
+                row.starts_at = ev.starts_at
+                row.ends_at = ev.ends_at
+                row.reason = "ical_unavailable"
+                row.source_external_uid = ev.uid
+                row.source_last_seen_at = resolved_now
+                row.deleted_at = None
+                session.flush()
+                event_bus.publish(
+                    PropertyClosureCreated(
+                        workspace_id=ctx.workspace_id,
+                        actor_id=ctx.actor_id,
+                        correlation_id=ctx.audit_correlation_id,
+                        occurred_at=resolved_now,
+                        closure_id=row.id,
+                        property_id=feed.property_id,
+                        starts_at=ev.starts_at,
+                        ends_at=ev.ends_at,
+                        reason="ical_unavailable",
+                        source_ical_feed_id=feed.id,
+                    )
+                )
+                return "created"
+            row.source_external_uid = ev.uid
+            row.source_last_seen_at = resolved_now
+            session.flush()
+            return None
+
+        changed = (
+            _ensure_utc(row.starts_at) != ev.starts_at
+            or _ensure_utc(row.ends_at) != ev.ends_at
+            or row.reason != "ical_unavailable"
+        )
+        row.starts_at = ev.starts_at
+        row.ends_at = ev.ends_at
+        row.reason = "ical_unavailable"
+        row.source_external_uid = ev.uid
+        row.source_last_seen_at = resolved_now
+        session.flush()
+        if changed:
+            event_bus.publish(
+                PropertyClosureUpdated(
+                    workspace_id=ctx.workspace_id,
+                    actor_id=ctx.actor_id,
+                    correlation_id=ctx.audit_correlation_id,
+                    occurred_at=resolved_now,
+                    closure_id=row.id,
+                    property_id=feed.property_id,
+                    starts_at=ev.starts_at,
+                    ends_at=ev.ends_at,
+                    reason="ical_unavailable",
+                    source_ical_feed_id=feed.id,
+                )
+            )
+            return "updated"
+        return None
 
     row = PropertyClosure(
         id=new_ulid(),
@@ -1455,6 +1520,8 @@ def _upsert_closure(
         ends_at=ev.ends_at,
         reason="ical_unavailable",
         source_ical_feed_id=feed.id,
+        source_external_uid=ev.uid,
+        source_last_seen_at=resolved_now,
         created_by_user_id=None,
         created_at=resolved_now,
     )
@@ -1468,10 +1535,26 @@ def _upsert_closure(
             occurred_at=resolved_now,
             closure_id=row.id,
             property_id=feed.property_id,
+            starts_at=ev.starts_at,
+            ends_at=ev.ends_at,
+            reason="ical_unavailable",
             source_ical_feed_id=feed.id,
         )
     )
-    return True
+    return "created"
+
+
+def _deleted_closure_reasserted(
+    row: PropertyClosure, *, previous_poll_at: datetime | None
+) -> bool:
+    if previous_poll_at is None or row.source_last_seen_at is None:
+        return False
+    if row.deleted_at is None:
+        return False
+    deleted_at = _ensure_utc(row.deleted_at)
+    source_last_seen_at = _ensure_utc(row.source_last_seen_at)
+    previous_poll_at = _ensure_utc(previous_poll_at)
+    return deleted_at <= previous_poll_at and source_last_seen_at < previous_poll_at
 
 
 def _guess_guest_name(summary: str | None, description: str | None) -> str | None:

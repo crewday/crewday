@@ -63,7 +63,11 @@ from app.adapters.db.stays.models import IcalFeed, Reservation
 from app.adapters.db.workspace.models import Workspace
 from app.adapters.ical.validator import Fetcher, FetchResponse
 from app.events.bus import EventBus
-from app.events.types import PropertyClosureCreated, ReservationUpserted
+from app.events.types import (
+    PropertyClosureCreated,
+    PropertyClosureUpdated,
+    ReservationUpserted,
+)
 from app.tenancy.context import WorkspaceContext
 from app.util.clock import FrozenClock
 from app.util.ulid import new_ulid
@@ -383,6 +387,12 @@ def _record_reservation(bus: EventBus) -> list[ReservationUpserted]:
 def _record_closure(bus: EventBus) -> list[PropertyClosureCreated]:
     captured: list[PropertyClosureCreated] = []
     bus.subscribe(PropertyClosureCreated)(captured.append)
+    return captured
+
+
+def _record_closure_updates(bus: EventBus) -> list[PropertyClosureUpdated]:
+    captured: list[PropertyClosureUpdated] = []
+    bus.subscribe(PropertyClosureUpdated)(captured.append)
     return captured
 
 
@@ -908,10 +918,16 @@ class TestBlockedSummaryToClosure:
         assert row.property_id == prop
         assert row.reason == "ical_unavailable"
         assert row.source_ical_feed_id == feed_id
+        assert row.source_external_uid == f"b-{summary}"
+        assert row.source_last_seen_at is not None
+        assert row.source_last_seen_at.replace(tzinfo=UTC) == _PINNED
 
         assert len(captured) == 1
         assert captured[0].closure_id == row.id
         assert captured[0].source_ical_feed_id == feed_id
+        assert captured[0].starts_at == starts
+        assert captured[0].ends_at == ends
+        assert captured[0].reason == "ical_unavailable"
 
 
 class TestClosureIdempotency:
@@ -961,6 +977,88 @@ class TestClosureIdempotency:
         rows = list(session.scalars(select(PropertyClosure)).all())
         assert len(rows) == 1
         assert len(captured) == 1
+
+    def test_manual_delete_is_sticky_until_upstream_reasserts(
+        self,
+        session: Session,
+        bus: EventBus,
+        clock: FrozenClock,
+        envelope: FakeEnvelope,
+    ) -> None:
+        ws = _bootstrap_workspace(session)
+        prop = _bootstrap_property(session)
+        _bootstrap_feed(session, workspace_id=ws, property_id=prop, envelope=envelope)
+        starts = datetime(2026, 5, 1, 0, 0, tzinfo=UTC)
+        ends = datetime(2026, 5, 8, 0, 0, tzinfo=UTC)
+        blocked = _vcalendar(
+            _vevent_blocked(uid="blocked-x", starts=starts, ends=ends),
+        )
+        empty = _vcalendar()
+        fetcher = _ScriptedFetcher(
+            responses={
+                _FEED_URL: [_ok(blocked), _ok(blocked), _ok(empty), _ok(blocked)]
+            },
+        )
+        created = _record_closure(bus)
+        updated = _record_closure_updates(bus)
+
+        poll_ical(
+            _ctx(ws),
+            session=session,
+            envelope=envelope,
+            clock=clock,
+            event_bus=bus,
+            fetcher=fetcher,
+            resolver=_fixed_resolver([_FAKE_IP]),  # type: ignore[arg-type]
+        )
+        row = session.scalars(select(PropertyClosure)).one()
+        row.deleted_at = _PINNED + timedelta(minutes=5)
+        session.flush()
+
+        clock.set(_PINNED + timedelta(minutes=20))
+        suppressed = poll_ical(
+            _ctx(ws),
+            session=session,
+            envelope=envelope,
+            clock=clock,
+            event_bus=bus,
+            fetcher=fetcher,
+            resolver=_fixed_resolver([_FAKE_IP]),  # type: ignore[arg-type]
+        )
+
+        assert suppressed.closures_created == 0
+        assert row.deleted_at is not None
+        assert len(created) == 1
+        assert updated == []
+
+        clock.set(_PINNED + timedelta(minutes=40))
+        poll_ical(
+            _ctx(ws),
+            session=session,
+            envelope=envelope,
+            clock=clock,
+            event_bus=bus,
+            fetcher=fetcher,
+            resolver=_fixed_resolver([_FAKE_IP]),  # type: ignore[arg-type]
+        )
+        assert row.deleted_at is not None
+
+        clock.set(_PINNED + timedelta(minutes=60))
+        reasserted = poll_ical(
+            _ctx(ws),
+            session=session,
+            envelope=envelope,
+            clock=clock,
+            event_bus=bus,
+            fetcher=fetcher,
+            resolver=_fixed_resolver([_FAKE_IP]),  # type: ignore[arg-type]
+        )
+
+        assert reasserted.closures_created == 1
+        assert row.deleted_at is None
+        assert row.source_external_uid == "blocked-x"
+        assert len(created) == 2
+        assert updated == []
 
 
 # ---------------------------------------------------------------------------

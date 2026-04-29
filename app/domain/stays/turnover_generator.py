@@ -739,6 +739,7 @@ def _gap_intersects_closure(
     stmt = (
         select(PropertyClosure.id)
         .where(PropertyClosure.property_id == property_id)
+        .where(PropertyClosure.deleted_at.is_(None))
         .where(PropertyClosure.starts_at < ends_at)
         .where(PropertyClosure.ends_at > starts_at)
         .limit(1)

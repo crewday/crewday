@@ -517,6 +517,7 @@ def _load_closures(session: Session, *, property_id: str) -> list[PropertyClosur
     stmt = (
         select(PropertyClosure)
         .where(PropertyClosure.property_id == property_id)
+        .where(PropertyClosure.deleted_at.is_(None))
         .order_by(PropertyClosure.starts_at.asc())
     )
     return list(session.scalars(stmt).all())
