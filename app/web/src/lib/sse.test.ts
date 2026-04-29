@@ -335,12 +335,32 @@ describe("INVALIDATIONS — per-kind behaviour", () => {
     INVALIDATIONS["agent.message.appended"](
       makeEvent("agent.message.appended", {
         scope: "manager",
-        message: { id: "m1", body: "hi" },
+        message: { id: "m1", body: "hi", kind: "agent" },
       }),
       qc,
     );
     const log = qc.getQueryData<{ id: string }[]>(qk.agentManagerLog());
-    expect(log).toEqual([{ id: "m1", body: "hi" }]);
+    expect(log).toEqual([{ id: "m1", body: "hi", kind: "agent" }]);
+  });
+
+  it("agent.message.appended invalidates instead of appending user echoes", () => {
+    const qc = makeClient();
+    qc.setQueryData(qk.agentEmployeeLog(), [
+      { at: "now", kind: "user", body: "Can you help?" },
+    ]);
+
+    INVALIDATIONS["agent.message.appended"](
+      makeEvent("agent.message.appended", {
+        scope: "employee",
+        message: { at: "now", kind: "user", body: "Can you help?" },
+      }),
+      qc,
+    );
+
+    expect(qc.getQueryData(qk.agentEmployeeLog())).toEqual([
+      { at: "now", kind: "user", body: "Can you help?" },
+    ]);
+    expect(qc.getQueryCache().find({ queryKey: qk.agentEmployeeLog() })?.isStale()).toBe(true);
   });
 
   it("agent.message.appended on scope=task uses the per-task log key", () => {
@@ -349,12 +369,12 @@ describe("INVALIDATIONS — per-kind behaviour", () => {
       makeEvent("agent.message.appended", {
         scope: "task",
         task_id: "t42",
-        message: { id: "m1", body: "hi" },
+        message: { id: "m1", body: "hi", kind: "agent" },
       }),
       qc,
     );
     const log = qc.getQueryData<{ id: string }[]>(qk.agentTaskChat("t42"));
-    expect(log).toEqual([{ id: "m1", body: "hi" }]);
+    expect(log).toEqual([{ id: "m1", body: "hi", kind: "agent" }]);
     // Manager log should be untouched.
     expect(qc.getQueryData(qk.agentManagerLog())).toBeUndefined();
   });

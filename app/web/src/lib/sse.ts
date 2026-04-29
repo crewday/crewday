@@ -300,6 +300,11 @@ export const INVALIDATIONS: Record<EventKind, InvalidationHandler> = {
           : payload.scope === "employee"
             ? qk.agentEmployeeLog()
             : qk.agentManagerLog();
+    if (payload.message.kind === "user") {
+      invalidate(qc, key);
+      stopTyping(qc, payload.scope, payload.task_id);
+      return;
+    }
     qc.setQueryData<AgentMessage[]>(key, (prev) =>
       prev ? [...prev, payload.message] : [payload.message],
     );

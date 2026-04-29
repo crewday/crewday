@@ -156,6 +156,8 @@ from app.events.bus import EventBus
 from app.events.bus import bus as default_event_bus
 from app.events.types import (
     AgentActionPending,
+    AgentMessageAppended,
+    AgentMessagePayload,
     AgentTurnFinished,
     AgentTurnOutcome,
     AgentTurnScope,
@@ -735,6 +737,9 @@ def run_turn(
                     ctx=ctx,
                     thread_id=thread_id,
                     body_md=response.text or "",
+                    scope=scope,
+                    event_bus=bus,
+                    correlation_id=correlation_id,
                     clock=eff_clock,
                 )
                 ended_at = eff_clock.now()
@@ -889,6 +894,9 @@ def run_turn(
             ctx=ctx,
             thread_id=thread_id,
             body_md=_TIMEOUT_REPLY_TEXT,
+            scope=scope,
+            event_bus=bus,
+            correlation_id=correlation_id,
             clock=eff_clock,
         )
         ended_at = eff_clock.now()
@@ -1321,6 +1329,9 @@ def _write_chat_reply(
     ctx: WorkspaceContext,
     thread_id: str | None,
     body_md: str,
+    scope: AgentTurnScope,
+    event_bus: EventBus,
+    correlation_id: str,
     clock: Clock,
 ) -> str | None:
     """Persist the agent's reply and return the row id.
@@ -1352,6 +1363,23 @@ def _write_chat_reply(
     )
     session.add(row)
     session.flush()
+    event_bus.publish(
+        AgentMessageAppended(
+            workspace_id=ctx.workspace_id,
+            actor_id=ctx.actor_id,
+            actor_user_id=ctx.actor_id,
+            correlation_id=correlation_id,
+            occurred_at=row.created_at,
+            scope=scope,
+            task_id=thread_id if scope == "task" else None,
+            message=AgentMessagePayload(
+                at=row.created_at,
+                kind="agent",
+                body=body_md,
+                channel_kind=None,
+            ),
+        )
+    )
     return row_id
 
 

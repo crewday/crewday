@@ -37,7 +37,13 @@ from app.domain.agent.runtime import (
     ToolResult,
     run_turn,
 )
-from app.events.types import AgentActionPending, AgentTurnFinished, AgentTurnStarted
+from app.events.bus import EventBus
+from app.events.types import (
+    AgentActionPending,
+    AgentMessageAppended,
+    AgentTurnFinished,
+    AgentTurnStarted,
+)
 from app.tenancy.current import set_current
 from app.util.clock import FrozenClock
 from tests.domain.agent.conftest import (
@@ -82,7 +88,7 @@ def _bind_and_seed(db_session: Session, *, capability: str = _CAPABILITY):  # ty
 
 def test_no_tool_turn_emits_started_finished_and_one_chat_message(
     db_session: Session,
-    bus,  # type: ignore[no-untyped-def]
+    bus: EventBus,
     captured_events: CapturedEvents,
     clock: FrozenClock,
 ) -> None:
@@ -113,13 +119,25 @@ def test_no_tool_turn_emits_started_finished_and_one_chat_message(
     # Started + finished, in order, both with the same correlation id.
     assert captured_events.names() == [
         "agent.turn.started",
+        "agent.message.appended",
         "agent.turn.finished",
     ]
     started = captured_events.events[0]
-    finished = captured_events.events[1]
+    appended = captured_events.events[1]
+    finished = captured_events.events[2]
     assert isinstance(started, AgentTurnStarted)
+    assert isinstance(appended, AgentMessageAppended)
     assert isinstance(finished, AgentTurnFinished)
-    assert started.correlation_id == finished.correlation_id == outcome.correlation_id
+    assert (
+        started.correlation_id
+        == appended.correlation_id
+        == finished.correlation_id
+        == outcome.correlation_id
+    )
+    assert appended.actor_user_id == ctx.actor_id
+    assert appended.scope == "manager"
+    assert appended.message.kind == "agent"
+    assert appended.message.body == "Hello back!"
     assert finished.outcome == "replied"
 
     # Exactly one chat row (the reply); no audit row.
@@ -133,6 +151,38 @@ def test_no_tool_turn_emits_started_finished_and_one_chat_message(
     assert audit_count == 0
 
 
+def test_task_scope_reply_event_carries_task_key(
+    db_session: Session,
+    bus: EventBus,
+    captured_events: CapturedEvents,
+    clock: FrozenClock,
+) -> None:
+    _ws, ctx, channel_id = _bind_and_seed(db_session)
+
+    outcome = run_turn(
+        ctx,
+        session=db_session,
+        scope="task",
+        thread_id=channel_id,
+        user_message="Any notes?",
+        trigger="event",
+        llm_client=ScriptedLLMClient(replies=[make_text_response("Looks clear.")]),
+        tool_dispatcher=FakeToolDispatcher(),
+        token_factory=FakeTokenFactory(),
+        agent_label=_AGENT_LABEL,
+        capability=_CAPABILITY,
+        event_bus=bus,
+        clock=clock,
+    )
+
+    assert outcome.outcome == "replied"
+    appended = next(
+        e for e in captured_events.events if isinstance(e, AgentMessageAppended)
+    )
+    assert appended.scope == "task"
+    assert appended.task_id == channel_id
+
+
 # ---------------------------------------------------------------------------
 # Acceptance: one read tool, no audit
 # ---------------------------------------------------------------------------
@@ -140,7 +190,7 @@ def test_no_tool_turn_emits_started_finished_and_one_chat_message(
 
 def test_one_read_tool_no_audit(
     db_session: Session,
-    bus,  # type: ignore[no-untyped-def]
+    bus: EventBus,
     captured_events: CapturedEvents,
     clock: FrozenClock,
 ) -> None:
@@ -198,7 +248,7 @@ def test_one_read_tool_no_audit(
 
 def test_workspace_preferences_are_injected_into_system_prompt(
     db_session: Session,
-    bus,  # type: ignore[no-untyped-def]
+    bus: EventBus,
     clock: FrozenClock,
 ) -> None:
     _ws, ctx, channel_id = _bind_and_seed(db_session)
@@ -237,7 +287,7 @@ def test_workspace_preferences_are_injected_into_system_prompt(
 
 def test_blocked_action_returns_403_without_dispatch_or_audit(
     db_session: Session,
-    bus,  # type: ignore[no-untyped-def]
+    bus: EventBus,
     clock: FrozenClock,
 ) -> None:
     _ws, ctx, channel_id = _bind_and_seed(db_session)
@@ -295,7 +345,7 @@ def test_blocked_action_returns_403_without_dispatch_or_audit(
 
 def test_one_write_tool_writes_audit_with_token_and_label(
     db_session: Session,
-    bus,  # type: ignore[no-untyped-def]
+    bus: EventBus,
     captured_events: CapturedEvents,
     clock: FrozenClock,
 ) -> None:
@@ -367,7 +417,7 @@ def test_one_write_tool_writes_audit_with_token_and_label(
 
 def test_gated_write_tool_creates_approval_request_and_pauses(
     db_session: Session,
-    bus,  # type: ignore[no-untyped-def]
+    bus: EventBus,
     captured_events: CapturedEvents,
     clock: FrozenClock,
 ) -> None:
@@ -465,7 +515,7 @@ def test_gated_write_tool_creates_approval_request_and_pauses(
 
 def test_scheduled_trigger_records_turn_and_audits(
     db_session: Session,
-    bus,  # type: ignore[no-untyped-def]
+    bus: EventBus,
     captured_events: CapturedEvents,
     clock: FrozenClock,
 ) -> None:
@@ -532,7 +582,7 @@ def test_scheduled_trigger_records_turn_and_audits(
 
 def test_iteration_cap_emits_timeout(
     db_session: Session,
-    bus,  # type: ignore[no-untyped-def]
+    bus: EventBus,
     captured_events: CapturedEvents,
     clock: FrozenClock,
 ) -> None:
@@ -582,7 +632,7 @@ def test_iteration_cap_emits_timeout(
 
 def test_wall_clock_timeout_emits_timeout(
     db_session: Session,
-    bus,  # type: ignore[no-untyped-def]
+    bus: EventBus,
     captured_events: CapturedEvents,
     clock: FrozenClock,
 ) -> None:
@@ -635,7 +685,7 @@ def test_wall_clock_timeout_emits_timeout(
 
 def test_forbidden_read_returns_empty_or_403(
     db_session: Session,
-    bus,  # type: ignore[no-untyped-def]
+    bus: EventBus,
     captured_events: CapturedEvents,
     clock: FrozenClock,
 ) -> None:
@@ -699,7 +749,7 @@ def test_forbidden_read_returns_empty_or_403(
 
 def test_headers_propagated_to_tool_calls(
     db_session: Session,
-    bus,  # type: ignore[no-untyped-def]
+    bus: EventBus,
     captured_events: CapturedEvents,
     clock: FrozenClock,
 ) -> None:
@@ -754,7 +804,7 @@ def test_headers_propagated_to_tool_calls(
 
 def test_budget_exceeded_returns_error_no_llm_call_row(
     db_session: Session,
-    bus,  # type: ignore[no-untyped-def]
+    bus: EventBus,
     captured_events: CapturedEvents,
     clock: FrozenClock,
 ) -> None:
@@ -824,7 +874,7 @@ def test_budget_exceeded_returns_error_no_llm_call_row(
 
 def test_event_trigger_without_thread_id_raises(
     db_session: Session,
-    bus,  # type: ignore[no-untyped-def]
+    bus: EventBus,
     clock: FrozenClock,
 ) -> None:
     from app.domain.agent.runtime import AgentTurnError
@@ -910,7 +960,7 @@ def test_parse_tool_call_dispatches_when_block_wrapped_in_prose() -> None:
 
 def test_runtime_treats_multiple_tool_blocks_as_plain_reply(
     db_session: Session,
-    bus,  # type: ignore[no-untyped-def]
+    bus: EventBus,
     captured_events: CapturedEvents,
     clock: FrozenClock,
 ) -> None:
@@ -962,7 +1012,7 @@ def test_runtime_treats_multiple_tool_blocks_as_plain_reply(
 
 def test_runtime_treats_malformed_block_as_plain_reply(
     db_session: Session,
-    bus,  # type: ignore[no-untyped-def]
+    bus: EventBus,
     captured_events: CapturedEvents,
     clock: FrozenClock,
 ) -> None:

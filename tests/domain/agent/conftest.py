@@ -427,12 +427,17 @@ class CapturedEvents:
         # name, so we wire one shim per concrete subclass.
         from app.events.types import (
             AgentActionPending,
+            AgentMessageAppended,
             AgentTurnFinished,
             AgentTurnStarted,
         )
 
         @self.bus.subscribe(AgentTurnStarted)
         def _on_started(event: AgentTurnStarted) -> None:
+            self.events.append(event)
+
+        @self.bus.subscribe(AgentMessageAppended)
+        def _on_message(event: AgentMessageAppended) -> None:
             self.events.append(event)
 
         @self.bus.subscribe(AgentTurnFinished)

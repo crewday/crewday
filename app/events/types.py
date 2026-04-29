@@ -34,12 +34,14 @@ import re
 from datetime import datetime, timedelta
 from typing import ClassVar, Final, Literal
 
-from pydantic import field_validator
+from pydantic import BaseModel, field_validator
 
 from app.events.registry import Event, EventRole, register
 
 __all__ = [
     "AgentActionPending",
+    "AgentMessageAppended",
+    "AgentMessagePayload",
     "AgentTurnFinished",
     "AgentTurnOutcome",
     "AgentTurnScope",
@@ -87,6 +89,20 @@ __all__ = [
 # admin`` only.
 AgentTurnScope = Literal["employee", "manager", "admin", "task"]
 AgentTurnOutcome = Literal["replied", "action", "error", "timeout"]
+
+
+class AgentMessagePayload(BaseModel):
+    """Rendered chat-message shape pushed to web agent logs."""
+
+    at: datetime
+    kind: Literal["agent", "user", "action"]
+    body: str
+    channel_kind: str | None = None
+
+    @field_validator("at")
+    @classmethod
+    def _at_is_utc(cls, value: datetime) -> datetime:
+        return _require_aware_utc(value)
 
 
 # Values the ``ShiftChanged.action`` field narrows to. Kept as a
@@ -1093,6 +1109,25 @@ class AgentTurnFinished(Event):
 # manager / owner deny; ``expired`` covers the TTL worker flipping a
 # pending row past its ``expires_at``.
 ApprovalDecision = Literal["approved", "rejected", "expired"]
+
+
+@register
+class AgentMessageAppended(Event):
+    """A rendered message was appended to one embedded agent log.
+
+    The SPA consumes this event directly in the TanStack Query cache for
+    the shared agent rail and the worker full-screen chat. Unlike most
+    workspace events, this carries rendered free text, so the event is
+    always user-scoped to the delegating human whose chat owns the row.
+    """
+
+    name: ClassVar[str] = "agent.message.appended"
+    user_scoped: ClassVar[bool] = True
+
+    actor_user_id: str
+    scope: AgentTurnScope
+    task_id: str | None = None
+    message: AgentMessagePayload
 
 
 @register

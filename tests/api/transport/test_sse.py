@@ -1375,6 +1375,11 @@ DEFAULT_ROLE_EVENTS_ALLOWLIST: frozenset[str] = frozenset(
         # indicator. cd-nyvm.
         "agent.turn.started",
         "agent.turn.finished",
+        # ``agent.message.appended`` carries rendered chat text, so
+        # it relies on the same ``user_scoped=True`` narrowing as the
+        # turn indicator and is only delivered to the delegating
+        # user's own tabs.
+        "agent.message.appended",
         # ``agent.action.pending`` (cd-9ghv) follows the same posture
         # as the sibling ``agent.turn.*`` events — every grant role
         # can host an embedded chat agent. ``user_scoped=True`` is
