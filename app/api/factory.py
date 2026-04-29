@@ -967,6 +967,10 @@ def _build_custom_openapi(app: FastAPI) -> dict[str, Any]:
        not auto-populate ``tags[]`` from operation-level tag lists,
        so without this seed the Swagger UI would render the section
        with no description.
+    4. Declare the workspace ``slug`` path parameter once at the path
+       level for every path containing ``{slug}``. FastAPI's
+       router-prefix placeholder is consumed by tenancy middleware
+       rather than handler signatures, so the default schema omits it.
 
     ``operation_id`` rewriting is deliberately NOT done here: spec
     §12 requires every handler to declare its own
@@ -1019,7 +1023,50 @@ def _build_custom_openapi(app: FastAPI) -> dict[str, Any]:
         if name not in seen and name is not None:
             merged_tags.append(tag)
     schema["tags"] = merged_tags
+    _declare_workspace_slug_path_parameters(schema)
     return schema
+
+
+def _slug_path_parameter() -> dict[str, Any]:
+    return {
+        "name": "slug",
+        "in": "path",
+        "required": True,
+        "schema": {"type": "string", "minLength": 1, "maxLength": 64},
+    }
+
+
+def _declares_slug_path_parameter(parameters: object) -> bool:
+    if not isinstance(parameters, list):
+        return False
+    return any(
+        isinstance(param, dict)
+        and param.get("name") == "slug"
+        and param.get("in") == "path"
+        for param in parameters
+    )
+
+
+def _declare_workspace_slug_path_parameters(schema: dict[str, Any]) -> None:
+    paths = schema.get("paths")
+    if not isinstance(paths, dict):
+        return
+
+    for path, path_item in paths.items():
+        if (
+            not isinstance(path, str)
+            or "{slug}" not in path
+            or not isinstance(path_item, dict)
+        ):
+            continue
+
+        parameters = path_item.get("parameters")
+        if _declares_slug_path_parameter(parameters):
+            continue
+        if isinstance(parameters, list):
+            parameters.append(_slug_path_parameter())
+        else:
+            path_item["parameters"] = [_slug_path_parameter()]
 
 
 def _install_custom_openapi(app: FastAPI) -> None:

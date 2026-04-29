@@ -139,27 +139,53 @@ class TestOpenapiShape:
         targets the still-empty scaffolds so an accidental route
         leakage anywhere else still fails the test.
         """
-        # ``time`` carries routes as of cd-whl; ``tasks`` as of cd-sn26;
-        # ``expenses`` as of cd-t6y2; ``messaging`` as of cd-0bnz;
-        # ``payroll`` as of cd-7rvx.
-        # Add any further implemented contexts here as they land. Every
-        # name in this set must still appear in :data:`CONTEXT_ROUTERS`
-        # so the tag seed check above keeps firing. The workspace-scoped
-        # admin aggregator (cd-g1ay) does NOT belong here — it lives
-        # outside ``CONTEXT_ROUTERS`` and mounts through its own seam.
-        implemented_contexts = {"expenses", "messaging", "payroll", "tasks", "time"}
+        # Contexts with live routes are excluded: their presence is
+        # the whole point. The workspace-scoped admin aggregator
+        # (cd-g1ay) does NOT belong here — it lives outside
+        # ``CONTEXT_ROUTERS`` and mounts through its own seam.
         client = _client(create_app(settings=_settings()))
         schema = client.get("/api/openapi.json").json()
         # None of the empty context prefixes should be in ``paths``.
         # e.g. ``/w/{slug}/api/v1/tasks`` must not be a key.
-        for context_name, _router in CONTEXT_ROUTERS:
-            if context_name in implemented_contexts:
+        for context_name, router in CONTEXT_ROUTERS:
+            if router.routes:
                 continue
             prefix = f"/w/{{slug}}/api/v1/{context_name}"
             for path in schema.get("paths", {}):
                 assert not path.startswith(prefix), (
                     f"empty context {context_name!r} leaked path {path!r}"
                 )
+
+    def test_workspace_paths_declare_slug_path_parameter(self) -> None:
+        """Every workspace-scoped path declares the URL slug once.
+
+        The tenancy middleware resolves ``/w/{slug}`` before handlers run,
+        so route functions do not accept a ``slug`` argument. The OpenAPI
+        schema still has to expose the placeholder for Schemathesis and
+        downstream client generators.
+        """
+        client = _client(create_app(settings=_settings()))
+        schema = client.get("/api/openapi.json").json()
+        expected = {
+            "name": "slug",
+            "in": "path",
+            "required": True,
+            "schema": {"type": "string", "minLength": 1, "maxLength": 64},
+        }
+        workspace_paths = {
+            path: item
+            for path, item in schema.get("paths", {}).items()
+            if "{slug}" in path
+        }
+        assert workspace_paths, "expected workspace-scoped paths"
+        for path, item in workspace_paths.items():
+            parameters = item.get("parameters", [])
+            matches = [
+                param
+                for param in parameters
+                if param.get("name") == "slug" and param.get("in") == "path"
+            ]
+            assert matches == [expected], f"{path} has slug params {matches!r}"
 
 
 # ---------------------------------------------------------------------------

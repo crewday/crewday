@@ -263,56 +263,6 @@ def _response_declares_header(case: Case, status_code: int, header_name: str) ->
 
 
 # ---------------------------------------------------------------------------
-# Schema patch: declare missing ``{slug}`` path parameter
-# ---------------------------------------------------------------------------
-
-
-@schemathesis.hook
-def before_load_schema(
-    ctx: schemathesis.HookContext, raw_schema: dict[str, Any]
-) -> None:
-    """Inject the ``{slug}`` path parameter on every workspace-scoped path.
-
-    Schemathesis refuses to test an operation whose path template
-    references a placeholder the OpenAPI document does not declare as
-    a parameter. FastAPI's sub-app composition omits the
-    ``{slug}`` parameter from the merged document — every
-    ``/w/{slug}/api/v1/...`` op is missing the path-level entry. We
-    repair the schema in-place so the gate has something to test;
-    the long-term fix is to surface the parameter in
-    :func:`app.api.factory.create_app`'s OpenAPI customiser, tracked
-    by a cd-3j25 follow-up Beads task.
-    """
-    paths = raw_schema.get("paths")
-    if not isinstance(paths, dict):
-        return
-    slug_param: dict[str, Any] = {
-        "name": "slug",
-        "in": "path",
-        "required": True,
-        "schema": {"type": "string", "minLength": 1, "maxLength": 64},
-    }
-    for path, methods in paths.items():
-        if not isinstance(methods, dict) or "{slug}" not in path:
-            continue
-        # Path-level ``parameters`` is the right home — applies to
-        # every method on the path. If the path already has a
-        # parameters list, append unless ``slug`` is already declared.
-        existing = methods.get("parameters")
-        if existing is None:
-            methods["parameters"] = [slug_param.copy()]
-            continue
-        if not isinstance(existing, list):
-            continue
-        if any(
-            isinstance(p, dict) and p.get("name") == "slug" and p.get("in") == "path"
-            for p in existing
-        ):
-            continue
-        existing.append(slug_param.copy())
-
-
-# ---------------------------------------------------------------------------
 # Path-parameter constraints
 # ---------------------------------------------------------------------------
 
