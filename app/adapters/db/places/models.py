@@ -111,6 +111,15 @@ _UNIT_TYPE_VALUES: tuple[str, ...] = (
     "other",
 )
 
+# Allowed ``area.kind`` values. §04 leaves room for future expansion
+# ("..."), but the current domain service only needs the concrete set
+# used by the seeded STR defaults and manager CRUD.
+_AREA_KIND_VALUES: tuple[str, ...] = (
+    "indoor_room",
+    "outdoor",
+    "service",
+)
+
 
 class Property(Base):
     """A physical place the workspace operates in.
@@ -415,10 +424,22 @@ class Unit(Base):
 class Area(Base):
     """Subdivision of a property — kitchen, pool, garden, etc.
 
-    v1 slice: ``id`` / ``property_id`` / ``label`` / ``icon`` /
-    ``ordering`` / ``created_at``. The §04 ``unit_id`` (for
-    unit-scoped areas), ``kind`` enum and ``parent_area`` self-FK
-    land with cd-8u5.
+    The v1 slice landed ``id`` / ``property_id`` / ``label`` /
+    ``icon`` / ``ordering`` / ``created_at``. cd-a2k adds the §04
+    service surface while preserving those legacy columns:
+
+    * ``name`` — human-visible display name. Backfilled from
+      ``label``; the domain service writes both so older adapters
+      keep reading ``label``.
+    * ``unit_id`` — nullable FK for unit-specific areas. ``NULL`` is
+      a shared/property-level area.
+    * ``kind`` — ``indoor_room | outdoor | service``.
+    * ``ordering`` — existing integer walk-order column, surfaced by
+      the domain service as ``order_hint``.
+    * ``parent_area_id`` — optional self-FK. The service enforces the
+      one-level nesting invariant.
+    * ``notes_md`` / ``updated_at`` / ``deleted_at`` — internal notes
+      and mutation/soft-delete timestamps.
     """
 
     __tablename__ = "area"
@@ -429,7 +450,14 @@ class Area(Base):
         ForeignKey("property.id", ondelete="CASCADE"),
         nullable=False,
     )
+    unit_id: Mapped[str | None] = mapped_column(
+        String,
+        ForeignKey("unit.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    name: Mapped[str | None] = mapped_column(String, nullable=True)
     label: Mapped[str] = mapped_column(String, nullable=False)
+    kind: Mapped[str] = mapped_column(String, nullable=False, default="indoor_room")
     # ``icon`` is the lucide icon slug the UI renders next to the
     # label (e.g. ``"utensils"``, ``"waves"``). Nullable — areas
     # without a canonical icon just render the label.
@@ -437,11 +465,32 @@ class Area(Base):
     # ``ordering`` is the integer walk-order hint (§04 "Auto-seeded
     # areas"); lower values render first.
     ordering: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    parent_area_id: Mapped[str | None] = mapped_column(
+        String,
+        ForeignKey("area.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    notes_md: Mapped[str] = mapped_column(String, nullable=False, default="")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
     )
+    updated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    deleted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
-    __table_args__ = (Index("ix_area_property", "property_id"),)
+    __table_args__ = (
+        CheckConstraint(
+            "kind IN ('" + "', '".join(_AREA_KIND_VALUES) + "')",
+            name="kind",
+        ),
+        Index("ix_area_property", "property_id"),
+        Index("ix_area_unit", "unit_id"),
+        Index("ix_area_parent", "parent_area_id"),
+        Index("ix_area_deleted", "deleted_at"),
+    )
 
 
 class PropertyClosure(Base):

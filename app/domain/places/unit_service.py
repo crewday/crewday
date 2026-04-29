@@ -97,6 +97,7 @@ _MAX_NAME_LEN = 200
 _MAX_NOTES_LEN = 20_000
 _MAX_ID_LEN = 64
 _MAX_TIME_LEN = 5  # ``HH:MM``
+_AREA_SEED_PROPERTY_KINDS = frozenset({"vacation", "str", "mixed"})
 
 
 # ---------------------------------------------------------------------------
@@ -326,11 +327,31 @@ def _assert_property_in_workspace(
         .join(PropertyWorkspace, PropertyWorkspace.property_id == Property.id)
         .where(
             Property.id == property_id,
+            Property.deleted_at.is_(None),
             PropertyWorkspace.workspace_id == ctx.workspace_id,
         )
     )
     if session.scalars(stmt).one_or_none() is None:
         raise UnitNotFound(property_id)
+
+
+def _property_kind_in_workspace(
+    session: Session, ctx: WorkspaceContext, *, property_id: str
+) -> str:
+    """Return ``property.kind`` when the property is visible to ``ctx``."""
+    stmt = (
+        select(Property.kind)
+        .join(PropertyWorkspace, PropertyWorkspace.property_id == Property.id)
+        .where(
+            Property.id == property_id,
+            Property.deleted_at.is_(None),
+            PropertyWorkspace.workspace_id == ctx.workspace_id,
+        )
+    )
+    kind = session.scalars(stmt).one_or_none()
+    if kind is None:
+        raise UnitNotFound(property_id)
+    return kind
 
 
 def _load_unit_row(
@@ -480,7 +501,9 @@ def create_unit(
     resolved_clock = clock if clock is not None else SystemClock()
     now = resolved_clock.now()
 
-    _assert_property_in_workspace(session, ctx, property_id=property_id)
+    property_kind = _property_kind_in_workspace(
+        session, ctx, property_id=property_id
+    )
     if _name_taken(session, property_id=property_id, name=body.name):
         raise UnitNameTaken(
             f"a unit named {body.name!r} already exists on property {property_id!r}"
@@ -501,6 +524,17 @@ def create_unit(
         diff={"after": _view_to_diff_dict(view)},
         clock=resolved_clock,
     )
+    if property_kind in _AREA_SEED_PROPERTY_KINDS:
+        from app.domain.places.area_service import seed_default_areas_for_unit
+
+        seed_default_areas_for_unit(
+            session,
+            ctx,
+            property_id=property_id,
+            unit_id=view.id,
+            now=now,
+            clock=resolved_clock,
+        )
     return view
 
 
@@ -510,6 +544,7 @@ def create_default_unit_for_property(
     *,
     property_id: str,
     name: str,
+    property_kind: str = "residence",
     now: datetime,
     clock: Clock,
 ) -> UnitView:
@@ -544,6 +579,17 @@ def create_default_unit_for_property(
         diff={"after": _view_to_diff_dict(view)},
         clock=clock,
     )
+    if property_kind in _AREA_SEED_PROPERTY_KINDS:
+        from app.domain.places.area_service import seed_default_areas_for_unit
+
+        seed_default_areas_for_unit(
+            session,
+            ctx,
+            property_id=property_id,
+            unit_id=view.id,
+            now=now,
+            clock=clock,
+        )
     return view
 
 

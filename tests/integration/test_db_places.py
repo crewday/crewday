@@ -260,10 +260,16 @@ class TestMigrationShape:
         assert indexes["ix_unit_property"]["column_names"] == ["property_id"]
 
     def test_area_fks(self, engine: Engine) -> None:
-        fks = inspect(engine).get_foreign_keys("area")
-        assert len(fks) == 1
-        assert fks[0]["referred_table"] == "property"
-        assert fks[0]["options"].get("ondelete") == "CASCADE"
+        fks = {
+            tuple(fk["constrained_columns"]): fk
+            for fk in inspect(engine).get_foreign_keys("area")
+        }
+        assert fks[("property_id",)]["referred_table"] == "property"
+        assert fks[("property_id",)]["options"].get("ondelete") == "CASCADE"
+        assert fks[("unit_id",)]["referred_table"] == "unit"
+        assert fks[("unit_id",)]["options"].get("ondelete") == "SET NULL"
+        assert fks[("parent_area_id",)]["referred_table"] == "area"
+        assert fks[("parent_area_id",)]["options"].get("ondelete") == "SET NULL"
 
     def test_property_closure_fks(self, engine: Engine) -> None:
         fks = {

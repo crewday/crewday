@@ -22,6 +22,22 @@ See docs/specs/04-properties-and-stays.md and
 docs/specs/05-employees-and-roles.md §"Property work role assignment".
 """
 
+from app.domain.places.area_service import (
+    AreaCreate,
+    AreaKind,
+    AreaNestingTooDeep,
+    AreaNotFound,
+    AreaReorderItem,
+    AreaUpdate,
+    AreaView,
+    create_area,
+    delete_area,
+    get_area,
+    list_areas,
+    move_area,
+    reorder_areas,
+    update_area,
+)
 from app.domain.places.membership_service import (
     CannotRevokeOwner,
     InvalidMembershipRole,
@@ -51,6 +67,13 @@ from app.domain.places.ports import (
 )
 
 __all__ = [
+    "AreaCreate",
+    "AreaKind",
+    "AreaNestingTooDeep",
+    "AreaNotFound",
+    "AreaReorderItem",
+    "AreaUpdate",
+    "AreaView",
     "AssignmentIntegrityError",
     "CannotRevokeOwner",
     "DuplicateActiveAssignment",
@@ -68,10 +91,17 @@ __all__ = [
     "PropertyWorkRoleAssignmentRow",
     "TransferDemoteAction",
     "accept_invite",
+    "create_area",
+    "delete_area",
+    "get_area",
     "invite_workspace",
+    "list_areas",
     "list_memberships",
+    "move_area",
+    "reorder_areas",
     "revoke_workspace",
     "transfer_ownership",
+    "update_area",
     "update_membership_role",
     "update_share_guest_identity",
 ]

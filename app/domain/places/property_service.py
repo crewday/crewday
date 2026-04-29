@@ -747,6 +747,7 @@ def create_property(
         ctx,
         property_id=row.id,
         name=body.name,
+        property_kind=body.kind,
         now=now,
         clock=resolved_clock,
     )
