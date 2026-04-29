@@ -40,6 +40,7 @@ from datetime import datetime
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -50,6 +51,7 @@ from app.domain.time.shifts import (
     ShiftClose,
     ShiftEdit,
     ShiftEditForbidden,
+    ShiftGeofenceRejected,
     ShiftNotFound,
     ShiftOpen,
     ShiftView,
@@ -230,6 +232,11 @@ def _http_for_shift_error(exc: Exception) -> HTTPException:
             status_code=422,
             detail={"error": "invalid_window", "message": str(exc)},
         )
+    if isinstance(exc, ShiftGeofenceRejected):
+        return HTTPException(
+            status_code=422,
+            detail=exc.verdict.to_http_detail(),
+        )
     if isinstance(exc, ShiftEditForbidden):
         return HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -306,7 +313,7 @@ def post_open_shift(
     body: ShiftOpen,
     ctx: _Ctx,
     session: _Db,
-) -> ShiftPayload:
+) -> ShiftPayload | JSONResponse:
     """Open a fresh shift for the caller (or the body's ``user_id``)."""
     try:
         view = open_shift(
@@ -316,6 +323,15 @@ def post_open_shift(
             property_id=body.property_id,
             source=body.source,
             notes_md=body.notes_md,
+            client_lat=body.client_lat,
+            client_lon=body.client_lon,
+            gps_accuracy_m=body.gps_accuracy_m,
+        )
+    except ShiftGeofenceRejected as exc:
+        http_exc = _http_for_shift_error(exc)
+        return JSONResponse(
+            status_code=http_exc.status_code,
+            content={"detail": http_exc.detail},
         )
     except (ShiftAlreadyOpen, ShiftEditForbidden) as exc:
         raise _http_for_shift_error(exc) from exc

@@ -91,6 +91,11 @@ _LEAVE_STATUS_VALUES: tuple[str, ...] = (
     "cancelled",
 )
 
+# Allowed ``geofence_setting.mode`` values. ``enforce`` rejects a
+# clock-in without an in-radius fix; ``warn`` records the issue but
+# allows the shift; ``off`` bypasses checks for the property.
+_GEOFENCE_MODE_VALUES: tuple[str, ...] = ("enforce", "warn", "off")
+
 
 def _in_clause(values: tuple[str, ...]) -> str:
     """Render a ``col IN ('a', 'b', …)`` CHECK body fragment.
@@ -244,10 +249,10 @@ class GeofenceSetting(Base):
 
     One row per ``(workspace_id, property_id)`` pair — the
     ``UNIQUE`` composite enforces the invariant. The v1 slice
-    captures the centre (``lat`` / ``lon``) + ``radius_m`` radius
-    plus the ``enabled`` kill switch; the geofence poller (cd-whl
-    and successors) reads this row to decide whether a tracked user
-    is on-site.
+    captures the centre (``lat`` / ``lon``) + ``radius_m`` radius,
+    the ``mode`` (``enforce`` / ``warn`` / ``off``), plus the legacy
+    ``enabled`` kill switch. The clock-in path reads this row to
+    decide whether a worker's client-supplied GPS fix is in range.
 
     CHECK constraints enforce the coordinate bounds (``-90 ≤ lat ≤
     90``, ``-180 ≤ lon ≤ 180``) and the positivity of ``radius_m``.
@@ -277,11 +282,21 @@ class GeofenceSetting(Base):
     lon: Mapped[float] = mapped_column(Float, nullable=False)
     radius_m: Mapped[int] = mapped_column(Integer, nullable=False)
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    mode: Mapped[str] = mapped_column(
+        String,
+        nullable=False,
+        default="enforce",
+        server_default="enforce",
+    )
 
     __table_args__ = (
         CheckConstraint("radius_m > 0", name="radius_m_positive"),
         CheckConstraint("lat BETWEEN -90 AND 90", name="lat_bounds"),
         CheckConstraint("lon BETWEEN -180 AND 180", name="lon_bounds"),
+        CheckConstraint(
+            f"mode IN ({_in_clause(_GEOFENCE_MODE_VALUES)})",
+            name="mode",
+        ),
         UniqueConstraint(
             "workspace_id",
             "property_id",

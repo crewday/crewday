@@ -73,6 +73,7 @@ __all__ = [
     "ShiftChanged",
     "ShiftChangedAction",
     "ShiftEnded",
+    "ShiftGeofenceWarning",
     "StayUpcoming",
     "TaskApprovalRequested",
     "TaskApprovalState",
@@ -1205,6 +1206,26 @@ class ShiftChanged(Event):
     shift_id: str
     user_id: str
     action: ShiftChangedAction
+
+
+@register
+class ShiftGeofenceWarning(Event):
+    """A clock-in succeeded while the property's geofence was in warn mode.
+
+    Payload is limited to FK identifiers and numeric verdict fields.
+    Clients that need names or richer context must fetch through REST
+    under normal row-level authorisation.
+    """
+
+    name: ClassVar[str] = "time.shift.geofence_warning"
+    allowed_roles: ClassVar[tuple[EventRole, ...]] = ("manager", "worker")
+
+    shift_id: str
+    user_id: str
+    property_id: str | None
+    distance_m: float | None
+    radius_m: int | None
+    gps_accuracy_m: float | None
 
 
 @register

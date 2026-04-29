@@ -140,8 +140,9 @@ See §16 for deployment details.
 - `Strict-Transport-Security` (once HSTS opted in).
 - `Referrer-Policy: strict-origin-when-cross-origin`.
 - `Permissions-Policy`: allow `camera=(self)` only on worker pages
-  (for task evidence). `geolocation` is **not** granted anywhere in
-  v1 (the v0 clock-in geofence is gone — see §09 "Out of scope").
+  (for task evidence). Allow `geolocation=(self)` only on the worker
+  clock-in surface; other surfaces must not receive geolocation
+  permission.
 - `X-Content-Type-Options: nosniff`.
 - `Cross-Origin-Opener-Policy: same-origin`, `Cross-Origin-Resource-
   Policy: same-origin`.
@@ -597,14 +598,13 @@ does not require it, and v1 does not ship it.
 Even though this is self-hosted, GDPR-like practices apply because
 much of the data is personal.
 
-**Data-minimisation note: no clock GPS.** v1 deliberately drops
-the v0 `geofence_required` setting and the `shift.geo_in_*` /
-`shift.geo_out_*` columns — bookings (§09) are the time record,
-and a per-tap GPS coordinate added no commercial signal beyond
-what task-completion timestamps already provide. The PII surface
-is correspondingly smaller: no historical worker location data,
-no Geolocation API consent prompt on clock-in, nothing to redact
-on `crewday admin purge`.
+**Data-minimisation note: clock GPS is verdict-only.** v1 does not
+store `shift.geo_in_*` / `shift.geo_out_*` columns or any historical
+worker location trail. When a property enables clock-in geofencing
+(§09), the client submits a one-shot fix for that clock-in attempt;
+the service stores only the resulting audit verdict
+(`outside` / `no_fix`, distance, radius, and accuracy), not the raw
+lat/lon. `geofence_setting.mode = off` disables the prompt entirely.
 
 **Labour-law compliance.** A booking row plus its
 `actual_minutes` (when amended) constitutes a compliant time

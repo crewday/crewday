@@ -85,6 +85,7 @@ def pinned_settings_demo(db_url: str) -> Settings:
         worker="internal",
         profile="prod",
         vite_dev_url="http://127.0.0.1:5173",
+        public_url="https://demo.crew.day",
         demo_mode=True,
         demo_frame_ancestors="https://crew.day",
         hsts_enabled=False,
@@ -315,3 +316,22 @@ class TestWorkerRouteCamera:
         resp = client.get("/w/any-slug/worker/task/abc/photo")
         policy = resp.headers["permissions-policy"]
         assert "camera=(self)" in policy
+        assert "geolocation=()" in policy
+
+
+class TestWorkerClockGeolocation:
+    """Worker clock-in surfaces expose ``geolocation=(self)`` only there."""
+
+    @pytest.mark.parametrize("path", ["/w/any-slug/me", "/w/any-slug/worker/clock"])
+    def test_clock_path_allows_geolocation(
+        self,
+        pinned_settings: Settings,
+        real_make_uow: None,
+        path: str,
+    ) -> None:
+        app = create_app(settings=pinned_settings)
+        client = TestClient(app, raise_server_exceptions=False)
+        resp = client.get(path)
+        policy = resp.headers["permissions-policy"]
+        assert "geolocation=(self)" in policy
+        assert "microphone=()" in policy

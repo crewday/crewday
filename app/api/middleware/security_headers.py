@@ -70,6 +70,14 @@ __all__ = [
 # segment under a workspace slug.
 _WORKER_CAMERA_PATH_RE: Final[re.Pattern[str]] = re.compile(r"^/w/[^/]+/worker/")
 
+# Paths that may ask for a one-shot GPS fix during clock-in. The
+# current worker clock surface is the SPA ``/me`` route under a
+# workspace slug; the ``/worker/clock`` form is reserved for a future
+# dedicated page without widening geolocation to every worker route.
+_WORKER_CLOCK_GEOLOCATION_PATH_RE: Final[re.Pattern[str]] = re.compile(
+    r"^/w/[^/]+/(?:me(?:/|$)|worker/clock(?:/|$))"
+)
+
 
 # 128 bits of randomness: the CSP nonce lives for one response, and the
 # attacker needs to guess it to inject an inline script. 128 bits
@@ -142,19 +150,21 @@ def build_permissions_policy(path: str) -> str:
 
     Worker routes (``/w/<slug>/worker/...``) are the only surface that
     asks the browser for camera access (task-evidence capture). Every
-    other route denies the camera outright. ``geolocation`` is denied
-    everywhere — the v0 clock-in geofence is gone in v1 (§15
-    "Data-minimisation note"). ``microphone`` and ``payment`` are
-    denied anywhere; we currently have no use case for either, and the
-    §15 prose is a hard "deny everywhere except the task-evidence
-    surface".
+    other route denies the camera outright. Geolocation is allowed only
+    on worker clock-in surfaces so a property with
+    ``geofence_setting.mode`` set to ``enforce`` or ``warn`` can request
+    a one-shot GPS fix; every other path denies it. ``microphone`` and
+    ``payment`` are denied anywhere; we currently have no use case for
+    either, and the §15 prose is a hard "deny everywhere except the
+    named worker surfaces".
 
     The ``(self)`` form allows the top-level document's origin and
     nothing else — the browser will refuse to fanout the capability
     into cross-origin iframes even on the worker page.
     """
     camera = "(self)" if _WORKER_CAMERA_PATH_RE.match(path) else "()"
-    return f"camera={camera}, geolocation=(), microphone=(), payment=()"
+    geolocation = "(self)" if _WORKER_CLOCK_GEOLOCATION_PATH_RE.match(path) else "()"
+    return f"camera={camera}, geolocation={geolocation}, microphone=(), payment=()"
 
 
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):

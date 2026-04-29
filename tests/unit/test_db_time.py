@@ -206,6 +206,7 @@ class TestGeofenceSettingModel:
             lon=7.1251,
             radius_m=75,
             enabled=True,
+            mode="enforce",
         )
         assert gs.id == "01HWA00000000000000000GFSA"
         assert gs.workspace_id == "01HWA00000000000000000WSPA"
@@ -214,6 +215,7 @@ class TestGeofenceSettingModel:
         assert gs.lon == 7.1251
         assert gs.radius_m == 75
         assert gs.enabled is True
+        assert gs.mode == "enforce"
 
     def test_disabled_construction(self) -> None:
         gs = GeofenceSetting(
@@ -224,8 +226,10 @@ class TestGeofenceSettingModel:
             lon=151.2093,
             radius_m=200,
             enabled=False,
+            mode="off",
         )
         assert gs.enabled is False
+        assert gs.mode == "off"
 
     def test_tablename(self) -> None:
         assert GeofenceSetting.__tablename__ == "geofence_setting"
@@ -266,6 +270,19 @@ class TestGeofenceSettingModel:
         sql = str(checks[0].sqltext)
         assert "-180" in sql
         assert "180" in sql
+
+    def test_mode_check_present(self) -> None:
+        checks = [
+            c
+            for c in GeofenceSetting.__table_args__
+            if isinstance(c, CheckConstraint)
+            and c.name is not None
+            and str(c.name).endswith("mode")
+        ]
+        assert len(checks) == 1
+        sql = str(checks[0].sqltext)
+        for mode in ("enforce", "warn", "off"):
+            assert mode in sql, f"{mode} missing from CHECK constraint"
 
     def test_unique_workspace_property_present(self) -> None:
         uniques = [

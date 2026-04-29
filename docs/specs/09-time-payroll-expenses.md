@@ -400,9 +400,13 @@ that prints the daily booking list as a signable PDF — flagged in
 - **Door-lock / NFC integration** for external "she was on
   premises" proof. Better than GPS pings, but not v1 — flagged in
   §19 alongside the marketplace.
-- **GPS geofencing.** Without clock-in, GPS adds nothing; the v0
-  geofence_required setting is removed. PII surface shrinks
-  accordingly (§15).
+- **Continuous GPS tracking.** v1 does not store per-worker location
+  history or live presence maps. A property may require a one-shot
+  client GPS fix only at clock-in via `geofence_setting.mode`:
+  `enforce` rejects out-of-radius or missing fixes, `warn` allows the
+  shift but writes an audit row (and warns clients when the fix is
+  outside), and `off` bypasses checks. The raw coordinate is not stored
+  on `shift`; only the audit verdict keeps distance / accuracy.
 - **Real-time presence dashboards.** Owners who want "is Maria at
   Villa A right now?" see the booking's `scheduled_start`,
   `scheduled_end`, and the most recent task tick; that's enough

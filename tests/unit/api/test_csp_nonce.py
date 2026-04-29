@@ -221,9 +221,34 @@ class TestBuildPermissionsPolicy:
         assert "camera=()" in policy
         assert "camera=(self)" not in policy
 
-    def test_geolocation_denied_everywhere(self) -> None:
-        """v1 has no geolocation surface — §15 data-minimisation."""
-        for path in ("/", "/w/x/worker/task/1"):
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "/",
+            "/w/x/worker/task/1",
+            "/w/x/today",
+            "/w/x/api/v1/time/shifts/open",
+            "/w/x/meeting",
+        ],
+    )
+    def test_geolocation_denied_outside_clock_in(self, path: str) -> None:
+        """Only the worker clock-in page may request a one-shot GPS fix."""
+        assert "geolocation=()" in build_permissions_policy(path)
+
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "/w/x/me",
+            "/w/x/worker/clock",
+            "/w/x/worker/clock/start",
+        ],
+    )
+    def test_clock_in_paths_allow_geolocation(self, path: str) -> None:
+        policy = build_permissions_policy(path)
+        assert "geolocation=(self)" in policy
+
+    def test_worker_camera_route_still_denies_geolocation(self) -> None:
+        for path in ("/w/x/worker/task/1", "/w/x/worker/task/1/photo"):
             assert "geolocation=()" in build_permissions_policy(path)
 
     def test_microphone_and_payment_denied_everywhere(self) -> None:

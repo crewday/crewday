@@ -12260,6 +12260,44 @@
         "additionalProperties": false,
         "description": "Request body for ``POST /shifts/open``.\n\n``user_id`` defaults to the caller's ``ctx.actor_id`` when the\nservice receives ``None`` \u2014 workers opening their own shift do\nnot pass the field. Managers opening a retroactive shift for\nsomeone else pass an explicit ``user_id``; the service gates\nthat path through ``time.edit_others``.",
         "properties": {
+          "client_lat": {
+            "anyOf": [
+              {
+                "maximum": 90.0,
+                "minimum": -90.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Client Lat"
+          },
+          "client_lon": {
+            "anyOf": [
+              {
+                "maximum": 180.0,
+                "minimum": -180.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Client Lon"
+          },
+          "gps_accuracy_m": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gps Accuracy M"
+          },
           "notes_md": {
             "anyOf": [
               {

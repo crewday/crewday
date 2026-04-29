@@ -62,7 +62,12 @@ from app.authz import (
     UnknownActionKey,
     require,
 )
-from app.events import ShiftChanged, ShiftEnded, bus
+from app.domain.time.geofence import (
+    GeofenceRejected,
+    GeofenceVerdict,
+    check_geofence,
+)
+from app.events import ShiftChanged, ShiftEnded, ShiftGeofenceWarning, bus
 from app.tenancy import WorkspaceContext
 from app.util.clock import Clock, SystemClock
 from app.util.ulid import new_ulid
@@ -73,6 +78,7 @@ __all__ = [
     "ShiftClose",
     "ShiftEdit",
     "ShiftEditForbidden",
+    "ShiftGeofenceRejected",
     "ShiftNotFound",
     "ShiftOpen",
     "ShiftSource",
@@ -150,6 +156,9 @@ class ShiftEditForbidden(PermissionError):
     """
 
 
+ShiftGeofenceRejected = GeofenceRejected
+
+
 # ---------------------------------------------------------------------------
 # DTOs
 # ---------------------------------------------------------------------------
@@ -178,6 +187,9 @@ class ShiftOpen(BaseModel):
     property_id: str | None = Field(default=None, max_length=_MAX_ID_LEN)
     source: ShiftSource = "manual"
     notes_md: str | None = Field(default=None, max_length=_MAX_NOTES_LEN)
+    client_lat: float | None = Field(default=None, ge=-90, le=90)
+    client_lon: float | None = Field(default=None, ge=-180, le=180)
+    gps_accuracy_m: float | None = Field(default=None, ge=0)
 
 
 class ShiftClose(BaseModel):
@@ -477,6 +489,34 @@ def _find_open_shift_id(
     return session.scalars(stmt).first()
 
 
+def _write_geofence_audit(
+    session: Session,
+    ctx: WorkspaceContext,
+    *,
+    action: str,
+    target_user_id: str,
+    verdict: GeofenceVerdict,
+    shift_id: str | None = None,
+    clock: Clock | None = None,
+) -> None:
+    entity_kind = "shift" if shift_id is not None else "geofence_setting"
+    entity_id = shift_id if shift_id is not None else verdict.property_id
+    if entity_id is None:
+        entity_id = target_user_id
+    write_audit(
+        session,
+        ctx,
+        entity_kind=entity_kind,
+        entity_id=entity_id,
+        action=action,
+        diff={
+            "user_id": target_user_id,
+            "geofence": verdict.to_audit_diff(),
+        },
+        clock=clock,
+    )
+
+
 def open_shift(
     session: Session,
     ctx: WorkspaceContext,
@@ -485,6 +525,9 @@ def open_shift(
     property_id: str | None = None,
     source: ShiftSource = "manual",
     notes_md: str | None = None,
+    client_lat: float | None = None,
+    client_lon: float | None = None,
+    gps_accuracy_m: float | None = None,
     clock: Clock | None = None,
 ) -> ShiftView:
     """Open a shift for ``user_id`` (or the caller) and return the fresh row.
@@ -534,6 +577,25 @@ def open_shift(
             f"shift.source={source!r} is not one of {_SHIFT_SOURCE_VALUES!r}"
         )
 
+    geofence = check_geofence(
+        session,
+        ctx,
+        property_id=property_id,
+        client_lat=client_lat,
+        client_lon=client_lon,
+        gps_accuracy_m=gps_accuracy_m,
+    )
+    if geofence.mode == "enforce" and geofence.status in {"outside", "no_fix"}:
+        _write_geofence_audit(
+            session,
+            ctx,
+            action="shift.geofence_rejected",
+            target_user_id=target_user_id,
+            verdict=geofence,
+            clock=clock,
+        )
+        raise GeofenceRejected(geofence)
+
     row = Shift(
         id=new_ulid(),
         workspace_id=ctx.workspace_id,
@@ -559,6 +621,31 @@ def open_shift(
         diff={"after": _view_to_diff_dict(view)},
         clock=clock,
     )
+    if geofence.mode == "warn" and geofence.status in {"outside", "no_fix"}:
+        _write_geofence_audit(
+            session,
+            ctx,
+            action="shift.geofence_warning",
+            target_user_id=target_user_id,
+            verdict=geofence,
+            shift_id=row.id,
+            clock=clock,
+        )
+        if geofence.status == "outside":
+            bus.publish(
+                ShiftGeofenceWarning(
+                    workspace_id=ctx.workspace_id,
+                    actor_id=ctx.actor_id,
+                    correlation_id=ctx.audit_correlation_id,
+                    occurred_at=now,
+                    shift_id=row.id,
+                    user_id=target_user_id,
+                    property_id=property_id,
+                    distance_m=geofence.distance_m,
+                    radius_m=geofence.radius_m,
+                    gps_accuracy_m=geofence.gps_accuracy_m,
+                )
+            )
     bus.publish(
         ShiftChanged(
             workspace_id=ctx.workspace_id,

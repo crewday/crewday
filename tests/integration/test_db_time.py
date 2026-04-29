@@ -235,6 +235,7 @@ class TestMigrationShape:
             "lon",
             "radius_m",
             "enabled",
+            "mode",
         }
         assert set(cols) == expected
         for name in expected:
@@ -431,6 +432,7 @@ class TestGeofenceCrud:
                 lon=7.1251,
                 radius_m=75,
                 enabled=True,
+                mode="enforce",
             )
             db_session.add(gs)
             db_session.flush()
@@ -438,18 +440,20 @@ class TestGeofenceCrud:
             loaded = db_session.get(GeofenceSetting, gs.id)
             assert loaded is not None
             assert loaded.enabled is True
+            assert loaded.mode == "enforce"
             assert loaded.radius_m == 75
 
-            # Update: owner widens the perimeter and flips the kill switch.
+            # Update: owner widens the perimeter and switches to warn mode.
             loaded.radius_m = 120
-            loaded.enabled = False
+            loaded.mode = "warn"
             db_session.flush()
             db_session.expire_all()
 
             reloaded = db_session.get(GeofenceSetting, gs.id)
             assert reloaded is not None
             assert reloaded.radius_m == 120
-            assert reloaded.enabled is False
+            assert reloaded.enabled is True
+            assert reloaded.mode == "warn"
 
             db_session.delete(reloaded)
             db_session.flush()
@@ -700,6 +704,34 @@ class TestCheckConstraints:
                     lon=180.0001,  # east of the antemeridian
                     radius_m=50,
                     enabled=True,
+                )
+            )
+            with pytest.raises(IntegrityError):
+                db_session.flush()
+            db_session.rollback()
+        finally:
+            reset_current(token)
+
+    def test_geofence_mode_rejected_outside_enum(self, db_session: Session) -> None:
+        workspace, user = _bootstrap(
+            db_session,
+            email="gf-mode@example.com",
+            display="GfMode",
+            slug="gf-mode-ws",
+            name="GfModeWS",
+        )
+        token = set_current(_ctx_for(workspace, user.id))
+        try:
+            db_session.add(
+                GeofenceSetting(
+                    id="01HWA00000000000000000GFMX",
+                    workspace_id=workspace.id,
+                    property_id="01HWA00000000000000000PRPN",
+                    lat=0.0,
+                    lon=0.0,
+                    radius_m=50,
+                    enabled=True,
+                    mode="observe",
                 )
             )
             with pytest.raises(IntegrityError):
