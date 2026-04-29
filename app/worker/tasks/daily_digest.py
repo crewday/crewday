@@ -33,16 +33,20 @@ from app.adapters.db.payroll.models import PayPeriod
 from app.adapters.db.places.models import Property, PropertyWorkspace
 from app.adapters.db.tasks.models import Occurrence, TaskApproval
 from app.adapters.db.workspace.models import Workspace
-from app.adapters.llm.ports import LLMClient, LLMResponse
+from app.adapters.llm.ports import LLMClient
 from app.adapters.mail.ports import Mailer
 from app.domain.llm.budget import (
     PricingTable,
-    check_budget,
     default_pricing_table,
-    estimate_cost_cents,
 )
-from app.domain.llm.router import CapabilityUnassignedError, ModelPick, resolve_model
-from app.domain.llm.usage_recorder import AgentAttribution, record
+from app.domain.llm.capabilities.digest_gen import (
+    DIGEST_COMPOSE_CAPABILITY,
+    DigestComposeContext,
+)
+from app.domain.llm.capabilities.digest_gen import (
+    compose as compose_digest_prose,
+)
+from app.domain.llm.router import ModelPick, resolve_model
 from app.domain.messaging.notifications import NotificationKind, NotificationService
 from app.events.bus import EventBus
 from app.events.bus import bus as default_event_bus
@@ -60,10 +64,8 @@ __all__ = [
 ]
 
 
-DAILY_DIGEST_CAPABILITY = "daily_digest"
+DAILY_DIGEST_CAPABILITY = DIGEST_COMPOSE_CAPABILITY
 DEFAULT_ALWAYS_SEND_EMPTY_DIGEST = False
-_PROJECTED_PROMPT_TOKENS = 512
-_PROJECTED_COMPLETION_TOKENS = 384
 
 DigestModelResolver = Callable[[Session, WorkspaceContext, Clock], Sequence[ModelPick]]
 
@@ -202,6 +204,7 @@ def send_daily_digest(
                 session,
                 ctx=ctx,
                 snapshot=snapshot,
+                recipient_user_id=recipient.user_id,
                 llm=llm,
                 clock=resolved_clock,
                 pricing=resolved_pricing,
@@ -535,6 +538,7 @@ def _try_llm_prose(
     *,
     ctx: WorkspaceContext,
     snapshot: DigestSnapshot,
+    recipient_user_id: str,
     llm: LLMClient | None,
     clock: Clock,
     pricing: PricingTable,
@@ -544,123 +548,41 @@ def _try_llm_prose(
         return None
     try:
         model_chain = resolve_models(session, ctx, clock)
-    except CapabilityUnassignedError:
-        return None
     except Exception:
         return None
     if not model_chain:
         return None
 
-    correlation_id = new_ulid(clock=clock)
-    for attempt, model_pick in enumerate(model_chain):
-        try:
-            projected_cost = estimate_cost_cents(
-                prompt_tokens=_PROJECTED_PROMPT_TOKENS,
-                max_output_tokens=_PROJECTED_COMPLETION_TOKENS,
-                api_model_id=model_pick.api_model_id,
-                pricing=pricing,
-                workspace_id=ctx.workspace_id,
-            )
-            check_budget(
-                session,
-                ctx,
-                capability=DAILY_DIGEST_CAPABILITY,
-                projected_cost_cents=projected_cost,
-                clock=clock,
-            )
-            started = clock.now()
-            response = llm.chat(
-                model_id=model_pick.api_model_id,
-                messages=[
-                    {
-                        "role": "user",
-                        "content": _llm_prompt(snapshot),
-                    }
-                ],
-                max_tokens=model_pick.max_tokens or _PROJECTED_COMPLETION_TOKENS,
-                temperature=(
-                    model_pick.temperature
-                    if model_pick.temperature is not None
-                    else 0.2
-                ),
-            )
-            latency_ms = max(0, int((clock.now() - started).total_seconds() * 1000))
-            _record_llm_usage(
-                session,
-                ctx=ctx,
-                model_pick=model_pick,
-                response=response,
-                correlation_id=correlation_id,
-                latency_ms=latency_ms,
+    try:
+        prose = compose_digest_prose(
+            DigestComposeContext(
+                session=session,
+                workspace_ctx=ctx,
+                llm=llm,
+                model_chain=tuple(model_chain),
                 pricing=pricing,
                 clock=clock,
-                fallback_attempts=attempt,
-                attempt=attempt,
-            )
-        except Exception:
-            continue
-        body = response.text.strip()
-        if body:
-            return body
-    return None
+            ),
+            recipient_user_id,
+            _structured_payload(snapshot),
+        )
+    except Exception:
+        return None
+    if prose.used_fallback:
+        return None
+    return prose.body_md.strip() or None
 
 
-def _llm_prompt(snapshot: DigestSnapshot) -> str:
-    return (
-        "Write a concise morning operations digest opening paragraph in Markdown. "
-        "Do not invent names, addresses, task titles, or private details. "
-        "Do not include numeric claims beyond the facts provided. "
-        "Use only these aggregate facts: "
-        f"role={snapshot.role}; local_day={snapshot.local_day.isoformat()}; "
-        f"scheduled_tasks={snapshot.scheduled_count}; "
-        f"overdue_tasks={snapshot.overdue_count}; "
-        f"pending_task_approvals={snapshot.pending_task_approval_count}; "
-        f"pending_agent_approvals={snapshot.pending_agent_approval_count}; "
-        f"pay_period_state={snapshot.pay_period_state or 'none'}."
-    )
-
-
-def _record_llm_usage(
-    session: Session,
-    *,
-    ctx: WorkspaceContext,
-    model_pick: ModelPick,
-    response: LLMResponse,
-    correlation_id: str,
-    latency_ms: int,
-    pricing: PricingTable,
-    clock: Clock,
-    fallback_attempts: int,
-    attempt: int,
-) -> None:
-    cost_cents = estimate_cost_cents(
-        prompt_tokens=response.usage.prompt_tokens,
-        max_output_tokens=response.usage.completion_tokens,
-        api_model_id=model_pick.api_model_id,
-        pricing=pricing,
-        workspace_id=ctx.workspace_id,
-    )
-    record(
-        session,
-        ctx,
-        capability=DAILY_DIGEST_CAPABILITY,
-        model_pick=model_pick,
-        fallback_attempts=fallback_attempts,
-        correlation_id=correlation_id,
-        prompt_tokens=response.usage.prompt_tokens,
-        completion_tokens=response.usage.completion_tokens,
-        cost_cents=cost_cents,
-        latency_ms=latency_ms,
-        status="ok",
-        finish_reason=response.finish_reason,
-        attribution=AgentAttribution(
-            actor_user_id=None,
-            token_id=None,
-            agent_label="daily-digest-worker",
-        ),
-        attempt=attempt,
-        clock=clock,
-    )
+def _structured_payload(snapshot: DigestSnapshot) -> dict[str, object]:
+    return {
+        "role": snapshot.role,
+        "local_day": snapshot.local_day.isoformat(),
+        "scheduled_tasks": snapshot.scheduled_count,
+        "overdue_tasks": snapshot.overdue_count,
+        "pending_task_approvals": snapshot.pending_task_approval_count,
+        "pending_agent_approvals": snapshot.pending_agent_approval_count,
+        "pay_period_state": snapshot.pay_period_state or "none",
+    }
 
 
 def _fallback_subject(snapshot: DigestSnapshot) -> str:
