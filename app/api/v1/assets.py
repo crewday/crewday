@@ -1,15 +1,12 @@
-"""Assets context router scaffold.
-
-Owns asset types, assets, asset actions, and asset documents
-(spec §01 "Context map", §12 "Assets / documents"). Routes land
-in cd-qm5b; this file is the reserved seat under
-``/w/<slug>/api/v1/assets``.
-"""
+"""Assets context router."""
 
 from __future__ import annotations
 
 from fastapi import APIRouter
 
+from app.api.assets import build_asset_types_router
+
 router = APIRouter(tags=["assets"])
+router.include_router(build_asset_types_router())
 
 __all__ = ["router"]

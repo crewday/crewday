@@ -1591,7 +1591,7 @@ GET    /asset_types                   # list; ?category=…&workspace_only=bool
 POST   /asset_types
 GET    /asset_types/{id}
 PATCH  /asset_types/{id}
-DELETE /asset_types/{id}              # workspace-custom only; system → 403
+DELETE /asset_types/{id}              # hard-delete unused rows; archive rows referenced by assets
 
 GET    /assets                        # ?property_id=…&status=…&condition=…&asset_type_id=…&area_id=…&q=…
 POST   /assets

@@ -14,6 +14,7 @@ from __future__ import annotations
 import factory
 from sqlalchemy.orm import Session
 
+from app.adapters.db.assets.bootstrap import seed_asset_type_catalog
 from app.adapters.db.authz.bootstrap import seed_owners_system_group
 from app.adapters.db.identity.models import User, canonicalise_email
 from app.adapters.db.workspace.models import Workspace
@@ -202,6 +203,7 @@ def bootstrap_workspace(
             owner_user_id=owner_user_id,
             clock=clock,
         )
+        seed_asset_type_catalog(session, ctx, clock=clock)
     # The derived ``user_workspace`` row materialises through
     # :func:`reconcile_user_workspace` (cd-yqm4): the production
     # worker runs this reconciler every

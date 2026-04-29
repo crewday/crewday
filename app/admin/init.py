@@ -14,6 +14,7 @@ from pydantic import SecretStr
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
+from app.adapters.db.assets.bootstrap import seed_asset_type_catalog
 from app.adapters.db.authz.bootstrap import (
     seed_owners_system_group,
     seed_system_permission_groups,
@@ -563,6 +564,7 @@ def workspace_bootstrap(
             clock=clock,
         )
         seed_system_permission_groups(session, workspace_id=workspace_id, clock=clock)
+        seed_asset_type_catalog(session, ctx, clock=clock)
         invite_id = new_ulid(clock=clock)
         session.add(
             Invite(

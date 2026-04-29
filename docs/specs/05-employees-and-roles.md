@@ -539,6 +539,7 @@ configuration.
 | `inventory.stocktake`                   | `workspace`, `property`        | `owners, managers`            | —  | §08 — open, edit, and commit an `inventory_stocktake` session. |
 | `instructions.edit`                     | `workspace`, `property`        | `owners, managers`            | —  | §07 |
 | `assets.edit`                           | `workspace`, `property`        | `owners, managers`            | —  | §21 |
+| `assets.manage_types`                   | `workspace`                    | `owners, managers`            | —  | §21 |
 | `api_tokens.manage`                     | `workspace`                    | `owners, managers`            | ✅ | §03 |
 | `audit_log.view`                        | `workspace`, `property`, `organization` | `owners, managers`            | ✅ | §02 |
 | `organizations.create`                  | `workspace`                    | `owners, managers`            | —  | §22 |

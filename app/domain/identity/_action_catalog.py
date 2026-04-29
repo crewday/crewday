@@ -176,6 +176,13 @@ _RULE_DRIVEN: tuple[ActionSpec, ...] = (
         root_protected_deny=False,
     ),
     ActionSpec(
+        key="assets.manage_types",
+        valid_scope_kinds=("workspace",),
+        default_allow=("owners", "managers"),
+        root_only=False,
+        root_protected_deny=False,
+    ),
+    ActionSpec(
         key="audit_log.view",
         valid_scope_kinds=("workspace", "property", "organization"),
         default_allow=("owners", "managers"),

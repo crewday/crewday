@@ -56,6 +56,7 @@ from typing import Any, Final
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
+from app.adapters.db.assets.bootstrap import seed_asset_type_catalog
 from app.adapters.db.authz.bootstrap import (
     seed_owners_system_group,
     seed_system_permission_groups,
@@ -1063,6 +1064,7 @@ def provision_workspace_and_owner_seat(
             workspace_id=workspace_id,
             clock=clock,
         )
+        seed_asset_type_catalog(session, real_ctx, clock=clock)
     return real_ctx
 
 

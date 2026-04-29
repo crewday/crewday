@@ -7,15 +7,16 @@ keep it maintained, and understand what it costs.
 
 ## Asset types (catalog)
 
-A catalog of equipment categories. The system ships with pre-seeded
-rows (`workspace_id = NULL`); managers add workspace-custom types.
+A catalog of equipment categories. Workspace bootstrap copies the
+pre-seeded base catalog into each workspace exactly once; managers edit
+or add workspace-custom types from there.
 
 ### `asset_types`
 
 | field                  | type    | notes                                 |
 |------------------------|---------|---------------------------------------|
 | id                     | ULID PK |                                       |
-| workspace_id           | ULID FK? | NULL = system-seeded                 |
+| workspace_id           | ULID FK | workspace that owns the catalog row   |
 | key                    | text    | unique per workspace (composite `(workspace_id, key)`) |
 | name                   | text    | "Air conditioner", "Pool pump"        |
 | category               | enum    | `climate | appliance | plumbing | pool | heating | outdoor | safety | security | vehicle | other` |
@@ -35,26 +36,19 @@ assets of this type:
 ```json
 [
   {
-    "key": "filter_clean",
+    "kind": "service",
     "label": "Clean / replace filter",
-    "description_md": "Remove the filter, rinse or replace, and reinstall.",
-    "suggested_rrule": "FREQ=MONTHLY",
     "interval_days": 30,
-    "estimated_duration_minutes": 20,
-    "suggested_checklist": [
-      "Turn off unit",
-      "Remove filter",
-      "Clean or replace",
-      "Reinstall and power on"
-    ],
-    "suggested_inventory": [
-      {"sku": "filter_ac_standard", "qty": 1}
-    ]
+    "warn_before_days": 7
   }
 ]
 ```
 
-All fields except `key` and `label` are optional.
+`kind`, `label`, `interval_days`, and `warn_before_days` are required;
+unknown fields are rejected. `kind` is one of
+`service | repair | replace | inspect | read`. `interval_days` must be
+positive, and `warn_before_days` must be non-negative and no greater
+than `interval_days`.
 
 ### Pre-seeded catalog
 
@@ -79,8 +73,9 @@ All fields except `key` and `label` are optional.
 | `alarm_system`     | Alarm system        | security   | 10                     | sensor_test (90d), battery_replace (365d), code_review (180d)             |
 | `vehicle`          | Vehicle             | vehicle    | —                      | oil_change (180d), tire_inspect (90d), registration_renew (365d)          |
 
-System-seeded rows are read-only in the UI; managers can duplicate
-and customize. Workspace-custom types follow the same schema.
+Pre-seeded rows are regular workspace rows after bootstrap. Managers can
+customize them in place or add new types; repeated bootstrap runs leave
+existing keys untouched.
 
 ## Assets
 
@@ -505,7 +500,7 @@ GET    /asset_types                   # list; ?category=…&workspace_only=bool
 POST   /asset_types                   # create workspace-custom type
 GET    /asset_types/{id}
 PATCH  /asset_types/{id}
-DELETE /asset_types/{id}              # workspace-custom only; system types → 403
+DELETE /asset_types/{id}              # hard-delete unused rows; archive rows referenced by assets
 ```
 
 ### Assets
