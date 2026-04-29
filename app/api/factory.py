@@ -502,6 +502,11 @@ def _mount_auth_routers(
     # /auth/me — SPA identity-bootstrap probe. Mounted unconditionally
     # (no SMTP dependency) because every authenticated SPA load hits it.
     app.include_router(me_module.build_me_router(), prefix=bare_prefix)
+    # /me — app-shell profile payload consumed by workspace layouts.
+    # Mounted bare-host because the SPA fetches ``/api/v1/me`` from
+    # every workspace route; the session row carries the active
+    # workspace picked by login / dev-login.
+    app.include_router(me_module.build_me_profile_router(), prefix=bare_prefix)
     # /me/workspaces — workspace-switcher payload (cd-y5z3). Bare-host
     # alongside /auth/me because the switcher runs before a workspace
     # is picked.
@@ -626,6 +631,13 @@ def _mount_auth_routers(
     # passkey" flow). Reused verbatim — the router requires a live
     # :class:`WorkspaceContext` which the tenancy middleware installs.
     app.include_router(passkey_module.router, prefix=scoped_prefix)
+    # Workspace-scoped alias for the app-shell profile. The SPA uses
+    # the bare-host route, but smoke scripts and curl probes often hit
+    # the fully scoped equivalent under ``/w/<slug>/api/v1/me``.
+    app.include_router(
+        me_module.build_me_profile_router(operation_id="me.profile.scoped.get"),
+        prefix=scoped_prefix,
+    )
 
     # Workspace-scoped identity-adjacent routers (cd-dcfw) — work
     # engagements, work roles, user_work_roles. Their URLs sit at the

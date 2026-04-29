@@ -33,7 +33,7 @@ See ``docs/specs/03-auth-and-tokens.md`` §"Sessions",
 from __future__ import annotations
 
 import logging
-from datetime import UTC
+from datetime import UTC, datetime
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, status
@@ -50,15 +50,21 @@ from app.adapters.db.authz.models import (
 from app.adapters.db.identity.models import Session as SessionRow
 from app.adapters.db.identity.models import User
 from app.adapters.db.workspace.models import UserWorkspace, Workspace
+from app.api.admin._owners import is_deployment_owner
 from app.api.deps import db_session
 from app.auth import session as auth_session
+from app.authz.deployment_admin import is_deployment_admin
 from app.tenancy import tenant_agnostic
+from app.tenancy.current import get_current
 
 __all__ = [
     "AuthMeResponse",
     "AvailableWorkspaceResponse",
+    "EmployeeProfileResponse",
+    "MeProfileResponse",
     "WorkspaceSummary",
     "WorkspaceSwitcherEntry",
+    "build_me_profile_router",
     "build_me_router",
     "build_me_workspaces_router",
 ]
@@ -128,6 +134,48 @@ class AuthMeResponse(BaseModel):
     current_workspace_id: str | None
 
 
+class EmployeeProfileResponse(BaseModel):
+    """Legacy SPA ``Employee`` projection embedded in ``GET /api/v1/me``."""
+
+    id: str
+    name: str
+    roles: list[str]
+    properties: list[str]
+    avatar_initials: str
+    avatar_file_id: str | None
+    avatar_url: str | None
+    phone: str
+    email: str
+    started_on: str
+    capabilities: dict[str, bool | None]
+    workspaces: list[str]
+    villas: list[str]
+    language: str
+    weekly_availability: dict[str, tuple[str, str] | None]
+    evidence_policy: str
+    preferred_locale: str | None
+    settings_override: dict[str, Any]
+
+
+class MeProfileResponse(BaseModel):
+    """Body of ``GET /api/v1/me`` consumed by the app shell layouts."""
+
+    role: str
+    theme: str
+    agent_sidebar_collapsed: bool
+    employee: EmployeeProfileResponse
+    manager_name: str
+    today: str
+    now: str
+    user_id: str | None
+    agent_approval_mode: str
+    current_workspace_id: str
+    available_workspaces: list[AvailableWorkspaceResponse]
+    client_binding_org_ids: list[str]
+    is_deployment_admin: bool
+    is_deployment_owner: bool
+
+
 class WorkspaceSwitcherEntry(BaseModel):
     """One entry of ``GET /api/v1/me/workspaces``.
 
@@ -174,6 +222,56 @@ def _client_headers(request: Request) -> tuple[str, str]:
         request.headers.get("user-agent", ""),
         request.headers.get("accept-language", ""),
     )
+
+
+def _session_cookie_value(
+    *,
+    session_cookie_primary: str | None,
+    session_cookie_dev: str | None,
+) -> str:
+    cookie_value = session_cookie_primary or session_cookie_dev
+    if not cookie_value:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail={"error": "session_required"},
+        )
+    return cookie_value
+
+
+def _validated_session_user(
+    request: Request,
+    session: Session,
+    *,
+    cookie_value: str,
+    touch_session: bool = True,
+) -> tuple[User, SessionRow]:
+    ua, accept_language = _client_headers(request)
+    try:
+        user_id = auth_session.validate(
+            session,
+            cookie_value=cookie_value,
+            ua=ua,
+            accept_language=accept_language,
+            touch=touch_session,
+        )
+    except (auth_session.SessionInvalid, auth_session.SessionExpired) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail={"error": "session_invalid"},
+        ) from exc
+
+    with tenant_agnostic():
+        user = session.get(User, user_id)
+        session_row = session.get(
+            SessionRow,
+            auth_session.hash_cookie_value(cookie_value),
+        )
+    if user is None or session_row is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail={"error": "session_invalid"},
+        )
+    return user, session_row
 
 
 def _load_available_workspaces(
@@ -250,6 +348,112 @@ def _load_available_workspaces(
             )
         )
     return out
+
+
+def _workspace_ids_for_user(session: Session, *, user_id: str) -> list[str]:
+    with tenant_agnostic():
+        return list(
+            session.scalars(
+                select(UserWorkspace.workspace_id)
+                .where(UserWorkspace.user_id == user_id)
+                .order_by(UserWorkspace.workspace_id.asc())
+            ).all()
+        )
+
+
+def _current_workspace_id(
+    session: Session,
+    *,
+    user_id: str,
+    session_row: SessionRow,
+) -> str:
+    ctx = get_current()
+    if ctx is not None:
+        return ctx.workspace_id
+    if session_row.workspace_id:
+        return session_row.workspace_id
+    workspace_ids = _workspace_ids_for_user(session, user_id=user_id)
+    if workspace_ids:
+        return workspace_ids[0]
+    raise HTTPException(
+        status_code=status.HTTP_404_NOT_FOUND,
+        detail={"error": "workspace_required"},
+    )
+
+
+def _workspace_role(session: Session, *, user_id: str, workspace_id: str) -> str:
+    with tenant_agnostic():
+        grants = list(
+            session.scalars(
+                select(RoleGrant.grant_role)
+                .where(RoleGrant.user_id == user_id)
+                .where(RoleGrant.workspace_id == workspace_id)
+                .where(RoleGrant.scope_kind == "workspace")
+                .where(RoleGrant.scope_property_id.is_(None))
+            ).all()
+        )
+        owner_member = (
+            session.scalars(
+                select(PermissionGroupMember.user_id)
+                .join(
+                    PermissionGroup,
+                    PermissionGroup.id == PermissionGroupMember.group_id,
+                )
+                .where(PermissionGroupMember.user_id == user_id)
+                .where(PermissionGroupMember.workspace_id == workspace_id)
+                .where(PermissionGroup.slug == "owners")
+                .where(PermissionGroup.system.is_(True))
+                .limit(1)
+            ).first()
+            is not None
+        )
+
+    if owner_member:
+        return "manager"
+    rank = {"manager": 0, "worker": 1, "client": 2, "guest": 3}
+    best = min(grants, key=lambda role: rank.get(role, 99), default="worker")
+    if best == "manager":
+        return "manager"
+    if best == "client":
+        return "client"
+    return "employee"
+
+
+def _initials(name: str) -> str:
+    parts = [part for part in name.replace("-", " ").split() if part]
+    if not parts:
+        return "??"
+    if len(parts) == 1:
+        return parts[0][:2].upper()
+    return f"{parts[0][0]}{parts[-1][0]}".upper()
+
+
+def _employee_profile(
+    user: User,
+    *,
+    role: str,
+    workspace_ids: list[str],
+) -> EmployeeProfileResponse:
+    return EmployeeProfileResponse(
+        id=user.id,
+        name=user.display_name,
+        roles=[role],
+        properties=[],
+        avatar_initials=_initials(user.display_name),
+        avatar_file_id=None,
+        avatar_url=None,
+        phone="",
+        email=user.email,
+        started_on=user.created_at.date().isoformat(),
+        capabilities={},
+        workspaces=workspace_ids,
+        villas=[],
+        language=user.locale or "en",
+        weekly_availability={},
+        evidence_policy="inherit",
+        preferred_locale=user.locale,
+        settings_override={},
+    )
 
 
 def _load_switcher_entries(
@@ -388,6 +592,82 @@ def _load_switcher_entries(
     return out
 
 
+def build_me_profile_router(*, operation_id: str = "me.profile.get") -> APIRouter:
+    """Return the router that serves ``GET /api/v1/me``.
+
+    The production SPA layouts still consume the legacy mock ``/me``
+    envelope for shell chrome (display name, role, deployment-admin
+    flag). Keep it as a thin authenticated identity/profile view while
+    ``/auth/me`` remains the tenant-agnostic bootstrap surface.
+    """
+    router = APIRouter(prefix="/me", tags=["identity", "me"])
+
+    @router.get(
+        "",
+        response_model=MeProfileResponse,
+        operation_id=operation_id,
+        summary="Return the current user's app-shell profile",
+        openapi_extra={
+            "x-cli": {
+                "group": "me",
+                "verb": "profile",
+                "summary": "Return the app-shell profile payload",
+                "mutates": False,
+                "hidden": True,
+            },
+        },
+    )
+    def get_me_profile(
+        request: Request,
+        session: _Db,
+        session_cookie_primary: Annotated[
+            str | None,
+            Cookie(alias=auth_session.SESSION_COOKIE_NAME),
+        ] = None,
+        session_cookie_dev: Annotated[
+            str | None,
+            Cookie(alias="crewday_session"),
+        ] = None,
+    ) -> MeProfileResponse:
+        cookie_value = _session_cookie_value(
+            session_cookie_primary=session_cookie_primary,
+            session_cookie_dev=session_cookie_dev,
+        )
+        user, session_row = _validated_session_user(
+            request,
+            session,
+            cookie_value=cookie_value,
+            touch_session=False,
+        )
+        workspace_id = _current_workspace_id(
+            session,
+            user_id=user.id,
+            session_row=session_row,
+        )
+        role = _workspace_role(session, user_id=user.id, workspace_id=workspace_id)
+        workspace_ids = _workspace_ids_for_user(session, user_id=user.id)
+        now = datetime.now(UTC)
+        return MeProfileResponse(
+            role=role,
+            theme=request.cookies.get("crewday_theme", "system"),
+            agent_sidebar_collapsed=request.cookies.get("crewday_agent_collapsed")
+            == "1",
+            employee=_employee_profile(user, role=role, workspace_ids=workspace_ids),
+            manager_name=user.display_name,
+            today=now.date().isoformat(),
+            now=now.isoformat(),
+            user_id=user.id,
+            agent_approval_mode=user.agent_approval_mode,
+            current_workspace_id=workspace_id,
+            available_workspaces=_load_available_workspaces(session, user_id=user.id),
+            client_binding_org_ids=[],
+            is_deployment_admin=is_deployment_admin(session, user_id=user.id),
+            is_deployment_owner=is_deployment_owner(session, user_id=user.id),
+        )
+
+    return router
+
+
 def build_me_router() -> APIRouter:
     """Return the router that serves ``GET /api/v1/auth/me``.
 
@@ -439,35 +719,15 @@ def build_me_router() -> APIRouter:
         :mod:`auth.onUnauthorized` seam routes every 401 to the store
         reset + login bounce.
         """
-        cookie_value = session_cookie_primary or session_cookie_dev
-        if not cookie_value:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail={"error": "session_required"},
-            )
-        ua, accept_language = _client_headers(request)
-        try:
-            user_id = auth_session.validate(
-                session,
-                cookie_value=cookie_value,
-                ua=ua,
-                accept_language=accept_language,
-            )
-        except (auth_session.SessionInvalid, auth_session.SessionExpired) as exc:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail={"error": "session_invalid"},
-            ) from exc
-
-        with tenant_agnostic():
-            user = session.get(User, user_id)
-        if user is None:
-            # Session row references a user that was hard-deleted
-            # between validate and this lookup. Treat as unauth.
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail={"error": "session_invalid"},
-            )
+        cookie_value = _session_cookie_value(
+            session_cookie_primary=session_cookie_primary,
+            session_cookie_dev=session_cookie_dev,
+        )
+        user, _session_row = _validated_session_user(
+            request,
+            session,
+            cookie_value=cookie_value,
+        )
 
         return AuthMeResponse(
             user_id=user.id,

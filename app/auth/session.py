@@ -457,6 +457,7 @@ def validate(
     now: datetime | None = None,
     settings: Settings | None = None,
     clock: Clock | None = None,
+    touch: bool = True,
 ) -> str:
     """Return the session's ``user_id`` if the cookie is live; raise otherwise.
 
@@ -473,7 +474,7 @@ def validate(
        the row carries one and the caller supplied one (else
        :class:`SessionInvalid` + ``audit.session.fingerprint_mismatch``).
 
-    Side effects on success:
+    Side effects on success when ``touch`` is true:
 
     * ``last_seen_at`` is bumped to ``now`` on every call (cheap —
       one UPDATE on the already-indexed PK).
@@ -482,10 +483,14 @@ def validate(
       ``absolute_expires_at``** when one is set, so the 90-day cap
       genuinely bounds the row.
 
-    ``ua`` / ``accept_language`` default to ``""`` so older callers
-    that don't yet route headers through can invoke ``validate`` and
-    skip the fingerprint gate. The HTTP router MUST forward the real
-    values for the gate to carry its defence-in-depth signal.
+    ``touch=False`` performs the same auth checks without mutating the
+    row. Use it for secondary bootstrap probes that run alongside
+    ``/auth/me`` so SQLite dev stacks do not race on the same
+    ``last_seen_at`` update. ``ua`` / ``accept_language`` default to
+    ``""`` so older callers that don't yet route headers through can
+    invoke ``validate`` and skip the fingerprint gate. The HTTP router
+    MUST forward the real values for the gate to carry its defence-in-
+    depth signal.
 
     Raises:
 
@@ -565,6 +570,9 @@ def validate(
                 clock=clock,
             )
             raise SessionInvalid(f"session id {session_id!r} fingerprint mismatch")
+
+    if not touch:
+        return row.user_id
 
     created_at = row.created_at
     if created_at.tzinfo is None:
