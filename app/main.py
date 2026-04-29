@@ -25,6 +25,7 @@ from __future__ import annotations
 from app.api.factory import (
     _SPA_DIST,
     _SPA_STUB_HTML,
+    DemoModeRefused,
     PublicBindRefused,
     _is_api_path,
     _resolve_spa_dist,
@@ -43,6 +44,7 @@ from app.util.logging import setup_logging
 __all__ = [
     "_SPA_DIST",
     "_SPA_STUB_HTML",
+    "DemoModeRefused",
     "PublicBindRefused",
     "_is_api_path",
     "_resolve_spa_dist",

@@ -56,6 +56,7 @@ from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as pkg_version
 from pathlib import Path
 from typing import Any, Final
+from urllib.parse import urlparse
 
 from fastapi import FastAPI
 from fastapi.openapi.utils import get_openapi
@@ -109,6 +110,7 @@ from app.api.v1.role_grants import (
     build_role_grants_router,
     build_users_role_grants_router,
 )
+from app.api.v1.runtime import router as runtime_router
 from app.api.v1.settings import build_settings_router
 from app.api.v1.user_availability_overrides import (
     build_user_availability_overrides_router,
@@ -132,7 +134,7 @@ from app.security import BindGuardError, assert_bind_allowed
 from app.tenancy.middleware import WorkspaceContextMiddleware
 from app.util.logging import setup_logging
 
-__all__ = ["PublicBindRefused", "create_app"]
+__all__ = ["DemoModeRefused", "PublicBindRefused", "create_app"]
 
 _log = logging.getLogger(__name__)
 
@@ -220,6 +222,10 @@ class PublicBindRefused(RuntimeError):
     """
 
 
+class DemoModeRefused(RuntimeError):
+    """Raised when ``CREWDAY_DEMO_MODE=1`` is paired with unsafe config."""
+
+
 def _resolve_version() -> str:
     """Return the installed package version or a clear sentinel.
 
@@ -252,6 +258,27 @@ def _enforce_bind_guard(settings: Settings) -> None:
         )
     except BindGuardError as exc:
         raise PublicBindRefused(str(exc)) from exc
+
+
+def _enforce_demo_guard(settings: Settings) -> None:
+    """Refuse unsafe demo-mode deployments before the app starts serving."""
+    if not settings.demo_mode:
+        return
+
+    parsed = urlparse(settings.public_url or "")
+    host = (parsed.hostname or "").lower()
+    if not host.endswith(".crew.day"):
+        public_url = settings.public_url or "<unset>"
+        raise DemoModeRefused(
+            "CREWDAY_DEMO_MODE=1 requires CREWDAY_PUBLIC_URL host to end "
+            f"with .crew.day; got {public_url!r}"
+        )
+
+    if settings.database_url in settings.demo_db_denylist:
+        raise DemoModeRefused(
+            "CREWDAY_DEMO_MODE=1 refuses to start with CREWDAY_DATABASE_URL "
+            "listed in CREWDAY_DEMO_DB_DENYLIST"
+        )
 
 
 def _resolve_spa_dist() -> Path | None:
@@ -727,6 +754,11 @@ def _mount_context_routers(app: FastAPI, *, settings: Settings) -> None:
     app.include_router(build_chat_gateway_router(settings=settings), prefix="")
 
 
+def _register_runtime_routes(app: FastAPI) -> None:
+    """Mount deployment-runtime information for the SPA shell."""
+    app.include_router(runtime_router, prefix="/api/v1")
+
+
 def _register_ops_routes(app: FastAPI) -> None:
     """Mount the ops-probe router (§16 "Healthchecks").
 
@@ -1012,6 +1044,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # stream with the redaction filter already installed.
     setup_logging(level=cfg.log_level)
 
+    _enforce_demo_guard(cfg)
     _enforce_bind_guard(cfg)
 
     app = FastAPI(
@@ -1088,6 +1121,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     mailer, throttle, capabilities = _wire_services(app, cfg)
 
     _register_ops_routes(app)
+    _register_runtime_routes(app)
     # Prometheus ``GET /metrics`` — gated by ``settings.metrics_enabled``
     # + the source-IP CIDR allowlist. Mounted before the auth /
     # context routers so a 404 from the gate cannot accidentally

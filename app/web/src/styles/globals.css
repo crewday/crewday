@@ -16,6 +16,21 @@
 }
 [data-theme="dark"] .grain { opacity: 0.06; mix-blend-mode: screen; }
 
+/* ── Demo mode banner ───────────────────────────────────────── */
+.demo-banner {
+  position: relative; z-index: 55;
+  display: flex; align-items: center; justify-content: center;
+  min-height: 32px; padding: 6px 16px;
+  background: var(--rust-soft); color: var(--ink);
+  border-bottom: 1px solid rgba(122, 62, 37, 0.24);
+  font-size: 13px; font-weight: 700;
+  text-align: center;
+}
+[data-theme="dark"] .demo-banner {
+  color: var(--paper);
+  border-bottom-color: rgba(255,255,255,0.16);
+}
+
 /* ── Preview banner ──────────────────────────────────────────── */
 .preview-banner {
   position: sticky; top: 0; z-index: 50;

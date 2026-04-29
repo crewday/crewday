@@ -6,16 +6,18 @@
 // `mocks/web/src/lib/useBannerHeightVar.ts`.
 import { useEffect } from "react";
 
-export function useBannerHeightVar(): void {
+export function useBannerHeightVar(refreshKey: unknown = null): void {
   useEffect(() => {
     const sync = (): void => {
-      const banner = document.querySelector(".preview-banner");
-      if (!banner) return;
-      const h = banner.getBoundingClientRect().height;
+      const banners = document.querySelectorAll(".demo-banner, .preview-banner");
+      const h = Array.from(banners).reduce(
+        (total, banner) => total + banner.getBoundingClientRect().height,
+        0,
+      );
       document.documentElement.style.setProperty("--banner-h", h + "px");
     };
     sync();
     window.addEventListener("resize", sync);
     return () => window.removeEventListener("resize", sync);
-  }, []);
+  }, [refreshKey]);
 }

@@ -22,6 +22,7 @@ import pytest
 from app.capabilities import (
     Capabilities,
     DeploymentSettings,
+    RuntimeCapabilities,
     _probe_features,
     _sqlite_has_fts5,
     probe,
@@ -33,6 +34,7 @@ def _sqlite_settings(
     *,
     database_url: str = "sqlite:///:memory:",
     storage_backend: Literal["localfs", "s3"] = "localfs",
+    demo_mode: bool = False,
 ) -> Settings:
     """Build a :class:`Settings` pinned to SQLite with selective overrides.
 
@@ -55,7 +57,7 @@ def _sqlite_settings(
         smtp_password=None,
         openrouter_api_key=None,
         root_key=None,
-        demo_mode=False,
+        demo_mode=demo_mode,
         worker="internal",
         storage_backend=storage_backend,
     )
@@ -186,6 +188,21 @@ class TestProbeWithoutSession:
         caps = probe(_sqlite_settings(storage_backend="s3"), session=None)
         assert caps.features.object_storage is True
         assert caps.features.rls is False
+
+    def test_runtime_demo_mode_populated_from_settings(self) -> None:
+        caps = probe(_sqlite_settings(demo_mode=True), session=None)
+        assert caps.runtime.demo_mode is True
+        assert caps.has("runtime.demo_mode") is True
+
+    def test_runtime_demo_mode_defaults_false(self) -> None:
+        caps = probe(_sqlite_settings(), session=None)
+        assert caps.runtime == RuntimeCapabilities(demo_mode=False)
+        assert caps.has("runtime.demo_mode") is False
+
+    def test_unknown_capability_key_raises(self) -> None:
+        caps = probe(_sqlite_settings(), session=None)
+        with pytest.raises(KeyError):
+            caps.has("runtime.not_real")
 
 
 class TestProbeLogsSnapshotOnce:

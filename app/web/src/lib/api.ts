@@ -90,6 +90,8 @@ export function resolveApiPath(path: string, slug: string | null = workspaceSlug
   if (/^https?:\/\//i.test(path)) return path;
   // Admin surface has no slug; workspace-prefixed paths are already final.
   if (path.startsWith("/w/") || path.startsWith("/admin/")) return path;
+  // Deployment-runtime info is bare-host shell metadata, not tenant data.
+  if (path.startsWith("/api/v1/runtime/")) return path;
   // Only rewrite tenant API paths; non-API relative paths (e.g.
   // /theme/set, /switch/manager) keep their bare shape.
   if (slug && path.startsWith("/api/v1/")) return `/w/${slug}${path}`;

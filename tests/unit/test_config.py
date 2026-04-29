@@ -63,6 +63,7 @@ class TestDefaults:
         assert s.openrouter_api_key is None
         assert s.root_key is None
         assert s.demo_mode is False
+        assert s.demo_db_denylist == []
         assert s.worker == "internal"
         assert s.storage_backend == "localfs"
 
@@ -73,12 +74,20 @@ class TestEnvOverride:
         monkeypatch.setenv("CREWDAY_BIND_HOST", "100.1.2.3")
         monkeypatch.setenv("CREWDAY_BIND_PORT", "9000")
         monkeypatch.setenv("CREWDAY_DEMO_MODE", "1")
+        monkeypatch.setenv(
+            "CREWDAY_DEMO_DB_DENYLIST",
+            "sqlite:///prod.db, postgresql://prod/crewday",
+        )
         monkeypatch.setenv("CREWDAY_WORKER", "external")
         monkeypatch.setenv("CREWDAY_STORAGE_BACKEND", "s3")
         s = Settings()
         assert s.bind_host == "100.1.2.3"
         assert s.bind_port == 9000
         assert s.demo_mode is True
+        assert s.demo_db_denylist == [
+            "sqlite:///prod.db",
+            "postgresql://prod/crewday",
+        ]
         assert s.worker == "external"
         assert s.storage_backend == "s3"
 

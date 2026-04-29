@@ -145,6 +145,9 @@ class Settings(BaseSettings):
 
     # --- Runtime ---
     demo_mode: bool = False
+    demo_db_denylist: Annotated[list[str], NoDecode] = Field(
+        default_factory=list,
+    )
     # Whitelist of top-frame origins the demo app is willing to be
     # embedded from (§15 "CSP on demo"). Whitespace-separated, pasted
     # verbatim into the ``frame-ancestors`` CSP directive when
@@ -251,6 +254,14 @@ class Settings(BaseSettings):
     @classmethod
     def _split_metrics_allow_cidr(cls, value: object) -> object:
         """Parse comma-separated env input into a list (see above)."""
+        if isinstance(value, str):
+            return [item.strip() for item in value.split(",") if item.strip()]
+        return value
+
+    @field_validator("demo_db_denylist", mode="before")
+    @classmethod
+    def _split_demo_db_denylist(cls, value: object) -> object:
+        """Parse comma-separated demo DB denylist URLs into a list."""
         if isinstance(value, str):
             return [item.strip() for item in value.split(",") if item.strip()]
         return value

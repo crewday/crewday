@@ -38,6 +38,7 @@ __all__ = [
     "Capabilities",
     "DeploymentSettings",
     "Features",
+    "RuntimeCapabilities",
     "probe",
 ]
 
@@ -105,6 +106,13 @@ class DeploymentSettings:
     captcha_required: bool = True
 
 
+@dataclass(frozen=True, slots=True)
+class RuntimeCapabilities:
+    """Immutable runtime-mode probes."""
+
+    demo_mode: bool = False
+
+
 @dataclass(slots=True)
 class Capabilities:
     """Envelope bundling immutable probes and mutable settings.
@@ -118,6 +126,13 @@ class Capabilities:
 
     features: Features
     settings: DeploymentSettings
+    runtime: RuntimeCapabilities = field(default_factory=RuntimeCapabilities)
+
+    def has(self, key: str) -> bool:
+        """Return a boolean capability by dotted registry key."""
+        if key == "runtime.demo_mode":
+            return self.runtime.demo_mode
+        raise KeyError(f"unknown capability {key!r}")
 
     def refresh_settings(self, session: DbSession) -> None:
         """Re-read the mutable subset from ``deployment_setting`` rows.
@@ -246,7 +261,11 @@ def probe(settings: Settings, session: DbSession | None = None) -> Capabilities:
     :meth:`Capabilities.refresh_settings` as soon as the DB is reachable.
     """
     features = _probe_features(settings)
-    caps = Capabilities(features=features, settings=DeploymentSettings())
+    caps = Capabilities(
+        features=features,
+        settings=DeploymentSettings(),
+        runtime=RuntimeCapabilities(demo_mode=settings.demo_mode),
+    )
     if session is not None:
         caps.refresh_settings(session)
     # Snapshot is secrets-free by construction: only booleans, ints,

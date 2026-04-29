@@ -164,6 +164,7 @@ export const qk = {
   adminAudit: () => ["admin", "audit"] as const,
   adminAgentLog: () => ["admin", "agent", "log"] as const,
   adminAgentActions: () => ["admin", "agent", "actions"] as const,
+  runtimeInfo: () => ["runtime", "info"] as const,
   // §11 — Agent knowledge tools.
   documentExtraction: (did: string) => [...ws(), "document", did, "extraction"] as const,
   kbSearch: (q: string) => [...ws(), "kb", "search", q] as const,

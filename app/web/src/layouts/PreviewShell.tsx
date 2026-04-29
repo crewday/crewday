@@ -1,13 +1,22 @@
 import { Link, Outlet, useLocation, useNavigate } from "react-router-dom";
+import { useQuery } from "@tanstack/react-query";
 import { Monitor, Moon, Sun } from "lucide-react";
 import { useRole } from "@/context/RoleContext";
 import { useTheme } from "@/context/ThemeContext";
+import { fetchJson } from "@/lib/api";
+import { qk } from "@/lib/queryKeys";
 import { useBannerHeightVar } from "@/lib/useBannerHeightVar";
 
 const STYLEGUIDE_ENABLED =
   import.meta.env.DEV ||
   import.meta.env.VITE_CREWDAY_STAGING === "1" ||
   import.meta.env.VITE_CREWDAY_STAGING === "true";
+
+interface RuntimeInfo {
+  runtime: {
+    demo_mode: boolean;
+  };
+}
 
 // PreviewShell is the outermost layout: grain, sticky preview banner,
 // then the routed layout inside <Outlet />. Grain is mounted once at
@@ -17,7 +26,13 @@ export default function PreviewShell() {
   const { theme, resolved, toggle } = useTheme();
   const navigate = useNavigate();
   const { pathname } = useLocation();
-  useBannerHeightVar();
+  const runtimeQ = useQuery({
+    queryKey: qk.runtimeInfo(),
+    queryFn: () => fetchJson<RuntimeInfo>("/api/v1/runtime/info"),
+    retry: false,
+    staleTime: Infinity,
+  });
+  useBannerHeightVar(runtimeQ.data?.runtime.demo_mode ?? false);
 
   // Pages that don't render role-specific content: pill clicks should
   // still navigate (so they have a visible effect), but neither pill
@@ -49,6 +64,12 @@ export default function PreviewShell() {
   return (
     <div className="surface" data-role={role} data-theme={resolved}>
       <img src="/grain.svg" alt="" aria-hidden="true" className="grain" />
+
+      {runtimeQ.data?.runtime.demo_mode ? (
+        <div className="demo-banner" role="note">
+          Demo data - resets on inactivity
+        </div>
+      ) : null}
 
       <div className="preview-banner">
         <span className="preview-banner__badge">PREVIEW</span>

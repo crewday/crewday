@@ -87,6 +87,10 @@ describe("resolveApiPath", () => {
     expect(resolveApiPath("/admin/api/v1/me", "acme")).toBe("/admin/api/v1/me");
   });
 
+  it("passes runtime info through untouched — it is deployment-scope shell data", () => {
+    expect(resolveApiPath("/api/v1/runtime/info", "acme")).toBe("/api/v1/runtime/info");
+  });
+
   it("passes absolute URLs through untouched", () => {
     expect(resolveApiPath("https://example.test/oauth", "acme")).toBe("https://example.test/oauth");
   });

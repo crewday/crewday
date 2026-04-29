@@ -39,7 +39,7 @@ from pydantic import SecretStr
 
 import app.main as main_module
 from app.config import Settings
-from app.main import PublicBindRefused, create_app
+from app.main import DemoModeRefused, PublicBindRefused, create_app
 from app.tenancy.middleware import CORRELATION_ID_HEADER
 
 
@@ -57,6 +57,10 @@ def _settings(
     cors_allow_origins: list[str] | None = None,
     profile: Literal["prod", "dev"] = "prod",
     vite_dev_url: str = "http://127.0.0.1:5173",
+    demo_mode: bool = False,
+    public_url: str | None = None,
+    demo_db_denylist: list[str] | None = None,
+    database_url: str = "sqlite:///:memory:",
 ) -> Settings:
     """Return a :class:`Settings` suitable for an in-memory factory build.
 
@@ -69,7 +73,7 @@ def _settings(
     tests — so mypy keeps the typed shape of ``model_construct``.
     """
     return Settings.model_construct(
-        database_url="sqlite:///:memory:",
+        database_url=database_url,
         root_key=SecretStr("unit-test-main-root-key"),
         bind_host=bind_host,
         bind_port=bind_port,
@@ -83,6 +87,9 @@ def _settings(
         cors_allow_origins=list(cors_allow_origins or []),
         profile=profile,
         vite_dev_url=vite_dev_url,
+        demo_mode=demo_mode,
+        public_url=public_url,
+        demo_db_denylist=list(demo_db_denylist or []),
     )
 
 
@@ -236,6 +243,26 @@ class TestBindGuard:
             create_app(settings=cfg)
 
 
+class TestDemoGuard:
+    """Demo mode refuses unsafe boot configuration."""
+
+    def test_demo_mode_with_non_crewday_public_url_raises(self) -> None:
+        cfg = _settings(demo_mode=True, public_url="https://ops.example.com")
+        with pytest.raises(DemoModeRefused, match="CREWDAY_PUBLIC_URL"):
+            create_app(settings=cfg)
+
+    def test_demo_mode_with_denylisted_database_url_raises(self) -> None:
+        database_url = "sqlite+aiosqlite:///prod.db"
+        cfg = _settings(
+            demo_mode=True,
+            public_url="https://demo.crew.day",
+            database_url=database_url,
+            demo_db_denylist=[database_url],
+        )
+        with pytest.raises(DemoModeRefused, match="CREWDAY_DEMO_DB_DENYLIST"):
+            create_app(settings=cfg)
+
+
 # ---------------------------------------------------------------------------
 # /healthz
 # ---------------------------------------------------------------------------
@@ -255,6 +282,23 @@ class TestHealthzMount:
         resp = client.get("/healthz")
         assert resp.status_code == 200
         assert CORRELATION_ID_HEADER in resp.headers
+
+
+class TestRuntimeInfo:
+    """Bare-host SPA runtime probe."""
+
+    def test_runtime_info_reports_demo_mode_false(self, app_factory: Settings) -> None:
+        client = _client(create_app(settings=app_factory))
+        resp = client.get("/api/v1/runtime/info")
+        assert resp.status_code == 200
+        assert resp.json() == {"runtime": {"demo_mode": False}}
+
+    def test_runtime_info_reports_demo_mode_true(self) -> None:
+        cfg = _settings(demo_mode=True, public_url="https://demo.crew.day")
+        client = _client(create_app(settings=cfg))
+        resp = client.get("/api/v1/runtime/info")
+        assert resp.status_code == 200
+        assert resp.json() == {"runtime": {"demo_mode": True}}
 
 
 # ---------------------------------------------------------------------------
