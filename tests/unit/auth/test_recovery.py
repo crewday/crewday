@@ -110,10 +110,9 @@ class _ExplodingMailer:
     """:class:`Mailer` double that raises a pre-canned exception.
 
     Used to exercise the §15 enumeration guard in
-    :func:`request_recovery`: the function must swallow
-    :class:`MailDeliveryError` on both hit and miss branches so a
-    mailer outage never turns into a 5xx (which would leak the
-    hit/miss bit via status code alone).
+    :func:`request_recovery`: the hit branch must swallow
+    :class:`MailDeliveryError` so a relay outage never turns into a
+    5xx. The miss branch sends no email.
     """
 
     exc: BaseException
@@ -475,7 +474,7 @@ class TestRequestRecoveryHitBranch:
 class TestRequestRecoveryMissBranch:
     """Miss: no :class:`User` matches the submitted email."""
 
-    def test_sends_unknown_template_with_no_link(
+    def test_unknown_email_sends_no_mail(
         self,
         session: Session,
         mailer: _RecordingMailer,
@@ -493,17 +492,10 @@ class TestRequestRecoveryMissBranch:
             settings=settings,
         )
 
-        # No magic-link nonce — we never minted a token on the miss
-        # branch; the enumeration guard relies on mail cadence, not on
-        # persisting a useless row.
+        # No magic-link nonce and no outbound message — unknown email
+        # requests do not mint tokens or relay mail.
         assert session.scalars(select(MagicLinkNonce)).all() == []
-
-        # One mail — the "no account" notice. No URL in the body.
-        assert len(mailer.sent) == 1
-        msg = mailer.sent[0]
-        assert msg.to == ["ghost@example.com"]
-        assert "https://" not in msg.body_text  # no URL
-        assert "didn't find" in msg.body_text.lower()
+        assert mailer.sent == []
 
     def test_audit_row_records_miss_with_hashes(
         self,
@@ -650,7 +642,7 @@ class TestRequestRecoveryRateLimit:
 class TestRequestRecoveryEnumerationGuard:
     """Both branches write an audit row and call the mailer once."""
 
-    def test_hit_and_miss_both_write_audit_and_send_mail(
+    def test_hit_and_miss_both_write_audit_but_only_hit_sends_mail(
         self,
         session: Session,
         mailer: _RecordingMailer,
@@ -680,12 +672,13 @@ class TestRequestRecoveryEnumerationGuard:
             throttle=throttle,
             settings=settings,
         )
-        # Two audit rows, two mails — cadence matches between branches.
+        # Two audit rows, one mail — the miss branch audits without
+        # sending a message to the unknown address.
         audits = session.scalars(
             select(AuditLog).where(AuditLog.action == "recovery.requested")
         ).all()
         assert len(audits) == 2
-        assert len(mailer.sent) == 2
+        assert len(mailer.sent) == 1
         # One "hit=True", one "hit=False".
         hits = sorted(
             (a.diff["hit"] for a in audits if isinstance(a.diff, dict)),
@@ -726,18 +719,13 @@ class TestRequestRecoveryEnumerationGuard:
         assert len(audits) == 1
         assert isinstance(audits[0].diff, dict) and audits[0].diff["hit"] is True
 
-    def test_miss_branch_swallows_mail_delivery_error(
+    def test_miss_branch_does_not_touch_mailer(
         self,
         session: Session,
         throttle: Throttle,
         settings: Settings,
     ) -> None:
-        """§15: the miss branch swallows mailer failures too.
-
-        Mirrors the hit-branch test. The miss branch has no nonce row
-        to commit, but the audit row must still land with
-        ``hit=False``.
-        """
+        """§15: miss branch sends no email but still audits ``hit=False``."""
         from app.adapters.mail.ports import MailDeliveryError
 
         failing_mailer = _ExplodingMailer(MailDeliveryError("relay down"))
@@ -767,10 +755,9 @@ class TestRequestRecoveryOutboxOrdering:
     at the recovery-domain layer. Production callers (the recovery
     HTTP router) sequence ``with UoW: request_recovery() → commit →
     dispatch.deliver()``; a commit failure short-circuits both queued
-    sends (the recovery template on the hit branch + the no-account
-    notice on the miss branch), so neither leaves the host with a
-    rolled-back ``MagicLinkNonce`` / ``audit.recovery.requested``
-    row.
+    sends (the recovery template on the hit branch), so no email
+    leaves the host with a rolled-back ``MagicLinkNonce`` /
+    ``audit.recovery.requested`` row.
     """
 
     def test_pending_returned_does_not_send_email_until_deliver(
@@ -866,11 +853,7 @@ class TestRequestRecoveryOutboxOrdering:
         throttle: Throttle,
         settings: Settings,
     ) -> None:
-        """Miss branch: a commit failure short-circuits the no-account
-        notice send. The §15 enumeration guard relies on identical
-        cadence between hit + miss; the outbox boundary applies on
-        both sides.
-        """
+        """Miss branch: commit failure still sends no email."""
         original_commit = session.commit
 
         def _failing_commit() -> None:
@@ -1883,7 +1866,7 @@ class TestRequestRecoveryKillSwitch:
             == []
         )
 
-    def test_unknown_email_still_sends_miss_template(
+    def test_unknown_email_still_uses_normal_miss_branch(
         self,
         session: Session,
         mailer: _RecordingMailer,
@@ -1913,9 +1896,9 @@ class TestRequestRecoveryKillSwitch:
             throttle=throttle,
             settings=settings,
         )
-        # Normal miss: one mail (the no-account notice), zero nonces,
-        # zero disabled-by-workspace audits, one hit=False audit.
-        assert len(mailer.sent) == 1
+        # Normal miss: no mail, zero nonces, zero disabled-by-workspace
+        # audits, one hit=False audit.
+        assert mailer.sent == []
         assert session.scalars(select(MagicLinkNonce)).all() == []
         audits = session.scalars(
             select(AuditLog).where(AuditLog.action == "recovery.requested")
@@ -2463,7 +2446,7 @@ class TestRequestRecoveryStepUp:
 
         The step-up gate runs AFTER user lookup; an unknown email
         never reaches the gate (no user → no step-up classifier
-        call) and falls through to the no-account notice.
+        call) and sends no email.
         """
         request_recovery(
             session,
@@ -2476,9 +2459,9 @@ class TestRequestRecoveryStepUp:
             throttle=throttle,
             settings=settings,
         )
-        # Normal miss: one mail (no-account notice), no nonce, audit
-        # hit=False with NO stepup flag.
-        assert len(mailer.sent) == 1
+        # Normal miss: no mail, no nonce, audit hit=False with NO
+        # stepup flag.
+        assert mailer.sent == []
         assert session.scalars(select(MagicLinkNonce)).all() == []
         audit = session.scalars(
             select(AuditLog).where(AuditLog.action == "recovery.requested")

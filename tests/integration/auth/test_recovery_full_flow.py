@@ -432,10 +432,7 @@ class TestRecoveryEnumerationGuard:
             json={"email": "noone@example.com"},
         )
         assert r.status_code == 202, r.text
-        # Unknown-email template still sent.
-        assert len(mailer.sent) == 1
-        assert mailer.sent[0][0] == ("noone@example.com",)
-        assert "https://" not in mailer.sent[0][2]  # no link
+        assert mailer.sent == []
 
         # Audit row carries hit=False.
         factory = sessionmaker(bind=engine, expire_on_commit=False, class_=Session)

@@ -38,7 +38,7 @@ from __future__ import annotations
 import logging
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -384,6 +384,7 @@ def build_recovery_router(
     def post_request(
         body: RecoveryRequestBody,
         request: Request,
+        background_tasks: BackgroundTasks,
     ) -> RecoveryRequestResponse:
         """Kick off a recovery request.
 
@@ -395,11 +396,13 @@ def build_recovery_router(
 
         **Outbox ordering (cd-9slq).** Owns its own
         :class:`UnitOfWork` instead of going through ``db_session``
-        so the SMTP send fires only after the recovery audit + nonce
-        rows are durable. A commit failure short-circuits the
-        :meth:`PendingDispatch.deliver` call below so no recovery
-        magic-link or no-account notice leaves the host with
-        rolled-back state.
+        so the SMTP send is scheduled only after the recovery audit
+        + nonce rows are durable. A commit failure short-circuits the
+        :meth:`PendingDispatch.deliver` scheduling below so no
+        recovery magic-link leaves the host with rolled-back state.
+        Delivery runs as response background work so the known-email
+        branch does not hold the 202 open on SMTP while the
+        unknown-email branch sends no mail.
         """
         if resolved_base_url is None:
             raise RuntimeError(
@@ -462,10 +465,12 @@ def build_recovery_router(
                 detail={"error": "rate_limited"},
             ) from exc
         # ``with`` exited cleanly → UoW committed → recovery audit +
-        # magic-link nonce are durable on disk. Only now do we fire
-        # the SMTP sends queued on the dispatch (cd-9slq).
+        # magic-link nonce are durable on disk. Only now do we schedule
+        # queued SMTP sends (cd-9slq). Running delivery as response
+        # background work keeps the 202 response from exposing known vs.
+        # unknown addresses through relay latency.
         if dispatch is not None:
-            dispatch.deliver()
+            background_tasks.add_task(dispatch.deliver)
         return RecoveryRequestResponse()
 
     @router.get(

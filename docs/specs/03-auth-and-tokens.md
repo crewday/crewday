@@ -349,11 +349,14 @@ field is required for owners and managers.
 1. Applies per-email and per-IP rate limits (§15 self-serve abuse
    mitigations — same family used on `signup/start`).
 2. Looks up `users.email` case-insensitively. If no match, logs
-   `auth.recover.miss` with `ip_hash` and `email_hash`. **Always
-   returns 202** with the generic body
+   `auth.recover.miss` with `ip_hash` and `email_hash`, mints no
+   token, and sends no email. **Always returns 202** with the generic body
    `{ "status": "accepted" }` regardless of the lookup
    outcome — the response does not reveal which emails map to a
-   user, nor which users require step-up.
+   user, nor which users require step-up. Known-email SMTP delivery
+   is scheduled only after the request transaction commits and runs
+   outside the response path, so relay latency is not a hit/miss
+   response-time oracle.
 3. If the user holds a `manager` surface grant anywhere **or** is
    a member of any `owners` permission group — the **step-up
    population** — the request is only honoured when

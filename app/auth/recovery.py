@@ -4,10 +4,10 @@ Three public entry points wire the spec's §03 "Self-service lost-
 device recovery" flow:
 
 1. :func:`request_recovery` — rate-limit gate, user lookup, audit
-   ``recovery.requested`` (distinguishing hit vs miss), mail the
-   magic link for a matched user / mail the no-account notice for
-   an unmatched one. Always returns ``None`` — the caller sees an
-   identical 202 on both branches (§15 enumeration guard).
+   ``recovery.requested`` (distinguishing hit vs miss), and mail the
+   magic link only for a matched user. Always returns ``None`` — the
+   caller sees an identical 202 on both branches (§15 enumeration
+   guard).
 2. :func:`verify_recovery` — consume the magic link with
    ``expected_purpose='recover_passkey'``, mint a transient
    **recovery session** that permits ONLY the passkey-finish step,
@@ -51,10 +51,8 @@ designed so the two branches pay (nearly) the same CPU:
   a user row was found, ``hit=False`` otherwise — so an operator
   can tell "nothing happened" from "everything went fine" without
   the caller seeing the diff;
-* both hand a message to the :class:`Mailer` port. The template
-  differs (``recovery_new_link`` vs ``recovery_unknown``) so a
-  legitimate owner who mistyped their address gets a useful
-  signal, but the cadence on the wire matches.
+* the miss branch sends no email, so a typed unknown address cannot
+  be used to relay mail or confirm mailbox control.
 
 The **one residual gap** is the DB INSERT the hit branch performs
 on the magic-link nonce row — roughly a sub-millisecond on SQLite
@@ -135,7 +133,6 @@ from app.auth.keys import derive_subkey
 from app.auth.magic_link import PendingDispatch
 from app.config import Settings, get_settings
 from app.mail.templates import recovery_new_link as recovery_new_link_template
-from app.mail.templates import recovery_unknown as recovery_unknown_template
 from app.mail.templates import render as render_template
 from app.tenancy import WorkspaceContext, tenant_agnostic
 from app.util.clock import Clock, SystemClock
@@ -474,21 +471,6 @@ def is_self_service_recovery_disabled(session: SqlaSession, *, user_id: str) -> 
         if value is False:
             return True
     return False
-
-
-def _send_unknown_email(
-    *,
-    mailer: Mailer,
-    to_email: str,
-) -> None:
-    """Send the no-account notice template.
-
-    Pays the same mailer render + send cost as the hit branch so the
-    wire cadence stays identical across the two branches.
-    """
-    subject = render_template(recovery_unknown_template.SUBJECT)
-    body_text = render_template(recovery_unknown_template.BODY_TEXT)
-    mailer.send(to=[to_email], subject=subject, body_text=body_text)
 
 
 def _audit_recovery_stepup_refused(
@@ -831,10 +813,9 @@ def request_recovery(
        ``subject_id`` is pinned to the user's id so the verify
        step binds directly to the row without trusting the
        browser.
-    7. **Miss branch** (no user): send the ``recovery_unknown``
-       template to the typed address so a legitimate owner who
-       typo'd sees "we couldn't find you" instead of a silent
-       no-op.
+    7. **Miss branch** (no user): send no email. The caller still
+       receives the same 202 body as the hit branch, and the forensic
+       audit row carries ``hit=False``.
     8. In the hit + miss branches (but NOT the kill-switch /
        step-up branches), write one ``audit.recovery.requested``
        row with ``hit`` discriminator — the spec AC requires
@@ -844,10 +825,10 @@ def request_recovery(
        ``stepup=True`` so operators can join the burnt code row
        to the request.
 
-    Returns a :class:`PendingDispatch` carrying every deferred SMTP
+    Returns a :class:`PendingDispatch` carrying any deferred SMTP
     send queued for the request — the recovery-flavoured magic-link
-    template (hit branch) or the no-account notice (miss branch).
-    The caller's HTTP router runs this function inside an explicit
+    template only on the hit branch. The caller's HTTP router runs this
+    function inside an explicit
     ``with make_uow() as session:`` block (replacing the shared
     ``db_session`` FastAPI dep) and invokes
     :meth:`PendingDispatch.deliver` only after the ``with`` exits —
@@ -1039,22 +1020,13 @@ def request_recovery(
     else:
         # Miss branch — burn matching CPU so the HMAC-sign cost the hit
         # branch pays inside ``magic_link.request_link`` doesn't show
-        # up as a timing channel, then queue the no-account notice to
-        # keep the mailer-send cost identical between the two branches.
+        # up as a timing channel. Unknown emails deliberately send no
+        # message, so the address cannot be used as a mail relay.
         # The residual gap is the one DB INSERT the hit branch performs
         # on the nonce row (documented in :func:`_burn_cpu_for_miss_branch`
         # — writing a throwaway row to balance it is worse than the
         # sub-millisecond residual leak).
         _burn_cpu_for_miss_branch(pepper)
-        # Capture the (immutable) plaintext destination for the
-        # deferred send; rendering happens at deliver time.
-        miss_to_email = email
-        miss_mailer = mailer
-
-        def _deferred_unknown_send() -> None:
-            _send_unknown_email(mailer=miss_mailer, to_email=miss_to_email)
-
-        dispatch.add_callback(_deferred_unknown_send)
 
     # Audit lands in the caller's UoW — committing or rolling back
     # with the rest of the request's state. The ``hit`` discriminator
