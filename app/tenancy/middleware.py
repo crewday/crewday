@@ -85,7 +85,8 @@ from app.auth.tokens import (
 )
 from app.authz.owners import is_owner_member
 from app.config import Settings, get_settings
-from app.tenancy.context import ActorGrantRole, WorkspaceContext
+from app.demo import load_bound_demo_workspace_for_slug
+from app.tenancy.context import ActorGrantRole, PrincipalKind, WorkspaceContext
 from app.tenancy.current import reset_current, set_current, tenant_agnostic
 from app.tenancy.slug import InvalidSlug, validate_slug
 from app.util.ulid import new_ulid
@@ -200,12 +201,12 @@ _log = logging.getLogger(__name__)
 class ActorIdentity:
     """Resolved caller identity: the outcome of :func:`resolve_actor`.
 
-    ``workspace_id`` is populated **only** for bearer-token callers
-    whose token row names a workspace (§03 "API tokens"). Session
-    cookies are tenant-agnostic at issue time (the user may switch
-    workspaces mid-session), so the session branch leaves it ``None``
-    and :func:`resolve_workspace` accepts the URL slug as the
-    authoritative workspace.
+    ``workspace_id`` is populated for bearer-token callers whose token
+    row names a workspace (§03 "API tokens") and for demo-cookie
+    callers bound to one ephemeral workspace (§24). Passkey session
+    cookies are tenant-agnostic at issue time, so the session branch
+    leaves it ``None`` and :func:`resolve_workspace` accepts the URL
+    slug as the authoritative workspace.
 
     ``token_id`` and ``session_id`` are mutually exclusive — whichever
     pipeline produced the row stamps it. The unused one stays ``None``.
@@ -217,6 +218,7 @@ class ActorIdentity:
     workspace_id: str | None
     token_id: str | None
     session_id: str | None
+    principal_kind: PrincipalKind = "session"
 
 
 # ---------------------------------------------------------------------------
@@ -345,6 +347,9 @@ def resolve_actor(
        :func:`app.auth.session.validate`. Returns the session's
        user_id on success; ``workspace_id`` is left ``None`` because
        the session itself is tenant-agnostic at issue time.
+    3. In demo mode only, ``Cookie: __Host-crewday_demo_<scenario>`` —
+       validate the signed binding against ``demo_workspace`` and act
+       as its seeded persona for that one workspace.
 
     Most failure paths (malformed token, unknown token, revoked
     token, expired token, bad session cookie, expired session, …)
@@ -390,6 +395,7 @@ def resolve_actor(
                 workspace_id=verified.workspace_id,
                 token_id=verified.key_id,
                 session_id=None,
+                principal_kind="token",
             )
 
     cookie_value = request.cookies.get(SESSION_COOKIE_NAME)
@@ -422,7 +428,28 @@ def resolve_actor(
             workspace_id=None,
             token_id=None,
             session_id=hash_cookie_value(cookie_value),
+            principal_kind="session",
         )
+
+    if settings.demo_mode:
+        slug = _parse_scoped_path(request.url.path)
+        secret = settings.demo_cookie_key or settings.root_key
+        if slug is not None and secret is not None:
+            binding = load_bound_demo_workspace_for_slug(
+                db_session,
+                secret,
+                workspace_slug=slug,
+                cookies=request.cookies,
+            )
+            if binding is not None:
+                return ActorIdentity(
+                    user_id=binding.persona_user_id,
+                    kind="user",
+                    workspace_id=binding.workspace_id,
+                    token_id=None,
+                    session_id=None,
+                    principal_kind="demo",
+                )
 
     return None
 
@@ -589,17 +616,6 @@ def resolve_workspace(
             is_owner=is_owner,
         )
 
-    # ``principal_kind`` records the transport that authenticated this
-    # caller — ``"token"`` when the bearer-header branch fired (the
-    # :class:`ActorIdentity` carries ``token_id``), ``"session"`` when
-    # the cookie branch fired. The dataclass default is ``"session"``;
-    # we set it explicitly here so the middleware's branch is the
-    # single source of truth and a future refactor that drops the
-    # explicit kwarg trips the assertion in :class:`ActorIdentity`'s
-    # invariant rather than silently mislabelling token traffic.
-    principal_kind: Literal["session", "token"] = (
-        "token" if actor.token_id is not None else "session"
-    )
     return WorkspaceContext(
         workspace_id=ws.id,
         workspace_slug=slug,
@@ -608,7 +624,7 @@ def resolve_workspace(
         actor_grant_role=grant_role,
         actor_was_owner_member=is_owner,
         audit_correlation_id=audit_correlation_id,
-        principal_kind=principal_kind,
+        principal_kind=actor.principal_kind,
     )
 
 

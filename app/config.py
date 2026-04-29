@@ -145,6 +145,11 @@ class Settings(BaseSettings):
 
     # --- Runtime ---
     demo_mode: bool = False
+    # Signed-cookie key for the ephemeral demo binding cookie (§24).
+    # Operators should set a dedicated 32-byte base64-ish secret via
+    # CREWDAY_DEMO_COOKIE_KEY; code falls back to root_key only for
+    # local/test settings that predate the dedicated knob.
+    demo_cookie_key: SecretStr | None = None
     demo_db_denylist: Annotated[list[str], NoDecode] = Field(
         default_factory=list,
     )

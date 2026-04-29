@@ -1,0 +1,125 @@
+workspace:
+  name: Bernard Villa Demo
+  timezone: Europe/Paris
+  locale: en
+  currency: EUR
+default_persona: owner
+default_start: /today
+start_paths: [/, /today, /tasks, /schedule, /expenses]
+personas:
+  owner:
+    user: elodie
+  worker:
+    user: maria
+users:
+  elodie:
+    name: Elodie Bernard
+    email: elodie.bernard@example.com
+    locale: en
+    timezone: Europe/Paris
+    grants: [owner, manager]
+  maria:
+    name: Maria Alvarez
+    email: maria@example.com
+    locale: fr
+    timezone: Europe/Paris
+    grants: [worker]
+    work_roles: [housekeeper]
+    engagement_kind: payroll
+work_roles:
+  - key: housekeeper
+    name: Housekeeper
+    icon: BrushCleaning
+properties:
+  - key: villa-sud
+    name: Villa Sud
+    city: Antibes
+    country: FR
+    timezone: Europe/Paris
+    kind: str
+    areas: [Master bedroom, Kitchen, Pool, Garden]
+    units:
+      - name: Whole villa
+        type: villa
+        max_guests: 6
+task_templates:
+  - key: turnover
+    name: Standard turnover
+    role: housekeeper
+    duration_minutes: 120
+    photo_evidence: required
+    priority: high
+    property_refs: [villa-sud]
+    checklist:
+      - label: Strip all beds
+      - label: Reset bathrooms
+      - label: Restock welcome basket
+  - key: linen
+    name: Linen change
+    role: housekeeper
+    duration_minutes: 30
+    photo_evidence: required
+    priority: normal
+    property_refs: [villa-sud]
+    checklist:
+      - label: Fresh sheets
+      - label: Replace towels
+schedules:
+  - key: linen-weekly
+    name: Villa Sud linen Mondays
+    template: linen
+    property: villa-sud
+    assignee: maria
+    rrule: FREQ=WEEKLY;BYDAY=MO
+    dtstart: T-7d
+    duration_minutes: 30
+stays:
+  - key: johnson
+    property: villa-sud
+    guest_name: Johnson family
+    guest_count: 4
+    channel: airbnb
+    check_in: T+2d
+    check_out: T+7d
+    status: scheduled
+    bundle_templates: [turnover]
+tasks:
+  - title: Change linen - master bedroom
+    template: linen
+    schedule: linen-weekly
+    property: villa-sud
+    assignee: maria
+    starts_at: T+3h
+    duration_minutes: 30
+    state: in_progress
+    priority: high
+    photo_evidence: required
+    created_by: elodie
+    created_at: T-1d
+    checklist:
+      - label: Strip bed
+        done: true
+      - label: Fresh sheets
+        done: false
+  - title: Turnover after Johnson stay
+    template: turnover
+    property: villa-sud
+    assignee: maria
+    starts_at: johnson:+5d
+    duration_minutes: 120
+    state: scheduled
+    priority: high
+    photo_evidence: required
+    created_by: elodie
+    created_at: T-1d
+expenses:
+  - worker: maria
+    property: villa-sud
+    vendor: Carrefour
+    amount_cents: 4280
+    currency: EUR
+    category: supplies
+    state: submitted
+    purchased_at: T-2d
+    created_at: T-2d
+    note: Cleaning supplies and fresh towels

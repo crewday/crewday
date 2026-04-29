@@ -1,0 +1,146 @@
+workspace:
+  name: Maria Housekeeper Demo
+  timezone: Europe/Paris
+  locale: en
+  currency: EUR
+default_persona: worker
+default_start: /today
+start_paths: [/, /today, /tasks, /expenses]
+personas:
+  worker:
+    user: maria
+  manager:
+    user: elodie
+users:
+  maria:
+    name: Maria Alvarez
+    email: maria@example.com
+    locale: fr
+    timezone: Europe/Paris
+    grants: [worker]
+    work_roles: [housekeeper]
+    engagement_kind: payroll
+  elodie:
+    name: Elodie Bernard
+    email: elodie.bernard@example.com
+    locale: en
+    timezone: Europe/Paris
+    grants: [manager]
+work_roles:
+  - key: housekeeper
+    name: Housekeeper
+    icon: BrushCleaning
+properties:
+  - key: villa-sud
+    name: Villa Sud
+    city: Antibes
+    country: FR
+    timezone: Europe/Paris
+    kind: str
+    areas: [Master bedroom, Kitchen, Bathroom, Entryway]
+    units:
+      - name: Whole villa
+        type: villa
+        max_guests: 6
+task_templates:
+  - key: daily-reset
+    name: Daily reset
+    role: housekeeper
+    duration_minutes: 45
+    photo_evidence: optional
+    priority: normal
+    property_refs: [villa-sud]
+    checklist:
+      - label: Kitchen surfaces
+      - label: Trash out
+  - key: linen
+    name: Linen change
+    role: housekeeper
+    duration_minutes: 30
+    photo_evidence: required
+    priority: high
+    property_refs: [villa-sud]
+    checklist:
+      - label: Strip bed
+      - label: Fresh sheets
+schedules:
+  - key: daily-reset
+    name: Villa Sud daily reset
+    template: daily-reset
+    property: villa-sud
+    assignee: maria
+    rrule: FREQ=DAILY
+    dtstart: T-3d
+    duration_minutes: 45
+stays:
+  - key: guest
+    property: villa-sud
+    guest_name: Johnson family
+    guest_count: 4
+    channel: airbnb
+    check_in: T-1d
+    check_out: T+2d
+    status: in_house
+    bundle_templates: [linen]
+tasks:
+  - title: Kitchen morning reset
+    template: daily-reset
+    schedule: daily-reset
+    property: villa-sud
+    assignee: maria
+    starts_at: T+1h
+    duration_minutes: 45
+    state: pending
+    priority: normal
+    photo_evidence: optional
+    created_by: elodie
+    created_at: T-1d
+    checklist:
+      - label: Kitchen surfaces
+        done: false
+      - label: Trash out
+        done: false
+  - title: Change linen - master bedroom
+    template: linen
+    property: villa-sud
+    assignee: maria
+    starts_at: T+2h
+    duration_minutes: 30
+    state: pending
+    priority: high
+    photo_evidence: required
+    created_by: elodie
+    created_at: T-1d
+  - title: Bathroom refresh
+    template: daily-reset
+    property: villa-sud
+    assignee: maria
+    starts_at: T+3h
+    duration_minutes: 25
+    state: pending
+    priority: normal
+    photo_evidence: optional
+    created_by: elodie
+    created_at: T-1d
+  - title: Entryway flowers
+    template: daily-reset
+    property: villa-sud
+    assignee: maria
+    starts_at: T+4h
+    duration_minutes: 15
+    state: pending
+    priority: low
+    photo_evidence: disabled
+    created_by: elodie
+    created_at: T-1d
+expenses:
+  - worker: maria
+    property: villa-sud
+    vendor: Carrefour
+    amount_cents: 2210
+    currency: EUR
+    category: supplies
+    state: submitted
+    purchased_at: T-2d
+    created_at: T-2d
+    note: Towels and sponges

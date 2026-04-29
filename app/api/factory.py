@@ -58,12 +58,14 @@ from pathlib import Path
 from typing import Any, Final
 from urllib.parse import urlparse
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.openapi.utils import get_openapi
-from fastapi.responses import FileResponse, HTMLResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
+from pydantic import SecretStr
 from starlette.middleware.cors import CORSMiddleware
 
+from app.adapters.db.session import make_uow
 from app.adapters.llm.openrouter import OpenRouterClient
 from app.adapters.llm.ports import LLMClient
 from app.adapters.mail.ports import Mailer
@@ -129,6 +131,18 @@ from app.auth.keys import KeyDerivationError, derive_subkey
 from app.capabilities import Capabilities
 from app.capabilities import probe as probe_capabilities
 from app.config import Settings, get_settings
+from app.demo import (
+    DEFAULT_SCENARIO_KEY,
+    SCENARIO_KEYS,
+    build_demo_cookie_header,
+    demo_cookie_name,
+    demo_workspace_slug,
+    load_bound_demo_workspace,
+    load_scenario_fixture,
+    mint_demo_cookie,
+    normalise_start_path,
+    seed_workspace,
+)
 from app.observability import build_metrics_router, setup_tracing
 from app.security import BindGuardError, assert_bind_allowed
 from app.tenancy.middleware import WorkspaceContextMiddleware
@@ -771,6 +785,73 @@ def _register_ops_routes(app: FastAPI) -> None:
     app.include_router(health_router)
 
 
+def _register_demo_routes(app: FastAPI, settings: Settings) -> None:
+    """Mount demo-mode first-visit mint flow (§24)."""
+    if not settings.demo_mode:
+        return
+
+    @app.get("/app", include_in_schema=False)
+    def demo_app(request: Request) -> Response:
+        scenario_param = request.query_params.get("scenario") or DEFAULT_SCENARIO_KEY
+        scenario_key = (
+            scenario_param if scenario_param in SCENARIO_KEYS else DEFAULT_SCENARIO_KEY
+        )
+        fixture = load_scenario_fixture(scenario_key)
+        start = normalise_start_path(fixture, request.query_params.get("start"))
+        persona_key = request.query_params.get("as")
+        cookie_secret = _demo_cookie_secret(settings)
+        with make_uow() as session:
+            existing = load_bound_demo_workspace(
+                session,
+                cookie_secret,
+                scenario_key=scenario_key,
+                value=request.cookies.get(demo_cookie_name(scenario_key)),
+            )
+            if existing is not None:
+                slug = demo_workspace_slug(session, existing.workspace_id)
+                if slug is not None:
+                    return RedirectResponse(
+                        url=_workspace_redirect_url(slug, start),
+                        status_code=303,
+                    )
+
+            seeded = seed_workspace(
+                session,
+                scenario_key,
+                persona_key=persona_key,
+            )
+            cookie_value = mint_demo_cookie(
+                cookie_secret,
+                scenario_key=scenario_key,
+                workspace_id=seeded.workspace_id,
+                persona_user_id=seeded.persona_user_id,
+            )
+
+        response = RedirectResponse(
+            url=_workspace_redirect_url(seeded.workspace_slug, start),
+            status_code=303,
+        )
+        response.headers.append(
+            "Set-Cookie", build_demo_cookie_header(scenario_key, cookie_value)
+        )
+        return response
+
+
+def _demo_cookie_secret(settings: Settings) -> SecretStr:
+    secret = settings.demo_cookie_key or settings.root_key
+    if secret is None:
+        raise DemoModeRefused(
+            "CREWDAY_DEMO_MODE=1 requires CREWDAY_DEMO_COOKIE_KEY or CREWDAY_ROOT_KEY"
+        )
+    return secret
+
+
+def _workspace_redirect_url(workspace_slug: str, start: str) -> str:
+    if start == "/":
+        return f"/w/{workspace_slug}"
+    return f"/w/{workspace_slug}{start}"
+
+
 def _register_spa_catch_all(app: FastAPI) -> None:
     """Mount the SPA static assets + fallback route (prod profile).
 
@@ -1137,6 +1218,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         capabilities=capabilities,
     )
     _mount_context_routers(app, settings=cfg)
+    _register_demo_routes(app, cfg)
     # Exception handlers are registered AFTER every router is mounted
     # so the :class:`DomainError` hierarchy and validation/HTTP-exception
     # handlers cover every surface — and BEFORE the custom OpenAPI

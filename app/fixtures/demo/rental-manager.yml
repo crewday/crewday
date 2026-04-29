@@ -1,0 +1,249 @@
+workspace:
+  name: CleanCo Rental Demo
+  timezone: Europe/Paris
+  locale: en
+  currency: EUR
+default_persona: manager
+default_start: /tasks
+start_paths: [/, /today, /tasks, /schedule, /expenses, /properties]
+personas:
+  manager:
+    user: olivia
+  worker:
+    user: maria
+  client:
+    user: vincent
+users:
+  olivia:
+    name: Olivia Martin
+    email: olivia@example.com
+    locale: en
+    timezone: Europe/Paris
+    grants: [manager]
+  maria:
+    name: Maria Alvarez
+    email: maria@example.com
+    locale: fr
+    timezone: Europe/Paris
+    grants: [worker]
+    work_roles: [housekeeper]
+    engagement_kind: payroll
+  ben:
+    name: Ben Traore
+    email: ben@example.com
+    locale: fr
+    timezone: Europe/Paris
+    grants: [worker]
+    work_roles: [poolcare]
+    engagement_kind: payroll
+  sam:
+    name: Sam Leclerc
+    email: sam@example.com
+    locale: fr
+    timezone: Europe/Paris
+    grants: [worker]
+    work_roles: [handyman]
+    engagement_kind: contractor
+  vincent:
+    name: Vincent Dupont
+    email: vincent@example.com
+    locale: en
+    timezone: Europe/Paris
+    grants: [client]
+work_roles:
+  - key: housekeeper
+    name: Housekeeper
+    icon: BrushCleaning
+  - key: poolcare
+    name: Pool care
+    icon: WavesLadder
+  - key: handyman
+    name: Handyman
+    icon: Wrench
+properties:
+  - key: villa-sud
+    name: Villa Sud
+    city: Antibes
+    country: FR
+    timezone: Europe/Paris
+    kind: str
+    areas: [Kitchen, Pool, Garden, Entryway]
+    units:
+      - name: Whole villa
+        type: villa
+        max_guests: 6
+  - key: apt-3b
+    name: Apt 3B
+    city: Paris
+    country: FR
+    timezone: Europe/Paris
+    kind: str
+    areas: [Full unit, Kitchen, Bathroom]
+    units:
+      - name: Apartment
+        type: apartment
+        max_guests: 4
+  - key: chalet
+    name: Chalet Mont
+    city: Megeve
+    country: FR
+    timezone: Europe/Paris
+    kind: vacation
+    areas: [Kitchen, Fireplace room, Ski room]
+    units:
+      - name: Whole chalet
+        type: villa
+        max_guests: 8
+task_templates:
+  - key: turnover
+    name: Standard turnover
+    role: housekeeper
+    duration_minutes: 120
+    photo_evidence: required
+    priority: high
+    property_refs: [villa-sud, apt-3b, chalet]
+    checklist:
+      - label: Strip beds
+      - label: Clean bathrooms
+      - label: Reset kitchen
+      - label: Close windows
+  - key: pool-weekly
+    name: Pool service weekly
+    role: poolcare
+    duration_minutes: 30
+    photo_evidence: optional
+    priority: normal
+    property_refs: [villa-sud]
+    checklist:
+      - label: Test chlorine
+      - label: Empty baskets
+  - key: repair
+    name: Small repair
+    role: handyman
+    duration_minutes: 45
+    photo_evidence: optional
+    priority: normal
+    checklist:
+      - label: Inspect issue
+      - label: Upload after photo
+schedules:
+  - key: pool-sat
+    name: Villa Sud pool Saturdays
+    template: pool-weekly
+    property: villa-sud
+    assignee: ben
+    rrule: FREQ=WEEKLY;BYDAY=SA
+    dtstart: T-5d
+    duration_minutes: 30
+  - key: apt-turnover
+    name: Apt 3B turnover from stays
+    template: turnover
+    property: apt-3b
+    assignee: maria
+    rrule: FREQ=WEEKLY;BYDAY=FR
+    dtstart: T-4d
+    duration_minutes: 120
+stays:
+  - key: park
+    property: villa-sud
+    guest_name: Park couple
+    guest_count: 2
+    channel: vrbo
+    check_in: T-1d
+    check_out: T+3d
+    status: in_house
+    bundle_templates: [turnover]
+  - key: nakamura
+    property: apt-3b
+    guest_name: Nakamura
+    guest_count: 2
+    channel: airbnb
+    check_in: T+4d
+    check_out: T+8d
+    status: scheduled
+    bundle_templates: [turnover]
+tasks:
+  - title: Pool check and chlorine
+    template: pool-weekly
+    schedule: pool-sat
+    property: villa-sud
+    assignee: ben
+    starts_at: T-2h
+    duration_minutes: 30
+    state: done
+    priority: normal
+    photo_evidence: optional
+    created_by: olivia
+    created_at: T-2d
+    checklist:
+      - label: Test chlorine
+        done: true
+      - label: Empty baskets
+        done: true
+  - title: Turnover - Apt 3B
+    template: turnover
+    schedule: apt-turnover
+    property: apt-3b
+    assignee: maria
+    starts_at: T+5h
+    duration_minutes: 120
+    state: pending
+    priority: high
+    photo_evidence: required
+    created_by: olivia
+    created_at: T-1d
+  - title: Fix loose cupboard handle
+    template: repair
+    property: chalet
+    assignee: sam
+    starts_at: T+1d
+    duration_minutes: 45
+    state: in_progress
+    priority: normal
+    photo_evidence: optional
+    created_by: olivia
+    created_at: T-2d
+  - title: Turnover after Park stay
+    template: turnover
+    property: villa-sud
+    assignee: maria
+    starts_at: park:+3d
+    duration_minutes: 120
+    state: scheduled
+    priority: high
+    photo_evidence: required
+    created_by: olivia
+    created_at: T-1d
+expenses:
+  - worker: maria
+    property: apt-3b
+    vendor: Carrefour
+    amount_cents: 3680
+    currency: EUR
+    category: supplies
+    state: submitted
+    purchased_at: T-2d
+    created_at: T-2d
+    note: Cleaning supplies
+  - worker: ben
+    property: villa-sud
+    vendor: Pool Pro
+    amount_cents: 12500
+    currency: EUR
+    category: maintenance
+    state: approved
+    decided_by: olivia
+    purchased_at: T-5d
+    created_at: T-5d
+    note: Chlorine tablets
+  - worker: sam
+    property: chalet
+    vendor: Brico Depot
+    amount_cents: 5780
+    currency: EUR
+    category: maintenance
+    state: reimbursed
+    decided_by: olivia
+    purchased_at: T-6d
+    created_at: T-6d
+    note: Door handles and screws

@@ -31,6 +31,10 @@ ActorGrantRole = Literal["manager", "worker", "client", "guest"]
 #   ``scoped`` / ``delegated`` / ``personal`` token kinds; routes that
 #   need to refuse a specific kind can additionally branch on the
 #   verified token's ``kind`` via the actor.
+# * ``"demo"`` — the request carried a signed demo binding cookie in
+#   ``CREWDAY_DEMO_MODE``. It acts as a seeded user inside one demo
+#   workspace, but it is not a passkey session and must not satisfy
+#   session-only surfaces such as token minting.
 # * ``"system"`` — synthesised by a worker / job / signup helper that
 #   has no live caller (e.g. cd-yqm4's reconciler, the magic-link
 #   issuer, the dev-login script). Sites that exercise governance
@@ -44,7 +48,7 @@ ActorGrantRole = Literal["manager", "worker", "client", "guest"]
 # system worker ⇒ system) but diverge for token paths
 # (``actor_kind="user"`` + ``principal_kind="token"``) — only with the
 # transport bit can routes refuse a transitive delegated mint.
-PrincipalKind = Literal["session", "token", "system"]
+PrincipalKind = Literal["session", "token", "demo", "system"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -56,8 +60,9 @@ class WorkspaceContext:
 
     ``principal_kind`` records the transport that authenticated the
     caller — ``"session"`` (passkey cookie), ``"token"`` (bearer
-    header), or ``"system"`` (worker / signup helper / magic-link
-    issuer). It defaults to ``"session"`` so existing call sites
+    header), ``"demo"`` (signed demo binding cookie), or ``"system"``
+    (worker / signup helper / magic-link issuer). It defaults to
+    ``"session"`` so existing call sites
     (factories, fixtures, domain helpers that build a synthetic ctx)
     behave as if they were a session-presented request — the field
     only carries weight for routes that gate on transport (e.g.
