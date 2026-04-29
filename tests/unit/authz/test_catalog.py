@@ -71,7 +71,7 @@ class TestShape:
         ``/user_availability_overrides`` surface (§06 hybrid approval
         model).
         """
-        assert len(ACTION_CATALOG) == 89
+        assert len(ACTION_CATALOG) == 91
 
     def test_entries_are_action_spec_instances(self) -> None:
         for key, spec in ACTION_CATALOG.items():

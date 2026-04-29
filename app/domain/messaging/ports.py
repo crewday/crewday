@@ -42,6 +42,8 @@ from typing import Protocol
 from sqlalchemy.orm import Session
 
 __all__ = [
+    "ChatChannelRepository",
+    "ChatChannelRow",
     "PushTokenRepository",
     "PushTokenRow",
 ]
@@ -50,6 +52,20 @@ __all__ = [
 # ---------------------------------------------------------------------------
 # Row shape (value object)
 # ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class ChatChannelRow:
+    """Immutable projection of a ``chat_channel`` row."""
+
+    id: str
+    workspace_id: str
+    kind: str
+    source: str
+    external_ref: str | None
+    title: str | None
+    created_at: datetime
+    archived_at: datetime | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -218,4 +234,88 @@ class PushTokenRepository(Protocol):
         flush. The caller's audit row still records the intent on a
         successful prior find.
         """
+        ...
+
+
+class ChatChannelRepository(Protocol):
+    """Read + write seam for ``chat_channel`` and explicit members."""
+
+    @property
+    def session(self) -> Session:
+        """Return the underlying SQLAlchemy session for audit/authz seams."""
+        ...
+
+    def insert(
+        self,
+        *,
+        channel_id: str,
+        workspace_id: str,
+        kind: str,
+        source: str,
+        external_ref: str | None,
+        title: str | None,
+        created_at: datetime,
+    ) -> ChatChannelRow:
+        """Insert a fresh channel row."""
+        ...
+
+    def list(
+        self,
+        *,
+        workspace_id: str,
+        kinds: Sequence[str],
+        include_archived: bool,
+        after_id: str | None,
+        limit: int,
+    ) -> Sequence[ChatChannelRow]:
+        """Return channels ordered by id for cursor pagination."""
+        ...
+
+    def get(self, *, workspace_id: str, channel_id: str) -> ChatChannelRow | None:
+        """Return the channel or ``None`` within ``workspace_id``."""
+        ...
+
+    def rename(
+        self,
+        *,
+        workspace_id: str,
+        channel_id: str,
+        title: str | None,
+    ) -> ChatChannelRow:
+        """Update the display title and return the current row."""
+        ...
+
+    def archive(
+        self,
+        *,
+        workspace_id: str,
+        channel_id: str,
+        archived_at: datetime,
+    ) -> ChatChannelRow:
+        """Soft-archive the channel and return the current row."""
+        ...
+
+    def add_member(
+        self,
+        *,
+        workspace_id: str,
+        channel_id: str,
+        user_id: str,
+        added_at: datetime,
+    ) -> None:
+        """Add an explicit channel member idempotently."""
+        ...
+
+    def is_workspace_member(self, *, workspace_id: str, user_id: str) -> bool:
+        """Return true when ``user_id`` belongs to ``workspace_id``."""
+        ...
+
+    def remove_member(
+        self,
+        *,
+        workspace_id: str,
+        channel_id: str,
+        user_id: str,
+    ) -> None:
+        """Remove an explicit channel member idempotently."""
         ...

@@ -1,6 +1,6 @@
 """messaging — notification/push_token/digest_record/chat_*/email_*.
 
-All seven tables in this package are workspace-scoped: each row carries
+All eight tables in this package are workspace-scoped: each row carries
 a ``workspace_id`` column and is registered in
 :mod:`app.tenancy.registry` so the ORM tenant filter auto-injects a
 ``workspace_id`` predicate on every SELECT / UPDATE / DELETE. A bare
@@ -12,7 +12,9 @@ push_token, digest_record, chat_channel, chat_message) — the
 minimum-viable shape for the notification fanout (§10), the web-push
 token registry (§12 ``/me/push-tokens`` — returns ``501
 push_unavailable`` until the native app ships), the daily / weekly
-email-digest ledger, and the chat-gateway substrate (§23). cd-aqwt
+email-digest ledger, and the chat-gateway substrate (§23). cd-7ej8
+adds :class:`ChatChannelMember` for explicit per-channel membership
+and soft channel archives via ``chat_channel.archived_at``. cd-aqwt
 extends the package with :class:`EmailOptOut` (per-user per-category
 unsubscribe marker the §10 worker consults pre-send) and
 :class:`EmailDelivery` (per-send delivery ledger driving bounce-reply
@@ -38,6 +40,9 @@ FK hygiene mirrors the rest of the app:
 * ``ChatMessage.channel_id`` → ``chat_channel.id`` with
   ``ondelete='CASCADE'`` — deleting a channel sweeps its messages;
   messages are not independently useful once the channel is gone.
+* ``ChatChannelMember.channel_id`` → ``chat_channel.id`` with
+  ``ondelete='CASCADE'`` — deleting or sweeping a channel removes its
+  explicit membership rows.
 * ``EmailDelivery.to_person_id`` has **no FK** — recipients can be
   client users not yet materialised in the ``user`` table (invoice
   reminders, stay-upcoming emails); the domain layer resolves the
@@ -56,6 +61,7 @@ from __future__ import annotations
 
 from app.adapters.db.messaging.models import (
     ChatChannel,
+    ChatChannelMember,
     ChatMessage,
     DigestRecord,
     EmailDelivery,
@@ -70,6 +76,7 @@ for _table in (
     "push_token",
     "digest_record",
     "chat_channel",
+    "chat_channel_member",
     "chat_message",
     "email_opt_out",
     "email_delivery",
@@ -78,6 +85,7 @@ for _table in (
 
 __all__ = [
     "ChatChannel",
+    "ChatChannelMember",
     "ChatMessage",
     "DigestRecord",
     "EmailDelivery",

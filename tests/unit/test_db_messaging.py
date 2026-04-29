@@ -20,6 +20,7 @@ from sqlalchemy import CheckConstraint, Index
 
 from app.adapters.db.messaging import (
     ChatChannel,
+    ChatChannelMember,
     ChatMessage,
     DigestRecord,
     EmailDelivery,
@@ -279,6 +280,7 @@ class TestChatChannelModel:
         # Nullable for in-app channels with no external counterpart.
         assert channel.external_ref is None
         assert channel.title is None
+        assert channel.archived_at is None
 
     def test_gateway_channel_construction(self) -> None:
         channel = ChatChannel(
@@ -635,6 +637,7 @@ class TestPackageReExports:
         assert PushToken is messaging_models.PushToken
         assert DigestRecord is messaging_models.DigestRecord
         assert ChatChannel is messaging_models.ChatChannel
+        assert ChatChannelMember is messaging_models.ChatChannelMember
         assert ChatMessage is messaging_models.ChatMessage
         assert EmailOptOut is messaging_models.EmailOptOut
         assert EmailDelivery is messaging_models.EmailDelivery
@@ -658,6 +661,7 @@ class TestRegistryIntent:
         "push_token",
         "digest_record",
         "chat_channel",
+        "chat_channel_member",
         "chat_message",
         "email_opt_out",
         "email_delivery",

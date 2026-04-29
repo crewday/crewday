@@ -9,6 +9,8 @@ Public surface:
   enum of valid notification kinds, mirroring the DB CHECK.
 * :class:`~app.domain.messaging.notifications.TemplateNotFound` —
   loud error when a kind's default template is missing.
+* :class:`~app.domain.messaging.channels.ChatChannelService` —
+  CRUD and authorization for staff / manager / gateway channels.
 * :class:`~app.domain.messaging.ports.PushTokenRepository` —
   repository port for the web-push subscription seam (cd-74pb);
   see :mod:`app.domain.messaging.push_tokens` for the consumer.
@@ -19,6 +21,14 @@ See docs/specs/10-messaging-notifications.md and
 docs/specs/23-chat-gateway.md.
 """
 
+from app.domain.messaging.channels import (
+    ChatChannelCreate,
+    ChatChannelInvalid,
+    ChatChannelNotFound,
+    ChatChannelPermissionDenied,
+    ChatChannelService,
+    ChatChannelView,
+)
 from app.domain.messaging.notifications import (
     TEMPLATE_ROOT,
     Jinja2TemplateLoader,
@@ -29,12 +39,22 @@ from app.domain.messaging.notifications import (
     TemplateNotFound,
 )
 from app.domain.messaging.ports import (
+    ChatChannelRepository,
+    ChatChannelRow,
     PushTokenRepository,
     PushTokenRow,
 )
 
 __all__ = [
     "TEMPLATE_ROOT",
+    "ChatChannelCreate",
+    "ChatChannelInvalid",
+    "ChatChannelNotFound",
+    "ChatChannelPermissionDenied",
+    "ChatChannelRepository",
+    "ChatChannelRow",
+    "ChatChannelService",
+    "ChatChannelView",
     "Jinja2TemplateLoader",
     "NotificationKind",
     "NotificationService",

@@ -9,7 +9,7 @@ soft reference), happy-path round-trip of every model, the unread-
 fanout hot-path query, the chat-scrollback hot-path query, the
 email opt-out pre-send probe, the email delivery state machine,
 CHECK / FK / UNIQUE violations, cross-workspace isolation, and
-tenant-filter behaviour (all seven tables scoped; SELECT without a
+tenant-filter behaviour (all eight tables scoped; SELECT without a
 :class:`WorkspaceContext` raises :class:`TenantFilterMissing`).
 
 The sibling ``tests/unit/test_db_messaging.py`` covers pure-Python
@@ -33,6 +33,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from app.adapters.db.identity.models import User
 from app.adapters.db.messaging.models import (
     ChatChannel,
+    ChatChannelMember,
     ChatMessage,
     DigestRecord,
     EmailDelivery,
@@ -60,6 +61,7 @@ _MESSAGING_TABLES: tuple[str, ...] = (
     "push_token",
     "digest_record",
     "chat_channel",
+    "chat_channel_member",
     "chat_message",
     "email_opt_out",
     "email_delivery",
@@ -135,7 +137,7 @@ def _bootstrap(
 
 
 class TestMigrationShape:
-    """The migrations land all seven tables with the correct keys + indexes."""
+    """The migrations land all eight tables with the correct keys + indexes."""
 
     def test_all_tables_exist(self, engine: Engine) -> None:
         tables = set(inspect(engine).get_table_names())
@@ -264,11 +266,12 @@ class TestMigrationShape:
             "external_ref",
             "title",
             "created_at",
+            "archived_at",
         }
         assert set(cols) == expected
-        for nullable in ("external_ref", "title"):
+        for nullable in ("external_ref", "title", "archived_at"):
             assert cols[nullable]["nullable"] is True
-        for notnull in expected - {"external_ref", "title"}:
+        for notnull in expected - {"external_ref", "title", "archived_at"}:
             assert cols[notnull]["nullable"] is False, f"{notnull} must be NOT NULL"
 
     def test_chat_channel_fks(self, engine: Engine) -> None:
@@ -283,6 +286,37 @@ class TestMigrationShape:
         indexes = {ix["name"]: ix for ix in inspect(engine).get_indexes("chat_channel")}
         assert "ix_chat_channel_workspace" in indexes
         assert "ix_chat_channel_workspace_external_ref" in indexes
+
+    def test_chat_channel_member_columns(self, engine: Engine) -> None:
+        cols = {
+            c["name"]: c for c in inspect(engine).get_columns("chat_channel_member")
+        }
+        expected = {"channel_id", "user_id", "workspace_id", "added_at"}
+        assert set(cols) == expected
+        for notnull in expected:
+            assert cols[notnull]["nullable"] is False, f"{notnull} must be NOT NULL"
+
+    def test_chat_channel_member_fks(self, engine: Engine) -> None:
+        fks = {
+            tuple(fk["constrained_columns"]): fk
+            for fk in inspect(engine).get_foreign_keys("chat_channel_member")
+        }
+        assert fks[("channel_id",)]["referred_table"] == "chat_channel"
+        assert fks[("channel_id",)]["options"].get("ondelete") == "CASCADE"
+        assert fks[("user_id",)]["referred_table"] == "user"
+        assert fks[("user_id",)]["options"].get("ondelete") == "CASCADE"
+        assert fks[("workspace_id",)]["referred_table"] == "workspace"
+        assert fks[("workspace_id",)]["options"].get("ondelete") == "CASCADE"
+
+    def test_chat_channel_member_indexes(self, engine: Engine) -> None:
+        indexes = {
+            ix["name"]: ix for ix in inspect(engine).get_indexes("chat_channel_member")
+        }
+        assert "ix_chat_channel_member_workspace_user" in indexes
+        assert indexes["ix_chat_channel_member_workspace_user"]["column_names"] == [
+            "workspace_id",
+            "user_id",
+        ]
 
     def test_chat_message_columns(self, engine: Engine) -> None:
         cols = {c["name"]: c for c in inspect(engine).get_columns("chat_message")}
@@ -1132,6 +1166,15 @@ class TestCascadeOnWorkspaceDelete:
                 )
             )
             db_session.flush()
+            db_session.add(
+                ChatChannelMember(
+                    channel_id=channel.id,
+                    user_id=user.id,
+                    workspace_id=workspace.id,
+                    added_at=_PINNED,
+                )
+            )
+            db_session.flush()
         finally:
             reset_current(token)
 
@@ -1144,7 +1187,13 @@ class TestCascadeOnWorkspaceDelete:
 
         token = set_current(_ctx_for(workspace, user.id))
         try:
-            for model in (Notification, PushToken, DigestRecord, ChatChannel):
+            for model in (
+                Notification,
+                PushToken,
+                DigestRecord,
+                ChatChannel,
+                ChatChannelMember,
+            ):
                 rows = db_session.scalars(
                     select(model).where(model.workspace_id == workspace.id)
                 ).all()

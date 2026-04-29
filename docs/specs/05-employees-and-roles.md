@@ -554,7 +554,9 @@ configuration.
 | `property_workspace_invite.reject`      | `workspace`                    | `owners, managers`            | —  | §22 |
 | `property_workspace_invite.revoke`      | `workspace`, `property`        | `owners, managers`            | —  | §22 |
 | `property_workspace.revoke`             | `workspace`, `property`        | `owners, managers`            | ✅ | §22 |
+| `chat_gateway.read`                     | `workspace`                    | `owners, managers`            | —  | §23 |
 | `messaging.comments.author_global`      | `workspace`, `property`        | `owners, managers, all_workers` | — | §10 |
+| `messaging.manager_channel`             | `workspace`                    | `owners, managers`            | —  | §10 |
 | `messaging.report_issue.triage`         | `workspace`, `property`        | `owners, managers`            | —  | §10 |
 | `time.clock_self`                       | `workspace`, `property`        | `owners, managers, all_workers` | — | §09 |
 | `time.edit_others`                      | `workspace`, `property`        | `owners, managers`            | —  | §09 |

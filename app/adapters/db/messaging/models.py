@@ -56,6 +56,7 @@ from app.adapters.db.workspace import models as _workspace_models  # noqa: F401
 
 __all__ = [
     "ChatChannel",
+    "ChatChannelMember",
     "ChatMessage",
     "DigestRecord",
     "EmailDelivery",
@@ -448,6 +449,9 @@ class ChatChannel(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
     )
+    archived_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
     __table_args__ = (
         CheckConstraint(
@@ -473,6 +477,40 @@ class ChatChannel(Base):
             "workspace_id",
             "external_ref",
         ),
+    )
+
+
+class ChatChannelMember(Base):
+    """Explicit per-channel membership for non-broadcast channel shapes.
+
+    Staff visibility is workspace-wide and manager visibility is
+    capability-gated, so those channel kinds do not need rows here for
+    ordinary reads. The table exists for gateway/future narrowed
+    channels and for the service-level add/remove contract introduced
+    by cd-7ej8.
+    """
+
+    __tablename__ = "chat_channel_member"
+
+    channel_id: Mapped[str] = mapped_column(
+        String,
+        ForeignKey("chat_channel.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    user_id: Mapped[str] = mapped_column(
+        String,
+        ForeignKey("user.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    workspace_id: Mapped[str] = mapped_column(
+        String,
+        ForeignKey("workspace.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    added_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+    __table_args__ = (
+        Index("ix_chat_channel_member_workspace_user", "workspace_id", "user_id"),
     )
 
 

@@ -28,14 +28,17 @@ from datetime import datetime
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.adapters.db.messaging.models import PushToken
-from app.adapters.db.workspace.models import Workspace
+from app.adapters.db.messaging.models import ChatChannel, ChatChannelMember, PushToken
+from app.adapters.db.workspace.models import UserWorkspace, Workspace
 from app.domain.messaging.ports import (
+    ChatChannelRepository,
+    ChatChannelRow,
     PushTokenRepository,
     PushTokenRow,
 )
 
 __all__ = [
+    "SqlAlchemyChatChannelRepository",
     "SqlAlchemyPushTokenRepository",
 ]
 
@@ -58,6 +61,174 @@ def _to_row(row: PushToken) -> PushTokenRow:
         created_at=row.created_at,
         last_used_at=row.last_used_at,
     )
+
+
+def _to_channel_row(row: ChatChannel) -> ChatChannelRow:
+    return ChatChannelRow(
+        id=row.id,
+        workspace_id=row.workspace_id,
+        kind=row.kind,
+        source=row.source,
+        external_ref=row.external_ref,
+        title=row.title,
+        created_at=row.created_at,
+        archived_at=row.archived_at,
+    )
+
+
+class SqlAlchemyChatChannelRepository(ChatChannelRepository):
+    """SA-backed concretion of :class:`ChatChannelRepository`."""
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    @property
+    def session(self) -> Session:
+        return self._session
+
+    def insert(
+        self,
+        *,
+        channel_id: str,
+        workspace_id: str,
+        kind: str,
+        source: str,
+        external_ref: str | None,
+        title: str | None,
+        created_at: datetime,
+    ) -> ChatChannelRow:
+        row = ChatChannel(
+            id=channel_id,
+            workspace_id=workspace_id,
+            kind=kind,
+            source=source,
+            external_ref=external_ref,
+            title=title,
+            created_at=created_at,
+            archived_at=None,
+        )
+        self._session.add(row)
+        self._session.flush()
+        return _to_channel_row(row)
+
+    def list(
+        self,
+        *,
+        workspace_id: str,
+        kinds: Sequence[str],
+        include_archived: bool,
+        after_id: str | None,
+        limit: int,
+    ) -> Sequence[ChatChannelRow]:
+        stmt = (
+            select(ChatChannel)
+            .where(
+                ChatChannel.workspace_id == workspace_id,
+                ChatChannel.kind.in_(tuple(kinds)),
+            )
+            .order_by(ChatChannel.id.asc())
+            .limit(limit)
+        )
+        if after_id is not None:
+            stmt = stmt.where(ChatChannel.id > after_id)
+        if not include_archived:
+            stmt = stmt.where(ChatChannel.archived_at.is_(None))
+        rows = self._session.scalars(stmt).all()
+        return [_to_channel_row(row) for row in rows]
+
+    def get(
+        self,
+        *,
+        workspace_id: str,
+        channel_id: str,
+    ) -> ChatChannelRow | None:
+        row = self._session.scalars(
+            select(ChatChannel).where(
+                ChatChannel.workspace_id == workspace_id,
+                ChatChannel.id == channel_id,
+            )
+        ).one_or_none()
+        return _to_channel_row(row) if row is not None else None
+
+    def rename(
+        self,
+        *,
+        workspace_id: str,
+        channel_id: str,
+        title: str | None,
+    ) -> ChatChannelRow:
+        row = self._load(workspace_id=workspace_id, channel_id=channel_id)
+        row.title = title
+        self._session.flush()
+        return _to_channel_row(row)
+
+    def archive(
+        self,
+        *,
+        workspace_id: str,
+        channel_id: str,
+        archived_at: datetime,
+    ) -> ChatChannelRow:
+        row = self._load(workspace_id=workspace_id, channel_id=channel_id)
+        if row.archived_at is None:
+            row.archived_at = archived_at
+            self._session.flush()
+        return _to_channel_row(row)
+
+    def add_member(
+        self,
+        *,
+        workspace_id: str,
+        channel_id: str,
+        user_id: str,
+        added_at: datetime,
+    ) -> None:
+        existing = self._session.get(ChatChannelMember, (channel_id, user_id))
+        if existing is not None:
+            return
+        self._session.add(
+            ChatChannelMember(
+                channel_id=channel_id,
+                user_id=user_id,
+                workspace_id=workspace_id,
+                added_at=added_at,
+            )
+        )
+        self._session.flush()
+
+    def is_workspace_member(self, *, workspace_id: str, user_id: str) -> bool:
+        return (
+            self._session.scalars(
+                select(UserWorkspace.user_id)
+                .where(
+                    UserWorkspace.workspace_id == workspace_id,
+                    UserWorkspace.user_id == user_id,
+                )
+                .limit(1)
+            ).first()
+            is not None
+        )
+
+    def remove_member(
+        self,
+        *,
+        workspace_id: str,
+        channel_id: str,
+        user_id: str,
+    ) -> None:
+        row = self._session.get(ChatChannelMember, (channel_id, user_id))
+        if row is None or row.workspace_id != workspace_id:
+            return
+        self._session.delete(row)
+        self._session.flush()
+
+    def _load(self, *, workspace_id: str, channel_id: str) -> ChatChannel:
+        return self._session.scalars(
+            select(ChatChannel).where(
+                ChatChannel.workspace_id == workspace_id,
+                ChatChannel.id == channel_id,
+            )
+        ).one()
 
 
 class SqlAlchemyPushTokenRepository(PushTokenRepository):

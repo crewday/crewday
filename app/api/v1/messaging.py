@@ -48,6 +48,7 @@ from sqlalchemy.orm import Session
 
 from app.adapters.db.messaging.repositories import SqlAlchemyPushTokenRepository
 from app.api.deps import current_workspace_context, db_session
+from app.api.messaging.channels import build_channels_router
 from app.domain.messaging.push_tokens import (
     MAX_ENDPOINT_LEN,
     EndpointNotAllowed,
@@ -289,6 +290,7 @@ def build_messaging_router(
     _monotonic = monotonic if monotonic is not None else time.monotonic
 
     r = APIRouter(tags=["messaging"])
+    r.include_router(build_channels_router())
 
     @r.get(
         "/notifications/push/vapid-key",
