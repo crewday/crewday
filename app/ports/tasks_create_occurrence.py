@@ -13,14 +13,15 @@ production wiring injects the live concretion in
 or a recording fake.
 
 **Idempotency contract.** Implementations MUST treat
-``(reservation_id, rule_id)`` as the dedup key. A second call with
-the same key and a small (< 4 h) shift in ``starts_at`` /
-``ends_at`` MUST patch the existing row in place; a larger shift
-MUST regenerate (cancel the existing row + insert a fresh one).
-Re-firing with identical inputs MUST be a no-op. The threshold is
-fixed by §04 "Stay task bundles" §"Edit semantics"; the port
-exposes it on the request so callers can override per-rule once
-the tasks-side service grows that knob.
+``(reservation_id, rule_id, occurrence_key)`` as the dedup key,
+falling back to ``(reservation_id, rule_id)`` when
+``occurrence_key`` is absent. A second call with the same key and a
+small (< 4 h) shift in ``starts_at`` / ``ends_at`` MUST patch the
+existing row in place; a larger shift MUST regenerate (cancel the
+existing row + insert a fresh one). Re-firing with identical inputs
+MUST be a no-op. The threshold is fixed by §04 "Stay task bundles"
+§"Edit semantics"; the port exposes it on the request so callers
+can override per-rule once the tasks-side service grows that knob.
 
 **Why "create or patch" rather than separate methods?** The
 caller does not know the existing occurrence's state. Splitting
@@ -77,7 +78,8 @@ class TurnoverOccurrenceRequest:
     Frozen so the request is a value, not a mutable record — the
     adapter cannot smuggle changes back to the caller through the
     DTO. ``reservation_id`` + ``rule_id`` together form the
-    idempotency key; the rest carries the materialisation shape.
+      idempotency key; for recurring rules, ``occurrence_key`` adds
+      the per-rule occurrence identity.
 
     * ``reservation_id`` — the upstream reservation that triggered
       the rule. The tasks adapter persists the linkage so a
@@ -111,6 +113,10 @@ class TurnoverOccurrenceRequest:
     starts_at: datetime
     ends_at: datetime
     patch_in_place_threshold: timedelta = DEFAULT_PATCH_IN_PLACE_THRESHOLD
+    stay_task_bundle_id: str | None = None
+    occurrence_key: str | None = None
+    due_by_utc: datetime | None = None
+    regenerate_cancellation_reason: str = "stay rescheduled"
 
 
 @dataclass(frozen=True, slots=True)
@@ -246,7 +252,9 @@ class RecordingTasksCreateOccurrencePort:
         self.calls: list[TurnoverOccurrenceRequest] = []
         # Deterministic id sequence: ``rec_occ_<n>`` so tests can
         # assert on the value without coupling to ULID generation.
-        self._anchors: dict[tuple[str, str], tuple[datetime, datetime, str]] = {}
+        self._anchors: dict[
+            tuple[str, str, str | None], tuple[datetime, datetime, str]
+        ] = {}
         self._counter = 0
 
     def create_or_patch_turnover_occurrence(
@@ -259,7 +267,7 @@ class RecordingTasksCreateOccurrencePort:
     ) -> TurnoverOccurrenceResult:
         _ = session, ctx, now
         self.calls.append(request)
-        key = (request.reservation_id, request.rule_id)
+        key = (request.reservation_id, request.rule_id, request.occurrence_key)
         previous = self._anchors.get(key)
         if previous is None:
             self._counter += 1
