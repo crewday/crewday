@@ -54,6 +54,8 @@ __all__ = [
     "PayrollExportRepository",
     "PayslipComputeRepository",
     "PayslipExportRow",
+    "PayslipReadRepository",
+    "PayslipReadRow",
     "PayslipRow",
     "TimesheetExportRow",
 ]
@@ -167,6 +169,27 @@ class PayslipRow:
 
 
 @dataclass(frozen=True, slots=True)
+class PayslipReadRow:
+    """Immutable projection for the REST payslip read surface."""
+
+    id: str
+    workspace_id: str
+    pay_period_id: str
+    user_id: str
+    currency: str
+    shift_hours_decimal: Decimal
+    overtime_hours_decimal: Decimal
+    gross_cents: int
+    deductions_cents: dict[str, int]
+    net_cents: int
+    components_json: dict[str, object]
+    status: str
+    issued_at: datetime | None
+    paid_at: datetime | None
+    created_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
 class TimesheetExportRow:
     """Flat row for the manager/accountant timesheet CSV export."""
 
@@ -266,6 +289,44 @@ class PayrollExportRepository(Protocol):
         status_filter: str,
     ) -> Iterable[ExpenseLedgerExportRow]:
         """Return expense claims in the export window."""
+        ...
+
+
+class PayslipReadRepository(Protocol):
+    """Read seam for payslip REST list/detail routes."""
+
+    @property
+    def session(self) -> Session:
+        """Return the underlying SQLAlchemy session."""
+        ...
+
+    def get_payslip(
+        self, *, workspace_id: str, payslip_id: str
+    ) -> PayslipReadRow | None:
+        """Return one payslip or ``None`` when absent."""
+        ...
+
+    def list_payslips(
+        self,
+        *,
+        workspace_id: str,
+        user_id: str | None = None,
+        pay_period_id: str | None = None,
+    ) -> Sequence[PayslipReadRow]:
+        """Return payslips ordered newest period first."""
+        ...
+
+    def set_payslip_state(
+        self,
+        *,
+        workspace_id: str,
+        payslip_id: str,
+        status: Literal["issued", "paid", "voided"],
+        issued_at: datetime | None = None,
+        paid_at: datetime | None = None,
+        payout_snapshot_json: dict[str, object] | None = None,
+    ) -> PayslipReadRow:
+        """Persist a payslip state transition and return the refreshed row."""
         ...
 
 
@@ -406,6 +467,17 @@ class PayPeriodRepository(Protocol):
         locked_by: str | None,
     ) -> PayPeriodRow:
         """Flip ``open`` to ``locked`` and stamp lock metadata."""
+        ...
+
+    def update(
+        self,
+        *,
+        workspace_id: str,
+        period_id: str,
+        starts_at: datetime,
+        ends_at: datetime,
+    ) -> PayPeriodRow:
+        """Update the window for an ``open`` period."""
         ...
 
     def reopen(self, *, workspace_id: str, period_id: str) -> PayPeriodRow:

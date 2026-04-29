@@ -33,6 +33,7 @@ __all__ = [
     "lock_period",
     "mark_paid",
     "reopen_period",
+    "update_period",
 ]
 
 
@@ -167,6 +168,52 @@ def create_period(
         clock=resolved_clock,
     )
     return view
+
+
+def update_period(
+    repo: PayPeriodRepository,
+    ctx: WorkspaceContext,
+    *,
+    period_id: str,
+    starts_at: datetime,
+    ends_at: datetime,
+    clock: Clock | None = None,
+) -> PayPeriodView:
+    _enforce_manage(repo, ctx)
+    _validate_window(starts_at=starts_at, ends_at=ends_at)
+    row = _load_row(repo, ctx, period_id=period_id)
+    if row.state != "open":
+        raise PayPeriodTransitionConflict("only open pay periods can be edited")
+    if repo.has_overlap(
+        workspace_id=ctx.workspace_id,
+        starts_at=starts_at,
+        ends_at=ends_at,
+        exclude_period_id=period_id,
+    ):
+        raise PayPeriodInvariantViolated("pay period overlaps an existing period")
+
+    before = _row_to_view(row)
+    after = _row_to_view(
+        repo.update(
+            workspace_id=ctx.workspace_id,
+            period_id=period_id,
+            starts_at=starts_at,
+            ends_at=ends_at,
+        )
+    )
+    write_audit(
+        repo.session,
+        ctx,
+        entity_kind="pay_period",
+        entity_id=period_id,
+        action="pay_period.updated",
+        diff={
+            "before": _view_to_diff_dict(before),
+            "after": _view_to_diff_dict(after),
+        },
+        clock=clock,
+    )
+    return after
 
 
 def delete_period(

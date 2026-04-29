@@ -24,6 +24,7 @@ from typing import Literal
 from sqlalchemy import and_, delete, exists, or_, select, update
 from sqlalchemy.orm import Session
 from sqlalchemy.sql.elements import ColumnElement
+from sqlalchemy.sql.selectable import ScalarSelect
 
 from app.adapters.db.expenses.models import ExpenseClaim
 from app.adapters.db.holidays.models import PublicHoliday
@@ -53,6 +54,7 @@ from app.domain.payroll.ports import (
     PayRuleRepository,
     PayRuleRow,
     PayslipExportRow,
+    PayslipReadRow,
     PayslipRow,
     TimesheetExportRow,
 )
@@ -64,6 +66,7 @@ __all__ = [
     "SqlAlchemyPayRuleRepository",
     "SqlAlchemyPayrollExportRepository",
     "SqlAlchemyPayslipComputeRepository",
+    "SqlAlchemyPayslipReadRepository",
 ]
 
 
@@ -204,6 +207,26 @@ def _payslip_to_row(row: Payslip) -> PayslipRow:
     )
 
 
+def _payslip_read_to_row(row: Payslip, *, currency: str | None) -> PayslipReadRow:
+    return PayslipReadRow(
+        id=row.id,
+        workspace_id=row.workspace_id,
+        pay_period_id=row.pay_period_id,
+        user_id=row.user_id,
+        currency=_currency_from_components(row.components_json) or currency or "",
+        shift_hours_decimal=row.shift_hours_decimal,
+        overtime_hours_decimal=row.overtime_hours_decimal,
+        gross_cents=row.gross_cents,
+        deductions_cents=dict(row.deductions_cents),
+        net_cents=row.net_cents,
+        components_json=dict(row.components_json),
+        status=row.status,
+        issued_at=row.issued_at,
+        paid_at=row.paid_at,
+        created_at=row.created_at,
+    )
+
+
 def _booking_window_filters(
     *,
     workspace_id: str,
@@ -240,6 +263,25 @@ def _currency_from_components(value: object) -> str | None:
         return None
     currency = value.get("currency")
     return currency if isinstance(currency, str) else None
+
+
+def _payslip_currency_subquery() -> ScalarSelect[str | None]:
+    return (
+        select(PayRule.currency)
+        .join(PayPeriod, PayPeriod.id == Payslip.pay_period_id)
+        .where(
+            PayRule.workspace_id == Payslip.workspace_id,
+            PayRule.user_id == Payslip.user_id,
+            PayRule.effective_from <= PayPeriod.ends_at,
+            or_(
+                PayRule.effective_to.is_(None),
+                PayRule.effective_to >= PayPeriod.starts_at,
+            ),
+        )
+        .order_by(PayRule.effective_from.desc(), PayRule.id.desc())
+        .limit(1)
+        .scalar_subquery()
+    )
 
 
 def _property_export_label(
@@ -344,6 +386,25 @@ class SqlAlchemyPayPeriodRepository(PayPeriodRepository):
         row.state = "locked"
         row.locked_at = locked_at
         row.locked_by = locked_by
+        self._session.flush()
+        return _period_to_row(row)
+
+    def update(
+        self,
+        *,
+        workspace_id: str,
+        period_id: str,
+        starts_at: datetime,
+        ends_at: datetime,
+    ) -> PayPeriodRow:
+        row = self._session.scalars(
+            select(PayPeriod).where(
+                PayPeriod.id == period_id,
+                PayPeriod.workspace_id == workspace_id,
+            )
+        ).one()
+        row.starts_at = starts_at
+        row.ends_at = ends_at
         self._session.flush()
         return _period_to_row(row)
 
@@ -751,6 +812,80 @@ class SqlAlchemyPayslipComputeRepository(SqlAlchemyBookingPayRepository):
             row.payout_snapshot_json = None
         self._session.flush()
         return _payslip_to_row(row)
+
+
+class SqlAlchemyPayslipReadRepository:
+    """SA-backed read adapter for payslip REST routes."""
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    @property
+    def session(self) -> Session:
+        return self._session
+
+    def get_payslip(
+        self, *, workspace_id: str, payslip_id: str
+    ) -> PayslipReadRow | None:
+        currency = _payslip_currency_subquery()
+        row = self._session.execute(
+            select(Payslip, currency).where(
+                Payslip.workspace_id == workspace_id,
+                Payslip.id == payslip_id,
+            )
+        ).one_or_none()
+        if row is None:
+            return None
+        payslip, resolved_currency = row
+        return _payslip_read_to_row(payslip, currency=resolved_currency)
+
+    def list_payslips(
+        self,
+        *,
+        workspace_id: str,
+        user_id: str | None = None,
+        pay_period_id: str | None = None,
+    ) -> Sequence[PayslipReadRow]:
+        currency = _payslip_currency_subquery()
+        stmt = (
+            select(Payslip, currency)
+            .join(PayPeriod, PayPeriod.id == Payslip.pay_period_id)
+            .where(Payslip.workspace_id == workspace_id)
+            .order_by(PayPeriod.starts_at.desc(), Payslip.id.desc())
+        )
+        if user_id is not None:
+            stmt = stmt.where(Payslip.user_id == user_id)
+        if pay_period_id is not None:
+            stmt = stmt.where(Payslip.pay_period_id == pay_period_id)
+        rows = self._session.execute(stmt).all()
+        return [
+            _payslip_read_to_row(payslip, currency=resolved_currency)
+            for payslip, resolved_currency in rows
+        ]
+
+    def set_payslip_state(
+        self,
+        *,
+        workspace_id: str,
+        payslip_id: str,
+        status: Literal["issued", "paid", "voided"],
+        issued_at: datetime | None = None,
+        paid_at: datetime | None = None,
+        payout_snapshot_json: dict[str, object] | None = None,
+    ) -> PayslipReadRow:
+        row = self._session.scalars(
+            select(Payslip).where(
+                Payslip.workspace_id == workspace_id,
+                Payslip.id == payslip_id,
+            )
+        ).one()
+        row.status = status
+        row.issued_at = issued_at
+        row.paid_at = paid_at
+        if payout_snapshot_json is not None:
+            row.payout_snapshot_json = payout_snapshot_json
+        self._session.flush()
+        return _payslip_read_to_row(row, currency=None)
 
 
 class SqlAlchemyPayrollExportRepository(PayrollExportRepository):

@@ -245,6 +245,7 @@ def _add_component(
 
 def _build_components_json(
     *,
+    currency: str,
     gross_breakdown: dict[str, int],
     deductions_cents: dict[str, int],
     sources: Sequence[_BookingSource],
@@ -258,6 +259,7 @@ def _build_components_json(
 ) -> dict[str, object]:
     return {
         "schema_version": 1,
+        "currency": currency,
         "gross_breakdown": [
             {"key": key, "cents": cents}
             for key, cents in sorted(gross_breakdown.items())
@@ -508,6 +510,7 @@ def compute_payslip(
         deductions_cents=deductions_cents,
         net_cents=net_cents,
         components_json=_build_components_json(
+            currency=next(iter(currencies)),
             gross_breakdown=gross_breakdown,
             deductions_cents=deductions_cents,
             sources=sources,

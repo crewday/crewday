@@ -152,9 +152,7 @@ _REPLAYABLE_RESPONSE_HEADERS: Final[frozenset[str]] = frozenset(
 # URL tree:
 #
 # * ``/w/<slug>/api/v1/...`` — canonical workspace-scoped form.
-# * ``/api/v1/...`` — bare-host form (not used for payslips in v1
-#   but pinned here so adding a bare-host mutating route later
-#   doesn't require a regex churn).
+# * ``/api/v1/...`` — bare-host form.
 # * bare ``/...`` — used by tests that mount the route outside the
 #   usual workspace prefix.
 #
@@ -164,7 +162,9 @@ _REPLAYABLE_RESPONSE_HEADERS: Final[frozenset[str]] = frozenset(
 #   secret store and can legitimately return 410 once secrets are
 #   purged. The header is accepted but ignored.
 EXEMPT_PATH_PATTERNS: Final[tuple[re.Pattern[str], ...]] = (
-    re.compile(r"^(?:/w/[^/]+)?(?:/api/v1)?/payslips/[^/]+/payout_manifest/?$"),
+    re.compile(
+        r"^(?:/w/[^/]+)?(?:/api/v1)?(?:/payroll)?/payslips/[^/]+/payout_manifest/?$"
+    ),
 )
 
 

@@ -107,6 +107,12 @@ class TestIsExemptPath:
             "/w/villa-sud/api/v1/payslips/01HX000000000000000000PAY/payout_manifest"
         )
 
+    def test_payout_manifest_payroll_router_path_is_exempt(self) -> None:
+        assert is_exempt_path(
+            "/w/villa-sud/api/v1/payroll/payslips/"
+            "01HX000000000000000000PAY/payout_manifest"
+        )
+
     def test_payout_manifest_trailing_slash_is_exempt(self) -> None:
         assert is_exempt_path(
             "/w/villa-sud/api/v1/payslips/01HX000000000000000000PAY/payout_manifest/"

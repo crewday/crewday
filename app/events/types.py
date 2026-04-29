@@ -59,6 +59,7 @@ __all__ = [
     "NotificationCreated",
     "PayPeriodLocked",
     "PayPeriodPaid",
+    "PayrollExportReady",
     "PayslipComputed",
     "PropertyClosureCreated",
     "ReservationChangeKind",
@@ -898,6 +899,18 @@ class PayPeriodPaid(Event):
     allowed_roles: ClassVar[tuple[EventRole, ...]] = ("manager",)
 
     pay_period_id: str
+
+
+@register
+class PayrollExportReady(Event):
+    """A payroll export job is ready for download."""
+
+    name: ClassVar[str] = "payroll_export.ready"
+    allowed_roles: ClassVar[tuple[EventRole, ...]] = ("manager",)
+
+    job_id: str
+    pay_period_id: str
+    kind: str
 
 
 @register
