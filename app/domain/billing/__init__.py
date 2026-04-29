@@ -2,3 +2,21 @@
 
 See docs/specs/22-clients-and-vendors.md.
 """
+
+from app.domain.billing.organizations import (
+    OrganizationCreate,
+    OrganizationInvalid,
+    OrganizationNotFound,
+    OrganizationPatch,
+    OrganizationService,
+    OrganizationView,
+)
+
+__all__ = [
+    "OrganizationCreate",
+    "OrganizationInvalid",
+    "OrganizationNotFound",
+    "OrganizationPatch",
+    "OrganizationService",
+    "OrganizationView",
+]

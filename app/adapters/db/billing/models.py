@@ -97,6 +97,9 @@ class Organization(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
     )
+    archived_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
     __table_args__ = (
         CheckConstraint(
@@ -118,6 +121,7 @@ class Organization(Base):
             name="uq_organization_workspace_display_name",
         ),
         Index("ix_organization_workspace_kind", "workspace_id", "kind"),
+        Index("ix_organization_workspace_archived", "workspace_id", "archived_at"),
     )
 
 

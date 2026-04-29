@@ -11,6 +11,15 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
-router = APIRouter(tags=["billing"])
+from app.api.billing.organizations import build_organizations_router
 
-__all__ = ["router"]
+
+def build_billing_router() -> APIRouter:
+    router = APIRouter(tags=["billing"])
+    router.include_router(build_organizations_router())
+    return router
+
+
+router = build_billing_router()
+
+__all__ = ["build_billing_router", "router"]
