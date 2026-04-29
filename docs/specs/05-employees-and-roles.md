@@ -514,6 +514,7 @@ configuration.
 | `tasks.skip_other`                      | `workspace`, `property`        | `owners, managers`            | —  | §06 |
 | `tasks.comment`                         | `workspace`, `property`        | `owners, managers, all_workers` | — | §06 — post a `kind='user'` message on a task's agent-inbox thread. Workers carry it by default because the thread is where they report progress; the domain service gates `kind='agent' \| 'system'` separately. |
 | `tasks.comment_moderate`                | `workspace`, `property`        | `owners, managers`            | —  | §06 — delete another user's comment, or edit a `kind='user'` comment after the 5-minute author grace window. Service checks this via `app.authz.require` on the non-author branch of `delete_comment`; owners short-circuit via their `owners` group membership. |
+| `tasks.review.decide`                   | `workspace`, `property`        | `owners, managers`            | —  | §06 — approve, reject, or request changes on a completed task's manager-review row. |
 | `bookings.view_other`                   | `workspace`, `property`        | `owners, managers`            | —  | §09 |
 | `bookings.amend_other`                  | `workspace`, `property`        | `owners, managers`            | —  | §09 |
 | `bookings.assign_other`                 | `workspace`, `property`        | `owners, managers`            | —  | §09 |

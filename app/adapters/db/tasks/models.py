@@ -80,6 +80,7 @@ __all__ = [
     "NlTaskPreview",
     "Occurrence",
     "Schedule",
+    "TaskApproval",
     "TaskTemplate",
 ]
 
@@ -170,6 +171,16 @@ _PHOTO_EVIDENCE_VALUES: tuple[str, ...] = ("disabled", "optional", "required")
 # Allowed ``task_template.priority`` values (cd-0tg). Drives the
 # manager's default sort and chip tone (see §06 "Task template").
 _PRIORITY_VALUES: tuple[str, ...] = ("low", "normal", "high", "urgent")
+
+# Allowed ``task_approval.state`` values (cd-z2py). ``pending`` and
+# ``changes_requested`` are the open-review states; ``approved`` and
+# ``rejected`` are terminal review judgements.
+_TASK_APPROVAL_STATE_VALUES: tuple[str, ...] = (
+    "pending",
+    "approved",
+    "rejected",
+    "changes_requested",
+)
 
 
 def _in_clause(values: tuple[str, ...]) -> str:
@@ -282,6 +293,12 @@ class TaskTemplate(Base):
     )
     # cd-0tg priority enum. Server default ``'normal'``.
     priority: Mapped[str] = mapped_column(String, nullable=False, default="normal")
+    # cd-z2py manager-review gate. When true, completion creates a
+    # sibling ``task_approval`` row; the occurrence itself remains
+    # terminal ``done`` per §06.
+    required_approval: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False
+    )
     # List of {item_ref, kind, qty} inventory effects (§08). JSON
     # rather than a join table for v1.
     inventory_effects_json: Mapped[list[Any]] = mapped_column(
@@ -1018,5 +1035,70 @@ class Comment(Base):
             "workspace_id",
             "occurrence_id",
             "created_at",
+        ),
+    )
+
+
+class TaskApproval(Base):
+    """Manager review row for a completed task occurrence.
+
+    Completion stays terminal on :class:`Occurrence`; the review
+    state machine lives here so managers can approve, reject, or ask
+    for changes without reopening the task row itself. The partial
+    unique index permits historical approved / rejected decisions but
+    forbids two simultaneously open reviews for the same task.
+    """
+
+    __tablename__ = "task_approval"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    workspace_id: Mapped[str] = mapped_column(
+        String,
+        ForeignKey("workspace.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    task_id: Mapped[str] = mapped_column(
+        String,
+        ForeignKey("occurrence.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    requested_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    requested_by_user_id: Mapped[str | None] = mapped_column(
+        String,
+        ForeignKey("user.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    state: Mapped[str] = mapped_column(String, nullable=False, default="pending")
+    decided_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    decided_by_user_id: Mapped[str | None] = mapped_column(
+        String,
+        ForeignKey("user.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    note_md: Mapped[str | None] = mapped_column(String, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            f"state IN ({_in_clause(_TASK_APPROVAL_STATE_VALUES)})",
+            name="state",
+        ),
+        Index("ix_task_approval_workspace_state", "workspace_id", "state"),
+        Index("ix_task_approval_task", "task_id"),
+        Index(
+            "uq_task_approval_open_task",
+            "task_id",
+            unique=True,
+            sqlite_where=text("state IN ('pending', 'changes_requested')"),
+            postgresql_where=text("state IN ('pending', 'changes_requested')"),
         ),
     )

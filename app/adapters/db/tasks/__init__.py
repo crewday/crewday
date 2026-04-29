@@ -35,6 +35,7 @@ from app.adapters.db.tasks.models import (
     NlTaskPreview,
     Occurrence,
     Schedule,
+    TaskApproval,
     TaskTemplate,
 )
 from app.tenancy.registry import register
@@ -45,6 +46,7 @@ for _table in (
     "schedule",
     "nl_task_preview",
     "occurrence",
+    "task_approval",
     "checklist_item",
     "evidence",
     "comment",
@@ -59,5 +61,6 @@ __all__ = [
     "NlTaskPreview",
     "Occurrence",
     "Schedule",
+    "TaskApproval",
     "TaskTemplate",
 ]

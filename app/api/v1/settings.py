@@ -246,6 +246,16 @@ _CATALOG: tuple[SettingDefinitionResponse, ...] = (
         spec="§05",
     ),
     SettingDefinitionResponse(
+        key="tasks.required_approval",
+        label="Manager approval required",
+        type="bool",
+        catalog_default=False,
+        enum_values=None,
+        override_scope="W/P/U/WE/T",
+        description="Whether completed tasks require manager review.",
+        spec="§06",
+    ),
+    SettingDefinitionResponse(
         key="tasks.allow_complete_backdated",
         label="Allow backdated completion",
         type="bool",

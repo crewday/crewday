@@ -12,7 +12,7 @@ invariants (§05 "Action catalog"):
   recognised by :mod:`app.authz.membership`.
 * Root-only entries carry an empty ``default_allow`` (root-only
   actions never consult defaults — see §02 "Permission resolution").
-* The catalog has the 95 entries currently documented in §05.
+* The catalog has the 96 entries currently documented in §05.
 * :func:`validate_catalog_integrity` passes with the empty v1
   rule-repo.
 """
@@ -54,7 +54,7 @@ class TestShape:
         assert frozenset(ACTION_CATALOG.keys()) == ACTION_KEYS
 
     def test_catalog_has_expected_size(self) -> None:
-        """v1 spec §05 enumerates 7 root-only + 88 rule-driven = 95 keys.
+        """v1 spec §05 enumerates 7 root-only + 89 rule-driven = 96 keys.
 
         A hard number — if it changes, either the spec or the catalog
         drifted and the author needs to say which. cd-cfe4 added
@@ -73,9 +73,10 @@ class TestShape:
         approvals desk. cd-t76 added ``payroll.export`` for CSV
         exports. cd-0510 added ``stays.read`` / ``stays.manage`` for
         the manager stays API surface while guest welcome remains
-        anonymous token-gated.
+        anonymous token-gated. cd-z2py added ``tasks.review.decide``
+        for manager decisions on completed-task approval rows.
         """
-        assert len(ACTION_CATALOG) == 95
+        assert len(ACTION_CATALOG) == 96
 
     def test_entries_are_action_spec_instances(self) -> None:
         for key, spec in ACTION_CATALOG.items():

@@ -715,6 +715,13 @@ _RULE_DRIVEN: tuple[ActionSpec, ...] = (
         root_protected_deny=False,
     ),
     ActionSpec(
+        key="tasks.review.decide",
+        valid_scope_kinds=("workspace", "property"),
+        default_allow=("owners", "managers"),
+        root_only=False,
+        root_protected_deny=False,
+    ),
+    ActionSpec(
         key="tasks.skip_other",
         valid_scope_kinds=("workspace", "property"),
         default_allow=("owners", "managers"),

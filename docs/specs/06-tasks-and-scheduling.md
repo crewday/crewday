@@ -706,8 +706,13 @@ Server-side:
    `asset_action.last_performed_task_id = task.id` (§21).
 5. Insert `task_completion` row (a tombstone used for history even if
    the task is later edited).
-6. Fire `task.completed` webhook.
-7. Audit log.
+6. If the task template or resolved setting
+   `tasks.required_approval = true`, insert a sibling
+   `task_approval` row in `pending` state. The task itself remains
+   `completed` / terminal; approval is a review judgement, not a
+   reopen.
+7. Fire `task.completed` webhook.
+8. Audit log.
 
 ## Checklist items
 

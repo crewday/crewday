@@ -25,6 +25,7 @@ from app.adapters.db.tasks import (
     Evidence,
     Occurrence,
     Schedule,
+    TaskApproval,
     TaskTemplate,
 )
 from app.adapters.db.tasks import models as tasks_models
@@ -116,6 +117,10 @@ class TestTaskTemplateModel:
         indexes = [i for i in TaskTemplate.__table_args__ if isinstance(i, Index)]
         names = [i.name for i in indexes]
         assert "ix_task_template_workspace" in names
+
+    def test_required_approval_default_present(self) -> None:
+        default = TaskTemplate.__table__.c.required_approval.default
+        assert default is not None and default.arg is False
 
 
 class TestChecklistTemplateItemModel:
@@ -472,6 +477,51 @@ class TestCommentModel:
             assert legal in sql, f"{legal} missing from kind CHECK constraint"
 
 
+class TestTaskApprovalModel:
+    """The ``TaskApproval`` mapped class carries the review state machine."""
+
+    def test_minimal_construction(self) -> None:
+        row = TaskApproval(
+            id="01HWA00000000000000000APPA",
+            workspace_id="01HWA00000000000000000WSPA",
+            task_id="01HWA00000000000000000OCCA",
+            requested_at=_PINNED,
+            requested_by_user_id="01HWA00000000000000000USRA",
+            state="pending",
+            decided_at=None,
+            decided_by_user_id=None,
+            note_md=None,
+            created_at=_PINNED,
+            updated_at=_PINNED,
+        )
+        assert row.task_id == "01HWA00000000000000000OCCA"
+        assert row.state == "pending"
+        assert row.decided_at is None
+
+    def test_tablename(self) -> None:
+        assert TaskApproval.__tablename__ == "task_approval"
+
+    def test_state_check_present(self) -> None:
+        checks = [
+            c
+            for c in TaskApproval.__table_args__
+            if isinstance(c, CheckConstraint)
+            and c.name is not None
+            and str(c.name).endswith("state")
+        ]
+        assert len(checks) == 1
+        sql = str(checks[0].sqltext)
+        for state in ("pending", "approved", "rejected", "changes_requested"):
+            assert state in sql, f"{state} missing from CHECK constraint"
+
+    def test_open_review_partial_unique_index_present(self) -> None:
+        indexes = [i for i in TaskApproval.__table_args__ if isinstance(i, Index)]
+        target = next(i for i in indexes if i.name == "uq_task_approval_open_task")
+        assert target.unique is True
+        assert [c.name for c in target.columns] == ["task_id"]
+        assert "changes_requested" in str(target.dialect_options["sqlite"]["where"])
+
+
 class TestPackageReExports:
     """``app.adapters.db.tasks`` re-exports every v1-slice model."""
 
@@ -483,6 +533,7 @@ class TestPackageReExports:
         assert ChecklistItem is tasks_models.ChecklistItem
         assert Evidence is tasks_models.Evidence
         assert Comment is tasks_models.Comment
+        assert TaskApproval is tasks_models.TaskApproval
 
 
 class TestRegistryIntent:
@@ -507,6 +558,7 @@ class TestRegistryIntent:
             "checklist_template_item",
             "schedule",
             "occurrence",
+            "task_approval",
             "checklist_item",
             "evidence",
             "comment",
@@ -518,6 +570,7 @@ class TestRegistryIntent:
             "checklist_template_item",
             "schedule",
             "occurrence",
+            "task_approval",
             "checklist_item",
             "evidence",
             "comment",

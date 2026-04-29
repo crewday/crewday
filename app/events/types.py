@@ -68,8 +68,12 @@ __all__ = [
     "ShiftChangedAction",
     "ShiftEnded",
     "StayUpcoming",
+    "TaskApprovalRequested",
+    "TaskApprovalState",
+    "TaskApproved",
     "TaskAssigned",
     "TaskCancelled",
+    "TaskChangesRequested",
     "TaskCommentAdded",
     "TaskCompleted",
     "TaskCreated",
@@ -77,6 +81,7 @@ __all__ = [
     "TaskOverdue",
     "TaskPrimaryUnavailable",
     "TaskReassigned",
+    "TaskRejected",
     "TaskSkipped",
     "TaskUnassigned",
     "TaskUpdated",
@@ -368,6 +373,49 @@ class TaskCompleted(Event):
 
     task_id: str
     completed_by: str
+
+
+TaskApprovalState = Literal["pending", "approved", "rejected", "changes_requested"]
+
+
+class _TaskApprovalEvent(Event):
+    """Base payload for the task review state machine (cd-z2py)."""
+
+    allowed_roles: ClassVar[tuple[EventRole, ...]] = ("manager", "worker")
+
+    task_id: str
+    approval_id: str
+    decided_by_user_id: str | None = None
+    state: TaskApprovalState
+    note_md: str | None = None
+
+
+@register
+class TaskApprovalRequested(_TaskApprovalEvent):
+    """A completed task now needs manager review."""
+
+    name: ClassVar[str] = "task.approval_requested"
+
+
+@register
+class TaskApproved(_TaskApprovalEvent):
+    """A manager approved a completed task."""
+
+    name: ClassVar[str] = "task.approved"
+
+
+@register
+class TaskRejected(_TaskApprovalEvent):
+    """A manager rejected a completed task review."""
+
+    name: ClassVar[str] = "task.rejected"
+
+
+@register
+class TaskChangesRequested(_TaskApprovalEvent):
+    """A manager requested changes on a completed task review."""
+
+    name: ClassVar[str] = "task.changes_requested"
 
 
 @register

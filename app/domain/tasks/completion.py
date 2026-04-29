@@ -116,7 +116,13 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.adapters.db.inventory.models import Item
-from app.adapters.db.tasks.models import ChecklistItem, Evidence, Occurrence
+from app.adapters.db.tasks.models import (
+    ChecklistItem,
+    Evidence,
+    Occurrence,
+    TaskTemplate,
+)
+from app.adapters.db.workspace.models import Workspace
 from app.adapters.storage.mime import FiletypeMimeSniffer
 from app.adapters.storage.ports import (
     MimeSniffer,
@@ -138,7 +144,7 @@ from app.events.types import (
     TaskSkipped,
 )
 from app.services.inventory import movement_service
-from app.tenancy import WorkspaceContext
+from app.tenancy import WorkspaceContext, tenant_agnostic
 from app.util.clock import Clock, SystemClock
 from app.util.ulid import new_ulid
 
@@ -158,6 +164,7 @@ __all__ = [
     "InventoryApplyHook",
     "PermissionDenied",
     "PhotoForbidden",
+    "RequiredApprovalResolver",
     "RequiredChecklistIncomplete",
     "SkipAllowedResolver",
     "SkipNotPermitted",
@@ -230,6 +237,17 @@ Default :func:`_default_checklist_required` returns ``True`` — if
 the template seeded required items, they must be ticked to
 complete. Override to ``False`` for workspaces that opt out via
 the settings cascade (cd-settings-cascade).
+"""
+
+RequiredApprovalResolver = Callable[[Session, WorkspaceContext, Occurrence], bool]
+"""Port: resolve ``tasks.required_approval`` for a task.
+
+Default :func:`_default_required_approval` reads the narrow cd-z2py
+seam: ``task_template.required_approval`` when the task has a
+template, otherwise the workspace-level
+``settings_json['tasks.required_approval']`` boolean. The full
+W/P/U/WE/T cascade can replace this resolver later without changing
+completion's transaction shape.
 """
 
 SkipAllowedResolver = Callable[[Session, WorkspaceContext, Occurrence], bool]
@@ -528,6 +546,35 @@ def _default_skip_allowed(
     return True
 
 
+def _default_required_approval(
+    session: Session, ctx: WorkspaceContext, task: Occurrence
+) -> bool:
+    """Resolve the narrow cd-z2py approval gate.
+
+    Template opt-in wins because cd-z2py's motivating case is a
+    manager marking specific templates for review. Workspace
+    ``settings_json`` provides the broad default until the full
+    settings cascade lands.
+    """
+    if task.template_id is not None:
+        template_required = session.scalar(
+            select(TaskTemplate.required_approval).where(
+                TaskTemplate.id == task.template_id,
+                TaskTemplate.workspace_id == ctx.workspace_id,
+            )
+        )
+        if template_required is True:
+            return True
+
+    with tenant_agnostic():
+        workspace_settings = session.scalar(
+            select(Workspace.settings_json).where(Workspace.id == ctx.workspace_id)
+        )
+    if not isinstance(workspace_settings, dict):
+        return False
+    return workspace_settings.get("tasks.required_approval") is True
+
+
 def _default_inventory_apply(
     session: Session, ctx: WorkspaceContext, task: Occurrence
 ) -> None:
@@ -574,7 +621,7 @@ def _default_inventory_apply(
             continue
         try:
             delta = Decimal(str(qty))
-        except (ArithmeticError, ValueError):
+        except ArithmeticError, ValueError:
             # Non-numeric value in the consumption map — skip for the
             # same reason as unknown-sku above. Data hygiene is a CRUD
             # concern, not a completion-time hard error.
@@ -848,6 +895,7 @@ def complete(
     inventory_apply: InventoryApplyHook | None = None,
     asset_action: AssetActionHook | None = None,
     tombstone: TombstoneHook | None = None,
+    required_approval: RequiredApprovalResolver | None = None,
 ) -> TaskState:
     """Drive ``pending | in_progress → done``.
 
@@ -892,6 +940,11 @@ def complete(
         asset_action if asset_action is not None else _default_asset_action
     )
     write_tombstone = tombstone if tombstone is not None else _default_tombstone
+    resolve_required_approval = (
+        required_approval
+        if required_approval is not None
+        else _default_required_approval
+    )
 
     task = _load_task(session, ctx, task_id)
     if not _can_drive_completion(ctx, task):
@@ -1019,6 +1072,16 @@ def complete(
             completed_by=ctx.actor_id,
         )
     )
+    if resolve_required_approval(session, ctx, task):
+        from app.domain.tasks.approvals import request_review
+
+        request_review(
+            session,
+            ctx,
+            task.id,
+            clock=resolved_clock,
+            event_bus=resolved_bus,
+        )
     return _state_view(task, state="done")
 
 

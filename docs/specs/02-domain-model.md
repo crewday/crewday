@@ -265,7 +265,7 @@ catalog pair (see `permission_rule` below and the catalog in
   `user_work_role`, `property_work_role_assignment`,
   `work_engagement`.
 - **Work** (§06): `task_template`, `schedule`, `task`,
-  `task_checklist_item`, `task_completion`, `task_evidence`,
+  `task_approval`, `task_checklist_item`, `task_completion`, `task_evidence`,
   `task_comment`, `stay_lifecycle_rule`, `stay_task_bundle`,
   `user_leave`, `user_weekly_availability`,
   `user_availability_override`, `public_holiday`,
@@ -1518,6 +1518,7 @@ scope, and the spec that defines the feature:
 | `retention.template_revisions_days` | int | `365` | W | §02 "Hash-self-seeded tables" — governs **every** hash-self-seeded revision twin (prompt library, agent docs, future callers). Not task templates, not email templates, not WhatsApp templates. |
 | `scheduling.horizon_days` | int | `30` | W/P | §06 |
 | `tasks.checklist_required` | bool | `false` | W/P/U/WE/T | §05 |
+| `tasks.required_approval` | bool | `false` | W/P/U/WE/T | §06 |
 | `tasks.allow_complete_backdated` | bool | `false` | W/P/U/WE | §05 |
 | `tasks.allow_skip_with_reason` | bool | `true` | W/P/U/WE | §05 |
 | `inventory.apply_on_task` | bool | `true` | W/P/U/WE/T | §08 — gates both consume and produce effects declared on task templates / asset actions. |

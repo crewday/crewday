@@ -58,6 +58,7 @@ from app.adapters.db.tasks.models import (
     ChecklistItem,
     Evidence,
     Occurrence,
+    TaskApproval,
 )
 from app.adapters.db.workspace.models import Workspace
 from app.domain.tasks.completion import (
@@ -82,7 +83,12 @@ from app.domain.tasks.completion import (
     start,
 )
 from app.events.bus import EventBus
-from app.events.types import TaskCancelled, TaskCompleted, TaskSkipped
+from app.events.types import (
+    TaskApprovalRequested,
+    TaskCancelled,
+    TaskCompleted,
+    TaskSkipped,
+)
 from app.tenancy.context import WorkspaceContext
 from app.util.clock import FrozenClock
 from app.util.ulid import new_ulid
@@ -490,6 +496,45 @@ class TestComplete:
         assert actions == ["task.complete"]
         assert len(completed) == 1
         assert completed[0].completed_by == worker
+
+    def test_required_approval_requests_review(
+        self, session: Session, clock: FrozenClock, bus: EventBus
+    ) -> None:
+        ws = _bootstrap_workspace(session)
+        prop = _bootstrap_property(session)
+        worker = _bootstrap_user(session)
+        occ = _bootstrap_occurrence(
+            session, workspace_id=ws, property_id=prop, assignee_user_id=worker
+        )
+        ctx = _ctx(ws, role="worker", owner=False, actor_id=worker)
+        approval_events: list[TaskApprovalRequested] = []
+        bus.subscribe(TaskApprovalRequested)(approval_events.append)
+
+        complete(
+            session,
+            ctx,
+            occ,
+            clock=clock,
+            event_bus=bus,
+            required_approval=lambda _session, _ctx, _task: True,
+        )
+
+        approval = session.scalars(
+            select(TaskApproval).where(TaskApproval.task_id == occ)
+        ).one()
+        assert approval.state == "pending"
+        assert approval.requested_by_user_id == worker
+        assert len(approval_events) == 1
+        assert approval_events[0].task_id == occ
+        assert approval_events[0].approval_id == approval.id
+
+        actions = [
+            row.action
+            for row in session.scalars(
+                select(AuditLog).order_by(AuditLog.created_at, AuditLog.id)
+            ).all()
+        ]
+        assert actions == ["task.complete", "task.approval_requested"]
 
     def test_note_md_persisted_as_evidence_note(
         self, session: Session, clock: FrozenClock, bus: EventBus
