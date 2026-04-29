@@ -42,6 +42,7 @@ from .llm import router as llm_router
 from .messaging import router as messaging_router
 from .payroll import router as payroll_router
 from .places import router as places_router
+from .stays import public_router as stays_public_router
 from .stays import router as stays_router
 from .tasks import router as tasks_router
 from .time import router as time_router
@@ -90,4 +91,11 @@ WORKSPACE_ADMIN_ROUTER: APIRouter = _workspace_admin_router
 # co-located with the LLM context's operations alphabetically.
 APPROVALS_ROUTER: APIRouter = _approvals_router
 
-__all__ = ["APPROVALS_ROUTER", "CONTEXT_ROUTERS", "WORKSPACE_ADMIN_ROUTER"]
+STAYS_PUBLIC_ROUTER: APIRouter = stays_public_router
+
+__all__ = [
+    "APPROVALS_ROUTER",
+    "CONTEXT_ROUTERS",
+    "STAYS_PUBLIC_ROUTER",
+    "WORKSPACE_ADMIN_ROUTER",
+]

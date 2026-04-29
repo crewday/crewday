@@ -84,7 +84,12 @@ from app.api.middleware import (
     SecurityHeadersMiddleware,
 )
 from app.api.transport.sse import router as sse_router
-from app.api.v1 import APPROVALS_ROUTER, CONTEXT_ROUTERS, WORKSPACE_ADMIN_ROUTER
+from app.api.v1 import (
+    APPROVALS_ROUTER,
+    CONTEXT_ROUTERS,
+    STAYS_PUBLIC_ROUTER,
+    WORKSPACE_ADMIN_ROUTER,
+)
 from app.api.v1.agent import build_agent_router
 from app.api.v1.auth import email_change as email_change_module
 from app.api.v1.auth import invite as invite_module
@@ -747,6 +752,11 @@ def _mount_context_routers(app: FastAPI, *, settings: Settings) -> None:
     # contract pins (not nested under ``/llm``). The router's own
     # ``tags=["approvals"]`` drives the schema tag.
     app.include_router(APPROVALS_ROUTER, prefix=f"{scoped_prefix}/approvals")
+
+    # Anonymous guest welcome API. Mounted on the bare API tree so the
+    # tenancy middleware does not require a workspace session before
+    # the signed guest token can be validated.
+    app.include_router(STAYS_PUBLIC_ROUTER, prefix="/api/v1/stays")
 
     # Embedded employee / manager agent chat endpoints. Kept outside
     # ``CONTEXT_ROUTERS`` because the URL contract is the flat

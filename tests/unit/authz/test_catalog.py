@@ -12,7 +12,7 @@ invariants (§05 "Action catalog"):
   recognised by :mod:`app.authz.membership`.
 * Root-only entries carry an empty ``default_allow`` (root-only
   actions never consult defaults — see §02 "Permission resolution").
-* The catalog has the 76 entries currently documented in §05.
+* The catalog has the 95 entries currently documented in §05.
 * :func:`validate_catalog_integrity` passes with the empty v1
   rule-repo.
 """
@@ -54,7 +54,7 @@ class TestShape:
         assert frozenset(ACTION_CATALOG.keys()) == ACTION_KEYS
 
     def test_catalog_has_expected_size(self) -> None:
-        """v1 spec §05 enumerates 7 root-only + 86 rule-driven = 93 keys.
+        """v1 spec §05 enumerates 7 root-only + 88 rule-driven = 95 keys.
 
         A hard number — if it changes, either the spec or the catalog
         drifted and the author needs to say which. cd-cfe4 added
@@ -71,9 +71,11 @@ class TestShape:
         ``/user_availability_overrides`` surface (§06 hybrid approval
         model). cd-hyo4 added ``approvals.read`` for the manager
         approvals desk. cd-t76 added ``payroll.export`` for CSV
-        exports.
+        exports. cd-0510 added ``stays.read`` / ``stays.manage`` for
+        the manager stays API surface while guest welcome remains
+        anonymous token-gated.
         """
-        assert len(ACTION_CATALOG) == 93
+        assert len(ACTION_CATALOG) == 95
 
     def test_entries_are_action_spec_instances(self) -> None:
         for key, spec in ACTION_CATALOG.items():
@@ -191,6 +193,14 @@ class TestRootFlags:
             f"{key!r}: expected root_protected_deny=True per §05"
         )
         assert spec.root_only is False
+
+    @pytest.mark.parametrize("key", ["stays.manage", "stays.read"])
+    def test_known_stays_actions(self, key: str) -> None:
+        spec = ACTION_CATALOG[key]
+        assert spec.valid_scope_kinds == ("workspace", "property")
+        assert spec.default_allow == ("owners", "managers")
+        assert spec.root_only is False
+        assert spec.root_protected_deny is False
 
 
 class TestIntegrityFunction:

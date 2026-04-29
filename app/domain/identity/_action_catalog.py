@@ -654,6 +654,20 @@ _RULE_DRIVEN: tuple[ActionSpec, ...] = (
         root_protected_deny=True,
     ),
     ActionSpec(
+        key="stays.manage",
+        valid_scope_kinds=("workspace", "property"),
+        default_allow=("owners", "managers"),
+        root_only=False,
+        root_protected_deny=False,
+    ),
+    ActionSpec(
+        key="stays.read",
+        valid_scope_kinds=("workspace", "property"),
+        default_allow=("owners", "managers"),
+        root_only=False,
+        root_protected_deny=False,
+    ),
+    ActionSpec(
         key="tasks.assign_other",
         valid_scope_kinds=("workspace", "property"),
         default_allow=("owners", "managers"),
