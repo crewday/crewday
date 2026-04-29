@@ -517,6 +517,7 @@ configuration.
 | `bookings.assign_other`                 | `workspace`, `property`        | `owners, managers`            | —  | §09 |
 | `bookings.cancel`                       | `workspace`, `property`        | `owners, managers`            | —  | §09 |
 | `bookings.create_pending`               | `workspace`, `property`        | `owners, managers, all_workers` | — | §09 |
+| `payroll.export`                        | `workspace`                    | `owners, managers`            | —  | §09 |
 | `payroll.lock_period`                   | `workspace`                    | `owners, managers`            | ✅ | §09 |
 | `payroll.issue_payslip`                 | `workspace`                    | `owners, managers`            | ✅ | §09 |
 | `payroll.view_other`                    | `workspace`, `property`        | `owners, managers`            | —  | §09 |

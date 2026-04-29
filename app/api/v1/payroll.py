@@ -47,11 +47,15 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Path, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, Response, status
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
-from app.adapters.db.payroll.repositories import SqlAlchemyPayRuleRepository
+from app.adapters.db.payroll.repositories import (
+    SqlAlchemyPayrollExportRepository,
+    SqlAlchemyPayRuleRepository,
+)
 from app.api.deps import current_workspace_context, db_session
 from app.api.pagination import (
     DEFAULT_LIMIT,
@@ -61,6 +65,15 @@ from app.api.pagination import (
     paginate,
 )
 from app.authz.dep import Permission
+from app.domain.payroll.exports import (
+    ExpenseStatusInvalid,
+    ExportWindowInvalid,
+    PayPeriodNotFound,
+    export_expense_ledger_csv,
+    export_payslips_csv,
+    export_timesheets_csv,
+    stream_csv_with_audit,
+)
 from app.domain.payroll.rules import (
     BASE_CENTS_MAX,
     PayRuleCreate,
@@ -236,6 +249,13 @@ _RuleIdPath = Annotated[
         description="ULID of the target ``pay_rule`` row.",
     ),
 ]
+_ExportKindPath = Annotated[
+    str,
+    Path(
+        pattern="^(timesheets|payslips|expense-ledger)$",
+        description="Export kind.",
+    ),
+]
 
 
 # ---------------------------------------------------------------------------
@@ -249,6 +269,7 @@ def build_payroll_router() -> APIRouter:
 
     edit_gate = Depends(Permission("pay_rules.edit", scope_kind="workspace"))
     payout_gate = Depends(Permission("payroll.issue_payslip", scope_kind="workspace"))
+    export_gate = Depends(Permission("payroll.export", scope_kind="workspace"))
 
     @api.get(
         "/users/{user_id}/pay-rules",
@@ -413,6 +434,89 @@ def build_payroll_router() -> APIRouter:
         except PayRuleLocked as exc:
             raise _http_for_locked(exc) from exc
         return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+    @api.get(
+        "/exports/{kind}.csv",
+        operation_id="payroll.exports.csv",
+        summary="Stream a payroll CSV export",
+        dependencies=[export_gate],
+    )
+    def export_csv(
+        ctx: _Ctx,
+        session: _Db,
+        kind: _ExportKindPath,
+        since: Annotated[
+            datetime | None, Query(description="Inclusive UTC start.")
+        ] = None,
+        until: Annotated[
+            datetime | None, Query(description="Exclusive UTC end.")
+        ] = None,
+        period_id: Annotated[
+            str | None,
+            Query(max_length=_MAX_ID_LEN, description="Pay period id for payslips."),
+        ] = None,
+        bom: Annotated[
+            bool,
+            Query(description="Prefix the CSV with a UTF-8 BOM for spreadsheet tools."),
+        ] = False,
+        status_filter: Annotated[
+            str,
+            Query(
+                min_length=1,
+                max_length=32,
+                description="Expense claim state to export; use 'all' for every state.",
+            ),
+        ] = "approved",
+    ) -> StreamingResponse:
+        repo = SqlAlchemyPayrollExportRepository(session)
+        try:
+            if kind == "timesheets":
+                if since is None or until is None:
+                    raise ExportWindowInvalid("timesheets exports require since/until")
+                export = export_timesheets_csv(repo, ctx, since=since, until=until)
+            elif kind == "payslips":
+                export = export_payslips_csv(
+                    repo,
+                    ctx,
+                    period_id=period_id,
+                    since=since,
+                    until=until,
+                )
+            else:
+                if since is None or until is None:
+                    raise ExportWindowInvalid(
+                        "expense ledger exports require since/until"
+                    )
+                export = export_expense_ledger_csv(
+                    repo,
+                    ctx,
+                    since=since,
+                    until=until,
+                    status_filter=status_filter,
+                )
+        except ExportWindowInvalid as exc:
+            raise HTTPException(
+                status_code=422,
+                detail={"error": "invalid_export_window", "message": str(exc)},
+            ) from exc
+        except PayPeriodNotFound as exc:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={"error": "pay_period_not_found", "period_id": str(exc)},
+            ) from exc
+        except ExpenseStatusInvalid as exc:
+            raise HTTPException(
+                status_code=422,
+                detail={"error": "invalid_expense_status", "message": str(exc)},
+            ) from exc
+
+        return StreamingResponse(
+            stream_csv_with_audit(export, repo, ctx, include_bom=bom),
+            media_type="text/csv; charset=utf-8",
+            headers={
+                "Content-Disposition": f'attachment; filename="{export.filename}"',
+            },
+        )
 
     @api.post(
         "/payslips/{payslip_id}/payout_manifest",

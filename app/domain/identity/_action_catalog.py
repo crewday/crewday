@@ -495,6 +495,13 @@ _RULE_DRIVEN: tuple[ActionSpec, ...] = (
         root_protected_deny=False,
     ),
     ActionSpec(
+        key="payroll.export",
+        valid_scope_kinds=("workspace",),
+        default_allow=("owners", "managers"),
+        root_only=False,
+        root_protected_deny=False,
+    ),
+    ActionSpec(
         key="payroll.issue_payslip",
         valid_scope_kinds=("workspace",),
         default_allow=("owners", "managers"),

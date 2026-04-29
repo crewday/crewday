@@ -16,7 +16,7 @@ writer's FK reference to ``entity_id``) sees the new row.
 
 from __future__ import annotations
 
-from collections.abc import Sequence, Set
+from collections.abc import Iterable, Sequence, Set
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import Literal
@@ -25,7 +25,9 @@ from sqlalchemy import and_, delete, exists, or_, select, update
 from sqlalchemy.orm import Session
 from sqlalchemy.sql.elements import ColumnElement
 
+from app.adapters.db.expenses.models import ExpenseClaim
 from app.adapters.db.holidays.models import PublicHoliday
+from app.adapters.db.identity.models import User
 from app.adapters.db.payroll.models import (
     Booking,
     PayPeriod,
@@ -33,7 +35,9 @@ from app.adapters.db.payroll.models import (
     PayRule,
     Payslip,
 )
-from app.adapters.db.places.models import Property
+from app.adapters.db.places.models import Property, PropertyWorkspace
+from app.adapters.db.time.models import Shift
+from app.adapters.db.workspace.models import WorkEngagement
 from app.domain.payroll.bookings import (
     derive_booking_pay_entry,
     group_booking_entries_by_day,
@@ -41,12 +45,16 @@ from app.domain.payroll.bookings import (
 from app.domain.payroll.ports import (
     BookingPayRepository,
     BookingPayRow,
+    ExpenseLedgerExportRow,
     PayPeriodEntryRow,
     PayPeriodRepository,
     PayPeriodRow,
+    PayrollExportRepository,
     PayRuleRepository,
     PayRuleRow,
+    PayslipExportRow,
     PayslipRow,
+    TimesheetExportRow,
 )
 from app.util.ulid import new_ulid
 
@@ -54,6 +62,7 @@ __all__ = [
     "SqlAlchemyBookingPayRepository",
     "SqlAlchemyPayPeriodRepository",
     "SqlAlchemyPayRuleRepository",
+    "SqlAlchemyPayrollExportRepository",
     "SqlAlchemyPayslipComputeRepository",
 ]
 
@@ -207,6 +216,41 @@ def _booking_window_filters(
         Booking.scheduled_start < ends_at,
         Booking.scheduled_end > starts_at,
     )
+
+
+def _hours_between(starts_at: datetime, ends_at: datetime) -> Decimal:
+    seconds = Decimal(str((ends_at - starts_at).total_seconds()))
+    return (seconds / Decimal("3600")).quantize(Decimal("0.01"))
+
+
+def _deductions_total(value: object) -> int:
+    if not isinstance(value, dict):
+        return 0
+    total = 0
+    for amount in value.values():
+        if isinstance(amount, bool):
+            continue
+        if isinstance(amount, int):
+            total += amount
+    return total
+
+
+def _currency_from_components(value: object) -> str | None:
+    if not isinstance(value, dict):
+        return None
+    currency = value.get("currency")
+    return currency if isinstance(currency, str) else None
+
+
+def _property_export_label(
+    *,
+    property_id: str | None,
+    workspace_label: str | None,
+    property_name: str | None,
+) -> str:
+    if property_id is None:
+        return ""
+    return workspace_label or property_name or ""
 
 
 class SqlAlchemyPayPeriodRepository(PayPeriodRepository):
@@ -707,6 +751,206 @@ class SqlAlchemyPayslipComputeRepository(SqlAlchemyBookingPayRepository):
             row.payout_snapshot_json = None
         self._session.flush()
         return _payslip_to_row(row)
+
+
+class SqlAlchemyPayrollExportRepository(PayrollExportRepository):
+    """SA-backed read adapter for payroll CSV exports."""
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    @property
+    def session(self) -> Session:
+        return self._session
+
+    def pay_period_window(
+        self, *, workspace_id: str, period_id: str
+    ) -> tuple[datetime, datetime] | None:
+        row = self._session.execute(
+            select(PayPeriod.starts_at, PayPeriod.ends_at).where(
+                PayPeriod.workspace_id == workspace_id,
+                PayPeriod.id == period_id,
+            )
+        ).one_or_none()
+        if row is None:
+            return None
+        return row.starts_at, row.ends_at
+
+    def iter_timesheets(
+        self, *, workspace_id: str, since: datetime, until: datetime
+    ) -> Iterable[TimesheetExportRow]:
+        rows = self._session.execute(
+            select(
+                Shift,
+                User.email,
+                PropertyWorkspace.label,
+                Property.name,
+                Property.id,
+            )
+            .join(User, User.id == Shift.user_id)
+            .outerjoin(
+                PropertyWorkspace,
+                and_(
+                    PropertyWorkspace.property_id == Shift.property_id,
+                    PropertyWorkspace.workspace_id == workspace_id,
+                    PropertyWorkspace.status == "active",
+                ),
+            )
+            .outerjoin(
+                Property,
+                and_(
+                    Property.id == PropertyWorkspace.property_id,
+                    Property.deleted_at.is_(None),
+                ),
+            )
+            .where(
+                Shift.workspace_id == workspace_id,
+                Shift.ends_at.is_not(None),
+                Shift.starts_at < until,
+                Shift.ends_at > since,
+            )
+            .order_by(Shift.starts_at.asc(), Shift.id.asc())
+        ).yield_per(500)
+        for shift, email, property_label, property_name, property_id in rows:
+            ends_at = shift.ends_at
+            if ends_at is None:
+                continue
+            yield (
+                TimesheetExportRow(
+                    shift_id=shift.id,
+                    user_email=email,
+                    property_label=_property_export_label(
+                        property_id=property_id,
+                        workspace_label=property_label,
+                        property_name=property_name,
+                    ),
+                    starts_at_utc=shift.starts_at,
+                    ends_at_utc=ends_at,
+                    hours_decimal=_hours_between(shift.starts_at, ends_at),
+                    source=shift.source,
+                    notes=shift.notes_md or "",
+                )
+            )
+
+    def iter_payslips(
+        self,
+        *,
+        workspace_id: str,
+        since: datetime | None = None,
+        until: datetime | None = None,
+        period_id: str | None = None,
+    ) -> Iterable[PayslipExportRow]:
+        currency_subquery = (
+            select(PayRule.currency)
+            .where(
+                PayRule.workspace_id == Payslip.workspace_id,
+                PayRule.user_id == Payslip.user_id,
+                PayRule.effective_from <= PayPeriod.ends_at,
+                or_(
+                    PayRule.effective_to.is_(None),
+                    PayRule.effective_to >= PayPeriod.starts_at,
+                ),
+            )
+            .order_by(PayRule.effective_from.desc(), PayRule.id.desc())
+            .limit(1)
+            .scalar_subquery()
+        )
+        stmt = (
+            select(Payslip, PayPeriod, User.email, currency_subquery)
+            .join(PayPeriod, PayPeriod.id == Payslip.pay_period_id)
+            .join(User, User.id == Payslip.user_id)
+            .where(Payslip.workspace_id == workspace_id)
+            .order_by(PayPeriod.starts_at.asc(), User.email.asc(), Payslip.id.asc())
+        )
+        if period_id is not None:
+            stmt = stmt.where(Payslip.pay_period_id == period_id)
+        if since is not None and until is not None:
+            stmt = stmt.where(PayPeriod.starts_at < until, PayPeriod.ends_at > since)
+        rows = self._session.execute(stmt).yield_per(500)
+        for payslip, period, email, currency in rows:
+            yield PayslipExportRow(
+                payslip_id=payslip.id,
+                user_email=email,
+                period_starts_at=period.starts_at,
+                period_ends_at=period.ends_at,
+                hours=payslip.shift_hours_decimal,
+                overtime_hours=payslip.overtime_hours_decimal,
+                gross_cents=payslip.gross_cents,
+                deductions_cents=_deductions_total(payslip.deductions_cents),
+                net_cents=payslip.net_cents,
+                currency=_currency_from_components(payslip.components_json)
+                or currency
+                or "",
+                paid_at=payslip.paid_at,
+            )
+
+    def iter_expense_ledger(
+        self,
+        *,
+        workspace_id: str,
+        since: datetime,
+        until: datetime,
+        status_filter: str,
+    ) -> Iterable[ExpenseLedgerExportRow]:
+        stmt = (
+            select(
+                ExpenseClaim,
+                User.email,
+                PropertyWorkspace.label,
+                Property.name,
+                Property.id,
+            )
+            .join(
+                WorkEngagement,
+                and_(
+                    WorkEngagement.id == ExpenseClaim.work_engagement_id,
+                    WorkEngagement.workspace_id == ExpenseClaim.workspace_id,
+                ),
+            )
+            .join(User, User.id == WorkEngagement.user_id)
+            .outerjoin(
+                PropertyWorkspace,
+                and_(
+                    PropertyWorkspace.property_id == ExpenseClaim.property_id,
+                    PropertyWorkspace.workspace_id == workspace_id,
+                    PropertyWorkspace.status == "active",
+                ),
+            )
+            .outerjoin(
+                Property,
+                and_(
+                    Property.id == PropertyWorkspace.property_id,
+                    Property.deleted_at.is_(None),
+                ),
+            )
+            .where(
+                ExpenseClaim.workspace_id == workspace_id,
+                ExpenseClaim.deleted_at.is_(None),
+                ExpenseClaim.purchased_at >= since,
+                ExpenseClaim.purchased_at < until,
+            )
+            .order_by(ExpenseClaim.purchased_at.asc(), ExpenseClaim.id.asc())
+        )
+        if status_filter != "all":
+            stmt = stmt.where(ExpenseClaim.state == status_filter)
+        rows = self._session.execute(stmt).yield_per(500)
+        for claim, email, property_label, property_name, property_id in rows:
+            yield ExpenseLedgerExportRow(
+                expense_id=claim.id,
+                claimant_email=email,
+                vendor=claim.vendor,
+                spent_at=claim.purchased_at,
+                category=claim.category,
+                amount_cents=claim.total_amount_cents,
+                currency=claim.currency,
+                property_label=_property_export_label(
+                    property_id=property_id,
+                    workspace_label=property_label,
+                    property_name=property_name,
+                ),
+                decided_at=claim.decided_at,
+                reimbursed_via=claim.reimbursed_via or "",
+            )
 
 
 class SqlAlchemyPayRuleRepository(PayRuleRepository):

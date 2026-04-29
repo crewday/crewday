@@ -33,7 +33,7 @@ shortcuts.
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence, Set
+from collections.abc import Iterable, Mapping, Sequence, Set
 from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import Decimal
@@ -44,14 +44,18 @@ from sqlalchemy.orm import Session
 __all__ = [
     "BookingPayRepository",
     "BookingPayRow",
+    "ExpenseLedgerExportRow",
     "PayPeriodEntryRow",
     "PayPeriodRecomputeScheduler",
     "PayPeriodRepository",
     "PayPeriodRow",
     "PayRuleRepository",
     "PayRuleRow",
+    "PayrollExportRepository",
     "PayslipComputeRepository",
+    "PayslipExportRow",
     "PayslipRow",
+    "TimesheetExportRow",
 ]
 
 
@@ -162,6 +166,53 @@ class PayslipRow:
     created_at: datetime
 
 
+@dataclass(frozen=True, slots=True)
+class TimesheetExportRow:
+    """Flat row for the manager/accountant timesheet CSV export."""
+
+    shift_id: str
+    user_email: str
+    property_label: str
+    starts_at_utc: datetime
+    ends_at_utc: datetime
+    hours_decimal: Decimal
+    source: str
+    notes: str
+
+
+@dataclass(frozen=True, slots=True)
+class PayslipExportRow:
+    """Flat row for the payroll register CSV export."""
+
+    payslip_id: str
+    user_email: str
+    period_starts_at: datetime
+    period_ends_at: datetime
+    hours: Decimal
+    overtime_hours: Decimal
+    gross_cents: int
+    deductions_cents: int
+    net_cents: int
+    currency: str
+    paid_at: datetime | None
+
+
+@dataclass(frozen=True, slots=True)
+class ExpenseLedgerExportRow:
+    """Flat row for the approved/reimbursed expense ledger CSV export."""
+
+    expense_id: str
+    claimant_email: str
+    vendor: str
+    spent_at: datetime
+    category: str
+    amount_cents: int
+    currency: str
+    property_label: str
+    decided_at: datetime | None
+    reimbursed_via: str
+
+
 class PayPeriodRecomputeScheduler(Protocol):
     """Port for scheduling payslip recomputation after a period locks."""
 
@@ -172,6 +223,49 @@ class PayPeriodRecomputeScheduler(Protocol):
         period_id: str,
     ) -> None:
         """Schedule the Phase 8 payslip recompute for ``period_id``."""
+        ...
+
+
+class PayrollExportRepository(Protocol):
+    """Read seam for CSV payroll exports."""
+
+    @property
+    def session(self) -> Session:
+        """Return the underlying SQLAlchemy session."""
+        ...
+
+    def pay_period_window(
+        self, *, workspace_id: str, period_id: str
+    ) -> tuple[datetime, datetime] | None:
+        """Return a pay period window or ``None`` when absent."""
+        ...
+
+    def iter_timesheets(
+        self, *, workspace_id: str, since: datetime, until: datetime
+    ) -> Iterable[TimesheetExportRow]:
+        """Return closed shifts intersecting the export window."""
+        ...
+
+    def iter_payslips(
+        self,
+        *,
+        workspace_id: str,
+        since: datetime | None = None,
+        until: datetime | None = None,
+        period_id: str | None = None,
+    ) -> Iterable[PayslipExportRow]:
+        """Return payslips for one period or an intersecting date window."""
+        ...
+
+    def iter_expense_ledger(
+        self,
+        *,
+        workspace_id: str,
+        since: datetime,
+        until: datetime,
+        status_filter: str,
+    ) -> Iterable[ExpenseLedgerExportRow]:
+        """Return expense claims in the export window."""
         ...
 
 
