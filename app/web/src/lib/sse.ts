@@ -22,11 +22,13 @@
 // there's no harm in listing them.
 //
 // Server emits (today): task.created, task.assigned, task.completed,
-// task.overdue, stay.upcoming, expense.approved, shift.ended,
+// task.overdue, stay.upcoming, reservation.upserted,
+// property.closure.created, expense.approved, shift.ended,
 // time.shift.changed. Additional kinds here (agent.*, booking.*,
-// asset_action.*, schedule_ruleset.*, task.updated/skipped, approval.*)
-// track the spec and the mock's dispatcher for when each backend
-// emitter lands. Any drift is flagged in the cd-y4g5 handoff.
+// asset_action.*, schedule_ruleset.*, task.updated/skipped, approval.*,
+// ical.poll.completed) track the spec and the mock's dispatcher for
+// when each backend emitter lands. Any drift is flagged in the
+// cd-y4g5 handoff.
 
 import type { QueryClient } from "@tanstack/react-query";
 import type {
@@ -84,6 +86,9 @@ export type EventKind =
   | "task.overdue"
   // Stays + stay task bundles (§04, §06).
   | "stay.upcoming"
+  | "reservation.upserted"
+  | "property.closure.created"
+  | "ical.poll.completed"
   | "stay_task_bundle.upserted"
   | "stay_task_bundle.deleted"
   // Approvals (§11 HITL).
@@ -254,6 +259,10 @@ export type InvalidationHandler = (event: SseEvent, qc: QueryClient) => void;
  */
 interface TaskRefPayload {
   task_id: string;
+}
+
+interface PropertyClosurePayload {
+  property_id: string;
 }
 
 interface AssetActionPayload {
@@ -445,6 +454,26 @@ export const INVALIDATIONS: Record<EventKind, InvalidationHandler> = {
     // §14 worker schedule — upcoming stays cut bookings via the
     // nightly materialiser (§09). The bookings/tasks then surface as
     // cells, so the worker's schedule has to refresh too.
+    invalidate(qc, ["my-schedule"]);
+  },
+
+  "reservation.upserted": (_event, qc) => {
+    invalidate(qc, qk.stays());
+    invalidate(qc, qk.dashboard());
+    invalidate(qc, ["my-schedule"]);
+  },
+
+  "property.closure.created": (event, qc) => {
+    const payload = event.data as unknown as PropertyClosurePayload;
+    invalidate(qc, qk.stays());
+    invalidate(qc, qk.propertyClosures(payload.property_id));
+    invalidate(qc, ["scheduler-calendar"]);
+    invalidate(qc, ["my-schedule"]);
+  },
+
+  "ical.poll.completed": (_event, qc) => {
+    invalidate(qc, qk.stays());
+    invalidate(qc, ["scheduler-calendar"]);
     invalidate(qc, ["my-schedule"]);
   },
 

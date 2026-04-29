@@ -191,6 +191,12 @@ export default function App() {
               </Route>
             </Route>
 
+            <Route element={<RequirePermission actionKey="stays.read" />}>
+              <Route element={<ManagerLayout />}>
+                <Route path="/stays" element={<StaysPage />} />
+              </Route>
+            </Route>
+
             <Route element={<ManagerLayout />}>
               <Route path="/dashboard" element={<DashboardPage />} />
               <Route path="/properties" element={<PropertiesPage />} />
@@ -200,7 +206,6 @@ export default function App() {
               <Route path="/employee/:eid" element={<EmployeeDetailPage />} />
               <Route path="/employee/:eid/leaves" element={<EmployeeLeavesPage />} />
               <Route path="/leaves" element={<LeavesInboxPage />} />
-              <Route path="/stays" element={<StaysPage />} />
               <Route
                 path="/expenses"
                 element={

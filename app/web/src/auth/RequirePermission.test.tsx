@@ -123,6 +123,12 @@ describe("<RequirePermission>", () => {
     );
   });
 
+  it("wraps the real stays route before the manager shell", () => {
+    expect(appSource).toMatch(
+      /<Route element={<RequirePermission actionKey="stays\.read" \/>}>\s*<Route element={<ManagerLayout \/>}>\s*<Route path="\/stays" element={<StaysPage \/>} \/>/,
+    );
+  });
+
   it("holds the route while the resolver is loading", () => {
     const original = globalThis.fetch;
     (globalThis as { fetch: typeof fetch }).fetch = vi.fn(

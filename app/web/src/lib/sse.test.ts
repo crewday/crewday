@@ -92,6 +92,9 @@ describe("INVALIDATIONS — coverage", () => {
     "task.evidence_added",
     "task.overdue",
     "stay.upcoming",
+    "reservation.upserted",
+    "property.closure.created",
+    "ical.poll.completed",
     "stay_task_bundle.upserted",
     "stay_task_bundle.deleted",
     "approval.decided",
@@ -213,6 +216,58 @@ describe("INVALIDATIONS — per-kind behaviour", () => {
     const called = spy.mock.calls.map((c) => c[0]?.queryKey);
     expect(called).toEqual(
       expect.arrayContaining([qk.stays(), qk.dashboard(), ["my-schedule"]]),
+    );
+  });
+
+  it("reservation.upserted invalidates stays + dashboard + my-schedule", () => {
+    const qc = makeClient();
+    const spy = vi.spyOn(qc, "invalidateQueries");
+    INVALIDATIONS["reservation.upserted"](
+      makeEvent("reservation.upserted", {
+        reservation_id: "res_1",
+        feed_id: "feed_1",
+        change_kind: "created",
+      }),
+      qc,
+    );
+    const called = spy.mock.calls.map((c) => c[0]?.queryKey);
+    expect(called).toEqual(
+      expect.arrayContaining([qk.stays(), qk.dashboard(), ["my-schedule"]]),
+    );
+  });
+
+  it("property.closure.created invalidates stays + closure timeline + calendars", () => {
+    const qc = makeClient();
+    const spy = vi.spyOn(qc, "invalidateQueries");
+    INVALIDATIONS["property.closure.created"](
+      makeEvent("property.closure.created", {
+        closure_id: "clos_1",
+        property_id: "prop_1",
+        source_ical_feed_id: "feed_1",
+      }),
+      qc,
+    );
+    const called = spy.mock.calls.map((c) => c[0]?.queryKey);
+    expect(called).toEqual(
+      expect.arrayContaining([
+        qk.stays(),
+        qk.propertyClosures("prop_1"),
+        ["scheduler-calendar"],
+        ["my-schedule"],
+      ]),
+    );
+  });
+
+  it("ical.poll.completed invalidates stays + calendars", () => {
+    const qc = makeClient();
+    const spy = vi.spyOn(qc, "invalidateQueries");
+    INVALIDATIONS["ical.poll.completed"](
+      makeEvent("ical.poll.completed", { feed_id: "feed_1" }),
+      qc,
+    );
+    const called = spy.mock.calls.map((c) => c[0]?.queryKey);
+    expect(called).toEqual(
+      expect.arrayContaining([qk.stays(), ["scheduler-calendar"], ["my-schedule"]]),
     );
   });
 
