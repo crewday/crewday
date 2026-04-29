@@ -131,7 +131,13 @@ describe("<RequirePermission>", () => {
 
   it("wraps the real property detail route before the manager shell", () => {
     expect(appSource).toMatch(
-      /<Route element={<RequirePermission actionKey="properties\.read" \/>}>\s*<Route element={<ManagerLayout \/>}>\s*<Route path="\/property\/:pid" element={<PropertyDetailPage \/>} \/>/,
+      /<Route element={<RequirePermission actionKey="properties\.read" \/>}>\s*<Route element={<ManagerLayout \/>}>[\s\S]*?<Route path="\/property\/:pid" element={<PropertyDetailPage \/>} \/>/,
+    );
+  });
+
+  it("wraps the real properties list route before the manager shell", () => {
+    expect(appSource).toMatch(
+      /<Route element={<RequirePermission actionKey="properties\.read" \/>}>\s*<Route element={<ManagerLayout \/>}>\s*<Route path="\/properties" element={<PropertiesPage \/>} \/>/,
     );
   });
 

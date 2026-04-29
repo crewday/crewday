@@ -46,6 +46,7 @@ function ws(): WorkspacePrefix {
 // factory spreads `ws()` then appends its own stable prefix + params,
 // which preserves tuple literal types all the way down.
 export const qk = {
+  authMe: () => ["auth", "me"] as const,
   me: () => [...ws(), "me"] as const,
   properties: () => [...ws(), "properties"] as const,
   property: (pid: string) => [...ws(), "property", pid] as const,

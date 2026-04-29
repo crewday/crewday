@@ -19,6 +19,12 @@ afterEach(() => {
 });
 
 describe("qk — workspace prefix", () => {
+  it("keeps bare-host auth identity outside workspace scope", () => {
+    registerQueryKeyWorkspaceGetter(() => "acme");
+
+    expect(qk.authMe()).toEqual(["auth", "me"]);
+  });
+
   it("prepends the active workspace slug to every workspace-scoped key", () => {
     registerQueryKeyWorkspaceGetter(() => "acme");
 
