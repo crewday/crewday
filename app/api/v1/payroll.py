@@ -57,9 +57,11 @@ from app.adapters.db.payroll.repositories import (
     SqlAlchemyPayrollExportRepository,
     SqlAlchemyPayRuleRepository,
     SqlAlchemyPayslipComputeRepository,
+    SqlAlchemyPayslipPdfRepository,
     SqlAlchemyPayslipReadRepository,
 )
-from app.api.deps import current_workspace_context, db_session
+from app.adapters.storage.ports import BlobNotFound, Storage
+from app.api.deps import current_workspace_context, db_session, get_storage
 from app.api.pagination import (
     DEFAULT_LIMIT,
     LimitQuery,
@@ -84,6 +86,11 @@ from app.domain.payroll.exports import (
     export_payslips_csv,
     export_timesheets_csv,
     stream_csv_with_audit,
+)
+from app.domain.payroll.pdf import (
+    PayslipPdfNotFound,
+    PayslipPdfRendered,
+    render_payslip,
 )
 from app.domain.payroll.periods import (
     PayPeriodInvariantViolated,
@@ -136,6 +143,7 @@ __all__ = [
 
 _Ctx = Annotated[WorkspaceContext, Depends(current_workspace_context)]
 _Db = Annotated[Session, Depends(db_session)]
+_Storage = Annotated[Storage, Depends(get_storage)]
 
 
 _MAX_ID_LEN = 64
@@ -272,6 +280,14 @@ class PayslipListResponse(BaseModel):
     data: list[PayslipResponse]
 
 
+class PayslipPdfRenderResponse(BaseModel):
+    """Response shape for explicit payslip PDF render requests."""
+
+    payslip_id: str
+    content_hash: str
+    rendered: bool
+
+
 class PayrollExportJobResponse(BaseModel):
     """Synchronous-ready export job placeholder until durable jobs land."""
 
@@ -343,6 +359,14 @@ def _payslip_to_response(row: PayslipReadRow) -> PayslipResponse:
         issued_at=row.issued_at,
         paid_at=row.paid_at,
         created_at=row.created_at,
+    )
+
+
+def _payslip_pdf_to_response(rendered: PayslipPdfRendered) -> PayslipPdfRenderResponse:
+    return PayslipPdfRenderResponse(
+        payslip_id=rendered.payslip_id,
+        content_hash=rendered.content_hash,
+        rendered=rendered.rendered,
     )
 
 
@@ -963,6 +987,99 @@ def build_payroll_router() -> APIRouter:
                 action_key="payroll.view_other",
             )
         return _payslip_to_response(row)
+
+    @api.get(
+        "/payslips/{payslip_id}/pdf",
+        operation_id="payroll.payslips.pdf",
+        summary="Fetch a payslip PDF visible to the caller",
+        response_class=StreamingResponse,
+    )
+    def get_payslip_pdf_route(
+        ctx: _Ctx,
+        session: _Db,
+        storage: _Storage,
+        payslip_id: _PayslipIdPath,
+    ) -> StreamingResponse:
+        row = SqlAlchemyPayslipReadRepository(session).get_payslip(
+            workspace_id=ctx.workspace_id,
+            payslip_id=payslip_id,
+        )
+        if row is None:
+            raise _http_for_payslip_not_found()
+        if row.user_id != ctx.actor_id:
+            _require_workspace_permission(
+                session,
+                ctx,
+                action_key="payroll.view_other",
+            )
+        try:
+            rendered = render_payslip(
+                SqlAlchemyPayslipPdfRepository(session),
+                ctx,
+                storage,
+                payslip_id=payslip_id,
+            )
+            blob = storage.get(rendered.content_hash)
+        except PayslipPdfNotFound as exc:
+            raise _http_for_payslip_not_found() from exc
+        except BlobNotFound as exc:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={"error": "payslip_pdf_blob_not_found"},
+            ) from exc
+        return StreamingResponse(
+            blob,
+            media_type="application/pdf",
+            headers={
+                "Content-Disposition": 'inline; filename="payslip.pdf"',
+            },
+        )
+
+    @api.post(
+        "/payslips/{payslip_id}/pdf",
+        response_model=PayslipPdfRenderResponse,
+        operation_id="payroll.payslips.pdf.render",
+        summary="Render or regenerate a payslip PDF",
+    )
+    def render_payslip_pdf_route(
+        ctx: _Ctx,
+        session: _Db,
+        storage: _Storage,
+        payslip_id: _PayslipIdPath,
+        force: Annotated[
+            bool,
+            Query(description="Regenerate the stored PDF even when one exists."),
+        ] = False,
+    ) -> PayslipPdfRenderResponse:
+        row = SqlAlchemyPayslipReadRepository(session).get_payslip(
+            workspace_id=ctx.workspace_id,
+            payslip_id=payslip_id,
+        )
+        if row is None:
+            raise _http_for_payslip_not_found()
+        if row.user_id != ctx.actor_id:
+            _require_workspace_permission(
+                session,
+                ctx,
+                action_key="payroll.view_other",
+            )
+        if force:
+            _require_workspace_permission(
+                session,
+                ctx,
+                action_key="payroll.issue_payslip",
+            )
+        try:
+            rendered = render_payslip(
+                SqlAlchemyPayslipPdfRepository(session),
+                ctx,
+                storage,
+                payslip_id=payslip_id,
+                force=force,
+            )
+        except PayslipPdfNotFound as exc:
+            raise _http_for_payslip_not_found() from exc
+        return _payslip_pdf_to_response(rendered)
 
     @api.post(
         "/payslips/{payslip_id}/issue",

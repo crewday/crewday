@@ -1,0 +1,253 @@
+<!doctype html>
+<html lang="{{ document.locale|replace('_', '-') }}">
+  <head>
+    <meta charset="utf-8">
+    <title>{{ document.title }}</title>
+    <style>
+      @page {
+        size: A4;
+        margin: 18mm;
+      }
+
+      body {
+        color: #17201b;
+        font-family: "DejaVu Sans", "Arial", sans-serif;
+        font-size: 11pt;
+        line-height: 1.45;
+      }
+
+      h1,
+      h2,
+      p {
+        margin: 0;
+      }
+
+      h1 {
+        font-size: 22pt;
+        font-weight: 700;
+      }
+
+      h2 {
+        border-bottom: 1px solid #ccd6cf;
+        font-size: 12pt;
+        margin: 22px 0 8px;
+        padding-bottom: 5px;
+      }
+
+      table {
+        border-collapse: collapse;
+        width: 100%;
+      }
+
+      th,
+      td {
+        border-bottom: 1px solid #e3e8e5;
+        padding: 7px 0;
+        text-align: left;
+        vertical-align: top;
+      }
+
+      th {
+        color: #4c5b54;
+        font-size: 9pt;
+        font-weight: 700;
+        text-transform: uppercase;
+      }
+
+      .amount,
+      .metric-value {
+        text-align: right;
+        white-space: nowrap;
+      }
+
+      .header {
+        align-items: flex-start;
+        border-bottom: 2px solid #17201b;
+        display: flex;
+        justify-content: space-between;
+        padding-bottom: 16px;
+      }
+
+      .muted {
+        color: #5f6f67;
+      }
+
+      .identity-grid,
+      .metrics-grid {
+        display: grid;
+        gap: 12px;
+        grid-template-columns: 1fr 1fr;
+        margin-top: 18px;
+      }
+
+      .identity-block,
+      .metric {
+        border: 1px solid #d8e0db;
+        border-radius: 4px;
+        padding: 10px 12px;
+      }
+
+      .label {
+        color: #5f6f67;
+        display: block;
+        font-size: 9pt;
+        font-weight: 700;
+        text-transform: uppercase;
+      }
+
+      .line-detail {
+        color: #5f6f67;
+        font-size: 9.5pt;
+      }
+
+      .totals {
+        margin-left: auto;
+        margin-top: 18px;
+        width: 48%;
+      }
+
+      .totals td {
+        border-bottom: 0;
+        padding: 5px 0;
+      }
+
+      .net-total td {
+        border-top: 2px solid #17201b;
+        font-size: 14pt;
+        font-weight: 700;
+        padding-top: 9px;
+      }
+
+      .payout-list {
+        margin: 0;
+        padding-left: 18px;
+      }
+    </style>
+  </head>
+  <body>
+    <header class="header">
+      <div>
+        <h1>Payslip</h1>
+        <p class="muted">{{ document.period_label }}</p>
+      </div>
+      <div class="amount">
+        <p><strong>{{ document.workspace_registered_name }}</strong></p>
+        {% if document.workspace_address %}
+        <p class="muted">{{ document.workspace_address }}</p>
+        {% endif %}
+      </div>
+    </header>
+
+    <section class="identity-grid">
+      <div class="identity-block">
+        <span class="label">Worker</span>
+        <p>{{ document.worker_name }}</p>
+        <p class="muted">{{ document.worker_email }}</p>
+      </div>
+      <div class="identity-block">
+        <span class="label">Payslip</span>
+        <p>Status: {{ document.status }}</p>
+        <p class="muted">Issued: {{ document.issued_label }}</p>
+        <p class="muted">Paid: {{ document.paid_label }}</p>
+      </div>
+    </section>
+
+    <section class="metrics-grid">
+      <div class="metric">
+        <span class="label">Regular hours</span>
+        <p class="metric-value">{{ document.regular_hours }}</p>
+      </div>
+      <div class="metric">
+        <span class="label">Overtime hours</span>
+        <p class="metric-value">{{ document.overtime_hours }}</p>
+      </div>
+    </section>
+
+    <h2>Earnings</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Item</th>
+          <th class="amount">Amount</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for line in document.gross_lines %}
+        <tr>
+          <td>
+            {{ line.label }}
+            {% if line.detail %}
+            <div class="line-detail">{{ line.detail }}</div>
+            {% endif %}
+          </td>
+          <td class="amount">{{ line.amount }}</td>
+        </tr>
+        {% else %}
+        <tr>
+          <td>Gross pay</td>
+          <td class="amount">{{ document.gross_total }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+
+    {% if document.statutory_lines %}
+    <h2>Statutory</h2>
+    <table>
+      <tbody>
+        {% for line in document.statutory_lines %}
+        <tr>
+          <td>
+            {{ line.label }}
+            {% if line.detail %}
+            <div class="line-detail">{{ line.detail }}</div>
+            {% endif %}
+          </td>
+          <td class="amount">{{ line.amount }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% endif %}
+
+    <h2>Deductions</h2>
+    <table>
+      <tbody>
+        {% for line in document.deduction_lines %}
+        <tr>
+          <td>
+            {{ line.label }}
+            {% if line.detail %}
+            <div class="line-detail">{{ line.detail }}</div>
+            {% endif %}
+          </td>
+          <td class="amount">{{ line.amount }}</td>
+        </tr>
+        {% else %}
+        <tr>
+          <td>No deductions</td>
+          <td class="amount">{{ 0|int }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+
+    <table class="totals">
+      <tr>
+        <td>Gross</td>
+        <td class="amount">{{ document.gross_total }}</td>
+      </tr>
+      <tr class="net-total">
+        <td>Net pay</td>
+        <td class="amount">{{ document.net_total }}</td>
+      </tr>
+    </table>
+
+    <h2>Payout</h2>
+    <ul class="payout-list">
+      {% for line in document.payout_lines %}
+      <li>{{ line }}</li>
+      {% endfor %}
+    </ul>
+  </body>
+</html>

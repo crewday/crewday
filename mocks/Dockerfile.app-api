@@ -16,22 +16,25 @@
 #   /app/pyproject.toml (bind-mount of repo ../pyproject.toml — read-only)
 #   /data               (named volume — SQLite DB, chown'd at boot)
 #
-# Deliberately NOT shipping ``weasyprint``: it pulls in the full
-# GTK/Pango toolchain (~400 MB of apt packages) and is only needed at
-# PDF-render time — which the current code path doesn't touch on boot.
-# The other prod deps mirror ``pyproject.toml`` ``[project].dependencies``
-# plus ``aiosqlite`` (for completeness — the sync engine's URL
-# normaliser would work without it).
+# Ships WeasyPrint + the Pango/fontconfig pieces needed for payslip
+# PDF rendering. The other prod deps mirror ``pyproject.toml``
+# ``[project].dependencies`` plus ``aiosqlite`` (for completeness —
+# the sync engine's URL normaliser would work without it).
 
 FROM python:3.14-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
-# ``curl`` is used by the healthcheck below; every other package comes
-# via pip so the image stays reproducible from the requirements list.
+# ``curl`` is used by the healthcheck below; Pango/fontconfig/DejaVu
+# are the runtime pieces WeasyPrint needs to produce PDFs.
 RUN apt-get update \
- && apt-get install -y --no-install-recommends curl \
+ && apt-get install -y --no-install-recommends \
+      curl \
+      fontconfig \
+      fonts-dejavu-core \
+      libpango-1.0-0 \
+      libpangoft2-1.0-0 \
  && rm -rf /var/lib/apt/lists/*
 
 # Non-root user pinned at the image level per docs/specs/16.
@@ -43,8 +46,8 @@ RUN groupadd --system --gid 10001 crewday \
 
 WORKDIR /app
 
-# Prod deps (mirrors ``pyproject.toml`` ``[project].dependencies``
-# minus ``weasyprint``; adds ``aiosqlite`` per cd-sgpl).
+# Prod deps (mirrors ``pyproject.toml`` ``[project].dependencies``;
+# adds ``aiosqlite`` per cd-sgpl).
 RUN pip install --no-cache-dir \
     "fastapi>=0.115" \
     "uvicorn[standard]>=0.30" \
@@ -60,6 +63,7 @@ RUN pip install --no-cache-dir \
     "icalendar" \
     "python-dateutil" \
     "itsdangerous" \
+    "weasyprint" \
     "click" \
     "argon2-cffi>=23" \
     "aiosqlite" \

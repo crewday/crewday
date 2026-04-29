@@ -211,6 +211,17 @@ module = [
 ]
 ignore_missing_imports = true
 
+# WeasyPrint ships no ``py.typed`` marker. The payslip PDF service
+# narrows the dependency to ``HTML(...).write_pdf()`` and exercises
+# it in integration tests; this override keeps ``mypy --strict`` from
+# treating the third-party package as part of our typed surface.
+[[tool.mypy.overrides]]
+module = [
+    "weasyprint",
+    "weasyprint.*",
+]
+ignore_missing_imports = true
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"

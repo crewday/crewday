@@ -54,6 +54,8 @@ __all__ = [
     "PayrollExportRepository",
     "PayslipComputeRepository",
     "PayslipExportRow",
+    "PayslipPdfRepository",
+    "PayslipPdfRow",
     "PayslipReadRepository",
     "PayslipReadRow",
     "PayslipRow",
@@ -186,6 +188,37 @@ class PayslipReadRow:
     status: str
     issued_at: datetime | None
     paid_at: datetime | None
+    created_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class PayslipPdfRow:
+    """Immutable projection for payslip PDF rendering."""
+
+    id: str
+    workspace_id: str
+    pay_period_id: str
+    user_id: str
+    worker_name: str
+    worker_email: str
+    workspace_name: str
+    workspace_settings: Mapping[str, object]
+    period_starts_at: datetime
+    period_ends_at: datetime
+    currency: str
+    locale: str
+    jurisdiction: str
+    shift_hours_decimal: Decimal
+    overtime_hours_decimal: Decimal
+    gross_cents: int
+    deductions_cents: dict[str, int]
+    net_cents: int
+    components_json: dict[str, object]
+    status: str
+    issued_at: datetime | None
+    paid_at: datetime | None
+    payout_snapshot_json: dict[str, object] | None
+    pdf_blob_hash: str | None
     created_at: datetime
 
 
@@ -327,6 +360,31 @@ class PayslipReadRepository(Protocol):
         payout_snapshot_json: dict[str, object] | None = None,
     ) -> PayslipReadRow:
         """Persist a payslip state transition and return the refreshed row."""
+        ...
+
+
+class PayslipPdfRepository(Protocol):
+    """Read + write seam for payslip PDF rendering."""
+
+    @property
+    def session(self) -> Session:
+        """Return the underlying SQLAlchemy session."""
+        ...
+
+    def get_payslip_pdf_row(
+        self, *, workspace_id: str, payslip_id: str
+    ) -> PayslipPdfRow | None:
+        """Return the render projection or ``None`` when absent."""
+        ...
+
+    def set_payslip_pdf_blob_hash(
+        self,
+        *,
+        workspace_id: str,
+        payslip_id: str,
+        pdf_blob_hash: str,
+    ) -> PayslipPdfRow:
+        """Persist the content-addressed PDF blob hash and return the row."""
         ...
 
 

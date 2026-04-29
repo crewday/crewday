@@ -38,7 +38,7 @@ from app.adapters.db.payroll.models import (
 )
 from app.adapters.db.places.models import Property, PropertyWorkspace
 from app.adapters.db.time.models import Shift
-from app.adapters.db.workspace.models import WorkEngagement
+from app.adapters.db.workspace.models import WorkEngagement, Workspace
 from app.domain.payroll.bookings import (
     derive_booking_pay_entry,
     group_booking_entries_by_day,
@@ -54,6 +54,7 @@ from app.domain.payroll.ports import (
     PayRuleRepository,
     PayRuleRow,
     PayslipExportRow,
+    PayslipPdfRow,
     PayslipReadRow,
     PayslipRow,
     TimesheetExportRow,
@@ -66,6 +67,7 @@ __all__ = [
     "SqlAlchemyPayRuleRepository",
     "SqlAlchemyPayrollExportRepository",
     "SqlAlchemyPayslipComputeRepository",
+    "SqlAlchemyPayslipPdfRepository",
     "SqlAlchemyPayslipReadRepository",
 ]
 
@@ -227,6 +229,53 @@ def _payslip_read_to_row(row: Payslip, *, currency: str | None) -> PayslipReadRo
     )
 
 
+def _payslip_pdf_to_row(
+    row: Payslip,
+    *,
+    user: User,
+    workspace: Workspace,
+    period: PayPeriod,
+    currency: str | None,
+) -> PayslipPdfRow:
+    locale = user.locale or workspace.default_locale or "en-US"
+    jurisdiction = _jurisdiction_from_components(row.components_json) or "US"
+    return PayslipPdfRow(
+        id=row.id,
+        workspace_id=row.workspace_id,
+        pay_period_id=row.pay_period_id,
+        user_id=row.user_id,
+        worker_name=user.display_name,
+        worker_email=user.email,
+        workspace_name=workspace.name,
+        workspace_settings=dict(workspace.settings_json),
+        period_starts_at=period.starts_at,
+        period_ends_at=period.ends_at,
+        currency=(
+            _currency_from_components(row.components_json)
+            or currency
+            or workspace.default_currency
+        ),
+        locale=locale,
+        jurisdiction=jurisdiction,
+        shift_hours_decimal=row.shift_hours_decimal,
+        overtime_hours_decimal=row.overtime_hours_decimal,
+        gross_cents=row.gross_cents,
+        deductions_cents=dict(row.deductions_cents),
+        net_cents=row.net_cents,
+        components_json=dict(row.components_json),
+        status=row.status,
+        issued_at=row.issued_at,
+        paid_at=row.paid_at,
+        payout_snapshot_json=(
+            dict(row.payout_snapshot_json)
+            if row.payout_snapshot_json is not None
+            else None
+        ),
+        pdf_blob_hash=row.pdf_blob_hash,
+        created_at=row.created_at,
+    )
+
+
 def _booking_window_filters(
     *,
     workspace_id: str,
@@ -263,6 +312,13 @@ def _currency_from_components(value: object) -> str | None:
         return None
     currency = value.get("currency")
     return currency if isinstance(currency, str) else None
+
+
+def _jurisdiction_from_components(value: object) -> str | None:
+    if not isinstance(value, dict):
+        return None
+    jurisdiction = value.get("jurisdiction")
+    return jurisdiction if isinstance(jurisdiction, str) else None
 
 
 def _payslip_currency_subquery() -> ScalarSelect[str | None]:
@@ -886,6 +942,65 @@ class SqlAlchemyPayslipReadRepository:
             row.payout_snapshot_json = payout_snapshot_json
         self._session.flush()
         return _payslip_read_to_row(row, currency=None)
+
+
+class SqlAlchemyPayslipPdfRepository:
+    """SA-backed adapter for payslip PDF rendering."""
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    @property
+    def session(self) -> Session:
+        return self._session
+
+    def get_payslip_pdf_row(
+        self, *, workspace_id: str, payslip_id: str
+    ) -> PayslipPdfRow | None:
+        currency = _payslip_currency_subquery()
+        row = self._session.execute(
+            select(Payslip, User, Workspace, PayPeriod, currency)
+            .join(User, User.id == Payslip.user_id)
+            .join(Workspace, Workspace.id == Payslip.workspace_id)
+            .join(PayPeriod, PayPeriod.id == Payslip.pay_period_id)
+            .where(
+                Payslip.workspace_id == workspace_id,
+                Payslip.id == payslip_id,
+            )
+        ).one_or_none()
+        if row is None:
+            return None
+        payslip, user, workspace, period, resolved_currency = row
+        return _payslip_pdf_to_row(
+            payslip,
+            user=user,
+            workspace=workspace,
+            period=period,
+            currency=resolved_currency,
+        )
+
+    def set_payslip_pdf_blob_hash(
+        self,
+        *,
+        workspace_id: str,
+        payslip_id: str,
+        pdf_blob_hash: str,
+    ) -> PayslipPdfRow:
+        row = self._session.scalars(
+            select(Payslip).where(
+                Payslip.workspace_id == workspace_id,
+                Payslip.id == payslip_id,
+            )
+        ).one()
+        row.pdf_blob_hash = pdf_blob_hash
+        self._session.flush()
+        refreshed = self.get_payslip_pdf_row(
+            workspace_id=workspace_id,
+            payslip_id=payslip_id,
+        )
+        if refreshed is None:
+            raise LookupError(f"payslip disappeared after PDF hash write: {payslip_id}")
+        return refreshed
 
 
 class SqlAlchemyPayrollExportRepository(PayrollExportRepository):

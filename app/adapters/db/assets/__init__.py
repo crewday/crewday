@@ -13,10 +13,6 @@ See ``docs/specs/02-domain-model.md`` §"Assets" and
 
 from __future__ import annotations
 
-from app.adapters.db.assets.bootstrap import (
-    BASE_ASSET_TYPE_CATALOG,
-    seed_asset_type_catalog,
-)
 from app.adapters.db.assets.models import Asset, AssetAction, AssetDocument, AssetType
 from app.tenancy.registry import register
 
@@ -31,3 +27,11 @@ __all__ = [
     "AssetType",
     "seed_asset_type_catalog",
 ]
+
+
+def __getattr__(name: str) -> object:
+    if name in {"BASE_ASSET_TYPE_CATALOG", "seed_asset_type_catalog"}:
+        from app.adapters.db.assets import bootstrap
+
+        return getattr(bootstrap, name)
+    raise AttributeError(name)
