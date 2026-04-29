@@ -89,6 +89,7 @@ from app.api.v1 import (
     APPROVALS_ROUTER,
     BILLING_PUBLIC_ROUTER,
     CONTEXT_ROUTERS,
+    ISSUES_ROUTER,
     STAYS_PUBLIC_ROUTER,
     WORKSPACE_ADMIN_ROUTER,
     asset_scan_router,
@@ -774,6 +775,7 @@ def _mount_context_routers(app: FastAPI, *, settings: Settings) -> None:
     # contract pins (not nested under ``/llm``). The router's own
     # ``tags=["approvals"]`` drives the schema tag.
     app.include_router(APPROVALS_ROUTER, prefix=f"{scoped_prefix}/approvals")
+    app.include_router(ISSUES_ROUTER, prefix=f"{scoped_prefix}/issues")
 
     # Anonymous guest welcome API. Mounted on the bare API tree so the
     # tenancy middleware does not require a workspace session before

@@ -40,6 +40,7 @@ from .expenses import router as expenses_router
 from .identity import router as identity_router
 from .instructions import router as instructions_router
 from .inventory import router as inventory_router
+from .issues import router as issues_router
 from .llm import router as llm_router
 from .messaging import router as messaging_router
 from .payroll import router as payroll_router
@@ -92,6 +93,7 @@ WORKSPACE_ADMIN_ROUTER: APIRouter = _workspace_admin_router
 # operations ``approvals`` so the OpenAPI tag list keeps it
 # co-located with the LLM context's operations alphabetically.
 APPROVALS_ROUTER: APIRouter = _approvals_router
+ISSUES_ROUTER: APIRouter = issues_router
 
 STAYS_PUBLIC_ROUTER: APIRouter = stays_public_router
 BILLING_PUBLIC_ROUTER: APIRouter = billing_public_router
@@ -100,6 +102,7 @@ __all__ = [
     "APPROVALS_ROUTER",
     "BILLING_PUBLIC_ROUTER",
     "CONTEXT_ROUTERS",
+    "ISSUES_ROUTER",
     "STAYS_PUBLIC_ROUTER",
     "WORKSPACE_ADMIN_ROUTER",
     "asset_scan_router",

@@ -57,6 +57,7 @@ __all__ = [
     "ExpenseRejected",
     "ExpenseSubmitted",
     "InventoryItemChanged",
+    "IssueReported",
     "LlmAssignmentChanged",
     "NotificationCreated",
     "PayPeriodLocked",
@@ -439,6 +440,18 @@ class InventoryItemChanged(Event):
     item_id: str
     movement_id: str
     reason: str
+
+
+@register
+class IssueReported(Event):
+    """A worker or manager reported a property issue."""
+
+    name: ClassVar[str] = "issue.reported"
+    allowed_roles: ClassVar[tuple[EventRole, ...]] = ("manager",)
+
+    issue_id: str
+    property_id: str
+    severity: Literal["low", "normal", "high", "urgent"]
 
 
 @register

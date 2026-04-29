@@ -693,6 +693,7 @@ _INVALIDATIONS: Final[dict[str, tuple[tuple[str, ...], ...]]] = {
     "shift.ended": (("shifts",), ("my-schedule",)),
     "time.shift.changed": (("shifts",), ("my-schedule",)),
     "work_order.completed": (("work_orders",),),
+    "issue.reported": (("issues",),),
     "asset.changed": (("assets",),),
     "asset_action.performed": (("assets",),),
     "chat.message.sent": (("chat", "channels"),),
