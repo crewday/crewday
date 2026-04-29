@@ -694,6 +694,7 @@ _INVALIDATIONS: Final[dict[str, tuple[tuple[str, ...], ...]]] = {
     "time.shift.changed": (("shifts",), ("my-schedule",)),
     "work_order.completed": (("work_orders",),),
     "asset.changed": (("assets",),),
+    "asset_action.performed": (("assets",),),
     "chat.message.sent": (("chat", "channels"),),
     "chat.message.received": (("chat", "channels"),),
     # Bell-menu unread count + the notification list. Both query keys

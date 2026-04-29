@@ -48,6 +48,7 @@ __all__ = [
     "AgentTurnStarted",
     "ApprovalDecided",
     "ApprovalDecision",
+    "AssetActionPerformed",
     "AssetChanged",
     "ChatMessageReceived",
     "ChatMessageSent",
@@ -450,6 +451,18 @@ class AssetChanged(Event):
     asset_id: str
     action: str
     changed_fields: tuple[str, ...]
+
+
+@register
+class AssetActionPerformed(Event):
+    """An asset maintenance/read action was recorded."""
+
+    name: ClassVar[str] = "asset_action.performed"
+    allowed_roles: ClassVar[tuple[EventRole, ...]] = ("manager", "worker")
+
+    asset_id: str
+    action_id: str
+    kind: Literal["service", "repair", "replace", "inspect", "read"]
 
 
 @register

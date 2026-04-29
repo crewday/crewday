@@ -54,7 +54,7 @@ class TestShape:
         assert frozenset(ACTION_CATALOG.keys()) == ACTION_KEYS
 
     def test_catalog_has_expected_size(self) -> None:
-        """v1 spec §05 enumerates 7 root-only + 89 rule-driven = 96 keys.
+        """v1 spec §05 enumerates 7 root-only + 93 rule-driven = 100 keys.
 
         A hard number — if it changes, either the spec or the catalog
         drifted and the author needs to say which. cd-cfe4 added
@@ -74,9 +74,11 @@ class TestShape:
         exports. cd-0510 added ``stays.read`` / ``stays.manage`` for
         the manager stays API surface while guest welcome remains
         anonymous token-gated. cd-z2py added ``tasks.review.decide``
-        for manager decisions on completed-task approval rows.
+        for manager decisions on completed-task approval rows. cd-ryxp
+        added work-order actions, and cd-5b35 added asset action /
+        document permissions.
         """
-        assert len(ACTION_CATALOG) == 96
+        assert len(ACTION_CATALOG) == 100
 
     def test_entries_are_action_spec_instances(self) -> None:
         for key, spec in ACTION_CATALOG.items():

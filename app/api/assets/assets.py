@@ -2,16 +2,37 @@
 
 from __future__ import annotations
 
+import hashlib
+import io
+from dataclasses import asdict
 from datetime import date, datetime
+from decimal import Decimal
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    Form,
+    HTTPException,
+    Query,
+    Request,
+    Response,
+    UploadFile,
+    status,
+)
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy.orm import Session
 from starlette.routing import NoMatchFound
 
 from app.adapters.qr import render_qr
-from app.api.deps import current_workspace_context, db_session
+from app.adapters.storage.ports import MimeSniffer, Storage
+from app.api.deps import (
+    current_workspace_context,
+    db_session,
+    get_mime_sniffer,
+    get_storage,
+)
 from app.api.pagination import (
     DEFAULT_LIMIT,
     LimitQuery,
@@ -20,6 +41,18 @@ from app.api.pagination import (
     paginate,
 )
 from app.authz.dep import Permission
+from app.domain.assets.actions import (
+    AssetActionAccessDenied,
+    AssetActionNotFound,
+    AssetActionValidationError,
+    AssetActionView,
+    AssetNextDueView,
+    delete_action,
+    list_actions,
+    next_due,
+    record_action,
+    update_action,
+)
 from app.domain.assets.assets import (
     AssetCreate,
     AssetNotFound,
@@ -40,6 +73,15 @@ from app.domain.assets.assets import (
     restore_asset,
     update_asset,
 )
+from app.domain.assets.documents import (
+    ASSET_DOCUMENT_CATEGORIES,
+    AssetDocumentNotFound,
+    AssetDocumentValidationError,
+    AssetDocumentView,
+    attach_document,
+    delete_document,
+    list_documents,
+)
 from app.tenancy import WorkspaceContext
 
 __all__ = [
@@ -55,6 +97,20 @@ __all__ = [
 
 _Ctx = Annotated[WorkspaceContext, Depends(current_workspace_context)]
 _Db = Annotated[Session, Depends(db_session)]
+_Storage = Annotated[Storage, Depends(get_storage)]
+_MimeSniffer = Annotated[MimeSniffer, Depends(get_mime_sniffer)]
+
+_MAX_ASSET_DOCUMENT_BYTES = 25 * 1024 * 1024
+_ASSET_DOCUMENT_ALLOWED_MIME = {
+    "application/pdf",
+    "application/zip",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "image/jpeg",
+    "image/png",
+    "image/webp",
+    "text/plain",
+}
 
 
 class AssetCreateRequest(BaseModel):
@@ -316,6 +372,102 @@ class AssetListResponse(BaseModel):
     has_more: bool = False
 
 
+class AssetActionCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["service", "repair", "replace", "inspect", "read"]
+    performed_at: datetime | None = None
+    notes_md: str | None = Field(default=None, max_length=20_000)
+    meter_reading: Decimal | None = Field(default=None, ge=0)
+    evidence_blob_hash: str | None = Field(default=None, min_length=64, max_length=64)
+
+
+class AssetActionUpdateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    label: str | None = Field(default=None, min_length=1, max_length=200)
+    performed_at: datetime | None = None
+    notes_md: str | None = Field(default=None, max_length=20_000)
+    meter_reading: Decimal | None = Field(default=None, ge=0)
+    evidence_blob_hash: str | None = Field(default=None, min_length=64, max_length=64)
+
+    @model_validator(mode="after")
+    def _validate_sparse(self) -> AssetActionUpdateRequest:
+        if not self.model_fields_set:
+            raise ValueError("PATCH body must include at least one field")
+        return self
+
+
+class AssetActionResponse(BaseModel):
+    id: str
+    workspace_id: str
+    asset_id: str
+    key: str | None
+    kind: str
+    label: str
+    description_md: str | None
+    interval_days: int | None
+    last_performed_at: datetime | None
+    performed_at: datetime | None
+    performed_by: str | None
+    notes_md: str | None
+    meter_reading: Decimal | None
+    evidence_blob_hash: str | None
+    created_at: datetime
+    updated_at: datetime
+    deleted_at: datetime | None
+
+    @classmethod
+    def from_view(cls, view: AssetActionView) -> AssetActionResponse:
+        return cls(**asdict(view))
+
+
+class AssetActionListResponse(BaseModel):
+    data: list[AssetActionResponse]
+
+
+class AssetNextDueResponse(BaseModel):
+    key: str | None
+    kind: str
+    label: str
+    due_at: datetime
+    interval_days: int
+    last_performed_at: datetime | None
+    action_id: str | None
+
+    @classmethod
+    def from_view(cls, view: AssetNextDueView) -> AssetNextDueResponse:
+        return cls(**asdict(view))
+
+
+class AssetDocumentResponse(BaseModel):
+    id: str
+    workspace_id: str
+    file_id: str | None
+    blob_hash: str | None
+    filename: str | None
+    asset_id: str | None
+    property_id: str | None
+    kind: str
+    category: str
+    title: str
+    notes_md: str | None
+    expires_on: date | None
+    amount_cents: int | None
+    amount_currency: str | None
+    created_at: datetime
+    updated_at: datetime
+    deleted_at: datetime | None
+
+    @classmethod
+    def from_view(cls, view: AssetDocumentView) -> AssetDocumentResponse:
+        return cls(**asdict(view))
+
+
+class AssetDocumentListResponse(BaseModel):
+    data: list[AssetDocumentResponse]
+
+
 def _http_for_asset_error(exc: Exception) -> HTTPException:
     if isinstance(exc, AssetNotFound):
         return HTTPException(
@@ -353,6 +505,106 @@ def _http_for_asset_error(exc: Exception) -> HTTPException:
     )
 
 
+def _http_for_action_error(exc: Exception) -> HTTPException:
+    if isinstance(exc, AssetNotFound | AssetActionNotFound):
+        return HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"error": "asset_action_not_found"},
+        )
+    if isinstance(exc, AssetActionAccessDenied):
+        return HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"error": "permission_denied", "action_key": "assets.record_action"},
+        )
+    if isinstance(exc, AssetActionValidationError):
+        return HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"error": exc.error, "field": exc.field},
+        )
+    return HTTPException(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        detail={"error": "internal"},
+    )
+
+
+def _http_for_document_error(exc: Exception) -> HTTPException:
+    if isinstance(exc, AssetNotFound | AssetDocumentNotFound):
+        return HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"error": "asset_document_not_found"},
+        )
+    if isinstance(exc, AssetDocumentValidationError):
+        return HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"error": exc.error, "field": exc.field},
+        )
+    return HTTPException(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        detail={"error": "internal"},
+    )
+
+
+async def _read_document_capped(upload: UploadFile) -> bytes:
+    chunk_size = 64 * 1024
+    total = 0
+    pieces: list[bytes] = []
+    while True:
+        chunk = await upload.read(chunk_size)
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > _MAX_ASSET_DOCUMENT_BYTES:
+            await upload.close()
+            raise HTTPException(
+                status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+                detail={
+                    "error": "asset_document_too_large",
+                    "message": (
+                        f"upload exceeds the {_MAX_ASSET_DOCUMENT_BYTES}-byte cap"
+                    ),
+                },
+            )
+        pieces.append(chunk)
+    await upload.close()
+    return b"".join(pieces)
+
+
+def _sniff_document_mime(
+    mime_sniffer: MimeSniffer,
+    payload: bytes,
+    *,
+    declared_type: str,
+) -> str:
+    sniffed = mime_sniffer.sniff(payload, hint=declared_type)
+    if sniffed is None and declared_type.lower().startswith("text/"):
+        try:
+            payload.decode("utf-8")
+        except UnicodeDecodeError:
+            sniffed = None
+        else:
+            sniffed = "text/plain"
+    if sniffed not in _ASSET_DOCUMENT_ALLOWED_MIME:
+        raise HTTPException(
+            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            detail={
+                "error": "asset_document_content_type_rejected",
+                "content_type": sniffed,
+                "declared_type": declared_type,
+            },
+        )
+    return sniffed
+
+
+def _storage_from_request(request: Request) -> Storage:
+    storage: Storage | None = getattr(request.app.state, "storage", None)
+    if storage is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"error": "storage_unavailable"},
+        )
+    return storage
+
+
 def _scan_asset(
     qr_token: str,
     ctx: WorkspaceContext,
@@ -388,6 +640,9 @@ def build_assets_router() -> APIRouter:
 
     view_gate = Depends(Permission("scope.view", scope_kind="workspace"))
     edit_gate = Depends(Permission("assets.edit", scope_kind="workspace"))
+    manage_documents_gate = Depends(
+        Permission("assets.manage_documents", scope_kind="workspace")
+    )
 
     @api.get(
         "/",
@@ -463,6 +718,259 @@ def build_assets_router() -> APIRouter:
     )
     def scan(qr_token: str, ctx: _Ctx, session: _Db) -> AssetResponse:
         return _scan_asset(qr_token, ctx, session)
+
+    @api.get(
+        "/{asset_id}/actions",
+        response_model=AssetActionListResponse,
+        operation_id="assets.actions.list",
+        summary="List asset actions",
+        dependencies=[view_gate],
+    )
+    def actions(
+        asset_id: str,
+        ctx: _Ctx,
+        session: _Db,
+        kind: Annotated[
+            Literal["service", "repair", "replace", "inspect", "read"] | None, Query()
+        ] = None,
+        since: Annotated[datetime | None, Query()] = None,
+        until: Annotated[datetime | None, Query()] = None,
+    ) -> AssetActionListResponse:
+        try:
+            views = list_actions(
+                session,
+                ctx,
+                asset_id,
+                kind=kind,
+                since=since,
+                until=until,
+            )
+        except (AssetNotFound, AssetActionValidationError) as exc:
+            raise _http_for_action_error(exc) from exc
+        return AssetActionListResponse(
+            data=[AssetActionResponse.from_view(view) for view in views]
+        )
+
+    @api.post(
+        "/{asset_id}/actions",
+        response_model=AssetActionResponse,
+        status_code=status.HTTP_201_CREATED,
+        operation_id="assets.actions.record",
+        summary="Record an asset action",
+    )
+    def record(
+        asset_id: str,
+        body: AssetActionCreateRequest,
+        ctx: _Ctx,
+        session: _Db,
+        request: Request,
+    ) -> AssetActionResponse:
+        try:
+            view = record_action(
+                session,
+                ctx,
+                asset_id,
+                kind=body.kind,
+                performed_at=body.performed_at,
+                notes_md=body.notes_md,
+                meter_reading=body.meter_reading,
+                evidence_blob_hash=body.evidence_blob_hash,
+                storage=(
+                    _storage_from_request(request)
+                    if body.evidence_blob_hash is not None
+                    else None
+                ),
+            )
+        except (
+            AssetNotFound,
+            AssetActionAccessDenied,
+            AssetActionValidationError,
+        ) as exc:
+            raise _http_for_action_error(exc) from exc
+        return AssetActionResponse.from_view(view)
+
+    @api.get(
+        "/{asset_id}/actions/next_due",
+        response_model=AssetNextDueResponse | None,
+        operation_id="assets.actions.next_due",
+        summary="Return the next due asset action",
+        dependencies=[view_gate],
+    )
+    def next_due_action(
+        asset_id: str,
+        ctx: _Ctx,
+        session: _Db,
+    ) -> AssetNextDueResponse | None:
+        try:
+            view = next_due(session, ctx, asset_id)
+        except AssetNotFound as exc:
+            raise _http_for_asset_error(exc) from exc
+        return AssetNextDueResponse.from_view(view) if view is not None else None
+
+    @api.patch(
+        "/actions/{action_id}",
+        response_model=AssetActionResponse,
+        operation_id="assets.actions.update",
+        summary="Update an asset action",
+        dependencies=[edit_gate],
+    )
+    def patch_action(
+        action_id: str,
+        body: AssetActionUpdateRequest,
+        ctx: _Ctx,
+        session: _Db,
+        request: Request,
+    ) -> AssetActionResponse:
+        try:
+            view = update_action(
+                session,
+                ctx,
+                action_id,
+                label=body.label,
+                performed_at=body.performed_at,
+                notes_md=body.notes_md,
+                meter_reading=body.meter_reading,
+                evidence_blob_hash=body.evidence_blob_hash,
+                storage=(
+                    _storage_from_request(request)
+                    if body.evidence_blob_hash is not None
+                    else None
+                ),
+            )
+        except (AssetNotFound, AssetActionNotFound, AssetActionValidationError) as exc:
+            raise _http_for_action_error(exc) from exc
+        return AssetActionResponse.from_view(view)
+
+    @api.delete(
+        "/actions/{action_id}",
+        status_code=status.HTTP_204_NO_CONTENT,
+        operation_id="assets.actions.delete",
+        summary="Delete an asset action",
+        dependencies=[edit_gate],
+    )
+    def delete_recorded_action(
+        action_id: str,
+        ctx: _Ctx,
+        session: _Db,
+    ) -> Response:
+        try:
+            delete_action(session, ctx, action_id)
+        except (AssetNotFound, AssetActionNotFound) as exc:
+            raise _http_for_action_error(exc) from exc
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+    @api.get(
+        "/{asset_id}/documents",
+        response_model=AssetDocumentListResponse,
+        operation_id="assets.documents.list",
+        summary="List asset documents",
+        dependencies=[view_gate],
+    )
+    def documents(
+        asset_id: str,
+        ctx: _Ctx,
+        session: _Db,
+        category: (
+            Literal[
+                "manual",
+                "warranty",
+                "invoice",
+                "receipt",
+                "photo",
+                "certificate",
+                "contract",
+                "permit",
+                "insurance",
+                "other",
+            ]
+            | None
+        ) = Query(default=None),
+    ) -> AssetDocumentListResponse:
+        try:
+            views = list_documents(session, ctx, asset_id, category=category)
+        except (AssetNotFound, AssetDocumentValidationError) as exc:
+            raise _http_for_document_error(exc) from exc
+        return AssetDocumentListResponse(
+            data=[AssetDocumentResponse.from_view(view) for view in views]
+        )
+
+    @api.post(
+        "/{asset_id}/documents",
+        response_model=AssetDocumentResponse,
+        status_code=status.HTTP_201_CREATED,
+        operation_id="assets.documents.upload",
+        summary="Upload an asset document",
+        dependencies=[manage_documents_gate],
+    )
+    async def upload_document(
+        asset_id: str,
+        ctx: _Ctx,
+        session: _Db,
+        storage: _Storage,
+        mime_sniffer: _MimeSniffer,
+        category: Annotated[str, Form()],
+        title: Annotated[str | None, Form(max_length=200)] = None,
+        notes_md: Annotated[str | None, Form(max_length=20_000)] = None,
+        file: Annotated[UploadFile | None, File()] = None,
+    ) -> AssetDocumentResponse:
+        if file is None:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail={"error": "asset_document_file_required"},
+            )
+        declared_type = file.content_type
+        if declared_type is None or declared_type == "":
+            await file.close()
+            raise HTTPException(
+                status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+                detail={"error": "asset_document_content_type_missing"},
+            )
+        try:
+            get_asset(session, ctx, asset_id=asset_id)
+            if category not in ASSET_DOCUMENT_CATEGORIES:
+                raise AssetDocumentValidationError("category", "invalid")
+        except (AssetNotFound, AssetDocumentValidationError) as exc:
+            await file.close()
+            raise _http_for_document_error(exc) from exc
+        payload = await _read_document_capped(file)
+        sniffed_type = _sniff_document_mime(
+            mime_sniffer, payload, declared_type=declared_type
+        )
+        blob_hash = hashlib.sha256(payload).hexdigest()
+        storage.put(blob_hash, io.BytesIO(payload), content_type=sniffed_type)
+        try:
+            view = attach_document(
+                session,
+                ctx,
+                asset_id,
+                blob_hash=blob_hash,
+                filename=file.filename or "upload.bin",
+                category=category,
+                title=title,
+                notes_md=notes_md,
+                storage=storage,
+            )
+        except (AssetNotFound, AssetDocumentValidationError) as exc:
+            raise _http_for_document_error(exc) from exc
+        return AssetDocumentResponse.from_view(view)
+
+    @api.delete(
+        "/documents/{document_id}",
+        status_code=status.HTTP_204_NO_CONTENT,
+        operation_id="assets.documents.delete",
+        summary="Delete an asset document",
+        dependencies=[manage_documents_gate],
+    )
+    def delete_asset_document(
+        document_id: str,
+        ctx: _Ctx,
+        session: _Db,
+    ) -> Response:
+        try:
+            delete_document(session, ctx, document_id)
+        except (AssetNotFound, AssetDocumentNotFound) as exc:
+            raise _http_for_document_error(exc) from exc
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
 
     @api.get(
         "/{asset_id}",
