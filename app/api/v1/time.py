@@ -19,6 +19,8 @@ Routes (cd-whl, cd-31c):
 * ``DELETE /me/leaves/{leave_id}`` — worker cancels their own leave.
 * ``GET /leaves`` — workspace-wide leave queue (manager inbox).
 * ``GET /leaves/{leave_id}`` — read a single leave.
+* ``GET /leaves/{leave_id}/conflicts`` — manager advisory overlap ids.
+* ``POST /leaves/{leave_id}/decision`` — manager approve / reject.
 * ``DELETE /leaves/{leave_id}`` — manager cancel of someone else's leave.
 
 The handlers are thin: unpack the DTO, call the domain service, map
@@ -65,6 +67,8 @@ from app.domain.time.shifts import (
 from app.services.leave import (
     LeaveBoundaryInvalid,
     LeaveCreate,
+    LeaveDecision,
+    LeaveDecisionRequest,
     LeaveKind,
     LeaveKindInvalid,
     LeaveNotFound,
@@ -75,6 +79,8 @@ from app.services.leave import (
     LeaveView,
     cancel_own,
     create_leave,
+    decide_leave,
+    get_conflicts,
     get_leave,
     list_for_user,
     list_for_workspace,
@@ -193,6 +199,23 @@ class LeaveListResponse(BaseModel):
     """
 
     items: list[LeavePayload]
+
+
+class LeaveConflictsPayload(BaseModel):
+    """HTTP projection of advisory leave conflicts."""
+
+    leave_id: str
+    shift_ids: list[str]
+    occurrence_ids: list[str]
+
+
+class LeaveDecisionBody(BaseModel):
+    """Request body for ``POST /leaves/{leave_id}/decision``."""
+
+    model_config = {"extra": "forbid"}
+
+    decision: LeaveDecision
+    rationale_md: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -699,6 +722,63 @@ def get_one_leave(
     try:
         view = get_leave(session, ctx, leave_id=leave_id)
     except (LeaveNotFound, LeavePermissionDenied) as exc:
+        raise _http_for_leave_error(exc) from exc
+    return LeavePayload.from_view(view)
+
+
+@router.get(
+    "/leaves/{leave_id}/conflicts",
+    response_model=LeaveConflictsPayload,
+    operation_id="time.get_leave_conflicts",
+    summary="Return advisory leave overlap ids",
+    openapi_extra={"x-cli": {"group": "time", "verb": "leave-conflicts"}},
+)
+def get_leave_conflicts(
+    leave_id: str,
+    ctx: _Ctx,
+    session: _Db,
+) -> LeaveConflictsPayload:
+    """Return shift/task ids overlapping the target leave window."""
+    try:
+        conflicts = get_conflicts(session, ctx, leave_id=leave_id)
+    except (LeaveNotFound, LeavePermissionDenied) as exc:
+        raise _http_for_leave_error(exc) from exc
+    return LeaveConflictsPayload(
+        leave_id=conflicts.leave_id,
+        shift_ids=list(conflicts.shift_ids),
+        occurrence_ids=list(conflicts.occurrence_ids),
+    )
+
+
+@router.post(
+    "/leaves/{leave_id}/decision",
+    response_model=LeavePayload,
+    operation_id="time.decide_leave",
+    summary="Approve or reject a pending leave",
+    openapi_extra={"x-cli": {"group": "time", "verb": "leave-decide"}},
+)
+def post_decide_leave(
+    leave_id: str,
+    body: LeaveDecisionBody,
+    ctx: _Ctx,
+    session: _Db,
+) -> LeavePayload:
+    """Transition a pending leave to approved or rejected."""
+    try:
+        service_body = LeaveDecisionRequest.model_validate(body.model_dump())
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={"error": "invalid_payload", "message": str(exc)},
+        ) from exc
+
+    try:
+        view = decide_leave(session, ctx, leave_id=leave_id, body=service_body)
+    except (
+        LeaveNotFound,
+        LeaveTransitionForbidden,
+        LeavePermissionDenied,
+    ) as exc:
         raise _http_for_leave_error(exc) from exc
     return LeavePayload.from_view(view)
 

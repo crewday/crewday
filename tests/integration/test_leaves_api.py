@@ -44,10 +44,13 @@ from app.adapters.db.authz.models import RoleGrant
 from app.adapters.db.base import Base
 from app.adapters.db.identity.models import User, canonicalise_email
 from app.adapters.db.session import UnitOfWorkImpl, make_engine
-from app.adapters.db.time.models import Leave
+from app.adapters.db.tasks.models import Occurrence
+from app.adapters.db.time.models import Leave, Shift
 from app.adapters.db.workspace.models import Workspace
 from app.api.deps import current_workspace_context, db_session
 from app.api.v1.time import router as time_router
+from app.events.bus import bus as default_event_bus
+from app.events.types import LeaveDecided
 from app.tenancy.context import ActorGrantRole, WorkspaceContext
 from app.util.ulid import new_ulid
 
@@ -252,6 +255,23 @@ def _audit_actions(
             .order_by(AuditLog.created_at.asc(), AuditLog.id.asc())
         ).all()
     return [r.action for r in rows]
+
+
+def _manager_for_workspace(
+    factory: sessionmaker[Session], *, workspace_id: str
+) -> tuple[TestClient, WorkspaceContext, str]:
+    with factory() as s:
+        manager_id = _bootstrap_user(
+            s, email=f"m-{new_ulid()}@example.com", display_name="Manager"
+        )
+        _grant(s, workspace_id=workspace_id, user_id=manager_id, grant_role="manager")
+        s.commit()
+    ctx = _ctx(workspace_id=workspace_id, actor_id=manager_id, grant_role="manager")
+    return (
+        TestClient(_build_app(factory, ctx), raise_server_exceptions=False),
+        ctx,
+        manager_id,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -663,6 +683,105 @@ class TestManagerCancel:
 
 
 # ---------------------------------------------------------------------------
+# GET /leaves/{id}/conflicts + POST /leaves/{id}/decision
+# ---------------------------------------------------------------------------
+
+
+class TestManagerDecision:
+    def test_conflicts_and_decision_publish_event_once(
+        self,
+        factory: sessionmaker[Session],
+        worker_client: tuple[TestClient, WorkspaceContext, str],
+    ) -> None:
+        worker, worker_ctx, worker_id = worker_client
+        created = worker.post("/me/leaves", json=_leave_body()).json()
+        manager, manager_ctx, _manager_id = _manager_for_workspace(
+            factory, workspace_id=worker_ctx.workspace_id
+        )
+        with factory() as s:
+            shift = Shift(
+                id=new_ulid(),
+                workspace_id=worker_ctx.workspace_id,
+                user_id=worker_id,
+                starts_at=_FUTURE + timedelta(hours=2),
+                ends_at=_FUTURE + timedelta(hours=4),
+                property_id=None,
+                source="manual",
+                notes_md=None,
+                approved_by=None,
+                approved_at=None,
+            )
+            occurrence = Occurrence(
+                id=new_ulid(),
+                workspace_id=worker_ctx.workspace_id,
+                schedule_id=None,
+                template_id=None,
+                property_id=None,
+                assignee_user_id=worker_id,
+                starts_at=_FUTURE + timedelta(hours=5),
+                ends_at=_FUTURE + timedelta(hours=6),
+                scheduled_for_local="2026-04-26T17:00:00",
+                originally_scheduled_for="2026-04-26T17:00:00",
+                state="scheduled",
+                title="linen reset",
+                created_at=_PINNED,
+            )
+            s.add_all([shift, occurrence])
+            s.commit()
+            shift_id = shift.id
+            occurrence_id = occurrence.id
+
+        conflicts = manager.get(f"/leaves/{created['id']}/conflicts")
+        assert conflicts.status_code == 200, conflicts.text
+        assert conflicts.json() == {
+            "leave_id": created["id"],
+            "shift_ids": [shift_id],
+            "occurrence_ids": [occurrence_id],
+        }
+
+        events: list[LeaveDecided] = []
+        default_event_bus.subscribe(LeaveDecided)(events.append)
+        try:
+            decision = manager.post(
+                f"/leaves/{created['id']}/decision",
+                json={"decision": "approved", "rationale_md": "covered"},
+            )
+            replay = manager.post(
+                f"/leaves/{created['id']}/decision",
+                json={"decision": "approved", "rationale_md": "covered"},
+            )
+        finally:
+            default_event_bus._reset_for_tests()
+
+        assert decision.status_code == 200, decision.text
+        assert decision.json()["status"] == "approved"
+        assert decision.json()["decided_by"] == manager_ctx.actor_id
+        assert replay.status_code == 200, replay.text
+        assert len(events) == 1
+        assert events[0].leave_id == created["id"]
+        assert events[0].decision == "approved"
+        assert events[0].conflicting_shift_ids == (shift_id,)
+        assert events[0].conflicting_occurrence_ids == (occurrence_id,)
+        assert _audit_actions(
+            factory, workspace_id=worker_ctx.workspace_id, entity_kind="leave"
+        ) == ["leave.created", "leave.decided"]
+
+    def test_worker_cannot_decide_leave(
+        self,
+        worker_client: tuple[TestClient, WorkspaceContext, str],
+    ) -> None:
+        worker, _ctx, _worker_id = worker_client
+        created = worker.post("/me/leaves", json=_leave_body()).json()
+
+        resp = worker.post(
+            f"/leaves/{created['id']}/decision",
+            json={"decision": "approved"},
+        )
+
+        assert resp.status_code == 403
+
+
+# ---------------------------------------------------------------------------
 # /me/ scope enforcement (a manager's /me/ path cannot touch worker leaves)
 # ---------------------------------------------------------------------------
 
@@ -820,6 +939,8 @@ class TestOpenapiExposure:
         assert "/me/leaves/{leave_id}" in paths
         assert "/leaves" in paths
         assert "/leaves/{leave_id}" in paths
+        assert "/leaves/{leave_id}/conflicts" in paths
+        assert "/leaves/{leave_id}/decision" in paths
         op_ids: set[str] = set()
         for path in paths.values():
             for op in path.values():
@@ -832,6 +953,8 @@ class TestOpenapiExposure:
             "time.cancel_my_leave",
             "time.list_leaves",
             "time.get_leave",
+            "time.get_leave_conflicts",
+            "time.decide_leave",
             "time.cancel_leave",
         }
         assert expected.issubset(op_ids), f"missing: {expected - op_ids}"

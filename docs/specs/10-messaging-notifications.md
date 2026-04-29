@@ -387,7 +387,7 @@ asset.*              created, updated, condition_changed,
 asset_action.*       created, updated, performed,
                      schedule_linked, deleted
 asset_document.*     created, updated, deleted, expiring
-leave.*              requested, approved, rejected
+leave.*              requested, approved, rejected, decided
 availability_override.* created, approved, rejected
 public_holiday.*     created, updated, deleted
 property_closure.*   created, updated, deleted

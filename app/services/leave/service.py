@@ -59,9 +59,10 @@ A follow-up Beads task will file this once the tz-snap helper lands;
 until then the explicit ``UTC-aware datetime`` type on every field
 is the boundary contract.
 
-**Out of scope here.** Approval, rejection, conflict detection,
-and labour-law gate-keeping all live on the manager approval
-service (cd-8pi).
+**Manager decisions.** The cd-8pi slice adds advisory conflict
+detection plus the immutable approve / reject transition. Conflicts
+do not block the decision; downstream assignment and notification
+workers react to the emitted ``leave.decided`` event.
 
 See ``docs/specs/05-employees-and-roles.md`` §"Worker self-service",
 ``docs/specs/09-time-payroll-expenses.md`` §"Leave",
@@ -77,13 +78,15 @@ from datetime import UTC, datetime
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
+from app.adapters.db.tasks.models import Occurrence
 from app.adapters.db.time.models import (
     _LEAVE_KIND_VALUES,
     _LEAVE_STATUS_VALUES,
     Leave,
+    Shift,
 )
 from app.audit import write_audit
 from app.authz import (
@@ -92,13 +95,19 @@ from app.authz import (
     UnknownActionKey,
     require,
 )
+from app.events.bus import EventBus
+from app.events.bus import bus as default_event_bus
+from app.events.types import LeaveDecided
 from app.tenancy import WorkspaceContext
 from app.util.clock import Clock, SystemClock
 from app.util.ulid import new_ulid
 
 __all__ = [
     "LeaveBoundaryInvalid",
+    "LeaveConflictsView",
     "LeaveCreate",
+    "LeaveDecision",
+    "LeaveDecisionRequest",
     "LeaveKind",
     "LeaveKindInvalid",
     "LeaveNotFound",
@@ -109,6 +118,8 @@ __all__ = [
     "LeaveView",
     "cancel_own",
     "create_leave",
+    "decide_leave",
+    "get_conflicts",
     "get_leave",
     "list_for_user",
     "list_for_workspace",
@@ -123,6 +134,7 @@ __all__ = [
 
 LeaveKind = Literal["vacation", "sick", "comp", "other"]
 LeaveStatus = Literal["pending", "approved", "rejected", "cancelled"]
+LeaveDecision = Literal["approved", "rejected"]
 
 
 # ---------------------------------------------------------------------------
@@ -281,6 +293,24 @@ class LeaveView:
     decided_by: str | None
     decided_at: datetime | None
     created_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class LeaveConflictsView:
+    """Advisory manager-inbox conflicts for a pending leave request."""
+
+    leave_id: str
+    shift_ids: tuple[str, ...]
+    occurrence_ids: tuple[str, ...]
+
+
+class LeaveDecisionRequest(BaseModel):
+    """Service-level body for manager approve / reject decisions."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    decision: LeaveDecision
+    rationale_md: str | None = Field(default=None, max_length=_MAX_REASON_LEN)
 
 
 # ---------------------------------------------------------------------------
@@ -456,6 +486,7 @@ def _load_row(
     ctx: WorkspaceContext,
     *,
     leave_id: str,
+    for_update: bool = False,
 ) -> Leave:
     """Load ``leave_id`` scoped to the caller's workspace.
 
@@ -468,6 +499,8 @@ def _load_row(
         Leave.id == leave_id,
         Leave.workspace_id == ctx.workspace_id,
     )
+    if for_update:
+        stmt = stmt.with_for_update()
     row = session.scalars(stmt).one_or_none()
     if row is None:
         raise LeaveNotFound(leave_id)
@@ -553,6 +586,33 @@ def list_for_workspace(
         stmt = stmt.where(Leave.status == status)
     stmt = stmt.order_by(Leave.starts_at.asc(), Leave.id.asc())
     return [_row_to_view(row) for row in session.scalars(stmt).all()]
+
+
+def get_conflicts(
+    session: Session,
+    ctx: WorkspaceContext,
+    *,
+    leave_id: str,
+) -> LeaveConflictsView:
+    """Return shifts and scheduled task occurrences overlapping a leave.
+
+    This is the manager-inbox advisory surface, so it always requires
+    ``leaves.view_others`` even when the target leave happens to belong
+    to the caller. Conflicts do not block decisions; they let the
+    manager make the call with enough context.
+    """
+    try:
+        _require_capability(session, ctx, action_key="leaves.view_others")
+    except PermissionDenied as exc:
+        raise LeavePermissionDenied(str(exc)) from exc
+
+    row = _load_row(session, ctx, leave_id=leave_id)
+    conflicts = _find_conflicts(session, ctx, leave=row)
+    return LeaveConflictsView(
+        leave_id=row.id,
+        shift_ids=conflicts.shift_ids,
+        occurrence_ids=conflicts.occurrence_ids,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -788,6 +848,120 @@ def cancel_own(
         clock=resolved_clock,
     )
     return after
+
+
+def decide_leave(
+    session: Session,
+    ctx: WorkspaceContext,
+    *,
+    leave_id: str,
+    body: LeaveDecisionRequest,
+    clock: Clock | None = None,
+    event_bus: EventBus | None = None,
+) -> LeaveView:
+    """Approve or reject a pending leave request.
+
+    The transition is immutable. A replay of the same terminal decision
+    returns the existing row without writing another audit row or
+    publishing another event; an attempt to change one terminal decision
+    into the other is rejected.
+    """
+    resolved_clock = clock if clock is not None else SystemClock()
+    resolved_bus = event_bus if event_bus is not None else default_event_bus
+    now = resolved_clock.now()
+
+    try:
+        _require_capability(session, ctx, action_key="leaves.edit_others")
+    except PermissionDenied as exc:
+        raise LeavePermissionDenied(str(exc)) from exc
+
+    row = _load_row(session, ctx, leave_id=leave_id, for_update=True)
+    current_status = _narrow_status(row.status)
+    if current_status == body.decision:
+        return _row_to_view(row)
+    if current_status != "pending":
+        raise LeaveTransitionForbidden(
+            f"leave {leave_id!r} is {current_status!r}; terminal leave "
+            "decisions are immutable"
+        )
+
+    conflicts = _find_conflicts(session, ctx, leave=row)
+    before = _row_to_view(row)
+
+    row.status = body.decision
+    row.decided_by = ctx.actor_id
+    row.decided_at = now
+    session.flush()
+    after = _row_to_view(row)
+
+    write_audit(
+        session,
+        ctx,
+        entity_kind="leave",
+        entity_id=row.id,
+        action="leave.decided",
+        diff={
+            "before": _view_to_diff_dict(before),
+            "after": _view_to_diff_dict(after),
+            "rationale_md": body.rationale_md,
+        },
+        clock=resolved_clock,
+    )
+    resolved_bus.publish(
+        LeaveDecided(
+            workspace_id=ctx.workspace_id,
+            actor_id=ctx.actor_id,
+            correlation_id=ctx.audit_correlation_id,
+            occurred_at=now,
+            leave_id=row.id,
+            decision=body.decision,
+            decided_by=ctx.actor_id,
+            decided_at=now,
+            conflicting_shift_ids=conflicts.shift_ids,
+            conflicting_occurrence_ids=conflicts.occurrence_ids,
+        )
+    )
+    return after
+
+
+@dataclass(frozen=True, slots=True)
+class _ConflictIds:
+    shift_ids: tuple[str, ...]
+    occurrence_ids: tuple[str, ...]
+
+
+def _find_conflicts(
+    session: Session,
+    ctx: WorkspaceContext,
+    *,
+    leave: Leave,
+) -> _ConflictIds:
+    """Return assigned work intervals intersecting ``leave``'s window."""
+    shift_rows = session.scalars(
+        select(Shift)
+        .where(
+            Shift.workspace_id == ctx.workspace_id,
+            Shift.user_id == leave.user_id,
+            Shift.starts_at < leave.ends_at,
+            or_(Shift.ends_at.is_(None), Shift.ends_at > leave.starts_at),
+        )
+        .order_by(Shift.starts_at.asc(), Shift.id.asc())
+    ).all()
+    occurrence_rows = session.scalars(
+        select(Occurrence)
+        .where(
+            Occurrence.workspace_id == ctx.workspace_id,
+            Occurrence.assignee_user_id == leave.user_id,
+            Occurrence.state.in_(("scheduled", "pending", "in_progress", "overdue")),
+            Occurrence.starts_at < leave.ends_at,
+            Occurrence.ends_at > leave.starts_at,
+        )
+        .order_by(Occurrence.starts_at.asc(), Occurrence.id.asc())
+    ).all()
+    return _ConflictIds(
+        shift_ids=tuple(row.id for row in shift_rows),
+        occurrence_ids=tuple(row.id for row in occurrence_rows),
+    )
 
 
 # ---------------------------------------------------------------------------

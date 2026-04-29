@@ -58,6 +58,7 @@ __all__ = [
     "ExpenseSubmitted",
     "InventoryItemChanged",
     "IssueReported",
+    "LeaveDecided",
     "LlmAssignmentChanged",
     "NotificationCreated",
     "PayPeriodLocked",
@@ -1468,3 +1469,35 @@ class ApprovalDecided(Event):
     # event can decide whether to drop its inline card without a
     # follow-up REST round-trip.
     for_user_id: str | None
+
+
+@register
+class LeaveDecided(Event):
+    """A manager approved or rejected a leave request.
+
+    Payload is identifier-only plus decision metadata so subscribers
+    can refresh assignment / notification state without receiving the
+    manager's free-text rationale. The rationale stays in the audit row
+    behind the normal per-row authz path.
+
+    Manager-only: the payload includes leave, shift, and occurrence ids
+    for one worker's request. The SSE transport can filter by role or by
+    a single user scope, not by "all managers plus this one worker", so
+    worker notification fanout must happen through a dedicated downstream
+    notification event.
+    """
+
+    name: ClassVar[str] = "leave.decided"
+    allowed_roles: ClassVar[tuple[EventRole, ...]] = ("manager",)
+
+    leave_id: str
+    decision: Literal["approved", "rejected"]
+    decided_by: str
+    decided_at: datetime
+    conflicting_shift_ids: tuple[str, ...]
+    conflicting_occurrence_ids: tuple[str, ...]
+
+    @field_validator("decided_at")
+    @classmethod
+    def _decided_at_is_utc(cls, value: datetime) -> datetime:
+        return _require_aware_utc(value)

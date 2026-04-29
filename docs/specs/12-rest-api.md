@@ -1400,8 +1400,8 @@ PATCH  /time/shifts/{shift_id}     # manager retroactive amend: body ShiftEdit {
 GET    /time/shifts/{shift_id}     # read a single shift; 404 if unknown.
                                    # 200 ShiftPayload.
 
-# Leave requests (cd-31c). State machine: pending -> approved | rejected |
-# cancelled; approval/rejection ships with cd-8pi. The `reason_md` free-text
+# Leave requests (cd-31c/cd-8pi). State machine: pending -> approved |
+# rejected | cancelled. The `reason_md` / decision-rationale free-text
 # field is redacted through the audit writer (`scope="log"`) on every write,
 # per §15 "Audit log" — it never lands in plaintext on disk.
 #
@@ -1431,6 +1431,14 @@ GET    /time/leaves                # ?user_id=…&status=…
                                    # 200 {"items": [LeavePayload, ...]}; 403 forbidden.
 GET    /time/leaves/{leave_id}     # read single; requester or leaves.view_others.
                                    # 200 LeavePayload; 404 not_found; 403 forbidden.
+GET    /time/leaves/{leave_id}/conflicts
+                                   # manager advisory overlap ids for pending decision UI.
+                                   # 200 {leave_id, shift_ids, occurrence_ids}; 403 forbidden.
+POST   /time/leaves/{leave_id}/decision
+                                   # body {decision: approved|rejected, rationale_md?};
+                                   # leaves.edit_others only. Terminal decisions are immutable;
+                                   # replaying the same decision is a no-op 200. Publishes
+                                   # `leave.decided` with conflict ids.
 DELETE /time/leaves/{leave_id}     # manager cancel; requester or leaves.edit_others.
                                    # same state-machine semantics as DELETE /time/me/leaves/{id}.
 
