@@ -285,6 +285,7 @@ class TestDefaultInvalidates:
     def test_known_kind(self) -> None:
         assert _default_invalidates("task.created") == [["tasks"]]
         assert _default_invalidates("shift.ended") == [["shifts"], ["my-schedule"]]
+        assert _default_invalidates("asset.changed") == [["assets"]]
         assert _default_invalidates("chat.message.sent") == [["chat", "channels"]]
         assert _default_invalidates("agent.settings.changed") == [
             ["agent_preferences", "me"],

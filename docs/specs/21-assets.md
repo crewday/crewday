@@ -364,8 +364,11 @@ scan.
 ### Token format
 
 - 12 characters, Crockford base32 (uppercase, no ambiguous chars).
-- Generated at asset creation; immutable thereafter.
-- Unique across the entire database (not scoped to workspace).
+- Generated at asset creation and unique within the asset's workspace.
+- Managers may regenerate a token. Regeneration replaces the
+  `qr_token` on the asset, records an audit row, and invalidates the
+  old token immediately: future scans of the old token return "not
+  found" rather than resolving to the asset.
 
 ### URL pattern
 
@@ -457,6 +460,8 @@ asset.create
 asset.update
 asset.condition_changed
 asset.status_changed
+asset.move
+asset.qr_regenerate
 asset.delete
 asset.restore
 
@@ -481,7 +486,8 @@ Added to the event catalog (§10):
 
 ```
 asset.*               created, updated, condition_changed,
-                      status_changed, deleted, restored
+                      status_changed, moved, qr_regenerated,
+                      deleted, restored
 asset_action.*        created, updated, performed,
                       schedule_linked, deleted
 asset_document.*      created, updated, deleted, expiring
@@ -512,6 +518,9 @@ GET    /assets/{id}                   # includes computed TCO, next_due per acti
 PATCH  /assets/{id}
 DELETE /assets/{id}
 PUT    /assets/{id}/restore
+POST   /assets/{id}/move
+POST   /assets/{id}/regenerate_qr
+GET    /assets/{id}/qr.png
 
 GET    /assets/{id}/actions           # actions for this asset
 POST   /assets/{id}/actions

@@ -91,6 +91,7 @@ dependencies = [
     # tarfile on our runtime does not expose ``w:zst`` yet, so the admin
     # backup command streams tar entries through this package explicitly.
     "zstandard>=0.23",
+    "segno>=1.6.6",
 ]
 
 # ``crewday`` is the sole console-script entry point. The target is

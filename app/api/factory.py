@@ -91,6 +91,7 @@ from app.api.v1 import (
     CONTEXT_ROUTERS,
     STAYS_PUBLIC_ROUTER,
     WORKSPACE_ADMIN_ROUTER,
+    asset_scan_router,
 )
 from app.api.v1.agent import build_agent_router
 from app.api.v1.auth import email_change as email_change_module
@@ -719,7 +720,7 @@ def _mount_context_routers(app: FastAPI, *, settings: Settings) -> None:
     Beads tasks (cd-rpxd, cd-75wp, cd-sn26, ...) fill in the real
     routes without having to re-wire this seam.
 
-    Four non-context routers also mount here alongside the §01
+    Five non-context routers also mount here alongside the §01
     contexts — they're neither bounded contexts nor part of the
     context-map invariant, but they share the workspace or
     deployment URL prefix so keeping them co-located with the
@@ -738,6 +739,9 @@ def _mount_context_routers(app: FastAPI, *, settings: Settings) -> None:
       §12 spec contract pins, NOT under ``/llm``. Carries its own
       ``approvals`` tag so the desk + inline-card endpoints render
       as a distinct Swagger section.
+    * :data:`app.api.v1.asset_scan_router` under
+      ``/w/{slug}/api/v1/asset`` — QR scan alias pinned by §21 so
+      printed labels and the SPA route use singular ``/asset/scan``.
     * :data:`app.api.admin.admin_router` under ``/admin/api/v1`` —
       deployment-scoped admin tree, empty for now and gated by
       the admin authz middleware (cd-jlms) when real routes land.
@@ -750,6 +754,8 @@ def _mount_context_routers(app: FastAPI, *, settings: Settings) -> None:
         # module itself) lets the downstream task choose whether to
         # add sub-prefixes like ``/tasks/{id}/evidence``.
         app.include_router(router, prefix=f"{scoped_prefix}/{context_name}")
+
+    app.include_router(asset_scan_router, prefix=f"{scoped_prefix}/asset")
 
     # Workspace-scoped admin aggregator. Mounted OUTSIDE the
     # ``CONTEXT_ROUTERS`` loop so the §01 13-context invariant stays

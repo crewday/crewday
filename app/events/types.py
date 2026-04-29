@@ -48,6 +48,7 @@ __all__ = [
     "AgentTurnStarted",
     "ApprovalDecided",
     "ApprovalDecision",
+    "AssetChanged",
     "ChatMessageReceived",
     "ChatMessageSent",
     "ExpenseApproved",
@@ -436,6 +437,18 @@ class InventoryItemChanged(Event):
     item_id: str
     movement_id: str
     reason: str
+
+
+@register
+class AssetChanged(Event):
+    """An asset row changed and clients should refresh cached asset data."""
+
+    name: ClassVar[str] = "asset.changed"
+    allowed_roles: ClassVar[tuple[EventRole, ...]] = ("manager", "worker")
+
+    asset_id: str
+    action: str
+    changed_fields: tuple[str, ...]
 
 
 @register

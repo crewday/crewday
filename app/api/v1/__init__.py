@@ -33,6 +33,7 @@ from fastapi import APIRouter
 from .admin import router as _workspace_admin_router
 from .approvals import router as _approvals_router
 from .assets import router as assets_router
+from .assets import scan_router as asset_scan_router
 from .billing import public_router as billing_public_router
 from .billing import router as billing_router
 from .expenses import router as expenses_router
@@ -101,4 +102,5 @@ __all__ = [
     "CONTEXT_ROUTERS",
     "STAYS_PUBLIC_ROUTER",
     "WORKSPACE_ADMIN_ROUTER",
+    "asset_scan_router",
 ]
