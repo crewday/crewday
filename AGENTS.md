@@ -330,13 +330,18 @@ Plain text to the user; CLI handles styling.
   `.playwright-mcp/README.md`). Close the browser
   (`mcp__playwright__browser_close`) when done.
 - **End-to-end Playwright suite (`tests/e2e/`)** runs against the
-  dev compose stack. Bring it up first; the suite skips with a
+  dev compose stack plus the e2e override, which aligns WebAuthn
+  `rp_id` / `public_url` with the loopback origin for Chromium's
+  virtual authenticator. Bring it up first; the suite skips with a
   focused message if `/healthz` is unreachable. Default origin is
-  `http://127.0.0.1:8100` — override via `CREWDAY_E2E_BASE_URL`.
+  `http://localhost:8100` because Chromium rejects IP literals as
+  WebAuthn RP IDs; this still reaches the same 127.0.0.1-bound Vite
+  port. Override via `CREWDAY_E2E_BASE_URL`.
   Browsers must be installed once (`uv run playwright install
   chromium webkit`); WebKit auto-skips on hosts missing libicu74.
   ```
-  docker compose -f mocks/docker-compose.yml up -d
+  docker compose -f mocks/docker-compose.yml \
+      -f mocks/docker-compose.e2e.yml up -d --build
   uv run playwright install chromium webkit
   uv run pytest tests/e2e -v -n0 \
       --tracing=retain-on-failure \

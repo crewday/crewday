@@ -8,7 +8,7 @@ Layered on top of ``pytest-playwright``'s built-in fixtures (``page``,
 cutting concerns the spec calls out:
 
 * **Base URL.** Read from ``CREWDAY_E2E_BASE_URL`` (default
-  ``http://127.0.0.1:8100`` per ``AGENTS.md`` §Environments). The
+  ``http://localhost:8100`` for WebAuthn RP-ID validity). The
   ``base_url`` fixture name is the one ``pytest-playwright`` already
   recognises — exporting it here lets every test reach the dev-stack
   loopback without hard-coding an URL.
@@ -54,13 +54,12 @@ __all__ = [
 ]
 
 
-# ``http://127.0.0.1:8100`` is the loopback published by the
-# ``web-dev`` Vite container in ``mocks/docker-compose.yml`` —
-# AGENTS.md §Environments calls it the canonical dev entry point for
-# scripted verification (the public ``dev.crew.day`` host requires
-# Pangolin badger forward-auth). Override via env var when the
-# operator runs the suite against a non-default stack.
-DEFAULT_BASE_URL: Final[str] = "http://127.0.0.1:8100"
+# The Vite container binds to 127.0.0.1 only, but the e2e suite uses
+# localhost so Chromium can complete WebAuthn registration: IP
+# literals are not valid RP IDs. This is still loopback-only; the
+# public ``dev.crew.day`` host remains blocked by Pangolin badger
+# forward-auth for scripted verification.
+DEFAULT_BASE_URL: Final[str] = "http://localhost:8100"
 ENV_BASE_URL: Final[str] = "CREWDAY_E2E_BASE_URL"
 
 # Where Playwright drops trace.zip / screenshots / videos when its
@@ -119,12 +118,14 @@ def dev_stack_ready(base_url: str) -> str:
             if resp.status != 200:
                 pytest.skip(
                     f"dev stack /healthz returned {resp.status}; "
-                    "run `docker compose -f mocks/docker-compose.yml up -d`"
+                    "run `docker compose -f mocks/docker-compose.yml "
+                    "-f mocks/docker-compose.e2e.yml up -d --build`"
                 )
     except (TimeoutError, urllib.error.URLError, ConnectionError) as exc:
         pytest.skip(
             f"dev stack unreachable at {base_url} ({exc!r}); "
-            "run `docker compose -f mocks/docker-compose.yml up -d`"
+            "run `docker compose -f mocks/docker-compose.yml "
+            "-f mocks/docker-compose.e2e.yml up -d --build`"
         )
     return base_url
 

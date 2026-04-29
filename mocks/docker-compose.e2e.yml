@@ -1,0 +1,13 @@
+# Loopback WebAuthn override for the Playwright e2e suite.
+#
+# The normal dev stack advertises https://dev.crew.day /
+# rp_id=dev.crew.day because that is the remote entry point. Playwright
+# drives the same Vite container through http://localhost:8100, and
+# WebAuthn requires the advertised RP ID to match the browser origin.
+# Use localhost rather than an IP literal because Chromium rejects IP
+# addresses as RP IDs during navigator.credentials.create().
+services:
+  app-api:
+    environment:
+      CREWDAY_PUBLIC_URL: "http://localhost:8100"
+      CREWDAY_WEBAUTHN_RP_ID: "localhost"

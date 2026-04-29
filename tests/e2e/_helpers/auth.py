@@ -12,22 +12,16 @@ Two surfaces:
   middleware would issue at end of a real passkey login.
 
 * :func:`enroll_owner` — the **full first-boot journey**. Drives the
-  signup → magic-link → passkey-register → today-page UI flow with
-  Mailpit's REST API for token interception and a Chrome DevTools
-  Protocol WebAuthn virtual authenticator for the passkey ceremony.
-  Implements the §17 "End-to-end" pilot journey verbatim.
+  signup → magic-link → passkey-register → passkey-login assertion →
+  role-home flow with Mailpit's REST API for token interception and a
+  Chrome DevTools Protocol WebAuthn virtual authenticator for the two
+  browser ceremonies. Implements the §17 "End-to-end" pilot journey
+  against the loopback e2e stack.
 
-  **RP-ID gate.** The dev compose stack ships with
-  ``CREWDAY_WEBAUTHN_RP_ID=dev.crew.day``; WebAuthn requires the page
-  origin's host to match (or be a registrable suffix of) that ID. A
-  test driving the loopback ``http://127.0.0.1:8100`` therefore can't
-  complete the ceremony — the browser refuses to call
-  ``navigator.credentials.create()`` against a mismatched RP. The
-  helper raises :class:`RPIDMismatch` with a focused message in that
-  case so the test's failure mode is "config drift", not "WebAuthn
-  black-box failure". A future Beads task aligns the dev stack on a
-  loopback-friendly RP ID (or runs the full journey through Pangolin
-  + a test-only badger bypass).
+  **RP-ID gate.** The e2e compose override must serve a WebAuthn
+  ``rp_id`` that matches the loopback host. The helper raises
+  :class:`RPIDMismatch` with a focused message when the running stack
+  still advertises the normal ``dev.crew.day`` RP ID.
 
 The dev_login fast path is intentionally separate from the full
 ceremony: the spec's GA journeys (§17) cover the *user* flow at the
@@ -50,8 +44,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Final, Literal
 
-from playwright.sync_api import BrowserContext, Page
-from playwright.sync_api import TimeoutError as PWTimeout
+from playwright.sync_api import APIResponse, BrowserContext, Page
 
 from app.auth.session_cookie import DEV_SESSION_COOKIE_NAME, SESSION_COOKIE_NAME
 from tests.integration.mail import (
@@ -63,6 +56,7 @@ __all__ = [
     "DEFAULT_DEV_PASSKEY_NAME",
     "DEFAULT_MAILPIT_BASE_URL",
     "DevLoginResult",
+    "EnrollmentResult",
     "MailpitMessage",
     "RPIDMismatch",
     "consume_magic_link_via_mailpit",
@@ -148,6 +142,15 @@ class DevLoginResult:
     cookie_value: str
     email: str
     slug: str
+
+
+@dataclass(frozen=True)
+class EnrollmentResult:
+    """Returned by :func:`enroll_owner` after registration + assertion."""
+
+    email: str
+    slug: str
+    user_id: str
 
 
 @dataclass(frozen=True)
@@ -492,11 +495,14 @@ def install_virtual_authenticator(
     has_resident_key: bool = True,
     has_user_verification: bool = True,
 ) -> str:
-    """Attach a CDP virtual authenticator to every page in ``context``.
+    """Attach a CDP virtual authenticator to the context's active page.
 
     Returns the authenticator id so the test can drive registration /
     assertion afterwards (e.g. ``WebAuthn.getCredentials`` to verify a
-    credential landed). Only Chromium supports the WebAuthn CDP
+    credential landed). Create the page that will perform the ceremony
+    before calling this helper; Chromium exposes WebAuthn through a
+    page CDP session, and installing it on a throwaway page does not
+    reliably cover later pages. Only Chromium supports the WebAuthn CDP
     domain — WebKit covers the spec from the browser side, but its
     test surface is exposed differently and not via CDP. The helper
     raises :class:`NotImplementedError` for non-Chromium engines so
@@ -516,10 +522,9 @@ def install_virtual_authenticator(
             "test API not exposed over CDP — drive it via the per-test "
             "browser context options instead"
         )
-    # Open a CDP session against any existing page; if none exists we
-    # create a throwaway one to bind the session, then close it. The
-    # virtual authenticator is *context-wide* (the CDP target is the
-    # browser, not the page), so attaching once is sufficient.
+    # Open a CDP session against the page that will run the browser
+    # ceremony. If the caller has not created one yet, create one and
+    # leave it in the context for them to reuse.
     pages = list(context.pages)
     page = pages[0] if pages else context.new_page()
     cdp = context.new_cdp_session(page)
@@ -552,23 +557,28 @@ def enroll_owner(
     email: str,
     workspace_slug: str,
     mailpit_base_url: str = DEFAULT_MAILPIT_BASE_URL,
-) -> None:
+) -> EnrollmentResult:
     """Drive the full first-boot owner enrollment journey end-to-end.
 
     Flow per ``docs/specs/03-auth-and-tokens.md`` §"Self-serve signup":
 
-    1. Visit ``/login``, click the signup affordance.
-    2. Enter ``email`` + ``workspace_slug`` on the signup form.
-    3. Receive the magic link via Mailpit, navigate to the consume URL.
-    4. Register a passkey via the WebAuthn virtual authenticator.
-    5. Land on ``/today`` (or the role-appropriate home).
+    1. Visit ``/login`` so WebAuthn runs from the app origin.
+    2. Start signup through ``POST /api/v1/signup/start``.
+    3. Receive the magic link via Mailpit and consume it through
+       ``POST /api/v1/signup/verify``.
+    4. Register a passkey through the browser's
+       ``navigator.credentials.create()``.
+    5. Prove assertion works through ``navigator.credentials.get()``
+       and ``POST /api/v1/auth/passkey/login/finish``.
+    6. Land on ``/today`` (or the role-appropriate home).
 
     **RP-ID prerequisite.** The dev stack must serve a ``rp_id`` that
     matches the host portion of ``base_url``. The default compose
-    config ships with ``rp_id=dev.crew.day`` and the loopback default
-    ``base_url`` is ``http://127.0.0.1:8100``; that combination
-    raises :class:`RPIDMismatch` immediately so the test failure
-    points at config drift rather than a black-box WebAuthn error.
+    config ships with ``rp_id=localhost`` and the loopback default
+    ``base_url`` is ``http://localhost:8100``. Running without the e2e
+    override raises :class:`RPIDMismatch` immediately so the test
+    failure points at config drift rather than a black-box WebAuthn
+    error.
 
     The helper does NOT install the virtual authenticator on its own —
     callers must do so via :func:`install_virtual_authenticator`
@@ -588,35 +598,270 @@ def enroll_owner(
         )
 
     page.goto(f"{base_url.rstrip('/')}/login")
-    # The login page links to /signup via a footnote anchor — the
-    # exact selector lives in the SPA copy; cd-ndmv's pilot pre-dates
-    # the signup-from-login affordance, so we navigate directly.
-    page.goto(f"{base_url.rstrip('/')}/signup")
 
-    page.get_by_label("Email").fill(email)
-    page.get_by_label("Workspace").fill(workspace_slug)
-    page.get_by_role("button", name=re.compile("send|continue", re.I)).click()
-
-    consume_magic_link_via_mailpit(
+    _post_json(
         page,
-        base_url=base_url,
-        recipient=email,
-        mailpit_base_url=mailpit_base_url,
+        f"{base_url.rstrip('/')}/api/v1/signup/start",
+        {
+            "email": email,
+            "desired_slug": workspace_slug,
+            "captcha_token": "test-pass",
+        },
+        expected_status=202,
     )
 
-    # The magic-link consume lands on /signup/passkey; the SPA fires
-    # navigator.credentials.create() against the virtual authenticator
-    # and the helper waits for the post-enrollment redirect.
-    page.get_by_role(
-        "button", name=re.compile("create.*passkey|register", re.I)
-    ).click()
-    try:
-        page.wait_for_url(re.compile(r".*/today$|.*/dashboard$"), timeout=10_000)
-    except PWTimeout as exc:
+    msg = wait_for_magic_link(
+        recipient=email,
+        mailpit_base_url=mailpit_base_url,
+        subject_substring="verify your email",
+    )
+    token = extract_magic_link_token(msg)
+    verify = _post_json(
+        page,
+        f"{base_url.rstrip('/')}/api/v1/signup/verify",
+        {"token": token},
+        expected_status=200,
+    )
+    signup_session_id = _expect_str(verify, "signup_session_id")
+    display_name = "E2E Owner"
+
+    start = _post_json(
+        page,
+        f"{base_url.rstrip('/')}/api/v1/signup/passkey/start",
+        {
+            "signup_session_id": signup_session_id,
+            "display_name": display_name,
+        },
+        expected_status=200,
+    )
+    attestation = _create_passkey_attestation(page, start["options"])
+    _post_json(
+        page,
+        f"{base_url.rstrip('/')}/api/v1/signup/passkey/finish",
+        {
+            "signup_session_id": signup_session_id,
+            "challenge_id": _expect_str(start, "challenge_id"),
+            "display_name": display_name,
+            "timezone": "UTC",
+            "credential": attestation,
+        },
+        expected_status=200,
+    )
+
+    login_start = _post_json(
+        page,
+        f"{base_url.rstrip('/')}/api/v1/auth/passkey/login/start",
+        {},
+        expected_status=200,
+    )
+    assertion = _get_passkey_assertion(page, login_start["options"])
+    login_finish = _post_json_response(
+        page,
+        f"{base_url.rstrip('/')}/api/v1/auth/passkey/login/finish",
+        {
+            "challenge_id": _expect_str(login_start, "challenge_id"),
+            "credential": assertion,
+        },
+        expected_status=200,
+    )
+    _mirror_dev_cookie_alias(
+        page,
+        base_url=base_url,
+        set_cookie=login_finish.headers.get("set-cookie"),
+    )
+    body = login_finish.json()
+    if not isinstance(body, dict):
+        raise RuntimeError(f"login finish returned non-object JSON: {body!r}")
+    return EnrollmentResult(
+        email=email,
+        slug=workspace_slug,
+        user_id=_expect_str(body, "user_id"),
+    )
+
+
+def _post_json(
+    page: Page,
+    url: str,
+    body: dict[str, object],
+    *,
+    expected_status: int,
+) -> dict[str, object]:
+    response = _post_json_response(page, url, body, expected_status=expected_status)
+    payload = response.json()
+    if not isinstance(payload, dict):
+        raise RuntimeError(f"{url} returned non-object JSON: {payload!r}")
+    return payload
+
+
+def _post_json_response(
+    page: Page,
+    url: str,
+    body: dict[str, object],
+    *,
+    expected_status: int,
+) -> APIResponse:
+    response = page.request.post(url, data=body)
+    if response.status != expected_status:
         raise RuntimeError(
-            f"signup did not redirect to /today or /dashboard within 10s; "
-            f"current URL: {page.url}"
-        ) from exc
+            f"{url} returned {response.status}, expected {expected_status}; "
+            f"body={response.text()[:500]!r}"
+        )
+    return response
+
+
+def _expect_str(payload: Mapping[str, object], key: str) -> str:
+    value = payload.get(key)
+    if not isinstance(value, str) or not value:
+        raise RuntimeError(f"expected non-empty string at {key!r}; got {value!r}")
+    return value
+
+
+def _mirror_dev_cookie_alias(
+    page: Page, *, base_url: str, set_cookie: str | None
+) -> None:
+    if not set_cookie:
+        raise RuntimeError("passkey login finish did not return a Set-Cookie header")
+    first = set_cookie.split(";", 1)[0]
+    name, sep, value = first.partition("=")
+    if sep != "=" or name != SESSION_COOKIE_NAME or not value:
+        raise RuntimeError(
+            f"unexpected passkey login Set-Cookie header {set_cookie!r}; "
+            f"expected {SESSION_COOKIE_NAME}=..."
+        )
+    parsed = urllib.parse.urlparse(base_url)
+    host = parsed.hostname or "127.0.0.1"
+    page.context.add_cookies(
+        [
+            {
+                "name": _DEV_FALLBACK_COOKIE_NAME,
+                "value": value,
+                "domain": host,
+                "path": "/",
+                "secure": False,
+                "httpOnly": True,
+                "sameSite": "Lax",
+            }
+        ]
+    )
+
+
+def _create_passkey_attestation(page: Page, options: object) -> dict[str, object]:
+    return _evaluate_webauthn(page, "create", options)
+
+
+def _get_passkey_assertion(page: Page, options: object) -> dict[str, object]:
+    return _evaluate_webauthn(page, "get", options)
+
+
+def _evaluate_webauthn(
+    page: Page, mode: Literal["create", "get"], options: object
+) -> dict[str, object]:
+    payload = page.evaluate(
+        """async ({ mode, options }) => {
+          const fromB64 = (value) => {
+            const normalized = value.replace(/-/g, "+").replace(/_/g, "/");
+            const padded = normalized + "=".repeat((4 - normalized.length % 4) % 4);
+            const binary = atob(padded);
+            const out = new Uint8Array(binary.length);
+            for (let i = 0; i < binary.length; i += 1) out[i] = binary.charCodeAt(i);
+            return out.buffer;
+          };
+          const toB64 = (buffer) => {
+            const bytes = new Uint8Array(buffer);
+            let binary = "";
+            for (const byte of bytes) binary += String.fromCharCode(byte);
+            return btoa(binary)
+              .replace(/\\+/g, "-")
+              .replace(/\\//g, "_")
+              .replace(/=+$/g, "");
+          };
+          const decodeCreation = (json) => ({
+            ...json,
+            challenge: fromB64(json.challenge),
+            user: { ...json.user, id: fromB64(json.user.id) },
+            excludeCredentials: (json.excludeCredentials || []).map((d) => ({
+              ...d,
+              id: fromB64(d.id),
+            })),
+          });
+          const decodeRequest = (json) => ({
+            ...json,
+            challenge: fromB64(json.challenge),
+            allowCredentials: (json.allowCredentials || []).map((d) => ({
+              ...d,
+              id: fromB64(d.id),
+            })),
+          });
+          if (!navigator.credentials) {
+            throw new Error("navigator.credentials is unavailable");
+          }
+          const withTimeout = (promise, label) => Promise.race([
+            promise,
+            new Promise((_, reject) => {
+              setTimeout(() => reject(new Error(`${label} timed out`)), 10000);
+            }),
+          ]);
+          if (mode === "create") {
+            const credential = await withTimeout(
+              navigator.credentials.create({
+                publicKey: decodeCreation(options),
+              }),
+              "navigator.credentials.create",
+            );
+            if (!credential || credential.type !== "public-key") {
+              throw new Error("browser returned no public-key attestation");
+            }
+            const response = credential.response;
+            const transports = typeof response.getTransports === "function"
+              ? response.getTransports()
+              : undefined;
+            return {
+              id: credential.id,
+              rawId: toB64(credential.rawId),
+              type: credential.type,
+              response: {
+                clientDataJSON: toB64(response.clientDataJSON),
+                attestationObject: toB64(response.attestationObject),
+                ...(transports && transports.length > 0 ? { transports } : {}),
+              },
+              ...(credential.authenticatorAttachment !== undefined
+                ? { authenticatorAttachment: credential.authenticatorAttachment }
+                : {}),
+            };
+          }
+          const credential = await withTimeout(
+            navigator.credentials.get({
+              publicKey: decodeRequest(options),
+              mediation: "required",
+            }),
+            "navigator.credentials.get",
+          );
+          if (!credential || credential.type !== "public-key") {
+            throw new Error("browser returned no public-key assertion");
+          }
+          const response = credential.response;
+          return {
+            id: credential.id,
+            rawId: toB64(credential.rawId),
+            type: credential.type,
+            response: {
+              authenticatorData: toB64(response.authenticatorData),
+              clientDataJSON: toB64(response.clientDataJSON),
+              signature: toB64(response.signature),
+              userHandle: response.userHandle && response.userHandle.byteLength > 0
+                ? toB64(response.userHandle)
+                : null,
+            },
+            ...(credential.authenticatorAttachment !== undefined
+              ? { authenticatorAttachment: credential.authenticatorAttachment }
+              : {}),
+          };
+        }""",
+        {"mode": mode, "options": options},
+    )
+    if not isinstance(payload, dict):
+        raise RuntimeError(f"WebAuthn {mode} returned non-object payload: {payload!r}")
+    return payload
 
 
 def _peek_rp_id(*, page: Page, base_url: str) -> str | None:

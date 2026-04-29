@@ -184,9 +184,16 @@ comment).
      payslip issuance with reimbursement.
   5. Agent drives a task lifecycle via the CLI; action requiring
      approval is queued and approved.
-- Passkey ceremonies are exercised via
+- Passkey ceremonies are exercised via Chromium's
   [WebAuthn virtual authenticator](https://playwright.dev/docs/api/
-  class-cdpsession) in both Chromium and WebKit.
+  class-cdpsession). The e2e compose override aligns
+  `CREWDAY_PUBLIC_URL` / `CREWDAY_WEBAUTHN_RP_ID` with
+  `http://localhost:8100` so the browser origin satisfies WebAuthn's
+  RP-ID rule. The e2e stack remains bound to loopback; `localhost` is
+  used because Chromium rejects IP literals as RP IDs. WebKit remains
+  in the authenticated route smoke matrix, but passkey ceremony
+  coverage is Chromium-only until a WebKit virtual-authenticator
+  driver exists in the suite.
 - **360 px viewport sitemap** (§14 "Native wrapper readiness"): the
   full authenticated sitemap — worker + manager shells — is walked
   at a 360×780 viewport and fails on any horizontal scroll, any
