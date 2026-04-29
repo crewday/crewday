@@ -94,6 +94,7 @@ const BACKEND =
 const API_PATHS = [
   "/api",
   "/admin/api",
+  "/q",
   "/w",
   "/events",
   "/switch",

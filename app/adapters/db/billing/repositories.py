@@ -44,6 +44,7 @@ from app.domain.billing.work_orders import (
     WorkOrderRow,
     WorkOrderShiftRow,
 )
+from app.tenancy import tenant_agnostic
 
 __all__ = [
     "SqlAlchemyOrganizationRepository",
@@ -788,7 +789,9 @@ class SqlAlchemyQuoteRepository(QuoteRepository):
         stmt = select(Quote).where(Quote.id == quote_id)
         if for_update:
             stmt = stmt.with_for_update()
-        row = self._session.scalars(stmt).one_or_none()
+        # justification: public quote-token routes have no workspace request context.
+        with tenant_agnostic():
+            row = self._session.scalars(stmt).one_or_none()
         return _to_quote_row(row) if row is not None else None
 
     def list(
@@ -819,11 +822,13 @@ class SqlAlchemyQuoteRepository(QuoteRepository):
         quote_id: str,
         fields: Mapping[str, object | None],
     ) -> QuoteRow:
-        row = self._session.scalars(
-            select(Quote).where(
-                Quote.workspace_id == workspace_id, Quote.id == quote_id
-            )
-        ).one()
+        # justification: public quote-token decisions update by explicit workspace_id.
+        with tenant_agnostic():
+            row = self._session.scalars(
+                select(Quote).where(
+                    Quote.workspace_id == workspace_id, Quote.id == quote_id
+                )
+            ).one()
         try:
             with self._session.begin_nested():
                 for key, value in fields.items():

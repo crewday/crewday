@@ -70,6 +70,7 @@ const MOCKS_BACKEND = process.env.VITE_MOCKS_BACKEND_URL ?? null;
 const API_PATHS = [
   "/api",
   "/admin/api",
+  "/q",
   "/w",
   "/events",
   "/switch",
