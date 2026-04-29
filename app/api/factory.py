@@ -86,6 +86,7 @@ from app.api.middleware import (
 from app.api.transport.sse import router as sse_router
 from app.api.v1 import (
     APPROVALS_ROUTER,
+    BILLING_PUBLIC_ROUTER,
     CONTEXT_ROUTERS,
     STAYS_PUBLIC_ROUTER,
     WORKSPACE_ADMIN_ROUTER,
@@ -757,6 +758,7 @@ def _mount_context_routers(app: FastAPI, *, settings: Settings) -> None:
     # tenancy middleware does not require a workspace session before
     # the signed guest token can be validated.
     app.include_router(STAYS_PUBLIC_ROUTER, prefix="/api/v1/stays")
+    app.include_router(BILLING_PUBLIC_ROUTER)
 
     # Embedded employee / manager agent chat endpoints. Kept outside
     # ``CONTEXT_ROUTERS`` because the URL contract is the flat

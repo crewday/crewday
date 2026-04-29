@@ -33,6 +33,7 @@ from fastapi import APIRouter
 from .admin import router as _workspace_admin_router
 from .approvals import router as _approvals_router
 from .assets import router as assets_router
+from .billing import public_router as billing_public_router
 from .billing import router as billing_router
 from .expenses import router as expenses_router
 from .identity import router as identity_router
@@ -92,9 +93,11 @@ WORKSPACE_ADMIN_ROUTER: APIRouter = _workspace_admin_router
 APPROVALS_ROUTER: APIRouter = _approvals_router
 
 STAYS_PUBLIC_ROUTER: APIRouter = stays_public_router
+BILLING_PUBLIC_ROUTER: APIRouter = billing_public_router
 
 __all__ = [
     "APPROVALS_ROUTER",
+    "BILLING_PUBLIC_ROUTER",
     "CONTEXT_ROUTERS",
     "STAYS_PUBLIC_ROUTER",
     "WORKSPACE_ADMIN_ROUTER",

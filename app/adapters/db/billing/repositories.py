@@ -23,8 +23,9 @@ from app.domain.billing.organizations import (
     OrganizationRepository,
     OrganizationRow,
 )
+from app.domain.billing.quotes import QuoteInvalid, QuoteRepository, QuoteRow
 
-__all__ = ["SqlAlchemyOrganizationRepository"]
+__all__ = ["SqlAlchemyOrganizationRepository", "SqlAlchemyQuoteRepository"]
 
 
 def _as_utc(value: datetime) -> datetime:
@@ -254,3 +255,139 @@ class SqlAlchemyOrganizationRepository(OrganizationRepository):
             .where(model.workspace_id == workspace_id, column == organization_id)
         )
         return int(count or 0)
+
+
+def _to_quote_row(row: Quote) -> QuoteRow:
+    return QuoteRow(
+        id=row.id,
+        workspace_id=row.workspace_id,
+        organization_id=row.organization_id,
+        property_id=row.property_id,
+        title=row.title,
+        body_md=row.body_md,
+        total_cents=row.total_cents,
+        currency=row.currency,
+        status=row.status,
+        sent_at=_as_utc_optional(row.sent_at),
+        decided_at=_as_utc_optional(row.decided_at),
+    )
+
+
+class SqlAlchemyQuoteRepository(QuoteRepository):
+    """SA-backed quote repository."""
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    @property
+    def session(self) -> Session:
+        return self._session
+
+    def get_workspace_default_currency(self, *, workspace_id: str) -> str | None:
+        return self._session.scalar(
+            select(Workspace.default_currency).where(Workspace.id == workspace_id)
+        )
+
+    def organization_contact_email(
+        self, *, workspace_id: str, organization_id: str
+    ) -> str | None:
+        return self._session.scalar(
+            select(Organization.contact_email).where(
+                Organization.workspace_id == workspace_id,
+                Organization.id == organization_id,
+                Organization.archived_at.is_(None),
+            )
+        )
+
+    def insert(
+        self,
+        *,
+        quote_id: str,
+        workspace_id: str,
+        organization_id: str,
+        property_id: str,
+        title: str,
+        body_md: str,
+        total_cents: int,
+        currency: str,
+        status: str,
+    ) -> QuoteRow:
+        row = Quote(
+            id=quote_id,
+            workspace_id=workspace_id,
+            organization_id=organization_id,
+            property_id=property_id,
+            title=title,
+            body_md=body_md,
+            total_cents=total_cents,
+            currency=currency,
+            status=status,
+        )
+        try:
+            with self._session.begin_nested():
+                self._session.add(row)
+                self._session.flush()
+        except IntegrityError as exc:
+            raise QuoteInvalid("quote references an unknown billing artifact") from exc
+        return _to_quote_row(row)
+
+    def get(
+        self, *, workspace_id: str, quote_id: str, for_update: bool = False
+    ) -> QuoteRow | None:
+        stmt = select(Quote).where(
+            Quote.workspace_id == workspace_id,
+            Quote.id == quote_id,
+        )
+        if for_update:
+            stmt = stmt.with_for_update()
+        row = self._session.scalars(stmt).one_or_none()
+        return _to_quote_row(row) if row is not None else None
+
+    def get_public(self, *, quote_id: str, for_update: bool = False) -> QuoteRow | None:
+        stmt = select(Quote).where(Quote.id == quote_id)
+        if for_update:
+            stmt = stmt.with_for_update()
+        row = self._session.scalars(stmt).one_or_none()
+        return _to_quote_row(row) if row is not None else None
+
+    def list(
+        self,
+        *,
+        workspace_id: str,
+        organization_id: str | None,
+        property_id: str | None,
+        status: str | None,
+    ) -> Sequence[QuoteRow]:
+        stmt = (
+            select(Quote)
+            .where(Quote.workspace_id == workspace_id)
+            .order_by(Quote.id.asc())
+        )
+        if organization_id is not None:
+            stmt = stmt.where(Quote.organization_id == organization_id)
+        if property_id is not None:
+            stmt = stmt.where(Quote.property_id == property_id)
+        if status is not None:
+            stmt = stmt.where(Quote.status == status)
+        return [_to_quote_row(row) for row in self._session.scalars(stmt).all()]
+
+    def update_fields(
+        self,
+        *,
+        workspace_id: str,
+        quote_id: str,
+        fields: Mapping[str, object | None],
+    ) -> QuoteRow:
+        row = self._session.scalars(
+            select(Quote).where(
+                Quote.workspace_id == workspace_id, Quote.id == quote_id
+            )
+        ).one()
+        try:
+            with self._session.begin_nested():
+                for key, value in fields.items():
+                    setattr(row, key, value)
+                self._session.flush()
+        except IntegrityError as exc:
+            raise QuoteInvalid("quote references an unknown billing artifact") from exc
+        return _to_quote_row(row)
