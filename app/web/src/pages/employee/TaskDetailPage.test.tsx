@@ -141,7 +141,7 @@ afterEach(() => {
 describe("TaskDetailPage", () => {
   it("renders the mock detail structure from the current task, property, evidence, and comments APIs", async () => {
     const env = installFetch({
-      "/api/v1/tasks/t1": [
+      "/api/v1/tasks/t1/detail": [
         {
           body: baseTask({
             property_id: "p1",
@@ -201,7 +201,7 @@ describe("TaskDetailPage", () => {
       expect(screen.getByText("linen")).toBeInTheDocument();
       expect(screen.getByText("Fresh towels are low.")).toBeInTheDocument();
       expect(screen.getByRole("button", { name: /add photo to complete/i })).toBeDisabled();
-      expect(env.calls.some((call) => call.url.endsWith("/w/acme/api/v1/tasks/t1"))).toBe(true);
+      expect(env.calls.some((call) => call.url.endsWith("/w/acme/api/v1/tasks/t1/detail"))).toBe(true);
     } finally {
       env.restore();
     }
@@ -209,7 +209,7 @@ describe("TaskDetailPage", () => {
 
   it("uploads photo evidence with an optimistic preview and completes with the returned evidence id", async () => {
     const env = installFetch({
-      "/api/v1/tasks/t1": [
+      "/api/v1/tasks/t1/detail": [
         { body: baseTask() },
         { body: baseTask({ state: "done" }) },
       ],
@@ -290,7 +290,7 @@ describe("TaskDetailPage", () => {
 
   it("does not treat a failed optimistic photo upload as completion evidence", async () => {
     const env = installFetch({
-      "/api/v1/tasks/t1": [{ body: baseTask() }],
+      "/api/v1/tasks/t1/detail": [{ body: baseTask() }],
       "/api/v1/tasks/t1/evidence": [
         { body: emptyEvidence() },
         {
@@ -320,12 +320,14 @@ describe("TaskDetailPage", () => {
     }
   });
 
-  it("renders returned checklist rows read-only until the backend exposes a checklist mutation route", async () => {
+  it("toggles returned checklist rows through the checklist mutation route", async () => {
     const env = installFetch({
-      "/api/v1/tasks/t1": [
+      "/api/v1/tasks/t1/detail": [
         {
-          body: baseTask({
-            photo_evidence: "disabled",
+          body: {
+            task: baseTask({
+              photo_evidence: "disabled",
+            }),
             checklist: [
               {
                 id: "ci1",
@@ -334,7 +336,39 @@ describe("TaskDetailPage", () => {
                 checked: false,
               },
             ],
-          }),
+            property: null,
+            instructions: [],
+            inventory_effects: [],
+          },
+        },
+        {
+          body: {
+            task: baseTask({
+              photo_evidence: "disabled",
+            }),
+            checklist: [
+              {
+                id: "ci1",
+                text: "Check under the bed",
+                required: true,
+                checked: true,
+              },
+            ],
+            property: null,
+            instructions: [],
+            inventory_effects: [],
+          },
+        },
+      ],
+      "/api/v1/tasks/t1/checklist/ci1": [
+        {
+          body: {
+            id: "ci1",
+            text: "Check under the bed",
+            required: true,
+            checked: true,
+            done: true,
+          },
         },
       ],
       "/api/v1/tasks/t1/evidence": [{ body: emptyEvidence() }],
@@ -348,7 +382,14 @@ describe("TaskDetailPage", () => {
       fireEvent.click(item);
 
       expect(screen.getByRole("button", { name: /mark done/i })).not.toBeDisabled();
-      expect(env.calls.some((call) => call.url.includes("/checklist/"))).toBe(false);
+      await waitFor(() => {
+        expect(env.calls.some((call) => call.url.endsWith("/api/v1/tasks/t1/checklist/ci1"))).toBe(true);
+      });
+      const checklistCall = env.calls.find((call) =>
+        call.url.endsWith("/api/v1/tasks/t1/checklist/ci1"),
+      );
+      expect(checklistCall?.init.method).toBe("PATCH");
+      expect(checklistCall?.init.body).toBe(JSON.stringify({ checked: true }));
     } finally {
       env.restore();
     }
@@ -356,7 +397,7 @@ describe("TaskDetailPage", () => {
 
   it("posts chat messages through the task comments endpoint", async () => {
     const env = installFetch({
-      "/api/v1/tasks/t1": [{ body: baseTask({ photo_evidence: "disabled" }) }],
+      "/api/v1/tasks/t1/detail": [{ body: baseTask({ photo_evidence: "disabled" }) }],
       "/api/v1/tasks/t1/evidence": [{ body: emptyEvidence() }],
       "/api/v1/tasks/t1/comments": [
         { body: emptyComments() },
@@ -414,7 +455,7 @@ describe("TaskDetailPage", () => {
 
   it("renders an inline error state without navigating during render", async () => {
     const env = installFetch({
-      "/api/v1/tasks/t1": [
+      "/api/v1/tasks/t1/detail": [
         {
           status: 404,
           body: {

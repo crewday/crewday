@@ -39,8 +39,9 @@ from fastapi.testclient import TestClient
 from sqlalchemy import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
+from app.adapters.db.instructions.models import Instruction, InstructionVersion
 from app.adapters.db.places.models import Area, Property, PropertyWorkspace, Unit
-from app.adapters.db.tasks.models import Occurrence
+from app.adapters.db.tasks.models import ChecklistItem, Occurrence
 from app.adapters.db.workspace.models import WorkRole
 from app.adapters.storage.mime import FiletypeMimeSniffer
 from app.adapters.storage.ports import MimeSniffer
@@ -826,6 +827,221 @@ class TestTasksListing:
             r = client.get(f"/api/v1/tasks/{seeded['foreign_task_id']}")
             assert r.status_code == 404
             assert r.json()["detail"]["error"] == "task_not_found"
+
+    def test_task_detail_includes_property_instructions_and_runtime_checklist(
+        self,
+        session_factory: sessionmaker[Session],
+        seeded: dict[str, Any],
+    ) -> None:
+        instruction_id = new_ulid()
+        version_id = new_ulid()
+        checklist_id = new_ulid()
+        with session_factory() as s, tenant_agnostic():
+            task = s.get(Occurrence, seeded["task_id"])
+            assert task is not None
+            task.linked_instruction_ids = [instruction_id]
+            instruction = Instruction(
+                id=instruction_id,
+                workspace_id=seeded["workspace_id"],
+                slug="pool-safety",
+                title="Pool safety",
+                scope_kind="property",
+                scope_id=seeded["property_id"],
+                current_version_id=version_id,
+                created_by=seeded["owner_id"],
+                created_at=_PINNED,
+            )
+            version = InstructionVersion(
+                id=version_id,
+                workspace_id=seeded["workspace_id"],
+                instruction_id=instruction_id,
+                version_num=2,
+                body_md="Lock the gate after cleaning.",
+                author_id=seeded["owner_id"],
+                created_at=_PINNED + timedelta(minutes=5),
+            )
+            item = ChecklistItem(
+                id=checklist_id,
+                workspace_id=seeded["workspace_id"],
+                occurrence_id=seeded["task_id"],
+                label="Check chlorine",
+                position=1,
+                requires_photo=True,
+                checked=True,
+                checked_at=_PINNED + timedelta(minutes=10),
+                evidence_blob_hash="sha256:abc",
+            )
+            s.add_all([instruction, version, item])
+            s.commit()
+
+        with _client_for(session_factory, seeded["worker_ctx"]) as client:
+            r = client.get(f"/api/v1/tasks/{seeded['task_id']}/detail")
+            assert r.status_code == 200, r.text
+            body = r.json()
+            assert body["task"]["id"] == seeded["task_id"]
+            assert body["property"]["id"] == seeded["property_id"]
+            assert body["instructions"] == [
+                {
+                    "id": instruction_id,
+                    "title": "Pool safety",
+                    "scope": "property",
+                    "property_id": seeded["property_id"],
+                    "area": None,
+                    "tags": [],
+                    "body_md": "Lock the gate after cleaning.",
+                    "version": 2,
+                    "updated_at": "2026-04-19T12:05:00Z",
+                }
+            ]
+            assert body["checklist"][0]["id"] == checklist_id
+            assert body["checklist"][0]["text"] == "Check chlorine"
+            assert body["checklist"][0]["required"] is True
+            assert body["checklist"][0]["guest_visible"] is False
+            assert body["checklist"][0]["checked"] is True
+            assert body["checklist"][0]["completed_by_user_id"] is None
+
+    def test_checklist_patch_ticks_and_unticks_idempotently(
+        self,
+        session_factory: sessionmaker[Session],
+        seeded: dict[str, Any],
+    ) -> None:
+        checklist_id = new_ulid()
+        with session_factory() as s, tenant_agnostic():
+            s.add(
+                ChecklistItem(
+                    id=checklist_id,
+                    workspace_id=seeded["workspace_id"],
+                    occurrence_id=seeded["task_id"],
+                    label="Wipe chairs",
+                    position=1,
+                    requires_photo=False,
+                    checked=False,
+                    checked_at=None,
+                    evidence_blob_hash=None,
+                )
+            )
+            s.commit()
+
+        with _client_for(session_factory, seeded["worker_ctx"]) as client:
+            r = client.patch(
+                f"/api/v1/tasks/{seeded['task_id']}/checklist/{checklist_id}",
+                json={"checked": True},
+            )
+            assert r.status_code == 200, r.text
+            first_checked_at = r.json()["checked_at"]
+            assert r.json()["checked"] is True
+            assert first_checked_at is not None
+
+            r = client.patch(
+                f"/api/v1/tasks/{seeded['task_id']}/checklist/{checklist_id}",
+                json={"checked": True},
+            )
+            assert r.status_code == 200, r.text
+            assert r.json()["checked_at"] == first_checked_at
+
+            r = client.patch(
+                f"/api/v1/tasks/{seeded['task_id']}/checklist/{checklist_id}",
+                json={"checked": False},
+            )
+            assert r.status_code == 200, r.text
+            assert r.json()["checked"] is False
+            assert r.json()["checked_at"] is None
+
+    def test_checklist_patch_collapses_cross_task_item_to_404(
+        self,
+        session_factory: sessionmaker[Session],
+        seeded: dict[str, Any],
+    ) -> None:
+        other_task_id = new_ulid()
+        other_item_id = new_ulid()
+        with session_factory() as s, tenant_agnostic():
+            s.add(
+                Occurrence(
+                    id=other_task_id,
+                    workspace_id=seeded["workspace_id"],
+                    schedule_id=None,
+                    template_id=None,
+                    property_id=seeded["property_id"],
+                    assignee_user_id=seeded["worker_id"],
+                    starts_at=_PINNED,
+                    ends_at=_PINNED + timedelta(hours=1),
+                    scheduled_for_local="2026-04-19T14:00",
+                    originally_scheduled_for="2026-04-19T14:00",
+                    state="pending",
+                    cancellation_reason=None,
+                    title="Other",
+                    description_md="",
+                    priority="normal",
+                    photo_evidence="disabled",
+                    duration_minutes=30,
+                    area_id=None,
+                    unit_id=None,
+                    expected_role_id=None,
+                    linked_instruction_ids=[],
+                    inventory_consumption_json={},
+                    is_personal=False,
+                    created_by_user_id=seeded["owner_id"],
+                    created_at=_PINNED,
+                )
+            )
+            s.flush()
+            s.add(
+                ChecklistItem(
+                    id=other_item_id,
+                    workspace_id=seeded["workspace_id"],
+                    occurrence_id=other_task_id,
+                    label="Other item",
+                    position=1,
+                    requires_photo=False,
+                    checked=False,
+                    checked_at=None,
+                    evidence_blob_hash=None,
+                )
+            )
+            s.commit()
+
+        with _client_for(session_factory, seeded["worker_ctx"]) as client:
+            r = client.patch(
+                f"/api/v1/tasks/{seeded['task_id']}/checklist/{other_item_id}",
+                json={"checked": True},
+            )
+            assert r.status_code == 404
+            assert r.json()["detail"]["error"] == "task_not_found"
+
+    def test_checklist_patch_rejects_terminal_task(
+        self,
+        session_factory: sessionmaker[Session],
+        seeded: dict[str, Any],
+    ) -> None:
+        checklist_id = new_ulid()
+        with session_factory() as s, tenant_agnostic():
+            task = s.get(Occurrence, seeded["task_id"])
+            assert task is not None
+            task.state = "done"
+            task.completed_at = _PINNED
+            task.completed_by_user_id = seeded["worker_id"]
+            s.add(
+                ChecklistItem(
+                    id=checklist_id,
+                    workspace_id=seeded["workspace_id"],
+                    occurrence_id=seeded["task_id"],
+                    label="Late edit",
+                    position=1,
+                    requires_photo=False,
+                    checked=True,
+                    checked_at=_PINNED,
+                    evidence_blob_hash=None,
+                )
+            )
+            s.commit()
+
+        with _client_for(session_factory, seeded["worker_ctx"]) as client:
+            r = client.patch(
+                f"/api/v1/tasks/{seeded['task_id']}/checklist/{checklist_id}",
+                json={"checked": False},
+            )
+            assert r.status_code == 409
+            assert r.json()["detail"]["error"] == "task_terminal"
 
     def test_list_pagination_two_pages(
         self,

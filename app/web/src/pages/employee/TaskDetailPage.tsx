@@ -55,6 +55,9 @@ interface ApiChecklistItem {
   required?: boolean;
   requires_photo?: boolean;
   guest_visible?: boolean;
+  completed_at?: string | null;
+  checked_at?: string | null;
+  completed_by_user_id?: string | null;
 }
 
 interface ChecklistItemView {
@@ -91,6 +94,7 @@ interface TaskDetailResponse {
   task: ApiTask;
   property?: Property | null;
   instructions?: Instruction[];
+  checklist?: ApiChecklistItem[];
   inventory_effects?: ResolvedInventoryEffect[];
 }
 
@@ -179,6 +183,15 @@ interface EvidenceMutationContext {
   localId: string;
 }
 
+interface ChecklistMutationInput {
+  itemId: string;
+  checked: boolean;
+}
+
+interface ChecklistMutationContext {
+  previous: ApiTask | TaskDetailResponse | undefined;
+}
+
 function fmtQty(n: number): string {
   const s = n.toFixed(3);
   return s.replace(/\.?0+$/, "");
@@ -213,7 +226,7 @@ export default function TaskDetailPage() {
 
   const q = useQuery({
     queryKey: qk.task(tid),
-    queryFn: () => fetchJson<ApiTask | TaskDetailResponse>("/api/v1/tasks/" + tid),
+    queryFn: () => fetchJson<TaskDetailResponse>("/api/v1/tasks/" + tid + "/detail"),
     enabled: Boolean(tid),
   });
 
@@ -330,6 +343,37 @@ export default function TaskDetailPage() {
       qc.invalidateQueries({ queryKey: qk.task(tid) });
       qc.invalidateQueries({ queryKey: qk.today() });
     },
+  });
+
+  const checklistToggle = useMutation<
+    ApiChecklistItem,
+    Error,
+    ChecklistMutationInput,
+    ChecklistMutationContext
+  >({
+    mutationFn: ({ itemId, checked }) =>
+      fetchJson<ApiChecklistItem>("/api/v1/tasks/" + tid + "/checklist/" + itemId, {
+        method: "PATCH",
+        body: { checked },
+      }),
+    onMutate: async ({ itemId, checked }) => {
+      await qc.cancelQueries({ queryKey: qk.task(tid) });
+      const previous = qc.getQueryData<ApiTask | TaskDetailResponse>(qk.task(tid));
+      qc.setQueryData<ApiTask | TaskDetailResponse>(qk.task(tid), (current) =>
+        updateChecklistItem(current, itemId, { checked, done: checked }),
+      );
+      return { previous };
+    },
+    onError: (_err, _input, ctx) => {
+      qc.setQueryData(qk.task(tid), ctx?.previous);
+    },
+    onSuccess: (row) => {
+      qc.setQueryData<ApiTask | TaskDetailResponse>(qk.task(tid), (current) =>
+        updateChecklistItem(current, row.id ?? "", row),
+      );
+      qc.invalidateQueries({ queryKey: qk.today() });
+    },
+    onSettled: () => qc.invalidateQueries({ queryKey: qk.task(tid) }),
   });
 
   if (q.isPending) {
@@ -472,12 +516,18 @@ export default function TaskDetailPage() {
           <h3 className="section-title section-title--sm">Checklist</h3>
           <ul>
             {task.checklist.map((item, idx) => (
-              <li
-                key={item.id ?? idx}
-                className={"checklist__item" + (item.done ? " checklist__item--done" : "")}
-              >
-                <span className="checklist__box" aria-hidden="true"><Check size={12} strokeWidth={2.5} /></span>
-                <span className="checklist__label">{item.label}</span>
+              <li key={item.id ?? idx}>
+                <button
+                  className={"checklist__item" + (item.done ? " checklist__item--done" : "")}
+                  type="button"
+                  disabled={terminal || !item.id || checklistToggle.isPending}
+                  onClick={() => {
+                    if (item.id) checklistToggle.mutate({ itemId: item.id, checked: !item.done });
+                  }}
+                >
+                  <span className="checklist__box" aria-hidden="true"><Check size={12} strokeWidth={2.5} /></span>
+                  <span className="checklist__label">{item.label}</span>
+                </button>
               </li>
             ))}
           </ul>
@@ -676,7 +726,10 @@ export default function TaskDetailPage() {
 
 function normalizeTaskDetail(payload: ApiTask | TaskDetailResponse): NormalizedTaskDetail {
   const response = isTaskDetailResponse(payload) ? payload : { task: payload };
-  const rawTask = response.task;
+  const rawTask = {
+    ...response.task,
+    checklist: response.checklist ?? response.task.checklist,
+  };
   return {
     task: normalizeTask(rawTask),
     property: response.property ?? null,
@@ -724,6 +777,30 @@ function normalizeChecklistItem(item: ApiChecklistItem): ChecklistItemView {
     label: item.label ?? item.text ?? "",
     done: item.done ?? item.checked ?? false,
     required: item.required ?? item.requires_photo ?? false,
+  };
+}
+
+function updateChecklistItem(
+  payload: ApiTask | TaskDetailResponse | undefined,
+  itemId: string,
+  patch: Partial<ApiChecklistItem>,
+): ApiTask | TaskDetailResponse | undefined {
+  if (!payload || !itemId) return payload;
+  const updateRows = (rows: ApiChecklistItem[] | undefined): ApiChecklistItem[] | undefined =>
+    rows?.map((row) => (row.id === itemId ? { ...row, ...patch } : row));
+  if (isTaskDetailResponse(payload)) {
+    return {
+      ...payload,
+      checklist: updateRows(payload.checklist),
+      task: {
+        ...payload.task,
+        checklist: updateRows(payload.task.checklist),
+      },
+    };
+  }
+  return {
+    ...payload,
+    checklist: updateRows(payload.checklist),
   };
 }
 

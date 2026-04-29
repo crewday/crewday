@@ -84,7 +84,7 @@ See ``docs/specs/06-tasks-and-scheduling.md`` §"Task template",
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Annotated, Any, Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -105,8 +105,9 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from app.adapters.db.identity.models import ApiToken
+from app.adapters.db.instructions.models import Instruction, InstructionVersion
 from app.adapters.db.places.models import Property
-from app.adapters.db.tasks.models import Occurrence
+from app.adapters.db.tasks.models import ChecklistItem, Occurrence
 from app.adapters.llm.ports import LLMClient
 from app.adapters.storage.ports import MimeSniffer, Storage
 from app.api.deps import (
@@ -635,6 +636,111 @@ class TaskPayload(BaseModel):
         )
 
 
+class TaskDetailPropertyPayload(BaseModel):
+    """Worker task-detail property summary.
+
+    Kept local to the tasks router so the worker detail endpoint can
+    expose the property chip without broadening the existing
+    ``/properties`` governance surface.
+    """
+
+    id: str
+    name: str
+    city: str
+    timezone: str
+    color: Literal["moss", "sky", "rust"]
+    kind: Literal["str", "vacation", "residence", "mixed"]
+    areas: list[str]
+    evidence_policy: Literal["inherit", "require", "optional", "forbid"]
+    country: str
+    locale: str
+    settings_override: dict[str, object]
+    client_org_id: str | None
+    owner_user_id: str | None
+
+
+class TaskDetailInstructionPayload(BaseModel):
+    """Instruction resolved for the worker task detail screen."""
+
+    id: str
+    title: str
+    scope: Literal["global", "property", "area"]
+    property_id: str | None
+    area: str | None
+    tags: list[str]
+    body_md: str
+    version: int
+    updated_at: datetime
+
+
+class TaskChecklistItemPayload(BaseModel):
+    """Runtime checklist row attached to one task occurrence."""
+
+    id: str
+    text: str
+    label: str
+    required: bool
+    guest_visible: bool
+    checked: bool
+    done: bool
+    completed_at: datetime | None
+    checked_at: datetime | None
+    completed_by_user_id: str | None
+    evidence_blob_hash: str | None
+
+    @classmethod
+    def from_row(cls, row: ChecklistItem) -> TaskChecklistItemPayload:
+        """Copy a :class:`ChecklistItem` row into the worker wire shape."""
+        return cls(
+            id=row.id,
+            text=row.label,
+            label=row.label,
+            required=row.requires_photo,
+            guest_visible=False,
+            checked=row.checked,
+            done=row.checked,
+            completed_at=_aware_utc(row.checked_at),
+            checked_at=_aware_utc(row.checked_at),
+            completed_by_user_id=None,
+            evidence_blob_hash=row.evidence_blob_hash,
+        )
+
+
+class ResolvedInventoryEffectPayload(BaseModel):
+    """Worker detail inventory effect projection.
+
+    The v1 task row only stores the consume-only
+    ``inventory_consumption_json`` map. The fuller inventory resolver
+    can widen these fields later without changing the envelope shape.
+    """
+
+    item_ref: str
+    kind: Literal["consume", "produce"]
+    qty: int
+    item_id: str | None
+    item_name: str
+    unit: str
+    on_hand: int | None
+
+
+class TaskDetailPayload(BaseModel):
+    """Worker task-detail envelope."""
+
+    task: TaskPayload
+    property: TaskDetailPropertyPayload | None
+    instructions: list[TaskDetailInstructionPayload]
+    checklist: list[TaskChecklistItemPayload]
+    inventory_effects: list[ResolvedInventoryEffectPayload]
+
+
+class ChecklistPatchRequest(BaseModel):
+    """Idempotent checklist tick/untick request."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    checked: bool
+
+
 class TaskStatePayload(BaseModel):
     """HTTP projection of :class:`TaskState`.
 
@@ -858,6 +964,15 @@ class CommentEditRequest(BaseModel):
 _TERMINAL_STATES: frozenset[str] = frozenset({"done", "skipped", "cancelled"})
 
 
+def _aware_utc(value: datetime | None) -> datetime | None:
+    """Coerce SQLite-naive UTC datetimes back to aware UTC."""
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
+
+
 def _compute_overdue(view: TaskView, now_utc: datetime) -> bool:
     """``True`` when the task is past its UTC anchor + not terminal.
 
@@ -903,7 +1018,7 @@ def _compute_time_window_local(
         return None
     try:
         zone = ZoneInfo(property_timezone)
-    except ZoneInfoNotFoundError, ValueError:
+    except (ZoneInfoNotFoundError, ValueError):
         return None
     anchor = view.scheduled_for_utc
     if anchor.tzinfo is None:
@@ -949,6 +1064,169 @@ def _resolve_zones_for_views(session: Session, views: list[TaskView]) -> dict[st
         select(Property.id, Property.timezone).where(Property.id.in_(list(ids)))
     ).all()
     return {row[0]: row[1] for row in rows}
+
+
+def _detail_property_payload(
+    session: Session, property_id: str | None
+) -> TaskDetailPropertyPayload | None:
+    """Return the property summary for a visible task, if any."""
+    if property_id is None:
+        return None
+    row = session.get(Property, property_id)
+    if row is None or row.deleted_at is not None:
+        return None
+    address_json = row.address_json or {}
+    city_raw = address_json.get("city")
+    city = city_raw if isinstance(city_raw, str) else ""
+    name = row.name if row.name is not None else row.address
+    return TaskDetailPropertyPayload(
+        id=row.id,
+        name=name,
+        city=city,
+        timezone=row.timezone,
+        color=_detail_property_color(row.id),
+        kind=_detail_property_kind(row.kind),
+        areas=[],
+        evidence_policy="inherit",
+        country=row.country or "XX",
+        locale=row.locale if row.locale is not None else "en-US",
+        settings_override={},
+        client_org_id=None,
+        owner_user_id=None,
+    )
+
+
+def _detail_property_color(property_id: str) -> Literal["moss", "sky", "rust"]:
+    """Stable property-chip color for the worker detail surface."""
+    colors: tuple[Literal["moss", "sky", "rust"], ...] = ("moss", "sky", "rust")
+    return colors[sum(property_id.encode("utf-8")) % len(colors)]
+
+
+def _detail_property_kind(value: str) -> Literal["str", "vacation", "residence", "mixed"]:
+    """Narrow the DB property kind enum for the task-detail payload."""
+    if value == "str":
+        return "str"
+    if value == "vacation":
+        return "vacation"
+    if value == "residence":
+        return "residence"
+    if value == "mixed":
+        return "mixed"
+    raise ValueError(f"unknown property.kind {value!r} on loaded row")
+
+
+def _task_checklist_payload(
+    session: Session,
+    ctx: WorkspaceContext,
+    *,
+    task_id: str,
+) -> list[TaskChecklistItemPayload]:
+    """Return runtime checklist rows for ``task_id`` in display order."""
+    rows = session.scalars(
+        select(ChecklistItem)
+        .where(
+            ChecklistItem.workspace_id == ctx.workspace_id,
+            ChecklistItem.occurrence_id == task_id,
+        )
+        .order_by(ChecklistItem.position.asc(), ChecklistItem.id.asc())
+    ).all()
+    return [TaskChecklistItemPayload.from_row(row) for row in rows]
+
+
+def _instruction_payloads(
+    session: Session,
+    ctx: WorkspaceContext,
+    *,
+    instruction_ids: list[str],
+) -> list[TaskDetailInstructionPayload]:
+    """Resolve linked instructions to their current-version payloads."""
+    if not instruction_ids:
+        return []
+    rows = session.execute(
+        select(Instruction, InstructionVersion)
+        .join(
+            InstructionVersion,
+            InstructionVersion.id == Instruction.current_version_id,
+        )
+        .where(
+            Instruction.workspace_id == ctx.workspace_id,
+            Instruction.id.in_(instruction_ids),
+        )
+    ).all()
+    by_id = {
+        instruction.id: (instruction, version) for instruction, version in rows
+    }
+    payloads: list[TaskDetailInstructionPayload] = []
+    for instruction_id in instruction_ids:
+        pair = by_id.get(instruction_id)
+        if pair is None:
+            continue
+        instruction, version = pair
+        payloads.append(
+            TaskDetailInstructionPayload(
+                id=instruction.id,
+                title=instruction.title,
+                scope=_instruction_scope(instruction.scope_kind),
+                property_id=(
+                    instruction.scope_id
+                    if instruction.scope_kind == "property"
+                    else None
+                ),
+                area=instruction.scope_id if instruction.scope_kind == "area" else None,
+                tags=[],
+                body_md=version.body_md,
+                version=version.version_num,
+                updated_at=_aware_utc(version.created_at) or version.created_at,
+            )
+        )
+    return payloads
+
+
+def _instruction_scope(value: str) -> Literal["global", "property", "area"]:
+    """Map persisted instruction scope names to the SPA contract."""
+    if value == "workspace":
+        return "global"
+    if value == "property":
+        return "property"
+    if value == "area":
+        return "area"
+    return "global"
+
+
+def _inventory_effects_for_task(view: TaskView) -> list[ResolvedInventoryEffectPayload]:
+    """Project v1 consume-only inventory hints into the detail envelope."""
+    return [
+        ResolvedInventoryEffectPayload(
+            item_ref=item_ref,
+            kind="consume",
+            qty=qty,
+            item_id=None,
+            item_name=item_ref,
+            unit="each",
+            on_hand=None,
+        )
+        for item_ref, qty in view.inventory_consumption_json.items()
+    ]
+
+
+def _task_detail_payload(
+    session: Session,
+    ctx: WorkspaceContext,
+    view: TaskView,
+) -> TaskDetailPayload:
+    """Build the worker task-detail envelope from a visible task view."""
+    zone = _property_timezone(session, view.property_id)
+    return TaskDetailPayload(
+        task=TaskPayload.from_view(view, property_timezone=zone),
+        property=_detail_property_payload(session, view.property_id),
+        instructions=_instruction_payloads(
+            session,
+            ctx,
+            instruction_ids=list(view.linked_instruction_ids),
+        ),
+        checklist=_task_checklist_payload(session, ctx, task_id=view.id),
+        inventory_effects=_inventory_effects_for_task(view),
+    )
 
 
 # Weekday names indexed by ``dateutil.rrule._byweekday`` (Mon=0..Sun=6).
@@ -1970,6 +2248,26 @@ def get_task_route(
     return TaskPayload.from_view(view, property_timezone=zone)
 
 
+@router.get(
+    "/tasks/{task_id}/detail",
+    response_model=TaskDetailPayload,
+    operation_id="get_task_detail",
+    summary="Read worker task detail with property, instructions, and checklist",
+    openapi_extra={"x-cli": {"group": "tasks", "verb": "detail"}},
+)
+def get_task_detail_route(
+    task_id: str,
+    ctx: _Ctx,
+    session: _Db,
+) -> TaskDetailPayload:
+    """Return the worker detail envelope; 404 on invisible tasks."""
+    try:
+        view = read_task(session, ctx, task_id=task_id)
+    except OneOffTaskNotFound as exc:
+        raise _task_not_found() from exc
+    return _task_detail_payload(session, ctx, view)
+
+
 @router.patch(
     "/tasks/{task_id}",
     response_model=TaskPayload,
@@ -2019,6 +2317,51 @@ def patch_task_route(
         raise _http(422, "invalid_field", message=str(exc)) from exc
     zone = _property_timezone(session, view.property_id)
     return TaskPayload.from_view(view, property_timezone=zone)
+
+
+@router.patch(
+    "/tasks/{task_id}/checklist/{item_id}",
+    response_model=TaskChecklistItemPayload,
+    operation_id="patch_task_checklist_item",
+    summary="Idempotently tick or untick a task checklist item",
+    openapi_extra={"x-cli": {"group": "tasks", "verb": "checklist"}},
+)
+def patch_task_checklist_item_route(
+    task_id: str,
+    item_id: str,
+    body: ChecklistPatchRequest,
+    ctx: _Ctx,
+    session: _Db,
+) -> TaskChecklistItemPayload:
+    """Tick/untick a checklist row visible through the parent task."""
+    try:
+        view = read_task(session, ctx, task_id=task_id)
+    except OneOffTaskNotFound as exc:
+        raise _task_not_found() from exc
+    row = session.scalar(
+        select(ChecklistItem).where(
+            ChecklistItem.id == item_id,
+            ChecklistItem.workspace_id == ctx.workspace_id,
+            ChecklistItem.occurrence_id == task_id,
+        )
+    )
+    if row is None:
+        raise _task_not_found()
+    if view.state in _TERMINAL_STATES:
+        raise _http(
+            status.HTTP_409_CONFLICT,
+            "task_terminal",
+            message="Checklist items cannot be changed after the task is terminal.",
+            state=view.state,
+        )
+    if body.checked and not row.checked:
+        row.checked = True
+        row.checked_at = datetime.now(tz=UTC)
+    elif not body.checked and row.checked:
+        row.checked = False
+        row.checked_at = None
+    session.flush()
+    return TaskChecklistItemPayload.from_row(row)
 
 
 @router.post(
