@@ -40,6 +40,7 @@ __all__ = [
     "create_closure",
     "delete_closure",
     "detect_clashes",
+    "get_closure",
     "list_closures",
     "update_closure",
 ]
@@ -295,6 +296,16 @@ def list_closures(
         .order_by(PropertyClosure.starts_at.asc(), PropertyClosure.id.asc())
     ).all()
     return [_row_to_view(row) for row in rows]
+
+
+def get_closure(
+    session: Session,
+    ctx: WorkspaceContext,
+    *,
+    closure_id: str,
+) -> PropertyClosureView:
+    row = _load_closure_row(session, ctx, closure_id=closure_id)
+    return _row_to_view(row)
 
 
 def detect_clashes(

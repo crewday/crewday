@@ -64,6 +64,7 @@ __all__ = [
     "PropertyClosureCreated",
     "PropertyClosureReason",
     "PropertyClosureUpdated",
+    "PropertyWorkspaceChanged",
     "ReservationChangeKind",
     "ReservationUpserted",
     "ShiftChanged",
@@ -800,6 +801,22 @@ class PropertyClosureUpdated(Event):
         if self.ends_at <= self.starts_at:
             raise ValueError("ends_at must be after starts_at")
         return self
+
+
+@register
+class PropertyWorkspaceChanged(Event):
+    """A property's workspace sharing membership changed.
+
+    Payload is identifier-only so manager tabs can invalidate property
+    and sharing queries, then re-fetch under normal REST authz.
+    """
+
+    name: ClassVar[str] = "property.workspace.changed"
+    allowed_roles: ClassVar[tuple[EventRole, ...]] = ("manager",)
+
+    property_id: str
+    target_workspace_id: str
+    change_kind: Literal["invited", "revoked", "updated"]
 
 
 @register

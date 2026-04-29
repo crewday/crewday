@@ -679,6 +679,16 @@ _INVALIDATIONS: Final[dict[str, tuple[tuple[str, ...], ...]]] = {
     "task.completed": (("tasks",),),
     "task.overdue": (("tasks",),),
     "stay.upcoming": (("stays",),),
+    "property.closure.created": (
+        ("stays",),
+        ("scheduler-calendar",),
+        ("my-schedule",),
+    ),
+    "property.closure.updated": (
+        ("stays",),
+        ("scheduler-calendar",),
+        ("my-schedule",),
+    ),
     "expense.approved": (("expenses",),),
     "shift.ended": (("shifts",), ("my-schedule",)),
     "time.shift.changed": (("shifts",), ("my-schedule",)),
@@ -694,6 +704,7 @@ _INVALIDATIONS: Final[dict[str, tuple[tuple[str, ...], ...]]] = {
         ("agent_preferences", "me"),
         ("me", "agent_approval_mode"),
     ),
+    "property.workspace.changed": (("properties",),),
     "workspace.changed": ((),),
 }
 
