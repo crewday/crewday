@@ -123,6 +123,7 @@ describe("INVALIDATIONS — coverage", () => {
     "booking.rejected",
     "booking.cancelled",
     "booking.reassigned",
+    "work_order.completed",
     "shift.ended",
     "time.shift.changed",
     "admin.audit.appended",
@@ -786,6 +787,16 @@ describe("INVALIDATIONS — per-kind behaviour", () => {
         expect.arrayContaining([["my-schedule"], qk.dashboard()]),
       );
     }
+  });
+
+  it("work_order.completed invalidates work orders + dashboard", () => {
+    const qc = makeClient();
+    const spy = vi.spyOn(qc, "invalidateQueries");
+    INVALIDATIONS["work_order.completed"](makeEvent("work_order.completed"), qc);
+    const called = spy.mock.calls.map((c) => c[0]?.queryKey);
+    expect(called).toEqual(
+      expect.arrayContaining([qk.workOrders(), qk.dashboard()]),
+    );
   });
 
   it("admin.audit.appended invalidates the deployment-scope audit list", () => {

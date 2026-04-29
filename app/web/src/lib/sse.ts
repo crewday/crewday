@@ -24,7 +24,7 @@
 // Server emits (today): task.created, task.assigned, task.completed,
 // task.overdue, stay.upcoming, reservation.upserted,
 // property.closure.created, property.closure.updated, expense.approved, shift.ended,
-// time.shift.changed. Additional kinds here (agent.*, booking.*,
+// time.shift.changed, work_order.completed. Additional kinds here (agent.*, booking.*,
 // asset_action.*, schedule_ruleset.*, task.updated/skipped, approval.*,
 // ical.poll.completed) track the spec and the mock's dispatcher for
 // when each backend emitter lands. Any drift is flagged in the
@@ -123,6 +123,8 @@ export type EventKind =
   | "booking.rejected"
   | "booking.cancelled"
   | "booking.reassigned"
+  // Billing (§22 work orders).
+  | "work_order.completed"
   // Shifts (§09 time + payroll).
   | "shift.ended"
   | "time.shift.changed"
@@ -672,6 +674,11 @@ export const INVALIDATIONS: Record<EventKind, InvalidationHandler> = {
   "booking.rejected": (_event, qc) => bookingInvalidations(qc),
   "booking.cancelled": (_event, qc) => bookingInvalidations(qc),
   "booking.reassigned": (_event, qc) => bookingInvalidations(qc),
+
+  "work_order.completed": (_event, qc) => {
+    invalidate(qc, qk.workOrders());
+    invalidate(qc, qk.dashboard());
+  },
 
   "shift.ended": (_event, qc) => {
     invalidate(qc, ["my-schedule"]);

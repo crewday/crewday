@@ -29,6 +29,14 @@ from app.domain.billing.rate_cards import (
     RateCardService,
     RateCardView,
 )
+from app.domain.billing.work_orders import (
+    WorkOrderCreate,
+    WorkOrderInvalid,
+    WorkOrderNotFound,
+    WorkOrderPatch,
+    WorkOrderService,
+    WorkOrderView,
+)
 
 __all__ = [
     "OrganizationCreate",
@@ -51,4 +59,10 @@ __all__ = [
     "RateCardPatch",
     "RateCardService",
     "RateCardView",
+    "WorkOrderCreate",
+    "WorkOrderInvalid",
+    "WorkOrderNotFound",
+    "WorkOrderPatch",
+    "WorkOrderService",
+    "WorkOrderView",
 ]

@@ -14,12 +14,14 @@ from fastapi import APIRouter
 from app.api.billing.organizations import build_organizations_router
 from app.api.billing.quotes import build_quotes_public_router, build_quotes_router
 from app.api.billing.rate_cards import build_rate_cards_router
+from app.api.billing.work_orders import build_work_orders_router
 
 
 def build_billing_router() -> APIRouter:
     router = APIRouter(tags=["billing"])
     router.include_router(build_organizations_router())
     router.include_router(build_rate_cards_router())
+    router.include_router(build_work_orders_router())
     router.include_router(build_quotes_router())
     return router
 

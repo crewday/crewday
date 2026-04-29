@@ -4,8 +4,9 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from datetime import UTC, date, datetime
+from decimal import Decimal
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -15,7 +16,10 @@ from app.adapters.db.billing.models import (
     RateCard,
     VendorInvoice,
     WorkOrder,
+    WorkOrderShiftAccrual,
 )
+from app.adapters.db.places.models import Property, PropertyWorkspace
+from app.adapters.db.time.models import Shift
 from app.adapters.db.workspace.models import Workspace
 from app.domain.billing.organizations import (
     OrganizationArtifactCounts,
@@ -30,11 +34,22 @@ from app.domain.billing.rate_cards import (
     RateCardRepository,
     RateCardRow,
 )
+from app.domain.billing.work_orders import (
+    ShiftAccrualRow,
+    WorkOrderInvalid,
+    WorkOrderOrganizationRow,
+    WorkOrderPropertyRow,
+    WorkOrderRateCardRow,
+    WorkOrderRepository,
+    WorkOrderRow,
+    WorkOrderShiftRow,
+)
 
 __all__ = [
     "SqlAlchemyOrganizationRepository",
     "SqlAlchemyQuoteRepository",
     "SqlAlchemyRateCardRepository",
+    "SqlAlchemyWorkOrderRepository",
 ]
 
 
@@ -305,6 +320,61 @@ def _to_rate_card_row(row: RateCard) -> RateCardRow:
     )
 
 
+def _to_work_order_row(row: WorkOrder) -> WorkOrderRow:
+    return WorkOrderRow(
+        id=row.id,
+        workspace_id=row.workspace_id,
+        organization_id=row.organization_id,
+        property_id=row.property_id,
+        title=row.title,
+        status=row.status,
+        starts_at=_as_utc(row.starts_at),
+        ends_at=_as_utc_optional(row.ends_at),
+        rate_card_id=row.rate_card_id,
+        total_hours_decimal=Decimal(row.total_hours_decimal).quantize(Decimal("0.01")),
+        total_cents=row.total_cents,
+    )
+
+
+def _to_work_order_organization_row(row: Organization) -> WorkOrderOrganizationRow:
+    return WorkOrderOrganizationRow(
+        id=row.id,
+        workspace_id=row.workspace_id,
+        kind=row.kind,
+        default_currency=row.default_currency,
+    )
+
+
+def _to_work_order_property_row(row: Property) -> WorkOrderPropertyRow:
+    return WorkOrderPropertyRow(
+        id=row.id,
+        client_org_id=row.client_org_id,
+        default_currency=row.default_currency,
+    )
+
+
+def _to_work_order_rate_card_row(row: RateCard) -> WorkOrderRateCardRow:
+    return WorkOrderRateCardRow(
+        id=row.id,
+        workspace_id=row.workspace_id,
+        organization_id=row.organization_id,
+        currency=row.currency,
+        rates=dict(row.rates_json),
+        active_from=row.active_from,
+        active_to=row.active_to,
+    )
+
+
+def _to_work_order_shift_row(row: Shift) -> WorkOrderShiftRow:
+    return WorkOrderShiftRow(
+        id=row.id,
+        workspace_id=row.workspace_id,
+        starts_at=_as_utc(row.starts_at),
+        ends_at=_as_utc_optional(row.ends_at),
+        property_id=row.property_id,
+    )
+
+
 class SqlAlchemyRateCardRepository(RateCardRepository):
     """SA-backed rate-card repository."""
 
@@ -360,9 +430,7 @@ class SqlAlchemyRateCardRepository(RateCardRepository):
             ) from exc
         return _to_rate_card_row(row)
 
-    def list(
-        self, *, workspace_id: str, organization_id: str
-    ) -> Sequence[RateCardRow]:
+    def list(self, *, workspace_id: str, organization_id: str) -> Sequence[RateCardRow]:
         rows = self._session.scalars(
             select(RateCard)
             .where(
@@ -420,6 +488,230 @@ class SqlAlchemyRateCardRepository(RateCardRepository):
                 "rate card references an unknown organization or duplicate window"
             ) from exc
         return _to_rate_card_row(row)
+
+
+class SqlAlchemyWorkOrderRepository(WorkOrderRepository):
+    """SA-backed work-order repository."""
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    @property
+    def session(self) -> Session:
+        return self._session
+
+    def get_workspace_default_currency(self, *, workspace_id: str) -> str | None:
+        return self._session.scalar(
+            select(Workspace.default_currency).where(Workspace.id == workspace_id)
+        )
+
+    def get_organization(
+        self, *, workspace_id: str, organization_id: str, for_update: bool = False
+    ) -> WorkOrderOrganizationRow | None:
+        stmt = select(Organization).where(
+            Organization.workspace_id == workspace_id,
+            Organization.id == organization_id,
+            Organization.archived_at.is_(None),
+        )
+        if for_update:
+            stmt = stmt.with_for_update()
+        row = self._session.scalars(stmt).one_or_none()
+        return _to_work_order_organization_row(row) if row is not None else None
+
+    def get_property(
+        self, *, workspace_id: str, property_id: str
+    ) -> WorkOrderPropertyRow | None:
+        row = self._session.scalars(
+            select(Property)
+            .where(Property.id == property_id, Property.deleted_at.is_(None))
+            .join(PropertyWorkspace, PropertyWorkspace.property_id == Property.id)
+            .where(
+                PropertyWorkspace.workspace_id == workspace_id,
+                PropertyWorkspace.status == "active",
+            )
+        ).one_or_none()
+        return _to_work_order_property_row(row) if row is not None else None
+
+    def get_rate_card(
+        self, *, workspace_id: str, organization_id: str, rate_card_id: str
+    ) -> WorkOrderRateCardRow | None:
+        row = self._session.scalars(
+            select(RateCard).where(
+                RateCard.workspace_id == workspace_id,
+                RateCard.organization_id == organization_id,
+                RateCard.id == rate_card_id,
+            )
+        ).one_or_none()
+        return _to_work_order_rate_card_row(row) if row is not None else None
+
+    def insert(
+        self,
+        *,
+        work_order_id: str,
+        workspace_id: str,
+        organization_id: str,
+        property_id: str,
+        title: str,
+        status: str,
+        starts_at: datetime,
+        ends_at: datetime | None,
+        rate_card_id: str | None,
+    ) -> WorkOrderRow:
+        row = WorkOrder(
+            id=work_order_id,
+            workspace_id=workspace_id,
+            organization_id=organization_id,
+            property_id=property_id,
+            title=title,
+            status=status,
+            starts_at=starts_at,
+            ends_at=ends_at,
+            rate_card_id=rate_card_id,
+            total_hours_decimal=Decimal("0.00"),
+            total_cents=0,
+        )
+        try:
+            with self._session.begin_nested():
+                self._session.add(row)
+                self._session.flush()
+        except IntegrityError as exc:
+            raise WorkOrderInvalid(
+                "work order references an unknown billing artifact"
+            ) from exc
+        return _to_work_order_row(row)
+
+    def get(
+        self, *, workspace_id: str, work_order_id: str, for_update: bool = False
+    ) -> WorkOrderRow | None:
+        stmt = select(WorkOrder).where(
+            WorkOrder.workspace_id == workspace_id,
+            WorkOrder.id == work_order_id,
+        )
+        if for_update:
+            stmt = stmt.with_for_update()
+        row = self._session.scalars(stmt).one_or_none()
+        return _to_work_order_row(row) if row is not None else None
+
+    def list(
+        self,
+        *,
+        workspace_id: str,
+        organization_id: str | None,
+        property_id: str | None,
+        status: str | None,
+    ) -> Sequence[WorkOrderRow]:
+        stmt = (
+            select(WorkOrder)
+            .where(WorkOrder.workspace_id == workspace_id)
+            .order_by(WorkOrder.starts_at.desc(), WorkOrder.id.asc())
+        )
+        if organization_id is not None:
+            stmt = stmt.where(WorkOrder.organization_id == organization_id)
+        if property_id is not None:
+            stmt = stmt.where(WorkOrder.property_id == property_id)
+        if status is not None:
+            stmt = stmt.where(WorkOrder.status == status)
+        return [_to_work_order_row(row) for row in self._session.scalars(stmt).all()]
+
+    def update_fields(
+        self,
+        *,
+        workspace_id: str,
+        work_order_id: str,
+        fields: Mapping[str, object | None],
+    ) -> WorkOrderRow:
+        row = self._session.scalars(
+            select(WorkOrder).where(
+                WorkOrder.workspace_id == workspace_id,
+                WorkOrder.id == work_order_id,
+            )
+        ).one()
+        try:
+            with self._session.begin_nested():
+                for key, value in fields.items():
+                    setattr(row, key, value)
+                self._session.flush()
+        except IntegrityError as exc:
+            raise WorkOrderInvalid(
+                "work order references an unknown billing artifact"
+            ) from exc
+        return _to_work_order_row(row)
+
+    def get_shift(
+        self, *, workspace_id: str, shift_id: str
+    ) -> WorkOrderShiftRow | None:
+        row = self._session.scalars(
+            select(Shift).where(
+                Shift.workspace_id == workspace_id,
+                Shift.id == shift_id,
+            )
+        ).one_or_none()
+        return _to_work_order_shift_row(row) if row is not None else None
+
+    def open_for_property(
+        self, *, workspace_id: str, property_id: str, for_update: bool = False
+    ) -> Sequence[WorkOrderRow]:
+        stmt = select(WorkOrder).where(
+            WorkOrder.workspace_id == workspace_id,
+            WorkOrder.property_id == property_id,
+            WorkOrder.status == "in_progress",
+        )
+        if for_update:
+            stmt = stmt.with_for_update()
+        rows = self._session.scalars(stmt).all()
+        return [_to_work_order_row(row) for row in rows]
+
+    def append_shift_accrual(
+        self,
+        *,
+        accrual_id: str,
+        workspace_id: str,
+        work_order_id: str,
+        shift_id: str,
+        hours_decimal: Decimal,
+        hourly_rate_cents: int,
+        accrued_cents: int,
+        created_at: datetime,
+    ) -> ShiftAccrualRow | None:
+        row = WorkOrderShiftAccrual(
+            id=accrual_id,
+            workspace_id=workspace_id,
+            work_order_id=work_order_id,
+            shift_id=shift_id,
+            hours_decimal=hours_decimal,
+            hourly_rate_cents=hourly_rate_cents,
+            accrued_cents=accrued_cents,
+            created_at=created_at,
+        )
+        try:
+            with self._session.begin_nested():
+                self._session.add(row)
+                self._session.flush()
+        except IntegrityError:
+            return None
+
+        self._session.execute(
+            update(WorkOrder)
+            .where(
+                WorkOrder.workspace_id == workspace_id,
+                WorkOrder.id == work_order_id,
+            )
+            .values(
+                total_hours_decimal=WorkOrder.total_hours_decimal + hours_decimal,
+                total_cents=WorkOrder.total_cents + accrued_cents,
+            )
+        )
+        self._session.flush()
+        return ShiftAccrualRow(
+            id=row.id,
+            workspace_id=row.workspace_id,
+            work_order_id=row.work_order_id,
+            shift_id=row.shift_id,
+            hours_decimal=Decimal(row.hours_decimal).quantize(Decimal("0.01")),
+            hourly_rate_cents=row.hourly_rate_cents,
+            accrued_cents=row.accrued_cents,
+            created_at=_as_utc(row.created_at),
+        )
 
 
 class SqlAlchemyQuoteRepository(QuoteRepository):

@@ -8,6 +8,7 @@ from app.adapters.db.billing.models import (
     RateCard,
     VendorInvoice,
     WorkOrder,
+    WorkOrderShiftAccrual,
 )
 from app.tenancy.registry import register
 
@@ -17,6 +18,7 @@ for _table in (
     "work_order",
     "quote",
     "vendor_invoice",
+    "work_order_shift_accrual",
 ):
     register(_table)
 
@@ -26,4 +28,5 @@ __all__ = [
     "RateCard",
     "VendorInvoice",
     "WorkOrder",
+    "WorkOrderShiftAccrual",
 ]

@@ -62,7 +62,7 @@ from app.authz import (
     UnknownActionKey,
     require,
 )
-from app.events import ShiftChanged, bus
+from app.events import ShiftChanged, ShiftEnded, bus
 from app.tenancy import WorkspaceContext
 from app.util.clock import Clock, SystemClock
 from app.util.ulid import new_ulid
@@ -616,7 +616,7 @@ def close_shift(
         return _row_to_view(row)
 
     now = (clock if clock is not None else SystemClock()).now()
-    resolved_ends_at = ends_at if ends_at is not None else now
+    resolved_ends_at = _ensure_utc(ends_at if ends_at is not None else now)
     row_starts_at = _ensure_utc(row.starts_at)
 
     if resolved_ends_at < row_starts_at:
@@ -642,6 +642,24 @@ def close_shift(
         },
         clock=clock,
     )
+    shift_ended = ShiftEnded(
+        workspace_id=ctx.workspace_id,
+        actor_id=ctx.actor_id,
+        correlation_id=ctx.audit_correlation_id,
+        occurred_at=now,
+        shift_id=row.id,
+        ended_at=resolved_ends_at,
+    )
+    from app.adapters.db.billing.repositories import SqlAlchemyWorkOrderRepository
+    from app.domain.billing.work_orders import handle_shift_ended
+
+    handle_shift_ended(
+        shift_ended,
+        repo=SqlAlchemyWorkOrderRepository(session),
+        ctx=ctx,
+        clock=clock,
+        event_bus=bus,
+    )
     bus.publish(
         ShiftChanged(
             workspace_id=ctx.workspace_id,
@@ -653,6 +671,7 @@ def close_shift(
             action="closed",
         )
     )
+    bus.publish(shift_ended)
     return after
 
 

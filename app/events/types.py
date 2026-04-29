@@ -90,6 +90,7 @@ __all__ = [
     "TaskUnassigned",
     "TaskUpdated",
     "UserAgentSettingsChanged",
+    "WorkOrderCompleted",
     "WorkspaceChanged",
 ]
 
@@ -1059,6 +1060,18 @@ class ShiftEnded(Event):
     @classmethod
     def _ended_at_is_utc(cls, value: datetime) -> datetime:
         return _require_aware_utc(value)
+
+
+@register
+class WorkOrderCompleted(Event):
+    """A work order moved into the completed state."""
+
+    name: ClassVar[str] = "work_order.completed"
+    allowed_roles: ClassVar[tuple[EventRole, ...]] = ("manager", "client")
+
+    work_order_id: str
+    total_cents: int
+    total_hours_decimal: str
 
 
 @register

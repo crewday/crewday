@@ -42,6 +42,7 @@ __all__ = [
     "RateCard",
     "VendorInvoice",
     "WorkOrder",
+    "WorkOrderShiftAccrual",
 ]
 
 
@@ -229,12 +230,59 @@ class WorkOrder(Base):
             ["rate_card.id", "rate_card.workspace_id"],
             ondelete="SET NULL",
         ),
+        UniqueConstraint(
+            "id",
+            "workspace_id",
+            name="uq_work_order_id_workspace",
+        ),
         Index("ix_work_order_workspace_status", "workspace_id", "status"),
         Index(
             "ix_work_order_workspace_property_status",
             "workspace_id",
             "property_id",
             "status",
+        ),
+    )
+
+
+class WorkOrderShiftAccrual(Base):
+    """Idempotency ledger for shift-driven work-order hour accrual."""
+
+    __tablename__ = "work_order_shift_accrual"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    workspace_id: Mapped[str] = mapped_column(
+        String,
+        ForeignKey("workspace.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    work_order_id: Mapped[str] = mapped_column(String, nullable=False)
+    shift_id: Mapped[str] = mapped_column(String, nullable=False)
+    hours_decimal: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False)
+    hourly_rate_cents: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    accrued_cents: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+
+    __table_args__ = (
+        CheckConstraint("hours_decimal >= 0", name="hours_decimal_nonneg"),
+        CheckConstraint("hourly_rate_cents > 0", name="hourly_rate_cents_positive"),
+        CheckConstraint("accrued_cents >= 0", name="accrued_cents_nonneg"),
+        ForeignKeyConstraint(
+            ["work_order_id", "workspace_id"],
+            ["work_order.id", "work_order.workspace_id"],
+            ondelete="CASCADE",
+        ),
+        UniqueConstraint(
+            "workspace_id",
+            "shift_id",
+            name="uq_work_order_shift_accrual_workspace_shift",
+        ),
+        Index(
+            "ix_work_order_shift_accrual_work_order",
+            "workspace_id",
+            "work_order_id",
         ),
     )
 
