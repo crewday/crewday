@@ -112,6 +112,7 @@ describe("INVALIDATIONS — coverage", () => {
     "payroll.period_paid",
     "payroll_export.ready",
     "payslip.computed",
+    "asset.changed",
     "asset_action.performed",
     "schedule_ruleset.upserted",
     "schedule_ruleset.deleted",
@@ -856,6 +857,37 @@ describe("INVALIDATIONS — per-kind behaviour", () => {
       for (const call of spy.mock.calls) {
         expect(call[0]?.refetchType).toBe("active");
       }
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// dispatchSseEvent — audit invalidation fan-out
+// ---------------------------------------------------------------------------
+
+describe("dispatchSseEvent — audit invalidation", () => {
+  it("refreshes the workspace audit query for workspace-domain events", () => {
+    const qc = makeClient();
+    const spy = vi.spyOn(qc, "invalidateQueries");
+
+    dispatchSseEvent(makeEvent("task.created", { task: { id: "t1" } }), qc);
+
+    const called = spy.mock.calls.map((c) => c[0]?.queryKey);
+    expect(called).toEqual(expect.arrayContaining([qk.audit()]));
+  });
+
+  it("does not refresh workspace audit for tick or deployment-admin events", () => {
+    for (const event of [
+      makeEvent("tick"),
+      makeEvent("admin.audit.appended"),
+    ] as const) {
+      const qc = makeClient();
+      const spy = vi.spyOn(qc, "invalidateQueries");
+
+      dispatchSseEvent(event, qc);
+
+      const called = spy.mock.calls.map((c) => c[0]?.queryKey);
+      expect(called).not.toContainEqual(qk.audit());
     }
   });
 });

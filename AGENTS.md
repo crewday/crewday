@@ -179,6 +179,11 @@ update in your wrap-up.
   workflow YAML may use normal shell control flow.
 - **JSON with `jq`**, not Python. Use `gh`'s `--jq` for GitHub
   payloads.
+- **OpenAPI regeneration needs a root key.** If you regenerate
+  `docs/api/openapi.json` from `create_app().openapi()`, set a
+  throwaway local `CREWDAY_ROOT_KEY` in the command; otherwise auth
+  subkey derivation fails after the shell has already opened the
+  output file.
 - **Modern CLI tools**: `rg` over `grep`, `fd` over `find`, `sd` over
   `sed`.
 - **Read dependencies from the local env**: Python packages under

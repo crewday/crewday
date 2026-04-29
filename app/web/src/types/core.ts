@@ -49,6 +49,16 @@ export interface AuditEntry {
   actor_action_key: string | null;
   actor_id: string | null;
   agent_label: string | null;
+  entity_kind?: string;
+  entity_id?: string;
+  correlation_id?: string;
+  diff?: unknown;
+}
+
+export interface AuditListResponse {
+  data: AuditEntry[];
+  next_cursor: string | null;
+  has_more: boolean;
 }
 
 export interface Webhook {

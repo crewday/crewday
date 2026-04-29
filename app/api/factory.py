@@ -94,6 +94,7 @@ from app.api.v1 import (
     asset_scan_router,
 )
 from app.api.v1.agent import build_agent_router
+from app.api.v1.audit import build_workspace_audit_router
 from app.api.v1.auth import email_change as email_change_module
 from app.api.v1.auth import invite as invite_module
 from app.api.v1.auth import logout as logout_module
@@ -710,6 +711,7 @@ def _mount_auth_routers(
     app.include_router(build_permissions_router(), prefix=scoped_prefix)
     app.include_router(build_settings_router(), prefix=scoped_prefix)
     app.include_router(build_workspace_llm_router(), prefix=scoped_prefix)
+    app.include_router(build_workspace_audit_router(), prefix=scoped_prefix)
 
 
 def _mount_context_routers(app: FastAPI, *, settings: Settings) -> None:

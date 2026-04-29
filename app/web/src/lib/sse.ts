@@ -110,6 +110,7 @@ export type EventKind =
   | "payroll_export.ready"
   | "payslip.computed"
   // Assets (§21).
+  | "asset.changed"
   | "asset_action.performed"
   // Schedule rulesets + scheduler calendar (§06, §14 scheduler).
   | "schedule_ruleset.upserted"
@@ -648,6 +649,12 @@ export const INVALIDATIONS: Record<EventKind, InvalidationHandler> = {
     invalidate(qc, qk.assets());
   },
 
+  "asset.changed": (event, qc) => {
+    const payload = event.data as unknown as AssetActionPayload;
+    invalidate(qc, qk.asset(payload.asset_id));
+    invalidate(qc, qk.assets());
+  },
+
   "schedule_ruleset.upserted": (_event, qc) => {
     invalidate(qc, qk.scheduleRulesets());
     invalidate(qc, ["scheduler-calendar"]);
@@ -747,6 +754,9 @@ export function dispatchSseEvent(event: SseEvent, qc: QueryClient): void {
   }
   const handler = INVALIDATIONS[event.kind];
   try {
+    if (event.kind !== "tick" && !event.kind.startsWith("admin.")) {
+      invalidate(qc, qk.audit());
+    }
     handler(event, qc);
   } catch (err) {
     // A handler bug must not take the SSE stream down. Log and move

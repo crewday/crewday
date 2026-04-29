@@ -229,11 +229,16 @@ export default function App() {
               />
               <Route path="/asset_types" element={<AssetTypesPage />} />
               <Route path="/documents" element={<DocumentsPage />} />
-              <Route path="/audit" element={<AuditPage />} />
               <Route path="/permissions" element={<PermissionsPage />} />
               <Route path="/organizations" element={<OrganizationsPage />} />
               <Route path="/webhooks" element={<WebhooksPage />} />
               <Route path="/tokens" element={<ApiTokensPage />} />
+            </Route>
+
+            <Route element={<RequirePermission actionKey="audit_log.view" />}>
+              <Route element={<ManagerLayout />}>
+                <Route path="/audit" element={<AuditPage />} />
+              </Route>
             </Route>
 
             <Route element={<ClientLayout />}>
