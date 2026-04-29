@@ -50,8 +50,8 @@ URL", §"OpenAPI"; ``docs/specs/16-deployment-operations.md``
 from __future__ import annotations
 
 import logging
-from collections.abc import AsyncIterator, Callable
-from contextlib import AbstractAsyncContextManager, asynccontextmanager
+from collections.abc import AsyncIterator, Callable, Iterator
+from contextlib import AbstractAsyncContextManager, asynccontextmanager, contextmanager
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as pkg_version
 from pathlib import Path
@@ -63,6 +63,7 @@ from fastapi.openapi.utils import get_openapi
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import SecretStr
+from sqlalchemy.orm import Session
 from starlette.middleware.cors import CORSMiddleware
 
 from app.adapters.db.session import make_uow
@@ -133,7 +134,6 @@ from app.api.v1.work_engagements import build_work_engagements_router
 from app.api.v1.work_roles import build_work_roles_router
 from app.auth._throttle import Throttle
 from app.auth.csrf import CSRFMiddleware
-from app.auth.keys import KeyDerivationError, derive_subkey
 from app.capabilities import Capabilities
 from app.capabilities import probe as probe_capabilities
 from app.config import Settings, get_settings
@@ -151,6 +151,7 @@ from app.demo import (
 )
 from app.observability import build_metrics_router, setup_tracing
 from app.security import BindGuardError, assert_bind_allowed
+from app.security.hmac_signer import HmacSigner
 from app.tenancy.middleware import WorkspaceContextMiddleware
 from app.util.logging import setup_logging
 
@@ -415,9 +416,10 @@ def _build_llm(settings: Settings) -> LLMClient | None:
 def _build_storage(settings: Settings) -> Storage | None:
     """Return the configured :class:`Storage` backend, or ``None``.
 
-    ``localfs`` wiring requires ``settings.root_key`` so the signing
+    ``localfs`` wiring requires ``settings.root_key`` so the signer
     seam on :class:`~app.adapters.storage.localfs.LocalFsStorage` can
-    derive its HMAC key. A deployment with no ``CREWDAY_ROOT_KEY``
+    read row-backed HMAC slots or use the legacy fallback. A deployment
+    with no ``CREWDAY_ROOT_KEY``
     already refuses to sign magic links or sessions; storage stays
     consistent with that posture — the dep surfaces a 503 instead of
     crashing the boot, so ``/healthz`` and the non-avatar routes
@@ -433,9 +435,7 @@ def _build_storage(settings: Settings) -> Storage | None:
         # meantime, which is the right failure mode for a deploy
         # that flipped the env var without finishing the wiring.
         return None
-    try:
-        signing_key = derive_subkey(settings.root_key, purpose="storage-sign")
-    except KeyDerivationError:
+    if settings.root_key is None:
         # Surface the misconfig at request time, not boot — a box
         # that never actually calls an avatar / file endpoint
         # shouldn't refuse to start just because the key is unset.
@@ -444,7 +444,20 @@ def _build_storage(settings: Settings) -> Storage | None:
             extra={"event": "storage.unwired", "backend": settings.storage_backend},
         )
         return None
-    return LocalFsStorage(settings.data_dir, signing_key=signing_key)
+    return LocalFsStorage(
+        settings.data_dir,
+        signer=HmacSigner(session_factory=_hmac_signer_session, settings=settings),
+    )
+
+
+@contextmanager
+def _hmac_signer_session() -> Iterator[Session]:
+    """Open a concrete SQLAlchemy session for process-wide signers."""
+    with make_uow() as session:
+        if not isinstance(session, Session):  # pragma: no cover - production seam
+            got = type(session).__name__
+            raise TypeError(f"expected SQLAlchemy Session, got {got}")
+        yield session
 
 
 def _mount_auth_routers(

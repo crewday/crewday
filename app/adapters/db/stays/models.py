@@ -356,8 +356,8 @@ class GuestLink(Base):
     token. The ``token`` column is the signed ``itsdangerous`` blob
     the public route resolves; the row stores no secret material on
     its own — the signing key lives behind
-    :func:`app.auth.keys.derive_subkey` and isn't part of the
-    persistence shape.
+    :mod:`app.security.hmac_signer` and isn't part of the persistence
+    shape.
 
     Cascades follow §02:
 

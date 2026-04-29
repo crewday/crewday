@@ -33,10 +33,9 @@ we'd have to re-walk the URL to reconstruct the message, and any
 buggy rewrite (trailing slash, case fold) would silently flip a
 verification failure into a verification success on the *wrong* blob.
 
-The signing key is injected by the caller (see
-:func:`app.auth.keys.derive_subkey` with ``purpose="storage-sign"``)
-so this module stays free of config reads — the storage layer
-doesn't know what :class:`Settings` is.
+The signer is injected by the caller with purpose ``"storage-sign"``
+so this module stays free of config and database reads — the storage
+layer doesn't know what :class:`Settings` is.
 """
 
 from __future__ import annotations
@@ -46,7 +45,7 @@ import hmac
 import os
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import IO, Final
+from typing import IO, Final, Protocol
 from urllib.parse import parse_qs, urlsplit
 
 from app.adapters.storage.ports import Blob, BlobNotFound
@@ -74,6 +73,7 @@ _HASH_LEN: Final[int] = 64
 # Relative-path template for the signed URL. The router mounts at
 # this prefix (§12) and the verifier only accepts this shape.
 _SIGNED_URL_PREFIX: Final[str] = "/api/v1/files/"
+_STORAGE_SIGN_PURPOSE: Final[str] = "storage-sign"
 
 
 class SignatureInvalid(ValueError):
@@ -84,6 +84,38 @@ class SignatureExpired(ValueError):
     """Raised when a signed URL's ``exp`` is in the past."""
 
 
+class _HmacSigner(Protocol):
+    def sign(self, message: bytes, *, purpose: str) -> str:
+        """Return the hex HMAC-SHA256 signature for ``message``."""
+
+    def verify(self, message: bytes, signature: str, *, purpose: str) -> bool:
+        """Return whether ``signature`` verifies for ``message``."""
+
+
+class _StaticHmacSigner:
+    __slots__ = ("_key",)
+
+    def __init__(self, key: bytes) -> None:
+        if not isinstance(key, bytes):
+            raise TypeError("signing_key must be bytes")
+        if not key:
+            raise ValueError("signing_key must be non-empty")
+        self._key = key
+
+    def sign(self, message: bytes, *, purpose: str) -> str:
+        return hmac.new(self._key, message, hashlib.sha256).hexdigest()
+
+    def verify(self, message: bytes, signature: str, *, purpose: str) -> bool:
+        if len(signature) != 64:
+            return False
+        try:
+            bytes.fromhex(signature)
+        except ValueError:
+            return False
+        expected = self.sign(message, purpose=purpose)
+        return hmac.compare_digest(expected, signature)
+
+
 class LocalFsStorage:
     """Content-addressed blob store backed by the local filesystem.
 
@@ -92,10 +124,11 @@ class LocalFsStorage:
     * ``data_dir`` — root where the ``uploads/`` tree lives. The
       directory is created on first write; parents must already
       exist (operators wire ``$CREWDAY_DATA_DIR`` at deploy time).
-    * ``signing_key`` — 32-byte (or longer) HMAC key used to sign
-      and verify ``sign_url`` outputs. Callers derive this via
-      :func:`app.auth.keys.derive_subkey` with ``purpose="storage-sign"``;
-      the storage layer stays free of :class:`Settings` reads.
+    * ``signing_key`` — legacy 32-byte static HMAC key used by tests
+      and old wiring.
+    * ``signer`` — preferred signer/verifier seam. Production passes
+      the deployment-wide row-backed HMAC signer with purpose
+      ``"storage-sign"``.
     * ``clock`` — :class:`app.util.clock.Clock` for deterministic
       tests. Defaults to :class:`SystemClock`.
 
@@ -106,19 +139,26 @@ class LocalFsStorage:
     (the FS is the coordination surface).
     """
 
-    __slots__ = ("clock", "data_dir", "signing_key")
+    __slots__ = ("clock", "data_dir", "signer")
 
     def __init__(
         self,
         data_dir: Path,
         *,
-        signing_key: bytes,
+        signing_key: bytes | None = None,
+        signer: _HmacSigner | None = None,
         clock: Clock | None = None,
     ) -> None:
-        if not signing_key:
-            raise ValueError("signing_key must be non-empty")
+        if signing_key is None and signer is None:
+            raise ValueError("signing_key or signer is required")
+        if signing_key is not None and signer is not None:
+            raise ValueError("pass either signing_key or signer, not both")
         self.data_dir = Path(data_dir)
-        self.signing_key = signing_key
+        if signer is None:
+            if signing_key is None:  # pragma: no cover - guarded above
+                raise ValueError("signing_key or signer is required")
+            signer = _StaticHmacSigner(signing_key)
+        self.signer = signer
         self.clock: Clock = clock if clock is not None else SystemClock()
 
     # ------------------------------------------------------------------
@@ -230,7 +270,10 @@ class LocalFsStorage:
         if ttl_seconds < 0:
             raise ValueError("ttl_seconds must be non-negative")
         exp = int(self.clock.now().timestamp()) + ttl_seconds
-        signature = _compute_signature(self.signing_key, content_hash, exp)
+        signature = self.signer.sign(
+            _signature_message(content_hash, exp),
+            purpose=_STORAGE_SIGN_PURPOSE,
+        )
         return f"{_SIGNED_URL_PREFIX}{signature}?h={content_hash}&e={exp}"
 
     def verify_signed_url(self, url: str, *, now: datetime) -> str:
@@ -267,10 +310,11 @@ class LocalFsStorage:
         except ValueError as exc:
             raise SignatureInvalid("url 'e' is not an integer") from exc
 
-        expected = _compute_signature(self.signing_key, content_hash, exp)
-        # Constant-time compare; ``hmac.compare_digest`` tolerates
-        # differing lengths by returning False without short-circuiting.
-        if not hmac.compare_digest(expected, signature):
+        if not self.signer.verify(
+            _signature_message(content_hash, exp),
+            signature,
+            purpose=_STORAGE_SIGN_PURPOSE,
+        ):
             raise SignatureInvalid("url signature does not verify")
 
         if now.tzinfo is None or now.tzinfo.utcoffset(now) is None:
@@ -297,10 +341,9 @@ def _validate_hash(content_hash: str) -> None:
         )
 
 
-def _compute_signature(key: bytes, content_hash: str, exp: int) -> str:
-    """Return the hex HMAC-SHA256 of ``content_hash.exp`` under ``key``."""
-    message = f"{content_hash}.{exp}".encode("ascii")
-    return hmac.new(key, message, hashlib.sha256).hexdigest()
+def _signature_message(content_hash: str, exp: int) -> bytes:
+    """Return the ASCII message signed for ``content_hash`` and ``exp``."""
+    return f"{content_hash}.{exp}".encode("ascii")
 
 
 def _stream_to_temp(src: IO[bytes], dst: Path, expected_hash: str) -> int:

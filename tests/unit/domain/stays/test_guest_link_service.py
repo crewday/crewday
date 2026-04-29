@@ -62,6 +62,7 @@ from app.domain.stays.guest_link_service import (
     resolve_link,
     revoke_link,
 )
+from app.security.hmac_signer import HmacSigner, rotate_hmac_key
 from app.tenancy.context import WorkspaceContext
 from app.util.clock import FrozenClock
 from app.util.ulid import new_ulid
@@ -766,6 +767,36 @@ class TestResolveLink:
         # No assets requested → empty.
         assert resolved.bundle.assets == ()
 
+    def test_resolve_accepts_token_signed_before_hmac_rotation(
+        self,
+        session_guest: Session,
+        frozen_clock: FrozenClock,
+    ) -> None:
+        ws, prop, stay, token = self._setup(
+            session_guest, frozen_clock, slug="r-rot"
+        )
+        rotate_hmac_key(
+            session_guest,
+            "guest-link",
+            b"g" * 32,
+            purge_after=_PINNED + timedelta(hours=72),
+            settings=get_settings(),
+            clock=frozen_clock,
+        )
+        welcome = FakeWelcomeResolver()
+        welcome.set(workspace_id=ws, stay_id=stay, value=_make_input(property_id=prop))
+
+        result = resolve_link(
+            session_guest,
+            token=token,
+            welcome_resolver=welcome,
+            settings_resolver=FakeSettingsResolver(),
+            clock=frozen_clock,
+        )
+
+        assert isinstance(result, ResolvedGuestLink)
+        assert result.stay_id == stay
+
     def test_resolve_expired_returns_gone_expired(
         self,
         session_guest: Session,
@@ -1277,10 +1308,10 @@ def test_token_does_not_carry_workspace_id(
     # would appear verbatim if it were in the payload.
     from itsdangerous import URLSafeTimedSerializer
 
-    from app.auth.keys import derive_subkey
-
-    key = derive_subkey(get_settings().root_key, purpose="guest-link")
-    serializer = URLSafeTimedSerializer(secret_key=key, salt="guest-link-v1")
+    keys = HmacSigner(
+        session_guest, settings=get_settings(), clock=frozen_clock
+    ).verification_keys(purpose="guest-link")
+    serializer = URLSafeTimedSerializer(secret_key=keys, salt="guest-link-v1")
     payload = serializer.loads(link.token)
     assert isinstance(payload, dict)
     assert "workspace_id" not in payload

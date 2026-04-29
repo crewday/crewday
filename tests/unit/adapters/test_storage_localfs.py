@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import hashlib
 import io
+import sqlite3
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -20,13 +21,20 @@ from typing import IO
 from urllib.parse import parse_qs, urlsplit
 
 import pytest
+from pydantic import SecretStr
+from sqlalchemy import Engine, create_engine, event
+from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.pool import StaticPool
 
+from app.adapters.db.base import Base
 from app.adapters.storage.localfs import (
     LocalFsStorage,
     SignatureExpired,
     SignatureInvalid,
 )
 from app.adapters.storage.ports import Blob, BlobNotFound
+from app.config import Settings
+from app.security.hmac_signer import HmacSigner, rotate_hmac_key
 from app.util.clock import FrozenClock
 
 # ---------------------------------------------------------------------------
@@ -83,6 +91,49 @@ class _ExplodingStream(io.BytesIO):
 @pytest.fixture
 def store(tmp_path: Path) -> Iterator[LocalFsStorage]:
     yield _store(tmp_path)
+
+
+@pytest.fixture
+def settings() -> Settings:
+    return Settings.model_construct(
+        database_url="sqlite:///:memory:",
+        root_key=SecretStr("unit-test-localfs-hmac-root-key"),
+    )
+
+
+@pytest.fixture
+def engine() -> Iterator[Engine]:
+    eng = create_engine(
+        "sqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+        future=True,
+    )
+
+    @event.listens_for(eng, "connect")
+    def _set_sqlite_pragma(
+        dbapi_connection: object, _connection_record: object
+    ) -> None:
+        if not isinstance(dbapi_connection, sqlite3.Connection):
+            return
+        cursor = dbapi_connection.cursor()
+        try:
+            cursor.execute("PRAGMA foreign_keys=ON")
+        finally:
+            cursor.close()
+
+    Base.metadata.create_all(eng)
+    try:
+        yield eng
+    finally:
+        eng.dispose()
+
+
+@pytest.fixture
+def db_session(engine: Engine) -> Iterator[Session]:
+    factory = sessionmaker(bind=engine, expire_on_commit=False, class_=Session)
+    with factory() as session:
+        yield session
 
 
 # ---------------------------------------------------------------------------
@@ -279,6 +330,20 @@ class TestConstruction:
         with pytest.raises(ValueError, match="signing_key"):
             LocalFsStorage(tmp_path, signing_key=b"")
 
+    def test_legacy_static_signing_key_accepts_existing_long_keys(
+        self, tmp_path: Path
+    ) -> None:
+        store = LocalFsStorage(
+            tmp_path,
+            signing_key=b"legacy-static-signing-key-longer-than-32-bytes",
+            clock=FrozenClock(_EPOCH),
+        )
+        content_hash = _sha256(b"hello")
+
+        url = store.sign_url(content_hash, ttl_seconds=900)
+
+        assert store.verify_signed_url(url, now=_EPOCH) == content_hash
+
     def test_default_clock_is_system_clock(self, tmp_path: Path) -> None:
         # Constructed without a clock: sign_url must still work and
         # return an ``e=`` value in the near future.
@@ -348,6 +413,18 @@ class TestSignUrl:
         with pytest.raises(SignatureInvalid, match="does not verify"):
             store.verify_signed_url(tampered, now=_EPOCH)
 
+    @pytest.mark.parametrize("bad_sig", ["z" * 64, "f" * 63])
+    def test_verify_rejects_malformed_signature_segment(
+        self, store: LocalFsStorage, bad_sig: str
+    ) -> None:
+        content_hash = _sha256(b"hello")
+        url = store.sign_url(content_hash, ttl_seconds=900)
+        parts = urlsplit(url)
+        tampered = f"/api/v1/files/{bad_sig}?{parts.query}"
+
+        with pytest.raises(SignatureInvalid, match="does not verify"):
+            store.verify_signed_url(tampered, now=_EPOCH)
+
     def test_verify_expired_raises_expired(self, store: LocalFsStorage) -> None:
         content_hash = _sha256(b"hello")
         url = store.sign_url(content_hash, ttl_seconds=0)
@@ -373,6 +450,40 @@ class TestSignUrl:
         url = issuer.sign_url(content_hash, ttl_seconds=900)
         with pytest.raises(SignatureInvalid, match="does not verify"):
             verifier.verify_signed_url(url, now=_EPOCH)
+
+    def test_verify_accepts_url_signed_before_hmac_rotation(
+        self, tmp_path: Path, db_session: Session, settings: Settings
+    ) -> None:
+        issuer = LocalFsStorage(
+            tmp_path,
+            signer=HmacSigner(db_session, settings=settings, clock=FrozenClock(_EPOCH)),
+            clock=FrozenClock(_EPOCH),
+        )
+        content_hash = _sha256(b"hello")
+        url = issuer.sign_url(content_hash, ttl_seconds=900)
+
+        rotate_hmac_key(
+            db_session,
+            "storage-sign",
+            b"s" * 32,
+            purge_after=_EPOCH + timedelta(hours=72),
+            settings=settings,
+            clock=FrozenClock(_EPOCH + timedelta(seconds=1)),
+        )
+
+        verifier = LocalFsStorage(
+            tmp_path,
+            signer=HmacSigner(
+                db_session,
+                settings=settings,
+                clock=FrozenClock(_EPOCH + timedelta(hours=1)),
+            ),
+            clock=FrozenClock(_EPOCH + timedelta(hours=1)),
+        )
+        assert (
+            verifier.verify_signed_url(url, now=_EPOCH + timedelta(seconds=899))
+            == content_hash
+        )
 
     def test_verify_rejects_url_with_wrong_prefix(self, store: LocalFsStorage) -> None:
         content_hash = _sha256(b"hello")

@@ -45,13 +45,12 @@ least one asset on the property carries ``guest_visible = true``.
 Either condition false → the equipment section is omitted from
 the rendered bundle entirely.
 
-**Token format.** ``URLSafeTimedSerializer`` keyed off the
-deployment ``settings.root_key`` via the existing
-:func:`app.auth.keys.derive_subkey` HKDF helper (purpose
-``"guest-link"``). The signed payload carries ``{stay_id,
-property_id, jti, exp}`` — never ``workspace_id``: a guest token
-is **scoped to the stay**, not to the workspace, and including
-the workspace id in the URL would leak the tenant identifier.
+**Token format.** ``URLSafeTimedSerializer`` keyed by the
+deployment-wide HMAC signer purpose ``"guest-link"``. The signed
+payload carries ``{stay_id, property_id, jti, exp}`` — never
+``workspace_id``: a guest token is **scoped to the stay**, not to
+the workspace, and including the workspace id in the URL would leak
+the tenant identifier.
 
 **Audit.** Every mutation (mint, revoke, access) writes one
 :class:`app.audit.write_audit` row with ``entity_kind =
@@ -85,8 +84,8 @@ from sqlalchemy.orm import Session
 
 from app.adapters.db.stays.models import GuestLink, Reservation
 from app.audit import write_audit
-from app.auth.keys import derive_subkey
 from app.config import Settings, get_settings
+from app.security.hmac_signer import HmacSigner
 from app.tenancy import WorkspaceContext, tenant_agnostic
 from app.util.clock import Clock, SystemClock
 from app.util.ulid import new_ulid
@@ -117,10 +116,10 @@ __all__ = [
 # ---------------------------------------------------------------------------
 
 
-# HKDF ``info`` label fed to :func:`app.auth.keys.derive_subkey`. Different
-# subkeys must be unrelated so an oracle on one signing surface (magic
-# links, session cookies, …) cannot forge tokens on another.
-_HKDF_PURPOSE: Final[str] = "guest-link"
+# Logical HMAC signer purpose. Different signing surfaces must be unrelated
+# so an oracle on one surface (magic links, session cookies, ...) cannot
+# forge tokens on another.
+_HMAC_PURPOSE: Final[str] = "guest-link"
 
 # itsdangerous serializer salt. Domain-separates the signature from any
 # other URLSafeTimedSerializer the deployment runs (magic-link uses
@@ -464,7 +463,7 @@ def mint_link(
 
     link_id = new_ulid()
     jti = new_ulid()
-    serializer = _serializer(settings)
+    serializer = _serializer(session, settings, clock=resolved_clock)
     token = serializer.dumps(
         {
             "stay_id": stay_id,
@@ -630,7 +629,7 @@ def resolve_link(
     resolved_clock = clock if clock is not None else SystemClock()
     now = resolved_clock.now()
 
-    serializer = _serializer(settings)
+    serializer = _serializer(session, settings, clock=resolved_clock)
     claims = _unseal(serializer, token=token, now=now)
     if claims is None:
         return None
@@ -765,17 +764,21 @@ def record_access(
 # ---------------------------------------------------------------------------
 
 
-def _serializer(settings: Settings | None) -> URLSafeTimedSerializer:
+def _serializer(
+    session: Session, settings: Settings | None, *, clock: Clock | None = None
+) -> URLSafeTimedSerializer:
     """Build a fresh :class:`URLSafeTimedSerializer` for guest links.
 
-    Uses the deployment ``settings.root_key`` filtered through HKDF so
-    a leak of the magic-link signing oracle cannot forge a guest link
-    and vice versa — every signing surface gets its own derived
-    subkey (see :mod:`app.auth.keys`).
+    Uses the deployment-wide HMAC signer keyring for ``guest-link``.
+    ``itsdangerous`` accepts keys oldest-to-newest, verifies with all
+    of them, and signs with the last one, matching the primary /
+    non-expired legacy slot contract in :mod:`app.security.hmac_signer`.
     """
     s = settings if settings is not None else get_settings()
-    key = derive_subkey(s.root_key, purpose=_HKDF_PURPOSE)
-    return URLSafeTimedSerializer(secret_key=key, salt=_SERIALIZER_SALT)
+    keys = HmacSigner(session, settings=s, clock=clock).verification_keys(
+        purpose=_HMAC_PURPOSE
+    )
+    return URLSafeTimedSerializer(secret_key=keys, salt=_SERIALIZER_SALT)
 
 
 @dataclass(frozen=True, slots=True)
