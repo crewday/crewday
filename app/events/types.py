@@ -59,6 +59,7 @@ __all__ = [
     "NotificationCreated",
     "PayPeriodLocked",
     "PayPeriodPaid",
+    "PayslipComputed",
     "PropertyClosureCreated",
     "ReservationChangeKind",
     "ReservationUpserted",
@@ -897,6 +898,18 @@ class PayPeriodPaid(Event):
     allowed_roles: ClassVar[tuple[EventRole, ...]] = ("manager",)
 
     pay_period_id: str
+
+
+@register
+class PayslipComputed(Event):
+    """A draft payslip has been computed or recomputed."""
+
+    name: ClassVar[str] = "payslip.computed"
+    allowed_roles: ClassVar[tuple[EventRole, ...]] = ("manager",)
+
+    pay_period_id: str
+    payslip_id: str
+    user_id: str
 
 
 @register

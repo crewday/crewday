@@ -224,6 +224,7 @@ class TestMigrationShape:
             "gross_cents",
             "deductions_cents",
             "net_cents",
+            "components_json",
             "pdf_blob_hash",
             "payout_snapshot_json",
             "payout_manifest_purged_at",

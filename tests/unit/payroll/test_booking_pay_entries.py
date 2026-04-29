@@ -36,6 +36,7 @@ def _row(
         work_engagement_id="01HWA00000000000000000ENG1",
         user_id="01HWA00000000000000000USR1",
         property_id="01HWA00000000000000000PRP1",
+        property_country="FR",
         status=status,
         kind="work",
         pay_basis=pay_basis,

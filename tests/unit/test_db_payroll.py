@@ -250,6 +250,7 @@ class TestPayslipModel:
         assert slip.gross_cents == 350000
         assert slip.deductions_cents == {}
         assert slip.net_cents == 350000
+        assert slip.components_json is None
         assert slip.pdf_blob_hash is None
 
     def test_construction_with_deductions_and_pdf(self) -> None:
@@ -263,10 +264,18 @@ class TestPayslipModel:
             gross_cents=400000,
             deductions_cents={"tax": 80000, "advance": 20000},
             net_cents=300000,
+            components_json={
+                "schema_version": 1,
+                "gross_breakdown": [{"key": "base_pay", "cents": 400000}],
+                "deductions": [],
+                "statutory": [],
+                "metadata": {},
+            },
             pdf_blob_hash="sha256-deadbeef",
             created_at=_PINNED,
         )
         assert slip.deductions_cents == {"tax": 80000, "advance": 20000}
+        assert slip.components_json["schema_version"] == 1
         assert slip.pdf_blob_hash == "sha256-deadbeef"
 
     def test_tablename(self) -> None:

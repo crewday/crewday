@@ -16,8 +16,8 @@ writer's FK reference to ``entity_id``) sees the new row.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
-from datetime import datetime
+from collections.abc import Sequence, Set
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import Literal
 
@@ -25,6 +25,7 @@ from sqlalchemy import and_, delete, exists, or_, select, update
 from sqlalchemy.orm import Session
 from sqlalchemy.sql.elements import ColumnElement
 
+from app.adapters.db.holidays.models import PublicHoliday
 from app.adapters.db.payroll.models import (
     Booking,
     PayPeriod,
@@ -32,6 +33,7 @@ from app.adapters.db.payroll.models import (
     PayRule,
     Payslip,
 )
+from app.adapters.db.places.models import Property
 from app.domain.payroll.bookings import (
     derive_booking_pay_entry,
     group_booking_entries_by_day,
@@ -44,6 +46,7 @@ from app.domain.payroll.ports import (
     PayPeriodRow,
     PayRuleRepository,
     PayRuleRow,
+    PayslipRow,
 )
 from app.util.ulid import new_ulid
 
@@ -51,6 +54,7 @@ __all__ = [
     "SqlAlchemyBookingPayRepository",
     "SqlAlchemyPayPeriodRepository",
     "SqlAlchemyPayRuleRepository",
+    "SqlAlchemyPayslipComputeRepository",
 ]
 
 
@@ -128,13 +132,16 @@ def _pay_basis(value: str) -> Literal["scheduled", "actual"]:
     raise ValueError(f"unknown booking pay_basis: {value!r}")
 
 
-def _booking_to_row(row: Booking) -> BookingPayRow:
+def _booking_to_row(
+    row: Booking, *, property_country: str | None = None
+) -> BookingPayRow:
     return BookingPayRow(
         id=row.id,
         workspace_id=row.workspace_id,
         work_engagement_id=row.work_engagement_id,
         user_id=row.user_id,
         property_id=row.property_id,
+        property_country=property_country,
         status=row.status,
         kind=row.kind,
         pay_basis=_pay_basis(row.pay_basis),
@@ -168,6 +175,23 @@ def _entry_to_row(row: PayPeriodEntry) -> PayPeriodEntryRow:
         source_details=tuple(row.source_details_json),
         created_at=row.created_at,
         updated_at=row.updated_at,
+    )
+
+
+def _payslip_to_row(row: Payslip) -> PayslipRow:
+    return PayslipRow(
+        id=row.id,
+        workspace_id=row.workspace_id,
+        pay_period_id=row.pay_period_id,
+        user_id=row.user_id,
+        shift_hours_decimal=row.shift_hours_decimal,
+        overtime_hours_decimal=row.overtime_hours_decimal,
+        gross_cents=row.gross_cents,
+        deductions_cents=dict(row.deductions_cents),
+        net_cents=row.net_cents,
+        components_json=dict(row.components_json),
+        status=row.status,
+        created_at=row.created_at,
     )
 
 
@@ -395,7 +419,14 @@ class SqlAlchemyBookingPayRepository(BookingPayRepository):
         work_engagement_id: str | None = None,
     ) -> Sequence[BookingPayRow]:
         stmt = (
-            select(Booking)
+            select(Booking, Property.country)
+            .outerjoin(
+                Property,
+                and_(
+                    Property.id == Booking.property_id,
+                    Property.deleted_at.is_(None),
+                ),
+            )
             .where(
                 *_booking_window_filters(
                     workspace_id=workspace_id,
@@ -412,8 +443,11 @@ class SqlAlchemyBookingPayRepository(BookingPayRepository):
         if work_engagement_id is not None:
             stmt = stmt.where(Booking.work_engagement_id == work_engagement_id)
 
-        rows = self._session.scalars(stmt).all()
-        return [_booking_to_row(row) for row in rows]
+        rows = self._session.execute(stmt).all()
+        return [
+            _booking_to_row(booking, property_country=property_country)
+            for booking, property_country in rows
+        ]
 
     def list_unsettled_booking_ids(
         self,
@@ -502,6 +536,177 @@ class SqlAlchemyBookingPayRepository(BookingPayRepository):
 
         self._session.flush()
         return [_entry_to_row(row) for row in rows]
+
+
+class SqlAlchemyPayslipComputeRepository(SqlAlchemyBookingPayRepository):
+    """SA-backed repository for payslip recomputation."""
+
+    def get_period(self, *, workspace_id: str, period_id: str) -> PayPeriodRow | None:
+        row = self._session.scalars(
+            select(PayPeriod).where(
+                PayPeriod.id == period_id,
+                PayPeriod.workspace_id == workspace_id,
+            )
+        ).one_or_none()
+        return _period_to_row(row) if row is not None else None
+
+    def list_period_entries(
+        self,
+        *,
+        workspace_id: str,
+        pay_period_id: str,
+    ) -> Sequence[PayPeriodEntryRow]:
+        rows = self._session.scalars(
+            select(PayPeriodEntry)
+            .where(
+                PayPeriodEntry.workspace_id == workspace_id,
+                PayPeriodEntry.pay_period_id == pay_period_id,
+            )
+            .order_by(
+                PayPeriodEntry.user_id.asc(),
+                PayPeriodEntry.work_engagement_id.asc(),
+                PayPeriodEntry.entry_date.asc(),
+                PayPeriodEntry.id.asc(),
+            )
+        ).all()
+        return [_entry_to_row(row) for row in rows]
+
+    def get_effective_pay_rule(
+        self,
+        *,
+        workspace_id: str,
+        user_id: str,
+        at: datetime,
+    ) -> PayRuleRow | None:
+        row = self._session.scalars(
+            select(PayRule)
+            .where(
+                PayRule.workspace_id == workspace_id,
+                PayRule.user_id == user_id,
+                PayRule.effective_from <= at,
+                or_(PayRule.effective_to.is_(None), PayRule.effective_to >= at),
+            )
+            .order_by(PayRule.effective_from.desc(), PayRule.id.desc())
+            .limit(1)
+        ).one_or_none()
+        return _to_row(row) if row is not None else None
+
+    def list_holiday_multipliers(
+        self,
+        *,
+        workspace_id: str,
+        starts_on: date,
+        ends_before: date,
+        countries: Set[str],
+    ) -> dict[tuple[date, str | None], Decimal]:
+        days: set[date] = set()
+        current = starts_on
+        while current < ends_before:
+            days.add(current)
+            current += timedelta(days=1)
+
+        rows = self._session.scalars(
+            select(PublicHoliday).where(
+                PublicHoliday.workspace_id == workspace_id,
+                PublicHoliday.deleted_at.is_(None),
+                or_(
+                    PublicHoliday.country.is_(None),
+                    PublicHoliday.country.in_(sorted(countries)),
+                ),
+                PublicHoliday.payroll_multiplier.is_not(None),
+                or_(
+                    and_(
+                        PublicHoliday.recurrence.is_(None),
+                        PublicHoliday.date >= starts_on,
+                        PublicHoliday.date < ends_before,
+                    ),
+                    PublicHoliday.recurrence == "annual",
+                ),
+            )
+        ).all()
+
+        multipliers: dict[tuple[date, str | None], Decimal] = {}
+        for row in rows:
+            for day in days:
+                if row.recurrence == "annual":
+                    if (row.date.month, row.date.day) != (day.month, day.day):
+                        continue
+                elif row.date != day:
+                    continue
+                key = (day, row.country)
+                existing = multipliers.get(key)
+                multiplier = row.payroll_multiplier
+                if multiplier is not None and (
+                    existing is None or multiplier > existing
+                ):
+                    multipliers[key] = multiplier
+        return multipliers
+
+    def has_paid_payslip(self, *, workspace_id: str, period_id: str) -> bool:
+        return bool(
+            self._session.scalar(
+                select(
+                    exists().where(
+                        Payslip.workspace_id == workspace_id,
+                        Payslip.pay_period_id == period_id,
+                        or_(Payslip.status == "paid", Payslip.paid_at.is_not(None)),
+                    )
+                )
+            )
+        )
+
+    def upsert_payslip(
+        self,
+        *,
+        payslip_id: str,
+        workspace_id: str,
+        pay_period_id: str,
+        user_id: str,
+        shift_hours_decimal: Decimal,
+        overtime_hours_decimal: Decimal,
+        gross_cents: int,
+        deductions_cents: dict[str, int],
+        net_cents: int,
+        components_json: dict[str, object],
+        now: datetime,
+    ) -> PayslipRow:
+        row = self._session.scalars(
+            select(Payslip).where(
+                Payslip.workspace_id == workspace_id,
+                Payslip.pay_period_id == pay_period_id,
+                Payslip.user_id == user_id,
+            )
+        ).one_or_none()
+        if row is None:
+            row = Payslip(
+                id=payslip_id,
+                workspace_id=workspace_id,
+                pay_period_id=pay_period_id,
+                user_id=user_id,
+                shift_hours_decimal=shift_hours_decimal,
+                overtime_hours_decimal=overtime_hours_decimal,
+                gross_cents=gross_cents,
+                deductions_cents=deductions_cents,
+                net_cents=net_cents,
+                components_json=components_json,
+                status="draft",
+                created_at=now,
+            )
+            self._session.add(row)
+        else:
+            row.shift_hours_decimal = shift_hours_decimal
+            row.overtime_hours_decimal = overtime_hours_decimal
+            row.gross_cents = gross_cents
+            row.deductions_cents = deductions_cents
+            row.net_cents = net_cents
+            row.components_json = components_json
+            row.status = "draft"
+            row.issued_at = None
+            row.paid_at = None
+            row.pdf_blob_hash = None
+            row.payout_snapshot_json = None
+        self._session.flush()
+        return _payslip_to_row(row)
 
 
 class SqlAlchemyPayRuleRepository(PayRuleRepository):

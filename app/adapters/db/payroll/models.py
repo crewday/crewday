@@ -551,6 +551,9 @@ class Payslip(Base):
         JSON, nullable=False, default=dict
     )
     net_cents: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    components_json: Mapped[dict[str, object]] = mapped_column(
+        JSON, nullable=False, default=dict
+    )
     # NULL until the payslip is issued; set to the PDF's content hash
     # once signed. The PDF itself lives in blob storage so a purge
     # can drop it while keeping the row intact.

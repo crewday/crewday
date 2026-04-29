@@ -33,7 +33,7 @@ shortcuts.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence, Set
 from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import Decimal
@@ -50,6 +50,8 @@ __all__ = [
     "PayPeriodRow",
     "PayRuleRepository",
     "PayRuleRow",
+    "PayslipComputeRepository",
+    "PayslipRow",
 ]
 
 
@@ -105,6 +107,7 @@ class BookingPayRow:
     work_engagement_id: str
     user_id: str
     property_id: str | None
+    property_country: str | None
     status: str
     kind: str
     pay_basis: Literal["scheduled", "actual"]
@@ -141,6 +144,24 @@ class PayPeriodEntryRow:
     updated_at: datetime
 
 
+@dataclass(frozen=True, slots=True)
+class PayslipRow:
+    """Immutable projection of a computed ``payslip`` row."""
+
+    id: str
+    workspace_id: str
+    pay_period_id: str
+    user_id: str
+    shift_hours_decimal: Decimal
+    overtime_hours_decimal: Decimal
+    gross_cents: int
+    deductions_cents: dict[str, int]
+    net_cents: int
+    components_json: dict[str, object]
+    status: str
+    created_at: datetime
+
+
 class PayPeriodRecomputeScheduler(Protocol):
     """Port for scheduling payslip recomputation after a period locks."""
 
@@ -151,6 +172,95 @@ class PayPeriodRecomputeScheduler(Protocol):
         period_id: str,
     ) -> None:
         """Schedule the Phase 8 payslip recompute for ``period_id``."""
+        ...
+
+
+class PayslipComputeRepository(Protocol):
+    """Read + write seam for payslip recomputation."""
+
+    @property
+    def session(self) -> Session:
+        """Return the underlying SQLAlchemy session."""
+        ...
+
+    def get_period(self, *, workspace_id: str, period_id: str) -> PayPeriodRow | None:
+        """Return the period or ``None`` when invisible to the caller."""
+        ...
+
+    def replace_period_entries(
+        self,
+        *,
+        workspace_id: str,
+        pay_period_id: str,
+        starts_at: datetime,
+        ends_at: datetime,
+        now: datetime,
+    ) -> Sequence[PayPeriodEntryRow]:
+        """Recompute booking-derived period entries."""
+        ...
+
+    def list_period_entries(
+        self,
+        *,
+        workspace_id: str,
+        pay_period_id: str,
+    ) -> Sequence[PayPeriodEntryRow]:
+        """Return period entries ordered deterministically."""
+        ...
+
+    def list_pay_bearing_bookings(
+        self,
+        *,
+        workspace_id: str,
+        starts_at: datetime,
+        ends_at: datetime,
+        user_id: str | None = None,
+        work_engagement_id: str | None = None,
+    ) -> Sequence[BookingPayRow]:
+        """Return settled pay-bearing bookings intersecting the period."""
+        ...
+
+    def get_effective_pay_rule(
+        self,
+        *,
+        workspace_id: str,
+        user_id: str,
+        at: datetime,
+    ) -> PayRuleRow | None:
+        """Return the rule active at ``at`` using §09 precedence."""
+        ...
+
+    def list_holiday_multipliers(
+        self,
+        *,
+        workspace_id: str,
+        starts_on: date,
+        ends_before: date,
+        countries: Set[str],
+    ) -> Mapping[tuple[date, str | None], Decimal]:
+        """Return workspace-wide and country-specific holiday multipliers."""
+        ...
+
+    def has_paid_payslip(self, *, workspace_id: str, period_id: str) -> bool:
+        """Return whether any contained payslip is already paid."""
+        ...
+
+    def upsert_payslip(
+        self,
+        *,
+        payslip_id: str,
+        workspace_id: str,
+        pay_period_id: str,
+        user_id: str,
+        shift_hours_decimal: Decimal,
+        overtime_hours_decimal: Decimal,
+        gross_cents: int,
+        deductions_cents: dict[str, int],
+        net_cents: int,
+        components_json: dict[str, object],
+        now: datetime,
+    ) -> PayslipRow:
+        """Insert or update the draft payslip for ``(period, user)``."""
         ...
 
 
