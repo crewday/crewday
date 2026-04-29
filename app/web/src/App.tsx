@@ -185,6 +185,12 @@ export default function App() {
               </Route>
             </Route>
 
+            <Route element={<RequirePermission actionKey="payroll.view_other" />}>
+              <Route element={<ManagerLayout />}>
+                <Route path="/pay" element={<PayPage />} />
+              </Route>
+            </Route>
+
             <Route element={<ManagerLayout />}>
               <Route path="/dashboard" element={<DashboardPage />} />
               <Route path="/properties" element={<PropertiesPage />} />
@@ -213,7 +219,6 @@ export default function App() {
               />
               <Route path="/asset_types" element={<AssetTypesPage />} />
               <Route path="/documents" element={<DocumentsPage />} />
-              <Route path="/pay" element={<PayPage />} />
               <Route path="/audit" element={<AuditPage />} />
               <Route path="/permissions" element={<PermissionsPage />} />
               <Route path="/organizations" element={<OrganizationsPage />} />

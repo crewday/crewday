@@ -97,6 +97,11 @@ export type EventKind =
   | "expense.rejected"
   | "expense.reimbursed"
   | "expense.decided"
+  // Payroll (§09).
+  | "payroll.period_locked"
+  | "payroll.period_paid"
+  | "payroll_export.ready"
+  | "payslip.computed"
   // Assets (§21).
   | "asset_action.performed"
   // Schedule rulesets + scheduler calendar (§06, §14 scheduler).
@@ -525,9 +530,11 @@ export const INVALIDATIONS: Record<EventKind, InvalidationHandler> = {
   "expense.approved": (_event, qc) => {
     invalidate(qc, qk.expenses("all"));
     invalidate(qc, qk.expenses("mine"));
-    // Approval is the moment the claim lands in "Owed to you" — refresh
-    // the per-user pending-reimbursement total alongside the list.
+    // Approval is the moment the claim lands in "Owed to you" and the
+    // manager Pay aggregate, so refresh both pending-reimbursement
+    // totals alongside the list.
     invalidate(qc, qk.expensesPendingReimbursement("me"));
+    invalidate(qc, qk.expensesPendingReimbursement("all"));
     invalidate(qc, qk.dashboard());
     invalidate(qc, qk.history("expenses"));
   },
@@ -540,6 +547,7 @@ export const INVALIDATIONS: Record<EventKind, InvalidationHandler> = {
     // possible on amend) the cached total would be stale. Cheap to
     // invalidate; safer than a divergent number on screen.
     invalidate(qc, qk.expensesPendingReimbursement("me"));
+    invalidate(qc, qk.expensesPendingReimbursement("all"));
     invalidate(qc, qk.dashboard());
     invalidate(qc, qk.history("expenses"));
   },
@@ -548,9 +556,10 @@ export const INVALIDATIONS: Record<EventKind, InvalidationHandler> = {
     invalidate(qc, qk.expenses("all"));
     invalidate(qc, qk.expenses("mine"));
     // Reimbursement removes the claim from the pending pool — refresh
-    // the worker's "Owed to you" total so it shrinks the moment the
-    // payslip lands.
+    // the worker's "Owed to you" and manager Pay totals so they shrink
+    // the moment the payslip lands.
     invalidate(qc, qk.expensesPendingReimbursement("me"));
+    invalidate(qc, qk.expensesPendingReimbursement("all"));
     invalidate(qc, qk.dashboard());
     invalidate(qc, qk.history("expenses"));
   },
@@ -561,8 +570,29 @@ export const INVALIDATIONS: Record<EventKind, InvalidationHandler> = {
     invalidate(qc, qk.expenses("all"));
     invalidate(qc, qk.expenses("mine"));
     invalidate(qc, qk.expensesPendingReimbursement("me"));
+    invalidate(qc, qk.expensesPendingReimbursement("all"));
     invalidate(qc, qk.dashboard());
     invalidate(qc, qk.history("expenses"));
+  },
+
+  "payroll.period_locked": (_event, qc) => {
+    invalidate(qc, qk.payslips());
+    invalidate(qc, qk.dashboard());
+  },
+
+  "payroll.period_paid": (_event, qc) => {
+    invalidate(qc, qk.payslips());
+    invalidate(qc, qk.expensesPendingReimbursement("all"));
+    invalidate(qc, qk.dashboard());
+  },
+
+  "payroll_export.ready": (_event, qc) => {
+    invalidate(qc, qk.payslips());
+  },
+
+  "payslip.computed": (_event, qc) => {
+    invalidate(qc, qk.payslips());
+    invalidate(qc, qk.dashboard());
   },
 
   "asset_action.performed": (event, qc) => {

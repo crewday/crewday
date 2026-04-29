@@ -82,6 +82,7 @@ describe("INVALIDATIONS — coverage", () => {
     "agent.turn.started",
     "agent.turn.finished",
     "agent.action.pending",
+    "agent.settings.changed",
     "task.created",
     "task.assigned",
     "task.updated",
@@ -102,6 +103,10 @@ describe("INVALIDATIONS — coverage", () => {
     "expense.rejected",
     "expense.reimbursed",
     "expense.decided",
+    "payroll.period_locked",
+    "payroll.period_paid",
+    "payroll_export.ready",
+    "payslip.computed",
     "asset_action.performed",
     "schedule_ruleset.upserted",
     "schedule_ruleset.deleted",
@@ -439,11 +444,11 @@ describe("INVALIDATIONS — per-kind behaviour", () => {
     }
   });
 
-  it("expense.{approved,rejected,reimbursed,decided} also invalidates the worker's pending-reimbursement total", () => {
+  it("expense.{approved,rejected,reimbursed,decided} also invalidates pending-reimbursement totals", () => {
     // §09 "Amount owed to the employee" — the worker's
-    // pending-reimbursement total has to shrink/grow the instant a
-    // claim crosses any decision boundary, so the four decision-side
-    // kinds all refresh `expensesPendingReimbursement("me")`.
+    // pending-reimbursement total and the manager Pay aggregate have
+    // to shrink/grow the instant a claim crosses any decision boundary,
+    // so the four decision-side kinds refresh both keys.
     for (const kind of [
       "expense.approved",
       "expense.rejected",
@@ -455,8 +460,26 @@ describe("INVALIDATIONS — per-kind behaviour", () => {
       INVALIDATIONS[kind](makeEvent(kind, { id: "e1", status: "approved" }), qc);
       const called = spy.mock.calls.map((c) => c[0]?.queryKey);
       expect(called).toEqual(
-        expect.arrayContaining([qk.expensesPendingReimbursement("me")]),
+        expect.arrayContaining([
+          qk.expensesPendingReimbursement("me"),
+          qk.expensesPendingReimbursement("all"),
+        ]),
       );
+    }
+  });
+
+  it("payroll events invalidate the manager Pay payslip key", () => {
+    for (const kind of [
+      "payroll.period_locked",
+      "payroll.period_paid",
+      "payroll_export.ready",
+      "payslip.computed",
+    ] as const) {
+      const qc = makeClient();
+      const spy = vi.spyOn(qc, "invalidateQueries");
+      INVALIDATIONS[kind](makeEvent(kind), qc);
+      const called = spy.mock.calls.map((c) => c[0]?.queryKey);
+      expect(called).toEqual(expect.arrayContaining([qk.payslips()]));
     }
   });
 
