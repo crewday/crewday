@@ -35,6 +35,7 @@ from app.domain.integrations.webhooks import (
     enqueue,
     list_subscriptions,
     replay_delivery,
+    rotate_subscription_secret,
     sign,
     update_subscription,
     verify,
@@ -114,6 +115,30 @@ class _InMemoryWebhookRepo:
             secret_last_4=existing.secret_last_4,
             events=new_events,
             active=active if active is not None else existing.active,
+            created_at=existing.created_at,
+            updated_at=updated_at,
+        )
+        self.subscriptions[sub_id] = new_row
+        return new_row
+
+    def rotate_subscription_secret(
+        self,
+        *,
+        sub_id: str,
+        secret_blob: str,
+        secret_last_4: str,
+        updated_at: datetime,
+    ) -> WebhookSubscriptionRow:
+        existing = self.subscriptions[sub_id]
+        new_row = WebhookSubscriptionRow(
+            id=existing.id,
+            workspace_id=existing.workspace_id,
+            name=existing.name,
+            url=existing.url,
+            secret_blob=secret_blob,
+            secret_last_4=secret_last_4,
+            events=existing.events,
+            active=existing.active,
             created_at=existing.created_at,
             updated_at=updated_at,
         )
@@ -467,6 +492,46 @@ class TestSubscriptionCrud:
             clock=clock,
         )
         assert repo.subscriptions == {}
+
+    def test_rotate_secret_returns_plaintext_once_and_audits(self) -> None:
+        repo = _InMemoryWebhookRepo()
+        envelope = FakeEnvelope()
+        clock = FrozenClock(_PINNED)
+        session = _SessionStub()
+        view = create_subscription(
+            session,  # type: ignore[arg-type]
+            _ctx(),
+            repo=repo,
+            envelope=envelope,
+            name="Hermes",
+            url="https://hermes.example.com/hook",
+            events=["task.completed"],
+            secret="0123456789abcdef",
+            clock=clock,
+        )
+        session.added.clear()
+        clock.advance(timedelta(seconds=1))
+
+        rotated = rotate_subscription_secret(
+            session,  # type: ignore[arg-type]
+            _ctx(),
+            repo=repo,
+            envelope=envelope,
+            sub_id=view.id,
+            secret="fedcba9876543210",
+            clock=clock,
+        )
+
+        assert rotated.plaintext_secret == "fedcba9876543210"
+        assert rotated.secret_last_4 == "3210"
+        assert (
+            envelope.decrypt(
+                repo.subscriptions[view.id].secret_blob.encode("latin-1"),
+                purpose=SUBSCRIPTION_SECRET_PURPOSE,
+            )
+            == b"fedcba9876543210"
+        )
+        assert len(session.added) == 1
 
     def test_update_refuses_cross_workspace(self) -> None:
         repo = _InMemoryWebhookRepo()

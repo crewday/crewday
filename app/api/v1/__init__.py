@@ -49,6 +49,7 @@ from .stays import public_router as stays_public_router
 from .stays import router as stays_router
 from .tasks import router as tasks_router
 from .time import router as time_router
+from .webhooks import router as webhooks_router
 
 # Ordered registry of (context_name, router). The name is the tag
 # key used in the merged OpenAPI doc and the URL segment under
@@ -94,6 +95,7 @@ WORKSPACE_ADMIN_ROUTER: APIRouter = _workspace_admin_router
 # co-located with the LLM context's operations alphabetically.
 APPROVALS_ROUTER: APIRouter = _approvals_router
 ISSUES_ROUTER: APIRouter = issues_router
+WEBHOOKS_ROUTER: APIRouter = webhooks_router
 
 STAYS_PUBLIC_ROUTER: APIRouter = stays_public_router
 BILLING_PUBLIC_ROUTER: APIRouter = billing_public_router
@@ -104,6 +106,7 @@ __all__ = [
     "CONTEXT_ROUTERS",
     "ISSUES_ROUTER",
     "STAYS_PUBLIC_ROUTER",
+    "WEBHOOKS_ROUTER",
     "WORKSPACE_ADMIN_ROUTER",
     "asset_scan_router",
 ]

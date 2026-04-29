@@ -166,6 +166,23 @@ class SqlAlchemyWebhookRepository(WebhookRepository):
         self._session.flush()
         return _sub_to_row(row)
 
+    def rotate_subscription_secret(
+        self,
+        *,
+        sub_id: str,
+        secret_blob: str,
+        secret_last_4: str,
+        updated_at: datetime,
+    ) -> WebhookSubscriptionRow:
+        row = self._session.get(WebhookSubscription, sub_id)
+        if row is None:
+            raise LookupError(f"webhook_subscription {sub_id!r} not found")
+        row.secret_blob = secret_blob
+        row.secret_last_4 = secret_last_4
+        row.updated_at = updated_at
+        self._session.flush()
+        return _sub_to_row(row)
+
     def delete_subscription(self, *, sub_id: str) -> None:
         row = self._session.get(WebhookSubscription, sub_id)
         if row is None:

@@ -123,6 +123,12 @@ describe("<RequirePermission>", () => {
     );
   });
 
+  it("wraps the real webhooks route before the manager shell", () => {
+    expect(appSource).toMatch(
+      /<Route element={<RequirePermission actionKey="scope\.edit_settings" \/>}>\s*<Route element={<ManagerLayout \/>}>[\s\S]*?<Route path="\/webhooks" element={<WebhooksPage \/>} \/>/,
+    );
+  });
+
   it("wraps the real stays route before the manager shell", () => {
     expect(appSource).toMatch(
       /<Route element={<RequirePermission actionKey="stays\.read" \/>}>\s*<Route element={<ManagerLayout \/>}>\s*<Route path="\/stays" element={<StaysPage \/>} \/>/,

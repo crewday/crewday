@@ -85,6 +85,7 @@ export const qk = {
   approvals: () => [...ws(), "approvals"] as const,
   audit: () => [...ws(), "audit"] as const,
   webhooks: () => [...ws(), "webhooks"] as const,
+  webhookDeliveries: (wid: string) => [...ws(), "webhooks", wid, "deliveries"] as const,
   apiTokens: () => [...ws(), "api_tokens"] as const,
   apiTokenAudit: (tid: string) => [...ws(), "api_tokens", tid, "audit"] as const,
   meApiTokens: () => [...ws(), "me", "api_tokens"] as const,

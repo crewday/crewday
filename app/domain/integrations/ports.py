@@ -124,6 +124,17 @@ class WebhookRepository(Protocol):
         """
         ...
 
+    def rotate_subscription_secret(
+        self,
+        *,
+        sub_id: str,
+        secret_blob: str,
+        secret_last_4: str,
+        updated_at: datetime,
+    ) -> WebhookSubscriptionRow:
+        """Replace the encrypted signing secret. Flushes."""
+        ...
+
     def delete_subscription(self, *, sub_id: str) -> None:
         """Hard delete; in-flight + dead-letter rows cascade."""
         ...

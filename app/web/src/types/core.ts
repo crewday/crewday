@@ -63,9 +63,28 @@ export interface AuditListResponse {
 
 export interface Webhook {
   id: string;
+  name: string;
   url: string;
   events: string[];
   active: boolean;
-  last_delivery_status: number;
-  last_delivery_at: string;
+  secret_last_4: string;
+  last_delivery_status: string | number | null;
+  last_delivery_at: string | null;
+  created_at: string;
+  updated_at: string;
+  secret?: string | null;
+}
+
+export interface WebhookDelivery {
+  id: string;
+  subscription_id?: string;
+  event: string;
+  status: string;
+  attempt: number;
+  response_status?: number | null;
+  error?: string | null;
+  last_status_code?: number | null;
+  last_error?: string | null;
+  created_at: string;
+  next_attempt_at: string | null;
 }

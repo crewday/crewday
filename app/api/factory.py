@@ -91,6 +91,7 @@ from app.api.v1 import (
     CONTEXT_ROUTERS,
     ISSUES_ROUTER,
     STAYS_PUBLIC_ROUTER,
+    WEBHOOKS_ROUTER,
     WORKSPACE_ADMIN_ROUTER,
     asset_scan_router,
 )
@@ -776,6 +777,7 @@ def _mount_context_routers(app: FastAPI, *, settings: Settings) -> None:
     # ``tags=["approvals"]`` drives the schema tag.
     app.include_router(APPROVALS_ROUTER, prefix=f"{scoped_prefix}/approvals")
     app.include_router(ISSUES_ROUTER, prefix=f"{scoped_prefix}/issues")
+    app.include_router(WEBHOOKS_ROUTER, prefix=f"{scoped_prefix}/webhooks")
 
     # Anonymous guest welcome API. Mounted on the bare API tree so the
     # tenancy middleware does not require a workspace session before

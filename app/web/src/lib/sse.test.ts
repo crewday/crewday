@@ -877,17 +877,17 @@ describe("INVALIDATIONS — per-kind behaviour", () => {
 // ---------------------------------------------------------------------------
 
 describe("dispatchSseEvent — audit invalidation", () => {
-  it("refreshes the workspace audit query for workspace-domain events", () => {
+  it("refreshes workspace audit and webhook queries for workspace-domain events", () => {
     const qc = makeClient();
     const spy = vi.spyOn(qc, "invalidateQueries");
 
     dispatchSseEvent(makeEvent("task.created", { task: { id: "t1" } }), qc);
 
     const called = spy.mock.calls.map((c) => c[0]?.queryKey);
-    expect(called).toEqual(expect.arrayContaining([qk.audit()]));
+    expect(called).toEqual(expect.arrayContaining([qk.audit(), qk.webhooks()]));
   });
 
-  it("does not refresh workspace audit for tick or deployment-admin events", () => {
+  it("does not refresh workspace audit or webhooks for tick or deployment-admin events", () => {
     for (const event of [
       makeEvent("tick"),
       makeEvent("admin.audit.appended"),
@@ -899,6 +899,7 @@ describe("dispatchSseEvent — audit invalidation", () => {
 
       const called = spy.mock.calls.map((c) => c[0]?.queryKey);
       expect(called).not.toContainEqual(qk.audit());
+      expect(called).not.toContainEqual(qk.webhooks());
     }
   });
 });

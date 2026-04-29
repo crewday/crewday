@@ -763,6 +763,12 @@ export function dispatchSseEvent(event: SseEvent, qc: QueryClient): void {
   try {
     if (event.kind !== "tick" && !event.kind.startsWith("admin.")) {
       invalidate(qc, qk.audit());
+      // The webhooks desk shows derived delivery state for arbitrary
+      // workspace-domain events. While it is mounted, any event may
+      // enqueue or advance a delivery for one of the configured
+      // subscriptions, so keep the list/log fresh without hardcoding
+      // the subscription catalog into the client.
+      invalidate(qc, qk.webhooks());
     }
     handler(event, qc);
   } catch (err) {

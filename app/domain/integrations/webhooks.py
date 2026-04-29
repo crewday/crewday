@@ -99,6 +99,7 @@ __all__ = [
     "enqueue",
     "list_subscriptions",
     "replay_delivery",
+    "rotate_subscription_secret",
     "sign",
     "update_subscription",
     "verify",
@@ -536,6 +537,60 @@ def delete_subscription(
         },
         clock=resolved_clock,
     )
+
+
+def rotate_subscription_secret(
+    session: Session,
+    ctx: WorkspaceContext,
+    *,
+    repo: WebhookRepository,
+    envelope: EnvelopeEncryptor,
+    sub_id: str,
+    secret: str | None = None,
+    clock: Clock | None = None,
+) -> SubscriptionView:
+    """Mint and store a new subscription secret.
+
+    Plaintext is returned exactly once, mirroring
+    :func:`create_subscription`. Existing delivery rows stay intact;
+    future dispatcher attempts sign with the new secret.
+    """
+    resolved_clock = clock if clock is not None else SystemClock()
+    now = resolved_clock.now()
+    existing = repo.get_subscription(sub_id=sub_id)
+    if existing is None or existing.workspace_id != ctx.workspace_id:
+        raise LookupError(f"webhook_subscription {sub_id!r} not found")
+
+    plaintext = secret if secret is not None else _generate_secret()
+    if not plaintext:
+        raise ValueError("webhook subscription secret must be non-blank")
+    if len(plaintext) < 16:
+        raise ValueError("webhook subscription secret must be at least 16 chars")
+
+    ciphertext = envelope.encrypt(
+        plaintext.encode("utf-8"),
+        purpose=SUBSCRIPTION_SECRET_PURPOSE,
+        owner=EnvelopeOwner(kind="webhook_subscription", id=sub_id),
+    )
+    row = repo.rotate_subscription_secret(
+        sub_id=sub_id,
+        secret_blob=ciphertext.decode("latin-1"),
+        secret_last_4=plaintext[-4:],
+        updated_at=now,
+    )
+    write_audit(
+        session,
+        ctx,
+        entity_kind="webhook_subscription",
+        entity_id=row.id,
+        action="secret_rotated",
+        diff={
+            "before": {"secret_last_4": existing.secret_last_4},
+            "after": {"secret_last_4": row.secret_last_4},
+        },
+        clock=resolved_clock,
+    )
+    return _to_view(row, plaintext_secret=plaintext)
 
 
 # ---------------------------------------------------------------------------

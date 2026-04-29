@@ -474,6 +474,7 @@ describe("Admin SettingsPage", () => {
     vi.resetModules();
     vi.doMock("@/auth", () => ({
       RequireAuth: () => <Outlet />,
+      RequirePermission: () => <Outlet />,
       WorkspaceGate: () => <Outlet />,
     }));
     vi.doMock("@/context/RoleContext", () => ({
