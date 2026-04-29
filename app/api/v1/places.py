@@ -595,6 +595,21 @@ def _resolve_workspace_id(
     return resolved
 
 
+def _resolve_workspace_path_ref(session: Session, workspace_ref: str) -> str:
+    with tenant_agnostic():
+        resolved = session.scalars(
+            select(Workspace.id).where(Workspace.slug == workspace_ref)
+        ).one_or_none()
+        if resolved is not None:
+            return resolved
+        resolved = session.scalars(
+            select(Workspace.id).where(Workspace.id == workspace_ref)
+        ).one_or_none()
+    if resolved is None:
+        raise _membership_not_found()
+    return resolved
+
+
 def _publish_membership_changed(
     ctx: WorkspaceContext,
     *,
@@ -1545,9 +1560,7 @@ def build_properties_router() -> APIRouter:
         session: _Db,
     ) -> MembershipResponse:
         try:
-            target_workspace_id = _resolve_workspace_id(
-                session, workspace_id=None, workspace_slug=workspace_slug
-            )
+            target_workspace_id = _resolve_workspace_path_ref(session, workspace_slug)
             view: membership_service.MembershipRead | None = None
             if body.membership_role is not None:
                 view = membership_service.update_membership_role(
@@ -1595,9 +1608,7 @@ def build_properties_router() -> APIRouter:
         session: _Db,
     ) -> Response:
         try:
-            target_workspace_id = _resolve_workspace_id(
-                session, workspace_id=None, workspace_slug=workspace_slug
-            )
+            target_workspace_id = _resolve_workspace_path_ref(session, workspace_slug)
             membership_service.revoke_workspace(
                 session,
                 ctx,

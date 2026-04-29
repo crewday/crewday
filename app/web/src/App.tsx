@@ -197,10 +197,15 @@ export default function App() {
               </Route>
             </Route>
 
+            <Route element={<RequirePermission actionKey="properties.read" />}>
+              <Route element={<ManagerLayout />}>
+                <Route path="/property/:pid" element={<PropertyDetailPage />} />
+              </Route>
+            </Route>
+
             <Route element={<ManagerLayout />}>
               <Route path="/dashboard" element={<DashboardPage />} />
               <Route path="/properties" element={<PropertiesPage />} />
-              <Route path="/property/:pid" element={<PropertyDetailPage />} />
               <Route path="/property/:pid/closures" element={<PropertyClosuresPage />} />
               <Route path="/employees" element={<EmployeesPage />} />
               <Route path="/employee/:eid" element={<EmployeeDetailPage />} />

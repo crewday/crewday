@@ -204,6 +204,51 @@ def test_share_creates_membership_and_publishes_event(
     assert row.membership_role == "managed_workspace"
 
 
+def test_revoke_accepts_workspace_id_path_ref(
+    owner_ctx: tuple[WorkspaceContext, sessionmaker[Session], str],
+) -> None:
+    ctx, factory, _ = owner_ctx
+    client = _client(ctx, factory)
+    property_id = client.post("/properties", json=_property_body()).json()["id"]
+    with factory() as session:
+        target_owner = bootstrap_user(
+            session, email="target-revoke@example.com", display_name="Target Revoke"
+        )
+        target = bootstrap_workspace(
+            session,
+            slug="target-revoke",
+            name="Target Revoke",
+            owner_user_id=target_owner.id,
+        )
+        session.commit()
+        target_id = target.id
+
+    response = client.post(
+        f"/properties/{property_id}/share",
+        json={"workspace_id": target_id, "membership_role": "managed_workspace"},
+    )
+    assert response.status_code == 201, response.text
+
+    seen: list[PropertyWorkspaceChanged] = []
+    bus._reset_for_tests()
+    bus.subscribe(PropertyWorkspaceChanged)(seen.append)
+    try:
+        revoked = client.delete(f"/properties/{property_id}/share/{target_id}")
+    finally:
+        bus._reset_for_tests()
+
+    assert revoked.status_code == 204, revoked.text
+    assert [event.workspace_id for event in seen] == [ctx.workspace_id, target_id]
+    assert [event.change_kind for event in seen] == ["revoked", "revoked"]
+
+    with factory() as session, tenant_agnostic():
+        row = session.get(
+            PropertyWorkspace,
+            {"property_id": property_id, "workspace_id": target_id},
+        )
+    assert row is None
+
+
 def test_share_with_unknown_workspace_id_returns_not_found(
     owner_ctx: tuple[WorkspaceContext, sessionmaker[Session], str],
 ) -> None:

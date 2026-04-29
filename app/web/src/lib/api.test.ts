@@ -91,6 +91,20 @@ describe("resolveApiPath", () => {
     expect(resolveApiPath("/api/v1/runtime/info", "acme")).toBe("/api/v1/runtime/info");
   });
 
+  it("passes auth bootstrap paths through untouched", () => {
+    expect(resolveApiPath("/api/v1/auth/me", "acme")).toBe("/api/v1/auth/me");
+    expect(resolveApiPath("/api/v1/auth/logout", "acme")).toBe("/api/v1/auth/logout");
+    expect(resolveApiPath("/api/v1/auth/passkey/login/start", "acme")).toBe("/api/v1/auth/passkey/login/start");
+    expect(resolveApiPath("/api/v1/me/workspaces", "acme")).toBe("/api/v1/me/workspaces");
+  });
+
+  it("keeps workspace-scoped auth routes under the active workspace", () => {
+    expect(resolveApiPath("/api/v1/auth/tokens", "acme")).toBe("/w/acme/api/v1/auth/tokens");
+    expect(resolveApiPath("/api/v1/auth/passkey/register/start", "acme")).toBe(
+      "/w/acme/api/v1/auth/passkey/register/start",
+    );
+  });
+
   it("passes absolute URLs through untouched", () => {
     expect(resolveApiPath("https://example.test/oauth", "acme")).toBe("https://example.test/oauth");
   });

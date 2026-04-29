@@ -88,6 +88,7 @@ export type EventKind =
   | "stay.upcoming"
   | "reservation.upserted"
   | "property.closure.created"
+  | "property.workspace.changed"
   | "ical.poll.completed"
   | "stay_task_bundle.upserted"
   | "stay_task_bundle.deleted"
@@ -469,6 +470,14 @@ export const INVALIDATIONS: Record<EventKind, InvalidationHandler> = {
     invalidate(qc, qk.propertyClosures(payload.property_id));
     invalidate(qc, ["scheduler-calendar"]);
     invalidate(qc, ["my-schedule"]);
+  },
+
+  "property.workspace.changed": (event, qc) => {
+    const payload = event.data as unknown as { property_id: string; target_workspace_id: string };
+    invalidate(qc, qk.properties());
+    invalidate(qc, qk.property(payload.property_id));
+    invalidate(qc, qk.propertyWorkspaces(payload.property_id));
+    invalidate(qc, qk.propertyWorkspaces(payload.property_id, payload.target_workspace_id));
   },
 
   "ical.poll.completed": (_event, qc) => {

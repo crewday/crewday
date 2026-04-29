@@ -90,6 +90,15 @@ export function resolveApiPath(path: string, slug: string | null = workspaceSlug
   if (/^https?:\/\//i.test(path)) return path;
   // Admin surface has no slug; workspace-prefixed paths are already final.
   if (path.startsWith("/w/") || path.startsWith("/admin/")) return path;
+  // Identity bootstrap and workspace switcher endpoints are bare-host
+  // APIs. Auth token and passkey registration routes remain workspace-
+  // scoped, so keep this list exact.
+  if (
+    path === "/api/v1/auth/me" ||
+    path === "/api/v1/auth/logout" ||
+    path.startsWith("/api/v1/auth/passkey/login/") ||
+    path === "/api/v1/me/workspaces"
+  ) return path;
   // Deployment-runtime info is bare-host shell metadata, not tenant data.
   if (path.startsWith("/api/v1/runtime/")) return path;
   // Only rewrite tenant API paths; non-API relative paths (e.g.

@@ -94,6 +94,7 @@ describe("INVALIDATIONS — coverage", () => {
     "stay.upcoming",
     "reservation.upserted",
     "property.closure.created",
+    "property.workspace.changed",
     "ical.poll.completed",
     "stay_task_bundle.upserted",
     "stay_task_bundle.deleted",
@@ -254,6 +255,28 @@ describe("INVALIDATIONS — per-kind behaviour", () => {
         qk.propertyClosures("prop_1"),
         ["scheduler-calendar"],
         ["my-schedule"],
+      ]),
+    );
+  });
+
+  it("property.workspace.changed invalidates property detail + sharing", () => {
+    const qc = makeClient();
+    const spy = vi.spyOn(qc, "invalidateQueries");
+    INVALIDATIONS["property.workspace.changed"](
+      makeEvent("property.workspace.changed", {
+        property_id: "prop_1",
+        target_workspace_id: "ws_2",
+        change_kind: "updated",
+      }),
+      qc,
+    );
+    const called = spy.mock.calls.map((c) => c[0]?.queryKey);
+    expect(called).toEqual(
+      expect.arrayContaining([
+        qk.properties(),
+        qk.property("prop_1"),
+        qk.propertyWorkspaces("prop_1"),
+        qk.propertyWorkspaces("prop_1", "ws_2"),
       ]),
     );
   });
@@ -803,6 +826,8 @@ describe("INVALIDATIONS — per-kind behaviour", () => {
         action: { id: "ax" },
         ruleset: { id: "r1" },
         booking: { id: "b1" },
+        property_id: "p1",
+        target_workspace_id: "w2",
       };
       INVALIDATIONS[kind](makeEvent(kind, data), qc);
       for (const call of spy.mock.calls) {
