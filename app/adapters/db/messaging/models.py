@@ -41,6 +41,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    UniqueConstraint,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -88,6 +89,7 @@ _NOTIFICATION_KIND_VALUES: tuple[str, ...] = (
     "stay_upcoming",
     "anomaly_detected",
     "agent_message",
+    "daily_digest",
 )
 
 # Allowed ``digest_record.kind`` values. Matches the §10 "Daily digests"
@@ -398,6 +400,13 @@ class DigestRecord(Base):
             "workspace_id",
             "recipient_user_id",
             "period_start",
+        ),
+        UniqueConstraint(
+            "workspace_id",
+            "recipient_user_id",
+            "period_start",
+            "kind",
+            name="uq_digest_record_workspace_recipient_period_kind",
         ),
     )
 

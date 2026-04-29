@@ -168,6 +168,7 @@ class NotificationKind(enum.StrEnum):
     STAY_UPCOMING = "stay_upcoming"
     ANOMALY_DETECTED = "anomaly_detected"
     AGENT_MESSAGE = "agent_message"
+    DAILY_DIGEST = "daily_digest"
 
 
 # Import-time invariant: the enum and the DB CHECK must stay aligned.

@@ -24,10 +24,13 @@ from unittest.mock import MagicMock
 import pytest
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
+from app.tenancy.context import WorkspaceContext
 from app.util.clock import FrozenClock
 from app.worker import scheduler as scheduler_mod
 from app.worker.scheduler import (
     APPROVAL_TTL_JOB_ID,
+    DAILY_DIGEST_JOB_ID,
+    DAILY_DIGEST_MISFIRE_GRACE_SECONDS,
     GENERATOR_JOB_ID,
     HEARTBEAT_JOB_ID,
     IDEMPOTENCY_SWEEP_JOB_ID,
@@ -36,6 +39,7 @@ from app.worker.scheduler import (
     OVERDUE_DETECT_INTERVAL_SECONDS,
     OVERDUE_DETECT_JOB_ID,
     POLL_ICAL_JOB_ID,
+    RETENTION_ROTATION_JOB_ID,
     USER_WORKSPACE_REFRESH_INTERVAL_SECONDS,
     USER_WORKSPACE_REFRESH_JOB_ID,
     WEBHOOK_DISPATCH_JOB_ID,
@@ -46,6 +50,7 @@ from app.worker.scheduler import (
     stop,
     wrap_job,
 )
+from app.worker.tasks.daily_digest import DailyDigestReport
 
 # ---------------------------------------------------------------------------
 # create_scheduler / register_jobs
@@ -73,10 +78,7 @@ class TestCreateScheduler:
 
 class TestRegisterJobs:
     def test_registers_expected_ids(self) -> None:
-        """Standard job set: heartbeat + generator + idempotency-sweep
-        + llm-budget + user_workspace-refresh + overdue-detect +
-        approval-ttl + webhook-dispatch.
-        """
+        """Standard job set includes the core heartbeat and worker fan-outs."""
         sched = create_scheduler()
         register_jobs(sched)
         # Compare as a set so inserting a future job doesn't break
@@ -86,12 +88,14 @@ class TestRegisterJobs:
         # ``test_is_idempotent_under_replace_existing`` path.
         assert set(registered_job_ids(sched)) == {
             APPROVAL_TTL_JOB_ID,
+            DAILY_DIGEST_JOB_ID,
             GENERATOR_JOB_ID,
             IDEMPOTENCY_SWEEP_JOB_ID,
             HEARTBEAT_JOB_ID,
             LLM_BUDGET_REFRESH_JOB_ID,
             OVERDUE_DETECT_JOB_ID,
             POLL_ICAL_JOB_ID,
+            RETENTION_ROTATION_JOB_ID,
             USER_WORKSPACE_REFRESH_JOB_ID,
             WEBHOOK_DISPATCH_JOB_ID,
         }
@@ -123,12 +127,14 @@ class TestRegisterJobs:
         ids = registered_job_ids(sched)
         expected_ids = {
             APPROVAL_TTL_JOB_ID,
+            DAILY_DIGEST_JOB_ID,
             GENERATOR_JOB_ID,
             IDEMPOTENCY_SWEEP_JOB_ID,
             HEARTBEAT_JOB_ID,
             LLM_BUDGET_REFRESH_JOB_ID,
             OVERDUE_DETECT_JOB_ID,
             POLL_ICAL_JOB_ID,
+            RETENTION_ROTATION_JOB_ID,
             USER_WORKSPACE_REFRESH_JOB_ID,
             WEBHOOK_DISPATCH_JOB_ID,
         }
@@ -176,6 +182,139 @@ class TestOverdueDetectJob:
         assert job.misfire_grace_time == OVERDUE_DETECT_INTERVAL_SECONDS
         assert job.coalesce is True
         assert job.max_instances == 1
+
+
+class TestDailyDigestJob:
+    """Registration shape for the hourly daily-digest fan-out."""
+
+    def test_adds_daily_digest_job_hourly(self) -> None:
+        from apscheduler.triggers.cron import CronTrigger
+
+        sched = create_scheduler()
+        register_jobs(sched)
+
+        job = sched.get_job(DAILY_DIGEST_JOB_ID)
+        assert job is not None, f"{DAILY_DIGEST_JOB_ID} not registered"
+
+        assert isinstance(job.trigger, CronTrigger)
+        assert str(job.trigger.fields[6]) == "0"
+        assert job.misfire_grace_time == DAILY_DIGEST_MISFIRE_GRACE_SECONDS
+        assert job.coalesce is True
+        assert job.max_instances == 1
+
+    def test_fanout_body_delegates_recipient_local_7am(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        clock = FrozenClock(datetime(2026, 4, 29, 12, 0, tzinfo=UTC))
+        calls: list[tuple[str, int | None]] = []
+
+        class _FakeSettings:
+            smtp_host = "smtp.example.test"
+            smtp_port = 587
+            smtp_from = "crew@example.test"
+            smtp_user: str | None = None
+            smtp_password: object = None
+            smtp_use_tls = True
+            smtp_timeout = 10
+            smtp_bounce_domain: str | None = None
+            openrouter_api_key: object = None
+
+        class _FakeMailer:
+            def __init__(
+                self,
+                *,
+                host: str,
+                port: int,
+                from_addr: str,
+                user: str | None,
+                password: object,
+                use_tls: bool,
+                timeout: int,
+                bounce_domain: str | None,
+            ) -> None:
+                self.host = host
+                self.port = port
+                self.from_addr = from_addr
+                self.user = user
+                self.password = password
+                self.use_tls = use_tls
+                self.timeout = timeout
+                self.bounce_domain = bounce_domain
+
+        class _FakeRow:
+            def __init__(self, id: str, slug: str) -> None:
+                self.id = id
+                self.slug = slug
+
+        class _FakeResult:
+            def all(self) -> list[_FakeRow]:
+                return [_FakeRow("01HWA00000000000000000WSP1", "ws-one")]
+
+        class _FakeScalarResult:
+            def all(self) -> list[str]:
+                return []
+
+        class _FakeNestedTx:
+            def __enter__(self) -> _FakeNestedTx:
+                return self
+
+            def __exit__(self, *exc: object) -> None:
+                return None
+
+        class _FakeSession:
+            def execute(self, _stmt: object) -> _FakeResult:
+                return _FakeResult()
+
+            def scalars(self, _stmt: object) -> _FakeScalarResult:
+                return _FakeScalarResult()
+
+            def begin_nested(self) -> _FakeNestedTx:
+                return _FakeNestedTx()
+
+        class _FakeUow:
+            def __enter__(self) -> _FakeSession:
+                return _FakeSession()
+
+            def __exit__(self, *exc: object) -> None:
+                return None
+
+        def fake_send_daily_digest(
+            ctx: WorkspaceContext,
+            *,
+            session: object,
+            mailer: object,
+            llm: object,
+            clock: object,
+            due_local_hour: int | None = None,
+        ) -> DailyDigestReport:
+            del session, mailer, llm, clock
+            calls.append((ctx.workspace_id, due_local_hour))
+            return DailyDigestReport(
+                recipients_considered=1,
+                sent=1,
+                skipped_not_due=0,
+                skipped_empty=0,
+                skipped_existing=0,
+                llm_rendered=0,
+                template_rendered=1,
+            )
+
+        monkeypatch.setattr(scheduler_mod, "get_settings", lambda: _FakeSettings())
+        monkeypatch.setattr(scheduler_mod, "make_uow", lambda: _FakeUow())
+        monkeypatch.setattr("app.adapters.mail.smtp.SMTPMailer", _FakeMailer)
+        monkeypatch.setattr(
+            "app.worker.tasks.daily_digest.send_daily_digest",
+            fake_send_daily_digest,
+        )
+        import sqlalchemy.orm as _orm_mod
+
+        monkeypatch.setattr(_orm_mod, "Session", _FakeSession)
+
+        body = scheduler_mod._make_daily_digest_fanout_body(clock)
+        body()
+
+        assert calls == [("01HWA00000000000000000WSP1", 7)]
 
 
 # ---------------------------------------------------------------------------
