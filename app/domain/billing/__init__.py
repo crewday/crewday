@@ -21,6 +21,14 @@ from app.domain.billing.quotes import (
     QuoteTokenInvalid,
     QuoteView,
 )
+from app.domain.billing.rate_cards import (
+    RateCardCreate,
+    RateCardInvalid,
+    RateCardNotFound,
+    RateCardPatch,
+    RateCardService,
+    RateCardView,
+)
 
 __all__ = [
     "OrganizationCreate",
@@ -37,4 +45,10 @@ __all__ = [
     "QuoteService",
     "QuoteTokenInvalid",
     "QuoteView",
+    "RateCardCreate",
+    "RateCardInvalid",
+    "RateCardNotFound",
+    "RateCardPatch",
+    "RateCardService",
+    "RateCardView",
 ]

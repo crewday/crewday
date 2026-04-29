@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
@@ -24,8 +24,18 @@ from app.domain.billing.organizations import (
     OrganizationRow,
 )
 from app.domain.billing.quotes import QuoteInvalid, QuoteRepository, QuoteRow
+from app.domain.billing.rate_cards import (
+    RateCardInvalid,
+    RateCardOrganizationRow,
+    RateCardRepository,
+    RateCardRow,
+)
 
-__all__ = ["SqlAlchemyOrganizationRepository", "SqlAlchemyQuoteRepository"]
+__all__ = [
+    "SqlAlchemyOrganizationRepository",
+    "SqlAlchemyQuoteRepository",
+    "SqlAlchemyRateCardRepository",
+]
 
 
 def _as_utc(value: datetime) -> datetime:
@@ -271,6 +281,145 @@ def _to_quote_row(row: Quote) -> QuoteRow:
         sent_at=_as_utc_optional(row.sent_at),
         decided_at=_as_utc_optional(row.decided_at),
     )
+
+
+def _to_rate_card_organization_row(row: Organization) -> RateCardOrganizationRow:
+    return RateCardOrganizationRow(
+        id=row.id,
+        workspace_id=row.workspace_id,
+        kind=row.kind,
+        default_currency=row.default_currency,
+    )
+
+
+def _to_rate_card_row(row: RateCard) -> RateCardRow:
+    return RateCardRow(
+        id=row.id,
+        workspace_id=row.workspace_id,
+        organization_id=row.organization_id,
+        label=row.label,
+        currency=row.currency,
+        rates=dict(row.rates_json),
+        active_from=row.active_from,
+        active_to=row.active_to,
+    )
+
+
+class SqlAlchemyRateCardRepository(RateCardRepository):
+    """SA-backed rate-card repository."""
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    @property
+    def session(self) -> Session:
+        return self._session
+
+    def get_organization(
+        self, *, workspace_id: str, organization_id: str, for_update: bool = False
+    ) -> RateCardOrganizationRow | None:
+        stmt = select(Organization).where(
+            Organization.workspace_id == workspace_id,
+            Organization.id == organization_id,
+            Organization.archived_at.is_(None),
+        )
+        if for_update:
+            stmt = stmt.with_for_update()
+        row = self._session.scalars(stmt).one_or_none()
+        return _to_rate_card_organization_row(row) if row is not None else None
+
+    def insert(
+        self,
+        *,
+        rate_card_id: str,
+        workspace_id: str,
+        organization_id: str,
+        label: str,
+        currency: str,
+        rates: Mapping[str, int],
+        active_from: date,
+        active_to: date | None,
+    ) -> RateCardRow:
+        row = RateCard(
+            id=rate_card_id,
+            workspace_id=workspace_id,
+            organization_id=organization_id,
+            label=label,
+            currency=currency,
+            rates_json=dict(rates),
+            active_from=active_from,
+            active_to=active_to,
+        )
+        try:
+            with self._session.begin_nested():
+                self._session.add(row)
+                self._session.flush()
+        except IntegrityError as exc:
+            raise RateCardInvalid(
+                "rate card references an unknown organization or duplicate window"
+            ) from exc
+        return _to_rate_card_row(row)
+
+    def list(
+        self, *, workspace_id: str, organization_id: str
+    ) -> Sequence[RateCardRow]:
+        rows = self._session.scalars(
+            select(RateCard)
+            .where(
+                RateCard.workspace_id == workspace_id,
+                RateCard.organization_id == organization_id,
+            )
+            .order_by(
+                RateCard.active_from.asc(),
+                RateCard.label.asc(),
+                RateCard.id.asc(),
+            )
+        ).all()
+        return [_to_rate_card_row(row) for row in rows]
+
+    def get(
+        self,
+        *,
+        workspace_id: str,
+        organization_id: str,
+        rate_card_id: str,
+        for_update: bool = False,
+    ) -> RateCardRow | None:
+        stmt = select(RateCard).where(
+            RateCard.workspace_id == workspace_id,
+            RateCard.organization_id == organization_id,
+            RateCard.id == rate_card_id,
+        )
+        if for_update:
+            stmt = stmt.with_for_update()
+        row = self._session.scalars(stmt).one_or_none()
+        return _to_rate_card_row(row) if row is not None else None
+
+    def update_fields(
+        self,
+        *,
+        workspace_id: str,
+        organization_id: str,
+        rate_card_id: str,
+        fields: Mapping[str, object | None],
+    ) -> RateCardRow:
+        row = self._session.scalars(
+            select(RateCard).where(
+                RateCard.workspace_id == workspace_id,
+                RateCard.organization_id == organization_id,
+                RateCard.id == rate_card_id,
+            )
+        ).one()
+        try:
+            with self._session.begin_nested():
+                for key, value in fields.items():
+                    setattr(row, key, value)
+                self._session.flush()
+        except IntegrityError as exc:
+            raise RateCardInvalid(
+                "rate card references an unknown organization or duplicate window"
+            ) from exc
+        return _to_rate_card_row(row)
 
 
 class SqlAlchemyQuoteRepository(QuoteRepository):
