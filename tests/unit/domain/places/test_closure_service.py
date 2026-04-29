@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app.adapters.db.audit.models import AuditLog
 from app.adapters.db.base import Base
-from app.adapters.db.places.models import PropertyClosure
+from app.adapters.db.places.models import PropertyClosure, Unit
 from app.adapters.db.session import make_engine
 from app.adapters.db.stays.models import IcalFeed
 from app.adapters.db.workspace.models import Workspace
@@ -126,6 +126,13 @@ def _create_property(session: Session, ctx: WorkspaceContext) -> str:
     return view.id
 
 
+def _first_unit_id(session: Session, *, property_id: str) -> str:
+    unit_id = session.scalars(
+        select(Unit.id).where(Unit.property_id == property_id)
+    ).one()
+    return unit_id
+
+
 def _create_feed(session: Session, ctx: WorkspaceContext, *, property_id: str) -> str:
     feed_id = new_ulid()
     session.add(
@@ -153,6 +160,7 @@ def _body(
     starts_at: datetime = datetime(2026, 5, 1, 0, 0, tzinfo=UTC),
     ends_at: datetime = datetime(2026, 5, 4, 0, 0, tzinfo=UTC),
     reason: str = "renovation",
+    unit_id: str | None = None,
     source_ical_feed_id: str | None = None,
 ) -> PropertyClosureCreate:
     return PropertyClosureCreate.model_validate(
@@ -160,6 +168,7 @@ def _body(
             "starts_at": starts_at,
             "ends_at": ends_at,
             "reason": reason,
+            "unit_id": unit_id,
             "source_ical_feed_id": source_ical_feed_id,
         }
     )
@@ -170,6 +179,7 @@ def _update_body(
     starts_at: datetime = datetime(2026, 5, 2, 0, 0, tzinfo=UTC),
     ends_at: datetime = datetime(2026, 5, 5, 0, 0, tzinfo=UTC),
     reason: str = "seasonal",
+    unit_id: str | None = None,
     source_ical_feed_id: str | None = None,
 ) -> PropertyClosureUpdate:
     return PropertyClosureUpdate.model_validate(
@@ -177,6 +187,7 @@ def _update_body(
             "starts_at": starts_at,
             "ends_at": ends_at,
             "reason": reason,
+            "unit_id": unit_id,
             "source_ical_feed_id": source_ical_feed_id,
         }
     )
@@ -250,6 +261,81 @@ def test_ical_lineage_is_persisted_and_listed(
     db_row = session_closure.get(PropertyClosure, created.id)
     assert db_row is not None
     assert db_row.source_ical_feed_id == feed_id
+
+
+def test_unit_scope_is_persisted_listed_and_updated(
+    session_closure: Session, frozen_clock: FrozenClock
+) -> None:
+    ws = _make_workspace(session_closure, slug="closure-unit")
+    ctx = _ctx(workspace_id=ws, slug="closure-unit")
+    property_id = _create_property(session_closure, ctx)
+    unit_id = _first_unit_id(session_closure, property_id=property_id)
+
+    created = create_closure(
+        session_closure,
+        ctx,
+        property_id=property_id,
+        body=_body(unit_id=unit_id),
+        clock=frozen_clock,
+        event_bus=EventBus(),
+    )
+
+    rows = list_closures(session_closure, ctx, property_id=property_id, unit_id=unit_id)
+    assert [row.id for row in rows] == [created.id]
+    assert created.unit_id == unit_id
+    db_row = session_closure.get(PropertyClosure, created.id)
+    assert db_row is not None
+    assert db_row.unit_id == unit_id
+
+    updated = update_closure(
+        session_closure,
+        ctx,
+        closure_id=created.id,
+        body=_update_body(unit_id=None),
+        clock=frozen_clock,
+        event_bus=EventBus(),
+    )
+
+    assert updated.unit_id is None
+    assert session_closure.get(PropertyClosure, created.id).unit_id is None
+
+
+def test_cross_property_unit_collapses_to_not_found(
+    session_closure: Session, frozen_clock: FrozenClock
+) -> None:
+    ws = _make_workspace(session_closure, slug="closure-cross-unit")
+    ctx = _ctx(workspace_id=ws, slug="closure-cross-unit")
+    property_id = _create_property(session_closure, ctx)
+    other_property_id = _create_property(session_closure, ctx)
+    other_unit_id = _first_unit_id(session_closure, property_id=other_property_id)
+
+    with pytest.raises(ClosureNotFound):
+        create_closure(
+            session_closure,
+            ctx,
+            property_id=property_id,
+            body=_body(unit_id=other_unit_id),
+            clock=frozen_clock,
+            event_bus=EventBus(),
+        )
+
+    created = create_closure(
+        session_closure,
+        ctx,
+        property_id=property_id,
+        body=_body(),
+        clock=frozen_clock,
+        event_bus=EventBus(),
+    )
+    with pytest.raises(ClosureNotFound):
+        update_closure(
+            session_closure,
+            ctx,
+            closure_id=created.id,
+            body=_update_body(unit_id=other_unit_id),
+            clock=frozen_clock,
+            event_bus=EventBus(),
+        )
 
 
 def test_workspace_denial_collapses_to_not_found(

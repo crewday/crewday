@@ -8,7 +8,8 @@ from datetime import UTC, datetime
 import pytest
 from sqlalchemy.orm import Session
 
-from app.adapters.db.stays.models import Reservation
+from app.adapters.db.places.models import Area, Unit
+from app.adapters.db.stays.models import IcalFeed, Reservation
 from app.adapters.db.tasks.models import Schedule, TaskTemplate
 from app.domain.places.closure_service import detect_clashes
 from app.domain.places.property_service import PropertyCreate, create_property
@@ -111,6 +112,84 @@ def _create_property(session: Session, ctx: WorkspaceContext) -> str:
     return view.id
 
 
+def _first_unit_id(session: Session, *, property_id: str) -> str:
+    return session.query(Unit.id).filter(Unit.property_id == property_id).one()[0]
+
+
+def _seed_unit(session: Session, *, property_id: str, name: str) -> str:
+    unit_id = new_ulid()
+    session.add(
+        Unit(
+            id=unit_id,
+            property_id=property_id,
+            name=name,
+            ordinal=10,
+            default_checkin_time=None,
+            default_checkout_time=None,
+            max_guests=None,
+            welcome_overrides_json={},
+            settings_override_json={},
+            notes_md="",
+            label=name,
+            type=None,
+            capacity=1,
+            created_at=_PINNED,
+            updated_at=_PINNED,
+        )
+    )
+    session.flush()
+    return unit_id
+
+
+def _seed_area(session: Session, *, property_id: str, unit_id: str, name: str) -> str:
+    area_id = new_ulid()
+    session.add(
+        Area(
+            id=area_id,
+            property_id=property_id,
+            unit_id=unit_id,
+            name=name,
+            kind="indoor_room",
+            ordering=0,
+            parent_area_id=None,
+            notes_md="",
+            label=name,
+            created_at=_PINNED,
+            updated_at=_PINNED,
+        )
+    )
+    session.flush()
+    return area_id
+
+
+def _seed_feed(
+    session: Session,
+    ctx: WorkspaceContext,
+    *,
+    property_id: str,
+    unit_id: str,
+) -> str:
+    feed_id = new_ulid()
+    session.add(
+        IcalFeed(
+            id=feed_id,
+            workspace_id=ctx.workspace_id,
+            property_id=property_id,
+            unit_id=unit_id,
+            url=f"https://calendar.example.test/{feed_id}.ics",
+            provider="airbnb",
+            poll_cadence="*/15 * * * *",
+            last_polled_at=None,
+            last_etag=None,
+            last_error=None,
+            enabled=True,
+            created_at=_PINNED,
+        )
+    )
+    session.flush()
+    return feed_id
+
+
 def _seed_reservation(
     session: Session,
     ctx: WorkspaceContext,
@@ -118,6 +197,7 @@ def _seed_reservation(
     property_id: str,
     check_in: datetime,
     check_out: datetime,
+    ical_feed_id: str | None = None,
     status: str = "scheduled",
 ) -> str:
     row_id = new_ulid()
@@ -126,7 +206,7 @@ def _seed_reservation(
             id=row_id,
             workspace_id=ctx.workspace_id,
             property_id=property_id,
-            ical_feed_id=None,
+            ical_feed_id=ical_feed_id,
             external_uid=row_id,
             check_in=check_in,
             check_out=check_out,
@@ -151,6 +231,7 @@ def _seed_schedule(
     property_id: str | None,
     active_from: str,
     active_until: str | None,
+    area_id: str | None = None,
     enabled: bool = True,
     deleted_at: datetime | None = None,
     paused_at: datetime | None = None,
@@ -193,7 +274,7 @@ def _seed_schedule(
             template_id=template_id,
             property_id=property_id,
             name="Pool service",
-            area_id=None,
+            area_id=area_id,
             rrule_text="FREQ=DAILY",
             dtstart=datetime(2026, 5, 1, 9, 0, tzinfo=UTC),
             dtstart_local="2026-05-01T09:00",
@@ -287,6 +368,65 @@ def test_detect_clashes_returns_overlapping_stays_and_live_schedules(
         overlapping_schedule,
         workspace_wide_schedule,
     ]
+
+
+def test_detect_clashes_filters_to_matching_unit_scope(
+    env: tuple[Session, WorkspaceContext],
+) -> None:
+    session, ctx = env
+    property_id = _create_property(session, ctx)
+    unit_a = _first_unit_id(session, property_id=property_id)
+    unit_b = _seed_unit(session, property_id=property_id, name="Guest house")
+    area_a = _seed_area(session, property_id=property_id, unit_id=unit_a, name="A")
+    area_b = _seed_area(session, property_id=property_id, unit_id=unit_b, name="B")
+    feed_a = _seed_feed(session, ctx, property_id=property_id, unit_id=unit_a)
+    feed_b = _seed_feed(session, ctx, property_id=property_id, unit_id=unit_b)
+    stay_a = _seed_reservation(
+        session,
+        ctx,
+        property_id=property_id,
+        ical_feed_id=feed_a,
+        check_in=datetime(2026, 5, 2, 15, 0, tzinfo=UTC),
+        check_out=datetime(2026, 5, 6, 10, 0, tzinfo=UTC),
+    )
+    _seed_reservation(
+        session,
+        ctx,
+        property_id=property_id,
+        ical_feed_id=feed_b,
+        check_in=datetime(2026, 5, 2, 15, 0, tzinfo=UTC),
+        check_out=datetime(2026, 5, 6, 10, 0, tzinfo=UTC),
+    )
+    schedule_a = _seed_schedule(
+        session,
+        ctx,
+        property_id=property_id,
+        area_id=area_a,
+        active_from="2026-05-01",
+        active_until="2026-05-31",
+    )
+    _seed_schedule(
+        session,
+        ctx,
+        property_id=property_id,
+        area_id=area_b,
+        active_from="2026-05-01",
+        active_until="2026-05-31",
+    )
+
+    clashes = detect_clashes(
+        session,
+        ctx,
+        property_id=property_id,
+        unit_id=unit_a,
+        starts_at=datetime(2026, 5, 3, 0, 0, tzinfo=UTC),
+        ends_at=datetime(2026, 5, 5, 0, 0, tzinfo=UTC),
+    )
+
+    assert [stay.id for stay in clashes.stays] == [stay_a]
+    assert [stay.unit_id for stay in clashes.stays] == [unit_a]
+    assert [schedule.id for schedule in clashes.schedules] == [schedule_a]
+    assert [schedule.unit_id for schedule in clashes.schedules] == [unit_a]
 
 
 def test_detect_clashes_compares_schedule_dates_in_property_timezone(

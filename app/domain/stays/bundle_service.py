@@ -446,6 +446,7 @@ def _windows_for_rule(
         if _gap_intersects_closure(
             session,
             property_id=reservation.property_id,
+            unit_id=unit_id,
             starts_at=starts_at,
             ends_at=ends_at,
         ):

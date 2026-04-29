@@ -14,10 +14,16 @@ from typing import Any, Literal
 from zoneinfo import ZoneInfo
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
-from sqlalchemy import or_, select
+from sqlalchemy import or_, select, true
 from sqlalchemy.orm import Session
 
-from app.adapters.db.places.models import Property, PropertyClosure, PropertyWorkspace
+from app.adapters.db.places.models import (
+    Area,
+    Property,
+    PropertyClosure,
+    PropertyWorkspace,
+    Unit,
+)
 from app.adapters.db.stays.models import IcalFeed, Reservation
 from app.adapters.db.tasks.models import Schedule
 from app.audit import write_audit
@@ -67,6 +73,7 @@ class _ClosureBody(BaseModel):
     starts_at: datetime
     ends_at: datetime
     reason: ClosureReason
+    unit_id: str | None = Field(default=None, max_length=_MAX_ID_LEN)
     source_ical_feed_id: str | None = Field(default=None, max_length=_MAX_ID_LEN)
 
     @field_validator("starts_at", "ends_at")
@@ -95,6 +102,7 @@ class PropertyClosureUpdate(_ClosureBody):
 class PropertyClosureView:
     id: str
     property_id: str
+    unit_id: str | None
     starts_at: datetime
     ends_at: datetime
     reason: ClosureReason
@@ -108,6 +116,7 @@ class PropertyClosureView:
 class ClosureStayClash:
     id: str
     property_id: str
+    unit_id: str | None
     check_in: datetime
     check_out: datetime
     status: str
@@ -118,6 +127,7 @@ class ClosureStayClash:
 class ClosureScheduleClash:
     id: str
     property_id: str | None
+    unit_id: str | None
     name: str
     active_from: date | None
     active_until: date | None
@@ -144,6 +154,7 @@ def create_closure(
     now = resolved_clock.now()
 
     _load_property_in_workspace(session, ctx, property_id=property_id)
+    _assert_unit_in_property(session, property_id=property_id, unit_id=body.unit_id)
     _assert_feed_in_property(
         session,
         ctx,
@@ -154,6 +165,7 @@ def create_closure(
     row = PropertyClosure(
         id=new_ulid(),
         property_id=property_id,
+        unit_id=body.unit_id,
         starts_at=body.starts_at,
         ends_at=body.ends_at,
         reason=body.reason,
@@ -212,10 +224,12 @@ def update_closure(
         property_id=row.property_id,
         source_ical_feed_id=body.source_ical_feed_id,
     )
+    _assert_unit_in_property(session, property_id=row.property_id, unit_id=body.unit_id)
 
     row.starts_at = body.starts_at
     row.ends_at = body.ends_at
     row.reason = body.reason
+    row.unit_id = body.unit_id
     row.source_ical_feed_id = body.source_ical_feed_id
     session.flush()
     after = _row_to_view(row)
@@ -285,13 +299,19 @@ def list_closures(
     ctx: WorkspaceContext,
     *,
     property_id: str,
+    unit_id: str | None = None,
 ) -> Sequence[PropertyClosureView]:
     _load_property_in_workspace(session, ctx, property_id=property_id)
+    _assert_unit_in_property(session, property_id=property_id, unit_id=unit_id)
+    unit_scope = _optional_unit_applicability_filter(
+        PropertyClosure.unit_id, unit_id=unit_id
+    )
     rows = session.scalars(
         select(PropertyClosure)
         .where(
             PropertyClosure.property_id == property_id,
             PropertyClosure.deleted_at.is_(None),
+            unit_scope,
         )
         .order_by(PropertyClosure.starts_at.asc(), PropertyClosure.id.asc())
     ).all()
@@ -313,6 +333,7 @@ def detect_clashes(
     ctx: WorkspaceContext,
     *,
     property_id: str,
+    unit_id: str | None = None,
     starts_at: datetime,
     ends_at: datetime,
 ) -> ClosureClashes:
@@ -324,29 +345,40 @@ def detect_clashes(
         raise ValueError("ends_at must be after starts_at")
 
     property_row = _load_property_in_workspace(session, ctx, property_id=property_id)
+    _assert_unit_in_property(session, property_id=property_id, unit_id=unit_id)
     closure_start_date, closure_end_date = _covered_dates(
         starts_at, ends_at, timezone=property_row.timezone
     )
     closure_start_iso = closure_start_date.isoformat()
     closure_end_iso = closure_end_date.isoformat()
 
-    stay_rows = session.scalars(
-        select(Reservation)
+    reservation_unit_id = (
+        select(IcalFeed.unit_id)
+        .where(IcalFeed.id == Reservation.ical_feed_id)
+        .scalar_subquery()
+    )
+    stay_rows = session.execute(
+        select(Reservation, reservation_unit_id)
         .where(
             Reservation.workspace_id == ctx.workspace_id,
             Reservation.property_id == property_id,
             Reservation.status != "cancelled",
             Reservation.check_in < ends_at,
             Reservation.check_out > starts_at,
+            _unit_match_filter(reservation_unit_id, unit_id=unit_id),
         )
         .order_by(Reservation.check_in.asc(), Reservation.id.asc())
     ).all()
 
-    schedule_rows = session.scalars(
-        select(Schedule)
+    schedule_unit_id = (
+        select(Area.unit_id).where(Area.id == Schedule.area_id).scalar_subquery()
+    )
+    schedule_rows = session.execute(
+        select(Schedule, schedule_unit_id)
         .where(
             Schedule.workspace_id == ctx.workspace_id,
-            or_(Schedule.property_id == property_id, Schedule.property_id.is_(None)),
+            _schedule_property_scope_filter(property_id=property_id, unit_id=unit_id),
+            _unit_match_filter(schedule_unit_id, unit_id=unit_id),
             Schedule.deleted_at.is_(None),
             Schedule.paused_at.is_(None),
             Schedule.enabled.is_(True),
@@ -363,8 +395,13 @@ def detect_clashes(
     ).all()
 
     return ClosureClashes(
-        stays=tuple(_stay_to_clash(row) for row in stay_rows),
-        schedules=tuple(_schedule_to_clash(row) for row in schedule_rows),
+        stays=tuple(
+            _stay_to_clash(row, unit_id=row_unit_id) for row, row_unit_id in stay_rows
+        ),
+        schedules=tuple(
+            _schedule_to_clash(row, unit_id=row_unit_id)
+            for row, row_unit_id in schedule_rows
+        ),
     )
 
 
@@ -430,10 +467,43 @@ def _assert_feed_in_property(
         raise ClosureNotFound(source_ical_feed_id)
 
 
+def _assert_unit_in_property(
+    session: Session, *, property_id: str, unit_id: str | None
+) -> None:
+    if unit_id is None:
+        return
+    stmt = select(Unit.id).where(
+        Unit.id == unit_id,
+        Unit.property_id == property_id,
+        Unit.deleted_at.is_(None),
+    )
+    if session.scalars(stmt).one_or_none() is None:
+        raise ClosureNotFound(unit_id)
+
+
+def _optional_unit_applicability_filter(column: Any, *, unit_id: str | None) -> Any:
+    if unit_id is None:
+        return true()
+    return or_(column.is_(None), column == unit_id)
+
+
+def _unit_match_filter(column: Any, *, unit_id: str | None) -> Any:
+    if unit_id is None:
+        return true()
+    return column == unit_id
+
+
+def _schedule_property_scope_filter(*, property_id: str, unit_id: str | None) -> Any:
+    if unit_id is None:
+        return or_(Schedule.property_id == property_id, Schedule.property_id.is_(None))
+    return Schedule.property_id == property_id
+
+
 def _row_to_view(row: PropertyClosure) -> PropertyClosureView:
     return PropertyClosureView(
         id=row.id,
         property_id=row.property_id,
+        unit_id=row.unit_id,
         starts_at=row.starts_at,
         ends_at=row.ends_at,
         reason=_narrow_reason(row.reason),
@@ -462,6 +532,7 @@ def _view_to_diff_dict(view: PropertyClosureView) -> dict[str, Any]:
     return {
         "id": view.id,
         "property_id": view.property_id,
+        "unit_id": view.unit_id,
         "starts_at": _iso(view.starts_at),
         "ends_at": _iso(view.ends_at),
         "reason": view.reason,
@@ -472,10 +543,11 @@ def _view_to_diff_dict(view: PropertyClosureView) -> dict[str, Any]:
     }
 
 
-def _stay_to_clash(row: Reservation) -> ClosureStayClash:
+def _stay_to_clash(row: Reservation, *, unit_id: str | None) -> ClosureStayClash:
     return ClosureStayClash(
         id=row.id,
         property_id=row.property_id,
+        unit_id=unit_id,
         check_in=row.check_in,
         check_out=row.check_out,
         status=row.status,
@@ -483,10 +555,11 @@ def _stay_to_clash(row: Reservation) -> ClosureStayClash:
     )
 
 
-def _schedule_to_clash(row: Schedule) -> ClosureScheduleClash:
+def _schedule_to_clash(row: Schedule, *, unit_id: str | None) -> ClosureScheduleClash:
     return ClosureScheduleClash(
         id=row.id,
         property_id=row.property_id,
+        unit_id=unit_id,
         name=row.name if row.name is not None else "",
         active_from=(
             date.fromisoformat(row.active_from) if row.active_from is not None else None

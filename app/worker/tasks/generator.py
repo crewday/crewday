@@ -68,7 +68,7 @@ from dateutil.rrule import rrulestr
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.adapters.db.places.models import Property, PropertyClosure
+from app.adapters.db.places.models import Area, Property, PropertyClosure
 from app.adapters.db.tasks.models import Occurrence, Schedule, TaskTemplate
 from app.audit import write_audit
 from app.events.bus import EventBus
@@ -305,6 +305,7 @@ def generate_task_occurrences(
 
         active_from = _parse_local_date(schedule.active_from)
         active_until = _parse_local_date(schedule.active_until)
+        schedule_unit_id = _schedule_unit_id(session, schedule)
 
         # Lower bound on the RRULE expansion. Without one a daily
         # schedule with an ancient ``dtstart_local`` would either walk
@@ -338,7 +339,9 @@ def generate_task_occurrences(
             if active_until is not None and candidate_date > active_until:
                 continue
 
-            if _covered_by_closure(closures, candidate_local, tz):
+            if _covered_by_closure(
+                closures, candidate_local, tz, unit_id=schedule_unit_id
+            ):
                 skipped_for_closure += 1
                 _write_closure_skip_audit(
                     session,
@@ -521,6 +524,13 @@ def _load_closures(session: Session, *, property_id: str) -> list[PropertyClosur
         .order_by(PropertyClosure.starts_at.asc())
     )
     return list(session.scalars(stmt).all())
+
+
+def _schedule_unit_id(session: Session, schedule: Schedule) -> str | None:
+    if schedule.area_id is None:
+        return None
+    stmt = select(Area.unit_id).where(Area.id == schedule.area_id).limit(1)
+    return session.scalars(stmt).first()
 
 
 def _already_materialised(
@@ -768,6 +778,8 @@ def _covered_by_closure(
     closures: list[PropertyClosure],
     candidate_local: datetime,
     zone: ZoneInfo,
+    *,
+    unit_id: str | None,
 ) -> bool:
     """Return ``True`` iff any closure covers ``candidate_local``'s day.
 
@@ -776,9 +788,8 @@ def _covered_by_closure(
     when the candidate day falls inside its ``[starts_at, ends_at)``
     UTC window (viewed in the property frame). The v1 model stores
     closures as UTC datetimes; we project the candidate to UTC and
-    check inclusion. The spec's ``unit_id`` filter lands with cd-8u5
-    — until then every closure on the property applies to every
-    task on the property.
+    check inclusion. Unit-scoped closures apply only to a task on
+    the same unit; NULL remains property-wide.
     """
     if not closures:
         return False
@@ -789,6 +800,8 @@ def _covered_by_closure(
     # cannot throw ``TypeError`` on one backend only.
     candidate_naive_utc = candidate_utc.replace(tzinfo=None)
     for closure in closures:
+        if closure.unit_id is not None and closure.unit_id != unit_id:
+            continue
         start = _as_naive_utc(closure.starts_at)
         end = _as_naive_utc(closure.ends_at)
         if start <= candidate_naive_utc < end:

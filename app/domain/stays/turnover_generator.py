@@ -77,7 +77,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Final, Literal, Protocol
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from app.adapters.db.places.models import PropertyClosure
@@ -607,6 +607,7 @@ def _evaluate_rule(
     if _gap_intersects_closure(
         session,
         property_id=reservation.property_id,
+        unit_id=enriched.unit_id,
         starts_at=starts_at,
         ends_at=ends_at,
     ):
@@ -716,6 +717,7 @@ def _gap_intersects_closure(
     session: Session,
     *,
     property_id: str,
+    unit_id: str | None,
     starts_at: datetime,
     ends_at: datetime,
 ) -> bool:
@@ -740,6 +742,14 @@ def _gap_intersects_closure(
         select(PropertyClosure.id)
         .where(PropertyClosure.property_id == property_id)
         .where(PropertyClosure.deleted_at.is_(None))
+        .where(
+            or_(
+                PropertyClosure.unit_id.is_(None),
+                PropertyClosure.unit_id == unit_id,
+            )
+            if unit_id is not None
+            else PropertyClosure.unit_id.is_(None)
+        )
         .where(PropertyClosure.starts_at < ends_at)
         .where(PropertyClosure.ends_at > starts_at)
         .limit(1)

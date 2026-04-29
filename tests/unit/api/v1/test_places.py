@@ -130,7 +130,7 @@ def test_closure_refuses_overlapping_stay_unless_forced(
     assert forced.json()["property_id"] == property_id
 
 
-def test_closure_rejects_unit_id_until_unit_scoped_storage_exists(
+def test_closure_persists_and_returns_unit_id(
     owner_ctx: tuple[WorkspaceContext, sessionmaker[Session], str],
 ) -> None:
     ctx, factory, _ = owner_ctx
@@ -149,8 +149,79 @@ def test_closure_rejects_unit_id_until_unit_scoped_storage_exists(
         },
     )
 
-    assert response.status_code == 422, response.text
-    assert response.json()["detail"]["error"] == "validation_error"
+    assert response.status_code == 201, response.text
+    created = response.json()
+    assert created["unit_id"] == unit_id
+
+    listed = client.get(
+        "/property_closures", params={"property_id": property_id, "unit_id": unit_id}
+    )
+    assert listed.status_code == 200, listed.text
+    assert listed.json()["data"][0]["unit_id"] == unit_id
+
+    updated = client.patch(
+        f"/property_closures/{created['id']}",
+        json={
+            "unit_id": None,
+            "starts_at": "2026-05-03T00:00:00+00:00",
+            "ends_at": "2026-05-05T00:00:00+00:00",
+            "reason": "seasonal",
+        },
+    )
+    assert updated.status_code == 200, updated.text
+    assert updated.json()["unit_id"] is None
+
+
+def test_closure_rejects_invalid_or_cross_property_unit_id(
+    owner_ctx: tuple[WorkspaceContext, sessionmaker[Session], str],
+) -> None:
+    ctx, factory, _ = owner_ctx
+    client = _client(ctx, factory)
+    property_id = client.post("/properties", json=_property_body("Villa A")).json()[
+        "id"
+    ]
+    other_property_id = client.post(
+        "/properties", json=_property_body("Villa B")
+    ).json()["id"]
+    other_unit_id = client.get(f"/properties/{other_property_id}/units").json()["data"][
+        0
+    ]["id"]
+
+    for unit_id in ("01HWA00000000000000000NOPE", other_unit_id):
+        response = client.post(
+            "/property_closures",
+            json={
+                "property_id": property_id,
+                "unit_id": unit_id,
+                "starts_at": "2026-05-02T00:00:00+00:00",
+                "ends_at": "2026-05-04T00:00:00+00:00",
+                "reason": "renovation",
+            },
+        )
+        assert response.status_code == 404, response.text
+        assert response.json()["detail"]["error"] == "property_closure_not_found"
+
+    valid = client.post(
+        "/property_closures",
+        json={
+            "property_id": property_id,
+            "starts_at": "2026-05-02T00:00:00+00:00",
+            "ends_at": "2026-05-04T00:00:00+00:00",
+            "reason": "renovation",
+        },
+    )
+    assert valid.status_code == 201, valid.text
+    update = client.patch(
+        f"/property_closures/{valid.json()['id']}",
+        json={
+            "unit_id": other_unit_id,
+            "starts_at": "2026-05-02T00:00:00+00:00",
+            "ends_at": "2026-05-04T00:00:00+00:00",
+            "reason": "renovation",
+        },
+    )
+    assert update.status_code == 404, update.text
+    assert update.json()["detail"]["error"] == "property_closure_not_found"
 
 
 def test_share_creates_membership_and_publishes_event(

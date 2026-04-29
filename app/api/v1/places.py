@@ -406,6 +406,7 @@ class ClosureUpdateRequest(closure_service.PropertyClosureUpdate):
 class ClosureResponse(BaseModel):
     id: str
     property_id: str
+    unit_id: str | None
     starts_at: datetime
     ends_at: datetime
     reason: closure_service.ClosureReason
@@ -419,6 +420,7 @@ class ClosureResponse(BaseModel):
         return cls(
             id=view.id,
             property_id=view.property_id,
+            unit_id=view.unit_id,
             starts_at=view.starts_at,
             ends_at=view.ends_at,
             reason=view.reason,
@@ -637,6 +639,7 @@ def _refuse_stay_clashes(
     ctx: WorkspaceContext,
     *,
     property_id: str,
+    unit_id: str | None,
     starts_at: datetime,
     ends_at: datetime,
     force: bool,
@@ -647,6 +650,7 @@ def _refuse_stay_clashes(
         session,
         ctx,
         property_id=property_id,
+        unit_id=unit_id,
         starts_at=starts_at,
         ends_at=ends_at,
     )
@@ -657,13 +661,6 @@ def _refuse_stay_clashes(
                 "error": "closure_stay_conflict",
                 "stay_ids": [stay.id for stay in clashes.stays],
             },
-        )
-
-
-def _reject_unit_scoped_closure(unit_id: str | None) -> None:
-    if unit_id is not None:
-        raise _validation_error(
-            ValueError("unit-scoped property closures are not supported yet")
         )
 
 
@@ -1364,9 +1361,8 @@ def build_properties_router() -> APIRouter:
         to: datetime | None = None,
     ) -> ClosureListResponse:
         try:
-            _reject_unit_scoped_closure(unit_id)
             views = closure_service.list_closures(
-                session, ctx, property_id=property_id
+                session, ctx, property_id=property_id, unit_id=unit_id
             )
         except closure_service.ClosureNotFound as exc:
             raise _closure_not_found() from exc
@@ -1398,11 +1394,11 @@ def build_properties_router() -> APIRouter:
         force: bool = False,
     ) -> ClosureResponse:
         try:
-            _reject_unit_scoped_closure(body.unit_id)
             _refuse_stay_clashes(
                 session,
                 ctx,
                 property_id=body.property_id,
+                unit_id=body.unit_id,
                 starts_at=body.starts_at,
                 ends_at=body.ends_at,
                 force=force,
@@ -1431,14 +1427,12 @@ def build_properties_router() -> APIRouter:
         force: bool = False,
     ) -> ClosureResponse:
         try:
-            _reject_unit_scoped_closure(body.unit_id)
-            current = closure_service.get_closure(
-                session, ctx, closure_id=closure_id
-            )
+            current = closure_service.get_closure(session, ctx, closure_id=closure_id)
             _refuse_stay_clashes(
                 session,
                 ctx,
                 property_id=current.property_id,
+                unit_id=body.unit_id,
                 starts_at=body.starts_at,
                 ends_at=body.ends_at,
                 force=force,

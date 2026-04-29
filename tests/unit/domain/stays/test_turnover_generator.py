@@ -48,7 +48,7 @@ from sqlalchemy import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.adapters.db.base import Base
-from app.adapters.db.places.models import Property, PropertyClosure
+from app.adapters.db.places.models import Property, PropertyClosure, Unit
 from app.adapters.db.session import make_engine
 from app.adapters.db.stays.models import Reservation
 from app.adapters.db.workspace.models import Workspace
@@ -221,6 +221,31 @@ def _bootstrap_property(session: Session, *, name: str = "Villa Sud") -> str:
     return pid
 
 
+def _bootstrap_unit(session: Session, *, property_id: str, name: str) -> str:
+    unit_id = new_ulid()
+    session.add(
+        Unit(
+            id=unit_id,
+            property_id=property_id,
+            name=name,
+            ordinal=0,
+            default_checkin_time=None,
+            default_checkout_time=None,
+            max_guests=None,
+            welcome_overrides_json={},
+            settings_override_json={},
+            notes_md="",
+            label=name,
+            type=None,
+            capacity=1,
+            created_at=_PINNED,
+            updated_at=_PINNED,
+        )
+    )
+    session.flush()
+    return unit_id
+
+
 def _bootstrap_reservation(
     session: Session,
     *,
@@ -261,12 +286,14 @@ def _bootstrap_closure(
     property_id: str,
     starts_at: datetime,
     ends_at: datetime,
+    unit_id: str | None = None,
 ) -> str:
     cid = new_ulid()
     session.add(
         PropertyClosure(
             id=cid,
             property_id=property_id,
+            unit_id=unit_id,
             starts_at=starts_at,
             ends_at=ends_at,
             reason="renovation",
@@ -631,6 +658,52 @@ class TestSkipPaths:
         assert len(result.per_rule) == 1
         assert result.per_rule[0].decision == "skipped_closure"
         assert port.calls == []
+
+    def test_unit_scoped_closure_for_other_unit_does_not_skip(
+        self,
+        session_turnover: Session,
+        ctx: WorkspaceContext,
+    ) -> None:
+        prop = _bootstrap_property(session_turnover)
+        check_out = _PINNED + timedelta(days=4)
+        next_check_in = check_out + timedelta(days=3)
+        rid = _bootstrap_reservation(
+            session_turnover,
+            workspace_id=ctx.workspace_id,
+            property_id=prop,
+            check_in=_PINNED + timedelta(days=1),
+            check_out=check_out,
+        )
+        _bootstrap_reservation(
+            session_turnover,
+            workspace_id=ctx.workspace_id,
+            property_id=prop,
+            check_in=next_check_in,
+            check_out=next_check_in + timedelta(days=2),
+        )
+        unit_a = _bootstrap_unit(session_turnover, property_id=prop, name="Unit A")
+        unit_b = _bootstrap_unit(session_turnover, property_id=prop, name="Unit B")
+        _bootstrap_closure(
+            session_turnover,
+            property_id=prop,
+            unit_id=unit_b,
+            starts_at=check_out - timedelta(hours=1),
+            ends_at=check_out + timedelta(hours=4),
+        )
+        port = RecordingTasksCreateOccurrencePort()
+        resolver = StaticReservationContextResolver(unit_id=unit_a, guest_kind="guest")
+
+        result = handle_reservation_upserted(
+            _make_event(ctx=ctx, reservation_id=rid),
+            session=session_turnover,
+            ctx=ctx,
+            port=port,
+            resolver=resolver,
+            now=_PINNED,
+        )
+
+        assert result.per_rule[0].decision == "materialised"
+        assert len(port.calls) == 1
 
     def test_closure_exactly_outside_gap_does_not_skip(
         self,

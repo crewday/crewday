@@ -278,6 +278,8 @@ class TestMigrationShape:
         }
         assert fks[("property_id",)]["referred_table"] == "property"
         assert fks[("property_id",)]["options"].get("ondelete") == "CASCADE"
+        assert fks[("unit_id",)]["referred_table"] == "unit"
+        assert fks[("unit_id",)]["options"].get("ondelete") == "SET NULL"
         # Audit actor survives a user-delete via SET NULL.
         assert fks[("created_by_user_id",)]["referred_table"] == "user"
         assert fks[("created_by_user_id",)]["options"].get("ondelete") == "SET NULL"
@@ -291,6 +293,7 @@ class TestMigrationShape:
             "property_id",
             "starts_at",
         ]
+        assert indexes["ix_property_closure_unit"]["column_names"] == ["unit_id"]
 
     # ------------------------------------------------------------------
     # cd-e4m3 — property_work_role_assignment

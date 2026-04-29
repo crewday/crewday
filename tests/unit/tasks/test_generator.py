@@ -37,7 +37,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app.adapters.db.audit.models import AuditLog
 from app.adapters.db.base import Base
-from app.adapters.db.places.models import Property, PropertyClosure
+from app.adapters.db.places.models import Area, Property, PropertyClosure, Unit
 from app.adapters.db.session import make_engine
 from app.adapters.db.tasks.models import Occurrence, Schedule, TaskTemplate
 from app.adapters.db.workspace.models import Workspace
@@ -203,6 +203,7 @@ def _bootstrap_schedule(
     workspace_id: str,
     template_id: str,
     property_id: str,
+    area_id: str | None = None,
     rrule: str = "FREQ=WEEKLY;BYDAY=SA",
     dtstart_local: str = "2026-04-18T09:00",
     duration_minutes: int | None = 60,
@@ -222,7 +223,7 @@ def _bootstrap_schedule(
             template_id=template_id,
             property_id=property_id,
             name="Villa Sud pool schedule",
-            area_id=None,
+            area_id=area_id,
             rrule_text=rrule,
             dtstart=anchor,
             dtstart_local=dtstart_local,
@@ -246,6 +247,57 @@ def _bootstrap_schedule(
     return schedule_id
 
 
+def _bootstrap_unit(session: Session, *, property_id: str, name: str) -> str:
+    unit_id = new_ulid()
+    session.add(
+        Unit(
+            id=unit_id,
+            property_id=property_id,
+            name=name,
+            ordinal=0,
+            default_checkin_time=None,
+            default_checkout_time=None,
+            max_guests=None,
+            welcome_overrides_json={},
+            settings_override_json={},
+            notes_md="",
+            label=name,
+            type=None,
+            capacity=1,
+            created_at=_PINNED,
+            updated_at=_PINNED,
+        )
+    )
+    session.flush()
+    return unit_id
+
+
+def _bootstrap_area(
+    session: Session,
+    *,
+    property_id: str,
+    unit_id: str,
+) -> str:
+    area_id = new_ulid()
+    session.add(
+        Area(
+            id=area_id,
+            property_id=property_id,
+            unit_id=unit_id,
+            name=f"Area {unit_id[-3:]}",
+            kind="indoor_room",
+            ordering=0,
+            parent_area_id=None,
+            notes_md="",
+            label=f"Area {unit_id[-3:]}",
+            created_at=_PINNED,
+            updated_at=_PINNED,
+        )
+    )
+    session.flush()
+    return area_id
+
+
 def _bootstrap_closure(
     session: Session,
     *,
@@ -253,12 +305,14 @@ def _bootstrap_closure(
     starts_at: datetime,
     ends_at: datetime,
     reason: str = "renovation",
+    unit_id: str | None = None,
 ) -> str:
     closure_id = new_ulid()
     session.add(
         PropertyClosure(
             id=closure_id,
             property_id=property_id,
+            unit_id=unit_id,
             starts_at=starts_at,
             ends_at=ends_at,
             reason=reason,
@@ -552,6 +606,52 @@ class TestPropertyClosures:
             assert isinstance(diff, dict)
             assert diff["property_id"] == property_id
             assert "scheduled_for_local" in diff
+
+    def test_unit_scoped_closure_only_suppresses_matching_schedule(
+        self, session: Session, bus: EventBus, clock: FrozenClock
+    ) -> None:
+        workspace_id = _bootstrap_workspace(session, slug="ws1")
+        property_id = _bootstrap_property(session)
+        template_id = _bootstrap_template(session, workspace_id=workspace_id)
+        unit_a = _bootstrap_unit(session, property_id=property_id, name="Unit A")
+        unit_b = _bootstrap_unit(session, property_id=property_id, name="Unit B")
+        area_a = _bootstrap_area(session, property_id=property_id, unit_id=unit_a)
+        area_b = _bootstrap_area(session, property_id=property_id, unit_id=unit_b)
+        schedule_a = _bootstrap_schedule(
+            session,
+            workspace_id=workspace_id,
+            template_id=template_id,
+            property_id=property_id,
+            area_id=area_a,
+        )
+        _bootstrap_schedule(
+            session,
+            workspace_id=workspace_id,
+            template_id=template_id,
+            property_id=property_id,
+            area_id=area_b,
+        )
+        _bootstrap_closure(
+            session,
+            property_id=property_id,
+            unit_id=unit_a,
+            starts_at=datetime(2026, 4, 17, 0, 0, tzinfo=UTC),
+            ends_at=datetime(2026, 4, 26, 0, 0, tzinfo=UTC),
+        )
+
+        report = generate_task_occurrences(
+            _ctx(workspace_id),
+            session=session,
+            now=datetime(2026, 4, 15, 8, 0, tzinfo=UTC),
+            clock=clock,
+            event_bus=bus,
+        )
+
+        assert report.skipped_for_closure == 2
+        audit_rows = session.scalars(
+            select(AuditLog).where(AuditLog.action == "schedules.skipped_for_closure")
+        ).all()
+        assert {row.entity_id for row in audit_rows} == {schedule_a}
 
 
 # ---------------------------------------------------------------------------

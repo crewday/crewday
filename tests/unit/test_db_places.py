@@ -230,6 +230,7 @@ class TestPropertyClosureModel:
         )
         assert closure.id == "01HWA00000000000000000PCLA"
         assert closure.property_id == "01HWA00000000000000000PRPA"
+        assert closure.unit_id is None
         assert closure.starts_at == _PINNED
         assert closure.ends_at == datetime(2026, 4, 20, 12, 0, 0, tzinfo=UTC)
         assert closure.reason == "renovation"
@@ -270,6 +271,7 @@ class TestPropertyClosureModel:
         indexes = [i for i in PropertyClosure.__table_args__ if isinstance(i, Index)]
         names = [i.name for i in indexes]
         assert "ix_property_closure_property_starts" in names
+        assert "ix_property_closure_unit" in names
         target = next(
             i for i in indexes if i.name == "ix_property_closure_property_starts"
         )

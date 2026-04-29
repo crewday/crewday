@@ -496,7 +496,7 @@ class Area(Base):
 class PropertyClosure(Base):
     """Blackout window on a property — renovation, owner-stay, etc.
 
-    v1 slice: ``id`` / ``property_id`` / ``starts_at`` / ``ends_at``
+    v1 slice: ``id`` / ``property_id`` / ``unit_id`` / ``starts_at`` / ``ends_at``
     / ``reason`` / ``source_ical_feed_id`` / ``source_external_uid`` /
     ``source_last_seen_at`` / ``created_by_user_id`` / ``created_at`` /
     ``deleted_at``. The CHECK ``ends_after_starts`` guards against
@@ -508,7 +508,9 @@ class PropertyClosure(Base):
     is nullable + ``ON DELETE SET NULL`` so iCal-sourced closures
     survive a feed delete; manual closures (owner-stay, renovation)
     leave the column ``NULL``. Every remaining FK cascades on the
-    parent property's delete.
+    parent property's delete. ``unit_id`` is nullable + ``ON DELETE
+    SET NULL`` so unit churn does not erase closure history; NULL
+    means the closure applies to the whole property.
     """
 
     __tablename__ = "property_closure"
@@ -518,6 +520,11 @@ class PropertyClosure(Base):
         String,
         ForeignKey("property.id", ondelete="CASCADE"),
         nullable=False,
+    )
+    unit_id: Mapped[str | None] = mapped_column(
+        String,
+        ForeignKey("unit.id", ondelete="SET NULL"),
+        nullable=True,
     )
     starts_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     ends_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
@@ -551,6 +558,7 @@ class PropertyClosure(Base):
     __table_args__ = (
         CheckConstraint("ends_at > starts_at", name="ends_after_starts"),
         Index("ix_property_closure_property_starts", "property_id", "starts_at"),
+        Index("ix_property_closure_unit", "unit_id"),
         Index("ix_property_closure_source_ical_feed", "source_ical_feed_id"),
         Index(
             "ix_property_closure_source_uid",

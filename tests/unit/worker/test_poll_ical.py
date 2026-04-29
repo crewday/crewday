@@ -57,7 +57,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app.adapters.db.audit.models import AuditLog
 from app.adapters.db.base import Base
-from app.adapters.db.places.models import Property, PropertyClosure
+from app.adapters.db.places.models import Property, PropertyClosure, Unit
 from app.adapters.db.session import make_engine
 from app.adapters.db.stays.models import IcalFeed, Reservation
 from app.adapters.db.workspace.models import Workspace
@@ -206,12 +206,38 @@ def _bootstrap_property(session: Session) -> str:
     return pid
 
 
+def _bootstrap_unit(session: Session, *, property_id: str, name: str) -> str:
+    uid = new_ulid()
+    session.add(
+        Unit(
+            id=uid,
+            property_id=property_id,
+            name=name,
+            ordinal=0,
+            default_checkin_time=None,
+            default_checkout_time=None,
+            max_guests=None,
+            welcome_overrides_json={},
+            settings_override_json={},
+            notes_md="",
+            label=name,
+            type=None,
+            capacity=1,
+            created_at=_PINNED,
+            updated_at=_PINNED,
+        )
+    )
+    session.flush()
+    return uid
+
+
 def _bootstrap_feed(
     session: Session,
     *,
     workspace_id: str,
     property_id: str,
     envelope: FakeEnvelope,
+    unit_id: str | None = None,
     url: str = _FEED_URL,
     enabled: bool = True,
     last_polled_at: datetime | None = None,
@@ -230,7 +256,7 @@ def _bootstrap_feed(
             id=fid,
             workspace_id=workspace_id,
             property_id=property_id,
-            unit_id=None,
+            unit_id=unit_id,
             url=ciphertext.decode("latin-1"),
             provider="custom",
             poll_cadence="*/15 * * * *",
@@ -1059,6 +1085,83 @@ class TestClosureIdempotency:
         assert row.source_external_uid == "blocked-x"
         assert len(created) == 2
         assert updated == []
+
+    def test_reasserted_closure_keeps_feed_unit_scope(
+        self,
+        session: Session,
+        bus: EventBus,
+        clock: FrozenClock,
+        envelope: FakeEnvelope,
+    ) -> None:
+        ws = _bootstrap_workspace(session)
+        prop = _bootstrap_property(session)
+        unit_id = _bootstrap_unit(session, property_id=prop, name="Villa Sud")
+        _bootstrap_feed(
+            session,
+            workspace_id=ws,
+            property_id=prop,
+            unit_id=unit_id,
+            envelope=envelope,
+        )
+        starts = datetime(2026, 5, 1, 0, 0, tzinfo=UTC)
+        ends = datetime(2026, 5, 8, 0, 0, tzinfo=UTC)
+        blocked = _vcalendar(
+            _vevent_blocked(uid="blocked-x", starts=starts, ends=ends),
+        )
+        empty = _vcalendar()
+        fetcher = _ScriptedFetcher(
+            responses={
+                _FEED_URL: [_ok(blocked), _ok(blocked), _ok(empty), _ok(blocked)]
+            },
+        )
+
+        poll_ical(
+            _ctx(ws),
+            session=session,
+            envelope=envelope,
+            clock=clock,
+            event_bus=bus,
+            fetcher=fetcher,
+            resolver=_fixed_resolver([_FAKE_IP]),  # type: ignore[arg-type]
+        )
+        row = session.scalars(select(PropertyClosure)).one()
+        row.unit_id = None
+        row.deleted_at = _PINNED + timedelta(minutes=5)
+        session.flush()
+
+        clock.set(_PINNED + timedelta(minutes=20))
+        poll_ical(
+            _ctx(ws),
+            session=session,
+            envelope=envelope,
+            clock=clock,
+            event_bus=bus,
+            fetcher=fetcher,
+            resolver=_fixed_resolver([_FAKE_IP]),  # type: ignore[arg-type]
+        )
+        clock.set(_PINNED + timedelta(minutes=40))
+        poll_ical(
+            _ctx(ws),
+            session=session,
+            envelope=envelope,
+            clock=clock,
+            event_bus=bus,
+            fetcher=fetcher,
+            resolver=_fixed_resolver([_FAKE_IP]),  # type: ignore[arg-type]
+        )
+        clock.set(_PINNED + timedelta(minutes=60))
+        poll_ical(
+            _ctx(ws),
+            session=session,
+            envelope=envelope,
+            clock=clock,
+            event_bus=bus,
+            fetcher=fetcher,
+            resolver=_fixed_resolver([_FAKE_IP]),  # type: ignore[arg-type]
+        )
+
+        assert row.deleted_at is None
+        assert row.unit_id == unit_id
 
 
 # ---------------------------------------------------------------------------

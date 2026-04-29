@@ -1457,6 +1457,7 @@ def _upsert_closure(
     if row is not None:
         if row.deleted_at is not None:
             if _deleted_closure_reasserted(row, previous_poll_at=feed.last_polled_at):
+                row.unit_id = feed.unit_id
                 row.starts_at = ev.starts_at
                 row.ends_at = ev.ends_at
                 row.reason = "ical_unavailable"
@@ -1488,7 +1489,9 @@ def _upsert_closure(
             _ensure_utc(row.starts_at) != ev.starts_at
             or _ensure_utc(row.ends_at) != ev.ends_at
             or row.reason != "ical_unavailable"
+            or row.unit_id != feed.unit_id
         )
+        row.unit_id = feed.unit_id
         row.starts_at = ev.starts_at
         row.ends_at = ev.ends_at
         row.reason = "ical_unavailable"
@@ -1516,6 +1519,7 @@ def _upsert_closure(
     row = PropertyClosure(
         id=new_ulid(),
         property_id=feed.property_id,
+        unit_id=feed.unit_id,
         starts_at=ev.starts_at,
         ends_at=ev.ends_at,
         reason="ical_unavailable",
