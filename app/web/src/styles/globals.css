@@ -2877,6 +2877,21 @@
 .chat-gateway-panel__hint {
   margin: 0; font-size: 12.5px;
 }
+.chat-gateway-test__form {
+  display: grid; grid-template-columns: minmax(160px, 0.7fr) minmax(180px, 0.8fr) 1fr auto;
+  gap: 12px; align-items: end;
+}
+.chat-gateway-test__message {
+  min-width: 220px;
+}
+.chat-gateway-test__result {
+  margin-top: 14px;
+}
+@media (max-width: 960px) {
+  .chat-gateway-test__form {
+    grid-template-columns: 1fr;
+  }
+}
 
 /* §23 — /me inline Chat channels card. Phone-scale variant of the
    manager table: one binding per row, stacked fields, phone-friendly

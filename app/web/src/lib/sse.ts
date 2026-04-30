@@ -141,6 +141,8 @@ export type EventKind =
   | "admin.usage.updated"
   | "admin.workspace.changed"
   | "admin.workspace.budget_paused"
+  | "chat_gateway.provider.changed"
+  | "chat_gateway.template.changed"
   // Catch-all workspace invalidation — e.g. owner flips a workspace
   // setting that reshapes policy. Drops every cached query under
   // the active workspace.
@@ -805,6 +807,16 @@ export const INVALIDATIONS: Record<EventKind, InvalidationHandler> = {
     invalidate(qc, qk.adminWorkspaces());
   },
 
+  "chat_gateway.provider.changed": (_event, qc) => {
+    invalidate(qc, qk.adminChatProviders());
+    invalidate(qc, qk.adminChatOverrides());
+  },
+
+  "chat_gateway.template.changed": (_event, qc) => {
+    invalidate(qc, qk.adminChatTemplates());
+    invalidate(qc, qk.adminChatProviders());
+  },
+
   "workspace.changed": (_event, qc) => {
     // Big-hammer: a workspace-level setting reshaped policy. Every
     // cached query under the active workspace is suspect.
@@ -851,7 +863,11 @@ export function dispatchSseEvent(event: SseEvent, qc: QueryClient): void {
   }
   const handler = INVALIDATIONS[event.kind];
   try {
-    if (event.kind !== "tick" && !event.kind.startsWith("admin.")) {
+    if (
+      event.kind !== "tick" &&
+      !event.kind.startsWith("admin.") &&
+      !event.kind.startsWith("chat_gateway.")
+    ) {
       invalidate(qc, qk.audit());
       // The webhooks desk shows derived delivery state for arbitrary
       // workspace-domain events. While it is mounted, any event may

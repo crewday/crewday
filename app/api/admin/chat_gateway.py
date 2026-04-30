@@ -10,24 +10,41 @@ empty/default state rather than fabricating successful provider data.
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from time import perf_counter
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, Request
-from pydantic import BaseModel, SecretStr
+from fastapi import APIRouter, Depends, HTTPException, Request, status
+from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.adapters.db.messaging.models import ChatGatewayBinding
+from app.adapters.db.messaging.repositories import SqlAlchemyChatGatewayRepository
+from app.adapters.db.workspace.models import Workspace
 from app.api.admin.deps import current_deployment_admin_principal
 from app.api.deps import db_session
 from app.config import Settings, get_settings
+from app.domain.chat_gateway.dispatcher import (
+    AgentDispatchJob,
+    AgentDispatchPayload,
+    dispatch_inbound_message,
+    register_chat_gateway_dispatcher,
+)
+from app.domain.messaging.gateway import ChatGatewayService
+from app.domain.messaging.gateway_types import NormalizedInboundMessage
+from app.events.bus import EventBus
 from app.tenancy import DeploymentContext, tenant_agnostic
+from app.tenancy.context import WorkspaceContext
+from app.util.ulid import new_ulid
 
 _Db = Annotated[Session, Depends(db_session)]
 
 _ChannelKind = Literal["offapp_whatsapp", "offapp_telegram"]
 _ProviderStatus = Literal["connected", "error", "not_configured"]
 _TemplateStatus = Literal["approved", "pending", "rejected", "paused"]
+_MAX_TEST_INBOUND_CONTACT = 160
+_MAX_TEST_INBOUND_BODY = 8_000
+_MAX_TEST_INBOUND_LANGUAGE = 35
 
 
 class AdminChatProviderCredential(BaseModel):
@@ -97,6 +114,57 @@ class AdminChatHealthResponse(BaseModel):
     """Body of ``GET /admin/api/v1/chat/health``."""
 
     providers: list[AdminChatHealthProvider]
+
+
+class AdminChatTestInboundRequest(BaseModel):
+    """Admin-triggered synthetic inbound payload for dispatcher smoke tests."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    channel_kind: Literal["offapp_whatsapp"] = "offapp_whatsapp"
+    external_contact: str = Field(
+        default="+15551234567",
+        min_length=1,
+        max_length=_MAX_TEST_INBOUND_CONTACT,
+    )
+    body_md: str = Field(
+        default="Admin chat-gateway test inbound",
+        min_length=1,
+        max_length=_MAX_TEST_INBOUND_BODY,
+    )
+    language_hint: str | None = Field(
+        default=None,
+        max_length=_MAX_TEST_INBOUND_LANGUAGE,
+    )
+
+    @field_validator("external_contact", "body_md")
+    @classmethod
+    def _required_text_must_have_content(cls, value: str) -> str:
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("field must contain text")
+        return stripped
+
+    @field_validator("language_hint")
+    @classmethod
+    def _optional_text_is_trimmed(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        stripped = value.strip()
+        return stripped or None
+
+
+class AdminChatTestInboundResponse(BaseModel):
+    """Result shown inline on ``/admin/chat-gateway`` after a test inbound."""
+
+    correlation_id: str
+    message_id: str
+    binding_id: str
+    channel_id: str
+    dispatch_status: Literal["enqueued", "skipped", "failed"]
+    agent_invoked: bool
+    latency_ms: int
+    failure_reason: str | None
 
 
 class _ProviderRuntime(BaseModel):
@@ -249,6 +317,89 @@ def build_admin_chat_gateway_router() -> APIRouter:
             ]
         )
 
+    @router.post(
+        "/test-inbound",
+        response_model=AdminChatTestInboundResponse,
+        operation_id="admin.chat.test_inbound",
+        summary="Send a synthetic inbound chat gateway message",
+        openapi_extra={
+            "x-cli": {
+                "group": "admin",
+                "verb": "chat-test-inbound",
+                "summary": "Send a synthetic chat gateway inbound message",
+                "mutates": True,
+            },
+        },
+    )
+    def test_inbound(
+        body: AdminChatTestInboundRequest,
+        ctx: Annotated[DeploymentContext, Depends(current_deployment_admin_principal)],
+        session: _Db,
+        request: Request,
+    ) -> AdminChatTestInboundResponse:
+        settings = _settings_from_request(request)
+        workspace_id = settings.chat_gateway_workspace_id
+        if (
+            not workspace_id
+            or not _secret_is_set(settings.chat_gateway_meta_whatsapp_secret)
+            or _workspace_exists(session, workspace_id=workspace_id) is False
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={"error": "chat_gateway_provider_not_configured"},
+            )
+
+        started = perf_counter()
+        correlation_id = new_ulid()
+        event_bus = EventBus()
+        scheduled: list[AgentDispatchJob] = []
+        register_chat_gateway_dispatcher(event_bus, schedule=scheduled.append)
+        inbound = NormalizedInboundMessage(
+            provider="meta_whatsapp",
+            external_contact=body.external_contact,
+            author_label=body.external_contact,
+            body_md=body.body_md,
+            provider_message_id=f"admin-test-{new_ulid()}",
+            provider_metadata={
+                key: value
+                for key, value in {
+                    "language_hint": body.language_hint,
+                    "admin_test": True,
+                }.items()
+                if value is not None
+            },
+            raw={"kind": "admin_test_inbound"},
+        )
+        result = ChatGatewayService(
+            _workspace_ctx(
+                ctx,
+                workspace_id=workspace_id,
+                correlation_id=correlation_id,
+            ),
+            event_bus=event_bus,
+        ).receive(
+            SqlAlchemyChatGatewayRepository(session),
+            inbound,
+            channel_source="whatsapp",
+        )
+        payloads: list[AgentDispatchPayload] = []
+        dispatch = dispatch_inbound_message(
+            session,
+            scheduled[0],
+            enqueue=payloads.append,
+        )
+        latency_ms = max(0, int((perf_counter() - started) * 1000))
+        return AdminChatTestInboundResponse(
+            correlation_id=correlation_id,
+            message_id=result.message_id,
+            binding_id=result.binding_id,
+            channel_id=result.channel_id,
+            dispatch_status=dispatch.status,
+            agent_invoked=bool(payloads),
+            latency_ms=latency_ms,
+            failure_reason=dispatch.failure_reason,
+        )
+
     return router
 
 
@@ -393,6 +544,31 @@ def _last_webhook_by_provider(session: Session) -> dict[str, datetime]:
             if isinstance(last_at, datetime):
                 rows.append((provider, last_at))
     return dict(rows)
+
+
+def _workspace_exists(session: Session, *, workspace_id: str) -> bool:
+    with tenant_agnostic():
+        return session.get(Workspace, workspace_id) is not None
+
+
+def _workspace_ctx(
+    ctx: DeploymentContext,
+    *,
+    workspace_id: str,
+    correlation_id: str,
+) -> WorkspaceContext:
+    return WorkspaceContext(
+        workspace_id=workspace_id,
+        workspace_slug="chat-gateway",
+        actor_id=ctx.user_id,
+        actor_kind="agent" if ctx.actor_kind == "agent" else "user",
+        actor_grant_role="manager",
+        actor_was_owner_member=False,
+        audit_correlation_id=correlation_id,
+        principal_kind=(
+            "token" if ctx.actor_kind in {"agent", "delegated"} else "session"
+        ),
+    )
 
 
 def _settings_from_request(request: Request) -> Settings:

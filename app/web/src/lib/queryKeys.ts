@@ -161,6 +161,7 @@ export const qk = {
   adminLlmCalls: () => ["admin", "llm", "calls"] as const,
   adminLlmPrompts: () => ["admin", "llm", "prompts"] as const,
   adminChatProviders: () => ["admin", "chat", "providers"] as const,
+  adminChatTemplates: () => ["admin", "chat", "templates"] as const,
   adminChatOverrides: () => ["admin", "chat", "overrides"] as const,
   adminSignup: () => ["admin", "signup"] as const,
   adminSettings: () => ["admin", "settings"] as const,

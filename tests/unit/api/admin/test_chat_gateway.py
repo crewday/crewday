@@ -11,7 +11,11 @@ from pydantic import SecretStr
 from sqlalchemy import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
-from app.adapters.db.messaging.models import ChatChannel, ChatGatewayBinding
+from app.adapters.db.messaging.models import (
+    ChatChannel,
+    ChatGatewayBinding,
+    ChatMessage,
+)
 from app.auth.session import SESSION_COOKIE_NAME
 from app.config import Settings
 from app.tenancy import tenant_agnostic
@@ -174,6 +178,12 @@ class TestChatGatewayProviders:
         assert resp.status_code == 404
         assert resp.json()["error"] == "not_found"
 
+    def test_test_inbound_hidden_from_non_admins(self, client: TestClient) -> None:
+        resp = client.post("/admin/api/v1/chat/test-inbound", json={})
+
+        assert resp.status_code == 404
+        assert resp.json()["error"] == "not_found"
+
     def test_empty_configuration_is_not_configured(
         self,
         client: TestClient,
@@ -289,3 +299,76 @@ class TestChatGatewayTemplatesOverridesHealth:
                 },
             ]
         }
+
+    def test_test_inbound_persists_and_dispatches_synthetic_message(
+        self,
+        client: TestClient,
+        session_factory: sessionmaker[Session],
+        settings: Settings,
+    ) -> None:
+        with session_factory() as s:
+            settings.chat_gateway_workspace_id = seed_workspace(s, slug="test-inbound")
+            s.commit()
+        _install_admin_cookie(client, session_factory, settings)
+
+        resp = client.post(
+            "/admin/api/v1/chat/test-inbound",
+            json={
+                "external_contact": " +15551230000 ",
+                "body_md": " Need help with check-in ",
+                "language_hint": " en ",
+            },
+        )
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["correlation_id"]
+        assert body["dispatch_status"] == "enqueued"
+        assert body["agent_invoked"] is True
+        assert body["failure_reason"] is None
+        assert body["latency_ms"] >= 0
+        with session_factory() as s:
+            message = s.get(ChatMessage, body["message_id"])
+            assert message is not None
+            assert message.workspace_id == settings.chat_gateway_workspace_id
+            assert message.body_md == "Need help with check-in"
+            assert message.dispatched_to_agent_at is not None
+
+    @pytest.mark.parametrize(
+        "payload",
+        [
+            {"external_contact": "   ", "body_md": "Need help"},
+            {"external_contact": "+15551230000", "body_md": "   "},
+        ],
+    )
+    def test_test_inbound_rejects_blank_direct_payload(
+        self,
+        client: TestClient,
+        session_factory: sessionmaker[Session],
+        settings: Settings,
+        payload: dict[str, str],
+    ) -> None:
+        with session_factory() as s:
+            settings.chat_gateway_workspace_id = seed_workspace(
+                s,
+                slug="test-inbound-validation",
+            )
+            s.commit()
+        _install_admin_cookie(client, session_factory, settings)
+
+        resp = client.post("/admin/api/v1/chat/test-inbound", json=payload)
+
+        assert resp.status_code == 422
+
+    def test_test_inbound_requires_configured_provider_workspace(
+        self,
+        client: TestClient,
+        session_factory: sessionmaker[Session],
+        settings: Settings,
+    ) -> None:
+        _install_admin_cookie(client, session_factory, settings)
+
+        resp = client.post("/admin/api/v1/chat/test-inbound", json={})
+
+        assert resp.status_code == 409
+        assert resp.json()["error"] == "chat_gateway_provider_not_configured"

@@ -753,6 +753,7 @@ GET    /admin/api/v1/chat/overrides                  # workspaces that opted int
 GET    /admin/api/v1/chat/templates                  # Meta template sync state
 POST   /admin/api/v1/chat/templates/{name}/resync    # request re-submission to Meta
 GET    /admin/api/v1/chat/health                     # last webhook ts, 24h delivery error rate
+POST   /admin/api/v1/chat/test-inbound               # persist a synthetic inbound message and exercise dispatcher enqueue
 
 # Usage aggregates
 GET    /admin/api/v1/usage/summary                   # rolling 30d spend, per capability & per workspace

@@ -136,6 +136,8 @@ describe("INVALIDATIONS — coverage", () => {
     "admin.usage.updated",
     "admin.workspace.changed",
     "admin.workspace.budget_paused",
+    "chat_gateway.provider.changed",
+    "chat_gateway.template.changed",
     "workspace.changed",
   ];
 
@@ -931,6 +933,34 @@ describe("INVALIDATIONS — per-kind behaviour", () => {
     }
   });
 
+  it("chat gateway events invalidate deployment chat queries", () => {
+    const providerClient = makeClient();
+    const providerSpy = vi.spyOn(providerClient, "invalidateQueries");
+    INVALIDATIONS["chat_gateway.provider.changed"](
+      makeEvent("chat_gateway.provider.changed"),
+      providerClient,
+    );
+    expect(providerSpy.mock.calls.map((c) => c[0]?.queryKey)).toEqual(
+      expect.arrayContaining([
+        qk.adminChatProviders(),
+        qk.adminChatOverrides(),
+      ]),
+    );
+
+    const templateClient = makeClient();
+    const templateSpy = vi.spyOn(templateClient, "invalidateQueries");
+    INVALIDATIONS["chat_gateway.template.changed"](
+      makeEvent("chat_gateway.template.changed"),
+      templateClient,
+    );
+    expect(templateSpy.mock.calls.map((c) => c[0]?.queryKey)).toEqual(
+      expect.arrayContaining([
+        qk.adminChatTemplates(),
+        qk.adminChatProviders(),
+      ]),
+    );
+  });
+
   it("workspace.changed invalidates everything", () => {
     const qc = makeClient();
     const spy = vi.spyOn(qc, "invalidateQueries");
@@ -990,6 +1020,8 @@ describe("dispatchSseEvent — audit invalidation", () => {
     for (const event of [
       makeEvent("tick"),
       makeEvent("admin.audit.appended"),
+      makeEvent("chat_gateway.provider.changed"),
+      makeEvent("chat_gateway.template.changed"),
     ] as const) {
       const qc = makeClient();
       const spy = vi.spyOn(qc, "invalidateQueries");

@@ -647,6 +647,107 @@
         "title": "AdminChatProviderTemplate",
         "type": "object"
       },
+      "AdminChatTestInboundRequest": {
+        "additionalProperties": false,
+        "description": "Admin-triggered synthetic inbound payload for dispatcher smoke tests.",
+        "properties": {
+          "body_md": {
+            "default": "Admin chat-gateway test inbound",
+            "maxLength": 8000,
+            "minLength": 1,
+            "title": "Body Md",
+            "type": "string"
+          },
+          "channel_kind": {
+            "const": "offapp_whatsapp",
+            "default": "offapp_whatsapp",
+            "title": "Channel Kind",
+            "type": "string"
+          },
+          "external_contact": {
+            "default": "+15551234567",
+            "maxLength": 160,
+            "minLength": 1,
+            "title": "External Contact",
+            "type": "string"
+          },
+          "language_hint": {
+            "anyOf": [
+              {
+                "maxLength": 35,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Language Hint"
+          }
+        },
+        "title": "AdminChatTestInboundRequest",
+        "type": "object"
+      },
+      "AdminChatTestInboundResponse": {
+        "description": "Result shown inline on ``/admin/chat-gateway`` after a test inbound.",
+        "properties": {
+          "agent_invoked": {
+            "title": "Agent Invoked",
+            "type": "boolean"
+          },
+          "binding_id": {
+            "title": "Binding Id",
+            "type": "string"
+          },
+          "channel_id": {
+            "title": "Channel Id",
+            "type": "string"
+          },
+          "correlation_id": {
+            "title": "Correlation Id",
+            "type": "string"
+          },
+          "dispatch_status": {
+            "enum": [
+              "enqueued",
+              "skipped",
+              "failed"
+            ],
+            "title": "Dispatch Status",
+            "type": "string"
+          },
+          "failure_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Failure Reason"
+          },
+          "latency_ms": {
+            "title": "Latency Ms",
+            "type": "integer"
+          },
+          "message_id": {
+            "title": "Message Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "correlation_id",
+          "message_id",
+          "binding_id",
+          "channel_id",
+          "dispatch_status",
+          "agent_invoked",
+          "latency_ms",
+          "failure_reason"
+        ],
+        "title": "AdminChatTestInboundResponse",
+        "type": "object"
+      },
       "AdminGrantRequest": {
         "description": "Request body for ``POST /admin/api/v1/admins``.\n\nThe grantor identifies the new admin by either ``user_id``\n(canonical lookup) or ``email`` (operator-friendly lookup).\nExactly one of the two must be present \u2014 both unset is a\n422 ``missing_target``; both set is a 422 ``ambiguous_target``.",
         "properties": {
@@ -22129,6 +22230,89 @@
           "mutates": false,
           "summary": "List chat gateway templates",
           "verb": "chat-templates-list"
+        }
+      }
+    },
+    "/admin/api/v1/chat/test-inbound": {
+      "post": {
+        "operationId": "admin.chat.test_inbound",
+        "parameters": [
+          {
+            "in": "cookie",
+            "name": "__Host-crewday_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "  Host-Crewday Session"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "crewday_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Crewday Session"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminChatTestInboundRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminChatTestInboundResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Send a synthetic inbound chat gateway message",
+        "tags": [
+          "admin",
+          "admin",
+          "chat_gateway"
+        ],
+        "x-cli": {
+          "group": "admin",
+          "mutates": true,
+          "summary": "Send a synthetic chat gateway inbound message",
+          "verb": "chat-test-inbound"
         }
       }
     },

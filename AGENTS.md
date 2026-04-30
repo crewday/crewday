@@ -186,6 +186,14 @@ update in your wrap-up.
   output file.
 - **Modern CLI tools**: `rg` over `grep`, `fd` over `find`, `sd` over
   `sed`.
+- **Let formatters do formatter work.** If Ruff reports only
+  import-order, whitespace, line-wrapping, or other mechanical format
+  issues, do not hand-edit them. Run `uv run ruff check --fix <paths>`
+  and `uv run ruff format <paths>` on the narrowest affected path set,
+  trust the tool output, and move on. Do not inspect formatter hunks
+  unless Ruff touches unexpected files, reports unsafe fixes, or says a
+  violation needs manual intervention. Manual edits are for semantic
+  lint failures or cases the tool cannot safely fix.
 - **Read dependencies from the local env**: Python packages under
   the active venv; don't curl GitHub.
 - **Never `cd` out of the worktree root** — always use absolute

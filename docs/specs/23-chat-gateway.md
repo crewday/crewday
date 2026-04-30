@@ -598,12 +598,13 @@ PUT    /chat/admin/provider                opt into a workspace-specific overrid
 DELETE /chat/admin/provider                drop the override; workspace falls back to deployment default
 
 # Deployment admin surface (bare host, §14 "Admin shell"):
-GET    /admin/api/v1/chat/provider                 resolved default provider — stubs only
-PUT    /admin/api/v1/chat/provider                 set/rotate the deployment-default envelope
+GET    /admin/api/v1/chat/providers                resolved default providers — stubs only
+PUT    /admin/api/v1/chat/providers/{kind}         set/rotate the deployment-default envelope
 GET    /admin/api/v1/chat/templates                template sync state (Meta approval per template)
 POST   /admin/api/v1/chat/templates/{name}/resync  request re-submission of a template to Meta
 GET    /admin/api/v1/chat/overrides                list workspaces on a custom provider
 GET    /admin/api/v1/chat/health                   last webhook ts, 24h delivery error rate, etc.
+POST   /admin/api/v1/chat/test-inbound             synthetic inbound message + dispatcher enqueue result
 ```
 
 All mutating routes honor `Idempotency-Key` (§12) and are CLI-
