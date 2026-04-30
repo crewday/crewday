@@ -565,6 +565,20 @@ class TestOutputFormats:
                 "header",
                 lambda out, cv: out == f"Cookie: __Host-crewday_session={cv}",
             ),
+            (
+                "playwright",
+                lambda out, cv: (
+                    json.loads(out)
+                    == {
+                        "name": "crewday_session",
+                        "value": cv,
+                        "url": "http://127.0.0.1:8100",
+                        "httpOnly": True,
+                        "secure": False,
+                        "sameSite": "Lax",
+                    }
+                ),
+            ),
         ],
     )
     def test_output_formats(
@@ -608,6 +622,8 @@ class TestOutputFormats:
             cookie_value = out.split("=", 1)[1].rstrip("'")
         elif fmt == "header":
             cookie_value = out.split("=", 1)[1]
+        elif fmt == "playwright":
+            cookie_value = json.loads(out)["value"]
         else:  # pragma: no cover - parametrize guard
             pytest.fail(f"unknown fmt {fmt!r}")
 

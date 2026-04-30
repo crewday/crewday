@@ -26,6 +26,15 @@
 #
 #        CREWDAY_DEV_AUTH=1 ./scripts/dev-login.sh me@dev.local dev
 #
+# For Playwright browser tests on the loopback app, use
+# ``python -m scripts.dev_login ... --output playwright`` inside the
+# compose stack. It prints a cookie object for
+# ``context.addCookies([cookie])`` using the dev-only
+# ``crewday_session`` alias with ``secure: false``. Do not add the
+# ``__Host-`` cookie directly through Playwright's cookie jar: the
+# prefix's Secure invariant is deliberately production-shaped and
+# does not round-trip over plain-HTTP loopback.
+#
 # Respect ``PYTHON=`` to point at an alternative interpreter (a venv
 # or a uv-run shim). The default is ``python3`` because every modern
 # Linux / macOS ships python3 on PATH, while the legacy ``python``
@@ -48,7 +57,7 @@ if [[ "${CREWDAY_DEV_AUTH:-0}" != "1" ]]; then
 fi
 
 if [[ $# -lt 2 ]]; then
-  echo "usage: $0 <email> <workspace-slug> [--output cookie|json|curl|header] [...]" >&2
+  echo "usage: $0 <email> <workspace-slug> [--output cookie|json|curl|header|playwright] [...]" >&2
   exit 2
 fi
 

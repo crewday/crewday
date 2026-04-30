@@ -17,6 +17,28 @@ goes here instead.
 
 ## How to use it
 
+For authenticated app pages, mint a dev session inside the compose
+stack and inject it into Playwright as the loopback-safe dev alias:
+
+```bash
+docker compose -f mocks/docker-compose.yml exec app-api \
+  python -m scripts.dev_login --email me@dev.local \
+    --workspace smoke --output playwright
+```
+
+The command prints a JSON cookie object using the dev-only
+`crewday_session` alias:
+
+```js
+const cookie = /* paste the JSON object from --output playwright */;
+await page.context().addCookies([cookie]);
+await page.goto("http://127.0.0.1:8100/w/smoke/...");
+```
+
+Do not add the `__Host-crewday_session` cookie directly through
+Playwright on loopback; its production `Secure` prefix invariants do
+not round-trip over plain-HTTP `127.0.0.1`.
+
 When you take a screenshot, always pass an explicit `filename` under
 `.playwright-mcp/`:
 

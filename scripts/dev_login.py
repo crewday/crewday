@@ -36,6 +36,7 @@ Outputs (exact one line; no trailing junk):
 * ``json``:             ``{"name": "__Host-crewday_session", "value": "<value>"}``
 * ``curl``:             ``-b '__Host-crewday_session=<value>'``
 * ``header``:           ``Cookie: __Host-crewday_session=<value>``
+* ``playwright``:       cookie object for ``context.addCookies([cookie])``
 
 See ``docs/specs/03-auth-and-tokens.md`` §"Sessions" and
 :mod:`app.auth.session` for the row lifecycle. The Beads task
@@ -98,9 +99,11 @@ _OWNER_ROLES: Final[frozenset[str]] = frozenset({"owner", "manager"})
 # service decided to mint today; the domain service always returns
 # the opaque value, never the name.
 _COOKIE_NAME: Final[str] = "__Host-crewday_session"
+_DEV_COOKIE_NAME: Final[str] = "crewday_session"
+_DEV_LOOPBACK_URL: Final[str] = "http://127.0.0.1:8100"
 
 Role = Literal["owner", "manager", "worker"]
-OutputFormat = Literal["cookie", "json", "curl", "header"]
+OutputFormat = Literal["cookie", "json", "curl", "header", "playwright"]
 
 
 class _GateError(RuntimeError):
@@ -674,6 +677,17 @@ def _format_output(cookie_value: str, output: OutputFormat) -> str:
         return f"-b '{_COOKIE_NAME}={cookie_value}'"
     if output == "header":
         return f"Cookie: {_COOKIE_NAME}={cookie_value}"
+    if output == "playwright":
+        return json.dumps(
+            {
+                "name": _DEV_COOKIE_NAME,
+                "value": cookie_value,
+                "url": _DEV_LOOPBACK_URL,
+                "httpOnly": True,
+                "secure": False,
+                "sameSite": "Lax",
+            }
+        )
     # mypy sees Literal exhaustion; defensive branch guards against a
     # future enum extension that forgets to update this switch.
     raise ValueError(f"unsupported output format: {output!r}")
@@ -716,7 +730,7 @@ def _format_output(cookie_value: str, output: OutputFormat) -> str:
 )
 @click.option(
     "--output",
-    type=click.Choice(["cookie", "json", "curl", "header"]),
+    type=click.Choice(["cookie", "json", "curl", "header", "playwright"]),
     default="cookie",
     help="Output format (default: cookie).",
 )

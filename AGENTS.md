@@ -110,8 +110,35 @@ Use these when the task needs a running app, API smoke, or UI smoke.
     python -m scripts.dev_login --email me@dev.local --workspace smoke
   ```
   Stdout is `__Host-crewday_session=<value>`. Feed it to
-  `curl -b "$cookie" http://127.0.0.1:8100/w/smoke/api/v1/...` or
-  Playwright `context.addCookies([...])`.
+  `curl -b "$cookie" http://127.0.0.1:8100/w/smoke/api/v1/...`.
+  For Playwright, do **not** add the `__Host-crewday_session` cookie
+  directly on loopback: the prefix requires `Secure`, and browser
+  cookie APIs will either reject it or keep it from plain-HTTP
+  requests. Ask `dev_login` for the Playwright shape and add that
+  dev-only alias cookie instead:
+  ```bash
+  docker compose -f mocks/docker-compose.yml exec app-api \
+    python -m scripts.dev_login --email me@dev.local \
+      --workspace smoke --output playwright
+  ```
+  ```js
+  const cookie = /* paste the JSON object from --output playwright */;
+  await page.context().addCookies([cookie]);
+  await page.goto("http://127.0.0.1:8100/w/smoke/...");
+  ```
+  The object has this shape:
+  ```js
+  await page.context().addCookies([{
+    name: "crewday_session",
+    value: "<same opaque session value>",
+    url: "http://127.0.0.1:8100",
+    httpOnly: true,
+    secure: false,
+    sameSite: "Lax",
+  }]);
+  ```
+  The pytest e2e helper `tests/e2e/_helpers/auth.py::login_with_dev_session`
+  performs this exact alias injection for full Playwright tests.
 - Host-side login variant:
   ```bash
   CREWDAY_DEV_AUTH=1 ./scripts/dev-login.sh <email> <slug>
