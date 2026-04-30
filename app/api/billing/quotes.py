@@ -29,6 +29,7 @@ from app.tenancy import WorkspaceContext
 
 __all__ = [
     "QuoteCreateRequest",
+    "QuoteDecisionActionRequest",
     "QuoteDecisionRequest",
     "QuoteListResponse",
     "QuotePatchRequest",
@@ -127,6 +128,10 @@ class QuoteDecisionRequest(BaseModel):
 
     def to_domain(self) -> QuoteDecision:
         return QuoteDecision(decision_note_md=self.decision_note_md)
+
+
+class QuoteDecisionActionRequest(QuoteDecisionRequest):
+    decision: Literal["accepted", "rejected"]
 
 
 class QuoteSendRequest(BaseModel):
@@ -321,6 +326,29 @@ def build_quotes_router() -> APIRouter:
                 quote_id,
                 body.to_domain() if body is not None else None,
             )
+        except (QuoteInvalid, QuoteNotFound) as exc:
+            raise _http_for_quote_error(exc) from exc
+        return QuoteResponse.from_view(view)
+
+    @router.post(
+        "/{quote_id}/decision",
+        response_model=QuoteResponse,
+        operation_id="billing.quotes.decision",
+        dependencies=[accept_gate],
+    )
+    def decide_quote(
+        quote_id: str,
+        body: QuoteDecisionActionRequest,
+        ctx: _Ctx,
+        session: _Db,
+    ) -> QuoteResponse:
+        try:
+            service = QuoteService(ctx)
+            repo = SqlAlchemyQuoteRepository(session)
+            if body.decision == "accepted":
+                view = service.accept(repo, quote_id)
+            else:
+                view = service.reject(repo, quote_id, body.to_domain())
         except (QuoteInvalid, QuoteNotFound) as exc:
             raise _http_for_quote_error(exc) from exc
         return QuoteResponse.from_view(view)

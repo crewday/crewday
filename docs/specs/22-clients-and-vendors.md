@@ -867,7 +867,8 @@ Appended to §10's catalog:
   `client_rate.archived`.
 - `work_order.state_changed` with `from` / `to` in the payload.
 - `quote.submitted`, `quote.accepted`, `quote.rejected`,
-  `quote.superseded`.
+  `quote.superseded`; `quote.decided` is the REST/SSE invalidation
+  event emitted for either accepted or rejected decisions.
 - `vendor_invoice.submitted`, `vendor_invoice.approved`,
   `vendor_invoice.rejected`, `vendor_invoice.paid`,
   `vendor_invoice.proof_uploaded`,

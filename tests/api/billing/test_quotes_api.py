@@ -306,3 +306,34 @@ def test_public_quote_rejects_tampered_token(factory: sessionmaker[Session]) -> 
 
     assert resp.status_code == 401
     assert resp.json()["detail"]["error"] == "quote_token_invalid"
+
+
+def test_quote_decision_route_rejects_sent_quote(
+    factory: sessionmaker[Session],
+    mailer: InMemoryMailer,
+) -> None:
+    with factory() as s:
+        workspace_id, manager_id, org_id, property_id = _bootstrap(s)
+        s.commit()
+    authed = TestClient(
+        _authed_app(factory, _ctx(workspace_id, manager_id), mailer),
+        raise_server_exceptions=False,
+    )
+    quote_id = authed.post(
+        "/billing/quotes",
+        json={
+            "organization_id": org_id,
+            "property_id": property_id,
+            "title": "Pool repair quote",
+            "total_cents": 12500,
+        },
+    ).json()["id"]
+    authed.post(f"/billing/quotes/{quote_id}/send", json={})
+
+    rejected = authed.post(
+        f"/billing/quotes/{quote_id}/decision",
+        json={"decision": "rejected", "decision_note_md": "Too expensive"},
+    )
+
+    assert rejected.status_code == 200
+    assert rejected.json()["status"] == "rejected"

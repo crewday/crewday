@@ -71,6 +71,7 @@ __all__ = [
     "PropertyClosureReason",
     "PropertyClosureUpdated",
     "PropertyWorkspaceChanged",
+    "QuoteDecided",
     "ReservationChangeKind",
     "ReservationUpserted",
     "ShiftChanged",
@@ -1147,6 +1148,30 @@ class WorkOrderCompleted(Event):
     work_order_id: str
     total_cents: int
     total_hours_decimal: str
+
+
+@register
+class QuoteDecided(Event):
+    """A billing quote has been accepted or rejected.
+
+    Payload is identifier-only plus the terminal decision so manager and
+    client tabs can invalidate quote/work-order views without receiving
+    free-text decision notes.
+    """
+
+    name: ClassVar[str] = "quote.decided"
+    allowed_roles: ClassVar[tuple[EventRole, ...]] = ("manager", "client")
+
+    quote_id: str
+    organization_id: str
+    property_id: str
+    decision: Literal["accepted", "rejected"]
+    decided_at: datetime
+
+    @field_validator("decided_at")
+    @classmethod
+    def _decided_at_is_utc(cls, value: datetime) -> datetime:
+        return _require_aware_utc(value)
 
 
 @register

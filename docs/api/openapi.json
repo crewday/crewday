@@ -12576,6 +12576,35 @@
         "title": "QuoteCreateRequest",
         "type": "object"
       },
+      "QuoteDecisionActionRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "decision": {
+            "enum": [
+              "accepted",
+              "rejected"
+            ],
+            "title": "Decision",
+            "type": "string"
+          },
+          "decision_note_md": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decision Note Md"
+          }
+        },
+        "required": [
+          "decision"
+        ],
+        "title": "QuoteDecisionActionRequest",
+        "type": "object"
+      },
       "QuoteDecisionRequest": {
         "additionalProperties": false,
         "properties": {
@@ -27514,6 +27543,72 @@
           }
         },
         "summary": "Accept Quote",
+        "tags": [
+          "billing",
+          "billing",
+          "quotes"
+        ]
+      }
+    },
+    "/w/{slug}/api/v1/billing/quotes/{quote_id}/decision": {
+      "parameters": [
+        {
+          "in": "path",
+          "name": "slug",
+          "required": true,
+          "schema": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          }
+        }
+      ],
+      "post": {
+        "operationId": "billing.quotes.decision",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "quote_id",
+            "required": true,
+            "schema": {
+              "title": "Quote Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/QuoteDecisionActionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuoteResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Decide Quote",
         "tags": [
           "billing",
           "billing",

@@ -395,7 +395,7 @@ organization.*       created, updated, archived
 client_rate.*        created, updated, archived
 work_order.*         created, state_changed, accept_quote,
                      cancelled, deleted
-quote.*              submitted, accepted, rejected, superseded
+quote.*              submitted, accepted, rejected, superseded, decided
 vendor_invoice.*     submitted, approved, rejected, paid, voided,
                      proof_uploaded, reminder_sent, reminder_exhausted
 booking_billing.*    resolved

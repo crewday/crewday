@@ -26,6 +26,7 @@ from app.domain.billing.quotes import (
     QuoteService,
     QuoteTokenInvalid,
 )
+from app.events import EventBus, QuoteDecided
 from app.tenancy import WorkspaceContext
 from app.util.clock import FrozenClock
 from app.util.ulid import new_ulid
@@ -160,8 +161,13 @@ def _seed_workspace_graph(s: Session) -> tuple[str, str, str]:
     return workspace_id, org_id, property_id
 
 
-def _service(ctx: WorkspaceContext) -> QuoteService:
-    return QuoteService(ctx, clock=FrozenClock(_PINNED), signing_key=_SIGNING_KEY)
+def _service(ctx: WorkspaceContext, bus: EventBus | None = None) -> QuoteService:
+    return QuoteService(
+        ctx,
+        clock=FrozenClock(_PINNED),
+        signing_key=_SIGNING_KEY,
+        event_bus=bus,
+    )
 
 
 def _create_quote(
@@ -317,6 +323,30 @@ def test_public_accept_is_idempotent_and_audits_guest_token_hint(
         ).all()
         assert len(audits) == 1
         assert audits[0].diff["actor_kind"] == "guest_token"
+
+
+def test_quote_decision_publishes_event_once(
+    factory: sessionmaker[Session],
+) -> None:
+    events: list[QuoteDecided] = []
+    event_bus = EventBus()
+    event_bus.subscribe(QuoteDecided)(events.append)
+    for s, ctx in _seeded_session(factory):
+        repo = SqlAlchemyQuoteRepository(s)
+        quote_id = _create_quote(s, ctx)
+        service = _service(ctx, event_bus)
+        service.send(
+            repo, quote_id, mailer=InMemoryMailer(), base_url="https://crew.day"
+        )
+
+        accepted = service.accept(repo, quote_id)
+        accepted_again = service.accept(repo, quote_id)
+
+        assert accepted.status == "accepted"
+        assert accepted_again.status == "accepted"
+        assert [(event.quote_id, event.decision) for event in events] == [
+            (quote_id, "accepted")
+        ]
 
 
 def test_public_get_validates_token_workspace(

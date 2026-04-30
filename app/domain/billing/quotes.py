@@ -17,6 +17,8 @@ from sqlalchemy.orm import Session
 
 from app.adapters.mail.ports import Mailer
 from app.audit import write_audit
+from app.events import EventBus, QuoteDecided
+from app.events import bus as default_bus
 from app.tenancy import WorkspaceContext
 from app.util.clock import Clock, SystemClock
 from app.util.currency import is_valid_currency, normalise_currency
@@ -163,10 +165,12 @@ class QuoteService:
         *,
         clock: Clock | None = None,
         signing_key: bytes | None = None,
+        event_bus: EventBus | None = None,
     ) -> None:
         self._ctx = ctx
         self._clock = clock if clock is not None else SystemClock()
         self._signing_key = signing_key
+        self._bus = event_bus if event_bus is not None else default_bus
 
     def create(self, repo: QuoteRepository, body: QuoteCreate) -> QuoteView:
         currency = self._currency_or_workspace_default(repo, body.currency)
@@ -481,10 +485,11 @@ class QuoteService:
             raise QuoteInvalid("only sent quotes can be accepted or rejected")
         if row.status in {"accepted", "rejected"}:
             raise QuoteInvalid("quote has already been decided")
+        decided_at = self._clock.now()
         updated = repo.update_fields(
             workspace_id=row.workspace_id,
             quote_id=row.id,
-            fields={"status": status, "decided_at": self._clock.now()},
+            fields={"status": status, "decided_at": decided_at},
         )
         diff: dict[str, object] = {"status": status}
         if note is not None:
@@ -499,6 +504,19 @@ class QuoteService:
             action=f"billing.quote.{status}",
             diff=diff,
             clock=self._clock,
+        )
+        self._bus.publish(
+            QuoteDecided(
+                workspace_id=row.workspace_id,
+                actor_id=audit_ctx.actor_id,
+                correlation_id=audit_ctx.audit_correlation_id,
+                occurred_at=decided_at,
+                quote_id=row.id,
+                organization_id=row.organization_id,
+                property_id=row.property_id,
+                decision=status,
+                decided_at=decided_at,
+            )
         )
         return _to_view(updated)
 
