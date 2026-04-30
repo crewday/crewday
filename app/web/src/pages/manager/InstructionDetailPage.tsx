@@ -1,9 +1,10 @@
-import { Fragment, type FormEvent, type ReactNode, useEffect, useRef, useState } from "react";
+import { Fragment, type FormEvent, type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useParams } from "react-router-dom";
 import { fetchJson } from "@/lib/api";
 import { type ListEnvelope, unwrapList } from "@/lib/listResponse";
 import { qk } from "@/lib/queryKeys";
+import { useCloseOnEscape } from "@/lib/useCloseOnEscape";
 import DeskPage from "@/components/DeskPage";
 import { Chip, Loading } from "@/components/common";
 import { INSTRUCTION_SCOPE_TONE } from "@/lib/tones";
@@ -126,6 +127,7 @@ export default function InstructionDetailPage() {
   const [editing, setEditing] = useState(false);
   const [versionsOpen, setVersionsOpen] = useState(false);
   const [draft, setDraft] = useState<InstructionPatch>(EMPTY_PATCH);
+  const closeVersions = useCallback(() => setVersionsOpen(false), []);
 
   const instrQ = useQuery({
     queryKey: qk.instruction(iid ?? ""),
@@ -188,6 +190,7 @@ export default function InstructionDetailPage() {
     }
     if (!dialog.open) dialog.setAttribute("open", "");
   }, [editing]);
+  useCloseOnEscape(closeVersions, versionsOpen);
 
   if (!iid) return <DeskPage title="Instruction">Missing instruction id.</DeskPage>;
   if (instrQ.isPending || propsQ.isPending) {
@@ -398,7 +401,7 @@ export default function InstructionDetailPage() {
       )}
 
       {versionsOpen && (
-        <div className="day-drawer__scrim" onClick={() => setVersionsOpen(false)}>
+        <div className="day-drawer__scrim" onClick={closeVersions}>
           <aside
             className="day-drawer"
             role="dialog"
@@ -413,7 +416,7 @@ export default function InstructionDetailPage() {
               <button
                 type="button"
                 className="day-drawer__close"
-                onClick={() => setVersionsOpen(false)}
+                onClick={closeVersions}
                 aria-label="Close instruction history"
               >
                 ×

@@ -260,6 +260,11 @@ describe("<WebhooksPage>", () => {
         expect(screen.getAllByText("pending").length).toBeGreaterThan(1);
       });
       expect(fake.calls).toContain("/w/acme/api/v1/webhooks/wh_1/deliveries");
+
+      fireEvent.keyDown(window, { key: "Escape" });
+      await waitFor(() => {
+        expect(screen.queryByRole("dialog", { name: /Delivery log/ })).not.toBeInTheDocument();
+      });
     } finally {
       fake.restore();
     }

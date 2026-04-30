@@ -302,6 +302,11 @@ describe("<InstructionDetailPage>", () => {
       expect(await screen.findByText("Use the brass key.")).toBeInTheDocument();
       expect(screen.getByText("updated key material")).toBeInTheDocument();
       expect(screen.getByRole("button", { name: "Close instruction history" })).toBeInTheDocument();
+
+      fireEvent.keyDown(window, { key: "Escape" });
+      await waitFor(() => {
+        expect(screen.queryByRole("dialog", { name: "Instruction history" })).not.toBeInTheDocument();
+      });
     } finally {
       fake.restore();
     }

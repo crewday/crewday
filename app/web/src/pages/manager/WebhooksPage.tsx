@@ -2,6 +2,7 @@ import { type FormEvent, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
+import { useCloseOnEscape } from "@/lib/useCloseOnEscape";
 import DeskPage from "@/components/DeskPage";
 import { Chip, Loading } from "@/components/common";
 import type { Webhook, WebhookDelivery } from "@/types/api";
@@ -352,6 +353,8 @@ function DeliveryLogDrawer({
   error: string | null;
   onClose: () => void;
 }) {
+  useCloseOnEscape(onClose);
+
   return (
     <>
       <div className="day-drawer__scrim" onClick={onClose} />
