@@ -2523,8 +2523,8 @@
       "path": "/w/{slug}/api/v1/inventory/properties/{property_id}/items"
     },
     "idempotent": false,
-    "name": "items",
-    "operation_id": "create_item_w__slug__api_v1_inventory_properties__property_id__items_post",
+    "name": "add",
+    "operation_id": "inventory.items.create",
     "path_params": [
       {
         "name": "property_id",
@@ -2539,75 +2539,41 @@
     "response_schema_ref": "#/components/schemas/InventoryItemResponse",
     "summary": "Create Item",
     "x_agent_confirm": null,
-    "x_cli": null
+    "x_cli": {
+      "group": "inventory",
+      "verb": "add"
+    }
   },
   {
-    "body_schema_ref": null,
+    "body_schema_ref": "#/components/schemas/InventoryAdjustRequest",
     "group": "inventory",
     "http": {
-      "method": "GET",
-      "path": "/w/{slug}/api/v1/inventory/properties/{property_id}/items/by_barcode/{barcode_ean13}"
+      "method": "POST",
+      "path": "/w/{slug}/api/v1/inventory/{item_id}/adjust"
     },
-    "idempotent": true,
-    "name": "properties-items-by-barcode-show",
-    "operation_id": "get_item_by_barcode_w__slug__api_v1_inventory_properties__property_id__items_by_barcode__barcode_ean13__get",
+    "idempotent": false,
+    "name": "adjust",
+    "operation_id": "inventory.adjust",
     "path_params": [
       {
-        "name": "property_id",
+        "name": "item_id",
         "required": true,
         "schema": {
-          "title": "Property Id",
-          "type": "string"
-        }
-      },
-      {
-        "name": "barcode_ean13",
-        "required": true,
-        "schema": {
-          "title": "Barcode Ean13",
+          "title": "Item Id",
           "type": "string"
         }
       }
     ],
     "query_params": [],
-    "response_schema_ref": "#/components/schemas/InventoryItemResponse",
-    "summary": "Get Item By Barcode",
-    "x_agent_confirm": null,
-    "x_cli": null
-  },
-  {
-    "body_schema_ref": null,
-    "group": "inventory",
-    "http": {
-      "method": "GET",
-      "path": "/w/{slug}/api/v1/inventory/properties/{property_id}/items/by_sku/{sku}"
+    "response_schema_ref": "#/components/schemas/InventoryMovementResponse",
+    "summary": "Adjust Item",
+    "x_agent_confirm": {
+      "message": "Record an inventory adjustment for this item?"
     },
-    "idempotent": true,
-    "name": "properties-items-by-sku-show",
-    "operation_id": "get_item_by_sku_w__slug__api_v1_inventory_properties__property_id__items_by_sku__sku__get",
-    "path_params": [
-      {
-        "name": "property_id",
-        "required": true,
-        "schema": {
-          "title": "Property Id",
-          "type": "string"
-        }
-      },
-      {
-        "name": "sku",
-        "required": true,
-        "schema": {
-          "title": "Sku",
-          "type": "string"
-        }
-      }
-    ],
-    "query_params": [],
-    "response_schema_ref": "#/components/schemas/InventoryItemResponse",
-    "summary": "Get Item By Sku",
-    "x_agent_confirm": null,
-    "x_cli": null
+    "x_cli": {
+      "group": "inventory",
+      "verb": "adjust"
+    }
   },
   {
     "body_schema_ref": null,
@@ -2617,8 +2583,8 @@
       "path": "/w/{slug}/api/v1/inventory/properties/{property_id}/items/{item_id}"
     },
     "idempotent": true,
-    "name": "properties-items-delete",
-    "operation_id": "archive_item_w__slug__api_v1_inventory_properties__property_id__items__item_id__delete",
+    "name": "delete",
+    "operation_id": "inventory.items.delete",
     "path_params": [
       {
         "name": "property_id",
@@ -2641,7 +2607,84 @@
     "response_schema_ref": null,
     "summary": "Archive Item",
     "x_agent_confirm": null,
-    "x_cli": null
+    "x_cli": {
+      "group": "inventory",
+      "verb": "delete"
+    }
+  },
+  {
+    "body_schema_ref": null,
+    "group": "inventory",
+    "http": {
+      "method": "GET",
+      "path": "/w/{slug}/api/v1/inventory/properties/{property_id}/items/by_barcode/{barcode_ean13}"
+    },
+    "idempotent": true,
+    "name": "get-by-barcode",
+    "operation_id": "inventory.items.get_by_barcode",
+    "path_params": [
+      {
+        "name": "property_id",
+        "required": true,
+        "schema": {
+          "title": "Property Id",
+          "type": "string"
+        }
+      },
+      {
+        "name": "barcode_ean13",
+        "required": true,
+        "schema": {
+          "title": "Barcode Ean13",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/InventoryItemResponse",
+    "summary": "Get Item By Barcode",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "inventory",
+      "verb": "get-by-barcode"
+    }
+  },
+  {
+    "body_schema_ref": null,
+    "group": "inventory",
+    "http": {
+      "method": "GET",
+      "path": "/w/{slug}/api/v1/inventory/properties/{property_id}/items/by_sku/{sku}"
+    },
+    "idempotent": true,
+    "name": "get-by-sku",
+    "operation_id": "inventory.items.get_by_sku",
+    "path_params": [
+      {
+        "name": "property_id",
+        "required": true,
+        "schema": {
+          "title": "Property Id",
+          "type": "string"
+        }
+      },
+      {
+        "name": "sku",
+        "required": true,
+        "schema": {
+          "title": "Sku",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/InventoryItemResponse",
+    "summary": "Get Item By Sku",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "inventory",
+      "verb": "get-by-sku"
+    }
   },
   {
     "body_schema_ref": null,
@@ -2651,8 +2694,8 @@
       "path": "/w/{slug}/api/v1/inventory/properties/{property_id}/items"
     },
     "idempotent": true,
-    "name": "properties-items-list",
-    "operation_id": "list_items_w__slug__api_v1_inventory_properties__property_id__items_get",
+    "name": "list",
+    "operation_id": "inventory.items.list",
     "path_params": [
       {
         "name": "property_id",
@@ -2679,32 +2722,73 @@
           ],
           "title": "Barcode"
         }
+      },
+      {
+        "name": "below_reorder",
+        "required": false,
+        "schema": {
+          "default": false,
+          "title": "Below Reorder",
+          "type": "boolean"
+        }
       }
     ],
     "response_schema_ref": null,
     "summary": "List Items",
     "x_agent_confirm": null,
-    "x_cli": null
+    "x_cli": {
+      "group": "inventory",
+      "verb": "list"
+    }
   },
   {
-    "body_schema_ref": "#/components/schemas/InventoryItemUpdateRequest",
+    "body_schema_ref": null,
     "group": "inventory",
     "http": {
-      "method": "PATCH",
-      "path": "/w/{slug}/api/v1/inventory/properties/{property_id}/items/{item_id}"
+      "method": "GET",
+      "path": "/w/{slug}/api/v1/inventory/reports/low_stock"
     },
-    "idempotent": false,
-    "name": "properties-items-update",
-    "operation_id": "update_item_w__slug__api_v1_inventory_properties__property_id__items__item_id__patch",
-    "path_params": [
+    "idempotent": true,
+    "name": "low-stock",
+    "operation_id": "inventory.reports.low_stock",
+    "path_params": [],
+    "query_params": [
       {
         "name": "property_id",
-        "required": true,
+        "required": false,
         "schema": {
-          "title": "Property Id",
-          "type": "string"
+          "anyOf": [
+            {
+              "maxLength": 500,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Property Id"
         }
-      },
+      }
+    ],
+    "response_schema_ref": "#/components/schemas/InventoryItemListResponse",
+    "summary": "Low Stock Report",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "inventory",
+      "verb": "low-stock"
+    }
+  },
+  {
+    "body_schema_ref": "#/components/schemas/InventoryMovementCreateRequest",
+    "group": "inventory",
+    "http": {
+      "method": "POST",
+      "path": "/w/{slug}/api/v1/inventory/{item_id}/movements"
+    },
+    "idempotent": false,
+    "name": "movement-create",
+    "operation_id": "inventory.movements.create",
+    "path_params": [
       {
         "name": "item_id",
         "required": true,
@@ -2715,10 +2799,71 @@
       }
     ],
     "query_params": [],
-    "response_schema_ref": "#/components/schemas/InventoryItemResponse",
-    "summary": "Update Item",
+    "response_schema_ref": "#/components/schemas/InventoryMovementResponse",
+    "summary": "Create Movement",
     "x_agent_confirm": null,
-    "x_cli": null
+    "x_cli": {
+      "group": "inventory",
+      "verb": "movement-create"
+    }
+  },
+  {
+    "body_schema_ref": null,
+    "group": "inventory",
+    "http": {
+      "method": "GET",
+      "path": "/w/{slug}/api/v1/inventory/{item_id}/movements"
+    },
+    "idempotent": true,
+    "name": "movements-list",
+    "operation_id": "inventory.movements.list",
+    "path_params": [
+      {
+        "name": "item_id",
+        "required": true,
+        "schema": {
+          "title": "Item Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [
+      {
+        "name": "before",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "maxLength": 1024,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Before"
+        }
+      },
+      {
+        "name": "limit",
+        "required": false,
+        "schema": {
+          "default": 50,
+          "description": "Maximum rows to return. Default 50, cap 500 per spec \u00a712 'Pagination'. Rejected with 422 outside ``[1, 500]``.",
+          "maximum": 500,
+          "minimum": 1,
+          "title": "Limit",
+          "type": "integer"
+        }
+      }
+    ],
+    "response_schema_ref": "#/components/schemas/InventoryMovementListResponse",
+    "summary": "List Movements",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "inventory",
+      "verb": "movements-list"
+    }
   },
   {
     "body_schema_ref": null,
@@ -2729,7 +2874,7 @@
     },
     "idempotent": false,
     "name": "restore",
-    "operation_id": "restore_item_w__slug__api_v1_inventory_properties__property_id__items__item_id__restore_post",
+    "operation_id": "inventory.items.restore",
     "path_params": [
       {
         "name": "property_id",
@@ -2752,7 +2897,47 @@
     "response_schema_ref": "#/components/schemas/InventoryItemResponse",
     "summary": "Restore Item",
     "x_agent_confirm": null,
-    "x_cli": null
+    "x_cli": {
+      "group": "inventory",
+      "verb": "restore"
+    }
+  },
+  {
+    "body_schema_ref": "#/components/schemas/InventoryItemUpdateRequest",
+    "group": "inventory",
+    "http": {
+      "method": "PATCH",
+      "path": "/w/{slug}/api/v1/inventory/properties/{property_id}/items/{item_id}"
+    },
+    "idempotent": false,
+    "name": "update",
+    "operation_id": "inventory.items.update",
+    "path_params": [
+      {
+        "name": "property_id",
+        "required": true,
+        "schema": {
+          "title": "Property Id",
+          "type": "string"
+        }
+      },
+      {
+        "name": "item_id",
+        "required": true,
+        "schema": {
+          "title": "Item Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/InventoryItemResponse",
+    "summary": "Update Item",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "inventory",
+      "verb": "update"
+    }
   },
   {
     "body_schema_ref": "#/components/schemas/AcceptRequest",

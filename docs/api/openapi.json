@@ -8022,6 +8022,59 @@
         "title": "IcalProbeResponse",
         "type": "object"
       },
+      "InventoryAdjustRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "note": {
+            "anyOf": [
+              {
+                "maxLength": 20000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "observed_on_hand": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ],
+            "title": "Observed On Hand"
+          },
+          "reason": {
+            "default": "audit_correction",
+            "enum": [
+              "restock",
+              "consume",
+              "produce",
+              "waste",
+              "theft",
+              "loss",
+              "found",
+              "returned_to_vendor",
+              "transfer_in",
+              "transfer_out",
+              "audit_correction",
+              "adjust"
+            ],
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "observed_on_hand"
+        ],
+        "title": "InventoryAdjustRequest",
+        "type": "object"
+      },
       "InventoryEffectPayload": {
         "description": "One entry of a task template's :attr:`TaskTemplatePayload.inventory_effects`.\n\nMirrors \u00a708 \"Inventory effects on task completion\" \u2014 a list of\n``{item_ref, kind, qty}`` declaring what the task **uses** and what\nit **produces**. The wire shape is the canonical projection per the\nspec; the v1 storage column (``inventory_consumption_json``, a flat\nSKU \u2192 positive int map) is a consume-only subset and is preserved on\nthe wire alongside this richer projection while the storage migration\nlands. See :func:`TaskTemplatePayload.from_view` for the derivation.",
         "properties": {
@@ -8525,6 +8578,205 @@
           }
         },
         "title": "InventoryItemUpdateRequest",
+        "type": "object"
+      },
+      "InventoryMovementCreateRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "delta": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ],
+            "title": "Delta"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "maxLength": 20000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "occurrence_id": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Occurrence Id"
+          },
+          "reason": {
+            "enum": [
+              "restock",
+              "consume",
+              "produce",
+              "waste",
+              "theft",
+              "loss",
+              "found",
+              "returned_to_vendor",
+              "transfer_in",
+              "transfer_out",
+              "audit_correction",
+              "adjust"
+            ],
+            "title": "Reason",
+            "type": "string"
+          },
+          "source_task_id": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Task Id"
+          }
+        },
+        "required": [
+          "delta",
+          "reason"
+        ],
+        "title": "InventoryMovementCreateRequest",
+        "type": "object"
+      },
+      "InventoryMovementResponse": {
+        "properties": {
+          "actor_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Actor Id"
+          },
+          "actor_kind": {
+            "title": "Actor Kind",
+            "type": "string"
+          },
+          "delta": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "title": "Delta"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "item_id": {
+            "title": "Item Id",
+            "type": "string"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "occurred_at": {
+            "title": "Occurred At",
+            "type": "string"
+          },
+          "occurrence_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Occurrence Id"
+          },
+          "on_hand_after": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "title": "On Hand After"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          },
+          "source_stocktake_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Stocktake Id"
+          },
+          "source_task_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Task Id"
+          },
+          "workspace_id": {
+            "title": "Workspace Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "workspace_id",
+          "item_id",
+          "delta",
+          "reason",
+          "source_task_id",
+          "occurrence_id",
+          "source_stocktake_id",
+          "actor_kind",
+          "actor_id",
+          "occurred_at",
+          "note",
+          "on_hand_after"
+        ],
+        "title": "InventoryMovementResponse",
         "type": "object"
       },
       "InviteIntrospectionResponse": {
@@ -30140,7 +30392,7 @@
     },
     "/w/{slug}/api/v1/inventory/properties/{property_id}/items": {
       "get": {
-        "operationId": "list_items_w__slug__api_v1_inventory_properties__property_id__items_get",
+        "operationId": "inventory.items.list",
         "parameters": [
           {
             "in": "path",
@@ -30167,6 +30419,16 @@
               ],
               "title": "Barcode"
             }
+          },
+          {
+            "in": "query",
+            "name": "below_reorder",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Below Reorder",
+              "type": "boolean"
+            }
           }
         ],
         "responses": {
@@ -30182,7 +30444,7 @@
                       "$ref": "#/components/schemas/InventoryItemResponse"
                     }
                   ],
-                  "title": "Response List Items W  Slug  Api V1 Inventory Properties  Property Id  Items Get"
+                  "title": "Response Inventory.Items.List"
                 }
               }
             },
@@ -30202,7 +30464,11 @@
         "summary": "List Items",
         "tags": [
           "inventory"
-        ]
+        ],
+        "x-cli": {
+          "group": "inventory",
+          "verb": "list"
+        }
       },
       "parameters": [
         {
@@ -30217,7 +30483,7 @@
         }
       ],
       "post": {
-        "operationId": "create_item_w__slug__api_v1_inventory_properties__property_id__items_post",
+        "operationId": "inventory.items.create",
         "parameters": [
           {
             "in": "path",
@@ -30264,12 +30530,16 @@
         "summary": "Create Item",
         "tags": [
           "inventory"
-        ]
+        ],
+        "x-cli": {
+          "group": "inventory",
+          "verb": "add"
+        }
       }
     },
     "/w/{slug}/api/v1/inventory/properties/{property_id}/items/by_barcode/{barcode_ean13}": {
       "get": {
-        "operationId": "get_item_by_barcode_w__slug__api_v1_inventory_properties__property_id__items_by_barcode__barcode_ean13__get",
+        "operationId": "inventory.items.get_by_barcode",
         "parameters": [
           {
             "in": "path",
@@ -30315,7 +30585,11 @@
         "summary": "Get Item By Barcode",
         "tags": [
           "inventory"
-        ]
+        ],
+        "x-cli": {
+          "group": "inventory",
+          "verb": "get-by-barcode"
+        }
       },
       "parameters": [
         {
@@ -30332,7 +30606,7 @@
     },
     "/w/{slug}/api/v1/inventory/properties/{property_id}/items/by_sku/{sku}": {
       "get": {
-        "operationId": "get_item_by_sku_w__slug__api_v1_inventory_properties__property_id__items_by_sku__sku__get",
+        "operationId": "inventory.items.get_by_sku",
         "parameters": [
           {
             "in": "path",
@@ -30378,7 +30652,11 @@
         "summary": "Get Item By Sku",
         "tags": [
           "inventory"
-        ]
+        ],
+        "x-cli": {
+          "group": "inventory",
+          "verb": "get-by-sku"
+        }
       },
       "parameters": [
         {
@@ -30395,7 +30673,7 @@
     },
     "/w/{slug}/api/v1/inventory/properties/{property_id}/items/{item_id}": {
       "delete": {
-        "operationId": "archive_item_w__slug__api_v1_inventory_properties__property_id__items__item_id__delete",
+        "operationId": "inventory.items.delete",
         "parameters": [
           {
             "in": "path",
@@ -30434,7 +30712,11 @@
         "summary": "Archive Item",
         "tags": [
           "inventory"
-        ]
+        ],
+        "x-cli": {
+          "group": "inventory",
+          "verb": "delete"
+        }
       },
       "parameters": [
         {
@@ -30449,7 +30731,7 @@
         }
       ],
       "patch": {
-        "operationId": "update_item_w__slug__api_v1_inventory_properties__property_id__items__item_id__patch",
+        "operationId": "inventory.items.update",
         "parameters": [
           {
             "in": "path",
@@ -30505,7 +30787,11 @@
         "summary": "Update Item",
         "tags": [
           "inventory"
-        ]
+        ],
+        "x-cli": {
+          "group": "inventory",
+          "verb": "update"
+        }
       }
     },
     "/w/{slug}/api/v1/inventory/properties/{property_id}/items/{item_id}/restore": {
@@ -30522,7 +30808,7 @@
         }
       ],
       "post": {
-        "operationId": "restore_item_w__slug__api_v1_inventory_properties__property_id__items__item_id__restore_post",
+        "operationId": "inventory.items.restore",
         "parameters": [
           {
             "in": "path",
@@ -30568,7 +30854,216 @@
         "summary": "Restore Item",
         "tags": [
           "inventory"
-        ]
+        ],
+        "x-cli": {
+          "group": "inventory",
+          "verb": "restore"
+        }
+      }
+    },
+    "/w/{slug}/api/v1/inventory/reports/low_stock": {
+      "get": {
+        "operationId": "inventory.reports.low_stock",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "property_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 500,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Property Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InventoryItemListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Low Stock Report",
+        "tags": [
+          "inventory"
+        ],
+        "x-cli": {
+          "group": "inventory",
+          "verb": "low-stock"
+        }
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "slug",
+          "required": true,
+          "schema": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          }
+        }
+      ]
+    },
+    "/w/{slug}/api/v1/inventory/{item_id}/adjust": {
+      "parameters": [
+        {
+          "in": "path",
+          "name": "slug",
+          "required": true,
+          "schema": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          }
+        }
+      ],
+      "post": {
+        "operationId": "inventory.adjust",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "title": "Item Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InventoryAdjustRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InventoryMovementResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Adjust Item",
+        "tags": [
+          "inventory"
+        ],
+        "x-agent-confirm": {
+          "message": "Record an inventory adjustment for this item?"
+        },
+        "x-cli": {
+          "group": "inventory",
+          "verb": "adjust"
+        }
+      }
+    },
+    "/w/{slug}/api/v1/inventory/{item_id}/movements": {
+      "parameters": [
+        {
+          "in": "path",
+          "name": "slug",
+          "required": true,
+          "schema": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          }
+        }
+      ],
+      "post": {
+        "operationId": "inventory.movements.create",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "title": "Item Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InventoryMovementCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InventoryMovementResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Movement",
+        "tags": [
+          "inventory"
+        ],
+        "x-cli": {
+          "group": "inventory",
+          "verb": "movement-create"
+        }
       }
     },
     "/w/{slug}/api/v1/issues": {

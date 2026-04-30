@@ -28,8 +28,10 @@ __all__ = [
     "MovementReason",
     "adjust_to_observed",
     "consume",
+    "list_movements",
     "produce",
     "reconcile",
+    "record",
     "restock",
     "transfer",
 ]
@@ -66,6 +68,12 @@ _REASONS: frozenset[str] = frozenset(
         "audit_correction",
         "adjust",
     }
+)
+_POSITIVE_REASONS: frozenset[str] = frozenset(
+    {"restock", "produce", "found", "transfer_in"}
+)
+_NEGATIVE_REASONS: frozenset[str] = frozenset(
+    {"consume", "waste", "theft", "loss", "returned_to_vendor", "transfer_out"}
 )
 
 
@@ -190,6 +198,68 @@ def produce(
     )
 
 
+def record(
+    session: Session,
+    ctx: WorkspaceContext,
+    *,
+    item_id: str,
+    delta: Decimal,
+    reason: MovementReason,
+    source_task_id: str | None = None,
+    note: str | None = None,
+    clock: Clock | None = None,
+    event_bus: EventBus | None = None,
+) -> InventoryMovementView:
+    """Record one signed inventory movement from the REST/API surface."""
+    clean_delta = _clean_quantity(delta, field_name="delta")
+    _validate_reason_sign(reason, clean_delta)
+    return _write_movement(
+        session,
+        ctx,
+        item_id=item_id,
+        delta=clean_delta,
+        reason=reason,
+        source_task_id=source_task_id,
+        source_stocktake_id=None,
+        note=_clean_optional_note(note),
+        clock=clock,
+        event_bus=event_bus,
+    )
+
+
+def list_movements(
+    session: Session,
+    ctx: WorkspaceContext,
+    *,
+    item_id: str,
+    before: tuple[datetime, str | None] | None = None,
+    limit: int,
+) -> tuple[InventoryMovementView, ...]:
+    """List an item's append-only movement ledger newest first."""
+    _ensure_active_item(session, ctx, item_id)
+    stmt = (
+        select(Movement)
+        .where(
+            Movement.workspace_id == ctx.workspace_id,
+            Movement.item_id == item_id,
+        )
+        .order_by(Movement.at.desc(), Movement.id.desc())
+        .limit(limit)
+    )
+    if before is not None:
+        before_at, before_id = before
+        if before_id is None:
+            stmt = stmt.where(Movement.at < before_at)
+        else:
+            stmt = stmt.where(
+                (Movement.at < before_at)
+                | ((Movement.at == before_at) & (Movement.id < before_id))
+            )
+    rows = tuple(session.scalars(stmt).all())
+    on_hand = _on_hand_after_by_movement(session, ctx, item_id=item_id, rows=rows)
+    return tuple(_project(row, on_hand_after=on_hand[row.id]) for row in rows)
+
+
 def adjust_to_observed(
     session: Session,
     ctx: WorkspaceContext,
@@ -209,6 +279,7 @@ def adjust_to_observed(
     delta = clean_observed - _clean_quantity(row.on_hand, field_name="on_hand")
     if delta == Decimal("0"):
         raise InventoryMovementValidationError("observed_qty", "nothing_to_adjust")
+    _validate_reason_sign(reason, delta)
     return _write_movement(
         session,
         ctx,
@@ -325,12 +396,12 @@ def _write_movement(
     resolved_clock = clock if clock is not None else SystemClock()
     resolved_bus = event_bus if event_bus is not None else default_event_bus
     clean_delta = _clean_quantity(delta, field_name="delta")
-    _validate_source_task(session, ctx, source_task_id)
     item = (
         locked_item
         if locked_item is not None
         else _load_active_item(session, ctx, item_id)
     )
+    _validate_source_task(session, ctx, source_task_id, item=item)
     _validate_source_stocktake(session, ctx, source_stocktake_id, item)
     now = resolved_clock.now()
     movement = Movement(
@@ -394,6 +465,57 @@ def _load_active_item(session: Session, ctx: WorkspaceContext, item_id: str) -> 
     return row
 
 
+def _ensure_active_item(session: Session, ctx: WorkspaceContext, item_id: str) -> None:
+    exists = session.scalar(
+        select(Item.id)
+        .where(
+            Item.workspace_id == ctx.workspace_id,
+            Item.id == item_id,
+            Item.deleted_at.is_(None),
+        )
+        .limit(1)
+    )
+    if exists is None:
+        raise InventoryItemNotFound("active inventory item not found")
+
+
+def _on_hand_after_by_movement(
+    session: Session,
+    ctx: WorkspaceContext,
+    *,
+    item_id: str,
+    rows: tuple[Movement, ...],
+) -> dict[str, Decimal]:
+    if not rows:
+        return {}
+    newest = rows[0]
+    running = sum(
+        session.scalars(
+            select(Movement.delta).where(
+                Movement.workspace_id == ctx.workspace_id,
+                Movement.item_id == item_id,
+                (Movement.at > newest.at)
+                | ((Movement.at == newest.at) & (Movement.id > newest.id)),
+            )
+        ),
+        Decimal("0"),
+    )
+    current_on_hand = session.scalar(
+        select(Item.on_hand).where(
+            Item.workspace_id == ctx.workspace_id,
+            Item.id == item_id,
+        )
+    )
+    if current_on_hand is None:
+        raise InventoryItemNotFound("active inventory item not found")
+    by_id: dict[str, Decimal] = {}
+    cursor_on_hand = current_on_hand - running
+    for row in rows:
+        by_id[row.id] = cursor_on_hand
+        cursor_on_hand -= row.delta
+    return by_id
+
+
 def _load_transfer_items(
     session: Session,
     ctx: WorkspaceContext,
@@ -428,19 +550,23 @@ def _load_transfer_items(
 
 
 def _validate_source_task(
-    session: Session, ctx: WorkspaceContext, source_task_id: str | None
+    session: Session,
+    ctx: WorkspaceContext,
+    source_task_id: str | None,
+    *,
+    item: Item,
 ) -> None:
     if source_task_id is None:
         return
-    exists = session.scalar(
-        select(Occurrence.id)
+    task = session.scalar(
+        select(Occurrence)
         .where(
             Occurrence.workspace_id == ctx.workspace_id,
             Occurrence.id == source_task_id,
         )
         .limit(1)
     )
-    if exists is None:
+    if task is None or task.property_id != item.property_id:
         raise InventoryMovementValidationError("source_task_id", "invalid")
 
 
@@ -527,6 +653,16 @@ def _clean_quantity(value: Decimal, *, field_name: str) -> Decimal:
 def _validate_reason(reason: str) -> None:
     if reason not in _REASONS:
         raise InventoryMovementValidationError("reason", "invalid")
+
+
+def _validate_reason_sign(reason: MovementReason, delta: Decimal) -> None:
+    _validate_reason(reason)
+    if delta == Decimal("0"):
+        raise InventoryMovementValidationError("delta", "quantity_nonzero")
+    if reason in _POSITIVE_REASONS and delta <= Decimal("0"):
+        raise InventoryMovementValidationError("delta", "reason_requires_positive")
+    if reason in _NEGATIVE_REASONS and delta >= Decimal("0"):
+        raise InventoryMovementValidationError("delta", "reason_requires_negative")
 
 
 def _clean_optional_note(value: str | None) -> str | None:

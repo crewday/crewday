@@ -8,11 +8,11 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Literal
 
-from sqlalchemy import select
+from sqlalchemy import exists, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.adapters.db.inventory.models import Item
+from app.adapters.db.inventory.models import Item, Movement
 from app.adapters.db.places.models import PropertyWorkspace
 from app.audit import write_audit
 from app.tenancy import WorkspaceContext
@@ -32,6 +32,7 @@ __all__ = [
     "get_by_barcode",
     "get_by_sku",
     "list",
+    "list_low_stock",
     "restore",
     "update",
 ]
@@ -368,6 +369,41 @@ def list(
     if not include_archived:
         stmt = stmt.where(Item.deleted_at.is_(None))
     stmt = stmt.order_by(Item.name, Item.id)
+    return tuple(_project(row) for row in session.scalars(stmt).all())
+
+
+def list_low_stock(
+    session: Session,
+    ctx: WorkspaceContext,
+    *,
+    property_id: str | None = None,
+) -> tuple[InventoryItemView, ...]:
+    """List active items at or below their configured reorder point."""
+    if property_id is not None:
+        _ensure_property(session, ctx, property_id)
+    stmt = (
+        select(Item)
+        .where(
+            Item.workspace_id == ctx.workspace_id,
+            Item.deleted_at.is_(None),
+            Item.reorder_point.is_not(None),
+            Item.on_hand <= Item.reorder_point,
+        )
+        .order_by(Item.property_id, Item.name, Item.id)
+    )
+    produce_movement_exists = exists().where(
+        Movement.workspace_id == ctx.workspace_id,
+        Movement.item_id == Item.id,
+        Movement.reason == "produce",
+    )
+    non_produce_movement_exists = exists().where(
+        Movement.workspace_id == ctx.workspace_id,
+        Movement.item_id == Item.id,
+        Movement.reason != "produce",
+    )
+    stmt = stmt.where(~(produce_movement_exists & ~non_produce_movement_exists))
+    if property_id is not None:
+        stmt = stmt.where(Item.property_id == property_id)
     return tuple(_project(row) for row in session.scalars(stmt).all())
 
 

@@ -367,6 +367,88 @@ def test_adjust_to_observed_rejects_zero_delta(
     assert _movement_rows(session) == []
 
 
+def test_adjust_to_observed_rejects_reason_with_wrong_delta_sign(
+    session: Session, clock: FrozenClock
+) -> None:
+    ctx, property_id = _seed_scope(session, clock)
+    item = _seed_item(session, ctx, property_id, clock, on_hand=Decimal("5.0000"))
+
+    with pytest.raises(movement_service.InventoryMovementValidationError) as raised:
+        movement_service.adjust_to_observed(
+            session,
+            ctx,
+            item_id=item.id,
+            observed_qty=Decimal("4.0000"),
+            reason="found",
+            clock=clock,
+        )
+
+    assert raised.value.field == "delta"
+    assert raised.value.error == "reason_requires_positive"
+    assert _movement_rows(session) == []
+
+
+def test_source_task_must_belong_to_item_property(
+    session: Session, clock: FrozenClock
+) -> None:
+    ctx, property_id = _seed_scope(session, clock)
+    other_property_id = _seed_property(session, ctx, clock, label="Other")
+    item = _seed_item(session, ctx, property_id, clock)
+    task_id = _seed_task(session, ctx, other_property_id, clock)
+
+    with pytest.raises(movement_service.InventoryMovementValidationError) as raised:
+        movement_service.record(
+            session,
+            ctx,
+            item_id=item.id,
+            delta=Decimal("1.0000"),
+            reason="restock",
+            source_task_id=task_id,
+            clock=clock,
+        )
+
+    assert raised.value.field == "source_task_id"
+    assert raised.value.error == "invalid"
+    assert _movement_rows(session) == []
+
+
+def test_list_movements_returns_newest_first_with_historical_balances(
+    session: Session, clock: FrozenClock
+) -> None:
+    ctx, property_id = _seed_scope(session, clock)
+    item = _seed_item(session, ctx, property_id, clock, on_hand=Decimal("0"))
+    first = movement_service.record(
+        session,
+        ctx,
+        item_id=item.id,
+        delta=Decimal("3.0000"),
+        reason="restock",
+        clock=clock,
+    )
+    clock.advance(timedelta(seconds=1))
+    second = movement_service.record(
+        session,
+        ctx,
+        item_id=item.id,
+        delta=Decimal("-1.0000"),
+        reason="consume",
+        clock=clock,
+    )
+
+    page = movement_service.list_movements(
+        session,
+        ctx,
+        item_id=item.id,
+        limit=2,
+    )
+
+    assert [movement.id for movement in page] == [second.id, first.id]
+    assert [movement.on_hand_after for movement in page] == [
+        Decimal("2.0000"),
+        Decimal("3.0000"),
+    ]
+
+
 def test_transfer_writes_two_correlated_movements_and_two_events(
     session: Session, clock: FrozenClock
 ) -> None:
