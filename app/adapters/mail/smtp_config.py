@@ -136,9 +136,7 @@ class DeploymentSmtpConfigSource:
         except SQLAlchemyError as exc:
             raise SmtpConfigError("smtp settings could not be loaded") from exc
         return SmtpConfig(
-            host=_db_or_env_optional_str(
-                rows, SMTP_HOST_SETTING, self._env.host
-            ),
+            host=_db_or_env_optional_str(rows, SMTP_HOST_SETTING, self._env.host),
             port=_db_or_env_port(rows, SMTP_PORT_SETTING, self._env.port),
             user=_db_or_env_optional_str(rows, SMTP_USER_SETTING, self._env.user),
             password=password,
@@ -154,9 +152,7 @@ class DeploymentSmtpConfigSource:
             ),
         )
 
-    def _password(
-        self, rows: dict[str, object], session: Session
-    ) -> SecretStr | None:
+    def _password(self, rows: dict[str, object], session: Session) -> SecretStr | None:
         if SMTP_PASSWORD_SETTING not in rows:
             return self._env.password
         envelope_id = rows[SMTP_PASSWORD_SETTING]
@@ -166,9 +162,7 @@ class DeploymentSmtpConfigSource:
             )
         root_key = self._root_key
         if root_key is None:
-            raise SmtpConfigError(
-                "smtp password setting requires CREWDAY_ROOT_KEY"
-            )
+            raise SmtpConfigError("smtp password setting requires CREWDAY_ROOT_KEY")
         envelope = Aes256GcmEnvelope(
             root_key,
             repository=SqlAlchemySecretEnvelopeRepository(session),
@@ -242,9 +236,7 @@ def _db_or_env_port(rows: dict[str, object], key: str, env_value: int) -> int:
     raise SmtpConfigError(f"{key} setting is malformed; expected TCP port 1-65535")
 
 
-def _db_or_env_positive_int(
-    rows: dict[str, object], key: str, env_value: int
-) -> int:
+def _db_or_env_positive_int(rows: dict[str, object], key: str, env_value: int) -> int:
     value = _db_or_env_int(rows, key, env_value)
     if value > 0:
         return value

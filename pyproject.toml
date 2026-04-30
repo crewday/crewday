@@ -96,6 +96,7 @@ dependencies = [
     # backup command streams tar entries through this package explicitly.
     "zstandard>=0.23",
     "segno>=1.6.6",
+    "pywebpush>=2.3.0",
 ]
 
 # ``crewday`` is the sole console-script entry point. The target is
@@ -224,6 +225,19 @@ ignore_missing_imports = true
 module = [
     "weasyprint",
     "weasyprint.*",
+]
+ignore_missing_imports = true
+
+# pywebpush (cd-y60x) ships no ``py.typed`` marker. The web-push
+# delivery worker (:mod:`app.worker.jobs.messaging_web_push`) narrows
+# the dependency to :func:`pywebpush.webpush` plus the
+# :class:`WebPushException` class; the ``ignore_missing_imports``
+# keeps ``mypy --strict`` quiet without masking type issues in our
+# own code. Drops if upstream ships a typed release.
+[[tool.mypy.overrides]]
+module = [
+    "pywebpush",
+    "pywebpush.*",
 ]
 ignore_missing_imports = true
 

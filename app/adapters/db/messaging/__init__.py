@@ -68,6 +68,7 @@ from app.adapters.db.messaging.models import (
     EmailDelivery,
     EmailOptOut,
     Notification,
+    NotificationPushQueue,
     PushToken,
 )
 from app.tenancy.registry import register
@@ -75,6 +76,7 @@ from app.tenancy.registry import register
 for _table in (
     "notification",
     "push_token",
+    "notification_push_queue",
     "digest_record",
     "chat_channel",
     "chat_channel_member",
@@ -94,5 +96,6 @@ __all__ = [
     "EmailDelivery",
     "EmailOptOut",
     "Notification",
+    "NotificationPushQueue",
     "PushToken",
 ]

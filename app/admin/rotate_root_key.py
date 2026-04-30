@@ -210,16 +210,17 @@ def finalize_rotation(
 
     with tenant_agnostic():
         slots = list(
-            session.scalars(
-                select(RootKeySlot).where(RootKeySlot.is_active.is_(False))
-            )
+            session.scalars(select(RootKeySlot).where(RootKeySlot.is_active.is_(False)))
         )
         for slot in slots:
-            pending = session.scalar(
-                select(func.count())
-                .select_from(SecretEnvelope)
-                .where(SecretEnvelope.key_fp == slot.key_fp)
-            ) or 0
+            pending = (
+                session.scalar(
+                    select(func.count())
+                    .select_from(SecretEnvelope)
+                    .where(SecretEnvelope.key_fp == slot.key_fp)
+                )
+                or 0
+            )
             if pending:
                 raise RootKeyRotationError(
                     f"cannot finalize; {pending} envelope row(s) still use "

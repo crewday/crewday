@@ -121,7 +121,9 @@ def reset_bus() -> Iterator[None]:
 
 @dataclass
 class PushCall:
+    workspace_id: str
     user_id: str
+    notification_id: str
     kind: str
     body: str
     payload: dict[str, Any]
@@ -135,14 +137,18 @@ class FakePushQueue:
 
     def __call__(
         self,
+        ctx: WorkspaceContext,
         user_id: str,
+        notification_id: str,
         kind: str,
         body: str,
         payload: Mapping[str, Any],
     ) -> None:
         self.calls.append(
             PushCall(
+                workspace_id=ctx.workspace_id,
                 user_id=user_id,
+                notification_id=notification_id,
                 kind=kind,
                 body=body,
                 payload=dict(payload),

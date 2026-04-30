@@ -25,7 +25,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from datetime import UTC, datetime
 
-from sqlalchemy import or_, select
+from sqlalchemy import or_, select, update
 from sqlalchemy.orm import Session
 
 from app.adapters.db.identity.models import User
@@ -34,6 +34,7 @@ from app.adapters.db.messaging.models import (
     ChatChannelMember,
     ChatGatewayBinding,
     ChatMessage,
+    NotificationPushQueue,
     PushToken,
 )
 from app.adapters.db.workspace.models import UserWorkspace, Workspace
@@ -44,6 +45,8 @@ from app.domain.messaging.ports import (
     ChatGatewayRepository,
     ChatMessageRepository,
     ChatMessageRow,
+    PushDeliveryRepository,
+    PushDeliveryRow,
     PushTokenRepository,
     PushTokenRow,
 )
@@ -53,6 +56,7 @@ __all__ = [
     "SqlAlchemyChatChannelRepository",
     "SqlAlchemyChatGatewayRepository",
     "SqlAlchemyChatMessageRepository",
+    "SqlAlchemyPushDeliveryRepository",
     "SqlAlchemyPushTokenRepository",
 ]
 
@@ -644,3 +648,248 @@ class SqlAlchemyPushTokenRepository(PushTokenRepository):
             return
         self._session.delete(row)
         self._session.flush()
+
+
+def _to_delivery_row(row: NotificationPushQueue) -> PushDeliveryRow:
+    """Project a queue ORM row into the seam-level value object."""
+    return PushDeliveryRow(
+        id=row.id,
+        workspace_id=row.workspace_id,
+        notification_id=row.notification_id,
+        push_token_id=row.push_token_id,
+        kind=row.kind,
+        body=row.body,
+        payload_json=dict(row.payload_json),
+        status=row.status,
+        attempt=row.attempt,
+        next_attempt_at=(
+            _as_utc(row.next_attempt_at) if row.next_attempt_at is not None else None
+        ),
+        last_status_code=row.last_status_code,
+        last_error=row.last_error,
+        last_attempted_at=(
+            _as_utc(row.last_attempted_at)
+            if row.last_attempted_at is not None
+            else None
+        ),
+        sent_at=_as_utc(row.sent_at) if row.sent_at is not None else None,
+        dead_lettered_at=(
+            _as_utc(row.dead_lettered_at) if row.dead_lettered_at is not None else None
+        ),
+        created_at=_as_utc(row.created_at),
+    )
+
+
+class SqlAlchemyPushDeliveryRepository(PushDeliveryRepository):
+    """SA-backed concretion of :class:`PushDeliveryRepository` (cd-y60x)."""
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    @property
+    def session(self) -> Session:
+        return self._session
+
+    def enqueue(
+        self,
+        *,
+        delivery_id: str,
+        workspace_id: str,
+        notification_id: str,
+        push_token_id: str,
+        kind: str,
+        body: str,
+        payload_json: dict[str, object],
+        created_at: datetime,
+        next_attempt_at: datetime,
+    ) -> PushDeliveryRow:
+        row = NotificationPushQueue(
+            id=delivery_id,
+            workspace_id=workspace_id,
+            notification_id=notification_id,
+            push_token_id=push_token_id,
+            kind=kind,
+            body=body,
+            payload_json=dict(payload_json),
+            status="pending",
+            attempt=0,
+            next_attempt_at=next_attempt_at,
+            last_status_code=None,
+            last_error=None,
+            last_attempted_at=None,
+            sent_at=None,
+            dead_lettered_at=None,
+            created_at=created_at,
+        )
+        self._session.add(row)
+        self._session.flush()
+        return _to_delivery_row(row)
+
+    def select_due(self, *, now: datetime, limit: int) -> Sequence[PushDeliveryRow]:
+        with tenant_agnostic():
+            # justification: cd-y60x worker is deployment-scope; each
+            # row carries its own ``workspace_id`` for downstream audit.
+            stmt = (
+                select(NotificationPushQueue)
+                .where(NotificationPushQueue.status == "pending")
+                .where(NotificationPushQueue.next_attempt_at <= now)
+                .order_by(NotificationPushQueue.next_attempt_at.asc())
+                .limit(limit)
+            )
+            rows = self._session.scalars(stmt).all()
+        return [_to_delivery_row(row) for row in rows]
+
+    def claim(
+        self,
+        *,
+        delivery_id: str,
+        expected_attempt: int,
+        now: datetime,
+        in_flight_until: datetime,
+    ) -> bool:
+        with tenant_agnostic():
+            stmt = (
+                update(NotificationPushQueue)
+                .where(NotificationPushQueue.id == delivery_id)
+                .where(NotificationPushQueue.status == "pending")
+                .where(NotificationPushQueue.attempt == expected_attempt)
+                .values(
+                    status="in_flight",
+                    last_attempted_at=now,
+                    # Push the visibility window forward so a crashed
+                    # worker is recovered by the next tick after the
+                    # in-flight grace expires; a peer worker that runs
+                    # in the same tick window already lost the CAS via
+                    # the ``status='pending'`` predicate above.
+                    next_attempt_at=in_flight_until,
+                )
+            )
+            result = self._session.execute(stmt)
+            self._session.flush()
+        # ``Session.execute`` on an ``UPDATE`` statement returns a
+        # :class:`~sqlalchemy.engine.CursorResult` whose ``rowcount``
+        # is the number of matched + updated rows. ``mypy --strict``
+        # narrows the return type to ``Result[Any]`` (no ``rowcount``
+        # accessor) — the explicit ``int`` cast keeps the seam typed
+        # without sprinkling :class:`Any` through the worker tick.
+        rowcount = int(getattr(result, "rowcount", 0))
+        return rowcount == 1
+
+    def mark_sent(
+        self,
+        *,
+        delivery_id: str,
+        attempt: int,
+        now: datetime,
+        last_status_code: int | None,
+    ) -> PushDeliveryRow:
+        row = self._load(delivery_id)
+        row.status = "sent"
+        row.attempt = attempt
+        row.last_status_code = last_status_code
+        row.last_error = None
+        row.last_attempted_at = now
+        row.sent_at = now
+        row.next_attempt_at = None
+        self._session.flush()
+        return _to_delivery_row(row)
+
+    def mark_transient(
+        self,
+        *,
+        delivery_id: str,
+        attempt: int,
+        next_attempt_at: datetime,
+        now: datetime,
+        last_status_code: int | None,
+        last_error: str,
+    ) -> PushDeliveryRow:
+        row = self._load(delivery_id)
+        row.status = "pending"
+        row.attempt = attempt
+        row.last_status_code = last_status_code
+        row.last_error = last_error
+        row.last_attempted_at = now
+        row.next_attempt_at = next_attempt_at
+        self._session.flush()
+        return _to_delivery_row(row)
+
+    def mark_dead_lettered(
+        self,
+        *,
+        delivery_id: str,
+        attempt: int,
+        now: datetime,
+        last_status_code: int | None,
+        last_error: str,
+    ) -> PushDeliveryRow:
+        row = self._load(delivery_id)
+        row.status = "dead_lettered"
+        row.attempt = attempt
+        row.last_status_code = last_status_code
+        row.last_error = last_error
+        row.last_attempted_at = now
+        row.dead_lettered_at = now
+        row.next_attempt_at = None
+        self._session.flush()
+        return _to_delivery_row(row)
+
+    def get(self, *, delivery_id: str) -> PushDeliveryRow | None:
+        with tenant_agnostic():
+            row = self._session.scalars(
+                select(NotificationPushQueue).where(
+                    NotificationPushQueue.id == delivery_id
+                )
+            ).one_or_none()
+        return _to_delivery_row(row) if row is not None else None
+
+    def get_token(self, *, push_token_id: str) -> PushTokenRow | None:
+        with tenant_agnostic():
+            row = self._session.scalars(
+                select(PushToken).where(PushToken.id == push_token_id)
+            ).one_or_none()
+        return _to_row(row) if row is not None else None
+
+    def delete_token(self, *, push_token_id: str) -> str | None:
+        with tenant_agnostic():
+            row = self._session.scalars(
+                select(PushToken).where(PushToken.id == push_token_id)
+            ).one_or_none()
+            if row is None:
+                return None
+            user_id = row.user_id
+            self._session.delete(row)
+            self._session.flush()
+        return user_id
+
+    def get_workspace_setting(
+        self, *, workspace_id: str, settings_key: str
+    ) -> str | None:
+        with tenant_agnostic():
+            payload = self._session.scalars(
+                select(Workspace.settings_json).where(Workspace.id == workspace_id)
+            ).one_or_none()
+        if payload is None or not isinstance(payload, dict):
+            return None
+        value = payload.get(settings_key)
+        if not isinstance(value, str) or not value:
+            return None
+        return value
+
+    def touch_token_last_used(self, *, push_token_id: str, now: datetime) -> None:
+        with tenant_agnostic():
+            row = self._session.scalars(
+                select(PushToken).where(PushToken.id == push_token_id)
+            ).one_or_none()
+            if row is None:
+                return
+            row.last_used_at = now
+            self._session.flush()
+
+    def _load(self, delivery_id: str) -> NotificationPushQueue:
+        with tenant_agnostic():
+            return self._session.scalars(
+                select(NotificationPushQueue).where(
+                    NotificationPushQueue.id == delivery_id
+                )
+            ).one()

@@ -551,7 +551,7 @@ def _root_key_slot_fps(settings: Settings) -> set[str]:
             if key is not None:
                 fps.add(compute_key_fingerprint(key).hex())
         return fps
-    except (OSError, SQLAlchemyError):
+    except OSError, SQLAlchemyError:
         return set()
     finally:
         engine.dispose()

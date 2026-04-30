@@ -90,9 +90,9 @@ def test_start_rotation_creates_active_and_retired_slots(
     retired = next(slot for slot in slots if not slot.is_active)
     assert retired.key_ref == rotate_root_key.ENV_ROOT_KEY_REF
     assert retired.retired_at == PINNED.replace(tzinfo=None)
-    assert retired.purge_after == (
-        PINNED + rotate_root_key.ROTATION_WINDOW
-    ).replace(tzinfo=None)
+    assert retired.purge_after == (PINNED + rotate_root_key.ROTATION_WINDOW).replace(
+        tzinfo=None
+    )
     assert audit.action == "key_rotation.started"
     assert audit.via == "cli"
 

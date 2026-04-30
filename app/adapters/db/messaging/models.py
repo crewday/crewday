@@ -64,6 +64,7 @@ __all__ = [
     "EmailDelivery",
     "EmailOptOut",
     "Notification",
+    "NotificationPushQueue",
     "PushToken",
 ]
 
@@ -151,6 +152,21 @@ _EMAIL_DELIVERY_STATE_VALUES: tuple[str, ...] = (
     "delivered",
     "bounced",
     "failed",
+)
+
+# Allowed ``notification_push_queue.status`` values per cd-y60x. The
+# worker drives ``pending → in_flight`` on claim, ``in_flight → sent``
+# on success or terminal-clean (410/404 token purge), and
+# ``in_flight → dead_lettered`` on retry exhaustion / non-404/410 4xx.
+# A worker that crashed while ``in_flight`` is recovered by the next
+# tick: the row's ``next_attempt_at`` is bumped on claim so it stays
+# off the due-set for one backoff window before another worker picks
+# it up.
+_PUSH_QUEUE_STATUS_VALUES: tuple[str, ...] = (
+    "pending",
+    "in_flight",
+    "sent",
+    "dead_lettered",
 )
 
 
@@ -899,5 +915,119 @@ class EmailDelivery(Base):
             "workspace_id",
             "delivery_state",
             "sent_at",
+        ),
+    )
+
+
+class NotificationPushQueue(Base):
+    """Staging row for a §10 web-push delivery (cd-y60x).
+
+    One row per ``(notification_id, push_token_id)`` pair — the
+    fanout in :class:`~app.domain.messaging.notifications.Notification\
+Service` enqueues one row for every active token of the recipient at
+    notify time, and the worker tick at
+    :mod:`app.worker.jobs.messaging_web_push` walks rows whose
+    ``status='pending'`` and ``next_attempt_at <= now`` to fire the
+    actual ``pywebpush`` send.
+
+    Spec: ``docs/specs/10-messaging-notifications.md`` §"Channels"
+    (web push), §"Delivery tracking". Backoff schedule
+    ``[30s, 2m, 10m, 1h]`` with a hard cap of 5 attempts; the row
+    transitions ``pending → in_flight → sent`` on success and
+    ``pending → in_flight → dead_lettered`` on retry exhaustion or a
+    non-404/410 4xx response. A 410 / 404 from the provider deletes
+    the matching :class:`PushToken` row and audits
+    ``messaging.push.token_purged``; the queue row itself transitions
+    to ``sent`` (terminal-clean — there's nothing left to retry).
+
+    ``body`` is the rendered push envelope (server never ships the
+    full message body in the push payload, per §10 "Agent-message
+    delivery" tier 2). ``payload_json`` mirrors the
+    :class:`Notification.payload_json` context the renderer consumed
+    so a future replay / inspection can reconstruct the deep-link URL
+    without re-resolving the entity.
+
+    FK hygiene:
+
+    * ``workspace_id`` ``CASCADE`` — sweeping a workspace sweeps its
+      push queue.
+    * ``notification_id`` ``CASCADE`` — the queue row has no meaning
+      without the notification it announces.
+    * ``push_token_id`` ``CASCADE`` — a deleted token's pending pushes
+      can't deliver anyway; cascade keeps the table tight.
+    """
+
+    __tablename__ = "notification_push_queue"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    workspace_id: Mapped[str] = mapped_column(
+        String,
+        ForeignKey("workspace.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    notification_id: Mapped[str] = mapped_column(
+        String,
+        ForeignKey("notification.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    push_token_id: Mapped[str] = mapped_column(
+        String,
+        ForeignKey("push_token.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    # Notification kind value (mirrors :class:`Notification.kind`).
+    # Carried denormalised so the worker can log + audit without a
+    # second join.
+    kind: Mapped[str] = mapped_column(String, nullable=False)
+    # Rendered push envelope body — the short copy from the kind's
+    # ``<kind>.push.j2`` template. Capped at the column's ``String``
+    # default (no fixed length); the §10 tier-2 envelope is ~140 chars.
+    body: Mapped[str] = mapped_column(String, nullable=False)
+    # Free-form context — mirrors :class:`Notification.payload_json`.
+    payload_json: Mapped[dict[str, Any]] = mapped_column(
+        JSON, nullable=False, default=dict
+    )
+    # ``pending | in_flight | sent | dead_lettered``. See
+    # :data:`_PUSH_QUEUE_STATUS_VALUES`.
+    status: Mapped[str] = mapped_column(String, nullable=False)
+    # Number of attempts already fired (0 when freshly enqueued). The
+    # backoff schedule ``[30s, 2m, 10m, 1h]`` is keyed off this
+    # counter; ``attempt >= 5`` forces a dead-letter on the next tick.
+    attempt: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    next_attempt_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    last_status_code: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Free-form short error label (``http_500``, ``timeout:ReadTimeout``,
+    # ``network:ConnectError``, ``vapid_missing``). Stamped on every
+    # non-2xx; cleared on success.
+    last_error: Mapped[str | None] = mapped_column(String, nullable=True)
+    last_attempted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    sent_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    dead_lettered_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            f"status IN ({_in_clause(_PUSH_QUEUE_STATUS_VALUES)})",
+            name="status",
+        ),
+        Index(
+            "ix_notification_push_queue_workspace",
+            "workspace_id",
+        ),
+        # Worker hot path: pending rows whose retry window has opened.
+        Index(
+            "ix_notification_push_queue_status_next_attempt",
+            "status",
+            "next_attempt_at",
         ),
     )

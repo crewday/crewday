@@ -48,6 +48,8 @@ __all__ = [
     "ChatGatewayRepository",
     "ChatMessageRepository",
     "ChatMessageRow",
+    "PushDeliveryRepository",
+    "PushDeliveryRow",
     "PushTokenRepository",
     "PushTokenRow",
 ]
@@ -100,6 +102,38 @@ class ChatGatewayBindingRow:
     provider_metadata_json: dict[str, object]
     created_at: datetime
     last_message_at: datetime | None
+
+
+@dataclass(frozen=True, slots=True)
+class PushDeliveryRow:
+    """Immutable projection of a ``notification_push_queue`` row.
+
+    Carries only the fields the worker needs to drive the §10 retry
+    schedule (``status``, ``attempt``, ``next_attempt_at``) plus the
+    enough context to fire the ``pywebpush`` send (``push_token_id``,
+    ``body``, ``payload_json``). The encryption keys + endpoint are
+    fetched from the matching :class:`PushTokenRow` by the worker
+    when claiming the row, so the queue projection deliberately does
+    not duplicate them — a token rotation between enqueue and send
+    must use the latest material.
+    """
+
+    id: str
+    workspace_id: str
+    notification_id: str
+    push_token_id: str
+    kind: str
+    body: str
+    payload_json: dict[str, object]
+    status: str
+    attempt: int
+    next_attempt_at: datetime | None
+    last_status_code: int | None
+    last_error: str | None
+    last_attempted_at: datetime | None
+    sent_at: datetime | None
+    dead_lettered_at: datetime | None
+    created_at: datetime
 
 
 @dataclass(frozen=True, slots=True)
@@ -451,4 +485,162 @@ class ChatGatewayRepository(Protocol):
         created_at: datetime,
     ) -> ChatMessageRow:
         """Insert a gateway-inbound message row."""
+        ...
+
+
+class PushDeliveryRepository(Protocol):
+    """Read + write seam for the ``notification_push_queue`` staging table.
+
+    The web-push delivery worker (cd-y60x) consults this seam to:
+
+    * enqueue one row per active push token at notify time;
+    * walk the deployment-wide pending set on each tick;
+    * atomically claim a row (CAS update keyed on the prior status
+      and ``attempt`` counter) so two workers never double-send;
+    * stamp the per-attempt outcome (success / transient retry /
+      dead-letter / token-purge).
+
+    Cross-tenant by design — like the webhook dispatcher, the worker
+    tick reads under :func:`app.tenancy.tenant_agnostic` because each
+    row carries its own ``workspace_id`` and the dispatcher is
+    deployment-scope, not per-workspace.
+    """
+
+    @property
+    def session(self) -> Session:
+        """Return the underlying SQLAlchemy session for audit seams."""
+        ...
+
+    def enqueue(
+        self,
+        *,
+        delivery_id: str,
+        workspace_id: str,
+        notification_id: str,
+        push_token_id: str,
+        kind: str,
+        body: str,
+        payload_json: dict[str, object],
+        created_at: datetime,
+        next_attempt_at: datetime,
+    ) -> PushDeliveryRow:
+        """Insert a fresh queue row in ``status='pending'``.
+
+        ``next_attempt_at`` is set to the caller's ``now`` so the
+        very next worker tick picks the row up. ``attempt`` starts
+        at 0; the first send increments to 1.
+        """
+        ...
+
+    def select_due(self, *, now: datetime, limit: int) -> Sequence[PushDeliveryRow]:
+        """Return up-to-``limit`` rows whose retry window has opened.
+
+        Filters on ``status='pending'`` and ``next_attempt_at <= now``,
+        ordered by ``next_attempt_at`` ascending so older overdue
+        rows fire first. Cross-tenant — caller wraps in
+        :func:`tenant_agnostic`.
+        """
+        ...
+
+    def claim(
+        self,
+        *,
+        delivery_id: str,
+        expected_attempt: int,
+        now: datetime,
+        in_flight_until: datetime,
+    ) -> bool:
+        """Atomically flip ``pending → in_flight`` for ``delivery_id``.
+
+        Returns ``True`` when the CAS succeeded (the caller now owns
+        the send), ``False`` when another worker already claimed the
+        row or the row's ``attempt`` counter moved (race lost). The
+        update bumps ``next_attempt_at`` to ``in_flight_until`` so a
+        worker that crashes mid-send is recovered by the next tick
+        once the in-flight window expires (cd-y60x restart safety).
+
+        ``last_attempted_at`` is stamped to ``now`` so the row's
+        attempt timestamp is fresh even if the send raises before
+        the success / failure handlers run.
+        """
+        ...
+
+    def mark_sent(
+        self,
+        *,
+        delivery_id: str,
+        attempt: int,
+        now: datetime,
+        last_status_code: int | None,
+    ) -> PushDeliveryRow:
+        """Stamp the row as ``status='sent'`` (terminal-clean)."""
+        ...
+
+    def mark_transient(
+        self,
+        *,
+        delivery_id: str,
+        attempt: int,
+        next_attempt_at: datetime,
+        now: datetime,
+        last_status_code: int | None,
+        last_error: str,
+    ) -> PushDeliveryRow:
+        """Schedule another retry — back to ``status='pending'``."""
+        ...
+
+    def mark_dead_lettered(
+        self,
+        *,
+        delivery_id: str,
+        attempt: int,
+        now: datetime,
+        last_status_code: int | None,
+        last_error: str,
+    ) -> PushDeliveryRow:
+        """Stamp the row as ``status='dead_lettered'`` (terminal-failure)."""
+        ...
+
+    def get(self, *, delivery_id: str) -> PushDeliveryRow | None:
+        """Return the queue row by id, or ``None`` if it's missing."""
+        ...
+
+    def get_token(self, *, push_token_id: str) -> PushTokenRow | None:
+        """Return the matching :class:`PushTokenRow` by id.
+
+        Reads cross-tenant — the token is identified by primary key
+        and the queue row already carries the workspace stamp.
+        Returns ``None`` if the token was deleted between enqueue
+        and send (the worker treats that as a clean drop).
+        """
+        ...
+
+    def delete_token(self, *, push_token_id: str) -> str | None:
+        """Hard-delete the matching ``push_token`` row by id.
+
+        Returns the deleted row's ``user_id`` so the caller can
+        forward it to the audit writer (the audit ledger keys
+        ``messaging.push.token_purged`` rows on the user). Returns
+        ``None`` when the row was already gone — idempotent.
+        """
+        ...
+
+    def get_workspace_setting(
+        self, *, workspace_id: str, settings_key: str
+    ) -> str | None:
+        """Return ``workspace.settings_json[settings_key]`` or ``None``.
+
+        Mirrors :meth:`PushTokenRepository.get_workspace_vapid_public_key`
+        but takes the key explicitly so the worker can read both the
+        VAPID private key and the optional subject claim through one
+        seam.
+        """
+        ...
+
+    def touch_token_last_used(self, *, push_token_id: str, now: datetime) -> None:
+        """Update ``push_token.last_used_at`` to ``now`` after a 2xx send.
+
+        Idempotent — a missing token (deleted between claim and
+        success) is a no-op.
+        """
         ...

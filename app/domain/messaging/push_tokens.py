@@ -83,7 +83,9 @@ from app.util.ulid import new_ulid
 
 __all__ = [
     "MAX_ENDPOINT_LEN",
+    "SETTINGS_KEY_VAPID_PRIVATE",
     "SETTINGS_KEY_VAPID_PUBLIC",
+    "SETTINGS_KEY_VAPID_SUBJECT",
     "EndpointNotAllowed",
     "EndpointSchemeInvalid",
     "PushSubscribe",
@@ -136,6 +138,30 @@ _PUSH_ENDPOINT_ALLOWED_HOSTS: frozenset[str] = frozenset(
 # multiple tenants can rotate them independently; rotation is CLI-
 # driven (out of scope for this module, tracked as a follow-up).
 SETTINGS_KEY_VAPID_PUBLIC = "messaging.push.vapid_public_key"
+
+# Workspace ``settings_json`` key for the VAPID private key. The push
+# delivery worker (cd-y60x) reads this when signing the JWT in the
+# Authorization header sent to the push provider; without it the
+# worker logs ``vapid_missing`` and dead-letters the row immediately
+# (the operator must provision the keypair before web-push can
+# deliver). The private half is workspace-scoped for the same
+# isolation reason as the public half — multi-tenant deployments
+# rotate independently. Stored as a base64url-encoded raw EC private
+# key (the shape ``py_vapid.Vapid.from_string`` accepts) or a PEM
+# string; the worker accepts whichever the CLI provisioning tool
+# writes.
+SETTINGS_KEY_VAPID_PRIVATE = "messaging.push.vapid_private_key"
+
+# Workspace ``settings_json`` key for the VAPID subject claim — an
+# operator-controlled ``mailto:`` URI the push provider uses to
+# contact the deployment if a key starts misbehaving. RFC 8292
+# §"Application Server Subject Information" recommends populating
+# the JWT's ``sub`` claim with a contact address; some providers
+# (notably FCM) reject pushes without one. Optional in the data
+# model — the worker falls back to a deployment-wide default
+# ``mailto:`` derived from ``MAIL_FROM`` (resolved at send time) if
+# the per-workspace value is absent.
+SETTINGS_KEY_VAPID_SUBJECT = "messaging.push.vapid_subject"
 
 
 # Size caps on the incoming subscription payload. Browsers produce

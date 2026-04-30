@@ -86,6 +86,7 @@ from app.worker.jobs.maintenance import (
     _make_webhook_dispatch_body,
 )
 from app.worker.jobs.messaging import _make_daily_digest_fanout_body
+from app.worker.jobs.messaging_web_push import _make_web_push_dispatch_body
 from app.worker.jobs.stays import _make_poll_ical_fanout_body
 from app.worker.jobs.tasks import _make_generator_fanout_body, _make_overdue_fanout_body
 
@@ -118,6 +119,8 @@ __all__ = [
     "USER_WORKSPACE_REFRESH_JOB_ID",
     "WEBHOOK_DISPATCH_INTERVAL_SECONDS",
     "WEBHOOK_DISPATCH_JOB_ID",
+    "WEB_PUSH_DISPATCH_INTERVAL_SECONDS",
+    "WEB_PUSH_DISPATCH_JOB_ID",
     "create_scheduler",
     "register_jobs",
     "start",
@@ -293,6 +296,20 @@ INVENTORY_REORDER_JOB_ID: str = "inventory.check_reorder_points"
 # per timezone.
 DAILY_DIGEST_JOB_ID: str = "messaging.daily_digest"
 DAILY_DIGEST_MISFIRE_GRACE_SECONDS: int = 1800
+
+# Stable job id for the web-push delivery worker (cd-y60x). The body
+# walks the ``notification_push_queue`` staging table and fires
+# :func:`pywebpush.webpush` calls bounded by a per-workspace
+# semaphore. Tick fires every 60 s — the smallest non-zero entry on
+# the §10 backoff schedule (``[30s, 2m, 10m, 1h]``) is 30 s, so a
+# 60 s tick honours the schedule with at most one tick of lag for
+# the first retry slot. ``misfire_grace_time`` matches the interval:
+# one tick late is fine (the dispatcher is idempotent on rows in
+# terminal state and re-attempts pending rows that were due);
+# two-ticks-late is a signal the scheduler is stuck and a skip is
+# preferable to a stacked catch-up.
+WEB_PUSH_DISPATCH_JOB_ID: str = "messaging.web_push_dispatch"
+WEB_PUSH_DISPATCH_INTERVAL_SECONDS: int = 60
 
 DEMO_GC_JOB_ID: str = "demo_gc"
 DEMO_GC_INTERVAL_SECONDS: int = 900
@@ -544,6 +561,7 @@ def register_jobs(
         INVENTORY_REORDER_JOB_ID,
         DAILY_DIGEST_JOB_ID,
         RETENTION_ROTATION_JOB_ID,
+        WEB_PUSH_DISPATCH_JOB_ID,
         DEMO_GC_JOB_ID,
         DEMO_USAGE_ROLLUP_JOB_ID,
     ):
@@ -877,6 +895,29 @@ def register_jobs(
             max_instances=1,
             coalesce=True,
             misfire_grace_time=DAILY_DIGEST_MISFIRE_GRACE_SECONDS,
+        )
+
+    # --- 60 s web-push delivery dispatcher (cd-y60x) ---
+    # The body walks the ``notification_push_queue`` staging table and
+    # fires :func:`pywebpush.webpush` for due rows. Cross-tenant by
+    # design — like the webhook dispatcher and approval-TTL sweep, the
+    # tick is deployment-scope; each row carries its own ``workspace_
+    # id`` so the per-row audit (token-purge on 410 / 404) keys off
+    # that field through a system-actor :class:`WorkspaceContext`.
+    if not demo_mode:
+        scheduler.add_job(
+            wrap_job(
+                _make_web_push_dispatch_body(resolved_clock),
+                job_id=WEB_PUSH_DISPATCH_JOB_ID,
+                clock=resolved_clock,
+            ),
+            trigger=IntervalTrigger(seconds=WEB_PUSH_DISPATCH_INTERVAL_SECONDS),
+            id=WEB_PUSH_DISPATCH_JOB_ID,
+            name=WEB_PUSH_DISPATCH_JOB_ID,
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+            misfire_grace_time=WEB_PUSH_DISPATCH_INTERVAL_SECONDS,
         )
 
     if demo_mode:

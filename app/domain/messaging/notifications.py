@@ -363,23 +363,29 @@ class Jinja2TemplateLoader:
 # ---------------------------------------------------------------------------
 
 
-# Callable seam for web-push dispatch. v1 does not ship a concrete
-# worker (the native-app project is future work per §10
-# "Agent-message delivery" v1 scope note) so the caller injects the
-# function that knows how to enqueue; a test-only implementation
-# records into an in-memory list. Signature matches what the
-# eventual :func:`app.worker.push.enqueue_push` will expose so the
-# swap is a drop-in.
+# Callable seam for web-push dispatch.
 #
-# ``user_id`` is the recipient. ``kind`` is the notification kind's
-# string value (used for telemetry on the push adapter). ``body`` is
-# the rendered push copy — the short envelope per §10 "Agent-message
-# delivery" tier 2 (server never ships full message body in push).
-# ``payload`` is the structured context the template consumed,
-# forwarded so the push adapter can build a deep-link URL without
-# re-resolving the entity.
+# The cd-y60x worker (``app/worker/jobs/messaging_web_push.py``) wires
+# the production implementation: it inserts one row per active push
+# token of the recipient into ``notification_push_queue`` so a
+# subsequent worker tick fires the actual ``pywebpush`` send. Tests
+# wire a fake that records the call into an in-memory list.
+#
+# ``ctx`` carries the workspace + actor context so the enqueue path
+# can scope token lookups and audit writes. ``recipient_user_id`` is
+# the user the notification is being delivered to (often distinct
+# from ``ctx.actor_id`` — the actor is the sender). ``notification_id``
+# is the freshly-minted :class:`Notification.id` so the queue row's
+# FK to that row resolves; a future replay / inspection links back
+# through this id. ``kind`` is the notification kind's string value
+# (used for telemetry on the push adapter). ``body`` is the rendered
+# push copy — the short envelope per §10 "Agent-message delivery"
+# tier 2 (server never ships full message body in push). ``payload``
+# is the structured context the template consumed, forwarded so the
+# push adapter can build a deep-link URL without re-resolving the
+# entity.
 PushEnqueue = Callable[
-    [str, str, str, Mapping[str, Any]],
+    [WorkspaceContext, str, str, str, str, Mapping[str, Any]],
     None,
 ]
 
@@ -664,7 +670,9 @@ class NotificationService:
             )
         else:
             self.push_enqueue(
+                self.ctx,
                 recipient.id,
+                notification_id,
                 kind.value,
                 push_body,
                 dict(payload),

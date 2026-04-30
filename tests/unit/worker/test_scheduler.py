@@ -46,6 +46,7 @@ from app.worker.scheduler import (
     RETENTION_ROTATION_JOB_ID,
     USER_WORKSPACE_REFRESH_INTERVAL_SECONDS,
     USER_WORKSPACE_REFRESH_JOB_ID,
+    WEB_PUSH_DISPATCH_JOB_ID,
     WEBHOOK_DISPATCH_JOB_ID,
     create_scheduler,
     register_jobs,
@@ -102,6 +103,7 @@ class TestRegisterJobs:
             POLL_ICAL_JOB_ID,
             RETENTION_ROTATION_JOB_ID,
             USER_WORKSPACE_REFRESH_JOB_ID,
+            WEB_PUSH_DISPATCH_JOB_ID,
             WEBHOOK_DISPATCH_JOB_ID,
         }
 
@@ -142,6 +144,7 @@ class TestRegisterJobs:
             POLL_ICAL_JOB_ID,
             RETENTION_ROTATION_JOB_ID,
             USER_WORKSPACE_REFRESH_JOB_ID,
+            WEB_PUSH_DISPATCH_JOB_ID,
             WEBHOOK_DISPATCH_JOB_ID,
         }
         assert set(ids) == expected_ids
