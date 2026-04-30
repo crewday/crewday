@@ -178,6 +178,8 @@ deliberately narrow:
   OpenRouter adapter the pointer key is
   `openrouter.api_key_envelope_id`, the envelope purpose is
   `openrouter.api_key`, and admin reads expose only `display_stub`.
+  Operator rotation commands, validation probes, and recommended
+  cadences are listed in §16 "Secret lifecycle".
 
 1. **Payout manifest** (HTTP, §09) — owner/manager passkey session
    only; on §11's interactive-session-only list; not stored; not

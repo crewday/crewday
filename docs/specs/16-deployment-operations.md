@@ -121,6 +121,41 @@ Cron:
 0 3 * * * cd /srv/crewday && docker compose exec -T app crewday admin backup --to /backups/
 ```
 
+### Secret lifecycle
+
+Operator-rotated secrets use host-only `crewday admin` commands. They
+accept secret material only from `0600` files owned by the invoking user
+or from non-interactive stdin; argv-delivered `--new <value>` forms are
+refused because they leak through shell history and process listings.
+
+| Secret | Command | Validation before write | Cadence |
+| --- | --- | --- | --- |
+| Root key | `crewday admin rotate-root-key --new-key-file <path>` or `--new-key-stdin` | Re-encrypts `secret_envelope` rows and finalizes legacy slots separately; see §15. | P0 incident or planned annual drill |
+| SMTP credentials | `crewday admin rotate-smtp --new-cred-file <json>` or `--new-cred-stdin` | Opens the relay, runs `EHLO`, STARTTLS when configured, and logs in when a username is supplied before writing `smtp.*` deployment settings. | When relay credentials change; otherwise quarterly |
+| OpenRouter API key | `crewday admin rotate-openrouter --new-key-file <path>` or `--new-key-stdin` | Calls OpenRouter `GET /models` with the new key before replacing `openrouter.api_key_envelope_id`. | Provider key rotation policy; otherwise quarterly |
+| HMAC signing key | `crewday admin rotate-hmac --new-key-file <path>` or `--new-key-stdin` | Installs a new primary for the deployment HMAC purposes (`guest-link`, `storage-sign`) and keeps the old key in legacy slots for 72 hours. | Quarterly or after any URL-signing exposure |
+| Session signing key | `crewday admin rotate-session-secret --new-key-file <path>` or `--new-key-stdin` | Writes a new session signing envelope and deletes every web session row in the same transaction. | P0 session incident or planned forced sign-out |
+
+SMTP credential JSON uses:
+
+```json
+{
+  "host": "smtp.example.com",
+  "port": 587,
+  "from": "crew.day <ops@example.com>",
+  "user": "crewday",
+  "password": "provider-secret",
+  "use_tls": true,
+  "timeout": 10,
+  "bounce_domain": "ops.example.com"
+}
+```
+
+`user` and `bounce_domain` are optional. The password and OpenRouter
+key are stored through `secret_envelope`; admin reads expose only a
+`display_stub`. Every rotation writes a deployment-scope audit row with
+`actor_kind = system` and `via = cli`.
+
 **Lockout recovery** is host-CLI-only in v1. If the last owner is
 locked out, the operator stops the service, runs
 `crewday admin recover --email ...` on the host, and opens the

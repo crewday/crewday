@@ -53,6 +53,16 @@ def _load_app_rotate_root_key() -> Any:
     return rotate_root_key_mod
 
 
+def _load_app_rotate_secrets() -> Any:
+    try:
+        from app.admin import rotate_secrets as rotate_secrets_mod
+    except Exception as exc:
+        raise ConfigError(
+            "admin commands must run on the server host with app dependencies installed"
+        ) from exc
+    return rotate_secrets_mod
+
+
 def _make_uow() -> Any:
     try:
         from app.adapters.db.session import make_uow
@@ -518,6 +528,245 @@ def rotate_root_key(
 rotate_root_key = cli_override("admin", "rotate-root-key", covers=[])(rotate_root_key)
 
 
+def _refuse_argv_secret(value: str | None) -> None:
+    if value is not None:
+        raise click.UsageError(
+            "--new <value> is refused because it leaks secrets through shell "
+            "history and process listings; use the file or stdin form"
+        )
+
+
+def _safe_input_flags(
+    *,
+    file_path: pathlib.Path | None,
+    stdin: bool,
+    unsafe_value: str | None,
+    file_label: str,
+    stdin_label: str,
+) -> None:
+    _refuse_argv_secret(unsafe_value)
+    if sum((file_path is not None, stdin)) != 1:
+        raise click.UsageError(f"choose exactly one of {file_label} or {stdin_label}")
+
+
+def _stdin_not_tty(option: str) -> None:
+    if os.isatty(0):
+        raise click.UsageError(f"{option} refuses an interactive TTY")
+
+
+@click.command(name="rotate-smtp")
+@click.option(
+    "--new-cred-file",
+    type=click.Path(exists=True, dir_okay=False, readable=True, path_type=pathlib.Path),
+    default=None,
+    help="Read new SMTP credentials from an operator-owned 0600 JSON file.",
+)
+@click.option(
+    "--new-cred-stdin",
+    is_flag=True,
+    help="Read new SMTP credentials JSON from stdin. Refuses an interactive TTY.",
+)
+@click.option("--new", "unsafe_new_value", default=None, help="Refused.")
+def rotate_smtp(
+    *,
+    new_cred_file: pathlib.Path | None,
+    new_cred_stdin: bool,
+    unsafe_new_value: str | None,
+) -> None:
+    """Rotate deployment SMTP credentials."""
+    _safe_input_flags(
+        file_path=new_cred_file,
+        stdin=new_cred_stdin,
+        unsafe_value=unsafe_new_value,
+        file_label="--new-cred-file",
+        stdin_label="--new-cred-stdin",
+    )
+    rotate_mod = _load_app_rotate_secrets()
+    raw: bytearray
+    if new_cred_file is not None:
+        raw = rotate_mod.load_secret_file(new_cred_file)
+    else:
+        _stdin_not_tty("--new-cred-stdin")
+        raw = rotate_mod.secret_bytes_from_input(
+            click.get_binary_stream("stdin").read()
+        )
+    credentials = rotate_mod.parse_smtp_credentials(bytes(raw))
+    settings = _settings()
+    make_uow = _make_uow()
+    try:
+        with make_uow() as session:
+            assert isinstance(session, Session)
+            result = rotate_mod.rotate_smtp_credentials(
+                session,
+                settings=settings,
+                credentials=credentials,
+            )
+    finally:
+        rotate_mod.zero_key_material(raw)
+        rotate_mod.zero_key_material(credentials.password)
+    click.echo(json.dumps(rotate_mod.rotation_result_payload(result), sort_keys=True))
+
+
+@click.command(name="rotate-openrouter")
+@click.option(
+    "--new-key-file",
+    type=click.Path(exists=True, dir_okay=False, readable=True, path_type=pathlib.Path),
+    default=None,
+    help="Read the new OpenRouter key from an operator-owned 0600 file.",
+)
+@click.option(
+    "--new-key-stdin",
+    is_flag=True,
+    help="Read the new OpenRouter key from stdin. Refuses an interactive TTY.",
+)
+@click.option("--new", "unsafe_new_value", default=None, help="Refused.")
+def rotate_openrouter(
+    *,
+    new_key_file: pathlib.Path | None,
+    new_key_stdin: bool,
+    unsafe_new_value: str | None,
+) -> None:
+    """Rotate the deployment OpenRouter key."""
+    _safe_input_flags(
+        file_path=new_key_file,
+        stdin=new_key_stdin,
+        unsafe_value=unsafe_new_value,
+        file_label="--new-key-file",
+        stdin_label="--new-key-stdin",
+    )
+    rotate_mod = _load_app_rotate_secrets()
+    if new_key_file is not None:
+        key = rotate_mod.load_secret_file(new_key_file)
+    else:
+        _stdin_not_tty("--new-key-stdin")
+        key = rotate_mod.secret_bytes_from_input(
+            click.get_binary_stream("stdin").read()
+        )
+    settings = _settings()
+    make_uow = _make_uow()
+    try:
+        with make_uow() as session:
+            assert isinstance(session, Session)
+            result = rotate_mod.rotate_openrouter_key(
+                session,
+                settings=settings,
+                api_key=key,
+            )
+    finally:
+        rotate_mod.zero_key_material(key)
+    click.echo(json.dumps(rotate_mod.rotation_result_payload(result), sort_keys=True))
+
+
+@click.command(name="rotate-hmac")
+@click.option(
+    "--new-key-file",
+    type=click.Path(exists=True, dir_okay=False, readable=True, path_type=pathlib.Path),
+    default=None,
+    help="Read the new 32-byte HMAC key from an operator-owned 0600 file.",
+)
+@click.option(
+    "--new-key-stdin",
+    is_flag=True,
+    help="Read the new 32-byte HMAC key from stdin. Refuses an interactive TTY.",
+)
+@click.option("--new", "unsafe_new_value", default=None, help="Refused.")
+def rotate_hmac(
+    *,
+    new_key_file: pathlib.Path | None,
+    new_key_stdin: bool,
+    unsafe_new_value: str | None,
+) -> None:
+    """Rotate deployment HMAC signing keys."""
+    _safe_input_flags(
+        file_path=new_key_file,
+        stdin=new_key_stdin,
+        unsafe_value=unsafe_new_value,
+        file_label="--new-key-file",
+        stdin_label="--new-key-stdin",
+    )
+    rotate_mod = _load_app_rotate_secrets()
+    if new_key_file is not None:
+        key = rotate_mod.load_secret_file(new_key_file)
+    else:
+        _stdin_not_tty("--new-key-stdin")
+        key = rotate_mod.secret_bytes_from_input(
+            click.get_binary_stream("stdin").read()
+        )
+    settings = _settings()
+    make_uow = _make_uow()
+    try:
+        with make_uow() as session:
+            assert isinstance(session, Session)
+            result = rotate_mod.rotate_hmac_signing_key(
+                session,
+                settings=settings,
+                new_key=key,
+            )
+    finally:
+        rotate_mod.zero_key_material(key)
+    click.echo(json.dumps(rotate_mod.rotation_result_payload(result), sort_keys=True))
+
+
+@click.command(name="rotate-session-secret")
+@click.option(
+    "--new-key-file",
+    type=click.Path(exists=True, dir_okay=False, readable=True, path_type=pathlib.Path),
+    default=None,
+    help="Read the new 32-byte session signing key from a 0600 file.",
+)
+@click.option(
+    "--new-key-stdin",
+    is_flag=True,
+    help="Read the new 32-byte session signing key from stdin.",
+)
+@click.option("--new", "unsafe_new_value", default=None, help="Refused.")
+def rotate_session_secret(
+    *,
+    new_key_file: pathlib.Path | None,
+    new_key_stdin: bool,
+    unsafe_new_value: str | None,
+) -> None:
+    """Rotate session signing material and clear sessions."""
+    _safe_input_flags(
+        file_path=new_key_file,
+        stdin=new_key_stdin,
+        unsafe_value=unsafe_new_value,
+        file_label="--new-key-file",
+        stdin_label="--new-key-stdin",
+    )
+    rotate_mod = _load_app_rotate_secrets()
+    if new_key_file is not None:
+        key = rotate_mod.load_secret_file(new_key_file)
+    else:
+        _stdin_not_tty("--new-key-stdin")
+        key = rotate_mod.secret_bytes_from_input(
+            click.get_binary_stream("stdin").read()
+        )
+    settings = _settings()
+    make_uow = _make_uow()
+    try:
+        with make_uow() as session:
+            assert isinstance(session, Session)
+            result = rotate_mod.rotate_session_secret(
+                session,
+                settings=settings,
+                new_key=key,
+            )
+    finally:
+        rotate_mod.zero_key_material(key)
+    click.echo(json.dumps(rotate_mod.rotation_result_payload(result), sort_keys=True))
+
+
+rotate_smtp = cli_override("admin", "rotate-smtp", covers=[])(rotate_smtp)
+rotate_openrouter = cli_override("admin", "rotate-openrouter", covers=[])(
+    rotate_openrouter
+)
+rotate_hmac = cli_override("admin", "rotate-hmac", covers=[])(rotate_hmac)
+rotate_session_secret = cli_override("admin", "rotate-session-secret", covers=[])(
+    rotate_session_secret
+)
+
+
 def _ensure_group(root: click.Group, name: str, *, help_text: str) -> click.Group:
     group = root.get_command(click.Context(root), name)
     if group is None:
@@ -535,6 +784,10 @@ def register(root: click.Group) -> None:
     group.add_command(purge)
     group.add_command(restore)
     group.add_command(rotate_root_key)
+    group.add_command(rotate_smtp)
+    group.add_command(rotate_openrouter)
+    group.add_command(rotate_hmac)
+    group.add_command(rotate_session_secret)
 
     user = _ensure_group(group, "user", help_text="host-only user admin commands")
     user.add_command(user_invite)

@@ -124,3 +124,36 @@ def test_admin_restore_runs_migrations_after_restore(
     assert migrations_called is True
     body = json.loads(result.output)
     assert body["restored_database"] == str(tmp_path / "restored.db")
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        admin.rotate_smtp,
+        admin.rotate_openrouter,
+        admin.rotate_hmac,
+        admin.rotate_session_secret,
+    ],
+)
+def test_secret_rotation_commands_refuse_argv_secret(command: object) -> None:
+    result = CliRunner().invoke(command, ["--new", "secret-on-argv"])
+
+    assert result.exit_code == 2
+    assert "leaks secrets through shell history" in result.output
+    assert "secret-on-argv" not in result.output
+
+
+@pytest.mark.parametrize(
+    ("command", "expected"),
+    [
+        (admin.rotate_smtp, "--new-cred-file"),
+        (admin.rotate_openrouter, "--new-key-file"),
+        (admin.rotate_hmac, "--new-key-file"),
+        (admin.rotate_session_secret, "--new-key-file"),
+    ],
+)
+def test_secret_rotation_help_renders(command: object, expected: str) -> None:
+    result = CliRunner().invoke(command, ["--help"])
+
+    assert result.exit_code == 0
+    assert expected in result.output
