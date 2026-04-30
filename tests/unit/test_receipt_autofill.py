@@ -89,14 +89,16 @@ _OCR_MODEL = "test/gemma-vision"
 
 
 # ---------------------------------------------------------------------------
-# Seam compat shims (cd-0e8i)
+# Seam helpers
 # ---------------------------------------------------------------------------
 #
-# The cd-0e8i refactor flipped :mod:`app.domain.expenses.claims`'s
-# public API to ``(repo, checker, ctx, *, ...)``. Autofill is still on
-# the old session-based shape (cd-sxmz follow-up); these wrappers
-# rebuild the SA seam pair on each call so the autofill-side coverage
-# can keep using the legacy session-based call shape until then.
+# The expenses domain services take Protocol seams. These helpers keep
+# the test setup compact while still threading the same SQLAlchemy
+# session-backed repository/checker pair the API uses.
+
+
+def _make_repo(session: Session) -> SqlAlchemyExpensesRepository:
+    return SqlAlchemyExpensesRepository(session)
 
 
 def _make_seam_pair(
@@ -737,7 +739,7 @@ class TestRunExtractionHappyPath:
         llm = StubLLMClient(chat_payload=_high_confidence_payload())
 
         result = run_extraction(
-            session,
+            _make_repo(session),
             ctx,
             claim_id=view.id,
             attachment_id=att_id,
@@ -784,7 +786,7 @@ class TestRunExtractionHappyPath:
         llm = StubLLMClient(chat_payload=_low_confidence_payload())
 
         result = run_extraction(
-            session,
+            _make_repo(session),
             ctx,
             claim_id=view.id,
             attachment_id=att_id,
@@ -824,7 +826,7 @@ class TestRunExtractionHappyPath:
         )
         llm = StubLLMClient(chat_payload=_high_confidence_payload())
         run_extraction(
-            session,
+            _make_repo(session),
             ctx,
             claim_id=view.id,
             attachment_id=att_id_1,
@@ -850,7 +852,7 @@ class TestRunExtractionHappyPath:
             chat_payload=_high_confidence_payload(vendor="Other Vendor", amount="55.00")
         )
         result = run_extraction(
-            session,
+            _make_repo(session),
             ctx,
             claim_id=view.id,
             attachment_id=att_id_2,
@@ -891,7 +893,7 @@ class TestRunExtractionHappyPath:
         llm = StubLLMClient(chat_payload=_high_confidence_payload())
 
         result = run_extraction(
-            session,
+            _make_repo(session),
             ctx,
             claim_id=view.id,
             attachment_id=att_id,
@@ -942,7 +944,7 @@ class TestRunExtractionFailures:
 
         with pytest.raises(ExtractionParseError):
             run_extraction(
-                session,
+                _make_repo(session),
                 ctx,
                 claim_id=claim_id,
                 attachment_id=att_id,
@@ -980,7 +982,7 @@ class TestRunExtractionFailures:
 
         with pytest.raises(ExtractionParseError):
             run_extraction(
-                session,
+                _make_repo(session),
                 ctx,
                 claim_id=claim_id,
                 attachment_id=att_id,
@@ -1003,7 +1005,7 @@ class TestRunExtractionFailures:
 
         with pytest.raises(ExtractionParseError):
             run_extraction(
-                session,
+                _make_repo(session),
                 ctx,
                 claim_id=claim_id,
                 attachment_id=att_id,
@@ -1025,7 +1027,7 @@ class TestRunExtractionFailures:
 
         with pytest.raises(ExtractionRateLimited):
             run_extraction(
-                session,
+                _make_repo(session),
                 ctx,
                 claim_id=claim_id,
                 attachment_id=att_id,
@@ -1059,7 +1061,7 @@ class TestRunExtractionFailures:
 
         with pytest.raises(ExtractionProviderError):
             run_extraction(
-                session,
+                _make_repo(session),
                 ctx,
                 claim_id=claim_id,
                 attachment_id=att_id,
@@ -1081,7 +1083,7 @@ class TestRunExtractionFailures:
 
         with pytest.raises(ExtractionProviderError):
             run_extraction(
-                session,
+                _make_repo(session),
                 ctx,
                 claim_id=claim_id,
                 attachment_id=att_id,
@@ -1103,7 +1105,7 @@ class TestRunExtractionFailures:
 
         with pytest.raises(ExtractionTimeout):
             run_extraction(
-                session,
+                _make_repo(session),
                 ctx,
                 claim_id=claim_id,
                 attachment_id=att_id,
@@ -1141,7 +1143,7 @@ class TestLlmUsagePersisted:
         llm = StubLLMClient(chat_payload=_high_confidence_payload())
 
         result = run_extraction(
-            session,
+            _make_repo(session),
             ctx,
             claim_id=view.id,
             attachment_id=att_id,
@@ -1187,7 +1189,7 @@ class TestLlmUsagePersisted:
 
         with pytest.raises(ExtractionParseError):
             run_extraction(
-                session,
+                _make_repo(session),
                 ctx,
                 claim_id=view.id,
                 attachment_id=att_id,
@@ -1269,7 +1271,7 @@ class TestAttachReceiptRunner:
         captured: list[tuple[str, str]] = []
 
         def fake_runner(
-            _session: Session,
+            _repo: SqlAlchemyExpensesRepository,
             _ctx: WorkspaceContext,
             *,
             claim_id: str,
@@ -1324,7 +1326,7 @@ class TestAttachReceiptRunner:
         runner_calls = 0
 
         def fake_runner(
-            _session: Session,
+            _repo: SqlAlchemyExpensesRepository,
             _ctx: WorkspaceContext,
             *,
             claim_id: str,
@@ -1370,7 +1372,7 @@ class TestAttachReceiptRunner:
         )
 
         def boom_runner(
-            _session: Session,
+            _repo: SqlAlchemyExpensesRepository,
             _ctx: WorkspaceContext,
             *,
             claim_id: str,
@@ -1428,7 +1430,7 @@ class TestLookups:
 
         with pytest.raises(ClaimNotFound):
             run_extraction(
-                session,
+                _make_repo(session),
                 ctx,
                 claim_id="nonexistent",
                 attachment_id="nope",
@@ -1453,7 +1455,7 @@ class TestLookups:
 
         with pytest.raises(AttachmentNotFound):
             run_extraction(
-                session,
+                _make_repo(session),
                 ctx,
                 claim_id=view.id,
                 attachment_id="nope",

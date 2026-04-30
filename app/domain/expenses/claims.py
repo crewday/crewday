@@ -1385,7 +1385,7 @@ def attach_receipt(
     ``extraction_runner`` is the cd-95zb DI seam: when non-``None``
     AND the claim is still ``draft`` after the attach lands, the
     callable is invoked synchronously with
-    ``(session, ctx, claim_id=..., attachment_id=...)`` so the LLM
+    ``(repo, ctx, claim_id=..., attachment_id=...)`` so the LLM
     OCR / autofill pipeline can write back to the same UoW. Pass
     ``None`` (the default) when no autofill is desired — tests, the
     legacy call sites that predate cd-95zb, and any deployment
@@ -1497,7 +1497,7 @@ def attach_receipt(
     # path untouched.
     #
     # The runner writes its own ``receipt.ocr_failed`` audit row +
-    # :class:`LlmUsageRow` BEFORE re-raising on every failure mode
+    # LLM usage row BEFORE re-raising on every failure mode
     # (timeout, rate-limit, parse error, provider error). If we let
     # those exceptions propagate here, the surrounding UoW would
     # rollback — wiping out the attach row, the attach audit row,
@@ -1514,9 +1514,7 @@ def attach_receipt(
     # stays NULL) to know to fall back to manual entry.
     if extraction_runner is not None and row.state == "draft":
         try:
-            extraction_runner(
-                repo.session, ctx, claim_id=claim_id, attachment_id=view.id
-            )
+            extraction_runner(repo, ctx, claim_id=claim_id, attachment_id=view.id)
         except Exception as exc:
             # The runner has already written its own audit row +
             # ``LlmUsage`` row before raising; we want those rows

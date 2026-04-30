@@ -9,8 +9,8 @@ fresh draft with no prior autofill run — fills the claim's
 worker-typed fields. Every call writes one
 :class:`~app.adapters.db.audit.models.AuditLog` row
 (``receipt.ocr_completed`` on success, ``receipt.ocr_failed`` on every
-failure mode) and one :class:`~app.adapters.db.llm.models.LlmUsage`
-row keyed under capability ``"expenses.autofill"``.
+failure mode) and one LLM usage row keyed under capability
+``"expenses.autofill"``.
 
 Public surface:
 
@@ -100,16 +100,17 @@ from decimal import ROUND_HALF_EVEN, Decimal
 from typing import Any, Final, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
-from sqlalchemy import select
-from sqlalchemy.orm import Session
 
-from app.adapters.db.expenses.models import ExpenseAttachment, ExpenseClaim
-from app.adapters.db.llm.models import LlmUsage as LlmUsageRow
 from app.adapters.llm.ports import LLMClient, LLMResponse
 from app.adapters.storage.ports import BlobNotFound, Storage
 from app.audit import write_audit
 from app.config import Settings, get_settings
 from app.domain.expenses.claims import _validate_currency
+from app.domain.expenses.ports import (
+    ExpenseAttachmentRow,
+    ExpenseClaimRow,
+    ExpensesRepository,
+)
 from app.tenancy import WorkspaceContext
 from app.util.clock import Clock, SystemClock
 from app.util.currency import ISO_4217_ALLOWLIST
@@ -241,7 +242,7 @@ class ExtractionParseError(ValueError):
     AFTER the provider charged tokens, :func:`extract_from_bytes`
     attaches a :class:`ExtractionMetrics` snapshot via
     :attr:`burnt_metrics` so the persist path can record the real
-    token counts on the failure-mode :class:`LlmUsageRow`. The
+    token counts on the failure-mode LLM usage row. The
     attribute is ``None`` when the chat itself never landed (a
     :class:`pydantic.ValidationError` raised before any tokens were
     spent goes through the same exception type).
@@ -407,7 +408,7 @@ class ExtractionResult:
       ``True``) or empty.
     * ``overall_confidence`` — the per-row score persisted on the
       claim. Returned for the caller's audit log / UI.
-    * ``llm_usage_id`` — the id of the :class:`LlmUsageRow` written
+    * ``llm_usage_id`` — the id of the LLM usage row written
       in the same UoW. Useful for /admin/usage smoke tests.
     """
 
@@ -428,7 +429,7 @@ class ExtractionMetrics:
     """Adapter-reported metrics carried back from :func:`extract_from_bytes`.
 
     Bundled into a frozen dataclass so the persist path can write
-    them to :class:`LlmUsageRow` without re-shuffling the call site.
+    them to the LLM usage seam without re-shuffling the call site.
     The HTTP preview route reads ``extraction`` only and discards
     the rest.
 
@@ -673,12 +674,12 @@ def _to_amount_cents(payload: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def _load_claim(
-    session: Session,
+    repo: ExpensesRepository,
     ctx: WorkspaceContext,
     *,
     claim_id: str,
     for_update: bool = False,
-) -> ExpenseClaim:
+) -> ExpenseClaimRow:
     """Load ``claim_id`` scoped to the caller's workspace, or raise.
 
     ``for_update`` issues a ``SELECT ... FOR UPDATE`` so concurrent
@@ -692,33 +693,29 @@ def _load_claim(
     :func:`run_extraction` directly without an outer lock relies on
     this seam.
     """
-    stmt = select(ExpenseClaim).where(
-        ExpenseClaim.id == claim_id,
-        ExpenseClaim.workspace_id == ctx.workspace_id,
-        ExpenseClaim.deleted_at.is_(None),
+    row = repo.get_claim(
+        workspace_id=ctx.workspace_id,
+        claim_id=claim_id,
+        for_update=for_update,
     )
-    if for_update:
-        stmt = stmt.with_for_update()
-    row = session.scalars(stmt).one_or_none()
     if row is None:
         raise ClaimNotFound(claim_id)
     return row
 
 
 def _load_attachment(
-    session: Session,
+    repo: ExpensesRepository,
     ctx: WorkspaceContext,
     *,
     claim_id: str,
     attachment_id: str,
-) -> ExpenseAttachment:
+) -> ExpenseAttachmentRow:
     """Load ``attachment_id`` (scoped to ``claim_id`` + tenant) or raise."""
-    stmt = select(ExpenseAttachment).where(
-        ExpenseAttachment.id == attachment_id,
-        ExpenseAttachment.claim_id == claim_id,
-        ExpenseAttachment.workspace_id == ctx.workspace_id,
+    row = repo.get_attachment(
+        workspace_id=ctx.workspace_id,
+        claim_id=claim_id,
+        attachment_id=attachment_id,
     )
-    row = session.scalars(stmt).one_or_none()
     if row is None:
         raise AttachmentNotFound(attachment_id)
     return row
@@ -742,7 +739,7 @@ def _read_blob(storage: Storage, *, blob_hash: str) -> bytes:
 
 
 def _write_audit_failure(
-    session: Session,
+    repo: ExpensesRepository,
     ctx: WorkspaceContext,
     *,
     claim_id: str,
@@ -757,7 +754,7 @@ def _write_audit_failure(
     shape — the SPA's failure pivot keys on ``error`` directly.
     """
     write_audit(
-        session,
+        repo.session,
         ctx,
         entity_kind="expense_claim",
         entity_id=claim_id,
@@ -768,7 +765,7 @@ def _write_audit_failure(
 
 
 def _record_llm_usage(
-    session: Session,
+    repo: ExpensesRepository,
     ctx: WorkspaceContext,
     *,
     model_id: str,
@@ -779,7 +776,7 @@ def _record_llm_usage(
     correlation_id: str,
     clock: Clock,
 ) -> str:
-    """Insert one :class:`LlmUsageRow` row and return its id.
+    """Insert one LLM usage row and return its id.
 
     Takes primitive token / latency fields (rather than an
     :class:`ExtractionMetrics` snapshot) so the failure paths can
@@ -801,8 +798,8 @@ def _record_llm_usage(
     # :mod:`app.domain.llm.budget` ``estimate_cost_cents`` for the
     # current "unknown model → 0" semantic. Tracked together with
     # the §11 router landing.
-    row = LlmUsageRow(
-        id=usage_id,
+    repo.insert_llm_usage(
+        usage_id=usage_id,
         workspace_id=ctx.workspace_id,
         capability=AUTOFILL_CAPABILITY,
         model_id=model_id,
@@ -812,21 +809,14 @@ def _record_llm_usage(
         latency_ms=latency_ms,
         status=status,
         correlation_id=correlation_id,
-        attempt=0,
-        assignment_id=None,
-        fallback_attempts=0,
-        finish_reason=None,
         actor_user_id=ctx.actor_id,
-        token_id=None,
-        agent_label=None,
         created_at=clock.now(),
     )
-    session.add(row)
     return usage_id
 
 
 def run_extraction(
-    session: Session,
+    repo: ExpensesRepository,
     ctx: WorkspaceContext,
     *,
     claim_id: str,
@@ -849,7 +839,7 @@ def run_extraction(
     * Loads claim + attachment scoped to the caller's tenant.
     * Reads the blob bytes and runs :func:`extract_from_bytes`.
     * On any extraction failure, writes a ``receipt.ocr_failed``
-      audit row + an :class:`LlmUsageRow` with the matching status
+      audit row + an LLM usage row with the matching status
       (``error`` for parse / provider, ``timeout`` for timeout).
       The claim is NOT mutated on failure.
     * On success, persists ``llm_autofill_json`` +
@@ -869,9 +859,9 @@ def run_extraction(
     # (``llm_autofill_json IS NULL``) is a single atomic
     # read-then-write per row. See :func:`_load_claim` for the
     # rationale + the v1 redundancy with attach_receipt's own lock.
-    claim = _load_claim(session, ctx, claim_id=claim_id, for_update=True)
+    claim = _load_claim(repo, ctx, claim_id=claim_id, for_update=True)
     attachment = _load_attachment(
-        session, ctx, claim_id=claim_id, attachment_id=attachment_id
+        repo, ctx, claim_id=claim_id, attachment_id=attachment_id
     )
 
     # Snapshot the "no autofill yet" predicate BEFORE we run anything —
@@ -894,7 +884,7 @@ def run_extraction(
         )
     except ExtractionTimeout as exc:
         _write_audit_failure(
-            session,
+            repo,
             ctx,
             claim_id=claim_id,
             attachment_id=attachment_id,
@@ -906,7 +896,7 @@ def run_extraction(
         # surfaces the failed call and operators can pivot on
         # ``status='timeout'``.
         _record_llm_usage(
-            session,
+            repo,
             ctx,
             model_id=fallback_model_id,
             prompt_tokens=0,
@@ -919,7 +909,7 @@ def run_extraction(
         raise
     except ExtractionParseError as exc:
         _write_audit_failure(
-            session,
+            repo,
             ctx,
             claim_id=claim_id,
             attachment_id=attachment_id,
@@ -932,7 +922,7 @@ def run_extraction(
         # the spend instead of zeroing it out.
         burnt = exc.burnt_metrics
         _record_llm_usage(
-            session,
+            repo,
             ctx,
             model_id=burnt.model_id if burnt is not None else fallback_model_id,
             prompt_tokens=burnt.prompt_tokens if burnt is not None else 0,
@@ -948,7 +938,7 @@ def run_extraction(
         ExtractionProviderError,
     ) as exc:
         _write_audit_failure(
-            session,
+            repo,
             ctx,
             claim_id=claim_id,
             attachment_id=attachment_id,
@@ -958,7 +948,7 @@ def run_extraction(
         # Rate-limit / provider-error paths failed before the chat
         # body landed; no token spend to record.
         _record_llm_usage(
-            session,
+            repo,
             ctx,
             model_id=fallback_model_id,
             prompt_tokens=0,
@@ -985,8 +975,10 @@ def run_extraction(
     # whether we autofill. The UI shows the suggestions even on a
     # low-confidence run (the worker can accept individual fields).
     payload_dict = _extraction_to_payload(extraction, confidence_overall)
-    claim.llm_autofill_json = payload_dict
-    claim.autofill_confidence_overall = confidence_overall
+    fields: dict[str, Any] = {
+        "llm_autofill_json": payload_dict,
+        "autofill_confidence_overall": confidence_overall,
+    }
 
     autofilled_fields: tuple[str, ...] = ()
     autofilled = False
@@ -998,11 +990,15 @@ def run_extraction(
         # keep the DB invariant intact (the schema validator already
         # enforced this once; the second pass is defence-in-depth
         # in case a future subclass loosens the rule).
-        claim.vendor = extraction.vendor
-        claim.purchased_at = extraction.purchased_at
-        claim.currency = _validate_currency(extraction.currency)
-        claim.total_amount_cents = extraction.amount_cents
-        claim.category = extraction.category
+        fields.update(
+            {
+                "vendor": extraction.vendor,
+                "purchased_at": extraction.purchased_at,
+                "currency": _validate_currency(extraction.currency),
+                "total_amount_cents": extraction.amount_cents,
+                "category": extraction.category,
+            }
+        )
         autofilled_fields = (
             "vendor",
             "purchased_at",
@@ -1012,10 +1008,14 @@ def run_extraction(
         )
         autofilled = True
 
-    session.flush()
+    repo.update_claim_fields(
+        workspace_id=ctx.workspace_id,
+        claim_id=claim_id,
+        fields=fields,
+    )
 
     usage_id = _record_llm_usage(
-        session,
+        repo,
         ctx,
         model_id=metrics.model_id,
         prompt_tokens=metrics.prompt_tokens,
@@ -1027,7 +1027,7 @@ def run_extraction(
     )
 
     write_audit(
-        session,
+        repo.session,
         ctx,
         entity_kind="expense_claim",
         entity_id=claim_id,

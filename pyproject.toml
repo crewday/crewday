@@ -528,19 +528,6 @@ ignore_imports = [
     "app.domain.tasks.comments -> app.adapters.db.identity.models",
     "app.domain.tasks.comments -> app.adapters.db.workspace.models",
     "app.domain.tasks.comments -> app.authz",
-    # v1 stopgap (cd-95zb): ``app.domain.expenses.autofill`` reads
-    # :class:`ExpenseClaim` from ``app.adapters.db.expenses.models`` and
-    # :class:`LlmUsage` from ``app.adapters.db.llm.models`` to record
-    # post-flight token spend (same envelope as the LLM router/budget
-    # stopgaps).
-    #
-    # The ``app.domain.expenses.claims`` edges that previously lived
-    # here dropped with cd-0e8i, which rewired the claims service onto
-    # the cd-v3jp ``ExpensesRepository`` + ``CapabilityChecker``
-    # Protocol seams. The approval edges dropped with cd-zoj4; the
-    # remaining autofill stopgaps drop with cd-sxmz.
-    "app.domain.expenses.autofill -> app.adapters.db.expenses.models",
-    "app.domain.expenses.autofill -> app.adapters.db.llm.models",
     # v1 stopgap (cd-dcfw): ``app.domain.identity.work_roles`` /
     # ``user_work_roles`` / ``work_engagements`` read
     # :class:`WorkRole` / :class:`UserWorkRole` /

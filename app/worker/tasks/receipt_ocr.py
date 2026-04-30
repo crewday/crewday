@@ -14,15 +14,14 @@ change at the call site (move the call from inside ``attach_receipt``
 to the queue consumer; pass the runner ``None`` so the attach path
 stops calling it inline).
 
-The wrapper deliberately offers the same signature shape as a queue
-consumer so the eventual swap is mechanical: ``(session, ctx,
-claim_id, attachment_id)`` matches the
-``(payload['claim_id'], payload['attachment_id'])`` shape a queue
-job's body would carry, with the session + ctx threaded by the
-worker harness. Adapter dependencies (LLM client, Storage) are
-DI-only — neither lives on the call site so a future queue consumer
-can plug a different LLM client (e.g. a sticky-priority retry rung)
-without touching the domain seam.
+The wrapper deliberately offers the same seam-first shape as a queue
+consumer so the eventual swap is mechanical: ``(repo, ctx, claim_id,
+attachment_id)`` matches the ``(payload['claim_id'],
+payload['attachment_id'])`` body a queue job would carry, with the
+repository + context threaded by the worker harness. Adapter
+dependencies (LLM client, Storage) are DI-only — neither lives on the
+call site so a future queue consumer can plug a different LLM client
+(e.g. a sticky-priority retry rung) without touching the domain seam.
 
 See ``docs/specs/09-time-payroll-expenses.md`` §"Submission flow
 (worker)", ``docs/specs/01-architecture.md`` §"Worker".
@@ -30,12 +29,11 @@ See ``docs/specs/09-time-payroll-expenses.md`` §"Submission flow
 
 from __future__ import annotations
 
-from sqlalchemy.orm import Session
-
 from app.adapters.llm.ports import LLMClient
 from app.adapters.storage.ports import Storage
 from app.config import Settings
 from app.domain.expenses.autofill import ExtractionResult, run_extraction
+from app.domain.expenses.ports import ExpensesRepository
 from app.tenancy import WorkspaceContext
 from app.util.clock import Clock
 
@@ -43,7 +41,7 @@ __all__ = ["run_receipt_ocr"]
 
 
 def run_receipt_ocr(
-    session: Session,
+    repo: ExpensesRepository,
     ctx: WorkspaceContext,
     *,
     claim_id: str,
@@ -63,7 +61,7 @@ def run_receipt_ocr(
     :mod:`app.domain.expenses.autofill`.
     """
     return run_extraction(
-        session,
+        repo,
         ctx,
         claim_id=claim_id,
         attachment_id=attachment_id,

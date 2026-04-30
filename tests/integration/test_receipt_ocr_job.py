@@ -72,10 +72,9 @@ _OCR_MODEL = "test/gemma-vision"
 # ---------------------------------------------------------------------------
 #
 # The cd-0e8i refactor flipped :mod:`app.domain.expenses.claims`'s
-# public API to ``(repo, checker, ctx, *, ...)``. The integration
-# coverage here doesn't yet feed seams through; these wrappers rebuild
-# the SA pair on each call so the legacy session-based shape keeps
-# working until cd-sxmz wires the worker job onto the seam.
+# public API to ``(repo, checker, ctx, *, ...)``. These wrappers rebuild
+# the SA pair on each call so this integration coverage threads the
+# same seam shape through claim creation, attachment, and OCR.
 
 
 def _make_seam_pair(
@@ -345,14 +344,14 @@ class TestAttachReceiptWithRunner:
         llm = StubLLMClient(payloads=_high_confidence_payload())
 
         def runner(
-            _session: Session,
+            _repo: SqlAlchemyExpensesRepository,
             _ctx: WorkspaceContext,
             *,
             claim_id: str,
             attachment_id: str,
         ) -> None:
             run_receipt_ocr(
-                _session,
+                _repo,
                 _ctx,
                 claim_id=claim_id,
                 attachment_id=attachment_id,
@@ -411,14 +410,14 @@ class TestAttachReceiptWithRunner:
         llm = StubLLMClient(payloads=[first, second])
 
         def runner(
-            _session: Session,
+            _repo: SqlAlchemyExpensesRepository,
             _ctx: WorkspaceContext,
             *,
             claim_id: str,
             attachment_id: str,
         ) -> None:
             run_receipt_ocr(
-                _session,
+                _repo,
                 _ctx,
                 claim_id=claim_id,
                 attachment_id=attachment_id,

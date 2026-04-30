@@ -90,7 +90,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from datetime import datetime
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import (
     APIRouter,
@@ -111,7 +111,6 @@ from app.adapters.db.expenses.repositories import (
     SqlAlchemyCapabilityChecker,
     SqlAlchemyExpensesRepository,
 )
-from app.adapters.db.llm.models import LlmUsage as LlmUsageRow
 from app.adapters.llm.ports import LLMClient
 from app.adapters.storage.ports import Storage
 from app.api.deps import current_workspace_context, db_session, get_llm, get_storage
@@ -173,6 +172,7 @@ from app.domain.expenses.autofill import (
     ReceiptExtraction,
     extract_from_bytes,
 )
+from app.domain.expenses.ports import ExpensesRepository
 from app.tenancy import WorkspaceContext
 from app.util.clock import SystemClock
 from app.util.ulid import new_ulid
@@ -1005,7 +1005,7 @@ def _build_attach_runner(
     captured_storage = storage
 
     def runner(
-        session: Session,
+        repo: ExpensesRepository,
         ctx: WorkspaceContext,
         *,
         claim_id: str,
@@ -1017,7 +1017,7 @@ def _build_attach_runner(
         # commit; see the ``attach_receipt`` docstring for the
         # contract.
         run_receipt_ocr(
-            session,
+            repo,
             ctx,
             claim_id=claim_id,
             attachment_id=attachment_id,
@@ -1339,13 +1339,13 @@ async def scan_expense_receipt_route(
 
     "Preview" semantic: the route does NOT create a claim, attach a
     blob, or write any DB row apart from the workspace-scoped
-    :class:`~app.adapters.db.llm.models.LlmUsage` ledger row that
-    every LLM call costs. It exists for the SPA to surface extracted
-    suggestions on the upload screen before the worker commits to a
-    claim. To persist the same result, the SPA chains ``POST
-    /uploads`` → ``POST /expenses`` → ``POST /expenses/{id}/
-    attachments`` and lets the wired ``extraction_runner`` re-run
-    the same extraction inside the attach transaction.
+    LLM usage ledger row that every LLM call costs. It exists for
+    the SPA to surface extracted suggestions on the upload screen
+    before the worker commits to a claim. To persist the same result,
+    the SPA chains ``POST /uploads`` → ``POST /expenses`` → ``POST
+    /expenses/{id}/attachments`` and lets the wired
+    ``extraction_runner`` re-run the same extraction inside the
+    attach transaction.
 
     Disabled at the deployment level when ``settings.llm_ocr_model``
     is unset — the response is 503 ``scan_not_configured`` so a
@@ -1361,10 +1361,10 @@ async def scan_expense_receipt_route(
     LLM, so an attacker who supplies a doctored ``hint_vendor``
     cannot inject prompt content the model sees today.
 
-    Every successful or failed LLM call lands one
-    :class:`~app.adapters.db.llm.models.LlmUsage` row (capability
-    ``expenses.autofill``) so the workspace usage budget envelope
-    stays honest even when callers exercise the preview surface.
+    Every successful or failed LLM call lands one usage row
+    (capability ``expenses.autofill``) so the workspace usage budget
+    envelope stays honest even when callers exercise the preview
+    surface.
     """
     if settings.llm_ocr_model is None:
         # Drain the upload so the multipart parser doesn't leak
@@ -1418,6 +1418,8 @@ async def scan_expense_receipt_route(
             message="image upload is empty",
         )
 
+    repo, _checker = make_seam_pair(session, ctx)
+
     try:
         metrics = extract_from_bytes(image_bytes, llm=llm, settings=settings)
     except ExtractionParseError as exc:
@@ -1425,7 +1427,7 @@ async def scan_expense_receipt_route(
         # the spent tokens so /admin/usage stays honest. The burnt
         # metrics ride :attr:`ExtractionParseError.burnt_metrics`.
         _record_preview_usage(
-            session,
+            repo,
             ctx,
             burnt=exc.burnt_metrics,
             fallback_model_id=settings.llm_ocr_model,
@@ -1434,7 +1436,7 @@ async def scan_expense_receipt_route(
         raise _http(422, "extraction_parse_error", message=str(exc)) from exc
     except ExtractionTimeout as exc:
         _record_preview_usage(
-            session,
+            repo,
             ctx,
             burnt=None,
             fallback_model_id=settings.llm_ocr_model,
@@ -1443,7 +1445,7 @@ async def scan_expense_receipt_route(
         raise _http(504, "extraction_timeout", message=str(exc)) from exc
     except ExtractionRateLimited as exc:
         _record_preview_usage(
-            session,
+            repo,
             ctx,
             burnt=None,
             fallback_model_id=settings.llm_ocr_model,
@@ -1462,7 +1464,7 @@ async def scan_expense_receipt_route(
         ) from exc
     except ExtractionProviderError as exc:
         _record_preview_usage(
-            session,
+            repo,
             ctx,
             burnt=None,
             fallback_model_id=settings.llm_ocr_model,
@@ -1476,7 +1478,7 @@ async def scan_expense_receipt_route(
         # the happy path; a ``None`` here implies a future helper
         # bypassed the parse step but didn't raise.
         _record_preview_usage(
-            session,
+            repo,
             ctx,
             burnt=metrics,
             fallback_model_id=settings.llm_ocr_model,
@@ -1489,7 +1491,7 @@ async def scan_expense_receipt_route(
         )
 
     _record_preview_usage(
-        session,
+        repo,
         ctx,
         burnt=metrics,
         fallback_model_id=settings.llm_ocr_model,
@@ -1499,14 +1501,14 @@ async def scan_expense_receipt_route(
 
 
 def _record_preview_usage(
-    session: Session,
+    repo: ExpensesRepository,
     ctx: WorkspaceContext,
     *,
     burnt: ExtractionMetrics | None,
     fallback_model_id: str,
-    status: str,
+    status: Literal["ok", "error", "timeout"],
 ) -> None:
-    """Insert one :class:`LlmUsageRow` for a preview-endpoint call.
+    """Insert one LLM usage row for a preview-endpoint call.
 
     Mirrors :func:`app.domain.expenses.autofill._record_llm_usage`
     but lives here because the preview route has no claim id to
@@ -1520,8 +1522,8 @@ def _record_preview_usage(
     workspace-scoped ``LlmUsage`` shape backs the §11 budget
     envelope, so a row lands on every outcome.
     """
-    row = LlmUsageRow(
-        id=new_ulid(),
+    repo.insert_llm_usage(
+        usage_id=new_ulid(),
         workspace_id=ctx.workspace_id,
         capability=AUTOFILL_CAPABILITY,
         model_id=burnt.model_id if burnt is not None else fallback_model_id,
@@ -1531,13 +1533,6 @@ def _record_preview_usage(
         latency_ms=burnt.latency_ms if burnt is not None else 0,
         status=status,
         correlation_id=new_ulid(),
-        attempt=0,
-        assignment_id=None,
-        fallback_attempts=0,
-        finish_reason=None,
         actor_user_id=ctx.actor_id,
-        token_id=None,
-        agent_label=None,
         created_at=SystemClock().now(),
     )
-    session.add(row)
