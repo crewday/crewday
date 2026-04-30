@@ -1,12 +1,11 @@
 """Instruction / InstructionVersion SQLAlchemy models.
 
-v1 slice per cd-bce — sufficient for the ``instruction`` + revision
-CRUD follow-up (cd-oyq) to layer the auto-version-bump logic on top.
-The richer §07 surface (``tags`` array, ``summary_md``,
-``attachment_file_ids``, ``status`` / ``deleted_at`` retirement
-lifecycle, ``change_note``, the ``instruction_link`` cross-reference
-table) lands with those follow-ups without breaking this
-migration's public write contract.
+v1 slice per cd-bce, extended by cd-d00j with ``tags`` /
+``archived_at`` / ``body_hash`` / ``change_note`` so cd-oyq's
+service contract has the columns it needs. The remaining §07 surface
+(``summary_md``, ``attachment_file_ids``, the ``instruction_link``
+cross-reference table) still lands with the follow-ups without
+breaking this migration's public write contract.
 
 Every table carries a ``workspace_id`` column and is registered as
 workspace-scoped via the package's ``__init__``. The
@@ -56,6 +55,7 @@ from __future__ import annotations
 from datetime import datetime
 
 from sqlalchemy import (
+    JSON,
     CheckConstraint,
     DateTime,
     ForeignKey,
@@ -156,6 +156,20 @@ class Instruction(Base):
     # bump by the domain layer. No hard FK because the pair is
     # mutually dependent — hard-wiring would force a two-phase write.
     current_version_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    # Normalised tag strings (lowercase, deduped, capped at 20). The
+    # service layer enforces normalisation on write; the DB layer just
+    # stores the JSON list. ``sa.JSON`` keeps the column portable
+    # across SQLite + Postgres — Postgres ``ARRAY`` is unnecessary at
+    # this scale and would couple the schema to one dialect.
+    tags: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    # Soft-delete tombstone — null on every live row, set to the
+    # archive moment when a manager archives the instruction; cleared
+    # back to null on restore. Mirrors the
+    # ``messaging.chat_channel.archived_at`` / ``billing.organization
+    # .archived_at`` / ``user.archived_at`` pattern across the app.
+    archived_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     created_by: Mapped[str | None] = mapped_column(String, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
@@ -182,6 +196,15 @@ class Instruction(Base):
             "workspace_id",
             "scope_kind",
             "scope_id",
+        ),
+        # ``?include=archived`` listing scans: leading ``workspace_id``
+        # rides the tenant filter, trailing ``archived_at`` lets the
+        # listing path skip archived rows cheaply (or sweep them on
+        # explicit opt-in).
+        Index(
+            "ix_instruction_workspace_archived_at",
+            "workspace_id",
+            "archived_at",
         ),
     )
 
@@ -238,10 +261,25 @@ class InstructionVersion(Base):
     # domain layer's render path treats empty as "no body" without
     # crashing.
     body_md: Mapped[str] = mapped_column(String, nullable=False)
+    # SHA-256 hex digest of the post-normalised ``body_md`` — exactly
+    # 64 chars. The service layer hashes; the DB stores. Indexed
+    # ``(instruction_id, body_hash)`` (see ``__table_args__`` below)
+    # so the future cd-oyq idempotency check ("did this exact body
+    # already land for this instruction?") is O(1). NOT unique —
+    # uniqueness is on ``(instruction_id, version_num)``; two rows
+    # sharing the same hash on the same instruction is legal (a
+    # caller may rewrite to an earlier body verbatim and the version
+    # bumps regardless). Stored as :class:`String` to match the
+    # ``ApiToken.hash`` / ``AgentToken.hash`` convention rather than
+    # introducing a brand-new ``CHAR(64)`` style.
+    body_hash: Mapped[str] = mapped_column(String, nullable=False)
     # Soft-ref :class:`str` — see the module docstring. Nullable
     # because a system-actor seed (a migration backfill, a capability
     # agent authoring from a template) has no user id to pin.
     author_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    # Optional human-authored revision summary. ``NULL`` on rows
+    # written by a system actor or a caller that didn't supply one.
+    change_note: Mapped[str | None] = mapped_column(String, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
     )
@@ -256,5 +294,14 @@ class InstructionVersion(Base):
             "instruction_id",
             "version_num",
             name="uq_instruction_version_instruction_version_num",
+        ),
+        # cd-oyq idempotency check: "does any version of this
+        # instruction already carry this exact body?" rides this
+        # B-tree directly. NOT unique — see the ``body_hash`` column
+        # comment.
+        Index(
+            "ix_instruction_version_instruction_body_hash",
+            "instruction_id",
+            "body_hash",
         ),
     )

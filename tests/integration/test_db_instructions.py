@@ -22,6 +22,7 @@ See ``docs/specs/02-domain-model.md`` §"instruction",
 
 from __future__ import annotations
 
+import hashlib
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 
@@ -92,6 +93,11 @@ def _ensure_instructions_registered() -> None:
         registry.register(table)
 
 
+def _hash(body: str) -> str:
+    """SHA-256 hex digest of ``body`` — matches the migration backfill."""
+    return hashlib.sha256(body.encode("utf-8")).hexdigest()
+
+
 def _ctx_for(workspace: Workspace, actor_id: str) -> WorkspaceContext:
     """Build a :class:`WorkspaceContext` pinned to ``workspace``."""
     return WorkspaceContext(
@@ -135,13 +141,25 @@ class TestMigrationShape:
             "scope_kind",
             "scope_id",
             "current_version_id",
+            "tags",
+            "archived_at",
             "created_by",
             "created_at",
         }
         assert set(cols) == expected
-        for nullable in ("scope_id", "current_version_id", "created_by"):
+        for nullable in (
+            "scope_id",
+            "current_version_id",
+            "archived_at",
+            "created_by",
+        ):
             assert cols[nullable]["nullable"] is True, f"{nullable} must be nullable"
-        for notnull in expected - {"scope_id", "current_version_id", "created_by"}:
+        for notnull in expected - {
+            "scope_id",
+            "current_version_id",
+            "archived_at",
+            "created_by",
+        }:
             assert cols[notnull]["nullable"] is False, f"{notnull} must be NOT NULL"
 
     def test_instruction_fks(self, engine: Engine) -> None:
@@ -178,6 +196,17 @@ class TestMigrationShape:
             "scope_id",
         ]
 
+    def test_instruction_workspace_archived_at_index(self, engine: Engine) -> None:
+        """cd-d00j: ``(workspace_id, archived_at)`` listing-scan index."""
+        indexes = {ix["name"]: ix for ix in inspect(engine).get_indexes("instruction")}
+        assert "ix_instruction_workspace_archived_at" in indexes
+        assert indexes["ix_instruction_workspace_archived_at"]["column_names"] == [
+            "workspace_id",
+            "archived_at",
+        ]
+        # SQLAlchemy's SQLite reflector returns 0/1 here, not False/True.
+        assert not indexes["ix_instruction_workspace_archived_at"]["unique"]
+
     def test_instruction_version_columns(self, engine: Engine) -> None:
         cols = {
             c["name"]: c for c in inspect(engine).get_columns("instruction_version")
@@ -188,12 +217,15 @@ class TestMigrationShape:
             "instruction_id",
             "version_num",
             "body_md",
+            "body_hash",
             "author_id",
+            "change_note",
             "created_at",
         }
         assert set(cols) == expected
-        assert cols["author_id"]["nullable"] is True
-        for notnull in expected - {"author_id"}:
+        for nullable in ("author_id", "change_note"):
+            assert cols[nullable]["nullable"] is True, f"{nullable} must be nullable"
+        for notnull in expected - {"author_id", "change_note"}:
             assert cols[notnull]["nullable"] is False, f"{notnull} must be NOT NULL"
 
     def test_instruction_version_fks(self, engine: Engine) -> None:
@@ -220,6 +252,19 @@ class TestMigrationShape:
         assert uniques["uq_instruction_version_instruction_version_num"][
             "column_names"
         ] == ["instruction_id", "version_num"]
+
+    def test_instruction_version_body_hash_index(self, engine: Engine) -> None:
+        """cd-d00j: ``(instruction_id, body_hash)`` idempotency-check index."""
+        indexes = {
+            ix["name"]: ix for ix in inspect(engine).get_indexes("instruction_version")
+        }
+        assert "ix_instruction_version_instruction_body_hash" in indexes
+        assert indexes["ix_instruction_version_instruction_body_hash"][
+            "column_names"
+        ] == ["instruction_id", "body_hash"]
+        # Uniqueness is on (instruction_id, version_num), NOT on hash.
+        # SQLAlchemy's SQLite reflector returns 0/1 here, not False/True.
+        assert not indexes["ix_instruction_version_instruction_body_hash"]["unique"]
 
 
 class TestInstructionCrud:
@@ -345,12 +390,14 @@ class TestVersionBumpScenario:
             db_session.flush()
             assert inst.current_version_id is None
 
+            v1_body = "# Daily opening\n\n- Unlock gates."
             v1 = InstructionVersion(
                 id="01HWA00000000000000000INV1",
                 workspace_id=workspace.id,
                 instruction_id=inst.id,
                 version_num=1,
-                body_md="# Daily opening\n\n- Unlock gates.",
+                body_md=v1_body,
+                body_hash=_hash(v1_body),
                 author_id=user.id,
                 created_at=_PINNED,
             )
@@ -367,12 +414,14 @@ class TestVersionBumpScenario:
             assert reloaded.current_version_id == v1.id
 
             # v2 — the edit path.
+            v2_body = "# Daily opening v2\n\n- Unlock gates\n- Check CCTV."
             v2 = InstructionVersion(
                 id="01HWA00000000000000000INV2",
                 workspace_id=workspace.id,
                 instruction_id=inst.id,
                 version_num=2,
-                body_md="# Daily opening v2\n\n- Unlock gates\n- Check CCTV.",
+                body_md=v2_body,
+                body_hash=_hash(v2_body),
                 author_id=user.id,
                 created_at=_LATER,
             )
@@ -428,12 +477,14 @@ class TestInstructionVersionCrud:
             db_session.add(inst)
             db_session.flush()
 
+            body = "Plumber: +33 6 00 00 00 01"
             version = InstructionVersion(
                 id="01HWA00000000000000000IVC1",
                 workspace_id=workspace.id,
                 instruction_id=inst.id,
                 version_num=1,
-                body_md="Plumber: +33 6 00 00 00 01",
+                body_md=body,
+                body_hash=_hash(body),
                 author_id=user.id,
                 created_at=_PINNED,
             )
@@ -443,12 +494,213 @@ class TestInstructionVersionCrud:
             loaded = db_session.get(InstructionVersion, version.id)
             assert loaded is not None
             assert loaded.version_num == 1
-            assert loaded.body_md == "Plumber: +33 6 00 00 00 01"
+            assert loaded.body_md == body
+            assert loaded.body_hash == _hash(body)
             assert loaded.author_id == user.id
 
             db_session.delete(loaded)
             db_session.flush()
             assert db_session.get(InstructionVersion, version.id) is None
+        finally:
+            reset_current(token)
+
+
+class TestColumnDefaults:
+    """cd-d00j default values land on insert."""
+
+    def test_instruction_defaults(self, db_session: Session) -> None:
+        """``tags == []`` and ``archived_at is None`` after a bare insert."""
+        workspace, user = _bootstrap(
+            db_session,
+            email="defaults-inst@example.com",
+            display="DefInst",
+            slug="defaults-inst-ws",
+            name="DefaultsInstWS",
+        )
+        token = set_current(_ctx_for(workspace, user.id))
+        try:
+            inst = Instruction(
+                id="01HWA00000000000000000INDF",
+                workspace_id=workspace.id,
+                slug="defaults",
+                title="Defaults",
+                scope_kind="workspace",
+                created_at=_PINNED,
+            )
+            db_session.add(inst)
+            db_session.flush()
+            db_session.expire_all()
+            reloaded = db_session.get(Instruction, inst.id)
+            assert reloaded is not None
+            assert reloaded.tags == []
+            assert reloaded.archived_at is None
+        finally:
+            reset_current(token)
+
+    def test_instruction_version_change_note_default(self, db_session: Session) -> None:
+        """``change_note is None`` when the caller supplies no summary."""
+        workspace, user = _bootstrap(
+            db_session,
+            email="defaults-iv@example.com",
+            display="DefIv",
+            slug="defaults-iv-ws",
+            name="DefaultsIvWS",
+        )
+        token = set_current(_ctx_for(workspace, user.id))
+        try:
+            inst = Instruction(
+                id="01HWA00000000000000000INDF",
+                workspace_id=workspace.id,
+                slug="iv-defaults",
+                title="IV Defaults",
+                scope_kind="workspace",
+                created_at=_PINNED,
+            )
+            db_session.add(inst)
+            db_session.flush()
+
+            body = "body text"
+            version = InstructionVersion(
+                id="01HWA00000000000000000IVDF",
+                workspace_id=workspace.id,
+                instruction_id=inst.id,
+                version_num=1,
+                body_md=body,
+                body_hash=_hash(body),
+                created_at=_PINNED,
+            )
+            db_session.add(version)
+            db_session.flush()
+            db_session.expire_all()
+            reloaded = db_session.get(InstructionVersion, version.id)
+            assert reloaded is not None
+            assert reloaded.change_note is None
+        finally:
+            reset_current(token)
+
+
+class TestHashCollisionBehaviour:
+    """cd-d00j: two rows on the same instruction may share ``body_hash``.
+
+    Uniqueness is on ``(instruction_id, version_num)``, *not* on the
+    hash. The future cd-oyq idempotency check uses ``body_hash`` as a
+    cheap probe; the spec deliberately allows a v3 to repeat the v1
+    body verbatim and bump the version regardless.
+    """
+
+    def test_same_hash_same_instruction_allowed(self, db_session: Session) -> None:
+        workspace, user = _bootstrap(
+            db_session,
+            email="hash-collide@example.com",
+            display="HashCol",
+            slug="hash-col-ws",
+            name="HashColWS",
+        )
+        token = set_current(_ctx_for(workspace, user.id))
+        try:
+            inst = Instruction(
+                id="01HWA00000000000000000INHC",
+                workspace_id=workspace.id,
+                slug="hash-collide",
+                title="Hash collide",
+                scope_kind="workspace",
+                created_at=_PINNED,
+            )
+            db_session.add(inst)
+            db_session.flush()
+
+            body = "Identical body across versions."
+            digest = _hash(body)
+
+            v1 = InstructionVersion(
+                id="01HWA00000000000000000IHC1",
+                workspace_id=workspace.id,
+                instruction_id=inst.id,
+                version_num=1,
+                body_md=body,
+                body_hash=digest,
+                created_at=_PINNED,
+            )
+            v2 = InstructionVersion(
+                id="01HWA00000000000000000IHC2",
+                workspace_id=workspace.id,
+                instruction_id=inst.id,
+                version_num=2,
+                body_md=body,
+                body_hash=digest,  # same hash, different version
+                created_at=_LATER,
+            )
+            db_session.add_all([v1, v2])
+            # Both rows must land — uniqueness is on (instruction_id,
+            # version_num), not on hash.
+            db_session.flush()
+
+            db_session.expire_all()
+            rows = db_session.scalars(
+                select(InstructionVersion)
+                .where(InstructionVersion.instruction_id == inst.id)
+                .order_by(InstructionVersion.version_num.asc())
+            ).all()
+            assert [r.body_hash for r in rows] == [digest, digest]
+            assert [r.version_num for r in rows] == [1, 2]
+        finally:
+            reset_current(token)
+
+
+class TestBodyHashMatchesSha256:
+    """cd-d00j: stored ``body_hash`` matches ``hashlib.sha256(body_md)``.
+
+    Pins the migration's backfill formula. Inserts a fresh row with a
+    pre-computed digest and asserts the stored value matches a
+    re-derivation from the body — the same recipe the migration's
+    ``_backfill_body_hashes`` uses on existing rows pre-cd-d00j.
+    """
+
+    def test_round_tripped_hash_matches_sha256(self, db_session: Session) -> None:
+        workspace, user = _bootstrap(
+            db_session,
+            email="hash-match@example.com",
+            display="HashMatch",
+            slug="hash-match-ws",
+            name="HashMatchWS",
+        )
+        token = set_current(_ctx_for(workspace, user.id))
+        try:
+            inst = Instruction(
+                id="01HWA00000000000000000INHM",
+                workspace_id=workspace.id,
+                slug="hash-match",
+                title="Hash match",
+                scope_kind="workspace",
+                created_at=_PINNED,
+            )
+            db_session.add(inst)
+            db_session.flush()
+
+            body = "# Title\n\nA paragraph with é, 🛟, and CRLF\r\n end."
+            version = InstructionVersion(
+                id="01HWA00000000000000000IVHM",
+                workspace_id=workspace.id,
+                instruction_id=inst.id,
+                version_num=1,
+                body_md=body,
+                body_hash=_hash(body),
+                created_at=_PINNED,
+            )
+            db_session.add(version)
+            db_session.flush()
+            db_session.expire_all()
+
+            reloaded = db_session.get(InstructionVersion, version.id)
+            assert reloaded is not None
+            # Re-derive the digest from the round-tripped body and
+            # confirm the column matches — the same recipe the
+            # migration's backfill applies row-by-row.
+            assert (
+                reloaded.body_hash
+                == hashlib.sha256(reloaded.body_md.encode("utf-8")).hexdigest()
+            )
+            assert len(reloaded.body_hash) == 64
         finally:
             reset_current(token)
 
@@ -510,6 +762,7 @@ class TestCheckConstraints:
                     instruction_id=inst.id,
                     version_num=0,
                     body_md="no body",
+                    body_hash=_hash("no body"),
                     created_at=_PINNED,
                 )
             )
@@ -547,6 +800,7 @@ class TestCheckConstraints:
                     instruction_id=inst.id,
                     version_num=-3,
                     body_md="no body",
+                    body_hash=_hash("no body"),
                     created_at=_PINNED,
                 )
             )
@@ -631,6 +885,7 @@ class TestUniqueConstraints:
                     instruction_id=inst.id,
                     version_num=1,
                     body_md="first",
+                    body_hash=_hash("first"),
                     created_at=_PINNED,
                 )
             )
@@ -643,6 +898,7 @@ class TestUniqueConstraints:
                     instruction_id=inst.id,
                     version_num=1,  # duplicate version number
                     body_md="second",
+                    body_hash=_hash("second"),
                     created_at=_LATER,
                 )
             )
@@ -811,6 +1067,7 @@ class TestCascadeOnInstructionDelete:
                 instruction_id=inst.id,
                 version_num=1,
                 body_md="v1",
+                body_hash=_hash("v1"),
                 created_at=_PINNED,
             )
             v2 = InstructionVersion(
@@ -819,6 +1076,7 @@ class TestCascadeOnInstructionDelete:
                 instruction_id=inst.id,
                 version_num=2,
                 body_md="v2",
+                body_hash=_hash("v2"),
                 created_at=_LATER,
             )
             db_session.add_all([v1, v2])
@@ -876,6 +1134,7 @@ class TestCascadeOnWorkspaceDelete:
                     instruction_id=inst.id,
                     version_num=1,
                     body_md="ws-cascade body",
+                    body_hash=_hash("ws-cascade body"),
                     created_at=_PINNED,
                 )
             )

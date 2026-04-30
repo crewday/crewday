@@ -48,6 +48,8 @@ class TestInstructionModel:
         assert inst.current_version_id is None
         assert inst.created_by is None
         assert inst.created_at == _PINNED
+        # cd-d00j columns.
+        assert inst.archived_at is None
 
     def test_property_scoped_construction(self) -> None:
         inst = Instruction(
@@ -141,6 +143,16 @@ class TestInstructionModel:
             "scope_id",
         ]
 
+    def test_workspace_archived_at_index_present(self) -> None:
+        """cd-d00j: ``(workspace_id, archived_at)`` listing-scan index."""
+        indexes = [i for i in Instruction.__table_args__ if isinstance(i, Index)]
+        names = [i.name for i in indexes]
+        assert "ix_instruction_workspace_archived_at" in names
+        target = next(
+            i for i in indexes if i.name == "ix_instruction_workspace_archived_at"
+        )
+        assert [c.name for c in target.columns] == ["workspace_id", "archived_at"]
+
 
 class TestInstructionVersionModel:
     """The ``InstructionVersion`` mapped class constructs from the v1 slice."""
@@ -152,6 +164,7 @@ class TestInstructionVersionModel:
             instruction_id="01HWA00000000000000000INSA",
             version_num=1,
             body_md="# Pool closing\n\nLock the gate at dusk.",
+            body_hash="0" * 64,
             created_at=_PINNED,
         )
         assert version.id == "01HWA00000000000000000INVA"
@@ -159,8 +172,11 @@ class TestInstructionVersionModel:
         assert version.instruction_id == "01HWA00000000000000000INSA"
         assert version.version_num == 1
         assert version.body_md == "# Pool closing\n\nLock the gate at dusk."
+        assert version.body_hash == "0" * 64
         # author_id nullable — system-actor authors have no user id.
         assert version.author_id is None
+        # cd-d00j: change_note nullable when no human authored a summary.
+        assert version.change_note is None
         assert version.created_at == _PINNED
 
     def test_authored_construction(self) -> None:
@@ -170,11 +186,14 @@ class TestInstructionVersionModel:
             instruction_id="01HWA00000000000000000INSA",
             version_num=2,
             body_md="# Pool closing v2\n\nNow with a photo step.",
+            body_hash="a" * 64,
             author_id="01HWA00000000000000000USRA",
+            change_note="Added the photo step.",
             created_at=_LATER,
         )
         assert version.version_num == 2
         assert version.author_id == "01HWA00000000000000000USRA"
+        assert version.change_note == "Added the photo step."
         assert version.created_at == _LATER
 
     def test_empty_body_allowed(self) -> None:
@@ -185,6 +204,7 @@ class TestInstructionVersionModel:
             instruction_id="01HWA00000000000000000INSA",
             version_num=1,
             body_md="",
+            body_hash="0" * 64,
             created_at=_PINNED,
         )
         assert version.body_md == ""
@@ -218,6 +238,24 @@ class TestInstructionVersionModel:
             "version_num",
         ]
         assert uniques[0].name == "uq_instruction_version_instruction_version_num"
+
+    def test_instruction_body_hash_index_present(self) -> None:
+        """cd-d00j: ``(instruction_id, body_hash)`` idempotency-check index.
+
+        The index is **not** unique — two rows sharing the same hash
+        on the same instruction is legal (a caller may rewrite to an
+        earlier body verbatim and the version bumps regardless).
+        """
+        indexes = [i for i in InstructionVersion.__table_args__ if isinstance(i, Index)]
+        names = [i.name for i in indexes]
+        assert "ix_instruction_version_instruction_body_hash" in names
+        target = next(
+            i
+            for i in indexes
+            if i.name == "ix_instruction_version_instruction_body_hash"
+        )
+        assert [c.name for c in target.columns] == ["instruction_id", "body_hash"]
+        assert target.unique is False
 
 
 class TestPackageReExports:
