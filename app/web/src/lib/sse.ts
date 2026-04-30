@@ -756,6 +756,7 @@ export const INVALIDATIONS: Record<EventKind, InvalidationHandler> = {
 
   "work_order.completed": (_event, qc) => {
     invalidate(qc, qk.workOrders());
+    invalidate(qc, qk.bookingBillings("client-portal"));
     invalidate(qc, qk.dashboard());
   },
 

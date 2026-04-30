@@ -864,13 +864,17 @@ describe("INVALIDATIONS — per-kind behaviour", () => {
     }
   });
 
-  it("work_order.completed invalidates work orders + dashboard", () => {
+  it("work_order.completed invalidates work orders, client billable hours, and dashboard", () => {
     const qc = makeClient();
     const spy = vi.spyOn(qc, "invalidateQueries");
     INVALIDATIONS["work_order.completed"](makeEvent("work_order.completed"), qc);
     const called = spy.mock.calls.map((c) => c[0]?.queryKey);
     expect(called).toEqual(
-      expect.arrayContaining([qk.workOrders(), qk.dashboard()]),
+      expect.arrayContaining([
+        qk.workOrders(),
+        qk.bookingBillings("client-portal"),
+        qk.dashboard(),
+      ]),
     );
   });
 

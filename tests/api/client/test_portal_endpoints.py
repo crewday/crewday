@@ -77,7 +77,9 @@ def test_portal_endpoints_return_redacted_paginated_data_and_audit(
         }
     ]
     assert "hourly_rate_cents" not in hours.text
+    assert "pay_rule" not in hours.text
     assert "shift_id" not in hours.text
+    assert "accrued_cents" not in hours.text
 
     assert invoices.status_code == 200
     assert invoices.json()["data"] == [
