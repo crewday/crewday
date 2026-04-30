@@ -39,7 +39,7 @@ DEFAULT_LOCALE = "en-US"
 PSEUDO_LOCALE = "qps-ploc"
 _CATALOG_DOMAIN = "messages"
 _CATALOG_ROOT = Path(__file__).resolve().parent / "locales"
-_TRANSLATION_LOCALES = frozenset({DEFAULT_LOCALE, PSEUDO_LOCALE})
+_TRANSLATION_LOCALES = frozenset({DEFAULT_LOCALE, "fr", "es"})
 _ACTIVE_LOCALE: ContextVar[str | None] = ContextVar("crewday_i18n_locale", default=None)
 
 
@@ -260,7 +260,12 @@ def _accept_language_candidates(header: str | None) -> tuple[str, ...]:
 
 
 def _catalog_locale(locale: str) -> str:
-    return locale if locale in _TRANSLATION_LOCALES else DEFAULT_LOCALE
+    if locale in _TRANSLATION_LOCALES:
+        return locale
+    language = locale.split("-", 1)[0]
+    if language in _TRANSLATION_LOCALES:
+        return language
+    return DEFAULT_LOCALE
 
 
 def _babel_locale(locale: str | None) -> str:

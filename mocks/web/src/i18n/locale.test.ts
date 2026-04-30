@@ -6,7 +6,8 @@ describe("locale negotiation", () => {
     expect(toSupportedLocale("en")).toBe(DEFAULT_LOCALE);
     expect(toSupportedLocale("en_GB")).toBe(DEFAULT_LOCALE);
     expect(toSupportedLocale("qps-ploc")).toBe(PSEUDO_LOCALE);
-    expect(toSupportedLocale("fr-FR")).toBeNull();
+    expect(toSupportedLocale("fr-FR")).toBe("fr");
+    expect(toSupportedLocale("es-MX")).toBe("es");
   });
 
   it.each([
@@ -15,7 +16,7 @@ describe("locale negotiation", () => {
       input: {
         search: "?locale=qps-ploc",
         preferredLocale: "en-US",
-        navigatorLanguages: ["fr-FR"],
+        navigatorLanguages: ["de-DE"],
         workspaceDefaultLocale: "en-US",
       },
       expected: PSEUDO_LOCALE,
@@ -25,7 +26,7 @@ describe("locale negotiation", () => {
       input: {
         search: "",
         preferredLocale: "en-US",
-        navigatorLanguages: ["fr-FR"],
+        navigatorLanguages: ["de-DE"],
         workspaceDefaultLocale: "en-US",
       },
       expected: DEFAULT_LOCALE,
@@ -38,14 +39,14 @@ describe("locale negotiation", () => {
         navigatorLanguages: ["fr-FR", "en-GB"],
         workspaceDefaultLocale: "en-US",
       },
-      expected: DEFAULT_LOCALE,
+      expected: "fr",
     },
     {
       name: "workspace default",
       input: {
         search: "",
         preferredLocale: null,
-        navigatorLanguages: ["fr-FR"],
+        navigatorLanguages: ["de-DE"],
         workspaceDefaultLocale: "en-US",
       },
       expected: DEFAULT_LOCALE,
@@ -55,8 +56,8 @@ describe("locale negotiation", () => {
       input: {
         search: "",
         preferredLocale: null,
-        navigatorLanguages: ["fr-FR"],
-        workspaceDefaultLocale: "fr-FR",
+        navigatorLanguages: ["de-DE"],
+        workspaceDefaultLocale: "de-DE",
       },
       expected: DEFAULT_LOCALE,
     },

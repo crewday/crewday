@@ -1,6 +1,9 @@
-import { enUSMessages, type MessageKey, type MessageParamMap } from "@/i18n/catalogs/en-US";
+import { type MessageKey, type MessageParamMap } from "@/i18n/catalogs/en-US";
+import enUSBundle from "@/i18n/bundles/en-US.json";
+import esBundle from "@/i18n/bundles/es.json";
+import frBundle from "@/i18n/bundles/fr.json";
+import pseudoBundle from "@/i18n/bundles/qps-ploc.json";
 import { DEFAULT_LOCALE, PSEUDO_LOCALE, type SupportedLocale } from "@/i18n/locale";
-import { pseudolocalize } from "@/i18n/pseudo";
 
 type Catalog = Record<MessageKey, string>;
 type MissingKeyMode = "throw" | "return-key";
@@ -18,12 +21,10 @@ interface TranslatorOptions {
 }
 
 function catalogFor(locale: SupportedLocale): Catalog {
-  if (locale === PSEUDO_LOCALE) {
-    return Object.fromEntries(
-      Object.entries(enUSMessages).map(([key, value]) => [key, pseudolocalize(value)]),
-    ) as Catalog;
-  }
-  return enUSMessages;
+  if (locale === "fr") return frBundle as Catalog;
+  if (locale === "es") return esBundle as Catalog;
+  if (locale === PSEUDO_LOCALE) return pseudoBundle as Catalog;
+  return enUSBundle as Catalog;
 }
 
 function missingKeyMode(): MissingKeyMode {

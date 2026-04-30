@@ -1,50 +1,50 @@
 msgid ""
 msgstr ""
 "Project-Id-Version: crewday 0.0.1\n"
-"Language: en-US\n"
+"Language: \n"
 "Content-Type: text/plain; charset=UTF-8\n"
 
 msgid "approval.status.approved"
-msgstr "Approved"
+msgstr ""
 
 msgid "approval.status.pending"
-msgstr "Pending"
+msgstr ""
 
 msgid "approval.status.rejected"
-msgstr "Rejected"
+msgstr ""
 
 msgid "i18n.testGreeting"
-msgstr "Hello, {name}!"
+msgstr ""
 
 msgid "login.firstTime"
-msgstr "First time here? Open the invite link your manager sent."
+msgstr ""
 
 msgid "login.inviteExampleLink"
-msgstr "See what accepting an invite looks like →"
+msgstr ""
 
 msgid "login.passkeyButton"
-msgstr "Use passkey"
+msgstr ""
 
 msgid "login.recoverLink"
-msgstr "Lost your device? Recover access →"
+msgstr ""
 
 msgid "login.subtitle"
-msgstr "No passwords, ever. Tap once to unlock the house."
+msgstr ""
 
 msgid "login.title"
-msgstr "Sign in with your passkey"
+msgstr ""
 
 msgid "notification.task_assigned"
-msgstr "Task assigned: {task_title}"
+msgstr ""
 
 msgid "task.status.cancelled"
-msgstr "Cancelled"
+msgstr ""
 
 msgid "task.status.done"
-msgstr "Done"
+msgstr ""
 
 msgid "task.status.in_progress"
-msgstr "In progress"
+msgstr ""
 
 msgid "task.status.scheduled"
-msgstr "Scheduled"
+msgstr ""

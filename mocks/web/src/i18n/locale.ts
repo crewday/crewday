@@ -1,7 +1,7 @@
 export const DEFAULT_LOCALE = "en-US";
 export const PSEUDO_LOCALE = "qps-ploc";
 
-export const SUPPORTED_LOCALES = [DEFAULT_LOCALE, PSEUDO_LOCALE] as const;
+export const SUPPORTED_LOCALES = [DEFAULT_LOCALE, "fr", "es", PSEUDO_LOCALE] as const;
 
 export type SupportedLocale = (typeof SUPPORTED_LOCALES)[number];
 
@@ -26,6 +26,8 @@ export function toSupportedLocale(value: string | null | undefined): SupportedLo
   const normalized = value.trim().replaceAll("_", "-").toLowerCase();
   if (normalized === PSEUDO_LOCALE) return PSEUDO_LOCALE;
   if (normalized === "en" || normalized.startsWith("en-")) return DEFAULT_LOCALE;
+  if (normalized === "fr" || normalized.startsWith("fr-")) return "fr";
+  if (normalized === "es" || normalized.startsWith("es-")) return "es";
   return null;
 }
 

@@ -1,4 +1,4 @@
-.PHONY: lint fmt type test coverage schemathesis
+.PHONY: lint fmt type test coverage schemathesis i18n-extract i18n-check
 
 lint:
 	uv run ruff check .
@@ -14,6 +14,13 @@ test:
 
 coverage:
 	uv run pytest --cov=app --cov-report=term-missing
+
+i18n-extract:
+	uv run python scripts/i18n_extract.py
+
+i18n-check:
+	uv run python scripts/i18n_extract.py
+	git diff --exit-code -- app/i18n/locales app/web/src/i18n/bundles mocks/web/src/i18n/bundles
 
 # API contract sweep (cd-3j25).
 #

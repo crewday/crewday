@@ -1,7 +1,7 @@
 msgid ""
 msgstr ""
 "Project-Id-Version: crewday 0.0.1\n"
-"Language: en-US\n"
+"Language: fr\n"
 "Content-Type: text/plain; charset=UTF-8\n"
 
 msgid "approval.status.approved"

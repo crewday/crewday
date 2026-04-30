@@ -11,13 +11,17 @@ from app.i18n import DEFAULT_LOCALE, PSEUDO_LOCALE, get_locale, resolve_locale, 
 
 
 def test_t_resolves_en_us_value() -> None:
-    assert t("login.title") == "Sign in to crew.day"
+    assert t("login.title") == "Sign in with your passkey"
 
 
 def test_t_interpolates_named_params() -> None:
     assert t("notification.task_assigned", task_title="Room 3") == (
         "Task assigned: Room 3"
     )
+
+
+def test_t_uses_language_catalog_for_region_locale() -> None:
+    assert t("login.title", locale="fr-FR") == "Sign in with your passkey"
 
 
 def test_missing_key_raises_when_strict() -> None:
@@ -34,7 +38,7 @@ def test_pseudolocale_transforms_catalog_value() -> None:
     assert out.startswith("[!! ")
     assert out.endswith(" !!]")
     assert "Sígn" in out
-    assert len(out) > len("Sign in to crew.day")
+    assert len(out) > len("Sign in with your passkey")
 
 
 @pytest.mark.parametrize(

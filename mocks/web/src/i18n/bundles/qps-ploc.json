@@ -1,0 +1,17 @@
+{
+  "approval.status.approved": "Åṕṕŕöṽéð ~~",
+  "approval.status.pending": "Ṕéñðíñĝ ~~",
+  "approval.status.rejected": "Ŕéĵéçŧéð ~~",
+  "i18n.testGreeting": "Ĥéĺĺö,  ~~{name}! ~",
+  "login.firstTime": "Ƒíŕšŧ ŧíṁé ĥéŕé? Öṕéñ ŧĥé íñṽíŧé ĺíñķ ýöúŕ ṁåñåĝéŕ šéñŧ. ~~~~~~~~~~~~~~~~",
+  "login.inviteExampleLink": "Šéé ŵĥåŧ åççéṕŧíñĝ åñ íñṽíŧé ĺööķš ĺíķé → ~~~~~~~~~~~~",
+  "login.passkeyButton": "Úšé ṕåššķéý ~~~",
+  "login.recoverLink": "Ĺöšŧ ýöúŕ ðéṽíçé? Ŕéçöṽéŕ åççéšš → ~~~~~~~~~~",
+  "login.subtitle": "Ñö ṕåššŵöŕðš, éṽéŕ. Ŧåṕ öñçé ŧö úñĺöçķ ŧĥé ĥöúšé. ~~~~~~~~~~~~~~",
+  "login.title": "Šíĝñ íñ ŵíŧĥ ýöúŕ ṕåššķéý ~~~~~~~",
+  "notification.task_assigned": "Ŧåšķ åššíĝñéð:  ~~~~{task_title}",
+  "task.status.cancelled": "Çåñçéĺĺéð ~~",
+  "task.status.done": "Ðöñé ~",
+  "task.status.in_progress": "Ĩñ ṕŕöĝŕéšš ~~~",
+  "task.status.scheduled": "Šçĥéðúĺéð ~~"
+}

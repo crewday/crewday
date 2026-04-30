@@ -13,7 +13,7 @@ def test_jinja_trans_block_uses_catalog() -> None:
     )
     install_jinja_i18n(env)
 
-    assert env.get_template("subject.j2").render() == "Sign in to crew.day"
+    assert env.get_template("subject.j2").render() == "Sign in with your passkey"
 
 
 def test_template_loader_uses_render_locale_for_trans_blocks() -> None:

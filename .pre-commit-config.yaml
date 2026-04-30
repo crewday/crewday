@@ -1,0 +1,8 @@
+repos:
+  - repo: local
+    hooks:
+      - id: i18n-keys
+        name: i18n catalog freshness
+        entry: make i18n-check
+        language: system
+        pass_filenames: false

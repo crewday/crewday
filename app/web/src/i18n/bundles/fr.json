@@ -1,0 +1,17 @@
+{
+  "approval.status.approved": "Approved",
+  "approval.status.pending": "Pending",
+  "approval.status.rejected": "Rejected",
+  "i18n.testGreeting": "Hello, {name}!",
+  "login.firstTime": "First time here? Open the invite link your manager sent.",
+  "login.inviteExampleLink": "See what accepting an invite looks like →",
+  "login.passkeyButton": "Use passkey",
+  "login.recoverLink": "Lost your device? Recover access →",
+  "login.subtitle": "No passwords, ever. Tap once to unlock the house.",
+  "login.title": "Sign in with your passkey",
+  "notification.task_assigned": "Task assigned: {task_title}",
+  "task.status.cancelled": "Cancelled",
+  "task.status.done": "Done",
+  "task.status.in_progress": "In progress",
+  "task.status.scheduled": "Scheduled"
+}
