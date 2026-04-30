@@ -26,7 +26,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 import app.adapters.db.session as _session_mod
 from app.adapters.db.audit.models import AuditLog
-from app.adapters.db.authz.models import RoleGrant
+from app.adapters.db.authz.models import DeploymentOwner, RoleGrant
 from app.adapters.db.capabilities.models import DeploymentSetting
 from app.adapters.db.identity.models import ApiToken, User
 from app.adapters.db.identity.models import Session as SessionRow
@@ -113,6 +113,7 @@ def _seed_admin(
     *,
     email: str,
     display_name: str,
+    owner: bool = False,
 ) -> str:
     with session_factory() as s:
         user = bootstrap_user(s, email=email, display_name=display_name)
@@ -127,6 +128,14 @@ def _seed_admin(
                     created_at=_PINNED,
                 )
             )
+            if owner:
+                s.add(
+                    DeploymentOwner(
+                        user_id=user.id,
+                        added_at=_PINNED,
+                        added_by_user_id=None,
+                    )
+                )
             s.flush()
         s.commit()
         return user.id
@@ -175,6 +184,7 @@ def _wipe(session_factory: sessionmaker[Session]) -> None:
             ApiToken,
             SessionRow,
             UserWorkspace,
+            DeploymentOwner,
             RoleGrant,
             AuditLog,
             DeploymentSetting,
@@ -195,7 +205,9 @@ class TestWorkspaceListAndSummary:
     ) -> None:
         try:
             user_id = _seed_admin(
-                session_factory, email="ada@example.com", display_name="Ada"
+                session_factory,
+                email="ada@example.com",
+                display_name="Ada",
             )
             ws = _seed_workspace(session_factory, slug="prod-ws")
             cookie = _issue_session(
@@ -216,7 +228,6 @@ class TestWorkspaceListAndSummary:
             assert trust_resp.json()["verification_state"] == "trusted"
 
             archive_resp = client.post(f"/admin/api/v1/workspaces/{ws}/archive")
-            # cd-zkr deferred → owner gate 404s.
             assert archive_resp.status_code == 404
         finally:
             _wipe(session_factory)
@@ -231,7 +242,7 @@ class TestSettingsAndSignup:
     ) -> None:
         try:
             user_id = _seed_admin(
-                session_factory, email="ada@example.com", display_name="Ada"
+                session_factory, email="ada@example.com", display_name="Ada", owner=True
             )
             cookie = _issue_session(
                 session_factory, user_id=user_id, settings=pinned_settings
@@ -276,7 +287,10 @@ class TestAdminsAndUsageAndAudit:
     ) -> None:
         try:
             user_id = _seed_admin(
-                session_factory, email="ada@example.com", display_name="Ada"
+                session_factory,
+                email="ada@example.com",
+                display_name="Ada",
+                owner=True,
             )
             ws = _seed_workspace(session_factory, slug="usage-ws")
             cookie = _issue_session(

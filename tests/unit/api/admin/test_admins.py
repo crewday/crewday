@@ -8,8 +8,9 @@ surface" §"Admin team":
   validation 422s on missing / ambiguous / unknown target.
 * ``POST /admins/{id}/revoke`` — hard-delete; 404 on missing;
   audit row emits.
-* ``GET /admins/groups`` — empty rosters today (cd-zkr deferred).
-* Owners-group add / revoke 404 today (cd-zkr deferred).
+* ``GET /admins/groups`` — owners from ``deployment_owner`` and
+  managers from deployment ``role_grant`` rows.
+* Owners-group add / revoke require a deployment owner.
 """
 
 from __future__ import annotations
@@ -27,6 +28,7 @@ from app.adapters.db.authz.models import RoleGrant
 from app.adapters.db.identity.models import User
 from app.api.admin.admins import (
     ERROR_AMBIGUOUS_TARGET,
+    ERROR_LAST_OWNER,
     ERROR_MISSING_TARGET,
     ERROR_USER_NOT_FOUND,
 )
@@ -38,6 +40,7 @@ from tests.unit.api.admin._helpers import (
     build_client,
     engine_fixture,
     grant_deployment_admin,
+    grant_deployment_owner,
     issue_session,
     seed_user,
     settings_fixture,
@@ -69,11 +72,13 @@ def client(
 
 
 def _admin_cookie(
-    session_factory: sessionmaker[Session], settings: Settings
+    session_factory: sessionmaker[Session], settings: Settings, *, owner: bool = True
 ) -> tuple[str, str]:
     with session_factory() as s:
         user_id = seed_user(s, email="ada@example.com", display_name="Ada")
         grant_deployment_admin(s, user_id=user_id)
+        if owner:
+            grant_deployment_owner(s, user_id=user_id)
         s.commit()
     return user_id, issue_session(session_factory, user_id=user_id, settings=settings)
 
@@ -252,6 +257,7 @@ class TestRevokeAdmin:
             ada = seed_user(s, email="ada@example.com", display_name="Ada")
             grace = seed_user(s, email="grace@example.com", display_name="Grace")
             grant_deployment_admin(s, user_id=ada)
+            grant_deployment_owner(s, user_id=ada)
             grace_grant = grant_deployment_admin(s, user_id=grace)
             s.commit()
         cookie = issue_session(session_factory, user_id=ada, settings=settings)
@@ -320,20 +326,39 @@ class TestRevokeAdmin:
 
 
 class TestGroups:
-    def test_groups_listing_returns_owners_and_managers_empty(
+    def test_groups_listing_returns_owners_and_managers(
         self,
         client: TestClient,
         session_factory: sessionmaker[Session],
         settings: Settings,
     ) -> None:
-        _user, cookie = _admin_cookie(session_factory, settings)
+        user, cookie = _admin_cookie(session_factory, settings)
         client.cookies.set(SESSION_COOKIE_NAME, cookie)
         body = client.get("/admin/api/v1/admins/groups").json()
-        slugs = [g["slug"] for g in body["groups"]]
-        assert slugs == ["owners", "managers"]
-        assert all(g["members"] == [] for g in body["groups"])
+        groups = {g["slug"]: g for g in body["groups"]}
+        assert list(groups) == ["owners", "managers"]
+        assert [m["user_id"] for m in groups["owners"]["members"]] == [user]
+        assert [m["user_id"] for m in groups["managers"]["members"]] == [user]
 
-    def test_owners_add_404s_today_due_to_owner_gate(
+    def test_non_owner_owners_add_404s(
+        self,
+        client: TestClient,
+        session_factory: sessionmaker[Session],
+        settings: Settings,
+    ) -> None:
+        with session_factory() as s:
+            target = seed_user(s, email="t@example.com", display_name="T")
+            s.commit()
+        _user, cookie = _admin_cookie(session_factory, settings, owner=False)
+        client.cookies.set(SESSION_COOKIE_NAME, cookie)
+        resp = client.post(
+            "/admin/api/v1/admins/groups/owners/members",
+            json={"user_id": target},
+        )
+        assert resp.status_code == 404
+        assert resp.json().get("error") == "not_found"
+
+    def test_owner_adds_owner_and_audits(
         self,
         client: TestClient,
         session_factory: sessionmaker[Session],
@@ -348,18 +373,68 @@ class TestGroups:
             "/admin/api/v1/admins/groups/owners/members",
             json={"user_id": target},
         )
-        assert resp.status_code == 404
-        assert resp.json().get("error") == "not_found"
+        assert resp.status_code == 200, resp.text
+        assert target in {row["user_id"] for row in resp.json()["members"]}
+        with session_factory() as s, tenant_agnostic():
+            audits = s.scalars(
+                select(AuditLog).where(AuditLog.action == "admin.owner_added")
+            ).all()
+        assert len(audits) == 1
+        assert audits[0].actor_was_owner_member is True
 
-    def test_owners_revoke_404s_today_due_to_owner_gate(
+    def test_owner_add_is_idempotent_without_extra_audit(
         self,
         client: TestClient,
         session_factory: sessionmaker[Session],
         settings: Settings,
     ) -> None:
+        with session_factory() as s:
+            target = seed_user(s, email="t@example.com", display_name="T")
+            s.commit()
         _user, cookie = _admin_cookie(session_factory, settings)
         client.cookies.set(SESSION_COOKIE_NAME, cookie)
-        resp = client.post(
-            "/admin/api/v1/admins/groups/owners/members/01HBOGUS00000000000000000/revoke"
+        first = client.post(
+            "/admin/api/v1/admins/groups/owners/members",
+            json={"user_id": target},
         )
-        assert resp.status_code == 404
+        second = client.post(
+            "/admin/api/v1/admins/groups/owners/members",
+            json={"user_id": target},
+        )
+        assert first.status_code == 200
+        assert second.status_code == 200
+        with session_factory() as s, tenant_agnostic():
+            audits = s.scalars(
+                select(AuditLog).where(AuditLog.action == "admin.owner_added")
+            ).all()
+        assert len(audits) == 1
+
+    def test_owner_revoke_removes_owner(
+        self,
+        client: TestClient,
+        session_factory: sessionmaker[Session],
+        settings: Settings,
+    ) -> None:
+        caller, cookie = _admin_cookie(session_factory, settings)
+        with session_factory() as s:
+            target = seed_user(s, email="t@example.com", display_name="T")
+            grant_deployment_owner(s, user_id=target, added_by_user_id=caller)
+            s.commit()
+        client.cookies.set(SESSION_COOKIE_NAME, cookie)
+        resp = client.post(
+            f"/admin/api/v1/admins/groups/owners/members/{target}/revoke"
+        )
+        assert resp.status_code == 200, resp.text
+        assert target not in {row["user_id"] for row in resp.json()["members"]}
+
+    def test_last_owner_revoke_returns_typed_422(
+        self,
+        client: TestClient,
+        session_factory: sessionmaker[Session],
+        settings: Settings,
+    ) -> None:
+        user, cookie = _admin_cookie(session_factory, settings)
+        client.cookies.set(SESSION_COOKIE_NAME, cookie)
+        resp = client.post(f"/admin/api/v1/admins/groups/owners/members/{user}/revoke")
+        assert resp.status_code == 422
+        assert resp.json().get("error") == ERROR_LAST_OWNER

@@ -14,10 +14,9 @@ Every route gates on
 :func:`app.api.admin.deps.current_deployment_admin_principal`;
 the canonical 404 envelope hides the surface from non-admin
 callers per spec. ``archive`` additionally gates on
-:func:`app.api.admin._owners.ensure_deployment_owner` — until
-cd-zkr seeds the deployment owners group, every caller fails
-that gate and the route 404s, which is the spec-mandated
-fail-closed posture.
+:func:`app.api.admin._owners.ensure_deployment_owner`, backed by
+the deployment ``owners`` membership table. Non-owner admins see
+the same canonical 404 as non-admin callers.
 
 The ``verification_state`` and ``archived_at`` projections are
 read off :mod:`app.api.admin._workspace_state` — an interim
@@ -138,8 +137,7 @@ class WorkspaceSummaryResponse(BaseModel):
       same window.
     * ``admins_count`` — count of deployment-scoped grants whose
       :attr:`RoleGrant.workspace_id` points at this workspace
-      (always zero today; wired here so cd-zkr's group rollout
-      doesn't change the contract).
+      (always zero today; retained for the summary-card contract).
     """
 
     id: str
@@ -488,11 +486,8 @@ def build_admin_workspaces_router() -> APIRouter:
     ) -> WorkspaceArchiveResponse:
         """Stamp ``archived_at`` and audit.
 
-        **Owners-only** per spec §12 "Admin surface". The owner
-        check fails closed today (cd-zkr has not yet seeded the
-        deployment owners group); every caller therefore 404s.
-        Once cd-zkr lands, only deployment-owner admins pass —
-        a non-owner admin still sees a 404 (surface invisibility).
+        **Owners-only** per spec §12 "Admin surface". A non-owner
+        admin still sees a 404 (surface invisibility).
 
         Idempotent: archiving an already-archived workspace
         returns the original timestamp (no fresh stamp, no

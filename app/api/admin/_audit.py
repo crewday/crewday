@@ -25,6 +25,7 @@ from fastapi import Request
 from sqlalchemy.orm import Session
 
 from app.audit import write_deployment_audit
+from app.authz.deployment_owners import is_deployment_owner
 from app.tenancy import DeploymentContext
 from app.util.ulid import new_ulid
 
@@ -67,15 +68,12 @@ def audit_admin(
       ``user|agent|system`` set the workspace-side feed expects.
     * ``actor_grant_role`` — pinned to ``"manager"`` for v1.
       Deployment grants today land as ``grant_role='manager'``
-      (§02 "role_grants"; cd-wchi). When the deployment owners
-      group surfaces (cd-zkr), this seam can read the resolved
-      role off ``ctx`` — but the audit row's own ``actor_grant_role``
-      is informational, not authoritative; the
+      (§02 "role_grants"). The audit row's own
+      ``actor_grant_role`` is informational, not authoritative; the
       :attr:`actor_was_owner_member` bit is the load-bearing
       governance signal.
-    * ``actor_was_owner_member`` — hard-wired ``False`` until cd-zkr
-      seeds the deployment owners group; once that lands, this
-      seam reads :func:`app.api.admin._owners.is_deployment_owner`.
+    * ``actor_was_owner_member`` — read from ``deployment_owner`` so
+      root-only mutations carry the governance signal.
     * ``correlation_id`` — the ambient ``X-Request-Id`` (the
       :class:`RequestIdMiddleware` already minted one when the
       request arrived; if it is missing for any reason, the writer
@@ -97,10 +95,9 @@ def audit_admin(
         actor_id=ctx.user_id,
         actor_kind=_ACTOR_KIND_FOR_AUDIT[ctx.actor_kind],
         # ``manager`` is the v1 ``role_grant.grant_role`` value used
-        # for every deployment grant (§02 "role_grants"); see helper
-        # docstring for the cd-zkr migration path that promotes this.
+        # for every deployment grant (§02 "role_grants").
         actor_grant_role="manager",
-        actor_was_owner_member=False,
+        actor_was_owner_member=is_deployment_owner(session, user_id=ctx.user_id),
         correlation_id=correlation_id,
         entity_kind=entity_kind,
         entity_id=entity_id,

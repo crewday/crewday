@@ -12,7 +12,7 @@ from sqlalchemy import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.adapters.db import audit, authz, billing, identity, workspace  # noqa: F401
-from app.adapters.db.authz.models import RoleGrant
+from app.adapters.db.authz.models import DeploymentOwner, RoleGrant
 from app.adapters.db.base import Base
 from app.adapters.db.billing.models import Organization
 from app.adapters.db.identity.models import Session as SessionRow
@@ -169,6 +169,50 @@ def test_bare_me_returns_shell_profile(
     assert body["employee"]["avatar_initials"] == "MM"
     assert body["current_workspace_id"] == workspace_id
     assert body["available_workspaces"][0]["workspace"]["id"] == "smoke"
+    assert body["is_deployment_admin"] is False
+    assert body["is_deployment_owner"] is False
+
+
+def test_me_profile_reports_deployment_owner(
+    client: TestClient,
+    session_factory: sessionmaker[Session],
+    settings: Settings,
+) -> None:
+    user_id, workspace_id, _slug = _seed_user_workspace(session_factory)
+    with session_factory() as s, tenant_agnostic():
+        s.add(
+            RoleGrant(
+                id=new_ulid(),
+                workspace_id=None,
+                user_id=user_id,
+                grant_role="manager",
+                scope_kind="deployment",
+                created_at=SystemClock().now(),
+                created_by_user_id=None,
+            )
+        )
+        s.add(
+            DeploymentOwner(
+                user_id=user_id,
+                added_at=SystemClock().now(),
+                added_by_user_id=None,
+            )
+        )
+        s.commit()
+    cookie = _issue_cookie(
+        session_factory,
+        user_id=user_id,
+        workspace_id=workspace_id,
+        settings=settings,
+    )
+    client.cookies.set(SESSION_COOKIE_NAME, cookie)
+
+    response = client.get("/api/v1/me")
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["is_deployment_admin"] is True
+    assert body["is_deployment_owner"] is True
 
 
 def test_scoped_me_alias_returns_same_profile(

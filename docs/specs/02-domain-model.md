@@ -562,7 +562,7 @@ membership in that scope's `owners` permission group.
 | user_id            | ULID FK   |                                                                       |
 | scope_kind         | text      | `workspace \| deployment \| property \| organization` — `workspace` is the legacy default; `deployment` (cd-wchi) authorises bare-host admin (§12); `property` / `organization` are reserved (the v1 storage carries property scope on the sibling `scope_property_id` column, organization scope is not yet materialised) |
 | scope_id           | ULID      | references `workspace.id` / `property.id` / `organization.id`. Stored in v1 as `workspace_id` (workspace scope) / `scope_property_id` (property narrowing); `deployment` rows have neither (`workspace_id IS NULL`, `scope_property_id IS NULL`) |
-| grant_role         | text      | `manager \| worker \| client \| guest` (see note on dropped `owner`). Applies uniformly across scope kinds — a deployment admin holds `grant_role = 'manager'` at `scope_kind = 'deployment'`; deployment-owner authority lives on the deployment `owners` permission group. |
+| grant_role         | text      | `manager \| worker \| client \| guest` (see note on dropped `owner`). Applies uniformly across scope kinds — a deployment admin holds `grant_role = 'manager'` at `scope_kind = 'deployment'`; deployment-owner authority lives on `deployment_owner`. |
 | binding_org_id     | ULID FK?  | only meaningful when `scope_kind = 'workspace'` and `grant_role = 'client'`; narrows the client's visibility to data billed to this organization within the workspace |
 | started_on         | date      | when the grant takes effect                                           |
 | ended_on           | date?     | when it expired (null = active)                                       |
@@ -605,6 +605,27 @@ Note: v1 drops the `owner` grant_role and the per-row
 Governance lives on the `owners` **permission group** (below);
 fine-grained authority lives on `permission_rule`. `role_grants`
 is now strictly the surface/persona anchor.
+
+### deployment_owner
+
+Explicit membership in the deployment `owners` group. Workspace
+permission groups are tenant-bound in v1 (`permission_group` and
+`permission_group_member` carry non-null `workspace_id`), while the
+deployment owner set has no workspace tenant. The small
+`deployment_owner` table is therefore the v1 storage for
+`owners@deployment`; it does not grant the `/admin` surface by
+itself. A deployment owner who needs the admin shell also holds an
+active `role_grants` row with `scope_kind = 'deployment'`.
+
+| column           | type    | notes                                                            |
+|------------------|---------|------------------------------------------------------------------|
+| user_id          | ULID PK | FK to `user.id`; cascade delete removes the owner membership     |
+| added_at         | tstz    | UTC timestamp for the membership write                           |
+| added_by_user_id | ULID?   | FK to `user.id`, `NULL` for bootstrap/system adds; SET NULL on delete |
+
+First bootstrap seeds the initial deployment owner and a matching
+deployment admin grant for the same user. Deployments with no
+`deployment_owner` rows fail owner-only mutations closed.
 
 **Valid `grant_role` per `scope_kind`:**
 

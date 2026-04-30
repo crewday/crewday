@@ -269,7 +269,7 @@ action catalog + `permission_rule` rows.
 
 | role      | typical user                                  | primary surface                                              |
 |-----------|-----------------------------------------------|--------------------------------------------------------------|
-| `admin`   | deployment operator (self-host owner, SaaS ops) | the bare-host `/admin` shell (§14): LLM + provider config, deployment-wide usage, workspace lifecycle, signup settings, admin-team management, deployment audit. Only valid on `scope_kind = 'deployment'` grants. |
+| `admin`   | deployment operator (self-host owner, SaaS ops) | the bare-host `/admin` shell (§14): LLM + provider config, deployment-wide usage, workspace lifecycle, signup settings, admin-team management, deployment audit. In v1 storage this surface is represented as `scope_kind = 'deployment'` with `grant_role = 'manager'`; the UI names it "admin". |
 | `manager` | head of household, co-manager, agency staff   | full admin dashboard (properties, tasks, payroll, orgs). Which actions they may *perform* depends on rules + owners-group membership. |
 | `worker`  | a maid, driver, cook, contractor              | PWA: assigned tasks, own bookings, own expenses, own profile |
 | `client`  | a villa owner who pays an agency              | read-only portal for bookings/invoices billed to them; accept/reject quotes (gated) |
@@ -285,31 +285,26 @@ versa.
 
 ### Deployment scope
 
-`scope_kind = 'deployment'` is the process-level scope: a single
-synthetic row per running deployment, seeded at first boot with
-`id = '00000000000000000000000000'` (the reserved system ULID
-already used for the pseudo-system actor). Every deployment has
-exactly one, and there is no cascade with workspace scopes — a
-user's deployment grants are independent of every workspace
-grant they hold.
+`scope_kind = 'deployment'` is the process-level scope. There is
+no cascade with workspace scopes — a user's deployment grants are
+independent of every workspace grant they hold.
 
-- Only two `grant_role` values are valid here: `admin` (surface
-  grant → `/admin` shell) and — for symmetry with other scopes —
-  `owners` group membership (governance anchor for the
-  deployment). No `manager`, `worker`, `client`, or `guest`
-  grants on the deployment.
-- The **`owners@deployment`** permission group is seeded on first
-  boot with exactly one member: the operator who ran
-  `crewday admin init` (recipe A / B) or the first workspace
-  created on a managed deployment (recipe D). That user is also
-  auto-issued a `role_grants` row with
-  `(scope_kind='deployment', scope_id='00000000000000000000000000',
-  grant_role='admin')` so the `/admin` shell is reachable from
-  their first login.
-- The **`managers@deployment`** permission group is seeded empty
-  and tracks everyone currently holding
-  `(scope_kind='deployment', grant_role='admin')` — same derived-
-  from-grants pattern as `managers@<workspace>`.
+- The `/admin` surface grant is stored as a deployment-scoped
+  `role_grants` row with `grant_role = 'manager'`. The product UI
+  and docs call that person a deployment admin; `role_grants`
+  keeps the v1 enum shared with workspace grants.
+- The **`owners@deployment`** group is backed by the
+  `deployment_owner` table (§02), not by tenant-bound
+  `permission_group_member` rows. It is seeded on first boot with
+  exactly one member: the operator who ran `crewday admin init`
+  (recipe A / B) or the first workspace created on a managed
+  deployment (recipe D). That user is also auto-issued a
+  `role_grants` row with `(scope_kind='deployment',
+  workspace_id=NULL, grant_role='manager')` so the `/admin` shell
+  is reachable from their first login.
+- The **`managers@deployment`** group is derived from every active
+  deployment admin grant — same derived-from-grants pattern as
+  `managers@<workspace>`.
 - Extending the admin team is `groups.manage_members` +
   `role_grants.create` on the deployment scope (both default to
   `owners@deployment` only); adding to `owners@deployment` itself
@@ -317,7 +312,7 @@ grant they hold.
 
 ### Admin surface
 
-Users holding `(scope_kind='deployment', grant_role='admin')`
+Users holding `(scope_kind='deployment', grant_role='manager')`
 see the `/admin` shell on the bare host (§14 "Admin shell").
 They do **not** get workspace access through this grant — a
 deployment admin who is also a workspace manager holds two
@@ -581,10 +576,11 @@ configuration.
 | `deployment.settings.edit`              | `deployment`                   | `owners`                      | ✅ | §16 |
 | `deployment.audit.view`                 | `deployment`                   | `owners, managers`            | ✅ | §15 |
 
-`deployment` entries use the system groups seeded on the
-deployment scope: `owners@deployment` (the operator seat,
-always ≥ 1 member) and `managers@deployment` (derived from every
-active `(scope_kind='deployment', grant_role='admin')` grant).
+`deployment` entries use the system groups on the deployment
+scope: `owners@deployment` (explicit `deployment_owner` rows,
+normally seeded with at least one operator seat) and
+`managers@deployment` (derived from every active
+`(scope_kind='deployment', grant_role='manager')` grant).
 `all_workers@deployment` and `all_clients@deployment` are not
 seeded — a deployment has no workers and no clients, only
 admins.

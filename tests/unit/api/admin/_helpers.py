@@ -31,7 +31,7 @@ from sqlalchemy.orm import Session, sessionmaker
 # of pytest collection order — same shape ``test_me.py`` follows.
 import app.adapters.db.payroll.models
 import app.adapters.db.places.models  # noqa: F401
-from app.adapters.db.authz.models import RoleGrant
+from app.adapters.db.authz.models import DeploymentOwner, RoleGrant
 from app.adapters.db.base import Base
 from app.adapters.db.session import make_engine
 from app.adapters.db.workspace.models import Workspace
@@ -51,6 +51,7 @@ __all__ = [
     "build_client",
     "engine_fixture",
     "grant_deployment_admin",
+    "grant_deployment_owner",
     "install_admin_cookie",
     "issue_session",
     "seed_admin",
@@ -194,6 +195,25 @@ def grant_deployment_admin(
     return grant_id
 
 
+def grant_deployment_owner(
+    session: Session,
+    *,
+    user_id: str,
+    added_at: datetime | None = None,
+    added_by_user_id: str | None = None,
+) -> None:
+    """Plant a deployment-owner membership row."""
+    with tenant_agnostic():
+        session.add(
+            DeploymentOwner(
+                user_id=user_id,
+                added_at=added_at or PINNED,
+                added_by_user_id=added_by_user_id,
+            )
+        )
+        session.flush()
+
+
 def issue_session(
     session_factory: sessionmaker[Session],
     *,
@@ -221,6 +241,7 @@ def seed_admin(
     settings: Settings,
     email: str = "ada@example.com",
     display_name: str = "Ada",
+    owner: bool = False,
 ) -> tuple[str, str]:
     """Seed an admin user + grant; return ``(user_id, cookie_value)``.
 
@@ -231,6 +252,8 @@ def seed_admin(
     with session_factory() as s:
         user_id = seed_user(s, email=email, display_name=display_name)
         grant_deployment_admin(s, user_id=user_id)
+        if owner:
+            grant_deployment_owner(s, user_id=user_id)
         s.commit()
     cookie = issue_session(session_factory, user_id=user_id, settings=settings)
     return user_id, cookie

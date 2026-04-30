@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.adapters.db.audit.models import AuditLog
 from app.adapters.db.authz.models import (
+    DeploymentOwner,
     PermissionGroup,
     PermissionGroupMember,
     RoleGrant,
@@ -76,6 +77,14 @@ def test_workspace_bootstrap_creates_workspace_owner_and_cli_audit(
                 RoleGrant.grant_role == "manager",
             )
         )
+        deployment_owner = db_session.get(DeploymentOwner, result.user_id)
+        deployment_grant = db_session.scalar(
+            select(RoleGrant).where(
+                RoleGrant.workspace_id.is_(None),
+                RoleGrant.scope_kind == "deployment",
+                RoleGrant.user_id == result.user_id,
+            )
+        )
         nonce = db_session.scalar(
             select(MagicLinkNonce).where(
                 MagicLinkNonce.purpose == "grant_invite",
@@ -100,6 +109,8 @@ def test_workspace_bootstrap_creates_workspace_owner_and_cli_audit(
     assert owners is not None
     assert owner_member is not None
     assert owner_grant is not None
+    assert deployment_owner is not None
+    assert deployment_grant is not None
     assert nonce is not None
     assert invite is not None
     assert invite.user_id == result.user_id

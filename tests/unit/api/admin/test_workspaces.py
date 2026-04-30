@@ -9,8 +9,7 @@ surface" pins:
   aggregates.
 * ``POST /workspaces/{id}/trust`` — promote
   ``verification_state``; idempotent re-call; 404 for missing.
-* ``POST /workspaces/{id}/archive`` — owners-only soft-archive
-  (404 today because cd-zkr deferred); idempotent.
+* ``POST /workspaces/{id}/archive`` — owners-only soft-archive.
 
 Auth gating relies on the cd-yj4k dep tested in
 :mod:`tests.unit.api.admin.test_deps`; this module focuses on
@@ -44,6 +43,7 @@ from tests.unit.api.admin._helpers import (
     build_client,
     engine_fixture,
     grant_deployment_admin,
+    grant_deployment_owner,
     issue_session,
     seed_user,
     seed_workspace,
@@ -76,12 +76,14 @@ def client(
 
 
 def _admin_cookie(
-    session_factory: sessionmaker[Session], settings: Settings
+    session_factory: sessionmaker[Session], settings: Settings, *, owner: bool = False
 ) -> tuple[str, str]:
     """Seed a deployment admin + return ``(user_id, cookie_value)``."""
     with session_factory() as s:
         user_id = seed_user(s, email="ada@example.com", display_name="Ada Lovelace")
         grant_deployment_admin(s, user_id=user_id)
+        if owner:
+            grant_deployment_owner(s, user_id=user_id)
         s.commit()
     return user_id, issue_session(session_factory, user_id=user_id, settings=settings)
 
@@ -350,10 +352,7 @@ class TestTrustWorkspace:
 
 
 class TestArchiveWorkspace:
-    """``POST /admin/api/v1/workspaces/{id}/archive``.
-
-    Owners-only — cd-zkr deferred → every caller 404s today.
-    """
+    """``POST /admin/api/v1/workspaces/{id}/archive``."""
 
     def test_404_for_admin_who_is_not_owner(
         self,
@@ -376,6 +375,33 @@ class TestArchiveWorkspace:
             row = s.get(Workspace, ws)
             assert row is not None
             assert ARCHIVED_AT_KEY not in row.settings_json
+
+    def test_owner_archives_workspace_and_audits(
+        self,
+        client: TestClient,
+        session_factory: sessionmaker[Session],
+        settings: Settings,
+    ) -> None:
+        with session_factory() as s:
+            ws = seed_workspace(s, slug="ws-owner-archive")
+            s.commit()
+        _user, cookie = _admin_cookie(session_factory, settings, owner=True)
+        client.cookies.set(SESSION_COOKIE_NAME, cookie)
+
+        resp = client.post(f"/admin/api/v1/workspaces/{ws}/archive")
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["id"] == ws
+        assert resp.json()["archived_at"] is not None
+
+        with session_factory() as s, tenant_agnostic():
+            row = s.get(Workspace, ws)
+            audits = s.scalars(
+                select(AuditLog).where(AuditLog.action == "workspace.archived")
+            ).all()
+        assert row is not None
+        assert ARCHIVED_AT_KEY in row.settings_json
+        assert len(audits) == 1
+        assert audits[0].actor_was_owner_member is True
 
     def test_404_for_non_admin_without_workspace_id_leak(
         self,

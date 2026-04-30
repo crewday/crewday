@@ -42,7 +42,7 @@ from sqlalchemy.orm import Session, sessionmaker
 # tables we'd otherwise skip.
 import app.adapters.db.payroll.models
 import app.adapters.db.places.models  # noqa: F401
-from app.adapters.db.authz.models import RoleGrant
+from app.adapters.db.authz.models import DeploymentOwner, RoleGrant
 from app.adapters.db.base import Base
 from app.adapters.db.session import make_engine
 from app.adapters.db.workspace.models import Workspace
@@ -202,6 +202,24 @@ def _grant_deployment_admin(
     return grant_id
 
 
+def _grant_deployment_owner(
+    session: Session,
+    *,
+    user_id: str,
+    added_by_user_id: str | None = None,
+) -> None:
+    """Plant an ``owners@deployment`` membership row."""
+    with tenant_agnostic():
+        session.add(
+            DeploymentOwner(
+                user_id=user_id,
+                added_at=_PINNED,
+                added_by_user_id=added_by_user_id,
+            )
+        )
+        session.flush()
+
+
 def _grant_workspace_role(
     session: Session,
     *,
@@ -298,6 +316,7 @@ class TestAdminMe:
                 s, email="ada@example.com", display_name="Ada Lovelace"
             )
             _grant_deployment_admin(s, user_id=user_id)
+            _grant_deployment_owner(s, user_id=user_id)
             s.commit()
 
         cookie_value = _issue_session(
@@ -313,9 +332,7 @@ class TestAdminMe:
         assert body["user_id"] == user_id
         assert body["display_name"] == "Ada Lovelace"
         assert body["email"] == "ada@example.com"
-        # Deployment owners group not yet seeded — flag is always
-        # ``False`` until cd-zkr lands.
-        assert body["is_owner"] is False
+        assert body["is_owner"] is True
 
         # Capabilities reflect the dep's full scope catalogue for a
         # session principal.
@@ -426,6 +443,7 @@ class TestAdminMeAdmins:
                 user_id=caller_id,
                 created_at=_PINNED,
             )
+            _grant_deployment_owner(s, user_id=caller_id)
             # Grace was promoted later, by the caller.
             grace_grant_id = _grant_deployment_admin(
                 s,
@@ -453,7 +471,7 @@ class TestAdminMeAdmins:
         assert first["user_id"] == caller_id
         assert first["display_name"] == "Ada Lovelace"
         assert first["email"] == "ada@example.com"
-        assert first["is_owner"] is False
+        assert first["is_owner"] is True
         # Bootstrap null → ``"system"`` sentinel.
         assert first["granted_by"] == "system"
         # ISO-8601 with explicit UTC offset.
@@ -463,6 +481,7 @@ class TestAdminMeAdmins:
         assert second["user_id"] == grace_id
         assert second["display_name"] == "Grace Hopper"
         assert second["email"] == "grace@example.com"
+        assert second["is_owner"] is False
         assert second["granted_by"] == caller_id
 
         # Groups not yet seeded — empty list keeps the contract

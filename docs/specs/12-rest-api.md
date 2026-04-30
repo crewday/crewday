@@ -33,8 +33,9 @@ the workspace's URL slug (§01 "Workspace addressing", §02
   bare host.
 - `https://<host>/admin/api/v1/...` — **deployment-scoped** routes,
   reachable only by callers whose `role_grants` include
-  `(scope_kind='deployment', grant_role='admin')` or membership in
-  a deployment permission group. The full set — `llm/*`, `usage`,
+  `(scope_kind='deployment', grant_role='manager')`. Deployment
+  owner authority is separate and comes from `deployment_owner`
+  membership (§02). The full set — `llm/*`, `usage`,
   `workspaces`, `signup`, `settings`, `admins`, `audit`, and the
   admin chat agent (`agent/{log,message,actions}`) — is enumerated
   in the "Admin surface" subsection below. Tokens without any
@@ -635,9 +636,8 @@ non-admin caller.
 * `display_name` / `email` are read off the `user` row verbatim
   (the email is the display value, not the canonicalised lookup
   form).
-* `is_owner` is `true` iff the user belongs to the deployment
-  `owners` permission group. The deployment owners group lands
-  with cd-zkr; until then this field is always `false`.
+* `is_owner` is `true` iff the user belongs to
+  `owners@deployment`, backed by the `deployment_owner` table.
 * `capabilities` is a flat `{scope_key: true}` map — one entry
   per `deployment.*` scope key the caller currently holds, sorted
   by key. Session / delegated principals carry every key from the
@@ -674,13 +674,11 @@ admin grant:
   bootstrap row seeded at deployment creation, which surfaces as
   the literal string `"system"` so the SPA's table can render the
   cell without a defensive nullish-coalesce.
-* `is_owner` is forward-reserved for the deployment `owners`
-  permission group (cd-zkr); until that group lands every entry
-  emits `false`.
-* `groups` is reserved for the deployment owners + managers group
-  listings (cd-zkr / cd-79r). The wrapper envelope is shipped
-  today so consumers can stay forward-compatible without a shape
-  break when the field starts populating.
+* `is_owner` is `true` iff the admin's user id appears in
+  `deployment_owner`.
+* `groups` remains an empty legacy envelope on this caller-view
+  route. Use `GET /admin/api/v1/admins/groups` for the populated
+  owners + managers rosters.
 
 ```
 # Caller identity
@@ -776,9 +774,9 @@ GET    /admin/api/v1/settings                        # every `deployment_setting
 PUT    /admin/api/v1/settings/{key}                  # owners-only; root-only keys (e.g. trusted_interfaces) refuse
 
 # Admin team
-GET    /admin/api/v1/admins                          # every role_grants with scope_kind='deployment'
-POST   /admin/api/v1/admins                          # grant admin to an existing user by email / id
-POST   /admin/api/v1/admins/{id}/revoke
+GET    /admin/api/v1/admins                          # every role_grant with scope_kind='deployment'
+POST   /admin/api/v1/admins                          # owners-only; grant admin to an existing user by email / id
+POST   /admin/api/v1/admins/{id}/revoke              # owners-only
 GET    /admin/api/v1/admins/groups                   # owners + managers deployment groups, members
 POST   /admin/api/v1/admins/groups/owners/members    # add; root-only
 POST   /admin/api/v1/admins/groups/owners/members/{user_id}/revoke

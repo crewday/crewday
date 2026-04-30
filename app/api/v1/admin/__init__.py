@@ -16,7 +16,7 @@ operate on a concrete workspace, never on the bare host.
 
 **Not the deployment-scoped admin tree.** :mod:`app.api.admin`
 (``/admin/api/v1/*``) is a separate, deployment-operator surface
-gated on ``(scope_kind='deployment', grant_role='admin')``. The two
+gated on ``(scope_kind='deployment', grant_role='manager')``. The two
 trees never overlap: the deployment admin mounts LLM provider
 config, cross-workspace usage, and deployment-wide audit; the
 workspace admin mounts per-workspace abuse/security surfaces that a

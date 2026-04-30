@@ -416,10 +416,8 @@ def build_admin_settings_router() -> APIRouter:
            (the spec's "owners-only; root-only keys refuse"
            wording wraps both the gate and the typed code).
         3. Owner-gate the write via
-           :func:`ensure_deployment_owner`. Today every caller
-           fails this check (cd-zkr deferred), so every owner-
-           gated PUT 404s — see the helper's docstring for the
-           fail-closed rationale.
+           :func:`ensure_deployment_owner`; non-owner admins receive
+           the same 404 wall as non-admin callers.
         4. Coerce the body's value through the registry's typed
            converter; bad shapes 422 ``invalid_setting_value``.
         5. Upsert the ``deployment_setting`` row, write the
@@ -437,8 +435,8 @@ def build_admin_settings_router() -> APIRouter:
                 ),
             )
         # Every non-root-only setting still requires deployment-owner
-        # authority for v1. The cd-zkr migration will narrow this gate
-        # to a per-key matrix once the deployment owners group lands.
+        # authority for v1. A later per-key matrix can narrow this
+        # gate without changing the wire shape.
         ensure_deployment_owner(session, ctx=ctx)
         try:
             value = definition.coerce(payload.value)

@@ -19,7 +19,7 @@ from app.adapters.db.authz.bootstrap import (
     seed_owners_system_group,
     seed_system_permission_groups,
 )
-from app.adapters.db.authz.models import PermissionGroup
+from app.adapters.db.authz.models import DeploymentOwner, PermissionGroup, RoleGrant
 from app.adapters.db.capabilities.models import DeploymentSetting
 from app.adapters.db.identity.models import (
     Invite,
@@ -143,6 +143,47 @@ def _seed_deployment_settings(
             seeded += 1
         session.flush()
     return seeded
+
+
+def _seed_first_deployment_owner(
+    session: Session,
+    *,
+    user_id: str,
+    now: datetime,
+    clock: Clock | None = None,
+) -> bool:
+    """Seed the first deployment owner/admin, returning whether it was new."""
+    with tenant_agnostic():
+        existing_owner = session.scalar(select(DeploymentOwner.user_id).limit(1))
+        if existing_owner is not None:
+            return False
+        existing_grant = session.scalar(
+            select(RoleGrant.id)
+            .where(RoleGrant.scope_kind == "deployment")
+            .where(RoleGrant.user_id == user_id)
+            .limit(1)
+        )
+        if existing_grant is None:
+            session.add(
+                RoleGrant(
+                    id=new_ulid(clock=clock),
+                    workspace_id=None,
+                    user_id=user_id,
+                    grant_role="manager",
+                    scope_kind="deployment",
+                    created_at=now,
+                    created_by_user_id=None,
+                )
+            )
+        session.add(
+            DeploymentOwner(
+                user_id=user_id,
+                added_at=now,
+                added_by_user_id=None,
+            )
+        )
+        session.flush()
+    return True
 
 
 def _deployment_audit(
@@ -564,6 +605,12 @@ def workspace_bootstrap(
             clock=clock,
         )
         seed_system_permission_groups(session, workspace_id=workspace_id, clock=clock)
+        seeded_deployment_owner = _seed_first_deployment_owner(
+            session,
+            user_id=owner.id,
+            now=now,
+            clock=clock,
+        )
         seed_asset_type_catalog(session, ctx, clock=clock)
         invite_id = new_ulid(clock=clock)
         session.add(
@@ -594,6 +641,7 @@ def workspace_bootstrap(
                 "workspace_slug": slug,
                 "owner_user_id": owner.id,
                 "owner_user_created": user_created,
+                "deployment_owner_seeded": seeded_deployment_owner,
                 "via": "cli",
             },
             clock=clock,

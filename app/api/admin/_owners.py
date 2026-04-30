@@ -10,14 +10,10 @@ deployment ``owners`` permission group (§12 "Admin surface"):
   ``POST /admin/api/v1/admins/groups/owners/members/{user_id}/revoke``
   — root-only mutations on the owners-group itself.
 
-The deployment owners permission group is **not yet seeded** —
-cd-zkr is the task that lands its bootstrap. Until then the
-question "is this caller in ``owners@deployment``?" must always
-return ``False`` so the gate fails closed: an unauthorised
-mutation is far less harmful than a silent elevation. Once cd-zkr
-ships the owners group, :func:`is_deployment_owner` reads the
-real ``permission_group_member`` row instead and the gates start
-admitting.
+``owners@deployment`` is backed by the deployment-scoped
+``deployment_owner`` table. Deployments with no seeded owner row
+still fail closed: an unauthorised mutation is less harmful than a
+silent elevation.
 
 The gate **never raises 403**. Spec §12 "Admin surface": "the
 surface does not advertise its own existence to tenants" — an
@@ -38,33 +34,10 @@ from __future__ import annotations
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
+from app.authz.deployment_owners import is_deployment_owner
 from app.tenancy import DeploymentContext
 
 __all__ = ["ensure_deployment_owner", "is_deployment_owner"]
-
-
-def is_deployment_owner(
-    session: Session,
-    *,
-    user_id: str,
-) -> bool:
-    """Return ``True`` iff ``user_id`` belongs to ``owners@deployment``.
-
-    The deployment owners permission group does not exist yet
-    (cd-zkr will seed it). Until then the helper hard-returns
-    ``False`` so every owner-only gate fails closed — an owner
-    mutation today returns 404, matching the spec's surface-
-    invisibility contract. When cd-zkr lands the seed, this
-    function flips to a single SELECT against
-    ``permission_group_member`` joined to ``permission_group``
-    on ``slug='owners'`` AND ``workspace_id IS NULL`` (the
-    deployment partition).
-
-    The signature already takes ``session`` and ``user_id`` so
-    the call sites land today without churn — the cd-zkr swap is
-    an internal-only change.
-    """
-    return False
 
 
 def ensure_deployment_owner(session: Session, *, ctx: DeploymentContext) -> None:

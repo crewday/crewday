@@ -8,8 +8,8 @@ Covers ``GET /settings`` + ``PUT /settings/{key}`` per spec §12
 * PUT 422s ``unknown_setting`` for an unknown key, ``root_only_setting``
   for ``trusted_interfaces``, and ``invalid_setting_value`` for
   a wrong-typed value.
-* Owner-required gate (404) holds today (cd-zkr deferred);
-  every owner-only mutation 404s.
+* Non-owner admins still hit the surface-invisible 404 owner gate;
+  deployment owners can update mutable settings.
 """
 
 from __future__ import annotations
@@ -36,6 +36,7 @@ from tests.unit.api.admin._helpers import (
     build_client,
     engine_fixture,
     grant_deployment_admin,
+    grant_deployment_owner,
     issue_session,
     seed_user,
     settings_fixture,
@@ -66,10 +67,17 @@ def client(
     yield from build_client(settings, session_factory, monkeypatch)
 
 
-def _admin_cookie(session_factory: sessionmaker[Session], settings: Settings) -> str:
+def _admin_cookie(
+    session_factory: sessionmaker[Session],
+    settings: Settings,
+    *,
+    owner: bool = False,
+) -> str:
     with session_factory() as s:
         user_id = seed_user(s, email="ada@example.com", display_name="Ada")
         grant_deployment_admin(s, user_id=user_id)
+        if owner:
+            grant_deployment_owner(s, user_id=user_id)
         s.commit()
     return issue_session(session_factory, user_id=user_id, settings=settings)
 
@@ -174,7 +182,7 @@ class TestUpdateSetting:
         assert resp.status_code == 422
         assert resp.json().get("error") == ERROR_ROOT_ONLY
 
-    def test_owner_only_admin_404s_today(
+    def test_non_owner_admin_404s_on_owner_only_write(
         self,
         client: TestClient,
         session_factory: sessionmaker[Session],
@@ -187,11 +195,34 @@ class TestUpdateSetting:
             "/admin/api/v1/settings/signup_enabled",
             json={"value": False},
         )
-        # cd-zkr deferred → :func:`ensure_deployment_owner` 404s
-        # every caller. Once the owners group lands, a deployment
-        # owner promotes this assertion to a 200 + audit row.
         assert resp.status_code == 404
         assert resp.json().get("error") == "not_found"
+
+    def test_deployment_owner_updates_setting_and_audits(
+        self,
+        client: TestClient,
+        session_factory: sessionmaker[Session],
+        settings: Settings,
+    ) -> None:
+        client.cookies.set(
+            SESSION_COOKIE_NAME, _admin_cookie(session_factory, settings, owner=True)
+        )
+        resp = client.put(
+            "/admin/api/v1/settings/signup_enabled",
+            json={"value": False},
+        )
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["value"] is False
+
+        with session_factory() as s, tenant_agnostic():
+            row = s.get(DeploymentSetting, "signup_enabled")
+            audits = s.scalars(
+                select(AuditLog).where(AuditLog.action == "deployment_setting.updated")
+            ).all()
+        assert row is not None
+        assert row.value is False
+        assert len(audits) == 1
+        assert audits[0].actor_was_owner_member is True
 
     def test_invalid_type_for_bool_setting(
         self,
@@ -199,18 +230,15 @@ class TestUpdateSetting:
         session_factory: sessionmaker[Session],
         settings: Settings,
     ) -> None:
-        # Owner gate fails first today; pin the assertion against
-        # the 404 envelope so a future cd-zkr promotion that lights
-        # up :func:`ensure_deployment_owner` is the one place this
-        # test needs updating to assert the typed coerce error.
         client.cookies.set(
-            SESSION_COOKIE_NAME, _admin_cookie(session_factory, settings)
+            SESSION_COOKIE_NAME, _admin_cookie(session_factory, settings, owner=True)
         )
         resp = client.put(
             "/admin/api/v1/settings/signup_enabled",
             json={"value": "definitely-not-a-bool"},
         )
-        assert resp.status_code == 404
+        assert resp.status_code == 422
+        assert resp.json().get("error") == ERROR_VALUE_TYPE
 
     def test_audit_row_not_emitted_when_owner_gate_fails(
         self,

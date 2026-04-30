@@ -51,7 +51,12 @@ from app.adapters.db.billing import models as _billing_models  # noqa: F401
 from app.adapters.db.identity import models as _identity_models  # noqa: F401
 from app.adapters.db.workspace import models as _workspace_models  # noqa: F401
 
-__all__ = ["PermissionGroup", "PermissionGroupMember", "RoleGrant"]
+__all__ = [
+    "DeploymentOwner",
+    "PermissionGroup",
+    "PermissionGroupMember",
+    "RoleGrant",
+]
 
 
 # Allowed ``role_grant.grant_role`` values, enforced by a CHECK
@@ -148,6 +153,31 @@ class PermissionGroupMember(Base):
     )
 
     __table_args__ = (Index("ix_permission_group_member_workspace", "workspace_id"),)
+
+
+class DeploymentOwner(Base):
+    """Explicit membership row for the deployment owners group.
+
+    Workspace permission groups carry a non-null ``workspace_id`` in
+    v1. The deployment owner set is deployment-scoped by definition, so
+    it uses this small table instead of overloading workspace groups.
+    The row represents membership in ``owners@deployment``; the
+    deployment admin surface still comes from ``RoleGrant``.
+    """
+
+    __tablename__ = "deployment_owner"
+
+    user_id: Mapped[str] = mapped_column(
+        String,
+        ForeignKey("user.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    added_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    added_by_user_id: Mapped[str | None] = mapped_column(
+        String,
+        ForeignKey("user.id", ondelete="SET NULL"),
+        nullable=True,
+    )
 
 
 class RoleGrant(Base):

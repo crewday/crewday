@@ -3,20 +3,16 @@
 Mounts under ``/admin/api/v1`` (§12 "Admin surface"):
 
 * ``GET /admins`` — every active deployment ``role_grant`` row.
-* ``POST /admins`` — grant deployment-admin to a user (by id or
-  email).
-* ``POST /admins/{id}/revoke`` — revoke a deployment-admin grant.
+* ``POST /admins`` — owners-only grant of deployment-admin to a
+  user (by id or email).
+* ``POST /admins/{id}/revoke`` — owners-only revoke of a
+  deployment-admin grant.
 * ``GET /admins/groups`` — owners + managers deployment groups
-  with their members. Empty until cd-zkr seeds the groups.
+  with their members.
 * ``POST /admins/groups/owners/members`` — add a user to the
   deployment owners group. Owners-only.
 * ``POST /admins/groups/owners/members/{user_id}/revoke`` —
   remove a user from the deployment owners group. Owners-only.
-
-The owners-group routes accept the requests and return the
-spec-shaped envelope today, but the deployment owners group
-itself does not exist (cd-zkr) — every owner-only mutation
-fails closed via :func:`ensure_deployment_owner` (404).
 
 Listing routes are read-only; ``GET /admins`` ships with the
 same shape as :class:`app.api.admin.me.AdminTeamMemberResponse`
@@ -37,13 +33,19 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.adapters.db.authz.models import RoleGrant
+from app.adapters.db.authz.models import DeploymentOwner, RoleGrant
 from app.adapters.db.identity.models import User, canonicalise_email
 from app.api.admin._audit import audit_admin
 from app.api.admin._owners import ensure_deployment_owner
 from app.api.admin.deps import current_deployment_admin_principal
 from app.api.admin.me import AdminTeamMemberResponse
 from app.api.deps import db_session
+from app.authz.deployment_owners import (
+    add_deployment_owner,
+    deployment_owner_count,
+    deployment_owner_user_ids,
+    remove_deployment_owner,
+)
 from app.tenancy import DeploymentContext, tenant_agnostic
 from app.util.ulid import new_ulid
 
@@ -124,7 +126,7 @@ class GroupMemberRequest(BaseModel):
 
     Same shape as :class:`AdminGrantRequest` — the operator
     identifies the new owner by either ``user_id`` or ``email``.
-    Owner-only; cd-zkr deferred → every call 404s today.
+    Owner-only.
     """
 
     user_id: str | None = Field(default=None, max_length=64)
@@ -136,12 +138,9 @@ class GroupMemberInfo(BaseModel):
     """One member entry on ``GET /admin/api/v1/admins/groups``.
 
     Mirrors the SPA's :interface:`AdminTeamMember` shape but
-    drops the grant-row fields — the deployment owners group is
-    a permission-group membership, not a ``role_grant`` row, so
-    it carries ``added_at`` / ``added_by`` instead of
-    ``granted_at`` / ``granted_by``. Today the lists are empty
-    (cd-zkr deferred), but the shape is locked so consumers
-    stay forward-compatible.
+    drops the grant-row fields. Owners carry ``deployment_owner``
+    timestamps; managers are derived from deployment ``role_grant``
+    rows and projected into the same shape.
     """
 
     user_id: str
@@ -162,10 +161,8 @@ class GroupResponse(BaseModel):
 class GroupsListResponse(BaseModel):
     """Body of ``GET /admin/api/v1/admins/groups``.
 
-    Empty member lists today; cd-zkr will seed both groups with
-    real members. Returning the groups themselves now means the
-    SPA's group-management page can render the "no members yet"
-    state instead of an empty page.
+    Owners are explicit ``deployment_owner`` rows; managers are
+    derived from active deployment admin grants.
     """
 
     groups: list[GroupResponse]
@@ -174,8 +171,7 @@ class GroupsListResponse(BaseModel):
 class OwnersGroupResponse(BaseModel):
     """Body of the owners-group add / revoke routes.
 
-    Echoes the freshly-changed members list. Empty today (cd-zkr
-    deferred); the route 404s before reaching this shape.
+    Echoes the freshly-changed owners member list.
     """
 
     members: list[GroupMemberInfo]
@@ -189,6 +185,7 @@ class OwnersGroupResponse(BaseModel):
 _ERROR_MISSING_TARGET = "missing_target"
 _ERROR_AMBIGUOUS_TARGET = "ambiguous_target"
 _ERROR_USER_NOT_FOUND = "user_not_found"
+_ERROR_LAST_OWNER = "last_owner"
 
 
 def _problem(error: str, *, message: str, http_status: int = 422) -> HTTPException:
@@ -262,17 +259,70 @@ def _format_granted_at(grant: RoleGrant) -> str:
     return moment.isoformat()
 
 
-def _project_member(grant: RoleGrant, user: User) -> AdminTeamMemberResponse:
+def _project_member(
+    grant: RoleGrant,
+    user: User,
+    *,
+    owner_user_ids: frozenset[str] | None = None,
+) -> AdminTeamMemberResponse:
     """Build the wire-shaped admin row from a (grant, user) pair."""
     return AdminTeamMemberResponse(
         id=grant.id,
         user_id=user.id,
         display_name=user.display_name,
         email=user.email,
-        is_owner=False,
+        is_owner=owner_user_ids is not None and user.id in owner_user_ids,
         granted_at=_format_granted_at(grant),
         granted_by=grant.created_by_user_id or "system",
     )
+
+
+def _format_added_at(value: datetime) -> str:
+    """ISO-8601 UTC for group-member timestamps."""
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=UTC)
+    return value.isoformat()
+
+
+def _owner_members(session: Session) -> list[GroupMemberInfo]:
+    """Return explicit ``owners@deployment`` members."""
+    with tenant_agnostic():
+        rows = session.execute(
+            select(DeploymentOwner, User)
+            .join(User, User.id == DeploymentOwner.user_id)
+            .order_by(DeploymentOwner.added_at.asc(), DeploymentOwner.user_id.asc())
+        ).all()
+    return [
+        GroupMemberInfo(
+            user_id=user.id,
+            display_name=user.display_name,
+            email=user.email,
+            added_at=_format_added_at(owner.added_at),
+            added_by=owner.added_by_user_id or "system",
+        )
+        for owner, user in rows
+    ]
+
+
+def _manager_members(session: Session) -> list[GroupMemberInfo]:
+    """Return deployment managers derived from deployment admin grants."""
+    with tenant_agnostic():
+        rows = session.execute(
+            select(RoleGrant, User)
+            .join(User, User.id == RoleGrant.user_id)
+            .where(RoleGrant.scope_kind == "deployment")
+            .order_by(RoleGrant.created_at.asc(), RoleGrant.id.asc())
+        ).all()
+    return [
+        GroupMemberInfo(
+            user_id=user.id,
+            display_name=user.display_name,
+            email=user.email,
+            added_at=_format_granted_at(grant),
+            added_by=grant.created_by_user_id or "system",
+        )
+        for grant, user in rows
+    ]
 
 
 def _existing_grant(session: Session, *, user_id: str) -> RoleGrant | None:
@@ -335,7 +385,11 @@ def build_admin_admins_router() -> APIRouter:
                 .where(RoleGrant.scope_kind == "deployment")
                 .order_by(RoleGrant.created_at.asc(), RoleGrant.id.asc())
             ).all()
-        admins = [_project_member(grant, user) for grant, user in rows]
+        owner_user_ids = deployment_owner_user_ids(session)
+        admins = [
+            _project_member(grant, user, owner_user_ids=owner_user_ids)
+            for grant, user in rows
+        ]
         return AdminListResponse(admins=admins)
 
     @router.post(
@@ -372,10 +426,18 @@ def build_admin_admins_router() -> APIRouter:
         agent token's underlying human is a reasonable workflow.
         The audit row attributes the mint to ``ctx.user_id``.
         """
+        ensure_deployment_owner(session, ctx=ctx)
         target_user = _resolve_target_user(session, request_body=payload)
         existing = _existing_grant(session, user_id=target_user.id)
         if existing is not None:
-            return AdminGrantResponse(admin=_project_member(existing, target_user))
+            owner_user_ids = deployment_owner_user_ids(session)
+            return AdminGrantResponse(
+                admin=_project_member(
+                    existing,
+                    target_user,
+                    owner_user_ids=owner_user_ids,
+                )
+            )
         now = datetime.now(UTC)
         with tenant_agnostic():
             grant = RoleGrant(
@@ -402,7 +464,10 @@ def build_admin_admins_router() -> APIRouter:
                 },
             )
             session.flush()
-        return AdminGrantResponse(admin=_project_member(grant, target_user))
+        owner_user_ids = deployment_owner_user_ids(session)
+        return AdminGrantResponse(
+            admin=_project_member(grant, target_user, owner_user_ids=owner_user_ids)
+        )
 
     @router.post(
         "/admins/{id}/revoke",
@@ -441,6 +506,7 @@ def build_admin_admins_router() -> APIRouter:
         last-deployment-admin guard lives separately (cd-79r
         will host it).
         """
+        ensure_deployment_owner(session, ctx=ctx)
         with tenant_agnostic():
             grant = session.get(RoleGrant, id)
             if grant is None or grant.scope_kind != "deployment":
@@ -474,20 +540,21 @@ def build_admin_admins_router() -> APIRouter:
     )
     def list_groups(
         _ctx: Annotated[DeploymentContext, Depends(current_deployment_admin_principal)],
-        _session: _Db,
+        session: _Db,
     ) -> GroupsListResponse:
-        """Return the two deployment groups with empty rosters.
-
-        cd-zkr seeds the deployment owners + managers permission
-        groups; until that lands the rosters are unconditionally
-        empty. The SPA's group-management page renders the
-        empty state ("no owners yet — promote one") off this
-        shape.
-        """
+        """Return the deployment owners and managers groups."""
         return GroupsListResponse(
             groups=[
-                GroupResponse(slug="owners", name="Owners", members=[]),
-                GroupResponse(slug="managers", name="Managers", members=[]),
+                GroupResponse(
+                    slug="owners",
+                    name="Owners",
+                    members=_owner_members(session),
+                ),
+                GroupResponse(
+                    slug="managers",
+                    name="Managers",
+                    members=_manager_members(session),
+                ),
             ]
         )
 
@@ -510,23 +577,30 @@ def build_admin_admins_router() -> APIRouter:
         payload: GroupMemberRequest,
         ctx: Annotated[DeploymentContext, Depends(current_deployment_admin_principal)],
         session: _Db,
+        request: Request,
     ) -> OwnersGroupResponse:
-        """Owners-only add to the deployment owners group.
-
-        Today the deployment owners group does not exist (cd-zkr
-        deferred); :func:`ensure_deployment_owner` therefore
-        404s every caller. The route is wired now so the SPA
-        and CLI can target the correct URL — once cd-zkr lands,
-        this body grows the actual permission_group_member
-        upsert + audit write without a wire-shape change.
-        """
+        """Owners-only add to the deployment owners group."""
         ensure_deployment_owner(session, ctx=ctx)
-        # Reach the body only when the gate admits — i.e. once
-        # cd-zkr seeds the owners group. ``payload`` validation
-        # still runs here so the contract stays exercised: a
-        # missing target raises 422, a missing user 404.
-        _ = _resolve_target_user(session, request_body=payload)
-        return OwnersGroupResponse(members=[])
+        target = _resolve_target_user(session, request_body=payload)
+        now = datetime.now(UTC)
+        _row, created = add_deployment_owner(
+            session,
+            user_id=target.id,
+            added_by_user_id=ctx.user_id,
+            now=now,
+        )
+        if created:
+            audit_admin(
+                session,
+                ctx=ctx,
+                request=request,
+                entity_kind="deployment_owner",
+                entity_id=target.id,
+                action="admin.owner_added",
+                diff={"user_id": target.id},
+            )
+            session.flush()
+        return OwnersGroupResponse(members=_owner_members(session))
 
     @router.post(
         "/admins/groups/owners/members/{user_id}/revoke",
@@ -547,18 +621,28 @@ def build_admin_admins_router() -> APIRouter:
         user_id: str,
         ctx: Annotated[DeploymentContext, Depends(current_deployment_admin_principal)],
         session: _Db,
+        request: Request,
     ) -> OwnersGroupResponse:
-        """Owners-only revoke from the deployment owners group.
-
-        Same fail-closed posture as :func:`add_owner` — every
-        caller 404s today via :func:`ensure_deployment_owner`.
-        ``user_id`` is accepted on the URL today so the route
-        contract is fixed; cd-zkr lands the permission_group_member
-        delete + last-owner guard.
-        """
+        """Owners-only revoke from the deployment owners group."""
         ensure_deployment_owner(session, ctx=ctx)
-        _ = user_id  # consumed in the cd-zkr revoke implementation
-        return OwnersGroupResponse(members=[])
+        if user_id == ctx.user_id and deployment_owner_count(session) <= 1:
+            raise _problem(
+                _ERROR_LAST_OWNER,
+                message="cannot remove the last deployment owner",
+            )
+        removed = remove_deployment_owner(session, user_id=user_id)
+        if removed:
+            audit_admin(
+                session,
+                ctx=ctx,
+                request=request,
+                entity_kind="deployment_owner",
+                entity_id=user_id,
+                action="admin.owner_removed",
+                diff={"user_id": user_id},
+            )
+            session.flush()
+        return OwnersGroupResponse(members=_owner_members(session))
 
     return router
 
@@ -569,3 +653,4 @@ def build_admin_admins_router() -> APIRouter:
 ERROR_MISSING_TARGET = _ERROR_MISSING_TARGET
 ERROR_AMBIGUOUS_TARGET = _ERROR_AMBIGUOUS_TARGET
 ERROR_USER_NOT_FOUND = _ERROR_USER_NOT_FOUND
+ERROR_LAST_OWNER = _ERROR_LAST_OWNER

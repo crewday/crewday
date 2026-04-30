@@ -15,10 +15,8 @@ own existence to tenants").
   identity card without a workspace round-trip).
 * ``GET /admin/api/v1/me/admins`` — listing of every deployment
   admin (every ``role_grant`` row with ``scope_kind='deployment'``).
-  Drives the admin-team page. Group-membership listings (owners +
-  managers deployment groups) land with cd-zkr / cd-79r — until then
-  the response carries ``groups=[]`` and the consumer renders an
-  empty group section.
+  Drives the admin-team page. The owner flag is resolved from
+  ``deployment_owner`` rows.
 
 The response shapes match :interface:`AdminMe` and
 :interface:`AdminTeamMember` in ``app/web/src/types/admin.ts`` —
@@ -44,6 +42,10 @@ from app.adapters.db.authz.models import RoleGrant
 from app.adapters.db.identity.models import User
 from app.api.admin.deps import current_deployment_admin_principal
 from app.api.deps import db_session
+from app.authz.deployment_owners import (
+    deployment_owner_user_ids,
+    is_deployment_owner,
+)
 from app.tenancy import DeploymentContext, tenant_agnostic
 
 __all__ = [
@@ -69,9 +71,7 @@ class AdminMeResponse(BaseModel):
     * ``email`` — :attr:`User.email` (display value, not the
       canonicalised lookup form).
     * ``is_owner`` — ``True`` iff the caller belongs to the
-      ``owners@deployment`` permission group. The deployment owners
-      group does not exist yet (deferred to cd-zkr); v1 always emits
-      ``False`` until the group lands. The SPA renders the
+      ``owners@deployment`` group. The SPA renders the
       "Deployment owner" / "Deployment admin" footer label off this
       flag.
     * ``capabilities`` — flat ``{scope_key: True}`` map, one entry
@@ -102,8 +102,7 @@ class AdminTeamMemberResponse(BaseModel):
     * ``display_name`` — :attr:`User.display_name`.
     * ``email`` — :attr:`User.email`.
     * ``is_owner`` — ``True`` iff the user belongs to the deployment
-      ``owners`` group. v1 always emits ``False`` (the deployment
-      owners group lands with cd-zkr).
+      ``owners`` group.
     * ``granted_at`` — ISO-8601 UTC timestamp of the grant. Read off
       :attr:`RoleGrant.created_at`.
     * ``granted_by`` — :class:`User.id` of the actor that planted
@@ -126,12 +125,9 @@ class AdminTeamResponse(BaseModel):
 
     The SPA's :file:`AdminsPage.tsx` consumes
     :interface:`AdminTeamMember[]` directly today; the wrapper
-    envelope here adds a ``groups`` field reserved for the
-    deployment owners + managers groups (§12 "Admin team"). The
-    groups payload is empty until cd-zkr lands the deployment-scope
-    permission groups; consumers handling ``groups=[]`` today stay
-    forward-compatible without a shape break when the field starts
-    populating.
+    envelope here keeps the legacy ``groups`` field. The populated
+    deployment owners + managers rosters live on
+    ``GET /admin/api/v1/admins/groups``.
     """
 
     admins: list[AdminTeamMemberResponse]
@@ -228,21 +224,16 @@ def build_admin_me_router() -> APIRouter:
         capabilities come straight off
         :attr:`DeploymentContext.deployment_scopes`.
 
-        ``is_owner`` is hard-wired to ``False`` until the deployment
-        ``owners`` permission group lands (cd-zkr). The SPA already
-        handles ``False`` (renders "Deployment admin" rather than
-        "Deployment owner"); promoting the flag once the group exists
-        is a single read, not a shape change.
+        ``is_owner`` resolves the concrete deployment-owner membership
+        row so owner-only admin routes and labels share one source of
+        truth.
         """
         user = _resolve_user_or_404(session, user_id=ctx.user_id)
         return AdminMeResponse(
             user_id=user.id,
             display_name=user.display_name,
             email=user.email,
-            # Deployment owners group not yet seeded (cd-zkr); no
-            # caller can be an owner today. The flag is shipped now
-            # so the SPA contract is stable across the gap.
-            is_owner=False,
+            is_owner=is_deployment_owner(session, user_id=ctx.user_id),
             capabilities=_capabilities_payload(ctx),
         )
 
@@ -298,6 +289,7 @@ def build_admin_me_router() -> APIRouter:
                 .order_by(RoleGrant.created_at.asc(), RoleGrant.id.asc())
             ).all()
 
+        owner_user_ids = deployment_owner_user_ids(session)
         admins: list[AdminTeamMemberResponse] = []
         for grant, user in rows:
             admins.append(
@@ -306,19 +298,15 @@ def build_admin_me_router() -> APIRouter:
                     user_id=user.id,
                     display_name=user.display_name,
                     email=user.email,
-                    # Deployment owners group not yet seeded (cd-zkr);
-                    # no admin can be an owner today.
-                    is_owner=False,
+                    is_owner=user.id in owner_user_ids,
                     granted_at=_format_granted_at(grant),
                     granted_by=grant.created_by_user_id or "system",
                 )
             )
 
-        # ``groups=[]`` until cd-zkr lands the deployment-scope
-        # permission groups (owners + managers). The SPA's admins
-        # page does not yet read this field — keeping it on the
-        # response now means the consumer can light up groups
-        # without a shape break.
+        # The canonical group-roster route is
+        # ``GET /admin/api/v1/admins/groups``; this legacy caller view
+        # keeps the envelope field for forward-compatible clients.
         return AdminTeamResponse(admins=admins, groups=[])
 
     return router

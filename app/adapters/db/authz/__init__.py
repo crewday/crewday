@@ -5,9 +5,9 @@ workspace-scoped in :mod:`app.tenancy.registry`. Unlike the
 ``identity`` context — where ``user`` / ``session`` / ``api_token``
 stay tenant-agnostic so sign-in can run before a
 :class:`~app.tenancy.WorkspaceContext` exists — every table in this
-package carries a ``workspace_id`` column and is always queried
-under a live context (the resolver reads the active user's grants
-only after the workspace has been picked).
+package is workspace-scoped except ``deployment_owner``, which is a
+bare-host admin table and is always queried under
+``tenant_agnostic()``.
 
 Re-exports the seed helper :func:`seed_owners_system_group` from
 :mod:`app.adapters.db.authz.bootstrap` so the production signup
@@ -23,6 +23,7 @@ from __future__ import annotations
 
 from app.adapters.db.authz.bootstrap import seed_owners_system_group
 from app.adapters.db.authz.models import (
+    DeploymentOwner,
     PermissionGroup,
     PermissionGroupMember,
     RoleGrant,
@@ -34,6 +35,7 @@ register("permission_group_member")
 register("role_grant")
 
 __all__ = [
+    "DeploymentOwner",
     "PermissionGroup",
     "PermissionGroupMember",
     "RoleGrant",

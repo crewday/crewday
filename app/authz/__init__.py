@@ -31,6 +31,8 @@ Public surface (pure-domain — safe for ``app.domain`` callers):
   (cd-wchi). Returns True iff the user holds any deployment-scoped
   ``role_grant``; consumed by the admin auth dep at cd-xgmu and by
   ``/auth/me`` to populate the ``is_deployment_admin`` flag.
+* :func:`is_deployment_owner` — explicit ``owners@deployment``
+  membership lookup for root-only admin mutations.
 * :func:`is_member_of` — dispatch on system-group slug, derived-vs-
   explicit (cd-dzp).
 * :func:`require` — the canonical permission check (cd-dzp). Service
@@ -49,6 +51,7 @@ groups, and action catalog" and
 from __future__ import annotations
 
 from app.authz.deployment_admin import is_deployment_admin
+from app.authz.deployment_owners import is_deployment_owner
 from app.authz.enforce import (
     CatalogDrift,
     EmptyPermissionRuleRepository,
@@ -77,6 +80,7 @@ __all__ = [
     "UnknownActionKey",
     "UnknownSystemGroup",
     "is_deployment_admin",
+    "is_deployment_owner",
     "is_member_of",
     "is_owner_member",
     "require",

@@ -2,7 +2,7 @@
 
 Covers the post-migration schema shape (tables, composite + unique
 keys, FKs, CHECK constraints), the referential-integrity contract
-on all three authz tables (CASCADE on workspace / user / group,
+on all authz tables (CASCADE on workspace / user / group,
 SET NULL on ``added_by_user_id`` / ``created_by_user_id``), the
 ``seed_owners_system_group`` happy path + double-seed conflict, and
 the tenant-filter behaviour (all three tables scoped; SELECT without
@@ -107,7 +107,7 @@ def _ctx_for(workspace: Workspace, actor_id: str) -> WorkspaceContext:
 
 
 class TestMigrationShape:
-    """The migration lands all three authz tables with correct keys."""
+    """The migration lands the authz tables with correct keys."""
 
     def test_permission_group_table_exists(self, engine: Engine) -> None:
         assert "permission_group" in inspect(engine).get_table_names()
@@ -117,6 +117,9 @@ class TestMigrationShape:
 
     def test_role_grant_table_exists(self, engine: Engine) -> None:
         assert "role_grant" in inspect(engine).get_table_names()
+
+    def test_deployment_owner_table_exists(self, engine: Engine) -> None:
+        assert "deployment_owner" in inspect(engine).get_table_names()
 
     def test_permission_group_columns(self, engine: Engine) -> None:
         cols = {c["name"]: c for c in inspect(engine).get_columns("permission_group")}
@@ -288,6 +291,24 @@ class TestMigrationShape:
         # ``True``. Normalise via ``bool`` so the assertion works on
         # both backends.
         assert bool(ix.get("unique")) is True
+
+    def test_deployment_owner_columns(self, engine: Engine) -> None:
+        cols = {c["name"]: c for c in inspect(engine).get_columns("deployment_owner")}
+        expected = {"user_id", "added_at", "added_by_user_id"}
+        assert set(cols) == expected
+        assert cols["added_by_user_id"]["nullable"] is True
+        for name in expected - {"added_by_user_id"}:
+            assert cols[name]["nullable"] is False, f"{name} must be NOT NULL"
+        pk = inspect(engine).get_pk_constraint("deployment_owner")
+        assert pk["constrained_columns"] == ["user_id"]
+
+    def test_deployment_owner_fks(self, engine: Engine) -> None:
+        fks = inspect(engine).get_foreign_keys("deployment_owner")
+        by_col = {tuple(fk["constrained_columns"]): fk for fk in fks}
+        assert by_col[("user_id",)]["referred_table"] == "user"
+        assert by_col[("user_id",)]["options"].get("ondelete") == "CASCADE"
+        assert by_col[("added_by_user_id",)]["referred_table"] == "user"
+        assert by_col[("added_by_user_id",)]["options"].get("ondelete") == "SET NULL"
 
 
 class TestAuthzRoundtrip:
