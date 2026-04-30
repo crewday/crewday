@@ -74,6 +74,7 @@ from app.adapters.llm.openrouter import (
 from app.adapters.llm.ports import LLMClient
 from app.adapters.mail.ports import Mailer
 from app.adapters.mail.smtp import SMTPMailer
+from app.adapters.mail.smtp_config import DeploymentSmtpConfigSource, SmtpConfig
 from app.adapters.storage.localfs import LocalFsStorage
 from app.adapters.storage.mime import FiletypeMimeSniffer
 from app.adapters.storage.ports import MimeSniffer, Storage
@@ -367,27 +368,15 @@ def _wire_services(
     """Instantiate process-wide services and stash them on ``app.state``.
 
     The throttle is always constructed (it's pure in-memory state).
-    The mailer is ``None`` when SMTP isn't configured — the signup /
-    magic / recovery routers each raise :class:`RuntimeError` on the
-    first request in that case, which is the right failure mode for
-    a deployment that forgot to set ``CREWDAY_SMTP_*``. Capabilities
-    is probed without a DB session; the mutable subset is refreshed
-    on the first readyz probe that actually opens a UoW.
+    The mailer resolves SMTP settings at send time so deployment_setting
+    writes can enable or rotate SMTP without rebuilding the app. Missing
+    SMTP config fails at the Mailer port when a route actually sends.
+    Capabilities is probed without a DB session; the mutable subset is
+    refreshed on the first readyz probe that actually opens a UoW.
     """
     throttle = Throttle()
     capabilities = probe_capabilities(settings)
-    mailer: Mailer | None = None
-    if settings.smtp_host is not None and settings.smtp_from is not None:
-        mailer = SMTPMailer(
-            host=settings.smtp_host,
-            port=settings.smtp_port,
-            from_addr=settings.smtp_from,
-            user=settings.smtp_user,
-            password=settings.smtp_password,
-            use_tls=settings.smtp_use_tls,
-            timeout=settings.smtp_timeout,
-            bounce_domain=settings.smtp_bounce_domain,
-        )
+    mailer = _build_mailer(settings)
     storage = _build_storage(settings)
     llm = _build_llm(settings)
     mime_sniffer: MimeSniffer = FiletypeMimeSniffer()
@@ -399,6 +388,29 @@ def _wire_services(
     app.state.llm = llm
     app.state.mime_sniffer = mime_sniffer
     return mailer, throttle, capabilities
+
+
+def _smtp_env_config(settings: Settings) -> SmtpConfig:
+    return SmtpConfig(
+        host=settings.smtp_host,
+        port=settings.smtp_port,
+        from_addr=settings.smtp_from,
+        user=settings.smtp_user,
+        password=settings.smtp_password,
+        use_tls=settings.smtp_use_tls,
+        timeout=settings.smtp_timeout,
+        bounce_domain=settings.smtp_bounce_domain,
+    )
+
+
+def _build_mailer(settings: Settings) -> Mailer | None:
+    """Return the SMTP mailer with send-time DB → env config resolution."""
+    return SMTPMailer(
+        config_source=DeploymentSmtpConfigSource(
+            env=_smtp_env_config(settings),
+            root_key=settings.root_key,
+        )
+    )
 
 
 def _build_llm(settings: Settings) -> LLMClient | None:

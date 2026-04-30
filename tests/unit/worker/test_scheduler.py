@@ -216,9 +216,9 @@ class TestDailyDigestJob:
         calls: list[tuple[str, int | None]] = []
 
         class _FakeSettings:
-            smtp_host = "smtp.example.test"
+            smtp_host: str | None = None
             smtp_port = 587
-            smtp_from = "crew@example.test"
+            smtp_from: str | None = None
             smtp_user: str | None = None
             smtp_password: object = None
             smtp_use_tls = True
@@ -230,23 +230,20 @@ class TestDailyDigestJob:
             def __init__(
                 self,
                 *,
-                host: str,
-                port: int,
-                from_addr: str,
-                user: str | None,
-                password: object,
-                use_tls: bool,
-                timeout: int,
-                bounce_domain: str | None,
+                config_source: object,
             ) -> None:
-                self.host = host
-                self.port = port
-                self.from_addr = from_addr
-                self.user = user
-                self.password = password
-                self.use_tls = use_tls
-                self.timeout = timeout
-                self.bounce_domain = bounce_domain
+                self.config_source = config_source
+
+        class _FakeSmtpConfig:
+            host = "smtp.db.example"
+            from_addr = "crew@example.test"
+
+        class _FakeSmtpSource:
+            def __init__(self, **_: object) -> None:
+                pass
+
+            def config(self) -> _FakeSmtpConfig:
+                return _FakeSmtpConfig()
 
         class _FakeRow:
             def __init__(self, id: str, slug: str) -> None:
@@ -310,6 +307,10 @@ class TestDailyDigestJob:
         monkeypatch.setattr(messaging_jobs, "make_uow", lambda: _FakeUow())
         monkeypatch.setattr("app.adapters.mail.smtp.SMTPMailer", _FakeMailer)
         monkeypatch.setattr(
+            "app.adapters.mail.smtp_config.DeploymentSmtpConfigSource",
+            _FakeSmtpSource,
+        )
+        monkeypatch.setattr(
             "app.worker.tasks.daily_digest.send_daily_digest",
             fake_send_daily_digest,
         )
@@ -317,7 +318,7 @@ class TestDailyDigestJob:
 
         monkeypatch.setattr(_orm_mod, "Session", _FakeSession)
 
-        body = scheduler_mod._make_daily_digest_fanout_body(clock)
+        body = messaging_jobs._make_daily_digest_fanout_body(clock)
         body()
 
         assert calls == [("01HWA00000000000000000WSP1", 7)]
@@ -504,7 +505,7 @@ class TestLlmBudgetRefreshJob:
 
         monkeypatch.setattr(_orm_mod, "Session", _FakeSession)
 
-        body = scheduler_mod._make_llm_budget_refresh_body(clock)
+        body = llm_budget_jobs._make_llm_budget_refresh_body(clock)
         body()
 
         # The body dispatched one ``refresh_aggregate`` call and
@@ -618,7 +619,7 @@ class TestUserWorkspaceRefreshJob:
         # ``isinstance(session, Session)`` narrowing accepts the fake.
         monkeypatch.setattr(_orm_mod, "Session", _FakeSession)
 
-        body = scheduler_mod._make_user_workspace_refresh_body(clock)
+        body = identity_jobs._make_user_workspace_refresh_body(clock)
         body()
 
         # The body dispatched one ``reconcile_user_workspace`` call

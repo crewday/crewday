@@ -45,6 +45,12 @@ from typing import Protocol, TypeVar
 from pydantic import SecretStr
 
 from app.adapters.mail.ports import MailDeliveryError
+from app.adapters.mail.smtp_config import (
+    SmtpConfig,
+    SmtpConfigError,
+    SmtpConfigSource,
+    StaticSmtpConfigSource,
+)
 from app.util.ulid import new_ulid
 
 __all__ = ["SMTPMailer"]
@@ -116,14 +122,15 @@ class SMTPMailer:
     def __init__(
         self,
         *,
-        host: str,
-        port: int,
-        from_addr: str,
+        host: str | None = None,
+        port: int = 587,
+        from_addr: str | None = None,
         user: str | None = None,
         password: SecretStr | None = None,
         use_tls: bool = True,
         timeout: int = 10,
         bounce_domain: str | None = None,
+        config_source: SmtpConfigSource | None = None,
         sleep: Callable[[float], None] = time.sleep,
         smtp_factory: Callable[..., _SMTPSession] | None = None,
         smtp_ssl_factory: Callable[..., _SMTPSession] | None = None,
@@ -136,23 +143,27 @@ class SMTPMailer:
         Return-Path, envelope) needs it; a missing From is a config
         error, not a runtime surprise.
         """
-        if not from_addr:
+        if config_source is None and not from_addr:
             raise ValueError(
                 "SMTPMailer requires a non-empty from_addr (set CREWDAY_SMTP_FROM)"
             )
-        self._host = host
-        self._port = port
-        self._from_addr = from_addr
-        self._user = user
-        self._password = password
-        self._use_tls = use_tls
-        self._timeout = timeout
-        self._bounce_domain = bounce_domain or _parse_domain(from_addr)
+        self._config_source = config_source or StaticSmtpConfigSource(
+            SmtpConfig(
+                host=host,
+                port=port,
+                from_addr=from_addr,
+                user=user,
+                password=password,
+                use_tls=use_tls,
+                timeout=timeout,
+                bounce_domain=bounce_domain,
+            )
+        )
         self._sleep = sleep
         self._smtp_factory = smtp_factory or smtplib.SMTP
         self._smtp_ssl_factory = smtp_ssl_factory or smtplib.SMTP_SSL
 
-        if self._port == _PLAIN_PORT:
+        if config_source is None and port == _PLAIN_PORT:
             _log.warning(
                 "SMTPMailer configured on port 25 without TLS; "
                 "traffic will travel in cleartext. Use port 465 or 587 "
@@ -183,7 +194,9 @@ class SMTPMailer:
         if not to:
             raise ValueError("SMTPMailer.send requires at least one recipient")
 
+        config = self._configured()
         message, message_id = self._build_message(
+            config,
             to=to,
             subject=subject,
             body_text=body_text,
@@ -191,15 +204,27 @@ class SMTPMailer:
             headers=headers,
             reply_to=reply_to,
         )
-        self._retry_on_transient(lambda: self._dispatch(message, list(to)))
+        self._retry_on_transient(lambda: self._dispatch(config, message, list(to)))
         return message_id
 
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
 
+    def _configured(self) -> SmtpConfig:
+        try:
+            config = self._config_source.config()
+        except SmtpConfigError as exc:
+            raise MailDeliveryError(f"SMTP configuration failed: {exc}") from exc
+        if not config.host:
+            raise MailDeliveryError("SMTP is not configured: missing host")
+        if not config.from_addr:
+            raise MailDeliveryError("SMTP is not configured: missing from address")
+        return config
+
     def _build_message(
         self,
+        config: SmtpConfig,
         *,
         to: Sequence[str],
         subject: str,
@@ -217,12 +242,14 @@ class SMTPMailer:
         ``multipart/alternative`` with plaintext first (so non-HTML
         readers see the text without scrolling past MIME delimiters).
         """
+        assert config.from_addr is not None
+        bounce_domain = config.bounce_domain or _parse_domain(config.from_addr)
         message = EmailMessage()
-        message["From"] = self._from_addr
+        message["From"] = config.from_addr
         message["To"] = ", ".join(to)
         message["Subject"] = subject
 
-        message_id = f"{new_ulid()}@{self._bounce_domain}"
+        message_id = f"{new_ulid()}@{bounce_domain}"
         message["Message-ID"] = f"<{message_id}>"
         # Bounce token is a short random id per-message; when the
         # provider posts a DSN to our inbound webhook we look the
@@ -230,7 +257,7 @@ class SMTPMailer:
         # correlate. ``token_urlsafe(9)`` → ~12 chars, plenty of
         # entropy to make collisions astronomical.
         bounce_token = secrets.token_urlsafe(9)
-        message["Return-Path"] = f"<bounce+{bounce_token}@{self._bounce_domain}>"
+        message["Return-Path"] = f"<bounce+{bounce_token}@{bounce_domain}>"
 
         if reply_to is not None:
             message["Reply-To"] = reply_to
@@ -252,32 +279,38 @@ class SMTPMailer:
 
         return message, message_id
 
-    def _dispatch(self, message: EmailMessage, recipients: list[str]) -> None:
+    def _dispatch(
+        self, config: SmtpConfig, message: EmailMessage, recipients: list[str]
+    ) -> None:
         """Open a session, authenticate if needed, send, and quit.
 
         Separated from :meth:`send` so :meth:`_retry_on_transient` can
         re-invoke it without rebuilding the :class:`EmailMessage`.
         """
+        assert config.host is not None
+        assert config.from_addr is not None
         smtp: _SMTPSession
-        if self._port == _IMPLICIT_TLS_PORT and self._use_tls:
-            smtp = self._smtp_ssl_factory(self._host, self._port, timeout=self._timeout)
+        if config.port == _IMPLICIT_TLS_PORT and config.use_tls:
+            smtp = self._smtp_ssl_factory(
+                config.host, config.port, timeout=config.timeout
+            )
         else:
-            smtp = self._smtp_factory(self._host, self._port, timeout=self._timeout)
+            smtp = self._smtp_factory(config.host, config.port, timeout=config.timeout)
 
         try:
             smtp.ehlo()
             if (
-                self._use_tls
-                and self._port != _IMPLICIT_TLS_PORT
-                and self._port != _PLAIN_PORT
+                config.use_tls
+                and config.port != _IMPLICIT_TLS_PORT
+                and config.port != _PLAIN_PORT
             ):
                 smtp.starttls()
                 smtp.ehlo()
 
-            if self._user and self._password is not None:
-                smtp.login(self._user, self._password.get_secret_value())
+            if config.user and config.password is not None:
+                smtp.login(config.user, config.password.get_secret_value())
 
-            smtp.send_message(message, from_addr=self._from_addr, to_addrs=recipients)
+            smtp.send_message(message, from_addr=config.from_addr, to_addrs=recipients)
         finally:
             # ``quit`` itself can raise :class:`SMTPServerDisconnected`
             # when the relay already dropped us. That's benign — we've

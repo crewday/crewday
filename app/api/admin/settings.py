@@ -46,6 +46,19 @@ from app.adapters.llm.openrouter import (
     openrouter_api_key_display_stub,
     openrouter_envelope_id_from_pointer,
 )
+from app.adapters.mail.smtp_config import (
+    SMTP_BOUNCE_DOMAIN_SETTING,
+    SMTP_FROM_SETTING,
+    SMTP_HOST_SETTING,
+    SMTP_PASSWORD_PURPOSE,
+    SMTP_PASSWORD_SETTING,
+    SMTP_PORT_SETTING,
+    SMTP_TIMEOUT_SETTING,
+    SMTP_USE_TLS_SETTING,
+    SMTP_USER_SETTING,
+    smtp_envelope_id_from_pointer,
+    smtp_password_display_stub,
+)
 from app.adapters.storage.envelope import Aes256GcmEnvelope
 from app.adapters.storage.ports import EnvelopeOwner
 from app.api.admin._audit import audit_admin
@@ -137,6 +150,20 @@ def _coerce_int(value: Any) -> int:
     if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
         return value
     raise ValueError("expected a non-negative JSON integer")
+
+
+def _coerce_positive_int(value: Any) -> int:
+    number = _coerce_int(value)
+    if number > 0:
+        return number
+    raise ValueError("expected a positive JSON integer")
+
+
+def _coerce_tcp_port(value: Any) -> int:
+    number = _coerce_int(value)
+    if 1 <= number <= 65535:
+        return number
+    raise ValueError("expected a TCP port from 1 to 65535")
 
 
 def _coerce_str_int_dict(value: Any) -> dict[str, int]:
@@ -231,6 +258,62 @@ _REGISTRY: Final[tuple[_SettingDef, ...]] = (
         description="OpenRouter API key encrypted into secret_envelope.",
         coerce=_coerce_secret_str,
         default={"display_stub": ""},
+    ),
+    _SettingDef(
+        key=SMTP_HOST_SETTING,
+        kind="string",
+        description="SMTP relay host.",
+        coerce=_coerce_secret_str,
+        default="",
+    ),
+    _SettingDef(
+        key=SMTP_PORT_SETTING,
+        kind="int",
+        description="SMTP relay port.",
+        coerce=_coerce_tcp_port,
+        default=587,
+    ),
+    _SettingDef(
+        key=SMTP_USER_SETTING,
+        kind="string",
+        description="SMTP login username.",
+        coerce=_coerce_secret_str,
+        default="",
+    ),
+    _SettingDef(
+        key=SMTP_PASSWORD_SETTING,
+        kind="secret",
+        description="SMTP password encrypted into secret_envelope.",
+        coerce=_coerce_secret_str,
+        default={"display_stub": ""},
+    ),
+    _SettingDef(
+        key=SMTP_FROM_SETTING,
+        kind="string",
+        description="SMTP From address.",
+        coerce=_coerce_secret_str,
+        default="",
+    ),
+    _SettingDef(
+        key=SMTP_USE_TLS_SETTING,
+        kind="bool",
+        description="Use TLS for SMTP delivery.",
+        coerce=_coerce_bool,
+        default=True,
+    ),
+    _SettingDef(
+        key=SMTP_BOUNCE_DOMAIN_SETTING,
+        kind="string",
+        description="SMTP bounce domain override.",
+        coerce=_coerce_secret_str,
+        default="",
+    ),
+    _SettingDef(
+        key=SMTP_TIMEOUT_SETTING,
+        kind="int",
+        description="SMTP socket timeout, in seconds.",
+        coerce=_coerce_positive_int,
+        default=10,
     ),
     # ``trusted_interfaces`` is the canonical ``root_only`` example
     # (§12 "PUT /settings/{key}"). The actual value is read off
@@ -342,6 +425,10 @@ def _resolve_value(definition: _SettingDef, row: DeploymentSetting | None) -> An
         if row is None:
             return {"display_stub": ""}
         return {"display_stub": openrouter_api_key_display_stub()}
+    if definition.key == SMTP_PASSWORD_SETTING:
+        if row is None:
+            return {"display_stub": ""}
+        return {"display_stub": smtp_password_display_stub()}
     if row is None:
         return definition.default
     return row.value
@@ -353,6 +440,10 @@ def _audit_value(definition: _SettingDef, value: Any) -> Any:
         if value is None:
             return None
         return {"display_stub": openrouter_api_key_display_stub()}
+    if definition.key == SMTP_PASSWORD_SETTING:
+        if value is None:
+            return None
+        return {"display_stub": smtp_password_display_stub()}
     return value
 
 
@@ -371,26 +462,38 @@ def _stored_value_for_write(
     request: Request,
 ) -> Any:
     """Return the DB value for a coerced admin setting write."""
-    if definition.key != OPENROUTER_API_KEY_SETTING:
+    if definition.key not in {OPENROUTER_API_KEY_SETTING, SMTP_PASSWORD_SETTING}:
         return value
     if not isinstance(value, str):  # pragma: no cover - coerce narrows first
         raise ValueError("expected a non-blank JSON string")
     settings = _settings_from_request(request)
     if settings.root_key is None:
+        setting_label = (
+            "OpenRouter API key"
+            if definition.key == OPENROUTER_API_KEY_SETTING
+            else "SMTP password"
+        )
         raise _problem(
             _ERROR_VALUE_TYPE,
-            message="CREWDAY_ROOT_KEY is required to store the OpenRouter API key",
+            message=f"CREWDAY_ROOT_KEY is required to store the {setting_label}",
         )
+    purpose = (
+        OPENROUTER_API_KEY_PURPOSE
+        if definition.key == OPENROUTER_API_KEY_SETTING
+        else SMTP_PASSWORD_PURPOSE
+    )
     envelope = Aes256GcmEnvelope(
         settings.root_key,
         repository=SqlAlchemySecretEnvelopeRepository(session),
     )
     pointer = envelope.encrypt(
         value.encode("utf-8"),
-        purpose=OPENROUTER_API_KEY_PURPOSE,
+        purpose=purpose,
         owner=EnvelopeOwner(kind="deployment_setting", id=definition.key),
     )
-    return openrouter_envelope_id_from_pointer(pointer)
+    if definition.key == OPENROUTER_API_KEY_SETTING:
+        return openrouter_envelope_id_from_pointer(pointer)
+    return smtp_envelope_id_from_pointer(pointer)
 
 
 def _problem(error: str, *, message: str) -> HTTPException:

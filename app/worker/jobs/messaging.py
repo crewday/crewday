@@ -23,11 +23,16 @@ def _make_daily_digest_fanout_body(clock: Clock) -> Callable[[], None]:
         OpenRouterClient,
     )
     from app.adapters.mail.smtp import SMTPMailer
+    from app.adapters.mail.smtp_config import (
+        DeploymentSmtpConfigSource,
+        SmtpConfig,
+        SmtpConfigError,
+    )
 
     settings = get_settings()
     root_key = getattr(settings, "root_key", None)
-    mailer = (
-        SMTPMailer(
+    smtp_source = DeploymentSmtpConfigSource(
+        env=SmtpConfig(
             host=settings.smtp_host,
             port=settings.smtp_port,
             from_addr=settings.smtp_from,
@@ -36,10 +41,10 @@ def _make_daily_digest_fanout_body(clock: Clock) -> Callable[[], None]:
             use_tls=settings.smtp_use_tls,
             timeout=settings.smtp_timeout,
             bounce_domain=settings.smtp_bounce_domain,
-        )
-        if settings.smtp_host is not None and settings.smtp_from is not None
-        else None
+        ),
+        root_key=root_key,
     )
+    mailer = SMTPMailer(config_source=smtp_source)
     llm = (
         OpenRouterClient(
             DeploymentOpenRouterConfigSource(
@@ -58,7 +63,18 @@ def _make_daily_digest_fanout_body(clock: Clock) -> Callable[[], None]:
         from app.tenancy import tenant_agnostic
         from app.worker.tasks.daily_digest import send_daily_digest
 
-        if mailer is None:
+        try:
+            smtp_config = smtp_source.config()
+        except SmtpConfigError as exc:
+            _log.warning(
+                "worker.daily_digest.skipped_no_smtp",
+                extra={
+                    "event": "worker.daily_digest.skipped_no_smtp",
+                    "reason": str(exc),
+                },
+            )
+            return
+        if smtp_config.host is None or smtp_config.from_addr is None:
             _log.warning(
                 "worker.daily_digest.skipped_no_smtp",
                 extra={"event": "worker.daily_digest.skipped_no_smtp"},

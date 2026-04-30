@@ -145,9 +145,11 @@ class TestCreateApp:
         app = create_app(settings=app_factory)
         assert app.state.throttle is not None
 
-    def test_mailer_is_none_without_smtp_config(self, app_factory: Settings) -> None:
+    def test_mailer_is_dynamic_without_env_smtp(self, app_factory: Settings) -> None:
         app = create_app(settings=app_factory)
-        assert app.state.mailer is None
+        assert app.state.mailer is not None
+        paths = {getattr(r, "path", "") for r in app.routes}
+        assert "/api/v1/signup/start" in paths
 
     def test_mailer_present_when_smtp_configured(self) -> None:
         cfg = _settings(

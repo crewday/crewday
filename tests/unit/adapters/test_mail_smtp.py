@@ -23,6 +23,7 @@ from pydantic import SecretStr
 
 from app.adapters.mail.ports import MailDeliveryError
 from app.adapters.mail.smtp import SMTPMailer
+from app.adapters.mail.smtp_config import SmtpConfig
 
 # ---------------------------------------------------------------------------
 # Test doubles
@@ -174,6 +175,68 @@ def _make_mailer(
 
 
 class TestHappyPath:
+    def test_send_resolves_config_source_on_each_call(
+        self,
+        plain_factory: _FakeSMTPFactory,
+        ssl_factory: _FakeSMTPFactory,
+        sleeps: list[float],
+    ) -> None:
+        class _RotatingSource:
+            def __init__(self) -> None:
+                self.configs = [
+                    SmtpConfig(
+                        host="first.smtp.example",
+                        port=587,
+                        from_addr="first@example.com",
+                        user=None,
+                        password=None,
+                        use_tls=True,
+                        timeout=10,
+                        bounce_domain=None,
+                    ),
+                    SmtpConfig(
+                        host="second.smtp.example",
+                        port=2525,
+                        from_addr="second@example.com",
+                        user=None,
+                        password=None,
+                        use_tls=False,
+                        timeout=5,
+                        bounce_domain="bounces.example.net",
+                    ),
+                ]
+
+            def config(self) -> SmtpConfig:
+                return self.configs.pop(0)
+
+        mailer = SMTPMailer(
+            config_source=_RotatingSource(),
+            sleep=sleeps.append,
+            smtp_factory=plain_factory,
+            smtp_ssl_factory=ssl_factory,
+        )
+
+        first_id = mailer.send(
+            to=["alice@example.com"], subject="First", body_text="one"
+        )
+        second_id = mailer.send(
+            to=["bob@example.com"], subject="Second", body_text="two"
+        )
+
+        assert [conn.host for conn in plain_factory.connections] == [
+            "first.smtp.example",
+            "second.smtp.example",
+        ]
+        assert [conn.port for conn in plain_factory.connections] == [587, 2525]
+        first_msg, first_from, _ = plain_factory.connections[0].sent_messages[0]
+        second_msg, second_from, _ = plain_factory.connections[1].sent_messages[0]
+        assert first_from == "first@example.com"
+        assert second_from == "second@example.com"
+        assert first_id.endswith("@example.com")
+        assert second_id.endswith("@bounces.example.net")
+        assert first_msg["From"] == "first@example.com"
+        assert second_msg["From"] == "second@example.com"
+
     def test_send_runs_full_session_and_returns_message_id(
         self,
         plain_factory: _FakeSMTPFactory,
