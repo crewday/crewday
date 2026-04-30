@@ -122,6 +122,8 @@ describe("INVALIDATIONS — coverage", () => {
     "asset_document.extracted",
     "asset_document.extraction_failed",
     "asset_document.extraction_retried",
+    "inventory.item_changed",
+    "inventory.low_stock",
     "schedule_ruleset.upserted",
     "schedule_ruleset.deleted",
     "booking.created",
@@ -856,6 +858,40 @@ describe("INVALIDATIONS — per-kind behaviour", () => {
         ]),
       );
     }
+  });
+
+  it("inventory.item_changed invalidates inventory and the item ledger", () => {
+    const qc = makeClient();
+    const spy = vi.spyOn(qc, "invalidateQueries");
+    INVALIDATIONS["inventory.item_changed"](
+      makeEvent("inventory.item_changed", { item_id: "item_1" }),
+      qc,
+    );
+    const called = spy.mock.calls.map((c) => c[0]?.queryKey);
+    expect(called).toEqual(
+      expect.arrayContaining([
+        qk.inventory(),
+        qk.inventoryMovements("item_1"),
+      ]),
+    );
+  });
+
+  it("inventory.low_stock also invalidates tasks and dashboard", () => {
+    const qc = makeClient();
+    const spy = vi.spyOn(qc, "invalidateQueries");
+    INVALIDATIONS["inventory.low_stock"](
+      makeEvent("inventory.low_stock", { item_id: "item_1" }),
+      qc,
+    );
+    const called = spy.mock.calls.map((c) => c[0]?.queryKey);
+    expect(called).toEqual(
+      expect.arrayContaining([
+        qk.inventory(),
+        qk.inventoryMovements("item_1"),
+        qk.tasks(),
+        qk.dashboard(),
+      ]),
+    );
   });
 
   it("schedule_ruleset.{upserted,deleted} invalidates rulesets + calendar", () => {

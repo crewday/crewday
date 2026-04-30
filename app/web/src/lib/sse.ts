@@ -25,10 +25,10 @@
 // task.overdue, stay.upcoming, reservation.upserted,
 // property.closure.created, property.closure.updated, expense.approved, shift.ended,
 // time.shift.changed, work_order.completed, quote.decided. Additional kinds here (agent.*, booking.*,
-// asset_action.*, schedule_ruleset.*, task.updated/skipped, approval.*,
-// leave.*, ical.poll.completed, asset_type.*) track the spec and the
-// mock's dispatcher for when each backend emitter lands. Any drift is
-// flagged in the cd-y4g5 handoff.
+// asset_action.*, inventory.*, schedule_ruleset.*, task.updated/skipped,
+// approval.*, leave.*, ical.poll.completed, asset_type.*) track the spec
+// and the mock's dispatcher for when each backend emitter lands. Any
+// drift is flagged in the cd-y4g5 handoff.
 
 import type { QueryClient } from "@tanstack/react-query";
 import type {
@@ -121,6 +121,9 @@ export type EventKind =
   | "asset_document.extracted"
   | "asset_document.extraction_failed"
   | "asset_document.extraction_retried"
+  // Inventory (§08).
+  | "inventory.item_changed"
+  | "inventory.low_stock"
   // Schedule rulesets + scheduler calendar (§06, §14 scheduler).
   | "schedule_ruleset.upserted"
   | "schedule_ruleset.deleted"
@@ -302,6 +305,10 @@ interface AssetPayload {
 interface AssetDocumentPayload {
   document_id: string;
   asset_id?: string;
+}
+
+interface InventoryItemPayload {
+  item_id: string;
 }
 
 interface AgentMessagePayload {
@@ -772,6 +779,20 @@ export const INVALIDATIONS: Record<EventKind, InvalidationHandler> = {
   "asset_document.extraction_failed": invalidateAssetDocument,
 
   "asset_document.extraction_retried": invalidateAssetDocument,
+
+  "inventory.item_changed": (event, qc) => {
+    const payload = event.data as unknown as InventoryItemPayload;
+    invalidate(qc, qk.inventory());
+    invalidate(qc, qk.inventoryMovements(payload.item_id));
+  },
+
+  "inventory.low_stock": (event, qc) => {
+    const payload = event.data as unknown as InventoryItemPayload;
+    invalidate(qc, qk.inventory());
+    invalidate(qc, qk.inventoryMovements(payload.item_id));
+    invalidate(qc, qk.tasks());
+    invalidate(qc, qk.dashboard());
+  },
 
   "schedule_ruleset.upserted": (_event, qc) => {
     invalidate(qc, qk.scheduleRulesets());

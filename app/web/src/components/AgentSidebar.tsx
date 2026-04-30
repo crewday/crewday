@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useLocation, useParams } from "react-router-dom";
 import { ChevronDown } from "lucide-react";
 import { fetchJson } from "@/lib/api";
+import { fetchApprovals } from "@/lib/approvals";
 import { qk } from "@/lib/queryKeys";
 import { initialAgentCollapsed, persistAgentCollapsed } from "@/lib/preferences";
 import { useAgentTyping } from "@/lib/agentTyping";
@@ -40,13 +41,13 @@ export default function AgentSidebar({ role }: AgentSidebarProps) {
   const typing = useAgentTyping(typingScope);
 
   // Query keys and endpoints are scoped per role. The admin agent
-  // lives under /admin/api/v1/... with its own log/actions, the
-  // manager agent under /api/v1/agent/manager/..., and the worker
-  // agent under /api/v1/agent/employee/...
+  // lives under /admin/api/v1/... with its own log/actions. Workspace
+  // chat logs live under /api/v1/agent/{manager|employee}/..., while
+  // manager approval cards come from the shared /approvals queue.
   const logKey = isAdmin
     ? qk.adminAgentLog()
     : isManager ? qk.agentManagerLog() : qk.agentEmployeeLog();
-  const actionsKey = isAdmin ? qk.adminAgentActions() : qk.agentManagerActions();
+  const actionsKey = isAdmin ? qk.adminAgentActions() : qk.approvals();
   const logUrl = isAdmin
     ? "/admin/api/v1/agent/log"
     : isManager ? "/api/v1/agent/manager/log" : "/api/v1/agent/employee/log";
@@ -55,11 +56,11 @@ export default function AgentSidebar({ role }: AgentSidebarProps) {
     : isManager ? "/api/v1/agent/manager/message" : "/api/v1/agent/employee/message";
   const actionsUrl = isAdmin
     ? "/admin/api/v1/agent/actions"
-    : "/api/v1/agent/manager/actions";
+    : "/api/v1/approvals";
   const decideUrlFor = (id: string, decision: "approve" | "deny") =>
     isAdmin
       ? `/admin/api/v1/agent/action/${id}/${decision}`
-      : `/api/v1/agent/manager/action/${id}/${decision}`;
+      : `/api/v1/approvals/${id}/${decision === "approve" ? "approve" : "deny"}`;
 
   const log = useQuery({
     queryKey: logKey,
@@ -67,7 +68,22 @@ export default function AgentSidebar({ role }: AgentSidebarProps) {
   });
   const actions = useQuery({
     queryKey: actionsKey,
-    queryFn: () => fetchJson<AgentAction[]>(actionsUrl),
+    queryFn: async (): Promise<AgentAction[]> => {
+      if (isAdmin) return fetchJson<AgentAction[]>(actionsUrl);
+      const approvals = await fetchApprovals();
+      return approvals
+        .filter((approval) => approval.inline_channel === "web_owner_sidebar")
+        .map((approval) => ({
+          id: approval.id,
+          title: approval.action,
+          detail: approval.reason,
+          risk: approval.risk,
+          card_summary: approval.card_summary,
+          card_fields: approval.card_fields,
+          gate_source: approval.gate_source,
+          inline_channel: "web_owner_sidebar",
+        }));
+    },
     enabled: showActions,
   });
 

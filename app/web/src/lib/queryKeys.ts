@@ -82,6 +82,7 @@ export const qk = {
   instruction: (iid: string) => [...ws(), "instruction", iid] as const,
   instructionVersions: (iid: string) => [...ws(), "instruction", iid, "versions"] as const,
   inventory: () => [...ws(), "inventory"] as const,
+  inventoryMovements: (iid: string) => [...ws(), "inventory", iid, "movements"] as const,
   payslips: () => [...ws(), "payslips"] as const,
   leaves: () => [...ws(), "leaves"] as const,
   approvals: () => [...ws(), "approvals"] as const,

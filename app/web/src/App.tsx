@@ -257,6 +257,7 @@ export default function App() {
             <Route element={<RequirePermission actionKey="scope.view" />}>
               <Route element={<ManagerLayout />}>
                 <Route path="/assets" element={<AssetsPage />} />
+                <Route path="/inventory" element={<InventoryPage />} />
                 <Route path="/asset_types" element={<AssetTypesPage />} />
                 <Route path="/w/:slug/asset_types" element={<AssetTypesPage />} />
                 <Route path="/organizations" element={<OrganizationsPage />} />
@@ -275,7 +276,6 @@ export default function App() {
               />
               <Route path="/templates" element={<TemplatesPage />} />
               <Route path="/schedules" element={<SchedulesPage />} />
-              <Route path="/inventory" element={<InventoryPage />} />
               <Route path="/permissions" element={<PermissionsPage />} />
               <Route path="/tokens" element={<ApiTokensPage />} />
             </Route>
