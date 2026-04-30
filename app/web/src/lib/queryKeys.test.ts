@@ -35,6 +35,7 @@ describe("qk — workspace prefix", () => {
     expect(qk.property("p1")).toEqual(["w", "acme", "property", "p1"]);
     expect(qk.propertyClosures("p1")).toEqual(["w", "acme", "property", "p1", "closures"]);
     expect(qk.clientPortfolio()).toEqual(["w", "acme", "client", "portfolio"]);
+    expect(qk.clientQuotes()).toEqual(["w", "acme", "client", "quotes"]);
     expect(qk.mySchedule("2026-04-20", "2026-04-27")).toEqual([
       "w",
       "acme",

@@ -24,7 +24,7 @@
 // Server emits (today): task.created, task.assigned, task.completed,
 // task.overdue, stay.upcoming, reservation.upserted,
 // property.closure.created, property.closure.updated, expense.approved, shift.ended,
-// time.shift.changed, work_order.completed. Additional kinds here (agent.*, booking.*,
+// time.shift.changed, work_order.completed, quote.decided. Additional kinds here (agent.*, booking.*,
 // asset_action.*, schedule_ruleset.*, task.updated/skipped, approval.*,
 // leave.*, ical.poll.completed) track the spec and the mock's dispatcher for
 // when each backend emitter lands. Any drift is flagged in the
@@ -127,6 +127,7 @@ export type EventKind =
   | "booking.reassigned"
   // Billing (§22 work orders).
   | "work_order.completed"
+  | "quote.decided"
   // Issues (§06 worker issue reports).
   | "issue.reported"
   // Shifts (§09 time + payroll).
@@ -538,6 +539,8 @@ export const INVALIDATIONS: Record<EventKind, InvalidationHandler> = {
 
   "approval.decided": (_event, qc) => {
     invalidate(qc, qk.approvals());
+    invalidate(qc, qk.clientQuotes());
+    invalidate(qc, qk.workOrders());
     invalidate(qc, qk.dashboard());
     // §14 worker history — approved leaves surface on the Leaves tab;
     // approved expenses reach the Expenses tab via the `expense.*`
@@ -561,6 +564,8 @@ export const INVALIDATIONS: Record<EventKind, InvalidationHandler> = {
     // the same decision event). Kept as an alias so a server build
     // emitting either name works unchanged.
     invalidate(qc, qk.approvals());
+    invalidate(qc, qk.clientQuotes());
+    invalidate(qc, qk.workOrders());
     invalidate(qc, qk.dashboard());
     invalidate(qc, qk.history("leaves"));
     invalidate(qc, qk.history("expenses"));
@@ -714,6 +719,11 @@ export const INVALIDATIONS: Record<EventKind, InvalidationHandler> = {
   "work_order.completed": (_event, qc) => {
     invalidate(qc, qk.workOrders());
     invalidate(qc, qk.dashboard());
+  },
+
+  "quote.decided": (_event, qc) => {
+    invalidate(qc, qk.clientQuotes());
+    invalidate(qc, qk.workOrders());
   },
 
   "issue.reported": (_event, qc) => {

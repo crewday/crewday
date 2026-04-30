@@ -125,6 +125,7 @@ describe("INVALIDATIONS — coverage", () => {
     "booking.cancelled",
     "booking.reassigned",
     "work_order.completed",
+    "quote.decided",
     "issue.reported",
     "shift.ended",
     "time.shift.changed",
@@ -360,7 +361,7 @@ describe("INVALIDATIONS — per-kind behaviour", () => {
     }
   });
 
-  it("approval.{decided,resolved} also invalidates my-schedule + leaves + meOverrides", () => {
+  it("approval.{decided,resolved} also invalidates client quotes, work orders, my-schedule + leaves + meOverrides", () => {
     // cd-ops1 — until the backend emits dedicated `user_leave.*` and
     // `user_availability_override.*` events, the leave + override
     // approval flow rides on `approval.{decided,resolved}`. The
@@ -377,6 +378,8 @@ describe("INVALIDATIONS — per-kind behaviour", () => {
       expect(called).toEqual(
         expect.arrayContaining([
           ["my-schedule"],
+          qk.clientQuotes(),
+          qk.workOrders(),
           qk.leaves(),
           qk.meOverrides(),
         ]),
@@ -837,6 +840,16 @@ describe("INVALIDATIONS — per-kind behaviour", () => {
     const called = spy.mock.calls.map((c) => c[0]?.queryKey);
     expect(called).toEqual(
       expect.arrayContaining([qk.workOrders(), qk.dashboard()]),
+    );
+  });
+
+  it("quote.decided invalidates client quotes + work orders", () => {
+    const qc = makeClient();
+    const spy = vi.spyOn(qc, "invalidateQueries");
+    INVALIDATIONS["quote.decided"](makeEvent("quote.decided", { quote_id: "quote_1" }), qc);
+    const called = spy.mock.calls.map((c) => c[0]?.queryKey);
+    expect(called).toEqual(
+      expect.arrayContaining([qk.clientQuotes(), qk.workOrders()]),
     );
   });
 
