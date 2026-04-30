@@ -28,7 +28,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.adapters.db.audit.models import AuditLog
-from app.adapters.db.llm.models import ApprovalRequest, LlmUsage
+from app.adapters.db.llm.models import ApprovalRequest, LlmPromptTemplate, LlmUsage
 from app.adapters.db.messaging.models import ChatMessage
 from app.domain.agent.preferences import PreferenceUpdate, save_preference
 from app.domain.agent.runtime import (
@@ -283,6 +283,100 @@ def test_workspace_preferences_are_injected_into_system_prompt(
     system = llm.last_messages[0]["content"]
     assert "## Workspace preferences --" in system
     assert "Use concise formal replies." in system
+
+
+def test_runtime_self_seeds_default_prompt_template(
+    db_session: Session,
+    bus: EventBus,
+    clock: FrozenClock,
+) -> None:
+    _ws, ctx, channel_id = _bind_and_seed(db_session)
+
+    llm = ScriptedLLMClient(replies=[make_text_response("Default observed.")])
+    run_turn(
+        ctx,
+        session=db_session,
+        scope="manager",
+        thread_id=channel_id,
+        user_message="Hi",
+        trigger="event",
+        llm_client=llm,
+        tool_dispatcher=FakeToolDispatcher(),
+        token_factory=FakeTokenFactory(),
+        agent_label=_AGENT_LABEL,
+        capability=_CAPABILITY,
+        event_bus=bus,
+        clock=clock,
+    )
+
+    row = db_session.scalar(
+        select(LlmPromptTemplate).where(
+            LlmPromptTemplate.capability == _CAPABILITY,
+            LlmPromptTemplate.is_active.is_(True),
+        )
+    )
+    assert row is not None
+    assert row.version == 1
+    assert llm.last_messages is not None
+    assert llm.last_messages[0]["content"].startswith(row.template)
+    assert "manager-side chat agent" in row.template
+
+
+def test_runtime_uses_operator_prompt_template_override(
+    db_session: Session,
+    bus: EventBus,
+    clock: FrozenClock,
+) -> None:
+    _ws, ctx, channel_id = _bind_and_seed(db_session)
+
+    first = ScriptedLLMClient(replies=[make_text_response("Seeded.")])
+    run_turn(
+        ctx,
+        session=db_session,
+        scope="manager",
+        thread_id=channel_id,
+        user_message="Hi",
+        trigger="event",
+        llm_client=first,
+        tool_dispatcher=FakeToolDispatcher(),
+        token_factory=FakeTokenFactory(),
+        agent_label=_AGENT_LABEL,
+        capability=_CAPABILITY,
+        event_bus=bus,
+        clock=clock,
+    )
+    row = db_session.scalar(
+        select(LlmPromptTemplate).where(
+            LlmPromptTemplate.capability == _CAPABILITY,
+            LlmPromptTemplate.is_active.is_(True),
+        )
+    )
+    assert row is not None
+    row.template = "You are the customised manager prompt."
+    row.updated_at = clock.now()
+    db_session.flush()
+
+    second = ScriptedLLMClient(replies=[make_text_response("Override observed.")])
+    run_turn(
+        ctx,
+        session=db_session,
+        scope="manager",
+        thread_id=channel_id,
+        user_message="Hi again",
+        trigger="event",
+        llm_client=second,
+        tool_dispatcher=FakeToolDispatcher(),
+        token_factory=FakeTokenFactory(),
+        agent_label=_AGENT_LABEL,
+        capability=_CAPABILITY,
+        event_bus=bus,
+        clock=clock,
+    )
+
+    assert second.last_messages is not None
+    system = second.last_messages[0]["content"]
+    assert system.startswith("You are the customised manager prompt.")
+    assert "manager-side chat agent" not in system
 
 
 def test_blocked_action_returns_403_without_dispatch_or_audit(

@@ -103,9 +103,6 @@ follow-ups before coding so the carve-outs are explicit):
   story (single-summary invariant, span columns, recent-window
   floor, trigger heuristics, ``chat.compact`` capability) lands
   as a worker tick, not inside this module.
-* **System prompt from llm_prompt_template** (cd-4if3). The MVP
-  builds a minimal default per-scope system prompt. The
-  prompt-library reader + per-workspace overrides land separately.
 * **Full HITL approval pipeline** (cd-9ghv). The runtime writes
   an ``ApprovalRequest`` row and pauses; cd-9ghv is the consumer
   that wires the full state machine, the inline cards, and the
@@ -163,6 +160,7 @@ from app.events.types import (
     AgentTurnScope,
     AgentTurnStarted,
 )
+from app.services.llm import get_active_prompt
 from app.tenancy import WorkspaceContext, tenant_agnostic
 from app.util.clock import Clock, SystemClock
 from app.util.ulid import new_ulid
@@ -693,14 +691,20 @@ def run_turn(
         capability=capability,
         user_id=ctx.actor_id,
     )
+    system_prompt = get_active_prompt(
+        session,
+        capability,
+        default=_default_system_prompt(scope),
+        clock=eff_clock.now,
+    )
 
     history = _assemble_history(
         session,
-        scope=scope,
         thread_id=thread_id,
         user_message=user_message,
         history_cap=history_cap,
         preferences=preferences,
+        system_prompt=system_prompt,
     )
 
     tool_calls_made = 0
@@ -1046,16 +1050,16 @@ def _resolve_external_ref(session: Session, *, thread_id: str | None) -> str | N
 def _assemble_history(
     session: Session,
     *,
-    scope: AgentTurnScope,
     thread_id: str | None,
     user_message: str,
     history_cap: int,
     preferences: PreferenceBundle,
+    system_prompt: str,
 ) -> list[LlmChatMessage]:
     """Build the ``[system, …history, user]`` sequence the LLM sees.
 
-    System prompt: a minimal default per scope until cd-4if3 wires
-    the prompt-library reader. History: the last N
+    System prompt: the active prompt-library body for the turn's
+    capability, followed by resolved agent preferences. History: the last N
     :class:`ChatMessage` rows on the thread (oldest first), capped
     at :data:`DEFAULT_HISTORY_CAP`. The newly-arrived user message
     lands as the trailing ``user`` turn.
@@ -1066,7 +1070,7 @@ def _assemble_history(
     messages: list[LlmChatMessage] = [
         {
             "role": "system",
-            "content": (f"{_default_system_prompt(scope)}\n\n{preferences.text}"),
+            "content": f"{system_prompt}\n\n{preferences.text}",
         },
     ]
     if thread_id is not None:
@@ -1076,13 +1080,12 @@ def _assemble_history(
 
 
 def _default_system_prompt(scope: AgentTurnScope) -> str:
-    """Minimal per-scope default until cd-4if3 lands.
+    """Code default for the prompt-library row for ``scope``.
 
     The tool-call protocol is documented inline so the model can
-    react to it from the prompt alone — the runtime parses the
-    closed shape :func:`_parse_tool_call` walks. Once cd-4if3
-    surfaces the full prompt-library reader, this default becomes
-    the seed copy a workspace admin can override per capability.
+    react to it from the prompt alone. The prompt-library reader
+    self-seeds this body and returns the operator-edited copy when
+    the deployment customises the capability prompt.
     """
     role_label = {
         "manager": "the manager-side chat agent for crew.day",

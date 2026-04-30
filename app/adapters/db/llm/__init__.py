@@ -14,12 +14,13 @@ SELECT / UPDATE / DELETE. A bare read without a
 
 **Deployment-scope** (no ``workspace_id``, NOT registered):
 :class:`LlmProvider`, :class:`LlmModel`, :class:`LlmProviderModel`,
-:class:`AgentDoc`, :class:`AgentDocRevision`. Every workspace shares
-the same registry and system-doc rows — they are edited from the
-deployment admin surfaces and read by the §11 resolver. Registering
-them in the workspace-scoped registry would inject a
-``workspace_id =`` predicate the column doesn't have and break every
-read.
+:class:`AgentDoc`, :class:`AgentDocRevision`,
+:class:`LlmPromptTemplate`, :class:`LlmPromptTemplateRevision`. Every
+workspace shares the same registry, prompt-library, and system-doc
+rows — they are edited from the deployment admin surfaces and read by
+the §11 resolver. Registering them in the workspace-scoped registry
+would inject a ``workspace_id =`` predicate the column doesn't have and
+break every read.
 
 Together this is the §11 agent layer: per-workspace capability →
 provider_model bindings backed by a deployment-shared provider /
@@ -83,6 +84,8 @@ from app.adapters.db.llm.models import (
     BudgetLedger,
     LlmCapabilityInheritance,
     LlmModel,
+    LlmPromptTemplate,
+    LlmPromptTemplateRevision,
     LlmProvider,
     LlmProviderModel,
     LlmUsage,
@@ -117,6 +120,8 @@ __all__ = [
     "BudgetLedger",
     "LlmCapabilityInheritance",
     "LlmModel",
+    "LlmPromptTemplate",
+    "LlmPromptTemplateRevision",
     "LlmProvider",
     "LlmProviderModel",
     "LlmUsage",

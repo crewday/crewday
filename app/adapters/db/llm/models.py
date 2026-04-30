@@ -18,6 +18,8 @@ LLM plumbing from the DB side:
   status, correlation id).
 * :class:`BudgetLedger` — rolling-period spend ledger (one row per
   ``(workspace_id, period_start, period_end)``).
+* :class:`LlmPromptTemplate` — deployment-scoped prompt-library row
+  keyed by capability, with a hash-self-seeded code default.
 
 The spec (§02 "LLM" and §11) lands a richer normalised model in a
 later slice (``llm_provider`` / ``llm_model`` / ``llm_provider_model``
@@ -96,6 +98,8 @@ __all__ = [
     "BudgetLedger",
     "LlmCapabilityInheritance",
     "LlmModel",
+    "LlmPromptTemplate",
+    "LlmPromptTemplateRevision",
     "LlmProvider",
     "LlmProviderModel",
     "LlmUsage",
@@ -1082,6 +1086,81 @@ class AgentDocRevision(Base):
         Index(
             "ix_agent_doc_revision_doc_created",
             "doc_id",
+            "created_at",
+        ),
+    )
+
+
+class LlmPromptTemplate(Base):
+    """Deployment-scoped prompt-library template keyed by capability."""
+
+    __tablename__ = "llm_prompt_template"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    capability: Mapped[str] = mapped_column(String, nullable=False)
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    template: Mapped[str] = mapped_column(String, nullable=False)
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    is_active: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default=true()
+    )
+    default_hash: Mapped[str] = mapped_column(String(16), nullable=False)
+    notes: Mapped[str | None] = mapped_column(String, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+
+    __table_args__ = (
+        CheckConstraint("version >= 1", name="llm_prompt_template_version"),
+        Index(
+            "uq_llm_prompt_template_active_capability",
+            "capability",
+            unique=True,
+            sqlite_where=text("is_active = 1"),
+            postgresql_where=text("is_active = true"),
+        ),
+    )
+
+
+class LlmPromptTemplateRevision(Base):
+    """Append-only body history for :class:`LlmPromptTemplate` saves."""
+
+    __tablename__ = "llm_prompt_template_revision"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    template_id: Mapped[str] = mapped_column(
+        String,
+        ForeignKey("llm_prompt_template.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
+    body: Mapped[str] = mapped_column(String, nullable=False)
+    notes: Mapped[str | None] = mapped_column(String, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    created_by_user_id: Mapped[str | None] = mapped_column(
+        String,
+        ForeignKey("user.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "version >= 1",
+            name="llm_prompt_template_revision_version",
+        ),
+        UniqueConstraint(
+            "template_id",
+            "version",
+            name="uq_llm_prompt_template_revision_version",
+        ),
+        Index(
+            "ix_llm_prompt_template_revision_template_created",
+            "template_id",
             "created_at",
         ),
     )
