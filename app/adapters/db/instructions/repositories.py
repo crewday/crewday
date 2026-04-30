@@ -180,6 +180,29 @@ class SqlAlchemyInstructionsRepository(InstructionsRepository):
         row = self._session.scalars(stmt).one_or_none()
         return None if row is None else _to_version_row(row)
 
+    def list_versions(
+        self,
+        *,
+        workspace_id: str,
+        instruction_id: str,
+        limit: int,
+        cursor_id: str | None,
+    ) -> Sequence[InstructionVersionRow]:
+        stmt = select(InstructionVersion).where(
+            InstructionVersion.workspace_id == workspace_id,
+            InstructionVersion.instruction_id == instruction_id,
+        )
+        if cursor_id is not None:
+            cursor = self.get_version(workspace_id=workspace_id, version_id=cursor_id)
+            if cursor is None or cursor.instruction_id != instruction_id:
+                return ()
+            stmt = stmt.where(InstructionVersion.version_num < cursor.version_num)
+        stmt = stmt.order_by(
+            InstructionVersion.version_num.desc(),
+            InstructionVersion.id.desc(),
+        ).limit(limit)
+        return [_to_version_row(row) for row in self._session.scalars(stmt).all()]
+
     def get_max_version_num(self, *, workspace_id: str, instruction_id: str) -> int:
         stmt = select(func.coalesce(func.max(InstructionVersion.version_num), 0)).where(
             InstructionVersion.instruction_id == instruction_id,

@@ -28,8 +28,8 @@ Covers cd-oyq:
   :class:`ArchivedInstructionError`.
 * Audit rows include ``revision_id`` for body edits but NOT for
   metadata-only edits.
-* :func:`restore_to_revision` raises :class:`NotImplementedError`
-  with a future-task pointer (the cd-t5j seam).
+* :func:`restore_to_revision` is implemented in
+  ``tests/unit/test_instructions_versions.py``.
 
 See ``docs/specs/07-instructions-kb.md`` §"Editing semantics" /
 §"Retractable" and ``docs/specs/02-domain-model.md`` §"instruction"
@@ -1035,20 +1035,20 @@ class TestLookups:
 
 
 # ---------------------------------------------------------------------------
-# restore_to_revision() seam
+# restore_to_revision()
 # ---------------------------------------------------------------------------
 
 
 class TestRestoreSeam:
-    """``restore_to_revision`` is a typed seam — raises for now."""
+    """Baseline restore lookup behavior; version tests cover history semantics."""
 
-    def test_raises_not_implemented(
+    def test_unknown_instruction_id_raises(
         self, session_instructions: Session, clock: FrozenClock
     ) -> None:
         session = session_instructions
         _, _, ctx = _bootstrap_owner(session, slug="ws-seam", clock=clock)
         repo = SqlAlchemyInstructionsRepository(session)
-        with pytest.raises(NotImplementedError) as exc_info:
+        with pytest.raises(InstructionNotFound):
             restore_to_revision(
                 repo,
                 ctx,
@@ -1056,8 +1056,6 @@ class TestRestoreSeam:
                 revision_id=new_ulid(),
                 clock=clock,
             )
-        assert "p6.version.history" in str(exc_info.value)
-        assert "cd-t5j" in str(exc_info.value)
 
 
 # Silence the unused-import warnings for symbols imported purely to

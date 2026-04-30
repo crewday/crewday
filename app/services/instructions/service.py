@@ -36,18 +36,19 @@ safety notes) per ``docs/specs/07-instructions-kb.md`` §"Data model"
   archiving an already-archived row is a no-op for the DB column but
   still writes one ``instruction.archived`` audit row so the
   forensic trail stays linear (matches the
-  :func:`app.services.employees.service.archive_employee` shape).
-  Restoration is intentionally NOT shipped here — spec §"Archived /
-  Retractable" describes restore as part of the version-history
-  surface (cd-t5j); cd-oyq leaves the seam open via
-  :func:`restore_to_revision` below.
+  :func:`app.services.employees.service.archive_employee` shape). This
+  is archive-state management only; version-history restore lives in
+  :func:`restore_to_revision` below and still refuses archived rows.
 
-* :func:`restore_to_revision` — version-history seam. Raises
-  :class:`NotImplementedError` until cd-t5j (``feat(instructions):
-  version history view + restore-to-revision``) lands; the signature
-  is pinned so the HTTP layer (cd-xkfe) can wire its route now and
-  the version-history work fills it in without re-shaping the
-  caller.
+* :func:`list_revisions` — newest-first immutable revision history
+  with a small cursor page shape.
+
+* :func:`restore_to_revision` — copies a historical revision body
+  into a brand-new revision, flips ``current_version_id`` to that
+  fresh row, and records restore provenance in audit. Restoring the
+  already-current revision raises
+  :class:`CurrentRevisionRestoreRejected` so the HTTP layer can map a
+  no-op restore to 409.
 
 **Scope semantics** (§"instruction" constraint table):
 
@@ -125,9 +126,11 @@ from app.util.ulid import new_ulid
 
 __all__ = [
     "ArchivedInstructionError",
+    "CurrentRevisionRestoreRejected",
     "InstructionNotFound",
     "InstructionPermissionDenied",
     "InstructionResult",
+    "InstructionRevisionPage",
     "InstructionScope",
     "InstructionVersionView",
     "InstructionView",
@@ -136,6 +139,7 @@ __all__ = [
     "TagValidationError",
     "archive",
     "create",
+    "list_revisions",
     "resolve_instructions",
     "restore_to_revision",
     "update_body",
@@ -176,6 +180,7 @@ _SCOPE_KIND_FOR_SCOPE: dict[InstructionScope, str] = {
 }
 
 _MAX_TAGS = 20
+_MAX_REVISION_PAGE_LIMIT = 500
 
 
 @dataclass(frozen=True, slots=True)
@@ -228,6 +233,15 @@ class InstructionResult:
 
     instruction: InstructionView
     revision: InstructionVersionView
+
+
+@dataclass(frozen=True, slots=True)
+class InstructionRevisionPage:
+    """Cursor page of instruction revisions, newest first."""
+
+    data: tuple[InstructionVersionView, ...]
+    next_cursor: str | None
+    has_more: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -295,6 +309,15 @@ class InstructionPermissionDenied(PermissionError):
 
     403-equivalent. Raised by the capability gate on every mutation
     path.
+    """
+
+
+class CurrentRevisionRestoreRejected(RuntimeError):
+    """Caller tried to restore the already-current revision.
+
+    409-equivalent. The router can map this directly to a conflict
+    without treating it as an idempotent success; restore must append
+    a meaningful ledger row, not restate the current pointer.
     """
 
 
@@ -995,27 +1018,124 @@ def archive(
     return _view_from_row(refreshed)
 
 
+def list_revisions(
+    repo: InstructionsRepository,
+    ctx: WorkspaceContext,
+    instruction_id: str,
+    *,
+    limit: int = 50,
+    cursor: str | None = None,
+) -> InstructionRevisionPage:
+    """Return newest-first immutable revisions for one instruction."""
+    _require_edit(repo, ctx)
+    existing = repo.get_instruction(
+        workspace_id=ctx.workspace_id, instruction_id=instruction_id
+    )
+    if existing is None:
+        raise InstructionNotFound(instruction_id)
+
+    if limit <= 0:
+        raise ValueError(f"limit must be positive; got {limit}")
+    bounded_limit = min(limit, _MAX_REVISION_PAGE_LIMIT)
+    rows = repo.list_versions(
+        workspace_id=ctx.workspace_id,
+        instruction_id=instruction_id,
+        limit=bounded_limit + 1,
+        cursor_id=cursor,
+    )
+    has_more = len(rows) > bounded_limit
+    page_rows = tuple(_version_view_from_row(row) for row in rows[:bounded_limit])
+    next_cursor = page_rows[-1].id if has_more and page_rows else None
+    return InstructionRevisionPage(
+        data=page_rows,
+        next_cursor=next_cursor,
+        has_more=has_more,
+    )
+
+
 def restore_to_revision(
     repo: InstructionsRepository,
     ctx: WorkspaceContext,
     *,
     instruction_id: str,
     revision_id: str,
+    change_note: str | None = None,
     clock: Clock | None = None,
 ) -> InstructionResult:
-    """Restore the instruction's current pointer to a prior revision.
+    """Copy a historical revision body into a brand-new current revision."""
+    _require_edit(repo, ctx)
+    existing = repo.get_instruction_for_update(
+        workspace_id=ctx.workspace_id, instruction_id=instruction_id
+    )
+    if existing is None:
+        raise InstructionNotFound(instruction_id)
+    _require_not_archived(existing)
 
-    **Seam — not implemented in cd-oyq.** Ships in
-    ``cd-t5j`` (``feat(instructions): version history view +
-    restore-to-revision``). The signature is pinned here so the
-    HTTP route lands in cd-xkfe without re-shaping the caller; the
-    body raises :class:`NotImplementedError` until the version-
-    history work fills it in.
-    """
-    del repo, ctx, instruction_id, revision_id, clock
-    raise NotImplementedError(
-        "ships in p6.version.history (cd-t5j: version history view + "
-        "restore-to-revision)"
+    current_version = _current_version_or_raise(
+        repo, workspace_id=ctx.workspace_id, instruction=existing
+    )
+    if revision_id == current_version.id:
+        raise CurrentRevisionRestoreRejected(
+            f"revision {revision_id!r} is already current for instruction "
+            f"{instruction_id!r}"
+        )
+
+    target_version = repo.get_version(
+        workspace_id=ctx.workspace_id, version_id=revision_id
+    )
+    if target_version is None or target_version.instruction_id != instruction_id:
+        raise InstructionNotFound(instruction_id)
+
+    next_version_num = (
+        repo.get_max_version_num(
+            workspace_id=ctx.workspace_id, instruction_id=instruction_id
+        )
+        + 1
+    )
+    now = _now(clock)
+    version_id = new_ulid(clock=clock)
+    body_hash = _hash_body(target_version.body_md)
+    version_row = repo.insert_version(
+        version_id=version_id,
+        workspace_id=ctx.workspace_id,
+        instruction_id=instruction_id,
+        version_num=next_version_num,
+        body_md=target_version.body_md,
+        body_hash=body_hash,
+        author_id=ctx.actor_id,
+        change_note=(
+            change_note
+            if change_note is not None
+            else f"Restored from v{target_version.version_num}: "
+        ),
+        created_at=now,
+    )
+    refreshed = repo.set_current_version(
+        workspace_id=ctx.workspace_id,
+        instruction_id=instruction_id,
+        version_id=version_id,
+    )
+
+    write_audit(
+        repo.session,
+        ctx,
+        entity_kind="instruction",
+        entity_id=instruction_id,
+        action="instruction.restored",
+        diff={
+            "revision_id": version_id,
+            "version_num": next_version_num,
+            "previous_revision_id": current_version.id,
+            "previous_version_num": current_version.version_num,
+            "restored_from_revision_id": target_version.id,
+            "restored_from_version_num": target_version.version_num,
+            "body_hash": body_hash,
+        },
+        clock=clock,
+    )
+    return InstructionResult(
+        instruction=_view_from_row(refreshed),
+        revision=_version_view_from_row(version_row),
     )
 
 

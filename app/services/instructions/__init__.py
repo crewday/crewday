@@ -10,9 +10,11 @@ from __future__ import annotations
 
 from app.services.instructions.service import (
     ArchivedInstructionError,
+    CurrentRevisionRestoreRejected,
     InstructionNotFound,
     InstructionPermissionDenied,
     InstructionResult,
+    InstructionRevisionPage,
     InstructionScope,
     InstructionVersionView,
     InstructionView,
@@ -20,6 +22,7 @@ from app.services.instructions.service import (
     TagValidationError,
     archive,
     create,
+    list_revisions,
     restore_to_revision,
     update_body,
     update_metadata,
@@ -27,9 +30,11 @@ from app.services.instructions.service import (
 
 __all__ = [
     "ArchivedInstructionError",
+    "CurrentRevisionRestoreRejected",
     "InstructionNotFound",
     "InstructionPermissionDenied",
     "InstructionResult",
+    "InstructionRevisionPage",
     "InstructionScope",
     "InstructionVersionView",
     "InstructionView",
@@ -37,6 +42,7 @@ __all__ = [
     "TagValidationError",
     "archive",
     "create",
+    "list_revisions",
     "restore_to_revision",
     "update_body",
     "update_metadata",

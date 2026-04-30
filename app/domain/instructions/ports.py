@@ -212,6 +212,22 @@ class InstructionsRepository(Protocol):
         """Return the version row scoped to ``workspace_id`` or ``None``."""
         ...
 
+    def list_versions(
+        self,
+        *,
+        workspace_id: str,
+        instruction_id: str,
+        limit: int,
+        cursor_id: str | None,
+    ) -> Sequence[InstructionVersionRow]:
+        """Return newest-first version rows for one instruction.
+
+        Loads at most ``limit`` rows. ``cursor_id`` is the last row id
+        from the previous page; stale, cross-tenant, or cross-
+        instruction cursors return an empty page.
+        """
+        ...
+
     def get_max_version_num(self, *, workspace_id: str, instruction_id: str) -> int:
         """Return the highest ``version_num`` recorded for this instruction.
 
