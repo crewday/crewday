@@ -3,9 +3,8 @@
 v1 slice per cd-bce, extended by cd-d00j with ``tags`` /
 ``archived_at`` / ``body_hash`` / ``change_note`` so cd-oyq's
 service contract has the columns it needs. The remaining §07 surface
-(``summary_md``, ``attachment_file_ids``, the ``instruction_link``
-cross-reference table) still lands with the follow-ups without
-breaking this migration's public write contract.
+(``summary_md``, ``attachment_file_ids``) still lands with the
+follow-ups without breaking this migration's public write contract.
 
 Every table carries a ``workspace_id`` column and is registered as
 workspace-scoped via the package's ``__init__``. The
@@ -74,7 +73,7 @@ from app.adapters.db.base import Base
 # been imported, so we register it here as a side effect.
 from app.adapters.db.workspace import models as _workspace_models  # noqa: F401
 
-__all__ = ["Instruction", "InstructionVersion"]
+__all__ = ["Instruction", "InstructionLink", "InstructionVersion"]
 
 
 # Allowed ``instruction.scope_kind`` values — the v1 taxonomy matching
@@ -89,6 +88,15 @@ _SCOPE_KIND_VALUES: tuple[str, ...] = (
     "stay",
     "role",
     "workspace",
+)
+
+_LINK_TARGET_KIND_VALUES: tuple[str, ...] = (
+    "task_template",
+    "schedule",
+    "work_role",
+    "task",
+    "asset",
+    "stay",
 )
 
 
@@ -303,5 +311,52 @@ class InstructionVersion(Base):
             "ix_instruction_version_instruction_body_hash",
             "instruction_id",
             "body_hash",
+        ),
+    )
+
+
+class InstructionLink(Base):
+    """Explicit link from an instruction to an applying target."""
+
+    __tablename__ = "instruction_link"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    workspace_id: Mapped[str] = mapped_column(
+        String,
+        ForeignKey("workspace.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    instruction_id: Mapped[str] = mapped_column(
+        String,
+        ForeignKey("instruction.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    target_kind: Mapped[str] = mapped_column(String, nullable=False)
+    target_id: Mapped[str] = mapped_column(String, nullable=False)
+    added_by: Mapped[str] = mapped_column(String, nullable=False)
+    added_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+    __table_args__ = (
+        CheckConstraint(
+            f"target_kind IN ({_in_clause(_LINK_TARGET_KIND_VALUES)})",
+            name="target_kind",
+        ),
+        UniqueConstraint(
+            "workspace_id",
+            "instruction_id",
+            "target_kind",
+            "target_id",
+            name="uq_instruction_link_workspace_instruction_target",
+        ),
+        Index(
+            "ix_instruction_link_workspace_target",
+            "workspace_id",
+            "target_kind",
+            "target_id",
+        ),
+        Index(
+            "ix_instruction_link_workspace_instruction",
+            "workspace_id",
+            "instruction_id",
         ),
     )

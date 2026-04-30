@@ -24,13 +24,19 @@ from __future__ import annotations
 from collections.abc import Sequence
 from datetime import UTC, datetime
 
-from sqlalchemy import func, select
+from sqlalchemy import Select, func, select
 from sqlalchemy.orm import Session
 
-from app.adapters.db.instructions.models import Instruction, InstructionVersion
+from app.adapters.db.instructions.models import (
+    Instruction,
+    InstructionLink,
+    InstructionVersion,
+)
 from app.adapters.db.places.models import Area, Property, PropertyWorkspace
 from app.domain.instructions.ports import (
     AreaParentRow,
+    InstructionLinkRow,
+    InstructionResolutionRow,
     InstructionRow,
     InstructionsRepository,
     InstructionVersionRow,
@@ -89,6 +95,32 @@ def _to_version_row(row: InstructionVersion) -> InstructionVersionRow:
         author_id=row.author_id,
         change_note=row.change_note,
         created_at=_ensure_utc(row.created_at),
+    )
+
+
+def _to_resolution_row(
+    instruction: Instruction, version: InstructionVersion
+) -> InstructionResolutionRow:
+    if instruction.current_version_id is None:
+        raise LookupError(
+            f"instruction {instruction.id!r} has no current version in resolver read"
+        )
+    return InstructionResolutionRow(
+        instruction_id=instruction.id,
+        current_revision_id=instruction.current_version_id,
+        body_md=version.body_md,
+    )
+
+
+def _to_link_row(row: InstructionLink) -> InstructionLinkRow:
+    return InstructionLinkRow(
+        id=row.id,
+        workspace_id=row.workspace_id,
+        instruction_id=row.instruction_id,
+        target_kind=row.target_kind,
+        target_id=row.target_id,
+        added_by=row.added_by,
+        added_at=_ensure_utc(row.added_at),
     )
 
 
@@ -200,6 +232,51 @@ class SqlAlchemyInstructionsRepository(InstructionsRepository):
             )
         )
         return self._session.scalars(stmt).first() is not None
+
+    def list_live_current_by_scope(
+        self,
+        *,
+        workspace_id: str,
+        scope_kind: str,
+        scope_id: str | None,
+    ) -> Sequence[InstructionResolutionRow]:
+        stmt = self._live_current_stmt(workspace_id=workspace_id).where(
+            Instruction.scope_kind == scope_kind
+        )
+        if scope_id is None:
+            stmt = stmt.where(Instruction.scope_id.is_(None))
+        else:
+            stmt = stmt.where(Instruction.scope_id == scope_id)
+        stmt = stmt.order_by(Instruction.created_at.asc(), Instruction.id.asc())
+        return [
+            _to_resolution_row(inst, version)
+            for inst, version in self._session.execute(stmt).all()
+        ]
+
+    def list_live_current_by_link(
+        self,
+        *,
+        workspace_id: str,
+        target_kind: str,
+        target_id: str,
+    ) -> Sequence[InstructionResolutionRow]:
+        stmt = (
+            self._live_current_stmt(workspace_id=workspace_id)
+            .join(
+                InstructionLink,
+                InstructionLink.instruction_id == Instruction.id,
+            )
+            .where(
+                InstructionLink.workspace_id == workspace_id,
+                InstructionLink.target_kind == target_kind,
+                InstructionLink.target_id == target_id,
+            )
+            .order_by(InstructionLink.added_at.asc(), InstructionLink.id.asc())
+        )
+        return [
+            _to_resolution_row(inst, version)
+            for inst, version in self._session.execute(stmt).all()
+        ]
 
     # -- Writes ----------------------------------------------------------
 
@@ -314,6 +391,40 @@ class SqlAlchemyInstructionsRepository(InstructionsRepository):
         self._session.flush()
         return self._to_instruction_row(row)
 
+    def insert_instruction_link(
+        self,
+        *,
+        link_id: str,
+        workspace_id: str,
+        instruction_id: str,
+        target_kind: str,
+        target_id: str,
+        added_by: str,
+        added_at: datetime,
+    ) -> InstructionLinkRow:
+        if (
+            self.get_instruction(
+                workspace_id=workspace_id, instruction_id=instruction_id
+            )
+            is None
+        ):
+            raise LookupError(
+                f"instruction {instruction_id!r} not found in workspace "
+                f"{workspace_id!r}"
+            )
+        row = InstructionLink(
+            id=link_id,
+            workspace_id=workspace_id,
+            instruction_id=instruction_id,
+            target_kind=target_kind,
+            target_id=target_id,
+            added_by=added_by,
+            added_at=added_at,
+        )
+        self._session.add(row)
+        self._session.flush()
+        return _to_link_row(row)
+
     # -- Internal helpers -----------------------------------------------
 
     def _load_instruction_orm(
@@ -348,6 +459,24 @@ class SqlAlchemyInstructionsRepository(InstructionsRepository):
         if for_update:
             stmt = stmt.with_for_update()
         return self._session.scalars(stmt).one_or_none()
+
+    def _live_current_stmt(
+        self, *, workspace_id: str
+    ) -> Select[tuple[Instruction, InstructionVersion]]:
+        return (
+            select(Instruction, InstructionVersion)
+            .join(
+                InstructionVersion,
+                (InstructionVersion.id == Instruction.current_version_id)
+                & (InstructionVersion.instruction_id == Instruction.id),
+            )
+            .where(
+                Instruction.workspace_id == workspace_id,
+                Instruction.archived_at.is_(None),
+                Instruction.current_version_id.is_not(None),
+                InstructionVersion.workspace_id == workspace_id,
+            )
+        )
 
     def _to_instruction_row(self, row: Instruction) -> InstructionRow:
         property_id: str | None = None

@@ -114,6 +114,7 @@ from app.authz import (
     require,
 )
 from app.domain.instructions.ports import (
+    InstructionResolutionRow,
     InstructionRow,
     InstructionsRepository,
     InstructionVersionRow,
@@ -130,10 +131,12 @@ __all__ = [
     "InstructionScope",
     "InstructionVersionView",
     "InstructionView",
+    "ResolvedInstruction",
     "ScopeValidationError",
     "TagValidationError",
     "archive",
     "create",
+    "resolve_instructions",
     "restore_to_revision",
     "update_body",
     "update_metadata",
@@ -147,6 +150,18 @@ __all__ = [
 
 InstructionScope = Literal["global", "property", "area"]
 """Spec-level scope enum (§07 "Properties of the system")."""
+
+InstructionProvenance = Literal[
+    "scope:area",
+    "scope:property",
+    "scope:global",
+    "link:task_template",
+    "link:schedule",
+    "link:work_role",
+    "link:task",
+    "link:asset",
+    "link:stay",
+]
 
 
 # ``scope_kind`` values stored on the ``instruction`` row. Spec §07
@@ -213,6 +228,16 @@ class InstructionResult:
 
     instruction: InstructionView
     revision: InstructionVersionView
+
+
+@dataclass(frozen=True, slots=True)
+class ResolvedInstruction:
+    """Instruction body selected for a concrete work context."""
+
+    instruction_id: str
+    current_revision_id: str
+    body_md: str
+    provenance: InstructionProvenance
 
 
 # ---------------------------------------------------------------------------
@@ -502,6 +527,106 @@ def _require_not_archived(row: InstructionRow) -> None:
             f"instruction {row.id!r} is archived since {row.archived_at.isoformat()}; "
             "cannot edit until restored"
         )
+
+
+# ---------------------------------------------------------------------------
+# Resolution
+# ---------------------------------------------------------------------------
+
+
+def resolve_instructions(
+    repo: InstructionsRepository,
+    ctx: WorkspaceContext,
+    *,
+    property_id: str | None = None,
+    area_id: str | None = None,
+    template_id: str | None = None,
+    schedule_id: str | None = None,
+    task_id: str | None = None,
+    asset_id: str | None = None,
+    stay_id: str | None = None,
+    work_role_id: str | None = None,
+) -> list[ResolvedInstruction]:
+    """Return the deduped, ordered instruction set for a work context."""
+    resolved_area_id: str | None = None
+    resolved_property_id = property_id
+    if area_id is not None:
+        area = repo.get_area(workspace_id=ctx.workspace_id, area_id=area_id)
+        if area is not None:
+            resolved_area_id = area_id
+            resolved_property_id = area.property_id
+
+    out: list[ResolvedInstruction] = []
+    seen: set[str] = set()
+
+    def append_rows(
+        rows: Sequence[InstructionResolutionRow],
+        provenance: InstructionProvenance,
+    ) -> None:
+        for row in rows:
+            if row.instruction_id in seen:
+                continue
+            seen.add(row.instruction_id)
+            out.append(
+                ResolvedInstruction(
+                    instruction_id=row.instruction_id,
+                    current_revision_id=row.current_revision_id,
+                    body_md=row.body_md,
+                    provenance=provenance,
+                )
+            )
+
+    if resolved_area_id is not None:
+        append_rows(
+            repo.list_live_current_by_scope(
+                workspace_id=ctx.workspace_id,
+                scope_kind="area",
+                scope_id=resolved_area_id,
+            ),
+            "scope:area",
+        )
+    if resolved_property_id is not None:
+        append_rows(
+            repo.list_live_current_by_scope(
+                workspace_id=ctx.workspace_id,
+                scope_kind="property",
+                scope_id=resolved_property_id,
+            ),
+            "scope:property",
+        )
+    append_rows(
+        repo.list_live_current_by_scope(
+            workspace_id=ctx.workspace_id,
+            scope_kind="workspace",
+            scope_id=None,
+        ),
+        "scope:global",
+    )
+
+    linked_targets: tuple[
+        tuple[str, str | None, InstructionProvenance],
+        ...,
+    ] = (
+        ("task_template", template_id, "link:task_template"),
+        ("schedule", schedule_id, "link:schedule"),
+        ("work_role", work_role_id, "link:work_role"),
+        ("task", task_id, "link:task"),
+        ("asset", asset_id, "link:asset"),
+        ("stay", stay_id, "link:stay"),
+    )
+    for target_kind, target_id, provenance in linked_targets:
+        if target_id is None:
+            continue
+        append_rows(
+            repo.list_live_current_by_link(
+                workspace_id=ctx.workspace_id,
+                target_kind=target_kind,
+                target_id=target_id,
+            ),
+            provenance,
+        )
+
+    return out
 
 
 # ---------------------------------------------------------------------------

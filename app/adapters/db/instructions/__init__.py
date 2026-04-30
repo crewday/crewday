@@ -46,10 +46,14 @@ See ``docs/specs/02-domain-model.md`` §"instruction",
 
 from __future__ import annotations
 
-from app.adapters.db.instructions.models import Instruction, InstructionVersion
+from app.adapters.db.instructions.models import (
+    Instruction,
+    InstructionLink,
+    InstructionVersion,
+)
 from app.tenancy.registry import register
 
-for _table in ("instruction", "instruction_version"):
+for _table in ("instruction", "instruction_version", "instruction_link"):
     register(_table)
 
-__all__ = ["Instruction", "InstructionVersion"]
+__all__ = ["Instruction", "InstructionLink", "InstructionVersion"]

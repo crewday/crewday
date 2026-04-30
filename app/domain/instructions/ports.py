@@ -49,6 +49,8 @@ from sqlalchemy.orm import Session
 
 __all__ = [
     "AreaParentRow",
+    "InstructionLinkRow",
+    "InstructionResolutionRow",
     "InstructionRow",
     "InstructionVersionRow",
     "InstructionsRepository",
@@ -102,6 +104,28 @@ class InstructionVersionRow:
     author_id: str | None
     change_note: str | None
     created_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class InstructionResolutionRow:
+    """Current live instruction body returned for resolver reads."""
+
+    instruction_id: str
+    current_revision_id: str
+    body_md: str
+
+
+@dataclass(frozen=True, slots=True)
+class InstructionLinkRow:
+    """Immutable projection of an ``instruction_link`` row."""
+
+    id: str
+    workspace_id: str
+    instruction_id: str
+    target_kind: str
+    target_id: str
+    added_by: str
+    added_at: datetime
 
 
 @dataclass(frozen=True, slots=True)
@@ -222,6 +246,26 @@ class InstructionsRepository(Protocol):
         """
         ...
 
+    def list_live_current_by_scope(
+        self,
+        *,
+        workspace_id: str,
+        scope_kind: str,
+        scope_id: str | None,
+    ) -> Sequence[InstructionResolutionRow]:
+        """Return live instructions for one scope joined to their current body."""
+        ...
+
+    def list_live_current_by_link(
+        self,
+        *,
+        workspace_id: str,
+        target_kind: str,
+        target_id: str,
+    ) -> Sequence[InstructionResolutionRow]:
+        """Return live instructions linked to one target joined to current body."""
+        ...
+
     # -- Writes ----------------------------------------------------------
 
     def insert_instruction(
@@ -320,4 +364,18 @@ class InstructionsRepository(Protocol):
         — out of scope for cd-oyq, kept here so the seam is
         symmetrical when that work lands).
         """
+        ...
+
+    def insert_instruction_link(
+        self,
+        *,
+        link_id: str,
+        workspace_id: str,
+        instruction_id: str,
+        target_kind: str,
+        target_id: str,
+        added_by: str,
+        added_at: datetime,
+    ) -> InstructionLinkRow:
+        """Insert an explicit instruction link and return its projection."""
         ...
