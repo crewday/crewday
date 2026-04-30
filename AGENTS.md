@@ -28,64 +28,46 @@ OpenClaw, etc.) operating on this repository.
 
 - **Ask before any non-obvious decision.** Use `AskUserQuestion` or
   the current runtime's equivalent. Batch related questions, but
-  never silently guess at ambiguous
-  requirements — especially in auth, privacy, payroll, and anything
-  touching PII.
+  never silently guess at ambiguous requirements — especially in auth,
+  privacy, payroll, and anything touching PII.
 - **Ask before any irreversible operation** (delete, purge,
   force-push, overwrite committed work or production data). Confirmed
   per-invocation, not once-per-session.
+- **Ask when an instruction is in doubt.** Do not silently reinterpret
+  repo principles, workflow rules, or quality bars when trying to
+  simplify them.
 - **Shared worktree**: multiple agents may be working concurrently.
-  Run `git status` before any destructive op; never discard changes
-  you didn't make; stop and ask if you see unexpected edits mid-task.
+  Run `git status --short` before editing and before any destructive
+  operation; never discard changes you didn't make; stop and ask if
+  you see unexpected edits mid-task.
 
-## Session bootstrap
+## Operating loop
 
-1. Skim recent git log, uncommitted changes, and active worktrees.
-2. Read the relevant spec under `docs/specs/`. **Spec is the source
-   of truth; code follows.** Default to updating code on divergence
-   unless an ADR or postmortem says otherwise.
-3. If `bd` is on `PATH`, skim `bd ready` and claim
-   (`bd update <id> --claim`) any task that covers what you're about
-   to do. If not, skip — don't block on Beads availability.
-4. For API/UI smoke tests, use **dev login** to exercise the real app
-   at `127.0.0.1:8100` without a passkey. Run inside the dev stack —
-   the compose file pre-sets `CREWDAY_DEV_AUTH=1` and
-   `CREWDAY_PROFILE=dev` so the gates are green by construction:
-   ```
-   docker compose -f mocks/docker-compose.yml exec app-api \
-     python -m scripts.dev_login --email me@dev.local --workspace smoke
-   ```
-   Stdout is `__Host-crewday_session=<value>`. Feed it to
-   `curl -b "$cookie" http://127.0.0.1:8100/w/smoke/api/v1/...` or
-   Playwright `context.addCookies([...])`. Creates user / workspace
-   /  role_grant on first call, mints a fresh session row every call.
-   Flags: `--role {owner,manager,worker}` (default owner),
-   `--output {cookie,json,curl,header}`. Host-side variant with the
-   same gates: `CREWDAY_DEV_AUTH=1 ./scripts/dev-login.sh <email> <slug>`
-   (needs `uv sync` / `pip install -e .` first). See
-   `scripts/dev_login.py` for the full contract.
-5. Keep the dev SQLite schema usable. If `dev_login`, `/readyz`, or a
-   smoke request fails with a missing column/table, run:
-   `docker compose -f mocks/docker-compose.yml exec app-api alembic upgrade head`.
-   If that cannot repair the disposable local DB, it is acceptable to
-   reset only the dev app volume: stop/remove `app-api`, remove
-   `crewday-mocks_crewday-app-data`, then bring `app-api` back up. Do
-   not reset any non-dev database.
-
-## Autonomy and persistence
-
+- **Use judgment before process.** Trivial answers do not need full
+  bootstrap, Beads, or role workflows. Coding work does need enough
+  context to avoid trampling the shared tree.
 - **Default to delivering working code**, not a plan. Make the
-  reasonable assumption, state it, proceed.
-- Gather context, plan, implement, test, refine — within the turn
-  when feasible. Bias to action; don't end on clarifying questions
-  unless truly blocked.
-- Stop if you catch yourself looping — re-reading or re-editing the
-  same files without progress.
-- **Never call work "done" without verifying it.** Type-checks and
-  unit tests prove code compiles, not that the feature works.
-  Exercise end-to-end — Playwright for UI, `curl`/CLI for APIs, real
-  invocation for scripts. If you can't verify, say so explicitly
-  instead of claiming success.
+  reasonable assumption, state it, proceed, unless the decision is
+  non-obvious or high-impact enough to require asking first.
+- **Prefer the simplest complete change.** No speculative features,
+  configurability, future-proofing, or abstractions for one caller. If a
+  solution is growing faster than the request, stop and simplify.
+- **Make scoped edits.** Every changed line should trace to the user's
+  request, the relevant spec, or cleanup caused by your change. Do not
+  use "surgical" as an excuse to leave the code worse; ask before
+  expanding into a larger refactor.
+- **Define success before looping.** For non-trivial work, keep a short
+  mental or written goal like "reproduce bug -> fix -> run focused test
+  -> smoke real path." Stop if you catch yourself rereading or reediting
+  without new information.
+- **Verify before calling it done.** Type checks and unit tests prove
+  only part of the work. Exercise the real code path with Playwright,
+  `curl`, CLI, or a direct script when that is the behavior being changed.
+  If you cannot verify, say exactly what is missing.
+
+These rules intentionally mirror the high-signal parts of the
+Karpathy-style guidance: surface uncertainty, keep changes small, avoid
+speculation, and make success verifiable.
 
 ## Partner in thought
 
@@ -99,6 +81,49 @@ The user expects pushback, not compliance. Flag before acting when:
 
 Say what you'd do instead in one or two lines. Don't silently "fix"
 a request you disagree with.
+
+## Start-of-task checks
+
+- Skim recent log or worktrees only when branch context matters. Use:
+  `git log --oneline -5` and `git worktree list`.
+- Read the relevant spec before changing behavior. App specs live under
+  `docs/specs/`; marketing-site specs live under `docs/specs-site/`.
+  **Specs are the source of truth; code follows** unless an ADR or
+  postmortem says otherwise.
+- If `bd` is available, check it when the task is more than a tiny
+  same-file fix. Claim an exact matching issue with
+  `bd update <id> --claim`; skip Beads if no issue fits or the tool is
+  unavailable.
+
+## Dev verification helpers
+
+Use these when the task needs a running app, API smoke, or UI smoke.
+
+- Bring the stack up with:
+  ```bash
+  docker compose -f mocks/docker-compose.yml up -d --build
+  ```
+- Use the loopback app, not `dev.crew.day`: `http://127.0.0.1:8100`.
+- Create a dev session inside the compose stack:
+  ```bash
+  docker compose -f mocks/docker-compose.yml exec app-api \
+    python -m scripts.dev_login --email me@dev.local --workspace smoke
+  ```
+  Stdout is `__Host-crewday_session=<value>`. Feed it to
+  `curl -b "$cookie" http://127.0.0.1:8100/w/smoke/api/v1/...` or
+  Playwright `context.addCookies([...])`.
+- Host-side login variant:
+  ```bash
+  CREWDAY_DEV_AUTH=1 ./scripts/dev-login.sh <email> <slug>
+  ```
+  Requires `uv sync` or `pip install -e .`.
+- If `dev_login`, `/readyz`, or a smoke request fails with a missing
+  column/table, run:
+  ```bash
+  docker compose -f mocks/docker-compose.yml exec app-api alembic upgrade head
+  ```
+  If the disposable dev DB is still broken, reset only the dev app volume.
+  Do not reset any non-dev database.
 
 ## Keep this file fresh
 
@@ -140,6 +165,9 @@ update in your wrap-up.
   unit suite under a few minutes. If you add tests that push past
   that, refactor (parallelise, split integration from unit, trim
   fixtures) rather than accepting the slowdown.
+- **Scope stays honest.** Karpathy-style simplicity means no speculative
+  features or abstractions, not lower quality. If the clean solution is
+  larger than expected, flag the tradeoff and ask.
 - Follow existing conventions. If you must diverge, say why in the
   PR.
 - Preserve behavior unless the task is explicitly about changing it.
@@ -147,8 +175,9 @@ update in your wrap-up.
   add tests.
 - Tight error handling. No bare `except:`, no silent
   `except Exception: pass`.
-- Type safety: `mypy --strict` passes. Avoid `Any` and
-  `# type: ignore`.
+- Type safety: `mypy --strict` passes. Avoid `Any`, `cast(...)`, and
+  `# type: ignore` unless there is no better typed boundary and the
+  reason is documented.
 
 ## Git and editing rules
 
@@ -191,84 +220,57 @@ update in your wrap-up.
   `uv run ruff format <paths>` on the narrowest affected path set.
   Trust the tool unless it touches unexpected files or asks for help.
 - **Read dependencies from the local env**: Python packages under
-  the active venv; don't curl GitHub.
+  the active venv; do not curl GitHub for dependency source.
 - **Never `cd` out of the worktree root** — always use absolute
   paths.
 
-## Skill triggers (repo slash-commands)
+## Skills and Beads
 
-Procedures live in `.claude/skills/<name>/`.
+Procedures live in `.claude/skills/<name>/`; Claude-compatible wrappers
+live in `.claude/agents/`. Use a skill when the user names it or when it
+clearly matches the work. Do not turn every small task into a workflow.
 
-| Skill | When |
-|-------|------|
-| `/specs` | Interactive spec + mock co-evolution while there's no prod code |
-| `/audit-spec` | After any feature adding or removing behavior |
-| `/selfreview` | Skeptical pass on your own changes before handoff |
-| `/security-check` | Red-team pass on a feature or spec |
-| `/gap-finder` | Pre-implementation walk of a spec section, filing Beads tasks for gaps |
-| `/director` | Top-level planning across specs / modules |
-| `/coder` | Implementation workflow for scoped code, tests, and docs |
-| `/commiter` | Close Beads, sync/export, commit, and push |
-| `/oracle` | Deep research for hard decisions; no edits |
-| `/beads` | Create well-formed Beads tasks from a prompt |
-| `/frontend-design:frontend-design` | **Mandatory** before creative frontend work under `mocks/web/` or `app/web/`; not needed for exact mock copying unless design choices are required |
-| `/ai-slop` | Strip AI-generated noise from a branch before it ships |
+- `/specs`: interactive spec and mock co-evolution while there is no prod
+  code.
+- `/audit-spec`: after a feature adds or removes behavior.
+- `/selfreview`: skeptical pass on non-trivial edits before handoff.
+- `/security-check`: auth, permission, PII, or privacy review.
+- `/gap-finder`: pre-implementation spec-gap walk.
+- `/director`: larger cross-module planning and delegation.
+- `/coder`: scoped implementation workflow.
+- `/commiter`: close Beads, stage explicit paths, commit, and push.
+- `/oracle`: hard decisions; no edits.
+- `/beads`: create atomic follow-up tasks.
+- `/frontend-design:frontend-design`: mandatory before creative frontend
+  work under `mocks/web/` or `app/web/`; not needed for exact mock copying.
+- `/ai-slop`: remove overcomplication, noisy comments, speculative code,
+  and bloated prose before shipping.
 
-## Role workflows and specialised agents
-
-For larger changes, split work across role workflows. The canonical
-instructions live in [`.claude/skills/`](.claude/skills/); files under
-[`.claude/agents/`](.claude/agents/) are Claude compatibility wrappers
-that load the matching skill.
-
-| Workflow | Role |
-|----------|------|
-| `director` (skill) | Plans, tracks via Beads, delegates |
-| `/coder` | Implements within a narrow scope (code + docs); runs only its module's tests |
-| `/selfreview autofix` | Reviews the just-finished task, fixes BUGS/MISSING/RISKY, and stops before commit |
-| `/commiter` | Stages, signs off, commits, pushes — nothing else |
-| `/oracle` | Deep research for hard decisions; no edits, just advice |
-
-Default flow: `/director → /coder → /selfreview autofix → /commiter`.
-Pull in `/oracle` when a decision is genuinely hard. The Director may
-spin up subagents for implementation, selfreview, commit, or oracle work
-when the runtime supports it and the user has authorized delegation.
-See [`.claude/README.md`](.claude/README.md).
+For larger changes, the usual sequence is `/director` -> `/coder` ->
+`/selfreview autofix` -> `/commiter`. Use it when the scope justifies the
+overhead or the user asks for that flow.
 
 **Every implementation plan must end with `/selfreview`** — regardless
 of scope — to catch bugs, missing pieces, and unintended consequences
 before pushing. Pure explanation, investigation, or brainstorming does
 not need a selfreview step unless it leads to edits.
 
-## Issue tracking with Beads
-
-crew.day uses **Beads** (`bd` CLI) as its task queue. Anything
-bigger than a typo or obvious same-file fix should have a Beads
-issue so follow-ups don't get lost between sessions.
-
-If `bd` isn't on `PATH`, skip Beads steps. Do not install tooling
-unless the user asks.
+crew.day uses **Beads** (`bd`) as its task queue. If it is not on `PATH`,
+skip it and do not install tooling unless asked. Use Beads for claimed
+work and follow-ups that should survive the session; do not create issues
+for tiny same-file fixes.
 
 ```bash
-bd ready                              # what's unblocked right now
-bd show <id>                          # full task context
-bd update <id> --claim                # claim it
-# … do the work …
-bd close <id>                         # done
-bd export -o .beads/issues.jsonl        # export jsonl to git
+bd ready
+bd show <id>
+bd update <id> --claim
+bd close <id>
+bd export -o .beads/issues.jsonl
 ```
 
-- **Create issues** for anything you discover but won't do this
-  turn — not just a line in a commit message.
-- **Atomic tasks** — one concern each (see
-  [`.claude/skills/beads/SKILL.md`](.claude/skills/beads/SKILL.md)).
-- **Link dependencies** with `bd dep <blocker> --blocks <blocked>`
-  only when one task literally cannot start before another.
-- **Commit the jsonl**: after any `bd` change, run
-  `bd export -o .beads/issues.jsonl` and include `.beads/` in the same
-  commit (the `/commiter` workflow handles this).
-- **Close what you claim** before handing off, so `bd ready` stays
-  honest.
+After any Beads change, export `.beads/issues.jsonl` and include it in
+the same commit. Link dependencies only when one task literally cannot
+start before another.
 
 ## Presenting your work
 
@@ -362,14 +364,11 @@ Plain text to the user; CLI handles styling.
 
 ## Session wrap-up
 
-- **File follow-ups** as Beads issues, not commit-message
-  footnotes.
-- **Close or block** what you claimed (`bd close <id>` /
-  `bd update <id> --status blocked`); then
-  `bd export -o .beads/issues.jsonl`.
-- **Run the quality gates** that apply (`pytest <scope>`, `mypy`,
-  `ruff`).
-- **Commit and push** via `/commiter`; include `.beads/` in the same
-  commit. Push rules in §"Git and editing rules".
-- **Summarise briefly**: what changed, where, what's still open,
-  what the next agent should pick up from `bd ready`.
+- Run the narrowest quality gates that prove the change. Say what you
+  could not run.
+- Close or block any Beads issue you claimed, then export
+  `.beads/issues.jsonl`.
+- Commit and push only when the user asked for it or the workflow requires
+  it. Use `/commiter` for that path.
+- Summarize briefly: what changed, where it lives, verification, and any
+  follow-up already filed.
