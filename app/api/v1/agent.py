@@ -101,6 +101,7 @@ def build_agent_router(
             .where(
                 ChatMessage.workspace_id == ctx.workspace_id,
                 ChatMessage.channel_id == channel.id,
+                ChatMessage.kind != "summary",
             )
             .order_by(ChatMessage.created_at.asc(), ChatMessage.id.asc())
         ).all()

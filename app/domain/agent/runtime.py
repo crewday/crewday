@@ -98,11 +98,10 @@ follow-ups before coding so the carve-outs are explicit):
   implementation that walks the FastAPI router lands separately
   so the dispatcher contract can be reviewed against the agent
   surface that doesn't yet exist (no ``app/api/v1/agent/*`` today).
-* **Deep conversation compaction** (cd-cn7v). The MVP caps history
-  at the last 30 messages on the thread. The full §11 compaction
-  story (single-summary invariant, span columns, recent-window
-  floor, trigger heuristics, ``chat.compact`` capability) lands
-  as a worker tick, not inside this module.
+* **Compaction worker scheduling** (cd-cn7v follow-up). The runtime
+  consumes the live summary row + uncompacted recent turns, but the
+  background tick that calls the compactor is wired outside this
+  turn loop so a user request never blocks on summarisation.
 * **Full HITL approval pipeline** (cd-9ghv). The runtime writes
   an ``ApprovalRequest`` row and pauses; cd-9ghv is the consumer
   that wires the full state machine, the inline cards, and the
@@ -130,6 +129,7 @@ from app.adapters.db.messaging.models import ChatChannel, ChatMessage
 from app.adapters.llm.ports import ChatMessage as LlmChatMessage
 from app.adapters.llm.ports import LLMClient, LLMResponse
 from app.audit import write_audit
+from app.domain.agent.compaction import search_chat_archive
 from app.domain.agent.preferences import (
     PreferenceBundle,
     blocked_action_result_body,
@@ -786,6 +786,19 @@ def run_turn(
                     ),
                 )
                 continue
+            builtin_result = _dispatch_builtin_read_tool(
+                session,
+                ctx,
+                thread_id=thread_id,
+                tool_call=tool_call,
+            )
+            if builtin_result is not None:
+                history = _append_tool_result_to_history(
+                    history,
+                    tool_call,
+                    builtin_result,
+                )
+                continue
             decision = tool_dispatcher.is_gated(tool_call)
             if decision.gated:
                 # The chat-trigger turn always has a delegating user
@@ -1059,7 +1072,8 @@ def _assemble_history(
     """Build the ``[system, …history, user]`` sequence the LLM sees.
 
     System prompt: the active prompt-library body for the turn's
-    capability, followed by resolved agent preferences. History: the last N
+    capability, followed by resolved agent preferences. History: the
+    live compaction summary, then the last N uncompacted
     :class:`ChatMessage` rows on the thread (oldest first), capped
     at :data:`DEFAULT_HISTORY_CAP`. The newly-arrived user message
     lands as the trailing ``user`` turn.
@@ -1098,43 +1112,120 @@ def _default_system_prompt(scope: AgentTurnScope) -> str:
         "never carry permissions beyond theirs. Reply in plain text, "
         "or call a tool by emitting exactly one block of the form "
         '`<tool_call name="…" input="…"/>` where ``input`` is a JSON '
-        "object. After a tool call, you will see the result on the "
-        "next turn and can either reply or call another tool."
+        'object. Use `search_chat_archive` with input `{"q":"..."}` '
+        "to retrieve compacted original chat text when a follow-up refers "
+        "to older omitted details. After a tool call, you will see the "
+        "result on the next turn and can either reply or call another tool."
     )
 
 
 def _load_recent_history(
     session: Session, thread_id: str, history_cap: int
 ) -> list[LlmChatMessage]:
-    """Return the last ``history_cap`` rows of the thread, oldest first.
+    """Return summary context plus current thread rows, oldest first.
 
     The order matters: the LLM consumes the messages chronologically
-    so a fresh ``user`` turn at the end is visibly the most recent
-    one. The DB query orders ``created_at DESC`` for the LIMIT to
-    pick the most recent N; we then reverse so the in-memory list
-    is oldest-first.
+    so a fresh ``user`` turn at the end is visibly the most recent one.
+    Compacted originals are omitted; the one live summary row carries
+    their durable context. The DB query orders ``created_at DESC`` for
+    the LIMIT to pick the most recent N; we then reverse so the
+    in-memory list is oldest-first.
 
     Each row's ``author_label`` discriminator drives the role on
     the wire: the agent's prior turns become ``assistant``;
     everything else (humans, gateway-inbound) becomes ``user``.
     """
+    summary = session.scalar(
+        select(ChatMessage).where(
+            ChatMessage.channel_id == thread_id,
+            ChatMessage.kind == "summary",
+            ChatMessage.compacted_into_id.is_(None),
+        )
+    )
     stmt = (
         select(ChatMessage)
-        .where(ChatMessage.channel_id == thread_id)
+        .where(
+            ChatMessage.channel_id == thread_id,
+            ChatMessage.kind != "summary",
+            ChatMessage.compacted_into_id.is_(None),
+        )
         .order_by(ChatMessage.created_at.desc())
         .limit(history_cap)
     )
     rows = list(session.scalars(stmt).all())
     rows.reverse()
-    return [_chat_message_to_llm(row) for row in rows]
+    messages: list[LlmChatMessage] = []
+    if summary is not None:
+        messages.append(_chat_message_to_llm(summary))
+    messages.extend(_chat_message_to_llm(row) for row in rows)
+    return messages
 
 
 def _chat_message_to_llm(row: ChatMessage) -> LlmChatMessage:
     """Map a :class:`ChatMessage` row onto the LLM's role-tagged shape."""
+    if row.kind == "summary":
+        return {
+            "role": "system",
+            "content": f"Conversation summary:\n{row.body_md}",
+        }
     role: Literal["user", "assistant"] = (
         "assistant" if row.author_label == "agent" else "user"
     )
     return {"role": role, "content": row.body_md}
+
+
+_CHAT_ARCHIVE_TOOL_NAMES: Final[frozenset[str]] = frozenset(
+    {"search_chat_archive", "chat_archive"}
+)
+
+
+def _dispatch_builtin_read_tool(
+    session: Session,
+    ctx: WorkspaceContext,
+    *,
+    thread_id: str | None,
+    tool_call: ToolCall,
+) -> ToolResult | None:
+    """Handle runtime-owned read tools that do not leave through REST."""
+    if tool_call.name not in _CHAT_ARCHIVE_TOOL_NAMES:
+        return None
+    if thread_id is None:
+        return ToolResult(
+            call_id=tool_call.id,
+            status_code=400,
+            body={"error": "chat_archive_requires_thread"},
+            mutated=False,
+        )
+    raw_query = tool_call.input.get("q", tool_call.input.get("query"))
+    if not isinstance(raw_query, str) or not raw_query.strip():
+        return ToolResult(
+            call_id=tool_call.id,
+            status_code=422,
+            body={"error": "chat_archive_query_required"},
+            mutated=False,
+        )
+    rows = search_chat_archive(
+        session,
+        ctx,
+        channel_id=thread_id,
+        query=raw_query,
+    )
+    return ToolResult(
+        call_id=tool_call.id,
+        status_code=200,
+        body={
+            "results": [
+                {
+                    "id": row.id,
+                    "at": row.created_at.isoformat(),
+                    "author": row.author_label,
+                    "body": row.body_md,
+                }
+                for row in rows
+            ]
+        },
+        mutated=False,
+    )
 
 
 # ---------------------------------------------------------------------------

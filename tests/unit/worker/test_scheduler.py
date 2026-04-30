@@ -31,6 +31,7 @@ from app.worker.jobs import identity as identity_jobs
 from app.worker.jobs import llm_budget as llm_budget_jobs
 from app.worker.jobs import messaging as messaging_jobs
 from app.worker.scheduler import (
+    AGENT_COMPACTION_JOB_ID,
     APPROVAL_TTL_JOB_ID,
     CHAT_GATEWAY_SWEEP_JOB_ID,
     DAILY_DIGEST_JOB_ID,
@@ -94,6 +95,7 @@ class TestRegisterJobs:
         # ``test_is_idempotent_under_replace_existing`` path.
         assert set(registered_job_ids(sched)) == {
             APPROVAL_TTL_JOB_ID,
+            AGENT_COMPACTION_JOB_ID,
             CHAT_GATEWAY_SWEEP_JOB_ID,
             DAILY_DIGEST_JOB_ID,
             GENERATOR_JOB_ID,
@@ -136,6 +138,7 @@ class TestRegisterJobs:
         ids = registered_job_ids(sched)
         expected_ids = {
             APPROVAL_TTL_JOB_ID,
+            AGENT_COMPACTION_JOB_ID,
             CHAT_GATEWAY_SWEEP_JOB_ID,
             DAILY_DIGEST_JOB_ID,
             GENERATOR_JOB_ID,

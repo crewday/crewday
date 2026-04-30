@@ -42,6 +42,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -649,6 +650,13 @@ class ChatMessage(Base):
     # original and the translated copy on later fields (not in this
     # slice); ``body_md`` is the displayed-to-recipient form.
     body_md: Mapped[str] = mapped_column(String, nullable=False)
+    # ``message`` = authored/gateway/agent turn. ``summary`` = the
+    # one live compaction summary for a channel (§11 Conversation
+    # compaction); compacted summaries stay in the table with
+    # ``compacted_into_id`` pointing at the replacement.
+    kind: Mapped[str] = mapped_column(
+        String, nullable=False, default="message", server_default="message"
+    )
     # List of ``{blob_hash, filename, …}`` payloads — matches the
     # ``comment.attachments_json`` shape on :mod:`app.adapters.db.
     # tasks`. The outer ``Any`` is scoped to SQLAlchemy's JSON
@@ -671,6 +679,21 @@ class ChatMessage(Base):
     # for the fuller state-machine follow-up.
     dispatched_to_agent_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
+    )
+    summary_range_from_id: Mapped[str | None] = mapped_column(
+        String,
+        ForeignKey("chat_message.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    summary_range_to_id: Mapped[str | None] = mapped_column(
+        String,
+        ForeignKey("chat_message.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    compacted_into_id: Mapped[str | None] = mapped_column(
+        String,
+        ForeignKey("chat_message.id", ondelete="SET NULL"),
+        nullable=True,
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
@@ -701,6 +724,14 @@ class ChatMessage(Base):
             "provider_message_id",
             unique=True,
         ),
+        Index(
+            "uq_chat_message_live_summary",
+            "channel_id",
+            unique=True,
+            sqlite_where=text("kind = 'summary' AND compacted_into_id IS NULL"),
+            postgresql_where=text("kind = 'summary' AND compacted_into_id IS NULL"),
+        ),
+        Index("ix_chat_message_compacted_into", "compacted_into_id"),
     )
 
 

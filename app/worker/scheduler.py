@@ -74,6 +74,7 @@ from app.util.clock import Clock, SystemClock
 from app.util.logging import new_request_id, reset_request_id, set_request_id
 from app.worker.heartbeat import upsert_heartbeat
 from app.worker.jobs import common as _common_jobs
+from app.worker.jobs.agent import _make_agent_compaction_body
 from app.worker.jobs.demo import _make_demo_gc_body, _make_demo_usage_rollup_body
 from app.worker.jobs.identity import _make_user_workspace_refresh_body
 from app.worker.jobs.llm_budget import _make_llm_budget_refresh_body
@@ -95,6 +96,8 @@ _demo_expired_workspace_ids = _common_jobs._demo_expired_workspace_ids
 _system_actor_context = _common_jobs._system_actor_context
 
 __all__ = [
+    "AGENT_COMPACTION_INTERVAL_SECONDS",
+    "AGENT_COMPACTION_JOB_ID",
     "APPROVAL_TTL_INTERVAL_SECONDS",
     "APPROVAL_TTL_JOB_ID",
     "CHAT_GATEWAY_SWEEP_INTERVAL_SECONDS",
@@ -337,6 +340,12 @@ DAILY_DIGEST_MISFIRE_GRACE_SECONDS: int = 1800
 # preferable to a stacked catch-up.
 WEB_PUSH_DISPATCH_JOB_ID: str = "messaging.web_push_dispatch"
 WEB_PUSH_DISPATCH_INTERVAL_SECONDS: int = 60
+
+# Stable job id for the agent conversation compaction worker (cd-cn7v).
+# The body walks workspaces and lets :func:`compact_due_threads` decide
+# which chat channels have crossed the §11 trigger bounds.
+AGENT_COMPACTION_JOB_ID: str = "agent.conversation_compaction"
+AGENT_COMPACTION_INTERVAL_SECONDS: int = 300
 
 DEMO_GC_JOB_ID: str = "demo_gc"
 DEMO_GC_INTERVAL_SECONDS: int = 900
@@ -590,6 +599,7 @@ def register_jobs(
         DAILY_DIGEST_JOB_ID,
         RETENTION_ROTATION_JOB_ID,
         WEB_PUSH_DISPATCH_JOB_ID,
+        AGENT_COMPACTION_JOB_ID,
         DEMO_GC_JOB_ID,
         DEMO_USAGE_ROLLUP_JOB_ID,
     ):
@@ -980,6 +990,22 @@ def register_jobs(
             max_instances=1,
             coalesce=True,
             misfire_grace_time=WEB_PUSH_DISPATCH_INTERVAL_SECONDS,
+        )
+
+    if not demo_mode:
+        scheduler.add_job(
+            wrap_job(
+                _make_agent_compaction_body(resolved_clock),
+                job_id=AGENT_COMPACTION_JOB_ID,
+                clock=resolved_clock,
+            ),
+            trigger=IntervalTrigger(seconds=AGENT_COMPACTION_INTERVAL_SECONDS),
+            id=AGENT_COMPACTION_JOB_ID,
+            name=AGENT_COMPACTION_JOB_ID,
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+            misfire_grace_time=AGENT_COMPACTION_INTERVAL_SECONDS,
         )
 
     if demo_mode:
