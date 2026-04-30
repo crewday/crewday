@@ -641,6 +641,7 @@ def _to_vendor_invoice_row(row: VendorInvoice) -> VendorInvoiceRow:
         paid_at=_as_utc_optional(row.paid_at),
         payment_method=row.payment_method,
         proof_blob_hash=row.proof_blob_hash,
+        proof_of_payment_file_ids=tuple(row.proof_of_payment_file_ids or ()),
         disputed_at=_as_utc_optional(row.disputed_at),
         notes_md=row.notes_md,
     )
@@ -1161,6 +1162,7 @@ class SqlAlchemyVendorInvoiceRepository(VendorInvoiceRepository):
             paid_at=None,
             payment_method=None,
             proof_blob_hash=None,
+            proof_of_payment_file_ids=[],
             disputed_at=None,
             notes_md=notes_md,
         )

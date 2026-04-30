@@ -162,6 +162,7 @@ def test_create_attach_approve_mark_paid_audits_and_publishes_event(
             service.approve(repo, created.id)
         attached = service.attach_pdf(repo, created.id, _PDF_HASH)
         approved = service.approve(repo, created.id)
+        proofed = service.upload_proof(repo, created.id, _PROOF_HASH)
         paid = service.mark_paid(
             repo,
             created.id,
@@ -177,6 +178,9 @@ def test_create_attach_approve_mark_paid_audits_and_publishes_event(
         assert created.reminder_windows == (date(2026, 5, 13), date(2026, 5, 19), _DUE)
         assert attached.pdf_blob_hash == _PDF_HASH
         assert approved.approved_at == _PINNED
+        assert proofed.status == "approved"
+        assert proofed.paid_at is None
+        assert proofed.proof_of_payment_file_ids == (_PROOF_HASH,)
         assert paid.status == "paid"
         assert paid.payment_method == "bank_transfer"
         assert [event.vendor_invoice_id for event in events] == [created.id]
@@ -184,6 +188,7 @@ def test_create_attach_approve_mark_paid_audits_and_publishes_event(
             "billing.vendor_invoice.created",
             "billing.vendor_invoice.pdf_attached",
             "billing.vendor_invoice.approved",
+            "billing.vendor_invoice.proof_uploaded",
             "billing.vendor_invoice.paid",
         ]
 
@@ -210,6 +215,8 @@ def test_invalid_transitions_and_payment_requirements(
         service = _service(_ctx(workspace_id, user_id))
         invoice = service.create(repo, _create_body(vendor_org_id))
 
+        with pytest.raises(VendorInvoiceInvalid, match="approved vendor invoices"):
+            service.upload_proof(repo, invoice.id, _PROOF_HASH)
         with pytest.raises(VendorInvoiceInvalid, match="to 'paid'"):
             service.mark_paid(
                 repo,

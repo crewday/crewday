@@ -366,6 +366,9 @@ class VendorInvoice(Base):
     )
     payment_method: Mapped[str | None] = mapped_column(String, nullable=True)
     proof_blob_hash: Mapped[str | None] = mapped_column(String, nullable=True)
+    proof_of_payment_file_ids: Mapped[list[str]] = mapped_column(
+        JSON, nullable=False, default=list
+    )
     disputed_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )

@@ -64,6 +64,7 @@ class VendorInvoiceRow:
     paid_at: datetime | None
     payment_method: str | None
     proof_blob_hash: str | None
+    proof_of_payment_file_ids: tuple[str, ...]
     disputed_at: datetime | None
     notes_md: str | None
 
@@ -84,6 +85,7 @@ class VendorInvoiceView:
     paid_at: datetime | None
     payment_method: str | None
     proof_blob_hash: str | None
+    proof_of_payment_file_ids: tuple[str, ...]
     disputed_at: datetime | None
     notes_md: str | None
     reminder_windows: tuple[date, ...]
@@ -309,6 +311,32 @@ class VendorInvoiceService:
         )
         return view
 
+    def upload_proof(
+        self, repo: VendorInvoiceRepository, invoice_id: str, blob_hash: str
+    ) -> VendorInvoiceView:
+        current = self._get(repo, invoice_id, for_update=True)
+        if current.status != "approved":
+            raise VendorInvoiceInvalid(
+                "proof can only be uploaded for approved vendor invoices"
+            )
+        clean_hash = _clean_blob_hash(blob_hash, field="proof_of_payment_file_ids")
+        if clean_hash in current.proof_of_payment_file_ids:
+            return _to_view(current)
+        updated = repo.update_fields(
+            workspace_id=self._ctx.workspace_id,
+            invoice_id=current.id,
+            fields={
+                "proof_of_payment_file_ids": [
+                    *current.proof_of_payment_file_ids,
+                    clean_hash,
+                ]
+            },
+        )
+        self._audit_change(
+            repo, current, updated, "billing.vendor_invoice.proof_uploaded"
+        )
+        return _to_view(updated)
+
     def dispute(
         self, repo: VendorInvoiceRepository, invoice_id: str
     ) -> VendorInvoiceView:
@@ -477,6 +505,7 @@ def _to_view(row: VendorInvoiceRow) -> VendorInvoiceView:
         paid_at=row.paid_at,
         payment_method=row.payment_method,
         proof_blob_hash=row.proof_blob_hash,
+        proof_of_payment_file_ids=row.proof_of_payment_file_ids,
         disputed_at=row.disputed_at,
         notes_md=row.notes_md,
         reminder_windows=_reminder_windows(row.due_at),
@@ -501,6 +530,7 @@ def _audit_shape(view: VendorInvoiceView) -> dict[str, object]:
         "paid_at": view.paid_at.isoformat() if view.paid_at is not None else None,
         "payment_method": view.payment_method,
         "proof_blob_hash": view.proof_blob_hash,
+        "proof_of_payment_file_ids": list(view.proof_of_payment_file_ids),
         "disputed_at": (
             view.disputed_at.isoformat() if view.disputed_at is not None else None
         ),

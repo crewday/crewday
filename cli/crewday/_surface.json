@@ -10055,6 +10055,34 @@
     "x_cli": null
   },
   {
+    "body_schema_ref": null,
+    "group": "vendor-invoices",
+    "http": {
+      "method": "POST",
+      "path": "/w/{slug}/api/v1/billing/vendor-invoices/{invoice_id}/proof"
+    },
+    "idempotent": false,
+    "name": "proof",
+    "operation_id": "billing.vendor_invoices.upload_proof",
+    "path_params": [
+      {
+        "name": "invoice_id",
+        "required": true,
+        "schema": {
+          "title": "Invoice Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/VendorInvoiceResponse",
+    "summary": "Upload proof of payment for a vendor invoice",
+    "x_agent_confirm": {
+      "message": "Upload proof of payment for this vendor invoice?"
+    },
+    "x_cli": null
+  },
+  {
     "body_schema_ref": "#/components/schemas/WebhookCreateRequest",
     "group": "webhooks",
     "http": {

@@ -36,6 +36,8 @@ from tests._fakes.storage import InMemoryStorage
 _PINNED = datetime(2026, 4, 30, 12, 0, 0, tzinfo=UTC)
 _PDF_BYTES = b"%PDF-1.7\nvendor invoice\n%%EOF\n"
 _PDF_HASH = hashlib.sha256(_PDF_BYTES).hexdigest()
+_UPLOAD_PROOF_BYTES = b"%PDF-1.7\npayment proof\n%%EOF\n"
+_UPLOAD_PROOF_HASH = hashlib.sha256(_UPLOAD_PROOF_BYTES).hexdigest()
 _PROOF_HASH = "c" * 64
 
 
@@ -232,6 +234,17 @@ def test_vendor_invoice_flow(factory: sessionmaker[Session]) -> None:
     assert approved.status_code == 200
     assert approved.json()["status"] == "approved"
 
+    proof = client.post(
+        f"/billing/vendor-invoices/{invoice['id']}/proof",
+        files={"file": ("proof.pdf", _UPLOAD_PROOF_BYTES, "application/pdf")},
+    )
+    assert proof.status_code == 200
+    proof_body = proof.json()
+    assert proof_body["status"] == "approved"
+    assert proof_body["paid_at"] is None
+    assert proof_body["proof_of_payment_file_ids"] == [_UPLOAD_PROOF_HASH]
+    assert storage.exists(_UPLOAD_PROOF_HASH)
+
     missing_payment_fields = client.post(
         f"/billing/vendor-invoices/{invoice['id']}/paid",
         json={"payment_method": "bank_transfer"},
@@ -310,9 +323,14 @@ def test_worker_cannot_approve_or_mark_paid(factory: sessionmaker[Session]) -> N
     )
 
     approve = client.post(f"/billing/vendor-invoices/{invoice_id}/approve")
+    proof = client.post(
+        f"/billing/vendor-invoices/{invoice_id}/proof",
+        files={"file": ("proof.pdf", _UPLOAD_PROOF_BYTES, "application/pdf")},
+    )
     paid = client.post(
         f"/billing/vendor-invoices/{invoice_id}/paid",
         json={"paid_at": _PINNED.isoformat(), "payment_method": "cash"},
     )
     assert approve.status_code == 403
+    assert proof.status_code == 403
     assert paid.status_code == 403

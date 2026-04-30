@@ -45,6 +45,16 @@ _MimeSniffer = Annotated[MimeSniffer, Depends(get_mime_sniffer)]
 _Status = Literal["received", "approved", "paid", "disputed"]
 _MAX_PDF_BYTES = 25 * 1024 * 1024
 _MAX_PDF_BODY_BYTES = _MAX_PDF_BYTES + 1
+_MAX_PROOF_BYTES = 25 * 1024 * 1024
+_MAX_PROOF_BODY_BYTES = _MAX_PROOF_BYTES + 1
+_PROOF_MIME_TYPES = frozenset(
+    {
+        "application/pdf",
+        "image/jpeg",
+        "image/png",
+        "image/webp",
+    }
+)
 
 
 class VendorInvoiceResponse(BaseModel):
@@ -62,6 +72,7 @@ class VendorInvoiceResponse(BaseModel):
     paid_at: datetime | None
     payment_method: str | None
     proof_blob_hash: str | None
+    proof_of_payment_file_ids: tuple[str, ...]
     disputed_at: datetime | None
     notes_md: str | None
     reminder_windows: tuple[date, ...]
@@ -83,6 +94,7 @@ class VendorInvoiceResponse(BaseModel):
             paid_at=view.paid_at,
             payment_method=view.payment_method,
             proof_blob_hash=view.proof_blob_hash,
+            proof_of_payment_file_ids=view.proof_of_payment_file_ids,
             disputed_at=view.disputed_at,
             notes_md=view.notes_md,
             reminder_windows=view.reminder_windows,
@@ -196,6 +208,54 @@ def _check_pdf_content_length(request: Request) -> None:
 _PdfContentLengthGuard = Annotated[None, Depends(_check_pdf_content_length)]
 
 
+async def _read_proof_capped(upload: UploadFile) -> bytes:
+    chunk_size = 64 * 1024
+    total = 0
+    pieces: list[bytes] = []
+    while True:
+        chunk = await upload.read(chunk_size)
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > _MAX_PROOF_BYTES:
+            await upload.close()
+            raise HTTPException(
+                status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+                detail={"error": "vendor_invoice_proof_too_large"},
+            )
+        pieces.append(chunk)
+    await upload.close()
+    return b"".join(pieces)
+
+
+def _sniff_proof(mime_sniffer: MimeSniffer, payload: bytes, declared_type: str) -> str:
+    sniffed = mime_sniffer.sniff(payload, hint=declared_type)
+    if sniffed not in _PROOF_MIME_TYPES:
+        raise HTTPException(
+            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            detail={"error": "vendor_invoice_proof_invalid_type"},
+        )
+    return sniffed
+
+
+def _check_proof_content_length(request: Request) -> None:
+    cl = request.headers.get("content-length")
+    if cl is None:
+        return
+    try:
+        size = int(cl)
+    except ValueError:
+        return
+    if size > _MAX_PROOF_BODY_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+            detail={"error": "vendor_invoice_proof_too_large"},
+        )
+
+
+_ProofContentLengthGuard = Annotated[None, Depends(_check_proof_content_length)]
+
+
 def _service(ctx: WorkspaceContext) -> VendorInvoiceService:
     return VendorInvoiceService(ctx)
 
@@ -216,6 +276,9 @@ def build_vendor_invoices_router() -> APIRouter:
         Permission("vendor_invoices.approve", scope_kind="workspace")
     )
     pay_gate = Depends(Permission("vendor_invoices.mark_paid", scope_kind="workspace"))
+    upload_proof_gate = Depends(
+        Permission("vendor_invoices.upload_proof", scope_kind="workspace")
+    )
 
     @router.get(
         "",
@@ -358,6 +421,49 @@ def build_vendor_invoices_router() -> APIRouter:
             )
         try:
             view = _service(ctx).mark_paid(_repo(session), invoice_id, body.to_domain())
+        except (VendorInvoiceInvalid, VendorInvoiceNotFound) as exc:
+            raise _http_for_vendor_invoice_error(exc) from exc
+        return VendorInvoiceResponse.from_view(view)
+
+    @router.post(
+        "/{invoice_id}/proof",
+        response_model=VendorInvoiceResponse,
+        operation_id="billing.vendor_invoices.upload_proof",
+        dependencies=[upload_proof_gate],
+        summary="Upload proof of payment for a vendor invoice",
+        openapi_extra={
+            "x-agent-confirm": {
+                "message": "Upload proof of payment for this vendor invoice?"
+            }
+        },
+    )
+    async def upload_vendor_invoice_proof(
+        invoice_id: str,
+        ctx: _Ctx,
+        session: _Db,
+        storage: _Storage,
+        mime_sniffer: _MimeSniffer,
+        _: _ProofContentLengthGuard,
+        file: Annotated[UploadFile | None, File()] = None,
+    ) -> VendorInvoiceResponse:
+        if file is None:
+            raise HTTPException(
+                status_code=422,
+                detail={"error": "vendor_invoice_proof_required"},
+            )
+        declared_type = file.content_type
+        if declared_type is None or declared_type == "":
+            await file.close()
+            raise HTTPException(
+                status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+                detail={"error": "vendor_invoice_proof_content_type_missing"},
+            )
+        payload = await _read_proof_capped(file)
+        sniffed_type = _sniff_proof(mime_sniffer, payload, declared_type)
+        blob_hash = hashlib.sha256(payload).hexdigest()
+        storage.put(blob_hash, io.BytesIO(payload), content_type=sniffed_type)
+        try:
+            view = _service(ctx).upload_proof(_repo(session), invoice_id, blob_hash)
         except (VendorInvoiceInvalid, VendorInvoiceNotFound) as exc:
             raise _http_for_vendor_invoice_error(exc) from exc
         return VendorInvoiceResponse.from_view(view)
