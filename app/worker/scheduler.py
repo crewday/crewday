@@ -90,6 +90,7 @@ __all__ = [
     "HEARTBEAT_JOB_ID",
     "HEARTBEAT_JOB_INTERVAL_SECONDS",
     "IDEMPOTENCY_SWEEP_JOB_ID",
+    "INVENTORY_REORDER_JOB_ID",
     "LLM_BUDGET_REFRESH_INTERVAL_SECONDS",
     "LLM_BUDGET_REFRESH_JOB_ID",
     "OVERDUE_DETECT_INTERVAL_SECONDS",
@@ -266,6 +267,9 @@ WEBHOOK_DISPATCH_JOB_ID: str = "webhook_dispatch"
 # itself a no-op on rows in terminal state, so a tick that fires
 # while no rows are due is cheap.
 WEBHOOK_DISPATCH_INTERVAL_SECONDS: int = 30
+
+# Stable job id for the hourly inventory reorder-point check (§08).
+INVENTORY_REORDER_JOB_ID: str = "inventory.check_reorder_points"
 
 # Stable job id for the daily digest fan-out (cd-f0ue). The job wakes
 # hourly at minute zero and the worker body sends only recipients
@@ -515,6 +519,7 @@ def register_jobs(
         USER_WORKSPACE_REFRESH_JOB_ID,
         APPROVAL_TTL_JOB_ID,
         WEBHOOK_DISPATCH_JOB_ID,
+        INVENTORY_REORDER_JOB_ID,
         DAILY_DIGEST_JOB_ID,
         RETENTION_ROTATION_JOB_ID,
     ):
@@ -812,6 +817,22 @@ def register_jobs(
         misfire_grace_time=WEBHOOK_DISPATCH_INTERVAL_SECONDS,
     )
 
+    # --- Hourly inventory reorder-point check (cd-kxr0) ---
+    scheduler.add_job(
+        wrap_job(
+            _make_inventory_reorder_body(resolved_clock),
+            job_id=INVENTORY_REORDER_JOB_ID,
+            clock=resolved_clock,
+        ),
+        trigger=CronTrigger(minute=0),
+        id=INVENTORY_REORDER_JOB_ID,
+        name=INVENTORY_REORDER_JOB_ID,
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=600,
+    )
+
     # --- Hourly daily-digest fan-out (cd-f0ue) ---
     # The body sends only users whose recipient-local clock is in the
     # 07:00 hour, so an hourly UTC trigger covers every timezone
@@ -910,6 +931,30 @@ def _make_webhook_dispatch_body(clock: Clock) -> Callable[[], None]:
         # to re-emit. Discard the report — operators read it off the
         # structured-log stream, not the wrapper's return.
         dispatch_due_webhooks(clock=clock)
+
+    return _body
+
+
+def _make_inventory_reorder_body(clock: Clock) -> Callable[[], None]:
+    """Build the hourly inventory reorder-point check body."""
+
+    def _body() -> None:
+        from app.worker.tasks.inventory_reorder import (
+            check_reorder_points_for_all_workspaces,
+        )
+
+        report = check_reorder_points_for_all_workspaces(clock=clock)
+        _log.info(
+            "worker.inventory_reorder.tick.summary",
+            extra={
+                "event": "worker.inventory_reorder.tick.summary",
+                "total_workspaces": report.total_workspaces,
+                "total_workspaces_failed": report.total_workspaces_failed,
+                "checked_items": report.checked_items,
+                "tasks_created": report.tasks_created,
+                "events_emitted": report.events_emitted,
+            },
+        )
 
     return _body
 

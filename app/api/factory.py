@@ -161,6 +161,7 @@ from app.security import BindGuardError, assert_bind_allowed
 from app.security.hmac_signer import HmacSigner
 from app.tenancy.middleware import WorkspaceContextMiddleware
 from app.util.logging import setup_logging
+from app.worker.tasks.inventory_reorder import register_inventory_reorder_subscriber
 
 __all__ = ["DemoModeRefused", "PublicBindRefused", "create_app"]
 
@@ -1225,6 +1226,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # warnings, capability probes) deserve to show up in the JSON
     # stream with the redaction filter already installed.
     setup_logging(level=cfg.log_level)
+    register_inventory_reorder_subscriber()
 
     _enforce_demo_guard(cfg)
     _enforce_bind_guard(cfg)

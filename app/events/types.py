@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import re
 from datetime import datetime, timedelta
+from decimal import Decimal
 from typing import ClassVar, Final, Literal
 
 from pydantic import BaseModel, field_validator, model_validator
@@ -57,6 +58,7 @@ __all__ = [
     "ExpenseRejected",
     "ExpenseSubmitted",
     "InventoryItemChanged",
+    "InventoryLowStock",
     "IssueReported",
     "LeaveDecided",
     "LlmAssignmentChanged",
@@ -442,6 +444,25 @@ class InventoryItemChanged(Event):
     item_id: str
     movement_id: str
     reason: str
+
+
+@register
+class InventoryLowStock(Event):
+    """An inventory item crossed its reorder threshold.
+
+    The payload carries identifiers plus decimal stock levels only.
+    Subscribers that need item names, vendor URLs, or task details
+    re-fetch them through REST under normal inventory/task authz.
+    """
+
+    name: ClassVar[str] = "inventory.low_stock"
+    allowed_roles: ClassVar[tuple[EventRole, ...]] = ("manager",)
+
+    property_id: str
+    item_id: str
+    on_hand: Decimal
+    reorder_point: Decimal
+    restock_task_id: str
 
 
 @register
