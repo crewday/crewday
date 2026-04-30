@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session, sessionmaker
 import app.admin.backup as backup_module
 from app.adapters.db.base import Base
 from app.adapters.db.identity.models import User
-from app.adapters.db.secrets.models import SecretEnvelope
+from app.adapters.db.secrets.models import RootKeySlot, SecretEnvelope
 from app.admin.backup import BackupManifest, backup, restore, rotate_backups
 from app.config import Settings
 from app.tenancy import tenant_agnostic
@@ -155,6 +155,36 @@ def test_legacy_key_file_allows_old_fingerprint(tmp_path: Path) -> None:
     )
 
     assert (tmp_path / "target.db").exists()
+
+
+def test_root_key_slot_allows_restore_fingerprint(tmp_path: Path) -> None:
+    db_path = tmp_path / "current.db"
+    key_path = _write_key(tmp_path, "legacy.key", "old-root-key")
+    _load_all_models()
+    engine = create_engine(f"sqlite:///{db_path}", future=True)
+    Base.metadata.create_all(engine)
+    factory = sessionmaker(bind=engine, expire_on_commit=False, class_=Session)
+    with factory() as session, tenant_agnostic():
+        session.add(
+            RootKeySlot(
+                id="slot_restore",
+                key_fp=bytes.fromhex("8eba9648f425e32b"),
+                key_ref=f"file:{key_path}",
+                is_active=False,
+                activated_at=datetime(2026, 4, 29, 7, 0, tzinfo=UTC),
+                retired_at=datetime(2026, 4, 29, 7, 1, tzinfo=UTC),
+                purge_after=datetime(2026, 5, 2, 7, 1, tzinfo=UTC),
+                notes=None,
+            )
+        )
+        session.commit()
+    engine.dispose()
+
+    backup_module._verify_key_fps(
+        {"8eba9648f425e32b"},
+        settings=_settings(db_path, tmp_path / "data", "wrong-root-key"),
+        legacy_key_files=[],
+    )
 
 
 def test_rotate_backups_keeps_newest_daily(tmp_path: Path) -> None:

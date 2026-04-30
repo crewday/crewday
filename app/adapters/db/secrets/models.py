@@ -34,6 +34,7 @@ from __future__ import annotations
 from datetime import datetime
 
 from sqlalchemy import (
+    Boolean,
     DateTime,
     Index,
     LargeBinary,
@@ -44,8 +45,42 @@ from sqlalchemy.orm import Mapped, mapped_column
 from app.adapters.db.base import Base
 
 __all__ = [
+    "RootKeySlot",
     "SecretEnvelope",
 ]
+
+
+class RootKeySlot(Base):
+    """Pointer to active and recently retired deployment root keys.
+
+    The row stores only metadata and a ``key_ref`` pointer such as
+    ``env:CREWDAY_ROOT_KEY`` or ``file:/run/secrets/crewday-root-key``.
+    Key material never lives in this table; the cipher resolves the
+    referenced value only when it needs to open a legacy envelope row.
+    """
+
+    __tablename__ = "root_key_slot"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    key_fp: Mapped[bytes] = mapped_column(LargeBinary, nullable=False, unique=True)
+    key_ref: Mapped[str] = mapped_column(String, nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    activated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    retired_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    purge_after: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    notes: Mapped[str | None] = mapped_column(String, nullable=True)
+
+    __table_args__ = (
+        Index("ix_root_key_slot_key_fp", "key_fp"),
+        Index("ix_root_key_slot_is_active", "is_active"),
+        Index("ix_root_key_slot_purge_after", "purge_after"),
+    )
 
 
 class SecretEnvelope(Base):

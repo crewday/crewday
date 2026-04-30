@@ -31,7 +31,8 @@ from sqlalchemy.orm import Session, sessionmaker
 
 import app.adapters.db as adapters_db_pkg
 from app.adapters.db.base import Base
-from app.adapters.db.secrets.models import SecretEnvelope
+from app.adapters.db.secrets.models import RootKeySlot, SecretEnvelope
+from app.adapters.db.secrets.repositories import resolve_root_key_ref
 from app.adapters.db.session import normalise_sync_url
 from app.adapters.storage.envelope import compute_key_fingerprint
 from app.config import Settings
@@ -516,6 +517,7 @@ def _verify_key_fps(
     legacy_key_files: Iterable[Path],
 ) -> None:
     allowed = _legacy_key_fps(legacy_key_files)
+    allowed.update(_root_key_slot_fps(settings))
     active = _current_key_fp(settings.root_key)
     if active is not None:
         allowed.add(active)
@@ -525,6 +527,34 @@ def _verify_key_fps(
             "backup contains secret envelopes encrypted with unavailable key "
             f"fingerprint(s): {', '.join(missing)}"
         )
+
+
+def _root_key_slot_fps(settings: Settings) -> set[str]:
+    parsed = make_url(normalise_sync_url(settings.database_url))
+    database = parsed.database
+    if parsed.drivername.startswith("sqlite"):
+        if database is None or database in ("", ":memory:"):
+            return set()
+        if not Path(database).exists():
+            return set()
+
+    engine = create_engine(normalise_sync_url(settings.database_url), future=True)
+    try:
+        if not inspect(engine).has_table("root_key_slot"):
+            return set()
+        factory = sessionmaker(bind=engine, expire_on_commit=False, class_=Session)
+        with factory() as session, tenant_agnostic():
+            refs = session.scalars(select(RootKeySlot.key_ref)).all()
+        fps: set[str] = set()
+        for key_ref in refs:
+            key = resolve_root_key_ref(key_ref)
+            if key is not None:
+                fps.add(compute_key_fingerprint(key).hex())
+        return fps
+    except (OSError, SQLAlchemyError):
+        return set()
+    finally:
+        engine.dispose()
 
 
 def _restore_database(

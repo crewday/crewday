@@ -27,11 +27,15 @@ See ``docs/specs/02-domain-model.md`` §"secret_envelope" and
 
 from __future__ import annotations
 
+import os
+import pathlib
 from datetime import UTC, datetime
 
+from pydantic import SecretStr
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.adapters.db.secrets.models import SecretEnvelope
+from app.adapters.db.secrets.models import RootKeySlot, SecretEnvelope
 from app.domain.secrets.ports import (
     SecretEnvelopeRepository,
     SecretEnvelopeRow,
@@ -40,7 +44,38 @@ from app.tenancy import tenant_agnostic
 
 __all__ = [
     "SqlAlchemySecretEnvelopeRepository",
+    "resolve_root_key_ref",
 ]
+
+
+def resolve_root_key_ref(key_ref: str) -> SecretStr | None:
+    """Resolve a ``root_key_slot.key_ref`` pointer to key material.
+
+    Supported refs are ``env:NAME`` and ``file:/absolute/or/relative/path``.
+    The function returns ``None`` when the pointer is absent or the target is
+    empty so callers can keep the decrypt failure on the normal
+    ``KeyFingerprintMismatch`` path.
+    """
+    if key_ref.startswith("env:"):
+        name = key_ref.removeprefix("env:").strip()
+        if not name:
+            return None
+        value = os.environ.get(name)
+        if not value:
+            return None
+        return SecretStr(value)
+    if key_ref.startswith("file:"):
+        raw_path = key_ref.removeprefix("file:").strip()
+        if not raw_path:
+            return None
+        try:
+            value = pathlib.Path(raw_path).read_text(encoding="utf-8").strip()
+        except OSError:
+            return None
+        if not value:
+            return None
+        return SecretStr(value)
+    return None
 
 
 def _to_row(row: SecretEnvelope) -> SecretEnvelopeRow:
@@ -121,3 +156,17 @@ class SqlAlchemySecretEnvelopeRepository(SecretEnvelopeRepository):
         if row is None:
             return None
         return _to_row(row)
+
+    def legacy_root_key_for_fp(self, *, key_fp: bytes) -> SecretStr | None:
+        # justification: root_key_slot has no workspace_id column; rotation is
+        # deployment-wide and must resolve legacy keys across all tenants.
+        with tenant_agnostic():
+            slot = self._session.scalars(
+                select(RootKeySlot).where(
+                    RootKeySlot.key_fp == key_fp,
+                    RootKeySlot.is_active.is_(False),
+                )
+            ).first()
+        if slot is None:
+            return None
+        return resolve_root_key_ref(slot.key_ref)

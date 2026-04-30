@@ -43,6 +43,16 @@ def _load_app_backup() -> Any:
     return admin_backup_mod
 
 
+def _load_app_rotate_root_key() -> Any:
+    try:
+        from app.admin import rotate_root_key as rotate_root_key_mod
+    except Exception as exc:
+        raise ConfigError(
+            "admin commands must run on the server host with app dependencies installed"
+        ) from exc
+    return rotate_root_key_mod
+
+
 def _make_uow() -> Any:
     try:
         from app.adapters.db.session import make_uow
@@ -400,6 +410,114 @@ def restore(
 restore = cli_override("admin", "restore", covers=[])(restore)
 
 
+@click.command(name="rotate-root-key")
+@click.option(
+    "--new-key-file",
+    type=click.Path(exists=True, dir_okay=False, readable=True, path_type=pathlib.Path),
+    default=None,
+    help="Read the new root key from an operator-owned 0600 file.",
+)
+@click.option(
+    "--new-key-stdin",
+    is_flag=True,
+    help="Read the new root key from stdin. Refuses an interactive TTY.",
+)
+@click.option(
+    "--reencrypt",
+    is_flag=True,
+    help="Re-encrypt legacy secret-envelope rows under the active root key.",
+)
+@click.option(
+    "--finalize",
+    is_flag=True,
+    help="Purge retired slots after the 72-hour retention window.",
+)
+@click.option(
+    "--finalize-now",
+    is_flag=True,
+    help="Purge retired slots immediately once no rows still use them.",
+)
+@click.option(
+    "--new",
+    "legacy_new_value",
+    default=None,
+    help="Refused: use --new-key-file or --new-key-stdin.",
+)
+def rotate_root_key(
+    *,
+    new_key_file: pathlib.Path | None,
+    new_key_stdin: bool,
+    reencrypt: bool,
+    finalize: bool,
+    finalize_now: bool,
+    legacy_new_value: str | None,
+) -> None:
+    """Rotate the deployment root key without an HTTP surface."""
+    if legacy_new_value is not None:
+        raise click.UsageError(
+            "--new <value> is refused because it leaks root keys through shell "
+            "history and process listings; use --new-key-file or --new-key-stdin"
+        )
+
+    selected = [
+        new_key_file is not None,
+        new_key_stdin,
+        reencrypt,
+        finalize,
+        finalize_now,
+    ]
+    if sum(selected) != 1:
+        raise click.UsageError(
+            "choose exactly one of --new-key-file, --new-key-stdin, --reencrypt, "
+            "--finalize, or --finalize-now"
+        )
+    rotate_mod = _load_app_rotate_root_key()
+    make_uow = _make_uow()
+    settings = _settings()
+    with make_uow() as session:
+        assert isinstance(session, Session)
+        if new_key_file is not None:
+            key = rotate_mod.load_new_key_file(new_key_file)
+            try:
+                result = rotate_mod.start_rotation(
+                    session,
+                    settings=settings,
+                    new_key=key,
+                    new_key_ref=f"file:{new_key_file}",
+                )
+            finally:
+                rotate_mod.zero_key_material(key)
+        elif new_key_stdin:
+            if os.isatty(0):
+                raise click.UsageError(
+                    "--new-key-stdin refuses an interactive TTY"
+                )
+            key = rotate_mod.normalise_new_key_material(
+                click.get_binary_stream("stdin").read()
+            )
+            try:
+                result = rotate_mod.start_rotation(
+                    session,
+                    settings=settings,
+                    new_key=key,
+                    new_key_ref=rotate_mod.ENV_ROOT_KEY_REF,
+                )
+            finally:
+                rotate_mod.zero_key_material(key)
+        elif reencrypt:
+            result = rotate_mod.reencrypt_legacy_rows(session, settings=settings)
+        else:
+            result = rotate_mod.finalize_rotation(
+                session,
+                settings=settings,
+                finalize_now=finalize_now,
+            )
+    click.echo(json.dumps(rotate_mod.result_payload(result), sort_keys=True))
+
+
+rotate_root_key = cli_override("admin", "rotate-root-key", covers=[])(rotate_root_key)
+
+
 def _ensure_group(root: click.Group, name: str, *, help_text: str) -> click.Group:
     group = root.get_command(click.Context(root), name)
     if group is None:
@@ -416,6 +534,7 @@ def register(root: click.Group) -> None:
     group.add_command(backup)
     group.add_command(purge)
     group.add_command(restore)
+    group.add_command(rotate_root_key)
 
     user = _ensure_group(group, "user", help_text="host-only user admin commands")
     user.add_command(user_invite)

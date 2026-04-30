@@ -30,6 +30,8 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Protocol
 
+from pydantic import SecretStr
+
 __all__ = [
     "EnvelopeNotFound",
     "SecretEnvelopeRepository",
@@ -143,5 +145,14 @@ class SecretEnvelopeRepository(Protocol):
         envelope it uses for tag / version mismatches — a single
         failure mode for every "this ciphertext is not openable
         right now" reason.
+        """
+        ...
+
+    def legacy_root_key_for_fp(self, *, key_fp: bytes) -> SecretStr | None:
+        """Return the retired root key for ``key_fp`` when a slot resolves.
+
+        Row-backed decrypt uses this during root-key rotation: a row stamped
+        with a retired fingerprint can still open while the re-encryption
+        worker catches up. ``None`` means no usable legacy slot is available.
         """
         ...

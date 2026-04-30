@@ -62,6 +62,7 @@ class _InMemoryEnvelopeRepository:
 
     def __init__(self) -> None:
         self.rows: dict[str, SecretEnvelopeRow] = {}
+        self.legacy_keys: dict[bytes, SecretStr] = {}
 
     def insert(
         self,
@@ -91,6 +92,9 @@ class _InMemoryEnvelopeRepository:
 
     def get_by_id(self, *, envelope_id: str) -> SecretEnvelopeRow | None:
         return self.rows.get(envelope_id)
+
+    def legacy_root_key_for_fp(self, *, key_fp: bytes) -> SecretStr | None:
+        return self.legacy_keys.get(key_fp)
 
 
 # ---------------------------------------------------------------------------
@@ -255,7 +259,7 @@ class TestRowBackedMode:
         # so a wrong-shape arg can't sneak through into the row's
         # ``owner_entity_*`` columns.
         with pytest.raises(TypeError, match="EnvelopeOwner"):
-            env.encrypt(b"secret", purpose="p", owner=("ical_feed", "f1"))  # type: ignore[arg-type]
+            env.encrypt(b"secret", purpose="p", owner=("ical_feed", "f1"))
 
     def test_blank_owner_kind_rejected(self) -> None:
         with pytest.raises(ValueError, match="non-blank slug"):
@@ -297,6 +301,22 @@ class TestRowBackedMode:
         # KeyFingerprintMismatch is a subclass of EnvelopeDecryptError —
         # callers that ``except EnvelopeDecryptError`` still catch it.
         assert isinstance(exc_info.value, EnvelopeDecryptError)
+
+    def test_matching_legacy_key_slot_opens_retired_row(self) -> None:
+        """A retired-key row stays open while rotation re-encryption catches up."""
+        repo = _InMemoryEnvelopeRepository()
+        encrypt_env = Aes256GcmEnvelope(
+            _KEY, repository=repo, clock=_FrozenClock(_PINNED)
+        )
+        owner = EnvelopeOwner(kind="ical_feed", id="feed-legacy-slot")
+        ciphertext = encrypt_env.encrypt(b"secret", purpose="p", owner=owner)
+        repo.legacy_keys[compute_key_fingerprint(_KEY)] = _KEY
+
+        decrypt_env = Aes256GcmEnvelope(
+            _OTHER_KEY, repository=repo, clock=_FrozenClock(_PINNED)
+        )
+
+        assert decrypt_env.decrypt(ciphertext, purpose="p") == b"secret"
 
     def test_missing_row_raises_decrypt_error(self) -> None:
         """A pointer-tagged blob whose row is gone fails loudly."""

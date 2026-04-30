@@ -363,15 +363,19 @@ class Aes256GcmEnvelope:
                 f"row-backed envelope {envelope_id!r} not found in repository"
             )
 
-        # §15 "Key fingerprint": check the row's fingerprint against
-        # the active key's fingerprint. Mismatch raises with the
-        # spec's actionable message shape (no legacy-key list yet —
-        # that lands with the rotate-root-key CLI).
+        # §15 "Key fingerprint": open rows under the active key when the
+        # fingerprint matches. During rotation, a retired root_key_slot may
+        # resolve the legacy key for rows the re-encryption worker has not
+        # rewritten yet.
         active_fp = compute_key_fingerprint(self._root_key)
+        root_key = self._root_key
         if row.key_fp != active_fp:
-            raise KeyFingerprintMismatch(expected=row.key_fp, actual=active_fp)
+            legacy_key = self._repository.legacy_root_key_for_fp(key_fp=row.key_fp)
+            if legacy_key is None:
+                raise KeyFingerprintMismatch(expected=row.key_fp, actual=active_fp)
+            root_key = legacy_key
 
-        key = derive_subkey(self._root_key, purpose=_purpose_label(purpose))
+        key = derive_subkey(root_key, purpose=_purpose_label(purpose))
         aead = AESGCM(key)
         try:
             return aead.decrypt(row.nonce, row.ciphertext, None)
