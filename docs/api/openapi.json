@@ -5248,6 +5248,622 @@
         "title": "CurrencyTotalPayload",
         "type": "object"
       },
+      "DashboardApproval": {
+        "properties": {
+          "action": {
+            "title": "Action",
+            "type": "string"
+          },
+          "agent": {
+            "title": "Agent",
+            "type": "string"
+          },
+          "card_fields": {
+            "items": {
+              "maxItems": 2,
+              "minItems": 2,
+              "prefixItems": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "string"
+                }
+              ],
+              "type": "array"
+            },
+            "title": "Card Fields",
+            "type": "array"
+          },
+          "card_summary": {
+            "title": "Card Summary",
+            "type": "string"
+          },
+          "diff": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Diff",
+            "type": "array"
+          },
+          "for_user_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "For User Id"
+          },
+          "gate_destination": {
+            "enum": [
+              "desk",
+              "inline_chat"
+            ],
+            "title": "Gate Destination",
+            "type": "string"
+          },
+          "gate_source": {
+            "title": "Gate Source",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "inline_channel": {
+            "title": "Inline Channel",
+            "type": "string"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          },
+          "requested_at": {
+            "format": "date-time",
+            "title": "Requested At",
+            "type": "string"
+          },
+          "resolved_user_mode": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolved User Mode"
+          },
+          "risk": {
+            "enum": [
+              "low",
+              "medium",
+              "high"
+            ],
+            "title": "Risk",
+            "type": "string"
+          },
+          "target": {
+            "title": "Target",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "agent",
+          "action",
+          "target",
+          "reason",
+          "requested_at",
+          "risk",
+          "diff",
+          "gate_source",
+          "gate_destination",
+          "inline_channel",
+          "card_summary",
+          "card_fields",
+          "for_user_id",
+          "resolved_user_mode"
+        ],
+        "title": "DashboardApproval",
+        "type": "object"
+      },
+      "DashboardIssue": {
+        "properties": {
+          "area": {
+            "title": "Area",
+            "type": "string"
+          },
+          "body": {
+            "title": "Body",
+            "type": "string"
+          },
+          "category": {
+            "enum": [
+              "damage",
+              "broken",
+              "supplies",
+              "safety",
+              "other"
+            ],
+            "title": "Category",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "property_id": {
+            "title": "Property Id",
+            "type": "string"
+          },
+          "reported_at": {
+            "format": "date-time",
+            "title": "Reported At",
+            "type": "string"
+          },
+          "reported_by": {
+            "title": "Reported By",
+            "type": "string"
+          },
+          "severity": {
+            "enum": [
+              "low",
+              "normal",
+              "high",
+              "urgent"
+            ],
+            "title": "Severity",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "open",
+              "in_progress",
+              "resolved",
+              "wont_fix"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "reported_by",
+          "property_id",
+          "area",
+          "severity",
+          "category",
+          "title",
+          "body",
+          "reported_at",
+          "status"
+        ],
+        "title": "DashboardIssue",
+        "type": "object"
+      },
+      "DashboardLeave": {
+        "properties": {
+          "approved_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Approved At"
+          },
+          "category": {
+            "enum": [
+              "vacation",
+              "sick",
+              "personal",
+              "bereavement",
+              "other"
+            ],
+            "title": "Category",
+            "type": "string"
+          },
+          "employee_id": {
+            "title": "Employee Id",
+            "type": "string"
+          },
+          "ends_on": {
+            "format": "date",
+            "title": "Ends On",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "note": {
+            "title": "Note",
+            "type": "string"
+          },
+          "starts_on": {
+            "format": "date",
+            "title": "Starts On",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "employee_id",
+          "starts_on",
+          "ends_on",
+          "category",
+          "note",
+          "approved_at"
+        ],
+        "title": "DashboardLeave",
+        "type": "object"
+      },
+      "DashboardPayload": {
+        "properties": {
+          "by_status": {
+            "$ref": "#/components/schemas/DashboardTaskBuckets"
+          },
+          "employees": {
+            "items": {
+              "$ref": "#/components/schemas/EmployeeResponse"
+            },
+            "title": "Employees",
+            "type": "array"
+          },
+          "on_booking": {
+            "items": {
+              "$ref": "#/components/schemas/EmployeeResponse"
+            },
+            "title": "On Booking",
+            "type": "array"
+          },
+          "open_issues": {
+            "items": {
+              "$ref": "#/components/schemas/DashboardIssue"
+            },
+            "title": "Open Issues",
+            "type": "array"
+          },
+          "pending_approvals": {
+            "items": {
+              "$ref": "#/components/schemas/DashboardApproval"
+            },
+            "title": "Pending Approvals",
+            "type": "array"
+          },
+          "pending_expenses": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Pending Expenses",
+            "type": "array"
+          },
+          "pending_leaves": {
+            "items": {
+              "$ref": "#/components/schemas/DashboardLeave"
+            },
+            "title": "Pending Leaves",
+            "type": "array"
+          },
+          "properties": {
+            "items": {
+              "$ref": "#/components/schemas/PropertyResponse"
+            },
+            "title": "Properties",
+            "type": "array"
+          },
+          "stays_today": {
+            "items": {
+              "$ref": "#/components/schemas/DashboardStay"
+            },
+            "title": "Stays Today",
+            "type": "array"
+          }
+        },
+        "required": [
+          "on_booking",
+          "by_status",
+          "pending_approvals",
+          "pending_expenses",
+          "pending_leaves",
+          "open_issues",
+          "stays_today",
+          "properties",
+          "employees"
+        ],
+        "title": "DashboardPayload",
+        "type": "object"
+      },
+      "DashboardStay": {
+        "properties": {
+          "check_in": {
+            "format": "date-time",
+            "title": "Check In",
+            "type": "string"
+          },
+          "check_out": {
+            "format": "date-time",
+            "title": "Check Out",
+            "type": "string"
+          },
+          "guest_name": {
+            "title": "Guest Name",
+            "type": "string"
+          },
+          "guests": {
+            "title": "Guests",
+            "type": "integer"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "property_id": {
+            "title": "Property Id",
+            "type": "string"
+          },
+          "source": {
+            "enum": [
+              "manual",
+              "airbnb",
+              "vrbo",
+              "booking",
+              "google_calendar",
+              "ical"
+            ],
+            "title": "Source",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "tentative",
+              "confirmed",
+              "in_house",
+              "checked_out",
+              "cancelled"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "property_id",
+          "guest_name",
+          "source",
+          "check_in",
+          "check_out",
+          "guests",
+          "status"
+        ],
+        "title": "DashboardStay",
+        "type": "object"
+      },
+      "DashboardTask": {
+        "properties": {
+          "area": {
+            "title": "Area",
+            "type": "string"
+          },
+          "asset_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Asset Id"
+          },
+          "assigned_user_id": {
+            "title": "Assigned User Id",
+            "type": "string"
+          },
+          "assignee_id": {
+            "title": "Assignee Id",
+            "type": "string"
+          },
+          "checklist": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Checklist",
+            "type": "array"
+          },
+          "created_by": {
+            "title": "Created By",
+            "type": "string"
+          },
+          "estimated_minutes": {
+            "title": "Estimated Minutes",
+            "type": "integer"
+          },
+          "evidence_policy": {
+            "enum": [
+              "inherit",
+              "require",
+              "optional",
+              "forbid"
+            ],
+            "title": "Evidence Policy",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "instructions_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Instructions Ids",
+            "type": "array"
+          },
+          "is_personal": {
+            "title": "Is Personal",
+            "type": "boolean"
+          },
+          "photo_evidence": {
+            "enum": [
+              "disabled",
+              "optional",
+              "required"
+            ],
+            "title": "Photo Evidence",
+            "type": "string"
+          },
+          "priority": {
+            "enum": [
+              "low",
+              "normal",
+              "high",
+              "urgent"
+            ],
+            "title": "Priority",
+            "type": "string"
+          },
+          "property_id": {
+            "title": "Property Id",
+            "type": "string"
+          },
+          "schedule_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Schedule Id"
+          },
+          "scheduled_start": {
+            "format": "date-time",
+            "title": "Scheduled Start",
+            "type": "string"
+          },
+          "settings_override": {
+            "additionalProperties": true,
+            "title": "Settings Override",
+            "type": "object"
+          },
+          "status": {
+            "enum": [
+              "scheduled",
+              "pending",
+              "in_progress",
+              "completed",
+              "skipped",
+              "cancelled",
+              "overdue"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "template_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Template Id"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "turnover_bundle_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Turnover Bundle Id"
+          },
+          "workspace_id": {
+            "title": "Workspace Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "property_id",
+          "area",
+          "assignee_id",
+          "scheduled_start",
+          "estimated_minutes",
+          "priority",
+          "status",
+          "checklist",
+          "photo_evidence",
+          "evidence_policy",
+          "instructions_ids",
+          "template_id",
+          "schedule_id",
+          "turnover_bundle_id",
+          "asset_id",
+          "settings_override",
+          "assigned_user_id",
+          "workspace_id",
+          "created_by",
+          "is_personal"
+        ],
+        "title": "DashboardTask",
+        "type": "object"
+      },
+      "DashboardTaskBuckets": {
+        "properties": {
+          "completed": {
+            "items": {
+              "$ref": "#/components/schemas/DashboardTask"
+            },
+            "title": "Completed",
+            "type": "array"
+          },
+          "in_progress": {
+            "items": {
+              "$ref": "#/components/schemas/DashboardTask"
+            },
+            "title": "In Progress",
+            "type": "array"
+          },
+          "pending": {
+            "items": {
+              "$ref": "#/components/schemas/DashboardTask"
+            },
+            "title": "Pending",
+            "type": "array"
+          }
+        },
+        "required": [
+          "completed",
+          "in_progress",
+          "pending"
+        ],
+        "title": "DashboardTaskBuckets",
+        "type": "object"
+      },
       "DefaultAssetActionRequest": {
         "additionalProperties": false,
         "description": "Wire-facing default action shape.",
@@ -26755,6 +27371,39 @@
         ]
       }
     },
+    "/w/{slug}/api/v1/dashboard": {
+      "get": {
+        "operationId": "dashboard.get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DashboardPayload"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Read the manager dashboard aggregate",
+        "tags": [
+          "dashboard"
+        ]
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "slug",
+          "required": true,
+          "schema": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          }
+        }
+      ]
+    },
     "/w/{slug}/api/v1/employees": {
       "get": {
         "description": "Return every employee in the workspace as a flat array.\n\nJoins :class:`UserWorkspace` (membership), :class:`User`\n(identity profile), :class:`WorkEngagement` (active engagement\nfor the ``started_on`` field), :class:`UserWorkRole` +\n:class:`WorkRole` (role keys for the chip set), and\n:class:`RoleGrant` + :class:`PropertyWorkspace` (property\nassignments for the schedule / approval pages).\n\nBare-array response \u2014 see module docstring for the rationale.",
@@ -28466,6 +29115,114 @@
         "summary": "Convert an issue to a task",
         "tags": [
           "issues"
+        ]
+      }
+    },
+    "/w/{slug}/api/v1/leaves/{leave_id}/approve": {
+      "parameters": [
+        {
+          "in": "path",
+          "name": "slug",
+          "required": true,
+          "schema": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          }
+        }
+      ],
+      "post": {
+        "operationId": "dashboard.leaves.approve",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "leave_id",
+            "required": true,
+            "schema": {
+              "title": "Leave Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DashboardLeave"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Approve a pending leave from manager dashboard",
+        "tags": [
+          "dashboard"
+        ]
+      }
+    },
+    "/w/{slug}/api/v1/leaves/{leave_id}/reject": {
+      "parameters": [
+        {
+          "in": "path",
+          "name": "slug",
+          "required": true,
+          "schema": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          }
+        }
+      ],
+      "post": {
+        "operationId": "dashboard.leaves.reject",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "leave_id",
+            "required": true,
+            "schema": {
+              "title": "Leave Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DashboardLeave"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Reject a pending leave from manager dashboard",
+        "tags": [
+          "dashboard"
         ]
       }
     },

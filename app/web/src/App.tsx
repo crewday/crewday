@@ -183,6 +183,12 @@ export default function App() {
               </Route>
             </Route>
 
+            <Route element={<RequirePermission actionKey="employees.read" />}>
+              <Route element={<ManagerLayout />}>
+                <Route path="/dashboard" element={<DashboardPage />} />
+              </Route>
+            </Route>
+
             <Route element={<RequirePermission actionKey="scope.edit_settings" />}>
               <Route element={<ManagerLayout />}>
                 <Route path="/settings" element={<SettingsPage />} />
@@ -211,7 +217,6 @@ export default function App() {
             </Route>
 
             <Route element={<ManagerLayout />}>
-              <Route path="/dashboard" element={<DashboardPage />} />
               <Route path="/employees" element={<EmployeesPage />} />
               <Route path="/employee/:eid" element={<EmployeeDetailPage />} />
               <Route path="/employee/:eid/leaves" element={<EmployeeLeavesPage />} />

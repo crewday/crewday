@@ -109,6 +109,7 @@ from app.api.v1.auth import passkey as passkey_module
 from app.api.v1.auth import recovery as recovery_module
 from app.api.v1.auth import signup as signup_module
 from app.api.v1.auth import tokens as tokens_module
+from app.api.v1.dashboard import build_dashboard_router
 from app.api.v1.employees import build_employees_router
 from app.api.v1.llm import build_workspace_llm_router
 from app.api.v1.me_schedule import build_me_schedule_router
@@ -695,6 +696,7 @@ def _mount_auth_routers(
     # ``extra="forbid"``), so a worker cannot use these surfaces to
     # author requests for another user.
     app.include_router(build_me_schedule_router(), prefix=scoped_prefix)
+    app.include_router(build_dashboard_router(), prefix=scoped_prefix)
     # Workspace-scoped employees roster (cd-g6nf, cd-jtgo) — flat
     # ``Employee[]`` projection consumed by the SPA's manager pages.
     # See ``app/api/v1/employees.py`` for the join shape and the
