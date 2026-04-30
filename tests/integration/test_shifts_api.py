@@ -25,7 +25,7 @@ Covers:
 * SSE: every mutation emits a :class:`ShiftChanged` event whose
   handler receives the right action + shift id.
 * OpenAPI regeneration: the factory picks up the new routes and
-  the merged document exposes the five operation ids.
+  the merged document exposes the time operation ids.
 """
 
 from __future__ import annotations
@@ -619,6 +619,7 @@ class TestOpenapiExposure:
         assert "/shifts/{shift_id}/close" in paths
         assert "/shifts/{shift_id}" in paths
         assert "/shifts" in paths
+        assert "/properties/{property_id}/geofence" in paths
         # Confirm the operation ids pinned in the router match the spec.
         op_ids: set[str] = set()
         for path in paths.values():
@@ -631,6 +632,9 @@ class TestOpenapiExposure:
             "time.edit_shift",
             "time.list_shifts",
             "time.get_shift",
+            "time.get_geofence_setting",
+            "time.upsert_geofence_setting",
+            "time.delete_geofence_setting",
         }
         assert expected.issubset(op_ids), f"missing: {expected - op_ids}"
 

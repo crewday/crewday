@@ -1399,6 +1399,20 @@ PATCH  /time/shifts/{shift_id}     # manager retroactive amend: body ShiftEdit {
                                    #   (strict on edit path; clock-out tolerates zero-length).
 GET    /time/shifts/{shift_id}     # read a single shift; 404 if unknown.
                                    # 200 ShiftPayload.
+GET    /time/properties/{property_id}/geofence
+                                   # manager read of one property's geofence setting; requires
+                                   # time.edit_others at property scope. 200 GeofenceSettingPayload;
+                                   # 404 not_found when the property is not active in the workspace
+                                   # or has no setting; 403 forbidden.
+PUT    /time/properties/{property_id}/geofence
+                                   # manager create/replace: body {lat, lon, radius_m, enabled?, mode?}
+                                   # where mode is enforce|warn|off. 200 GeofenceSettingPayload;
+                                   # validation rejects out-of-bounds coordinates or non-positive radius;
+                                   # 404 not_found when the property is not active in the workspace.
+DELETE /time/properties/{property_id}/geofence
+                                   # manager delete; 200 with the removed GeofenceSettingPayload;
+                                   # 404 not_found when the property is not active in the workspace
+                                   # or no setting exists.
 
 # Leave requests (cd-31c/cd-8pi). State machine: pending -> approved |
 # rejected | cancelled. The `reason_md` / decision-rationale free-text

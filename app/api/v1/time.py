@@ -22,6 +22,8 @@ Routes (cd-whl, cd-31c):
 * ``GET /leaves/{leave_id}/conflicts`` — manager advisory overlap ids.
 * ``POST /leaves/{leave_id}/decision`` — manager approve / reject.
 * ``DELETE /leaves/{leave_id}`` — manager cancel of someone else's leave.
+* ``GET|PUT|DELETE /properties/{property_id}/geofence`` — manager reads,
+  replaces, or deletes one property's geofence setting.
 
 The handlers are thin: unpack the DTO, call the domain service, map
 typed errors to HTTP. The UoW (:func:`app.api.deps.db_session`) owns
@@ -41,12 +43,22 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.api.deps import current_workspace_context, db_session
+from app.domain.time.geofence_settings import (
+    GeofenceMode,
+    GeofenceSettingNotFound,
+    GeofenceSettingPermissionDenied,
+    GeofenceSettingUpsert,
+    GeofenceSettingView,
+    delete_geofence_setting,
+    get_geofence_setting,
+    upsert_geofence_setting,
+)
 from app.domain.time.shifts import (
     ShiftAlreadyOpen,
     ShiftBoundaryInvalid,
@@ -218,6 +230,39 @@ class LeaveDecisionBody(BaseModel):
     rationale_md: str | None = None
 
 
+class GeofenceSettingPayload(BaseModel):
+    """HTTP projection of a per-property geofence setting."""
+
+    id: str
+    workspace_id: str
+    property_id: str
+    lat: float
+    lon: float
+    radius_m: int
+    enabled: bool
+    mode: GeofenceMode
+
+    @classmethod
+    def from_view(cls, view: GeofenceSettingView) -> GeofenceSettingPayload:
+        return cls(
+            id=view.id,
+            workspace_id=view.workspace_id,
+            property_id=view.property_id,
+            lat=view.lat,
+            lon=view.lon,
+            radius_m=view.radius_m,
+            enabled=view.enabled,
+            mode=view.mode,
+        )
+
+
+class GeofenceSettingBody(GeofenceSettingUpsert):
+    """Request body for ``PUT /properties/{property_id}/geofence``."""
+
+
+_PropertyId = Annotated[str, Path(max_length=40)]
+
+
 # ---------------------------------------------------------------------------
 # Error mapping
 # ---------------------------------------------------------------------------
@@ -310,6 +355,24 @@ def _http_for_leave_error(exc: Exception) -> HTTPException:
             detail={"error": "invalid_transition", "message": str(exc)},
         )
     if isinstance(exc, LeavePermissionDenied):
+        return HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"error": "forbidden"},
+        )
+    return HTTPException(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        detail={"error": "internal"},
+    )
+
+
+def _http_for_geofence_setting_error(exc: Exception) -> HTTPException:
+    """Map geofence-setting service errors to HTTP envelopes."""
+    if isinstance(exc, GeofenceSettingNotFound):
+        return HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"error": "not_found"},
+        )
+    if isinstance(exc, GeofenceSettingPermissionDenied):
         return HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail={"error": "forbidden"},
@@ -465,6 +528,77 @@ def get_one_shift(
     except ShiftNotFound as exc:
         raise _http_for_shift_error(exc) from exc
     return ShiftPayload.from_view(view)
+
+
+# ---------------------------------------------------------------------------
+# Geofence setting routes (cd-gdit)
+# ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/properties/{property_id}/geofence",
+    response_model=GeofenceSettingPayload,
+    operation_id="time.get_geofence_setting",
+    summary="Read one property's geofence setting",
+    openapi_extra={"x-cli": {"group": "time", "verb": "geofence-setting-show"}},
+)
+def get_one_geofence_setting(
+    property_id: _PropertyId,
+    ctx: _Ctx,
+    session: _Db,
+) -> GeofenceSettingPayload:
+    """Return one property's geofence setting."""
+    try:
+        view = get_geofence_setting(session, ctx, property_id=property_id)
+    except (GeofenceSettingNotFound, GeofenceSettingPermissionDenied) as exc:
+        raise _http_for_geofence_setting_error(exc) from exc
+    return GeofenceSettingPayload.from_view(view)
+
+
+@router.put(
+    "/properties/{property_id}/geofence",
+    response_model=GeofenceSettingPayload,
+    operation_id="time.upsert_geofence_setting",
+    summary="Create or replace one property's geofence setting",
+    openapi_extra={"x-cli": {"group": "time", "verb": "geofence-setting-upsert"}},
+)
+def put_geofence_setting(
+    property_id: _PropertyId,
+    body: GeofenceSettingBody,
+    ctx: _Ctx,
+    session: _Db,
+) -> GeofenceSettingPayload:
+    """Create or replace the geofence setting for ``property_id``."""
+    try:
+        view = upsert_geofence_setting(
+            session,
+            ctx,
+            property_id=property_id,
+            body=body,
+        )
+    except (GeofenceSettingNotFound, GeofenceSettingPermissionDenied) as exc:
+        raise _http_for_geofence_setting_error(exc) from exc
+    return GeofenceSettingPayload.from_view(view)
+
+
+@router.delete(
+    "/properties/{property_id}/geofence",
+    response_model=GeofenceSettingPayload,
+    operation_id="time.delete_geofence_setting",
+    summary="Delete one property's geofence setting",
+    openapi_extra={"x-cli": {"group": "time", "verb": "geofence-setting-delete"}},
+)
+def delete_one_geofence_setting(
+    property_id: _PropertyId,
+    ctx: _Ctx,
+    session: _Db,
+) -> GeofenceSettingPayload:
+    """Delete the geofence setting for ``property_id``."""
+    try:
+        view = delete_geofence_setting(session, ctx, property_id=property_id)
+    except (GeofenceSettingNotFound, GeofenceSettingPermissionDenied) as exc:
+        raise _http_for_geofence_setting_error(exc) from exc
+    return GeofenceSettingPayload.from_view(view)
 
 
 # ---------------------------------------------------------------------------

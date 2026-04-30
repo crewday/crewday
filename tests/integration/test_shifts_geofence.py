@@ -15,13 +15,14 @@ from app.adapters.db.audit.models import AuditLog
 from app.adapters.db.authz.models import RoleGrant
 from app.adapters.db.base import Base
 from app.adapters.db.identity.models import User, canonicalise_email
+from app.adapters.db.places.models import Property, PropertyWorkspace
 from app.adapters.db.session import UnitOfWorkImpl, make_engine
 from app.adapters.db.time.models import GeofenceSetting, Shift
 from app.adapters.db.workspace.models import Workspace
 from app.api.deps import current_workspace_context, db_session
 from app.api.v1.time import router as time_router
 from app.events import ShiftGeofenceWarning, bus
-from app.tenancy.context import WorkspaceContext
+from app.tenancy.context import ActorGrantRole, WorkspaceContext
 from app.util.ulid import new_ulid
 
 pytestmark = pytest.mark.integration
@@ -85,14 +86,43 @@ def _bootstrap_workspace(s: Session) -> str:
     return workspace_id
 
 
-def _bootstrap_user(s: Session, *, workspace_id: str) -> str:
+def _bootstrap_property(s: Session, *, workspace_id: str) -> None:
+    s.add(
+        Property(
+            id=_PROPERTY_ID,
+            address="1 Geofence Way",
+            timezone="UTC",
+            tags_json=[],
+            created_at=_PINNED,
+        )
+    )
+    s.flush()
+    s.add(
+        PropertyWorkspace(
+            property_id=_PROPERTY_ID,
+            workspace_id=workspace_id,
+            label="Main",
+            membership_role="owner_workspace",
+            status="active",
+            created_at=_PINNED,
+        )
+    )
+    s.flush()
+
+
+def _bootstrap_user(
+    s: Session,
+    *,
+    workspace_id: str,
+    grant_role: str = "worker",
+) -> str:
     user_id = new_ulid()
     s.add(
         User(
             id=user_id,
             email=f"{user_id}@example.com",
             email_lower=canonicalise_email(f"{user_id}@example.com"),
-            display_name="Worker",
+            display_name=grant_role.title(),
             created_at=_PINNED,
         )
     )
@@ -102,7 +132,7 @@ def _bootstrap_user(s: Session, *, workspace_id: str) -> str:
             id=new_ulid(),
             workspace_id=workspace_id,
             user_id=user_id,
-            grant_role="worker",
+            grant_role=grant_role,
             scope_property_id=None,
             created_at=_PINNED,
             created_by_user_id=None,
@@ -112,13 +142,18 @@ def _bootstrap_user(s: Session, *, workspace_id: str) -> str:
     return user_id
 
 
-def _ctx(*, workspace_id: str, actor_id: str) -> WorkspaceContext:
+def _ctx(
+    *,
+    workspace_id: str,
+    actor_id: str,
+    grant_role: ActorGrantRole = "worker",
+) -> WorkspaceContext:
     return WorkspaceContext(
         workspace_id=workspace_id,
         workspace_slug="geofence-api",
         actor_id=actor_id,
         actor_kind="user",
-        actor_grant_role="worker",
+        actor_grant_role=grant_role,
         actor_was_owner_member=False,
         audit_correlation_id=new_ulid(),
     )
@@ -151,9 +186,28 @@ def client_env(
 ) -> tuple[TestClient, sessionmaker[Session], WorkspaceContext]:
     with factory() as s:
         workspace_id = _bootstrap_workspace(s)
+        _bootstrap_property(s, workspace_id=workspace_id)
         user_id = _bootstrap_user(s, workspace_id=workspace_id)
         s.commit()
     ctx = _ctx(workspace_id=workspace_id, actor_id=user_id)
+    client = TestClient(_build_app(factory, ctx), raise_server_exceptions=False)
+    return client, factory, ctx
+
+
+@pytest.fixture
+def manager_env(
+    factory: sessionmaker[Session],
+) -> tuple[TestClient, sessionmaker[Session], WorkspaceContext]:
+    with factory() as s:
+        workspace_id = _bootstrap_workspace(s)
+        _bootstrap_property(s, workspace_id=workspace_id)
+        user_id = _bootstrap_user(
+            s,
+            workspace_id=workspace_id,
+            grant_role="manager",
+        )
+        s.commit()
+    ctx = _ctx(workspace_id=workspace_id, actor_id=user_id, grant_role="manager")
     client = TestClient(_build_app(factory, ctx), raise_server_exceptions=False)
     return client, factory, ctx
 
@@ -202,6 +256,157 @@ def _shift_count(factory: sessionmaker[Session], workspace_id: str) -> int:
             )
             or 0
         )
+
+
+def _geofence_count(factory: sessionmaker[Session], workspace_id: str) -> int:
+    with factory() as s:
+        return (
+            s.scalar(
+                select(func.count())
+                .select_from(GeofenceSetting)
+                .where(GeofenceSetting.workspace_id == workspace_id)
+            )
+            or 0
+        )
+
+
+def test_manager_can_create_update_read_and_delete_geofence_setting(
+    manager_env: tuple[TestClient, sessionmaker[Session], WorkspaceContext],
+) -> None:
+    client, factory, ctx = manager_env
+
+    create = client.put(
+        f"/properties/{_PROPERTY_ID}/geofence",
+        json={
+            "lat": 43.5804,
+            "lon": 7.1251,
+            "radius_m": 25,
+            "enabled": True,
+            "mode": "enforce",
+        },
+    )
+    assert create.status_code == 200, create.text
+    created = create.json()
+    assert created["workspace_id"] == ctx.workspace_id
+    assert created["property_id"] == _PROPERTY_ID
+    assert created["mode"] == "enforce"
+    assert _geofence_count(factory, ctx.workspace_id) == 1
+
+    read = client.get(f"/properties/{_PROPERTY_ID}/geofence")
+    assert read.status_code == 200, read.text
+    assert read.json() == created
+
+    update = client.put(
+        f"/properties/{_PROPERTY_ID}/geofence",
+        json={
+            "lat": 43.581,
+            "lon": 7.126,
+            "radius_m": 40,
+            "enabled": True,
+            "mode": "warn",
+        },
+    )
+    assert update.status_code == 200, update.text
+    updated = update.json()
+    assert updated["id"] == created["id"]
+    assert updated["radius_m"] == 40
+    assert updated["mode"] == "warn"
+    assert _geofence_count(factory, ctx.workspace_id) == 1
+
+    delete = client.delete(f"/properties/{_PROPERTY_ID}/geofence")
+    assert delete.status_code == 200, delete.text
+    assert delete.json() == updated
+    assert _geofence_count(factory, ctx.workspace_id) == 0
+
+    missing = client.get(f"/properties/{_PROPERTY_ID}/geofence")
+    assert missing.status_code == 404
+    assert missing.json()["detail"]["error"] == "not_found"
+    assert _audit_actions(factory, ctx.workspace_id) == [
+        "geofence_setting.created",
+        "geofence_setting.updated",
+        "geofence_setting.deleted",
+    ]
+
+
+def test_worker_cannot_manage_geofence_setting(
+    client_env: tuple[TestClient, sessionmaker[Session], WorkspaceContext],
+) -> None:
+    client, factory, ctx = client_env
+
+    resp = client.put(
+        f"/properties/{_PROPERTY_ID}/geofence",
+        json={
+            "lat": 43.5804,
+            "lon": 7.1251,
+            "radius_m": 25,
+            "mode": "enforce",
+        },
+    )
+
+    assert resp.status_code == 403, resp.text
+    assert resp.json()["detail"]["error"] == "forbidden"
+    assert _geofence_count(factory, ctx.workspace_id) == 0
+
+
+def test_manager_cannot_create_setting_for_unlinked_property(
+    manager_env: tuple[TestClient, sessionmaker[Session], WorkspaceContext],
+) -> None:
+    client, factory, ctx = manager_env
+
+    resp = client.put(
+        "/properties/not-in-workspace/geofence",
+        json={
+            "lat": 43.5804,
+            "lon": 7.1251,
+            "radius_m": 25,
+            "mode": "enforce",
+        },
+    )
+
+    assert resp.status_code == 404, resp.text
+    assert resp.json()["detail"]["error"] == "not_found"
+    assert _geofence_count(factory, ctx.workspace_id) == 0
+
+
+def test_invalid_geofence_setting_payload_returns_422(
+    manager_env: tuple[TestClient, sessionmaker[Session], WorkspaceContext],
+) -> None:
+    client, factory, ctx = manager_env
+
+    resp = client.put(
+        f"/properties/{_PROPERTY_ID}/geofence",
+        json={
+            "lat": 91,
+            "lon": 7.1251,
+            "radius_m": 25,
+            "mode": "enforce",
+        },
+    )
+
+    assert resp.status_code == 422, resp.text
+    assert _geofence_count(factory, ctx.workspace_id) == 0
+
+
+def test_upserted_geofence_setting_enforces_clock_in(
+    manager_env: tuple[TestClient, sessionmaker[Session], WorkspaceContext],
+) -> None:
+    client, factory, ctx = manager_env
+    resp = client.put(
+        f"/properties/{_PROPERTY_ID}/geofence",
+        json={
+            "lat": 43.5804,
+            "lon": 7.1251,
+            "radius_m": 25,
+            "mode": "enforce",
+        },
+    )
+    assert resp.status_code == 200, resp.text
+
+    clock_in = client.post("/shifts/open", json={"property_id": _PROPERTY_ID})
+
+    assert clock_in.status_code == 422, clock_in.text
+    assert clock_in.json()["detail"]["error"] == "geofence_fix_required"
+    assert _shift_count(factory, ctx.workspace_id) == 0
 
 
 def test_in_fence_open_succeeds(
