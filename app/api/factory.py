@@ -94,6 +94,7 @@ from app.api.v1 import (
     APPROVALS_ROUTER,
     BILLING_PUBLIC_ROUTER,
     CONTEXT_ROUTERS,
+    DOCUMENTS_ROUTER,
     ISSUES_ROUTER,
     STAYS_PUBLIC_ROUTER,
     WEBHOOKS_ROUTER,
@@ -782,6 +783,7 @@ def _mount_context_routers(app: FastAPI, *, settings: Settings) -> None:
         app.include_router(router, prefix=f"{scoped_prefix}/{context_name}")
 
     app.include_router(asset_scan_router, prefix=f"{scoped_prefix}/asset")
+    app.include_router(DOCUMENTS_ROUTER, prefix=scoped_prefix)
 
     # Workspace-scoped admin aggregator. Mounted OUTSIDE the
     # ``CONTEXT_ROUTERS`` loop so the §01 13-context invariant stays

@@ -108,6 +108,14 @@ export interface DocumentExtraction {
   extracted_at: string | null;
 }
 
+export interface DocumentExtractionPage {
+  page: number;
+  char_start: number;
+  char_end: number;
+  body: string;
+  more_pages: boolean;
+}
+
 export interface KbHit {
   kind: "instruction" | "document";
   id: string;

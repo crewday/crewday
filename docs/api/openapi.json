@@ -6726,6 +6726,122 @@
         "title": "DeploymentSettingsResponse",
         "type": "object"
       },
+      "DocumentExtractionPageResponse": {
+        "properties": {
+          "body": {
+            "title": "Body",
+            "type": "string"
+          },
+          "char_end": {
+            "title": "Char End",
+            "type": "integer"
+          },
+          "char_start": {
+            "title": "Char Start",
+            "type": "integer"
+          },
+          "more_pages": {
+            "title": "More Pages",
+            "type": "boolean"
+          },
+          "page": {
+            "title": "Page",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "page",
+          "char_start",
+          "char_end",
+          "body",
+          "more_pages"
+        ],
+        "title": "DocumentExtractionPageResponse",
+        "type": "object"
+      },
+      "DocumentExtractionResponse": {
+        "properties": {
+          "body_preview": {
+            "title": "Body Preview",
+            "type": "string"
+          },
+          "document_id": {
+            "title": "Document Id",
+            "type": "string"
+          },
+          "extracted_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Extracted At"
+          },
+          "extractor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Extractor"
+          },
+          "has_secret_marker": {
+            "title": "Has Secret Marker",
+            "type": "boolean"
+          },
+          "last_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Error"
+          },
+          "page_count": {
+            "title": "Page Count",
+            "type": "integer"
+          },
+          "status": {
+            "enum": [
+              "pending",
+              "extracting",
+              "succeeded",
+              "failed",
+              "unsupported",
+              "empty"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "token_count": {
+            "title": "Token Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "document_id",
+          "status",
+          "extractor",
+          "body_preview",
+          "page_count",
+          "token_count",
+          "has_secret_marker",
+          "last_error",
+          "extracted_at"
+        ],
+        "title": "DocumentExtractionResponse",
+        "type": "object"
+      },
       "EmployeeLeaveResponse": {
         "description": "Mock-compatible leave row for the manager employee ledger.",
         "properties": {
@@ -19687,6 +19803,133 @@
         "title": "WorkspaceArchiveResponse",
         "type": "object"
       },
+      "WorkspaceDocumentListResponse": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/WorkspaceDocumentResponse"
+            },
+            "title": "Data",
+            "type": "array"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "WorkspaceDocumentListResponse",
+        "type": "object"
+      },
+      "WorkspaceDocumentResponse": {
+        "properties": {
+          "amount_cents": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Amount Cents"
+          },
+          "amount_currency": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Amount Currency"
+          },
+          "asset_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Asset Id"
+          },
+          "expires_on": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expires On"
+          },
+          "extracted_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Extracted At"
+          },
+          "extraction_status": {
+            "title": "Extraction Status",
+            "type": "string"
+          },
+          "filename": {
+            "title": "Filename",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "property_id": {
+            "title": "Property Id",
+            "type": "string"
+          },
+          "size_kb": {
+            "title": "Size Kb",
+            "type": "integer"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "uploaded_at": {
+            "format": "date-time",
+            "title": "Uploaded At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "asset_id",
+          "property_id",
+          "kind",
+          "title",
+          "filename",
+          "size_kb",
+          "uploaded_at",
+          "expires_on",
+          "amount_cents",
+          "amount_currency",
+          "extraction_status",
+          "extracted_at"
+        ],
+        "title": "WorkspaceDocumentResponse",
+        "type": "object"
+      },
       "WorkspaceListItem": {
         "description": "One row of ``GET /admin/api/v1/workspaces``.\n\nMirrors the spec's \"list (id, slug, plan, verification, size)\"\ncontract with a few inline aggregates the SPA's ``WorkspacesPage``\nrenders without a follow-up call:\n\n* ``id`` / ``slug`` / ``name`` / ``plan`` \u2014 straight off\n  :class:`Workspace`.\n* ``verification_state`` \u2014 read from the interim\n  ``settings_json`` slot (cd-s8kk follow-up promotes the column).\n* ``properties_count`` \u2014 active :class:`PropertyWorkspace` rows.\n* ``members_count`` \u2014 count of :class:`UserWorkspace` rows.\n* ``spent_cents_30d`` / ``cap_cents_30d`` \u2014 rolling usage and\n  resolved LLM budget cap, matching the admin usage table.\n* ``archived_at`` \u2014 ISO-8601 UTC string; ``None`` for live rows.\n* ``created_at`` \u2014 ISO-8601 UTC string for the row's creation.",
         "properties": {
@@ -29976,6 +30219,416 @@
           }
         }
       ]
+    },
+    "/w/{slug}/api/v1/documents": {
+      "get": {
+        "operationId": "documents.list",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "asset_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Asset Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "property_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Property Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "kind",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "manual",
+                    "warranty",
+                    "invoice",
+                    "receipt",
+                    "photo",
+                    "certificate",
+                    "contract",
+                    "permit",
+                    "insurance",
+                    "other"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Kind"
+            }
+          },
+          {
+            "in": "query",
+            "name": "expires_before",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Expires Before"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceDocumentListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Permission denied or CSRF mismatch"
+          },
+          "404": {
+            "description": "Asset resource not found"
+          },
+          "409": {
+            "description": "Asset conflict"
+          },
+          "410": {
+            "description": "Archived asset"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List workspace documents",
+        "tags": [
+          "assets",
+          "assets"
+        ]
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "slug",
+          "required": true,
+          "schema": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          }
+        }
+      ]
+    },
+    "/w/{slug}/api/v1/documents/{document_id}": {
+      "get": {
+        "operationId": "documents.get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "document_id",
+            "required": true,
+            "schema": {
+              "title": "Document Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceDocumentResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Permission denied or CSRF mismatch"
+          },
+          "404": {
+            "description": "Asset resource not found"
+          },
+          "409": {
+            "description": "Asset conflict"
+          },
+          "410": {
+            "description": "Archived asset"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get one workspace document",
+        "tags": [
+          "assets",
+          "assets"
+        ]
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "slug",
+          "required": true,
+          "schema": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          }
+        }
+      ]
+    },
+    "/w/{slug}/api/v1/documents/{document_id}/extraction": {
+      "get": {
+        "operationId": "documents.extraction.get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "document_id",
+            "required": true,
+            "schema": {
+              "title": "Document Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentExtractionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Permission denied or CSRF mismatch"
+          },
+          "404": {
+            "description": "Asset resource not found"
+          },
+          "409": {
+            "description": "Asset conflict"
+          },
+          "410": {
+            "description": "Archived asset"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get document extraction status",
+        "tags": [
+          "assets",
+          "assets"
+        ]
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "slug",
+          "required": true,
+          "schema": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          }
+        }
+      ]
+    },
+    "/w/{slug}/api/v1/documents/{document_id}/extraction/pages/{page}": {
+      "get": {
+        "operationId": "documents.extraction.page",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "document_id",
+            "required": true,
+            "schema": {
+              "title": "Document Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "page",
+            "required": true,
+            "schema": {
+              "title": "Page",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentExtractionPageResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Permission denied or CSRF mismatch"
+          },
+          "404": {
+            "description": "Asset resource not found"
+          },
+          "409": {
+            "description": "Asset conflict"
+          },
+          "410": {
+            "description": "Archived asset"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get one document extraction page",
+        "tags": [
+          "assets",
+          "assets"
+        ]
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "slug",
+          "required": true,
+          "schema": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          }
+        }
+      ]
+    },
+    "/w/{slug}/api/v1/documents/{document_id}/extraction/retry": {
+      "parameters": [
+        {
+          "in": "path",
+          "name": "slug",
+          "required": true,
+          "schema": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          }
+        }
+      ],
+      "post": {
+        "operationId": "documents.extraction.retry",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "document_id",
+            "required": true,
+            "schema": {
+              "title": "Document Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Permission denied or CSRF mismatch"
+          },
+          "404": {
+            "description": "Asset resource not found"
+          },
+          "409": {
+            "description": "Asset conflict"
+          },
+          "410": {
+            "description": "Archived asset"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Retry document extraction",
+        "tags": [
+          "assets",
+          "assets"
+        ]
+      }
     },
     "/w/{slug}/api/v1/employees": {
       "get": {

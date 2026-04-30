@@ -114,6 +114,9 @@ export type EventKind =
   // Assets (§21).
   | "asset.changed"
   | "asset_action.performed"
+  | "asset_document.extracted"
+  | "asset_document.extraction_failed"
+  | "asset_document.extraction_retried"
   // Schedule rulesets + scheduler calendar (§06, §14 scheduler).
   | "schedule_ruleset.upserted"
   | "schedule_ruleset.deleted"
@@ -280,6 +283,15 @@ interface AssetActionPayload {
   action: AssetAction;
 }
 
+interface AssetPayload {
+  asset_id: string;
+}
+
+interface AssetDocumentPayload {
+  document_id: string;
+  asset_id?: string;
+}
+
 interface AgentMessagePayload {
   scope: AgentTurnScope;
   task_id?: string;
@@ -320,6 +332,26 @@ function invalidate(qc: QueryClient, queryKey: readonly unknown[]): void {
 function employeeLeavesFamilyKey(): readonly unknown[] {
   const [scope, slug] = qk.employees();
   return [scope, slug, "employee"] as const;
+}
+
+function documentExtractionPageFamilyKey(documentId: string): readonly unknown[] {
+  return qk.documentExtractionPages(documentId);
+}
+
+function kbDocumentFamilyKey(documentId: string): readonly unknown[] {
+  const [scope, slug] = qk.documents();
+  return [scope, slug, "kb", "doc", "document", documentId] as const;
+}
+
+function invalidateAssetDocument(event: SseEvent, qc: QueryClient): void {
+  const payload = event.data as unknown as AssetDocumentPayload;
+  invalidate(qc, qk.documents());
+  invalidate(qc, qk.documentExtraction(payload.document_id));
+  invalidate(qc, documentExtractionPageFamilyKey(payload.document_id));
+  invalidate(qc, kbDocumentFamilyKey(payload.document_id));
+  if (payload.asset_id) {
+    invalidate(qc, qk.asset(payload.asset_id));
+  }
 }
 
 export const INVALIDATIONS: Record<EventKind, InvalidationHandler> = {
@@ -693,10 +725,16 @@ export const INVALIDATIONS: Record<EventKind, InvalidationHandler> = {
   },
 
   "asset.changed": (event, qc) => {
-    const payload = event.data as unknown as AssetActionPayload;
+    const payload = event.data as unknown as AssetPayload;
     invalidate(qc, qk.asset(payload.asset_id));
     invalidate(qc, qk.assets());
   },
+
+  "asset_document.extracted": invalidateAssetDocument,
+
+  "asset_document.extraction_failed": invalidateAssetDocument,
+
+  "asset_document.extraction_retried": invalidateAssetDocument,
 
   "schedule_ruleset.upserted": (_event, qc) => {
     invalidate(qc, qk.scheduleRulesets());

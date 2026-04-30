@@ -171,6 +171,10 @@ export const qk = {
   runtimeInfo: () => ["runtime", "info"] as const,
   // §11 — Agent knowledge tools.
   documentExtraction: (did: string) => [...ws(), "document", did, "extraction"] as const,
+  documentExtractionPages: (did: string) =>
+    [...ws(), "document", did, "extraction", "pages"] as const,
+  documentExtractionPage: (did: string, page: number) =>
+    [...ws(), "document", did, "extraction", "pages", page] as const,
   kbSearch: (q: string) => [...ws(), "kb", "search", q] as const,
   kbDoc: (kind: "instruction" | "document", id: string, page: number = 1) =>
     [...ws(), "kb", "doc", kind, id, page] as const,

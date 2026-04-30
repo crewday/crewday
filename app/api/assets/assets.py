@@ -26,6 +26,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 from starlette.routing import NoMatchFound
 
+from app.adapters.db.assets.models import Asset as AssetRow
 from app.adapters.db.assets.models import AssetAction as AssetActionRow
 from app.adapters.db.places.models import Area, Property, PropertyWorkspace
 from app.adapters.qr import render_qr
@@ -84,6 +85,7 @@ from app.domain.assets.documents import (
     attach_document,
     delete_document,
     list_documents,
+    list_workspace_documents,
 )
 from app.domain.assets.types import AssetTypeNotFound, AssetTypeView, get_type
 from app.tenancy import WorkspaceContext, tenant_agnostic
@@ -96,6 +98,7 @@ __all__ = [
     "AssetUpdateRequest",
     "build_asset_scan_router",
     "build_assets_router",
+    "build_documents_router",
 ]
 
 
@@ -479,6 +482,53 @@ class AssetDocumentListResponse(BaseModel):
     data: list[AssetDocumentResponse]
 
 
+class WorkspaceDocumentResponse(BaseModel):
+    id: str
+    asset_id: str | None
+    property_id: str
+    kind: str
+    title: str
+    filename: str
+    size_kb: int
+    uploaded_at: datetime
+    expires_on: date | None
+    amount_cents: int | None
+    amount_currency: str | None
+    extraction_status: str
+    extracted_at: datetime | None
+
+
+class WorkspaceDocumentListResponse(BaseModel):
+    data: list[WorkspaceDocumentResponse]
+
+
+class DocumentExtractionResponse(BaseModel):
+    document_id: str
+    status: Literal[
+        "pending",
+        "extracting",
+        "succeeded",
+        "failed",
+        "unsupported",
+        "empty",
+    ]
+    extractor: str | None
+    body_preview: str
+    page_count: int
+    token_count: int
+    has_secret_marker: bool
+    last_error: str | None
+    extracted_at: datetime | None
+
+
+class DocumentExtractionPageResponse(BaseModel):
+    page: int
+    char_start: int
+    char_end: int
+    body: str
+    more_pages: bool
+
+
 class AssetDetailAssetResponse(BaseModel):
     id: str
     property_id: str
@@ -706,6 +756,63 @@ def _http_for_document_error(exc: Exception) -> HTTPException:
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         detail={"error": "internal"},
     )
+
+
+def _workspace_document_response(
+    view: AssetDocumentView,
+    *,
+    asset_property_ids: dict[str, str],
+) -> WorkspaceDocumentResponse:
+    property_id = view.property_id
+    if property_id is None and view.asset_id is not None:
+        property_id = asset_property_ids.get(view.asset_id)
+    if property_id is None:
+        raise AssetDocumentValidationError("property_id", "required")
+    return WorkspaceDocumentResponse(
+        id=view.id,
+        asset_id=view.asset_id,
+        property_id=property_id,
+        kind=view.kind,
+        title=view.title,
+        filename=view.filename or view.title,
+        size_kb=0,
+        uploaded_at=view.created_at,
+        expires_on=view.expires_on,
+        amount_cents=view.amount_cents,
+        amount_currency=view.amount_currency,
+        extraction_status="pending",
+        extracted_at=None,
+    )
+
+
+def _asset_property_ids(
+    session: Session,
+    ctx: WorkspaceContext,
+    views: list[AssetDocumentView],
+) -> dict[str, str]:
+    asset_ids = {view.asset_id for view in views if view.asset_id is not None}
+    if not asset_ids:
+        return {}
+    with tenant_agnostic():
+        rows = session.execute(
+            select(AssetRow.id, AssetRow.property_id).where(
+                AssetRow.workspace_id == ctx.workspace_id,
+                AssetRow.id.in_(asset_ids),
+            )
+        ).all()
+    return {asset_id: property_id for asset_id, property_id in rows}
+
+
+def _load_workspace_document(
+    session: Session,
+    ctx: WorkspaceContext,
+    document_id: str,
+) -> AssetDocumentView:
+    matches = list_workspace_documents(session, ctx)
+    for view in matches:
+        if view.id == document_id:
+            return view
+    raise AssetDocumentNotFound(document_id)
 
 
 _PROPERTY_COLOR_PALETTE: tuple[Literal["moss", "sky", "rust"], ...] = (
@@ -1192,6 +1299,166 @@ def build_asset_scan_router() -> APIRouter:
     )
     def scan(qr_token: str, ctx: _Ctx, session: _Db) -> AssetResponse:
         return _scan_asset(qr_token, ctx, session)
+
+    return api
+
+
+def build_documents_router() -> APIRouter:
+    api = APIRouter(tags=["assets"], responses=_ASSET_ERROR_RESPONSES)
+    manage_documents_gate = Depends(
+        Permission("assets.manage_documents", scope_kind="workspace")
+    )
+
+    @api.get(
+        "/documents",
+        response_model=WorkspaceDocumentListResponse,
+        operation_id="documents.list",
+        summary="List workspace documents",
+        dependencies=[manage_documents_gate],
+    )
+    def documents(
+        ctx: _Ctx,
+        session: _Db,
+        asset_id: str | None = Query(default=None),
+        property_id: str | None = Query(default=None),
+        kind: (
+            Literal[
+                "manual",
+                "warranty",
+                "invoice",
+                "receipt",
+                "photo",
+                "certificate",
+                "contract",
+                "permit",
+                "insurance",
+                "other",
+            ]
+            | None
+        ) = Query(default=None),
+        expires_before: Annotated[date | None, Query()] = None,
+    ) -> WorkspaceDocumentListResponse:
+        try:
+            views = list_workspace_documents(
+                session,
+                ctx,
+                asset_id=asset_id,
+                category=kind,
+                expires_before=expires_before,
+            )
+            asset_property_ids = _asset_property_ids(session, ctx, views)
+            rows = [
+                _workspace_document_response(
+                    view,
+                    asset_property_ids=asset_property_ids,
+                )
+                for view in views
+            ]
+        except AssetDocumentValidationError as exc:
+            raise _http_for_document_error(exc) from exc
+        if property_id is not None:
+            rows = [row for row in rows if row.property_id == property_id]
+        return WorkspaceDocumentListResponse(data=rows)
+
+    @api.get(
+        "/documents/{document_id}",
+        response_model=WorkspaceDocumentResponse,
+        operation_id="documents.get",
+        summary="Get one workspace document",
+        dependencies=[manage_documents_gate],
+    )
+    def document(
+        document_id: str,
+        ctx: _Ctx,
+        session: _Db,
+    ) -> WorkspaceDocumentResponse:
+        try:
+            view = _load_workspace_document(session, ctx, document_id)
+            return _workspace_document_response(
+                view,
+                asset_property_ids=_asset_property_ids(session, ctx, [view]),
+            )
+        except (AssetDocumentNotFound, AssetDocumentValidationError) as exc:
+            raise _http_for_document_error(exc) from exc
+
+    @api.get(
+        "/documents/{document_id}/extraction",
+        response_model=DocumentExtractionResponse,
+        operation_id="documents.extraction.get",
+        summary="Get document extraction status",
+        dependencies=[manage_documents_gate],
+    )
+    def extraction(
+        document_id: str,
+        ctx: _Ctx,
+        session: _Db,
+    ) -> DocumentExtractionResponse:
+        try:
+            _load_workspace_document(session, ctx, document_id)
+        except AssetDocumentNotFound as exc:
+            raise _http_for_document_error(exc) from exc
+        # Temporary cd-mo9e boundary: the file_extraction table and worker do
+        # not exist yet, so expose conservative pending metadata only.
+        return DocumentExtractionResponse(
+            document_id=document_id,
+            status="pending",
+            extractor=None,
+            body_preview="",
+            page_count=0,
+            token_count=0,
+            has_secret_marker=False,
+            last_error=None,
+            extracted_at=None,
+        )
+
+    @api.get(
+        "/documents/{document_id}/extraction/pages/{page}",
+        response_model=DocumentExtractionPageResponse,
+        operation_id="documents.extraction.page",
+        summary="Get one document extraction page",
+        dependencies=[manage_documents_gate],
+    )
+    def extraction_page(
+        document_id: str,
+        page: int,
+        ctx: _Ctx,
+        session: _Db,
+    ) -> DocumentExtractionPageResponse:
+        if page < 1:
+            raise HTTPException(
+                status_code=422,
+                detail={"error": "invalid", "field": "page"},
+            )
+        try:
+            _load_workspace_document(session, ctx, document_id)
+        except AssetDocumentNotFound as exc:
+            raise _http_for_document_error(exc) from exc
+        # Temporary cd-mo9e boundary: no extracted page bodies are persisted yet.
+        return DocumentExtractionPageResponse(
+            page=page,
+            char_start=0,
+            char_end=0,
+            body="",
+            more_pages=False,
+        )
+
+    @api.post(
+        "/documents/{document_id}/extraction/retry",
+        status_code=status.HTTP_202_ACCEPTED,
+        operation_id="documents.extraction.retry",
+        summary="Retry document extraction",
+        dependencies=[manage_documents_gate],
+    )
+    def retry_extraction(
+        document_id: str,
+        ctx: _Ctx,
+        session: _Db,
+    ) -> Response:
+        try:
+            _load_workspace_document(session, ctx, document_id)
+        except AssetDocumentNotFound as exc:
+            raise _http_for_document_error(exc) from exc
+        return Response(status_code=status.HTTP_202_ACCEPTED)
 
     return api
 

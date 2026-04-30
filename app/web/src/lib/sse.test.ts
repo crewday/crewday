@@ -115,6 +115,9 @@ describe("INVALIDATIONS — coverage", () => {
     "payslip.computed",
     "asset.changed",
     "asset_action.performed",
+    "asset_document.extracted",
+    "asset_document.extraction_failed",
+    "asset_document.extraction_retried",
     "schedule_ruleset.upserted",
     "schedule_ruleset.deleted",
     "booking.created",
@@ -780,6 +783,34 @@ describe("INVALIDATIONS — per-kind behaviour", () => {
     expect(called).toEqual(
       expect.arrayContaining([qk.asset("a1"), qk.assets()]),
     );
+  });
+
+  it("asset_document extraction events invalidate documents, extraction metadata, pages, kb doc, and asset detail", () => {
+    for (const kind of [
+      "asset_document.extracted",
+      "asset_document.extraction_failed",
+      "asset_document.extraction_retried",
+    ] as const) {
+      const qc = makeClient();
+      const spy = vi.spyOn(qc, "invalidateQueries");
+      INVALIDATIONS[kind](
+        makeEvent(kind, {
+          document_id: "doc_1",
+          asset_id: "asset_1",
+        }),
+        qc,
+      );
+      const called = spy.mock.calls.map((c) => c[0]?.queryKey);
+      expect(called).toEqual(
+        expect.arrayContaining([
+          qk.documents(),
+          qk.documentExtraction("doc_1"),
+          qk.documentExtractionPages("doc_1"),
+          ["w", "acme", "kb", "doc", "document", "doc_1"],
+          qk.asset("asset_1"),
+        ]),
+      );
+    }
   });
 
   it("schedule_ruleset.{upserted,deleted} invalidates rulesets + calendar", () => {

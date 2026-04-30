@@ -32,6 +32,7 @@ __all__ = [
     "attach_document",
     "delete_document",
     "list_documents",
+    "list_workspace_documents",
 ]
 
 
@@ -184,6 +185,37 @@ def list_documents(
     )
     if category is not None:
         stmt = stmt.where(AssetDocument.kind == _validate_category(category))
+    stmt = stmt.order_by(AssetDocument.created_at.desc(), AssetDocument.id.desc())
+    with tenant_agnostic():
+        rows = session.scalars(stmt).all()
+    return [_row_to_view(row) for row in rows]
+
+
+def list_workspace_documents(
+    session: Session,
+    ctx: WorkspaceContext,
+    *,
+    asset_id: str | None = None,
+    property_id: str | None = None,
+    category: str | None = None,
+    expires_before: date | None = None,
+) -> list[AssetDocumentView]:
+    """List active documents attached anywhere in the workspace."""
+    stmt = select(AssetDocument).where(
+        AssetDocument.workspace_id == ctx.workspace_id,
+        AssetDocument.deleted_at.is_(None),
+    )
+    if asset_id is not None:
+        stmt = stmt.where(AssetDocument.asset_id == asset_id)
+    if property_id is not None:
+        stmt = stmt.where(AssetDocument.property_id == property_id)
+    if category is not None:
+        stmt = stmt.where(AssetDocument.kind == _validate_category(category))
+    if expires_before is not None:
+        stmt = stmt.where(
+            AssetDocument.expires_on.is_not(None),
+            AssetDocument.expires_on <= expires_before,
+        )
     stmt = stmt.order_by(AssetDocument.created_at.desc(), AssetDocument.id.desc())
     with tenant_agnostic():
         rows = session.scalars(stmt).all()

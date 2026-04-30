@@ -20,6 +20,7 @@ from app.api.deps import (
     get_mime_sniffer,
     get_storage,
 )
+from app.api.v1.assets import documents_router
 from app.api.v1.assets import router as assets_router
 from app.domain.assets.assets import create_asset
 from app.tenancy.context import ActorGrantRole, WorkspaceContext
@@ -67,6 +68,7 @@ def _client(
 ) -> TestClient:
     app = FastAPI()
     app.include_router(assets_router, prefix="/assets")
+    app.include_router(documents_router)
 
     def override_ctx() -> WorkspaceContext:
         return ctx
@@ -169,6 +171,67 @@ def test_document_upload_stores_sniffed_blob_and_lists_document(
     assert [row["id"] for row in listed.json()["data"]] == [body["id"]]
 
 
+def test_workspace_documents_list_and_extraction_routes(
+    db_session: Session,
+) -> None:
+    ctx, property_id, _owner_id, _slug = _seed_workspace(db_session)
+    asset = create_asset(
+        db_session,
+        ctx,
+        property_id=property_id,
+        label="Document library pump",
+        token_factory=lambda: "D0CMNT000005",
+        clock=FrozenClock(_NOW),
+    )
+    storage = InMemoryStorage()
+    client = _client(db_session, ctx, storage=storage, sniffed_type="application/pdf")
+    created = client.post(
+        f"/assets/{asset.id}/documents",
+        data={"category": "manual", "title": "Pump manual"},
+        files={"file": ("pump.pdf", b"%PDF pump", "application/pdf")},
+    )
+    assert created.status_code == 201
+    document_id = created.json()["id"]
+
+    listed = client.get("/documents")
+    filtered = client.get(f"/documents?property_id={property_id}&kind=manual")
+    extraction = client.get(f"/documents/{document_id}/extraction")
+    page = client.get(f"/documents/{document_id}/extraction/pages/1")
+    retry = client.post(f"/documents/{document_id}/extraction/retry")
+
+    assert listed.status_code == 200
+    row = listed.json()["data"][0]
+    assert row["id"] == document_id
+    assert row["asset_id"] == asset.id
+    assert row["property_id"] == property_id
+    assert row["filename"] == "pump.pdf"
+    assert row["uploaded_at"] == created.json()["created_at"]
+    assert row["extraction_status"] == "pending"
+    assert filtered.status_code == 200
+    assert [r["id"] for r in filtered.json()["data"]] == [document_id]
+    assert extraction.status_code == 200
+    assert extraction.json() == {
+        "document_id": document_id,
+        "status": "pending",
+        "extractor": None,
+        "body_preview": "",
+        "page_count": 0,
+        "token_count": 0,
+        "has_secret_marker": False,
+        "last_error": None,
+        "extracted_at": None,
+    }
+    assert page.status_code == 200
+    assert page.json() == {
+        "page": 1,
+        "char_start": 0,
+        "char_end": 0,
+        "body": "",
+        "more_pages": False,
+    }
+    assert retry.status_code == 202
+
+
 def test_document_upload_rejects_oversized_body(
     db_session: Session,
     monkeypatch: pytest.MonkeyPatch,
@@ -269,8 +332,29 @@ def test_worker_cannot_delete_document(db_session: Session) -> None:
         role="worker",
     )
     worker_client = _client(db_session, worker_ctx, storage=storage)
+    document_id = created.json()["id"]
 
-    denied = worker_client.delete(f"/assets/documents/{created.json()['id']}")
+    denied = worker_client.delete(f"/assets/documents/{document_id}")
 
     assert denied.status_code == 403
     assert denied.json()["detail"]["action_key"] == "assets.manage_documents"
+
+    list_denied = worker_client.get("/documents")
+    get_denied = worker_client.get(f"/documents/{document_id}")
+    extraction_denied = worker_client.get(f"/documents/{document_id}/extraction")
+    page_denied = worker_client.get(f"/documents/{document_id}/extraction/pages/1")
+    retry_denied = worker_client.post(f"/documents/{document_id}/extraction/retry")
+
+    assert list_denied.status_code == 403
+    assert list_denied.json()["detail"]["action_key"] == "assets.manage_documents"
+    assert get_denied.status_code == 403
+    assert get_denied.json()["detail"]["action_key"] == "assets.manage_documents"
+    assert extraction_denied.status_code == 403
+    assert (
+        extraction_denied.json()["detail"]["action_key"]
+        == "assets.manage_documents"
+    )
+    assert page_denied.status_code == 403
+    assert page_denied.json()["detail"]["action_key"] == "assets.manage_documents"
+    assert retry_denied.status_code == 403
+    assert retry_denied.json()["detail"]["action_key"] == "assets.manage_documents"
