@@ -133,6 +133,7 @@ from app.api.v1.role_grants import (
     build_users_role_grants_router,
 )
 from app.api.v1.runtime import router as runtime_router
+from app.api.v1.scheduler import build_scheduler_router
 from app.api.v1.settings import build_settings_router
 from app.api.v1.user_availability_overrides import (
     build_user_availability_overrides_router,
@@ -707,6 +708,7 @@ def _mount_auth_routers(
     # ``extra="forbid"``), so a worker cannot use these surfaces to
     # author requests for another user.
     app.include_router(build_me_schedule_router(), prefix=scoped_prefix)
+    app.include_router(build_scheduler_router(), prefix=scoped_prefix)
     app.include_router(build_dashboard_router(), prefix=scoped_prefix)
     # Workspace-scoped employees roster (cd-g6nf, cd-jtgo) — flat
     # ``Employee[]`` projection consumed by the SPA's manager pages.
