@@ -643,7 +643,7 @@ def run_turn(
             correlation_id=correlation_id,
             started_at=started_at,
             ended_at=eff_clock.now(),
-            error_code="budget_exceeded",
+            error_code=exc.error_code,
             error_message=exc.message_text,
         )
 

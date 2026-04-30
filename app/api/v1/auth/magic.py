@@ -94,7 +94,8 @@ class MagicRequestBody(BaseModel):
         ...,
         description=(
             "One of 'signup_verify', 'recover_passkey', "
-            "'email_change_confirm', 'email_change_revert', 'grant_invite'."
+            "'email_change_confirm', 'email_change_revert', 'grant_invite', "
+            "'workspace_verify_ownership'."
         ),
     )
 

@@ -544,6 +544,9 @@ class SignupAttempt(Base):
     link nonces carry) so abuse-tracking joins stay PII-free. The
     plaintext email is never logged, never audited — only the hash
     flows into audit diffs. ``ip_hash`` mirrors the magic-link shape.
+    ``signup_ip`` is retained only long enough to copy the
+    signup-start source address onto the workspace row for the per-IP
+    LLM spend cap; audit rows still carry hashes only.
 
     **Tenant-agnostic.** No ``workspace_id`` column — the whole point
     of this row is to precede the workspace's existence. The domain
@@ -569,6 +572,7 @@ class SignupAttempt(Base):
     desired_slug: Mapped[str] = mapped_column(String, nullable=False)
     # SHA-256 of ``ip + hkdf_subkey``; 64 hex chars.
     ip_hash: Mapped[str] = mapped_column(String, nullable=False)
+    signup_ip: Mapped[str | None] = mapped_column(String, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
     )

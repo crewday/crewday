@@ -15,7 +15,8 @@ Token format (§03 "Magic link format"):
 ```
 {
   "purpose": "signup_verify | recover_passkey | email_change_confirm |
-              email_change_revert | grant_invite",
+              email_change_revert | grant_invite |
+              workspace_verify_ownership",
   "subject_id": "<ULID>",
   "jti":        "<ULID>",
   "exp":        <unix_timestamp>,
@@ -196,6 +197,7 @@ MagicLinkPurpose = Literal[
     "email_change_confirm",
     "email_change_revert",
     "grant_invite",
+    "workspace_verify_ownership",
 ]
 
 
@@ -206,6 +208,7 @@ _VALID_PURPOSES: Final[frozenset[str]] = frozenset(
         "email_change_confirm",
         "email_change_revert",
         "grant_invite",
+        "workspace_verify_ownership",
     }
 )
 
@@ -224,6 +227,7 @@ _TTL_BY_PURPOSE: Final[dict[str, timedelta]] = {
     "email_change_confirm": timedelta(minutes=15),
     "email_change_revert": timedelta(hours=72),
     "grant_invite": timedelta(hours=24),
+    "workspace_verify_ownership": timedelta(minutes=15),
 }
 
 # itsdangerous salt. Changing the value invalidates every link in
@@ -662,6 +666,8 @@ def _resolve_subject_id(
     hand a pre-resolved ``subject_id`` to :func:`request_link` so this
     branch is bypassed entirely.
     """
+    if purpose == "workspace_verify_ownership":
+        return None
     if purpose in ("signup_verify", "grant_invite"):
         # Fresh subject id; the downstream flow owns the row creation.
         return new_ulid()

@@ -84,6 +84,7 @@ import logging
 import threading
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from ipaddress import IPv4Address, ip_address, ip_network
 from typing import Any, Final, Literal
 
 from sqlalchemy import func, select, update
@@ -92,8 +93,10 @@ from sqlalchemy.orm import Session
 
 from app.adapters.db.llm.models import BudgetLedger
 from app.adapters.db.llm.models import LlmUsage as LlmUsageRow
+from app.adapters.db.workspace.models import Workspace
 from app.config import get_settings
 from app.demo.guardrails import DEMO_BUDGET_EXCEEDED_MESSAGE
+from app.domain.plans import FREE_TIER_DEFAULTS
 from app.tenancy import WorkspaceContext
 from app.tenancy.current import tenant_agnostic
 from app.util.clock import Clock, SystemClock
@@ -110,6 +113,7 @@ __all__ = [
     "default_pricing_table",
     "estimate_cost_cents",
     "new_ledger_row",
+    "normalize_signup_ip_key",
     "record_usage",
     "refresh_aggregate",
     "reset_unknown_model_dedup_for_tests",
@@ -156,6 +160,14 @@ WINDOW_DAYS: Final[int] = 30
 # ``window`` field ("30d_rolling").
 WINDOW_LABEL: Final[str] = "30d_rolling"
 
+IP_BUDGET_EXCEEDED_MESSAGE: Final[str] = (
+    "This IP address has exceeded its unverified-workspace spend limit. "
+    "Verify one of your workspaces (the owner email address on file) to continue."
+)
+
+_IP_BUDGET_POOL_STATES: Final[tuple[str, str]] = ("unverified", "email_verified")
+_IP_BUDGET_MULTIPLIER: Final[int] = 3
+
 
 # Enum body mirrors :data:`app.adapters.db.llm.models._LLM_USAGE_STATUS_VALUES`.
 # Kept narrow on the domain side so callers can't slip an unknown
@@ -193,12 +205,11 @@ def default_pricing_table() -> PricingTable:
 class BudgetExceeded(Exception):
     """Raised by :func:`check_budget` when the envelope would overshoot.
 
-    The shape mirrors the §11 JSON refusal envelope (``error``,
+    The default shape mirrors the §11 JSON refusal envelope (``error``,
     ``capability``, ``window``, ``message``) so the API layer can
     serialise the exception verbatim without a projection step. The
-    FastAPI exception handler (cd-6bcl / future ``app/api/errors.py``
-    entry) surfaces this as HTTP 402 ``budget_exceeded`` by calling
-    :meth:`to_dict`.
+    per-IP aggregate cap uses the same exception class but returns the
+    §15 ``payment_required`` envelope with an explicit ``error_code``.
 
     Convention parallels :class:`~app.domain.llm.router.
     CapabilityUnassignedError` (bare :class:`Exception` subclass with
@@ -209,13 +220,20 @@ class BudgetExceeded(Exception):
     refusals, :meth:`to_dict` maps directly into the ``extra`` slot.
     """
 
-    __slots__ = ("capability", "message_text", "window", "workspace_id")
+    __slots__ = (
+        "capability",
+        "error_code",
+        "message_text",
+        "window",
+        "workspace_id",
+    )
 
     def __init__(
         self,
         *,
         capability: str,
         workspace_id: str,
+        error_code: str = "budget_exceeded",
         message: str = (
             "Workspace agent budget exceeded. Agents will resume as "
             "older calls age out."
@@ -223,6 +241,7 @@ class BudgetExceeded(Exception):
     ) -> None:
         super().__init__(message)
         self.capability = capability
+        self.error_code = error_code
         self.workspace_id = workspace_id
         self.window = WINDOW_LABEL
         self.message_text = message
@@ -230,7 +249,9 @@ class BudgetExceeded(Exception):
     def to_dict(self) -> dict[str, Any]:
         """Return the §11 JSON refusal envelope as a plain dict.
 
-        Keys: ``error`` (constant ``"budget_exceeded"``),
+        Keys: ``error`` (``"budget_exceeded"`` for the regular
+        workspace envelope, ``"payment_required"`` for a §15 per-IP
+        refusal),
         ``capability``, ``window``, ``message``. The API seam wraps
         this in a 402 ``PaymentRequired`` response body verbatim; the
         CLI prints ``message`` as the user-facing line.
@@ -240,12 +261,17 @@ class BudgetExceeded(Exception):
         surfacing the ULID over the wire leaks a tenant identifier
         with no downstream value (§15 "Privacy").
         """
-        return {
-            "error": "budget_exceeded",
+        body: dict[str, Any] = {
+            "error": "budget_exceeded"
+            if self.error_code == "budget_exceeded"
+            else "payment_required",
             "capability": self.capability,
             "window": self.window,
             "message": self.message_text,
         }
+        if self.error_code != "budget_exceeded":
+            body["error_code"] = self.error_code
+        return body
 
 
 @dataclass(frozen=True, slots=True)
@@ -558,6 +584,31 @@ def _window_bounds(now: datetime) -> tuple[datetime, datetime]:
     return period_start, period_end
 
 
+def normalize_signup_ip_key(ip: str | None) -> str | None:
+    """Return the per-IP aggregation key for a signup source address.
+
+    IPv4 keys are the canonical address string. IPv6 keys collapse to
+    the containing /64 prefix because residential IPv6 clients often
+    rotate interface identifiers while staying on the same household
+    prefix. Blank or unparseable inputs return ``None`` so test/dev
+    paths that cannot resolve a client IP do not join the aggregate
+    pool accidentally.
+    """
+    if ip is None:
+        return None
+    stripped = ip.strip()
+    if not stripped:
+        return None
+    try:
+        parsed = ip_address(stripped)
+    except ValueError:
+        return None
+    if isinstance(parsed, IPv4Address):
+        return str(parsed)
+    network = ip_network(f"{parsed}/64", strict=False)
+    return f"{network.network_address}/64"
+
+
 def _sum_usage_cents(
     session: Session,
     *,
@@ -687,6 +738,13 @@ def check_budget(
             clock=c,
             cap_usd=settings.demo_global_daily_usd_cap,
         )
+    _check_per_ip_aggregate_cap(
+        session,
+        ctx,
+        capability=capability,
+        projected_cost_cents=projected_cost_cents,
+        clock=c,
+    )
     ledger = _load_ledger_row(session, workspace_id=ctx.workspace_id)
     if ledger is None:
         # Fail closed — the missing ledger row is a seeding bug, not
@@ -742,6 +800,66 @@ def check_budget(
                 "older calls age out."
             ),
         )
+
+
+def _check_per_ip_aggregate_cap(
+    session: Session,
+    ctx: WorkspaceContext,
+    *,
+    capability: str,
+    projected_cost_cents: int,
+    clock: Clock,
+) -> None:
+    """Refuse unverified workspaces once their signup-IP pool is over cap."""
+    now = clock.now()
+    window_start = now - timedelta(days=WINDOW_DAYS)
+    cap_cents = _IP_BUDGET_MULTIPLIER * FREE_TIER_DEFAULTS["llm_budget_cents_30d"]
+
+    with tenant_agnostic():
+        workspace = session.get(Workspace, ctx.workspace_id)
+        if workspace is None:
+            return
+        if workspace.signup_ip_key is None:
+            return
+        if workspace.verification_state not in _IP_BUDGET_POOL_STATES:
+            return
+
+        workspace_ids = session.scalars(
+            select(Workspace.id).where(
+                Workspace.signup_ip_key == workspace.signup_ip_key,
+                Workspace.verification_state.in_(_IP_BUDGET_POOL_STATES),
+            )
+        ).all()
+        if not workspace_ids:
+            return
+
+        spent = int(
+            session.execute(
+                select(func.coalesce(func.sum(LlmUsageRow.cost_cents), 0)).where(
+                    LlmUsageRow.workspace_id.in_(workspace_ids),
+                    LlmUsageRow.created_at >= window_start,
+                    LlmUsageRow.status != "refused",
+                )
+            ).scalar_one()
+        )
+
+    if spent + projected_cost_cents <= cap_cents:
+        return
+
+    _log_refusal(
+        workspace_id=ctx.workspace_id,
+        capability=capability,
+        spent_cents=spent,
+        cap_cents=cap_cents,
+        projected_cost_cents=projected_cost_cents,
+        clock=clock,
+    )
+    raise BudgetExceeded(
+        capability=capability,
+        workspace_id=ctx.workspace_id,
+        error_code="ip_budget_exceeded",
+        message=IP_BUDGET_EXCEEDED_MESSAGE,
+    )
 
 
 def _check_demo_global_daily_cap(

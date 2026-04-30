@@ -11,8 +11,9 @@ enough columns to unblock downstream DB + auth work:
 
 The richer ``workspaces`` surface from §02 lands incrementally:
 ``verification_state`` / ``archived_at`` are typed columns as of
-cd-s8kk, owner-facing defaults landed with cd-n6p, and the remaining
-provisioning metadata (``signup_ip``, ``created_via``,
+cd-s8kk, ``signup_ip`` / ``signup_ip_key`` land with cd-1i7s for the
+per-IP aggregate LLM spend cap, owner-facing defaults landed with
+cd-n6p, and the remaining provisioning metadata (``created_via``,
 ``created_by_user_id``) is deferred to follow-up migrations without
 breaking the v1 public surface. The ``settings_json`` column already
 lands here (cd-jdhm) so the recovery kill-switch has a canonical
@@ -207,6 +208,8 @@ class Workspace(Base):
         default="unverified",
         server_default="unverified",
     )
+    signup_ip: Mapped[str | None] = mapped_column(String, nullable=True)
+    signup_ip_key: Mapped[str | None] = mapped_column(String, nullable=True)
     archived_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
@@ -230,6 +233,11 @@ class Workspace(Base):
             name="default_currency_shape",
         ),
         Index("ix_workspace_verification_state", "verification_state"),
+        Index(
+            "ix_workspace_signup_ip_key_verification_state",
+            "signup_ip_key",
+            "verification_state",
+        ),
         Index("ix_workspace_archived_at", "archived_at"),
     )
 

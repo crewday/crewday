@@ -77,7 +77,7 @@ from app.auth.keys import derive_subkey
 from app.auth.magic_link import PendingDispatch
 from app.capabilities import Capabilities
 from app.config import Settings, get_settings
-from app.domain.llm.budget import new_ledger_row
+from app.domain.llm.budget import new_ledger_row, normalize_signup_ip_key
 from app.domain.plans import (
     FREE_TIER_DEFAULTS,
     seed_free_tier_10pct,
@@ -697,6 +697,7 @@ def start_signup(
         # but a legitimate user hopping networks mid-retry shouldn't
         # be penalised for it.
         existing_attempt.ip_hash = ip_hash
+        existing_attempt.signup_ip = ip
         # justification: signup_attempt is identity-scoped.
         with tenant_agnostic():
             session.flush()
@@ -717,6 +718,7 @@ def start_signup(
                     email_hash=email_hash,
                     desired_slug=desired_slug,
                     ip_hash=ip_hash,
+                    signup_ip=ip,
                     created_at=resolved_now,
                     expires_at=expires_at,
                     verified_at=None,
@@ -879,6 +881,7 @@ def provision_workspace_and_owner_seat(
     now: datetime,
     clock: Clock | None = None,
     workspace_name: str | None = None,
+    signup_ip: str | None = None,
     capabilities: Capabilities | None = None,
 ) -> WorkspaceContext:
     """Create the workspace, first user, membership, four system groups.
@@ -974,6 +977,8 @@ def provision_workspace_and_owner_seat(
             plan="free",
             quota_json=seed_free_tier_10pct(),
             created_at=now,
+            signup_ip=signup_ip,
+            signup_ip_key=normalize_signup_ip_key(signup_ip),
         )
         session.add(workspace)
         session.flush()
@@ -1150,6 +1155,7 @@ def complete_signup(
         now=resolved_now,
         clock=clock,
         capabilities=capabilities,
+        signup_ip=attempt.signup_ip,
     )
 
     # Passkey finish — verifies the attestation, inserts the credential

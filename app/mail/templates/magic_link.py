@@ -52,6 +52,7 @@ _PURPOSE_LABELS: dict[str, str] = {
     "email_change_confirm": "confirm your new email address",
     "email_change_revert": "revert the recent email change on your account",
     "grant_invite": "accept the invite to join a workspace",
+    "workspace_verify_ownership": "verify ownership of your workspace",
 }
 
 

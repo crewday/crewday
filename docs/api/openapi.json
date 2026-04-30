@@ -20441,6 +20441,46 @@
         "title": "VerifyBody",
         "type": "object"
       },
+      "VerifyOwnershipConsumeBody": {
+        "additionalProperties": false,
+        "properties": {
+          "token": {
+            "title": "Token",
+            "type": "string"
+          }
+        },
+        "required": [
+          "token"
+        ],
+        "title": "VerifyOwnershipConsumeBody",
+        "type": "object"
+      },
+      "VerifyOwnershipConsumeResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "verification_state": {
+            "title": "Verification State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "verification_state"
+        ],
+        "title": "VerifyOwnershipConsumeResponse",
+        "type": "object"
+      },
+      "VerifyOwnershipRequestResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "status": {
+            "default": "sent",
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "title": "VerifyOwnershipRequestResponse",
+        "type": "object"
+      },
       "VerifyResponse": {
         "description": "Response body carrying the signup-session id + desired slug.",
         "properties": {
@@ -56435,6 +56475,190 @@
           }
         }
       ]
+    },
+    "/w/{slug}/api/v1/settings/verify-ownership": {
+      "parameters": [
+        {
+          "in": "path",
+          "name": "slug",
+          "required": true,
+          "schema": {
+            "maxLength": 40,
+            "minLength": 3,
+            "pattern": "^[a-z][a-z0-9-]{1,38}[a-z0-9]$",
+            "type": "string"
+          }
+        }
+      ],
+      "post": {
+        "operationId": "settings.workspace.verify_ownership.request",
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VerifyOwnershipRequestResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "properties": {
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    },
+                    "retry_after_seconds": {
+                      "minimum": 1,
+                      "type": "integer"
+                    },
+                    "status": {
+                      "const": 429,
+                      "type": "integer"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "type": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "title",
+                    "status",
+                    "instance"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Rate limited",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until the caller should retry.",
+                "schema": {
+                  "minimum": 1,
+                  "type": "integer"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Mail workspace ownership verification link",
+        "tags": [
+          "settings"
+        ]
+      }
+    },
+    "/w/{slug}/api/v1/settings/verify-ownership/consume": {
+      "parameters": [
+        {
+          "in": "path",
+          "name": "slug",
+          "required": true,
+          "schema": {
+            "maxLength": 40,
+            "minLength": 3,
+            "pattern": "^[a-z][a-z0-9-]{1,38}[a-z0-9]$",
+            "type": "string"
+          }
+        }
+      ],
+      "post": {
+        "operationId": "settings.workspace.verify_ownership.consume",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VerifyOwnershipConsumeBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VerifyOwnershipConsumeResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "properties": {
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    },
+                    "retry_after_seconds": {
+                      "minimum": 1,
+                      "type": "integer"
+                    },
+                    "status": {
+                      "const": 429,
+                      "type": "integer"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "type": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "title",
+                    "status",
+                    "instance"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Rate limited",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until the caller should retry.",
+                "schema": {
+                  "minimum": 1,
+                  "type": "integer"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Consume workspace ownership verification link",
+        "tags": [
+          "settings"
+        ]
+      }
     },
     "/w/{slug}/api/v1/stays/guest-links/{link_id}": {
       "delete": {

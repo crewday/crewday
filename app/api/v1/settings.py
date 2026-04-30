@@ -19,18 +19,37 @@ can render one concrete workspace-default map.
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Literal, cast
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, ConfigDict, RootModel
 from sqlalchemy.orm import Session
 
+from app.adapters.db.session import make_uow
 from app.adapters.db.workspace.models import Workspace
+from app.adapters.mail.ports import Mailer
 from app.api.deps import current_workspace_context, db_session
 from app.audit import write_audit
+from app.auth._throttle import Throttle
+from app.auth.magic_link import (
+    AlreadyConsumed,
+    ConsumeLockout,
+    InvalidToken,
+    PurposeMismatch,
+    RateLimited,
+    TokenExpired,
+)
 from app.authz.dep import Permission
+from app.config import Settings
 from app.events.bus import bus as default_event_bus
 from app.events.types import WorkspaceChanged
+from app.services.workspace.ownership_verification import (
+    WorkspaceVerificationMismatch,
+    WorkspaceVerificationNotFound,
+    consume_ownership_verification,
+    request_ownership_verification,
+)
+from app.services.workspace.settings_service import OwnersOnlyError
 from app.tenancy import WorkspaceContext, tenant_agnostic
 from app.util.clock import SystemClock
 
@@ -84,6 +103,24 @@ class WorkspaceSettingsResponse(BaseModel):
     meta: WorkspaceSettingsMeta
     defaults: dict[str, Any]
     policy: WorkspaceSettingsPolicy
+
+
+class VerifyOwnershipRequestResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    status: str = "sent"
+
+
+class VerifyOwnershipConsumeBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    token: str
+
+
+class VerifyOwnershipConsumeResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    verification_state: str
 
 
 class WorkspaceSettingsPatch(RootModel[dict[str, Any]]):
@@ -474,6 +511,93 @@ def get_workspace_settings(ctx: _Ctx, session: _Db) -> WorkspaceSettingsResponse
     return _workspace_settings_response(_get_workspace(session, ctx))
 
 
+@router.post(
+    "/settings/verify-ownership",
+    response_model=VerifyOwnershipRequestResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+    operation_id="settings.workspace.verify_ownership.request",
+    summary="Mail workspace ownership verification link",
+    dependencies=[Depends(Permission("scope.edit_settings", scope_kind="workspace"))],
+)
+def post_verify_ownership_request(
+    ctx: _Ctx,
+    request: Request,
+) -> VerifyOwnershipRequestResponse:
+    mailer = _mailer(request)
+    throttle = _throttle(request)
+    settings = _settings(request)
+    if settings.public_url is None:
+        raise RuntimeError(
+            "settings.public_url is not set; cannot build ownership verification URL"
+        )
+    dispatch = None
+    try:
+        with make_uow() as session:
+            assert isinstance(session, Session)
+            dispatch = request_ownership_verification(
+                session,
+                ctx,
+                ip=_client_ip(request),
+                mailer=mailer,
+                base_url=settings.public_url,
+                throttle=throttle,
+                settings=settings,
+            )
+    except (
+        OwnersOnlyError,
+        WorkspaceVerificationNotFound,
+        RateLimited,
+        InvalidToken,
+    ) as exc:
+        raise _http_for_verify_ownership(exc) from exc
+    if dispatch is not None:
+        dispatch.deliver()
+    return VerifyOwnershipRequestResponse()
+
+
+@router.post(
+    "/settings/verify-ownership/consume",
+    response_model=VerifyOwnershipConsumeResponse,
+    operation_id="settings.workspace.verify_ownership.consume",
+    summary="Consume workspace ownership verification link",
+    dependencies=[Depends(Permission("scope.edit_settings", scope_kind="workspace"))],
+)
+def post_verify_ownership_consume(
+    body: VerifyOwnershipConsumeBody,
+    ctx: _Ctx,
+    request: Request,
+    session: _Db,
+) -> VerifyOwnershipConsumeResponse:
+    throttle = _throttle(request)
+    settings = _settings(request)
+    ip = _client_ip(request)
+    try:
+        verification_state = consume_ownership_verification(
+            session,
+            ctx,
+            token=body.token,
+            ip=ip,
+            throttle=throttle,
+            settings=settings,
+        )
+    except ConsumeLockout as exc:
+        raise _http_for_verify_ownership(exc) from exc
+    except (
+        OwnersOnlyError,
+        WorkspaceVerificationNotFound,
+        WorkspaceVerificationMismatch,
+        InvalidToken,
+        PurposeMismatch,
+        TokenExpired,
+        AlreadyConsumed,
+        RateLimited,
+    ) as exc:
+        throttle.record_consume_failure(ip=ip, now=SystemClock().now())
+        raise _http_for_verify_ownership(exc) from exc
+    throttle.record_consume_success(ip=ip)
+    return VerifyOwnershipConsumeResponse(verification_state=verification_state)
+
+
 @router.patch(
     "/settings",
     response_model=WorkspaceSettingsResponse,
@@ -539,6 +663,70 @@ def _get_workspace(session: Session, ctx: WorkspaceContext) -> Workspace:
     if ws is None:
         raise HTTPException(status_code=404, detail={"error": "workspace_not_found"})
     return ws
+
+
+def _client_ip(request: Request) -> str:
+    if request.client is None:
+        return ""
+    return request.client.host
+
+
+def _mailer(request: Request) -> Mailer:
+    mailer = getattr(request.app.state, "mailer", None)
+    if mailer is None or not callable(getattr(mailer, "send", None)):
+        raise RuntimeError("app mailer is not configured")
+    return cast(Mailer, mailer)
+
+
+def _throttle(request: Request) -> Throttle:
+    throttle = getattr(request.app.state, "throttle", None)
+    if not isinstance(throttle, Throttle):
+        raise RuntimeError("app throttle is not configured")
+    return throttle
+
+
+def _settings(request: Request) -> Settings:
+    settings = getattr(request.app.state, "settings", None)
+    if not isinstance(settings, Settings):
+        raise RuntimeError("app settings are not configured")
+    return settings
+
+
+def _http_for_verify_ownership(exc: Exception) -> HTTPException:
+    if isinstance(exc, OwnersOnlyError):
+        return HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"error": "owners_only"},
+        )
+    if isinstance(exc, WorkspaceVerificationNotFound):
+        return HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"error": "workspace_verification_not_found"},
+        )
+    if isinstance(exc, WorkspaceVerificationMismatch | PurposeMismatch | InvalidToken):
+        return HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"error": "workspace_verification_invalid"},
+        )
+    if isinstance(exc, TokenExpired):
+        return HTTPException(
+            status_code=status.HTTP_410_GONE,
+            detail={"error": "workspace_verification_expired"},
+        )
+    if isinstance(exc, AlreadyConsumed):
+        return HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"error": "workspace_verification_already_consumed"},
+        )
+    if isinstance(exc, RateLimited | ConsumeLockout):
+        return HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail={"error": "rate_limited"},
+        )
+    return HTTPException(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        detail={"error": "internal"},
+    )
 
 
 def _workspace_settings_response(ws: Workspace) -> WorkspaceSettingsResponse:
