@@ -19,7 +19,10 @@ Routes:
 
   * **Scoped** (default): ``{label, scopes, expires_at_days?}``.
     ``scopes`` is the flat ``{"action_key": true}`` shape §03 pins;
-    default TTL 90 days (§03 "Guardrails").
+    default TTL 90 days (§03 "Guardrails"). An empty dict is accepted
+    for compatibility with existing scoped-token callers, and unknown
+    scope keys are stored as supplied rather than catalog-validated at
+    this API layer.
   * **Delegated**: ``{label, delegate: true, expires_at_days?,
     scopes: {}}``. The session user's id populates
     ``delegate_for_user_id``; scopes MUST be empty (§03 "Delegated
@@ -54,7 +57,6 @@ Error shapes:
   request is refused at the seam.
 * 422 ``me_scope_conflict`` — scoped mint with a ``me:*`` key in
   ``scopes``.
-* 422 ``invalid_kind`` — body carried an unknown ``kind`` literal.
 
 Handlers are intentionally thin: validate the body, call the domain
 service inside the request's UoW, map typed errors onto HTTP
@@ -124,12 +126,10 @@ _MAX_TTL_DAYS = 365 * 10
 class MintTokenBody(BaseModel):
     """Request body for ``POST /auth/tokens``.
 
-    ``scopes`` is a flat ``{"action_key": true}`` mapping for v1 —
-    matches the :attr:`ApiToken.scope_json` column shape so the
-    router doesn't have to translate between "list of strings"
-    (§03 body example) and "dict" (schema). A later cd-c91 follow-up
-    may accept the list shape for symmetry with the spec's JSON
-    example; for now the dict form is the internal canonical.
+    ``scopes`` is a flat ``{"action_key": true}`` mapping for v1. It
+    matches the :attr:`ApiToken.scope_json` column shape, so the router
+    stores it as supplied: empty dicts are valid for scoped tokens and
+    unknown workspace scope keys are not catalog-validated here.
 
     ``delegate`` (§03 "Delegated tokens") — when ``true``, the row
     is minted as a delegated token acting for the session user

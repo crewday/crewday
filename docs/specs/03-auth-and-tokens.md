@@ -601,10 +601,13 @@ auth dep edge alongside the change_request / verify routes.
   value on the response for the client's reference.
 - `scopes` is a flat `{"<action_key>": true}` dict — the same shape
   the `api_token.scope_json` column stores, so the router holds no
-  list-to-dict coercion. The key is an action string from the scope
-  catalog below; the value is truthy (v1 uses `true`; reserved for a
-  future per-scope constraint payload). Delegated tokens send
-  `scopes: {}` — see "Delegated tokens" below.
+  list-to-dict coercion. The key should be an action string from the
+  scope catalog below, but v1 stores unknown keys as supplied and does
+  not validate them at the API layer. Scoped tokens may send
+  `scopes: {}`; v1 accepts and stores the empty dict, yielding a token
+  with no explicit action scopes. The value is truthy (v1 uses `true`;
+  reserved for a future per-scope constraint payload). Delegated tokens
+  send `scopes: {}` — see "Delegated tokens" below.
 - Response shows the **plaintext token once**; never again.
 - Token format: `mip_<key_id>_<secret>` where `key_id` is a public
   ULID and `secret` is 256 bits of base32. Only the argon2id hash of
