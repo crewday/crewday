@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import hashlib
 import io
-from dataclasses import asdict
-from datetime import date, datetime
+from dataclasses import asdict, dataclass
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from typing import Annotated, Any, Literal
 
@@ -22,9 +22,12 @@ from fastapi import (
     status,
 )
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 from starlette.routing import NoMatchFound
 
+from app.adapters.db.assets.models import AssetAction as AssetActionRow
+from app.adapters.db.places.models import Area, Property, PropertyWorkspace
 from app.adapters.qr import render_qr
 from app.adapters.storage.ports import MimeSniffer, Storage
 from app.api.deps import (
@@ -82,7 +85,8 @@ from app.domain.assets.documents import (
     delete_document,
     list_documents,
 )
-from app.tenancy import WorkspaceContext
+from app.domain.assets.types import AssetTypeNotFound, AssetTypeView, get_type
+from app.tenancy import WorkspaceContext, tenant_agnostic
 
 __all__ = [
     "AssetCreateRequest",
@@ -475,6 +479,159 @@ class AssetDocumentListResponse(BaseModel):
     data: list[AssetDocumentResponse]
 
 
+class AssetDetailAssetResponse(BaseModel):
+    id: str
+    property_id: str
+    asset_type_id: str | None
+    name: str
+    area: str | None
+    condition: str
+    status: str
+    make: str | None
+    model: str | None
+    serial_number: str | None
+    installed_on: date | None
+    purchased_on: date | None
+    purchase_price_cents: int | None
+    purchase_currency: str | None
+    purchase_vendor: str | None
+    warranty_expires_on: date | None
+    expected_lifespan_years: int | None
+    guest_visible: bool
+    guest_instructions: str | None
+    notes: str | None
+    qr_token: str
+
+    @classmethod
+    def from_view(
+        cls, view: AssetView, *, area_label: str | None
+    ) -> AssetDetailAssetResponse:
+        return cls(
+            id=view.id,
+            property_id=view.property_id,
+            asset_type_id=view.asset_type_id,
+            name=view.name,
+            area=area_label,
+            condition=view.condition,
+            status=view.status,
+            make=view.make,
+            model=view.model,
+            serial_number=view.serial_number,
+            installed_on=view.installed_on,
+            purchased_on=view.purchased_on,
+            purchase_price_cents=view.purchase_price_cents,
+            purchase_currency=view.purchase_currency,
+            purchase_vendor=view.purchase_vendor,
+            warranty_expires_on=view.warranty_expires_on,
+            expected_lifespan_years=view.expected_lifespan_years,
+            guest_visible=view.guest_visible,
+            guest_instructions=view.guest_instructions_md,
+            notes=view.notes_md,
+            qr_token=view.qr_token,
+        )
+
+
+class AssetDetailAssetTypeResponse(BaseModel):
+    id: str
+    key: str
+    name: str
+    category: str
+    icon_name: str | None
+    default_actions: list[dict[str, object]]
+    default_lifespan_years: int | None
+
+    @classmethod
+    def from_view(cls, view: AssetTypeView) -> AssetDetailAssetTypeResponse:
+        return cls(
+            id=view.id,
+            key=view.key,
+            name=view.name,
+            category=view.category,
+            icon_name=view.icon_name,
+            default_actions=view.default_actions,
+            default_lifespan_years=view.default_lifespan_years,
+        )
+
+
+class AssetDetailPropertyResponse(BaseModel):
+    id: str
+    name: str
+    city: str
+    timezone: str
+    color: Literal["moss", "sky", "rust"]
+    kind: Literal["str", "vacation", "residence", "mixed"]
+    areas: list[str]
+    evidence_policy: Literal["inherit", "require", "optional", "forbid"]
+    country: str
+    locale: str
+    settings_override: dict[str, object]
+    client_org_id: str | None
+    owner_user_id: str | None
+
+
+class AssetDetailActionResponse(BaseModel):
+    id: str
+    asset_id: str
+    key: str | None
+    kind: str
+    label: str
+    interval_days: int | None
+    last_performed_at: datetime | None
+    next_due_on: date | None
+    linked_task_id: str | None
+    linked_schedule_id: str | None
+    description: str | None
+    estimated_duration_minutes: int | None
+
+
+class AssetDetailDocumentResponse(BaseModel):
+    id: str
+    asset_id: str | None
+    property_id: str
+    kind: str
+    title: str
+    filename: str
+    size_kb: int
+    uploaded_at: datetime
+    expires_on: date | None
+    amount_cents: int | None
+    amount_currency: str | None
+    extraction_status: str
+    extracted_at: datetime | None
+
+    @classmethod
+    def from_view(
+        cls,
+        view: AssetDocumentView,
+        *,
+        property_id: str,
+    ) -> AssetDetailDocumentResponse:
+        return cls(
+            id=view.id,
+            asset_id=view.asset_id,
+            property_id=view.property_id or property_id,
+            kind=view.category,
+            title=view.title,
+            filename=view.filename or view.title,
+            size_kb=0,
+            uploaded_at=view.created_at,
+            expires_on=view.expires_on,
+            amount_cents=view.amount_cents,
+            amount_currency=view.amount_currency,
+            extraction_status="pending",
+            extracted_at=None,
+        )
+
+
+class AssetDetailResponse(BaseModel):
+    asset: AssetDetailAssetResponse
+    asset_type: AssetDetailAssetTypeResponse | None
+    property: AssetDetailPropertyResponse
+    actions: list[AssetDetailActionResponse]
+    documents: list[AssetDetailDocumentResponse]
+    linked_tasks: list[dict[str, object]]
+
+
 def _http_for_asset_error(exc: Exception) -> HTTPException:
     if isinstance(exc, AssetNotFound):
         return HTTPException(
@@ -548,6 +705,403 @@ def _http_for_document_error(exc: Exception) -> HTTPException:
     return HTTPException(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         detail={"error": "internal"},
+    )
+
+
+_PROPERTY_COLOR_PALETTE: tuple[Literal["moss", "sky", "rust"], ...] = (
+    "moss",
+    "sky",
+    "rust",
+)
+_DEFAULT_ACTION_PREFIX = "default__"
+
+
+@dataclass(frozen=True, slots=True)
+class _CompletionActionSpec:
+    kind: str
+    tracking_key: str | None
+    label: str | None
+
+
+def _asset_detail(
+    session: Session,
+    ctx: WorkspaceContext,
+    *,
+    asset_id: str,
+    include_archived: bool = False,
+) -> AssetDetailResponse:
+    asset = get_asset(
+        session,
+        ctx,
+        asset_id=asset_id,
+        include_archived=include_archived,
+    )
+    asset_type = _asset_type_for(session, ctx, asset)
+    documents = list_documents(session, ctx, asset_id=asset.id)
+    action_views = list_actions(session, ctx, asset.id)
+    return AssetDetailResponse(
+        asset=AssetDetailAssetResponse.from_view(
+            asset,
+            area_label=_area_label_for(session, asset.area_id),
+        ),
+        asset_type=(
+            AssetDetailAssetTypeResponse.from_view(asset_type)
+            if asset_type is not None
+            else None
+        ),
+        property=_asset_property_for(session, ctx, asset.property_id),
+        actions=_asset_detail_actions(asset, asset_type, action_views),
+        documents=[
+            AssetDetailDocumentResponse.from_view(
+                document,
+                property_id=asset.property_id,
+            )
+            for document in documents
+        ],
+        linked_tasks=[],
+    )
+
+
+def _asset_type_for(
+    session: Session,
+    ctx: WorkspaceContext,
+    asset: AssetView,
+) -> AssetTypeView | None:
+    if asset.asset_type_id is None:
+        return None
+    try:
+        return get_type(session, ctx, type_id=asset.asset_type_id)
+    except AssetTypeNotFound:
+        return None
+
+
+def _area_label_for(session: Session, area_id: str | None) -> str | None:
+    if area_id is None:
+        return None
+    with tenant_agnostic():
+        row = session.get(Area, area_id)
+    return row.label if row is not None else None
+
+
+def _asset_property_for(
+    session: Session,
+    ctx: WorkspaceContext,
+    property_id: str,
+) -> AssetDetailPropertyResponse:
+    stmt = (
+        select(Property)
+        .join(PropertyWorkspace, PropertyWorkspace.property_id == Property.id)
+        .where(
+            Property.id == property_id,
+            PropertyWorkspace.workspace_id == ctx.workspace_id,
+            Property.deleted_at.is_(None),
+        )
+    )
+    row = session.scalar(stmt)
+    if row is None:
+        raise AssetNotFound()
+    areas = _property_area_labels(session, property_id)
+    return AssetDetailPropertyResponse(
+        id=row.id,
+        name=row.name if row.name is not None else row.address,
+        city=_city_for(row.address_json),
+        timezone=row.timezone,
+        color=_property_color_for(row.id),
+        kind=_property_kind(row.kind),
+        areas=areas,
+        evidence_policy="inherit",
+        country=row.country if row.country else "XX",
+        locale=row.locale if row.locale is not None else "",
+        settings_override={},
+        client_org_id=None,
+        owner_user_id=None,
+    )
+
+
+def _property_area_labels(session: Session, property_id: str) -> list[str]:
+    stmt = (
+        select(Area.label)
+        .where(Area.property_id == property_id)
+        .order_by(Area.ordering.asc(), Area.label.asc())
+    )
+    return list(session.scalars(stmt).all())
+
+
+def _city_for(address_json: dict[str, Any] | None) -> str:
+    if not address_json:
+        return ""
+    raw = address_json.get("city")
+    return raw if isinstance(raw, str) else ""
+
+
+def _property_color_for(property_id: str) -> Literal["moss", "sky", "rust"]:
+    digest = hashlib.sha256(property_id.encode("utf-8")).digest()
+    return _PROPERTY_COLOR_PALETTE[digest[0] % len(_PROPERTY_COLOR_PALETTE)]
+
+
+def _property_kind(value: str) -> Literal["str", "vacation", "residence", "mixed"]:
+    if value == "str":
+        return "str"
+    if value == "vacation":
+        return "vacation"
+    if value == "residence":
+        return "residence"
+    if value == "mixed":
+        return "mixed"
+    raise ValueError(f"unknown property kind {value!r}")
+
+
+def _asset_detail_actions(
+    asset: AssetView,
+    asset_type: AssetTypeView | None,
+    action_views: list[AssetActionView],
+) -> list[AssetDetailActionResponse]:
+    if asset_type is None:
+        return [_detail_action_from_view(asset, action) for action in action_views]
+    default_keys = _default_action_tracking_keys(asset_type)
+    actions = [
+        _detail_action_from_view(asset, action)
+        for action in action_views
+        if action.key not in default_keys
+    ]
+    return _default_detail_actions(asset, asset_type, action_views) + actions
+
+
+def _detail_action_from_view(
+    asset: AssetView,
+    action: AssetActionView,
+) -> AssetDetailActionResponse:
+    return AssetDetailActionResponse(
+        id=action.id,
+        asset_id=action.asset_id,
+        key=action.key,
+        kind=action.kind,
+        label=action.label,
+        interval_days=action.interval_days,
+        last_performed_at=action.last_performed_at,
+        next_due_on=_next_due_date(
+            asset,
+            action.last_performed_at,
+            action.interval_days,
+        ),
+        linked_task_id=None,
+        linked_schedule_id=None,
+        description=action.description_md,
+        estimated_duration_minutes=None,
+    )
+
+
+def _default_detail_actions(
+    asset: AssetView,
+    asset_type: AssetTypeView,
+    action_views: list[AssetActionView],
+) -> list[AssetDetailActionResponse]:
+    actions: list[AssetDetailActionResponse] = []
+    for index, item in enumerate(asset_type.default_actions):
+        interval_days = _positive_int(item.get("interval_days"))
+        kind = item.get("kind")
+        if interval_days is None or not isinstance(kind, str):
+            continue
+        key = item.get("key")
+        key_str = key if isinstance(key, str) and key else None
+        label = item.get("label")
+        label_str = label.strip() if isinstance(label, str) and label.strip() else kind
+        tracking_key = _default_action_tracking_key(
+            index=index,
+            key=key_str,
+            kind=kind,
+        )
+        last = _latest_action(action_views, key=tracking_key, kind=kind)
+        actions.append(
+            AssetDetailActionResponse(
+                id=_default_action_id(index=index, key=key_str, kind=kind),
+                asset_id=asset.id,
+                key=key_str,
+                kind=kind,
+                label=label_str,
+                interval_days=interval_days,
+                last_performed_at=last.last_performed_at if last is not None else None,
+                next_due_on=_next_due_date(
+                    asset,
+                    last.last_performed_at if last is not None else None,
+                    interval_days,
+                ),
+                linked_task_id=None,
+                linked_schedule_id=None,
+                description=None,
+                estimated_duration_minutes=_positive_int(
+                    item.get("estimated_duration_minutes")
+                ),
+            )
+        )
+    return actions
+
+
+def _default_action_tracking_keys(asset_type: AssetTypeView) -> set[str]:
+    keys: set[str] = set()
+    for index, item in enumerate(asset_type.default_actions):
+        kind = item.get("kind")
+        if not isinstance(kind, str):
+            continue
+        key = item.get("key")
+        key_str = key if isinstance(key, str) and key else None
+        keys.add(_default_action_tracking_key(index=index, key=key_str, kind=kind))
+    return keys
+
+
+def _latest_action(
+    actions: list[AssetActionView],
+    *,
+    key: str | None,
+    kind: str,
+) -> AssetActionView | None:
+    if key is not None:
+        matches = [
+            action
+            for action in actions
+            if action.last_performed_at is not None and action.key == key
+        ]
+        if not matches:
+            return None
+        return max(matches, key=lambda action: _as_utc(action.last_performed_at))
+    matches = [
+        action
+        for action in actions
+        if action.last_performed_at is not None and action.kind == kind
+    ]
+    if not matches:
+        return None
+    return max(matches, key=lambda action: _as_utc(action.last_performed_at))
+
+
+def _next_due_date(
+    asset: AssetView,
+    last_performed_at: datetime | None,
+    interval_days: int | None,
+) -> date | None:
+    if interval_days is None:
+        return None
+    base = (
+        _as_utc(last_performed_at)
+        if last_performed_at is not None
+        else _asset_start(asset)
+    )
+    return (base + timedelta(days=interval_days)).date()
+
+
+def _asset_start(asset: AssetView) -> datetime:
+    start = asset.installed_on or asset.purchased_on
+    if start is not None:
+        return datetime.combine(start, datetime.min.time(), tzinfo=UTC)
+    return _as_utc(asset.created_at)
+
+
+def _as_utc(value: datetime | None) -> datetime:
+    if value is None:
+        raise ValueError("datetime value is required")
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
+
+
+def _positive_int(value: object) -> int | None:
+    return value if isinstance(value, int) and value > 0 else None
+
+
+def _default_action_id(*, index: int, key: str | None, kind: str) -> str:
+    return f"{_DEFAULT_ACTION_PREFIX}{index}__{key or kind}"
+
+
+def _default_action_tracking_key(*, index: int, key: str | None, kind: str) -> str:
+    return key or _default_action_id(index=index, key=None, kind=kind)
+
+
+def _completion_action_spec(
+    session: Session,
+    ctx: WorkspaceContext,
+    asset: AssetView,
+    action_id: str,
+) -> _CompletionActionSpec:
+    if action_id.startswith(_DEFAULT_ACTION_PREFIX):
+        asset_type = _asset_type_for(session, ctx, asset)
+        if asset_type is None:
+            raise AssetActionNotFound()
+        for index, item in enumerate(asset_type.default_actions):
+            kind = item.get("kind")
+            key = item.get("key")
+            key_str = key if isinstance(key, str) and key else None
+            label = item.get("label")
+            label_str = (
+                label.strip() if isinstance(label, str) and label.strip() else None
+            )
+            if (
+                isinstance(kind, str)
+                and _default_action_id(
+                    index=index,
+                    key=key_str,
+                    kind=kind,
+                )
+                == action_id
+            ):
+                return _CompletionActionSpec(
+                    kind=kind,
+                    tracking_key=_default_action_tracking_key(
+                        index=index,
+                        key=key_str,
+                        kind=kind,
+                    ),
+                    label=label_str,
+                )
+        raise AssetActionNotFound()
+
+    with tenant_agnostic():
+        row = session.scalar(
+            select(AssetActionRow).where(
+                AssetActionRow.id == action_id,
+                AssetActionRow.workspace_id == ctx.workspace_id,
+                AssetActionRow.asset_id == asset.id,
+                AssetActionRow.deleted_at.is_(None),
+            )
+        )
+    if row is None:
+        raise AssetActionNotFound()
+    return _CompletionActionSpec(kind=row.kind, tracking_key=row.key, label=row.label)
+
+
+def _stamp_completion_metadata(
+    session: Session,
+    view: AssetActionView,
+    spec: _CompletionActionSpec,
+) -> AssetActionView:
+    if spec.tracking_key is None and spec.label is None:
+        return view
+    with tenant_agnostic():
+        row = session.get(AssetActionRow, view.id)
+    if row is None:
+        return view
+    if spec.tracking_key is not None:
+        row.key = spec.tracking_key
+    if spec.label is not None:
+        row.label = spec.label
+    session.flush()
+    return AssetActionView(
+        id=row.id,
+        workspace_id=row.workspace_id,
+        asset_id=row.asset_id,
+        key=row.key,
+        kind=row.kind,
+        label=row.label,
+        description_md=row.description_md,
+        interval_days=row.interval_days,
+        last_performed_at=row.last_performed_at,
+        performed_at=row.performed_at,
+        performed_by=row.performed_by,
+        notes_md=row.notes_md,
+        meter_reading=row.meter_reading,
+        evidence_blob_hash=row.evidence_blob_hash,
+        created_at=row.created_at,
+        updated_at=row.updated_at,
+        deleted_at=row.deleted_at,
     )
 
 
@@ -796,6 +1350,33 @@ def build_assets_router() -> APIRouter:
             raise _http_for_action_error(exc) from exc
         return AssetActionResponse.from_view(view)
 
+    @api.post(
+        "/{asset_id}/actions/{action_id}/complete",
+        response_model=AssetActionResponse,
+        status_code=status.HTTP_201_CREATED,
+        operation_id="assets.actions.complete",
+        summary="Mark an asset action as done",
+    )
+    def complete_action(
+        asset_id: str,
+        action_id: str,
+        ctx: _Ctx,
+        session: _Db,
+    ) -> AssetActionResponse:
+        try:
+            asset = get_asset(session, ctx, asset_id=asset_id)
+            spec = _completion_action_spec(session, ctx, asset, action_id)
+            view = record_action(session, ctx, asset_id, kind=spec.kind)
+            view = _stamp_completion_metadata(session, view, spec)
+        except (
+            AssetNotFound,
+            AssetActionAccessDenied,
+            AssetActionNotFound,
+            AssetActionValidationError,
+        ) as exc:
+            raise _http_for_action_error(exc) from exc
+        return AssetActionResponse.from_view(view)
+
     @api.get(
         "/{asset_id}/actions/next_due",
         response_model=AssetNextDueResponse | None,
@@ -981,7 +1562,7 @@ def build_assets_router() -> APIRouter:
 
     @api.get(
         "/{asset_id}",
-        response_model=AssetResponse,
+        response_model=AssetDetailResponse,
         operation_id="assets.get",
         summary="Get one tracked asset",
         dependencies=[view_gate],
@@ -991,9 +1572,9 @@ def build_assets_router() -> APIRouter:
         ctx: _Ctx,
         session: _Db,
         include_archived: bool = Query(default=False),
-    ) -> AssetResponse:
+    ) -> AssetDetailResponse:
         try:
-            view = get_asset(
+            return _asset_detail(
                 session,
                 ctx,
                 asset_id=asset_id,
@@ -1001,7 +1582,6 @@ def build_assets_router() -> APIRouter:
             )
         except AssetNotFound as exc:
             raise _http_for_asset_error(exc) from exc
-        return AssetResponse.from_view(view)
 
     @api.patch(
         "/{asset_id}",

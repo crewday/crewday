@@ -163,6 +163,10 @@ export default function App() {
               <Route path="/shifts" element={<Navigate to="/schedule" replace />} />
               <Route path="/history" element={<HistoryPage />} />
               <Route path="/issues/new" element={<IssueNewPage />} />
+              <Route
+                path="/asset/:aid"
+                element={role === "manager" ? <AssetDetailPage /> : <EmployeeAssetPage />}
+              />
             </Route>
 
             {/* Worker-only surfaces. /chat is the worker mobile full-
@@ -224,10 +228,6 @@ export default function App() {
               <Route path="/instructions/:iid" element={<InstructionDetailPage />} />
               <Route path="/inventory" element={<InventoryPage />} />
               <Route path="/assets" element={<AssetsPage />} />
-              <Route
-                path="/asset/:aid"
-                element={role === "manager" ? <AssetDetailPage /> : <EmployeeAssetPage />}
-              />
               <Route path="/asset_types" element={<AssetTypesPage />} />
               <Route path="/documents" element={<DocumentsPage />} />
               <Route path="/permissions" element={<PermissionsPage />} />

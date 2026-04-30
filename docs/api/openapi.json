@@ -1890,6 +1890,678 @@
         "title": "AssetCreateRequest",
         "type": "object"
       },
+      "AssetDetailActionResponse": {
+        "properties": {
+          "asset_id": {
+            "title": "Asset Id",
+            "type": "string"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "estimated_duration_minutes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Estimated Duration Minutes"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "interval_days": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Interval Days"
+          },
+          "key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Key"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "last_performed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Performed At"
+          },
+          "linked_schedule_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Linked Schedule Id"
+          },
+          "linked_task_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Linked Task Id"
+          },
+          "next_due_on": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Due On"
+          }
+        },
+        "required": [
+          "id",
+          "asset_id",
+          "key",
+          "kind",
+          "label",
+          "interval_days",
+          "last_performed_at",
+          "next_due_on",
+          "linked_task_id",
+          "linked_schedule_id",
+          "description",
+          "estimated_duration_minutes"
+        ],
+        "title": "AssetDetailActionResponse",
+        "type": "object"
+      },
+      "AssetDetailAssetResponse": {
+        "properties": {
+          "area": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Area"
+          },
+          "asset_type_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Asset Type Id"
+          },
+          "condition": {
+            "title": "Condition",
+            "type": "string"
+          },
+          "expected_lifespan_years": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Lifespan Years"
+          },
+          "guest_instructions": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Guest Instructions"
+          },
+          "guest_visible": {
+            "title": "Guest Visible",
+            "type": "boolean"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "installed_on": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Installed On"
+          },
+          "make": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Make"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "notes": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notes"
+          },
+          "property_id": {
+            "title": "Property Id",
+            "type": "string"
+          },
+          "purchase_currency": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Purchase Currency"
+          },
+          "purchase_price_cents": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Purchase Price Cents"
+          },
+          "purchase_vendor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Purchase Vendor"
+          },
+          "purchased_on": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Purchased On"
+          },
+          "qr_token": {
+            "title": "Qr Token",
+            "type": "string"
+          },
+          "serial_number": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Serial Number"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "warranty_expires_on": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Warranty Expires On"
+          }
+        },
+        "required": [
+          "id",
+          "property_id",
+          "asset_type_id",
+          "name",
+          "area",
+          "condition",
+          "status",
+          "make",
+          "model",
+          "serial_number",
+          "installed_on",
+          "purchased_on",
+          "purchase_price_cents",
+          "purchase_currency",
+          "purchase_vendor",
+          "warranty_expires_on",
+          "expected_lifespan_years",
+          "guest_visible",
+          "guest_instructions",
+          "notes",
+          "qr_token"
+        ],
+        "title": "AssetDetailAssetResponse",
+        "type": "object"
+      },
+      "AssetDetailAssetTypeResponse": {
+        "properties": {
+          "category": {
+            "title": "Category",
+            "type": "string"
+          },
+          "default_actions": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Default Actions",
+            "type": "array"
+          },
+          "default_lifespan_years": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Lifespan Years"
+          },
+          "icon_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Icon Name"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "key",
+          "name",
+          "category",
+          "icon_name",
+          "default_actions",
+          "default_lifespan_years"
+        ],
+        "title": "AssetDetailAssetTypeResponse",
+        "type": "object"
+      },
+      "AssetDetailDocumentResponse": {
+        "properties": {
+          "amount_cents": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Amount Cents"
+          },
+          "amount_currency": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Amount Currency"
+          },
+          "asset_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Asset Id"
+          },
+          "expires_on": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expires On"
+          },
+          "extracted_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Extracted At"
+          },
+          "extraction_status": {
+            "title": "Extraction Status",
+            "type": "string"
+          },
+          "filename": {
+            "title": "Filename",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "property_id": {
+            "title": "Property Id",
+            "type": "string"
+          },
+          "size_kb": {
+            "title": "Size Kb",
+            "type": "integer"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "uploaded_at": {
+            "format": "date-time",
+            "title": "Uploaded At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "asset_id",
+          "property_id",
+          "kind",
+          "title",
+          "filename",
+          "size_kb",
+          "uploaded_at",
+          "expires_on",
+          "amount_cents",
+          "amount_currency",
+          "extraction_status",
+          "extracted_at"
+        ],
+        "title": "AssetDetailDocumentResponse",
+        "type": "object"
+      },
+      "AssetDetailPropertyResponse": {
+        "properties": {
+          "areas": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Areas",
+            "type": "array"
+          },
+          "city": {
+            "title": "City",
+            "type": "string"
+          },
+          "client_org_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Client Org Id"
+          },
+          "color": {
+            "enum": [
+              "moss",
+              "sky",
+              "rust"
+            ],
+            "title": "Color",
+            "type": "string"
+          },
+          "country": {
+            "title": "Country",
+            "type": "string"
+          },
+          "evidence_policy": {
+            "enum": [
+              "inherit",
+              "require",
+              "optional",
+              "forbid"
+            ],
+            "title": "Evidence Policy",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "str",
+              "vacation",
+              "residence",
+              "mixed"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "locale": {
+            "title": "Locale",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "owner_user_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner User Id"
+          },
+          "settings_override": {
+            "additionalProperties": true,
+            "title": "Settings Override",
+            "type": "object"
+          },
+          "timezone": {
+            "title": "Timezone",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "city",
+          "timezone",
+          "color",
+          "kind",
+          "areas",
+          "evidence_policy",
+          "country",
+          "locale",
+          "settings_override",
+          "client_org_id",
+          "owner_user_id"
+        ],
+        "title": "AssetDetailPropertyResponse",
+        "type": "object"
+      },
+      "AssetDetailResponse": {
+        "properties": {
+          "actions": {
+            "items": {
+              "$ref": "#/components/schemas/AssetDetailActionResponse"
+            },
+            "title": "Actions",
+            "type": "array"
+          },
+          "asset": {
+            "$ref": "#/components/schemas/AssetDetailAssetResponse"
+          },
+          "asset_type": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AssetDetailAssetTypeResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "documents": {
+            "items": {
+              "$ref": "#/components/schemas/AssetDetailDocumentResponse"
+            },
+            "title": "Documents",
+            "type": "array"
+          },
+          "linked_tasks": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Linked Tasks",
+            "type": "array"
+          },
+          "property": {
+            "$ref": "#/components/schemas/AssetDetailPropertyResponse"
+          }
+        },
+        "required": [
+          "asset",
+          "asset_type",
+          "property",
+          "actions",
+          "documents",
+          "linked_tasks"
+        ],
+        "title": "AssetDetailResponse",
+        "type": "object"
+      },
       "AssetDocumentListResponse": {
         "properties": {
           "data": {
@@ -4690,6 +5362,169 @@
         "title": "DeploymentSettingsResponse",
         "type": "object"
       },
+      "EmployeeProfileResponse": {
+        "description": "Legacy SPA ``Employee`` projection embedded in ``GET /api/v1/me``.",
+        "properties": {
+          "avatar_file_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Avatar File Id"
+          },
+          "avatar_initials": {
+            "title": "Avatar Initials",
+            "type": "string"
+          },
+          "avatar_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Avatar Url"
+          },
+          "capabilities": {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "title": "Capabilities",
+            "type": "object"
+          },
+          "email": {
+            "title": "Email",
+            "type": "string"
+          },
+          "evidence_policy": {
+            "title": "Evidence Policy",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "language": {
+            "title": "Language",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "phone": {
+            "title": "Phone",
+            "type": "string"
+          },
+          "preferred_locale": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Preferred Locale"
+          },
+          "properties": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Properties",
+            "type": "array"
+          },
+          "roles": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Roles",
+            "type": "array"
+          },
+          "settings_override": {
+            "additionalProperties": true,
+            "title": "Settings Override",
+            "type": "object"
+          },
+          "started_on": {
+            "title": "Started On",
+            "type": "string"
+          },
+          "villas": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Villas",
+            "type": "array"
+          },
+          "weekly_availability": {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "maxItems": 2,
+                  "minItems": 2,
+                  "prefixItems": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "string"
+                    }
+                  ],
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "title": "Weekly Availability",
+            "type": "object"
+          },
+          "workspaces": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Workspaces",
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "roles",
+          "properties",
+          "avatar_initials",
+          "avatar_file_id",
+          "avatar_url",
+          "phone",
+          "email",
+          "started_on",
+          "capabilities",
+          "workspaces",
+          "villas",
+          "language",
+          "weekly_availability",
+          "evidence_policy",
+          "preferred_locale",
+          "settings_override"
+        ],
+        "title": "EmployeeProfileResponse",
+        "type": "object"
+      },
       "EmployeeResponse": {
         "description": "Flat ``Employee`` projection \u2014 see module docstring for the join.\n\nMirrors :class:`Employee` in ``app/web/src/types/employee.ts``\nfield-for-field. Optional fields the v1 ORM does not yet carry\nare documented inline; future migrations replace the static\ndefaults with the real column reads in lockstep.",
         "properties": {
@@ -5471,6 +6306,105 @@
           "note_md"
         ],
         "title": "ExpenseScanResultPayload",
+        "type": "object"
+      },
+      "GeofenceSettingBody": {
+        "additionalProperties": false,
+        "description": "Request body for ``PUT /properties/{property_id}/geofence``.",
+        "properties": {
+          "enabled": {
+            "default": true,
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "lat": {
+            "maximum": 90.0,
+            "minimum": -90.0,
+            "title": "Lat",
+            "type": "number"
+          },
+          "lon": {
+            "maximum": 180.0,
+            "minimum": -180.0,
+            "title": "Lon",
+            "type": "number"
+          },
+          "mode": {
+            "default": "enforce",
+            "enum": [
+              "enforce",
+              "warn",
+              "off"
+            ],
+            "title": "Mode",
+            "type": "string"
+          },
+          "radius_m": {
+            "exclusiveMinimum": 0.0,
+            "title": "Radius M",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "lat",
+          "lon",
+          "radius_m"
+        ],
+        "title": "GeofenceSettingBody",
+        "type": "object"
+      },
+      "GeofenceSettingPayload": {
+        "description": "HTTP projection of a per-property geofence setting.",
+        "properties": {
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "lat": {
+            "title": "Lat",
+            "type": "number"
+          },
+          "lon": {
+            "title": "Lon",
+            "type": "number"
+          },
+          "mode": {
+            "enum": [
+              "enforce",
+              "warn",
+              "off"
+            ],
+            "title": "Mode",
+            "type": "string"
+          },
+          "property_id": {
+            "title": "Property Id",
+            "type": "string"
+          },
+          "radius_m": {
+            "title": "Radius M",
+            "type": "integer"
+          },
+          "workspace_id": {
+            "title": "Workspace Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "workspace_id",
+          "property_id",
+          "lat",
+          "lon",
+          "radius_m",
+          "enabled",
+          "mode"
+        ],
+        "title": "GeofenceSettingPayload",
         "type": "object"
       },
       "GroupMemberInfo": {
@@ -6976,6 +7910,66 @@
         "title": "IssueUpdateRequest",
         "type": "object"
       },
+      "LeaveConflictsPayload": {
+        "description": "HTTP projection of advisory leave conflicts.",
+        "properties": {
+          "leave_id": {
+            "title": "Leave Id",
+            "type": "string"
+          },
+          "occurrence_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Occurrence Ids",
+            "type": "array"
+          },
+          "shift_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Shift Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "leave_id",
+          "shift_ids",
+          "occurrence_ids"
+        ],
+        "title": "LeaveConflictsPayload",
+        "type": "object"
+      },
+      "LeaveDecisionBody": {
+        "additionalProperties": false,
+        "description": "Request body for ``POST /leaves/{leave_id}/decision``.",
+        "properties": {
+          "decision": {
+            "enum": [
+              "approved",
+              "rejected"
+            ],
+            "title": "Decision",
+            "type": "string"
+          },
+          "rationale_md": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rationale Md"
+          }
+        },
+        "required": [
+          "decision"
+        ],
+        "title": "LeaveDecisionBody",
+        "type": "object"
+      },
       "LeaveListResponse": {
         "description": "Response body for ``GET /me/leaves`` and ``GET /leaves``.\n\nAlways-present ``items`` key so the SPA can treat the response\nas paginated-able from day one \u2014 adding a ``next_cursor`` field\nlater is non-breaking.",
         "properties": {
@@ -7330,6 +8324,97 @@
           "overrides"
         ],
         "title": "MePendingItemsResponse",
+        "type": "object"
+      },
+      "MeProfileResponse": {
+        "description": "Body of ``GET /api/v1/me`` consumed by the app shell layouts.",
+        "properties": {
+          "agent_approval_mode": {
+            "title": "Agent Approval Mode",
+            "type": "string"
+          },
+          "agent_sidebar_collapsed": {
+            "title": "Agent Sidebar Collapsed",
+            "type": "boolean"
+          },
+          "available_workspaces": {
+            "items": {
+              "$ref": "#/components/schemas/AvailableWorkspaceResponse"
+            },
+            "title": "Available Workspaces",
+            "type": "array"
+          },
+          "client_binding_org_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Client Binding Org Ids",
+            "type": "array"
+          },
+          "current_workspace_id": {
+            "title": "Current Workspace Id",
+            "type": "string"
+          },
+          "employee": {
+            "$ref": "#/components/schemas/EmployeeProfileResponse"
+          },
+          "is_deployment_admin": {
+            "title": "Is Deployment Admin",
+            "type": "boolean"
+          },
+          "is_deployment_owner": {
+            "title": "Is Deployment Owner",
+            "type": "boolean"
+          },
+          "manager_name": {
+            "title": "Manager Name",
+            "type": "string"
+          },
+          "now": {
+            "title": "Now",
+            "type": "string"
+          },
+          "role": {
+            "title": "Role",
+            "type": "string"
+          },
+          "theme": {
+            "title": "Theme",
+            "type": "string"
+          },
+          "today": {
+            "title": "Today",
+            "type": "string"
+          },
+          "user_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Id"
+          }
+        },
+        "required": [
+          "role",
+          "theme",
+          "agent_sidebar_collapsed",
+          "employee",
+          "manager_name",
+          "today",
+          "now",
+          "user_id",
+          "agent_approval_mode",
+          "current_workspace_id",
+          "available_workspaces",
+          "client_binding_org_ids",
+          "is_deployment_admin",
+          "is_deployment_owner"
+        ],
+        "title": "MeProfileResponse",
         "type": "object"
       },
       "MePublicHolidayResponse": {
@@ -19966,6 +21051,79 @@
         }
       }
     },
+    "/api/v1/me": {
+      "get": {
+        "operationId": "me.profile.get",
+        "parameters": [
+          {
+            "in": "cookie",
+            "name": "__Host-crewday_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "  Host-Crewday Session"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "crewday_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Crewday Session"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MeProfileResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Return the current user's app-shell profile",
+        "tags": [
+          "identity",
+          "me"
+        ],
+        "x-cli": {
+          "group": "me",
+          "hidden": true,
+          "mutates": false,
+          "summary": "Return the app-shell profile payload",
+          "verb": "profile"
+        }
+      }
+    },
     "/api/v1/me/avatar": {
       "delete": {
         "description": "Clear the caller's ``avatar_blob_hash``; the blob is left on disk.\n\nIdempotent \u2014 a caller clearing an already-null avatar still\ngets a ``200`` with ``avatar_url=None``. The preserved blob is\neventually reaped by the GC sweep (see module docstring).",
@@ -22705,7 +23863,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AssetResponse"
+                  "$ref": "#/components/schemas/AssetDetailResponse"
                 }
               }
             },
@@ -23077,6 +24235,82 @@
           }
         }
       ]
+    },
+    "/w/{slug}/api/v1/assets/{asset_id}/actions/{action_id}/complete": {
+      "parameters": [
+        {
+          "in": "path",
+          "name": "slug",
+          "required": true,
+          "schema": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          }
+        }
+      ],
+      "post": {
+        "operationId": "assets.actions.complete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "asset_id",
+            "required": true,
+            "schema": {
+              "title": "Asset Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "action_id",
+            "required": true,
+            "schema": {
+              "title": "Action Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AssetActionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Permission denied or CSRF mismatch"
+          },
+          "404": {
+            "description": "Asset resource not found"
+          },
+          "409": {
+            "description": "Asset conflict"
+          },
+          "410": {
+            "description": "Archived asset"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Mark an asset action as done",
+        "tags": [
+          "assets",
+          "assets"
+        ]
+      }
     },
     "/w/{slug}/api/v1/assets/{asset_id}/documents": {
       "get": {
@@ -27534,6 +28768,91 @@
           "mutates": false,
           "summary": "Read workspace agent usage",
           "verb": "usage"
+        }
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "slug",
+          "required": true,
+          "schema": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          }
+        }
+      ]
+    },
+    "/w/{slug}/api/v1/me": {
+      "get": {
+        "operationId": "me.profile.scoped.get",
+        "parameters": [
+          {
+            "in": "cookie",
+            "name": "__Host-crewday_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "  Host-Crewday Session"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "crewday_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Crewday Session"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MeProfileResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Return the current user's app-shell profile",
+        "tags": [
+          "identity",
+          "me"
+        ],
+        "x-cli": {
+          "group": "me",
+          "hidden": true,
+          "mutates": false,
+          "summary": "Return the app-shell profile payload",
+          "verb": "profile"
         }
       },
       "parameters": [
@@ -35844,6 +37163,134 @@
         }
       ]
     },
+    "/w/{slug}/api/v1/time/leaves/{leave_id}/conflicts": {
+      "get": {
+        "description": "Return shift/task ids overlapping the target leave window.",
+        "operationId": "time.get_leave_conflicts",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "leave_id",
+            "required": true,
+            "schema": {
+              "title": "Leave Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LeaveConflictsPayload"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Return advisory leave overlap ids",
+        "tags": [
+          "time"
+        ],
+        "x-cli": {
+          "group": "time",
+          "verb": "leave-conflicts"
+        }
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "slug",
+          "required": true,
+          "schema": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          }
+        }
+      ]
+    },
+    "/w/{slug}/api/v1/time/leaves/{leave_id}/decision": {
+      "parameters": [
+        {
+          "in": "path",
+          "name": "slug",
+          "required": true,
+          "schema": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          }
+        }
+      ],
+      "post": {
+        "description": "Transition a pending leave to approved or rejected.",
+        "operationId": "time.decide_leave",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "leave_id",
+            "required": true,
+            "schema": {
+              "title": "Leave Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LeaveDecisionBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LeavePayload"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Approve or reject a pending leave",
+        "tags": [
+          "time"
+        ],
+        "x-cli": {
+          "group": "time",
+          "verb": "leave-decide"
+        }
+      }
+    },
     "/w/{slug}/api/v1/time/me/leaves": {
       "get": {
         "description": "Return every leave owned by the caller, optionally filtered.",
@@ -36067,6 +37514,168 @@
         "x-cli": {
           "group": "time",
           "verb": "my-leave-update"
+        }
+      }
+    },
+    "/w/{slug}/api/v1/time/properties/{property_id}/geofence": {
+      "delete": {
+        "description": "Delete the geofence setting for ``property_id``.",
+        "operationId": "time.delete_geofence_setting",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "property_id",
+            "required": true,
+            "schema": {
+              "maxLength": 40,
+              "title": "Property Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GeofenceSettingPayload"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete one property's geofence setting",
+        "tags": [
+          "time"
+        ],
+        "x-cli": {
+          "group": "time",
+          "verb": "geofence-setting-delete"
+        }
+      },
+      "get": {
+        "description": "Return one property's geofence setting.",
+        "operationId": "time.get_geofence_setting",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "property_id",
+            "required": true,
+            "schema": {
+              "maxLength": 40,
+              "title": "Property Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GeofenceSettingPayload"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Read one property's geofence setting",
+        "tags": [
+          "time"
+        ],
+        "x-cli": {
+          "group": "time",
+          "verb": "geofence-setting-show"
+        }
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "slug",
+          "required": true,
+          "schema": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          }
+        }
+      ],
+      "put": {
+        "description": "Create or replace the geofence setting for ``property_id``.",
+        "operationId": "time.upsert_geofence_setting",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "property_id",
+            "required": true,
+            "schema": {
+              "maxLength": 40,
+              "title": "Property Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GeofenceSettingBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GeofenceSettingPayload"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create or replace one property's geofence setting",
+        "tags": [
+          "time"
+        ],
+        "x-cli": {
+          "group": "time",
+          "verb": "geofence-setting-upsert"
         }
       }
     },
