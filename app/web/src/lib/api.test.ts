@@ -91,6 +91,12 @@ describe("resolveApiPath", () => {
     expect(resolveApiPath("/api/v1/runtime/info", "acme")).toBe("/api/v1/runtime/info");
   });
 
+  it("passes public guest welcome tokens through untouched", () => {
+    expect(resolveApiPath("/api/v1/stays/welcome/token-123", "acme")).toBe(
+      "/api/v1/stays/welcome/token-123",
+    );
+  });
+
   it("passes auth bootstrap paths through untouched", () => {
     expect(resolveApiPath("/api/v1/auth/me", "acme")).toBe("/api/v1/auth/me");
     expect(resolveApiPath("/api/v1/auth/logout", "acme")).toBe("/api/v1/auth/logout");

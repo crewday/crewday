@@ -18,6 +18,10 @@ interface RuntimeInfo {
   };
 }
 
+function isGuestPath(pathname: string): boolean {
+  return pathname.startsWith("/guest/") || /^\/w\/[^/]+\/guest\//.test(pathname);
+}
+
 // PreviewShell is the outermost layout: grain, sticky preview banner,
 // then the routed layout inside <Outlet />. Grain is mounted once at
 // tree root (not per-page) so navigation doesn't flicker.
@@ -43,12 +47,12 @@ export default function PreviewShell() {
     pathname === "/login" ||
     pathname === "/recover" ||
     pathname.startsWith("/accept/") ||
-    pathname.startsWith("/guest/");
+    isGuestPath(pathname);
   const stayOnRoleSwitch =
     pathname === "/login" ||
     pathname === "/recover" ||
     pathname.startsWith("/accept/") ||
-    pathname.startsWith("/guest/");
+    isGuestPath(pathname);
 
   const switchRole = (r: typeof role) => {
     setRole(r);

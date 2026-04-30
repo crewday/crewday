@@ -116,6 +116,7 @@ export default function App() {
           <Route path="/recover/enroll" element={<EnrollPage />} />
           <Route path="/accept/:token" element={<AcceptPage />} />
           <Route path="/guest/:token" element={<GuestPage />} />
+          <Route path="/w/:slug/guest/:token" element={<GuestPage />} />
         </Route>
 
         {/* Styleguide — public dev surface; render without auth so

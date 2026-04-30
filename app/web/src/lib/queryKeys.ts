@@ -113,7 +113,7 @@ export const qk = {
       : ([...ws(), "agent", "typing", scope] as const),
   bookings: () => [...ws(), "bookings"] as const,
   booking: (bid: string) => [...ws(), "booking", bid] as const,
-  guest: () => [...ws(), "guest"] as const,
+  guest: (token?: string) => [...ws(), "guest", token ?? ""] as const,
   assetTypes: () => [...ws(), "asset_types"] as const,
   assets: () => [...ws(), "assets"] as const,
   asset: (aid: string) => [...ws(), "asset", aid] as const,
