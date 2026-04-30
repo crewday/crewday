@@ -164,10 +164,9 @@ export default function App() {
               <Route path="/shifts" element={<Navigate to="/schedule" replace />} />
               <Route path="/history" element={<HistoryPage />} />
               <Route path="/issues/new" element={<IssueNewPage />} />
-              <Route
-                path="/asset/:aid"
-                element={role === "manager" ? <AssetDetailPage /> : <EmployeeAssetPage />}
-              />
+              {role === "manager" ? null : (
+                <Route path="/asset/:aid" element={<EmployeeAssetPage />} />
+              )}
             </Route>
 
             {/* Worker-only surfaces. /chat is the worker mobile full-
@@ -237,6 +236,15 @@ export default function App() {
                 <Route path="/documents" element={<DocumentsPage />} />
               </Route>
             </Route>
+
+            {role === "manager" ? (
+              <Route element={<RequirePermission actionKey="scope.view" />}>
+                <Route element={<ManagerLayout />}>
+                  <Route path="/asset/:aid" element={<AssetDetailPage />} />
+                  <Route path="/w/:slug/asset/:aid" element={<AssetDetailPage />} />
+                </Route>
+              </Route>
+            ) : null}
 
             <Route element={<RequirePermission actionKey="scope.view" />}>
               <Route element={<ManagerLayout />}>
