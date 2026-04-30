@@ -27,27 +27,34 @@ See §11 "The agent-first invariant" for the broader principle and
 
 ## Config
 
-Profiles live in `~/.config/crewday/config.toml`:
+Profiles live in `~/.config/crewday/profiles.toml` (or
+`$XDG_CONFIG_HOME/crewday/profiles.toml` when `XDG_CONFIG_HOME` is
+set):
 
 ```toml
-default_profile = "prod"
+default = "prod"
 
 [profile.prod]
 base_url = "https://ops.example.com/api/v1"
 token = "env:CREWDAY_TOKEN_PROD"
-timezone = "Europe/Paris"              # used to resolve ambiguous local times
+default_workspace = "ops"
+output = "json"
+ca_bundle = "/etc/ssl/certs/private-ca.pem"
 
 [profile.dev]
 base_url = "http://127.0.0.1:8000/api/v1"
 token = "env:CREWDAY_TOKEN_DEV"
+default_workspace = "smoke"
 ```
 
 - `token` values prefixed with `env:` resolve to environment variables
   (avoids storing secrets in the config file).
-- Profile selection: `--profile <name>` or `CREWDAY_PROFILE` env
-  var.
-- `crewday login` writes a new profile: walks through base URL,
-  pastes token, pings `/healthz`.
+- Profile selection precedence: `--profile <name>`, then
+  `CREWDAY_PROFILE`, then `default` in the file.
+- `crewday auth login` writes or updates a profile: walks through base
+  URL, pastes token, pings `/healthz`.
+- `crewday config show|list|use|rm` inspects profiles and switches or
+  removes the default.
 
 ## CLI generation from OpenAPI
 

@@ -34,10 +34,9 @@ def fake_config(
     tmp_path: pathlib.Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> pathlib.Path:
-    """Redirect ``_CONFIG_FILE`` to a temp path for one test."""
-    config_path = tmp_path / "config.toml"
-    monkeypatch.setattr(auth_override, "_CONFIG_FILE", config_path)
-    monkeypatch.setattr(auth_override, "_CONFIG_DIR", tmp_path)
+    """Redirect the shared XDG config path to a temp file for one test."""
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    config_path = tmp_path / "crewday" / "profiles.toml"
     return config_path
 
 
@@ -92,7 +91,7 @@ def test_login_happy_path_with_token_writes_profile(
     assert fake_config.is_file()
 
     parsed = tomllib.loads(fake_config.read_text(encoding="utf-8"))
-    assert parsed["default_profile"] == "dev"
+    assert parsed["default"] == "dev"
     profile = parsed["profile"]["dev"]
     assert profile["base_url"] == "http://127.0.0.1:8100"
     assert profile["token"] == "secret-abc"
@@ -237,7 +236,7 @@ def test_login_preserves_other_profiles(
     """Writing 'dev' must not erase a pre-existing 'prod' profile."""
     fake_config.parent.mkdir(parents=True, exist_ok=True)
     fake_config.write_text(
-        'default_profile = "prod"\n\n'
+        'default = "prod"\n\n'
         "[profile.prod]\n"
         'base_url = "https://ops.example.com"\n'
         'token = "env:CREWDAY_TOKEN_PROD"\n',
@@ -261,8 +260,8 @@ def test_login_preserves_other_profiles(
     parsed = tomllib.loads(fake_config.read_text(encoding="utf-8"))
     # Both profiles present.
     assert set(parsed["profile"].keys()) == {"prod", "dev"}
-    # default_profile unchanged on a second-profile add.
-    assert parsed["default_profile"] == "prod"
+    # default unchanged on a second-profile add.
+    assert parsed["default"] == "prod"
     assert parsed["profile"]["prod"]["token"] == "env:CREWDAY_TOKEN_PROD"
     assert parsed["profile"]["dev"]["token"] == "dev-secret"
 
@@ -272,7 +271,7 @@ def test_login_corrupt_existing_config_aborts_cleanly(
     fake_config: pathlib.Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """An unparseable config.toml is a hard error, never silently overwritten."""
+    """An unparseable profiles.toml is a hard error, never silently overwritten."""
     fake_config.parent.mkdir(parents=True, exist_ok=True)
     fake_config.write_text("[unterminated table\n", encoding="utf-8")
     original_bytes = fake_config.read_bytes()

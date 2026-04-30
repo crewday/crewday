@@ -3,7 +3,7 @@
 See ``docs/specs/13-cli.md``. The CLI is a local client to the same
 HTTP surface as ``api.v1.*`` (§01 "High-level picture"); it holds no
 server-side logic and no state beyond config profiles
-(``~/.config/crewday/config.toml``).
+(``~/.config/crewday/profiles.toml``).
 
 The public entry point is :func:`crewday._main.main`, registered as
 the ``crewday`` script in ``pyproject.toml``. All non-leaf modules in

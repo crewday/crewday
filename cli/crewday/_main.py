@@ -35,6 +35,7 @@ from importlib.metadata import version as _pkg_version
 
 import click
 
+from crewday import _config
 from crewday._globals import (
     DEFAULT_OUTPUT,
     OUTPUT_CHOICES,
@@ -194,11 +195,24 @@ def handle_errors[**P, R](func: Callable[P, R]) -> Callable[P, R]:
     "--profile",
     type=str,
     default=None,
-    envvar="CREWDAY_PROFILE",
     help=(
-        "Name of the profile in ~/.config/crewday/config.toml to use "
+        "Name of the profile in ~/.config/crewday/profiles.toml to use "
         "for base URL + token. Overrides CREWDAY_PROFILE."
     ),
+)
+@click.option(
+    "--base-url",
+    type=str,
+    default=None,
+    envvar="CREWDAY_BASE_URL",
+    help="Ad-hoc API base URL override; otherwise read from the active profile.",
+)
+@click.option(
+    "--token",
+    type=str,
+    default=None,
+    envvar="CREWDAY_TOKEN",
+    help="Ad-hoc API token override; otherwise read from the active profile.",
 )
 @click.option(
     "--workspace",
@@ -214,8 +228,7 @@ def handle_errors[**P, R](func: Callable[P, R]) -> Callable[P, R]:
     "-o",
     "--output",
     type=click.Choice(OUTPUT_CHOICES, case_sensitive=False),
-    default=DEFAULT_OUTPUT,
-    show_default=True,
+    default=None,
     envvar="CREWDAY_OUTPUT",
     help="Output format. 'json' (default) and 'ndjson' stream cleanly through jq.",
 )
@@ -229,8 +242,10 @@ def root(
     ctx: click.Context,
     *,
     profile: str | None,
+    base_url: str | None,
+    token: str | None,
     workspace: str | None,
-    output: str,
+    output: str | None,
     verbose: bool,
 ) -> None:
     """crew.day command-line interface.
@@ -242,15 +257,19 @@ def root(
     command tree and the code behind ``_surface.json`` for the
     canonical source.
     """
-    # Click's ``click.Choice`` returns the chosen value as a plain
-    # ``str``; narrow it to the Literal so the dataclass field stays
-    # strictly typed without a cast.
-    normalised: OutputMode = _narrow_output(output)
+    resolved_output = output
+    output_from_default = resolved_output is None
+    if resolved_output is None:
+        resolved_output = DEFAULT_OUTPUT
+    normalised: OutputMode = _narrow_output(resolved_output)
 
     ctx.obj = CrewdayContext(
         profile=profile,
         workspace=workspace,
         output=normalised,
+        base_url=base_url,
+        token=token,
+        output_from_default=output_from_default,
         idempotency_key_factory=default_idempotency_key_factory,
         logger=logging.getLogger("crewday"),
     )
@@ -295,8 +314,72 @@ def _narrow_output(value: str) -> OutputMode:
             )
 
 
+@click.group(name="config", help="profile configuration commands")
+def config_group() -> None:
+    """Inspect and manage local CLI profiles."""
+
+
+@config_group.command(name="show")
+@click.pass_obj
+def config_show(ctx: CrewdayContext) -> None:
+    """Show the active profile with the token redacted."""
+    profile = _config.active(ctx.profile, resolve_token=False)
+    click.echo(f"name: {profile.name}")
+    click.echo(f"base_url: {profile.base_url}")
+    click.echo(f"token: {_config.display_token(profile.token)}")
+    if profile.default_workspace is not None:
+        click.echo(f"default_workspace: {profile.default_workspace}")
+    if profile.output is not None:
+        click.echo(f"output: {profile.output}")
+    if profile.ca_bundle is not None:
+        click.echo(f"ca_bundle: {profile.ca_bundle}")
+
+
+@config_group.command(name="list")
+def config_list() -> None:
+    """List configured profile names."""
+    cfg = _config.load()
+    for name in sorted(cfg.profiles):
+        marker = "*" if name == cfg.default else " "
+        click.echo(f"{marker} {name}")
+
+
+@config_group.command(name="use")
+@click.argument("name")
+def config_use(name: str) -> None:
+    """Set the default profile."""
+    cfg = _config.load()
+    if name not in cfg.profiles:
+        raise ConfigError(f"profile {name!r} does not exist")
+    _config.save(_config.Config(default=name, profiles=cfg.profiles))
+    click.echo(f"Default profile set to {name!r}.")
+
+
+@config_group.command(name="rm")
+@click.argument("name")
+def config_rm(name: str) -> None:
+    """Remove a profile."""
+    cfg = _config.load()
+    if name not in cfg.profiles:
+        raise ConfigError(f"profile {name!r} does not exist")
+    profiles = dict(cfg.profiles)
+    del profiles[name]
+    default = None if cfg.default == name else cfg.default
+    _config.save(_config.Config(default=default, profiles=profiles))
+    click.echo(f"Removed profile {name!r}.")
+
+
 _surface_registered: bool = False
 _overrides_registered: bool = False
+_config_registered: bool = False
+
+
+def _register_config_commands_once() -> None:
+    global _config_registered
+    if _config_registered:
+        return
+    root.add_command(config_group)
+    _config_registered = True
 
 
 def _register_surface_commands_once() -> None:
@@ -366,6 +449,7 @@ def main() -> None:
     unhandled :class:`Exception` (which should not happen — every
     CLI error path raises a :class:`CrewdayError`).
     """
+    _register_config_commands_once()
     _register_surface_commands_once()
     _register_overrides_once()
     root(prog_name="crewday")

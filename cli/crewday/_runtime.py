@@ -44,13 +44,14 @@ import pathlib
 import sys
 import urllib.parse
 from collections.abc import Callable, Iterator, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from functools import cache
 from typing import Any, Final
 
 import click
 import httpx
 
+from crewday import _config
 from crewday._client import ApiError, CrewdayClient
 from crewday._globals import CrewdayContext
 from crewday._main import ConfigError
@@ -754,13 +755,17 @@ def _make_callback(
 
     @click.pass_obj
     def callback(ctx: CrewdayContext, /, **kwargs: object) -> None:
+        resolved_ctx = _resolve_profile_context(
+            ctx,
+            client_factory=client_factory,
+        )
         path_values = {k: kwargs[k] for k in path_param_names if k in kwargs}
         query_values = {k: kwargs[k] for k in query_param_names if k in kwargs}
 
         url = _resolve_path(
             template=entry.http.path,
             path_param_values=path_values,
-            workspace=ctx.workspace,
+            workspace=resolved_ctx.workspace,
         )
         params = _build_query_params(
             query_params=entry.query_params,
@@ -780,16 +785,16 @@ def _make_callback(
             if isinstance(override, str) and override:
                 idempotency_key = override
             else:
-                idempotency_key = ctx.idempotency_key_factory()
+                idempotency_key = resolved_ctx.idempotency_key_factory()
 
-        with client_factory(ctx) as client:
+        with client_factory(resolved_ctx) as client:
             try:
                 if paginated and bool(kwargs.get("follow_all", False)):
                     _run_paginated(
                         client=client,
                         url=url,
                         params=params,
-                        ctx=ctx,
+                        ctx=resolved_ctx,
                         schema_hint=entry.x_cli,
                     )
                     return
@@ -802,8 +807,8 @@ def _make_callback(
                     idempotency_key=idempotency_key,
                 )
             except ApiError as exc:
-                _emit_api_error(exc, ctx=ctx)
-            _emit_response(response, ctx=ctx, schema_hint=entry.x_cli)
+                _emit_api_error(exc, ctx=resolved_ctx)
+            _emit_response(response, ctx=resolved_ctx, schema_hint=entry.x_cli)
 
     return callback
 
@@ -901,17 +906,52 @@ def _build_command(
 
 
 def _default_client_factory(ctx: CrewdayContext) -> CrewdayClient:
-    """Production stub until profile resolution lands (Beads cd-cksj).
+    """Build the production HTTP client from CLI overrides + active profile."""
+    base_url = ctx.base_url
+    token = ctx.token
+    if base_url is None or (isinstance(token, str) and token.startswith("env:")):
+        profile = _config.active(ctx.profile)
+        base_url = base_url or profile.base_url
+        token = profile.token if token is None or token.startswith("env:") else token
+    if base_url is None:
+        raise ConfigError(
+            "base URL is not set (pass --base-url or configure an active profile)."
+        )
+    return CrewdayClient(
+        base_url=base_url,
+        token=token,
+        workspace=ctx.workspace,
+    )
 
-    Raising :class:`ConfigError` (rather than instantiating with a
-    placeholder URL) means a user who runs a generated command before
-    the profile system exists sees a focused error pointing at the
-    Beads task — not a spurious connection refused on a localhost URL.
-    """
-    raise ConfigError(
-        "profile resolution is not yet implemented; pass a "
-        "client_factory= to register_generated_commands() or wait for "
-        "Beads cd-cksj to land the config loader."
+
+def _resolve_profile_context(
+    ctx: CrewdayContext,
+    *,
+    client_factory: ClientFactory,
+) -> CrewdayContext:
+    """Apply active-profile defaults for generated production commands."""
+    token = ctx.token
+    needs_profile = client_factory is _default_client_factory and (
+        ctx.profile is not None
+        or ctx.base_url is None
+        or (isinstance(token, str) and token.startswith("env:"))
+    )
+    if not needs_profile:
+        return ctx
+
+    profile = _config.active(ctx.profile)
+    return replace(
+        ctx,
+        profile=profile.name,
+        workspace=ctx.workspace or profile.default_workspace,
+        output=profile.output
+        if ctx.output_from_default and profile.output is not None
+        else ctx.output,
+        base_url=ctx.base_url or profile.base_url,
+        token=profile.token
+        if token is None or (isinstance(token, str) and token.startswith("env:"))
+        else token,
+        output_from_default=False,
     )
 
 

@@ -2,7 +2,7 @@
 
 Spec ``docs/specs/13-cli.md`` §"Config" + §"crewday auth": ``auth
 login`` is the interactive flow that writes a profile into
-``~/.config/crewday/config.toml`` and pings ``GET /healthz`` against
+``~/.config/crewday/profiles.toml`` and pings ``GET /healthz`` against
 the chosen ``base_url`` so the user gets immediate feedback that the
 profile is wired correctly. There is no API analogue (the underlying
 HTTP surface is just the bare-host ``/healthz`` probe), so the
@@ -24,22 +24,17 @@ secrets in the config file" guidance.
 
 from __future__ import annotations
 
-import os
-import pathlib
-import tomllib
 from typing import Final
 
 import click
 import httpx
 
+from crewday import _config
 from crewday._main import ConfigError
 from crewday._overrides import cli_override
 
 __all__ = ["register"]
 
-
-_CONFIG_DIR: Final[pathlib.Path] = pathlib.Path.home() / ".config" / "crewday"
-_CONFIG_FILE: Final[pathlib.Path] = _CONFIG_DIR / "config.toml"
 
 _DEFAULT_PROFILE_NAME: Final[str] = "default"
 _DEFAULT_BASE_URL: Final[str] = "http://127.0.0.1:8100"
@@ -49,114 +44,6 @@ _DEFAULT_BASE_URL: Final[str] = "http://127.0.0.1:8100"
 # legitimately-slow homelab while still being short enough that an
 # operator notices the failure mode quickly.
 _HEALTHZ_TIMEOUT_SECONDS: Final[float] = 10.0
-
-
-def _read_existing_config(path: pathlib.Path) -> dict[str, object]:
-    """Return the parsed config or an empty dict if the file is missing.
-
-    A missing file is the common "first profile" case; we preserve any
-    pre-existing profiles so writing a new one is non-destructive.
-    A *corrupt* file is a hard error — silently overwriting would
-    discard the operator's other profiles, which is exactly the
-    failure mode atomic writes are meant to prevent in the first
-    place.
-    """
-    if not path.is_file():
-        return {}
-    try:
-        with path.open("rb") as fh:
-            return dict(tomllib.load(fh))
-    except tomllib.TOMLDecodeError as exc:
-        raise ConfigError(
-            f"existing config at {path} is not valid TOML: {exc}. "
-            "Fix or remove it before re-running 'crewday auth login'."
-        ) from exc
-
-
-def _format_toml(config: dict[str, object]) -> str:
-    """Hand-format the config back to TOML text.
-
-    The shape is small and well-known: a ``default_profile`` scalar
-    plus one ``[profile.<name>]`` table per entry, each with 2-4 string
-    keys. Reaching for a dependency (``tomli_w``) for that is overkill;
-    the writer is twenty lines and round-trips through :mod:`tomllib`
-    in the test suite.
-
-    Strings are emitted with double quotes; ``\\`` and ``"`` inside a
-    value are escaped per the TOML "basic string" production. Other
-    control characters never appear in our values (URL, ULID/email/UUID,
-    short identifiers), so the writer asserts ASCII-printable input
-    rather than implementing the full escape table — the next agent
-    who tries to write a tab-separated token will get a clear error.
-    """
-    lines: list[str] = []
-    default_profile = config.get("default_profile")
-    if isinstance(default_profile, str):
-        lines.append(f"default_profile = {_toml_string(default_profile)}")
-        lines.append("")
-
-    profiles = config.get("profile")
-    if isinstance(profiles, dict):
-        # Sort for deterministic output; idempotent re-writes produce
-        # byte-identical files which keeps diffs small and makes the
-        # idempotency test (re-run ``auth login`` twice → same bytes)
-        # trivial.
-        for name in sorted(profiles):
-            entry = profiles[name]
-            if not isinstance(entry, dict):
-                raise ConfigError(
-                    f"config 'profile.{name}' must be a table, "
-                    f"got {type(entry).__name__}"
-                )
-            lines.append(f"[profile.{name}]")
-            for key in sorted(entry):
-                value = entry[key]
-                if not isinstance(value, str):
-                    raise ConfigError(
-                        f"config 'profile.{name}.{key}' must be a string, "
-                        f"got {type(value).__name__}"
-                    )
-                lines.append(f"{key} = {_toml_string(value)}")
-            lines.append("")
-
-    return "\n".join(lines).rstrip("\n") + "\n"
-
-
-def _toml_string(value: str) -> str:
-    """Quote ``value`` as a TOML basic string.
-
-    Asserts the value is printable ASCII so we don't have to ship the
-    full escape table for control characters that have no business in
-    our field set. ``\\`` and ``"`` get the standard backslash escape.
-    """
-    for ch in value:
-        if ord(ch) < 0x20 or ord(ch) == 0x7F:
-            raise ConfigError(
-                f"refusing to write control character (0x{ord(ch):02X}) into "
-                "config.toml; the values for profile fields must be printable "
-                "ASCII"
-            )
-    escaped = value.replace("\\", "\\\\").replace('"', '\\"')
-    return f'"{escaped}"'
-
-
-def _write_atomic(path: pathlib.Path, contents: str) -> None:
-    """Write ``contents`` to ``path`` via temp-file + rename.
-
-    A crash partway through ``write_text`` would leave a half-written
-    file; the rename closes that window — the temp file lives in the
-    same directory so the rename is atomic on every supported OS. We
-    chmod the temp file to 0600 before renaming so the secret-bearing
-    config is never world-readable, regardless of the umask.
-    """
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp_path = path.with_suffix(path.suffix + ".tmp")
-    tmp_path.write_text(contents, encoding="utf-8")
-    # 0600: rw for the owner, nothing for anyone else. The token may
-    # still leak via ``--token-env``-skipping callers; the secrets-in-
-    # env story is the user's choice.
-    os.chmod(tmp_path, 0o600)
-    os.replace(tmp_path, path)
 
 
 def _ping_healthz(
@@ -292,7 +179,7 @@ def login(
     token_arg: str | None,
     token_env: str | None,
 ) -> None:
-    """Write or update a profile in ~/.config/crewday/config.toml.
+    """Write or update a profile in ~/.config/crewday/profiles.toml.
 
     Walks through the four pieces of state every profile needs (name,
     base URL, token storage strategy, ping-check) and lands the result
@@ -323,28 +210,19 @@ def login(
     # exit 5 (CONFIG_ERROR) and the on-disk config stays untouched.
     _ping_healthz(resolved_base_url)
 
-    config = _read_existing_config(_CONFIG_FILE)
-    profiles_obj = config.get("profile")
-    if profiles_obj is not None and not isinstance(profiles_obj, dict):
-        raise ConfigError(
-            f"existing config at {_CONFIG_FILE} has a non-table 'profile' key; "
-            "fix or remove it before re-running 'crewday auth login'."
-        )
-    profiles: dict[str, object] = (
-        dict(profiles_obj) if isinstance(profiles_obj, dict) else {}
+    config = _config.load()
+    profiles = dict(config.profiles)
+    profiles[resolved_profile] = _config.Profile(
+        name=resolved_profile,
+        base_url=resolved_base_url,
+        token=token_value,
     )
-
-    profiles[resolved_profile] = {
-        "base_url": resolved_base_url,
-        "token": token_value,
-    }
-    config["profile"] = profiles
-    config.setdefault("default_profile", resolved_profile)
-
-    _write_atomic(_CONFIG_FILE, _format_toml(config))
+    default_profile = config.default or resolved_profile
+    _config.save(_config.Config(default=default_profile, profiles=profiles))
 
     click.echo(
-        f"Wrote profile {resolved_profile!r} → {resolved_base_url} ({_CONFIG_FILE})."
+        f"Wrote profile {resolved_profile!r} -> {resolved_base_url} "
+        f"({_config.config_path()})."
     )
 
 

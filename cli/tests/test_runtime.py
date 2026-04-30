@@ -24,6 +24,7 @@ from typing import Any
 import click
 import httpx
 from click.testing import CliRunner
+from crewday import _config
 from crewday._client import CrewdayClient
 from crewday._globals import CrewdayContext
 from crewday._main import ExitCode, _register_surface_commands_once, root
@@ -31,6 +32,8 @@ from crewday._runtime import (
     DEFAULT_SURFACE_ADMIN_PATH,
     DEFAULT_SURFACE_PATH,
     SurfaceEntry,
+    _default_client_factory,
+    _resolve_profile_context,
     load_surface,
     register_generated_commands,
 )
@@ -163,6 +166,95 @@ def _entry(
         "x_cli": x_cli,
         "x_agent_confirm": None,
     }
+
+
+def test_default_client_factory_uses_active_profile(
+    tmp_path: pathlib.Path,
+    monkeypatch: Any,
+) -> None:
+    """Production client factory reads base URL + token from profiles.toml."""
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    monkeypatch.setenv("CREWDAY_TOKEN_DEV", "resolved-token")
+    _config.save(
+        _config.Config(
+            default="dev",
+            profiles={
+                "dev": _config.Profile(
+                    name="dev",
+                    base_url="https://api.example.test",
+                    token="env:CREWDAY_TOKEN_DEV",
+                    default_workspace="smoke",
+                )
+            },
+        )
+    )
+
+    client = _default_client_factory(
+        CrewdayContext(profile="dev", workspace="smoke", output="json")
+    )
+    try:
+        assert client._base_url == "https://api.example.test"
+        assert client._token == "resolved-token"
+    finally:
+        client.close()
+
+
+def test_generated_command_context_applies_profile_defaults(
+    tmp_path: pathlib.Path,
+    monkeypatch: Any,
+) -> None:
+    """Generated commands apply profile defaults before URL/client construction."""
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    monkeypatch.setenv("CREWDAY_TOKEN_DEV", "resolved-token")
+    _config.save(
+        _config.Config(
+            default="dev",
+            profiles={
+                "dev": _config.Profile(
+                    name="dev",
+                    base_url="https://api.example.test",
+                    token="env:CREWDAY_TOKEN_DEV",
+                    default_workspace="smoke",
+                    output="ndjson",
+                )
+            },
+        )
+    )
+
+    resolved = _resolve_profile_context(
+        CrewdayContext(
+            profile=None,
+            workspace=None,
+            output="json",
+            output_from_default=True,
+        ),
+        client_factory=_default_client_factory,
+    )
+
+    assert resolved.profile == "dev"
+    assert resolved.workspace == "smoke"
+    assert resolved.output == "ndjson"
+    assert resolved.base_url == "https://api.example.test"
+    assert resolved.token == "resolved-token"
+    assert not resolved.output_from_default
+
+
+def test_generated_command_context_honours_adhoc_base_url_without_profile() -> None:
+    """A --base-url command without a profile should not load profiles.toml."""
+    ctx = CrewdayContext(
+        profile=None,
+        workspace=None,
+        output="json",
+        base_url="https://public.example.test",
+        output_from_default=True,
+    )
+
+    resolved = _resolve_profile_context(
+        ctx,
+        client_factory=_default_client_factory,
+    )
+
+    assert resolved is ctx
 
 
 # ---------------------------------------------------------------------------

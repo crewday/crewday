@@ -67,6 +67,8 @@ def test_help_lists_global_flags(runner: CliRunner) -> None:
     help_text = result.output
     for flag in ("--profile", "--workspace", "--output"):
         assert flag in help_text, f"missing global flag {flag!r} in --help"
+    assert "--base-url" in help_text
+    assert "--token" in help_text
 
     # Verbose flag is also a spec requirement (§13 "Global flags" row).
     assert "--verbose" in help_text
@@ -129,10 +131,14 @@ def test_crewday_context_fields() -> None:
         profile="dev",
         workspace="smoke",
         output="json",
+        base_url="https://api.example.test",
+        token="secret",
     )
     assert ctx.profile == "dev"
     assert ctx.workspace == "smoke"
     assert ctx.output == "json"
+    assert ctx.base_url == "https://api.example.test"
+    assert ctx.token == "secret"
 
     # Idempotency factory: defaults to a ULID generator (§12
     # "Idempotency"); each call yields a fresh value and the values
@@ -351,12 +357,12 @@ def test_placeholders_importable() -> None:
     # ``_client`` graduated from a placeholder to a real module in
     # cd-2ms7 — its public surface is now populated and tested in
     # ``cli/tests/test_client.py``. ``_output`` graduated in cd-oe5j.
-    # ``_config`` is still a placeholder (cd-cksj).
     from crewday import _client, _config, _output
 
     assert "CrewdayClient" in _client.__all__
     assert "ApiError" in _client.__all__
-    assert _config.__all__ == []
+    assert "Profile" in _config.__all__
+    assert "Config" in _config.__all__
     assert "format_response" in _output.__all__
     assert "format_api_error" in _output.__all__
 

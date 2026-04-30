@@ -57,7 +57,7 @@ class CrewdayContext:
 
     Fields:
       * ``profile``: name of the active profile from
-        ``~/.config/crewday/config.toml`` (or ``None`` when no
+        ``~/.config/crewday/profiles.toml`` (or ``None`` when no
         profile is resolved — commands that require one must error
         with ``ClickException`` and exit 5, see §13 "Exit codes").
       * ``workspace``: workspace slug (``^[a-z][a-z0-9-]{1,38}[a-z0-9]$``
@@ -76,6 +76,9 @@ class CrewdayContext:
     profile: str | None
     workspace: str | None
     output: OutputMode
+    base_url: str | None = None
+    token: str | None = None
+    output_from_default: bool = False
     idempotency_key_factory: Callable[[], str] = field(
         default=default_idempotency_key_factory,
     )
