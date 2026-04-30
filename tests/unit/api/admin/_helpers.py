@@ -30,7 +30,8 @@ from sqlalchemy.orm import Session, sessionmaker
 # ``Base.metadata.create_all`` below stays consistent regardless
 # of pytest collection order — same shape ``test_me.py`` follows.
 import app.adapters.db.payroll.models
-import app.adapters.db.places.models  # noqa: F401
+import app.adapters.db.places.models
+import app.adapters.db.secrets.models  # noqa: F401
 from app.adapters.db.authz.models import DeploymentOwner, RoleGrant
 from app.adapters.db.base import Base
 from app.adapters.db.session import make_engine
@@ -108,6 +109,7 @@ def build_client(
     monkeypatch.setattr("app.auth.session.get_settings", lambda: settings)
 
     app = FastAPI()
+    app.state.settings = settings
     app.include_router(admin_router, prefix="/admin/api/v1")
     add_exception_handlers(app)
 

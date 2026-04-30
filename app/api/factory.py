@@ -67,7 +67,10 @@ from sqlalchemy.orm import Session
 from starlette.middleware.cors import CORSMiddleware
 
 from app.adapters.db.session import make_uow
-from app.adapters.llm.openrouter import OpenRouterClient
+from app.adapters.llm.openrouter import (
+    DeploymentOpenRouterConfigSource,
+    OpenRouterClient,
+)
 from app.adapters.llm.ports import LLMClient
 from app.adapters.mail.ports import Mailer
 from app.adapters.mail.smtp import SMTPMailer
@@ -397,13 +400,10 @@ def _wire_services(
 def _build_llm(settings: Settings) -> LLMClient | None:
     """Return the configured :class:`LLMClient`, or ``None``.
 
-    The v1 wiring instantiates :class:`OpenRouterClient` when
-    ``settings.openrouter_api_key`` is set; otherwise the LLM seam is
-    unwired and :func:`app.api.deps.get_llm` returns 503
-    ``llm_unavailable`` on the first request that asks for it. This
-    matches the storage / mailer pattern: deployment misconfig
-    surfaces as a request-time 503 rather than refusing to boot, so
-    ``/healthz`` and the non-LLM routes still serve.
+    The v1 wiring instantiates :class:`OpenRouterClient` when an env
+    key is present or a root key can decrypt the DB-backed deployment
+    setting. The DB source is resolved per request, so an admin key
+    rotation takes effect without rebuilding the app.
 
     The OCR-autofill capability layers an additional gate on
     :attr:`Settings.llm_ocr_model` — both the API key AND a model id
@@ -412,13 +412,18 @@ def _build_llm(settings: Settings) -> LLMClient | None:
     capability by clearing either side without booting a half-wired
     state machine.
     """
-    if settings.openrouter_api_key is None:
+    if settings.openrouter_api_key is None and settings.root_key is None:
         _log.info(
-            "LLM client unavailable: CREWDAY_OPENROUTER_API_KEY is unset",
-            extra={"event": "llm.unwired", "reason": "missing_api_key"},
+            "LLM client unavailable: OpenRouter env key and CREWDAY_ROOT_KEY are unset",
+            extra={"event": "llm.unwired", "reason": "missing_api_key_source"},
         )
         return None
-    return OpenRouterClient(settings.openrouter_api_key)
+    return OpenRouterClient(
+        DeploymentOpenRouterConfigSource(
+            env_api_key=settings.openrouter_api_key,
+            root_key=settings.root_key,
+        )
+    )
 
 
 def _build_storage(settings: Settings) -> Storage | None:

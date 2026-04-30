@@ -59,20 +59,36 @@ import json
 import logging
 import time
 from collections.abc import Callable, Iterator, Mapping, Sequence
-from typing import Final, TypedDict, cast
+from typing import Final, Protocol, TypedDict, cast
 
 import httpx
 from pydantic import SecretStr
+from sqlalchemy.orm import Session
 
+from app.adapters.db.capabilities.models import DeploymentSetting
+from app.adapters.db.ports import UnitOfWork
+from app.adapters.db.secrets.repositories import SqlAlchemySecretEnvelopeRepository
+from app.adapters.db.session import make_uow
 from app.adapters.llm.ports import ChatMessage, LLMResponse, LLMUsage
+from app.adapters.storage.envelope import Aes256GcmEnvelope
+from app.adapters.storage.ports import EnvelopeDecryptError
+from app.tenancy import tenant_agnostic
 from app.util.clock import Clock, SystemClock
 from app.util.redact import ConsentSet, redact
 
 __all__ = [
+    "OPENROUTER_API_KEY_PURPOSE",
+    "OPENROUTER_API_KEY_SETTING",
+    "DeploymentOpenRouterConfigSource",
     "LlmProviderError",
     "LlmRateLimited",
     "LlmTransportError",
     "OpenRouterClient",
+    "OpenRouterConfigSource",
+    "StaticOpenRouterConfigSource",
+    "openrouter_api_key_display_stub",
+    "openrouter_envelope_id_from_pointer",
+    "openrouter_envelope_pointer",
 ]
 
 _log = logging.getLogger(__name__)
@@ -93,6 +109,9 @@ _ATTRIBUTION_REFERER: Final[str] = "https://crew.day"
 _ATTRIBUTION_TITLE: Final[str] = "crewday"
 
 _DEFAULT_BASE_URL: Final[str] = "https://openrouter.ai/api/v1"
+OPENROUTER_API_KEY_SETTING: Final[str] = "openrouter.api_key_envelope_id"
+OPENROUTER_API_KEY_PURPOSE: Final[str] = "openrouter.api_key"
+_OPENROUTER_ENVELOPE_ROW_VERSION: Final[int] = 0x02
 
 # SSE prefixes emitted by OpenRouter's streaming endpoint. Every data
 # frame is ``data: {...}`` on its own line with a blank-line separator
@@ -111,6 +130,14 @@ _DEFAULT_OCR_PROMPT: Final[str] = (
     "Preserve line breaks; do not summarise."
 )
 _DEFAULT_OCR_MIME: Final[str] = "image/jpeg"
+
+
+class OpenRouterConfigSource(Protocol):
+    """Resolve the active OpenRouter API key at request time."""
+
+    def api_key(self) -> SecretStr | None:
+        """Return the configured API key, or ``None`` when absent."""
+        ...
 
 
 # ---------------------------------------------------------------------------
@@ -171,6 +198,97 @@ class LlmProviderError(RuntimeError):
     """Raised when the provider rejects the request with a non-retryable ``4xx``."""
 
 
+class StaticOpenRouterConfigSource:
+    """OpenRouter key source for env-only deployments and tests."""
+
+    __slots__ = ("_api_key",)
+
+    def __init__(self, api_key: SecretStr | None) -> None:
+        self._api_key = api_key
+
+    def api_key(self) -> SecretStr | None:
+        return self._api_key
+
+
+class DeploymentOpenRouterConfigSource:
+    """Resolve OpenRouter key from deployment_setting, then env fallback."""
+
+    __slots__ = ("_env_api_key", "_root_key", "_uow_factory")
+
+    def __init__(
+        self,
+        *,
+        env_api_key: SecretStr | None,
+        root_key: SecretStr | None,
+        uow_factory: Callable[[], UnitOfWork] = make_uow,
+    ) -> None:
+        self._env_api_key = env_api_key
+        self._root_key = root_key
+        self._uow_factory = uow_factory
+
+    def api_key(self) -> SecretStr | None:
+        with self._uow_factory() as session:
+            with tenant_agnostic():
+                row = session.get(DeploymentSetting, OPENROUTER_API_KEY_SETTING)
+            if row is None:
+                return self._env_api_key
+            envelope_id = row.value
+            if not isinstance(envelope_id, str) or not envelope_id.strip():
+                raise LlmTransportError(
+                    "openrouter api key setting is malformed; expected envelope id"
+                )
+            root_key = self._root_key
+            if root_key is None:
+                raise LlmTransportError(
+                    "openrouter api key setting requires CREWDAY_ROOT_KEY"
+                )
+            envelope = Aes256GcmEnvelope(
+                root_key,
+                repository=SqlAlchemySecretEnvelopeRepository(cast(Session, session)),
+            )
+            pointer = openrouter_envelope_pointer(envelope_id)
+            try:
+                plaintext = envelope.decrypt(
+                    pointer, purpose=OPENROUTER_API_KEY_PURPOSE
+                )
+            except EnvelopeDecryptError as exc:
+                raise LlmTransportError(
+                    "openrouter api key setting could not be decrypted"
+                ) from exc
+        try:
+            decoded = plaintext.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise LlmTransportError("openrouter api key is not valid UTF-8") from exc
+        if not decoded.strip():
+            raise LlmTransportError("openrouter api key is blank")
+        return SecretStr(decoded)
+
+
+def openrouter_envelope_pointer(envelope_id: str) -> bytes:
+    """Return the row-backed envelope pointer for ``envelope_id``."""
+    if not envelope_id or not envelope_id.strip():
+        raise ValueError("openrouter envelope id must be non-blank")
+    return bytes((_OPENROUTER_ENVELOPE_ROW_VERSION,)) + envelope_id.encode("utf-8")
+
+
+def openrouter_envelope_id_from_pointer(pointer: bytes) -> str:
+    """Extract the row id from a row-backed envelope pointer."""
+    if len(pointer) < 2 or pointer[0] != _OPENROUTER_ENVELOPE_ROW_VERSION:
+        raise ValueError("openrouter envelope pointer is not row-backed")
+    try:
+        envelope_id = pointer[1:].decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise ValueError("openrouter envelope pointer id is not UTF-8") from exc
+    if not envelope_id.strip():
+        raise ValueError("openrouter envelope pointer id is blank")
+    return envelope_id
+
+
+def openrouter_api_key_display_stub() -> str:
+    """Public-safe marker for a configured OpenRouter API key."""
+    return "********"
+
+
 # ---------------------------------------------------------------------------
 # Client
 # ---------------------------------------------------------------------------
@@ -191,7 +309,7 @@ class OpenRouterClient:
 
     def __init__(
         self,
-        api_key: SecretStr,
+        api_key: SecretStr | OpenRouterConfigSource,
         *,
         base_url: str = _DEFAULT_BASE_URL,
         timeout: float = 60.0,
@@ -202,7 +320,11 @@ class OpenRouterClient:
     ) -> None:
         if max_retries < 1:
             raise ValueError("max_retries must be >= 1")
-        self._api_key = api_key
+        self._config_source = (
+            StaticOpenRouterConfigSource(api_key)
+            if isinstance(api_key, SecretStr)
+            else api_key
+        )
         # ``rstrip('/')`` so callers can pass either
         # ``https://openrouter.ai/api/v1`` or the same URL with a
         # trailing slash without us emitting ``//chat/completions``.
@@ -215,6 +337,10 @@ class OpenRouterClient:
         # :class:`httpx.MockTransport`); in production we build a
         # fresh client so the timeout and defaults live on the wire.
         self._http = http or httpx.Client(timeout=timeout)
+
+    def is_configured(self) -> bool:
+        """Return whether a request can currently resolve an API key."""
+        return self._config_source.api_key() is not None
 
     # ------------------------------------------------------------------
     # Public LLMClient surface
@@ -552,8 +678,11 @@ class OpenRouterClient:
         the module — so the raw key touches memory once per call,
         inside the string we're about to hand to :mod:`httpx`.
         """
+        api_key = self._config_source.api_key()
+        if api_key is None:
+            raise LlmTransportError("openrouter api key is not configured")
         return {
-            "Authorization": f"Bearer {self._api_key.get_secret_value()}",
+            "Authorization": f"Bearer {api_key.get_secret_value()}",
             "Content-Type": "application/json",
             "HTTP-Referer": _ATTRIBUTION_REFERER,
             "X-Title": _ATTRIBUTION_TITLE,

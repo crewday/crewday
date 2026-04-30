@@ -39,11 +39,21 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.adapters.db.capabilities.models import DeploymentSetting
+from app.adapters.db.secrets.repositories import SqlAlchemySecretEnvelopeRepository
+from app.adapters.llm.openrouter import (
+    OPENROUTER_API_KEY_PURPOSE,
+    OPENROUTER_API_KEY_SETTING,
+    openrouter_api_key_display_stub,
+    openrouter_envelope_id_from_pointer,
+)
+from app.adapters.storage.envelope import Aes256GcmEnvelope
+from app.adapters.storage.ports import EnvelopeOwner
 from app.api.admin._audit import audit_admin
 from app.api.admin._owners import ensure_deployment_owner
 from app.api.admin.deps import current_deployment_admin_principal
 from app.api.deps import db_session
 from app.capabilities import Capabilities, DeploymentSettings
+from app.config import Settings
 from app.tenancy import DeploymentContext, tenant_agnostic
 
 __all__ = [
@@ -76,7 +86,7 @@ class _SettingDef:
 
     * ``key`` — the row PK; matches the corresponding field on
       :class:`DeploymentSettings`.
-    * ``kind`` — one of ``bool|int|string`` for the SPA's input
+    * ``kind`` — one of ``bool|int|string|secret`` for the SPA's input
       widget. Mirrors §02 setting-catalog conventions.
     * ``description`` — short operator-facing label.
     * ``coerce`` — callable that narrows the request body's free-form
@@ -151,6 +161,13 @@ def _coerce_str_int_dict(value: Any) -> dict[str, int]:
     return out
 
 
+def _coerce_secret_str(value: Any) -> str:
+    """Coerce a JSON value into a non-blank secret string."""
+    if isinstance(value, str) and value.strip():
+        return value
+    raise ValueError("expected a non-blank JSON string")
+
+
 # ``DeploymentSettings`` is a slotted dataclass — class-level
 # field access reads an attribute descriptor, not the default
 # value. Pull the defaults out of the dataclass field metadata
@@ -163,10 +180,9 @@ _DEPLOYMENT_DEFAULTS: Final[dict[str, Any]] = {
 
 # Registry of writable setting definitions. Mirrors the
 # :class:`DeploymentSettings` field set so a new operator-mutable
-# knob lights up by appending one entry here. Adding a knob
-# without updating both layers leaves the GET feed and the PUT
-# validator out of sync — keeping the catalog in this module
-# means the test suite can import :data:`_REGISTRY` to cross-check.
+# knob lights up by appending one entry here. Registry-only secret
+# pointers that are not capability flags also live here so the admin
+# route remains the single deployment-setting writer.
 _REGISTRY: Final[tuple[_SettingDef, ...]] = (
     _SettingDef(
         key="signup_enabled",
@@ -208,6 +224,13 @@ _REGISTRY: Final[tuple[_SettingDef, ...]] = (
         description="Require Turnstile CAPTCHA on the self-serve signup form.",
         coerce=_coerce_bool,
         default=_DEPLOYMENT_DEFAULTS["captcha_required"],
+    ),
+    _SettingDef(
+        key=OPENROUTER_API_KEY_SETTING,
+        kind="secret",
+        description="OpenRouter API key encrypted into secret_envelope.",
+        coerce=_coerce_secret_str,
+        default={"display_stub": ""},
     ),
     # ``trusted_interfaces`` is the canonical ``root_only`` example
     # (§12 "PUT /settings/{key}"). The actual value is read off
@@ -315,9 +338,59 @@ def _refresh_capabilities(request: Request, session: Session) -> None:
 
 def _resolve_value(definition: _SettingDef, row: DeploymentSetting | None) -> Any:
     """Return the row's stored value, falling back to the default."""
+    if definition.key == OPENROUTER_API_KEY_SETTING:
+        if row is None:
+            return {"display_stub": ""}
+        return {"display_stub": openrouter_api_key_display_stub()}
     if row is None:
         return definition.default
     return row.value
+
+
+def _audit_value(definition: _SettingDef, value: Any) -> Any:
+    """Return a log-safe representation of a stored setting value."""
+    if definition.key == OPENROUTER_API_KEY_SETTING:
+        if value is None:
+            return None
+        return {"display_stub": openrouter_api_key_display_stub()}
+    return value
+
+
+def _settings_from_request(request: Request) -> Settings:
+    settings = getattr(request.app.state, "settings", None)
+    if isinstance(settings, Settings):
+        return settings
+    raise RuntimeError("app.state.settings is not configured")
+
+
+def _stored_value_for_write(
+    *,
+    definition: _SettingDef,
+    value: Any,
+    session: Session,
+    request: Request,
+) -> Any:
+    """Return the DB value for a coerced admin setting write."""
+    if definition.key != OPENROUTER_API_KEY_SETTING:
+        return value
+    if not isinstance(value, str):  # pragma: no cover - coerce narrows first
+        raise ValueError("expected a non-blank JSON string")
+    settings = _settings_from_request(request)
+    if settings.root_key is None:
+        raise _problem(
+            _ERROR_VALUE_TYPE,
+            message="CREWDAY_ROOT_KEY is required to store the OpenRouter API key",
+        )
+    envelope = Aes256GcmEnvelope(
+        settings.root_key,
+        repository=SqlAlchemySecretEnvelopeRepository(session),
+    )
+    pointer = envelope.encrypt(
+        value.encode("utf-8"),
+        purpose=OPENROUTER_API_KEY_PURPOSE,
+        owner=EnvelopeOwner(kind="deployment_setting", id=definition.key),
+    )
+    return openrouter_envelope_id_from_pointer(pointer)
 
 
 def _problem(error: str, *, message: str) -> HTTPException:
@@ -449,13 +522,27 @@ def build_admin_settings_router() -> APIRouter:
             previous: Any
             if row is None:
                 previous = None
+                stored_value = _stored_value_for_write(
+                    definition=definition,
+                    value=value,
+                    session=session,
+                    request=request,
+                )
                 row = DeploymentSetting(
-                    key=key, value=value, updated_at=now, updated_by=ctx.user_id
+                    key=key,
+                    value=stored_value,
+                    updated_at=now,
+                    updated_by=ctx.user_id,
                 )
                 session.add(row)
             else:
                 previous = row.value
-                row.value = value
+                row.value = _stored_value_for_write(
+                    definition=definition,
+                    value=value,
+                    session=session,
+                    request=request,
+                )
                 row.updated_at = now
                 row.updated_by = ctx.user_id
             audit_admin(
@@ -465,13 +552,18 @@ def build_admin_settings_router() -> APIRouter:
                 entity_kind="deployment_setting",
                 entity_id=key,
                 action="deployment_setting.updated",
-                diff={"value": {"before": previous, "after": value}},
+                diff={
+                    "value": {
+                        "before": _audit_value(definition, previous),
+                        "after": _audit_value(definition, row.value),
+                    }
+                },
             )
             session.flush()
         _refresh_capabilities(request, session)
         return DeploymentSettingResponse(
             key=key,
-            value=value,
+            value=_resolve_value(definition, row),
             kind=definition.kind,
             description=definition.description,
             root_only=definition.root_only,

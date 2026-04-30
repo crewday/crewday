@@ -24,6 +24,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app.adapters.db.audit.models import AuditLog
 from app.adapters.db.capabilities.models import DeploymentSetting
+from app.adapters.llm.openrouter import OPENROUTER_API_KEY_SETTING
 from app.api.admin.settings import (
     ERROR_ROOT_ONLY,
     ERROR_UNKNOWN_KEY,
@@ -104,6 +105,7 @@ class TestListSettings:
             "require_passkey_attestation",
             "llm_default_budget_cents_30d",
             "captcha_required",
+            OPENROUTER_API_KEY_SETTING,
             "trusted_interfaces",
         } <= keys
 

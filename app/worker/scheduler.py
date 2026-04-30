@@ -1927,7 +1927,10 @@ def _make_llm_budget_refresh_body(clock: Clock) -> Callable[[], None]:
 def _make_daily_digest_fanout_body(clock: Clock) -> Callable[[], None]:
     """Build the hourly daily-digest fan-out body (cd-f0ue)."""
 
-    from app.adapters.llm.openrouter import OpenRouterClient
+    from app.adapters.llm.openrouter import (
+        DeploymentOpenRouterConfigSource,
+        OpenRouterClient,
+    )
     from app.adapters.mail.smtp import SMTPMailer
 
     settings = get_settings()
@@ -1946,8 +1949,13 @@ def _make_daily_digest_fanout_body(clock: Clock) -> Callable[[], None]:
         else None
     )
     llm = (
-        OpenRouterClient(settings.openrouter_api_key)
-        if settings.openrouter_api_key is not None
+        OpenRouterClient(
+            DeploymentOpenRouterConfigSource(
+                env_api_key=settings.openrouter_api_key,
+                root_key=settings.root_key,
+            )
+        )
+        if settings.openrouter_api_key is not None or settings.root_key is not None
         else None
     )
 

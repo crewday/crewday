@@ -173,6 +173,12 @@ containing tokens, property wifi password, property access codes,
 `secret_envelope` with per-row nonce. Decryption paths are
 deliberately narrow:
 
+- Deployment-wide API keys that still have env-var fallbacks store only
+  a `deployment_setting` pointer to `secret_envelope`. For the default
+  OpenRouter adapter the pointer key is
+  `openrouter.api_key_envelope_id`, the envelope purpose is
+  `openrouter.api_key`, and admin reads expose only `display_stub`.
+
 1. **Payout manifest** (HTTP, §09) — owner/manager passkey session
    only; on §11's interactive-session-only list; not stored; not
    cached by the idempotency layer.

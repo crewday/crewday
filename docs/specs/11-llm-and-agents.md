@@ -595,6 +595,14 @@ llm_provider
   `envelope:llm:openrouter:default`) that the server resolves through
   `secret_envelope` (§15). The raw key is never returned by the API,
   never logged, and never appears in `llm_call.*` payloads.
+- Until the full `/admin/llm` provider graph is the only operator
+  surface, the default OpenRouter adapter also accepts a transitional
+  deployment setting named `openrouter.api_key_envelope_id`. Its value
+  is only the referenced `secret_envelope.id`; writes accept plaintext
+  server-side, encrypt with purpose `openrouter.api_key`, and admin
+  reads return only `display_stub`. At runtime the adapter resolves the
+  DB setting first and falls back to `CREWDAY_OPENROUTER_API_KEY` only
+  when the setting row is absent.
 - The deployment admin rotates keys with
   `PUT /admin/api/v1/llm/providers/{id}/key`, which generates a new
   envelope ciphertext and updates the ref atomically. This surface is

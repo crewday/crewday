@@ -25,12 +25,22 @@ function sameValue(left: unknown, right: unknown): boolean {
   return JSON.stringify(left) === JSON.stringify(right);
 }
 
+function displayStub(value: unknown): string {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return "";
+  const stub = (value as { display_stub?: unknown }).display_stub;
+  return typeof stub === "string" ? stub : "";
+}
+
 function displayDate(value: string): string {
   if (!value) return "default";
   return new Date(value).toLocaleString();
 }
 
 function parseSettingDraft(row: AdminDeploymentSetting, draft: SettingDraft): ParsedSetting {
+  if (row.kind === "secret") {
+    if (typeof draft === "string" && draft.trim().length > 0) return { ok: true, value: draft };
+    return { ok: false, message: "Enter a non-empty secret before saving." };
+  }
   if (row.kind !== "json") return { ok: true, value: draft };
   if (typeof draft !== "string") return { ok: false, message: "JSON draft must be text." };
   try {
@@ -42,6 +52,7 @@ function parseSettingDraft(row: AdminDeploymentSetting, draft: SettingDraft): Pa
 
 function settingInputValue(row: AdminDeploymentSetting, drafts: Record<string, SettingDraft>): SettingDraft {
   if (Object.prototype.hasOwnProperty.call(drafts, row.key)) return drafts[row.key]!;
+  if (row.kind === "secret") return "";
   if (row.kind === "json") return prettyJson(row.value);
   if (row.kind === "int" && typeof row.value === "number") return row.value;
   if (row.kind === "bool" && typeof row.value === "boolean") return row.value;
@@ -82,7 +93,7 @@ export default function AdminSettingsPage() {
         if (!current) return current;
         return {
           settings: current.settings.map((row) =>
-            row.key === key ? { ...row, value } : row,
+            row.key === key && row.kind !== "secret" ? { ...row, value } : row,
           ),
         };
       });
@@ -384,6 +395,20 @@ export default function AdminSettingsPage() {
                           onChange={(e) => setDraft(row.key, e.target.value)}
                         />
                         {!parsed.ok && (
+                          <div className="table__sub muted">{parsed.message}</div>
+                        )}
+                      </>
+                    ) : row.kind === "secret" ? (
+                      <>
+                        <input
+                          type="password"
+                          className="input input--inline"
+                          value={String(settingInputValue(row, drafts))}
+                          placeholder={displayStub(row.value) || "not configured"}
+                          disabled={locked}
+                          onChange={(e) => setDraft(row.key, e.target.value)}
+                        />
+                        {!parsed.ok && Object.prototype.hasOwnProperty.call(drafts, row.key) && (
                           <div className="table__sub muted">{parsed.message}</div>
                         )}
                       </>

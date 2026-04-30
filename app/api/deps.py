@@ -124,18 +124,28 @@ def get_llm(request: Request) -> LLMClient:
     """FastAPI dep — return the configured :class:`LLMClient`.
 
     Reads :attr:`app.state.llm`, populated by the app factory at boot
-    when ``settings.openrouter_api_key`` is set (and otherwise left
-    as ``None``). Raises :class:`HTTPException` 503 when no client is
-    wired — the absence is a deployment-level misconfiguration (the
-    receipt-OCR / autofill capability is gated by
-    ``settings.llm_ocr_model`` AND requires a usable adapter behind
-    the port).
+    when a static OpenRouter env key or DB decrypt key is available.
+    Raises :class:`HTTPException` 503 when no client is wired, or when
+    the wired client cannot currently resolve an API key.
 
     Tests override via ``app.dependency_overrides[get_llm] = …`` to
     inject :class:`tests._fakes.llm.EchoLLMClient` or a stub.
     """
     llm: LLMClient | None = getattr(request.app.state, "llm", None)
     if llm is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"error": "llm_unavailable"},
+        )
+    configured = getattr(llm, "is_configured", None)
+    try:
+        is_configured = bool(configured()) if callable(configured) else True
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"error": "llm_unavailable"},
+        ) from exc
+    if not is_configured:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail={"error": "llm_unavailable"},

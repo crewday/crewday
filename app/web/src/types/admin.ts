@@ -135,7 +135,7 @@ export interface AdminDeploymentSettingsResponse {
 export interface AdminDeploymentSetting {
   key: string;
   value: string | number | boolean | JsonValue;
-  kind: "bool" | "int" | "string" | "json";
+  kind: "bool" | "int" | "string" | "json" | "secret";
   description: string;
   root_only: boolean;
   updated_at: string;
