@@ -67,9 +67,7 @@ def test_movement_event_creates_restock_task_then_completion_allows_next_loop() 
 
     try:
         with factory() as session:
-            ctx, property_id, item_id, source_task_id = _seed_loop(
-                session, clock=clock
-            )
+            ctx, property_id, item_id, source_task_id = _seed_loop(session, clock=clock)
             session.commit()
 
         with factory() as session:

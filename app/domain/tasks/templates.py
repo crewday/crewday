@@ -586,7 +586,9 @@ def _row_to_view(row: TaskTemplate) -> TaskTemplateView:
         photo_evidence=_narrow_photo_evidence(row.photo_evidence),
         linked_instruction_ids=tuple(row.linked_instruction_ids or []),
         priority=_narrow_priority(row.priority),
-        inventory_consumption_json=_consumption_from_effects(row.inventory_effects_json),
+        inventory_consumption_json=_consumption_from_effects(
+            row.inventory_effects_json
+        ),
         llm_hints_md=row.llm_hints_md,
         created_at=row.created_at,
         deleted_at=row.deleted_at,

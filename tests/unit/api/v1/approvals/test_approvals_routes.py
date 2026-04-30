@@ -206,9 +206,7 @@ class TestListPending:
         resp = client.get("/approvals/", params={"limit": 0})
         assert resp.status_code == 422
 
-    def test_worker_without_read_permission_gets_403(
-        self, owner_ctx: _Persona
-    ) -> None:
+    def test_worker_without_read_permission_gets_403(self, owner_ctx: _Persona) -> None:
         seed_pending(
             owner_ctx.factory,
             workspace_id=owner_ctx.workspace_id,
@@ -290,9 +288,7 @@ class TestGetOne:
         body = resp.json()
         assert body["type"].endswith("/approval_not_found")
 
-    def test_worker_without_read_permission_gets_403(
-        self, owner_ctx: _Persona
-    ) -> None:
+    def test_worker_without_read_permission_gets_403(self, owner_ctx: _Persona) -> None:
         row_id = seed_pending(
             owner_ctx.factory,
             workspace_id=owner_ctx.workspace_id,

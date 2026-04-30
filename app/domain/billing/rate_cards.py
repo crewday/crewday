@@ -290,9 +290,7 @@ class RateCardService:
             organization_id=organization.id,
         )
         matches = [
-            row
-            for row in rows
-            if _covers(row, on=on) and clean_key in row.rates
+            row for row in rows if _covers(row, on=on) and clean_key in row.rates
         ]
         if not matches:
             raise RateCardNotFound(
@@ -381,7 +379,15 @@ class RateCardService:
 def _field_value(row: RateCardRow, key: str) -> object | None:
     if key == "rates_json":
         return dict(row.rates)
-    return getattr(row, key)
+    if key == "label":
+        return row.label
+    if key == "currency":
+        return row.currency
+    if key == "active_from":
+        return row.active_from
+    if key == "active_to":
+        return row.active_to
+    raise KeyError(key)
 
 
 def _external_field(key: str) -> str:

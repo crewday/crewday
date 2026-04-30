@@ -276,9 +276,7 @@ def get_area(
     area_id: str,
     include_deleted: bool = False,
 ) -> AreaView:
-    row = _load_area_row(
-        session, ctx, area_id=area_id, include_deleted=include_deleted
-    )
+    row = _load_area_row(session, ctx, area_id=area_id, include_deleted=include_deleted)
     return _row_to_view(row)
 
 

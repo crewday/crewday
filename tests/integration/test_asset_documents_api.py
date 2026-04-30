@@ -350,10 +350,7 @@ def test_worker_cannot_delete_document(db_session: Session) -> None:
     assert get_denied.status_code == 403
     assert get_denied.json()["detail"]["action_key"] == "assets.manage_documents"
     assert extraction_denied.status_code == 403
-    assert (
-        extraction_denied.json()["detail"]["action_key"]
-        == "assets.manage_documents"
-    )
+    assert extraction_denied.json()["detail"]["action_key"] == "assets.manage_documents"
     assert page_denied.status_code == 403
     assert page_denied.json()["detail"]["action_key"] == "assets.manage_documents"
     assert retry_denied.status_code == 403

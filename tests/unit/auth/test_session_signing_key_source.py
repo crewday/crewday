@@ -65,9 +65,7 @@ def db_session(engine: Engine) -> Iterator[Session]:
         yield session
 
 
-def test_falls_back_to_root_key_subkey(
-    db_session: Session, settings: Settings
-) -> None:
+def test_falls_back_to_root_key_subkey(db_session: Session, settings: Settings) -> None:
     key = SessionSigningKeySource(db_session, settings=settings).current()
 
     assert key == derive_subkey(settings.root_key, purpose="session-cookie")
@@ -93,8 +91,7 @@ def test_reads_latest_session_signing_key_envelope(
     )
 
     assert (
-        SessionSigningKeySource(db_session, settings=settings).current()
-        == second_key
+        SessionSigningKeySource(db_session, settings=settings).current() == second_key
     )
 
 
@@ -104,7 +101,7 @@ def test_missing_root_key_fallback_fails_cleanly(db_session: Session) -> None:
         root_key=None,
     )
 
-    with pytest.raises(KeyDerivationError, match="settings.root_key is not set"):
+    with pytest.raises(KeyDerivationError, match=r"settings\.root_key is not set"):
         SessionSigningKeySource(db_session, settings=settings).current()
 
 
@@ -126,6 +123,4 @@ def test_missing_root_key_row_backed_fails_cleanly(
         KeyDerivationError,
         match="cannot read the row-backed session signing key",
     ):
-        SessionSigningKeySource(
-            db_session, settings=settings_without_root
-        ).current()
+        SessionSigningKeySource(db_session, settings=settings_without_root).current()

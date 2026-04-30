@@ -216,9 +216,7 @@ class VendorInvoiceService:
         )
         return [_to_view(row) for row in rows]
 
-    def get(
-        self, repo: VendorInvoiceRepository, invoice_id: str
-    ) -> VendorInvoiceView:
+    def get(self, repo: VendorInvoiceRepository, invoice_id: str) -> VendorInvoiceView:
         return _to_view(self._get(repo, invoice_id))
 
     def attach_pdf(

@@ -224,9 +224,7 @@ def test_verify_rejects_malformed_signature(
     assert not signer.verify(b"payload", "f" * 63, purpose=_PURPOSE)
 
 
-def test_session_factory_scope_is_closed(
-    engine: Engine, settings: Settings
-) -> None:
+def test_session_factory_scope_is_closed(engine: Engine, settings: Settings) -> None:
     factory = sessionmaker(bind=engine, expire_on_commit=False, class_=Session)
     events: list[str] = []
 

@@ -21,6 +21,8 @@ __all__ = ["register"]
 
 
 _REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
+
+
 def _load_app_admin() -> Any:
     try:
         from app.admin import init as admin_init_mod

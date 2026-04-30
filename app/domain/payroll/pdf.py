@@ -247,7 +247,7 @@ def _normalise_locale(locale: str) -> str:
     candidate = locale or "en-US"
     try:
         parsed = Locale.parse(candidate, sep="-")
-    except (UnknownLocaleError, ValueError):
+    except UnknownLocaleError, ValueError:
         return "en_US"
     return str(parsed)
 

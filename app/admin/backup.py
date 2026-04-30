@@ -397,7 +397,9 @@ def _row_counts(session: Session) -> dict[str, int]:
                 continue
             try:
                 counts[table.name] = int(
-                    session.execute(select(func.count()).select_from(table)).scalar_one()
+                    session.execute(
+                        select(func.count()).select_from(table)
+                    ).scalar_one()
                 )
             except SQLAlchemyError:
                 continue

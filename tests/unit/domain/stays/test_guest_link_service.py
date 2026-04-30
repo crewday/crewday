@@ -772,9 +772,7 @@ class TestResolveLink:
         session_guest: Session,
         frozen_clock: FrozenClock,
     ) -> None:
-        ws, prop, stay, token = self._setup(
-            session_guest, frozen_clock, slug="r-rot"
-        )
+        ws, prop, stay, token = self._setup(session_guest, frozen_clock, slug="r-rot")
         rotate_hmac_key(
             session_guest,
             "guest-link",

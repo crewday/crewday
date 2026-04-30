@@ -64,8 +64,7 @@ class SessionSigningKeySource:
             row = self._session.scalars(
                 select(SecretEnvelope)
                 .where(
-                    SecretEnvelope.owner_entity_kind
-                    == SESSION_SIGNING_KEY_OWNER_KIND,
+                    SecretEnvelope.owner_entity_kind == SESSION_SIGNING_KEY_OWNER_KIND,
                     SecretEnvelope.owner_entity_id == SESSION_SIGNING_KEY_OWNER_ID,
                     SecretEnvelope.purpose == SESSION_SIGNING_KEY_PURPOSE,
                 )

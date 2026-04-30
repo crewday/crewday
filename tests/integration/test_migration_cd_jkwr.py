@@ -108,9 +108,7 @@ class TestInventoryItemsMigration:
             assert cols["sku"]["nullable"] is False
 
             with Session(engine) as session:
-                skus = session.scalars(
-                    select(Item.sku).order_by(Item.id)
-                ).all()
+                skus = session.scalars(select(Item.sku).order_by(Item.id)).all()
             assert len(skus) == len(set(skus))
             assert all(skus)
             assert skus[0] == "DUP"

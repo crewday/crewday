@@ -861,20 +861,26 @@ class WorkspaceContextMiddleware(BaseHTTPMiddleware):
                 skip_path=False,
                 outcome=outcome,
             )
-            response = _not_found()
-            response.headers[CORRELATION_ID_HEADER] = correlation_id
+            not_found_response: Response = _not_found()
+            not_found_response.headers[CORRELATION_ID_HEADER] = correlation_id
             if _is_scoped_api_path(path):
                 setattr(request.state, ACTOR_STATE_ATTR, actor)
-                setattr(request.state, WORKSPACE_REJECTION_STATE_ATTR, response)
-                downstream = await call_next(request)
-                if (
-                    getattr(request.state, WORKSPACE_REJECTION_STATE_ATTR, None)
-                    is response
-                ):
-                    return response
+                setattr(
+                    request.state,
+                    WORKSPACE_REJECTION_STATE_ATTR,
+                    not_found_response,
+                )
+                downstream: Response = await call_next(request)
+                workspace_rejection: object = getattr(
+                    request.state,
+                    WORKSPACE_REJECTION_STATE_ATTR,
+                    None,
+                )
+                if workspace_rejection is not_found_response:
+                    return not_found_response
                 downstream.headers[CORRELATION_ID_HEADER] = correlation_id
                 return downstream
-            return response
+            return not_found_response
 
         _log_tenancy_event(
             slug=ctx.workspace_slug,

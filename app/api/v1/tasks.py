@@ -1018,7 +1018,7 @@ def _compute_time_window_local(
         return None
     try:
         zone = ZoneInfo(property_timezone)
-    except (ZoneInfoNotFoundError, ValueError):
+    except ZoneInfoNotFoundError, ValueError:
         return None
     anchor = view.scheduled_for_utc
     if anchor.tzinfo is None:
@@ -1102,7 +1102,9 @@ def _detail_property_color(property_id: str) -> Literal["moss", "sky", "rust"]:
     return colors[sum(property_id.encode("utf-8")) % len(colors)]
 
 
-def _detail_property_kind(value: str) -> Literal["str", "vacation", "residence", "mixed"]:
+def _detail_property_kind(
+    value: str,
+) -> Literal["str", "vacation", "residence", "mixed"]:
     """Narrow the DB property kind enum for the task-detail payload."""
     if value == "str":
         return "str"
@@ -1153,9 +1155,7 @@ def _instruction_payloads(
             Instruction.id.in_(instruction_ids),
         )
     ).all()
-    by_id = {
-        instruction.id: (instruction, version) for instruction, version in rows
-    }
+    by_id = {instruction.id: (instruction, version) for instruction, version in rows}
     payloads: list[TaskDetailInstructionPayload] = []
     for instruction_id in instruction_ids:
         pair = by_id.get(instruction_id)

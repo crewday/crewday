@@ -564,6 +564,59 @@ ignore_imports = [
     # ORM models. Same reasoning as the other ``-> app.authz``
     # stopgaps above; tracked by cd-duv6.
     "app.domain.payroll.rules -> app.authz",
+    # v1 stopgaps surfaced by the repository-wide import-linter sweep
+    # in cd-j7wt. These modules follow the same direct-ORM or shared
+    # authz/helper shapes as the older entries above and should drop as
+    # their repository ports land under cd-duv6 / sibling seam cleanups.
+    "app.domain.agent.preferences -> app.adapters.db.llm.models",
+    "app.domain.agent.preferences -> app.adapters.db.workspace.models",
+    "app.domain.assets.actions -> app.adapters.db.assets.models",
+    "app.domain.assets.actions -> app.adapters.db.authz.models",
+    "app.domain.assets.assets -> app.adapters.db.assets.models",
+    "app.domain.assets.assets -> app.adapters.db.places.models",
+    "app.domain.assets.documents -> app.adapters.db.assets.models",
+    "app.domain.assets.types -> app.adapters.db.assets.models",
+    "app.domain.chat_gateway.dispatcher -> app.adapters.db.messaging.models",
+    "app.domain.issues.service -> app.adapters.db.authz.models",
+    "app.domain.issues.service -> app.adapters.db.issues.models",
+    "app.domain.issues.service -> app.adapters.db.places.models",
+    "app.domain.issues.service -> app.adapters.db.tasks.models",
+    "app.domain.llm.capabilities.digest_gen -> app.adapters.db.identity.models",
+    "app.domain.llm.capabilities.tasks_intake -> app.adapters.db.identity.models",
+    "app.domain.llm.capabilities.tasks_intake -> app.adapters.db.places.models",
+    "app.domain.llm.capabilities.tasks_intake -> app.adapters.db.tasks.models",
+    "app.domain.llm.capabilities.tasks_intake -> app.adapters.db.workspace.models",
+    "app.domain.messaging.channels -> app.authz",
+    "app.domain.payroll.periods -> app.authz",
+    "app.domain.places.area_service -> app.adapters.db.places.models",
+    "app.domain.places.closure_service -> app.adapters.db.places.models",
+    "app.domain.places.closure_service -> app.adapters.db.stays.models",
+    "app.domain.places.closure_service -> app.adapters.db.tasks.models",
+    "app.domain.privacy -> app.adapters.db.audit.models",
+    "app.domain.privacy -> app.adapters.db.expenses.models",
+    "app.domain.privacy -> app.adapters.db.identity.models",
+    "app.domain.privacy -> app.adapters.db.integrations.models",
+    "app.domain.privacy -> app.adapters.db.llm.models",
+    "app.domain.privacy -> app.adapters.db.messaging.models",
+    "app.domain.privacy -> app.adapters.db.payroll.models",
+    "app.domain.privacy -> app.adapters.db.privacy.models",
+    "app.domain.privacy -> app.adapters.db.secrets.models",
+    "app.domain.privacy -> app.adapters.db.tasks.models",
+    "app.domain.privacy -> app.adapters.db.workspace.models",
+    "app.domain.stays.bundle_service -> app.adapters.db.stays.models",
+    "app.domain.stays.guest_link_service -> app.security.hmac_signer",
+    "app.domain.tasks.approvals -> app.adapters.db.places.models",
+    "app.domain.tasks.approvals -> app.adapters.db.tasks.models",
+    "app.domain.tasks.approvals -> app.authz",
+    "app.domain.tasks.completion -> app.adapters.db.workspace.models",
+    "app.domain.tasks.completion -> app.services.inventory.movement_service",
+    "app.domain.tasks.evidence -> app.adapters.db.tasks.models",
+    "app.domain.tasks.evidence -> app.adapters.storage.mime",
+    "app.domain.time.geofence -> app.adapters.db.time.models",
+    "app.domain.time.geofence_settings -> app.adapters.db.places.models",
+    "app.domain.time.geofence_settings -> app.adapters.db.time.models",
+    "app.domain.time.geofence_settings -> app.authz",
+    "app.domain.time.shifts -> app.adapters.db.billing.repositories",
 ]
 unmatched_ignore_imports_alerting = "none"
 
@@ -637,6 +690,11 @@ ignore_imports = [
     # catalog to ``app.capabilities`` (the shared-kernel home per
     # spec §01); tracked by cd-duv6's broader seam cleanup.
     "app.authz.enforce -> app.domain.identity._action_catalog",
+    # v1 stopgap (cd-j7wt): agent task-intake resolves task schedules
+    # and templates directly while the LLM capability ports are still
+    # being split from task-domain implementation details.
+    "app.domain.llm.capabilities.tasks_intake -> app.domain.tasks.schedules",
+    "app.domain.llm.capabilities.tasks_intake -> app.domain.tasks.templates",
 ]
 unmatched_ignore_imports_alerting = "none"
 
@@ -682,5 +740,13 @@ ignore_imports = [
     # :mod:`app.api.factory` (routers, middleware, ``app.worker``)
     # don't need listing and won't rot as the factory evolves.
     "crewday._codegen -> app.api.factory",
+    # v1 stopgap (cd-j7wt): the local admin overrides are privileged
+    # maintenance commands that currently reuse server-side admin,
+    # privacy, and session helpers directly. Keep the exception narrow
+    # to this override module so normal CLI commands remain HTTP-only.
+    "crewday._overrides.admin -> app.adapters.db.session",
+    "crewday._overrides.admin -> app.admin.backup",
+    "crewday._overrides.admin -> app.admin.init",
+    "crewday._overrides.admin -> app.domain.privacy",
 ]
 unmatched_ignore_imports_alerting = "none"

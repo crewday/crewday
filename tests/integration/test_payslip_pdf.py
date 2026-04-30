@@ -147,9 +147,7 @@ def _canonical_payslip(
         issued_at=_NOW,
         payout_snapshot_json={
             "schema_version": 1,
-            "destinations": [
-                {"label": "Payout", "display_stub": "Bank ending 1234"}
-            ],
+            "destinations": [{"label": "Payout", "display_stub": "Bank ending 1234"}],
             "reimbursements": [],
         },
         created_at=_NOW,

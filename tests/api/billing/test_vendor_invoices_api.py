@@ -262,9 +262,12 @@ def test_duplicate_invoice_number_surfaces_clear_error(
         raise_server_exceptions=False,
     )
 
-    assert client.post(
-        "/billing/vendor-invoices", json=_create_payload(vendor_org_id)
-    ).status_code == 201
+    assert (
+        client.post(
+            "/billing/vendor-invoices", json=_create_payload(vendor_org_id)
+        ).status_code
+        == 201
+    )
     duplicate = client.post(
         "/billing/vendor-invoices", json=_create_payload(vendor_org_id)
     )

@@ -91,10 +91,14 @@ def test_settings_patch_updates_known_keys_and_audits(
     assert body["defaults"]["tasks.checklist_required"] is True
 
     with factory() as session:
-        audit = session.query(AuditLog).filter_by(
-            workspace_id=workspace_id,
-            action="workspace.settings_updated",
-        ).one()
+        audit = (
+            session.query(AuditLog)
+            .filter_by(
+                workspace_id=workspace_id,
+                action="workspace.settings_updated",
+            )
+            .one()
+        )
         assert audit.diff["after"] == {
             "evidence.policy": "forbid",
             "tasks.checklist_required": True,

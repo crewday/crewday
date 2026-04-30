@@ -101,9 +101,7 @@ def test_rotate_writes_active_row_and_clears_sessions(
     assert SessionSigningKeySource(db_session, settings=settings).current() == new_key
 
 
-def test_rotate_does_not_commit(
-    db_session: Session, settings: Settings
-) -> None:
+def test_rotate_does_not_commit(db_session: Session, settings: Settings) -> None:
     committed = False
 
     @event.listens_for(db_session, "before_commit")
@@ -186,6 +184,5 @@ def test_delete_failure_rolls_back_envelope(
     rows = _session_key_rows(db_session)
     assert len(rows) == 1
     assert (
-        SessionSigningKeySource(db_session, settings=settings).current()
-        == original_key
+        SessionSigningKeySource(db_session, settings=settings).current() == original_key
     )

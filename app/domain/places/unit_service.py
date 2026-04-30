@@ -501,9 +501,7 @@ def create_unit(
     resolved_clock = clock if clock is not None else SystemClock()
     now = resolved_clock.now()
 
-    property_kind = _property_kind_in_workspace(
-        session, ctx, property_id=property_id
-    )
+    property_kind = _property_kind_in_workspace(session, ctx, property_id=property_id)
     if _name_taken(session, property_id=property_id, name=body.name):
         raise UnitNameTaken(
             f"a unit named {body.name!r} already exists on property {property_id!r}"
