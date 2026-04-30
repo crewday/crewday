@@ -225,7 +225,7 @@ describe("INVALIDATIONS — per-kind behaviour", () => {
     );
   });
 
-  it("reservation.upserted invalidates stays + dashboard + my-schedule", () => {
+  it("reservation.upserted invalidates client portfolio + properties + stays + dashboard + my-schedule", () => {
     const qc = makeClient();
     const spy = vi.spyOn(qc, "invalidateQueries");
     INVALIDATIONS["reservation.upserted"](
@@ -238,11 +238,11 @@ describe("INVALIDATIONS — per-kind behaviour", () => {
     );
     const called = spy.mock.calls.map((c) => c[0]?.queryKey);
     expect(called).toEqual(
-      expect.arrayContaining([qk.stays(), qk.dashboard(), ["my-schedule"]]),
+      expect.arrayContaining([qk.clientPortfolio(), qk.properties(), qk.stays(), qk.dashboard(), ["my-schedule"]]),
     );
   });
 
-  it("property.closure.created invalidates stays + closure timeline + calendars", () => {
+  it("property.closure.created invalidates client portfolio + properties + stays + closure timeline + calendars", () => {
     const qc = makeClient();
     const spy = vi.spyOn(qc, "invalidateQueries");
     INVALIDATIONS["property.closure.created"](
@@ -256,6 +256,8 @@ describe("INVALIDATIONS — per-kind behaviour", () => {
     const called = spy.mock.calls.map((c) => c[0]?.queryKey);
     expect(called).toEqual(
       expect.arrayContaining([
+        qk.clientPortfolio(),
+        qk.properties(),
         qk.stays(),
         qk.propertyClosures("prop_1"),
         ["scheduler-calendar"],
@@ -264,7 +266,7 @@ describe("INVALIDATIONS — per-kind behaviour", () => {
     );
   });
 
-  it("property.closure.updated invalidates stays + closure timeline + calendars", () => {
+  it("property.closure.updated invalidates client portfolio + properties + stays + closure timeline + calendars", () => {
     const qc = makeClient();
     const spy = vi.spyOn(qc, "invalidateQueries");
     INVALIDATIONS["property.closure.updated"](
@@ -278,6 +280,8 @@ describe("INVALIDATIONS — per-kind behaviour", () => {
     const called = spy.mock.calls.map((c) => c[0]?.queryKey);
     expect(called).toEqual(
       expect.arrayContaining([
+        qk.clientPortfolio(),
+        qk.properties(),
         qk.stays(),
         qk.propertyClosures("prop_1"),
         ["scheduler-calendar"],
@@ -286,7 +290,7 @@ describe("INVALIDATIONS — per-kind behaviour", () => {
     );
   });
 
-  it("property.workspace.changed invalidates property detail + sharing", () => {
+  it("property.workspace.changed invalidates client portfolio + property detail + sharing", () => {
     const qc = makeClient();
     const spy = vi.spyOn(qc, "invalidateQueries");
     INVALIDATIONS["property.workspace.changed"](
@@ -300,6 +304,7 @@ describe("INVALIDATIONS — per-kind behaviour", () => {
     const called = spy.mock.calls.map((c) => c[0]?.queryKey);
     expect(called).toEqual(
       expect.arrayContaining([
+        qk.clientPortfolio(),
         qk.properties(),
         qk.property("prop_1"),
         qk.propertyWorkspaces("prop_1"),

@@ -54,6 +54,7 @@ def test_portal_endpoints_return_redacted_paginated_data_and_audit(
         {
             "id": data["prop_a"],
             "organization_id": data["org_a"],
+            "organization_name": "A Client",
             "name": "Alpha Villa",
             "kind": "vacation",
             "address": "Alpha Villa Road",

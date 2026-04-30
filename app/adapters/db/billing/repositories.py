@@ -6,7 +6,7 @@ from collections.abc import Mapping, Sequence
 from datetime import UTC, date, datetime
 from decimal import Decimal
 
-from sqlalchemy import false, func, or_, select, update
+from sqlalchemy import and_, false, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import InstrumentedAttribute, Session
 from sqlalchemy.sql import ColumnElement
@@ -380,7 +380,15 @@ class SqlAlchemyClientPortalRepository(ClientPortalRepository):
         if scope.property_ids:
             clauses.append(Property.id.in_(scope.property_ids))
         stmt = (
-            select(Property)
+            select(Property, Organization.display_name)
+            .outerjoin(
+                Organization,
+                and_(
+                    Organization.id == Property.client_org_id,
+                    Organization.workspace_id == workspace_id,
+                    Organization.archived_at.is_(None),
+                ),
+            )
             .join(PropertyWorkspace, PropertyWorkspace.property_id == Property.id)
             .where(
                 PropertyWorkspace.workspace_id == workspace_id,
@@ -391,11 +399,12 @@ class SqlAlchemyClientPortalRepository(ClientPortalRepository):
             )
             .order_by(Property.name.asc(), Property.id.asc())
         )
-        rows = self._session.scalars(stmt).all()
+        rows = self._session.execute(stmt).all()
         return [
             ClientPortalPropertyRow(
                 id=row.id,
                 organization_id=row.client_org_id or "",
+                organization_name=organization_name,
                 name=row.name or row.address,
                 kind=row.kind,
                 address=row.address,
@@ -403,7 +412,7 @@ class SqlAlchemyClientPortalRepository(ClientPortalRepository):
                 timezone=row.timezone,
                 default_currency=row.default_currency,
             )
-            for row in rows
+            for row, organization_name in rows
         ]
 
     def list_accruals(

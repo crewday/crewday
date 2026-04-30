@@ -477,6 +477,8 @@ export const INVALIDATIONS: Record<EventKind, InvalidationHandler> = {
   },
 
   "reservation.upserted": (_event, qc) => {
+    invalidate(qc, qk.clientPortfolio());
+    invalidate(qc, qk.properties());
     invalidate(qc, qk.stays());
     invalidate(qc, qk.dashboard());
     invalidate(qc, ["my-schedule"]);
@@ -484,6 +486,8 @@ export const INVALIDATIONS: Record<EventKind, InvalidationHandler> = {
 
   "property.closure.created": (event, qc) => {
     const payload = event.data as unknown as PropertyClosurePayload;
+    invalidate(qc, qk.clientPortfolio());
+    invalidate(qc, qk.properties());
     invalidate(qc, qk.stays());
     invalidate(qc, qk.propertyClosures(payload.property_id));
     invalidate(qc, ["scheduler-calendar"]);
@@ -492,6 +496,8 @@ export const INVALIDATIONS: Record<EventKind, InvalidationHandler> = {
 
   "property.closure.updated": (event, qc) => {
     const payload = event.data as unknown as PropertyClosurePayload;
+    invalidate(qc, qk.clientPortfolio());
+    invalidate(qc, qk.properties());
     invalidate(qc, qk.stays());
     invalidate(qc, qk.propertyClosures(payload.property_id));
     invalidate(qc, ["scheduler-calendar"]);
@@ -500,6 +506,7 @@ export const INVALIDATIONS: Record<EventKind, InvalidationHandler> = {
 
   "property.workspace.changed": (event, qc) => {
     const payload = event.data as unknown as { property_id: string; target_workspace_id: string };
+    invalidate(qc, qk.clientPortfolio());
     invalidate(qc, qk.properties());
     invalidate(qc, qk.property(payload.property_id));
     invalidate(qc, qk.propertyWorkspaces(payload.property_id));

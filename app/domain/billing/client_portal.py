@@ -48,6 +48,7 @@ class ClientPortalScope:
 class ClientPortalPropertyRow:
     id: str
     organization_id: str
+    organization_name: str | None
     name: str
     kind: str
     address: str

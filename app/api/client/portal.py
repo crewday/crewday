@@ -43,6 +43,7 @@ _CACHE_CONTROL = "private, max-age=30"
 class ClientPortalPropertyResponse(BaseModel):
     id: str
     organization_id: str
+    organization_name: str | None
     name: str
     kind: str
     address: str
@@ -55,6 +56,7 @@ class ClientPortalPropertyResponse(BaseModel):
         return cls(
             id=row.id,
             organization_id=row.organization_id,
+            organization_name=row.organization_name,
             name=row.name,
             kind=row.kind,
             address=row.address,
