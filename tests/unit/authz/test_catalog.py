@@ -76,9 +76,10 @@ class TestShape:
         anonymous token-gated. cd-z2py added ``tasks.review.decide``
         for manager decisions on completed-task approval rows. cd-ryxp
         added work-order actions, cd-5b35 added asset action /
-        document permissions, and cd-14m3 added ``inventory.stocktake``.
+        document permissions, cd-14m3 added ``inventory.stocktake``, and
+        cd-om4v added ``vendor_invoices.mark_paid``.
         """
-        assert len(ACTION_CATALOG) == 101
+        assert len(ACTION_CATALOG) == 102
 
     def test_entries_are_action_spec_instances(self) -> None:
         for key, spec in ACTION_CATALOG.items():
@@ -183,6 +184,7 @@ class TestRootFlags:
             "organizations.edit_pay_destination",
             "property_workspace.revoke",
             "vendor_invoices.approve",
+            "vendor_invoices.mark_paid",
             "deployment.view",
             "deployment.workspaces.archive",
             "deployment.settings.edit",
@@ -190,7 +192,7 @@ class TestRootFlags:
         ],
     )
     def test_known_root_protected_deny(self, key: str) -> None:
-        """These are the 21 ✅ entries from §05 "Rule-driven actions"."""
+        """These are the 22 ✅ entries from §05 "Rule-driven actions"."""
         spec = ACTION_CATALOG[key]
         assert spec.root_protected_deny is True, (
             f"{key!r}: expected root_protected_deny=True per §05"

@@ -358,6 +358,17 @@ class VendorInvoice(Base):
     currency: Mapped[str] = mapped_column(String, nullable=False)
     status: Mapped[str] = mapped_column(String, nullable=False)
     pdf_blob_hash: Mapped[str | None] = mapped_column(String, nullable=True)
+    approved_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    paid_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    payment_method: Mapped[str | None] = mapped_column(String, nullable=True)
+    proof_blob_hash: Mapped[str | None] = mapped_column(String, nullable=True)
+    disputed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     notes_md: Mapped[str | None] = mapped_column(String, nullable=True)
 
     __table_args__ = (

@@ -38,6 +38,7 @@ from app.events.types import (
     TaskEvidenceAdded,
     TaskOverdue,
     TaskUpdated,
+    VendorInvoicePaid,
     WorkOrderCompleted,
 )
 
@@ -74,6 +75,7 @@ __all__ = [
     "TaskEvidenceAdded",
     "TaskOverdue",
     "TaskUpdated",
+    "VendorInvoicePaid",
     "WorkOrderCompleted",
     "bus",
     "get_event_type",

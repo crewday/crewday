@@ -504,7 +504,7 @@ approval). The **approval step itself** is the money-routing
 decision, and accordingly `vendor_invoice.approve` is on the
 unconditionally approval-gated list (§11) — an agent can submit,
 attach, and draft the invoice, but cannot commit payment routing.
-`vendor_invoice.mark_paid` (the `approved → paid` transition) is
+`vendor_invoices.mark_paid` (the `approved → paid` transition) is
 also unconditionally gated.
 
 ### Approval flow

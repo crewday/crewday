@@ -96,6 +96,7 @@ __all__ = [
     "TaskUnassigned",
     "TaskUpdated",
     "UserAgentSettingsChanged",
+    "VendorInvoicePaid",
     "WorkOrderCompleted",
     "WorkspaceChanged",
 ]
@@ -1070,6 +1071,31 @@ class PayPeriodPaid(Event):
     allowed_roles: ClassVar[tuple[EventRole, ...]] = ("manager",)
 
     pay_period_id: str
+
+
+@register
+class VendorInvoicePaid(Event):
+    """A vendor invoice has been marked paid.
+
+    Manager-only: the event carries payable metadata and is intended for
+    accounts-payable invalidation and future reconciliation. Client-visible
+    proof flows through REST routes with normal row authorization.
+    """
+
+    name: ClassVar[str] = "vendor_invoice.paid"
+    allowed_roles: ClassVar[tuple[EventRole, ...]] = ("manager",)
+
+    vendor_invoice_id: str
+    vendor_org_id: str
+    total_cents: int
+    currency: str
+    paid_at: datetime
+    payment_method: str
+
+    @field_validator("paid_at")
+    @classmethod
+    def _paid_at_is_utc(cls, value: datetime) -> datetime:
+        return _require_aware_utc(value)
 
 
 @register

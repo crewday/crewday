@@ -549,6 +549,7 @@ configuration.
 | `vendor_invoices.submit`                | `workspace`, `property`        | `owners, managers`            | —  | §22 |
 | `vendor_invoices.approve`               | `workspace`, `property`        | `owners, managers`            | ✅ | §22 |
 | `vendor_invoices.approve_as_client`     | `workspace`, `property`        | `all_clients`                 | —  | §22 |
+| `vendor_invoices.mark_paid`             | `workspace`, `property`        | `owners, managers`            | ✅ | §22 |
 | `vendor_invoices.upload_proof`          | `workspace`, `property`        | `owners, managers, all_clients` | — | §22 |
 | `vendor_invoices.remove_proof`          | `workspace`, `property`        | `owners, managers`            | —  | §22 |
 | `property_workspace_invite.create`      | `workspace`, `property`        | `owners, managers`            | —  | §22 |

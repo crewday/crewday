@@ -14,6 +14,7 @@ from fastapi import APIRouter
 from app.api.billing.organizations import build_organizations_router
 from app.api.billing.quotes import build_quotes_public_router, build_quotes_router
 from app.api.billing.rate_cards import build_rate_cards_router
+from app.api.billing.vendor_invoices import build_vendor_invoices_router
 from app.api.billing.work_orders import build_work_orders_router
 
 
@@ -23,6 +24,7 @@ def build_billing_router() -> APIRouter:
     router.include_router(build_rate_cards_router())
     router.include_router(build_work_orders_router())
     router.include_router(build_quotes_router())
+    router.include_router(build_vendor_invoices_router())
     return router
 
 

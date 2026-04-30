@@ -355,7 +355,7 @@
         "type": "object"
       },
       "AdminMeResponse": {
-        "description": "Body of ``GET /admin/api/v1/me``.\n\nMirrors :interface:`AdminMe` in ``app/web/src/types/admin.ts``:\n\n* ``user_id`` \u2014 the caller's :class:`User.id`. For a delegated /\n  agent token this is the **delegating** user, mirroring\n  :attr:`DeploymentContext.user_id`.\n* ``display_name`` \u2014 :attr:`User.display_name`.\n* ``email`` \u2014 :attr:`User.email` (display value, not the\n  canonicalised lookup form).\n* ``is_owner`` \u2014 ``True`` iff the caller belongs to the\n  ``owners@deployment`` permission group. The deployment owners\n  group does not exist yet (deferred to cd-zkr); v1 always emits\n  ``False`` until the group lands. The SPA renders the\n  \"Deployment owner\" / \"Deployment admin\" footer label off this\n  flag.\n* ``capabilities`` \u2014 flat ``{scope_key: True}`` map, one entry\n  per ``deployment.*`` scope key the caller currently holds. A\n  session / delegated principal carries the full\n  :data:`DEPLOYMENT_SCOPE_CATALOG`; a scoped token carries the\n  subset its row pins. The SPA reads individual flags off this\n  map to gate \"Edit settings\" buttons, etc.",
+        "description": "Body of ``GET /admin/api/v1/me``.\n\nMirrors :interface:`AdminMe` in ``app/web/src/types/admin.ts``:\n\n* ``user_id`` \u2014 the caller's :class:`User.id`. For a delegated /\n  agent token this is the **delegating** user, mirroring\n  :attr:`DeploymentContext.user_id`.\n* ``display_name`` \u2014 :attr:`User.display_name`.\n* ``email`` \u2014 :attr:`User.email` (display value, not the\n  canonicalised lookup form).\n* ``is_owner`` \u2014 ``True`` iff the caller belongs to the\n  ``owners@deployment`` group. The SPA renders the\n  \"Deployment owner\" / \"Deployment admin\" footer label off this\n  flag.\n* ``capabilities`` \u2014 flat ``{scope_key: True}`` map, one entry\n  per ``deployment.*`` scope key the caller currently holds. A\n  session / delegated principal carries the full\n  :data:`DEPLOYMENT_SCOPE_CATALOG`; a scoped token carries the\n  subset its row pins. The SPA reads individual flags off this\n  map to gate \"Edit settings\" buttons, etc.",
         "properties": {
           "capabilities": {
             "additionalProperties": {
@@ -406,7 +406,7 @@
         "type": "object"
       },
       "AdminTeamMemberResponse": {
-        "description": "One entry of ``GET /admin/api/v1/me/admins``.\n\nMirrors :interface:`AdminTeamMember` in\n``app/web/src/types/admin.ts``:\n\n* ``id`` \u2014 the :class:`RoleGrant.id` (the row primary key the SPA\n  passes back to ``POST /admin/api/v1/admins/{id}/revoke`` once\n  that route lands; until then the field is informational).\n* ``user_id`` \u2014 the admin's :class:`User.id`.\n* ``display_name`` \u2014 :attr:`User.display_name`.\n* ``email`` \u2014 :attr:`User.email`.\n* ``is_owner`` \u2014 ``True`` iff the user belongs to the deployment\n  ``owners`` group. v1 always emits ``False`` (the deployment\n  owners group lands with cd-zkr).\n* ``granted_at`` \u2014 ISO-8601 UTC timestamp of the grant. Read off\n  :attr:`RoleGrant.created_at`.\n* ``granted_by`` \u2014 :class:`User.id` of the actor that planted\n  the grant; ``\"system\"`` when the column is NULL (the\n  bootstrap row seeded at deployment creation has no prior\n  actor). The SPA renders this verbatim.",
+        "description": "One entry of ``GET /admin/api/v1/me/admins``.\n\nMirrors :interface:`AdminTeamMember` in\n``app/web/src/types/admin.ts``:\n\n* ``id`` \u2014 the :class:`RoleGrant.id` (the row primary key the SPA\n  passes back to ``POST /admin/api/v1/admins/{id}/revoke`` once\n  that route lands; until then the field is informational).\n* ``user_id`` \u2014 the admin's :class:`User.id`.\n* ``display_name`` \u2014 :attr:`User.display_name`.\n* ``email`` \u2014 :attr:`User.email`.\n* ``is_owner`` \u2014 ``True`` iff the user belongs to the deployment\n  ``owners`` group.\n* ``granted_at`` \u2014 ISO-8601 UTC timestamp of the grant. Read off\n  :attr:`RoleGrant.created_at`.\n* ``granted_by`` \u2014 :class:`User.id` of the actor that planted\n  the grant; ``\"system\"`` when the column is NULL (the\n  bootstrap row seeded at deployment creation has no prior\n  actor). The SPA renders this verbatim.",
         "properties": {
           "display_name": {
             "title": "Display Name",
@@ -450,7 +450,7 @@
         "type": "object"
       },
       "AdminTeamResponse": {
-        "description": "Body of ``GET /admin/api/v1/me/admins``.\n\nThe SPA's :file:`AdminsPage.tsx` consumes\n:interface:`AdminTeamMember[]` directly today; the wrapper\nenvelope here adds a ``groups`` field reserved for the\ndeployment owners + managers groups (\u00a712 \"Admin team\"). The\ngroups payload is empty until cd-zkr lands the deployment-scope\npermission groups; consumers handling ``groups=[]`` today stay\nforward-compatible without a shape break when the field starts\npopulating.",
+        "description": "Body of ``GET /admin/api/v1/me/admins``.\n\nThe SPA's :file:`AdminsPage.tsx` consumes\n:interface:`AdminTeamMember[]` directly today; the wrapper\nenvelope here keeps the legacy ``groups`` field. The populated\ndeployment owners + managers rosters live on\n``GET /admin/api/v1/admins/groups``.",
         "properties": {
           "admins": {
             "items": {
@@ -4138,7 +4138,7 @@
         "type": "object"
       },
       "AvailableWorkspaceResponse": {
-        "description": "One entry of :attr:`AuthMeResponse.available_workspaces`.\n\n``grant_role`` is the caller's highest-privilege surface grant on\nthis workspace. ``binding_org_id`` and ``source`` are carried for\ntype-parity with the SPA contract; v1 always emits\n``source='workspace_grant'`` and ``binding_org_id=None`` (the org\nbinding and non-workspace-scoped grants land in follow-ups).",
+        "description": "One entry of :attr:`AuthMeResponse.available_workspaces`.\n\n``grant_role`` is the caller's highest-privilege surface grant on\nthis workspace. ``binding_org_id`` carries the selected grant's\nclient organization binding when present; ``source`` is retained\nfor type-parity with the SPA contract.",
         "properties": {
           "binding_org_id": {
             "anyOf": [
@@ -4780,6 +4780,388 @@
           "text"
         ],
         "title": "ChecklistTemplateItem",
+        "type": "object"
+      },
+      "ClientPortalBillableHoursPage": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/ClientPortalBillableHoursResponse"
+            },
+            "title": "Data",
+            "type": "array"
+          },
+          "has_more": {
+            "title": "Has More",
+            "type": "boolean"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          }
+        },
+        "required": [
+          "data",
+          "next_cursor",
+          "has_more"
+        ],
+        "title": "ClientPortalBillableHoursPage",
+        "type": "object"
+      },
+      "ClientPortalBillableHoursResponse": {
+        "properties": {
+          "currency": {
+            "title": "Currency",
+            "type": "string"
+          },
+          "hours_decimal": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Hours Decimal",
+            "type": "string"
+          },
+          "property_id": {
+            "title": "Property Id",
+            "type": "string"
+          },
+          "property_name": {
+            "title": "Property Name",
+            "type": "string"
+          },
+          "total_cents": {
+            "title": "Total Cents",
+            "type": "integer"
+          },
+          "week_start": {
+            "format": "date",
+            "title": "Week Start",
+            "type": "string"
+          },
+          "work_order_id": {
+            "title": "Work Order Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "work_order_id",
+          "property_id",
+          "property_name",
+          "week_start",
+          "hours_decimal",
+          "total_cents",
+          "currency"
+        ],
+        "title": "ClientPortalBillableHoursResponse",
+        "type": "object"
+      },
+      "ClientPortalInvoicePage": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/ClientPortalInvoiceResponse"
+            },
+            "title": "Data",
+            "type": "array"
+          },
+          "has_more": {
+            "title": "Has More",
+            "type": "boolean"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          }
+        },
+        "required": [
+          "data",
+          "next_cursor",
+          "has_more"
+        ],
+        "title": "ClientPortalInvoicePage",
+        "type": "object"
+      },
+      "ClientPortalInvoiceResponse": {
+        "properties": {
+          "currency": {
+            "title": "Currency",
+            "type": "string"
+          },
+          "due_at": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Due At"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "invoice_number": {
+            "title": "Invoice Number",
+            "type": "string"
+          },
+          "issued_at": {
+            "format": "date",
+            "title": "Issued At",
+            "type": "string"
+          },
+          "organization_id": {
+            "title": "Organization Id",
+            "type": "string"
+          },
+          "pdf_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pdf Url"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "total_cents": {
+            "title": "Total Cents",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "organization_id",
+          "invoice_number",
+          "issued_at",
+          "due_at",
+          "total_cents",
+          "currency",
+          "status",
+          "pdf_url"
+        ],
+        "title": "ClientPortalInvoiceResponse",
+        "type": "object"
+      },
+      "ClientPortalPropertyPage": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/ClientPortalPropertyResponse"
+            },
+            "title": "Data",
+            "type": "array"
+          },
+          "has_more": {
+            "title": "Has More",
+            "type": "boolean"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          }
+        },
+        "required": [
+          "data",
+          "next_cursor",
+          "has_more"
+        ],
+        "title": "ClientPortalPropertyPage",
+        "type": "object"
+      },
+      "ClientPortalPropertyResponse": {
+        "properties": {
+          "address": {
+            "title": "Address",
+            "type": "string"
+          },
+          "country": {
+            "title": "Country",
+            "type": "string"
+          },
+          "default_currency": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Currency"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "organization_id": {
+            "title": "Organization Id",
+            "type": "string"
+          },
+          "timezone": {
+            "title": "Timezone",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "organization_id",
+          "name",
+          "kind",
+          "address",
+          "country",
+          "timezone",
+          "default_currency"
+        ],
+        "title": "ClientPortalPropertyResponse",
+        "type": "object"
+      },
+      "ClientPortalQuotePage": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/ClientPortalQuoteResponse"
+            },
+            "title": "Data",
+            "type": "array"
+          },
+          "has_more": {
+            "title": "Has More",
+            "type": "boolean"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          }
+        },
+        "required": [
+          "data",
+          "next_cursor",
+          "has_more"
+        ],
+        "title": "ClientPortalQuotePage",
+        "type": "object"
+      },
+      "ClientPortalQuoteResponse": {
+        "properties": {
+          "accept_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Accept Url"
+          },
+          "currency": {
+            "title": "Currency",
+            "type": "string"
+          },
+          "decided_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decided At"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "organization_id": {
+            "title": "Organization Id",
+            "type": "string"
+          },
+          "property_id": {
+            "title": "Property Id",
+            "type": "string"
+          },
+          "sent_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sent At"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "total_cents": {
+            "title": "Total Cents",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "organization_id",
+          "property_id",
+          "title",
+          "total_cents",
+          "currency",
+          "status",
+          "sent_at",
+          "decided_at",
+          "accept_url"
+        ],
+        "title": "ClientPortalQuoteResponse",
         "type": "object"
       },
       "ClosureCreateRequest": {
@@ -7106,7 +7488,7 @@
         "type": "object"
       },
       "GroupMemberInfo": {
-        "description": "One member entry on ``GET /admin/api/v1/admins/groups``.\n\nMirrors the SPA's :interface:`AdminTeamMember` shape but\ndrops the grant-row fields \u2014 the deployment owners group is\na permission-group membership, not a ``role_grant`` row, so\nit carries ``added_at`` / ``added_by`` instead of\n``granted_at`` / ``granted_by``. Today the lists are empty\n(cd-zkr deferred), but the shape is locked so consumers\nstay forward-compatible.",
+        "description": "One member entry on ``GET /admin/api/v1/admins/groups``.\n\nMirrors the SPA's :interface:`AdminTeamMember` shape but\ndrops the grant-row fields. Owners carry ``deployment_owner``\ntimestamps; managers are derived from deployment ``role_grant``\nrows and projected into the same shape.",
         "properties": {
           "added_at": {
             "title": "Added At",
@@ -7140,7 +7522,7 @@
         "type": "object"
       },
       "GroupMemberRequest": {
-        "description": "Request body for the owners-group add route.\n\nSame shape as :class:`AdminGrantRequest` \u2014 the operator\nidentifies the new owner by either ``user_id`` or ``email``.\nOwner-only; cd-zkr deferred \u2192 every call 404s today.",
+        "description": "Request body for the owners-group add route.\n\nSame shape as :class:`AdminGrantRequest` \u2014 the operator\nidentifies the new owner by either ``user_id`` or ``email``.\nOwner-only.",
         "properties": {
           "email": {
             "anyOf": [
@@ -7198,7 +7580,7 @@
         "type": "object"
       },
       "GroupsListResponse": {
-        "description": "Body of ``GET /admin/api/v1/admins/groups``.\n\nEmpty member lists today; cd-zkr will seed both groups with\nreal members. Returning the groups themselves now means the\nSPA's group-management page can render the \"no members yet\"\nstate instead of an empty page.",
+        "description": "Body of ``GET /admin/api/v1/admins/groups``.\n\nOwners are explicit ``deployment_owner`` rows; managers are\nderived from active deployment admin grants.",
         "properties": {
           "groups": {
             "items": {
@@ -10201,7 +10583,7 @@
         "type": "object"
       },
       "OwnersGroupResponse": {
-        "description": "Body of the owners-group add / revoke routes.\n\nEchoes the freshly-changed members list. Empty today (cd-zkr\ndeferred); the route 404s before reaching this shape.",
+        "description": "Body of the owners-group add / revoke routes.\n\nEchoes the freshly-changed owners member list.",
         "properties": {
           "members": {
             "items": {
@@ -17206,6 +17588,281 @@
         "title": "VapidKeyPayload",
         "type": "object"
       },
+      "VendorInvoiceCreateRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "currency": {
+            "maxLength": 3,
+            "minLength": 3,
+            "title": "Currency",
+            "type": "string"
+          },
+          "due_at": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Due At"
+          },
+          "invoice_number": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Invoice Number",
+            "type": "string"
+          },
+          "issued_at": {
+            "format": "date",
+            "title": "Issued At",
+            "type": "string"
+          },
+          "notes_md": {
+            "anyOf": [
+              {
+                "maxLength": 20000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notes Md"
+          },
+          "total_cents": {
+            "minimum": 0.0,
+            "title": "Total Cents",
+            "type": "integer"
+          },
+          "vendor_org_id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Vendor Org Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "vendor_org_id",
+          "invoice_number",
+          "issued_at",
+          "total_cents",
+          "currency"
+        ],
+        "title": "VendorInvoiceCreateRequest",
+        "type": "object"
+      },
+      "VendorInvoiceListResponse": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/VendorInvoiceResponse"
+            },
+            "title": "Data",
+            "type": "array"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "VendorInvoiceListResponse",
+        "type": "object"
+      },
+      "VendorInvoiceMarkPaidRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "paid_at": {
+            "format": "date-time",
+            "title": "Paid At",
+            "type": "string"
+          },
+          "payment_method": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Payment Method",
+            "type": "string"
+          },
+          "proof_blob_hash": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "minLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Proof Blob Hash"
+          }
+        },
+        "required": [
+          "paid_at",
+          "payment_method"
+        ],
+        "title": "VendorInvoiceMarkPaidRequest",
+        "type": "object"
+      },
+      "VendorInvoiceResponse": {
+        "properties": {
+          "approved_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Approved At"
+          },
+          "currency": {
+            "title": "Currency",
+            "type": "string"
+          },
+          "disputed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Disputed At"
+          },
+          "due_at": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Due At"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "invoice_number": {
+            "title": "Invoice Number",
+            "type": "string"
+          },
+          "issued_at": {
+            "format": "date",
+            "title": "Issued At",
+            "type": "string"
+          },
+          "notes_md": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notes Md"
+          },
+          "paid_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Paid At"
+          },
+          "payment_method": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Payment Method"
+          },
+          "pdf_blob_hash": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pdf Blob Hash"
+          },
+          "proof_blob_hash": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Proof Blob Hash"
+          },
+          "reminder_windows": {
+            "items": {
+              "format": "date",
+              "type": "string"
+            },
+            "title": "Reminder Windows",
+            "type": "array"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "total_cents": {
+            "title": "Total Cents",
+            "type": "integer"
+          },
+          "vendor_org_id": {
+            "title": "Vendor Org Id",
+            "type": "string"
+          },
+          "workspace_id": {
+            "title": "Workspace Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "workspace_id",
+          "vendor_org_id",
+          "invoice_number",
+          "issued_at",
+          "due_at",
+          "total_cents",
+          "currency",
+          "status",
+          "pdf_blob_hash",
+          "approved_at",
+          "paid_at",
+          "payment_method",
+          "proof_blob_hash",
+          "disputed_at",
+          "notes_md",
+          "reminder_windows"
+        ],
+        "title": "VendorInvoiceResponse",
+        "type": "object"
+      },
       "WebhookCreateRequest": {
         "additionalProperties": false,
         "properties": {
@@ -18570,7 +19227,7 @@
         "type": "object"
       },
       "WorkspaceSummaryResponse": {
-        "description": "Body of ``GET /admin/api/v1/workspaces/{id}``.\n\nCarries the list-row fields plus the inline usage + admin\ncounts the SPA's workspace-detail card needs in one round trip:\n\n* ``llm_calls_30d`` \u2014 count of :class:`LlmUsage` rows in the\n  last 30 days.\n* ``llm_spend_cents_30d`` \u2014 sum of ``cost_cents`` over the\n  same window.\n* ``admins_count`` \u2014 count of deployment-scoped grants whose\n  :attr:`RoleGrant.workspace_id` points at this workspace\n  (always zero today; wired here so cd-zkr's group rollout\n  doesn't change the contract).",
+        "description": "Body of ``GET /admin/api/v1/workspaces/{id}``.\n\nCarries the list-row fields plus the inline usage + admin\ncounts the SPA's workspace-detail card needs in one round trip:\n\n* ``llm_calls_30d`` \u2014 count of :class:`LlmUsage` rows in the\n  last 30 days.\n* ``llm_spend_cents_30d`` \u2014 sum of ``cost_cents`` over the\n  same window.\n* ``admins_count`` \u2014 count of deployment-scoped grants whose\n  :attr:`RoleGrant.workspace_id` points at this workspace\n  (always zero today; retained for the summary-card contract).",
         "properties": {
           "archived_at": {
             "anyOf": [
@@ -19277,6 +19934,24 @@
         "title": "CompleteRequest",
         "type": "object"
       },
+      "attach_pdf": {
+        "properties": {
+          "file": {
+            "anyOf": [
+              {
+                "contentMediaType": "application/octet-stream",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "File"
+          }
+        },
+        "title": "Body_billing.vendor_invoices.attach_pdf",
+        "type": "object"
+      },
       "set": {
         "properties": {
           "image": {
@@ -19505,7 +20180,7 @@
     },
     "/admin/api/v1/admins/groups": {
       "get": {
-        "description": "Return the two deployment groups with empty rosters.\n\ncd-zkr seeds the deployment owners + managers permission\ngroups; until that lands the rosters are unconditionally\nempty. The SPA's group-management page renders the\nempty state (\"no owners yet \u2014 promote one\") off this\nshape.",
+        "description": "Return the deployment owners and managers groups.",
         "operationId": "admin.admins.groups.list",
         "parameters": [
           {
@@ -19578,7 +20253,7 @@
     },
     "/admin/api/v1/admins/groups/owners/members": {
       "post": {
-        "description": "Owners-only add to the deployment owners group.\n\nToday the deployment owners group does not exist (cd-zkr\ndeferred); :func:`ensure_deployment_owner` therefore\n404s every caller. The route is wired now so the SPA\nand CLI can target the correct URL \u2014 once cd-zkr lands,\nthis body grows the actual permission_group_member\nupsert + audit write without a wire-shape change.",
+        "description": "Owners-only add to the deployment owners group.",
         "operationId": "admin.admins.groups.owners.add",
         "parameters": [
           {
@@ -19661,7 +20336,7 @@
     },
     "/admin/api/v1/admins/groups/owners/members/{user_id}/revoke": {
       "post": {
-        "description": "Owners-only revoke from the deployment owners group.\n\nSame fail-closed posture as :func:`add_owner` \u2014 every\ncaller 404s today via :func:`ensure_deployment_owner`.\n``user_id`` is accepted on the URL today so the route\ncontract is fixed; cd-zkr lands the permission_group_member\ndelete + last-owner guard.",
+        "description": "Owners-only revoke from the deployment owners group.",
         "operationId": "admin.admins.groups.owners.revoke",
         "parameters": [
           {
@@ -20231,7 +20906,7 @@
     },
     "/admin/api/v1/me": {
       "get": {
-        "description": "Return the caller's :class:`AdminMeResponse`.\n\n``ctx.user_id`` is the human (or delegating human for\ndelegated tokens) \u2014 see :class:`DeploymentContext`. We\nhydrate the :class:`User` row to surface display name + email;\ncapabilities come straight off\n:attr:`DeploymentContext.deployment_scopes`.\n\n``is_owner`` is hard-wired to ``False`` until the deployment\n``owners`` permission group lands (cd-zkr). The SPA already\nhandles ``False`` (renders \"Deployment admin\" rather than\n\"Deployment owner\"); promoting the flag once the group exists\nis a single read, not a shape change.",
+        "description": "Return the caller's :class:`AdminMeResponse`.\n\n``ctx.user_id`` is the human (or delegating human for\ndelegated tokens) \u2014 see :class:`DeploymentContext`. We\nhydrate the :class:`User` row to surface display name + email;\ncapabilities come straight off\n:attr:`DeploymentContext.deployment_scopes`.\n\n``is_owner`` resolves the concrete deployment-owner membership\nrow so owner-only admin routes and labels share one source of\ntruth.",
         "operationId": "admin.me.read",
         "parameters": [
           {
@@ -20450,7 +21125,7 @@
     },
     "/admin/api/v1/settings/{key}": {
       "put": {
-        "description": "Write one setting; refuse for unknown / root-only keys.\n\nValidation order matches the spec's principle \"do not\nelevate before authorising\":\n\n1. Reject unknown keys with ``unknown_setting`` 422.\n2. Reject root-only keys with ``root_only_setting`` 422\n   (the spec's \"owners-only; root-only keys refuse\"\n   wording wraps both the gate and the typed code).\n3. Owner-gate the write via\n   :func:`ensure_deployment_owner`. Today every caller\n   fails this check (cd-zkr deferred), so every owner-\n   gated PUT 404s \u2014 see the helper's docstring for the\n   fail-closed rationale.\n4. Coerce the body's value through the registry's typed\n   converter; bad shapes 422 ``invalid_setting_value``.\n5. Upsert the ``deployment_setting`` row, write the\n   audit, refresh the in-memory capability registry.",
+        "description": "Write one setting; refuse for unknown / root-only keys.\n\nValidation order matches the spec's principle \"do not\nelevate before authorising\":\n\n1. Reject unknown keys with ``unknown_setting`` 422.\n2. Reject root-only keys with ``root_only_setting`` 422\n   (the spec's \"owners-only; root-only keys refuse\"\n   wording wraps both the gate and the typed code).\n3. Owner-gate the write via\n   :func:`ensure_deployment_owner`; non-owner admins receive\n   the same 404 wall as non-admin callers.\n4. Coerce the body's value through the registry's typed\n   converter; bad shapes 422 ``invalid_setting_value``.\n5. Upsert the ``deployment_setting`` row, write the\n   audit, refresh the in-memory capability registry.",
         "operationId": "admin.settings.update",
         "parameters": [
           {
@@ -21089,7 +21764,7 @@
     },
     "/admin/api/v1/workspaces/{id}/archive": {
       "post": {
-        "description": "Stamp ``archived_at`` and audit.\n\n**Owners-only** per spec \u00a712 \"Admin surface\". The owner\ncheck fails closed today (cd-zkr has not yet seeded the\ndeployment owners group); every caller therefore 404s.\nOnce cd-zkr lands, only deployment-owner admins pass \u2014\na non-owner admin still sees a 404 (surface invisibility).\n\nIdempotent: archiving an already-archived workspace\nreturns the original timestamp (no fresh stamp, no\nduplicate audit row). The SPA renders the row as\narchived either way.",
+        "description": "Stamp ``archived_at`` and audit.\n\n**Owners-only** per spec \u00a712 \"Admin surface\". A non-owner\nadmin still sees a 404 (surface invisibility).\n\nIdempotent: archiving an already-archived workspace\nreturns the original timestamp (no fresh stamp, no\nduplicate audit row). The SPA renders the row as\narchived either way.",
         "operationId": "admin.workspaces.archive",
         "parameters": [
           {
@@ -27058,6 +27733,431 @@
         ]
       }
     },
+    "/w/{slug}/api/v1/billing/vendor-invoices": {
+      "get": {
+        "operationId": "billing.vendor_invoices.list",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "vendor_org_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Vendor Org Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "received",
+                    "approved",
+                    "paid",
+                    "disputed"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VendorInvoiceListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List vendor invoices",
+        "tags": [
+          "billing",
+          "billing",
+          "vendor-invoices"
+        ]
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "slug",
+          "required": true,
+          "schema": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          }
+        }
+      ],
+      "post": {
+        "operationId": "billing.vendor_invoices.create",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VendorInvoiceCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VendorInvoiceResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create a vendor invoice",
+        "tags": [
+          "billing",
+          "billing",
+          "vendor-invoices"
+        ]
+      }
+    },
+    "/w/{slug}/api/v1/billing/vendor-invoices/{invoice_id}": {
+      "get": {
+        "operationId": "billing.vendor_invoices.get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "invoice_id",
+            "required": true,
+            "schema": {
+              "title": "Invoice Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VendorInvoiceResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get a vendor invoice",
+        "tags": [
+          "billing",
+          "billing",
+          "vendor-invoices"
+        ]
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "slug",
+          "required": true,
+          "schema": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          }
+        }
+      ]
+    },
+    "/w/{slug}/api/v1/billing/vendor-invoices/{invoice_id}/approve": {
+      "parameters": [
+        {
+          "in": "path",
+          "name": "slug",
+          "required": true,
+          "schema": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          }
+        }
+      ],
+      "post": {
+        "operationId": "billing.vendor_invoices.approve",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "invoice_id",
+            "required": true,
+            "schema": {
+              "title": "Invoice Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VendorInvoiceResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Approve a vendor invoice",
+        "tags": [
+          "billing",
+          "billing",
+          "vendor-invoices"
+        ]
+      }
+    },
+    "/w/{slug}/api/v1/billing/vendor-invoices/{invoice_id}/dispute": {
+      "parameters": [
+        {
+          "in": "path",
+          "name": "slug",
+          "required": true,
+          "schema": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          }
+        }
+      ],
+      "post": {
+        "operationId": "billing.vendor_invoices.dispute",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "invoice_id",
+            "required": true,
+            "schema": {
+              "title": "Invoice Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VendorInvoiceResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Dispute a vendor invoice",
+        "tags": [
+          "billing",
+          "billing",
+          "vendor-invoices"
+        ]
+      }
+    },
+    "/w/{slug}/api/v1/billing/vendor-invoices/{invoice_id}/paid": {
+      "parameters": [
+        {
+          "in": "path",
+          "name": "slug",
+          "required": true,
+          "schema": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          }
+        }
+      ],
+      "post": {
+        "operationId": "billing.vendor_invoices.mark_paid",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "invoice_id",
+            "required": true,
+            "schema": {
+              "title": "Invoice Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VendorInvoiceMarkPaidRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VendorInvoiceResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Mark a vendor invoice paid",
+        "tags": [
+          "billing",
+          "billing",
+          "vendor-invoices"
+        ]
+      }
+    },
+    "/w/{slug}/api/v1/billing/vendor-invoices/{invoice_id}/pdf": {
+      "parameters": [
+        {
+          "in": "path",
+          "name": "slug",
+          "required": true,
+          "schema": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          }
+        }
+      ],
+      "post": {
+        "operationId": "billing.vendor_invoices.attach_pdf",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "invoice_id",
+            "required": true,
+            "schema": {
+              "title": "Invoice Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/attach_pdf"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VendorInvoiceResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Attach a PDF to a vendor invoice",
+        "tags": [
+          "billing",
+          "billing",
+          "vendor-invoices"
+        ]
+      }
+    },
     "/w/{slug}/api/v1/billing/work-orders": {
       "get": {
         "operationId": "billing.work_orders.list",
@@ -27476,6 +28576,322 @@
           "work-orders"
         ]
       }
+    },
+    "/w/{slug}/api/v1/client/billable-hours": {
+      "get": {
+        "operationId": "client.billable_hours.list",
+        "parameters": [
+          {
+            "description": "Maximum rows to return. Default 50, cap 500 per spec \u00a712 'Pagination'. Rejected with 422 outside ``[1, 500]``.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "description": "Maximum rows to return. Default 50, cap 500 per spec \u00a712 'Pagination'. Rejected with 422 outside ``[1, 500]``.",
+              "maximum": 500,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Opaque forward cursor from the previous page's ``next_cursor``. Omitted on the first call. Bounded to 256 chars to keep the URL below reverse-proxy header limits.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 256,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Opaque forward cursor from the previous page's ``next_cursor``. Omitted on the first call. Bounded to 256 chars to keep the URL below reverse-proxy header limits.",
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClientPortalBillableHoursPage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List client billable hours",
+        "tags": [
+          "client",
+          "billing"
+        ]
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "slug",
+          "required": true,
+          "schema": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          }
+        }
+      ]
+    },
+    "/w/{slug}/api/v1/client/invoices": {
+      "get": {
+        "operationId": "client.invoices.list",
+        "parameters": [
+          {
+            "description": "Maximum rows to return. Default 50, cap 500 per spec \u00a712 'Pagination'. Rejected with 422 outside ``[1, 500]``.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "description": "Maximum rows to return. Default 50, cap 500 per spec \u00a712 'Pagination'. Rejected with 422 outside ``[1, 500]``.",
+              "maximum": 500,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Opaque forward cursor from the previous page's ``next_cursor``. Omitted on the first call. Bounded to 256 chars to keep the URL below reverse-proxy header limits.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 256,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Opaque forward cursor from the previous page's ``next_cursor``. Omitted on the first call. Bounded to 256 chars to keep the URL below reverse-proxy header limits.",
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClientPortalInvoicePage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List client invoices",
+        "tags": [
+          "client",
+          "billing"
+        ]
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "slug",
+          "required": true,
+          "schema": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          }
+        }
+      ]
+    },
+    "/w/{slug}/api/v1/client/portfolio": {
+      "get": {
+        "operationId": "client.portfolio.list",
+        "parameters": [
+          {
+            "description": "Maximum rows to return. Default 50, cap 500 per spec \u00a712 'Pagination'. Rejected with 422 outside ``[1, 500]``.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "description": "Maximum rows to return. Default 50, cap 500 per spec \u00a712 'Pagination'. Rejected with 422 outside ``[1, 500]``.",
+              "maximum": 500,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Opaque forward cursor from the previous page's ``next_cursor``. Omitted on the first call. Bounded to 256 chars to keep the URL below reverse-proxy header limits.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 256,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Opaque forward cursor from the previous page's ``next_cursor``. Omitted on the first call. Bounded to 256 chars to keep the URL below reverse-proxy header limits.",
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClientPortalPropertyPage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List client-owned properties",
+        "tags": [
+          "client",
+          "billing"
+        ]
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "slug",
+          "required": true,
+          "schema": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          }
+        }
+      ]
+    },
+    "/w/{slug}/api/v1/client/quotes": {
+      "get": {
+        "operationId": "client.quotes.list",
+        "parameters": [
+          {
+            "description": "Maximum rows to return. Default 50, cap 500 per spec \u00a712 'Pagination'. Rejected with 422 outside ``[1, 500]``.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "description": "Maximum rows to return. Default 50, cap 500 per spec \u00a712 'Pagination'. Rejected with 422 outside ``[1, 500]``.",
+              "maximum": 500,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Opaque forward cursor from the previous page's ``next_cursor``. Omitted on the first call. Bounded to 256 chars to keep the URL below reverse-proxy header limits.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 256,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Opaque forward cursor from the previous page's ``next_cursor``. Omitted on the first call. Bounded to 256 chars to keep the URL below reverse-proxy header limits.",
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClientPortalQuotePage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List client quotes",
+        "tags": [
+          "client",
+          "billing"
+        ]
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "slug",
+          "required": true,
+          "schema": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          }
+        }
+      ]
     },
     "/w/{slug}/api/v1/dashboard": {
       "get": {

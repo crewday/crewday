@@ -44,6 +44,12 @@ from app.domain.billing.rate_cards import (
     RateCardRepository,
     RateCardRow,
 )
+from app.domain.billing.vendor_invoices import (
+    VendorInvoiceInvalid,
+    VendorInvoiceOrganizationRow,
+    VendorInvoiceRepository,
+    VendorInvoiceRow,
+)
 from app.domain.billing.work_orders import (
     ShiftAccrualRow,
     WorkOrderInvalid,
@@ -61,6 +67,7 @@ __all__ = [
     "SqlAlchemyOrganizationRepository",
     "SqlAlchemyQuoteRepository",
     "SqlAlchemyRateCardRepository",
+    "SqlAlchemyVendorInvoiceRepository",
     "SqlAlchemyWorkOrderRepository",
 ]
 
@@ -598,6 +605,38 @@ def _to_work_order_shift_row(row: Shift) -> WorkOrderShiftRow:
     )
 
 
+def _to_vendor_invoice_organization_row(
+    row: Organization,
+) -> VendorInvoiceOrganizationRow:
+    return VendorInvoiceOrganizationRow(
+        id=row.id,
+        workspace_id=row.workspace_id,
+        kind=row.kind,
+        default_currency=row.default_currency,
+    )
+
+
+def _to_vendor_invoice_row(row: VendorInvoice) -> VendorInvoiceRow:
+    return VendorInvoiceRow(
+        id=row.id,
+        workspace_id=row.workspace_id,
+        vendor_org_id=row.vendor_org_id,
+        invoice_number=row.invoice_number,
+        issued_at=row.issued_at,
+        due_at=row.due_at,
+        total_cents=row.total_cents,
+        currency=row.currency,
+        status=row.status,
+        pdf_blob_hash=row.pdf_blob_hash,
+        approved_at=_as_utc_optional(row.approved_at),
+        paid_at=_as_utc_optional(row.paid_at),
+        payment_method=row.payment_method,
+        proof_blob_hash=row.proof_blob_hash,
+        disputed_at=_as_utc_optional(row.disputed_at),
+        notes_md=row.notes_md,
+    )
+
+
 class SqlAlchemyRateCardRepository(RateCardRepository):
     """SA-backed rate-card repository."""
 
@@ -1059,3 +1098,131 @@ class SqlAlchemyQuoteRepository(QuoteRepository):
         except IntegrityError as exc:
             raise QuoteInvalid("quote references an unknown billing artifact") from exc
         return _to_quote_row(row)
+
+
+class SqlAlchemyVendorInvoiceRepository(VendorInvoiceRepository):
+    """SA-backed vendor-invoice repository."""
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    @property
+    def session(self) -> Session:
+        return self._session
+
+    def get_organization(
+        self, *, workspace_id: str, organization_id: str, for_update: bool = False
+    ) -> VendorInvoiceOrganizationRow | None:
+        stmt = select(Organization).where(
+            Organization.workspace_id == workspace_id,
+            Organization.id == organization_id,
+            Organization.archived_at.is_(None),
+        )
+        if for_update:
+            stmt = stmt.with_for_update()
+        row = self._session.scalars(stmt).one_or_none()
+        return _to_vendor_invoice_organization_row(row) if row is not None else None
+
+    def insert(
+        self,
+        *,
+        invoice_id: str,
+        workspace_id: str,
+        vendor_org_id: str,
+        invoice_number: str,
+        issued_at: date,
+        due_at: date | None,
+        total_cents: int,
+        currency: str,
+        status: str,
+        notes_md: str | None,
+    ) -> VendorInvoiceRow:
+        row = VendorInvoice(
+            id=invoice_id,
+            workspace_id=workspace_id,
+            vendor_org_id=vendor_org_id,
+            invoice_number=invoice_number,
+            issued_at=issued_at,
+            due_at=due_at,
+            total_cents=total_cents,
+            currency=currency,
+            status=status,
+            pdf_blob_hash=None,
+            approved_at=None,
+            paid_at=None,
+            payment_method=None,
+            proof_blob_hash=None,
+            disputed_at=None,
+            notes_md=notes_md,
+        )
+        try:
+            with self._session.begin_nested():
+                self._session.add(row)
+                self._session.flush()
+        except IntegrityError as exc:
+            raise VendorInvoiceInvalid(
+                "vendor invoice references an unknown vendor organization "
+                "or duplicates invoice_number for that vendor"
+            ) from exc
+        return _to_vendor_invoice_row(row)
+
+    def get(
+        self, *, workspace_id: str, invoice_id: str, for_update: bool = False
+    ) -> VendorInvoiceRow | None:
+        stmt = select(VendorInvoice).where(
+            VendorInvoice.workspace_id == workspace_id,
+            VendorInvoice.id == invoice_id,
+        )
+        if for_update:
+            stmt = stmt.with_for_update()
+        row = self._session.scalars(stmt).one_or_none()
+        return _to_vendor_invoice_row(row) if row is not None else None
+
+    def list(
+        self,
+        *,
+        workspace_id: str,
+        vendor_org_id: str | None,
+        status: str | None,
+    ) -> Sequence[VendorInvoiceRow]:
+        stmt = (
+            select(VendorInvoice)
+            .where(VendorInvoice.workspace_id == workspace_id)
+            .order_by(
+                VendorInvoice.issued_at.desc(),
+                VendorInvoice.invoice_number.asc(),
+                VendorInvoice.id.asc(),
+            )
+        )
+        if vendor_org_id is not None:
+            stmt = stmt.where(VendorInvoice.vendor_org_id == vendor_org_id)
+        if status is not None:
+            stmt = stmt.where(VendorInvoice.status == status)
+        return [
+            _to_vendor_invoice_row(row) for row in self._session.scalars(stmt).all()
+        ]
+
+    def update_fields(
+        self,
+        *,
+        workspace_id: str,
+        invoice_id: str,
+        fields: Mapping[str, object | None],
+    ) -> VendorInvoiceRow:
+        row = self._session.scalars(
+            select(VendorInvoice).where(
+                VendorInvoice.workspace_id == workspace_id,
+                VendorInvoice.id == invoice_id,
+            )
+        ).one()
+        try:
+            with self._session.begin_nested():
+                for key, value in fields.items():
+                    setattr(row, key, value)
+                self._session.flush()
+        except IntegrityError as exc:
+            raise VendorInvoiceInvalid(
+                "vendor invoice references an unknown vendor organization "
+                "or duplicates invoice_number for that vendor"
+            ) from exc
+        return _to_vendor_invoice_row(row)
