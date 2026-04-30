@@ -1427,15 +1427,23 @@ def complete_recovery(
     # Forward ``resolved_now`` so the callee's challenge-TTL comparison
     # uses the same instant this caller resolved (same class of time-
     # drift bug fixed in :func:`app.auth.signup.complete_signup`).
-    credential_ref = passkey.register_finish(
-        ctx,
-        session,
-        user_id=row.user_id,
-        challenge_id=challenge_id,
-        credential=credential,
-        clock=clock,
-        now=resolved_now,
-    )
+    try:
+        credential_ref = passkey.register_finish(
+            ctx,
+            session,
+            user_id=row.user_id,
+            challenge_id=challenge_id,
+            credential=credential,
+            clock=clock,
+            now=resolved_now,
+        )
+    except (
+        passkey.InvalidRegistration,
+        passkey.ChallengeSubjectMismatch,
+        passkey.ChallengeExpired,
+    ):
+        passkey.burn_challenge_on_failure(challenge_id, after_rollback_of=session)
+        raise
 
     # Audit FIRST under the caller's UoW, THEN evict the store.
     # Evicting before the audit row is queued would open a window

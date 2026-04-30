@@ -39,11 +39,13 @@ transaction as the insert so two concurrent finish calls cannot both
 pass the gate and land a 6th row.
 
 **Replay protection.** The challenge row is deleted on a successful
-``finish``. A second call with the same ``challenge_id`` returns
-:class:`ChallengeAlreadyConsumed` (409). Mismatched challenge, origin,
-or rp_id values raise :class:`InvalidRegistration` (400) — we rewrap
-py_webauthn's `InvalidRegistrationResponse` so the HTTP layer doesn't
-need to know about the upstream type.
+``finish`` and exposed finish callers burn it on verification failure
+via :func:`burn_challenge_on_failure`. A second call with the same
+``challenge_id`` returns :class:`ChallengeAlreadyConsumed` (409).
+Mismatched challenge, origin, or rp_id values raise
+:class:`InvalidRegistration` (400) — we rewrap py_webauthn's
+`InvalidRegistrationResponse` so the HTTP layer doesn't need to know
+about the upstream type.
 
 **Login error shape.** :func:`login_finish` collapses unknown
 credential, bad signature, and challenge-subject mismatch into a
@@ -64,11 +66,12 @@ rolls back on the raise.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any, Final
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, event, func, select
 from sqlalchemy.orm import Session
 
 from app.adapters.db.identity.models import (
@@ -76,6 +79,7 @@ from app.adapters.db.identity.models import (
     User,
     WebAuthnChallenge,
 )
+from app.adapters.db.session import make_uow
 from app.audit import write_audit
 from app.auth import session as session_module
 from app.auth._hashing import hash_with_pepper
@@ -115,6 +119,7 @@ __all__ = [
     "PasskeyNotFound",
     "RegistrationOptions",
     "TooManyPasskeys",
+    "burn_challenge_on_failure",
     "login_finish",
     "login_start",
     "register_finish",
@@ -124,6 +129,8 @@ __all__ = [
     "register_start_signup",
     "revoke_passkey",
 ]
+
+_log = logging.getLogger(__name__)
 
 
 # Spec §03 "Additional passkeys" caps a user at 5 passkeys; the 6th
@@ -627,6 +634,47 @@ def _delete_challenge(session: Session, *, row: WebAuthnChallenge) -> None:
     with tenant_agnostic():
         session.delete(row)
         session.flush()
+
+
+def burn_challenge_on_failure(
+    challenge_id: str,
+    *,
+    after_rollback_of: Session | None = None,
+) -> None:
+    """Idempotently delete ``challenge_id`` on its own Unit-of-Work.
+
+    Spec §03 "WebAuthn specifics": challenge rows are single-use even
+    on finish failure. Callers invoke this from ``except`` blocks where
+    their primary UoW is about to roll back, so the delete must land on
+    a fresh UoW or the failed challenge remains replayable until TTL.
+    Service callers that already hold write locks pass their current
+    session so the burn runs immediately after that rollback releases
+    the lock.
+
+    Failures are logged and swallowed so a DB hiccup on the best-effort
+    burn never shadows the domain error the caller is preserving.
+    """
+    if after_rollback_of is not None and after_rollback_of.in_transaction():
+
+        def _burn_after_rollback(_session: Session) -> None:
+            burn_challenge_on_failure(challenge_id)
+
+        event.listen(
+            after_rollback_of,
+            "after_rollback",
+            _burn_after_rollback,
+            once=True,
+        )
+        return
+
+    try:
+        with make_uow() as uow_session:
+            assert isinstance(uow_session, Session)
+            uow_session.execute(
+                delete(WebAuthnChallenge).where(WebAuthnChallenge.id == challenge_id)
+            )
+    except Exception:
+        _log.exception("fresh-UoW challenge delete failed for id=%r", challenge_id)
 
 
 # ---------------------------------------------------------------------------

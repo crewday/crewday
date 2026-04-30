@@ -1474,6 +1474,65 @@ class TestCompleteSignupAtomicity:
         assert session.scalars(select(UserWorkspace)).all() == []
         assert session.scalars(select(PermissionGroup)).all() == []
 
+    @pytest.mark.parametrize(
+        ("failure", "expected"),
+        [
+            ("invalid_registration", passkey.InvalidRegistration),
+            ("subject_mismatch", passkey.ChallengeSubjectMismatch),
+            ("expired", passkey.ChallengeExpired),
+        ],
+    )
+    def test_passkey_finish_failures_burn_challenge(
+        self,
+        engine: Engine,
+        session: Session,
+        mailer: _RecordingMailer,
+        throttle: Throttle,
+        settings: Settings,
+        capabilities_enabled: Capabilities,
+        monkeypatch: pytest.MonkeyPatch,
+        failure: str,
+        expected: type[Exception],
+    ) -> None:
+        ssn = _start_and_verify(
+            session, mailer, throttle, settings, capabilities_enabled
+        )
+        challenge_started_at = _PINNED + timedelta(minutes=1)
+        if failure == "expired":
+            challenge_started_at = _PINNED - timedelta(minutes=20)
+        challenge_id = _make_signup_challenge(
+            session,
+            signup_attempt_id=ssn.signup_attempt_id,
+            now=challenge_started_at,
+        )
+        if failure == "invalid_registration":
+            _stub_verify_registration(monkeypatch, fail=True)
+        elif failure == "subject_mismatch":
+            row = session.get(WebAuthnChallenge, challenge_id)
+            assert row is not None
+            row.signup_session_id = "01HWA00000000000000000DIFF"
+            session.flush()
+        session.commit()
+
+        with _redirect_default_engine_to(engine):
+            with pytest.raises(expected):
+                signup.complete_signup(
+                    session,
+                    signup_attempt_id=ssn.signup_attempt_id,
+                    display_name="Owner",
+                    timezone="Pacific/Auckland",
+                    challenge_id=challenge_id,
+                    passkey_payload=_dummy_credential(),
+                    ip="127.0.0.1",
+                    capabilities=capabilities_enabled,
+                    now=_PINNED + timedelta(minutes=2),
+                    settings=settings,
+                )
+            session.rollback()
+        session.expire_all()
+
+        assert session.get(WebAuthnChallenge, challenge_id) is None
+
 
 class TestCompleteSignupGuards:
     def test_not_verified_attempt_rejected(

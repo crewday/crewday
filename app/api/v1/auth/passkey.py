@@ -49,12 +49,11 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel, Field
-from sqlalchemy import delete
 from sqlalchemy.orm import Session
 
 from app.abuse.throttle import ShieldStore
 from app.abuse.throttle import throttle as throttle_decorator
-from app.adapters.db.identity.models import PasskeyCredential, WebAuthnChallenge
+from app.adapters.db.identity.models import PasskeyCredential
 from app.adapters.db.session import make_uow
 from app.api.deps import current_workspace_context, db_session
 from app.audit import write_audit
@@ -76,6 +75,7 @@ from app.auth.passkey import (
     PasskeyNotFound,
     RegistrationOptions,
     TooManyPasskeys,
+    burn_challenge_on_failure,
     login_finish,
     login_start,
     register_finish,
@@ -299,7 +299,7 @@ def post_register_finish(
         # cd-qx1f: challenge rows are single-use even on verification
         # failure. The primary UoW rolls back on the raise, so we
         # land the delete on a fresh UoW before mapping to HTTP.
-        _delete_challenge_fresh_uow(body.challenge_id)
+        burn_challenge_on_failure(body.challenge_id)
         raise _http_for(exc) from exc
     return RegisterFinishResponse(
         credential_id=ref.credential_id_b64url,
@@ -633,42 +633,6 @@ def _auto_revoke_credential_fresh_uow(
         )
 
 
-def _delete_challenge_fresh_uow(challenge_id: str) -> None:
-    """Idempotently delete ``challenge_id`` on its own Unit-of-Work.
-
-    Spec §03 "WebAuthn specifics" / cd-qx1f: challenge rows are
-    single-use **even on verification failure**. The primary UoW
-    rolls back on any domain raise, so a challenge delete inside it
-    would disappear with the rollback and leave the row redeemable
-    until its 10-minute TTL — handing an attacker with a leaked
-    ``challenge_id`` a replay window that the spec wants to be zero.
-    Opening a fresh UoW via :func:`make_uow` here lands the delete
-    even when the caller's UoW is about to roll back, mirroring the
-    sibling :func:`_write_login_audit_fresh_uow` pattern.
-
-    Idempotency: uses a ``DELETE ... WHERE id = ?`` statement, which
-    tolerates zero rows affected. Two concurrent finish calls (one
-    succeeds and deletes the row, the other fails post-success and
-    tries to delete it again) both exit cleanly. No ``tenant_agnostic``
-    gate is needed — ``webauthn_challenge`` is an identity-scoped
-    table, not registered in :mod:`app.tenancy.registry`, so the
-    ORM tenant filter ignores it.
-
-    Failures are logged and swallowed so a DB hiccup on the delete
-    never shadows the 4xx response the router is about to return.
-    Broad ``Exception`` catch — ``BaseException`` still propagates so
-    operator aborts aren't swallowed.
-    """
-    try:
-        with make_uow() as uow_session:
-            assert isinstance(uow_session, Session)
-            uow_session.execute(
-                delete(WebAuthnChallenge).where(WebAuthnChallenge.id == challenge_id)
-            )
-    except Exception:
-        _log.exception("fresh-UoW challenge delete failed for id=%r", challenge_id)
-
-
 def _write_login_audit_fresh_uow(
     *,
     action: str,
@@ -972,7 +936,7 @@ def build_login_router(
             )
             # cd-qx1f: single-use even on failure. Idempotent —
             # zero-rows-affected is fine if another caller beat us.
-            _delete_challenge_fresh_uow(body.challenge_id)
+            burn_challenge_on_failure(body.challenge_id)
             # cd-cx19: hard-delete the credential + emit
             # passkey.auto_revoked. Responsibilities are split from
             # the invalidate above — this helper does NOT touch
@@ -1019,7 +983,7 @@ def build_login_router(
             # naturally lands in a no-op delete (row already gone);
             # the other four burn the row so a leaked id can't be
             # replayed until TTL. Idempotent.
-            _delete_challenge_fresh_uow(body.challenge_id)
+            burn_challenge_on_failure(body.challenge_id)
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail={"error": "invalid_credential"},

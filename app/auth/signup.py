@@ -1168,15 +1168,23 @@ def complete_signup(
     # wall clock and trip the 10-minute challenge TTL. Passing ``now``
     # in keeps every TTL / audit timestamp inside this UoW aligned on
     # one instant.
-    passkey.register_finish_signup(
-        session,
-        signup_session_id=signup_attempt_id,
-        user_id=user_id,
-        challenge_id=challenge_id,
-        credential=passkey_payload,
-        clock=clock,
-        now=resolved_now,
-    )
+    try:
+        passkey.register_finish_signup(
+            session,
+            signup_session_id=signup_attempt_id,
+            user_id=user_id,
+            challenge_id=challenge_id,
+            credential=passkey_payload,
+            clock=clock,
+            now=resolved_now,
+        )
+    except (
+        passkey.InvalidRegistration,
+        passkey.ChallengeSubjectMismatch,
+        passkey.ChallengeExpired,
+    ):
+        passkey.burn_challenge_on_failure(challenge_id, after_rollback_of=session)
+        raise
 
     # Flip the signup_attempt row now that every downstream insert
     # succeeded. Under rollback this flip is discarded too, which is

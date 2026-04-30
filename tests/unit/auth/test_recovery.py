@@ -39,6 +39,7 @@ from app.adapters.db.identity.models import (
     MagicLinkNonce,
     PasskeyCredential,
     User,
+    WebAuthnChallenge,
 )
 from app.adapters.db.identity.models import (
     Session as AuthSession,
@@ -1264,6 +1265,75 @@ class TestCompleteRecoveryAtomicity:
 
         # Recovery session NOT consumed — it stays live for a retry.
         assert recovery_id in recovery_module._RECOVERY_SESSIONS
+
+    @pytest.mark.parametrize(
+        ("failure", "expected"),
+        [
+            ("invalid_registration", InvalidRegistration),
+            ("subject_mismatch", passkey_module.ChallengeSubjectMismatch),
+            ("expired", passkey_module.ChallengeExpired),
+        ],
+    )
+    def test_passkey_finish_failures_burn_challenge(
+        self,
+        session: Session,
+        mailer: _RecordingMailer,
+        throttle: Throttle,
+        settings: Settings,
+        redirect_default_engine: None,
+        monkeypatch: pytest.MonkeyPatch,
+        failure: str,
+        expected: type[Exception],
+    ) -> None:
+        user, recovery_id = _set_up_verified_recovery(
+            session, mailer=mailer, throttle=throttle, settings=settings
+        )
+        if failure == "invalid_registration":
+            opts = passkey_module.register_start_recovery(
+                session,
+                user_id=user.id,
+                now=_PINNED + timedelta(minutes=1),
+            )
+            challenge_id = opts.challenge_id
+            _stub_verify_raises(monkeypatch)
+        else:
+            challenge_id = new_ulid()
+            row_user_id: str | None = user.id
+            signup_session_id: str | None = None
+            expires_at = _PINNED + timedelta(minutes=11)
+            if failure == "subject_mismatch":
+                row_user_id = None
+                signup_session_id = "01HWA00000000000000000SGN0"
+            elif failure == "expired":
+                expires_at = _PINNED - timedelta(minutes=1)
+            session.add(
+                WebAuthnChallenge(
+                    id=challenge_id,
+                    user_id=row_user_id,
+                    signup_session_id=signup_session_id,
+                    challenge=b"\x00" * 32,
+                    exclude_credentials=[],
+                    created_at=_PINNED + timedelta(minutes=1),
+                    expires_at=expires_at,
+                )
+            )
+            session.flush()
+        session.commit()
+
+        with pytest.raises(expected):
+            complete_recovery(
+                session,
+                recovery_session_id=recovery_id,
+                challenge_id=challenge_id,
+                credential=_raw_credential(),
+                ip="127.0.0.1",
+                now=_PINNED + timedelta(minutes=2),
+                settings=settings,
+            )
+        session.rollback()
+        session.expire_all()
+
+        assert session.get(WebAuthnChallenge, challenge_id) is None
 
 
 class TestCompleteRecoveryUnknownSession:
