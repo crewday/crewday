@@ -101,6 +101,7 @@ describe("INVALIDATIONS — coverage", () => {
     "stay_task_bundle.deleted",
     "approval.decided",
     "approval.resolved",
+    "leave.decided",
     "expense.created",
     "expense.submitted",
     "expense.cancelled",
@@ -375,6 +376,24 @@ describe("INVALIDATIONS — per-kind behaviour", () => {
         ]),
       );
     }
+  });
+
+  it("leave.decided invalidates leaves, dashboard, history, and my-schedule", () => {
+    const qc = makeClient();
+    const spy = vi.spyOn(qc, "invalidateQueries");
+    INVALIDATIONS["leave.decided"](
+      makeEvent("leave.decided", { leave_id: "l1", decision: "approved" }),
+      qc,
+    );
+    const called = spy.mock.calls.map((c) => c[0]?.queryKey);
+    expect(called).toEqual(
+      expect.arrayContaining([
+        qk.leaves(),
+        qk.dashboard(),
+        qk.history("leaves"),
+        ["my-schedule"],
+      ]),
+    );
   });
 
   it("task.updated invalidates the per-row detail key by task_id", () => {

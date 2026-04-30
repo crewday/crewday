@@ -7,7 +7,7 @@ from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from app.adapters.db.issues.models import IssueReport
@@ -154,16 +154,23 @@ class DashboardPayload(BaseModel):
     employees: list[EmployeeResponse]
 
 
+class LeavesInboxPayload(BaseModel):
+    pending: list[DashboardLeave]
+    approved: list[DashboardLeave]
+
+
 def build_dashboard_router() -> APIRouter:
     api = APIRouter(tags=["dashboard"])
-    gate = Depends(Permission("employees.read", scope_kind="workspace"))
+    dashboard_gate = Depends(Permission("employees.read", scope_kind="workspace"))
+    leave_view_gate = Depends(Permission("leaves.view_others", scope_kind="workspace"))
+    leave_edit_gate = Depends(Permission("leaves.edit_others", scope_kind="workspace"))
 
     @api.get(
         "/dashboard",
         response_model=DashboardPayload,
         operation_id="dashboard.get",
         summary="Read the manager dashboard aggregate",
-        dependencies=[gate],
+        dependencies=[dashboard_gate],
     )
     def dashboard(ctx: _Ctx, session: _Db) -> DashboardPayload:
         employees = _employees(session, ctx)
@@ -190,12 +197,22 @@ def build_dashboard_router() -> APIRouter:
             employees=employees,
         )
 
+    @api.get(
+        "/leaves",
+        response_model=LeavesInboxPayload,
+        operation_id="dashboard.leaves.list",
+        summary="Read the manager leave inbox aggregate",
+        dependencies=[leave_view_gate],
+    )
+    def leaves(ctx: _Ctx, session: _Db) -> LeavesInboxPayload:
+        return _leaves_inbox(session, ctx, now=datetime.now(tz=UTC))
+
     @api.post(
         "/leaves/{leave_id}/approve",
         response_model=DashboardLeave,
         operation_id="dashboard.leaves.approve",
         summary="Approve a pending leave from manager dashboard",
-        dependencies=[gate],
+        dependencies=[leave_edit_gate],
     )
     def approve_leave(leave_id: str, ctx: _Ctx, session: _Db) -> DashboardLeave:
         return _decide_leave(session, ctx, leave_id=leave_id, decision="approved")
@@ -205,7 +222,7 @@ def build_dashboard_router() -> APIRouter:
         response_model=DashboardLeave,
         operation_id="dashboard.leaves.reject",
         summary="Reject a pending leave from manager dashboard",
-        dependencies=[gate],
+        dependencies=[leave_edit_gate],
     )
     def reject_leave(leave_id: str, ctx: _Ctx, session: _Db) -> DashboardLeave:
         return _decide_leave(session, ctx, leave_id=leave_id, decision="rejected")
@@ -443,6 +460,35 @@ def _pending_leaves(session: Session, ctx: WorkspaceContext) -> list[DashboardLe
         .limit(20)
     ).all()
     return [_leave_from_row(row) for row in rows]
+
+
+def _leaves_inbox(
+    session: Session,
+    ctx: WorkspaceContext,
+    *,
+    now: datetime,
+) -> LeavesInboxPayload:
+    rows = session.scalars(
+        select(Leave)
+        .where(
+            Leave.workspace_id == ctx.workspace_id,
+            or_(
+                Leave.status == "pending",
+                (Leave.status == "approved") & (Leave.ends_at >= now),
+            ),
+        )
+        .order_by(Leave.starts_at.asc(), Leave.id.asc())
+        .limit(100)
+    ).all()
+    pending: list[DashboardLeave] = []
+    approved: list[DashboardLeave] = []
+    for row in rows:
+        item = _leave_from_row(row)
+        if row.status == "pending":
+            pending.append(item)
+        elif row.status == "approved":
+            approved.append(item)
+    return LeavesInboxPayload(pending=pending, approved=approved)
 
 
 def _leave_from_row(row: Leave) -> DashboardLeave:

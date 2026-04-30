@@ -26,7 +26,7 @@
 // property.closure.created, property.closure.updated, expense.approved, shift.ended,
 // time.shift.changed, work_order.completed. Additional kinds here (agent.*, booking.*,
 // asset_action.*, schedule_ruleset.*, task.updated/skipped, approval.*,
-// ical.poll.completed) track the spec and the mock's dispatcher for
+// leave.*, ical.poll.completed) track the spec and the mock's dispatcher for
 // when each backend emitter lands. Any drift is flagged in the
 // cd-y4g5 handoff.
 
@@ -96,6 +96,8 @@ export type EventKind =
   // Approvals (§11 HITL).
   | "approval.decided"
   | "approval.resolved"
+  // Leave decisions (§09).
+  | "leave.decided"
   // Expenses (§09).
   | "expense.created"
   | "expense.submitted"
@@ -548,6 +550,13 @@ export const INVALIDATIONS: Record<EventKind, InvalidationHandler> = {
     invalidate(qc, ["my-schedule"]);
     invalidate(qc, qk.leaves());
     invalidate(qc, qk.meOverrides());
+  },
+
+  "leave.decided": (_event, qc) => {
+    invalidate(qc, qk.leaves());
+    invalidate(qc, qk.dashboard());
+    invalidate(qc, qk.history("leaves"));
+    invalidate(qc, ["my-schedule"]);
   },
 
   "expense.created": (_event, qc) => {

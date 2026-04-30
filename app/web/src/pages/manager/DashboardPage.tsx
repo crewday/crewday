@@ -2,6 +2,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
+import { useDecideMutation } from "@/lib/useDecideMutation";
 import DeskPage from "@/components/DeskPage";
 import { Avatar, Chip, Loading, Panel, StatCard } from "@/components/common";
 import { fmtTime } from "@/lib/dates";
@@ -23,10 +24,14 @@ export default function DashboardPage() {
       fetchJson("/api/v1/approvals/" + id + "/" + decision, { method: "POST" }),
     onSuccess: () => qc.invalidateQueries({ queryKey: qk.dashboard() }),
   });
-  const decideLeave = useMutation({
-    mutationFn: ({ id, decision }: { id: string; decision: "approve" | "reject" }) =>
-      fetchJson("/api/v1/leaves/" + id + "/" + decision, { method: "POST" }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: qk.dashboard() }),
+  const decideLeave = useDecideMutation<Dashboard, "approve" | "reject">({
+    queryKey: qk.dashboard(),
+    endpoint: (id, decision) => "/api/v1/leaves/" + id + "/" + decision,
+    applyOptimistic: (prev, id) => ({
+      ...prev,
+      pending_leaves: prev.pending_leaves.filter((lv) => lv.id !== id),
+    }),
+    alsoInvalidate: [qk.leaves()],
   });
 
   if (d.isPending || me.isPending) return <DeskPage title="Dashboard"><Loading /></DeskPage>;

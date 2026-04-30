@@ -8714,6 +8714,30 @@
         "title": "LeaveUpdateDates",
         "type": "object"
       },
+      "LeavesInboxPayload": {
+        "properties": {
+          "approved": {
+            "items": {
+              "$ref": "#/components/schemas/DashboardLeave"
+            },
+            "title": "Approved",
+            "type": "array"
+          },
+          "pending": {
+            "items": {
+              "$ref": "#/components/schemas/DashboardLeave"
+            },
+            "title": "Pending",
+            "type": "array"
+          }
+        },
+        "required": [
+          "pending",
+          "approved"
+        ],
+        "title": "LeavesInboxPayload",
+        "type": "object"
+      },
       "LoginFinishRequest": {
         "description": "Request body for ``POST /auth/passkey/login/finish``.",
         "properties": {
@@ -29117,6 +29141,39 @@
           "issues"
         ]
       }
+    },
+    "/w/{slug}/api/v1/leaves": {
+      "get": {
+        "operationId": "dashboard.leaves.list",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LeavesInboxPayload"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Read the manager leave inbox aggregate",
+        "tags": [
+          "dashboard"
+        ]
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "slug",
+          "required": true,
+          "schema": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          }
+        }
+      ]
     },
     "/w/{slug}/api/v1/leaves/{leave_id}/approve": {
       "parameters": [

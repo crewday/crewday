@@ -252,6 +252,21 @@ def _seed_dashboard(
         )
     )
     session.add(
+        Leave(
+            id=f"approved_leave_dashboard_api_{suffix}",
+            workspace_id=workspace.id,
+            user_id=worker.id,
+            kind="sick",
+            starts_at=_NOW + timedelta(days=10),
+            ends_at=_NOW + timedelta(days=11),
+            status="approved",
+            reason_md="Planned recovery",
+            decided_by=manager.id,
+            decided_at=_NOW,
+            created_at=_NOW,
+        )
+    )
+    session.add(
         IssueReport(
             id=f"issue_dashboard_api_{suffix}",
             workspace_id=workspace.id,
@@ -339,6 +354,40 @@ def test_dashboard_leave_decision_alias_approves_pending_leave(
     assert row.status == "approved"
 
 
+def test_dashboard_leave_decision_alias_rejects_pending_leave(
+    db_session: Session,
+) -> None:
+    _ctx, client, worker_id, _property_id, leave_id = _seed_dashboard(db_session)
+
+    response = client.post(f"/leaves/{leave_id}/reject")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["id"] == leave_id
+    assert payload["employee_id"] == worker_id
+    assert payload["approved_at"] is None
+    row = db_session.scalar(select(Leave).where(Leave.id == leave_id))
+    assert row is not None
+    assert row.status == "rejected"
+
+
+def test_leaves_inbox_lists_pending_and_upcoming_approved(
+    db_session: Session,
+) -> None:
+    _ctx, client, _worker_id, _property_id, leave_id = _seed_dashboard(db_session)
+
+    response = client.get("/leaves")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert [row["id"] for row in payload["pending"]] == [leave_id]
+    assert payload["pending"][0]["note"] == "Family trip"
+    assert len(payload["approved"]) == 1
+    assert payload["approved"][0]["category"] == "sick"
+    assert payload["approved"][0]["note"] == "Planned recovery"
+    assert payload["approved"][0]["approved_at"] is not None
+
+
 def test_dashboard_requires_employee_read_permission(db_session: Session) -> None:
     ctx, _manager_client, worker_id, _property_id, _leave_id = _seed_dashboard(
         db_session
@@ -358,4 +407,50 @@ def test_dashboard_requires_employee_read_permission(db_session: Session) -> Non
     assert response.json()["detail"] == {
         "error": "permission_denied",
         "action_key": "employees.read",
+    }
+
+
+def test_leaves_inbox_requires_leave_view_permission(db_session: Session) -> None:
+    ctx, _manager_client, worker_id, _property_id, _leave_id = _seed_dashboard(
+        db_session
+    )
+    worker_ctx = _ctx(
+        ctx.workspace_id,
+        worker_id,
+        slug=ctx.workspace_slug,
+        grant_role="worker",
+        owner_member=False,
+    )
+    client = _client(db_session, worker_ctx)
+
+    response = client.get("/leaves")
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == {
+        "error": "permission_denied",
+        "action_key": "leaves.view_others",
+    }
+
+
+def test_leave_decision_alias_requires_leave_edit_permission(
+    db_session: Session,
+) -> None:
+    ctx, _manager_client, worker_id, _property_id, leave_id = _seed_dashboard(
+        db_session
+    )
+    worker_ctx = _ctx(
+        ctx.workspace_id,
+        worker_id,
+        slug=ctx.workspace_slug,
+        grant_role="worker",
+        owner_member=False,
+    )
+    client = _client(db_session, worker_ctx)
+
+    response = client.post(f"/leaves/{leave_id}/approve")
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == {
+        "error": "permission_denied",
+        "action_key": "leaves.edit_others",
     }

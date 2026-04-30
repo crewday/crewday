@@ -153,6 +153,12 @@ describe("<RequirePermission>", () => {
     );
   });
 
+  it("wraps the real leaves route before the manager shell", () => {
+    expect(appSource).toMatch(
+      /<Route element={<RequirePermission actionKey="leaves\.view_others" \/>}>\s*<Route element={<RequirePermission actionKey="employees\.read" \/>}>\s*<Route element={<ManagerLayout \/>}>\s*<Route path="\/leaves" element={<LeavesInboxPage \/>} \/>/,
+    );
+  });
+
   it("wraps the real audit route before the manager shell", () => {
     expect(appSource).toMatch(
       /<Route element={<RequirePermission actionKey="audit_log\.view" \/>}>\s*<Route element={<ManagerLayout \/>}>\s*<Route path="\/audit" element={<AuditPage \/>} \/>/,
