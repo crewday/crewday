@@ -27,6 +27,9 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from app.tenancy.context import WorkspaceContext
 from app.util.clock import FrozenClock
 from app.worker import scheduler as scheduler_mod
+from app.worker.jobs import identity as identity_jobs
+from app.worker.jobs import llm_budget as llm_budget_jobs
+from app.worker.jobs import messaging as messaging_jobs
 from app.worker.scheduler import (
     APPROVAL_TTL_JOB_ID,
     DAILY_DIGEST_JOB_ID,
@@ -303,8 +306,8 @@ class TestDailyDigestJob:
                 template_rendered=1,
             )
 
-        monkeypatch.setattr(scheduler_mod, "get_settings", lambda: _FakeSettings())
-        monkeypatch.setattr(scheduler_mod, "make_uow", lambda: _FakeUow())
+        monkeypatch.setattr(messaging_jobs, "get_settings", lambda: _FakeSettings())
+        monkeypatch.setattr(messaging_jobs, "make_uow", lambda: _FakeUow())
         monkeypatch.setattr("app.adapters.mail.smtp.SMTPMailer", _FakeMailer)
         monkeypatch.setattr(
             "app.worker.tasks.daily_digest.send_daily_digest",
@@ -496,7 +499,7 @@ class TestLlmBudgetRefreshJob:
         # Patch the seams the body pulls from:
         #   * ``make_uow`` — hand back the fake UoW.
         #   * ``Session`` — isinstance check flips to ``_FakeSession``.
-        monkeypatch.setattr(scheduler_mod, "make_uow", lambda: _FakeUow())
+        monkeypatch.setattr(llm_budget_jobs, "make_uow", lambda: _FakeUow())
         import sqlalchemy.orm as _orm_mod
 
         monkeypatch.setattr(_orm_mod, "Session", _FakeSession)
@@ -608,7 +611,7 @@ class TestUserWorkspaceRefreshJob:
             def __exit__(self, *exc: object) -> None:
                 return None
 
-        monkeypatch.setattr(scheduler_mod, "make_uow", lambda: _FakeUow())
+        monkeypatch.setattr(identity_jobs, "make_uow", lambda: _FakeUow())
         import sqlalchemy.orm as _orm_mod
 
         # Flip ``Session`` to ``_FakeSession`` so the body's
