@@ -108,6 +108,7 @@ from app.api.v1 import (
     BILLING_PUBLIC_ROUTER,
     CONTEXT_ROUTERS,
     DOCUMENTS_ROUTER,
+    INVENTORY_STOCKTAKES_ROUTER,
     ISSUES_ROUTER,
     STAYS_PUBLIC_ROUTER,
     WEBHOOKS_ROUTER,
@@ -766,6 +767,7 @@ def _mount_auth_routers(
     app.include_router(build_settings_router(), prefix=scoped_prefix)
     app.include_router(build_workspace_llm_router(), prefix=scoped_prefix)
     app.include_router(build_workspace_audit_router(), prefix=scoped_prefix)
+    app.include_router(INVENTORY_STOCKTAKES_ROUTER, prefix=scoped_prefix)
 
 
 def _mount_context_routers(app: FastAPI, *, settings: Settings) -> None:
@@ -1141,7 +1143,12 @@ def _slug_path_parameter() -> dict[str, Any]:
         "name": "slug",
         "in": "path",
         "required": True,
-        "schema": {"type": "string", "minLength": 1, "maxLength": 64},
+        "schema": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 40,
+            "pattern": "^[a-z][a-z0-9-]{1,38}[a-z0-9]$",
+        },
     }
 
 

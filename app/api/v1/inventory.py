@@ -2,18 +2,24 @@
 
 from __future__ import annotations
 
+from dataclasses import asdict
 from datetime import datetime
 from decimal import Decimal
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response, status
-from pydantic import BaseModel, ConfigDict, Field, field_serializer, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_serializer
 from sqlalchemy.orm import Session
 
 from app.api.deps import current_workspace_context, db_session
 from app.api.pagination import DEFAULT_LIMIT, LimitQuery, decode_cursor, encode_cursor
 from app.authz.dep import Permission
-from app.services.inventory import item_service, movement_service
+from app.services.inventory import (
+    item_service,
+    movement_service,
+    report_service,
+    stocktake_service,
+)
 from app.services.inventory.item_service import (
     InventoryItemCreate,
     InventoryItemUpdate,
@@ -30,8 +36,17 @@ __all__ = [
     "InventoryMovementCreateRequest",
     "InventoryMovementListResponse",
     "InventoryMovementResponse",
+    "InventoryStocktakeCommitResponse",
+    "InventoryStocktakeDetailResponse",
+    "InventoryStocktakeLineRequest",
+    "InventoryStocktakeLineResponse",
+    "InventoryStocktakeListResponse",
+    "InventoryStocktakeOpenRequest",
+    "InventoryStocktakeResponse",
     "build_inventory_router",
+    "build_inventory_stocktakes_router",
     "router",
+    "stocktakes_router",
 ]
 
 
@@ -42,6 +57,9 @@ _MAX_TEXT = 20_000
 _MAX_SHORT = 500
 _IdempotencyKey = Annotated[
     str | None, Header(alias="Idempotency-Key", max_length=_MAX_SHORT)
+]
+_RequiredIdempotencyKey = Annotated[
+    str, Header(alias="Idempotency-Key", min_length=1, max_length=_MAX_SHORT)
 ]
 
 
@@ -173,16 +191,6 @@ class InventoryMovementCreateRequest(BaseModel):
     occurrence_id: str | None = Field(default=None, max_length=_MAX_SHORT)
     note: str | None = Field(default=None, max_length=_MAX_TEXT)
 
-    @model_validator(mode="after")
-    def _task_aliases_agree(self) -> InventoryMovementCreateRequest:
-        if (
-            self.source_task_id is not None
-            and self.occurrence_id is not None
-            and self.source_task_id != self.occurrence_id
-        ):
-            raise ValueError("source_task_id and occurrence_id must match")
-        return self
-
     def resolved_source_task_id(self) -> str | None:
         return (
             self.source_task_id
@@ -245,6 +253,190 @@ class InventoryMovementListResponse(BaseModel):
     has_more: bool
 
 
+def _decimal_json_number(value: Decimal) -> int | float:
+    if value == value.to_integral_value():
+        return int(value)
+    return float(value)
+
+
+class InventoryStocktakeOpenRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    note_md: str | None = Field(default=None, max_length=_MAX_TEXT)
+
+
+class InventoryStocktakeLineRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    observed_on_hand: Decimal
+    reason: movement_service.MovementReason = "audit_correction"
+    note: str | None = Field(default=None, max_length=_MAX_TEXT)
+
+
+class InventoryStocktakeResponse(BaseModel):
+    id: str
+    workspace_id: str
+    property_id: str
+    started_at: str
+    completed_at: str | None
+    actor_kind: str
+    actor_id: str | None
+    note_md: str | None
+
+    @classmethod
+    def from_view(
+        cls, view: stocktake_service.StocktakeView
+    ) -> InventoryStocktakeResponse:
+        return cls(
+            id=view.id,
+            workspace_id=view.workspace_id,
+            property_id=view.property_id,
+            started_at=view.started_at.isoformat(),
+            completed_at=view.completed_at.isoformat()
+            if view.completed_at is not None
+            else None,
+            actor_kind=view.actor_kind,
+            actor_id=view.actor_id,
+            note_md=view.note_md,
+        )
+
+
+class InventoryStocktakeLineResponse(BaseModel):
+    stocktake_id: str
+    item_id: str
+    workspace_id: str
+    observed_on_hand: Decimal
+    reason: str
+    note: str | None
+    updated_at: str
+
+    @field_serializer("observed_on_hand")
+    def _decimal_as_number(self, value: Decimal) -> int | float:
+        return _decimal_json_number(value)
+
+    @classmethod
+    def from_view(
+        cls, view: stocktake_service.StocktakeLineView
+    ) -> InventoryStocktakeLineResponse:
+        return cls(
+            stocktake_id=view.stocktake_id,
+            item_id=view.item_id,
+            workspace_id=view.workspace_id,
+            observed_on_hand=view.observed_on_hand,
+            reason=view.reason,
+            note=view.note,
+            updated_at=view.updated_at.isoformat(),
+        )
+
+
+class InventoryStocktakeListResponse(BaseModel):
+    data: list[InventoryStocktakeResponse]
+
+
+class InventoryStocktakeDetailResponse(InventoryStocktakeResponse):
+    lines: list[InventoryStocktakeLineResponse]
+
+    @classmethod
+    def from_detail(
+        cls, view: stocktake_service.StocktakeDetailView
+    ) -> InventoryStocktakeDetailResponse:
+        base = InventoryStocktakeResponse.from_view(view.stocktake)
+        return cls(
+            **base.model_dump(),
+            lines=[
+                InventoryStocktakeLineResponse.from_view(line) for line in view.lines
+            ],
+        )
+
+
+class InventoryStocktakeCommitResponse(BaseModel):
+    stocktake: InventoryStocktakeDetailResponse
+    movements: list[InventoryMovementResponse]
+
+
+class InventoryRateReportRowResponse(BaseModel):
+    property_id: str
+    item_id: str
+    item_name: str
+    sku: str | None
+    unit: str
+    total_qty: Decimal
+    daily_avg: Decimal
+    window_days: int
+
+    @field_serializer("total_qty", "daily_avg")
+    def _decimal_as_number(self, value: Decimal) -> int | float:
+        return _decimal_json_number(value)
+
+    @classmethod
+    def from_view(
+        cls, view: report_service.InventoryRateReportRow
+    ) -> InventoryRateReportRowResponse:
+        return cls(**asdict(view))
+
+
+class InventoryRateReportResponse(BaseModel):
+    data: list[InventoryRateReportRowResponse]
+
+
+class InventoryShrinkageReportRowResponse(BaseModel):
+    property_id: str
+    item_id: str
+    item_name: str
+    sku: str | None
+    unit: str
+    theft_qty: Decimal
+    loss_qty: Decimal
+    audit_correction_qty: Decimal
+    shrinkage_qty: Decimal
+    window_days: int
+
+    @field_serializer(
+        "theft_qty",
+        "loss_qty",
+        "audit_correction_qty",
+        "shrinkage_qty",
+    )
+    def _decimal_as_number(self, value: Decimal) -> int | float:
+        return _decimal_json_number(value)
+
+    @classmethod
+    def from_view(
+        cls, view: report_service.InventoryShrinkageReportRow
+    ) -> InventoryShrinkageReportRowResponse:
+        return cls(**asdict(view))
+
+
+class InventoryShrinkageReportResponse(BaseModel):
+    data: list[InventoryShrinkageReportRowResponse]
+
+
+class InventoryStocktakeActivityResponse(BaseModel):
+    stocktake_id: str
+    property_id: str
+    started_at: str
+    completed_at: str | None
+    actor_kind: str
+    actor_id: str | None
+    movement_count: int
+    absolute_delta: Decimal
+    net_delta: Decimal
+
+    @field_serializer("absolute_delta", "net_delta")
+    def _decimal_as_number(self, value: Decimal) -> int | float:
+        return _decimal_json_number(value)
+
+    @classmethod
+    def from_view(
+        cls, view: report_service.InventoryStocktakeActivityRow
+    ) -> InventoryStocktakeActivityResponse:
+        return cls(**asdict(view))
+
+
+class InventoryStocktakeActivityListResponse(BaseModel):
+    data: list[InventoryStocktakeActivityResponse]
+
+
 def _http_for_not_found() -> HTTPException:
     return HTTPException(
         status_code=status.HTTP_404_NOT_FOUND,
@@ -282,6 +474,59 @@ def _http_for_movement_validation(
         status_code=422,
         detail={"error": exc.error, "field": exc.field},
     )
+
+
+def _http_for_permission_denied(action_key: str) -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail={"error": "permission_denied", "action_key": action_key},
+    )
+
+
+def _http_for_stocktake_not_found() -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_404_NOT_FOUND,
+        detail={"error": "stocktake_not_found"},
+    )
+
+
+def _http_for_stocktake_committed() -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail={"error": "stocktake_already_committed"},
+    )
+
+
+def _http_for_stocktake_validation(
+    exc: stocktake_service.StocktakeValidationError,
+) -> HTTPException:
+    return HTTPException(
+        status_code=422,
+        detail={"error": exc.error, "field": exc.field},
+    )
+
+
+def _route_responses(*codes: int) -> dict[int | str, dict[str, Any]]:
+    descriptions = {
+        status.HTTP_403_FORBIDDEN: "Forbidden",
+        status.HTTP_404_NOT_FOUND: "Not found",
+        status.HTTP_409_CONFLICT: "Conflict",
+    }
+    responses: dict[int | str, dict[str, Any]] = {
+        422: {
+            "description": "Validation error",
+            "content": {
+                "application/problem+json": {
+                    "schema": {
+                        "type": "object",
+                        "additionalProperties": True,
+                    }
+                }
+            },
+        }
+    }
+    responses.update({code: {"description": descriptions[code]} for code in codes})
+    return responses
 
 
 def _decode_movement_cursor(
@@ -337,13 +582,13 @@ def build_inventory_router() -> APIRouter:
     api = APIRouter(tags=["inventory"])
     view_gate = Depends(Permission("scope.view", scope_kind="workspace"))
     edit_gate = Depends(Permission("scope.edit_settings", scope_kind="workspace"))
-    adjust_gate = Depends(Permission("inventory.adjust", scope_kind="workspace"))
 
     @api.get(
         "/properties/{property_id}/items",
         operation_id="inventory.items.list",
         openapi_extra={"x-cli": {"group": "inventory", "verb": "list"}},
         dependencies=[view_gate],
+        responses=_route_responses(status.HTTP_404_NOT_FOUND),
     )
     def list_items(
         property_id: str,
@@ -382,6 +627,7 @@ def build_inventory_router() -> APIRouter:
         operation_id="inventory.reports.low_stock",
         openapi_extra={"x-cli": {"group": "inventory", "verb": "low-stock"}},
         dependencies=[view_gate],
+        responses=_route_responses(status.HTTP_404_NOT_FOUND),
     )
     def low_stock_report(
         ctx: _Ctx,
@@ -400,12 +646,94 @@ def build_inventory_router() -> APIRouter:
             data=[InventoryItemResponse.from_view(view) for view in views]
         )
 
+    @api.get(
+        "/reports/production_rate",
+        operation_id="inventory.reports.production_rate",
+        openapi_extra={"x-cli": {"group": "inventory", "verb": "production-rate"}},
+        dependencies=[view_gate],
+        responses=_route_responses(status.HTTP_404_NOT_FOUND),
+    )
+    def production_rate_report(
+        ctx: _Ctx,
+        session: _Db,
+        property_id: Annotated[str | None, Query(max_length=_MAX_SHORT)] = None,
+        days: Annotated[int, Query(ge=1, le=366)] = 30,
+    ) -> InventoryRateReportResponse:
+        try:
+            rows = report_service.production_rate(
+                session,
+                ctx,
+                property_id=property_id,
+                window_days=days,
+            )
+        except report_service.InventoryReportPropertyNotFound as exc:
+            raise _http_for_property_not_found() from exc
+        return InventoryRateReportResponse(
+            data=[InventoryRateReportRowResponse.from_view(row) for row in rows]
+        )
+
+    @api.get(
+        "/reports/shrinkage",
+        operation_id="inventory.reports.shrinkage",
+        openapi_extra={"x-cli": {"group": "inventory", "verb": "shrinkage"}},
+        dependencies=[view_gate],
+        responses=_route_responses(status.HTTP_404_NOT_FOUND),
+    )
+    def shrinkage_report(
+        ctx: _Ctx,
+        session: _Db,
+        property_id: Annotated[str | None, Query(max_length=_MAX_SHORT)] = None,
+        days: Annotated[int, Query(ge=1, le=366)] = 30,
+    ) -> InventoryShrinkageReportResponse:
+        try:
+            rows = report_service.shrinkage(
+                session,
+                ctx,
+                property_id=property_id,
+                window_days=days,
+            )
+        except report_service.InventoryReportPropertyNotFound as exc:
+            raise _http_for_property_not_found() from exc
+        return InventoryShrinkageReportResponse(
+            data=[InventoryShrinkageReportRowResponse.from_view(row) for row in rows]
+        )
+
+    @api.get(
+        "/reports/stocktakes",
+        operation_id="inventory.reports.stocktakes",
+        openapi_extra={"x-cli": {"group": "inventory", "verb": "stocktakes"}},
+        dependencies=[view_gate],
+        responses=_route_responses(status.HTTP_404_NOT_FOUND),
+    )
+    def stocktakes_report(
+        ctx: _Ctx,
+        session: _Db,
+        property_id: Annotated[str | None, Query(max_length=_MAX_SHORT)] = None,
+        limit: LimitQuery = DEFAULT_LIMIT,
+    ) -> InventoryStocktakeActivityListResponse:
+        try:
+            rows = report_service.stocktake_activity(
+                session,
+                ctx,
+                property_id=property_id,
+                limit=limit,
+            )
+        except report_service.InventoryReportPropertyNotFound as exc:
+            raise _http_for_property_not_found() from exc
+        return InventoryStocktakeActivityListResponse(
+            data=[InventoryStocktakeActivityResponse.from_view(row) for row in rows]
+        )
+
     @api.post(
         "/{item_id}/movements",
         status_code=status.HTTP_201_CREATED,
         operation_id="inventory.movements.create",
         openapi_extra={"x-cli": {"group": "inventory", "verb": "movement-create"}},
-        dependencies=[adjust_gate],
+        responses=_route_responses(
+            status.HTTP_403_FORBIDDEN,
+            status.HTTP_404_NOT_FOUND,
+            status.HTTP_409_CONFLICT,
+        ),
     )
     def create_movement(
         item_id: str,
@@ -416,6 +744,7 @@ def build_inventory_router() -> APIRouter:
     ) -> InventoryMovementResponse:
         _ = _idempotency_key
         try:
+            movement_service.require_adjust_for_item(session, ctx, item_id=item_id)
             view = movement_service.record(
                 session,
                 ctx,
@@ -427,6 +756,8 @@ def build_inventory_router() -> APIRouter:
             )
         except movement_service.InventoryItemNotFound as exc:
             raise _http_for_not_found() from exc
+        except movement_service.InventoryMovementPermissionDenied as exc:
+            raise _http_for_permission_denied("inventory.adjust") from exc
         except movement_service.InventoryMovementValidationError as exc:
             raise _http_for_movement_validation(exc) from exc
         return InventoryMovementResponse.from_view(view)
@@ -436,6 +767,7 @@ def build_inventory_router() -> APIRouter:
         operation_id="inventory.movements.list",
         openapi_extra={"x-cli": {"group": "inventory", "verb": "movements-list"}},
         dependencies=[view_gate],
+        responses=_route_responses(status.HTTP_404_NOT_FOUND),
     )
     def list_movements(
         item_id: str,
@@ -445,12 +777,14 @@ def build_inventory_router() -> APIRouter:
         limit: LimitQuery = DEFAULT_LIMIT,
     ) -> InventoryMovementListResponse:
         try:
+            movement_service.ensure_active_item(session, ctx, item_id=item_id)
+            cursor = _decode_movement_cursor(before)
             views = list(
                 movement_service.list_movements(
                     session,
                     ctx,
                     item_id=item_id,
-                    before=_decode_movement_cursor(before),
+                    before=cursor,
                     limit=limit + 1,
                 )
             )
@@ -471,13 +805,17 @@ def build_inventory_router() -> APIRouter:
         "/{item_id}/adjust",
         status_code=status.HTTP_201_CREATED,
         operation_id="inventory.adjust",
-        dependencies=[adjust_gate],
         openapi_extra={
             "x-cli": {"group": "inventory", "verb": "adjust"},
             "x-agent-confirm": {
                 "message": "Record an inventory adjustment for this item?"
             },
         },
+        responses=_route_responses(
+            status.HTTP_403_FORBIDDEN,
+            status.HTTP_404_NOT_FOUND,
+            status.HTTP_409_CONFLICT,
+        ),
     )
     def adjust_item(
         item_id: str,
@@ -488,6 +826,7 @@ def build_inventory_router() -> APIRouter:
     ) -> InventoryMovementResponse:
         _ = _idempotency_key
         try:
+            movement_service.require_adjust_for_item(session, ctx, item_id=item_id)
             view = movement_service.adjust_to_observed(
                 session,
                 ctx,
@@ -498,6 +837,8 @@ def build_inventory_router() -> APIRouter:
             )
         except movement_service.InventoryItemNotFound as exc:
             raise _http_for_not_found() from exc
+        except movement_service.InventoryMovementPermissionDenied as exc:
+            raise _http_for_permission_denied("inventory.adjust") from exc
         except movement_service.InventoryMovementValidationError as exc:
             raise _http_for_movement_validation(exc) from exc
         return InventoryMovementResponse.from_view(view)
@@ -507,6 +848,7 @@ def build_inventory_router() -> APIRouter:
         operation_id="inventory.items.get_by_sku",
         openapi_extra={"x-cli": {"group": "inventory", "verb": "get-by-sku"}},
         dependencies=[view_gate],
+        responses=_route_responses(status.HTTP_404_NOT_FOUND),
     )
     def get_item_by_sku(
         property_id: str,
@@ -530,6 +872,7 @@ def build_inventory_router() -> APIRouter:
         operation_id="inventory.items.get_by_barcode",
         openapi_extra={"x-cli": {"group": "inventory", "verb": "get-by-barcode"}},
         dependencies=[view_gate],
+        responses=_route_responses(status.HTTP_404_NOT_FOUND),
     )
     def get_item_by_barcode(
         property_id: str,
@@ -559,6 +902,10 @@ def build_inventory_router() -> APIRouter:
         operation_id="inventory.items.create",
         openapi_extra={"x-cli": {"group": "inventory", "verb": "add"}},
         dependencies=[edit_gate],
+        responses=_route_responses(
+            status.HTTP_404_NOT_FOUND,
+            status.HTTP_409_CONFLICT,
+        ),
     )
     def create_item(
         property_id: str,
@@ -588,6 +935,10 @@ def build_inventory_router() -> APIRouter:
         operation_id="inventory.items.update",
         openapi_extra={"x-cli": {"group": "inventory", "verb": "update"}},
         dependencies=[edit_gate],
+        responses=_route_responses(
+            status.HTTP_404_NOT_FOUND,
+            status.HTTP_409_CONFLICT,
+        ),
     )
     def update_item(
         property_id: str,
@@ -618,6 +969,7 @@ def build_inventory_router() -> APIRouter:
         operation_id="inventory.items.delete",
         openapi_extra={"x-cli": {"group": "inventory", "verb": "delete"}},
         dependencies=[edit_gate],
+        responses=_route_responses(status.HTTP_404_NOT_FOUND),
     )
     def archive_item(
         property_id: str,
@@ -641,6 +993,10 @@ def build_inventory_router() -> APIRouter:
         operation_id="inventory.items.restore",
         openapi_extra={"x-cli": {"group": "inventory", "verb": "restore"}},
         dependencies=[edit_gate],
+        responses=_route_responses(
+            status.HTTP_404_NOT_FOUND,
+            status.HTTP_409_CONFLICT,
+        ),
     )
     def restore_item(
         property_id: str,
@@ -666,4 +1022,176 @@ def build_inventory_router() -> APIRouter:
     return api
 
 
+def build_inventory_stocktakes_router() -> APIRouter:
+    api = APIRouter(tags=["inventory"])
+
+    @api.post(
+        "/properties/{property_id}/stocktakes",
+        status_code=status.HTTP_201_CREATED,
+        operation_id="inventory.stocktakes.create",
+        openapi_extra={"x-cli": {"group": "inventory", "verb": "stocktake-open"}},
+        responses=_route_responses(
+            status.HTTP_403_FORBIDDEN,
+            status.HTTP_404_NOT_FOUND,
+            status.HTTP_409_CONFLICT,
+        ),
+    )
+    def open_stocktake(
+        property_id: str,
+        body: InventoryStocktakeOpenRequest,
+        ctx: _Ctx,
+        session: _Db,
+        _idempotency_key: _IdempotencyKey = None,
+    ) -> InventoryStocktakeResponse:
+        _ = _idempotency_key
+        try:
+            view = stocktake_service.open(
+                session,
+                ctx,
+                property_id=property_id,
+                note_md=body.note_md,
+            )
+        except stocktake_service.StocktakePermissionDenied as exc:
+            raise _http_for_permission_denied("inventory.stocktake") from exc
+        except stocktake_service.StocktakeNotFound as exc:
+            raise _http_for_property_not_found() from exc
+        return InventoryStocktakeResponse.from_view(view)
+
+    @api.get(
+        "/properties/{property_id}/stocktakes",
+        operation_id="inventory.stocktakes.list",
+        openapi_extra={"x-cli": {"group": "inventory", "verb": "stocktake-list"}},
+        responses=_route_responses(
+            status.HTTP_403_FORBIDDEN,
+            status.HTTP_404_NOT_FOUND,
+        ),
+    )
+    def list_stocktakes(
+        property_id: str,
+        ctx: _Ctx,
+        session: _Db,
+        limit: LimitQuery = DEFAULT_LIMIT,
+    ) -> InventoryStocktakeListResponse:
+        try:
+            views = stocktake_service.list_for_property(
+                session,
+                ctx,
+                property_id=property_id,
+                limit=limit,
+            )
+        except stocktake_service.StocktakePermissionDenied as exc:
+            raise _http_for_permission_denied("inventory.stocktake") from exc
+        except stocktake_service.StocktakeNotFound as exc:
+            raise _http_for_property_not_found() from exc
+        return InventoryStocktakeListResponse(
+            data=[InventoryStocktakeResponse.from_view(view) for view in views]
+        )
+
+    @api.get(
+        "/stocktakes/{stocktake_id}",
+        operation_id="inventory.stocktakes.get",
+        openapi_extra={"x-cli": {"group": "inventory", "verb": "stocktake-get"}},
+        responses=_route_responses(
+            status.HTTP_403_FORBIDDEN,
+            status.HTTP_404_NOT_FOUND,
+        ),
+    )
+    def get_stocktake(
+        stocktake_id: str,
+        ctx: _Ctx,
+        session: _Db,
+    ) -> InventoryStocktakeDetailResponse:
+        try:
+            detail = stocktake_service.get(session, ctx, stocktake_id=stocktake_id)
+        except stocktake_service.StocktakePermissionDenied as exc:
+            raise _http_for_permission_denied("inventory.stocktake") from exc
+        except stocktake_service.StocktakeNotFound as exc:
+            raise _http_for_stocktake_not_found() from exc
+        return InventoryStocktakeDetailResponse.from_detail(detail)
+
+    @api.patch(
+        "/stocktakes/{stocktake_id}/lines/{item_id}",
+        operation_id="inventory.stocktakes.lines.update",
+        openapi_extra={"x-cli": {"group": "inventory", "verb": "stocktake-line"}},
+        responses=_route_responses(
+            status.HTTP_403_FORBIDDEN,
+            status.HTTP_404_NOT_FOUND,
+            status.HTTP_409_CONFLICT,
+        ),
+    )
+    def save_stocktake_line(
+        stocktake_id: str,
+        item_id: str,
+        body: InventoryStocktakeLineRequest,
+        ctx: _Ctx,
+        session: _Db,
+    ) -> InventoryStocktakeLineResponse:
+        try:
+            line = stocktake_service.save_line(
+                session,
+                ctx,
+                stocktake_id=stocktake_id,
+                item_id=item_id,
+                observed=body.observed_on_hand,
+                reason=body.reason,
+                note=body.note,
+            )
+        except stocktake_service.StocktakePermissionDenied as exc:
+            raise _http_for_permission_denied("inventory.stocktake") from exc
+        except stocktake_service.StocktakeAlreadyCommitted as exc:
+            raise _http_for_stocktake_committed() from exc
+        except stocktake_service.StocktakeNotFound as exc:
+            raise _http_for_stocktake_not_found() from exc
+        except stocktake_service.StocktakeValidationError as exc:
+            raise _http_for_stocktake_validation(exc) from exc
+        return InventoryStocktakeLineResponse.from_view(line)
+
+    @api.post(
+        "/stocktakes/{stocktake_id}/commit",
+        operation_id="inventory.stocktakes.commit",
+        openapi_extra={
+            "x-cli": {"group": "inventory", "verb": "stocktake-commit"},
+            "x-agent-confirm": {"message": "Commit this inventory stocktake?"},
+        },
+        responses=_route_responses(
+            status.HTTP_403_FORBIDDEN,
+            status.HTTP_404_NOT_FOUND,
+            status.HTTP_409_CONFLICT,
+        ),
+    )
+    def commit_stocktake(
+        stocktake_id: str,
+        ctx: _Ctx,
+        session: _Db,
+        _idempotency_key: _RequiredIdempotencyKey,
+    ) -> InventoryStocktakeCommitResponse:
+        _ = _idempotency_key
+        try:
+            movements = stocktake_service.commit(
+                session,
+                ctx,
+                stocktake_id=stocktake_id,
+            )
+            detail = stocktake_service.get(session, ctx, stocktake_id=stocktake_id)
+        except stocktake_service.StocktakePermissionDenied as exc:
+            raise _http_for_permission_denied("inventory.stocktake") from exc
+        except stocktake_service.StocktakeAlreadyCommitted as exc:
+            raise _http_for_stocktake_committed() from exc
+        except stocktake_service.StocktakeNotFound as exc:
+            raise _http_for_stocktake_not_found() from exc
+        except stocktake_service.StocktakeValidationError as exc:
+            raise _http_for_stocktake_validation(exc) from exc
+        except movement_service.InventoryMovementValidationError as exc:
+            raise _http_for_movement_validation(exc) from exc
+        return InventoryStocktakeCommitResponse(
+            stocktake=InventoryStocktakeDetailResponse.from_detail(detail),
+            movements=[
+                InventoryMovementResponse.from_view(movement) for movement in movements
+            ],
+        )
+
+    return api
+
+
 router = build_inventory_router()
+stocktakes_router = build_inventory_stocktakes_router()

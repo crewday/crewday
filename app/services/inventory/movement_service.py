@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 from app.adapters.db.inventory.models import Item, Movement, Stocktake
 from app.adapters.db.tasks.models import Occurrence
 from app.audit import write_audit
+from app.authz import InvalidScope, PermissionDenied, UnknownActionKey, require
 from app.events.bus import EventBus
 from app.events.bus import bus as default_event_bus
 from app.events.types import InventoryItemChanged
@@ -23,15 +24,18 @@ from app.util.ulid import new_ulid
 
 __all__ = [
     "InventoryItemNotFound",
+    "InventoryMovementPermissionDenied",
     "InventoryMovementValidationError",
     "InventoryMovementView",
     "MovementReason",
     "adjust_to_observed",
     "consume",
+    "ensure_active_item",
     "list_movements",
     "produce",
     "reconcile",
     "record",
+    "require_adjust_for_item",
     "restock",
     "transfer",
 ]
@@ -90,6 +94,10 @@ class InventoryMovementValidationError(ValueError):
         super().__init__(f"{field}: {error}")
         self.field = field
         self.error = error
+
+
+class InventoryMovementPermissionDenied(PermissionError):
+    """Caller lacks ``inventory.adjust`` for the target property."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -225,6 +233,42 @@ def record(
         clock=clock,
         event_bus=event_bus,
     )
+
+
+def require_adjust_for_item(
+    session: Session,
+    ctx: WorkspaceContext,
+    *,
+    item_id: str,
+) -> None:
+    """Require ``inventory.adjust`` for the item's property."""
+    item = _load_active_item(session, ctx, item_id)
+    if item.property_id is None:
+        raise InventoryMovementValidationError("item_id", "property_required")
+    try:
+        require(
+            session,
+            ctx,
+            action_key="inventory.adjust",
+            scope_kind="property",
+            scope_id=item.property_id,
+        )
+    except (UnknownActionKey, InvalidScope) as exc:
+        raise RuntimeError(
+            f"authz catalog misconfigured for 'inventory.adjust': {exc!s}"
+        ) from exc
+    except PermissionDenied as exc:
+        raise InventoryMovementPermissionDenied("inventory.adjust") from exc
+
+
+def ensure_active_item(
+    session: Session,
+    ctx: WorkspaceContext,
+    *,
+    item_id: str,
+) -> None:
+    """Raise when the item is not readable in the current workspace."""
+    _ensure_active_item(session, ctx, item_id)
 
 
 def list_movements(

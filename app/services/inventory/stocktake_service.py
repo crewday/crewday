@@ -23,6 +23,7 @@ from app.util.ulid import new_ulid
 __all__ = [
     "ABANDONED_NOTE",
     "StocktakeAlreadyCommitted",
+    "StocktakeDetailView",
     "StocktakeLineView",
     "StocktakeNotFound",
     "StocktakePermissionDenied",
@@ -30,6 +31,8 @@ __all__ = [
     "StocktakeView",
     "abandon_stale",
     "commit",
+    "get",
+    "list_for_property",
     "open",
     "save_line",
 ]
@@ -100,6 +103,12 @@ class StocktakeLineView:
     updated_at: datetime
 
 
+@dataclass(frozen=True, slots=True)
+class StocktakeDetailView:
+    stocktake: StocktakeView
+    lines: tuple[StocktakeLineView, ...]
+
+
 def open(
     session: Session,
     ctx: WorkspaceContext,
@@ -135,6 +144,51 @@ def open(
         clock=resolved_clock,
     )
     return _project(row)
+
+
+def list_for_property(
+    session: Session,
+    ctx: WorkspaceContext,
+    *,
+    property_id: str,
+    limit: int,
+) -> tuple[StocktakeView, ...]:
+    """List recent stocktake sessions for one property."""
+    _ensure_property(session, ctx, property_id)
+    _require_stocktake(session, ctx, property_id=property_id)
+    rows = session.scalars(
+        select(Stocktake)
+        .where(
+            Stocktake.workspace_id == ctx.workspace_id,
+            Stocktake.property_id == property_id,
+        )
+        .order_by(Stocktake.started_at.desc(), Stocktake.id.desc())
+        .limit(limit)
+    ).all()
+    return tuple(_project(row) for row in rows)
+
+
+def get(
+    session: Session,
+    ctx: WorkspaceContext,
+    *,
+    stocktake_id: str,
+) -> StocktakeDetailView:
+    """Return one stocktake session plus its draft lines."""
+    stocktake = _load_stocktake(session, ctx, stocktake_id)
+    _require_stocktake(session, ctx, property_id=stocktake.property_id)
+    lines = tuple(
+        _project_line(row)
+        for row in session.scalars(
+            select(StocktakeLine)
+            .where(
+                StocktakeLine.workspace_id == ctx.workspace_id,
+                StocktakeLine.stocktake_id == stocktake.id,
+            )
+            .order_by(StocktakeLine.item_id)
+        ).all()
+    )
+    return StocktakeDetailView(stocktake=_project(stocktake), lines=lines)
 
 
 def save_line(
@@ -334,10 +388,18 @@ def _require_stocktake(
 def _load_stocktake_for_update(
     session: Session, ctx: WorkspaceContext, stocktake_id: str
 ) -> Stocktake:
+    row = _load_stocktake(session, ctx, stocktake_id)
+    session.refresh(row, with_for_update=True)
+    return row
+
+
+def _load_stocktake(
+    session: Session, ctx: WorkspaceContext, stocktake_id: str
+) -> Stocktake:
     row = session.scalar(
-        select(Stocktake)
-        .where(Stocktake.workspace_id == ctx.workspace_id, Stocktake.id == stocktake_id)
-        .with_for_update()
+        select(Stocktake).where(
+            Stocktake.workspace_id == ctx.workspace_id, Stocktake.id == stocktake_id
+        )
     )
     if row is None:
         raise StocktakeNotFound("stocktake not found")
