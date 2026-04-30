@@ -52,7 +52,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Literal
 
 from sqlalchemy import select
@@ -97,6 +97,7 @@ __all__ = [
     "SKIP_PATHS",
     "TEST_ACTOR_ID_HEADER",
     "TEST_WORKSPACE_ID_HEADER",
+    "WORKSPACE_REJECTION_STATE_ATTR",
     "ActorIdentity",
     "WorkspaceContextMiddleware",
     "resolve_actor",
@@ -110,6 +111,7 @@ __all__ = [
 # idempotency middleware at :mod:`app.api.middleware.idempotency`)
 # import the exact string instead of inlining it.
 ACTOR_STATE_ATTR: str = "actor_identity"
+WORKSPACE_REJECTION_STATE_ATTR: str = "workspace_rejection_response"
 
 
 # Outgoing + incoming correlation id header. Accepted from the client
@@ -219,6 +221,8 @@ class ActorIdentity:
     token_id: str | None
     session_id: str | None
     principal_kind: PrincipalKind = "session"
+    token_kind: str | None = None
+    token_scopes: dict[str, object] = field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------
@@ -287,6 +291,11 @@ def _parse_scoped_path(path: str) -> str | None:
     if not any(s != "" for s in segments[3:]):
         return None
     return slug
+
+
+def _is_scoped_api_path(path: str) -> bool:
+    segments = path.split("/")
+    return len(segments) >= 5 and segments[1] == "w" and segments[3] == "api"
 
 
 def _not_found() -> JSONResponse:
@@ -396,6 +405,8 @@ def resolve_actor(
                 token_id=verified.key_id,
                 session_id=None,
                 principal_kind="token",
+                token_kind=verified.kind,
+                token_scopes=dict(verified.scopes),
             )
 
     cookie_value = request.cookies.get(SESSION_COOKIE_NAME)
@@ -852,6 +863,17 @@ class WorkspaceContextMiddleware(BaseHTTPMiddleware):
             )
             response = _not_found()
             response.headers[CORRELATION_ID_HEADER] = correlation_id
+            if _is_scoped_api_path(path):
+                setattr(request.state, ACTOR_STATE_ATTR, actor)
+                setattr(request.state, WORKSPACE_REJECTION_STATE_ATTR, response)
+                downstream = await call_next(request)
+                if (
+                    getattr(request.state, WORKSPACE_REJECTION_STATE_ATTR, None)
+                    is response
+                ):
+                    return response
+                downstream.headers[CORRELATION_ID_HEADER] = correlation_id
+                return downstream
             return response
 
         _log_tenancy_event(

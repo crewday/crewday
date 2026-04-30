@@ -104,6 +104,41 @@ class TestEnvOverride:
             Settings()
 
 
+class TestRateLimitConfig:
+    def test_defaults_when_only_required_set(self, monkeypatch: MonkeyPatch) -> None:
+        monkeypatch.setenv("CREWDAY_DATABASE_URL", "sqlite:///:memory:")
+        s = Settings()
+        assert s.rate_limit_backend == "memory"
+        assert s.rate_limit_token_per_minute == 60
+        assert s.rate_limit_personal_me_per_minute == 600
+        assert s.rate_limit_anonymous_per_minute == 30
+
+    def test_env_overrides_propagate(self, monkeypatch: MonkeyPatch) -> None:
+        monkeypatch.setenv("CREWDAY_DATABASE_URL", "sqlite:///:memory:")
+        monkeypatch.setenv("CREWDAY_ROOT_KEY", "rate-limit-root")
+        monkeypatch.setenv("CREWDAY_RATE_LIMIT_BACKEND", "postgres")
+        monkeypatch.setenv("CREWDAY_RATE_LIMIT_TOKEN_PER_MINUTE", "61")
+        monkeypatch.setenv("CREWDAY_RATE_LIMIT_PERSONAL_ME_PER_MINUTE", "601")
+        monkeypatch.setenv("CREWDAY_RATE_LIMIT_ANONYMOUS_PER_MINUTE", "31")
+        s = Settings()
+        assert s.rate_limit_backend == "postgres"
+        assert s.rate_limit_token_per_minute == 61
+        assert s.rate_limit_personal_me_per_minute == 601
+        assert s.rate_limit_anonymous_per_minute == 31
+
+    def test_non_positive_limit_raises(self, monkeypatch: MonkeyPatch) -> None:
+        monkeypatch.setenv("CREWDAY_DATABASE_URL", "sqlite:///:memory:")
+        monkeypatch.setenv("CREWDAY_RATE_LIMIT_TOKEN_PER_MINUTE", "0")
+        with pytest.raises(ValidationError):
+            Settings()
+
+    def test_postgres_backend_requires_root_key(self, monkeypatch: MonkeyPatch) -> None:
+        monkeypatch.setenv("CREWDAY_DATABASE_URL", "sqlite:///:memory:")
+        monkeypatch.setenv("CREWDAY_RATE_LIMIT_BACKEND", "postgres")
+        with pytest.raises(ValidationError, match="CREWDAY_ROOT_KEY"):
+            Settings()
+
+
 class TestMissingRequired:
     def test_missing_database_url_raises(self) -> None:
         with pytest.raises(ValidationError) as excinfo:

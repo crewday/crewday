@@ -17,6 +17,6 @@ See ``docs/specs/16-deployment-operations.md`` §"Healthchecks" and
 
 from __future__ import annotations
 
-from app.adapters.db.ops.models import IdempotencyKey, WorkerHeartbeat
+from app.adapters.db.ops.models import IdempotencyKey, RateLimitBucket, WorkerHeartbeat
 
-__all__ = ["IdempotencyKey", "WorkerHeartbeat"]
+__all__ = ["IdempotencyKey", "RateLimitBucket", "WorkerHeartbeat"]

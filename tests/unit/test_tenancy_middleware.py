@@ -22,7 +22,7 @@ cross-tenant responses".
 from __future__ import annotations
 
 import re
-from collections.abc import Iterator
+from collections.abc import Awaitable, Callable, Iterator
 from datetime import UTC, datetime
 
 import pytest
@@ -31,6 +31,9 @@ from fastapi.testclient import TestClient
 from pydantic import SecretStr
 from sqlalchemy import Engine
 from sqlalchemy.orm import Session, sessionmaker
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import Request
+from starlette.responses import JSONResponse, Response
 
 import app.adapters.db.session as _session_mod
 from app.adapters.db.authz.bootstrap import seed_owners_system_group
@@ -49,6 +52,7 @@ from app.tenancy.middleware import (
     SKIP_PATHS,
     TEST_ACTOR_ID_HEADER,
     TEST_WORKSPACE_ID_HEADER,
+    WORKSPACE_REJECTION_STATE_ATTR,
     ActorIdentity,
     WorkspaceContextMiddleware,
     resolve_actor,
@@ -214,6 +218,31 @@ def _build_app(*, captured: list[WorkspaceContext | None] | None = None) -> Fast
     return app
 
 
+class _ConsumeWorkspaceRejectionMiddleware(BaseHTTPMiddleware):
+    async def dispatch(
+        self,
+        request: Request,
+        call_next: Callable[[Request], Awaitable[Response]],
+    ) -> Response:
+        response = getattr(request.state, WORKSPACE_REJECTION_STATE_ATTR, None)
+        if isinstance(response, Response):
+            delattr(request.state, WORKSPACE_REJECTION_STATE_ATTR)
+            return JSONResponse({"error": "rate_limited"}, status_code=429)
+        return await call_next(request)
+
+
+def _build_app_with_rejection_consumer() -> FastAPI:
+    app = FastAPI()
+    app.add_middleware(_ConsumeWorkspaceRejectionMiddleware)
+    app.add_middleware(WorkspaceContextMiddleware)
+
+    @app.get("/w/{slug}/api/v1/ping")
+    def scoped_ping() -> dict[str, object]:
+        return {"bound": get_current() is not None}
+
+    return app
+
+
 def _client(app: FastAPI | None = None) -> TestClient:
     return TestClient(app or _build_app(), raise_server_exceptions=False)
 
@@ -301,6 +330,21 @@ class TestPhase0Stub:
             )
         assert response.status_code == 404
         assert response.json() == {"error": "not_found", "detail": None}
+
+    def test_consumed_scoped_api_rejection_keeps_correlation_header(
+        self, stub_settings: Settings
+    ) -> None:
+        incoming = "01RQ00000000000000000000RL"
+        app = _build_app_with_rejection_consumer()
+
+        with _client(app) as client:
+            response = client.get(
+                "/w/villa-sud/api/v1/ping",
+                headers={CORRELATION_ID_HEADER: incoming},
+            )
+
+        assert response.status_code == 429
+        assert response.headers[CORRELATION_ID_HEADER] == incoming
 
 
 # ---------------------------------------------------------------------------

@@ -16,7 +16,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Annotated, Any, Literal
 
-from pydantic import Field, SecretStr, field_validator
+from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 __all__ = ["Settings", "get_settings"]
@@ -130,6 +130,15 @@ class Settings(BaseSettings):
     # Session lifetime (days) for worker / client / guest users who hold
     # no manager surface grant and no owners-group membership anywhere.
     session_user_ttl_days: int = 30
+
+    # --- API rate limiting (§12 "Rate limiting"; cd-uxdk) ---
+    # ``memory`` is the single-worker/dev backend. Multi-process
+    # deployments use ``postgres`` so bucket state is shared through the
+    # deployment-wide ``rate_limit_bucket`` table.
+    rate_limit_backend: Literal["memory", "postgres"] = "memory"
+    rate_limit_token_per_minute: int = Field(default=60, ge=1)
+    rate_limit_personal_me_per_minute: int = Field(default=600, ge=1)
+    rate_limit_anonymous_per_minute: int = Field(default=30, ge=1)
 
     # --- Signup abuse mitigations (§15 "Self-serve abuse mitigations"; cd-055) ---
     # Cloudflare Turnstile server-side secret. ``None`` means "test /
@@ -270,6 +279,12 @@ class Settings(BaseSettings):
         if isinstance(value, str):
             return [item.strip() for item in value.split(",") if item.strip()]
         return value
+
+    @model_validator(mode="after")
+    def _validate_rate_limit_backend(self) -> Settings:
+        if self.rate_limit_backend == "postgres" and self.root_key is None:
+            raise ValueError("CREWDAY_ROOT_KEY is required for postgres rate limiting")
+        return self
 
     def safe_dump(self) -> dict[str, Any]:
         """Return a dict with every :class:`SecretStr` masked.

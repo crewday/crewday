@@ -13,6 +13,8 @@ Each middleware is a thin, single-purpose wrapper around
   Logs").
 * :mod:`app.api.middleware.metrics` — Prometheus HTTP histograms
   + counter (spec §16 "Observability / Metrics").
+* :mod:`app.api.middleware.rate_limit` — per-token / per-IP API
+  token buckets (spec §12 "Rate limiting").
 
 See ``docs/specs/15-security-privacy.md`` §"HTTP security headers",
 ``docs/specs/12-rest-api.md`` §"Idempotency",
@@ -26,6 +28,7 @@ from app.api.middleware.idempotency import (
     prune_expired_idempotency_keys,
 )
 from app.api.middleware.metrics import HttpMetricsMiddleware
+from app.api.middleware.rate_limit import RateLimitMiddleware
 from app.api.middleware.request_id import (
     REQUEST_ID_HEADER,
     RequestIdMiddleware,
@@ -42,6 +45,7 @@ __all__ = [
     "REQUEST_ID_HEADER",
     "HttpMetricsMiddleware",
     "IdempotencyMiddleware",
+    "RateLimitMiddleware",
     "RequestIdMiddleware",
     "SecurityHeadersMiddleware",
     "build_csp_header",

@@ -1,21 +1,21 @@
-"""Deployment-wide ops tables: ``worker_heartbeat`` and ``idempotency_key``.
+"""Deployment-wide ops tables.
 
-Two concerns share this module because both sit outside the per-
-workspace schema and both support the §16 ops surface:
+These tables share this module because each sits outside the per-
+workspace schema:
 
 * :class:`WorkerHeartbeat` — one row per named background worker,
   bumped every 30 s, read by ``/readyz``.
 * :class:`IdempotencyKey` — the persisted replay cache for the
   ``Idempotency-Key`` middleware (spec §12 "Idempotency"). Keyed by
   ``(token_id, key)``; a TTL sweep deletes rows older than 24 h.
+* :class:`RateLimitBucket` — token-bucket state for the API
+  rate-limiter when multiple workers share a Postgres database.
 
-**Not workspace-scoped.** Both tables are deployment-wide: workers
-run once per process regardless of tenant count, and an idempotency
-row is keyed by the API token (which is itself workspace-scoped via
-its own row, but the replay lookup must succeed before any
-:class:`~app.tenancy.WorkspaceContext` is resolvable). Writers wrap
-their reads/writes in :func:`app.tenancy.tenant_agnostic` with an
-explicit justification.
+**Not workspace-scoped.** These tables are deployment-wide: workers
+run once per process regardless of tenant count, idempotency rows must
+be readable before a handler runs, and rate-limit buckets are consumed
+before the handler runs. Writers wrap their reads/writes in
+:func:`app.tenancy.tenant_agnostic` with an explicit justification.
 
 See ``docs/specs/16-deployment-operations.md`` §"Healthchecks",
 ``docs/specs/12-rest-api.md`` §"Idempotency", and
@@ -30,6 +30,7 @@ from typing import Any
 from sqlalchemy import (
     JSON,
     DateTime,
+    Float,
     Index,
     Integer,
     LargeBinary,
@@ -40,7 +41,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from app.adapters.db.base import Base
 
-__all__ = ["IdempotencyKey", "WorkerHeartbeat"]
+__all__ = ["IdempotencyKey", "RateLimitBucket", "WorkerHeartbeat"]
 
 
 class WorkerHeartbeat(Base):
@@ -117,3 +118,20 @@ class IdempotencyKey(Base):
         # older migrations emitted).
         Index("ix_idempotency_key_created_at", "created_at"),
     )
+
+
+class RateLimitBucket(Base):
+    """Persisted token-bucket state for API rate limiting.
+
+    ``bucket_key`` is already privacy-preserving: token callers use the
+    opaque token row id, and anonymous/session callers use a peppered IP
+    hash. The table stores only the floating token balance and the last
+    update time as Unix epoch seconds so every worker can run the same
+    math without depending on process-local monotonic clock origins.
+    """
+
+    __tablename__ = "rate_limit_bucket"
+
+    bucket_key: Mapped[str] = mapped_column(String, primary_key=True)
+    tokens: Mapped[float] = mapped_column(Float, nullable=False)
+    updated_at_epoch: Mapped[float] = mapped_column(Float, nullable=False)

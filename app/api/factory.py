@@ -81,6 +81,7 @@ from app.api.health import router as health_router
 from app.api.middleware import (
     HttpMetricsMiddleware,
     IdempotencyMiddleware,
+    RateLimitMiddleware,
     RequestIdMiddleware,
     SecurityHeadersMiddleware,
 )
@@ -1269,11 +1270,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     #    bug fix). The histogram now excludes the brief
     #    auth/tenancy resolution time, which is fine — operators
     #    care about handler latency, not tenancy lookup overhead.
-    # 6. IdempotencyMiddleware — replay cache for ``POST`` retries
+    # 6. RateLimitMiddleware — per-token / per-IP API buckets. Runs
+    #    inside HTTP metrics so 429s are counted, and after workspace
+    #    resolution so bearer-token metadata is already on
+    #    ``request.state``.
+    # 7. IdempotencyMiddleware — replay cache for ``POST`` retries
     #    carrying ``Idempotency-Key``. Runs AFTER auth (so
     #    ``token_id`` is known) and BEFORE the handler. Spec §12
     #    "Idempotency".
-    # 7. CSRFMiddleware — double-submit check on mutation verbs.
+    # 8. CSRFMiddleware — double-submit check on mutation verbs.
     #
     # To get that layout we register INNER → OUTER: CSRF first (ends up
     # innermost), CORS last (ends up outermost). CORS defaults to
@@ -1284,6 +1289,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # ``CREWDAY_CORS_ALLOW_ORIGINS`` with an explicit list.
     app.add_middleware(CSRFMiddleware)
     app.add_middleware(IdempotencyMiddleware)
+    app.add_middleware(RateLimitMiddleware, settings=cfg)
     app.add_middleware(HttpMetricsMiddleware)
     app.add_middleware(WorkspaceContextMiddleware)
     app.add_middleware(SecurityHeadersMiddleware, settings=cfg)

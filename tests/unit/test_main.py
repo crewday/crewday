@@ -38,6 +38,7 @@ from fastapi.testclient import TestClient
 from pydantic import SecretStr
 
 import app.main as main_module
+from app.api.middleware.rate_limit import RATE_LIMIT_REMAINING_HEADER
 from app.config import Settings
 from app.main import DemoModeRefused, PublicBindRefused, create_app
 from app.tenancy.middleware import CORRELATION_ID_HEADER
@@ -169,6 +170,7 @@ class TestCreateApp:
         resp = client.get("/api/openapi.json")
         assert resp.status_code == 200
         assert resp.headers["content-type"].startswith("application/json")
+        assert RATE_LIMIT_REMAINING_HEADER not in resp.headers
 
     def test_factory_falls_back_to_get_settings_when_none(
         self, monkeypatch: pytest.MonkeyPatch
@@ -524,6 +526,7 @@ class TestMiddlewareWiring:
         names = {_mw_name(mw) for mw in app.user_middleware}
         assert "WorkspaceContextMiddleware" in names
         assert "CSRFMiddleware" in names
+        assert "RateLimitMiddleware" in names
 
     def test_middleware_order_cors_outermost_csrf_innermost(
         self, app_factory: Settings
@@ -540,6 +543,12 @@ class TestMiddlewareWiring:
         # Index 0 = outermost, last index = innermost.
         assert names[0] == "CORSMiddleware"
         assert names[-1] == "CSRFMiddleware"
+        assert names.index("WorkspaceContextMiddleware") < names.index(
+            "HttpMetricsMiddleware"
+        )
+        assert names.index("HttpMetricsMiddleware") < names.index("RateLimitMiddleware")
+        assert names.index("RateLimitMiddleware") < names.index("IdempotencyMiddleware")
+        assert names.index("IdempotencyMiddleware") < names.index("CSRFMiddleware")
         # SecurityHeaders + Tenancy live strictly between them.
         assert names.index("SecurityHeadersMiddleware") < names.index(
             "WorkspaceContextMiddleware"
