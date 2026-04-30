@@ -148,8 +148,8 @@ because no workspace exists yet:
    typographic look-alikes registered before a similar slug gets
    trademarked.
 
-   **Grace period.** On workspace archive
-   (`verification_state='archived'`) or hard delete, the slug is
+   **Grace period.** On workspace archive (`archived_at IS NOT NULL`)
+   or hard delete, the slug is
    copied to a `slug_reservation` row (§02) with a **30-day**
    hold before any other signup may claim it. Attempts inside
    the window return `409 slug_in_grace_period` with the

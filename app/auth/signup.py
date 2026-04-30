@@ -340,11 +340,10 @@ def _agnostic_audit_ctx() -> WorkspaceContext:
 def _existing_active_slugs(session: Session) -> list[str]:
     """Return the ``workspace.slug`` values that are currently in use.
 
-    The slug column is globally unique. A future archive step (§02
-    ``verification_state='archived'``) will exclude archived rows from
-    this set so their slugs become reclaimable under the grace
-    predicate. Until ``verification_state`` lands, every row is
-    considered active.
+    The slug column is globally unique. A future archive-reservation
+    step (§02 ``archived_at IS NOT NULL``) will exclude archived rows
+    from this set so their slugs become reclaimable under the grace
+    predicate. Until that lands, every row is considered active.
     """
     # justification: signup runs before a WorkspaceContext exists; the
     # workspace table is workspace-scoped and the ORM tenant filter

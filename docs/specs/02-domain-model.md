@@ -333,7 +333,8 @@ introduces `workspace_id` on every user-editable table.)
 | plan               | text        | `free \| pro \| enterprise \| unlimited`. Enforced by the quota gate (§15). v1 ships every SaaS workspace on `free`; self-host operators typically assign `unlimited` to their own workspaces via `crewday admin workspace set-plan`. Paid-tier enforcement (Stripe, dunning) is Beyond v1 — §19. |
 | quota_json         | jsonb/text  | caps actually enforced: `{users_max, properties_max, storage_bytes, llm_budget_cents_30d}`. Derived from `plan` on provisioning; editable by deployment operator via `crewday admin workspace set-quota`. |
 | created_via        | text        | `self_serve \| admin_invite \| admin_init \| seed`. Drives first-run UI + quota tightening.    |
-| verification_state | text        | `unverified \| email_verified \| human_verified \| trusted \| archived`. Self-serve tenants stay below `human_verified` under tight quotas until a manager approves. `archived` is a terminal state reachable via `crewday admin workspace archive` (§13); archived workspaces are read-only, hold their slug in `slug_reservation` for 30 days, and can be unarchived atomically within the window. See §03, §15. |
+| verification_state | text        | `unverified \| email_verified \| human_verified \| trusted`. Self-serve tenants stay below `human_verified` under tight quotas until a manager approves. See §03, §15. |
+| archived_at        | tstz?       | Soft-archive timestamp set by `crewday admin workspace archive` (§13). Archived workspaces are read-only, hold their slug in `slug_reservation` for 30 days, and can be unarchived atomically within the window. |
 | created_at         | tstz        |                                                                                                |
 | created_by_user_id | ULID FK?    | provisioning user (the first owner); null for seeded rows                                      |
 | signup_ip          | inet?       | source IP captured at `POST /signup/start` for self-serve workspaces; null for `admin_invite`, `admin_init`, `seed`. Indexed (IPv4 full; IPv6 as `/64` prefix) for the per-IP aggregate LLM-spend cap (§15). Retained for audit; `verification_state = human_verified` promotes the workspace out of the aggregate pool. |
@@ -393,10 +394,10 @@ unarchive` (§13), which deletes the reservation atomically.
 
 **Reasons:**
 
-- `archived` — workspace transitioned to `verification_state =
-  'archived'`. The slug cannot be re-used for 30 days after the
-  archive event to avoid a new workspace impersonating the old
-  one while cached links still point at it.
+- `archived` — workspace has a non-null `archived_at`. The slug
+  cannot be re-used for 30 days after the archive event to avoid a
+  new workspace impersonating the old one while cached links still
+  point at it.
 - `hard_deleted` — workspace row was hard-deleted (operator
   action via `crewday admin workspace purge`). Same 30-day
   hold.

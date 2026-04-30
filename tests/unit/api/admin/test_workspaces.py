@@ -3,8 +3,8 @@
 Covers the four workspace-lifecycle routes spec §12 "Admin
 surface" pins:
 
-* ``GET /workspaces`` — list every workspace + interim verification
-  state + members count.
+* ``GET /workspaces`` — list every workspace + verification state +
+  members count.
 * ``GET /workspaces/{id}`` — summary card with rolling-30d LLM
   aggregates.
 * ``POST /workspaces/{id}/trust`` — promote
@@ -30,10 +30,6 @@ from app.adapters.db.audit.models import AuditLog
 from app.adapters.db.llm.models import LlmUsage
 from app.adapters.db.places.models import Property, PropertyWorkspace
 from app.adapters.db.workspace.models import Workspace
-from app.api.admin._workspace_state import (
-    ARCHIVED_AT_KEY,
-    VERIFICATION_STATE_KEY,
-)
 from app.auth.session import SESSION_COOKIE_NAME
 from app.config import Settings
 from app.tenancy import tenant_agnostic
@@ -300,7 +296,7 @@ class TestTrustWorkspace:
         with session_factory() as s, tenant_agnostic():
             row = s.get(Workspace, ws)
             assert row is not None
-            assert row.settings_json[VERIFICATION_STATE_KEY] == "trusted"
+            assert row.verification_state == "trusted"
             audit_rows = s.scalars(
                 select(AuditLog)
                 .where(AuditLog.scope_kind == "deployment")
@@ -374,7 +370,7 @@ class TestArchiveWorkspace:
         with session_factory() as s, tenant_agnostic():
             row = s.get(Workspace, ws)
             assert row is not None
-            assert ARCHIVED_AT_KEY not in row.settings_json
+            assert row.archived_at is None
 
     def test_owner_archives_workspace_and_audits(
         self,
@@ -399,7 +395,7 @@ class TestArchiveWorkspace:
                 select(AuditLog).where(AuditLog.action == "workspace.archived")
             ).all()
         assert row is not None
-        assert ARCHIVED_AT_KEY in row.settings_json
+        assert row.archived_at is not None
         assert len(audits) == 1
         assert audits[0].actor_was_owner_member is True
 

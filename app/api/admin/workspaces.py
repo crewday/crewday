@@ -18,13 +18,9 @@ callers per spec. ``archive`` additionally gates on
 the deployment ``owners`` membership table. Non-owner admins see
 the same canonical 404 as non-admin callers.
 
-The ``verification_state`` and ``archived_at`` projections are
-read off :mod:`app.api.admin._workspace_state` — an interim
-adapter that stores the values inside
-:attr:`Workspace.settings_json` until cd-s8kk lands the typed
-columns + indexes. The seam keeps the admin surface usable
-without forcing a schema migration into this task's atomic
-landing.
+The ``verification_state`` and ``archived_at`` projections are read
+through :mod:`app.api.admin._workspace_state`, which wraps the typed
+columns added by cd-s8kk.
 
 See ``docs/specs/12-rest-api.md`` §"Admin surface" and
 ``docs/specs/02-domain-model.md`` §"workspaces".
@@ -88,8 +84,7 @@ class WorkspaceListItem(BaseModel):
 
     * ``id`` / ``slug`` / ``name`` / ``plan`` — straight off
       :class:`Workspace`.
-    * ``verification_state`` — read from the interim
-      ``settings_json`` slot (cd-s8kk follow-up promotes the column).
+    * ``verification_state`` — read from the typed workspace column.
     * ``properties_count`` — active :class:`PropertyWorkspace` rows.
     * ``members_count`` — count of :class:`UserWorkspace` rows.
     * ``spent_cents_30d`` / ``cap_cents_30d`` — rolling usage and

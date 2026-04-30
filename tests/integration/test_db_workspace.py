@@ -16,6 +16,7 @@ addressing" / §"Tenant filter enforcement".
 
 from __future__ import annotations
 
+import importlib
 from collections.abc import Iterator
 from datetime import UTC, datetime
 
@@ -46,6 +47,9 @@ _CTX = WorkspaceContext(
 )
 
 _PINNED = datetime(2026, 4, 19, 12, 0, 0, tzinfo=UTC)
+_LIFECYCLE_MIGRATION = importlib.import_module(
+    "migrations.versions.20260430_1100_e4f6a8c0d2e5_workspace_verification_cd_s8kk"
+)
 
 
 @pytest.fixture(scope="module")
@@ -120,6 +124,8 @@ class TestMigrationShape:
             # mutable base columns below land via cd-n6p as first-class
             # columns rather than dotted keys on this map).
             "settings_json",
+            "verification_state",
+            "archived_at",
             # cd-n6p — owner-mutable identity-level base columns +
             # ``updated_at`` SSE invalidation seam (§02 "workspaces"
             # base columns).
@@ -131,28 +137,47 @@ class TestMigrationShape:
             "owner_onboarded_at",
         }
         assert set(cols) == expected
-        # Only ``owner_onboarded_at`` is nullable in the v1 slice; all
-        # other columns carry NOT NULL.
+        # Only tombstone / onboarding timestamps are nullable in the v1
+        # slice; all other columns carry NOT NULL.
         assert cols["owner_onboarded_at"]["nullable"] is True
-        for name in expected - {"owner_onboarded_at"}:
+        assert cols["archived_at"]["nullable"] is True
+        for name in expected - {"owner_onboarded_at", "archived_at"}:
             assert cols[name]["nullable"] is False, f"{name} must be NOT NULL"
         pk = inspect(engine).get_pk_constraint("workspace")
         assert pk["constrained_columns"] == ["id"]
 
     def test_workspace_slug_unique_index(self, engine: Engine) -> None:
         """``slug`` must carry a unique constraint / index."""
-        unique_cols: list[list[str]] = [
+        unique_cols = [
             uc["column_names"]
             for uc in inspect(engine).get_unique_constraints("workspace")
         ]
         # Unique indexes reported via ``get_indexes`` on some dialects
         # (Postgres). Union both sources so either shape satisfies.
-        unique_idx_cols: list[list[str]] = [
+        unique_idx_cols = [
             ix["column_names"]
             for ix in inspect(engine).get_indexes("workspace")
             if ix.get("unique")
         ]
         assert ["slug"] in unique_cols + unique_idx_cols
+
+    def test_workspace_lifecycle_indexes_are_present(self, engine: Engine) -> None:
+        indexes = {ix["name"]: ix for ix in inspect(engine).get_indexes("workspace")}
+        assert indexes["ix_workspace_verification_state"]["column_names"] == [
+            "verification_state"
+        ]
+        assert indexes["ix_workspace_archived_at"]["column_names"] == ["archived_at"]
+
+    def test_workspace_verification_state_check_is_present(
+        self, engine: Engine
+    ) -> None:
+        checks = {
+            check["name"]: check["sqltext"]
+            for check in inspect(engine).get_check_constraints("workspace")
+        }
+        assert "ck_workspace_workspace_verification_state" in checks
+        for state in ("unverified", "email_verified", "human_verified", "trusted"):
+            assert state in checks["ck_workspace_workspace_verification_state"]
 
     def test_user_workspace_composite_pk(self, engine: Engine) -> None:
         pk = inspect(engine).get_pk_constraint("user_workspace")
@@ -202,10 +227,95 @@ class TestWorkspaceInsertAndRead:
         assert loaded.id == "01HWA00000000000000000WRBA"
         assert loaded.name == "Read Back"
         assert loaded.plan == "free"
+        assert loaded.verification_state == "unverified"
+        assert loaded.archived_at is None
         assert loaded.quota_json == {"users_max": 5}
         # ``settings_json`` round-trips verbatim — the resolver (cd-n6p)
         # reads whole payloads here without further coalescing.
         assert loaded.settings_json == {"auth.self_service_recovery_enabled": False}
+
+    def test_invalid_verification_state_rejected(self, db_session: Session) -> None:
+        ws = Workspace(
+            id="01HWA00000000000000000WRVC",
+            slug="bad-verification",
+            name="Bad Verification",
+            plan="free",
+            quota_json={},
+            verification_state="archived",
+            created_at=_PINNED,
+        )
+        db_session.add(ws)
+
+        with pytest.raises(IntegrityError):
+            db_session.commit()
+
+    def test_lifecycle_migration_backfills_and_downgrades_settings_json(
+        self, db_session: Session, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        trusted = Workspace(
+            id="01HWA00000000000000000WRBF",
+            slug="backfill-verification",
+            name="Backfill Verification",
+            plan="free",
+            quota_json={},
+            settings_json={
+                "admin_verification_state": "human_verified",
+                "admin_archived_at": "2026-04-30T10:00:00+00:00",
+            },
+            created_at=_PINNED,
+        )
+        invalid = Workspace(
+            id="01HWA00000000000000000WRBI",
+            slug="backfill-invalid",
+            name="Backfill Invalid",
+            plan="free",
+            quota_json={},
+            settings_json={
+                "admin_verification_state": "archived",
+                "admin_archived_at": "not-a-date",
+            },
+            created_at=_PINNED,
+        )
+        db_session.add_all([trusted, invalid])
+        db_session.flush()
+        monkeypatch.setattr(_LIFECYCLE_MIGRATION.op, "get_bind", db_session.connection)
+
+        _LIFECYCLE_MIGRATION._backfill_from_settings_json()
+        db_session.expire_all()
+
+        trusted_row = db_session.get(Workspace, trusted.id)
+        invalid_row = db_session.get(Workspace, invalid.id)
+        assert trusted_row is not None
+        assert invalid_row is not None
+        assert trusted_row.verification_state == "human_verified"
+        assert trusted_row.archived_at is not None
+        archived_at = trusted_row.archived_at
+        if archived_at.tzinfo is None:
+            archived_at = archived_at.replace(tzinfo=UTC)
+        assert archived_at == datetime(2026, 4, 30, 10, 0, 0, tzinfo=UTC)
+        assert invalid_row.verification_state == "unverified"
+        assert invalid_row.archived_at is None
+
+        trusted_row.settings_json = {}
+        invalid_row.settings_json = {
+            "admin_archived_at": "2026-01-01T00:00:00+00:00",
+        }
+        db_session.flush()
+        _LIFECYCLE_MIGRATION._copy_to_settings_json()
+        db_session.expire_all()
+
+        trusted_row = db_session.get(Workspace, trusted.id)
+        invalid_row = db_session.get(Workspace, invalid.id)
+        assert trusted_row is not None
+        assert invalid_row is not None
+        assert trusted_row.settings_json["admin_verification_state"] == "human_verified"
+        assert (
+            trusted_row.settings_json["admin_archived_at"]
+            == "2026-04-30T10:00:00+00:00"
+        )
+        assert invalid_row.settings_json == {
+            "admin_verification_state": "unverified",
+        }
 
     def test_insert_defaults_settings_json_to_empty(self, db_session: Session) -> None:
         """Omitting ``settings_json`` yields the empty-map default.

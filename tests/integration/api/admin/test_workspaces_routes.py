@@ -232,6 +232,41 @@ class TestWorkspaceListAndSummary:
         finally:
             _wipe(session_factory)
 
+    def test_owner_can_archive_workspace_via_production_factory(
+        self,
+        client: TestClient,
+        session_factory: sessionmaker[Session],
+        pinned_settings: Settings,
+    ) -> None:
+        try:
+            user_id = _seed_admin(
+                session_factory,
+                email="owner@example.com",
+                display_name="Owner",
+                owner=True,
+            )
+            ws = _seed_workspace(session_factory, slug="owner-archive-ws")
+            cookie = _issue_session(
+                session_factory, user_id=user_id, settings=pinned_settings
+            )
+            client.cookies.set(SESSION_COOKIE_NAME, cookie)
+
+            archive_resp = client.post(f"/admin/api/v1/workspaces/{ws}/archive")
+            assert archive_resp.status_code == 200, archive_resp.text
+            assert archive_resp.json()["id"] == ws
+            assert archive_resp.json()["archived_at"] is not None
+
+            with session_factory() as s, tenant_agnostic():
+                row = s.get(Workspace, ws)
+                audits = s.scalars(
+                    select(AuditLog).where(AuditLog.action == "workspace.archived")
+                ).all()
+            assert row is not None
+            assert row.archived_at is not None
+            assert len(audits) == 1
+        finally:
+            _wipe(session_factory)
+
 
 class TestSettingsAndSignup:
     def test_settings_and_signup_routes_reachable(

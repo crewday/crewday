@@ -9,11 +9,11 @@ enough columns to unblock downstream DB + auth work:
 * cd-3i5 (self-serve signup)
 * cd-jpa (membership lifecycle)
 
-The richer ``workspaces`` surface from §02 —
-``verification_state``, ``signup_ip``, ``default_language`` /
-``_currency`` / ``_country`` / ``_locale``, ``created_via``,
-``created_by_user_id`` — is deferred to cd-n6p (owner settings) and
-cd-055 (signup quotas) and lands via follow-up migrations without
+The richer ``workspaces`` surface from §02 lands incrementally:
+``verification_state`` / ``archived_at`` are typed columns as of
+cd-s8kk, owner-facing defaults landed with cd-n6p, and the remaining
+provisioning metadata (``signup_ip``, ``created_via``,
+``created_by_user_id``) is deferred to follow-up migrations without
 breaking the v1 public surface. The ``settings_json`` column already
 lands here (cd-jdhm) so the recovery kill-switch has a canonical
 home; cd-n6p populates the rest of the owner-facing settings keys
@@ -91,6 +91,12 @@ __all__ = [
 # Allowed plan values, enforced by a CHECK constraint. Matches §02
 # "workspaces" — the quota gate (§15) reads ``plan`` to pick caps.
 _PLAN_VALUES: tuple[str, ...] = ("free", "pro", "enterprise", "unlimited")
+_VERIFICATION_STATE_VALUES: tuple[str, ...] = (
+    "unverified",
+    "email_verified",
+    "human_verified",
+    "trusted",
+)
 
 # Allowed membership-source values, enforced by a CHECK constraint.
 # A ``user_workspace`` row is derived from at least one upstream
@@ -195,11 +201,24 @@ class Workspace(Base):
     owner_onboarded_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    verification_state: Mapped[str] = mapped_column(
+        String,
+        nullable=False,
+        default="unverified",
+        server_default="unverified",
+    )
+    archived_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
     __table_args__ = (
         CheckConstraint(
             "plan IN ('" + "', '".join(_PLAN_VALUES) + "')",
             name="plan",
+        ),
+        CheckConstraint(
+            "verification_state IN ('" + "', '".join(_VERIFICATION_STATE_VALUES) + "')",
+            name="workspace_verification_state",
         ),
         # Defence-in-depth shape check — the full ISO-4217 narrowing
         # lives in :mod:`app.util.currency`; the CHECK only catches
@@ -210,6 +229,8 @@ class Workspace(Base):
             "LENGTH(default_currency) = 3",
             name="default_currency_shape",
         ),
+        Index("ix_workspace_verification_state", "verification_state"),
+        Index("ix_workspace_archived_at", "archived_at"),
     )
 
 
