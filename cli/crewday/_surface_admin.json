@@ -307,7 +307,7 @@
         }
       }
     ],
-    "response_schema_ref": "#/components/schemas/AuditListResponse",
+    "response_schema_ref": "#/components/schemas/app__api__admin__audit__AuditListResponse",
     "summary": "Page through deployment-scope audit rows",
     "x_agent_confirm": null,
     "x_cli": {

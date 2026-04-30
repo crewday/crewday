@@ -1,6 +1,249 @@
 [
   {
     "body_schema_ref": null,
+    "group": "agent",
+    "http": {
+      "method": "GET",
+      "path": "/w/{slug}/api/v1/me/agent_approval_mode"
+    },
+    "idempotent": true,
+    "name": "approval-mode",
+    "operation_id": "workspace.llm.agent_approval_mode.me.get",
+    "path_params": [],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/AgentApprovalModeRead",
+    "summary": "Read my agent approval mode",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "agent",
+      "mutates": false,
+      "summary": "Read my agent approval mode",
+      "verb": "approval-mode"
+    }
+  },
+  {
+    "body_schema_ref": null,
+    "group": "agent",
+    "http": {
+      "method": "GET",
+      "path": "/w/{slug}/api/v1/agent/{scope}/log"
+    },
+    "idempotent": true,
+    "name": "log",
+    "operation_id": "agent.log.list",
+    "path_params": [
+      {
+        "name": "scope",
+        "required": true,
+        "schema": {
+          "enum": [
+            "employee",
+            "manager"
+          ],
+          "title": "Scope",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": null,
+    "summary": "Get Log",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "agent",
+      "scope_arg": "scope",
+      "verb": "log"
+    }
+  },
+  {
+    "body_schema_ref": "#/components/schemas/AgentMessageRequest",
+    "group": "agent",
+    "http": {
+      "method": "POST",
+      "path": "/w/{slug}/api/v1/agent/{scope}/message"
+    },
+    "idempotent": false,
+    "name": "message",
+    "operation_id": "agent.message.create",
+    "path_params": [
+      {
+        "name": "scope",
+        "required": true,
+        "schema": {
+          "enum": [
+            "employee",
+            "manager"
+          ],
+          "title": "Scope",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/AgentLogMessage",
+    "summary": "Post Message",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "body": "body",
+      "group": "agent",
+      "scope_arg": "scope",
+      "verb": "message"
+    }
+  },
+  {
+    "body_schema_ref": "#/components/schemas/AgentApprovalModeUpdate",
+    "group": "agent",
+    "http": {
+      "method": "PUT",
+      "path": "/w/{slug}/api/v1/me/agent_approval_mode"
+    },
+    "idempotent": true,
+    "name": "set-approval-mode",
+    "operation_id": "workspace.llm.agent_approval_mode.me.put",
+    "path_params": [],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/AgentApprovalModeRead",
+    "summary": "Update my agent approval mode",
+    "x_agent_confirm": {
+      "fields_to_show": [
+        "mode"
+      ],
+      "risk": "medium",
+      "summary": "Update your agent approval mode?",
+      "verb": "Update agent approval mode"
+    },
+    "x_cli": {
+      "group": "agent",
+      "mutates": true,
+      "summary": "Update my agent approval mode",
+      "verb": "set-approval-mode"
+    }
+  },
+  {
+    "body_schema_ref": null,
+    "group": "agent",
+    "http": {
+      "method": "GET",
+      "path": "/w/{slug}/api/v1/workspace/usage"
+    },
+    "idempotent": true,
+    "name": "usage",
+    "operation_id": "workspace.llm.usage.get",
+    "path_params": [],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/WorkspaceUsageRead",
+    "summary": "Read workspace agent usage",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "agent",
+      "mutates": false,
+      "summary": "Read workspace agent usage",
+      "verb": "usage"
+    }
+  },
+  {
+    "body_schema_ref": "#/components/schemas/SelfAgentPreferenceUpdate",
+    "group": "agent-prefs",
+    "http": {
+      "method": "PUT",
+      "path": "/w/{slug}/api/v1/agent_preferences/me"
+    },
+    "idempotent": true,
+    "name": "set-me",
+    "operation_id": "workspace.llm.agent_preferences.me.put",
+    "path_params": [],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/AgentPreferenceRead",
+    "summary": "Update my agent preferences",
+    "x_agent_confirm": {
+      "fields_to_show": [],
+      "risk": "low",
+      "summary": "Update your agent preferences?",
+      "verb": "Update my agent preferences"
+    },
+    "x_cli": {
+      "group": "agent-prefs",
+      "mutates": true,
+      "summary": "Update my agent preferences",
+      "verb": "set-me"
+    }
+  },
+  {
+    "body_schema_ref": "#/components/schemas/WorkspaceAgentPreferenceUpdate",
+    "group": "agent-prefs",
+    "http": {
+      "method": "PUT",
+      "path": "/w/{slug}/api/v1/agent_preferences/workspace"
+    },
+    "idempotent": true,
+    "name": "set-workspace",
+    "operation_id": "workspace.llm.agent_preferences.workspace.put",
+    "path_params": [],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/AgentPreferenceRead",
+    "summary": "Update workspace agent preferences",
+    "x_agent_confirm": {
+      "fields_to_show": [
+        "blocked_actions",
+        "default_approval_mode"
+      ],
+      "risk": "medium",
+      "summary": "Update workspace agent preferences?",
+      "verb": "Update agent preferences"
+    },
+    "x_cli": {
+      "group": "agent-prefs",
+      "mutates": true,
+      "summary": "Update workspace agent preferences",
+      "verb": "set-workspace"
+    }
+  },
+  {
+    "body_schema_ref": null,
+    "group": "agent-prefs",
+    "http": {
+      "method": "GET",
+      "path": "/w/{slug}/api/v1/agent_preferences/me"
+    },
+    "idempotent": true,
+    "name": "show-me",
+    "operation_id": "workspace.llm.agent_preferences.me.get",
+    "path_params": [],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/AgentPreferenceRead",
+    "summary": "Read my agent preferences",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "agent-prefs",
+      "mutates": false,
+      "summary": "Read my agent preferences",
+      "verb": "show-me"
+    }
+  },
+  {
+    "body_schema_ref": null,
+    "group": "agent-prefs",
+    "http": {
+      "method": "GET",
+      "path": "/w/{slug}/api/v1/agent_preferences/workspace"
+    },
+    "idempotent": true,
+    "name": "show-workspace",
+    "operation_id": "workspace.llm.agent_preferences.workspace.get",
+    "path_params": [],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/AgentPreferenceRead",
+    "summary": "Read workspace agent preferences",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "agent-prefs",
+      "mutates": false,
+      "summary": "Read workspace agent preferences",
+      "verb": "show-workspace"
+    }
+  },
+  {
+    "body_schema_ref": null,
     "group": "approvals",
     "http": {
       "method": "POST",
@@ -126,6 +369,1039 @@
   },
   {
     "body_schema_ref": null,
+    "group": "asset_types",
+    "http": {
+      "method": "DELETE",
+      "path": "/w/{slug}/api/v1/assets/asset_types/{type_id}"
+    },
+    "idempotent": true,
+    "name": "assets-asset-types-delete",
+    "operation_id": "asset_types.delete",
+    "path_params": [
+      {
+        "name": "type_id",
+        "required": true,
+        "schema": {
+          "title": "Type Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": null,
+    "summary": "Delete or archive a workspace-custom asset type",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "asset_types",
+    "http": {
+      "method": "GET",
+      "path": "/w/{slug}/api/v1/assets/asset_types"
+    },
+    "idempotent": true,
+    "name": "assets-asset-types-list",
+    "operation_id": "asset_types.list",
+    "path_params": [],
+    "query_params": [
+      {
+        "name": "category",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Category"
+        }
+      },
+      {
+        "name": "workspace_only",
+        "required": false,
+        "schema": {
+          "default": false,
+          "title": "Workspace Only",
+          "type": "boolean"
+        }
+      },
+      {
+        "name": "include_archived",
+        "required": false,
+        "schema": {
+          "default": false,
+          "title": "Include Archived",
+          "type": "boolean"
+        }
+      },
+      {
+        "name": "cursor",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Opaque forward cursor from the previous page's ``next_cursor``. Omitted on the first call. Bounded to 256 chars to keep the URL below reverse-proxy header limits.",
+          "title": "Cursor"
+        }
+      },
+      {
+        "name": "limit",
+        "required": false,
+        "schema": {
+          "default": 50,
+          "description": "Maximum rows to return. Default 50, cap 500 per spec \u00a712 'Pagination'. Rejected with 422 outside ``[1, 500]``.",
+          "maximum": 500,
+          "minimum": 1,
+          "title": "Limit",
+          "type": "integer"
+        }
+      }
+    ],
+    "response_schema_ref": "#/components/schemas/AssetTypeListResponse",
+    "summary": "List asset types visible to the caller's workspace",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "asset_types",
+    "http": {
+      "method": "GET",
+      "path": "/w/{slug}/api/v1/assets/asset_types/{type_id}"
+    },
+    "idempotent": true,
+    "name": "assets-asset-types-show",
+    "operation_id": "asset_types.get",
+    "path_params": [
+      {
+        "name": "type_id",
+        "required": true,
+        "schema": {
+          "title": "Type Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/AssetTypeResponse",
+    "summary": "Get one asset type",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": "#/components/schemas/AssetTypeUpdateRequest",
+    "group": "asset_types",
+    "http": {
+      "method": "PATCH",
+      "path": "/w/{slug}/api/v1/assets/asset_types/{type_id}"
+    },
+    "idempotent": false,
+    "name": "assets-asset-types-update",
+    "operation_id": "asset_types.update",
+    "path_params": [
+      {
+        "name": "type_id",
+        "required": true,
+        "schema": {
+          "title": "Type Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/AssetTypeResponse",
+    "summary": "Update a workspace-custom asset type",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": "#/components/schemas/AssetTypeCreateRequest",
+    "group": "asset_types",
+    "http": {
+      "method": "POST",
+      "path": "/w/{slug}/api/v1/assets/asset_types"
+    },
+    "idempotent": false,
+    "name": "create",
+    "operation_id": "asset_types.create",
+    "path_params": [],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/AssetTypeResponse",
+    "summary": "Create a workspace-custom asset type",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": "#/components/schemas/AssetActionCreateRequest",
+    "group": "assets",
+    "http": {
+      "method": "POST",
+      "path": "/w/{slug}/api/v1/assets/{asset_id}/actions"
+    },
+    "idempotent": false,
+    "name": "actions",
+    "operation_id": "assets.actions.record",
+    "path_params": [
+      {
+        "name": "asset_id",
+        "required": true,
+        "schema": {
+          "title": "Asset Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/AssetActionResponse",
+    "summary": "Record an asset action",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "assets",
+    "http": {
+      "method": "DELETE",
+      "path": "/w/{slug}/api/v1/assets/actions/{action_id}"
+    },
+    "idempotent": true,
+    "name": "actions-delete",
+    "operation_id": "assets.actions.delete",
+    "path_params": [
+      {
+        "name": "action_id",
+        "required": true,
+        "schema": {
+          "title": "Action Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": null,
+    "summary": "Delete an asset action",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "assets",
+    "http": {
+      "method": "GET",
+      "path": "/w/{slug}/api/v1/assets/{asset_id}/actions"
+    },
+    "idempotent": true,
+    "name": "actions-list",
+    "operation_id": "assets.actions.list",
+    "path_params": [
+      {
+        "name": "asset_id",
+        "required": true,
+        "schema": {
+          "title": "Asset Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [
+      {
+        "name": "kind",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "enum": [
+                "service",
+                "repair",
+                "replace",
+                "inspect",
+                "read"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Kind"
+        }
+      },
+      {
+        "name": "since",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Since"
+        }
+      },
+      {
+        "name": "until",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Until"
+        }
+      }
+    ],
+    "response_schema_ref": "#/components/schemas/AssetActionListResponse",
+    "summary": "List asset actions",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "assets",
+    "http": {
+      "method": "GET",
+      "path": "/w/{slug}/api/v1/assets/{asset_id}/actions/next_due"
+    },
+    "idempotent": true,
+    "name": "actions-next-due-list",
+    "operation_id": "assets.actions.next_due",
+    "path_params": [
+      {
+        "name": "asset_id",
+        "required": true,
+        "schema": {
+          "title": "Asset Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": null,
+    "summary": "Return the next due asset action",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": "#/components/schemas/AssetActionUpdateRequest",
+    "group": "assets",
+    "http": {
+      "method": "PATCH",
+      "path": "/w/{slug}/api/v1/assets/actions/{action_id}"
+    },
+    "idempotent": false,
+    "name": "actions-update",
+    "operation_id": "assets.actions.update",
+    "path_params": [
+      {
+        "name": "action_id",
+        "required": true,
+        "schema": {
+          "title": "Action Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/AssetActionResponse",
+    "summary": "Update an asset action",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "assets",
+    "http": {
+      "method": "POST",
+      "path": "/w/{slug}/api/v1/assets/{asset_id}/actions/{action_id}/complete"
+    },
+    "idempotent": false,
+    "name": "complete",
+    "operation_id": "assets.actions.complete",
+    "path_params": [
+      {
+        "name": "asset_id",
+        "required": true,
+        "schema": {
+          "title": "Asset Id",
+          "type": "string"
+        }
+      },
+      {
+        "name": "action_id",
+        "required": true,
+        "schema": {
+          "title": "Action Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/AssetActionResponse",
+    "summary": "Mark an asset action as done",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": "#/components/schemas/AssetCreateRequest",
+    "group": "assets",
+    "http": {
+      "method": "POST",
+      "path": "/w/{slug}/api/v1/assets/"
+    },
+    "idempotent": false,
+    "name": "create",
+    "operation_id": "assets.create",
+    "path_params": [],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/AssetResponse",
+    "summary": "Create a tracked asset",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "assets",
+    "http": {
+      "method": "DELETE",
+      "path": "/w/{slug}/api/v1/assets/{asset_id}"
+    },
+    "idempotent": true,
+    "name": "delete",
+    "operation_id": "assets.delete",
+    "path_params": [
+      {
+        "name": "asset_id",
+        "required": true,
+        "schema": {
+          "title": "Asset Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": null,
+    "summary": "Archive a tracked asset",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "assets",
+    "http": {
+      "method": "POST",
+      "path": "/w/{slug}/api/v1/assets/{asset_id}/documents"
+    },
+    "idempotent": false,
+    "name": "documents",
+    "operation_id": "assets.documents.upload",
+    "path_params": [
+      {
+        "name": "asset_id",
+        "required": true,
+        "schema": {
+          "title": "Asset Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/AssetDocumentResponse",
+    "summary": "Upload an asset document",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "assets",
+    "http": {
+      "method": "DELETE",
+      "path": "/w/{slug}/api/v1/assets/documents/{document_id}"
+    },
+    "idempotent": true,
+    "name": "documents-delete",
+    "operation_id": "assets.documents.delete",
+    "path_params": [
+      {
+        "name": "document_id",
+        "required": true,
+        "schema": {
+          "title": "Document Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": null,
+    "summary": "Delete an asset document",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "assets",
+    "http": {
+      "method": "GET",
+      "path": "/w/{slug}/api/v1/assets/{asset_id}/documents"
+    },
+    "idempotent": true,
+    "name": "documents-list",
+    "operation_id": "assets.documents.list",
+    "path_params": [
+      {
+        "name": "asset_id",
+        "required": true,
+        "schema": {
+          "title": "Asset Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [
+      {
+        "name": "category",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "enum": [
+                "manual",
+                "warranty",
+                "invoice",
+                "receipt",
+                "photo",
+                "certificate",
+                "contract",
+                "permit",
+                "insurance",
+                "other"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Category"
+        }
+      }
+    ],
+    "response_schema_ref": "#/components/schemas/AssetDocumentListResponse",
+    "summary": "List asset documents",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "assets",
+    "http": {
+      "method": "GET",
+      "path": "/w/{slug}/api/v1/assets/"
+    },
+    "idempotent": true,
+    "name": "list",
+    "operation_id": "assets.list",
+    "path_params": [],
+    "query_params": [
+      {
+        "name": "property_id",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Property Id"
+        }
+      },
+      {
+        "name": "area_id",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Area Id"
+        }
+      },
+      {
+        "name": "status",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Status"
+        }
+      },
+      {
+        "name": "condition",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Condition"
+        }
+      },
+      {
+        "name": "asset_type_id",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Asset Type Id"
+        }
+      },
+      {
+        "name": "q",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Q"
+        }
+      },
+      {
+        "name": "include_archived",
+        "required": false,
+        "schema": {
+          "default": false,
+          "title": "Include Archived",
+          "type": "boolean"
+        }
+      },
+      {
+        "name": "cursor",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Opaque forward cursor from the previous page's ``next_cursor``. Omitted on the first call. Bounded to 256 chars to keep the URL below reverse-proxy header limits.",
+          "title": "Cursor"
+        }
+      },
+      {
+        "name": "limit",
+        "required": false,
+        "schema": {
+          "default": 50,
+          "description": "Maximum rows to return. Default 50, cap 500 per spec \u00a712 'Pagination'. Rejected with 422 outside ``[1, 500]``.",
+          "maximum": 500,
+          "minimum": 1,
+          "title": "Limit",
+          "type": "integer"
+        }
+      }
+    ],
+    "response_schema_ref": "#/components/schemas/AssetListResponse",
+    "summary": "List tracked assets",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": "#/components/schemas/AssetMoveRequest",
+    "group": "assets",
+    "http": {
+      "method": "POST",
+      "path": "/w/{slug}/api/v1/assets/{asset_id}/move"
+    },
+    "idempotent": false,
+    "name": "move",
+    "operation_id": "assets.move",
+    "path_params": [
+      {
+        "name": "asset_id",
+        "required": true,
+        "schema": {
+          "title": "Asset Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/AssetResponse",
+    "summary": "Move an asset to a property or area",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "assets",
+    "http": {
+      "method": "POST",
+      "path": "/w/{slug}/api/v1/assets/{asset_id}/regenerate_qr"
+    },
+    "idempotent": false,
+    "name": "regenerate_qr",
+    "operation_id": "assets.regenerate_qr",
+    "path_params": [
+      {
+        "name": "asset_id",
+        "required": true,
+        "schema": {
+          "title": "Asset Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/AssetResponse",
+    "summary": "Regenerate an asset QR token",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "assets",
+    "http": {
+      "method": "PUT",
+      "path": "/w/{slug}/api/v1/assets/{asset_id}/restore"
+    },
+    "idempotent": true,
+    "name": "restore-replace",
+    "operation_id": "assets.restore",
+    "path_params": [
+      {
+        "name": "asset_id",
+        "required": true,
+        "schema": {
+          "title": "Asset Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/AssetResponse",
+    "summary": "Restore an archived asset",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "assets",
+    "http": {
+      "method": "GET",
+      "path": "/w/{slug}/api/v1/assets/scan/{qr_token}"
+    },
+    "idempotent": true,
+    "name": "scan-show",
+    "operation_id": "assets.scan",
+    "path_params": [
+      {
+        "name": "qr_token",
+        "required": true,
+        "schema": {
+          "title": "Qr Token",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/AssetResponse",
+    "summary": "Resolve an asset QR token",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "assets",
+    "http": {
+      "method": "GET",
+      "path": "/w/{slug}/api/v1/assets/{asset_id}"
+    },
+    "idempotent": true,
+    "name": "show",
+    "operation_id": "assets.get",
+    "path_params": [
+      {
+        "name": "asset_id",
+        "required": true,
+        "schema": {
+          "title": "Asset Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [
+      {
+        "name": "include_archived",
+        "required": false,
+        "schema": {
+          "default": false,
+          "title": "Include Archived",
+          "type": "boolean"
+        }
+      }
+    ],
+    "response_schema_ref": "#/components/schemas/AssetDetailResponse",
+    "summary": "Get one tracked asset",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": "#/components/schemas/AssetUpdateRequest",
+    "group": "assets",
+    "http": {
+      "method": "PATCH",
+      "path": "/w/{slug}/api/v1/assets/{asset_id}"
+    },
+    "idempotent": false,
+    "name": "update",
+    "operation_id": "assets.update",
+    "path_params": [
+      {
+        "name": "asset_id",
+        "required": true,
+        "schema": {
+          "title": "Asset Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/AssetResponse",
+    "summary": "Update a tracked asset",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "audit",
+    "http": {
+      "method": "GET",
+      "path": "/w/{slug}/api/v1/audit"
+    },
+    "idempotent": true,
+    "name": "list",
+    "operation_id": "audit.list",
+    "path_params": [],
+    "query_params": [
+      {
+        "name": "actor",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Actor"
+        }
+      },
+      {
+        "name": "actor_id",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Actor Id"
+        }
+      },
+      {
+        "name": "action",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Action"
+        }
+      },
+      {
+        "name": "entity",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Entity"
+        }
+      },
+      {
+        "name": "entity_kind",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Entity Kind"
+        }
+      },
+      {
+        "name": "entity_id",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Entity Id"
+        }
+      },
+      {
+        "name": "since",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Since"
+        }
+      },
+      {
+        "name": "until",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Until"
+        }
+      },
+      {
+        "name": "cursor",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Cursor"
+        }
+      },
+      {
+        "name": "limit",
+        "required": false,
+        "schema": {
+          "default": 50,
+          "maximum": 500,
+          "minimum": 1,
+          "title": "Limit",
+          "type": "integer"
+        }
+      }
+    ],
+    "response_schema_ref": "#/components/schemas/app__api__v1__audit__AuditListResponse",
+    "summary": "Page through workspace-scoped audit rows",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "audit",
+      "mutates": false,
+      "summary": "Page through workspace-scoped audit rows",
+      "verb": "list"
+    }
+  },
+  {
+    "body_schema_ref": null,
     "group": "auth",
     "http": {
       "method": "DELETE",
@@ -198,6 +1474,485 @@
       "summary": "List the workspaces the caller can switch into",
       "verb": "workspaces"
     }
+  },
+  {
+    "body_schema_ref": null,
+    "group": "billing",
+    "http": {
+      "method": "GET",
+      "path": "/w/{slug}/api/v1/client/billable-hours"
+    },
+    "idempotent": true,
+    "name": "client-billable-hours-list",
+    "operation_id": "client.billable_hours.list",
+    "path_params": [],
+    "query_params": [
+      {
+        "name": "limit",
+        "required": false,
+        "schema": {
+          "default": 50,
+          "description": "Maximum rows to return. Default 50, cap 500 per spec \u00a712 'Pagination'. Rejected with 422 outside ``[1, 500]``.",
+          "maximum": 500,
+          "minimum": 1,
+          "title": "Limit",
+          "type": "integer"
+        }
+      },
+      {
+        "name": "cursor",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Opaque forward cursor from the previous page's ``next_cursor``. Omitted on the first call. Bounded to 256 chars to keep the URL below reverse-proxy header limits.",
+          "title": "Cursor"
+        }
+      }
+    ],
+    "response_schema_ref": "#/components/schemas/ClientPortalBillableHoursPage",
+    "summary": "List client billable hours",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "billing",
+    "http": {
+      "method": "GET",
+      "path": "/w/{slug}/api/v1/client/invoices"
+    },
+    "idempotent": true,
+    "name": "client-invoices-list",
+    "operation_id": "client.invoices.list",
+    "path_params": [],
+    "query_params": [
+      {
+        "name": "limit",
+        "required": false,
+        "schema": {
+          "default": 50,
+          "description": "Maximum rows to return. Default 50, cap 500 per spec \u00a712 'Pagination'. Rejected with 422 outside ``[1, 500]``.",
+          "maximum": 500,
+          "minimum": 1,
+          "title": "Limit",
+          "type": "integer"
+        }
+      },
+      {
+        "name": "cursor",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Opaque forward cursor from the previous page's ``next_cursor``. Omitted on the first call. Bounded to 256 chars to keep the URL below reverse-proxy header limits.",
+          "title": "Cursor"
+        }
+      }
+    ],
+    "response_schema_ref": "#/components/schemas/ClientPortalInvoicePage",
+    "summary": "List client invoices",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "billing",
+    "http": {
+      "method": "GET",
+      "path": "/w/{slug}/api/v1/client/portfolio"
+    },
+    "idempotent": true,
+    "name": "client-portfolio-list",
+    "operation_id": "client.portfolio.list",
+    "path_params": [],
+    "query_params": [
+      {
+        "name": "limit",
+        "required": false,
+        "schema": {
+          "default": 50,
+          "description": "Maximum rows to return. Default 50, cap 500 per spec \u00a712 'Pagination'. Rejected with 422 outside ``[1, 500]``.",
+          "maximum": 500,
+          "minimum": 1,
+          "title": "Limit",
+          "type": "integer"
+        }
+      },
+      {
+        "name": "cursor",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Opaque forward cursor from the previous page's ``next_cursor``. Omitted on the first call. Bounded to 256 chars to keep the URL below reverse-proxy header limits.",
+          "title": "Cursor"
+        }
+      }
+    ],
+    "response_schema_ref": "#/components/schemas/ClientPortalPropertyPage",
+    "summary": "List client-owned properties",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "billing",
+    "http": {
+      "method": "GET",
+      "path": "/w/{slug}/api/v1/client/quotes"
+    },
+    "idempotent": true,
+    "name": "client-quotes-list",
+    "operation_id": "client.quotes.list",
+    "path_params": [],
+    "query_params": [
+      {
+        "name": "limit",
+        "required": false,
+        "schema": {
+          "default": 50,
+          "description": "Maximum rows to return. Default 50, cap 500 per spec \u00a712 'Pagination'. Rejected with 422 outside ``[1, 500]``.",
+          "maximum": 500,
+          "minimum": 1,
+          "title": "Limit",
+          "type": "integer"
+        }
+      },
+      {
+        "name": "cursor",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Opaque forward cursor from the previous page's ``next_cursor``. Omitted on the first call. Bounded to 256 chars to keep the URL below reverse-proxy header limits.",
+          "title": "Cursor"
+        }
+      }
+    ],
+    "response_schema_ref": "#/components/schemas/ClientPortalQuotePage",
+    "summary": "List client quotes",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": "#/components/schemas/ChatChannelCreateRequest",
+    "group": "chat",
+    "http": {
+      "method": "POST",
+      "path": "/w/{slug}/api/v1/messaging/chat/channels"
+    },
+    "idempotent": false,
+    "name": "channels",
+    "operation_id": "messaging.chat_channels.create",
+    "path_params": [],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/ChatChannelResponse",
+    "summary": "Create a chat channel",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": "#/components/schemas/ChatMessageSendRequest",
+    "group": "chat",
+    "http": {
+      "method": "POST",
+      "path": "/w/{slug}/api/v1/messaging/chat/channels/{channel_id}/messages"
+    },
+    "idempotent": false,
+    "name": "messages",
+    "operation_id": "messaging.chat_messages.send",
+    "path_params": [
+      {
+        "name": "channel_id",
+        "required": true,
+        "schema": {
+          "title": "Channel Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/ChatMessageResponse",
+    "summary": "Send a chat message",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "chat",
+    "http": {
+      "method": "GET",
+      "path": "/w/{slug}/api/v1/messaging/chat/channels"
+    },
+    "idempotent": true,
+    "name": "messaging-chat-channels-list",
+    "operation_id": "messaging.chat_channels.list",
+    "path_params": [],
+    "query_params": [
+      {
+        "name": "cursor",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Opaque forward cursor from the previous page's ``next_cursor``. Omitted on the first call. Bounded to 256 chars to keep the URL below reverse-proxy header limits.",
+          "title": "Cursor"
+        }
+      },
+      {
+        "name": "limit",
+        "required": false,
+        "schema": {
+          "default": 50,
+          "description": "Maximum rows to return. Default 50, cap 500 per spec \u00a712 'Pagination'. Rejected with 422 outside ``[1, 500]``.",
+          "maximum": 500,
+          "minimum": 1,
+          "title": "Limit",
+          "type": "integer"
+        }
+      },
+      {
+        "name": "include_archived",
+        "required": false,
+        "schema": {
+          "default": false,
+          "title": "Include Archived",
+          "type": "boolean"
+        }
+      }
+    ],
+    "response_schema_ref": "#/components/schemas/ChatChannelListResponse",
+    "summary": "List visible chat channels in the caller's workspace",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "chat",
+    "http": {
+      "method": "GET",
+      "path": "/w/{slug}/api/v1/messaging/chat/channels/{channel_id}/messages"
+    },
+    "idempotent": true,
+    "name": "messaging-chat-channels-messages-list",
+    "operation_id": "messaging.chat_messages.list",
+    "path_params": [
+      {
+        "name": "channel_id",
+        "required": true,
+        "schema": {
+          "title": "Channel Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [
+      {
+        "name": "before",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Before"
+        }
+      },
+      {
+        "name": "limit",
+        "required": false,
+        "schema": {
+          "default": 50,
+          "description": "Maximum rows to return. Default 50, cap 500 per spec \u00a712 'Pagination'. Rejected with 422 outside ``[1, 500]``.",
+          "maximum": 500,
+          "minimum": 1,
+          "title": "Limit",
+          "type": "integer"
+        }
+      }
+    ],
+    "response_schema_ref": "#/components/schemas/ChatMessageListResponse",
+    "summary": "List chat messages in a channel",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": "#/components/schemas/ChatChannelPatchRequest",
+    "group": "chat",
+    "http": {
+      "method": "PATCH",
+      "path": "/w/{slug}/api/v1/messaging/chat/channels/{channel_id}"
+    },
+    "idempotent": false,
+    "name": "messaging-chat-channels-update",
+    "operation_id": "messaging.chat_channels.update",
+    "path_params": [
+      {
+        "name": "channel_id",
+        "required": true,
+        "schema": {
+          "title": "Channel Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/ChatChannelResponse",
+    "summary": "Rename or archive a chat channel",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "chat_gateway",
+    "http": {
+      "method": "POST",
+      "path": "/webhooks/chat/{provider}"
+    },
+    "idempotent": false,
+    "name": "create",
+    "operation_id": "chat_gateway.webhook.receive",
+    "path_params": [
+      {
+        "name": "provider",
+        "required": true,
+        "schema": {
+          "title": "Provider",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/ChatGatewayResponse",
+    "summary": "Receive a signed inbound chat provider webhook",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "dashboard",
+    "http": {
+      "method": "POST",
+      "path": "/w/{slug}/api/v1/leaves/{leave_id}/approve"
+    },
+    "idempotent": false,
+    "name": "approve",
+    "operation_id": "dashboard.leaves.approve",
+    "path_params": [
+      {
+        "name": "leave_id",
+        "required": true,
+        "schema": {
+          "title": "Leave Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/DashboardLeave",
+    "summary": "Approve a pending leave from manager dashboard",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "dashboard",
+    "http": {
+      "method": "GET",
+      "path": "/w/{slug}/api/v1/leaves"
+    },
+    "idempotent": true,
+    "name": "leaves-list",
+    "operation_id": "dashboard.leaves.list",
+    "path_params": [],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/LeavesInboxPayload",
+    "summary": "Read the manager leave inbox aggregate",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "dashboard",
+    "http": {
+      "method": "GET",
+      "path": "/w/{slug}/api/v1/dashboard"
+    },
+    "idempotent": true,
+    "name": "list",
+    "operation_id": "dashboard.get",
+    "path_params": [],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/DashboardPayload",
+    "summary": "Read the manager dashboard aggregate",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "dashboard",
+    "http": {
+      "method": "POST",
+      "path": "/w/{slug}/api/v1/leaves/{leave_id}/reject"
+    },
+    "idempotent": false,
+    "name": "reject",
+    "operation_id": "dashboard.leaves.reject",
+    "path_params": [
+      {
+        "name": "leave_id",
+        "required": true,
+        "schema": {
+          "title": "Leave Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/DashboardLeave",
+    "summary": "Reject a pending leave from manager dashboard",
+    "x_agent_confirm": null,
+    "x_cli": null
   },
   {
     "body_schema_ref": null,
@@ -761,6 +2516,245 @@
     "x_cli": null
   },
   {
+    "body_schema_ref": "#/components/schemas/InventoryItemCreateRequest",
+    "group": "inventory",
+    "http": {
+      "method": "POST",
+      "path": "/w/{slug}/api/v1/inventory/properties/{property_id}/items"
+    },
+    "idempotent": false,
+    "name": "items",
+    "operation_id": "create_item_w__slug__api_v1_inventory_properties__property_id__items_post",
+    "path_params": [
+      {
+        "name": "property_id",
+        "required": true,
+        "schema": {
+          "title": "Property Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/InventoryItemResponse",
+    "summary": "Create Item",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "inventory",
+    "http": {
+      "method": "GET",
+      "path": "/w/{slug}/api/v1/inventory/properties/{property_id}/items/by_barcode/{barcode_ean13}"
+    },
+    "idempotent": true,
+    "name": "properties-items-by-barcode-show",
+    "operation_id": "get_item_by_barcode_w__slug__api_v1_inventory_properties__property_id__items_by_barcode__barcode_ean13__get",
+    "path_params": [
+      {
+        "name": "property_id",
+        "required": true,
+        "schema": {
+          "title": "Property Id",
+          "type": "string"
+        }
+      },
+      {
+        "name": "barcode_ean13",
+        "required": true,
+        "schema": {
+          "title": "Barcode Ean13",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/InventoryItemResponse",
+    "summary": "Get Item By Barcode",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "inventory",
+    "http": {
+      "method": "GET",
+      "path": "/w/{slug}/api/v1/inventory/properties/{property_id}/items/by_sku/{sku}"
+    },
+    "idempotent": true,
+    "name": "properties-items-by-sku-show",
+    "operation_id": "get_item_by_sku_w__slug__api_v1_inventory_properties__property_id__items_by_sku__sku__get",
+    "path_params": [
+      {
+        "name": "property_id",
+        "required": true,
+        "schema": {
+          "title": "Property Id",
+          "type": "string"
+        }
+      },
+      {
+        "name": "sku",
+        "required": true,
+        "schema": {
+          "title": "Sku",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/InventoryItemResponse",
+    "summary": "Get Item By Sku",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "inventory",
+    "http": {
+      "method": "DELETE",
+      "path": "/w/{slug}/api/v1/inventory/properties/{property_id}/items/{item_id}"
+    },
+    "idempotent": true,
+    "name": "properties-items-delete",
+    "operation_id": "archive_item_w__slug__api_v1_inventory_properties__property_id__items__item_id__delete",
+    "path_params": [
+      {
+        "name": "property_id",
+        "required": true,
+        "schema": {
+          "title": "Property Id",
+          "type": "string"
+        }
+      },
+      {
+        "name": "item_id",
+        "required": true,
+        "schema": {
+          "title": "Item Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": null,
+    "summary": "Archive Item",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "inventory",
+    "http": {
+      "method": "GET",
+      "path": "/w/{slug}/api/v1/inventory/properties/{property_id}/items"
+    },
+    "idempotent": true,
+    "name": "properties-items-list",
+    "operation_id": "list_items_w__slug__api_v1_inventory_properties__property_id__items_get",
+    "path_params": [
+      {
+        "name": "property_id",
+        "required": true,
+        "schema": {
+          "title": "Property Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [
+      {
+        "name": "barcode",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "maxLength": 500,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Barcode"
+        }
+      }
+    ],
+    "response_schema_ref": null,
+    "summary": "List Items",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": "#/components/schemas/InventoryItemUpdateRequest",
+    "group": "inventory",
+    "http": {
+      "method": "PATCH",
+      "path": "/w/{slug}/api/v1/inventory/properties/{property_id}/items/{item_id}"
+    },
+    "idempotent": false,
+    "name": "properties-items-update",
+    "operation_id": "update_item_w__slug__api_v1_inventory_properties__property_id__items__item_id__patch",
+    "path_params": [
+      {
+        "name": "property_id",
+        "required": true,
+        "schema": {
+          "title": "Property Id",
+          "type": "string"
+        }
+      },
+      {
+        "name": "item_id",
+        "required": true,
+        "schema": {
+          "title": "Item Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/InventoryItemResponse",
+    "summary": "Update Item",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "inventory",
+    "http": {
+      "method": "POST",
+      "path": "/w/{slug}/api/v1/inventory/properties/{property_id}/items/{item_id}/restore"
+    },
+    "idempotent": false,
+    "name": "restore",
+    "operation_id": "restore_item_w__slug__api_v1_inventory_properties__property_id__items__item_id__restore_post",
+    "path_params": [
+      {
+        "name": "property_id",
+        "required": true,
+        "schema": {
+          "title": "Property Id",
+          "type": "string"
+        }
+      },
+      {
+        "name": "item_id",
+        "required": true,
+        "schema": {
+          "title": "Item Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/InventoryItemResponse",
+    "summary": "Restore Item",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
     "body_schema_ref": "#/components/schemas/AcceptRequest",
     "group": "invite",
     "http": {
@@ -860,7 +2854,7 @@
       "path": "/api/v1/invites/{token}"
     },
     "idempotent": true,
-    "name": "show",
+    "name": "invites-show",
     "operation_id": "auth.invites.introspect",
     "path_params": [
       {
@@ -875,6 +2869,129 @@
     "query_params": [],
     "response_schema_ref": "#/components/schemas/InviteIntrospectionResponse",
     "summary": "Introspect an invite (read-only preview)",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "issues",
+    "http": {
+      "method": "POST",
+      "path": "/w/{slug}/api/v1/issues/{issue_id}/convert_to_task"
+    },
+    "idempotent": false,
+    "name": "convert_to_task",
+    "operation_id": "issues.convert_to_task",
+    "path_params": [
+      {
+        "name": "issue_id",
+        "required": true,
+        "schema": {
+          "title": "Issue Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": null,
+    "summary": "Convert an issue to a task",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": "#/components/schemas/IssueCreateRequest",
+    "group": "issues",
+    "http": {
+      "method": "POST",
+      "path": "/w/{slug}/api/v1/issues"
+    },
+    "idempotent": false,
+    "name": "create",
+    "operation_id": "issues.create",
+    "path_params": [],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/IssueResponse",
+    "summary": "Report a property issue",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "issues",
+    "http": {
+      "method": "GET",
+      "path": "/w/{slug}/api/v1/issues"
+    },
+    "idempotent": true,
+    "name": "list",
+    "operation_id": "issues.list",
+    "path_params": [],
+    "query_params": [
+      {
+        "name": "state",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "enum": [
+                "open",
+                "in_progress",
+                "resolved",
+                "wont_fix"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "State"
+        }
+      },
+      {
+        "name": "property_id",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Property Id"
+        }
+      }
+    ],
+    "response_schema_ref": "#/components/schemas/IssueListResponse",
+    "summary": "List workspace issues",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": "#/components/schemas/IssueUpdateRequest",
+    "group": "issues",
+    "http": {
+      "method": "PATCH",
+      "path": "/w/{slug}/api/v1/issues/{issue_id}"
+    },
+    "idempotent": false,
+    "name": "update",
+    "operation_id": "issues.update",
+    "path_params": [
+      {
+        "name": "issue_id",
+        "required": true,
+        "schema": {
+          "title": "Issue Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/IssueResponse",
+    "summary": "Update a property issue",
     "x_agent_confirm": null,
     "x_cli": null
   },
@@ -1170,15 +3287,183 @@
     "group": "messaging",
     "http": {
       "method": "GET",
+      "path": "/w/{slug}/api/v1/messaging/notifications"
+    },
+    "idempotent": true,
+    "name": "notifications-list",
+    "operation_id": "messaging.notifications.list",
+    "path_params": [],
+    "query_params": [
+      {
+        "name": "unread_only",
+        "required": false,
+        "schema": {
+          "default": false,
+          "title": "Unread Only",
+          "type": "boolean"
+        }
+      },
+      {
+        "name": "cursor",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Cursor"
+        }
+      },
+      {
+        "name": "limit",
+        "required": false,
+        "schema": {
+          "default": 50,
+          "maximum": 100,
+          "minimum": 1,
+          "title": "Limit",
+          "type": "integer"
+        }
+      }
+    ],
+    "response_schema_ref": "#/components/schemas/NotificationListResponse",
+    "summary": "List the caller's notifications",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "messaging",
+    "http": {
+      "method": "DELETE",
+      "path": "/w/{slug}/api/v1/messaging/notifications/push/tokens/{token_id}"
+    },
+    "idempotent": true,
+    "name": "notifications-push-tokens-delete",
+    "operation_id": "messaging.push_tokens.delete",
+    "path_params": [
+      {
+        "name": "token_id",
+        "required": true,
+        "schema": {
+          "minLength": 1,
+          "title": "Token Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": null,
+    "summary": "Delete one of the caller's web-push tokens",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "messaging",
+    "http": {
+      "method": "GET",
+      "path": "/w/{slug}/api/v1/messaging/notifications/push/tokens"
+    },
+    "idempotent": true,
+    "name": "notifications-push-tokens-list",
+    "operation_id": "messaging.push_tokens.list",
+    "path_params": [],
+    "query_params": [],
+    "response_schema_ref": null,
+    "summary": "List the caller's registered web-push tokens",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "messaging",
+    "http": {
+      "method": "GET",
       "path": "/w/{slug}/api/v1/messaging/notifications/push/vapid-key"
     },
     "idempotent": true,
-    "name": "list",
+    "name": "notifications-push-vapid-key-list",
     "operation_id": "messaging.get_vapid_public_key",
     "path_params": [],
     "query_params": [],
     "response_schema_ref": "#/components/schemas/VapidKeyPayload",
     "summary": "Get the web-push VAPID public key for the workspace",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "messaging",
+    "http": {
+      "method": "GET",
+      "path": "/w/{slug}/api/v1/messaging/notifications/{notification_id}"
+    },
+    "idempotent": true,
+    "name": "notifications-show",
+    "operation_id": "messaging.notifications.get",
+    "path_params": [
+      {
+        "name": "notification_id",
+        "required": true,
+        "schema": {
+          "minLength": 1,
+          "title": "Notification Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/NotificationPayload",
+    "summary": "Get one notification",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": "#/components/schemas/NotificationPatchRequest",
+    "group": "messaging",
+    "http": {
+      "method": "PATCH",
+      "path": "/w/{slug}/api/v1/messaging/notifications/{notification_id}"
+    },
+    "idempotent": false,
+    "name": "notifications-update",
+    "operation_id": "messaging.notifications.update",
+    "path_params": [
+      {
+        "name": "notification_id",
+        "required": true,
+        "schema": {
+          "minLength": 1,
+          "title": "Notification Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/NotificationPayload",
+    "summary": "Mark a notification read or unread",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": "#/components/schemas/BulkMarkReadRequest",
+    "group": "messaging",
+    "http": {
+      "method": "POST",
+      "path": "/w/{slug}/api/v1/messaging/notifications:mark-read"
+    },
+    "idempotent": false,
+    "name": "notifications:mark-read",
+    "operation_id": "messaging.notifications.mark_read",
+    "path_params": [],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/NotificationListResponse",
+    "summary": "Bulk-mark notifications as read",
     "x_agent_confirm": null,
     "x_cli": null
   },
@@ -1196,6 +3481,23 @@
     "query_params": [],
     "response_schema_ref": "#/components/schemas/PushTokenPayload",
     "summary": "Register (or refresh) the caller's web-push subscription",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": "#/components/schemas/PushTokenUnavailableRequest",
+    "group": "messaging",
+    "http": {
+      "method": "POST",
+      "path": "/w/{slug}/api/v1/messaging/notifications/push/tokens"
+    },
+    "idempotent": false,
+    "name": "tokens",
+    "operation_id": "messaging.push_tokens.register_native_unavailable",
+    "path_params": [],
+    "query_params": [],
+    "response_schema_ref": null,
+    "summary": "Reserved native-app push token registration surface",
     "x_agent_confirm": null,
     "x_cli": null
   },
@@ -1218,13 +3520,548 @@
   },
   {
     "body_schema_ref": null,
+    "group": "organizations",
+    "http": {
+      "method": "POST",
+      "path": "/w/{slug}/api/v1/billing/organizations/{organization_id}/archive"
+    },
+    "idempotent": false,
+    "name": "archive",
+    "operation_id": "billing.organizations.archive",
+    "path_params": [
+      {
+        "name": "organization_id",
+        "required": true,
+        "schema": {
+          "title": "Organization Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/OrganizationResponse",
+    "summary": "Archive a billing organization",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "organizations",
+    "http": {
+      "method": "GET",
+      "path": "/w/{slug}/api/v1/billing/organizations"
+    },
+    "idempotent": true,
+    "name": "billing-organizations-list",
+    "operation_id": "billing.organizations.list",
+    "path_params": [],
+    "query_params": [
+      {
+        "name": "kind",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "enum": [
+                "client",
+                "vendor",
+                "mixed"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Kind"
+        }
+      },
+      {
+        "name": "q",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Q"
+        }
+      },
+      {
+        "name": "include_archived",
+        "required": false,
+        "schema": {
+          "default": false,
+          "title": "Include Archived",
+          "type": "boolean"
+        }
+      }
+    ],
+    "response_schema_ref": "#/components/schemas/OrganizationListResponse",
+    "summary": "List billing organizations",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "organizations",
+    "http": {
+      "method": "GET",
+      "path": "/w/{slug}/api/v1/billing/organizations/{organization_id}"
+    },
+    "idempotent": true,
+    "name": "billing-organizations-show",
+    "operation_id": "billing.organizations.get",
+    "path_params": [
+      {
+        "name": "organization_id",
+        "required": true,
+        "schema": {
+          "title": "Organization Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [
+      {
+        "name": "include_archived",
+        "required": false,
+        "schema": {
+          "default": false,
+          "title": "Include Archived",
+          "type": "boolean"
+        }
+      }
+    ],
+    "response_schema_ref": "#/components/schemas/OrganizationResponse",
+    "summary": "Get a billing organization",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": "#/components/schemas/OrganizationPatchRequest",
+    "group": "organizations",
+    "http": {
+      "method": "PATCH",
+      "path": "/w/{slug}/api/v1/billing/organizations/{organization_id}"
+    },
+    "idempotent": false,
+    "name": "billing-organizations-update",
+    "operation_id": "billing.organizations.update",
+    "path_params": [
+      {
+        "name": "organization_id",
+        "required": true,
+        "schema": {
+          "title": "Organization Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/OrganizationResponse",
+    "summary": "Update a billing organization",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": "#/components/schemas/OrganizationCreateRequest",
+    "group": "organizations",
+    "http": {
+      "method": "POST",
+      "path": "/w/{slug}/api/v1/billing/organizations"
+    },
+    "idempotent": false,
+    "name": "create",
+    "operation_id": "billing.organizations.create",
+    "path_params": [],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/OrganizationResponse",
+    "summary": "Create a billing organization",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "payroll",
+    "http": {
+      "method": "POST",
+      "path": "/w/{slug}/api/v1/payroll/pay-periods/{period_id}/exports"
+    },
+    "idempotent": false,
+    "name": "exports",
+    "operation_id": "payroll.pay_periods.export",
+    "path_params": [
+      {
+        "name": "period_id",
+        "required": true,
+        "schema": {
+          "description": "ULID of the target ``pay_period`` row.",
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Period Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/PayrollExportJobResponse",
+    "summary": "Create a payroll export job for a pay period",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "payroll",
+    "http": {
+      "method": "GET",
+      "path": "/w/{slug}/api/v1/payroll/exports/{kind}.csv"
+    },
+    "idempotent": true,
+    "name": "exports-csv-list",
+    "operation_id": "payroll.exports.csv",
+    "path_params": [
+      {
+        "name": "kind",
+        "required": true,
+        "schema": {
+          "description": "Export kind.",
+          "pattern": "^(timesheets|payslips|expense-ledger)$",
+          "title": "Kind",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [
+      {
+        "name": "since",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Inclusive UTC start.",
+          "title": "Since"
+        }
+      },
+      {
+        "name": "until",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Exclusive UTC end.",
+          "title": "Until"
+        }
+      },
+      {
+        "name": "period_id",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Pay period id for payslips.",
+          "title": "Period Id"
+        }
+      },
+      {
+        "name": "bom",
+        "required": false,
+        "schema": {
+          "default": false,
+          "description": "Prefix the CSV with a UTF-8 BOM for spreadsheet tools.",
+          "title": "Bom",
+          "type": "boolean"
+        }
+      },
+      {
+        "name": "status_filter",
+        "required": false,
+        "schema": {
+          "default": "approved",
+          "description": "Expense claim state to export; use 'all' for every state.",
+          "maxLength": 32,
+          "minLength": 1,
+          "title": "Status Filter",
+          "type": "string"
+        }
+      }
+    ],
+    "response_schema_ref": null,
+    "summary": "Stream a payroll CSV export",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "payroll",
+    "http": {
+      "method": "POST",
+      "path": "/w/{slug}/api/v1/payroll/payslips/{payslip_id}/issue"
+    },
+    "idempotent": false,
+    "name": "issue",
+    "operation_id": "payroll.payslips.issue",
+    "path_params": [
+      {
+        "name": "payslip_id",
+        "required": true,
+        "schema": {
+          "description": "ULID of the target ``payslip`` row.",
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Payslip Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/PayslipResponse",
+    "summary": "Issue a draft payslip",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "payroll",
+    "http": {
+      "method": "POST",
+      "path": "/w/{slug}/api/v1/payroll/pay-periods/{period_id}/lock"
+    },
+    "idempotent": false,
+    "name": "lock",
+    "operation_id": "payroll.pay_periods.lock",
+    "path_params": [
+      {
+        "name": "period_id",
+        "required": true,
+        "schema": {
+          "description": "ULID of the target ``pay_period`` row.",
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Period Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/PayPeriodResponse",
+    "summary": "Lock a pay period and compute draft payslips",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "payroll",
+    "http": {
+      "method": "POST",
+      "path": "/w/{slug}/api/v1/payroll/payslips/{payslip_id}/mark_paid"
+    },
+    "idempotent": false,
+    "name": "mark_paid",
+    "operation_id": "payroll.payslips.mark_paid",
+    "path_params": [
+      {
+        "name": "payslip_id",
+        "required": true,
+        "schema": {
+          "description": "ULID of the target ``payslip`` row.",
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Payslip Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/PayslipResponse",
+    "summary": "Mark an issued payslip paid",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": "#/components/schemas/PayPeriodCreateRequest",
+    "group": "payroll",
+    "http": {
+      "method": "POST",
+      "path": "/w/{slug}/api/v1/payroll/pay-periods"
+    },
+    "idempotent": false,
+    "name": "pay-periods",
+    "operation_id": "payroll.pay_periods.create",
+    "path_params": [],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/PayPeriodResponse",
+    "summary": "Create a pay period",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "payroll",
+    "http": {
+      "method": "DELETE",
+      "path": "/w/{slug}/api/v1/payroll/pay-periods/{period_id}"
+    },
+    "idempotent": true,
+    "name": "pay-periods-delete",
+    "operation_id": "payroll.pay_periods.delete",
+    "path_params": [
+      {
+        "name": "period_id",
+        "required": true,
+        "schema": {
+          "description": "ULID of the target ``pay_period`` row.",
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Period Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": null,
+    "summary": "Delete an open pay period",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "payroll",
+    "http": {
+      "method": "GET",
+      "path": "/w/{slug}/api/v1/payroll/pay-periods"
+    },
+    "idempotent": true,
+    "name": "pay-periods-list",
+    "operation_id": "payroll.pay_periods.list",
+    "path_params": [],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/PayPeriodListResponse",
+    "summary": "List pay periods",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "payroll",
+    "http": {
+      "method": "GET",
+      "path": "/w/{slug}/api/v1/payroll/pay-periods/{period_id}"
+    },
+    "idempotent": true,
+    "name": "pay-periods-show",
+    "operation_id": "payroll.pay_periods.get",
+    "path_params": [
+      {
+        "name": "period_id",
+        "required": true,
+        "schema": {
+          "description": "ULID of the target ``pay_period`` row.",
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Period Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/PayPeriodResponse",
+    "summary": "Read a pay period",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": "#/components/schemas/PayPeriodUpdateRequest",
+    "group": "payroll",
+    "http": {
+      "method": "PATCH",
+      "path": "/w/{slug}/api/v1/payroll/pay-periods/{period_id}"
+    },
+    "idempotent": false,
+    "name": "pay-periods-update",
+    "operation_id": "payroll.pay_periods.update",
+    "path_params": [
+      {
+        "name": "period_id",
+        "required": true,
+        "schema": {
+          "description": "ULID of the target ``pay_period`` row.",
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Period Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/PayPeriodResponse",
+    "summary": "Update an open pay period window",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": "#/components/schemas/PayRuleCreateRequest",
+    "group": "payroll",
+    "http": {
+      "method": "POST",
+      "path": "/w/{slug}/api/v1/payroll/users/{user_id}/pay-rules"
+    },
+    "idempotent": false,
+    "name": "pay-rules",
+    "operation_id": "payroll.pay_rules.create",
+    "path_params": [
+      {
+        "name": "user_id",
+        "required": true,
+        "schema": {
+          "description": "Owner of the pay-rule chain \u2014 usually a ``user.id`` ULID.",
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "User Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/PayRuleResponse",
+    "summary": "Create a pay rule for a user",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
     "group": "payroll",
     "http": {
       "method": "DELETE",
       "path": "/w/{slug}/api/v1/payroll/pay-rules/{rule_id}"
     },
     "idempotent": true,
-    "name": "delete",
+    "name": "pay-rules-delete",
     "operation_id": "payroll.pay_rules.delete",
     "path_params": [
       {
@@ -1250,10 +4087,247 @@
     "group": "payroll",
     "http": {
       "method": "GET",
+      "path": "/w/{slug}/api/v1/payroll/pay-rules/{rule_id}"
+    },
+    "idempotent": true,
+    "name": "pay-rules-show",
+    "operation_id": "payroll.pay_rules.get",
+    "path_params": [
+      {
+        "name": "rule_id",
+        "required": true,
+        "schema": {
+          "description": "ULID of the target ``pay_rule`` row.",
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Rule Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/PayRuleResponse",
+    "summary": "Read a single pay rule",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": "#/components/schemas/PayRuleUpdateRequest",
+    "group": "payroll",
+    "http": {
+      "method": "PATCH",
+      "path": "/w/{slug}/api/v1/payroll/pay-rules/{rule_id}"
+    },
+    "idempotent": false,
+    "name": "pay-rules-update",
+    "operation_id": "payroll.pay_rules.update",
+    "path_params": [
+      {
+        "name": "rule_id",
+        "required": true,
+        "schema": {
+          "description": "ULID of the target ``pay_rule`` row.",
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Rule Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/PayRuleResponse",
+    "summary": "Replace the mutable body of a pay rule",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "payroll",
+    "http": {
+      "method": "POST",
+      "path": "/w/{slug}/api/v1/payroll/payslips/{payslip_id}/payout_manifest"
+    },
+    "idempotent": false,
+    "name": "payout_manifest",
+    "operation_id": "payroll.payslips.payout_manifest",
+    "path_params": [
+      {
+        "name": "payslip_id",
+        "required": true,
+        "schema": {
+          "description": "Payslip id.",
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Payslip Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/PayoutManifestResponse",
+    "summary": "Stream the payout manifest for a payslip",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "payroll",
+    "http": {
+      "method": "GET",
+      "path": "/w/{slug}/api/v1/payroll/payslips"
+    },
+    "idempotent": true,
+    "name": "payslips-list",
+    "operation_id": "payroll.payslips.list",
+    "path_params": [],
+    "query_params": [
+      {
+        "name": "user_id",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Filter by payslip user.",
+          "title": "User Id"
+        }
+      },
+      {
+        "name": "pay_period_id",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Filter by pay period.",
+          "title": "Pay Period Id"
+        }
+      }
+    ],
+    "response_schema_ref": "#/components/schemas/PayslipListResponse",
+    "summary": "List payslips visible to the caller",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "payroll",
+    "http": {
+      "method": "GET",
+      "path": "/w/{slug}/api/v1/payroll/payslips/{payslip_id}"
+    },
+    "idempotent": true,
+    "name": "payslips-show",
+    "operation_id": "payroll.payslips.get",
+    "path_params": [
+      {
+        "name": "payslip_id",
+        "required": true,
+        "schema": {
+          "description": "ULID of the target ``payslip`` row.",
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Payslip Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/PayslipResponse",
+    "summary": "Read a payslip visible to the caller",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "payroll",
+    "http": {
+      "method": "POST",
+      "path": "/w/{slug}/api/v1/payroll/payslips/{payslip_id}/pdf"
+    },
+    "idempotent": false,
+    "name": "pdf",
+    "operation_id": "payroll.payslips.pdf.render",
+    "path_params": [
+      {
+        "name": "payslip_id",
+        "required": true,
+        "schema": {
+          "description": "ULID of the target ``payslip`` row.",
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Payslip Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [
+      {
+        "name": "force",
+        "required": false,
+        "schema": {
+          "default": false,
+          "description": "Regenerate the stored PDF even when one exists.",
+          "title": "Force",
+          "type": "boolean"
+        }
+      }
+    ],
+    "response_schema_ref": "#/components/schemas/PayslipPdfRenderResponse",
+    "summary": "Render or regenerate a payslip PDF",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "payroll",
+    "http": {
+      "method": "POST",
+      "path": "/w/{slug}/api/v1/payroll/pay-periods/{period_id}/reopen"
+    },
+    "idempotent": false,
+    "name": "reopen",
+    "operation_id": "payroll.pay_periods.reopen",
+    "path_params": [
+      {
+        "name": "period_id",
+        "required": true,
+        "schema": {
+          "description": "ULID of the target ``pay_period`` row.",
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Period Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/PayPeriodResponse",
+    "summary": "Reopen a locked pay period",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "payroll",
+    "http": {
+      "method": "GET",
       "path": "/w/{slug}/api/v1/payroll/users/{user_id}/pay-rules"
     },
     "idempotent": true,
-    "name": "list",
+    "name": "users-pay-rules-list",
     "operation_id": "payroll.pay_rules.list",
     "path_params": [
       {
@@ -1305,50 +4379,21 @@
     "x_cli": null
   },
   {
-    "body_schema_ref": "#/components/schemas/PayRuleCreateRequest",
-    "group": "payroll",
-    "http": {
-      "method": "POST",
-      "path": "/w/{slug}/api/v1/payroll/users/{user_id}/pay-rules"
-    },
-    "idempotent": false,
-    "name": "pay-rules",
-    "operation_id": "payroll.pay_rules.create",
-    "path_params": [
-      {
-        "name": "user_id",
-        "required": true,
-        "schema": {
-          "description": "Owner of the pay-rule chain \u2014 usually a ``user.id`` ULID.",
-          "maxLength": 64,
-          "minLength": 1,
-          "title": "User Id",
-          "type": "string"
-        }
-      }
-    ],
-    "query_params": [],
-    "response_schema_ref": "#/components/schemas/PayRuleResponse",
-    "summary": "Create a pay rule for a user",
-    "x_agent_confirm": null,
-    "x_cli": null
-  },
-  {
     "body_schema_ref": null,
     "group": "payroll",
     "http": {
       "method": "POST",
-      "path": "/w/{slug}/api/v1/payroll/payslips/{payslip_id}/payout_manifest"
+      "path": "/w/{slug}/api/v1/payroll/payslips/{payslip_id}/void"
     },
     "idempotent": false,
-    "name": "payout_manifest",
-    "operation_id": "payroll.payslips.payout_manifest",
+    "name": "void",
+    "operation_id": "payroll.payslips.void",
     "path_params": [
       {
         "name": "payslip_id",
         "required": true,
         "schema": {
-          "description": "Payslip id.",
+          "description": "ULID of the target ``payslip`` row.",
           "maxLength": 64,
           "minLength": 1,
           "title": "Payslip Id",
@@ -1357,66 +4402,8 @@
       }
     ],
     "query_params": [],
-    "response_schema_ref": "#/components/schemas/PayoutManifestResponse",
-    "summary": "Stream the payout manifest for a payslip",
-    "x_agent_confirm": null,
-    "x_cli": null
-  },
-  {
-    "body_schema_ref": null,
-    "group": "payroll",
-    "http": {
-      "method": "GET",
-      "path": "/w/{slug}/api/v1/payroll/pay-rules/{rule_id}"
-    },
-    "idempotent": true,
-    "name": "show",
-    "operation_id": "payroll.pay_rules.get",
-    "path_params": [
-      {
-        "name": "rule_id",
-        "required": true,
-        "schema": {
-          "description": "ULID of the target ``pay_rule`` row.",
-          "maxLength": 64,
-          "minLength": 1,
-          "title": "Rule Id",
-          "type": "string"
-        }
-      }
-    ],
-    "query_params": [],
-    "response_schema_ref": "#/components/schemas/PayRuleResponse",
-    "summary": "Read a single pay rule",
-    "x_agent_confirm": null,
-    "x_cli": null
-  },
-  {
-    "body_schema_ref": "#/components/schemas/PayRuleUpdateRequest",
-    "group": "payroll",
-    "http": {
-      "method": "PATCH",
-      "path": "/w/{slug}/api/v1/payroll/pay-rules/{rule_id}"
-    },
-    "idempotent": false,
-    "name": "update",
-    "operation_id": "payroll.pay_rules.update",
-    "path_params": [
-      {
-        "name": "rule_id",
-        "required": true,
-        "schema": {
-          "description": "ULID of the target ``pay_rule`` row.",
-          "maxLength": 64,
-          "minLength": 1,
-          "title": "Rule Id",
-          "type": "string"
-        }
-      }
-    ],
-    "query_params": [],
-    "response_schema_ref": "#/components/schemas/PayRuleResponse",
-    "summary": "Replace the mutable body of a pay rule",
+    "response_schema_ref": "#/components/schemas/PayslipResponse",
+    "summary": "Void a draft or issued payslip",
     "x_agent_confirm": null,
     "x_cli": null
   },
@@ -2011,6 +4998,271 @@
   },
   {
     "body_schema_ref": null,
+    "group": "permissions",
+    "http": {
+      "method": "GET",
+      "path": "/w/{slug}/api/v1/permissions/resolved/self"
+    },
+    "idempotent": true,
+    "name": "resolved-self-list",
+    "operation_id": "permissions.resolved_self",
+    "path_params": [],
+    "query_params": [
+      {
+        "name": "action_key",
+        "required": true,
+        "schema": {
+          "description": "Action key from \u00a705 to resolve against.",
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Action Key",
+          "type": "string"
+        }
+      },
+      {
+        "name": "scope_kind",
+        "required": true,
+        "schema": {
+          "description": "Scope kind on which to evaluate the action.",
+          "enum": [
+            "workspace",
+            "property",
+            "organization",
+            "deployment"
+          ],
+          "title": "Scope Kind",
+          "type": "string"
+        }
+      },
+      {
+        "name": "scope_id",
+        "required": true,
+        "schema": {
+          "description": "Scope id matching ``scope_kind``. For ``workspace`` this is typically the caller's workspace id; for ``property`` it is the property ULID.",
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Scope Id",
+          "type": "string"
+        }
+      }
+    ],
+    "response_schema_ref": "#/components/schemas/ResolvedPermissionResponse",
+    "summary": "\"Would the current actor be allowed action A on scope S?\"",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": "#/components/schemas/AreaCreate",
+    "group": "properties",
+    "http": {
+      "method": "POST",
+      "path": "/w/{slug}/api/v1/properties/{property_id}/areas"
+    },
+    "idempotent": false,
+    "name": "areas",
+    "operation_id": "areas.create",
+    "path_params": [
+      {
+        "name": "property_id",
+        "required": true,
+        "schema": {
+          "title": "Property Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/AreaResponse",
+    "summary": "Create an area for a property",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "properties",
+    "http": {
+      "method": "DELETE",
+      "path": "/w/{slug}/api/v1/areas/{area_id}"
+    },
+    "idempotent": true,
+    "name": "areas-delete",
+    "operation_id": "areas.delete",
+    "path_params": [
+      {
+        "name": "area_id",
+        "required": true,
+        "schema": {
+          "title": "Area Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": null,
+    "summary": "Soft-delete one area",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "properties",
+    "http": {
+      "method": "GET",
+      "path": "/w/{slug}/api/v1/properties/{property_id}/areas"
+    },
+    "idempotent": true,
+    "name": "areas-list",
+    "operation_id": "areas.list",
+    "path_params": [
+      {
+        "name": "property_id",
+        "required": true,
+        "schema": {
+          "title": "Property Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [
+      {
+        "name": "cursor",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Cursor"
+        }
+      },
+      {
+        "name": "limit",
+        "required": false,
+        "schema": {
+          "default": 50,
+          "maximum": 100,
+          "minimum": 1,
+          "title": "Limit",
+          "type": "integer"
+        }
+      },
+      {
+        "name": "deleted",
+        "required": false,
+        "schema": {
+          "default": false,
+          "title": "Deleted",
+          "type": "boolean"
+        }
+      }
+    ],
+    "response_schema_ref": "#/components/schemas/AreaListResponse",
+    "summary": "List areas for a property",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "properties",
+    "http": {
+      "method": "GET",
+      "path": "/w/{slug}/api/v1/areas/{area_id}"
+    },
+    "idempotent": true,
+    "name": "areas-show",
+    "operation_id": "areas.get",
+    "path_params": [
+      {
+        "name": "area_id",
+        "required": true,
+        "schema": {
+          "title": "Area Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/AreaResponse",
+    "summary": "Read one area",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": "#/components/schemas/AreaUpdate",
+    "group": "properties",
+    "http": {
+      "method": "PATCH",
+      "path": "/w/{slug}/api/v1/areas/{area_id}"
+    },
+    "idempotent": false,
+    "name": "areas-update",
+    "operation_id": "areas.update",
+    "path_params": [
+      {
+        "name": "area_id",
+        "required": true,
+        "schema": {
+          "title": "Area Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/AreaResponse",
+    "summary": "Update one area",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": "#/components/schemas/PropertyWriteRequest",
+    "group": "properties",
+    "http": {
+      "method": "POST",
+      "path": "/w/{slug}/api/v1/properties"
+    },
+    "idempotent": false,
+    "name": "create",
+    "operation_id": "properties.create",
+    "path_params": [],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/PropertyDetailResponse",
+    "summary": "Create a property in the caller's workspace",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "properties",
+    "http": {
+      "method": "DELETE",
+      "path": "/w/{slug}/api/v1/properties/{property_id}"
+    },
+    "idempotent": true,
+    "name": "delete",
+    "operation_id": "properties.delete",
+    "path_params": [
+      {
+        "name": "property_id",
+        "required": true,
+        "schema": {
+          "title": "Property Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": null,
+    "summary": "Soft-delete one property",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
     "group": "properties",
     "http": {
       "method": "GET",
@@ -2030,6 +5282,562 @@
       "summary": "List properties in a workspace",
       "verb": "list"
     }
+  },
+  {
+    "body_schema_ref": null,
+    "group": "properties",
+    "http": {
+      "method": "DELETE",
+      "path": "/w/{slug}/api/v1/property_closures/{closure_id}"
+    },
+    "idempotent": true,
+    "name": "property-closures-delete",
+    "operation_id": "property_closures.delete",
+    "path_params": [
+      {
+        "name": "closure_id",
+        "required": true,
+        "schema": {
+          "title": "Closure Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": null,
+    "summary": "Delete a property closure",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "properties",
+    "http": {
+      "method": "GET",
+      "path": "/w/{slug}/api/v1/property_closures"
+    },
+    "idempotent": true,
+    "name": "property-closures-list",
+    "operation_id": "property_closures.list",
+    "path_params": [],
+    "query_params": [
+      {
+        "name": "property_id",
+        "required": true,
+        "schema": {
+          "title": "Property Id",
+          "type": "string"
+        }
+      },
+      {
+        "name": "cursor",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Cursor"
+        }
+      },
+      {
+        "name": "limit",
+        "required": false,
+        "schema": {
+          "default": 50,
+          "maximum": 100,
+          "minimum": 1,
+          "title": "Limit",
+          "type": "integer"
+        }
+      },
+      {
+        "name": "unit_id",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Unit Id"
+        }
+      },
+      {
+        "name": "from",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "From"
+        }
+      },
+      {
+        "name": "to",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "To"
+        }
+      }
+    ],
+    "response_schema_ref": "#/components/schemas/ClosureListResponse",
+    "summary": "List property closures",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": "#/components/schemas/ClosureUpdateRequest",
+    "group": "properties",
+    "http": {
+      "method": "PATCH",
+      "path": "/w/{slug}/api/v1/property_closures/{closure_id}"
+    },
+    "idempotent": false,
+    "name": "property-closures-update",
+    "operation_id": "property_closures.update",
+    "path_params": [
+      {
+        "name": "closure_id",
+        "required": true,
+        "schema": {
+          "title": "Closure Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [
+      {
+        "name": "force",
+        "required": false,
+        "schema": {
+          "default": false,
+          "title": "Force",
+          "type": "boolean"
+        }
+      }
+    ],
+    "response_schema_ref": "#/components/schemas/ClosureResponse",
+    "summary": "Update a property closure",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": "#/components/schemas/ClosureCreateRequest",
+    "group": "properties",
+    "http": {
+      "method": "POST",
+      "path": "/w/{slug}/api/v1/property_closures"
+    },
+    "idempotent": false,
+    "name": "property_closures",
+    "operation_id": "property_closures.create",
+    "path_params": [],
+    "query_params": [
+      {
+        "name": "force",
+        "required": false,
+        "schema": {
+          "default": false,
+          "title": "Force",
+          "type": "boolean"
+        }
+      }
+    ],
+    "response_schema_ref": "#/components/schemas/ClosureResponse",
+    "summary": "Create a property closure",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": "#/components/schemas/ShareCreateRequest",
+    "group": "properties",
+    "http": {
+      "method": "POST",
+      "path": "/w/{slug}/api/v1/properties/{property_id}/share"
+    },
+    "idempotent": false,
+    "name": "share",
+    "operation_id": "property_workspace.share",
+    "path_params": [
+      {
+        "name": "property_id",
+        "required": true,
+        "schema": {
+          "title": "Property Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/MembershipResponse",
+    "summary": "Share a property with another workspace",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "properties",
+    "http": {
+      "method": "DELETE",
+      "path": "/w/{slug}/api/v1/properties/{property_id}/share/{workspace_slug}"
+    },
+    "idempotent": true,
+    "name": "share-delete",
+    "operation_id": "property_workspace.revoke",
+    "path_params": [
+      {
+        "name": "property_id",
+        "required": true,
+        "schema": {
+          "title": "Property Id",
+          "type": "string"
+        }
+      },
+      {
+        "name": "workspace_slug",
+        "required": true,
+        "schema": {
+          "title": "Workspace Slug",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": null,
+    "summary": "Revoke a property share",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "properties",
+    "http": {
+      "method": "GET",
+      "path": "/w/{slug}/api/v1/properties/{property_id}/share"
+    },
+    "idempotent": true,
+    "name": "share-list",
+    "operation_id": "property_workspace.list",
+    "path_params": [
+      {
+        "name": "property_id",
+        "required": true,
+        "schema": {
+          "title": "Property Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [
+      {
+        "name": "cursor",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Cursor"
+        }
+      },
+      {
+        "name": "limit",
+        "required": false,
+        "schema": {
+          "default": 50,
+          "maximum": 100,
+          "minimum": 1,
+          "title": "Limit",
+          "type": "integer"
+        }
+      }
+    ],
+    "response_schema_ref": "#/components/schemas/MembershipListResponse",
+    "summary": "List property workspace memberships",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": "#/components/schemas/ShareUpdateRequest",
+    "group": "properties",
+    "http": {
+      "method": "PATCH",
+      "path": "/w/{slug}/api/v1/properties/{property_id}/share/{workspace_slug}"
+    },
+    "idempotent": false,
+    "name": "share-update",
+    "operation_id": "property_workspace.update",
+    "path_params": [
+      {
+        "name": "property_id",
+        "required": true,
+        "schema": {
+          "title": "Property Id",
+          "type": "string"
+        }
+      },
+      {
+        "name": "workspace_slug",
+        "required": true,
+        "schema": {
+          "title": "Workspace Slug",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/MembershipResponse",
+    "summary": "Update a property share",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "properties",
+    "http": {
+      "method": "GET",
+      "path": "/w/{slug}/api/v1/properties/{property_id}"
+    },
+    "idempotent": true,
+    "name": "show",
+    "operation_id": "properties.get",
+    "path_params": [
+      {
+        "name": "property_id",
+        "required": true,
+        "schema": {
+          "title": "Property Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/PropertyDetailResponse",
+    "summary": "Read one property",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": "#/components/schemas/UnitCreate",
+    "group": "properties",
+    "http": {
+      "method": "POST",
+      "path": "/w/{slug}/api/v1/properties/{property_id}/units"
+    },
+    "idempotent": false,
+    "name": "units",
+    "operation_id": "units.create",
+    "path_params": [
+      {
+        "name": "property_id",
+        "required": true,
+        "schema": {
+          "title": "Property Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/UnitResponse",
+    "summary": "Create a unit for a property",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "properties",
+    "http": {
+      "method": "DELETE",
+      "path": "/w/{slug}/api/v1/units/{unit_id}"
+    },
+    "idempotent": true,
+    "name": "units-delete",
+    "operation_id": "units.delete",
+    "path_params": [
+      {
+        "name": "unit_id",
+        "required": true,
+        "schema": {
+          "title": "Unit Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": null,
+    "summary": "Soft-delete one unit",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "properties",
+    "http": {
+      "method": "GET",
+      "path": "/w/{slug}/api/v1/properties/{property_id}/units"
+    },
+    "idempotent": true,
+    "name": "units-list",
+    "operation_id": "units.list",
+    "path_params": [
+      {
+        "name": "property_id",
+        "required": true,
+        "schema": {
+          "title": "Property Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [
+      {
+        "name": "cursor",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Cursor"
+        }
+      },
+      {
+        "name": "limit",
+        "required": false,
+        "schema": {
+          "default": 50,
+          "maximum": 100,
+          "minimum": 1,
+          "title": "Limit",
+          "type": "integer"
+        }
+      },
+      {
+        "name": "deleted",
+        "required": false,
+        "schema": {
+          "default": false,
+          "title": "Deleted",
+          "type": "boolean"
+        }
+      }
+    ],
+    "response_schema_ref": "#/components/schemas/UnitListResponse",
+    "summary": "List units for a property",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "properties",
+    "http": {
+      "method": "GET",
+      "path": "/w/{slug}/api/v1/units/{unit_id}"
+    },
+    "idempotent": true,
+    "name": "units-show",
+    "operation_id": "units.get",
+    "path_params": [
+      {
+        "name": "unit_id",
+        "required": true,
+        "schema": {
+          "title": "Unit Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/UnitResponse",
+    "summary": "Read one unit",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": "#/components/schemas/UnitUpdate",
+    "group": "properties",
+    "http": {
+      "method": "PATCH",
+      "path": "/w/{slug}/api/v1/units/{unit_id}"
+    },
+    "idempotent": false,
+    "name": "units-update",
+    "operation_id": "units.update",
+    "path_params": [
+      {
+        "name": "unit_id",
+        "required": true,
+        "schema": {
+          "title": "Unit Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/UnitResponse",
+    "summary": "Update one unit",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": "#/components/schemas/PropertyWriteRequest",
+    "group": "properties",
+    "http": {
+      "method": "PATCH",
+      "path": "/w/{slug}/api/v1/properties/{property_id}"
+    },
+    "idempotent": false,
+    "name": "update",
+    "operation_id": "properties.update",
+    "path_params": [
+      {
+        "name": "property_id",
+        "required": true,
+        "schema": {
+          "title": "Property Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/PropertyDetailResponse",
+    "summary": "Update one property",
+    "x_agent_confirm": null,
+    "x_cli": null
   },
   {
     "body_schema_ref": "#/components/schemas/PropertyWorkRoleAssignmentCreateRequest",
@@ -2178,6 +5986,395 @@
     "query_params": [],
     "response_schema_ref": "#/components/schemas/PropertyWorkRoleAssignmentResponse",
     "summary": "Partial update of a property_work_role_assignment",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "quotes",
+    "http": {
+      "method": "POST",
+      "path": "/w/{slug}/api/v1/billing/quotes/{quote_id}/accept"
+    },
+    "idempotent": false,
+    "name": "accept",
+    "operation_id": "billing.quotes.accept",
+    "path_params": [
+      {
+        "name": "quote_id",
+        "required": true,
+        "schema": {
+          "title": "Quote Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/QuoteResponse",
+    "summary": "Accept Quote",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "quotes",
+    "http": {
+      "method": "GET",
+      "path": "/w/{slug}/api/v1/billing/quotes"
+    },
+    "idempotent": true,
+    "name": "billing-quotes-list",
+    "operation_id": "billing.quotes.list",
+    "path_params": [],
+    "query_params": [
+      {
+        "name": "organization_id",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Organization Id"
+        }
+      },
+      {
+        "name": "property_id",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Property Id"
+        }
+      },
+      {
+        "name": "status",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "enum": [
+                "draft",
+                "sent",
+                "accepted",
+                "rejected",
+                "expired"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Status"
+        }
+      }
+    ],
+    "response_schema_ref": "#/components/schemas/QuoteListResponse",
+    "summary": "List Quotes",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "quotes",
+    "http": {
+      "method": "GET",
+      "path": "/w/{slug}/api/v1/billing/quotes/{quote_id}"
+    },
+    "idempotent": true,
+    "name": "billing-quotes-show",
+    "operation_id": "billing.quotes.get",
+    "path_params": [
+      {
+        "name": "quote_id",
+        "required": true,
+        "schema": {
+          "title": "Quote Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/QuoteResponse",
+    "summary": "Get Quote",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": "#/components/schemas/QuotePatchRequest",
+    "group": "quotes",
+    "http": {
+      "method": "PATCH",
+      "path": "/w/{slug}/api/v1/billing/quotes/{quote_id}"
+    },
+    "idempotent": false,
+    "name": "billing-quotes-update",
+    "operation_id": "billing.quotes.update",
+    "path_params": [
+      {
+        "name": "quote_id",
+        "required": true,
+        "schema": {
+          "title": "Quote Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/QuoteResponse",
+    "summary": "Patch Quote",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": "#/components/schemas/QuoteCreateRequest",
+    "group": "quotes",
+    "http": {
+      "method": "POST",
+      "path": "/w/{slug}/api/v1/billing/quotes"
+    },
+    "idempotent": false,
+    "name": "create",
+    "operation_id": "billing.quotes.create",
+    "path_params": [],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/QuoteResponse",
+    "summary": "Create Quote",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": "#/components/schemas/QuoteDecisionActionRequest",
+    "group": "quotes",
+    "http": {
+      "method": "POST",
+      "path": "/w/{slug}/api/v1/billing/quotes/{quote_id}/decision"
+    },
+    "idempotent": false,
+    "name": "decision",
+    "operation_id": "billing.quotes.decision",
+    "path_params": [
+      {
+        "name": "quote_id",
+        "required": true,
+        "schema": {
+          "title": "Quote Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/QuoteResponse",
+    "summary": "Decide Quote",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "quotes",
+    "http": {
+      "method": "POST",
+      "path": "/w/{slug}/api/v1/billing/quotes/{quote_id}/reject"
+    },
+    "idempotent": false,
+    "name": "reject",
+    "operation_id": "billing.quotes.reject",
+    "path_params": [
+      {
+        "name": "quote_id",
+        "required": true,
+        "schema": {
+          "title": "Quote Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/QuoteResponse",
+    "summary": "Reject Quote",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": "#/components/schemas/QuoteSendRequest",
+    "group": "quotes",
+    "http": {
+      "method": "POST",
+      "path": "/w/{slug}/api/v1/billing/quotes/{quote_id}/send"
+    },
+    "idempotent": false,
+    "name": "send",
+    "operation_id": "billing.quotes.send",
+    "path_params": [
+      {
+        "name": "quote_id",
+        "required": true,
+        "schema": {
+          "title": "Quote Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/QuoteResponse",
+    "summary": "Send Quote",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "quotes",
+    "http": {
+      "method": "POST",
+      "path": "/w/{slug}/api/v1/billing/quotes/{quote_id}/supersede"
+    },
+    "idempotent": false,
+    "name": "supersede",
+    "operation_id": "billing.quotes.supersede",
+    "path_params": [
+      {
+        "name": "quote_id",
+        "required": true,
+        "schema": {
+          "title": "Quote Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/QuoteResponse",
+    "summary": "Supersede Quote",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "rate-cards",
+    "http": {
+      "method": "GET",
+      "path": "/w/{slug}/api/v1/billing/organizations/{organization_id}/rate-cards"
+    },
+    "idempotent": true,
+    "name": "billing-organizations-rate-cards-list",
+    "operation_id": "billing.rate_cards.list",
+    "path_params": [
+      {
+        "name": "organization_id",
+        "required": true,
+        "schema": {
+          "title": "Organization Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/RateCardListResponse",
+    "summary": "List billing rate cards for an organization",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "rate-cards",
+    "http": {
+      "method": "GET",
+      "path": "/w/{slug}/api/v1/billing/organizations/{organization_id}/rate-cards/{rate_card_id}"
+    },
+    "idempotent": true,
+    "name": "billing-organizations-rate-cards-show",
+    "operation_id": "billing.rate_cards.get",
+    "path_params": [
+      {
+        "name": "organization_id",
+        "required": true,
+        "schema": {
+          "title": "Organization Id",
+          "type": "string"
+        }
+      },
+      {
+        "name": "rate_card_id",
+        "required": true,
+        "schema": {
+          "title": "Rate Card Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/RateCardResponse",
+    "summary": "Get a billing rate card",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": "#/components/schemas/RateCardPatchRequest",
+    "group": "rate-cards",
+    "http": {
+      "method": "PATCH",
+      "path": "/w/{slug}/api/v1/billing/organizations/{organization_id}/rate-cards/{rate_card_id}"
+    },
+    "idempotent": false,
+    "name": "billing-organizations-rate-cards-update",
+    "operation_id": "billing.rate_cards.update",
+    "path_params": [
+      {
+        "name": "organization_id",
+        "required": true,
+        "schema": {
+          "title": "Organization Id",
+          "type": "string"
+        }
+      },
+      {
+        "name": "rate_card_id",
+        "required": true,
+        "schema": {
+          "title": "Rate Card Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/RateCardResponse",
+    "summary": "Update a billing rate card",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": "#/components/schemas/RateCardCreateRequest",
+    "group": "rate-cards",
+    "http": {
+      "method": "POST",
+      "path": "/w/{slug}/api/v1/billing/organizations/{organization_id}/rate-cards"
+    },
+    "idempotent": false,
+    "name": "rate-cards",
+    "operation_id": "billing.rate_cards.create",
+    "path_params": [
+      {
+        "name": "organization_id",
+        "required": true,
+        "schema": {
+          "title": "Organization Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/RateCardResponse",
+    "summary": "Create a billing rate card",
     "x_agent_confirm": null,
     "x_cli": null
   },
@@ -2344,6 +6541,551 @@
     }
   },
   {
+    "body_schema_ref": null,
+    "group": "runtime",
+    "http": {
+      "method": "GET",
+      "path": "/api/v1/runtime/info"
+    },
+    "idempotent": true,
+    "name": "info-list",
+    "operation_id": "runtime.info",
+    "path_params": [],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/RuntimeInfoResponse",
+    "summary": "Get runtime deployment flags",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "settings",
+    "http": {
+      "method": "GET",
+      "path": "/w/{slug}/api/v1/settings/catalog"
+    },
+    "idempotent": true,
+    "name": "catalog-list",
+    "operation_id": "settings.catalog",
+    "path_params": [],
+    "query_params": [],
+    "response_schema_ref": null,
+    "summary": "List workspace settings catalog",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "settings",
+    "http": {
+      "method": "GET",
+      "path": "/w/{slug}/api/v1/settings"
+    },
+    "idempotent": true,
+    "name": "list",
+    "operation_id": "settings.workspace.read",
+    "path_params": [],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/WorkspaceSettingsResponse",
+    "summary": "Read workspace settings",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": "#/components/schemas/WorkspaceSettingsPatch",
+    "group": "settings",
+    "http": {
+      "method": "PATCH",
+      "path": "/w/{slug}/api/v1/settings"
+    },
+    "idempotent": false,
+    "name": "update",
+    "operation_id": "settings.workspace.patch",
+    "path_params": [],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/WorkspaceSettingsResponse",
+    "summary": "Patch workspace settings",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "stays",
+    "http": {
+      "method": "POST",
+      "path": "/w/{slug}/api/v1/stays/ical-feeds/{feed_id}/disable"
+    },
+    "idempotent": false,
+    "name": "disable",
+    "operation_id": "stays.ical_feeds.disable",
+    "path_params": [
+      {
+        "name": "feed_id",
+        "required": true,
+        "schema": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Feed Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/IcalFeedResponse",
+    "summary": "Disable Ical Feed",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "stays",
+    "http": {
+      "method": "DELETE",
+      "path": "/w/{slug}/api/v1/stays/guest-links/{link_id}"
+    },
+    "idempotent": true,
+    "name": "guest-links-delete",
+    "operation_id": "stays.guest_links.revoke",
+    "path_params": [
+      {
+        "name": "link_id",
+        "required": true,
+        "schema": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Link Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/GuestLinkRevokeResponse",
+    "summary": "Revoke Guest Link",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": "#/components/schemas/IcalFeedCreateRequest",
+    "group": "stays",
+    "http": {
+      "method": "POST",
+      "path": "/w/{slug}/api/v1/stays/ical-feeds"
+    },
+    "idempotent": false,
+    "name": "ical-feeds",
+    "operation_id": "stays.ical_feeds.create",
+    "path_params": [],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/IcalFeedResponse",
+    "summary": "Create Ical Feed",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "stays",
+    "http": {
+      "method": "DELETE",
+      "path": "/w/{slug}/api/v1/stays/ical-feeds/{feed_id}"
+    },
+    "idempotent": true,
+    "name": "ical-feeds-delete",
+    "operation_id": "stays.ical_feeds.delete",
+    "path_params": [
+      {
+        "name": "feed_id",
+        "required": true,
+        "schema": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Feed Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": null,
+    "summary": "Delete Ical Feed",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "stays",
+    "http": {
+      "method": "GET",
+      "path": "/w/{slug}/api/v1/stays/ical-feeds"
+    },
+    "idempotent": true,
+    "name": "ical-feeds-list",
+    "operation_id": "stays.ical_feeds.list",
+    "path_params": [],
+    "query_params": [
+      {
+        "name": "property_id",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Property Id"
+        }
+      }
+    ],
+    "response_schema_ref": null,
+    "summary": "List Ical Feeds",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": "#/components/schemas/IcalFeedUpdateRequest",
+    "group": "stays",
+    "http": {
+      "method": "PATCH",
+      "path": "/w/{slug}/api/v1/stays/ical-feeds/{feed_id}"
+    },
+    "idempotent": false,
+    "name": "ical-feeds-update",
+    "operation_id": "stays.ical_feeds.update",
+    "path_params": [
+      {
+        "name": "feed_id",
+        "required": true,
+        "schema": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Feed Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/IcalFeedResponse",
+    "summary": "Patch Ical Feed",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "stays",
+    "http": {
+      "method": "POST",
+      "path": "/w/{slug}/api/v1/stays/ical-feeds/{feed_id}/poll"
+    },
+    "idempotent": false,
+    "name": "poll",
+    "operation_id": "stays.ical_feeds.poll",
+    "path_params": [
+      {
+        "name": "feed_id",
+        "required": true,
+        "schema": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Feed Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/IcalProbeResponse",
+    "summary": "Poll Ical Feed",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "stays",
+    "http": {
+      "method": "POST",
+      "path": "/w/{slug}/api/v1/stays/stay-bundles/{bundle_id}/regenerate"
+    },
+    "idempotent": false,
+    "name": "regenerate",
+    "operation_id": "stays.stay_bundles.regenerate",
+    "path_params": [
+      {
+        "name": "bundle_id",
+        "required": true,
+        "schema": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Bundle Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/StayBundleRegenerateResponse",
+    "summary": "Regenerate Stay Bundle",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "stays",
+    "http": {
+      "method": "GET",
+      "path": "/w/{slug}/api/v1/stays/reservations"
+    },
+    "idempotent": true,
+    "name": "reservations-list",
+    "operation_id": "stays.reservations.list",
+    "path_params": [],
+    "query_params": [
+      {
+        "name": "check_in_gte",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Check In Gte"
+        }
+      },
+      {
+        "name": "status",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "maxLength": 32,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Status"
+        }
+      },
+      {
+        "name": "property_id",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Property Id"
+        }
+      },
+      {
+        "name": "cursor",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Opaque forward cursor from the previous page's ``next_cursor``. Omitted on the first call. Bounded to 256 chars to keep the URL below reverse-proxy header limits.",
+          "title": "Cursor"
+        }
+      },
+      {
+        "name": "limit",
+        "required": false,
+        "schema": {
+          "default": 50,
+          "description": "Maximum rows to return. Default 50, cap 500 per spec \u00a712 'Pagination'. Rejected with 422 outside ``[1, 500]``.",
+          "maximum": 500,
+          "minimum": 1,
+          "title": "Limit",
+          "type": "integer"
+        }
+      }
+    ],
+    "response_schema_ref": "#/components/schemas/ReservationListResponse",
+    "summary": "List Reservations",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "stays",
+    "http": {
+      "method": "GET",
+      "path": "/w/{slug}/api/v1/stays/stay-bundles"
+    },
+    "idempotent": true,
+    "name": "stay-bundles-list",
+    "operation_id": "stays.stay_bundles.list",
+    "path_params": [],
+    "query_params": [
+      {
+        "name": "stay_id",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Stay Id"
+        }
+      },
+      {
+        "name": "reservation_id",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Reservation Id"
+        }
+      },
+      {
+        "name": "cursor",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Opaque forward cursor from the previous page's ``next_cursor``. Omitted on the first call. Bounded to 256 chars to keep the URL below reverse-proxy header limits.",
+          "title": "Cursor"
+        }
+      },
+      {
+        "name": "limit",
+        "required": false,
+        "schema": {
+          "default": 50,
+          "description": "Maximum rows to return. Default 50, cap 500 per spec \u00a712 'Pagination'. Rejected with 422 outside ``[1, 500]``.",
+          "maximum": 500,
+          "minimum": 1,
+          "title": "Limit",
+          "type": "integer"
+        }
+      }
+    ],
+    "response_schema_ref": "#/components/schemas/StayBundleListResponse",
+    "summary": "List Stay Bundles",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "stays",
+    "http": {
+      "method": "GET",
+      "path": "/w/{slug}/api/v1/stays/stay-bundles/{bundle_id}"
+    },
+    "idempotent": true,
+    "name": "stay-bundles-show",
+    "operation_id": "stays.stay_bundles.get",
+    "path_params": [
+      {
+        "name": "bundle_id",
+        "required": true,
+        "schema": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Bundle Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/StayBundleResponse",
+    "summary": "Get Stay Bundle",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "stays",
+    "http": {
+      "method": "DELETE",
+      "path": "/w/{slug}/api/v1/stays/stays/{stay_id}/welcome-link"
+    },
+    "idempotent": true,
+    "name": "stays-welcome-link-delete",
+    "operation_id": "stays.guest_links.revoke_active",
+    "path_params": [
+      {
+        "name": "stay_id",
+        "required": true,
+        "schema": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Stay Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/GuestLinkRevokeResponse",
+    "summary": "Revoke Active Guest Link",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": "#/components/schemas/GuestLinkIssueRequest",
+    "group": "stays",
+    "http": {
+      "method": "POST",
+      "path": "/w/{slug}/api/v1/stays/stays/{stay_id}/welcome-link"
+    },
+    "idempotent": false,
+    "name": "welcome-link",
+    "operation_id": "stays.guest_links.issue",
+    "path_params": [
+      {
+        "name": "stay_id",
+        "required": true,
+        "schema": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Stay Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/GuestLinkIssueResponse",
+    "summary": "Issue Guest Link",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
     "body_schema_ref": "#/components/schemas/AssignRequest",
     "group": "tasks",
     "http": {
@@ -2394,6 +7136,43 @@
     "summary": "Cancel a task with a reason (manager / owner only)",
     "x_agent_confirm": null,
     "x_cli": null
+  },
+  {
+    "body_schema_ref": "#/components/schemas/ChecklistPatchRequest",
+    "group": "tasks",
+    "http": {
+      "method": "PATCH",
+      "path": "/w/{slug}/api/v1/tasks/tasks/{task_id}/checklist/{item_id}"
+    },
+    "idempotent": false,
+    "name": "checklist",
+    "operation_id": "patch_task_checklist_item",
+    "path_params": [
+      {
+        "name": "task_id",
+        "required": true,
+        "schema": {
+          "title": "Task Id",
+          "type": "string"
+        }
+      },
+      {
+        "name": "item_id",
+        "required": true,
+        "schema": {
+          "title": "Item Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/TaskChecklistItemPayload",
+    "summary": "Idempotently tick or untick a task checklist item",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "tasks",
+      "verb": "checklist"
+    }
   },
   {
     "body_schema_ref": null,
@@ -2555,6 +7334,23 @@
     }
   },
   {
+    "body_schema_ref": "#/components/schemas/NlTaskCommitRequest",
+    "group": "tasks",
+    "http": {
+      "method": "POST",
+      "path": "/w/{slug}/api/v1/tasks/tasks/from_nl/commit"
+    },
+    "idempotent": false,
+    "name": "commit",
+    "operation_id": "commit_task_from_nl",
+    "path_params": [],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/NlTaskCommitPayload",
+    "summary": "Commit a natural-language task preview",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
     "body_schema_ref": "#/components/schemas/app__api__v1__tasks__CompleteRequest",
     "group": "tasks",
     "http": {
@@ -2596,6 +7392,35 @@
     "summary": "Create a one-off task",
     "x_agent_confirm": null,
     "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "tasks",
+    "http": {
+      "method": "GET",
+      "path": "/w/{slug}/api/v1/tasks/tasks/{task_id}/detail"
+    },
+    "idempotent": true,
+    "name": "detail",
+    "operation_id": "get_task_detail",
+    "path_params": [
+      {
+        "name": "task_id",
+        "required": true,
+        "schema": {
+          "title": "Task Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/TaskDetailPayload",
+    "summary": "Read worker task detail with property, instructions, and checklist",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "tasks",
+      "verb": "detail"
+    }
   },
   {
     "body_schema_ref": null,
@@ -2651,6 +7476,23 @@
       "group": "tasks",
       "verb": "evidence-list"
     }
+  },
+  {
+    "body_schema_ref": "#/components/schemas/NlTaskPreviewRequest",
+    "group": "tasks",
+    "http": {
+      "method": "POST",
+      "path": "/w/{slug}/api/v1/tasks/tasks/from_nl"
+    },
+    "idempotent": false,
+    "name": "from_nl",
+    "operation_id": "draft_task_from_nl",
+    "path_params": [],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/NlTaskPreviewPayload",
+    "summary": "Draft a task schedule from natural language",
+    "x_agent_confirm": null,
+    "x_cli": null
   },
   {
     "body_schema_ref": null,
@@ -3421,6 +8263,96 @@
     "group": "time",
     "http": {
       "method": "DELETE",
+      "path": "/w/{slug}/api/v1/time/properties/{property_id}/geofence"
+    },
+    "idempotent": true,
+    "name": "geofence-setting-delete",
+    "operation_id": "time.delete_geofence_setting",
+    "path_params": [
+      {
+        "name": "property_id",
+        "required": true,
+        "schema": {
+          "maxLength": 40,
+          "title": "Property Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/GeofenceSettingPayload",
+    "summary": "Delete one property's geofence setting",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "time",
+      "verb": "geofence-setting-delete"
+    }
+  },
+  {
+    "body_schema_ref": null,
+    "group": "time",
+    "http": {
+      "method": "GET",
+      "path": "/w/{slug}/api/v1/time/properties/{property_id}/geofence"
+    },
+    "idempotent": true,
+    "name": "geofence-setting-show",
+    "operation_id": "time.get_geofence_setting",
+    "path_params": [
+      {
+        "name": "property_id",
+        "required": true,
+        "schema": {
+          "maxLength": 40,
+          "title": "Property Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/GeofenceSettingPayload",
+    "summary": "Read one property's geofence setting",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "time",
+      "verb": "geofence-setting-show"
+    }
+  },
+  {
+    "body_schema_ref": "#/components/schemas/GeofenceSettingBody",
+    "group": "time",
+    "http": {
+      "method": "PUT",
+      "path": "/w/{slug}/api/v1/time/properties/{property_id}/geofence"
+    },
+    "idempotent": true,
+    "name": "geofence-setting-upsert",
+    "operation_id": "time.upsert_geofence_setting",
+    "path_params": [
+      {
+        "name": "property_id",
+        "required": true,
+        "schema": {
+          "maxLength": 40,
+          "title": "Property Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/GeofenceSettingPayload",
+    "summary": "Create or replace one property's geofence setting",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "time",
+      "verb": "geofence-setting-upsert"
+    }
+  },
+  {
+    "body_schema_ref": null,
+    "group": "time",
+    "http": {
+      "method": "DELETE",
       "path": "/w/{slug}/api/v1/time/leaves/{leave_id}"
     },
     "idempotent": true,
@@ -3443,6 +8375,64 @@
     "x_cli": {
       "group": "time",
       "verb": "leave-cancel"
+    }
+  },
+  {
+    "body_schema_ref": null,
+    "group": "time",
+    "http": {
+      "method": "GET",
+      "path": "/w/{slug}/api/v1/time/leaves/{leave_id}/conflicts"
+    },
+    "idempotent": true,
+    "name": "leave-conflicts",
+    "operation_id": "time.get_leave_conflicts",
+    "path_params": [
+      {
+        "name": "leave_id",
+        "required": true,
+        "schema": {
+          "title": "Leave Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/LeaveConflictsPayload",
+    "summary": "Return advisory leave overlap ids",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "time",
+      "verb": "leave-conflicts"
+    }
+  },
+  {
+    "body_schema_ref": "#/components/schemas/LeaveDecisionBody",
+    "group": "time",
+    "http": {
+      "method": "POST",
+      "path": "/w/{slug}/api/v1/time/leaves/{leave_id}/decision"
+    },
+    "idempotent": false,
+    "name": "leave-decide",
+    "operation_id": "time.decide_leave",
+    "path_params": [
+      {
+        "name": "leave_id",
+        "required": true,
+        "schema": {
+          "title": "Leave Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/LeavePayload",
+    "summary": "Approve or reject a pending leave",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "time",
+      "verb": "leave-decide"
     }
   },
   {
@@ -4391,6 +9381,32 @@
     "x_cli": null
   },
   {
+    "body_schema_ref": "#/components/schemas/UserWorkRoleUpdateRequest",
+    "group": "user_work_roles",
+    "http": {
+      "method": "PATCH",
+      "path": "/w/{slug}/api/v1/user_work_roles/{user_work_role_id}"
+    },
+    "idempotent": false,
+    "name": "update",
+    "operation_id": "user_work_roles.update",
+    "path_params": [
+      {
+        "name": "user_work_role_id",
+        "required": true,
+        "schema": {
+          "title": "User Work Role Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/UserWorkRoleResponse",
+    "summary": "Partial update of a user_work_role link",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
     "body_schema_ref": null,
     "group": "user_work_roles",
     "http": {
@@ -4398,7 +9414,7 @@
       "path": "/w/{slug}/api/v1/users/{user_id}/user_work_roles"
     },
     "idempotent": true,
-    "name": "list",
+    "name": "users-user-work-roles-list",
     "operation_id": "user_work_roles.list_by_user",
     "path_params": [
       {
@@ -4447,28 +9463,619 @@
     "x_cli": null
   },
   {
-    "body_schema_ref": "#/components/schemas/UserWorkRoleUpdateRequest",
-    "group": "user_work_roles",
+    "body_schema_ref": null,
+    "group": "vendor-invoices",
     "http": {
-      "method": "PATCH",
-      "path": "/w/{slug}/api/v1/user_work_roles/{user_work_role_id}"
+      "method": "POST",
+      "path": "/w/{slug}/api/v1/billing/vendor-invoices/{invoice_id}/approve"
     },
     "idempotent": false,
-    "name": "update",
-    "operation_id": "user_work_roles.update",
+    "name": "approve",
+    "operation_id": "billing.vendor_invoices.approve",
     "path_params": [
       {
-        "name": "user_work_role_id",
+        "name": "invoice_id",
         "required": true,
         "schema": {
-          "title": "User Work Role Id",
+          "title": "Invoice Id",
           "type": "string"
         }
       }
     ],
     "query_params": [],
-    "response_schema_ref": "#/components/schemas/UserWorkRoleResponse",
-    "summary": "Partial update of a user_work_role link",
+    "response_schema_ref": "#/components/schemas/VendorInvoiceResponse",
+    "summary": "Approve a vendor invoice",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "vendor-invoices",
+    "http": {
+      "method": "GET",
+      "path": "/w/{slug}/api/v1/billing/vendor-invoices"
+    },
+    "idempotent": true,
+    "name": "billing-vendor-invoices-list",
+    "operation_id": "billing.vendor_invoices.list",
+    "path_params": [],
+    "query_params": [
+      {
+        "name": "vendor_org_id",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Vendor Org Id"
+        }
+      },
+      {
+        "name": "status",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "enum": [
+                "received",
+                "approved",
+                "paid",
+                "disputed"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Status"
+        }
+      }
+    ],
+    "response_schema_ref": "#/components/schemas/VendorInvoiceListResponse",
+    "summary": "List vendor invoices",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "vendor-invoices",
+    "http": {
+      "method": "GET",
+      "path": "/w/{slug}/api/v1/billing/vendor-invoices/{invoice_id}"
+    },
+    "idempotent": true,
+    "name": "billing-vendor-invoices-show",
+    "operation_id": "billing.vendor_invoices.get",
+    "path_params": [
+      {
+        "name": "invoice_id",
+        "required": true,
+        "schema": {
+          "title": "Invoice Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/VendorInvoiceResponse",
+    "summary": "Get a vendor invoice",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": "#/components/schemas/VendorInvoiceCreateRequest",
+    "group": "vendor-invoices",
+    "http": {
+      "method": "POST",
+      "path": "/w/{slug}/api/v1/billing/vendor-invoices"
+    },
+    "idempotent": false,
+    "name": "create",
+    "operation_id": "billing.vendor_invoices.create",
+    "path_params": [],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/VendorInvoiceResponse",
+    "summary": "Create a vendor invoice",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "vendor-invoices",
+    "http": {
+      "method": "POST",
+      "path": "/w/{slug}/api/v1/billing/vendor-invoices/{invoice_id}/dispute"
+    },
+    "idempotent": false,
+    "name": "dispute",
+    "operation_id": "billing.vendor_invoices.dispute",
+    "path_params": [
+      {
+        "name": "invoice_id",
+        "required": true,
+        "schema": {
+          "title": "Invoice Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/VendorInvoiceResponse",
+    "summary": "Dispute a vendor invoice",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": "#/components/schemas/VendorInvoiceMarkPaidRequest",
+    "group": "vendor-invoices",
+    "http": {
+      "method": "POST",
+      "path": "/w/{slug}/api/v1/billing/vendor-invoices/{invoice_id}/paid"
+    },
+    "idempotent": false,
+    "name": "paid",
+    "operation_id": "billing.vendor_invoices.mark_paid",
+    "path_params": [
+      {
+        "name": "invoice_id",
+        "required": true,
+        "schema": {
+          "title": "Invoice Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/VendorInvoiceResponse",
+    "summary": "Mark a vendor invoice paid",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "vendor-invoices",
+    "http": {
+      "method": "POST",
+      "path": "/w/{slug}/api/v1/billing/vendor-invoices/{invoice_id}/pdf"
+    },
+    "idempotent": false,
+    "name": "pdf",
+    "operation_id": "billing.vendor_invoices.attach_pdf",
+    "path_params": [
+      {
+        "name": "invoice_id",
+        "required": true,
+        "schema": {
+          "title": "Invoice Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/VendorInvoiceResponse",
+    "summary": "Attach a PDF to a vendor invoice",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": "#/components/schemas/WebhookCreateRequest",
+    "group": "webhooks",
+    "http": {
+      "method": "POST",
+      "path": "/w/{slug}/api/v1/webhooks"
+    },
+    "idempotent": false,
+    "name": "create",
+    "operation_id": "webhooks.create",
+    "path_params": [],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/WebhookResponse",
+    "summary": "Create an outbound webhook subscription",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "webhooks",
+      "mutates": true,
+      "summary": "Create an outbound webhook subscription",
+      "verb": "create"
+    }
+  },
+  {
+    "body_schema_ref": null,
+    "group": "webhooks",
+    "http": {
+      "method": "DELETE",
+      "path": "/w/{slug}/api/v1/webhooks/{webhook_id}"
+    },
+    "idempotent": true,
+    "name": "delete",
+    "operation_id": "webhooks.delete",
+    "path_params": [
+      {
+        "name": "webhook_id",
+        "required": true,
+        "schema": {
+          "title": "Webhook Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": null,
+    "summary": "Delete an outbound webhook subscription",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "webhooks",
+      "mutates": true,
+      "summary": "Delete an outbound webhook subscription",
+      "verb": "delete"
+    }
+  },
+  {
+    "body_schema_ref": null,
+    "group": "webhooks",
+    "http": {
+      "method": "GET",
+      "path": "/w/{slug}/api/v1/webhooks/{webhook_id}/deliveries"
+    },
+    "idempotent": true,
+    "name": "deliveries",
+    "operation_id": "webhooks.deliveries.list",
+    "path_params": [
+      {
+        "name": "webhook_id",
+        "required": true,
+        "schema": {
+          "title": "Webhook Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": null,
+    "summary": "List delivery attempts for an outbound webhook subscription",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "webhooks",
+      "mutates": false,
+      "summary": "List outbound webhook delivery attempts",
+      "verb": "deliveries"
+    }
+  },
+  {
+    "body_schema_ref": null,
+    "group": "webhooks",
+    "http": {
+      "method": "GET",
+      "path": "/w/{slug}/api/v1/webhooks"
+    },
+    "idempotent": true,
+    "name": "list",
+    "operation_id": "webhooks.list",
+    "path_params": [],
+    "query_params": [],
+    "response_schema_ref": null,
+    "summary": "List outbound webhook subscriptions",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "webhooks",
+      "mutates": false,
+      "summary": "List outbound webhook subscriptions",
+      "verb": "list"
+    }
+  },
+  {
+    "body_schema_ref": null,
+    "group": "webhooks",
+    "http": {
+      "method": "POST",
+      "path": "/w/{slug}/api/v1/webhooks/{webhook_id}/rotate-secret"
+    },
+    "idempotent": false,
+    "name": "rotate-secret",
+    "operation_id": "webhooks.secret.rotate",
+    "path_params": [
+      {
+        "name": "webhook_id",
+        "required": true,
+        "schema": {
+          "title": "Webhook Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/WebhookResponse",
+    "summary": "Rotate an outbound webhook subscription secret",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "webhooks",
+      "mutates": true,
+      "summary": "Rotate an outbound webhook subscription secret",
+      "verb": "rotate-secret"
+    }
+  },
+  {
+    "body_schema_ref": null,
+    "group": "webhooks",
+    "http": {
+      "method": "POST",
+      "path": "/w/{slug}/api/v1/webhooks/{webhook_id}/test"
+    },
+    "idempotent": false,
+    "name": "test",
+    "operation_id": "webhooks.test",
+    "path_params": [
+      {
+        "name": "webhook_id",
+        "required": true,
+        "schema": {
+          "title": "Webhook Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/WebhookDeliveryResponse",
+    "summary": "Enqueue a test delivery for an outbound webhook subscription",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "webhooks",
+      "mutates": true,
+      "summary": "Enqueue a test webhook delivery",
+      "verb": "test"
+    }
+  },
+  {
+    "body_schema_ref": "#/components/schemas/WebhookUpdateRequest",
+    "group": "webhooks",
+    "http": {
+      "method": "PATCH",
+      "path": "/w/{slug}/api/v1/webhooks/{webhook_id}"
+    },
+    "idempotent": false,
+    "name": "update",
+    "operation_id": "webhooks.update",
+    "path_params": [
+      {
+        "name": "webhook_id",
+        "required": true,
+        "schema": {
+          "title": "Webhook Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/WebhookResponse",
+    "summary": "Update an outbound webhook subscription",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "webhooks",
+      "mutates": true,
+      "summary": "Update an outbound webhook subscription",
+      "verb": "update"
+    }
+  },
+  {
+    "body_schema_ref": null,
+    "group": "work-orders",
+    "http": {
+      "method": "GET",
+      "path": "/w/{slug}/api/v1/billing/work-orders"
+    },
+    "idempotent": true,
+    "name": "billing-work-orders-list",
+    "operation_id": "billing.work_orders.list",
+    "path_params": [],
+    "query_params": [
+      {
+        "name": "organization_id",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Organization Id"
+        }
+      },
+      {
+        "name": "property_id",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Property Id"
+        }
+      },
+      {
+        "name": "status",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "enum": [
+                "draft",
+                "sent",
+                "in_progress",
+                "completed",
+                "invoiced"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Status"
+        }
+      }
+    ],
+    "response_schema_ref": "#/components/schemas/WorkOrderListResponse",
+    "summary": "List billing work orders",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "work-orders",
+    "http": {
+      "method": "GET",
+      "path": "/w/{slug}/api/v1/billing/work-orders/{work_order_id}"
+    },
+    "idempotent": true,
+    "name": "billing-work-orders-show",
+    "operation_id": "billing.work_orders.get",
+    "path_params": [
+      {
+        "name": "work_order_id",
+        "required": true,
+        "schema": {
+          "title": "Work Order Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/WorkOrderResponse",
+    "summary": "Get a billing work order",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": "#/components/schemas/WorkOrderPatchRequest",
+    "group": "work-orders",
+    "http": {
+      "method": "PATCH",
+      "path": "/w/{slug}/api/v1/billing/work-orders/{work_order_id}"
+    },
+    "idempotent": false,
+    "name": "billing-work-orders-update",
+    "operation_id": "billing.work_orders.update",
+    "path_params": [
+      {
+        "name": "work_order_id",
+        "required": true,
+        "schema": {
+          "title": "Work Order Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/WorkOrderResponse",
+    "summary": "Update a billing work order",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "work-orders",
+    "http": {
+      "method": "POST",
+      "path": "/w/{slug}/api/v1/billing/work-orders/{work_order_id}/complete"
+    },
+    "idempotent": false,
+    "name": "complete",
+    "operation_id": "billing.work_orders.complete",
+    "path_params": [
+      {
+        "name": "work_order_id",
+        "required": true,
+        "schema": {
+          "title": "Work Order Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/WorkOrderResponse",
+    "summary": "Complete a billing work order",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": "#/components/schemas/WorkOrderCreateRequest",
+    "group": "work-orders",
+    "http": {
+      "method": "POST",
+      "path": "/w/{slug}/api/v1/billing/work-orders"
+    },
+    "idempotent": false,
+    "name": "create",
+    "operation_id": "billing.work_orders.create",
+    "path_params": [],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/WorkOrderResponse",
+    "summary": "Create a billing work order",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "work-orders",
+    "http": {
+      "method": "POST",
+      "path": "/w/{slug}/api/v1/billing/work-orders/{work_order_id}/in-progress"
+    },
+    "idempotent": false,
+    "name": "in-progress",
+    "operation_id": "billing.work_orders.mark_in_progress",
+    "path_params": [
+      {
+        "name": "work_order_id",
+        "required": true,
+        "schema": {
+          "title": "Work Order Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/WorkOrderResponse",
+    "summary": "Move a billing work order into progress",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "work-orders",
+    "http": {
+      "method": "POST",
+      "path": "/w/{slug}/api/v1/billing/work-orders/{work_order_id}/invoice"
+    },
+    "idempotent": false,
+    "name": "invoice",
+    "operation_id": "billing.work_orders.invoice",
+    "path_params": [
+      {
+        "name": "work_order_id",
+        "required": true,
+        "schema": {
+          "title": "Work Order Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/WorkOrderResponse",
+    "summary": "Invoice a completed billing work order",
     "x_agent_confirm": null,
     "x_cli": null
   },

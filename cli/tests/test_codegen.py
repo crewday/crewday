@@ -134,6 +134,13 @@ def test_derive_group_x_cli_subgroup_space_preserved() -> None:
         # GET — list vs show.
         ("GET", "/w/{slug}/api/v1/tasks", ["tasks"], "list"),
         ("GET", "/w/{slug}/api/v1/tasks/{id}", ["tasks"], "show"),
+        ("GET", "/w/{slug}/api/v1/assets/{id}/actions", ["assets"], "actions-list"),
+        (
+            "PATCH",
+            "/w/{slug}/api/v1/assets/actions/{action_id}",
+            ["assets"],
+            "actions-update",
+        ),
         # POST — create vs action vs sub-action. The action / create
         # split depends on whether the trailing non-param segment
         # matches the *derived group name*: ``/me/tokens`` with

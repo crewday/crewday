@@ -59,6 +59,7 @@ import fnmatch
 import json
 import logging
 import os
+import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -96,6 +97,7 @@ DEFAULT_EXCLUSIONS_PATH: Final[Path] = _PACKAGE_DIR / "_exclusions.yaml"
 # protocol contract, which is what the CLI needs to know to decide
 # whether a retry is safe.
 _IDEMPOTENT_METHODS: Final[frozenset[str]] = frozenset({"GET", "HEAD", "PUT", "DELETE"})
+_PATH_PARAM_RE: Final[re.Pattern[str]] = re.compile(r"\{[^}]+\}")
 
 # Every HTTP method we render as a CLI command. FastAPI also emits
 # ``options`` entries automatically; those are transport-level probes
@@ -322,6 +324,37 @@ def _path_ends_in_parameter(path: str) -> bool:
     return last.startswith("{") and last.endswith("}")
 
 
+def _path_resource_suffix(path: str, group: str) -> str | None:
+    """Return a stable sub-resource/action prefix for nested routes.
+
+    The default CRUD verbs (``list``, ``show``, ``update``, ``delete``)
+    are only unique when a group has one resource root. As soon as a
+    tagged router exposes sub-resources under the same group, the path
+    leaf becomes part of the CLI verb: ``/assets/{id}/actions`` maps to
+    ``actions-list`` rather than a second ``assets list``.
+    """
+    segments = _path_segments(path)
+    if "api" in segments:
+        segments = segments[segments.index("api") + 1 :]
+    if segments and segments[0].startswith("v") and segments[0][1:].isdigit():
+        segments = segments[1:]
+    if not segments:
+        return None
+
+    normalized_group = group.replace("_", "-")
+    normalized = [
+        _PATH_PARAM_RE.sub("", seg).replace("_", "-").replace(".", "-").strip("-")
+        for seg in segments
+    ]
+    normalized = [seg for seg in normalized if seg]
+    if not normalized:
+        return None
+    suffix = normalized[1:] if normalized[0] == normalized_group else normalized
+    if not suffix:
+        return None
+    return "-".join(suffix)
+
+
 def _derive_group(path: str, operation: dict[str, Any]) -> str:
     """Return the CLI group name for this operation.
 
@@ -416,14 +449,19 @@ def _derive_name(
         return "create"
 
     if method_upper == "GET":
-        return "show" if ends_param else "list"
+        base = "show" if ends_param else "list"
+        suffix = _path_resource_suffix(path, group)
+        return f"{suffix}-{base}" if suffix else base
 
     if method_upper == "PATCH":
-        return "update"
+        suffix = _path_resource_suffix(path, group)
+        return f"{suffix}-update" if suffix else "update"
     if method_upper == "PUT":
-        return "replace"
+        suffix = _path_resource_suffix(path, group)
+        return f"{suffix}-replace" if suffix else "replace"
     if method_upper == "DELETE":
-        return "delete"
+        suffix = _path_resource_suffix(path, group)
+        return f"{suffix}-delete" if suffix else "delete"
     if method_upper == "HEAD":
         return "head"
     # Unreachable under :data:`_CLI_METHODS`, but keep the fallback

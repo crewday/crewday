@@ -82,3 +82,46 @@ exclusions:
   # blob fetch when that surface lands.
   - operation_id: "files.blob"
     reason: "returns 302/binary stream; covered by 'files show' metadata + 'documents download' override"
+  - operation_id: "assets.qr_png"
+    reason: "returns binary PNG; future asset QR download override can wrap it explicitly"
+  - operation_id: "payroll.payslips.pdf"
+    reason: "returns binary PDF; future payslip download override can wrap it explicitly"
+
+  # ----- Legacy / public aliases with canonical workspace commands -----
+  #
+  # The flat workspace routes below are the canonical SPA + CLI homes.
+  # The /llm-prefixed variants remain mounted for API compatibility and
+  # deliberately share handlers/metadata, which would otherwise register
+  # duplicate generated commands.
+  - operation_id: "llm.agent_preferences.workspace.get"
+    reason: "legacy /llm alias; canonical CLI route is workspace.llm.agent_preferences.workspace.get"
+  - operation_id: "llm.agent_preferences.workspace.put"
+    reason: "legacy /llm alias; canonical CLI route is workspace.llm.agent_preferences.workspace.put"
+  - operation_id: "llm.agent_preferences.me.get"
+    reason: "legacy /llm alias; canonical CLI route is workspace.llm.agent_preferences.me.get"
+  - operation_id: "llm.agent_preferences.me.put"
+    reason: "legacy /llm alias; canonical CLI route is workspace.llm.agent_preferences.me.put"
+  - operation_id: "llm.agent_approval_mode.me.get"
+    reason: "legacy /llm alias; canonical CLI route is workspace.llm.agent_approval_mode.me.get"
+  - operation_id: "llm.agent_approval_mode.me.put"
+    reason: "legacy /llm alias; canonical CLI route is workspace.llm.agent_approval_mode.me.put"
+  - operation_id: "llm.workspace.usage.get"
+    reason: "legacy /llm alias; canonical CLI route is workspace.llm.usage.get"
+
+  # Public quote links are unauthenticated browser/client-decision
+  # routes. The authenticated workspace quote routes generate the CLI
+  # commands.
+  - operation_id: "billing.quotes.public_get"
+    reason: "public quote-token view; canonical CLI route is billing.quotes.get"
+  - operation_id: "billing.quotes.public_accept"
+    reason: "public quote-token decision; canonical CLI route is billing.quotes.accept"
+  - operation_id: "billing.quotes.public_reject"
+    reason: "public quote-token decision; canonical CLI route is billing.quotes.reject"
+
+  # Guest/token and singular-alias reads are browser/deep-link affordances.
+  - operation_id: "stays.welcome.read_bearer"
+    reason: "guest welcome token surface; not a workspace CLI command"
+  - operation_id: "stays.welcome.read_path_token"
+    reason: "guest welcome token surface; not a workspace CLI command"
+  - operation_id: "asset.scan"
+    reason: "singular asset scan alias; canonical CLI route is assets.scan"
