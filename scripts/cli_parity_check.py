@@ -91,22 +91,31 @@ def _command_signature(
 
 def _command_tree(root: click.Group) -> dict[tuple[str, str], CommandSignature]:
     tree: dict[tuple[str, str], CommandSignature] = {}
+
+    def walk(group: click.Group, group_path: tuple[str, ...]) -> None:
+        for name, command in sorted(group.commands.items()):
+            if isinstance(command, click.Group):
+                walk(command, (*group_path, name))
+                continue
+            path = (" ".join(group_path), name)
+            tree[path] = _command_signature(path, command)
+
     for group_name, group in sorted(root.commands.items()):
         if not isinstance(group, click.Group):
             continue
-        for command_name, command in sorted(group.commands.items()):
-            path = (group_name, command_name)
-            tree[path] = _command_signature(path, command)
+        walk(group, (group_name,))
     return tree
 
 
 def _override_metadata(root: click.Group) -> tuple[set[tuple[str, str]], set[str]]:
     keys: set[tuple[str, str]] = set()
     covered: set[str] = set()
-    for group in root.commands.values():
-        if not isinstance(group, click.Group):
-            continue
+
+    def walk(group: click.Group) -> None:
         for command in group.commands.values():
+            if isinstance(command, click.Group):
+                walk(command)
+                continue
             raw = getattr(command, "_cli_override", None)
             if raw is None:
                 continue
@@ -115,6 +124,8 @@ def _override_metadata(root: click.Group) -> tuple[set[tuple[str, str]], set[str
                 keys.add((group_name, verb))
             if isinstance(covers, tuple):
                 covered.update(item for item in covers if isinstance(item, str))
+
+    walk(root)
     return keys, covered
 
 

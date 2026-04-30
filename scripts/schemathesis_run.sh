@@ -94,6 +94,13 @@ export CREWDAY_BIND_PORT="${PORT}"
 # Cap LLM budget at zero so any handler reaching the LLM seam fails
 # fast instead of doing real network calls during the contract sweep.
 export CREWDAY_LLM_DEFAULT_BUDGET_CENTS_30D="0"
+# Contract fuzzing deliberately sends bursts at one operation. Raise
+# the per-minute API buckets so the rate limiter itself stays covered
+# by its unit/integration tests instead of making positive schema cases
+# fail with incidental 429s during this sweep.
+export CREWDAY_RATE_LIMIT_ANONYMOUS_PER_MINUTE="${CREWDAY_RATE_LIMIT_ANONYMOUS_PER_MINUTE:-10000}"
+export CREWDAY_RATE_LIMIT_TOKEN_PER_MINUTE="${CREWDAY_RATE_LIMIT_TOKEN_PER_MINUTE:-10000}"
+export CREWDAY_RATE_LIMIT_PERSONAL_ME_PER_MINUTE="${CREWDAY_RATE_LIMIT_PERSONAL_ME_PER_MINUTE:-10000}"
 
 cd "${REPO_ROOT}"
 

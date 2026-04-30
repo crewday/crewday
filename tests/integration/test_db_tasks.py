@@ -255,6 +255,7 @@ class TestMigrationShape:
             "photo_evidence",
             "linked_instruction_ids",
             "priority",
+            "required_approval",
             "inventory_effects_json",
             "llm_hints_md",
             "deleted_at",

@@ -21,7 +21,7 @@ export function RequirePermission({
 }: RequirePermissionProps) {
   const { user } = useAuth();
   const { workspaceId } = useWorkspace();
-  const resolvedScopeId = scopeId ?? (scopeKind === "workspace" ? workspaceId : null);
+  const resolvedScopeId = scopeId ?? (scopeKind === "workspace" ? user?.current_workspace_id ?? workspaceId : null);
   const userId = user?.user_id ?? null;
 
   const q = useQuery({

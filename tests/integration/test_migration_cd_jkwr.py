@@ -1,4 +1,4 @@
-"""Migration smoke for cd-jkwr inventory item schema changes."""
+"""Migration smoke for cd-jkwr inventory item compatibility revision."""
 
 from __future__ import annotations
 
@@ -48,7 +48,7 @@ def _override_database_url(url: str) -> Iterator[None]:
 
 
 class TestInventoryItemsMigration:
-    """cd-jkwr migration is reversible around SKU shape changes."""
+    """cd-jkwr remains reversible after the base migration absorbed it."""
 
     def test_downgrade_normalizes_property_scoped_and_null_skus(
         self, tmp_path_factory: pytest.TempPathFactory
@@ -104,14 +104,13 @@ class TestInventoryItemsMigration:
 
             insp = inspect(engine)
             cols = {c["name"]: c for c in insp.get_columns("inventory_item")}
-            assert "property_id" not in cols
-            assert cols["sku"]["nullable"] is False
+            assert "property_id" in cols
+            assert cols["sku"]["nullable"] is True
 
             with Session(engine) as session:
-                skus = session.scalars(select(Item.sku).order_by(Item.id)).all()
-            assert len(skus) == len(set(skus))
-            assert all(skus)
-            assert skus[0] == "DUP"
+                rows = session.scalars(select(Item).order_by(Item.id)).all()
+            assert [row.sku for row in rows] == ["DUP", "DUP", None]
+            assert [row.property_id for row in rows] == [prop_a, prop_b, prop_a]
         finally:
             engine.dispose()
 

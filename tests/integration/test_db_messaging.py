@@ -328,13 +328,26 @@ class TestMigrationShape:
             "author_label",
             "body_md",
             "attachments_json",
+            "source",
+            "provider_message_id",
+            "gateway_binding_id",
             "dispatched_to_agent_at",
             "created_at",
         }
         assert set(cols) == expected
-        for nullable in ("author_user_id", "dispatched_to_agent_at"):
+        for nullable in (
+            "author_user_id",
+            "provider_message_id",
+            "gateway_binding_id",
+            "dispatched_to_agent_at",
+        ):
             assert cols[nullable]["nullable"] is True
-        for notnull in expected - {"author_user_id", "dispatched_to_agent_at"}:
+        for notnull in expected - {
+            "author_user_id",
+            "provider_message_id",
+            "gateway_binding_id",
+            "dispatched_to_agent_at",
+        }:
             assert cols[notnull]["nullable"] is False, f"{notnull} must be NOT NULL"
 
     def test_chat_message_fks(self, engine: Engine) -> None:

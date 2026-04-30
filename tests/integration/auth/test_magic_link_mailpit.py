@@ -58,6 +58,7 @@ import pytest
 from tests.integration.mail import (
     fetch_message_detail,
     is_reachable,
+    mailpit_test_lock,
     purge_inbox,
     wait_for_message,
 )
@@ -218,8 +219,9 @@ def clean_inbox(stack_endpoints: tuple[str, str]) -> Iterator[tuple[str, str]]:
     cases to each other.
     """
     _, mailpit_url = stack_endpoints
-    purge_inbox(mailpit_url)
-    yield stack_endpoints
+    with mailpit_test_lock():
+        purge_inbox(mailpit_url)
+        yield stack_endpoints
 
 
 # ---------------------------------------------------------------------------

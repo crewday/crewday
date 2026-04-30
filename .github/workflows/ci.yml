@@ -277,7 +277,7 @@ jobs:
         # name already exists).
         run: docker network create traefik-proxy || true
       - name: Bring up dev stack
-        run: docker compose -f mocks/docker-compose.yml up -d --build
+        run: docker compose -f mocks/docker-compose.yml -f mocks/docker-compose.e2e.yml up -d --build
       - name: Wait for app-api healthz
         # The compose healthcheck has start_period=30s and retries=3;
         # we poll the loopback port the web-dev Vite container
@@ -300,8 +300,8 @@ jobs:
           until curl -fsS http://127.0.0.1:8100/healthz >/dev/null; do
             if (( SECONDS >= deadline )); then
               echo "::error::dev stack not healthy after 240s"
-              docker compose -f mocks/docker-compose.yml ps
-              docker compose -f mocks/docker-compose.yml logs --tail=200
+              docker compose -f mocks/docker-compose.yml -f mocks/docker-compose.e2e.yml ps
+              docker compose -f mocks/docker-compose.yml -f mocks/docker-compose.e2e.yml logs --tail=200
               exit 1
             fi
             sleep 2
@@ -343,4 +343,4 @@ jobs:
         # ephemeral VM. ``-v`` wipes the SQLite volume so subsequent
         # runs start from a clean slate.
         if: always()
-        run: docker compose -f mocks/docker-compose.yml down -v
+        run: docker compose -f mocks/docker-compose.yml -f mocks/docker-compose.e2e.yml down -v

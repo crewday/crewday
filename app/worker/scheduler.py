@@ -1934,6 +1934,7 @@ def _make_daily_digest_fanout_body(clock: Clock) -> Callable[[], None]:
     from app.adapters.mail.smtp import SMTPMailer
 
     settings = get_settings()
+    root_key = getattr(settings, "root_key", None)
     mailer = (
         SMTPMailer(
             host=settings.smtp_host,
@@ -1952,10 +1953,10 @@ def _make_daily_digest_fanout_body(clock: Clock) -> Callable[[], None]:
         OpenRouterClient(
             DeploymentOpenRouterConfigSource(
                 env_api_key=settings.openrouter_api_key,
-                root_key=settings.root_key,
+                root_key=root_key,
             )
         )
-        if settings.openrouter_api_key is not None or settings.root_key is not None
+        if settings.openrouter_api_key is not None or root_key is not None
         else None
     )
 

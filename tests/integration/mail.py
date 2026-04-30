@@ -22,10 +22,14 @@ See ``docs/specs/10-messaging-notifications.md`` §"Transport" and
 
 from __future__ import annotations
 
+import fcntl
 import json
 import time
 import urllib.error
 import urllib.request
+from collections.abc import Iterator
+from contextlib import contextmanager
+from pathlib import Path
 from typing import Any, Final
 
 __all__ = [
@@ -35,6 +39,7 @@ __all__ = [
     "fetch_message_detail",
     "fetch_messages",
     "is_reachable",
+    "mailpit_test_lock",
     "purge_inbox",
     "wait_for_http",
     "wait_for_message",
@@ -42,6 +47,7 @@ __all__ = [
 
 
 DEFAULT_DEADLINE_S: Final[float] = 10.0
+_MAILPIT_LOCK_PATH = Path("/tmp/crewday-mailpit-tests.lock")
 
 
 # Re-exporting Mailpit's ``messages`` array element shape under a name
@@ -50,6 +56,16 @@ DEFAULT_DEADLINE_S: Final[float] = 10.0
 # narrow on the specific keys they touch (``MessageID``, ``Subject``,
 # ``ID``) just like the existing test_mail_smtp.py does.
 MailpitMessage = dict[str, Any]
+
+
+@contextmanager
+def mailpit_test_lock() -> Iterator[None]:
+    with _MAILPIT_LOCK_PATH.open("w", encoding="utf-8") as lock_file:
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
 
 
 def fetch_messages(api_url: str, *, timeout: float = 5.0) -> list[MailpitMessage]:

@@ -95,8 +95,6 @@ DEFAULT_DEV_PASSKEY_NAME: Final[str] = "e2e-virtual-authenticator"
 _COMPOSE_FILE: Final[Path] = (
     Path(__file__).resolve().parents[3] / "mocks" / "docker-compose.yml"
 )
-_DEV_LOGIN_CACHE: dict[tuple[str, str, str, str, str, str], str] = {}
-
 # Dev-only cookie alias that the FastAPI routers accept in addition to
 # the canonical ``__Host-crewday_session`` — see
 # :mod:`app.auth.session_cookie`. The alias name has no prefix
@@ -228,64 +226,50 @@ def login_with_dev_session(
     the User / Workspace rows and mint fresh sessions; see
     :func:`scripts.dev_login.mint_session` for the row lifecycle.
     """
-    cache_key = (
-        base_url,
-        email,
-        workspace_slug,
-        role,
-        service,
+    cmd = [
+        "docker",
+        "compose",
+        "-f",
         str(compose_file),
+        "exec",
+        "-T",
+        service,
+        "python",
+        "-m",
+        "scripts.dev_login",
+        "--email",
+        email,
+        "--workspace",
+        workspace_slug,
+        "--role",
+        role,
+        "--output",
+        "cookie",
+    ]
+    proc = subprocess.run(
+        cmd,
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=30,
     )
-    value = _DEV_LOGIN_CACHE.get(cache_key)
-    if value is None:
-        cmd = [
-            "docker",
-            "compose",
-            "-f",
-            str(compose_file),
-            "exec",
-            "-T",
-            service,
-            "python",
-            "-m",
-            "scripts.dev_login",
-            "--email",
-            email,
-            "--workspace",
-            workspace_slug,
-            "--role",
-            role,
-            "--output",
-            "cookie",
-        ]
-        proc = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            check=True,
-            timeout=30,
+    line = proc.stdout.strip()
+    if "=" not in line:
+        raise RuntimeError(
+            f"dev_login output missing '=' separator: {line!r}; stderr={proc.stderr!r}"
         )
-        line = proc.stdout.strip()
-        if "=" not in line:
-            raise RuntimeError(
-                f"dev_login output missing '=' separator: {line!r}; "
-                f"stderr={proc.stderr!r}"
-            )
-        name, _, value = line.partition("=")
-        # ``scripts.dev_login --output cookie`` always emits the deployment-
-        # canonical ``__Host-crewday_session`` name (prod shape). Surfacing
-        # a drift here points at a compose-file regression — usually a
-        # stale ``CREWDAY_PROFILE`` / ``CREWDAY_DEV_AUTH`` env that flipped
-        # the script into a different output mode.
-        if name != SESSION_COOKIE_NAME:
-            raise RuntimeError(
-                f"unexpected cookie name {name!r} from dev_login (expected "
-                f"{SESSION_COOKIE_NAME!r}); compose file may be out of date"
-            )
-        _DEV_LOGIN_CACHE[cache_key] = value
+    name, _, value = line.partition("=")
+    # ``scripts.dev_login --output cookie`` always emits the deployment-
+    # canonical ``__Host-crewday_session`` name (prod shape). Surfacing
+    # a drift here points at a compose-file regression — usually a
+    # stale ``CREWDAY_PROFILE`` / ``CREWDAY_DEV_AUTH`` env that flipped
+    # the script into a different output mode.
+    if name != SESSION_COOKIE_NAME:
+        raise RuntimeError(
+            f"unexpected cookie name {name!r} from dev_login (expected "
+            f"{SESSION_COOKIE_NAME!r}); compose file may be out of date"
+        )
 
-    parsed = urllib.parse.urlparse(base_url)
-    host = parsed.hostname or "127.0.0.1"
     # See the docstring for the prefix / cookie-jar dance — the alias
     # name carries the same opaque value through to the server, with
     # ``secure=False`` so plain-HTTP loopback can transport it.
@@ -294,8 +278,7 @@ def login_with_dev_session(
             {
                 "name": _DEV_FALLBACK_COOKIE_NAME,
                 "value": value,
-                "domain": host,
-                "path": "/",
+                "url": base_url.rstrip("/") or base_url,
                 "secure": False,
                 "httpOnly": True,
                 "sameSite": "Lax",

@@ -2,13 +2,10 @@
 
 from __future__ import annotations
 
-import fcntl
 import os
 import uuid
 from collections.abc import Iterator
-from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
-from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
@@ -16,7 +13,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from pydantic import SecretStr
-from sqlalchemy import Engine, delete, select
+from sqlalchemy import Engine, select
 from sqlalchemy.orm import Session, sessionmaker
 from webauthn.helpers.structs import (
     AttestationFormat,
@@ -25,22 +22,15 @@ from webauthn.helpers.structs import (
 )
 
 from app.adapters.db.authz.models import (
-    PermissionGroup,
-    PermissionGroupMember,
     RoleGrant,
 )
 from app.adapters.db.identity.models import (
-    ApiToken,
     MagicLinkNonce,
     PasskeyCredential,
     SignupAttempt,
     User,
-    WebAuthnChallenge,
 )
-from app.adapters.db.identity.models import (
-    Session as AuthSession,
-)
-from app.adapters.db.workspace.models import UserWorkspace, Workspace
+from app.adapters.db.workspace.models import Workspace
 from app.adapters.mail.smtp import SMTPMailer
 from app.api.deps import db_session as _db_session_dep
 from app.api.v1.auth.signup import build_signup_router
@@ -49,9 +39,11 @@ from app.auth._throttle import Throttle
 from app.auth.webauthn import VerifiedRegistration
 from app.capabilities import Capabilities, DeploymentSettings, Features
 from app.config import Settings
+from tests.integration.auth._signup_cleanup import delete_signup_rows
 from tests.integration.mail import (
     fetch_message_detail,
     is_reachable,
+    mailpit_test_lock,
     purge_inbox,
     wait_for_message,
 )
@@ -59,7 +51,6 @@ from tests.integration.mail import (
 pytestmark = pytest.mark.integration
 
 _DEFAULT_MAILPIT_URL = "http://127.0.0.1:8026"
-_MAILPIT_LOCK_PATH = Path("/tmp/crewday-signup-mailpit.lock")
 _SIGNUP_SUBJECT = "crew.day — verify your email and finish signing up"
 _SIGNUP_PURPOSE = "signup_verify"
 
@@ -68,20 +59,10 @@ def _mailpit_url() -> str:
     return os.environ.get("CREWDAY_TEST_MAILPIT_URL", _DEFAULT_MAILPIT_URL)
 
 
-@contextmanager
-def _mailpit_lock() -> Iterator[None]:
-    with _MAILPIT_LOCK_PATH.open("w", encoding="utf-8") as lock_file:
-        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
-        try:
-            yield
-        finally:
-            fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
-
-
 @pytest.fixture
 def clean_mailpit() -> Iterator[str]:
     mailpit_url = _mailpit_url()
-    with _mailpit_lock():
+    with mailpit_test_lock():
         if not is_reachable(mailpit_url):
             pytest.skip(
                 f"Mailpit not reachable at {mailpit_url}; start the dev stack with "
@@ -183,26 +164,11 @@ def client(
 
 
 def _delete_signup_rows(factory: sessionmaker[Session]) -> None:
-    with factory() as s:
-        from app.adapters.db.audit.models import AuditLog
-
-        for table_model in (
-            PasskeyCredential,
-            AuthSession,
-            ApiToken,
-            WebAuthnChallenge,
-            MagicLinkNonce,
-            SignupAttempt,
-            PermissionGroupMember,
-            RoleGrant,
-            UserWorkspace,
-            PermissionGroup,
-            AuditLog,
-            Workspace,
-            User,
-        ):
-            s.execute(delete(table_model))
-        s.commit()
+    delete_signup_rows(
+        factory,
+        email_like="signup-mailpit-%@dev.local",
+        slug_like="signup-mailpit-%",
+    )
 
 
 def _stub_passkey_verifier(monkeypatch: pytest.MonkeyPatch) -> bytes:

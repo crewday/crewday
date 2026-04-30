@@ -2415,7 +2415,7 @@
   .task-row__area { display: none; }
   .page-topbar__trailing .btn {
     padding-inline: 14px;
-    min-height: 36px;
+    min-height: 44px;
   }
 
   /* Let wide tables scroll horizontally inside panels instead of

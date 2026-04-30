@@ -30,6 +30,7 @@ from tests.integration.mail import (
     fetch_message_detail,
     fetch_messages,
     is_reachable,
+    mailpit_test_lock,
     purge_inbox,
     wait_for_message,
 )
@@ -122,8 +123,9 @@ def stack_endpoints() -> Iterator[tuple[str, str]]:
 @pytest.fixture
 def clean_inbox(stack_endpoints: tuple[str, str]) -> Iterator[tuple[str, str]]:
     _, mailpit_url = stack_endpoints
-    purge_inbox(mailpit_url)
-    yield stack_endpoints
+    with mailpit_test_lock():
+        purge_inbox(mailpit_url)
+        yield stack_endpoints
 
 
 def _post_json(
@@ -269,23 +271,38 @@ def _token_from_recovery_url(recovery_url: str) -> str:
     return tokens[0]
 
 
-def _wait_for_no_extra_messages(
+def _message_matches_recipient(item: dict[str, Any], address: str) -> bool:
+    to_records = item.get("To")
+    if not isinstance(to_records, list):
+        return False
+    target = address.casefold()
+    return any(
+        isinstance(record, dict)
+        and isinstance(record.get("Address"), str)
+        and record["Address"].casefold() == target
+        for record in to_records
+    )
+
+
+def _wait_for_no_message_to(
     mailpit_url: str,
     *,
-    expected_count: int,
+    email: str,
     deadline_s: float = 2.0,
     poll_interval_s: float = 0.2,
 ) -> None:
     end = time.monotonic() + deadline_s
-    last_count = -1
+    matching_messages: list[dict[str, Any]] = []
     while time.monotonic() < end:
-        last_count = len(fetch_messages(mailpit_url))
-        if last_count > expected_count:
+        matching_messages = [
+            item
+            for item in fetch_messages(mailpit_url)
+            if _message_matches_recipient(item, email)
+        ]
+        if matching_messages:
             break
         time.sleep(poll_interval_s)
-    assert last_count == expected_count, (
-        f"Mailpit received {last_count} messages; expected exactly {expected_count}"
-    )
+    assert matching_messages == [], f"Mailpit received mail for {email!r}"
 
 
 def test_known_worker_recovery_email_verifies_and_starts_passkey(
@@ -348,4 +365,4 @@ def test_unknown_email_response_matches_and_sends_no_mail(
     miss_body = _request_recovery_or_skip(app_url, unknown_email)
     assert miss_body == happy_body
 
-    _wait_for_no_extra_messages(mailpit_url, expected_count=1, deadline_s=3.0)
+    _wait_for_no_message_to(mailpit_url, email=unknown_email, deadline_s=3.0)

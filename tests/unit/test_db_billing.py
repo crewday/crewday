@@ -40,6 +40,13 @@ _ORG_ID = "01HWA00000000000000000ORGA"
 _OTHER_ORG_ID = "01HWA00000000000000000ORGB"
 _RATE_CARD_ID = "01HWA00000000000000000RCAA"
 _OTHER_RATE_CARD_ID = "01HWA00000000000000000RCAB"
+_BILLING_TABLES = (
+    "organization",
+    "rate_card",
+    "work_order",
+    "quote",
+    "vendor_invoice",
+)
 
 
 class _TableArgsCarrier(Protocol):
@@ -218,14 +225,17 @@ def test_package_exports_and_tenancy_registration() -> None:
     assert Quote.__tablename__ == "quote"
     assert VendorInvoice.__tablename__ == "vendor_invoice"
 
-    for table in (
-        "organization",
-        "rate_card",
-        "work_order",
-        "quote",
-        "vendor_invoice",
-    ):
-        assert registry.is_scoped(table) is True
+    snapshot = registry.scoped_tables()
+    try:
+        registry._reset_for_tests()
+        for table in _BILLING_TABLES:
+            registry.register(table)
+        for table in _BILLING_TABLES:
+            assert registry.is_scoped(table) is True
+    finally:
+        registry._reset_for_tests()
+        for table in snapshot:
+            registry.register(table)
 
 
 def test_model_construction() -> None:

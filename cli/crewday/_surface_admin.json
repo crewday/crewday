@@ -547,6 +547,28 @@
     }
   },
   {
+    "body_schema_ref": "#/components/schemas/AdminChatTestInboundRequest",
+    "group": "admin",
+    "http": {
+      "method": "POST",
+      "path": "/admin/api/v1/chat/test-inbound"
+    },
+    "idempotent": false,
+    "name": "chat-test-inbound",
+    "operation_id": "admin.chat.test_inbound",
+    "path_params": [],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/AdminChatTestInboundResponse",
+    "summary": "Send a synthetic inbound chat gateway message",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "admin",
+      "mutates": true,
+      "summary": "Send a synthetic chat gateway inbound message",
+      "verb": "chat-test-inbound"
+    }
+  },
+  {
     "body_schema_ref": null,
     "group": "admin",
     "http": {

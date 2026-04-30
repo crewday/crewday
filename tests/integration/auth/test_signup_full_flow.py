@@ -34,7 +34,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from pydantic import SecretStr
-from sqlalchemy import Engine, delete, select
+from sqlalchemy import Engine, select
 from sqlalchemy.orm import Session, sessionmaker
 from webauthn.helpers.structs import (
     AttestationFormat,
@@ -48,14 +48,9 @@ from app.adapters.db.authz.models import (
     RoleGrant,
 )
 from app.adapters.db.identity.models import (
-    ApiToken,
     PasskeyCredential,
     SignupAttempt,
     User,
-    WebAuthnChallenge,
-)
-from app.adapters.db.identity.models import (
-    Session as AuthSession,
 )
 from app.adapters.db.workspace.models import UserWorkspace, Workspace
 from app.api.deps import db_session as _db_session_dep
@@ -65,8 +60,12 @@ from app.auth._throttle import Throttle
 from app.auth.webauthn import VerifiedRegistration
 from app.capabilities import Capabilities, DeploymentSettings, Features
 from app.config import Settings
+from tests.integration.auth._signup_cleanup import delete_signup_rows
 
 pytestmark = pytest.mark.integration
+
+_SIGNUP_CLEANUP_EMAILS = ("integration@example.com", "replay@example.com")
+_SIGNUP_CLEANUP_SLUGS = ("integration-ws", "replay-ws")
 
 
 # ---------------------------------------------------------------------------
@@ -239,27 +238,11 @@ def client(
     # Clean up committed rows so sibling integration tests see a clean
     # table. Delete children before parents so SQLAlchemy does not
     # transiently null token/user FKs and violate shape checks.
-    with factory() as s:
-        from app.adapters.db.audit.models import AuditLog
-        from app.adapters.db.identity.models import MagicLinkNonce
-
-        for table_model in (
-            PasskeyCredential,
-            AuthSession,
-            ApiToken,
-            WebAuthnChallenge,
-            MagicLinkNonce,
-            SignupAttempt,
-            PermissionGroupMember,
-            RoleGrant,
-            UserWorkspace,
-            PermissionGroup,
-            AuditLog,
-            Workspace,
-            User,
-        ):
-            s.execute(delete(table_model))
-        s.commit()
+    delete_signup_rows(
+        factory,
+        emails=_SIGNUP_CLEANUP_EMAILS,
+        slugs=_SIGNUP_CLEANUP_SLUGS,
+    )
 
 
 # ---------------------------------------------------------------------------

@@ -147,5 +147,5 @@ def downgrade() -> None:
     op.drop_table("agent_preference")
 
     with op.batch_alter_table("user", schema=None) as batch_op:
-        batch_op.drop_constraint("ck_user_user_agent_approval_mode", type_="check")
+        batch_op.drop_constraint("user_agent_approval_mode", type_="check")
         batch_op.drop_column("agent_approval_mode")

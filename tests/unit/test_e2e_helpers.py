@@ -21,14 +21,14 @@ helpers themselves are infrastructure for §17's GA journey suite).
 from __future__ import annotations
 
 import subprocess
-from collections.abc import Iterator
 from pathlib import Path
 from types import SimpleNamespace
+from typing import cast
 
 import pytest
+from playwright.sync_api import BrowserContext
 
 from tests.e2e._helpers.auth import (
-    _DEV_LOGIN_CACHE,
     MailpitMessage,
     _envelope_matches_recipient,
     _extract_to_addresses,
@@ -199,17 +199,11 @@ class _FakeContext:
         self.cookies.extend(cookies)
 
 
-class TestLoginWithDevSessionCache:
-    @pytest.fixture(autouse=True)
-    def _clear_cache(self) -> Iterator[None]:
-        _DEV_LOGIN_CACHE.clear()
-        yield
-        _DEV_LOGIN_CACHE.clear()
-
-    def test_reuses_dev_login_cookie_for_same_identity(
+class TestLoginWithDevSession:
+    def test_mints_fresh_dev_login_cookie_for_same_identity(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Repeated calls avoid another ``docker compose exec`` round-trip."""
+        """Repeated calls mint fresh rows so a logout cannot poison later tests."""
         calls: list[list[str]] = []
 
         def fake_run(
@@ -222,7 +216,7 @@ class TestLoginWithDevSessionCache:
         ) -> SimpleNamespace:
             calls.append(cmd)
             return SimpleNamespace(
-                stdout="__Host-crewday_session=cached-value\n",
+                stdout=f"__Host-crewday_session=value-{len(calls)}\n",
                 stderr="",
             )
 
@@ -230,18 +224,25 @@ class TestLoginWithDevSessionCache:
 
         first = _FakeContext()
         second = _FakeContext()
-        kwargs = {
-            "base_url": "http://127.0.0.1:8100",
-            "email": "same@dev.local",
-            "workspace_slug": "same",
-            "role": "owner",
-            "service": "app-api",
-            "compose_file": Path("compose.yml"),
-        }
+        login_with_dev_session(
+            cast(BrowserContext, first),
+            base_url="http://127.0.0.1:8100",
+            email="same@dev.local",
+            workspace_slug="same",
+            role="owner",
+            service="app-api",
+            compose_file=Path("compose.yml"),
+        )
+        login_with_dev_session(
+            cast(BrowserContext, second),
+            base_url="http://127.0.0.1:8100",
+            email="same@dev.local",
+            workspace_slug="same",
+            role="owner",
+            service="app-api",
+            compose_file=Path("compose.yml"),
+        )
 
-        login_with_dev_session(first, **kwargs)
-        login_with_dev_session(second, **kwargs)
-
-        assert len(calls) == 1
-        assert first.cookies[0]["value"] == "cached-value"
-        assert second.cookies[0]["value"] == "cached-value"
+        assert len(calls) == 2
+        assert first.cookies[0]["value"] == "value-1"
+        assert second.cookies[0]["value"] == "value-2"

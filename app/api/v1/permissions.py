@@ -177,6 +177,8 @@ def _resolve_decision(
         raise InvalidScope(
             f"action {action_key!r} does not accept scope_kind={scope_kind!r}"
         )
+    if scope_kind == "workspace" and scope_id == ctx.workspace_slug:
+        scope_id = ctx.workspace_id
 
     repo = rule_repo if rule_repo is not None else EmptyPermissionRuleRepository()
     # ``ctx.workspace_id`` pins the workspace anchor for owners /

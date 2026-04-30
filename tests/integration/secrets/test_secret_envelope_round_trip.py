@@ -206,6 +206,17 @@ def _bootstrap(db_session: Session) -> tuple[str, str, WorkspaceContext]:
     return ws_id, prop_id, _ctx(ws_id, "it-secrets")
 
 
+def _postgres_storable_legacy_ciphertext(plaintext: str) -> bytes:
+    for _ in range(100):
+        ciphertext = Aes256GcmEnvelope(_KEY).encrypt(
+            plaintext.encode("utf-8"), purpose="ical-feed-url"
+        )
+        assert ciphertext[0] == 0x01
+        if b"\x00" not in ciphertext:
+            return ciphertext
+    raise AssertionError("legacy ciphertext fixture kept generating NUL bytes")
+
+
 class _StubValidator:
     """Skip the SSRF / fetch / sniff dance — the URL is canonicalised through.
 
@@ -283,12 +294,8 @@ class TestIcalFeedMigration:
 
         # Hand-craft a feed row whose ``url`` carries a legacy 0x01
         # ciphertext (the cd-1ai layout).
-        legacy_env = Aes256GcmEnvelope(_KEY)
         legacy_url = "https://feeds.example.com/old.ics"
-        legacy_ct = legacy_env.encrypt(
-            legacy_url.encode("utf-8"), purpose="ical-feed-url"
-        )
-        assert legacy_ct[0] == 0x01
+        legacy_ct = _postgres_storable_legacy_ciphertext(legacy_url)
 
         feed_id = new_ulid()
         db_session.add(
@@ -339,12 +346,8 @@ class TestIcalFeedMigration:
         _ws, prop_id, ctx = _bootstrap(db_session)
 
         # Seed a feed row with a legacy 0x01 inline ciphertext.
-        legacy_env = Aes256GcmEnvelope(_KEY)
         legacy_url = "https://feeds.example.com/legacy.ics?token=old"
-        legacy_ct = legacy_env.encrypt(
-            legacy_url.encode("utf-8"), purpose="ical-feed-url"
-        )
-        assert legacy_ct[0] == 0x01
+        legacy_ct = _postgres_storable_legacy_ciphertext(legacy_url)
 
         feed_id = new_ulid()
         db_session.add(

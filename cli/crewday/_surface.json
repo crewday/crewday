@@ -861,6 +861,66 @@
     "group": "assets",
     "http": {
       "method": "GET",
+      "path": "/w/{slug}/api/v1/documents/{document_id}/extraction"
+    },
+    "idempotent": true,
+    "name": "documents-extraction-list",
+    "operation_id": "documents.extraction.get",
+    "path_params": [
+      {
+        "name": "document_id",
+        "required": true,
+        "schema": {
+          "title": "Document Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/DocumentExtractionResponse",
+    "summary": "Get document extraction status",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "assets",
+    "http": {
+      "method": "GET",
+      "path": "/w/{slug}/api/v1/documents/{document_id}/extraction/pages/{page}"
+    },
+    "idempotent": true,
+    "name": "documents-extraction-pages-show",
+    "operation_id": "documents.extraction.page",
+    "path_params": [
+      {
+        "name": "document_id",
+        "required": true,
+        "schema": {
+          "title": "Document Id",
+          "type": "string"
+        }
+      },
+      {
+        "name": "page",
+        "required": true,
+        "schema": {
+          "title": "Page",
+          "type": "integer"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/DocumentExtractionPageResponse",
+    "summary": "Get one document extraction page",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "assets",
+    "http": {
+      "method": "GET",
       "path": "/w/{slug}/api/v1/assets/{asset_id}/documents"
     },
     "idempotent": true,
@@ -907,6 +967,32 @@
     ],
     "response_schema_ref": "#/components/schemas/AssetDocumentListResponse",
     "summary": "List asset documents",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "assets",
+    "http": {
+      "method": "GET",
+      "path": "/w/{slug}/api/v1/documents/{document_id}"
+    },
+    "idempotent": true,
+    "name": "documents-show",
+    "operation_id": "documents.get",
+    "path_params": [
+      {
+        "name": "document_id",
+        "required": true,
+        "schema": {
+          "title": "Document Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/WorkspaceDocumentResponse",
+    "summary": "Get one workspace document",
     "x_agent_confirm": null,
     "x_cli": null
   },
@@ -1131,6 +1217,32 @@
     "query_params": [],
     "response_schema_ref": "#/components/schemas/AssetResponse",
     "summary": "Restore an archived asset",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "assets",
+    "http": {
+      "method": "POST",
+      "path": "/w/{slug}/api/v1/documents/{document_id}/extraction/retry"
+    },
+    "idempotent": false,
+    "name": "retry",
+    "operation_id": "documents.extraction.retry",
+    "path_params": [
+      {
+        "name": "document_id",
+        "required": true,
+        "schema": {
+          "title": "Document Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": null,
+    "summary": "Retry document extraction",
     "x_agent_confirm": null,
     "x_cli": null
   },
@@ -1953,6 +2065,100 @@
     "summary": "Reject a pending leave from manager dashboard",
     "x_agent_confirm": null,
     "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "documents",
+    "http": {
+      "method": "GET",
+      "path": "/w/{slug}/api/v1/documents"
+    },
+    "idempotent": true,
+    "name": "list",
+    "operation_id": "documents.list",
+    "path_params": [],
+    "query_params": [
+      {
+        "name": "asset_id",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Asset Id"
+        }
+      },
+      {
+        "name": "property_id",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Property Id"
+        }
+      },
+      {
+        "name": "kind",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "enum": [
+                "manual",
+                "warranty",
+                "invoice",
+                "receipt",
+                "photo",
+                "certificate",
+                "contract",
+                "permit",
+                "insurance",
+                "other"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Kind"
+        }
+      },
+      {
+        "name": "expires_before",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "format": "date",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Expires Before"
+        }
+      }
+    ],
+    "response_schema_ref": "#/components/schemas/WorkspaceDocumentListResponse",
+    "summary": "List workspace documents",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "documents",
+      "verb": "list"
+    }
   },
   {
     "body_schema_ref": null,

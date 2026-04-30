@@ -131,7 +131,7 @@ def walk_authenticated_sitemap(
     for route in routes:
         result.visited.append(route)
         try:
-            page.goto(f"{base_url.rstrip('/')}{route}", wait_until="networkidle")
+            page.goto(f"{base_url.rstrip('/')}{route}", wait_until="domcontentloaded")
         except Exception as exc:
             result.findings.append(
                 RouteFinding(route=route, kind="navigation_error", detail=repr(exc))
@@ -152,8 +152,11 @@ def walk_authenticated_sitemap(
             )
 
         if nav_selector is not None:
-            nav = page.locator(nav_selector).first
-            if not nav.is_visible():
+            navs = page.locator(nav_selector)
+            visible_nav = any(
+                navs.nth(index).is_visible() for index in range(navs.count())
+            )
+            if not visible_nav:
                 result.findings.append(
                     RouteFinding(
                         route=route,

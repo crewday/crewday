@@ -73,6 +73,7 @@ from app.auth.session import (
 from app.auth.session import (
     validate as validate_session,
 )
+from app.auth.session_cookie import DEV_SESSION_COOKIE_NAME
 from app.auth.tokens import (
     DelegatingUserArchived,
     InvalidToken,
@@ -409,7 +410,9 @@ def resolve_actor(
                 token_scopes=dict(verified.scopes),
             )
 
-    cookie_value = request.cookies.get(SESSION_COOKIE_NAME)
+    cookie_value = request.cookies.get(SESSION_COOKIE_NAME) or request.cookies.get(
+        DEV_SESSION_COOKIE_NAME
+    )
     if cookie_value:
         # Forward the request's ``User-Agent`` + ``Accept-Language``
         # headers so the cd-geqp fingerprint gate actually fires on

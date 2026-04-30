@@ -115,6 +115,8 @@ def test_authenticated_sitemap_at_360_walks_pilot_routes(
         role="owner",
     )
     page = context.new_page()
+    page.goto(f"{base_url.rstrip('/')}/dashboard", wait_until="domcontentloaded")
+    page.locator(".desk").wait_for(state="attached")
     result = walk_authenticated_sitemap(
         page,
         base_url=base_url,
@@ -157,7 +159,8 @@ def test_closed_drawer_removes_nav_from_focus_order(
     )
     page = context.new_page()
     page.set_viewport_size({"width": 360, "height": 780})
-    page.goto(f"{base_url.rstrip('/')}/dashboard", wait_until="networkidle")
+    page.goto(f"{base_url.rstrip('/')}/dashboard", wait_until="domcontentloaded")
+    page.locator(".desk__nav").wait_for(state="attached")
 
     # Confirm the drawer is in its closed state — a stray
     # data-nav-open="true" elsewhere would invalidate the test.

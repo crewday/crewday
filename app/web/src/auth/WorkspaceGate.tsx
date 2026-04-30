@@ -53,6 +53,11 @@ export function WorkspaceGate({ children }: { children?: React.ReactNode }) {
     const w = available[0];
     return w ? slugFor(w.workspace.id, w.workspace.name) : null;
   }, [available]);
+  const currentSlug = useMemo(() => {
+    if (!user?.current_workspace_id) return null;
+    const current = available.find((w) => w.workspace.id === user.current_workspace_id);
+    return current ? slugFor(current.workspace.id, current.workspace.name) : null;
+  }, [available, user?.current_workspace_id]);
 
   // Auto-adopt for single-workspace users. Runs as an effect so the
   // store update happens outside render (avoids the
@@ -72,10 +77,9 @@ export function WorkspaceGate({ children }: { children?: React.ReactNode }) {
   // without a follow-up call.
   useEffect(() => {
     if (workspaceId !== null) return;
-    if (!user?.current_workspace_id) return;
-    if (available.length === 0) return;
-    setWorkspaceId(user.current_workspace_id);
-  }, [workspaceId, user?.current_workspace_id, available.length, setWorkspaceId]);
+    if (!currentSlug) return;
+    setWorkspaceId(currentSlug);
+  }, [workspaceId, currentSlug, setWorkspaceId]);
 
   if (workspaceId !== null) return <>{children ?? <Outlet />}</>;
 

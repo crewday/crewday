@@ -22,7 +22,7 @@ from decimal import Decimal
 
 import pytest
 from sqlalchemy import Engine, inspect, select
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import DataError, IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.adapters.db.identity.models import User
@@ -807,7 +807,7 @@ class TestCheckConstraints:
                     at=_PINNED,
                 )
             )
-            with pytest.raises(IntegrityError):
+            with pytest.raises((DataError, IntegrityError)):
                 db_session.flush()
             db_session.rollback()
         finally:

@@ -1074,6 +1074,7 @@ def _build_custom_openapi(app: FastAPI) -> dict[str, Any]:
             merged_tags.append(tag)
     schema["tags"] = merged_tags
     _declare_workspace_slug_path_parameters(schema)
+    _declare_rate_limit_responses(schema)
     return schema
 
 
@@ -1117,6 +1118,66 @@ def _declare_workspace_slug_path_parameters(schema: dict[str, Any]) -> None:
             parameters.append(_slug_path_parameter())
         else:
             path_item["parameters"] = [_slug_path_parameter()]
+
+
+def _rate_limit_response() -> dict[str, Any]:
+    return {
+        "description": "Rate limited",
+        "content": {
+            "application/problem+json": {
+                "schema": {
+                    "type": "object",
+                    "properties": {
+                        "type": {"type": "string"},
+                        "title": {"type": "string"},
+                        "status": {"type": "integer", "const": 429},
+                        "detail": {"type": "string"},
+                        "instance": {"type": "string"},
+                        "retry_after_seconds": {
+                            "type": "integer",
+                            "minimum": 1,
+                        },
+                    },
+                    "required": ["type", "title", "status", "instance"],
+                    "additionalProperties": True,
+                }
+            }
+        },
+        "headers": {
+            "Retry-After": {
+                "description": "Seconds until the caller should retry.",
+                "schema": {"type": "integer", "minimum": 1},
+            }
+        },
+    }
+
+
+def _declare_rate_limit_responses(schema: dict[str, Any]) -> None:
+    paths = schema.get("paths")
+    if not isinstance(paths, dict):
+        return
+
+    for path, path_item in paths.items():
+        if not isinstance(path, str) or not isinstance(path_item, dict):
+            continue
+        if path == "/api/openapi.json":
+            continue
+        if not (
+            path == "/api"
+            or path.startswith("/api/")
+            or path == "/admin/api"
+            or path.startswith("/admin/api/")
+            or path == "/webhooks"
+            or path.startswith("/webhooks/")
+            or path.startswith("/w/{slug}/api/")
+        ):
+            continue
+        for operation in path_item.values():
+            if not isinstance(operation, dict):
+                continue
+            responses = operation.get("responses")
+            if isinstance(responses, dict):
+                responses.setdefault("429", _rate_limit_response())
 
 
 def _install_custom_openapi(app: FastAPI) -> None:

@@ -113,6 +113,7 @@ class TestMigrationShape:
             "diff",
             "correlation_id",
             "scope_kind",
+            "via",
             "created_at",
         }
         assert set(cols) == expected

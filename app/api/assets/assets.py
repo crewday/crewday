@@ -1315,6 +1315,7 @@ def build_documents_router() -> APIRouter:
         operation_id="documents.list",
         summary="List workspace documents",
         dependencies=[manage_documents_gate],
+        openapi_extra={"x-cli": {"group": "documents", "verb": "list"}},
     )
     def documents(
         ctx: _Ctx,

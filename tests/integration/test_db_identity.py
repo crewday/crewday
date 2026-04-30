@@ -83,6 +83,7 @@ class TestMigrationShape:
             "locale",
             "timezone",
             "avatar_blob_hash",
+            "agent_approval_mode",
             "created_at",
             "last_login_at",
             # Soft-delete tombstone (cd-et6y): NULL = live identity,
