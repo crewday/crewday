@@ -26,9 +26,9 @@
 // property.closure.created, property.closure.updated, expense.approved, shift.ended,
 // time.shift.changed, work_order.completed, quote.decided. Additional kinds here (agent.*, booking.*,
 // asset_action.*, schedule_ruleset.*, task.updated/skipped, approval.*,
-// leave.*, ical.poll.completed) track the spec and the mock's dispatcher for
-// when each backend emitter lands. Any drift is flagged in the
-// cd-y4g5 handoff.
+// leave.*, ical.poll.completed, asset_type.*) track the spec and the
+// mock's dispatcher for when each backend emitter lands. Any drift is
+// flagged in the cd-y4g5 handoff.
 
 import type { QueryClient } from "@tanstack/react-query";
 import type {
@@ -112,6 +112,10 @@ export type EventKind =
   | "payroll_export.ready"
   | "payslip.computed"
   // Assets (§21).
+  | "asset_type.created"
+  | "asset_type.updated"
+  | "asset_type.deleted"
+  | "asset_type.changed"
   | "asset.changed"
   | "asset_action.performed"
   | "asset_document.extracted"
@@ -355,6 +359,11 @@ function invalidateAssetDocument(event: SseEvent, qc: QueryClient): void {
   if (payload.asset_id) {
     invalidate(qc, qk.asset(payload.asset_id));
   }
+}
+
+function invalidateAssetTypeCatalog(_event: SseEvent, qc: QueryClient): void {
+  invalidate(qc, qk.assetTypes());
+  invalidate(qc, qk.assets());
 }
 
 export const INVALIDATIONS: Record<EventKind, InvalidationHandler> = {
@@ -720,6 +729,11 @@ export const INVALIDATIONS: Record<EventKind, InvalidationHandler> = {
     invalidate(qc, qk.payslips());
     invalidate(qc, qk.dashboard());
   },
+
+  "asset_type.created": invalidateAssetTypeCatalog,
+  "asset_type.updated": invalidateAssetTypeCatalog,
+  "asset_type.deleted": invalidateAssetTypeCatalog,
+  "asset_type.changed": invalidateAssetTypeCatalog,
 
   "asset_action.performed": (event, qc) => {
     const payload = event.data as unknown as AssetActionPayload;

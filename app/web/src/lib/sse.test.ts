@@ -113,6 +113,10 @@ describe("INVALIDATIONS — coverage", () => {
     "payroll.period_paid",
     "payroll_export.ready",
     "payslip.computed",
+    "asset_type.created",
+    "asset_type.updated",
+    "asset_type.deleted",
+    "asset_type.changed",
     "asset.changed",
     "asset_action.performed",
     "asset_document.extracted",
@@ -217,6 +221,19 @@ describe("INVALIDATIONS — per-kind behaviour", () => {
         ["my-schedule"],
       ]),
     );
+  });
+
+  it.each([
+    "asset_type.created",
+    "asset_type.updated",
+    "asset_type.deleted",
+    "asset_type.changed",
+  ] as const)("%s invalidates asset types and assets", (kind) => {
+    const qc = makeClient();
+    const spy = vi.spyOn(qc, "invalidateQueries");
+    INVALIDATIONS[kind](makeEvent(kind), qc);
+    const called = spy.mock.calls.map((c) => c[0]?.queryKey);
+    expect(called).toEqual(expect.arrayContaining([qk.assetTypes(), qk.assets()]));
   });
 
   it("stay.upcoming invalidates stays + dashboard + my-schedule", () => {

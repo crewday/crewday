@@ -242,6 +242,7 @@ export default function App() {
               <Route element={<ManagerLayout />}>
                 <Route path="/assets" element={<AssetsPage />} />
                 <Route path="/asset_types" element={<AssetTypesPage />} />
+                <Route path="/w/:slug/asset_types" element={<AssetTypesPage />} />
               </Route>
             </Route>
 
