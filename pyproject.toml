@@ -33,6 +33,10 @@ dependencies = [
     "itsdangerous",
     "weasyprint",
     "click",
+    # Rich powers the CLI table renderer (cd-oe5j). The CLI ships as a
+    # human and agent interface, so table output must be width-aware
+    # without depending on shell-specific formatting.
+    "rich",
     # argon2id hashing for API-token secrets (§03 "API tokens",
     # §15 "Token hashing"). The secret never leaves the server as
     # plaintext after mint; only its argon2id digest is stored, so a

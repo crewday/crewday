@@ -51,9 +51,10 @@ from typing import Any, Final
 import click
 import httpx
 
-from crewday._client import CrewdayClient
+from crewday._client import ApiError, CrewdayClient
 from crewday._globals import CrewdayContext
 from crewday._main import ConfigError
+from crewday._output import format_api_error, format_response
 
 __all__ = [
     "DEFAULT_SURFACE_ADMIN_PATH",
@@ -585,20 +586,30 @@ def _attach_pagination_option(
 # ---------------------------------------------------------------------------
 
 
-# TODO(cd-oe5j): route through crewday._output.format() once the
-# json/yaml/table/ndjson formatter lands. For now every command emits
-# pretty-printed JSON via json.dumps so agents can pipe through jq.
-def _emit(payload: object) -> None:
-    """Write ``payload`` to stdout as pretty JSON."""
-    click.echo(json.dumps(payload, indent=2, sort_keys=False, default=str))
+def _emit(
+    payload: object,
+    *,
+    ctx: CrewdayContext,
+    schema_hint: Mapping[str, Any] | None = None,
+) -> None:
+    """Write ``payload`` to stdout in the active output mode."""
+    rendered = format_response(payload, ctx.output, schema_hint=schema_hint)
+    if rendered:
+        click.echo(rendered)
 
 
 def _emit_ndjson(rows: Iterator[Mapping[str, Any]]) -> None:
     """Stream ``rows`` to stdout as NDJSON (one JSON object per line)."""
     for row in rows:
-        sys.stdout.write(json.dumps(row, sort_keys=False, default=str))
+        sys.stdout.write(format_response(row, "ndjson"))
         sys.stdout.write("\n")
         sys.stdout.flush()
+
+
+def _emit_api_error(error: ApiError, *, ctx: CrewdayContext) -> None:
+    """Write a structured API error to stderr and exit with its code."""
+    click.echo(format_api_error(error, ctx.output), err=True)
+    raise click.exceptions.Exit(error.exit_code)
 
 
 # ---------------------------------------------------------------------------
@@ -772,41 +783,55 @@ def _make_callback(
                 idempotency_key = ctx.idempotency_key_factory()
 
         with client_factory(ctx) as client:
-            if paginated and bool(kwargs.get("follow_all", False)):
-                _run_paginated(client=client, url=url, params=params, ctx=ctx)
-                return
+            try:
+                if paginated and bool(kwargs.get("follow_all", False)):
+                    _run_paginated(
+                        client=client,
+                        url=url,
+                        params=params,
+                        ctx=ctx,
+                        schema_hint=entry.x_cli,
+                    )
+                    return
 
-            response = client.request(
-                entry.http.method,
-                url,
-                json=body,
-                params=params,
-                idempotency_key=idempotency_key,
-            )
-            _emit_response(response)
+                response = client.request(
+                    entry.http.method,
+                    url,
+                    json=body,
+                    params=params,
+                    idempotency_key=idempotency_key,
+                )
+            except ApiError as exc:
+                _emit_api_error(exc, ctx=ctx)
+            _emit_response(response, ctx=ctx, schema_hint=entry.x_cli)
 
     return callback
 
 
-def _emit_response(response: httpx.Response) -> None:
+def _emit_response(
+    response: httpx.Response,
+    *,
+    ctx: CrewdayContext,
+    schema_hint: Mapping[str, Any] | None,
+) -> None:
     """Pretty-print a response body, tolerating empty or non-JSON payloads.
 
     A 204-style empty body lands as ``""`` from :attr:`httpx.Response.text`;
-    we emit ``null`` so JSON consumers (``jq``, downstream agents) see a
-    valid document. Non-JSON bodies (rare on the v1 API; the server emits
-    JSON for every documented endpoint) fall back to the raw text wrapped
-    in ``{"raw": "..."}`` so the output stays JSON-shaped.
+    we emit ``null`` so JSON consumers (``jq``, downstream agents) see
+    a valid document in structured modes. Non-JSON bodies (rare on the
+    v1 API; the server emits JSON for every documented endpoint) fall
+    back to the raw text wrapped in ``{"raw": "..."}``.
     """
     text = response.text
     if not text:
-        _emit(None)
+        _emit(None, ctx=ctx, schema_hint=schema_hint)
         return
     try:
         payload = response.json()
     except ValueError:
-        _emit({"raw": text})
+        _emit({"raw": text}, ctx=ctx, schema_hint=schema_hint)
         return
-    _emit(payload)
+    _emit(payload, ctx=ctx, schema_hint=schema_hint)
 
 
 def _run_paginated(
@@ -815,6 +840,7 @@ def _run_paginated(
     url: str,
     params: Mapping[str, Any],
     ctx: CrewdayContext,
+    schema_hint: Mapping[str, Any] | None,
 ) -> None:
     """Walk ``client.iterate(url, ...)`` honouring the active output mode.
 
@@ -828,7 +854,7 @@ def _run_paginated(
     if ctx.output == "ndjson":
         _emit_ndjson(iterator)
         return
-    _emit(list(iterator))
+    _emit(list(iterator), ctx=ctx, schema_hint=schema_hint)
 
 
 # ---------------------------------------------------------------------------

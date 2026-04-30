@@ -23,11 +23,10 @@ from typing import Any
 
 import click
 import httpx
-import pytest
 from click.testing import CliRunner
-from crewday._client import ApiError, CrewdayClient
+from crewday._client import CrewdayClient
 from crewday._globals import CrewdayContext
-from crewday._main import _register_surface_commands_once, root
+from crewday._main import ExitCode, _register_surface_commands_once, root
 from crewday._runtime import (
     DEFAULT_SURFACE_ADMIN_PATH,
     DEFAULT_SURFACE_PATH,
@@ -726,6 +725,27 @@ def test_all_flag_streams_ndjson_when_output_ndjson(
     assert parsed == [{"id": 1}, {"id": 2}, {"id": 3}, {"id": 4}, {"id": 5}]
 
 
+def test_empty_ndjson_response_emits_no_blank_line(tmp_path: pathlib.Path) -> None:
+    """An empty list under ``-o ndjson`` produces zero records."""
+    workspace_path, admin_path = _write_surface(
+        tmp_path,
+        workspace=[_entry(name="list", group="demo", path="/api/v1/demo")],
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=[])
+
+    test_root = _build_root(
+        handler, workspace_path=workspace_path, admin_path=admin_path
+    )
+    runner = CliRunner()
+
+    result = runner.invoke(test_root, ["--output", "ndjson", "demo", "list"])
+
+    assert result.exit_code == 0, result.output
+    assert result.output == ""
+
+
 def test_no_all_flag_returns_single_page(tmp_path: pathlib.Path) -> None:
     """Without ``--all`` the list verb returns the server's first page verbatim.
 
@@ -753,13 +773,78 @@ def test_no_all_flag_returns_single_page(tmp_path: pathlib.Path) -> None:
     assert payload["has_more"] is True
 
 
+def test_generated_command_honours_yaml_output(tmp_path: pathlib.Path) -> None:
+    """Normal responses route through the active output formatter."""
+    workspace_path, admin_path = _write_surface(
+        tmp_path,
+        workspace=[_entry(name="show", group="demo", path="/api/v1/demo")],
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"id": "task-1", "state": "open"})
+
+    test_root = _build_root(
+        handler, workspace_path=workspace_path, admin_path=admin_path
+    )
+    runner = CliRunner()
+
+    result = runner.invoke(test_root, ["--output", "yaml", "demo", "show"])
+
+    assert result.exit_code == 0, result.output
+    assert result.output.strip() == "id: task-1\nstate: open"
+
+
+def test_generated_command_passes_x_cli_columns_to_table_formatter(
+    tmp_path: pathlib.Path,
+) -> None:
+    """Table output uses ``x-cli-columns`` from the surface entry."""
+    workspace_path, admin_path = _write_surface(
+        tmp_path,
+        workspace=[
+            _entry(
+                name="list",
+                group="demo",
+                path="/api/v1/demo",
+                x_cli={
+                    "group": "demo",
+                    "verb": "list",
+                    "x-cli-columns": [
+                        {"key": "state", "label": "State"},
+                        {"key": "id", "label": "Task"},
+                    ],
+                },
+            )
+        ],
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={"data": [{"id": "task-1", "state": "open", "hidden": "x"}]},
+        )
+
+    test_root = _build_root(
+        handler, workspace_path=workspace_path, admin_path=admin_path
+    )
+    runner = CliRunner()
+
+    result = runner.invoke(test_root, ["--output", "table", "demo", "list"])
+
+    assert result.exit_code == 0, result.output
+    assert "State" in result.output
+    assert "Task" in result.output
+    assert "open" in result.output
+    assert "task-1" in result.output
+    assert "hidden" not in result.output
+
+
 # ---------------------------------------------------------------------------
 # Error propagation
 # ---------------------------------------------------------------------------
 
 
-def test_api_error_propagates_to_main_handler(tmp_path: pathlib.Path) -> None:
-    """``ApiError`` flows up — the runtime does not wrap it."""
+def test_api_error_formats_as_json_for_script_output(tmp_path: pathlib.Path) -> None:
+    """``ApiError`` uses the structured formatter under ``-o json``."""
     workspace_path, admin_path = _write_surface(
         tmp_path,
         workspace=[
@@ -790,19 +875,21 @@ def test_api_error_propagates_to_main_handler(tmp_path: pathlib.Path) -> None:
         handler, workspace_path=workspace_path, admin_path=admin_path
     )
     runner = CliRunner()
-    # ``standalone_mode=False`` lets the exception propagate so we can
-    # assert on the raised type instead of inspecting Click's own exit
-    # plumbing — which is exactly what :func:`crewday._main.handle_errors`
-    # relies on (no wrapping in the runtime).
-    with pytest.raises(ApiError) as exc_info:
-        runner.invoke(
-            test_root,
-            ["demo", "show", "--id", "missing"],
-            standalone_mode=False,
-            catch_exceptions=False,
-        )
-    assert exc_info.value.status == 404
-    assert exc_info.value.code == "not_found"
+
+    result = runner.invoke(test_root, ["demo", "show", "--id", "missing"])
+
+    assert result.exit_code == ExitCode.CLIENT_ERROR
+    rendered = result.stderr or result.output
+    assert json.loads(rendered) == {
+        "status": 404,
+        "code": "not_found",
+        "message": "no such demo",
+        "details": {
+            "type": "https://crewday.dev/errors/not_found",
+            "title": "Not Found",
+            "detail": "no such demo",
+        },
+    }
 
 
 # ---------------------------------------------------------------------------

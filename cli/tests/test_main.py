@@ -350,14 +350,15 @@ def test_placeholders_importable() -> None:
     #
     # ``_client`` graduated from a placeholder to a real module in
     # cd-2ms7 — its public surface is now populated and tested in
-    # ``cli/tests/test_client.py``. ``_config`` and ``_output`` are
-    # still placeholders (cd-cksj, cd-1cfg).
+    # ``cli/tests/test_client.py``. ``_output`` graduated in cd-oe5j.
+    # ``_config`` is still a placeholder (cd-cksj).
     from crewday import _client, _config, _output
 
     assert "CrewdayClient" in _client.__all__
     assert "ApiError" in _client.__all__
     assert _config.__all__ == []
-    assert _output.__all__ == []
+    assert "format_response" in _output.__all__
+    assert "format_api_error" in _output.__all__
 
     # Public surface of the package itself: empty list until codegen
     # wires groups in.
