@@ -90,6 +90,7 @@ class ClientPortalInvoiceRow:
     total_cents: int
     currency: str
     status: str
+    proof_of_payment_file_ids: tuple[str, ...]
     pdf_url: str | None
 
 

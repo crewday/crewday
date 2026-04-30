@@ -538,11 +538,13 @@ files to `proof_of_payment_file_ids`.
 
 - **Action.** `vendor_invoice.upload_proof` — see §05 action
   catalog. Allowed subjects: the biller-side workspace's owners and
-  managers; on the client side, any user with a `client` grant that
-  resolves to this invoice (workspace-scope `binding_org_id` match,
-  or property-scope grant on the invoice's property). Agents may
-  submit on behalf of the delegating user; this is **not**
-  approval-gated (no money routing), but it emits
+  managers; on the client side, any user with a `client` grant whose
+  workspace-scope `binding_org_id` matches the invoice's billed
+  organization. Property-scoped client grants do not expose vendor
+  invoices because invoice rows are billed to organizations, not to
+  individual properties. Agents may submit on behalf of the
+  delegating user; this is **not** approval-gated (no money routing),
+  but it emits
   `vendor_invoice.proof_uploaded` so owners/managers see it.
 - **Shape.** Each file is a row in the shared `file` table (§02);
   `proof_of_payment_file_ids` holds the reference ids. Multiple

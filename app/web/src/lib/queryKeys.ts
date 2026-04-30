@@ -121,6 +121,7 @@ export const qk = {
   users: (workspaceId?: string) => [...ws(), "users", workspaceId ?? "all"] as const,
   workspaces: () => [...ws(), "workspaces"] as const,
   clientPortfolio: () => [...ws(), "client", "portfolio"] as const,
+  clientInvoices: () => [...ws(), "client", "invoices"] as const,
   clientQuotes: () => [...ws(), "client", "quotes"] as const,
   organizations: (workspaceId?: string) => [...ws(), "organizations", workspaceId ?? "active"] as const,
   organization: (oid: string) => [...ws(), "organization", oid] as const,

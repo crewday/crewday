@@ -11,7 +11,10 @@ from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
-from app.adapters.db.billing.repositories import SqlAlchemyVendorInvoiceRepository
+from app.adapters.db.billing.repositories import (
+    SqlAlchemyClientPortalRepository,
+    SqlAlchemyVendorInvoiceRepository,
+)
 from app.adapters.storage.ports import MimeSniffer, Storage
 from app.api.deps import (
     current_workspace_context,
@@ -264,6 +267,28 @@ def _repo(session: Session) -> SqlAlchemyVendorInvoiceRepository:
     return SqlAlchemyVendorInvoiceRepository(session)
 
 
+def _ensure_client_upload_scope(
+    ctx: WorkspaceContext, session: Session, invoice_id: str
+) -> None:
+    if ctx.actor_grant_role != "client":
+        return
+    row = _repo(session).get(
+        workspace_id=ctx.workspace_id, invoice_id=invoice_id, for_update=False
+    )
+    if row is None:
+        raise _http_for_vendor_invoice_error(
+            VendorInvoiceNotFound("vendor invoice not found")
+        )
+    scope = SqlAlchemyClientPortalRepository(session).client_scope(
+        workspace_id=ctx.workspace_id,
+        user_id=ctx.actor_id,
+    )
+    if row.vendor_org_id not in scope.workspace_org_ids:
+        raise _http_for_vendor_invoice_error(
+            VendorInvoiceNotFound("vendor invoice not found")
+        )
+
+
 def build_vendor_invoices_router() -> APIRouter:
     router = APIRouter(
         prefix="/vendor-invoices",
@@ -446,6 +471,7 @@ def build_vendor_invoices_router() -> APIRouter:
         _: _ProofContentLengthGuard,
         file: Annotated[UploadFile | None, File()] = None,
     ) -> VendorInvoiceResponse:
+        _ensure_client_upload_scope(ctx, session, invoice_id)
         if file is None:
             raise HTTPException(
                 status_code=422,

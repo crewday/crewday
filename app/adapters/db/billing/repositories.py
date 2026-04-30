@@ -484,6 +484,7 @@ class SqlAlchemyClientPortalRepository(ClientPortalRepository):
                 total_cents=row.total_cents,
                 currency=row.currency,
                 status=row.status,
+                proof_of_payment_file_ids=tuple(row.proof_of_payment_file_ids),
                 pdf_url=None,
             )
             for row in rows

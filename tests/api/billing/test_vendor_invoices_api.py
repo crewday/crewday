@@ -79,7 +79,7 @@ def factory(api_engine: Engine) -> sessionmaker[Session]:
 
 
 def _bootstrap(
-    s: Session, *, grant_role: Literal["manager", "worker"] = "manager"
+    s: Session, *, grant_role: Literal["client", "manager", "worker"] = "manager"
 ) -> tuple[str, str, str]:
     workspace_id = new_ulid()
     manager_id = new_ulid()
@@ -117,18 +117,6 @@ def _bootstrap(
         )
     )
     s.add(
-        RoleGrant(
-            id=new_ulid(),
-            workspace_id=workspace_id,
-            user_id=manager_id,
-            grant_role=grant_role,
-            scope_kind="workspace",
-            scope_property_id=None,
-            created_at=_PINNED,
-            created_by_user_id=None,
-        )
-    )
-    s.add(
         Organization(
             id=vendor_org_id,
             workspace_id=workspace_id,
@@ -144,6 +132,20 @@ def _bootstrap(
         )
     )
     s.flush()
+    s.add(
+        RoleGrant(
+            id=new_ulid(),
+            workspace_id=workspace_id,
+            user_id=manager_id,
+            grant_role=grant_role,
+            scope_kind="workspace",
+            scope_property_id=None,
+            binding_org_id=vendor_org_id if grant_role == "client" else None,
+            created_at=_PINNED,
+            created_by_user_id=None,
+        )
+    )
+    s.flush()
     return workspace_id, manager_id, vendor_org_id
 
 
@@ -151,7 +153,7 @@ def _ctx(
     workspace_id: str,
     manager_id: str,
     *,
-    role: Literal["manager", "worker"] = "manager",
+    role: Literal["client", "manager", "worker"] = "manager",
 ) -> WorkspaceContext:
     return WorkspaceContext(
         workspace_id=workspace_id,
@@ -334,3 +336,77 @@ def test_worker_cannot_approve_or_mark_paid(factory: sessionmaker[Session]) -> N
     assert approve.status_code == 403
     assert proof.status_code == 403
     assert paid.status_code == 403
+
+
+def test_client_upload_proof_is_limited_to_bound_org(
+    factory: sessionmaker[Session],
+) -> None:
+    with factory() as s:
+        workspace_id, client_id, vendor_org_id = _bootstrap(s, grant_role="client")
+        other_org_id = new_ulid()
+        own_invoice_id = new_ulid()
+        other_invoice_id = new_ulid()
+        s.add(
+            Organization(
+                id=other_org_id,
+                workspace_id=workspace_id,
+                kind="vendor",
+                display_name="Other Vendor",
+                billing_address={},
+                tax_id=None,
+                default_currency="EUR",
+                contact_email=None,
+                contact_phone=None,
+                notes_md=None,
+                created_at=_PINNED,
+            )
+        )
+        for invoice_id, org_id, number in (
+            (own_invoice_id, vendor_org_id, "INV-OWN"),
+            (other_invoice_id, other_org_id, "INV-OTHER"),
+        ):
+            s.add(
+                VendorInvoice(
+                    id=invoice_id,
+                    workspace_id=workspace_id,
+                    vendor_org_id=org_id,
+                    invoice_number=number,
+                    issued_at=date(2026, 4, 20),
+                    due_at=None,
+                    total_cents=10_000,
+                    currency="EUR",
+                    status="approved",
+                    pdf_blob_hash=_PDF_HASH,
+                    approved_at=_PINNED,
+                    paid_at=None,
+                    payment_method=None,
+                    proof_blob_hash=None,
+                    disputed_at=None,
+                    notes_md=None,
+                )
+            )
+        s.commit()
+    storage = InMemoryStorage()
+    client = TestClient(
+        _build_app(
+            factory,
+            _ctx(workspace_id, client_id, role="client"),
+            storage,
+        ),
+        raise_server_exceptions=False,
+    )
+
+    own = client.post(
+        f"/billing/vendor-invoices/{own_invoice_id}/proof",
+        files={"file": ("proof.pdf", _UPLOAD_PROOF_BYTES, "application/pdf")},
+    )
+    other = client.post(
+        f"/billing/vendor-invoices/{other_invoice_id}/proof",
+        files={"file": ("proof.pdf", _UPLOAD_PROOF_BYTES, "application/pdf")},
+    )
+
+    assert own.status_code == 200
+    assert own.json()["proof_of_payment_file_ids"] == [_UPLOAD_PROOF_HASH]
+    assert storage.exists(_UPLOAD_PROOF_HASH)
+    assert other.status_code == 404
+    assert other.json()["detail"]["error"] == "vendor_invoice_not_found"

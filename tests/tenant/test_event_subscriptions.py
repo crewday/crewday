@@ -31,7 +31,8 @@ rules" #3.
 from __future__ import annotations
 
 from collections.abc import Iterator
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 from typing import Literal, get_args, get_origin
 
 import pytest
@@ -145,6 +146,8 @@ def _sentinel_value_for(field_name: str, annotation: object) -> object:
     domain's "common shape" (e.g. ``had_edits=False`` matches the
     no-edit branch in :mod:`app.domain.expenses.approval`).
     """
+    if field_name == "ends_at":
+        return _PINNED_NOW + timedelta(hours=1)
     # datetime first — some payload datetimes (``overdue_since``,
     # ``arrives_at``, ``ended_at``) enforce timezone-aware UTC.
     if annotation is datetime or annotation is datetime | None:
@@ -156,6 +159,14 @@ def _sentinel_value_for(field_name: str, annotation: object) -> object:
     # value for this event — "the pool was empty too").
     if annotation is int:
         return 0
+    if field_name == "radius_m":
+        return 0
+    if annotation is float:
+        return 0.0
+    if field_name in {"distance_m", "gps_accuracy_m"}:
+        return 0.0
+    if annotation is Decimal:
+        return Decimal("0")
     # Boolean payload fields (``had_edits`` on :class:`ExpenseApproved`).
     # ``False`` is the canonical "nothing changed" shape and matches
     # the no-edit branch of the approval flow that publishes the
@@ -189,6 +200,15 @@ def _sentinel_value_for(field_name: str, annotation: object) -> object:
     # events share this branch.
     if field_name == "kind":
         return "user"
+    if field_name == "message":
+        from app.events.types import AgentMessagePayload
+
+        return AgentMessagePayload(
+            at=_PINNED_NOW,
+            kind="agent",
+            body="sentinel",
+            channel_kind=None,
+        )
     # ``reimbursed_via`` on :class:`ExpenseReimbursed` is a four-value
     # :data:`~typing.Literal` (``cash`` / ``bank`` / ``card`` /
     # ``other``); ``"cash"`` is the common payment-channel shape.
@@ -210,6 +230,8 @@ def _sentinel_value_for(field_name: str, annotation: object) -> object:
     # ``tuple[str, ...]`` parser (a bare string is not a sequence
     # of strings), so this branch is required, not cosmetic.
     if field_name == "changed_fields":
+        return ()
+    if get_origin(annotation) is tuple:
         return ()
     # Default: a ULID-shaped string — satisfies every ``*_id`` field
     # in the registry today (``task_id``, ``shift_id``, ``user_id``,

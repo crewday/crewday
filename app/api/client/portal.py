@@ -99,6 +99,7 @@ class ClientPortalInvoiceResponse(BaseModel):
     total_cents: int
     currency: str
     status: str
+    proof_of_payment_file_ids: tuple[str, ...]
     pdf_url: str | None
 
     @classmethod
@@ -112,6 +113,7 @@ class ClientPortalInvoiceResponse(BaseModel):
             total_cents=row.total_cents,
             currency=row.currency,
             status=row.status,
+            proof_of_payment_file_ids=row.proof_of_payment_file_ids,
             pdf_url=row.pdf_url,
         )
 

@@ -5394,6 +5394,13 @@
             ],
             "title": "Pdf Url"
           },
+          "proof_of_payment_file_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Proof Of Payment File Ids",
+            "type": "array"
+          },
           "status": {
             "title": "Status",
             "type": "string"
@@ -5412,6 +5419,7 @@
           "total_cents",
           "currency",
           "status",
+          "proof_of_payment_file_ids",
           "pdf_url"
         ],
         "title": "ClientPortalInvoiceResponse",

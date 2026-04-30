@@ -128,9 +128,10 @@ export type EventKind =
   | "booking.rejected"
   | "booking.cancelled"
   | "booking.reassigned"
-  // Billing (§22 work orders).
+  // Billing (§22 work orders, quotes, vendor invoices).
   | "work_order.completed"
   | "quote.decided"
+  | "vendor_invoice.changed"
   // Issues (§06 worker issue reports).
   | "issue.reported"
   // Shifts (§09 time + payroll).
@@ -765,6 +766,11 @@ export const INVALIDATIONS: Record<EventKind, InvalidationHandler> = {
   "quote.decided": (_event, qc) => {
     invalidate(qc, qk.clientQuotes());
     invalidate(qc, qk.workOrders());
+  },
+
+  "vendor_invoice.changed": (_event, qc) => {
+    invalidate(qc, qk.clientInvoices());
+    invalidate(qc, qk.vendorInvoices());
   },
 
   "issue.reported": (_event, qc) => {

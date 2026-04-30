@@ -10,7 +10,7 @@ from typing import Protocol
 from sqlalchemy.orm import Session
 
 from app.audit import write_audit
-from app.events import EventBus, VendorInvoicePaid
+from app.events import EventBus, VendorInvoiceChanged, VendorInvoicePaid
 from app.events import bus as default_bus
 from app.tenancy import WorkspaceContext
 from app.util.clock import Clock, SystemClock
@@ -309,6 +309,7 @@ class VendorInvoiceService:
                 payment_method=view.payment_method or payment_method,
             )
         )
+        self._publish_changed(view)
         return view
 
     def upload_proof(
@@ -335,7 +336,9 @@ class VendorInvoiceService:
         self._audit_change(
             repo, current, updated, "billing.vendor_invoice.proof_uploaded"
         )
-        return _to_view(updated)
+        view = _to_view(updated)
+        self._publish_changed(view)
+        return view
 
     def dispute(
         self, repo: VendorInvoiceRepository, invoice_id: str
@@ -393,6 +396,19 @@ class VendorInvoiceService:
         if row.kind == "client":
             raise VendorInvoiceInvalid("client-only organizations cannot bill invoices")
         return row
+
+    def _publish_changed(self, view: VendorInvoiceView) -> None:
+        self._bus.publish(
+            VendorInvoiceChanged(
+                workspace_id=self._ctx.workspace_id,
+                actor_id=self._ctx.actor_id,
+                correlation_id=self._ctx.audit_correlation_id,
+                occurred_at=self._clock.now(),
+                vendor_invoice_id=view.id,
+                vendor_org_id=view.vendor_org_id,
+                status=view.status,
+            )
+        )
 
     def _audit_change(
         self,

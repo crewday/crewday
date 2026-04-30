@@ -129,6 +129,7 @@ describe("INVALIDATIONS — coverage", () => {
     "booking.reassigned",
     "work_order.completed",
     "quote.decided",
+    "vendor_invoice.changed",
     "issue.reported",
     "shift.ended",
     "time.shift.changed",
@@ -887,6 +888,16 @@ describe("INVALIDATIONS — per-kind behaviour", () => {
     const called = spy.mock.calls.map((c) => c[0]?.queryKey);
     expect(called).toEqual(
       expect.arrayContaining([qk.clientQuotes(), qk.workOrders()]),
+    );
+  });
+
+  it("vendor_invoice.changed invalidates client and manager invoice lists", () => {
+    const qc = makeClient();
+    const spy = vi.spyOn(qc, "invalidateQueries");
+    INVALIDATIONS["vendor_invoice.changed"](makeEvent("vendor_invoice.changed", { invoice_id: "invoice_1" }), qc);
+    const called = spy.mock.calls.map((c) => c[0]?.queryKey);
+    expect(called).toEqual(
+      expect.arrayContaining([qk.clientInvoices(), qk.vendorInvoices()]),
     );
   });
 

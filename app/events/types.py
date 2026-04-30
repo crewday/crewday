@@ -97,6 +97,7 @@ __all__ = [
     "TaskUnassigned",
     "TaskUpdated",
     "UserAgentSettingsChanged",
+    "VendorInvoiceChanged",
     "VendorInvoicePaid",
     "WorkOrderCompleted",
     "WorkspaceChanged",
@@ -1072,6 +1073,18 @@ class PayPeriodPaid(Event):
     allowed_roles: ClassVar[tuple[EventRole, ...]] = ("manager",)
 
     pay_period_id: str
+
+
+@register
+class VendorInvoiceChanged(Event):
+    """A vendor invoice changed enough for list views to refetch."""
+
+    name: ClassVar[str] = "vendor_invoice.changed"
+    allowed_roles: ClassVar[tuple[EventRole, ...]] = ("manager", "client")
+
+    vendor_invoice_id: str
+    vendor_org_id: str
+    status: str
 
 
 @register

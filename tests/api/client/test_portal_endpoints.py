@@ -92,6 +92,7 @@ def test_portal_endpoints_return_redacted_paginated_data_and_audit(
             "total_cents": 42000,
             "currency": "EUR",
             "status": "approved",
+            "proof_of_payment_file_ids": [],
             "pdf_url": None,
         }
     ]
