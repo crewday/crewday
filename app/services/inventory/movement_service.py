@@ -11,7 +11,7 @@ from typing import Literal
 from sqlalchemy import event, select, update
 from sqlalchemy.orm import Session
 
-from app.adapters.db.inventory.models import Item, Movement
+from app.adapters.db.inventory.models import Item, Movement, Stocktake
 from app.adapters.db.tasks.models import Occurrence
 from app.audit import write_audit
 from app.events.bus import EventBus
@@ -29,6 +29,7 @@ __all__ = [
     "adjust_to_observed",
     "consume",
     "produce",
+    "reconcile",
     "restock",
     "transfer",
 ]
@@ -105,9 +106,9 @@ class _PendingInventoryEvent:
     event: InventoryItemChanged
 
 
-_PENDING_EVENTS: weakref.WeakKeyDictionary[
-    Session, list[_PendingInventoryEvent]
-] = weakref.WeakKeyDictionary()
+_PENDING_EVENTS: weakref.WeakKeyDictionary[Session, list[_PendingInventoryEvent]] = (
+    weakref.WeakKeyDictionary()
+)
 _HOOKED_SESSIONS: weakref.WeakSet[Session] = weakref.WeakSet()
 
 
@@ -130,6 +131,7 @@ def restock(
         delta=_clean_magnitude(qty, field_name="qty"),
         reason="restock",
         source_task_id=source_task_id,
+        source_stocktake_id=None,
         note=_clean_optional_note(note),
         clock=clock,
         event_bus=event_bus,
@@ -155,6 +157,7 @@ def consume(
         delta=-_clean_magnitude(qty, field_name="qty"),
         reason="consume",
         source_task_id=source_task_id,
+        source_stocktake_id=None,
         note=_clean_optional_note(note),
         clock=clock,
         event_bus=event_bus,
@@ -180,6 +183,7 @@ def produce(
         delta=_clean_magnitude(qty, field_name="qty"),
         reason="produce",
         source_task_id=source_task_id,
+        source_stocktake_id=None,
         note=_clean_optional_note(note),
         clock=clock,
         event_bus=event_bus,
@@ -193,6 +197,7 @@ def adjust_to_observed(
     item_id: str,
     observed_qty: Decimal,
     reason: MovementReason = "audit_correction",
+    source_stocktake_id: str | None = None,
     note: str | None = None,
     clock: Clock | None = None,
     event_bus: EventBus | None = None,
@@ -211,10 +216,37 @@ def adjust_to_observed(
         delta=delta,
         reason=reason,
         source_task_id=None,
+        source_stocktake_id=source_stocktake_id,
         note=_clean_optional_note(note),
         clock=clock,
         event_bus=event_bus,
         locked_item=row,
+    )
+
+
+def reconcile(
+    session: Session,
+    ctx: WorkspaceContext,
+    *,
+    item_id: str,
+    observed_qty: Decimal,
+    reason: MovementReason = "audit_correction",
+    source_stocktake_id: str,
+    note: str | None = None,
+    clock: Clock | None = None,
+    event_bus: EventBus | None = None,
+) -> InventoryMovementView:
+    """Reconcile one item as part of a property-wide stocktake."""
+    return adjust_to_observed(
+        session,
+        ctx,
+        item_id=item_id,
+        observed_qty=observed_qty,
+        reason=reason,
+        source_stocktake_id=source_stocktake_id,
+        note=note,
+        clock=clock,
+        event_bus=event_bus,
     )
 
 
@@ -247,6 +279,7 @@ def transfer(
             delta=-clean_qty,
             reason="transfer_out",
             source_task_id=None,
+            source_stocktake_id=None,
             note=transfer_note,
             clock=clock,
             event_bus=event_bus,
@@ -260,6 +293,7 @@ def transfer(
             delta=clean_qty,
             reason="transfer_in",
             source_task_id=None,
+            source_stocktake_id=None,
             note=transfer_note,
             clock=clock,
             event_bus=event_bus,
@@ -280,6 +314,7 @@ def _write_movement(
     delta: Decimal,
     reason: MovementReason,
     source_task_id: str | None,
+    source_stocktake_id: str | None,
     note: str | None,
     clock: Clock | None,
     event_bus: EventBus | None,
@@ -291,9 +326,12 @@ def _write_movement(
     resolved_bus = event_bus if event_bus is not None else default_event_bus
     clean_delta = _clean_quantity(delta, field_name="delta")
     _validate_source_task(session, ctx, source_task_id)
-    item = locked_item if locked_item is not None else _load_active_item(
-        session, ctx, item_id
+    item = (
+        locked_item
+        if locked_item is not None
+        else _load_active_item(session, ctx, item_id)
     )
+    _validate_source_stocktake(session, ctx, source_stocktake_id, item)
     now = resolved_clock.now()
     movement = Movement(
         id=new_ulid(clock=clock),
@@ -302,7 +340,7 @@ def _write_movement(
         delta=clean_delta,
         reason=reason,
         source_task_id=source_task_id,
-        source_stocktake_id=None,
+        source_stocktake_id=source_stocktake_id,
         actor_kind=ctx.actor_kind,
         actor_id=ctx.actor_id if ctx.actor_kind != "system" else None,
         at=now,
@@ -329,6 +367,7 @@ def _write_movement(
                 "delta": str(clean_delta),
                 "reason": reason,
                 "source_task_id": source_task_id,
+                "source_stocktake_id": source_stocktake_id,
                 "on_hand_after": str(item.on_hand),
             }
         },
@@ -405,9 +444,27 @@ def _validate_source_task(
         raise InventoryMovementValidationError("source_task_id", "invalid")
 
 
-def _queue_item_changed(
-    session: Session, pending: _PendingInventoryEvent
+def _validate_source_stocktake(
+    session: Session,
+    ctx: WorkspaceContext,
+    source_stocktake_id: str | None,
+    item: Item,
 ) -> None:
+    if source_stocktake_id is None:
+        return
+    stocktake = session.scalar(
+        select(Stocktake)
+        .where(
+            Stocktake.workspace_id == ctx.workspace_id,
+            Stocktake.id == source_stocktake_id,
+        )
+        .limit(1)
+    )
+    if stocktake is None or stocktake.property_id != item.property_id:
+        raise InventoryMovementValidationError("source_stocktake_id", "invalid")
+
+
+def _queue_item_changed(session: Session, pending: _PendingInventoryEvent) -> None:
     if session not in _HOOKED_SESSIONS:
         event.listen(session, "after_commit", _publish_pending_events)
         event.listen(session, "after_rollback", _clear_pending_events)

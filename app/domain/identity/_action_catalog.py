@@ -467,6 +467,13 @@ _RULE_DRIVEN: tuple[ActionSpec, ...] = (
         root_protected_deny=False,
     ),
     ActionSpec(
+        key="inventory.stocktake",
+        valid_scope_kinds=("workspace", "property"),
+        default_allow=("owners", "managers"),
+        root_only=False,
+        root_protected_deny=False,
+    ),
+    ActionSpec(
         key="messaging.comments.author_global",
         valid_scope_kinds=("workspace", "property"),
         default_allow=("owners", "managers", "all_workers"),

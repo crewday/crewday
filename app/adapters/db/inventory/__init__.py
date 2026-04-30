@@ -23,15 +23,22 @@ See ``docs/specs/02-domain-model.md`` §"inventory_item",
 
 from __future__ import annotations
 
-from app.adapters.db.inventory.models import Item, Movement, ReorderRule, Stocktake
+from app.adapters.db.inventory.models import (
+    Item,
+    Movement,
+    ReorderRule,
+    Stocktake,
+    StocktakeLine,
+)
 from app.tenancy.registry import register
 
 for _table in (
     "inventory_item",
     "inventory_movement",
     "inventory_stocktake",
+    "inventory_stocktake_line",
     "inventory_reorder_rule",
 ):
     register(_table)
 
-__all__ = ["Item", "Movement", "ReorderRule", "Stocktake"]
+__all__ = ["Item", "Movement", "ReorderRule", "Stocktake", "StocktakeLine"]

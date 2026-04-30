@@ -525,7 +525,7 @@ def _clean_optional(value: str | None) -> str | None:
     return cleaned or None
 
 
-def _clean_tags(tags: tuple[str, ...]) -> list[str]:
+def _clean_tags(tags: tuple[str, ...]) -> _list[str]:
     return [tag.strip() for tag in tags if tag.strip()]
 
 

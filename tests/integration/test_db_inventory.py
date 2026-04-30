@@ -26,7 +26,13 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.adapters.db.identity.models import User
-from app.adapters.db.inventory.models import Item, Movement, ReorderRule, Stocktake
+from app.adapters.db.inventory.models import (
+    Item,
+    Movement,
+    ReorderRule,
+    Stocktake,
+    StocktakeLine,
+)
 from app.adapters.db.places.models import Property, PropertyWorkspace
 from app.adapters.db.workspace.models import Workspace
 from app.tenancy import registry, tenant_agnostic
@@ -47,6 +53,7 @@ _INVENTORY_TABLES: tuple[str, ...] = (
     "inventory_item",
     "inventory_movement",
     "inventory_stocktake",
+    "inventory_stocktake_line",
     "inventory_reorder_rule",
 )
 
@@ -348,6 +355,47 @@ class TestMigrationShape:
             "column_names"
         ][:2] == ["workspace_id", "property_id"]
 
+    def test_inventory_stocktake_line_columns(self, engine: Engine) -> None:
+        cols = {
+            c["name"]: c
+            for c in inspect(engine).get_columns("inventory_stocktake_line")
+        }
+        expected = {
+            "stocktake_id",
+            "item_id",
+            "workspace_id",
+            "observed_on_hand",
+            "reason",
+            "note",
+            "updated_at",
+        }
+        assert set(cols) == expected
+        assert cols["note"]["nullable"] is True
+        for notnull in expected - {"note"}:
+            assert cols[notnull]["nullable"] is False, f"{notnull} must be NOT NULL"
+
+    def test_inventory_stocktake_line_fks(self, engine: Engine) -> None:
+        fks = {
+            tuple(fk["constrained_columns"]): fk
+            for fk in inspect(engine).get_foreign_keys("inventory_stocktake_line")
+        }
+        assert fks[("workspace_id",)]["referred_table"] == "workspace"
+        assert fks[("workspace_id",)]["options"].get("ondelete") == "CASCADE"
+        assert fks[("stocktake_id",)]["referred_table"] == "inventory_stocktake"
+        assert fks[("stocktake_id",)]["options"].get("ondelete") == "CASCADE"
+        assert fks[("item_id",)]["referred_table"] == "inventory_item"
+        assert fks[("item_id",)]["options"].get("ondelete") == "CASCADE"
+
+    def test_inventory_stocktake_line_index(self, engine: Engine) -> None:
+        indexes = {
+            ix["name"]: ix
+            for ix in inspect(engine).get_indexes("inventory_stocktake_line")
+        }
+        assert "ix_inventory_stocktake_line_workspace_stocktake" in indexes
+        assert indexes["ix_inventory_stocktake_line_workspace_stocktake"][
+            "column_names"
+        ] == ["workspace_id", "stocktake_id"]
+
     def test_inventory_reorder_rule_columns(self, engine: Engine) -> None:
         cols = {
             c["name"]: c for c in inspect(engine).get_columns("inventory_reorder_rule")
@@ -598,6 +646,18 @@ class TestStocktakeCrud:
             db_session.add_all([item, stocktake])
             db_session.flush()
 
+            line = StocktakeLine(
+                stocktake_id=stocktake.id,
+                item_id=item.id,
+                workspace_id=workspace.id,
+                observed_on_hand=Decimal("3.0000"),
+                reason="audit_correction",
+                note="counted shelf",
+                updated_at=_PINNED,
+            )
+            db_session.add(line)
+            db_session.flush()
+
             movement = Movement(
                 id="01HWA00000000000000000STMV",
                 workspace_id=workspace.id,
@@ -615,6 +675,10 @@ class TestStocktakeCrud:
             reloaded = db_session.get(Stocktake, stocktake.id)
             assert reloaded is not None
             assert reloaded.completed_at is None
+            reloaded_line = db_session.get(StocktakeLine, (stocktake.id, item.id))
+            assert reloaded_line is not None
+            assert reloaded_line.observed_on_hand == Decimal("3.0000")
+            assert reloaded_line.note == "counted shelf"
             reloaded.completed_at = _LATER
             db_session.flush()
             db_session.expire_all()
@@ -706,7 +770,9 @@ class TestCheckConstraints:
             )
             db_session.add(item)
             db_session.flush()
-            assert db_session.get(Item, item.id).unit == "operator carton"
+            reloaded = db_session.get(Item, item.id)
+            assert reloaded is not None
+            assert reloaded.unit == "operator carton"
         finally:
             reset_current(token)
 

@@ -1,6 +1,6 @@
 """Inventory application services."""
 
-from app.services.inventory import movement_service
+from app.services.inventory import movement_service, stocktake_service
 from app.services.inventory.item_service import (
     InventoryItemConflict,
     InventoryItemCreate,
@@ -33,5 +33,6 @@ __all__ = [
     "list",
     "movement_service",
     "restore",
+    "stocktake_service",
     "update",
 ]

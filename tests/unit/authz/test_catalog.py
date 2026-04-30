@@ -75,10 +75,10 @@ class TestShape:
         the manager stays API surface while guest welcome remains
         anonymous token-gated. cd-z2py added ``tasks.review.decide``
         for manager decisions on completed-task approval rows. cd-ryxp
-        added work-order actions, and cd-5b35 added asset action /
-        document permissions.
+        added work-order actions, cd-5b35 added asset action /
+        document permissions, and cd-14m3 added ``inventory.stocktake``.
         """
-        assert len(ACTION_CATALOG) == 100
+        assert len(ACTION_CATALOG) == 101
 
     def test_entries_are_action_spec_instances(self) -> None:
         for key, spec in ACTION_CATALOG.items():

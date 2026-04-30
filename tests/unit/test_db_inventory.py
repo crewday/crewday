@@ -19,7 +19,13 @@ from decimal import Decimal
 
 from sqlalchemy import CheckConstraint, Enum, Index, Numeric, UniqueConstraint
 
-from app.adapters.db.inventory import Item, Movement, ReorderRule, Stocktake
+from app.adapters.db.inventory import (
+    Item,
+    Movement,
+    ReorderRule,
+    Stocktake,
+    StocktakeLine,
+)
 from app.adapters.db.inventory import models as inventory_models
 
 _PINNED = datetime(2026, 4, 20, 12, 0, 0, tzinfo=UTC)
@@ -113,7 +119,7 @@ class TestItemModel:
 
     def test_active_sku_and_barcode_unique_indexes_present(self) -> None:
         indexes = [i for i in Item.__table_args__ if isinstance(i, Index)]
-        by_name = {i.name: i for i in indexes}
+        by_name = {str(i.name): i for i in indexes}
         sku = by_name["uq_inventory_item_workspace_property_sku_active"]
         barcode = by_name["uq_inventory_item_workspace_property_barcode_active"]
         assert sku.unique is True
@@ -292,6 +298,41 @@ class TestStocktakeModel:
         assert [c.name for c in target.columns][:2] == ["workspace_id", "property_id"]
 
 
+class TestStocktakeLineModel:
+    """The ``StocktakeLine`` mapped class holds draft session counts."""
+
+    def test_minimal_construction(self) -> None:
+        line = StocktakeLine(
+            stocktake_id="01HWA00000000000000000STKA",
+            item_id="01HWA00000000000000000ITMA",
+            workspace_id="01HWA00000000000000000WSPA",
+            observed_on_hand=Decimal("3.5000"),
+            reason="audit_correction",
+            updated_at=_PINNED,
+        )
+        assert line.stocktake_id == "01HWA00000000000000000STKA"
+        assert line.item_id == "01HWA00000000000000000ITMA"
+        assert line.observed_on_hand == Decimal("3.5000")
+        assert line.reason == "audit_correction"
+        assert line.note is None
+
+    def test_tablename(self) -> None:
+        assert StocktakeLine.__tablename__ == "inventory_stocktake_line"
+
+    def test_composite_primary_key(self) -> None:
+        assert [c.name for c in StocktakeLine.__table__.primary_key] == [
+            "stocktake_id",
+            "item_id",
+        ]
+
+    def test_observed_uses_spec_precision(self) -> None:
+        column_type = StocktakeLine.__table__.c.observed_on_hand.type
+        assert isinstance(column_type, Numeric)
+        assert column_type.precision == 14
+        assert column_type.scale == 4
+        assert column_type.asdecimal is True
+
+
 class TestReorderRuleModel:
     """The ``ReorderRule`` mapped class constructs from the v1 slice."""
 
@@ -368,6 +409,7 @@ class TestPackageReExports:
         assert Movement is inventory_models.Movement
         assert ReorderRule is inventory_models.ReorderRule
         assert Stocktake is inventory_models.Stocktake
+        assert StocktakeLine is inventory_models.StocktakeLine
 
 
 class TestRegistryIntent:
@@ -391,6 +433,7 @@ class TestRegistryIntent:
             "inventory_item",
             "inventory_movement",
             "inventory_stocktake",
+            "inventory_stocktake_line",
             "inventory_reorder_rule",
         ):
             registry.register(table)
@@ -399,6 +442,7 @@ class TestRegistryIntent:
             "inventory_item",
             "inventory_movement",
             "inventory_stocktake",
+            "inventory_stocktake_line",
             "inventory_reorder_rule",
         ):
             assert table in scoped, f"{table} must be scoped"
@@ -412,6 +456,7 @@ class TestRegistryIntent:
             "inventory_item",
             "inventory_movement",
             "inventory_stocktake",
+            "inventory_stocktake_line",
             "inventory_reorder_rule",
         ):
             registry.register(table)

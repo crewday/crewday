@@ -52,12 +52,12 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Numeric,
+    PrimaryKeyConstraint,
     String,
     UniqueConstraint,
     text,
 )
-from sqlalchemy.ext.hybrid import hybrid_property
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, synonym
 
 from app.adapters.db.base import Base
 
@@ -70,7 +70,7 @@ from app.adapters.db.places import models as _places_models  # noqa: F401
 from app.adapters.db.tasks import models as _tasks_models  # noqa: F401
 from app.adapters.db.workspace import models as _workspace_models  # noqa: F401
 
-__all__ = ["Item", "Movement", "ReorderRule", "Stocktake"]
+__all__ = ["Item", "Movement", "ReorderRule", "Stocktake", "StocktakeLine"]
 
 
 _REASON_VALUES: tuple[str, ...] = (
@@ -273,6 +273,53 @@ class Stocktake(Base):
     )
 
 
+class StocktakeLine(Base):
+    """Session-scoped draft count for one stocktake/item pair."""
+
+    __tablename__ = "inventory_stocktake_line"
+
+    stocktake_id: Mapped[str] = mapped_column(
+        String,
+        ForeignKey("inventory_stocktake.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    item_id: Mapped[str] = mapped_column(
+        String,
+        ForeignKey("inventory_item.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    workspace_id: Mapped[str] = mapped_column(
+        String,
+        ForeignKey("workspace.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    observed_on_hand: Mapped[Decimal] = mapped_column(
+        Numeric(14, 4, asdecimal=True), nullable=False
+    )
+    reason: Mapped[str] = mapped_column(_MOVEMENT_REASON_ENUM, nullable=False)
+    note: Mapped[str | None] = mapped_column(String, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+
+    __table_args__ = (
+        PrimaryKeyConstraint(
+            "stocktake_id",
+            "item_id",
+            name="pk_inventory_stocktake_line",
+        ),
+        CheckConstraint(
+            f"reason IN ({_in_clause(_REASON_VALUES)})",
+            name="inventory_stocktake_line_reason",
+        ),
+        Index(
+            "ix_inventory_stocktake_line_workspace_stocktake",
+            "workspace_id",
+            "stocktake_id",
+        ),
+    )
+
+
 class Movement(Base):
     """An append-only ledger row recording one stock change.
 
@@ -351,19 +398,7 @@ class Movement(Base):
         ),
     )
 
-    @hybrid_property
-    def occurrence_id(self) -> str | None:
-        """Backward-compatible Python alias for task-source rows."""
-        return self.source_task_id
-
-    @occurrence_id.setter
-    def occurrence_id(self, value: str | None) -> None:
-        self.source_task_id = value
-
-    @occurrence_id.expression
-    @classmethod
-    def occurrence_id(cls) -> Mapped[str | None]:
-        return cls.source_task_id
+    occurrence_id = synonym("source_task_id")
 
     @property
     def created_by(self) -> str | None:
