@@ -5978,6 +5978,88 @@
         "title": "DeploymentSettingsResponse",
         "type": "object"
       },
+      "EmployeeLeaveResponse": {
+        "description": "Mock-compatible leave row for the manager employee ledger.",
+        "properties": {
+          "approved_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Approved At"
+          },
+          "category": {
+            "enum": [
+              "vacation",
+              "sick",
+              "personal",
+              "bereavement",
+              "other"
+            ],
+            "title": "Category",
+            "type": "string"
+          },
+          "employee_id": {
+            "title": "Employee Id",
+            "type": "string"
+          },
+          "ends_on": {
+            "format": "date",
+            "title": "Ends On",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "note": {
+            "title": "Note",
+            "type": "string"
+          },
+          "starts_on": {
+            "format": "date",
+            "title": "Starts On",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "employee_id",
+          "starts_on",
+          "ends_on",
+          "category",
+          "note",
+          "approved_at"
+        ],
+        "title": "EmployeeLeaveResponse",
+        "type": "object"
+      },
+      "EmployeeLeavesResponse": {
+        "description": "Payload for ``GET /employees/{employee_id}/leaves``.",
+        "properties": {
+          "leaves": {
+            "items": {
+              "$ref": "#/components/schemas/EmployeeLeaveResponse"
+            },
+            "title": "Leaves",
+            "type": "array"
+          },
+          "subject": {
+            "$ref": "#/components/schemas/EmployeeResponse"
+          }
+        },
+        "required": [
+          "subject",
+          "leaves"
+        ],
+        "title": "EmployeeLeavesResponse",
+        "type": "object"
+      },
       "EmployeeProfileResponse": {
         "description": "Legacy SPA ``Employee`` projection embedded in ``GET /api/v1/me``.",
         "properties": {
@@ -27458,6 +27540,68 @@
           "mutates": false,
           "summary": "List employees in a workspace",
           "verb": "list"
+        }
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "slug",
+          "required": true,
+          "schema": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          }
+        }
+      ]
+    },
+    "/w/{slug}/api/v1/employees/{employee_id}/leaves": {
+      "get": {
+        "operationId": "employees.leaves.list",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "employee_id",
+            "required": true,
+            "schema": {
+              "title": "Employee Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EmployeeLeavesResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List one employee's leave ledger",
+        "tags": [
+          "identity",
+          "employees"
+        ],
+        "x-cli": {
+          "group": "employees",
+          "hidden": true,
+          "mutates": false,
+          "summary": "List one employee's leave ledger",
+          "verb": "leaves-list"
         }
       },
       "parameters": [

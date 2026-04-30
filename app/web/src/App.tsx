@@ -190,9 +190,15 @@ export default function App() {
             </Route>
 
             <Route element={<RequirePermission actionKey="leaves.view_others" />}>
+              <Route element={<ManagerLayout />}>
+                <Route path="/leaves" element={<LeavesInboxPage />} />
+              </Route>
               <Route element={<RequirePermission actionKey="employees.read" />}>
                 <Route element={<ManagerLayout />}>
-                  <Route path="/leaves" element={<LeavesInboxPage />} />
+                  <Route path="/employee/:eid/leaves" element={<EmployeeLeavesPage />} />
+                  <Route path="/user/:eid/leaves" element={<EmployeeLeavesPage />} />
+                  <Route path="/w/:slug/employee/:eid/leaves" element={<EmployeeLeavesPage />} />
+                  <Route path="/w/:slug/user/:eid/leaves" element={<EmployeeLeavesPage />} />
                 </Route>
               </Route>
             </Route>
@@ -227,7 +233,6 @@ export default function App() {
             <Route element={<ManagerLayout />}>
               <Route path="/employees" element={<EmployeesPage />} />
               <Route path="/employee/:eid" element={<EmployeeDetailPage />} />
-              <Route path="/employee/:eid/leaves" element={<EmployeeLeavesPage />} />
               <Route
                 path="/expenses"
                 element={

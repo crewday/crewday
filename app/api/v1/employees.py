@@ -63,10 +63,10 @@ See ``docs/specs/12-rest-api.md`` §"Users / work roles / settings",
 from __future__ import annotations
 
 from collections import defaultdict
-from datetime import date
+from datetime import date, datetime
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -82,6 +82,7 @@ from app.adapters.db.workspace.models import (
 )
 from app.api.deps import current_workspace_context, db_session
 from app.authz.dep import Permission
+from app.services.leave import LeavePermissionDenied, LeaveView, list_for_user
 from app.tenancy import WorkspaceContext, tenant_agnostic
 
 __all__ = [
@@ -151,6 +152,25 @@ class EmployeeResponse(BaseModel):
     # consume a value — today the field is a static ``{}`` placeholder
     # until the per-user settings_override column lands.
     settings_override: dict[str, object]
+
+
+class EmployeeLeaveResponse(BaseModel):
+    """Mock-compatible leave row for the manager employee ledger."""
+
+    id: str
+    employee_id: str
+    starts_on: date
+    ends_on: date
+    category: Literal["vacation", "sick", "personal", "bereavement", "other"]
+    note: str
+    approved_at: datetime | None
+
+
+class EmployeeLeavesResponse(BaseModel):
+    """Payload for ``GET /employees/{employee_id}/leaves``."""
+
+    subject: EmployeeResponse
+    leaves: list[EmployeeLeaveResponse]
 
 
 # ---------------------------------------------------------------------------
@@ -423,6 +443,67 @@ def _project_employee(
     )
 
 
+def _employee_or_404(
+    session: Session,
+    ctx: WorkspaceContext,
+    *,
+    employee_id: str,
+) -> EmployeeResponse:
+    user_ids = _list_workspace_users(session, ctx)
+    if employee_id not in user_ids:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"error": "not_found"},
+        )
+
+    users = _load_users(session, user_ids=[employee_id])
+    user = users.get(employee_id)
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"error": "not_found"},
+        )
+
+    engagements = _load_active_engagements(session, ctx, user_ids=[employee_id])
+    role_keys = _load_role_keys_by_user(session, ctx, user_ids=[employee_id])
+    property_ids = _load_property_ids_by_user(session, ctx, user_ids=[employee_id])
+    return _project_employee(
+        user,
+        workspace_id=ctx.workspace_id,
+        engagement=engagements.get(employee_id),
+        role_keys=role_keys.get(employee_id, []),
+        property_ids=property_ids.get(employee_id, []),
+    )
+
+
+def _leave_category(
+    kind: str,
+) -> Literal["vacation", "sick", "personal", "bereavement", "other"]:
+    if kind == "vacation":
+        return "vacation"
+    if kind == "sick":
+        return "sick"
+    if kind == "comp":
+        return "personal"
+    return "other"
+
+
+def _employee_leave_from_view(view: LeaveView) -> EmployeeLeaveResponse:
+    return EmployeeLeaveResponse(
+        id=view.id,
+        employee_id=view.user_id,
+        starts_on=view.starts_at.date(),
+        ends_on=view.ends_at.date(),
+        category=_leave_category(view.kind),
+        note=view.reason_md or "",
+        approved_at=(
+            view.decided_at
+            if view.status == "approved" and view.decided_at is not None
+            else None
+        ),
+    )
+
+
 # ---------------------------------------------------------------------------
 # Router factory
 # ---------------------------------------------------------------------------
@@ -439,6 +520,7 @@ def build_employees_router() -> APIRouter:
     api = APIRouter(prefix="/employees", tags=["identity", "employees"])
 
     read_gate = Depends(Permission("employees.read", scope_kind="workspace"))
+    leave_view_gate = Depends(Permission("leaves.view_others", scope_kind="workspace"))
 
     @api.get(
         "",
@@ -497,5 +579,43 @@ def build_employees_router() -> APIRouter:
                 )
             )
         return out
+
+    @api.get(
+        "/{employee_id}/leaves",
+        response_model=EmployeeLeavesResponse,
+        operation_id="employees.leaves.list",
+        summary="List one employee's leave ledger",
+        dependencies=[read_gate, leave_view_gate],
+        openapi_extra={
+            # This is a web-facing composite for the manager profile
+            # page. CLI callers can compose the canonical employees
+            # list with ``/leaves?user_id=...`` instead of carrying a
+            # duplicate command.
+            "x-cli": {
+                "group": "employees",
+                "verb": "leaves-list",
+                "summary": "List one employee's leave ledger",
+                "mutates": False,
+                "hidden": True,
+            },
+        },
+    )
+    def list_leaves(
+        employee_id: str,
+        ctx: _Ctx,
+        session: _Db,
+    ) -> EmployeeLeavesResponse:
+        subject = _employee_or_404(session, ctx, employee_id=employee_id)
+        try:
+            leaves = list_for_user(session, ctx, user_id=employee_id)
+        except LeavePermissionDenied as exc:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={"error": "forbidden"},
+            ) from exc
+        return EmployeeLeavesResponse(
+            subject=subject,
+            leaves=[_employee_leave_from_view(view) for view in leaves],
+        )
 
     return api

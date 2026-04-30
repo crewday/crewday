@@ -57,21 +57,17 @@ const MOCKS_BACKEND = process.env.VITE_MOCKS_BACKEND_URL ?? null;
 // (§12 "Admin surface"); /admin itself (without /api) is a SPA route
 // and stays local.
 //
-// ``/w`` covers every workspace-scoped API path — per spec §12 "Base
-// URL", workspace REST lives under ``/w/<slug>/api/v1/...`` and SSE
-// under ``/w/<slug>/events``. ``src/lib/api.ts`` rewrites bare
-// ``/api/v1/...`` calls into ``/w/<slug>/api/v1/...`` in the browser;
-// without this proxy entry the rewritten path falls through to Vite's
-// SPA catch-all and returns ``index.html`` instead of JSON.
-// NOTE: `/w` is NOT a SPA route in dev — the SPA mounts workspace
-// pages under other prefixes (e.g. ``/today``, ``/admin``). If a
-// future SPA route needs the ``/w/`` prefix, narrow this to
-// ``/w/:slug/api`` + ``/w/:slug/events`` and co-exist.
+// Workspace pages are real SPA routes (`/w/<slug>/...`, §14), while
+// workspace REST and SSE are backend routes (`/w/<slug>/api/...` and
+// `/w/<slug>/events`). Keep the dev proxy at those API/SSE prefixes
+// only; proxying all of `/w` loops through the backend SPA catch-all
+// and back into this Vite server.
 const API_PATHS = [
   "/api",
   "/admin/api",
   "/q",
-  "/w",
+  "^/w/[^/]+/api(?:/|$)",
+  "^/w/[^/]+/events$",
   "/events",
   "/switch",
   "/theme",

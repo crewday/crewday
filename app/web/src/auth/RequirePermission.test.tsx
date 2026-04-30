@@ -155,7 +155,13 @@ describe("<RequirePermission>", () => {
 
   it("wraps the real leaves route before the manager shell", () => {
     expect(appSource).toMatch(
-      /<Route element={<RequirePermission actionKey="leaves\.view_others" \/>}>\s*<Route element={<RequirePermission actionKey="employees\.read" \/>}>\s*<Route element={<ManagerLayout \/>}>\s*<Route path="\/leaves" element={<LeavesInboxPage \/>} \/>/,
+      /<Route element={<RequirePermission actionKey="leaves\.view_others" \/>}>\s*<Route element={<ManagerLayout \/>}>\s*<Route path="\/leaves" element={<LeavesInboxPage \/>} \/>/,
+    );
+  });
+
+  it("wraps the employee leave ledger aliases before the manager shell", () => {
+    expect(appSource).toMatch(
+      /<Route element={<RequirePermission actionKey="leaves\.view_others" \/>}>[\s\S]*?<Route element={<RequirePermission actionKey="employees\.read" \/>}>\s*<Route element={<ManagerLayout \/>}>[\s\S]*?<Route path="\/employee\/:eid\/leaves" element={<EmployeeLeavesPage \/>} \/>[\s\S]*?<Route path="\/user\/:eid\/leaves" element={<EmployeeLeavesPage \/>} \/>[\s\S]*?<Route path="\/w\/:slug\/employee\/:eid\/leaves" element={<EmployeeLeavesPage \/>} \/>[\s\S]*?<Route path="\/w\/:slug\/user\/:eid\/leaves" element={<EmployeeLeavesPage \/>} \/>/,
     );
   });
 

@@ -302,11 +302,21 @@ interface AgentActionPendingPayload {
   approval_request_id: string;
 }
 
+interface LeaveDecidedPayload {
+  user_id?: string;
+  employee_id?: string;
+}
+
 function invalidate(qc: QueryClient, queryKey: readonly unknown[]): void {
   // `refetchType: "active"` keeps idle queries cheap (§14 "SSE-driven
   // invalidation"). Explicit here so the intent is visible at every
   // call site rather than relying on the v5 default.
   qc.invalidateQueries({ queryKey, refetchType: "active" });
+}
+
+function employeeLeavesFamilyKey(): readonly unknown[] {
+  const [scope, slug] = qk.employees();
+  return [scope, slug, "employee"] as const;
 }
 
 export const INVALIDATIONS: Record<EventKind, InvalidationHandler> = {
@@ -552,8 +562,16 @@ export const INVALIDATIONS: Record<EventKind, InvalidationHandler> = {
     invalidate(qc, qk.meOverrides());
   },
 
-  "leave.decided": (_event, qc) => {
+  "leave.decided": (event, qc) => {
+    const payload = event.data as unknown as LeaveDecidedPayload;
     invalidate(qc, qk.leaves());
+    if (payload.employee_id) {
+      invalidate(qc, qk.employeeLeaves(payload.employee_id));
+    } else if (payload.user_id) {
+      invalidate(qc, qk.employeeLeaves(payload.user_id));
+    } else {
+      invalidate(qc, employeeLeavesFamilyKey());
+    }
     invalidate(qc, qk.dashboard());
     invalidate(qc, qk.history("leaves"));
     invalidate(qc, ["my-schedule"]);
