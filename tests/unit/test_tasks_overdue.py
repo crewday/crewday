@@ -510,7 +510,11 @@ class TestManualTransitionPreserved:
         assert post.overdue_since is None
 
     def test_where_clause_guard_skips_in_flight_manual_transition(
-        self, session: Session, bus: EventBus, clock: FrozenClock
+        self,
+        session: Session,
+        bus: EventBus,
+        clock: FrozenClock,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """Even when SELECT picked up the row, the per-row UPDATE
         guard skips it if the state has since transitioned out of
@@ -559,17 +563,14 @@ class TestManualTransitionPreserved:
                 session.flush()
             return original_execute(stmt, *args, **kwargs)
 
-        session.execute = _race  # type: ignore[method-assign]
-        try:
-            report = detect_overdue(
-                _ctx(ws),
-                session=session,
-                clock=clock,
-                event_bus=bus,
-                grace_minutes=15,
-            )
-        finally:
-            del session.execute  # type: ignore[method-assign]
+        monkeypatch.setattr(session, "execute", _race)
+        report = detect_overdue(
+            _ctx(ws),
+            session=session,
+            clock=clock,
+            event_bus=bus,
+            grace_minutes=15,
+        )
 
         # The sweeper's UPDATE matched zero rows — the manual
         # transition wins. The report records the skip and no event

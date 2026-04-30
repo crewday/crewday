@@ -456,6 +456,7 @@ def _template_view(
         photo_evidence="disabled",
         linked_instruction_ids=(),
         priority="normal",
+        auto_shift_from_occurrence=False,
         inventory_consumption_json=dict(inventory_consumption or {}),
         llm_hints_md=None,
         created_at=datetime(2026, 1, 1, tzinfo=UTC),
