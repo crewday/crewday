@@ -11,8 +11,10 @@ from pydantic import SecretStr
 from sqlalchemy import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
-from app.adapters.db import audit, authz, identity, workspace  # noqa: F401
+from app.adapters.db import audit, authz, billing, identity, workspace  # noqa: F401
+from app.adapters.db.authz.models import RoleGrant
 from app.adapters.db.base import Base
+from app.adapters.db.billing.models import Organization
 from app.adapters.db.identity.models import Session as SessionRow
 from app.adapters.db.session import make_engine
 from app.api.deps import db_session as db_session_dep
@@ -21,6 +23,7 @@ from app.auth.session import SESSION_COOKIE_NAME, hash_cookie_value, issue
 from app.config import Settings
 from app.tenancy import tenant_agnostic
 from app.util.clock import SystemClock
+from app.util.ulid import new_ulid
 from tests.factories.identity import bootstrap_user, bootstrap_workspace
 
 _TEST_UA = "pytest-me-profile"
@@ -186,6 +189,59 @@ def test_scoped_me_alias_returns_same_profile(
 
     assert response.status_code == 200, response.text
     assert response.json()["current_workspace_id"] == workspace_id
+
+
+def test_me_profile_returns_client_binding_org_ids(
+    client: TestClient,
+    session_factory: sessionmaker[Session],
+    settings: Settings,
+) -> None:
+    user_id, workspace_id, _slug = _seed_user_workspace(session_factory)
+    org_id = new_ulid()
+    with session_factory() as s:
+        s.add(
+            Organization(
+                id=org_id,
+                workspace_id=workspace_id,
+                kind="client",
+                display_name="Client Org",
+                billing_address={},
+                tax_id=None,
+                default_currency="EUR",
+                contact_email=None,
+                contact_phone=None,
+                notes_md=None,
+                created_at=SystemClock().now(),
+                archived_at=None,
+            )
+        )
+        s.flush()
+        s.add(
+            RoleGrant(
+                id=new_ulid(),
+                workspace_id=workspace_id,
+                user_id=user_id,
+                grant_role="client",
+                scope_kind="workspace",
+                scope_property_id=None,
+                binding_org_id=org_id,
+                created_at=SystemClock().now(),
+                created_by_user_id=None,
+            )
+        )
+        s.commit()
+    cookie = _issue_cookie(
+        session_factory,
+        user_id=user_id,
+        workspace_id=workspace_id,
+        settings=settings,
+    )
+    client.cookies.set(SESSION_COOKIE_NAME, cookie)
+
+    response = client.get("/api/v1/me")
+
+    assert response.status_code == 200, response.text
+    assert response.json()["client_binding_org_ids"] == [org_id]
 
 
 def test_me_profile_does_not_touch_session_last_seen(

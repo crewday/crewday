@@ -216,15 +216,22 @@ class TestMigrationShape:
             "grant_role",
             "scope_kind",
             "scope_property_id",
+            "binding_org_id",
             "created_at",
             "created_by_user_id",
         }
         assert set(cols) == expected
         # ``scope_property_id`` (property-scope narrowing),
+        # ``binding_org_id`` (client-org narrowing),
         # ``created_by_user_id`` (self-bootstrap rows), and
         # ``workspace_id`` (NULL on deployment-scope grants per
         # cd-wchi) are nullable.
-        nullable = {"scope_property_id", "created_by_user_id", "workspace_id"}
+        nullable = {
+            "scope_property_id",
+            "binding_org_id",
+            "created_by_user_id",
+            "workspace_id",
+        }
         for name in nullable:
             assert cols[name]["nullable"] is True, f"{name} must be nullable"
         for name in expected - nullable:
@@ -241,6 +248,10 @@ class TestMigrationShape:
         # ``created_by_user_id`` sets NULL so history survives the actor.
         assert by_col[("created_by_user_id",)]["referred_table"] == "user"
         assert by_col[("created_by_user_id",)]["options"].get("ondelete") == "SET NULL"
+        binding_fk = by_col[("binding_org_id", "workspace_id")]
+        assert binding_fk["referred_table"] == "organization"
+        assert binding_fk["referred_columns"] == ["id", "workspace_id"]
+        assert binding_fk["options"].get("ondelete") == "RESTRICT"
         # ``scope_property_id`` is a soft reference in v1 (no FK until cd-i6u).
         assert ("scope_property_id",) not in by_col
 
@@ -254,6 +265,11 @@ class TestMigrationShape:
         assert "ix_role_grant_scope_property" in indexes
         assert indexes["ix_role_grant_scope_property"]["column_names"] == [
             "scope_property_id"
+        ]
+        assert "ix_role_grant_binding_org" in indexes
+        assert indexes["ix_role_grant_binding_org"]["column_names"] == [
+            "workspace_id",
+            "binding_org_id",
         ]
 
     def test_role_grant_deployment_partial_unique_index(self, engine: Engine) -> None:

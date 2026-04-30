@@ -141,6 +141,7 @@ class TestRoleGrantModel:
         assert grant.grant_role == "manager"
         # NULL ``scope_property_id`` means workspace-wide.
         assert grant.scope_property_id is None
+        assert grant.binding_org_id is None
         # Self-bootstrap grant: ``created_by_user_id`` defaults to ``None``.
         assert grant.created_by_user_id is None
         assert grant.created_at == _PINNED
@@ -174,6 +175,18 @@ class TestRoleGrantModel:
             created_at=_PINNED,
         )
         assert grant.scope_property_id == "01HWA00000000000000000PRPA"
+
+    def test_client_binding_org_construction(self) -> None:
+        """A workspace-scoped client grant may bind to one organization."""
+        grant = RoleGrant(
+            id="01HWA00000000000000000RGRC",
+            workspace_id="01HWA00000000000000000WSPA",
+            user_id="01HWA00000000000000000USRA",
+            grant_role="client",
+            binding_org_id="01HWA00000000000000000ORGA",
+            created_at=_PINNED,
+        )
+        assert grant.binding_org_id == "01HWA00000000000000000ORGA"
 
     def test_tablename(self) -> None:
         assert RoleGrant.__tablename__ == "role_grant"
@@ -223,6 +236,19 @@ class TestRoleGrantModel:
         assert "IS NULL" in sql
         assert "IS NOT NULL" in sql
 
+    def test_client_binding_org_scope_check_present(self) -> None:
+        """``binding_org_id`` is constrained to workspace client grants."""
+        checks = [c for c in RoleGrant.__table_args__ if isinstance(c, CheckConstraint)]
+        names = {c.name for c in checks}
+        assert "ck_role_grant_client_binding_org_scope" in names
+        binding_check = next(
+            c for c in checks if c.name == "ck_role_grant_client_binding_org_scope"
+        )
+        sql = str(binding_check.sqltext)
+        assert "binding_org_id IS NULL" in sql
+        assert "grant_role = 'client'" in sql
+        assert "scope_property_id IS NULL" in sql
+
     def test_deployment_partial_unique_index_present(self) -> None:
         """cd-wchi adds the partial UNIQUE on ``(user_id, grant_role)``."""
         indexes = [i for i in RoleGrant.__table_args__ if isinstance(i, Index)]
@@ -247,6 +273,13 @@ class TestRoleGrantModel:
         assert "ix_role_grant_scope_property" in names
         target = next(i for i in indexes if i.name == "ix_role_grant_scope_property")
         assert [c.name for c in target.columns] == ["scope_property_id"]
+
+    def test_binding_org_index_present(self) -> None:
+        indexes = [i for i in RoleGrant.__table_args__ if isinstance(i, Index)]
+        names = [i.name for i in indexes]
+        assert "ix_role_grant_binding_org" in names
+        target = next(i for i in indexes if i.name == "ix_role_grant_binding_org")
+        assert [c.name for c in target.columns] == ["workspace_id", "binding_org_id"]
 
 
 class TestPackageReExports:

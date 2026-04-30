@@ -107,10 +107,9 @@ class AvailableWorkspaceResponse(BaseModel):
     """One entry of :attr:`AuthMeResponse.available_workspaces`.
 
     ``grant_role`` is the caller's highest-privilege surface grant on
-    this workspace. ``binding_org_id`` and ``source`` are carried for
-    type-parity with the SPA contract; v1 always emits
-    ``source='workspace_grant'`` and ``binding_org_id=None`` (the org
-    binding and non-workspace-scoped grants land in follow-ups).
+    this workspace. ``binding_org_id`` carries the selected grant's
+    client organization binding when present; ``source`` is retained
+    for type-parity with the SPA contract.
     """
 
     workspace: WorkspaceSummary
@@ -343,11 +342,30 @@ def _load_available_workspaces(
                     default_locale=_DEFAULT_LOCALE,
                 ),
                 grant_role=role,
-                binding_org_id=None,
+                binding_org_id=grant.binding_org_id,
                 source="workspace_grant",
             )
         )
     return out
+
+
+def _client_binding_org_ids(
+    session: Session, *, workspace_id: str, user_id: str
+) -> list[str]:
+    with tenant_agnostic():
+        rows = session.scalars(
+            select(RoleGrant.binding_org_id)
+            .where(
+                RoleGrant.workspace_id == workspace_id,
+                RoleGrant.user_id == user_id,
+                RoleGrant.scope_kind == "workspace",
+                RoleGrant.grant_role == "client",
+                RoleGrant.scope_property_id.is_(None),
+                RoleGrant.binding_org_id.is_not(None),
+            )
+            .order_by(RoleGrant.binding_org_id.asc())
+        ).all()
+    return sorted({org_id for org_id in rows if org_id is not None})
 
 
 def _workspace_ids_for_user(session: Session, *, user_id: str) -> list[str]:
@@ -660,7 +678,9 @@ def build_me_profile_router(*, operation_id: str = "me.profile.get") -> APIRoute
             agent_approval_mode=user.agent_approval_mode,
             current_workspace_id=workspace_id,
             available_workspaces=_load_available_workspaces(session, user_id=user.id),
-            client_binding_org_ids=[],
+            client_binding_org_ids=_client_binding_org_ids(
+                session, workspace_id=workspace_id, user_id=user.id
+            ),
             is_deployment_admin=is_deployment_admin(session, user_id=user.id),
             is_deployment_owner=is_deployment_owner(session, user_id=user.id),
         )

@@ -109,6 +109,7 @@ class RoleGrantRow:
     user_id: str
     grant_role: str
     scope_property_id: str | None
+    binding_org_id: str | None
     created_at: datetime
     created_by_user_id: str | None
 

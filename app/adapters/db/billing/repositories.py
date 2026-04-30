@@ -6,10 +6,12 @@ from collections.abc import Mapping, Sequence
 from datetime import UTC, date, datetime
 from decimal import Decimal
 
-from sqlalchemy import func, select, update
+from sqlalchemy import false, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import InstrumentedAttribute, Session
+from sqlalchemy.sql import ColumnElement
 
+from app.adapters.db.authz.models import RoleGrant
 from app.adapters.db.billing.models import (
     Organization,
     Quote,
@@ -21,6 +23,14 @@ from app.adapters.db.billing.models import (
 from app.adapters.db.places.models import Property, PropertyWorkspace
 from app.adapters.db.time.models import Shift
 from app.adapters.db.workspace.models import Workspace
+from app.domain.billing.client_portal import (
+    ClientPortalAccrualRow,
+    ClientPortalInvoiceRow,
+    ClientPortalPropertyRow,
+    ClientPortalQuoteRow,
+    ClientPortalRepository,
+    ClientPortalScope,
+)
 from app.domain.billing.organizations import (
     OrganizationArtifactCounts,
     OrganizationInvalid,
@@ -47,6 +57,7 @@ from app.domain.billing.work_orders import (
 from app.tenancy import tenant_agnostic
 
 __all__ = [
+    "SqlAlchemyClientPortalRepository",
     "SqlAlchemyOrganizationRepository",
     "SqlAlchemyQuoteRepository",
     "SqlAlchemyRateCardRepository",
@@ -64,6 +75,20 @@ def _as_utc_optional(value: datetime | None) -> datetime | None:
     if value is None:
         return None
     return _as_utc(value)
+
+
+def _org_or_property_scope(
+    *,
+    organization_column: ColumnElement[str] | InstrumentedAttribute[str],
+    property_column: ColumnElement[str] | InstrumentedAttribute[str],
+    scope: ClientPortalScope,
+) -> ColumnElement[bool]:
+    clauses: list[ColumnElement[bool]] = []
+    if scope.workspace_org_ids:
+        clauses.append(organization_column.in_(scope.workspace_org_ids))
+    if scope.property_ids:
+        clauses.append(property_column.in_(scope.property_ids))
+    return or_(*clauses) if clauses else false()
 
 
 def _to_row(row: Organization) -> OrganizationRow:
@@ -281,6 +306,203 @@ class SqlAlchemyOrganizationRepository(OrganizationRepository):
             .where(model.workspace_id == workspace_id, column == organization_id)
         )
         return int(count or 0)
+
+
+class SqlAlchemyClientPortalRepository(ClientPortalRepository):
+    """SA-backed read repository for the client portal."""
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    @property
+    def session(self) -> Session:
+        return self._session
+
+    def client_scope(self, *, workspace_id: str, user_id: str) -> ClientPortalScope:
+        workspace_org_ids = frozenset(
+            org_id
+            for org_id in self._session.scalars(
+                select(RoleGrant.binding_org_id).where(
+                    RoleGrant.workspace_id == workspace_id,
+                    RoleGrant.user_id == user_id,
+                    RoleGrant.scope_kind == "workspace",
+                    RoleGrant.grant_role == "client",
+                    RoleGrant.scope_property_id.is_(None),
+                    RoleGrant.binding_org_id.is_not(None),
+                )
+            ).all()
+            if org_id is not None
+        )
+
+        scoped_properties = self._session.execute(
+            select(RoleGrant.scope_property_id, Property.client_org_id)
+            .join(Property, Property.id == RoleGrant.scope_property_id)
+            .join(PropertyWorkspace, PropertyWorkspace.property_id == Property.id)
+            .where(
+                RoleGrant.workspace_id == workspace_id,
+                RoleGrant.user_id == user_id,
+                RoleGrant.scope_kind == "workspace",
+                RoleGrant.grant_role == "client",
+                RoleGrant.scope_property_id.is_not(None),
+                PropertyWorkspace.workspace_id == workspace_id,
+                PropertyWorkspace.status == "active",
+                Property.deleted_at.is_(None),
+                Property.client_org_id.is_not(None),
+            )
+        ).all()
+        property_ids = frozenset(
+            property_id
+            for property_id, _org_id in scoped_properties
+            if property_id is not None
+        )
+        property_org_ids = frozenset(
+            org_id for _property_id, org_id in scoped_properties if org_id is not None
+        )
+        return ClientPortalScope(
+            workspace_org_ids=workspace_org_ids,
+            property_ids=property_ids,
+            property_org_ids=property_org_ids,
+        )
+
+    def list_portfolio(
+        self, *, workspace_id: str, scope: ClientPortalScope
+    ) -> Sequence[ClientPortalPropertyRow]:
+        clauses: list[ColumnElement[bool]] = []
+        if scope.workspace_org_ids:
+            clauses.append(Property.client_org_id.in_(scope.workspace_org_ids))
+        if scope.property_ids:
+            clauses.append(Property.id.in_(scope.property_ids))
+        stmt = (
+            select(Property)
+            .join(PropertyWorkspace, PropertyWorkspace.property_id == Property.id)
+            .where(
+                PropertyWorkspace.workspace_id == workspace_id,
+                PropertyWorkspace.status == "active",
+                Property.deleted_at.is_(None),
+                Property.client_org_id.is_not(None),
+                or_(*clauses) if clauses else false(),
+            )
+            .order_by(Property.name.asc(), Property.id.asc())
+        )
+        rows = self._session.scalars(stmt).all()
+        return [
+            ClientPortalPropertyRow(
+                id=row.id,
+                organization_id=row.client_org_id or "",
+                name=row.name or row.address,
+                kind=row.kind,
+                address=row.address,
+                country=row.country,
+                timezone=row.timezone,
+                default_currency=row.default_currency,
+            )
+            for row in rows
+        ]
+
+    def list_accruals(
+        self, *, workspace_id: str, scope: ClientPortalScope
+    ) -> Sequence[ClientPortalAccrualRow]:
+        stmt = (
+            select(WorkOrderShiftAccrual, WorkOrder, Property, Organization)
+            .join(
+                WorkOrder,
+                (WorkOrder.id == WorkOrderShiftAccrual.work_order_id)
+                & (WorkOrder.workspace_id == WorkOrderShiftAccrual.workspace_id),
+            )
+            .join(Property, Property.id == WorkOrder.property_id)
+            .join(Organization, Organization.id == WorkOrder.organization_id)
+            .where(
+                WorkOrderShiftAccrual.workspace_id == workspace_id,
+                Organization.workspace_id == workspace_id,
+                Property.deleted_at.is_(None),
+                _org_or_property_scope(
+                    organization_column=WorkOrder.organization_id,
+                    property_column=WorkOrder.property_id,
+                    scope=scope,
+                ),
+            )
+            .order_by(
+                WorkOrderShiftAccrual.created_at.asc(),
+                WorkOrder.id.asc(),
+                WorkOrderShiftAccrual.id.asc(),
+            )
+        )
+        return [
+            ClientPortalAccrualRow(
+                work_order_id=work_order.id,
+                property_id=work_order.property_id,
+                property_name=prop.name or prop.address,
+                organization_id=work_order.organization_id,
+                currency=org.default_currency,
+                hours_decimal=Decimal(accrual.hours_decimal).quantize(Decimal("0.01")),
+                accrued_cents=accrual.accrued_cents,
+                created_at=_as_utc(accrual.created_at),
+            )
+            for accrual, work_order, prop, org in self._session.execute(stmt).all()
+        ]
+
+    def list_invoices(
+        self, *, workspace_id: str, scope: ClientPortalScope
+    ) -> Sequence[ClientPortalInvoiceRow]:
+        if not scope.workspace_org_ids:
+            return []
+        rows = self._session.scalars(
+            select(VendorInvoice)
+            .where(
+                VendorInvoice.workspace_id == workspace_id,
+                VendorInvoice.vendor_org_id.in_(scope.workspace_org_ids),
+            )
+            .order_by(
+                VendorInvoice.issued_at.desc(),
+                VendorInvoice.invoice_number.asc(),
+                VendorInvoice.id.asc(),
+            )
+        ).all()
+        return [
+            ClientPortalInvoiceRow(
+                id=row.id,
+                organization_id=row.vendor_org_id,
+                invoice_number=row.invoice_number,
+                issued_at=row.issued_at,
+                due_at=row.due_at,
+                total_cents=row.total_cents,
+                currency=row.currency,
+                status=row.status,
+                pdf_url=None,
+            )
+            for row in rows
+        ]
+
+    def list_quotes(
+        self, *, workspace_id: str, scope: ClientPortalScope
+    ) -> Sequence[ClientPortalQuoteRow]:
+        rows = self._session.scalars(
+            select(Quote)
+            .where(
+                Quote.workspace_id == workspace_id,
+                Quote.status != "draft",
+                _org_or_property_scope(
+                    organization_column=Quote.organization_id,
+                    property_column=Quote.property_id,
+                    scope=scope,
+                ),
+            )
+            .order_by(Quote.sent_at.desc(), Quote.id.asc())
+        ).all()
+        return [
+            ClientPortalQuoteRow(
+                id=row.id,
+                organization_id=row.organization_id,
+                property_id=row.property_id,
+                title=row.title,
+                total_cents=row.total_cents,
+                currency=row.currency,
+                status=row.status,
+                sent_at=_as_utc_optional(row.sent_at),
+                decided_at=_as_utc_optional(row.decided_at),
+            )
+            for row in rows
+        ]
 
 
 def _to_quote_row(row: Quote) -> QuoteRow:

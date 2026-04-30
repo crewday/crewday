@@ -99,6 +99,7 @@ def _to_grant_row(row: RoleGrant) -> RoleGrantRow:
         user_id=row.user_id,
         grant_role=row.grant_role,
         scope_property_id=row.scope_property_id,
+        binding_org_id=row.binding_org_id,
         created_at=row.created_at,
         created_by_user_id=row.created_by_user_id,
     )
@@ -356,6 +357,7 @@ class SqlAlchemyRoleGrantRepository(RoleGrantRepository):
             user_id=user_id,
             grant_role=grant_role,
             scope_property_id=scope_property_id,
+            binding_org_id=None,
             created_at=created_at,
             created_by_user_id=created_by_user_id,
         )

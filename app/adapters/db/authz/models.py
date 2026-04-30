@@ -32,6 +32,7 @@ from sqlalchemy import (
     CheckConstraint,
     DateTime,
     ForeignKey,
+    ForeignKeyConstraint,
     Index,
     String,
     UniqueConstraint,
@@ -40,6 +41,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.adapters.db.base import Base
+from app.adapters.db.billing import models as _billing_models  # noqa: F401
 
 # Cross-package FK targets — see :mod:`app.adapters.db` package
 # docstring for the load-order contract. ``user.id`` / ``workspace.id``
@@ -152,9 +154,10 @@ class RoleGrant(Base):
     """Surface / persona grant: one row per ``(user, scope, grant_role)``.
 
     ``scope_property_id`` is nullable — NULL means the grant applies
-    workspace-wide, non-NULL narrows it to a single property. The
-    column is a **soft reference** for now; the ``property`` table
-    lands with cd-i6u, whose migration promotes this into a real FK.
+    workspace-wide, non-NULL narrows it to a single property. Client
+    grants may also carry ``binding_org_id`` at workspace scope,
+    narrowing the portal view to data billed to that organization.
+    ``scope_property_id`` remains a soft reference for now.
 
     ``scope_kind`` partitions grants into two universes:
 
@@ -214,6 +217,7 @@ class RoleGrant(Base):
     # workspace-scoped grant.
     scope_kind: Mapped[str] = mapped_column(String, nullable=False, default="workspace")
     scope_property_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    binding_org_id: Mapped[str | None] = mapped_column(String, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
     )
@@ -244,8 +248,20 @@ class RoleGrant(Base):
             "OR (scope_kind = 'workspace' AND workspace_id IS NOT NULL)",
             name="scope_kind_workspace_pairing",
         ),
+        CheckConstraint(
+            "binding_org_id IS NULL OR "
+            "(scope_kind = 'workspace' AND grant_role = 'client' "
+            "AND workspace_id IS NOT NULL AND scope_property_id IS NULL)",
+            name="client_binding_org_scope",
+        ),
+        ForeignKeyConstraint(
+            ["binding_org_id", "workspace_id"],
+            ["organization.id", "organization.workspace_id"],
+            ondelete="RESTRICT",
+        ),
         Index("ix_role_grant_workspace_user", "workspace_id", "user_id"),
         Index("ix_role_grant_scope_property", "scope_property_id"),
+        Index("ix_role_grant_binding_org", "workspace_id", "binding_org_id"),
         # Partial UNIQUE — at most one active deployment grant per
         # ``(user, role)``. Workspace-scope re-grants stay
         # history-preserving (no app-level uniqueness on the

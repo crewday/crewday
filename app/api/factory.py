@@ -76,6 +76,7 @@ from app.adapters.storage.mime import FiletypeMimeSniffer
 from app.adapters.storage.ports import MimeSniffer, Storage
 from app.api.admin import admin_router
 from app.api.chat_gateway import build_chat_gateway_router
+from app.api.client import build_client_portal_router
 from app.api.errors import add_exception_handlers
 from app.api.health import router as health_router
 from app.api.middleware import (
@@ -793,6 +794,7 @@ def _mount_context_routers(app: FastAPI, *, settings: Settings) -> None:
     app.include_router(APPROVALS_ROUTER, prefix=f"{scoped_prefix}/approvals")
     app.include_router(ISSUES_ROUTER, prefix=f"{scoped_prefix}/issues")
     app.include_router(WEBHOOKS_ROUTER, prefix=f"{scoped_prefix}/webhooks")
+    app.include_router(build_client_portal_router(), prefix=scoped_prefix)
 
     # Anonymous guest welcome API. Mounted on the bare API tree so the
     # tenancy middleware does not require a workspace session before

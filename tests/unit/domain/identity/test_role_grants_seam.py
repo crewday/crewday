@@ -144,6 +144,7 @@ class _FakeRepo(RoleGrantRepository):
             user_id=user_id,
             grant_role=grant_role,
             scope_property_id=scope_property_id,
+            binding_org_id=None,
             created_at=created_at,
             created_by_user_id=created_by_user_id,
         )
@@ -178,6 +179,7 @@ class TestRevoke:
             user_id="01HWA00000000000000000USR3",
             grant_role="worker",
             scope_property_id=None,
+            binding_org_id=None,
             created_at=_PINNED,
             created_by_user_id=None,
         )
@@ -198,6 +200,7 @@ class TestListGrants:
             user_id=_ACTOR_ID,
             grant_role="worker",
             scope_property_id=None,
+            binding_org_id=None,
             created_at=_PINNED,
             created_by_user_id=None,
         )
