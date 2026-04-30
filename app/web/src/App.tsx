@@ -176,6 +176,7 @@ export default function App() {
             <Route element={<EmployeeLayout />}>
               <Route path="/chat" element={<ChatPage />} />
               <Route path="/asset/scan" element={<AssetScanPage />} />
+              <Route path="/asset/scan/:token" element={<AssetScanPage />} />
             </Route>
 
             <Route element={<RequirePermission actionKey="approvals.read" />}>
