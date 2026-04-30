@@ -463,6 +463,94 @@
     "group": "admin",
     "http": {
       "method": "GET",
+      "path": "/admin/api/v1/chat/health"
+    },
+    "idempotent": true,
+    "name": "chat-health",
+    "operation_id": "admin.chat.health.get",
+    "path_params": [],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/AdminChatHealthResponse",
+    "summary": "Read chat gateway provider health",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "admin",
+      "mutates": false,
+      "summary": "Read chat gateway health",
+      "verb": "chat-health"
+    }
+  },
+  {
+    "body_schema_ref": null,
+    "group": "admin",
+    "http": {
+      "method": "GET",
+      "path": "/admin/api/v1/chat/overrides"
+    },
+    "idempotent": true,
+    "name": "chat-overrides-list",
+    "operation_id": "admin.chat.overrides.list",
+    "path_params": [],
+    "query_params": [],
+    "response_schema_ref": null,
+    "summary": "List workspaces using custom chat gateway providers",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "admin",
+      "mutates": false,
+      "summary": "List chat gateway workspace overrides",
+      "verb": "chat-overrides-list"
+    }
+  },
+  {
+    "body_schema_ref": null,
+    "group": "admin",
+    "http": {
+      "method": "GET",
+      "path": "/admin/api/v1/chat/providers"
+    },
+    "idempotent": true,
+    "name": "chat-providers-list",
+    "operation_id": "admin.chat.providers.list",
+    "path_params": [],
+    "query_params": [],
+    "response_schema_ref": null,
+    "summary": "List deployment-default chat gateway providers",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "admin",
+      "mutates": false,
+      "summary": "List chat gateway providers",
+      "verb": "chat-providers-list"
+    }
+  },
+  {
+    "body_schema_ref": null,
+    "group": "admin",
+    "http": {
+      "method": "GET",
+      "path": "/admin/api/v1/chat/templates"
+    },
+    "idempotent": true,
+    "name": "chat-templates-list",
+    "operation_id": "admin.chat.templates.list",
+    "path_params": [],
+    "query_params": [],
+    "response_schema_ref": null,
+    "summary": "List chat gateway template sync state",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "admin",
+      "mutates": false,
+      "summary": "List chat gateway templates",
+      "verb": "chat-templates-list"
+    }
+  },
+  {
+    "body_schema_ref": null,
+    "group": "admin",
+    "http": {
+      "method": "GET",
       "path": "/admin/api/v1/settings"
     },
     "idempotent": true,

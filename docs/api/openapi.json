@@ -293,6 +293,360 @@
         "title": "AddressPayload",
         "type": "object"
       },
+      "AdminChatHealthProvider": {
+        "description": "Provider health fields split out for API consumers.",
+        "properties": {
+          "channel_kind": {
+            "enum": [
+              "offapp_whatsapp",
+              "offapp_telegram"
+            ],
+            "title": "Channel Kind",
+            "type": "string"
+          },
+          "delivery_error_rate_pct": {
+            "title": "Delivery Error Rate Pct",
+            "type": "number"
+          },
+          "last_webhook_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Webhook At"
+          },
+          "last_webhook_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Webhook Error"
+          },
+          "outbound_24h": {
+            "title": "Outbound 24H",
+            "type": "integer"
+          },
+          "status": {
+            "enum": [
+              "connected",
+              "error",
+              "not_configured"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "channel_kind",
+          "status",
+          "last_webhook_at",
+          "last_webhook_error",
+          "outbound_24h",
+          "delivery_error_rate_pct"
+        ],
+        "title": "AdminChatHealthProvider",
+        "type": "object"
+      },
+      "AdminChatHealthResponse": {
+        "description": "Body of ``GET /admin/api/v1/chat/health``.",
+        "properties": {
+          "providers": {
+            "items": {
+              "$ref": "#/components/schemas/AdminChatHealthProvider"
+            },
+            "title": "Providers",
+            "type": "array"
+          }
+        },
+        "required": [
+          "providers"
+        ],
+        "title": "AdminChatHealthResponse",
+        "type": "object"
+      },
+      "AdminChatOverrideRow": {
+        "description": "Workspace using a custom chat provider instead of deployment default.",
+        "properties": {
+          "channel_kind": {
+            "enum": [
+              "offapp_whatsapp",
+              "offapp_telegram"
+            ],
+            "title": "Channel Kind",
+            "type": "string"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "phone_display": {
+            "title": "Phone Display",
+            "type": "string"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "status": {
+            "enum": [
+              "connected",
+              "error",
+              "not_configured"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "workspace_id": {
+            "title": "Workspace Id",
+            "type": "string"
+          },
+          "workspace_name": {
+            "title": "Workspace Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "workspace_id",
+          "workspace_name",
+          "channel_kind",
+          "phone_display",
+          "status",
+          "created_at",
+          "reason"
+        ],
+        "title": "AdminChatOverrideRow",
+        "type": "object"
+      },
+      "AdminChatProvider": {
+        "description": "Provider row consumed by ``/admin/chat-gateway``.",
+        "properties": {
+          "channel_kind": {
+            "enum": [
+              "offapp_whatsapp",
+              "offapp_telegram"
+            ],
+            "title": "Channel Kind",
+            "type": "string"
+          },
+          "credentials": {
+            "items": {
+              "$ref": "#/components/schemas/AdminChatProviderCredential"
+            },
+            "title": "Credentials",
+            "type": "array"
+          },
+          "daily_outbound_cap": {
+            "title": "Daily Outbound Cap",
+            "type": "integer"
+          },
+          "delivery_error_rate_pct": {
+            "title": "Delivery Error Rate Pct",
+            "type": "number"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "last_webhook_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Webhook At"
+          },
+          "last_webhook_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Webhook Error"
+          },
+          "outbound_24h": {
+            "title": "Outbound 24H",
+            "type": "integer"
+          },
+          "per_workspace_soft_cap": {
+            "title": "Per Workspace Soft Cap",
+            "type": "integer"
+          },
+          "phone_display": {
+            "title": "Phone Display",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "connected",
+              "error",
+              "not_configured"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "templates": {
+            "items": {
+              "$ref": "#/components/schemas/AdminChatProviderTemplate"
+            },
+            "title": "Templates",
+            "type": "array"
+          },
+          "verify_token_stub": {
+            "title": "Verify Token Stub",
+            "type": "string"
+          },
+          "webhook_url": {
+            "title": "Webhook Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "channel_kind",
+          "label",
+          "phone_display",
+          "status",
+          "last_webhook_at",
+          "last_webhook_error",
+          "webhook_url",
+          "verify_token_stub",
+          "credentials",
+          "templates",
+          "per_workspace_soft_cap",
+          "daily_outbound_cap",
+          "outbound_24h",
+          "delivery_error_rate_pct"
+        ],
+        "title": "AdminChatProvider",
+        "type": "object"
+      },
+      "AdminChatProviderCredential": {
+        "description": "One display-only provider credential field.",
+        "properties": {
+          "display_stub": {
+            "title": "Display Stub",
+            "type": "string"
+          },
+          "field": {
+            "title": "Field",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "set": {
+            "title": "Set",
+            "type": "boolean"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          },
+          "updated_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated By"
+          }
+        },
+        "required": [
+          "field",
+          "label",
+          "display_stub",
+          "set",
+          "updated_at",
+          "updated_by"
+        ],
+        "title": "AdminChatProviderCredential",
+        "type": "object"
+      },
+      "AdminChatProviderTemplate": {
+        "description": "Meta/transport template sync state.",
+        "properties": {
+          "last_sync_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Sync At"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "purpose": {
+            "title": "Purpose",
+            "type": "string"
+          },
+          "rejection_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rejection Reason"
+          },
+          "status": {
+            "enum": [
+              "approved",
+              "pending",
+              "rejected",
+              "paused"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "purpose",
+          "status",
+          "last_sync_at",
+          "rejection_reason"
+        ],
+        "title": "AdminChatProviderTemplate",
+        "type": "object"
+      },
       "AdminGrantRequest": {
         "description": "Request body for ``POST /admin/api/v1/admins``.\n\nThe grantor identifies the new admin by either ``user_id``\n(canonical lookup) or ``email`` (operator-friendly lookup).\nExactly one of the two must be present \u2014 both unset is a\n422 ``missing_target``; both set is a 422 ``ambiguous_target``.",
         "properties": {
@@ -8655,6 +9009,39 @@
           "reason"
         ],
         "title": "InventoryMovementCreateRequest",
+        "type": "object"
+      },
+      "InventoryMovementListResponse": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/InventoryMovementResponse"
+            },
+            "title": "Data",
+            "type": "array"
+          },
+          "has_more": {
+            "title": "Has More",
+            "type": "boolean"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          }
+        },
+        "required": [
+          "data",
+          "next_cursor",
+          "has_more"
+        ],
+        "title": "InventoryMovementListResponse",
         "type": "object"
       },
       "InventoryMovementResponse": {
@@ -21197,6 +21584,311 @@
         }
       }
     },
+    "/admin/api/v1/chat/health": {
+      "get": {
+        "operationId": "admin.chat.health.get",
+        "parameters": [
+          {
+            "in": "cookie",
+            "name": "__Host-crewday_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "  Host-Crewday Session"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "crewday_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Crewday Session"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminChatHealthResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Read chat gateway provider health",
+        "tags": [
+          "admin",
+          "admin",
+          "chat_gateway"
+        ],
+        "x-cli": {
+          "group": "admin",
+          "mutates": false,
+          "summary": "Read chat gateway health",
+          "verb": "chat-health"
+        }
+      }
+    },
+    "/admin/api/v1/chat/overrides": {
+      "get": {
+        "description": "Returns an empty list until workspace-specific chat provider override persistence ships; this is a stable read shape, not a synthetic success state.",
+        "operationId": "admin.chat.overrides.list",
+        "parameters": [
+          {
+            "in": "cookie",
+            "name": "__Host-crewday_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "  Host-Crewday Session"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "crewday_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Crewday Session"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/AdminChatOverrideRow"
+                  },
+                  "title": "Response Admin.Chat.Overrides.List",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List workspaces using custom chat gateway providers",
+        "tags": [
+          "admin",
+          "admin",
+          "chat_gateway"
+        ],
+        "x-cli": {
+          "group": "admin",
+          "mutates": false,
+          "summary": "List chat gateway workspace overrides",
+          "verb": "chat-overrides-list"
+        }
+      }
+    },
+    "/admin/api/v1/chat/providers": {
+      "get": {
+        "operationId": "admin.chat.providers.list",
+        "parameters": [
+          {
+            "in": "cookie",
+            "name": "__Host-crewday_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "  Host-Crewday Session"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "crewday_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Crewday Session"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/AdminChatProvider"
+                  },
+                  "title": "Response Admin.Chat.Providers.List",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List deployment-default chat gateway providers",
+        "tags": [
+          "admin",
+          "admin",
+          "chat_gateway"
+        ],
+        "x-cli": {
+          "group": "admin",
+          "mutates": false,
+          "summary": "List chat gateway providers",
+          "verb": "chat-providers-list"
+        }
+      }
+    },
+    "/admin/api/v1/chat/templates": {
+      "get": {
+        "operationId": "admin.chat.templates.list",
+        "parameters": [
+          {
+            "in": "cookie",
+            "name": "__Host-crewday_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "  Host-Crewday Session"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "crewday_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Crewday Session"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/AdminChatProviderTemplate"
+                  },
+                  "title": "Response Admin.Chat.Templates.List",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List chat gateway template sync state",
+        "tags": [
+          "admin",
+          "admin",
+          "chat_gateway"
+        ],
+        "x-cli": {
+          "group": "admin",
+          "mutates": false,
+          "summary": "List chat gateway templates",
+          "verb": "chat-templates-list"
+        }
+      }
+    },
     "/admin/api/v1/me": {
       "get": {
         "description": "Return the caller's :class:`AdminMeResponse`.\n\n``ctx.user_id`` is the human (or delegating human for\ndelegated tokens) \u2014 see :class:`DeploymentContext`. We\nhydrate the :class:`User` row to surface display name + email;\ncapabilities come straight off\n:attr:`DeploymentContext.deployment_scopes`.\n\n``is_owner`` resolves the concrete deployment-owner membership\nrow so owner-only admin routes and labels share one source of\ntruth.",
@@ -30493,6 +31185,23 @@
               "title": "Property Id",
               "type": "string"
             }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 500,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
           }
         ],
         "requestBody": {
@@ -30827,6 +31536,23 @@
               "title": "Item Id",
               "type": "string"
             }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 500,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
           }
         ],
         "responses": {
@@ -30951,6 +31677,23 @@
               "title": "Item Id",
               "type": "string"
             }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 500,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
           }
         ],
         "requestBody": {
@@ -30999,6 +31742,81 @@
       }
     },
     "/w/{slug}/api/v1/inventory/{item_id}/movements": {
+      "get": {
+        "operationId": "inventory.movements.list",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "title": "Item Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "before",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 1024,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Before"
+            }
+          },
+          {
+            "description": "Maximum rows to return. Default 50, cap 500 per spec \u00a712 'Pagination'. Rejected with 422 outside ``[1, 500]``.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "description": "Maximum rows to return. Default 50, cap 500 per spec \u00a712 'Pagination'. Rejected with 422 outside ``[1, 500]``.",
+              "maximum": 500,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InventoryMovementListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Movements",
+        "tags": [
+          "inventory"
+        ],
+        "x-cli": {
+          "group": "inventory",
+          "verb": "movements-list"
+        }
+      },
       "parameters": [
         {
           "in": "path",
@@ -31021,6 +31839,23 @@
             "schema": {
               "title": "Item Id",
               "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 500,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
             }
           }
         ],
