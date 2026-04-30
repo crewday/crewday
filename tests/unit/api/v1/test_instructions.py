@@ -10,6 +10,14 @@ from sqlalchemy.orm import Session, sessionmaker
 from app.adapters.db.instructions.repositories import SqlAlchemyInstructionsRepository
 from app.adapters.db.workspace.models import Workspace
 from app.api.v1.instructions import router as instructions_router
+from app.events import (
+    InstructionArchived,
+    InstructionCreated,
+    InstructionUpdated,
+)
+from app.events import (
+    bus as default_event_bus,
+)
 from app.tenancy import WorkspaceContext
 from app.util.ulid import new_ulid
 from tests.unit.api.v1.identity.conftest import build_client
@@ -90,6 +98,33 @@ def test_patch_body_bumps_version_and_metadata_keeps_current_shape(
     assert noop.json()["current_revision"]["version"] == 2
 
 
+def test_mutations_publish_instruction_sse_events(
+    owner_ctx: tuple[WorkspaceContext, sessionmaker[Session], str],
+) -> None:
+    ctx, factory, _ = owner_ctx
+    client = _client(ctx, factory)
+    captured: list[InstructionCreated | InstructionUpdated | InstructionArchived] = []
+    default_event_bus.subscribe(InstructionCreated)(captured.append)
+    default_event_bus.subscribe(InstructionUpdated)(captured.append)
+    default_event_bus.subscribe(InstructionArchived)(captured.append)
+
+    try:
+        created = client.post("/instructions", json=_create_payload()).json()
+        instruction_id = created["instruction"]["id"]
+        client.patch(f"/instructions/{instruction_id}", json={"title": "Updated"})
+        client.post(f"/instructions/{instruction_id}/archive")
+    finally:
+        default_event_bus._reset_for_tests()
+
+    assert [type(event).name for event in captured] == [
+        "instruction.created",
+        "instruction.updated",
+        "instruction.archived",
+    ]
+    assert [event.workspace_id for event in captured] == [ctx.workspace_id] * 3
+    assert [event.instruction_id for event in captured] == [instruction_id] * 3
+
+
 def test_patch_rejects_null_for_non_nullable_update_fields(
     owner_ctx: tuple[WorkspaceContext, sessionmaker[Session], str],
 ) -> None:
@@ -129,6 +164,9 @@ def test_list_and_get_use_cursor_envelope(
     assert listed.status_code == 200, listed.text
     page1 = listed.json()
     assert [row["slug"] for row in page1["data"]] == ["a", "b"]
+    assert page1["data"][0]["body_md"] == "A"
+    assert page1["data"][0]["version"] == 1
+    assert page1["data"][0]["updated_at"] == first["current_revision"]["created_at"]
     assert page1["has_more"] is True
     assert page1["next_cursor"] is not None
 
@@ -142,6 +180,35 @@ def test_list_and_get_use_cursor_envelope(
     fetched = client.get(f"/instructions/{first['instruction']['id']}")
     assert fetched.status_code == 200, fetched.text
     assert fetched.json()["current_revision"]["body_md"] == "A"
+
+
+def test_list_area_scope_uses_area_label(
+    owner_ctx: tuple[WorkspaceContext, sessionmaker[Session], str],
+) -> None:
+    ctx, factory, workspace_id = owner_ctx
+    with factory() as session:
+        ws = session.get(Workspace, workspace_id)
+        assert ws is not None
+        prop = _seed_property(session, ws=ws, label="Villa Sud")
+        area = _seed_area(session, prop=prop, label="Pool")
+        session.commit()
+    client = _client(ctx, factory)
+    client.post(
+        "/instructions",
+        json={
+            **_create_payload(slug="pool", title="Pool", body_md="Pool reset."),
+            "scope": "area",
+            "property_id": prop.id,
+            "area_id": area.id,
+        },
+    )
+
+    response = client.get("/instructions")
+
+    assert response.status_code == 200, response.text
+    row = response.json()["data"][0]
+    assert row["area_id"] == area.id
+    assert row["area"] == "Pool"
 
 
 def test_versions_list_and_specific_version(

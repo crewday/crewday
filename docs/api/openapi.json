@@ -8780,6 +8780,586 @@
         "title": "IcalProbeResponse",
         "type": "object"
       },
+      "InstructionCreateRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "area_id": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Area Id"
+          },
+          "body_md": {
+            "default": "",
+            "maxLength": 200000,
+            "title": "Body Md",
+            "type": "string"
+          },
+          "change_note": {
+            "anyOf": [
+              {
+                "maxLength": 1024,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Change Note"
+          },
+          "property_id": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Property Id"
+          },
+          "scope": {
+            "default": "global",
+            "enum": [
+              "global",
+              "property",
+              "area"
+            ],
+            "title": "Scope",
+            "type": "string"
+          },
+          "slug": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Slug",
+            "type": "string"
+          },
+          "tags": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Tags",
+            "type": "array"
+          },
+          "title": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "slug",
+          "title"
+        ],
+        "title": "InstructionCreateRequest",
+        "type": "object"
+      },
+      "InstructionListItemPayload": {
+        "properties": {
+          "archived_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Archived At"
+          },
+          "area": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Area"
+          },
+          "area_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Area Id"
+          },
+          "body_md": {
+            "title": "Body Md",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "created_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created By"
+          },
+          "current_revision_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Revision Id"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "property_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Property Id"
+          },
+          "scope": {
+            "enum": [
+              "global",
+              "property",
+              "area"
+            ],
+            "title": "Scope",
+            "type": "string"
+          },
+          "slug": {
+            "title": "Slug",
+            "type": "string"
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Tags",
+            "type": "array"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          },
+          "workspace_id": {
+            "title": "Workspace Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "workspace_id",
+          "slug",
+          "title",
+          "scope",
+          "property_id",
+          "area_id",
+          "current_revision_id",
+          "tags",
+          "archived_at",
+          "created_by",
+          "created_at",
+          "body_md",
+          "version",
+          "updated_at",
+          "area"
+        ],
+        "title": "InstructionListItemPayload",
+        "type": "object"
+      },
+      "InstructionListResponse": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/InstructionListItemPayload"
+            },
+            "title": "Data",
+            "type": "array"
+          },
+          "has_more": {
+            "title": "Has More",
+            "type": "boolean"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          }
+        },
+        "required": [
+          "data",
+          "next_cursor",
+          "has_more"
+        ],
+        "title": "InstructionListResponse",
+        "type": "object"
+      },
+      "InstructionPatchRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "area_id": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Area Id"
+          },
+          "body_md": {
+            "anyOf": [
+              {
+                "maxLength": 200000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Body Md"
+          },
+          "change_note": {
+            "anyOf": [
+              {
+                "maxLength": 1024,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Change Note"
+          },
+          "property_id": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Property Id"
+          },
+          "scope": {
+            "anyOf": [
+              {
+                "enum": [
+                  "global",
+                  "property",
+                  "area"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scope"
+          },
+          "tags": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tags"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "maxLength": 256,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          }
+        },
+        "title": "InstructionPatchRequest",
+        "type": "object"
+      },
+      "InstructionPayload": {
+        "properties": {
+          "archived_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Archived At"
+          },
+          "area_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Area Id"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "created_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created By"
+          },
+          "current_revision_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Revision Id"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "property_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Property Id"
+          },
+          "scope": {
+            "enum": [
+              "global",
+              "property",
+              "area"
+            ],
+            "title": "Scope",
+            "type": "string"
+          },
+          "slug": {
+            "title": "Slug",
+            "type": "string"
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Tags",
+            "type": "array"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "workspace_id": {
+            "title": "Workspace Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "workspace_id",
+          "slug",
+          "title",
+          "scope",
+          "property_id",
+          "area_id",
+          "current_revision_id",
+          "tags",
+          "archived_at",
+          "created_by",
+          "created_at"
+        ],
+        "title": "InstructionPayload",
+        "type": "object"
+      },
+      "InstructionRevisionListResponse": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/InstructionRevisionPayload"
+            },
+            "title": "Data",
+            "type": "array"
+          },
+          "has_more": {
+            "title": "Has More",
+            "type": "boolean"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          }
+        },
+        "required": [
+          "data",
+          "next_cursor",
+          "has_more"
+        ],
+        "title": "InstructionRevisionListResponse",
+        "type": "object"
+      },
+      "InstructionRevisionPayload": {
+        "properties": {
+          "author_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Author Id"
+          },
+          "body_hash": {
+            "title": "Body Hash",
+            "type": "string"
+          },
+          "body_md": {
+            "title": "Body Md",
+            "type": "string"
+          },
+          "change_note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Change Note"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "instruction_id": {
+            "title": "Instruction Id",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "instruction_id",
+          "version",
+          "body_md",
+          "body_hash",
+          "author_id",
+          "change_note",
+          "created_at"
+        ],
+        "title": "InstructionRevisionPayload",
+        "type": "object"
+      },
+      "InstructionWithRevisionPayload": {
+        "properties": {
+          "current_revision": {
+            "$ref": "#/components/schemas/InstructionRevisionPayload"
+          },
+          "instruction": {
+            "$ref": "#/components/schemas/InstructionPayload"
+          }
+        },
+        "required": [
+          "instruction",
+          "current_revision"
+        ],
+        "title": "InstructionWithRevisionPayload",
+        "type": "object"
+      },
       "InventoryAdjustRequest": {
         "additionalProperties": false,
         "properties": {
@@ -11005,7 +11585,8 @@
               "recover_passkey",
               "email_change_confirm",
               "email_change_revert",
-              "grant_invite"
+              "grant_invite",
+              "workspace_verify_ownership"
             ],
             "title": "Purpose",
             "type": "string"
@@ -11113,13 +11694,14 @@
             "type": "string"
           },
           "purpose": {
-            "description": "One of 'signup_verify', 'recover_passkey', 'email_change_confirm', 'email_change_revert', 'grant_invite'.",
+            "description": "One of 'signup_verify', 'recover_passkey', 'email_change_confirm', 'email_change_revert', 'grant_invite', 'workspace_verify_ownership'.",
             "enum": [
               "signup_verify",
               "recover_passkey",
               "email_change_confirm",
               "email_change_revert",
-              "grant_invite"
+              "grant_invite",
+              "workspace_verify_ownership"
             ],
             "title": "Purpose",
             "type": "string"
@@ -15447,6 +16029,71 @@
           "user_id"
         ],
         "title": "ResetPasskeyResponse",
+        "type": "object"
+      },
+      "ResolvedInstructionListResponse": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/ResolvedInstructionPayload"
+            },
+            "title": "Data",
+            "type": "array"
+          },
+          "has_more": {
+            "const": false,
+            "default": false,
+            "title": "Has More",
+            "type": "boolean"
+          },
+          "next_cursor": {
+            "title": "Next Cursor",
+            "type": "null"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "ResolvedInstructionListResponse",
+        "type": "object"
+      },
+      "ResolvedInstructionPayload": {
+        "properties": {
+          "body_md": {
+            "title": "Body Md",
+            "type": "string"
+          },
+          "current_revision_id": {
+            "title": "Current Revision Id",
+            "type": "string"
+          },
+          "instruction_id": {
+            "title": "Instruction Id",
+            "type": "string"
+          },
+          "provenance": {
+            "enum": [
+              "scope:area",
+              "scope:property",
+              "scope:global",
+              "link:task_template",
+              "link:schedule",
+              "link:work_role",
+              "link:task",
+              "link:asset",
+              "link:stay"
+            ],
+            "title": "Provenance",
+            "type": "string"
+          }
+        },
+        "required": [
+          "instruction_id",
+          "current_revision_id",
+          "body_md",
+          "provenance"
+        ],
+        "title": "ResolvedInstructionPayload",
         "type": "object"
       },
       "ResolvedInventoryEffectPayload": {
@@ -42347,7 +42994,7 @@
         }
       ],
       "post": {
-        "description": "Run a receipt blob through the LLM and return parsed fields.\n\n\"Preview\" semantic: the route does NOT create a claim, attach a\nblob, or write any DB row apart from the workspace-scoped\n:class:`~app.adapters.db.llm.models.LlmUsage` ledger row that\nevery LLM call costs. It exists for the SPA to surface extracted\nsuggestions on the upload screen before the worker commits to a\nclaim. To persist the same result, the SPA chains ``POST\n/uploads`` \u2192 ``POST /expenses`` \u2192 ``POST /expenses/{id}/\nattachments`` and lets the wired ``extraction_runner`` re-run\nthe same extraction inside the attach transaction.\n\nDisabled at the deployment level when ``settings.llm_ocr_model``\nis unset \u2014 the response is 503 ``scan_not_configured`` so a\ncaller can distinguish \"no model assigned\" from \"transient\nprovider error\".\n\nThe hint fields (``hint_currency``, ``hint_vendor``) are reserved\nfor the v1 endpoint surface; the current pipeline does not yet\nfeed them into the prompt. Wiring is tracked alongside cd-e626's\nprompt-tuning work \u2014 surfacing them here keeps the contract\nstable for the SPA. **Crucially the prompt body still carries\nonly the OCR text** \u2014 these hints are never forwarded to the\nLLM, so an attacker who supplies a doctored ``hint_vendor``\ncannot inject prompt content the model sees today.\n\nEvery successful or failed LLM call lands one\n:class:`~app.adapters.db.llm.models.LlmUsage` row (capability\n``expenses.autofill``) so the workspace usage budget envelope\nstays honest even when callers exercise the preview surface.",
+        "description": "Run a receipt blob through the LLM and return parsed fields.\n\n\"Preview\" semantic: the route does NOT create a claim, attach a\nblob, or write any DB row apart from the workspace-scoped\nLLM usage ledger row that every LLM call costs. It exists for\nthe SPA to surface extracted suggestions on the upload screen\nbefore the worker commits to a claim. To persist the same result,\nthe SPA chains ``POST /uploads`` \u2192 ``POST /expenses`` \u2192 ``POST\n/expenses/{id}/attachments`` and lets the wired\n``extraction_runner`` re-run the same extraction inside the\nattach transaction.\n\nDisabled at the deployment level when ``settings.llm_ocr_model``\nis unset \u2014 the response is 503 ``scan_not_configured`` so a\ncaller can distinguish \"no model assigned\" from \"transient\nprovider error\".\n\nThe hint fields (``hint_currency``, ``hint_vendor``) are reserved\nfor the v1 endpoint surface; the current pipeline does not yet\nfeed them into the prompt. Wiring is tracked alongside cd-e626's\nprompt-tuning work \u2014 surfacing them here keeps the contract\nstable for the SPA. **Crucially the prompt body still carries\nonly the OCR text** \u2014 these hints are never forwarded to the\nLLM, so an attacker who supplies a doctored ``hint_vendor``\ncannot inject prompt content the model sees today.\n\nEvery successful or failed LLM call lands one usage row\n(capability ``expenses.autofill``) so the workspace usage budget\nenvelope stays honest even when callers exercise the preview\nsurface.",
         "operationId": "scan_expense_receipt",
         "requestBody": {
           "content": {
@@ -43493,6 +44140,1049 @@
           "expenses"
         ]
       }
+    },
+    "/w/{slug}/api/v1/instructions": {
+      "get": {
+        "operationId": "instructions.list",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "include_archived",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Include Archived",
+              "type": "boolean"
+            }
+          },
+          {
+            "description": "Opaque forward cursor from the previous page's ``next_cursor``. Omitted on the first call. Bounded to 256 chars to keep the URL below reverse-proxy header limits.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 256,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Opaque forward cursor from the previous page's ``next_cursor``. Omitted on the first call. Bounded to 256 chars to keep the URL below reverse-proxy header limits.",
+              "title": "Cursor"
+            }
+          },
+          {
+            "description": "Maximum rows to return. Default 50, cap 500 per spec \u00a712 'Pagination'. Rejected with 422 outside ``[1, 500]``.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "description": "Maximum rows to return. Default 50, cap 500 per spec \u00a712 'Pagination'. Rejected with 422 outside ``[1, 500]``.",
+              "maximum": 500,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InstructionListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "properties": {
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    },
+                    "retry_after_seconds": {
+                      "minimum": 1,
+                      "type": "integer"
+                    },
+                    "status": {
+                      "const": 429,
+                      "type": "integer"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "type": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "title",
+                    "status",
+                    "instance"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Rate limited",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until the caller should retry.",
+                "schema": {
+                  "minimum": 1,
+                  "type": "integer"
+                }
+              }
+            }
+          }
+        },
+        "summary": "List instructions",
+        "tags": [
+          "instructions"
+        ],
+        "x-cli": {
+          "group": "instructions",
+          "mutates": false,
+          "summary": "List instructions",
+          "verb": "list"
+        }
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "slug",
+          "required": true,
+          "schema": {
+            "maxLength": 40,
+            "minLength": 3,
+            "pattern": "^[a-z][a-z0-9-]{1,38}[a-z0-9]$",
+            "type": "string"
+          }
+        }
+      ],
+      "post": {
+        "operationId": "instructions.create",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InstructionCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InstructionWithRevisionPayload"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "properties": {
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    },
+                    "retry_after_seconds": {
+                      "minimum": 1,
+                      "type": "integer"
+                    },
+                    "status": {
+                      "const": 429,
+                      "type": "integer"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "type": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "title",
+                    "status",
+                    "instance"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Rate limited",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until the caller should retry.",
+                "schema": {
+                  "minimum": 1,
+                  "type": "integer"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Create an instruction",
+        "tags": [
+          "instructions"
+        ],
+        "x-agent-confirm": {
+          "fields_to_show": [
+            "slug",
+            "title",
+            "scope"
+          ],
+          "risk": "low",
+          "summary": "Create instruction {title}?",
+          "verb": "Create instruction"
+        },
+        "x-cli": {
+          "group": "instructions",
+          "summary": "Create an instruction",
+          "verb": "create"
+        }
+      }
+    },
+    "/w/{slug}/api/v1/instructions/{instruction_id}": {
+      "get": {
+        "operationId": "instructions.get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "instruction_id",
+            "required": true,
+            "schema": {
+              "title": "Instruction Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InstructionWithRevisionPayload"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "properties": {
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    },
+                    "retry_after_seconds": {
+                      "minimum": 1,
+                      "type": "integer"
+                    },
+                    "status": {
+                      "const": 429,
+                      "type": "integer"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "type": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "title",
+                    "status",
+                    "instance"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Rate limited",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until the caller should retry.",
+                "schema": {
+                  "minimum": 1,
+                  "type": "integer"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Read an instruction",
+        "tags": [
+          "instructions"
+        ],
+        "x-cli": {
+          "group": "instructions",
+          "mutates": false,
+          "summary": "Read an instruction",
+          "verb": "get"
+        }
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "slug",
+          "required": true,
+          "schema": {
+            "maxLength": 40,
+            "minLength": 3,
+            "pattern": "^[a-z][a-z0-9-]{1,38}[a-z0-9]$",
+            "type": "string"
+          }
+        }
+      ],
+      "patch": {
+        "operationId": "instructions.patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "instruction_id",
+            "required": true,
+            "schema": {
+              "title": "Instruction Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InstructionPatchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InstructionWithRevisionPayload"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "properties": {
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    },
+                    "retry_after_seconds": {
+                      "minimum": 1,
+                      "type": "integer"
+                    },
+                    "status": {
+                      "const": 429,
+                      "type": "integer"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "type": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "title",
+                    "status",
+                    "instance"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Rate limited",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until the caller should retry.",
+                "schema": {
+                  "minimum": 1,
+                  "type": "integer"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Patch instruction metadata or body",
+        "tags": [
+          "instructions"
+        ],
+        "x-agent-confirm": {
+          "fields_to_show": [
+            "title",
+            "scope",
+            "change_note"
+          ],
+          "risk": "low",
+          "summary": "Update instruction?",
+          "verb": "Update instruction"
+        },
+        "x-cli": {
+          "group": "instructions",
+          "summary": "Patch instruction metadata or body",
+          "verb": "patch"
+        }
+      }
+    },
+    "/w/{slug}/api/v1/instructions/{instruction_id}/archive": {
+      "parameters": [
+        {
+          "in": "path",
+          "name": "slug",
+          "required": true,
+          "schema": {
+            "maxLength": 40,
+            "minLength": 3,
+            "pattern": "^[a-z][a-z0-9-]{1,38}[a-z0-9]$",
+            "type": "string"
+          }
+        }
+      ],
+      "post": {
+        "operationId": "instructions.archive",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "instruction_id",
+            "required": true,
+            "schema": {
+              "title": "Instruction Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InstructionPayload"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "properties": {
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    },
+                    "retry_after_seconds": {
+                      "minimum": 1,
+                      "type": "integer"
+                    },
+                    "status": {
+                      "const": 429,
+                      "type": "integer"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "type": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "title",
+                    "status",
+                    "instance"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Rate limited",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until the caller should retry.",
+                "schema": {
+                  "minimum": 1,
+                  "type": "integer"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Archive an instruction",
+        "tags": [
+          "instructions"
+        ],
+        "x-agent-confirm": {
+          "risk": "medium",
+          "summary": "Archive instruction?",
+          "verb": "Archive instruction"
+        },
+        "x-cli": {
+          "group": "instructions",
+          "summary": "Archive an instruction",
+          "verb": "archive"
+        }
+      }
+    },
+    "/w/{slug}/api/v1/instructions/{instruction_id}/versions": {
+      "get": {
+        "operationId": "instructions.versions.list",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "instruction_id",
+            "required": true,
+            "schema": {
+              "title": "Instruction Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Opaque forward cursor from the previous page's ``next_cursor``. Omitted on the first call. Bounded to 256 chars to keep the URL below reverse-proxy header limits.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 256,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Opaque forward cursor from the previous page's ``next_cursor``. Omitted on the first call. Bounded to 256 chars to keep the URL below reverse-proxy header limits.",
+              "title": "Cursor"
+            }
+          },
+          {
+            "description": "Maximum rows to return. Default 50, cap 500 per spec \u00a712 'Pagination'. Rejected with 422 outside ``[1, 500]``.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "description": "Maximum rows to return. Default 50, cap 500 per spec \u00a712 'Pagination'. Rejected with 422 outside ``[1, 500]``.",
+              "maximum": 500,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InstructionRevisionListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "properties": {
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    },
+                    "retry_after_seconds": {
+                      "minimum": 1,
+                      "type": "integer"
+                    },
+                    "status": {
+                      "const": 429,
+                      "type": "integer"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "type": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "title",
+                    "status",
+                    "instance"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Rate limited",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until the caller should retry.",
+                "schema": {
+                  "minimum": 1,
+                  "type": "integer"
+                }
+              }
+            }
+          }
+        },
+        "summary": "List instruction versions",
+        "tags": [
+          "instructions"
+        ],
+        "x-cli": {
+          "group": "instructions",
+          "mutates": false,
+          "summary": "List instruction versions",
+          "verb": "versions"
+        }
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "slug",
+          "required": true,
+          "schema": {
+            "maxLength": 40,
+            "minLength": 3,
+            "pattern": "^[a-z][a-z0-9-]{1,38}[a-z0-9]$",
+            "type": "string"
+          }
+        }
+      ]
+    },
+    "/w/{slug}/api/v1/instructions/{instruction_id}/versions/{version}": {
+      "get": {
+        "operationId": "instructions.versions.get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "instruction_id",
+            "required": true,
+            "schema": {
+              "title": "Instruction Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "version",
+            "required": true,
+            "schema": {
+              "minimum": 1,
+              "title": "Version",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InstructionRevisionPayload"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "properties": {
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    },
+                    "retry_after_seconds": {
+                      "minimum": 1,
+                      "type": "integer"
+                    },
+                    "status": {
+                      "const": 429,
+                      "type": "integer"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "type": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "title",
+                    "status",
+                    "instance"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Rate limited",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until the caller should retry.",
+                "schema": {
+                  "minimum": 1,
+                  "type": "integer"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Read one instruction version",
+        "tags": [
+          "instructions"
+        ],
+        "x-cli": {
+          "group": "instructions",
+          "mutates": false,
+          "summary": "Read one instruction version",
+          "verb": "version"
+        }
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "slug",
+          "required": true,
+          "schema": {
+            "maxLength": 40,
+            "minLength": 3,
+            "pattern": "^[a-z][a-z0-9-]{1,38}[a-z0-9]$",
+            "type": "string"
+          }
+        }
+      ]
+    },
+    "/w/{slug}/api/v1/instructions:scope": {
+      "get": {
+        "operationId": "instructions.scope",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "template",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Template"
+            }
+          },
+          {
+            "in": "query",
+            "name": "property",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Property"
+            }
+          },
+          {
+            "in": "query",
+            "name": "area",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Area"
+            }
+          },
+          {
+            "in": "query",
+            "name": "asset",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Asset"
+            }
+          },
+          {
+            "in": "query",
+            "name": "stay",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Stay"
+            }
+          },
+          {
+            "in": "query",
+            "name": "role",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Role"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResolvedInstructionListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "properties": {
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    },
+                    "retry_after_seconds": {
+                      "minimum": 1,
+                      "type": "integer"
+                    },
+                    "status": {
+                      "const": 429,
+                      "type": "integer"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "type": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "title",
+                    "status",
+                    "instance"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Rate limited",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until the caller should retry.",
+                "schema": {
+                  "minimum": 1,
+                  "type": "integer"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Resolve instructions for a work context",
+        "tags": [
+          "instructions"
+        ],
+        "x-cli": {
+          "group": "instructions",
+          "mutates": false,
+          "summary": "Resolve instructions for a work context",
+          "verb": "scope"
+        }
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "slug",
+          "required": true,
+          "schema": {
+            "maxLength": 40,
+            "minLength": 3,
+            "pattern": "^[a-z][a-z0-9-]{1,38}[a-z0-9]$",
+            "type": "string"
+          }
+        }
+      ]
     },
     "/w/{slug}/api/v1/inventory/properties/{property_id}/items": {
       "get": {

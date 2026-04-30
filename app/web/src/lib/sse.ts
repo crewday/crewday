@@ -138,6 +138,11 @@ export type EventKind =
   | "vendor_invoice.changed"
   // Issues (§06 worker issue reports).
   | "issue.reported"
+  // Instructions KB (§06).
+  | "instruction.created"
+  | "instruction.updated"
+  | "instruction.archived"
+  | "instruction.published"
   // Shifts (§09 time + payroll).
   | "shift.ended"
   | "time.shift.changed"
@@ -329,6 +334,11 @@ interface LeaveDecidedPayload {
   employee_id?: string;
 }
 
+interface InstructionPayload {
+  instruction_id?: string;
+  id?: string;
+}
+
 function invalidate(qc: QueryClient, queryKey: readonly unknown[]): void {
   // `refetchType: "active"` keeps idle queries cheap (§14 "SSE-driven
   // invalidation"). Explicit here so the intent is visible at every
@@ -364,6 +374,15 @@ function invalidateAssetDocument(event: SseEvent, qc: QueryClient): void {
 function invalidateAssetTypeCatalog(_event: SseEvent, qc: QueryClient): void {
   invalidate(qc, qk.assetTypes());
   invalidate(qc, qk.assets());
+}
+
+function invalidateInstruction(event: SseEvent, qc: QueryClient): void {
+  const payload = event.data as unknown as InstructionPayload;
+  invalidate(qc, qk.instructions());
+  const instructionId = payload.instruction_id ?? payload.id;
+  if (instructionId) {
+    invalidate(qc, qk.instruction(instructionId));
+  }
 }
 
 export const INVALIDATIONS: Record<EventKind, InvalidationHandler> = {
@@ -791,6 +810,11 @@ export const INVALIDATIONS: Record<EventKind, InvalidationHandler> = {
     invalidate(qc, qk.issues());
     invalidate(qc, qk.dashboard());
   },
+
+  "instruction.created": invalidateInstruction,
+  "instruction.updated": invalidateInstruction,
+  "instruction.archived": invalidateInstruction,
+  "instruction.published": invalidateInstruction,
 
   "shift.ended": (_event, qc) => {
     invalidate(qc, ["my-schedule"]);

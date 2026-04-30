@@ -57,6 +57,10 @@ __all__ = [
     "ExpenseReimbursed",
     "ExpenseRejected",
     "ExpenseSubmitted",
+    "InstructionArchived",
+    "InstructionCreated",
+    "InstructionPublished",
+    "InstructionUpdated",
     "InventoryItemChanged",
     "InventoryLowStock",
     "IssueReported",
@@ -207,6 +211,42 @@ class WorkspaceChanged(Event):
     name: ClassVar[str] = "workspace.changed"
 
     changed_keys: tuple[str, ...]
+
+
+class _InstructionEvent(Event):
+    """Instruction library change visible to manager KB surfaces."""
+
+    allowed_roles: ClassVar[tuple[EventRole, ...]] = ("manager",)
+
+    instruction_id: str
+
+
+@register
+class InstructionCreated(_InstructionEvent):
+    """An instruction row and first revision were created."""
+
+    name: ClassVar[str] = "instruction.created"
+
+
+@register
+class InstructionUpdated(_InstructionEvent):
+    """Instruction metadata or body changed."""
+
+    name: ClassVar[str] = "instruction.updated"
+
+
+@register
+class InstructionArchived(_InstructionEvent):
+    """Instruction was archived."""
+
+    name: ClassVar[str] = "instruction.archived"
+
+
+@register
+class InstructionPublished(_InstructionEvent):
+    """A future publishing workflow made an instruction visible."""
+
+    name: ClassVar[str] = "instruction.published"
 
 
 @register

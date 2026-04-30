@@ -224,6 +224,13 @@ export default function App() {
               </Route>
             </Route>
 
+            <Route element={<RequirePermission actionKey="instructions.edit" />}>
+              <Route element={<ManagerLayout />}>
+                <Route path="/instructions" element={<InstructionsPage />} />
+                <Route path="/instructions/:iid" element={<InstructionDetailPage />} />
+              </Route>
+            </Route>
+
             <Route element={<RequirePermission actionKey="properties.read" />}>
               <Route element={<ManagerLayout />}>
                 <Route path="/properties" element={<PropertiesPage />} />
@@ -268,8 +275,6 @@ export default function App() {
               />
               <Route path="/templates" element={<TemplatesPage />} />
               <Route path="/schedules" element={<SchedulesPage />} />
-              <Route path="/instructions" element={<InstructionsPage />} />
-              <Route path="/instructions/:iid" element={<InstructionDetailPage />} />
               <Route path="/inventory" element={<InventoryPage />} />
               <Route path="/permissions" element={<PermissionsPage />} />
               <Route path="/tokens" element={<ApiTokensPage />} />

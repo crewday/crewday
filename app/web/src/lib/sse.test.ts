@@ -135,6 +135,10 @@ describe("INVALIDATIONS — coverage", () => {
     "quote.decided",
     "vendor_invoice.changed",
     "issue.reported",
+    "instruction.created",
+    "instruction.updated",
+    "instruction.archived",
+    "instruction.published",
     "shift.ended",
     "time.shift.changed",
     "admin.audit.appended",
@@ -503,6 +507,23 @@ describe("INVALIDATIONS — per-kind behaviour", () => {
         ["my-schedule"],
       ]),
     );
+  });
+
+  it("instruction.* invalidates the instructions list and touched detail", () => {
+    for (const kind of [
+      "instruction.created",
+      "instruction.updated",
+      "instruction.archived",
+      "instruction.published",
+    ] as const) {
+      const qc = makeClient();
+      const spy = vi.spyOn(qc, "invalidateQueries");
+      INVALIDATIONS[kind](makeEvent(kind, { instruction_id: "ins_1" }), qc);
+      const called = spy.mock.calls.map((c) => c[0]?.queryKey);
+      expect(called).toEqual(
+        expect.arrayContaining([qk.instructions(), qk.instruction("ins_1")]),
+      );
+    }
   });
 
   it("agent.message.appended appends to the scope's chat log", () => {

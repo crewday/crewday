@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 
 from app.adapters.db.instructions.models import Instruction, InstructionVersion
 from app.adapters.db.instructions.repositories import SqlAlchemyInstructionsRepository
+from app.adapters.db.places.models import Area
 from app.api.deps import current_workspace_context, db_session
 from app.api.pagination import (
     DEFAULT_LIMIT,
@@ -21,8 +22,11 @@ from app.api.pagination import (
     decode_cursor,
     encode_cursor,
 )
+from app.events import InstructionArchived, InstructionCreated, InstructionUpdated
+from app.events.bus import bus as default_event_bus
 from app.services.instructions import service
 from app.tenancy import WorkspaceContext
+from app.util.clock import SystemClock
 
 router = APIRouter(tags=["instructions"])
 
@@ -30,6 +34,9 @@ _Ctx = Annotated[WorkspaceContext, Depends(current_workspace_context)]
 _Db = Annotated[Session, Depends(db_session)]
 _MaybeId = Annotated[str | None, Query(max_length=64)]
 _Scope = Literal["global", "property", "area"]
+_InstructionEventType = (
+    type[InstructionArchived] | type[InstructionCreated] | type[InstructionUpdated]
+)
 
 
 class InstructionPayload(BaseModel):
@@ -103,6 +110,29 @@ class InstructionRevisionPayload(BaseModel):
         )
 
 
+class InstructionListItemPayload(InstructionPayload):
+    body_md: str
+    version: int
+    updated_at: datetime
+    area: str | None
+
+    @classmethod
+    def from_views(
+        cls,
+        instruction: service.InstructionView,
+        revision: InstructionRevisionPayload,
+        *,
+        area: str | None = None,
+    ) -> InstructionListItemPayload:
+        return cls(
+            **InstructionPayload.from_view(instruction).model_dump(),
+            body_md=revision.body_md,
+            version=revision.version,
+            updated_at=revision.created_at,
+            area=area,
+        )
+
+
 class InstructionWithRevisionPayload(BaseModel):
     instruction: InstructionPayload
     current_revision: InstructionRevisionPayload
@@ -150,7 +180,7 @@ class InstructionPatchRequest(BaseModel):
 
 
 class InstructionListResponse(BaseModel):
-    data: tuple[InstructionPayload, ...]
+    data: tuple[InstructionListItemPayload, ...]
     next_cursor: str | None
     has_more: bool
 
@@ -185,6 +215,22 @@ class ResolvedInstructionListResponse(BaseModel):
 
 def _repo(session: Session) -> SqlAlchemyInstructionsRepository:
     return SqlAlchemyInstructionsRepository(session)
+
+
+def _publish_instruction_event(
+    ctx: WorkspaceContext,
+    event_type: _InstructionEventType,
+    instruction_id: str,
+) -> None:
+    default_event_bus.publish(
+        event_type(
+            workspace_id=ctx.workspace_id,
+            actor_id=ctx.actor_id,
+            correlation_id=ctx.audit_correlation_id,
+            occurred_at=SystemClock().now(),
+            instruction_id=instruction_id,
+        )
+    )
 
 
 def _http_error(
@@ -400,6 +446,7 @@ def create_instruction_route(
         raise _http_for_integrity_error(session, exc) from exc
     except Exception as exc:
         raise _http_for_service_error(exc) from exc
+    _publish_instruction_event(ctx, InstructionCreated, result.instruction.id)
     return InstructionWithRevisionPayload.from_result(result)
 
 
@@ -433,11 +480,38 @@ def list_instructions_route(
     stmt = stmt.order_by(Instruction.id.asc()).limit(limit + 1)
     rows = tuple(session.scalars(stmt).all())
     page_rows = rows[:limit]
+    repo = _repo(session)
+    instructions = tuple(_instruction_view(repo, ctx, row.id) for row in page_rows)
+    area_ids = tuple(
+        area_id
+        for area_id in {instruction.area_id for instruction in instructions}
+        if area_id is not None
+    )
+    area_labels: dict[str, str] = {}
+    if area_ids:
+        area_rows = session.scalars(
+            select(Area).where(Area.id.in_(area_ids), Area.deleted_at.is_(None))
+        )
+        area_labels = {
+            row.id: row.name or row.label
+            for row in area_rows
+            if row.name is not None or row.label
+        }
+    data: list[InstructionListItemPayload] = []
+    for instruction in instructions:
+        data.append(
+            InstructionListItemPayload.from_views(
+                instruction,
+                _current_revision(repo, ctx, instruction),
+                area=(
+                    area_labels.get(instruction.area_id)
+                    if instruction.area_id is not None
+                    else None
+                ),
+            )
+        )
     return InstructionListResponse(
-        data=tuple(
-            InstructionPayload.from_view(_instruction_view(_repo(session), ctx, row.id))
-            for row in page_rows
-        ),
+        data=tuple(data),
         next_cursor=(
             encode_cursor(page_rows[-1].id) if len(rows) > limit and page_rows else None
         ),
@@ -499,6 +573,7 @@ def patch_instruction_route(
 ) -> InstructionWithRevisionPayload:
     repo = _repo(session)
     fields = body.model_fields_set
+    mutation_requested = False
     try:
         if {"title", "scope", "property_id", "area_id", "tags"} & fields:
             service.update_metadata(
@@ -511,6 +586,7 @@ def patch_instruction_route(
                 property_id=body.property_id,
                 area_id=body.area_id,
             )
+            mutation_requested = True
         if "body_md" in fields:
             body_md = body.body_md
             if body_md is None:
@@ -526,6 +602,7 @@ def patch_instruction_route(
                 body_md=body_md,
                 change_note=body.change_note,
             )
+            _publish_instruction_event(ctx, InstructionUpdated, instruction_id)
             return InstructionWithRevisionPayload.from_result(result)
     except IntegrityError as exc:
         raise _http_for_integrity_error(session, exc) from exc
@@ -533,6 +610,8 @@ def patch_instruction_route(
         raise _http_for_service_error(exc) from exc
 
     instruction = _instruction_view(repo, ctx, instruction_id)
+    if mutation_requested:
+        _publish_instruction_event(ctx, InstructionUpdated, instruction_id)
     return InstructionWithRevisionPayload(
         instruction=InstructionPayload.from_view(instruction),
         current_revision=_current_revision(repo, ctx, instruction),
@@ -566,6 +645,7 @@ def archive_instruction_route(
         view = service.archive(_repo(session), ctx, instruction_id=instruction_id)
     except Exception as exc:
         raise _http_for_service_error(exc) from exc
+    _publish_instruction_event(ctx, InstructionArchived, instruction_id)
     return InstructionPayload.from_view(view)
 
 
