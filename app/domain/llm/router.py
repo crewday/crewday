@@ -109,6 +109,8 @@ from app.adapters.db.llm.models import (
     LlmProviderModel,
     ModelAssignment,
 )
+from app.config import get_settings
+from app.demo.guardrails import demo_free_model_pick, llm_capability_allowed_in_demo
 from app.events.bus import EventBus
 from app.events.bus import bus as default_event_bus
 from app.events.types import LlmAssignmentChanged
@@ -523,6 +525,11 @@ def resolve_model(
     TTL-advance cases are deterministic.
     """
     c = clock if clock is not None else SystemClock()
+    settings = get_settings()
+    if settings.demo_mode:
+        if not llm_capability_allowed_in_demo(capability):
+            return []
+        return [demo_free_model_pick(capability=capability)]
     return _cached_or_resolve(session, ctx=ctx, capability=capability, clock=c)
 
 

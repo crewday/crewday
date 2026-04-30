@@ -73,6 +73,7 @@ from sqlalchemy.orm import Session
 
 from app.adapters.storage.ports import EnvelopeEncryptor, EnvelopeOwner
 from app.audit import write_audit
+from app.config import get_settings
 from app.domain.integrations.ports import (
     WebhookDeliveryRow,
     WebhookRepository,
@@ -88,6 +89,7 @@ __all__ = [
     "DELIVERY_IN_FLIGHT",
     "DELIVERY_PENDING",
     "DELIVERY_SUCCEEDED",
+    "DELIVERY_SUPPRESSED_DEMO",
     "RETRY_SCHEDULE_SECONDS",
     "SIGNATURE_HEADER",
     "SUBSCRIPTION_SECRET_PURPOSE",
@@ -139,6 +141,7 @@ DELIVERY_PENDING: Final[str] = "pending"
 DELIVERY_IN_FLIGHT: Final[str] = "in_flight"
 DELIVERY_SUCCEEDED: Final[str] = "succeeded"
 DELIVERY_DEAD_LETTERED: Final[str] = "dead_lettered"
+DELIVERY_SUPPRESSED_DEMO: Final[str] = "suppressed_demo"
 
 # §10 catalog: minimum length the random secret. 32 bytes of urandom
 # rendered hex = 64 hex chars. The receiver shop expects "long enough
@@ -629,6 +632,7 @@ def enqueue(
     if subscription_id is not None:
         subscriptions = tuple(s for s in subscriptions if s.id == subscription_id)
     matching = tuple(s for s in subscriptions if event in s.events)
+    demo_mode = get_settings().demo_mode
 
     delivery_ids: list[str] = []
     for sub in matching:
@@ -642,9 +646,9 @@ def enqueue(
             subscription_id=sub.id,
             event=event,
             payload_json=payload,
-            status=DELIVERY_PENDING,
+            status=DELIVERY_SUPPRESSED_DEMO if demo_mode else DELIVERY_PENDING,
             attempt=0,
-            next_attempt_at=now,
+            next_attempt_at=None if demo_mode else now,
             replayed_from_id=None,
             created_at=now,
         )
@@ -662,9 +666,9 @@ def replay_delivery(
     """Mint a fresh delivery row carrying the same payload + a new timestamp.
 
     The new row stamps ``replayed_from_id`` at the source delivery so
-    the audit trail keeps the chain readable. Status starts at
-    ``pending`` with attempt 0 and next_attempt_at = now; the
-    dispatcher then walks it through the schedule from scratch.
+    the audit trail keeps the chain readable. Outside demo, status
+    starts at ``pending`` with attempt 0 and next_attempt_at = now;
+    in demo mode, the replay is suppressed like a fresh enqueue.
 
     Each replay re-mints the signature timestamp at delivery time
     (the dispatcher signs with ``int(clock.now().timestamp())`` on
@@ -705,15 +709,16 @@ def replay_delivery(
     payload = _build_payload(
         event=source.event, delivery_id=new_id, delivered_at=now, data=data_dict
     )
+    demo_mode = get_settings().demo_mode
     repo.insert_delivery(
         delivery_id=new_id,
         workspace_id=source.workspace_id,
         subscription_id=source.subscription_id,
         event=source.event,
         payload_json=payload,
-        status=DELIVERY_PENDING,
+        status=DELIVERY_SUPPRESSED_DEMO if demo_mode else DELIVERY_PENDING,
         attempt=0,
-        next_attempt_at=now,
+        next_attempt_at=None if demo_mode else now,
         replayed_from_id=source.id,
         created_at=now,
     )
@@ -767,8 +772,8 @@ def deliver(
       dead-letters with audit.
 
     Idempotent on a row already in a terminal state — re-invoking on
-    a ``succeeded`` / ``dead_lettered`` row is a no-op (logged at
-    INFO).
+    a ``succeeded`` / ``dead_lettered`` / ``suppressed_demo`` row is a
+    no-op (logged at INFO).
     """
     resolved_clock = clock if clock is not None else SystemClock()
     now = resolved_clock.now()
@@ -776,7 +781,11 @@ def deliver(
     delivery = repo.get_delivery(delivery_id=delivery_id)
     if delivery is None:
         raise LookupError(f"webhook_delivery {delivery_id!r} not found")
-    if delivery.status in (DELIVERY_SUCCEEDED, DELIVERY_DEAD_LETTERED):
+    if delivery.status in (
+        DELIVERY_SUCCEEDED,
+        DELIVERY_DEAD_LETTERED,
+        DELIVERY_SUPPRESSED_DEMO,
+    ):
         return DeliveryReport(
             delivery_id=delivery.id,
             status=delivery.status,

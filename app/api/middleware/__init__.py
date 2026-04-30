@@ -15,6 +15,8 @@ Each middleware is a thin, single-purpose wrapper around
   + counter (spec §16 "Observability / Metrics").
 * :mod:`app.api.middleware.rate_limit` — per-token / per-IP API
   token buckets (spec §12 "Rate limiting").
+* :mod:`app.api.middleware.demo_guardrails` — demo-only edge caps and
+  disabled-integration stubs (spec §24 "Abuse controls").
 
 See ``docs/specs/15-security-privacy.md`` §"HTTP security headers",
 ``docs/specs/12-rest-api.md`` §"Idempotency",
@@ -23,6 +25,7 @@ See ``docs/specs/15-security-privacy.md`` §"HTTP security headers",
 
 from __future__ import annotations
 
+from app.api.middleware.demo_guardrails import DemoGuardrailMiddleware
 from app.api.middleware.idempotency import (
     IdempotencyMiddleware,
     prune_expired_idempotency_keys,
@@ -43,6 +46,7 @@ from app.api.middleware.security_headers import (
 
 __all__ = [
     "REQUEST_ID_HEADER",
+    "DemoGuardrailMiddleware",
     "HttpMetricsMiddleware",
     "IdempotencyMiddleware",
     "RateLimitMiddleware",

@@ -92,7 +92,10 @@ from sqlalchemy.orm import Session
 
 from app.adapters.db.llm.models import BudgetLedger
 from app.adapters.db.llm.models import LlmUsage as LlmUsageRow
+from app.config import get_settings
+from app.demo.guardrails import DEMO_BUDGET_EXCEEDED_MESSAGE
 from app.tenancy import WorkspaceContext
+from app.tenancy.current import tenant_agnostic
 from app.util.clock import Clock, SystemClock
 from app.util.ulid import new_ulid
 
@@ -674,6 +677,16 @@ def check_budget(
     operational telemetry, not a state change.
     """
     c = clock if clock is not None else SystemClock()
+    settings = get_settings()
+    if settings.demo_mode:
+        _check_demo_global_daily_cap(
+            session,
+            ctx,
+            capability=capability,
+            projected_cost_cents=projected_cost_cents,
+            clock=c,
+            cap_usd=settings.demo_global_daily_usd_cap,
+        )
     ledger = _load_ledger_row(session, workspace_id=ctx.workspace_id)
     if ledger is None:
         # Fail closed — the missing ledger row is a seeding bug, not
@@ -698,6 +711,12 @@ def check_budget(
         raise BudgetExceeded(
             capability=capability,
             workspace_id=ctx.workspace_id,
+            message=DEMO_BUDGET_EXCEEDED_MESSAGE
+            if settings.demo_mode
+            else (
+                "Workspace agent budget exceeded. Agents will resume as "
+                "older calls age out."
+            ),
         )
 
     spent = ledger.spent_cents
@@ -716,6 +735,55 @@ def check_budget(
         raise BudgetExceeded(
             capability=capability,
             workspace_id=ctx.workspace_id,
+            message=DEMO_BUDGET_EXCEEDED_MESSAGE
+            if settings.demo_mode
+            else (
+                "Workspace agent budget exceeded. Agents will resume as "
+                "older calls age out."
+            ),
+        )
+
+
+def _check_demo_global_daily_cap(
+    session: Session,
+    ctx: WorkspaceContext,
+    *,
+    capability: str,
+    projected_cost_cents: int,
+    clock: Clock,
+    cap_usd: float,
+) -> None:
+    """Fail closed when the demo deployment-wide daily spend cap is hit."""
+    cap_cents = int(cap_usd * 100)
+    if cap_cents <= 0:
+        raise BudgetExceeded(
+            capability=capability,
+            workspace_id=ctx.workspace_id,
+            message=DEMO_BUDGET_EXCEEDED_MESSAGE,
+        )
+    now = clock.now()
+    day_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    stmt = select(func.coalesce(func.sum(LlmUsageRow.cost_cents), 0)).where(
+        LlmUsageRow.created_at >= day_start,
+        LlmUsageRow.status != "refused",
+    )
+    with tenant_agnostic():
+        spent = int(session.execute(stmt).scalar_one())
+    if spent + projected_cost_cents > cap_cents:
+        _log.warning(
+            "demo.global_cap_exceeded",
+            extra={
+                "event": "demo.global_cap_exceeded",
+                "capability": capability,
+                "spent_cents": spent,
+                "cap_cents": cap_cents,
+                "projected_cost_cents": projected_cost_cents,
+            },
+        )
+        raise BudgetExceeded(
+            capability=capability,
+            workspace_id=ctx.workspace_id,
+            message=DEMO_BUDGET_EXCEEDED_MESSAGE,
         )
 
 

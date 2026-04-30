@@ -16,7 +16,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Annotated, Any, Literal
 
-from pydantic import Field, SecretStr, field_validator, model_validator
+from pydantic import Field, IPvAnyNetwork, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 __all__ = ["Settings", "get_settings"]
@@ -169,6 +169,17 @@ class Settings(BaseSettings):
     # stand-alone (no embedding), matching the §15 default. Ignored
     # outside demo mode — prod always keeps ``frame-ancestors 'none'``.
     demo_frame_ancestors: str | None = None
+    demo_global_daily_usd_cap: float = Field(default=5.0, ge=0)
+    demo_block_cidr: Annotated[list[IPvAnyNetwork], NoDecode] = Field(
+        default_factory=list,
+    )
+    demo_mints_per_ip_per_hour: int = Field(default=10, ge=1)
+    demo_mutations_per_workspace_per_minute: int = Field(default=60, ge=1)
+    demo_llm_turns_per_workspace_per_minute: int = Field(default=10, ge=1)
+    demo_max_upload_bytes: int = Field(default=5 * 1024 * 1024, ge=1)
+    demo_upload_bytes_per_ip_per_day: int = Field(default=25 * 1024 * 1024, ge=1)
+    demo_uploads_per_workspace_lifetime: int = Field(default=10, ge=1)
+    demo_max_payload_bytes: int = Field(default=32 * 1024, ge=1)
     # Emit ``Strict-Transport-Security`` on every response (§15 "HTTP
     # security headers"). Default **off** so a fresh deployment that
     # has not yet provisioned TLS doesn't accidentally send a 2-year
@@ -276,6 +287,14 @@ class Settings(BaseSettings):
     @classmethod
     def _split_demo_db_denylist(cls, value: object) -> object:
         """Parse comma-separated demo DB denylist URLs into a list."""
+        if isinstance(value, str):
+            return [item.strip() for item in value.split(",") if item.strip()]
+        return value
+
+    @field_validator("demo_block_cidr", mode="before")
+    @classmethod
+    def _split_demo_block_cidr(cls, value: object) -> object:
+        """Parse comma-separated demo IP deny-list CIDRs."""
         if isinstance(value, str):
             return [item.strip() for item in value.split(",") if item.strip()]
         return value

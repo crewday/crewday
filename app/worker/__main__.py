@@ -64,7 +64,7 @@ async def _run() -> None:
     setup_logging(level=settings.log_level)
 
     scheduler = create_scheduler()
-    register_jobs(scheduler)
+    register_jobs(scheduler, settings=settings)
     start(scheduler)
     _log.info(
         "worker process started",

@@ -52,6 +52,7 @@ from __future__ import annotations
 import logging
 from collections.abc import AsyncIterator, Callable, Iterator
 from contextlib import AbstractAsyncContextManager, asynccontextmanager, contextmanager
+from datetime import timedelta
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as pkg_version
 from pathlib import Path
@@ -60,18 +61,26 @@ from urllib.parse import urlparse
 
 from fastapi import FastAPI, Request
 from fastapi.openapi.utils import get_openapi
-from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Response
+from fastapi.responses import (
+    FileResponse,
+    HTMLResponse,
+    JSONResponse,
+    RedirectResponse,
+    Response,
+)
 from fastapi.staticfiles import StaticFiles
 from pydantic import SecretStr
 from sqlalchemy.orm import Session
 from starlette.middleware.cors import CORSMiddleware
 
+from app.abuse.throttle import ShieldStore
 from app.adapters.db.session import make_uow
 from app.adapters.llm.openrouter import (
     DeploymentOpenRouterConfigSource,
     OpenRouterClient,
 )
 from app.adapters.llm.ports import LLMClient
+from app.adapters.mail.null import NullMailer
 from app.adapters.mail.ports import Mailer
 from app.adapters.mail.smtp import SMTPMailer
 from app.adapters.mail.smtp_config import DeploymentSmtpConfigSource, SmtpConfig
@@ -84,6 +93,7 @@ from app.api.client import build_client_portal_router
 from app.api.errors import add_exception_handlers
 from app.api.health import router as health_router
 from app.api.middleware import (
+    DemoGuardrailMiddleware,
     HttpMetricsMiddleware,
     IdempotencyMiddleware,
     RateLimitMiddleware,
@@ -168,6 +178,7 @@ from app.observability import build_metrics_router, setup_tracing
 from app.security import BindGuardError, assert_bind_allowed
 from app.security.hmac_signer import HmacSigner
 from app.tenancy.middleware import WorkspaceContextMiddleware
+from app.util.clock import SystemClock
 from app.util.logging import setup_logging
 from app.worker.tasks.inventory_reorder import register_inventory_reorder_subscriber
 
@@ -405,6 +416,8 @@ def _smtp_env_config(settings: Settings) -> SmtpConfig:
 
 def _build_mailer(settings: Settings) -> Mailer | None:
     """Return the SMTP mailer with send-time DB → env config resolution."""
+    if settings.demo_mode:
+        return NullMailer()
     return SMTPMailer(
         config_source=DeploymentSmtpConfigSource(
             env=_smtp_env_config(settings),
@@ -865,13 +878,34 @@ def _register_ops_routes(app: FastAPI) -> None:
     app.include_router(health_router)
 
 
-def _register_demo_routes(app: FastAPI, settings: Settings) -> None:
+def _register_demo_routes(
+    app: FastAPI,
+    settings: Settings,
+    *,
+    guardrail_store: ShieldStore,
+) -> None:
     """Mount demo-mode first-visit mint flow (§24)."""
     if not settings.demo_mode:
         return
 
     @app.get("/app", include_in_schema=False)
     def demo_app(request: Request) -> Response:
+        clock = SystemClock()
+        client_host = _client_host(request)
+        if not guardrail_store.check_and_record(
+            scope="demo.mint",
+            key=client_host,
+            limit=settings.demo_mints_per_ip_per_hour,
+            window=timedelta(hours=1),
+            now=clock.now(),
+        ):
+            return JSONResponse(
+                {
+                    "error": "rate_limited",
+                    "message": "Too many demo workspaces minted from this IP.",
+                },
+                status_code=429,
+            )
         scenario_param = request.query_params.get("scenario") or DEFAULT_SCENARIO_KEY
         scenario_key = (
             scenario_param if scenario_param in SCENARIO_KEYS else DEFAULT_SCENARIO_KEY
@@ -915,6 +949,12 @@ def _register_demo_routes(app: FastAPI, settings: Settings) -> None:
             "Set-Cookie", build_demo_cookie_header(scenario_key, cookie_value)
         )
         return response
+
+
+def _client_host(request: Request) -> str:
+    if request.client is None or not request.client.host:
+        return "0.0.0.0"
+    return request.client.host
 
 
 def _demo_cookie_secret(settings: Settings) -> SecretStr:
@@ -1281,7 +1321,7 @@ def _build_worker_lifespan(
 
         if cfg.worker == "internal":
             scheduler = create_scheduler()
-            register_jobs(scheduler)
+            register_jobs(scheduler, settings=cfg)
             scheduler_start(scheduler)
             app.state.scheduler = scheduler
             _log.info(
@@ -1349,6 +1389,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # existing ``/readyz`` integration suite) are unaffected.
         lifespan=_build_worker_lifespan(cfg),
     )
+    demo_guardrail_store = ShieldStore()
 
     # Middleware is applied OUTER → INNER at request time. FastAPI's
     # ``add_middleware`` prepends to ``user_middleware``, so the LAST
@@ -1397,6 +1438,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.add_middleware(RateLimitMiddleware, settings=cfg)
     app.add_middleware(HttpMetricsMiddleware)
     app.add_middleware(WorkspaceContextMiddleware)
+    app.add_middleware(
+        DemoGuardrailMiddleware,
+        settings=cfg,
+        store=demo_guardrail_store,
+    )
     app.add_middleware(SecurityHeadersMiddleware, settings=cfg)
     app.add_middleware(RequestIdMiddleware)
     app.add_middleware(
@@ -1427,7 +1473,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         capabilities=capabilities,
     )
     _mount_context_routers(app, settings=cfg)
-    _register_demo_routes(app, cfg)
+    _register_demo_routes(app, cfg, guardrail_store=demo_guardrail_store)
     # Exception handlers are registered AFTER every router is mounted
     # so the :class:`DomainError` hierarchy and validation/HTTP-exception
     # handlers cover every surface — and BEFORE the custom OpenAPI

@@ -31,6 +31,7 @@ from app.adapters.db.authz.models import (
 from app.adapters.db.demo.models import DemoWorkspace
 from app.adapters.db.expenses.models import ExpenseClaim
 from app.adapters.db.identity.models import User
+from app.adapters.db.llm.models import BudgetLedger
 from app.adapters.db.places.models import Area, Property, PropertyWorkspace, Unit
 from app.adapters.db.ports import DbSession
 from app.adapters.db.stays.models import Reservation, StayBundle
@@ -54,6 +55,7 @@ from app.demo.cookies import (
     demo_cookie_name,
     load_demo_cookie,
 )
+from app.demo.guardrails import DEMO_WORKSPACE_CAP_CENTS_30D
 from app.util.ulid import new_ulid
 
 DEFAULT_SCENARIO_KEY: Final[str] = "rental-manager"
@@ -150,6 +152,17 @@ def seed_workspace(
         owner_onboarded_at=resolved_now,
     )
     session.add(workspace)
+    session.add(
+        BudgetLedger(
+            id=new_ulid(),
+            workspace_id=workspace_id,
+            period_start=resolved_now - _WINDOW,
+            period_end=resolved_now,
+            spent_cents=0,
+            cap_cents=DEMO_WORKSPACE_CAP_CENTS_30D,
+            updated_at=resolved_now,
+        )
+    )
     session.flush()
 
     user_ids = _seed_users(

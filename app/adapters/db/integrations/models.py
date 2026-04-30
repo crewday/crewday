@@ -65,6 +65,7 @@ _WEBHOOK_DELIVERY_STATUS_VALUES: tuple[str, ...] = (
     "in_flight",
     "succeeded",
     "dead_lettered",
+    "suppressed_demo",
 )
 
 

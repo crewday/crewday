@@ -64,6 +64,7 @@ from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
 from app.adapters.db.session import make_uow
+from app.config import Settings
 from app.observability.metrics import (
     WORKER_JOB_DURATION_SECONDS,
     WORKER_JOBS_TOTAL,
@@ -73,6 +74,7 @@ from app.util.clock import Clock, SystemClock
 from app.util.logging import new_request_id, reset_request_id, set_request_id
 from app.worker.heartbeat import upsert_heartbeat
 from app.worker.jobs import common as _common_jobs
+from app.worker.jobs.demo import _make_demo_gc_body, _make_demo_usage_rollup_body
 from app.worker.jobs.identity import _make_user_workspace_refresh_body
 from app.worker.jobs.llm_budget import _make_llm_budget_refresh_body
 from app.worker.jobs.maintenance import (
@@ -95,6 +97,10 @@ __all__ = [
     "APPROVAL_TTL_JOB_ID",
     "DAILY_DIGEST_JOB_ID",
     "DAILY_DIGEST_MISFIRE_GRACE_SECONDS",
+    "DEMO_GC_INTERVAL_SECONDS",
+    "DEMO_GC_JOB_ID",
+    "DEMO_USAGE_ROLLUP_INTERVAL_SECONDS",
+    "DEMO_USAGE_ROLLUP_JOB_ID",
     "GENERATOR_JOB_ID",
     "HEARTBEAT_JOB_ID",
     "HEARTBEAT_JOB_INTERVAL_SECONDS",
@@ -287,6 +293,11 @@ INVENTORY_REORDER_JOB_ID: str = "inventory.check_reorder_points"
 # per timezone.
 DAILY_DIGEST_JOB_ID: str = "messaging.daily_digest"
 DAILY_DIGEST_MISFIRE_GRACE_SECONDS: int = 1800
+
+DEMO_GC_JOB_ID: str = "demo_gc"
+DEMO_GC_INTERVAL_SECONDS: int = 900
+DEMO_USAGE_ROLLUP_JOB_ID: str = "demo_usage_rollup"
+DEMO_USAGE_ROLLUP_INTERVAL_SECONDS: int = 60
 
 # Stable job id for §15 operational-log retention. The body archives
 # rows past each workspace's configured retention window to
@@ -490,6 +501,7 @@ def register_jobs(
     scheduler: AsyncIOScheduler,
     *,
     clock: Clock | None = None,
+    settings: Settings | None = None,
 ) -> None:
     """Register the standard job set on ``scheduler``.
 
@@ -511,6 +523,7 @@ def register_jobs(
     behave the same.
     """
     resolved_clock = clock if clock is not None else _clock_for(scheduler)
+    demo_mode = settings.demo_mode if settings is not None else False
 
     # Drop any pre-existing entries for the ids we're about to add
     # so the registration is idempotent regardless of scheduler
@@ -531,6 +544,8 @@ def register_jobs(
         INVENTORY_REORDER_JOB_ID,
         DAILY_DIGEST_JOB_ID,
         RETENTION_ROTATION_JOB_ID,
+        DEMO_GC_JOB_ID,
+        DEMO_USAGE_ROLLUP_JOB_ID,
     ):
         with contextlib.suppress(JobLookupError):
             scheduler.remove_job(pending_id)
@@ -719,20 +734,21 @@ def register_jobs(
     # preferable to a stacked catch-up that hammers upstream iCal
     # endpoints + the per-host rate-limit on a fleet returning from
     # a long pause.
-    scheduler.add_job(
-        wrap_job(
-            _make_poll_ical_fanout_body(resolved_clock),
-            job_id=POLL_ICAL_JOB_ID,
-            clock=resolved_clock,
-        ),
-        trigger=IntervalTrigger(seconds=POLL_ICAL_INTERVAL_SECONDS),
-        id=POLL_ICAL_JOB_ID,
-        name=POLL_ICAL_JOB_ID,
-        replace_existing=True,
-        max_instances=1,
-        coalesce=True,
-        misfire_grace_time=POLL_ICAL_MISFIRE_GRACE_SECONDS,
-    )
+    if not demo_mode:
+        scheduler.add_job(
+            wrap_job(
+                _make_poll_ical_fanout_body(resolved_clock),
+                job_id=POLL_ICAL_JOB_ID,
+                clock=resolved_clock,
+            ),
+            trigger=IntervalTrigger(seconds=POLL_ICAL_INTERVAL_SECONDS),
+            id=POLL_ICAL_JOB_ID,
+            name=POLL_ICAL_JOB_ID,
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+            misfire_grace_time=POLL_ICAL_MISFIRE_GRACE_SECONDS,
+        )
 
     # --- 5 min user_workspace derive-refresh (cd-yqm4) ---
     # The reconciler in
@@ -811,20 +827,21 @@ def register_jobs(
     # is preferable to a stacked catch-up. ``coalesce=True`` +
     # ``max_instances=1`` keep a slow dispatcher run from stacking
     # ticks on a long upstream timeout.
-    scheduler.add_job(
-        wrap_job(
-            _make_webhook_dispatch_body(resolved_clock),
-            job_id=WEBHOOK_DISPATCH_JOB_ID,
-            clock=resolved_clock,
-        ),
-        trigger=IntervalTrigger(seconds=WEBHOOK_DISPATCH_INTERVAL_SECONDS),
-        id=WEBHOOK_DISPATCH_JOB_ID,
-        name=WEBHOOK_DISPATCH_JOB_ID,
-        replace_existing=True,
-        max_instances=1,
-        coalesce=True,
-        misfire_grace_time=WEBHOOK_DISPATCH_INTERVAL_SECONDS,
-    )
+    if not demo_mode:
+        scheduler.add_job(
+            wrap_job(
+                _make_webhook_dispatch_body(resolved_clock),
+                job_id=WEBHOOK_DISPATCH_JOB_ID,
+                clock=resolved_clock,
+            ),
+            trigger=IntervalTrigger(seconds=WEBHOOK_DISPATCH_INTERVAL_SECONDS),
+            id=WEBHOOK_DISPATCH_JOB_ID,
+            name=WEBHOOK_DISPATCH_JOB_ID,
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+            misfire_grace_time=WEBHOOK_DISPATCH_INTERVAL_SECONDS,
+        )
 
     # --- Hourly inventory reorder-point check (cd-kxr0) ---
     scheduler.add_job(
@@ -846,20 +863,52 @@ def register_jobs(
     # The body sends only users whose recipient-local clock is in the
     # 07:00 hour, so an hourly UTC trigger covers every timezone
     # without registering per-timezone jobs.
-    scheduler.add_job(
-        wrap_job(
-            _make_daily_digest_fanout_body(resolved_clock),
-            job_id=DAILY_DIGEST_JOB_ID,
-            clock=resolved_clock,
-        ),
-        trigger=CronTrigger(minute=0),
-        id=DAILY_DIGEST_JOB_ID,
-        name=DAILY_DIGEST_JOB_ID,
-        replace_existing=True,
-        max_instances=1,
-        coalesce=True,
-        misfire_grace_time=DAILY_DIGEST_MISFIRE_GRACE_SECONDS,
-    )
+    if not demo_mode:
+        scheduler.add_job(
+            wrap_job(
+                _make_daily_digest_fanout_body(resolved_clock),
+                job_id=DAILY_DIGEST_JOB_ID,
+                clock=resolved_clock,
+            ),
+            trigger=CronTrigger(minute=0),
+            id=DAILY_DIGEST_JOB_ID,
+            name=DAILY_DIGEST_JOB_ID,
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+            misfire_grace_time=DAILY_DIGEST_MISFIRE_GRACE_SECONDS,
+        )
+
+    if demo_mode:
+        assert settings is not None
+        scheduler.add_job(
+            wrap_job(
+                _make_demo_gc_body(settings, resolved_clock),
+                job_id=DEMO_GC_JOB_ID,
+                clock=resolved_clock,
+            ),
+            trigger=IntervalTrigger(seconds=DEMO_GC_INTERVAL_SECONDS),
+            id=DEMO_GC_JOB_ID,
+            name=DEMO_GC_JOB_ID,
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+            misfire_grace_time=DEMO_GC_INTERVAL_SECONDS,
+        )
+        scheduler.add_job(
+            wrap_job(
+                _make_demo_usage_rollup_body(resolved_clock),
+                job_id=DEMO_USAGE_ROLLUP_JOB_ID,
+                clock=resolved_clock,
+            ),
+            trigger=IntervalTrigger(seconds=DEMO_USAGE_ROLLUP_INTERVAL_SECONDS),
+            id=DEMO_USAGE_ROLLUP_JOB_ID,
+            name=DEMO_USAGE_ROLLUP_JOB_ID,
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+            misfire_grace_time=90,
+        )
 
 
 def start(scheduler: AsyncIOScheduler) -> None:
