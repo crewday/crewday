@@ -98,6 +98,7 @@ def capabilities_captcha_required() -> Capabilities:
             wildcard_subdomains=False,
             email_bounce_webhooks=False,
             llm_voice_input=False,
+            postgis=False,
         ),
         settings=DeploymentSettings(signup_enabled=True, captcha_required=True),
     )
@@ -114,6 +115,7 @@ def capabilities_captcha_optional() -> Capabilities:
             wildcard_subdomains=False,
             email_bounce_webhooks=False,
             llm_voice_input=False,
+            postgis=False,
         ),
         settings=DeploymentSettings(signup_enabled=True, captcha_required=False),
     )

@@ -225,9 +225,10 @@ registry interface as everything else in §01):
 | `settings.platform_fee_default_bps`  | int  | `1000`  | default 10 % snapshotted onto each new match           |
 | `settings.platform_fee_currency_policy` | enum | `match_source` | `match_source \| fixed_<ISO>`                      |
 
-Operator sets them via `crewday deploy settings set ...` (§13).
-None of these live in v1's `deployment_setting` table seed — they
-are added in the marketplace migration.
+Operators set them through the deployment settings surface (§12/§13).
+In v1, only these settings and the `features.postgis` capability seam
+exist; marketplace tables, routes, workers, OpenAPI entries, fixtures,
+and UI remain out of scope until the deferred marketplace milestone.
 
 ## Actions (reserved)
 

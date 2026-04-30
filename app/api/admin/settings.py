@@ -166,6 +166,28 @@ def _coerce_tcp_port(value: Any) -> int:
     raise ValueError("expected a TCP port from 1 to 65535")
 
 
+def _coerce_marketplace_fee_bps(value: Any) -> int:
+    number = _coerce_int(value)
+    if 0 <= number <= 10000:
+        return number
+    raise ValueError("expected basis points from 0 to 10000")
+
+
+def _coerce_platform_fee_currency_policy(value: Any) -> str:
+    if not isinstance(value, str):
+        raise ValueError("expected a string")
+    if value == "match_source":
+        return value
+    if (
+        value.startswith("fixed_")
+        and len(value) == len("fixed_USD")
+        and value.removeprefix("fixed_").isalpha()
+        and value.removeprefix("fixed_").isupper()
+    ):
+        return value
+    raise ValueError("expected 'match_source' or fixed_<ISO>")
+
+
 def _coerce_str_int_dict(value: Any) -> dict[str, int]:
     """Coerce a JSON value into a ``{str: int}`` mapping.
 
@@ -251,6 +273,27 @@ _REGISTRY: Final[tuple[_SettingDef, ...]] = (
         description="Require Turnstile CAPTCHA on the self-serve signup form.",
         coerce=_coerce_bool,
         default=_DEPLOYMENT_DEFAULTS["captcha_required"],
+    ),
+    _SettingDef(
+        key="marketplace_enabled",
+        kind="bool",
+        description="Enable the deferred marketplace discovery surface.",
+        coerce=_coerce_bool,
+        default=_DEPLOYMENT_DEFAULTS["marketplace_enabled"],
+    ),
+    _SettingDef(
+        key="platform_fee_default_bps",
+        kind="int",
+        description="Default platform fee basis points snapshotted onto matches.",
+        coerce=_coerce_marketplace_fee_bps,
+        default=_DEPLOYMENT_DEFAULTS["platform_fee_default_bps"],
+    ),
+    _SettingDef(
+        key="platform_fee_currency_policy",
+        kind="string",
+        description="Marketplace platform fee currency policy.",
+        coerce=_coerce_platform_fee_currency_policy,
+        default=_DEPLOYMENT_DEFAULTS["platform_fee_currency_policy"],
     ),
     _SettingDef(
         key=OPENROUTER_API_KEY_SETTING,

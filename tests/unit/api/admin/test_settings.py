@@ -105,6 +105,9 @@ class TestListSettings:
             "require_passkey_attestation",
             "llm_default_budget_cents_30d",
             "captcha_required",
+            "marketplace_enabled",
+            "platform_fee_default_bps",
+            "platform_fee_currency_policy",
             OPENROUTER_API_KEY_SETTING,
             "trusted_interfaces",
         } <= keys
@@ -238,6 +241,33 @@ class TestUpdateSetting:
         resp = client.put(
             "/admin/api/v1/settings/signup_enabled",
             json={"value": "definitely-not-a-bool"},
+        )
+        assert resp.status_code == 422
+        assert resp.json().get("error") == ERROR_VALUE_TYPE
+
+    @pytest.mark.parametrize(
+        ("key", "value"),
+        [
+            ("platform_fee_default_bps", -1),
+            ("platform_fee_default_bps", 10001),
+            ("platform_fee_currency_policy", "fixed_usd"),
+            ("platform_fee_currency_policy", "variable"),
+        ],
+    )
+    def test_invalid_marketplace_setting_values(
+        self,
+        client: TestClient,
+        session_factory: sessionmaker[Session],
+        settings: Settings,
+        key: str,
+        value: object,
+    ) -> None:
+        client.cookies.set(
+            SESSION_COOKIE_NAME, _admin_cookie(session_factory, settings, owner=True)
+        )
+        resp = client.put(
+            f"/admin/api/v1/settings/{key}",
+            json={"value": value},
         )
         assert resp.status_code == 422
         assert resp.json().get("error") == ERROR_VALUE_TYPE

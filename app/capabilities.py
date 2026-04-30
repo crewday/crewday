@@ -79,6 +79,7 @@ class Features:
     wildcard_subdomains: bool
     email_bounce_webhooks: bool
     llm_voice_input: bool
+    postgis: bool
 
 
 @dataclass(slots=True)
@@ -104,6 +105,11 @@ class DeploymentSettings:
     # secret comes from :attr:`app.config.Settings.captcha_turnstile_secret`
     # and falls through to an offline test-mode when unset.
     captcha_required: bool = True
+    # Marketplace is intentionally deferred in v1 (§25). The settings
+    # exist now so future routes and workers have one stable gate.
+    marketplace_enabled: bool = False
+    platform_fee_default_bps: int = 1000
+    platform_fee_currency_policy: str = "match_source"
 
 
 @dataclass(frozen=True, slots=True)
@@ -132,6 +138,18 @@ class Capabilities:
         """Return a boolean capability by dotted registry key."""
         if key == "runtime.demo_mode":
             return self.runtime.demo_mode
+        if key.startswith("features."):
+            name = key.removeprefix("features.")
+            value = getattr(self.features, name, None)
+            if isinstance(value, bool):
+                return value
+            raise KeyError(f"unknown capability {key!r}")
+        if key.startswith("settings."):
+            name = key.removeprefix("settings.")
+            value = getattr(self.settings, name, None)
+            if isinstance(value, bool):
+                return value
+            raise KeyError(f"unknown capability {key!r}")
         raise KeyError(f"unknown capability {key!r}")
 
     def refresh_settings(self, session: DbSession) -> None:
@@ -162,6 +180,9 @@ class Capabilities:
         require_attestation = self.settings.require_passkey_attestation
         budget_cents = self.settings.llm_default_budget_cents_30d
         captcha_required = self.settings.captcha_required
+        marketplace_enabled = self.settings.marketplace_enabled
+        platform_fee_default_bps = self.settings.platform_fee_default_bps
+        platform_fee_currency_policy = self.settings.platform_fee_currency_policy
         if "signup_enabled" in mapping:
             signup_enabled = bool(mapping["signup_enabled"])
         if "signup_throttle_overrides" in mapping:
@@ -172,6 +193,12 @@ class Capabilities:
             budget_cents = int(mapping["llm_default_budget_cents_30d"])
         if "captcha_required" in mapping:
             captcha_required = bool(mapping["captcha_required"])
+        if "marketplace_enabled" in mapping:
+            marketplace_enabled = bool(mapping["marketplace_enabled"])
+        if "platform_fee_default_bps" in mapping:
+            platform_fee_default_bps = int(mapping["platform_fee_default_bps"])
+        if "platform_fee_currency_policy" in mapping:
+            platform_fee_currency_policy = str(mapping["platform_fee_currency_policy"])
 
         # Every coercion succeeded — apply in place so existing
         # references to ``self.settings`` see the new values.
@@ -180,6 +207,9 @@ class Capabilities:
         self.settings.require_passkey_attestation = require_attestation
         self.settings.llm_default_budget_cents_30d = budget_cents
         self.settings.captcha_required = captcha_required
+        self.settings.marketplace_enabled = marketplace_enabled
+        self.settings.platform_fee_default_bps = platform_fee_default_bps
+        self.settings.platform_fee_currency_policy = platform_fee_currency_policy
 
 
 def _is_postgres(database_url: str) -> bool:
@@ -248,6 +278,10 @@ def _probe_features(settings: Settings) -> Features:
         # llm_voice_input is an LLM-provider capability; routed via
         # the LLM adapter in §11 follow-ups.
         llm_voice_input=False,
+        # Marketplace spatial indexing lands after v1. The capability
+        # is registered now so future PostGIS migrations can flip it
+        # without changing route/service call sites.
+        postgis=False,
     )
 
 

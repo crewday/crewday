@@ -92,6 +92,7 @@ def capabilities() -> Capabilities:
             wildcard_subdomains=False,
             email_bounce_webhooks=False,
             llm_voice_input=False,
+            postgis=False,
         ),
         settings=DeploymentSettings(signup_enabled=True, captcha_required=False),
     )

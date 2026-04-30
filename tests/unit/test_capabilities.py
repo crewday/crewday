@@ -155,13 +155,14 @@ class TestProbeFeaturesStorage:
 
 
 class TestProbeFeaturesStubs:
-    """The three v1-stubbed fields stay False regardless of settings."""
+    """The v1-stubbed feature fields stay False regardless of settings."""
 
     def test_stubs_are_false_on_sqlite(self) -> None:
         features = _probe_features(_sqlite_settings())
         assert features.wildcard_subdomains is False
         assert features.email_bounce_webhooks is False
         assert features.llm_voice_input is False
+        assert features.postgis is False
 
     def test_stubs_are_false_on_postgres(self) -> None:
         features = _probe_features(
@@ -170,6 +171,7 @@ class TestProbeFeaturesStubs:
         assert features.wildcard_subdomains is False
         assert features.email_bounce_webhooks is False
         assert features.llm_voice_input is False
+        assert features.postgis is False
 
 
 class TestProbeWithoutSession:
@@ -183,6 +185,9 @@ class TestProbeWithoutSession:
         # cd-055: captcha_required defaults on (SaaS default); operators
         # toggle off via deployment_setting for self-host.
         assert caps.settings.captcha_required is True
+        assert caps.settings.marketplace_enabled is False
+        assert caps.settings.platform_fee_default_bps == 1000
+        assert caps.settings.platform_fee_currency_policy == "match_source"
 
     def test_features_populated_when_session_none(self) -> None:
         caps = probe(_sqlite_settings(storage_backend="s3"), session=None)
@@ -193,6 +198,8 @@ class TestProbeWithoutSession:
         caps = probe(_sqlite_settings(demo_mode=True), session=None)
         assert caps.runtime.demo_mode is True
         assert caps.has("runtime.demo_mode") is True
+        assert caps.has("settings.marketplace_enabled") is False
+        assert caps.has("features.postgis") is False
 
     def test_runtime_demo_mode_defaults_false(self) -> None:
         caps = probe(_sqlite_settings(), session=None)

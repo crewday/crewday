@@ -241,6 +241,7 @@ def capabilities() -> Capabilities:
             wildcard_subdomains=False,
             email_bounce_webhooks=False,
             llm_voice_input=False,
+            postgis=False,
         ),
         # Captcha disabled so the test can drive ``/signup/start``
         # without supplying a Turnstile token; the abuse gates we

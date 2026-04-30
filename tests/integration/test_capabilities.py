@@ -36,6 +36,7 @@ def _empty_capabilities() -> Capabilities:
         wildcard_subdomains=False,
         email_bounce_webhooks=False,
         llm_voice_input=False,
+        postgis=False,
     )
     return Capabilities(features=features, settings=DeploymentSettings())
 
@@ -111,6 +112,16 @@ class TestRefreshSettings:
         caps.refresh_settings(db_session)
         assert caps.settings.captcha_required is False
 
+    def test_marketplace_settings_update(self, db_session: Session) -> None:
+        _add(db_session, "marketplace_enabled", True)
+        _add(db_session, "platform_fee_default_bps", 750)
+        _add(db_session, "platform_fee_currency_policy", "fixed_EUR")
+        caps = _empty_capabilities()
+        caps.refresh_settings(db_session)
+        assert caps.settings.marketplace_enabled is True
+        assert caps.settings.platform_fee_default_bps == 750
+        assert caps.settings.platform_fee_currency_policy == "fixed_EUR"
+
     def test_unknown_key_silently_ignored(self, db_session: Session) -> None:
         """A DB row with a key the app doesn't know about must not crash."""
         _add(db_session, "invented_future_toggle", "anything")
@@ -146,6 +157,7 @@ class TestRefreshSettings:
         assert caps.settings.signup_throttle_overrides == {}
         assert caps.settings.require_passkey_attestation is False
         assert caps.settings.llm_default_budget_cents_30d == 500
+        assert caps.settings.marketplace_enabled is False
 
     def test_multiple_rows_all_applied(self, db_session: Session) -> None:
         _add(db_session, "signup_enabled", False)
