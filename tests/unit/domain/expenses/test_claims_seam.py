@@ -216,6 +216,13 @@ class _FakeRepo:
             key=lambda r: (r.submitted_at or _PINNED, r.id),
             reverse=True,
         )
+        if cursor is not None:
+            rows = [
+                r
+                for r in rows
+                if (r.submitted_at or _PINNED, r.id)
+                < (cursor.submitted_at, cursor.claim_id)
+            ]
         return rows[: limit + 1]
 
     def list_pending_reimbursement_claims(

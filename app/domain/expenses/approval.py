@@ -31,8 +31,9 @@ Public surface:
   enum, no-future ``paid_at`` skew window).
 * **Service functions** — :func:`approve_claim`, :func:`reject_claim`,
   :func:`mark_reimbursed`, :func:`list_pending`. Same argument
-  convention as :mod:`app.domain.expenses.claims`: ``session`` first,
-  :class:`~app.tenancy.WorkspaceContext` second, the rest keyword-only.
+  convention as :mod:`app.domain.expenses.claims`: repository first,
+  capability checker second, :class:`~app.tenancy.WorkspaceContext`
+  third, the rest keyword-only.
 * **Errors** — :class:`ClaimNotApprovable` (409 — wrong state for
   approve / reject), :class:`ClaimNotReimbursable` (409 — wrong state
   for mark-reimbursed), :class:`ApprovalPermissionDenied` (403 —
@@ -81,35 +82,25 @@ from datetime import datetime
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
-from sqlalchemy import select
-from sqlalchemy.orm import Session
 
-from app.adapters.db.expenses.models import (
-    _REIMBURSED_VIA_VALUES,
-    ExpenseAttachment,
-    ExpenseClaim,
-)
-from app.adapters.db.workspace.models import WorkEngagement
 from app.audit import write_audit
-from app.authz import (
-    InvalidScope,
-    PermissionDenied,
-    UnknownActionKey,
-    require,
-)
 from app.domain.expenses.claims import (
     ClaimNotFound,
-    ExpenseAttachmentView,
     ExpenseCategory,
     ExpenseClaimView,
     _ensure_utc,
-    _narrow_category,
-    _narrow_kind,
-    _narrow_state,
+    _row_to_view,
     _validate_category,
     _validate_currency,
     _validate_purchased_at_not_future,
     _view_to_diff_dict,
+)
+from app.domain.expenses.ports import (
+    CapabilityChecker,
+    ExpenseClaimRow,
+    ExpensesRepository,
+    PendingClaimsCursor,
+    SeamPermissionDenied,
 )
 from app.events import (
     ExpenseApproved,
@@ -146,6 +137,12 @@ __all__ = [
 # kept as a narrow literal at the boundary so the DTO + event stay
 # in lock-step with the DB CHECK clamp on ``reimbursed_via``.
 ReimburseVia = Literal["cash", "bank", "card", "other"]
+_REIMBURSED_VIA_VALUES_LOCAL: tuple[ReimburseVia, ...] = (
+    "cash",
+    "bank",
+    "card",
+    "other",
+)
 
 
 # ---------------------------------------------------------------------------
@@ -329,120 +326,28 @@ class ReimburseBody(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# ORM-bound helpers (cd-zoj4 follow-up will migrate these onto the seam)
+# Seam-backed helpers
 # ---------------------------------------------------------------------------
-#
-# The cd-0e8i refactor pulled :mod:`app.domain.expenses.claims` off
-# :mod:`app.adapters.db.expenses.models`, so the
-# ``_load_row(session, ctx, ...)`` / ``_row_to_view(session, row)`` /
-# ``_load_attachments(session, ...)`` helpers approval previously
-# imported from claims now live here as local equivalents until the
-# cd-zoj4 follow-up rewires this module onto
-# :class:`~app.domain.expenses.ports.ExpensesRepository` end-to-end.
-#
-# The import edges (``app.domain.expenses.approval ->
-# app.adapters.db.expenses.models`` / ``-> app.adapters.db.workspace.models``)
-# are already covered by the cd-9guk stopgap entries in
-# ``pyproject.toml``; nothing new gets added.
 
 
 def _load_row(
-    session: Session,
+    repo: ExpensesRepository,
     ctx: WorkspaceContext,
     *,
     claim_id: str,
     include_deleted: bool = False,
     for_update: bool = False,
-) -> ExpenseClaim:
-    """Load ``claim_id`` scoped to the caller's workspace or raise.
-
-    Mirrors the cd-0e8i-removed
-    :func:`app.domain.expenses.claims._load_row` shape so the rest of
-    the approval flow keeps reading. ``include_deleted`` /
-    ``for_update`` follow the same semantics as the original.
-    """
-    stmt = select(ExpenseClaim).where(
-        ExpenseClaim.id == claim_id,
-        ExpenseClaim.workspace_id == ctx.workspace_id,
+) -> ExpenseClaimRow:
+    """Load ``claim_id`` scoped to the caller's workspace or raise."""
+    row = repo.get_claim(
+        workspace_id=ctx.workspace_id,
+        claim_id=claim_id,
+        include_deleted=include_deleted,
+        for_update=for_update,
     )
-    if not include_deleted:
-        stmt = stmt.where(ExpenseClaim.deleted_at.is_(None))
-    if for_update:
-        stmt = stmt.with_for_update()
-    row = session.scalars(stmt).one_or_none()
     if row is None:
         raise ClaimNotFound(claim_id)
     return row
-
-
-def _load_attachments(
-    session: Session, *, workspace_id: str, claim_id: str
-) -> tuple[ExpenseAttachmentView, ...]:
-    """Return every attachment for ``claim_id`` in upload order.
-
-    Local copy of the cd-0e8i-removed
-    :func:`app.domain.expenses.claims._load_attachments` so
-    :func:`_row_to_view` can attach the receipts list to the projected
-    view.
-    """
-    stmt = (
-        select(ExpenseAttachment)
-        .where(
-            ExpenseAttachment.workspace_id == workspace_id,
-            ExpenseAttachment.claim_id == claim_id,
-        )
-        .order_by(ExpenseAttachment.created_at.asc(), ExpenseAttachment.id.asc())
-    )
-    rows = session.scalars(stmt).all()
-    return tuple(
-        ExpenseAttachmentView(
-            id=r.id,
-            claim_id=r.claim_id,
-            blob_hash=r.blob_hash,
-            kind=_narrow_kind(r.kind),
-            pages=r.pages,
-            created_at=_ensure_utc(r.created_at),
-        )
-        for r in rows
-    )
-
-
-def _row_to_view(session: Session, row: ExpenseClaim) -> ExpenseClaimView:
-    """Project a loaded :class:`ExpenseClaim` row into the domain read view.
-
-    Local copy of the cd-0e8i-removed
-    :func:`app.domain.expenses.claims._row_to_view`. Loads the
-    attachment tuple in the same SELECT pass — read views are always
-    whole-claim, never half-populated.
-    """
-    return ExpenseClaimView(
-        id=row.id,
-        workspace_id=row.workspace_id,
-        work_engagement_id=row.work_engagement_id,
-        vendor=row.vendor,
-        purchased_at=_ensure_utc(row.purchased_at),
-        currency=row.currency,
-        total_amount_cents=row.total_amount_cents,
-        category=_narrow_category(row.category),
-        property_id=row.property_id,
-        note_md=row.note_md,
-        state=_narrow_state(row.state),
-        submitted_at=(
-            _ensure_utc(row.submitted_at) if row.submitted_at is not None else None
-        ),
-        decided_by=row.decided_by,
-        decided_at=(
-            _ensure_utc(row.decided_at) if row.decided_at is not None else None
-        ),
-        decision_note_md=row.decision_note_md,
-        created_at=_ensure_utc(row.created_at),
-        deleted_at=(
-            _ensure_utc(row.deleted_at) if row.deleted_at is not None else None
-        ),
-        attachments=_load_attachments(
-            session, workspace_id=row.workspace_id, claim_id=row.id
-        ),
-    )
 
 
 # ---------------------------------------------------------------------------
@@ -450,50 +355,28 @@ def _row_to_view(session: Session, row: ExpenseClaim) -> ExpenseClaimView:
 # ---------------------------------------------------------------------------
 
 
-def _require_approval(session: Session, ctx: WorkspaceContext) -> None:
+def _require_approval(checker: CapabilityChecker) -> None:
     """Enforce ``expenses.approve`` or raise.
 
-    Wraps :func:`app.authz.require` + translates a caller-bug
-    (unknown key / invalid scope) into :class:`RuntimeError` so the
-    router layer surfaces it as 500. Mirrors
-    :func:`app.domain.expenses.claims._require_capability` but with
-    the dedicated 403 type for the approval surface.
+    The SA checker translates authz denials to the seam-level
+    :class:`SeamPermissionDenied`; catalog-misconfiguration errors
+    propagate as :class:`RuntimeError`.
     """
     try:
-        require(
-            session,
-            ctx,
-            action_key="expenses.approve",
-            scope_kind="workspace",
-            scope_id=ctx.workspace_id,
-        )
-    except (UnknownActionKey, InvalidScope) as exc:
-        raise RuntimeError(
-            f"authz catalog misconfigured for 'expenses.approve': {exc!s}"
-        ) from exc
-    except PermissionDenied as exc:
+        checker.require("expenses.approve")
+    except SeamPermissionDenied as exc:
         raise ApprovalPermissionDenied(str(exc)) from exc
 
 
-def _require_reimburse(session: Session, ctx: WorkspaceContext) -> None:
+def _require_reimburse(checker: CapabilityChecker) -> None:
     """Enforce ``expenses.reimburse`` or raise.
 
     Distinct from :func:`_require_approval` so the router emits the
     right 403 envelope ("missing approve" vs "missing reimburse").
     """
     try:
-        require(
-            session,
-            ctx,
-            action_key="expenses.reimburse",
-            scope_kind="workspace",
-            scope_id=ctx.workspace_id,
-        )
-    except (UnknownActionKey, InvalidScope) as exc:
-        raise RuntimeError(
-            f"authz catalog misconfigured for 'expenses.reimburse': {exc!s}"
-        ) from exc
-    except PermissionDenied as exc:
+        checker.require("expenses.reimburse")
+    except SeamPermissionDenied as exc:
         raise ReimbursePermissionDenied(str(exc)) from exc
 
 
@@ -527,7 +410,7 @@ def _validate_paid_at_not_future(value: datetime, *, now: datetime) -> datetime:
 
 
 def _submitter_user_id(
-    session: Session, ctx: WorkspaceContext, *, claim: ExpenseClaim
+    repo: ExpensesRepository, ctx: WorkspaceContext, *, claim: ExpenseClaimRow
 ) -> str:
     """Return the user_id behind the claim's bound engagement.
 
@@ -537,11 +420,9 @@ def _submitter_user_id(
     pass ``None`` into an event payload that requires a non-null
     ``submitter_user_id``.
     """
-    stmt = select(WorkEngagement).where(
-        WorkEngagement.id == claim.work_engagement_id,
-        WorkEngagement.workspace_id == ctx.workspace_id,
+    eng = repo.get_engagement(
+        workspace_id=ctx.workspace_id, engagement_id=claim.work_engagement_id
     )
-    eng = session.scalars(stmt).one_or_none()
     if eng is None:
         raise RuntimeError(
             f"claim {claim.id!r} references missing engagement "
@@ -555,13 +436,13 @@ def _submitter_user_id(
 # ---------------------------------------------------------------------------
 
 
-def _apply_edits(claim: ExpenseClaim, edits: ApprovalEdits, *, now: datetime) -> bool:
-    """Apply ``edits`` to ``claim`` in place.
+def _validated_edit_fields(edits: ApprovalEdits, *, now: datetime) -> dict[str, Any]:
+    """Return repository-ready fields for ``edits``.
 
-    Returns ``True`` when at least one field was rewritten (so the
-    audit row + event ``had_edits`` flag carry the truth), ``False``
-    when ``edits`` was a no-op (every supplied field omitted, or the
-    DTO was constructed but every key absent). Currency is
+    A non-empty mapping means at least one field should be rewritten
+    (so the audit row + event ``had_edits`` flag carry the truth).
+    An empty mapping means ``edits`` was a no-op (every supplied field
+    omitted, or the DTO was constructed but every key absent). Currency is
     re-validated + uppercased; ``purchased_at`` re-runs the no-future
     guard against the *current* clock (an approver cannot push the
     receipt date into the future even if the worker had submitted
@@ -569,32 +450,24 @@ def _apply_edits(claim: ExpenseClaim, edits: ApprovalEdits, *, now: datetime) ->
     """
     diff = edits.model_dump(exclude_unset=True)
     if not diff:
-        return False
+        return {}
 
-    if "vendor" in diff:
-        claim.vendor = diff["vendor"]
     if "purchased_at" in diff:
         _validate_purchased_at_not_future(diff["purchased_at"], now=now)
-        claim.purchased_at = diff["purchased_at"]
     if "currency" in diff:
-        claim.currency = _validate_currency(diff["currency"])
-    if "total_amount_cents" in diff:
-        claim.total_amount_cents = diff["total_amount_cents"]
+        diff["currency"] = _validate_currency(diff["currency"])
     if "category" in diff:
         # The DTO's ``Literal`` narrows the category on HTTP, but a
         # Python caller bypassing the DTO would otherwise land an
         # out-of-set value at the DB CHECK constraint. Mirrors the
         # safety net in :func:`app.domain.expenses.claims.update_claim`.
-        claim.category = _validate_category(diff["category"])
-    if "property_id" in diff:
-        claim.property_id = diff["property_id"]
-    if "note_md" in diff:
-        claim.note_md = diff["note_md"]
-    return True
+        diff["category"] = _validate_category(diff["category"])
+    return diff
 
 
 def approve_claim(
-    session: Session,
+    repo: ExpensesRepository,
+    checker: CapabilityChecker,
     ctx: WorkspaceContext,
     *,
     claim_id: str,
@@ -632,9 +505,9 @@ def approve_claim(
     resolved_clock = clock if clock is not None else SystemClock()
     now = resolved_clock.now()
 
-    _require_approval(session, ctx)
+    _require_approval(checker)
 
-    row = _load_row(session, ctx, claim_id=claim_id, for_update=True)
+    row = _load_row(repo, ctx, claim_id=claim_id, for_update=True)
 
     if row.state != "submitted":
         raise ClaimNotApprovable(
@@ -642,25 +515,34 @@ def approve_claim(
             "claims may be approved"
         )
 
-    submitter_user_id = _submitter_user_id(session, ctx, claim=row)
-    before = _row_to_view(session, row)
+    submitter_user_id = _submitter_user_id(repo, ctx, claim=row)
+    before = _row_to_view(repo, row)
 
     had_edits = False
     if edits is not None:
-        had_edits = _apply_edits(row, edits, now=now)
+        edit_fields = _validated_edit_fields(edits, now=now)
+        had_edits = bool(edit_fields)
+        if edit_fields:
+            row = repo.update_claim_fields(
+                workspace_id=ctx.workspace_id,
+                claim_id=row.id,
+                fields=edit_fields,
+            )
 
-    row.state = "approved"
-    row.decided_by = ctx.actor_id
-    row.decided_at = now
-    session.flush()
-    after = _row_to_view(session, row)
+    row = repo.mark_claim_approved(
+        workspace_id=ctx.workspace_id,
+        claim_id=row.id,
+        decided_by=ctx.actor_id,
+        decided_at=now,
+    )
+    after = _row_to_view(repo, row)
 
     audit_diff: dict[str, Any] = {
         "before": _view_to_diff_dict(before),
         "after": _view_to_diff_dict(after),
     }
     write_audit(
-        session,
+        repo.session,
         ctx,
         entity_kind="expense_claim",
         entity_id=row.id,
@@ -690,7 +572,8 @@ def approve_claim(
 
 
 def reject_claim(
-    session: Session,
+    repo: ExpensesRepository,
+    checker: CapabilityChecker,
     ctx: WorkspaceContext,
     *,
     claim_id: str,
@@ -729,7 +612,7 @@ def reject_claim(
     resolved_clock = clock if clock is not None else SystemClock()
     now = resolved_clock.now()
 
-    _require_approval(session, ctx)
+    _require_approval(checker)
 
     if not reason_md or not reason_md.strip():
         # Defence-in-depth — the DTO enforces ``min_length=1`` on
@@ -742,7 +625,7 @@ def reject_claim(
             "an empty rejection hides the why from the worker."
         )
 
-    row = _load_row(session, ctx, claim_id=claim_id, for_update=True)
+    row = _load_row(repo, ctx, claim_id=claim_id, for_update=True)
 
     if row.state != "submitted":
         raise ClaimNotApprovable(
@@ -750,18 +633,20 @@ def reject_claim(
             "claims may be rejected"
         )
 
-    submitter_user_id = _submitter_user_id(session, ctx, claim=row)
-    before = _row_to_view(session, row)
+    submitter_user_id = _submitter_user_id(repo, ctx, claim=row)
+    before = _row_to_view(repo, row)
 
-    row.state = "rejected"
-    row.decided_by = ctx.actor_id
-    row.decided_at = now
-    row.decision_note_md = reason_md
-    session.flush()
-    after = _row_to_view(session, row)
+    row = repo.mark_claim_rejected(
+        workspace_id=ctx.workspace_id,
+        claim_id=row.id,
+        decided_by=ctx.actor_id,
+        decided_at=now,
+        decision_note_md=reason_md,
+    )
+    after = _row_to_view(repo, row)
 
     write_audit(
-        session,
+        repo.session,
         ctx,
         entity_kind="expense_claim",
         entity_id=row.id,
@@ -809,12 +694,14 @@ def _narrow_reimbursed_via(value: str) -> ReimburseVia:
     if value == "other":
         return "other"
     raise ValueError(
-        f"reimbursed_via {value!r} is not one of {sorted(_REIMBURSED_VIA_VALUES)!r}"
+        "reimbursed_via "
+        f"{value!r} is not one of {sorted(_REIMBURSED_VIA_VALUES_LOCAL)!r}"
     )
 
 
 def mark_reimbursed(
-    session: Session,
+    repo: ExpensesRepository,
+    checker: CapabilityChecker,
     ctx: WorkspaceContext,
     *,
     claim_id: str,
@@ -849,13 +736,13 @@ def mark_reimbursed(
     resolved_clock = clock if clock is not None else SystemClock()
     now = resolved_clock.now()
 
-    _require_reimburse(session, ctx)
+    _require_reimburse(checker)
 
     if body.paid_at is not None:
         _validate_paid_at_not_future(body.paid_at, now=now)
     paid_at = body.paid_at if body.paid_at is not None else now
 
-    row = _load_row(session, ctx, claim_id=claim_id, for_update=True)
+    row = _load_row(repo, ctx, claim_id=claim_id, for_update=True)
 
     if row.state != "approved":
         raise ClaimNotReimbursable(
@@ -863,19 +750,21 @@ def mark_reimbursed(
             "claims may be marked reimbursed"
         )
 
-    submitter_user_id = _submitter_user_id(session, ctx, claim=row)
-    before = _row_to_view(session, row)
+    submitter_user_id = _submitter_user_id(repo, ctx, claim=row)
+    before = _row_to_view(repo, row)
 
     via = _narrow_reimbursed_via(body.via)
-    row.state = "reimbursed"
-    row.reimbursed_at = paid_at
-    row.reimbursed_via = via
-    row.reimbursed_by = ctx.actor_id
-    session.flush()
-    after = _row_to_view(session, row)
+    row = repo.mark_claim_reimbursed(
+        workspace_id=ctx.workspace_id,
+        claim_id=row.id,
+        reimbursed_at=paid_at,
+        reimbursed_via=via,
+        reimbursed_by=ctx.actor_id,
+    )
+    after = _row_to_view(repo, row)
 
     write_audit(
-        session,
+        repo.session,
         ctx,
         entity_kind="expense_claim",
         entity_id=row.id,
@@ -920,7 +809,7 @@ def _encode_pending_cursor(*, submitted_at: datetime, claim_id: str) -> str:
     return f"{_ensure_utc(submitted_at).isoformat()}|{claim_id}"
 
 
-def _decode_pending_cursor(cursor: str) -> tuple[datetime, str]:
+def _decode_pending_cursor(cursor: str) -> PendingClaimsCursor:
     """Decode a domain-side cursor produced by :func:`_encode_pending_cursor`.
 
     Raises :class:`ValueError` on a malformed payload — callers
@@ -941,11 +830,12 @@ def _decode_pending_cursor(cursor: str) -> tuple[datetime, str]:
         )
     if not claim_id:
         raise ValueError(f"cursor {cursor!r} carries empty claim id")
-    return ts, claim_id
+    return PendingClaimsCursor(submitted_at=_ensure_utc(ts), claim_id=claim_id)
 
 
 def list_pending(
-    session: Session,
+    repo: ExpensesRepository,
+    checker: CapabilityChecker,
     ctx: WorkspaceContext,
     *,
     claimant_user_id: str | None = None,
@@ -980,44 +870,18 @@ def list_pending(
     ``state='submitted'`` filter. ``limit`` is clamped to ``[1, 500]``
     matching the worker-side service.
     """
-    _require_approval(session, ctx)
+    _require_approval(checker)
 
     bounded_limit = max(1, min(limit, 500))
-
-    stmt = select(ExpenseClaim).where(
-        ExpenseClaim.workspace_id == ctx.workspace_id,
-        ExpenseClaim.state == "submitted",
-        ExpenseClaim.deleted_at.is_(None),
+    decoded_cursor = _decode_pending_cursor(cursor) if cursor is not None else None
+    rows = repo.list_pending_claims(
+        workspace_id=ctx.workspace_id,
+        claimant_user_id=claimant_user_id,
+        property_id=property_id,
+        category=category,
+        limit=bounded_limit,
+        cursor=decoded_cursor,
     )
-    if claimant_user_id is not None:
-        stmt = stmt.join(
-            WorkEngagement,
-            (WorkEngagement.id == ExpenseClaim.work_engagement_id)
-            & (WorkEngagement.workspace_id == ExpenseClaim.workspace_id),
-        ).where(WorkEngagement.user_id == claimant_user_id)
-    if property_id is not None:
-        stmt = stmt.where(ExpenseClaim.property_id == property_id)
-    if category is not None:
-        stmt = stmt.where(ExpenseClaim.category == category)
-
-    if cursor is not None:
-        cursor_ts, cursor_id = _decode_pending_cursor(cursor)
-        # Forward-cursor: rows strictly *after* the supplied position
-        # under the (submitted_at DESC, id DESC) ordering. "After"
-        # under a DESC sort means "less than" — older / smaller-ULID.
-        # The composite predicate splits on equality so two same-
-        # millisecond submissions break the tie via id alone.
-        stmt = stmt.where(
-            (ExpenseClaim.submitted_at < cursor_ts)
-            | ((ExpenseClaim.submitted_at == cursor_ts) & (ExpenseClaim.id < cursor_id))
-        )
-
-    stmt = stmt.order_by(
-        ExpenseClaim.submitted_at.desc(),
-        ExpenseClaim.id.desc(),
-    ).limit(bounded_limit + 1)
-
-    rows = list(session.scalars(stmt).all())
     has_more = len(rows) > bounded_limit
     rows = rows[:bounded_limit]
     next_cursor: str | None
@@ -1033,4 +897,4 @@ def list_pending(
         )
     else:
         next_cursor = None
-    return [_row_to_view(session, r) for r in rows], next_cursor
+    return [_row_to_view(repo, r) for r in rows], next_cursor

@@ -520,16 +520,8 @@ ignore_imports = [
     "app.domain.tasks.comments -> app.adapters.db.identity.models",
     "app.domain.tasks.comments -> app.adapters.db.workspace.models",
     "app.domain.tasks.comments -> app.authz",
-    # v1 stopgap (cd-9guk, cd-95zb): ``app.domain.expenses.approval``
-    # reads :class:`ExpenseClaim` / :class:`ExpenseAttachment` from
-    # ``app.adapters.db.expenses.models`` (plus the module-private
-    # ``_STATE_VALUES`` / ``_REIMBURSED_VIA_VALUES`` value tuples) and
-    # :class:`WorkEngagement` from ``app.adapters.db.workspace.models``
-    # (engagement-membership reads). It also calls
-    # :func:`app.authz.require` for the ``expenses.approve`` /
-    # ``expenses.reimburse`` defence-in-depth checks — same transitive-
-    # walk reasoning as the ``app.domain.tasks.oneoff -> app.authz``
-    # stopgap above. ``app.domain.expenses.autofill`` additionally reads
+    # v1 stopgap (cd-95zb): ``app.domain.expenses.autofill`` reads
+    # :class:`ExpenseClaim` from ``app.adapters.db.expenses.models`` and
     # :class:`LlmUsage` from ``app.adapters.db.llm.models`` to record
     # post-flight token spend (same envelope as the LLM router/budget
     # stopgaps).
@@ -537,12 +529,8 @@ ignore_imports = [
     # The ``app.domain.expenses.claims`` edges that previously lived
     # here dropped with cd-0e8i, which rewired the claims service onto
     # the cd-v3jp ``ExpensesRepository`` + ``CapabilityChecker``
-    # Protocol seams. The remaining approval / autofill stopgaps drop
-    # alongside the cd-zoj4 (approval) and cd-sxmz (autofill) follow-
-    # ups, both blocked on cd-0e8i.
-    "app.domain.expenses.approval -> app.adapters.db.expenses.models",
-    "app.domain.expenses.approval -> app.adapters.db.workspace.models",
-    "app.domain.expenses.approval -> app.authz",
+    # Protocol seams. The approval edges dropped with cd-zoj4; the
+    # remaining autofill stopgaps drop with cd-sxmz.
     "app.domain.expenses.autofill -> app.adapters.db.expenses.models",
     "app.domain.expenses.autofill -> app.adapters.db.llm.models",
     # v1 stopgap (cd-dcfw): ``app.domain.identity.work_roles`` /

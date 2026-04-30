@@ -715,9 +715,11 @@ def list_pending_expense_claims_route(
     :mod:`app.api.pagination`.
     """
     raw_cursor = decode_cursor(cursor)
+    repo, checker = make_seam_pair(session, ctx)
     try:
         rows, next_raw = list_pending(
-            session,
+            repo,
+            checker,
             ctx,
             claimant_user_id=claimant_user_id,
             property_id=property_id,
@@ -1121,8 +1123,9 @@ def approve_expense_claim_route(
     :func:`~app.domain.expenses.approval.approve_claim` for the
     field-level rules.
     """
+    repo, checker = make_seam_pair(session, ctx)
     try:
-        view = approve_claim(session, ctx, claim_id=claim_id, edits=body)
+        view = approve_claim(repo, checker, ctx, claim_id=claim_id, edits=body)
     except (
         ClaimNotFound,
         ClaimNotApprovable,
@@ -1152,8 +1155,15 @@ def reject_expense_claim_route(
     the DTO's ``min_length=1`` rule; the service-level guard fires
     for Python callers bypassing the DTO.
     """
+    repo, checker = make_seam_pair(session, ctx)
     try:
-        view = reject_claim(session, ctx, claim_id=claim_id, reason_md=body.reason_md)
+        view = reject_claim(
+            repo,
+            checker,
+            ctx,
+            claim_id=claim_id,
+            reason_md=body.reason_md,
+        )
     except (
         ClaimNotFound,
         ClaimNotApprovable,
@@ -1187,8 +1197,9 @@ def reimburse_expense_claim_route(
     surfaces as 422 via the service-level skew guard (vanilla
     :class:`ValueError`).
     """
+    repo, checker = make_seam_pair(session, ctx)
     try:
-        view = mark_reimbursed(session, ctx, claim_id=claim_id, body=body)
+        view = mark_reimbursed(repo, checker, ctx, claim_id=claim_id, body=body)
     except (
         ClaimNotFound,
         ClaimNotReimbursable,

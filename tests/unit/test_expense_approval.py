@@ -59,11 +59,8 @@ from app.domain.expenses import (
     ReimburseBody,
     ReimbursePermissionDenied,
     RejectBody,
-    approve_claim,
-    list_pending,
-    mark_reimbursed,
-    reject_claim,
 )
+from app.domain.expenses import approval as _approval_module
 from app.domain.expenses import claims as _claims_module
 from app.events import (
     ExpenseApproved,
@@ -122,6 +119,86 @@ def submit_claim(
     repo, checker = _make_seam_pair(session, ctx)
     return _claims_module.submit_claim(
         repo, checker, ctx, claim_id=claim_id, clock=clock
+    )
+
+
+def approve_claim(
+    session: Session,
+    ctx: WorkspaceContext,
+    *,
+    claim_id: str,
+    edits: ApprovalEdits | None = None,
+    clock: FrozenClock | None = None,
+) -> ExpenseClaimView:
+    repo, checker = _make_seam_pair(session, ctx)
+    return _approval_module.approve_claim(
+        repo,
+        checker,
+        ctx,
+        claim_id=claim_id,
+        edits=edits,
+        clock=clock,
+    )
+
+
+def reject_claim(
+    session: Session,
+    ctx: WorkspaceContext,
+    *,
+    claim_id: str,
+    reason_md: str,
+    clock: FrozenClock | None = None,
+) -> ExpenseClaimView:
+    repo, checker = _make_seam_pair(session, ctx)
+    return _approval_module.reject_claim(
+        repo,
+        checker,
+        ctx,
+        claim_id=claim_id,
+        reason_md=reason_md,
+        clock=clock,
+    )
+
+
+def mark_reimbursed(
+    session: Session,
+    ctx: WorkspaceContext,
+    *,
+    claim_id: str,
+    body: ReimburseBody,
+    clock: FrozenClock | None = None,
+) -> ExpenseClaimView:
+    repo, checker = _make_seam_pair(session, ctx)
+    return _approval_module.mark_reimbursed(
+        repo,
+        checker,
+        ctx,
+        claim_id=claim_id,
+        body=body,
+        clock=clock,
+    )
+
+
+def list_pending(
+    session: Session,
+    ctx: WorkspaceContext,
+    *,
+    claimant_user_id: str | None = None,
+    property_id: str | None = None,
+    category: str | None = None,
+    limit: int = 100,
+    cursor: str | None = None,
+) -> tuple[list[ExpenseClaimView], str | None]:
+    repo, checker = _make_seam_pair(session, ctx)
+    return _approval_module.list_pending(
+        repo,
+        checker,
+        ctx,
+        claimant_user_id=claimant_user_id,
+        property_id=property_id,
+        category=category,
+        limit=limit,
+        cursor=cursor,
     )
 
 
