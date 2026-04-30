@@ -1106,7 +1106,7 @@ def _declare_workspace_slug_path_parameters(schema: dict[str, Any]) -> None:
     for path, path_item in paths.items():
         if (
             not isinstance(path, str)
-            or "{slug}" not in path
+            or not path.startswith("/w/{slug}/")
             or not isinstance(path_item, dict)
         ):
             continue
@@ -1203,6 +1203,19 @@ def _install_custom_openapi(app: FastAPI) -> None:
     app.openapi = openapi  # type: ignore[method-assign]
 
 
+def _seed_agent_docs_for_lifespan() -> None:
+    """Seed deployment-scoped agent docs during application startup."""
+    from sqlalchemy.orm import Session
+
+    from app.adapters.db.session import make_uow
+    from app.services.agent.system_docs import seed_agent_docs
+
+    with make_uow() as session:
+        if not isinstance(session, Session):
+            raise TypeError("agent docs seeding requires a SQLAlchemy Session")
+        seed_agent_docs(session)
+
+
 def _build_worker_lifespan(
     cfg: Settings,
 ) -> Callable[[FastAPI], AbstractAsyncContextManager[None]]:
@@ -1245,6 +1258,8 @@ def _build_worker_lifespan(
         from app.worker import create_scheduler, register_jobs
         from app.worker import start as scheduler_start
         from app.worker import stop as scheduler_stop
+
+        _seed_agent_docs_for_lifespan()
 
         if cfg.worker == "internal":
             scheduler = create_scheduler()

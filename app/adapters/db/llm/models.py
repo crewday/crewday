@@ -71,6 +71,7 @@ from sqlalchemy import (
     Numeric,
     String,
     UniqueConstraint,
+    text,
     true,
 )
 from sqlalchemy.orm import Mapped, mapped_column
@@ -86,6 +87,8 @@ from app.adapters.db.identity import models as _identity_models  # noqa: F401
 from app.adapters.db.workspace import models as _workspace_models  # noqa: F401
 
 __all__ = [
+    "AgentDoc",
+    "AgentDocRevision",
     "AgentPreference",
     "AgentPreferenceRevision",
     "AgentToken",
@@ -1008,6 +1011,77 @@ class AgentPreferenceRevision(Base):
         Index(
             "ix_agent_preference_revision_preference_created",
             "preference_id",
+            "created_at",
+        ),
+    )
+
+
+class AgentDoc(Base):
+    """Deployment-scoped system document read by chat agents."""
+
+    __tablename__ = "agent_doc"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    slug: Mapped[str] = mapped_column(String, nullable=False)
+    title: Mapped[str] = mapped_column(String, nullable=False)
+    summary: Mapped[str | None] = mapped_column(String, nullable=True)
+    body_md: Mapped[str] = mapped_column(String, nullable=False)
+    roles: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    capabilities: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    is_active: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default=true()
+    )
+    default_hash: Mapped[str] = mapped_column(String(16), nullable=False)
+    notes: Mapped[str | None] = mapped_column(String, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+
+    __table_args__ = (
+        CheckConstraint("version >= 1", name="agent_doc_version"),
+        Index(
+            "uq_agent_doc_active_slug",
+            "slug",
+            unique=True,
+            sqlite_where=text("is_active = 1"),
+            postgresql_where=text("is_active = true"),
+        ),
+    )
+
+
+class AgentDocRevision(Base):
+    """Append-only body history for :class:`AgentDoc` saves."""
+
+    __tablename__ = "agent_doc_revision"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    doc_id: Mapped[str] = mapped_column(
+        String,
+        ForeignKey("agent_doc.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
+    body_md: Mapped[str] = mapped_column(String, nullable=False)
+    notes: Mapped[str | None] = mapped_column(String, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    created_by_user_id: Mapped[str | None] = mapped_column(
+        String,
+        ForeignKey("user.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+
+    __table_args__ = (
+        CheckConstraint("version >= 1", name="agent_doc_revision_version"),
+        UniqueConstraint("doc_id", "version", name="uq_agent_doc_revision_version"),
+        Index(
+            "ix_agent_doc_revision_doc_created",
+            "doc_id",
             "created_at",
         ),
     )

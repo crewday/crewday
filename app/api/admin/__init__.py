@@ -25,6 +25,8 @@ router; the wired surface today is:
 * :mod:`app.api.admin.chat_gateway` — deployment-default chat gateway
   status: ``GET /chat/providers`` / ``GET /chat/templates`` /
   ``GET /chat/overrides`` / ``GET /chat/health``.
+* :mod:`app.api.admin.agent_docs` — system docs read by chat agents:
+  ``GET /agent_docs`` / ``GET /agent_docs/{slug}``.
 
 Subsequent admin families (LLM graph, admin chat agent — per spec
 §12 "Admin surface") will add their own routers and register them
@@ -46,6 +48,7 @@ from __future__ import annotations
 from fastapi import APIRouter
 
 from app.api.admin.admins import build_admin_admins_router
+from app.api.admin.agent_docs import build_admin_agent_docs_router
 from app.api.admin.audit import build_admin_audit_router
 from app.api.admin.chat_gateway import build_admin_chat_gateway_router
 from app.api.admin.me import build_admin_me_router
@@ -66,3 +69,4 @@ admin_router.include_router(build_admin_admins_router())
 admin_router.include_router(build_admin_audit_router())
 admin_router.include_router(build_admin_usage_router())
 admin_router.include_router(build_admin_chat_gateway_router())
+admin_router.include_router(build_admin_agent_docs_router())

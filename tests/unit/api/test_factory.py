@@ -175,7 +175,7 @@ class TestOpenapiShape:
         workspace_paths = {
             path: item
             for path, item in schema.get("paths", {}).items()
-            if "{slug}" in path
+            if path.startswith("/w/{slug}/")
         }
         assert workspace_paths, "expected workspace-scoped paths"
         for path, item in workspace_paths.items():
@@ -186,6 +186,21 @@ class TestOpenapiShape:
                 if param.get("name") == "slug" and param.get("in") == "path"
             ]
             assert matches == [expected], f"{path} has slug params {matches!r}"
+
+    def test_admin_slug_paths_do_not_receive_workspace_slug_parameter(self) -> None:
+        """Admin route params named ``slug`` are route-owned, not workspace slugs."""
+        client = _client(create_app(settings=_settings()))
+        schema = client.get("/api/openapi.json").json()
+        item = schema["paths"]["/admin/api/v1/agent_docs/{slug}"]
+
+        assert item.get("parameters", []) == []
+        operation_params = item["get"].get("parameters", [])
+        matches = [
+            param
+            for param in operation_params
+            if param.get("name") == "slug" and param.get("in") == "path"
+        ]
+        assert len(matches) == 1
 
 
 # ---------------------------------------------------------------------------

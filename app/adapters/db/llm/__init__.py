@@ -13,12 +13,13 @@ SELECT / UPDATE / DELETE. A bare read without a
 :class:`~app.tenancy.orm_filter.TenantFilterMissing`.
 
 **Deployment-scope** (no ``workspace_id``, NOT registered):
-:class:`LlmProvider`, :class:`LlmModel`, :class:`LlmProviderModel`.
-Every workspace shares the same registry rows — they are edited
-from the ``/admin/llm`` graph (§11 "LLM graph admin") and read by
-the §11 resolver. Registering them in the workspace-scoped registry
-would inject a ``workspace_id =`` predicate the column doesn't have
-and break every read.
+:class:`LlmProvider`, :class:`LlmModel`, :class:`LlmProviderModel`,
+:class:`AgentDoc`, :class:`AgentDocRevision`. Every workspace shares
+the same registry and system-doc rows — they are edited from the
+deployment admin surfaces and read by the §11 resolver. Registering
+them in the workspace-scoped registry would inject a
+``workspace_id =`` predicate the column doesn't have and break every
+read.
 
 Together this is the §11 agent layer: per-workspace capability →
 provider_model bindings backed by a deployment-shared provider /
@@ -73,6 +74,8 @@ See ``docs/specs/02-domain-model.md`` §"LLM" and
 from __future__ import annotations
 
 from app.adapters.db.llm.models import (
+    AgentDoc,
+    AgentDocRevision,
     AgentPreference,
     AgentPreferenceRevision,
     AgentToken,
@@ -105,6 +108,8 @@ for _table in (
     register(_table)
 
 __all__ = [
+    "AgentDoc",
+    "AgentDocRevision",
     "AgentPreference",
     "AgentPreferenceRevision",
     "AgentToken",

@@ -6,8 +6,13 @@ import DeskPage from "@/components/DeskPage";
 import { Chip, Loading } from "@/components/common";
 import type { AgentDoc, AgentDocSummary } from "@/types/api";
 
+interface OpenApiSpec {
+  paths?: Record<string, Record<string, unknown>>;
+}
+
 export default function AdminAgentDocsPage() {
   const [activeSlug, setActiveSlug] = useState<string | null>(null);
+  const [openApiFilter, setOpenApiFilter] = useState("");
 
   const listQ = useQuery({
     queryKey: qk.adminAgentDocs(),
@@ -20,6 +25,11 @@ export default function AdminAgentDocsPage() {
     enabled: activeSlug != null,
   });
 
+  const openApiQ = useQuery({
+    queryKey: ["admin", "openapi"],
+    queryFn: () => fetchJson<OpenApiSpec>("/api/openapi.json"),
+  });
+
   const sub =
     "System-side virtual files the chat agents read on demand (\u00a711 \u201cAgent knowledge tools\u201d).";
 
@@ -29,6 +39,11 @@ export default function AdminAgentDocsPage() {
   if (!listQ.data) {
     return <DeskPage title="Agent docs" sub={sub}>Failed to load.</DeskPage>;
   }
+
+  const openApiNeedle = openApiFilter.trim().toLowerCase();
+  const openApiRows = Object.entries(openApiQ.data?.paths ?? {}).filter(([path]) =>
+    path.toLowerCase().includes(openApiNeedle),
+  );
 
   return (
     <DeskPage title="Agent docs" sub={sub}>
@@ -93,6 +108,42 @@ export default function AdminAgentDocsPage() {
             )}
           </section>
         )}
+
+        <section className="panel agent-docs__openapi">
+          <header className="agent-docs__header">
+            <h3>OpenAPI</h3>
+            {openApiQ.isPending && <span className="muted">loading</span>}
+          </header>
+          <input
+            className="input"
+            type="search"
+            value={openApiFilter}
+            onChange={(event) => setOpenApiFilter(event.target.value)}
+            placeholder="Search endpoints"
+            aria-label="Search OpenAPI endpoints"
+          />
+          <table className="table">
+            <thead>
+              <tr>
+                <th>Path</th>
+                <th>Methods</th>
+              </tr>
+            </thead>
+            <tbody>
+              {openApiRows.map(([path, methods]) => (
+                <tr key={path}>
+                  <td className="mono">{path}</td>
+                  <td className="muted">
+                    {Object.keys(methods)
+                      .filter((method) => method !== "parameters")
+                      .join(", ")
+                      .toUpperCase()}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </section>
       </div>
     </DeskPage>
   );
