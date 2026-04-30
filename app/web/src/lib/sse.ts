@@ -127,6 +127,8 @@ export type EventKind =
   | "booking.reassigned"
   // Billing (§22 work orders).
   | "work_order.completed"
+  // Issues (§06 worker issue reports).
+  | "issue.reported"
   // Shifts (§09 time + payroll).
   | "shift.ended"
   | "time.shift.changed"
@@ -704,6 +706,11 @@ export const INVALIDATIONS: Record<EventKind, InvalidationHandler> = {
 
   "work_order.completed": (_event, qc) => {
     invalidate(qc, qk.workOrders());
+    invalidate(qc, qk.dashboard());
+  },
+
+  "issue.reported": (_event, qc) => {
+    invalidate(qc, qk.issues());
     invalidate(qc, qk.dashboard());
   },
 

@@ -125,6 +125,7 @@ describe("INVALIDATIONS — coverage", () => {
     "booking.cancelled",
     "booking.reassigned",
     "work_order.completed",
+    "issue.reported",
     "shift.ended",
     "time.shift.changed",
     "admin.audit.appended",
@@ -831,6 +832,16 @@ describe("INVALIDATIONS — per-kind behaviour", () => {
     const called = spy.mock.calls.map((c) => c[0]?.queryKey);
     expect(called).toEqual(
       expect.arrayContaining([qk.workOrders(), qk.dashboard()]),
+    );
+  });
+
+  it("issue.reported invalidates issues + dashboard", () => {
+    const qc = makeClient();
+    const spy = vi.spyOn(qc, "invalidateQueries");
+    INVALIDATIONS["issue.reported"](makeEvent("issue.reported"), qc);
+    const called = spy.mock.calls.map((c) => c[0]?.queryKey);
+    expect(called).toEqual(
+      expect.arrayContaining([qk.issues(), qk.dashboard()]),
     );
   });
 
