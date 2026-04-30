@@ -136,6 +136,42 @@ def _make_retention_rotation_body(clock: Clock) -> Callable[[], None]:
     return _body
 
 
+def _make_chat_gateway_sweep_body(clock: Clock) -> Callable[[], None]:
+    """Build the 30 s chat-gateway dispatch safety-net body (cd-0gaa).
+
+    Factory rather than a bare module-level function so the body
+    closes over the scheduler's injected :class:`Clock` — the cutoff
+    (``created_at < clock.now() - 30 s``) MUST be driven by the same
+    clock the heartbeat uses; otherwise a
+    :class:`~app.util.clock.FrozenClock` under test would have a
+    deterministic heartbeat and a non-deterministic sweep cutoff.
+
+    The returned body is a thin adapter around
+    :func:`app.worker.tasks.chat_gateway_sweep.sweep_undispatched_messages`,
+    which opens its own UoW (the worker has no ambient session) and
+    re-publishes ``chat.message.received`` per straggler row. The
+    sibling :func:`_make_webhook_dispatch_body` cites the same
+    rationale.
+
+    The task import is deferred into the closure body so module
+    import order stays robust — the sweep module pulls in the event
+    bus singleton + the audit writer, neither of which the
+    standalone ``python -m app.worker`` entrypoint otherwise needs at
+    import time.
+    """
+
+    def _body() -> None:
+        from app.worker.tasks.chat_gateway_sweep import sweep_undispatched_messages
+
+        # The task itself logs the per-tick summary at INFO with
+        # ``event=chat_gateway.sweep.tick``; the wrapper does not need
+        # to re-emit. Discard the report — operators read the counts
+        # off the structured-log stream, not the wrapper's return.
+        sweep_undispatched_messages(clock=clock)
+
+    return _body
+
+
 def _make_idempotency_sweep_body(clock: Clock) -> Callable[[], None]:
     """Build the daily ``idempotency_key`` TTL-sweep body (cd-j9l7).
 

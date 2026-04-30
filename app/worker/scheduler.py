@@ -80,6 +80,7 @@ from app.worker.jobs.llm_budget import _make_llm_budget_refresh_body
 from app.worker.jobs.maintenance import (
     _heartbeat_only_body,
     _make_approval_ttl_body,
+    _make_chat_gateway_sweep_body,
     _make_idempotency_sweep_body,
     _make_inventory_reorder_body,
     _make_retention_rotation_body,
@@ -96,6 +97,8 @@ _system_actor_context = _common_jobs._system_actor_context
 __all__ = [
     "APPROVAL_TTL_INTERVAL_SECONDS",
     "APPROVAL_TTL_JOB_ID",
+    "CHAT_GATEWAY_SWEEP_INTERVAL_SECONDS",
+    "CHAT_GATEWAY_SWEEP_JOB_ID",
     "DAILY_DIGEST_JOB_ID",
     "DAILY_DIGEST_MISFIRE_GRACE_SECONDS",
     "DEMO_GC_INTERVAL_SECONDS",
@@ -285,6 +288,30 @@ WEBHOOK_DISPATCH_JOB_ID: str = "webhook_dispatch"
 # itself a no-op on rows in terminal state, so a tick that fires
 # while no rows are due is cheap.
 WEBHOOK_DISPATCH_INTERVAL_SECONDS: int = 30
+
+# Stable job id for the chat-gateway dispatch safety-net sweep (cd-0gaa).
+# The tick callable in
+# :mod:`app.worker.tasks.chat_gateway_sweep.sweep_undispatched_messages`
+# enumerates ``chat_message`` rows whose channel kind is
+# ``chat_gateway`` and whose ``dispatched_to_agent_at`` is still
+# ``NULL`` past the grace window, then re-publishes
+# ``chat.message.received`` so the in-process dispatcher catches up.
+# Cross-tenant by design — like the webhook dispatcher and approval-
+# TTL sweep, the tick is deployment-scope; each row carries its own
+# ``workspace_id`` and the audit row keys off that field through a
+# system-actor :class:`WorkspaceContext`.
+CHAT_GATEWAY_SWEEP_JOB_ID: str = "chat_gateway.agent_dispatch_sweep"
+
+# Interval for the chat-gateway dispatch safety net. Spec §16
+# "Worker process" pins ``agent_dispatch_sweep`` at every 30 s and
+# §23 "Routing > Inbound" pins the matching pending grace at 60 s
+# — a row left orphaned by an app-process crash gets picked up
+# within ~two ticks of the grace window. The sweep body is itself
+# idempotent (the dispatcher's CAS on ``dispatched_to_agent_at``
+# makes a re-published event a no-op against any row a primary
+# handler eventually catches up first), so a misfire that runs late
+# or a coalesced tick is strictly safe.
+CHAT_GATEWAY_SWEEP_INTERVAL_SECONDS: int = 30
 
 # Stable job id for the hourly inventory reorder-point check (§08).
 INVENTORY_REORDER_JOB_ID: str = "inventory.check_reorder_points"
@@ -558,6 +585,7 @@ def register_jobs(
         USER_WORKSPACE_REFRESH_JOB_ID,
         APPROVAL_TTL_JOB_ID,
         WEBHOOK_DISPATCH_JOB_ID,
+        CHAT_GATEWAY_SWEEP_JOB_ID,
         INVENTORY_REORDER_JOB_ID,
         DAILY_DIGEST_JOB_ID,
         RETENTION_ROTATION_JOB_ID,
@@ -860,6 +888,40 @@ def register_jobs(
             coalesce=True,
             misfire_grace_time=WEBHOOK_DISPATCH_INTERVAL_SECONDS,
         )
+
+    # --- 30 s chat-gateway dispatch safety-net sweep (cd-0gaa) ---
+    # The tick callable in
+    # :mod:`app.worker.tasks.chat_gateway_sweep.sweep_undispatched_messages`
+    # walks every ``chat_message`` row whose channel kind is
+    # ``chat_gateway``, whose ``dispatched_to_agent_at`` is still
+    # ``NULL``, and whose ``created_at`` is older than 30 s, then
+    # re-publishes ``chat.message.received`` so the in-process
+    # dispatcher catches up. The dispatcher's CAS on
+    # ``dispatched_to_agent_at`` keeps the re-publish idempotent.
+    #
+    # ``misfire_grace_time = CHAT_GATEWAY_SWEEP_INTERVAL_SECONDS`` —
+    # one tick late is fine (the body is idempotent: rows still
+    # carrying ``dispatched_to_agent_at IS NULL`` are simply
+    # re-fired, and rows the dispatcher caught up first fall out of
+    # the predicate); two-ticks-late is a signal the scheduler is
+    # stuck and a skip is preferable to a stacked catch-up that
+    # hammers the bus on a fleet returning from a long pause.
+    # ``coalesce=True`` + ``max_instances=1`` keep a slow sweep from
+    # stacking ticks on an overloaded DB.
+    scheduler.add_job(
+        wrap_job(
+            _make_chat_gateway_sweep_body(resolved_clock),
+            job_id=CHAT_GATEWAY_SWEEP_JOB_ID,
+            clock=resolved_clock,
+        ),
+        trigger=IntervalTrigger(seconds=CHAT_GATEWAY_SWEEP_INTERVAL_SECONDS),
+        id=CHAT_GATEWAY_SWEEP_JOB_ID,
+        name=CHAT_GATEWAY_SWEEP_JOB_ID,
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=CHAT_GATEWAY_SWEEP_INTERVAL_SECONDS,
+    )
 
     # --- Hourly inventory reorder-point check (cd-kxr0) ---
     scheduler.add_job(

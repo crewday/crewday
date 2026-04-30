@@ -74,6 +74,7 @@ __all__ = [
     "METRICS_REGISTRY",
     "WORKER_JOBS_TOTAL",
     "WORKER_JOB_DURATION_SECONDS",
+    "WORKER_SWEEP_REQUEUED_TOTAL",
     "sanitize_workspace_label",
 ]
 
@@ -169,6 +170,21 @@ WORKER_JOB_DURATION_SECONDS: Final[Histogram] = Histogram(
     "Scheduler tick duration (seconds).",
     labelnames=("job",),
     buckets=_DURATION_BUCKETS,
+    registry=METRICS_REGISTRY,
+)
+
+# Per-row outcome counter for safety-net sweeps that re-publish stuck
+# events back onto a queue or bus. The first user is
+# :func:`app.worker.tasks.chat_gateway_sweep.sweep_undispatched_messages`
+# (cd-0gaa); other future sweeps share the same counter to keep the
+# label set bounded. ``outcome`` is ``requeued`` on a successful
+# re-publish and ``failed`` on a per-row failure. ``job`` mirrors
+# the scheduler tick id so dashboards can filter by the registered
+# job without needing a per-counter alias.
+WORKER_SWEEP_REQUEUED_TOTAL: Final[Counter] = Counter(
+    "crewday_worker_sweep_requeued_total",
+    "Per-row outcomes for restart-safety sweep ticks (requeued | failed).",
+    labelnames=("job", "outcome"),
     registry=METRICS_REGISTRY,
 )
 

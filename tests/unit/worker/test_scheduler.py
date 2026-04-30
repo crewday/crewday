@@ -32,6 +32,7 @@ from app.worker.jobs import llm_budget as llm_budget_jobs
 from app.worker.jobs import messaging as messaging_jobs
 from app.worker.scheduler import (
     APPROVAL_TTL_JOB_ID,
+    CHAT_GATEWAY_SWEEP_JOB_ID,
     DAILY_DIGEST_JOB_ID,
     DAILY_DIGEST_MISFIRE_GRACE_SECONDS,
     GENERATOR_JOB_ID,
@@ -93,6 +94,7 @@ class TestRegisterJobs:
         # ``test_is_idempotent_under_replace_existing`` path.
         assert set(registered_job_ids(sched)) == {
             APPROVAL_TTL_JOB_ID,
+            CHAT_GATEWAY_SWEEP_JOB_ID,
             DAILY_DIGEST_JOB_ID,
             GENERATOR_JOB_ID,
             IDEMPOTENCY_SWEEP_JOB_ID,
@@ -134,6 +136,7 @@ class TestRegisterJobs:
         ids = registered_job_ids(sched)
         expected_ids = {
             APPROVAL_TTL_JOB_ID,
+            CHAT_GATEWAY_SWEEP_JOB_ID,
             DAILY_DIGEST_JOB_ID,
             GENERATOR_JOB_ID,
             IDEMPOTENCY_SWEEP_JOB_ID,
@@ -189,6 +192,45 @@ class TestOverdueDetectJob:
         # idempotent; two-ticks-late is a stuck-scheduler signal),
         # single instance, coalesce on.
         assert job.misfire_grace_time == OVERDUE_DETECT_INTERVAL_SECONDS
+        assert job.coalesce is True
+        assert job.max_instances == 1
+
+
+class TestChatGatewaySweepJob:
+    """Registration shape for the 30 s chat-gateway dispatch safety net (cd-0gaa).
+
+    The body's per-row fan-out (re-publishes ``chat.message.received``
+    on the bus, audits per row, isolates per-row failures) is covered
+    end-to-end in ``tests/unit/chat_gateway/test_sweep.py`` and
+    ``tests/integration/chat_gateway/test_sweep_e2e.py`` — the unit
+    layer here just pins the registration metadata so a future
+    refactor cannot silently change the operator-visible cadence.
+    """
+
+    def test_adds_chat_gateway_sweep_job_at_30s_interval(self) -> None:
+        from apscheduler.triggers.interval import IntervalTrigger
+
+        from app.worker.scheduler import (
+            CHAT_GATEWAY_SWEEP_INTERVAL_SECONDS,
+        )
+
+        sched = create_scheduler()
+        register_jobs(sched)
+
+        job = sched.get_job(CHAT_GATEWAY_SWEEP_JOB_ID)
+        assert job is not None, (
+            f"{CHAT_GATEWAY_SWEEP_JOB_ID} not registered by register_jobs"
+        )
+
+        assert isinstance(job.trigger, IntervalTrigger)
+        assert job.trigger.interval.total_seconds() == 30.0
+        assert CHAT_GATEWAY_SWEEP_INTERVAL_SECONDS == 30
+
+        # ``misfire_grace_time = CHAT_GATEWAY_SWEEP_INTERVAL_SECONDS``
+        # — one-tick-late is idempotent (rows still carrying
+        # ``dispatched_to_agent_at IS NULL`` are simply re-fired), and
+        # two-ticks-late is the stuck-scheduler signal.
+        assert job.misfire_grace_time == CHAT_GATEWAY_SWEEP_INTERVAL_SECONDS
         assert job.coalesce is True
         assert job.max_instances == 1
 
