@@ -521,7 +521,11 @@ describe("INVALIDATIONS — per-kind behaviour", () => {
       INVALIDATIONS[kind](makeEvent(kind, { instruction_id: "ins_1" }), qc);
       const called = spy.mock.calls.map((c) => c[0]?.queryKey);
       expect(called).toEqual(
-        expect.arrayContaining([qk.instructions(), qk.instruction("ins_1")]),
+        expect.arrayContaining([
+          qk.instructions(),
+          qk.instruction("ins_1"),
+          qk.instructionVersions("ins_1"),
+        ]),
       );
     }
   });

@@ -382,6 +382,7 @@ function invalidateInstruction(event: SseEvent, qc: QueryClient): void {
   const instructionId = payload.instruction_id ?? payload.id;
   if (instructionId) {
     invalidate(qc, qk.instruction(instructionId));
+    invalidate(qc, qk.instructionVersions(instructionId));
   }
 }
 
