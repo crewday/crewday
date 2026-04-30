@@ -11,6 +11,7 @@ import { WorkspaceProvider } from "@/context/WorkspaceContext";
 import { NavHistoryProvider } from "@/context/NavHistoryContext";
 import { I18nProvider } from "@/i18n";
 
+import "@/styles/fonts.css";
 import "@/styles/tokens.css";
 import "@/styles/reset.css";
 import "@/styles/globals.css";

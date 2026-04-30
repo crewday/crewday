@@ -3,6 +3,72 @@
    Tokens mirror mocks/web/src/styles/tokens.css so a future
    site-side build can simply import the shared file. */
 
+@font-face {
+  font-family: "Fraunces";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 300 700;
+  src: url("fonts/fraunces-latin-standard-normal.woff2") format("woff2-variations");
+  unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;
+}
+
+@font-face {
+  font-family: "Fraunces";
+  font-style: italic;
+  font-display: swap;
+  font-weight: 300 600;
+  src: url("fonts/fraunces-latin-standard-italic.woff2") format("woff2-variations");
+  unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;
+}
+
+@font-face {
+  font-family: "Inter Tight";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 400;
+  src: url("fonts/inter-tight-latin-400-normal.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Inter Tight";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 500;
+  src: url("fonts/inter-tight-latin-500-normal.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Inter Tight";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 600;
+  src: url("fonts/inter-tight-latin-600-normal.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Inter Tight";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 700;
+  src: url("fonts/inter-tight-latin-700-normal.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 400;
+  src: url("fonts/jetbrains-mono-latin-400-normal.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 500;
+  src: url("fonts/jetbrains-mono-latin-500-normal.woff2") format("woff2");
+}
+
 :root,
 [data-theme="light"] {
   color-scheme: light;

@@ -13,6 +13,7 @@ import { AuthProvider } from "@/auth";
 import { I18nProvider } from "@/i18n";
 import { startOfflineQueueReplay } from "@/lib/offlineQueue";
 
+import "@/styles/fonts.css";
 import "@/styles/tokens.css";
 import "@/styles/reset.css";
 import "@/styles/globals.css";
