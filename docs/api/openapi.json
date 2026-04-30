@@ -15420,8 +15420,7 @@
             "default": "manual",
             "enum": [
               "manual",
-              "geofence",
-              "occurrence"
+              "geofence"
             ],
             "title": "Source",
             "type": "string"
@@ -15510,6 +15509,17 @@
             "title": "Source",
             "type": "string"
           },
+          "source_occurrence_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Occurrence Id"
+          },
           "starts_at": {
             "format": "date-time",
             "title": "Starts At",
@@ -15531,6 +15541,7 @@
           "starts_at",
           "ends_at",
           "property_id",
+          "source_occurrence_id",
           "source",
           "notes_md",
           "approved_by",
@@ -16759,6 +16770,11 @@
             "title": "Area Scope",
             "type": "string"
           },
+          "auto_shift_from_occurrence": {
+            "default": false,
+            "title": "Auto Shift From Occurrence",
+            "type": "boolean"
+          },
           "checklist_template_json": {
             "items": {
               "$ref": "#/components/schemas/ChecklistTemplateItem"
@@ -16919,6 +16935,10 @@
             "title": "Area Scope",
             "type": "string"
           },
+          "auto_shift_from_occurrence": {
+            "title": "Auto Shift From Occurrence",
+            "type": "boolean"
+          },
           "checklist_template_json": {
             "items": {
               "additionalProperties": true,
@@ -17049,6 +17069,7 @@
           "photo_evidence",
           "linked_instruction_ids",
           "priority",
+          "auto_shift_from_occurrence",
           "inventory_consumption_json",
           "inventory_effects",
           "llm_hints_md",
@@ -17072,6 +17093,11 @@
             ],
             "title": "Area Scope",
             "type": "string"
+          },
+          "auto_shift_from_occurrence": {
+            "default": false,
+            "title": "Auto Shift From Occurrence",
+            "type": "boolean"
           },
           "checklist_template_json": {
             "items": {

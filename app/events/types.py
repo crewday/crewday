@@ -89,6 +89,8 @@ __all__ = [
     "TaskCompleted",
     "TaskCreated",
     "TaskEvidenceAdded",
+    "TaskOccurrenceCompleted",
+    "TaskOccurrenceStarted",
     "TaskOverdue",
     "TaskPrimaryUnavailable",
     "TaskReassigned",
@@ -384,6 +386,28 @@ class TaskCompleted(Event):
     """A task occurrence has been marked done by ``completed_by``."""
 
     name: ClassVar[str] = "task.completed"
+
+    task_id: str
+    completed_by: str
+
+
+@register
+class TaskOccurrenceStarted(Event):
+    """A task occurrence has entered ``in_progress``."""
+
+    name: ClassVar[str] = "task.occurrence.started"
+    allowed_roles: ClassVar[tuple[EventRole, ...]] = ("manager", "worker")
+
+    task_id: str
+    started_by: str
+
+
+@register
+class TaskOccurrenceCompleted(Event):
+    """A task occurrence has completed its work lifecycle."""
+
+    name: ClassVar[str] = "task.occurrence.completed"
+    allowed_roles: ClassVar[tuple[EventRole, ...]] = ("manager", "worker")
 
     task_id: str
     completed_by: str

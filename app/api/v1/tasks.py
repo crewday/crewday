@@ -268,6 +268,9 @@ from app.domain.tasks.templates import (
 from app.domain.tasks.templates import (
     update as update_template,
 )
+from app.domain.time.occurrence_shifts import register_occurrence_shift_subscription
+from app.events import Event, EventBus, registered_events
+from app.events.bus import bus as default_event_bus
 from app.tenancy import WorkspaceContext, tenant_agnostic
 from app.tenancy.middleware import ACTOR_STATE_ATTR, ActorIdentity
 
@@ -282,6 +285,22 @@ _Db = Annotated[Session, Depends(db_session)]
 _Storage = Annotated[Storage, Depends(get_storage)]
 _MimeSniffer = Annotated[MimeSniffer, Depends(get_mime_sniffer)]
 _Llm = Annotated[LLMClient, Depends(get_llm)]
+
+
+def _task_lifecycle_bus(session: Session, ctx: WorkspaceContext) -> EventBus:
+    """Return a request-local bus with occurrence-shift hooks and global fanout."""
+    local_bus = EventBus()
+    register_occurrence_shift_subscription(
+        local_bus,
+        session_provider=lambda _event: (session, ctx),
+    )
+
+    def _forward(event: Event) -> None:
+        default_event_bus.publish(event)
+
+    for event_cls in registered_events().values():
+        local_bus.subscribe(event_cls)(_forward)
+    return local_bus
 
 
 def _agent_attribution_from_request(
@@ -388,6 +407,7 @@ class TaskTemplatePayload(BaseModel):
     photo_evidence: str
     linked_instruction_ids: list[str]
     priority: str
+    auto_shift_from_occurrence: bool
     inventory_consumption_json: dict[str, int]
     inventory_effects: list[InventoryEffectPayload]
     llm_hints_md: str | None
@@ -419,6 +439,7 @@ class TaskTemplatePayload(BaseModel):
             photo_evidence=view.photo_evidence,
             linked_instruction_ids=list(view.linked_instruction_ids),
             priority=view.priority,
+            auto_shift_from_occurrence=view.auto_shift_from_occurrence,
             inventory_consumption_json=consumption,
             inventory_effects=effects,
             llm_hints_md=view.llm_hints_md,
@@ -2420,7 +2441,12 @@ def start_task_route(
 ) -> TaskStatePayload:
     """Delegate to :func:`app.domain.tasks.completion.start`."""
     try:
-        view = start_task(session, ctx, task_id)
+        view = start_task(
+            session,
+            ctx,
+            task_id,
+            event_bus=_task_lifecycle_bus(session, ctx),
+        )
     except (
         CompletionTaskNotFound,
         InvalidStateTransition,
@@ -2448,12 +2474,14 @@ def complete_task_route(
     middleware; no per-route logic needed.
     """
     try:
+        event_bus = _task_lifecycle_bus(session, ctx)
         view = complete_task(
             session,
             ctx,
             task_id,
             note_md=body.note_md,
             photo_evidence_ids=body.photo_evidence_ids,
+            event_bus=event_bus,
         )
     except (
         CompletionTaskNotFound,

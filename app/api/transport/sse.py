@@ -677,6 +677,8 @@ _INVALIDATIONS: Final[dict[str, tuple[tuple[str, ...], ...]]] = {
     "task.assigned": (("tasks",),),
     "task.updated": (("tasks",),),
     "task.completed": (("tasks",),),
+    "task.occurrence.started": (("tasks",), ("shifts",), ("my-schedule",)),
+    "task.occurrence.completed": (("tasks",), ("shifts",), ("my-schedule",)),
     "task.overdue": (("tasks",),),
     "stay.upcoming": (("stays",),),
     "property.closure.created": (

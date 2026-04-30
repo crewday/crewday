@@ -437,6 +437,14 @@ ignore_imports = [
     # pattern as ``app.domain.tasks.templates``; tracked by cd-duv6
     # (extended scope) — drops once the time repositories land.
     "app.domain.time.shifts -> app.adapters.db.time.models",
+    # v1 stopgap (cd-1ak): occurrence-driven shifts need to inspect
+    # the occurrence row plus template/property config before calling
+    # the shift service. Same Protocol-seam pattern as the sibling
+    # time/tasks services; tracked by cd-duv6 (extended scope) —
+    # drops once repositories land for these contexts.
+    "app.domain.time.occurrence_shifts -> app.adapters.db.places.models",
+    "app.domain.time.occurrence_shifts -> app.adapters.db.tasks.models",
+    "app.domain.time.occurrence_shifts -> app.adapters.db.time.models",
     # v1 stopgap (cd-whl): ``app.domain.time.shifts`` invokes
     # :func:`app.authz.enforce.require` for the ``time.clock_self``
     # / ``time.edit_others`` capability checks. ``app.authz``

@@ -299,6 +299,9 @@ class TaskTemplate(Base):
     required_approval: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False
     )
+    auto_shift_from_occurrence: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False
+    )
     # List of {item_ref, kind, qty} inventory effects (§08). JSON
     # rather than a join table for v1.
     inventory_effects_json: Mapped[list[Any]] = mapped_column(

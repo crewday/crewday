@@ -141,6 +141,8 @@ from app.events.bus import bus as default_event_bus
 from app.events.types import (
     TaskCancelled,
     TaskCompleted,
+    TaskOccurrenceCompleted,
+    TaskOccurrenceStarted,
     TaskSkipped,
 )
 from app.services.inventory import movement_service
@@ -850,7 +852,7 @@ def start(
     service already fired ``task.assigned`` at creation-time and
     nothing downstream of ``start`` invalidates a workspace cache).
     """
-    _ = event_bus  # reserved for a future ``task.started`` fanout.
+    resolved_bus = event_bus if event_bus is not None else default_event_bus
     resolved_clock = clock if clock is not None else SystemClock()
 
     task = _load_task(session, ctx, task_id)
@@ -877,6 +879,16 @@ def start(
         task=task,
         action="task.start",
         diff={"before": {"state": previous}, "after": {"state": "in_progress"}},
+    )
+    resolved_bus.publish(
+        TaskOccurrenceStarted(
+            workspace_id=ctx.workspace_id,
+            actor_id=ctx.actor_id,
+            correlation_id=ctx.audit_correlation_id,
+            occurred_at=resolved_clock.now(),
+            task_id=task.id,
+            started_by=ctx.actor_id,
+        )
     )
     return _state_view(task, state="in_progress")
 
@@ -1064,6 +1076,16 @@ def complete(
 
     resolved_bus.publish(
         TaskCompleted(
+            workspace_id=ctx.workspace_id,
+            actor_id=ctx.actor_id,
+            correlation_id=ctx.audit_correlation_id,
+            occurred_at=resolved_clock.now(),
+            task_id=task.id,
+            completed_by=ctx.actor_id,
+        )
+    )
+    resolved_bus.publish(
+        TaskOccurrenceCompleted(
             workspace_id=ctx.workspace_id,
             actor_id=ctx.actor_id,
             correlation_id=ctx.audit_correlation_id,

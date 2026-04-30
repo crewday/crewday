@@ -276,6 +276,9 @@ class PropertyWorkspace(Base):
     share_guest_identity: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False
     )
+    auto_shift_from_occurrence: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False
+    )
     # Invite-acceptance lifecycle. ``invited`` covers a non-owner row
     # minted by the owner that the recipient workspace has not yet
     # accepted; ``active`` covers the live, in-force row. Owner rows

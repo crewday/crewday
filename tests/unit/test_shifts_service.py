@@ -271,6 +271,7 @@ class TestShiftView:
             starts_at=_PINNED,
             ends_at=None,
             property_id=None,
+            source_occurrence_id=None,
             source="manual",
             notes_md=None,
             approved_by=None,
@@ -313,6 +314,10 @@ class TestShiftDtos:
     def test_shift_open_bad_source_literal_rejected(self) -> None:
         with pytest.raises(ValidationError):
             ShiftOpen(source="nope")  # type: ignore[arg-type]
+
+    def test_shift_open_rejects_internal_occurrence_source(self) -> None:
+        with pytest.raises(ValidationError):
+            ShiftOpen(source="occurrence")  # type: ignore[arg-type]
 
     def test_shift_close_defaults(self) -> None:
         assert ShiftClose().ends_at is None
@@ -393,6 +398,29 @@ class TestOpenShift:
             open_shift(session, ctx, clock=clock)
         assert exc.value.user_id == user_id
         assert exc.value.existing_shift_id == first.id
+
+    def test_occurrence_source_requires_source_occurrence_id(
+        self,
+        session: Session,
+        worker_env: tuple[WorkspaceContext, str, FrozenClock],
+    ) -> None:
+        ctx, _user_id, clock = worker_env
+        with pytest.raises(ValueError, match="source_occurrence_id"):
+            open_shift(session, ctx, source="occurrence", clock=clock)
+
+    def test_source_occurrence_id_requires_occurrence_source(
+        self,
+        session: Session,
+        worker_env: tuple[WorkspaceContext, str, FrozenClock],
+    ) -> None:
+        ctx, _user_id, clock = worker_env
+        with pytest.raises(ValueError, match="only valid"):
+            open_shift(
+                session,
+                ctx,
+                source_occurrence_id="occ_123",
+                clock=clock,
+            )
 
     def test_worker_cannot_open_for_another_user(
         self,

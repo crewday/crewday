@@ -99,6 +99,7 @@ export interface TaskTemplate {
   photo_evidence: PhotoEvidence;
   linked_instruction_ids: string[];
   priority: TaskPriority;
+  auto_shift_from_occurrence: boolean;
   inventory_consumption_json: Record<string, number>;
   inventory_effects: InventoryEffect[];
   llm_hints_md: string | null;

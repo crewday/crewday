@@ -59,6 +59,15 @@ pipeline; their relationship to `booking_billing` is deferred to a
 future spec update (see `docs/specs/02-domain-model.md`
 §"Time / pay / expenses").
 
+When `task_template.auto_shift_from_occurrence` or the workspace's
+`property_workspace.auto_shift_from_occurrence` flag is enabled, the
+task occurrence lifecycle may create those lightweight shift rows:
+`task.occurrence.started` opens a `source = occurrence` shift linked by
+`shift.source_occurrence_id`, and `task.occurrence.completed` closes
+that matching shift. Redelivery is idempotent by that link. If the
+worker already has an open manual shift, the auto-open is skipped and
+audited with `shift.auto_open_skipped`.
+
 ### Model
 
 ```

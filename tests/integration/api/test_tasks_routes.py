@@ -36,12 +36,13 @@ from typing import Any
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from sqlalchemy import Engine
+from sqlalchemy import Engine, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.adapters.db.instructions.models import Instruction, InstructionVersion
 from app.adapters.db.places.models import Area, Property, PropertyWorkspace, Unit
-from app.adapters.db.tasks.models import ChecklistItem, Occurrence
+from app.adapters.db.tasks.models import ChecklistItem, Occurrence, TaskTemplate
+from app.adapters.db.time.models import Shift
 from app.adapters.db.workspace.models import WorkRole
 from app.adapters.storage.mime import FiletypeMimeSniffer
 from app.adapters.storage.ports import MimeSniffer
@@ -1102,6 +1103,64 @@ class TestTasksListing:
 
 
 class TestStateMachine:
+    def test_start_complete_routes_drive_occurrence_shift_subscription(
+        self,
+        session_factory: sessionmaker[Session],
+        seeded: dict[str, Any],
+    ) -> None:
+        with session_factory() as s, tenant_agnostic():
+            template_id = new_ulid()
+            s.add(
+                TaskTemplate(
+                    id=template_id,
+                    workspace_id=seeded["workspace_id"],
+                    title="Turnover",
+                    name="Turnover",
+                    description_md="",
+                    role_id=None,
+                    default_duration_min=60,
+                    duration_minutes=60,
+                    required_evidence="none",
+                    photo_required=False,
+                    default_assignee_role=None,
+                    property_scope="one",
+                    listed_property_ids=[seeded["property_id"]],
+                    area_scope="any",
+                    listed_area_ids=[],
+                    checklist_template_json=[],
+                    photo_evidence="disabled",
+                    linked_instruction_ids=[],
+                    priority="normal",
+                    required_approval=False,
+                    auto_shift_from_occurrence=True,
+                    inventory_effects_json=[],
+                    llm_hints_md=None,
+                    deleted_at=None,
+                    created_at=_PINNED,
+                )
+            )
+            task = s.get(Occurrence, seeded["task_id"])
+            assert task is not None
+            task.template_id = template_id
+            s.commit()
+
+        with _client_for(session_factory, seeded["owner_ctx"]) as client:
+            r = client.post(f"/api/v1/tasks/{seeded['task_id']}/start")
+            assert r.status_code == 200, r.text
+            r = client.post(f"/api/v1/tasks/{seeded['task_id']}/complete", json={})
+            assert r.status_code == 200, r.text
+
+        with session_factory() as s, tenant_agnostic():
+            shift = s.scalars(
+                select(Shift).where(
+                    Shift.workspace_id == seeded["workspace_id"],
+                    Shift.source_occurrence_id == seeded["task_id"],
+                )
+            ).one()
+            assert shift.user_id == seeded["worker_id"]
+            assert shift.source == "occurrence"
+            assert shift.ends_at is not None
+
     def test_start_then_complete(
         self,
         session_factory: sessionmaker[Session],

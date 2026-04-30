@@ -85,6 +85,7 @@ __all__ = [
     "ShiftView",
     "close_shift",
     "edit_shift",
+    "find_shift_by_source_occurrence",
     "get_shift",
     "list_open_shifts",
     "list_shifts",
@@ -98,6 +99,7 @@ __all__ = [
 
 
 ShiftSource = Literal["manual", "geofence", "occurrence"]
+ShiftOpenSource = Literal["manual", "geofence"]
 
 
 # ---------------------------------------------------------------------------
@@ -185,7 +187,7 @@ class ShiftOpen(BaseModel):
 
     user_id: str | None = Field(default=None, max_length=_MAX_ID_LEN)
     property_id: str | None = Field(default=None, max_length=_MAX_ID_LEN)
-    source: ShiftSource = "manual"
+    source: ShiftOpenSource = "manual"
     notes_md: str | None = Field(default=None, max_length=_MAX_NOTES_LEN)
     client_lat: float | None = Field(default=None, ge=-90, le=90)
     client_lon: float | None = Field(default=None, ge=-180, le=180)
@@ -240,6 +242,7 @@ class ShiftView:
     starts_at: datetime
     ends_at: datetime | None
     property_id: str | None
+    source_occurrence_id: str | None
     source: ShiftSource
     notes_md: str | None
     approved_by: str | None
@@ -302,6 +305,7 @@ def _row_to_view(row: Shift) -> ShiftView:
         starts_at=_ensure_utc(row.starts_at),
         ends_at=_ensure_utc(row.ends_at) if row.ends_at is not None else None,
         property_id=row.property_id,
+        source_occurrence_id=row.source_occurrence_id,
         source=_narrow_source(row.source),
         notes_md=row.notes_md,
         approved_by=row.approved_by,
@@ -327,6 +331,7 @@ def _view_to_diff_dict(view: ShiftView) -> dict[str, Any]:
         "starts_at": view.starts_at.isoformat(),
         "ends_at": view.ends_at.isoformat() if view.ends_at is not None else None,
         "property_id": view.property_id,
+        "source_occurrence_id": view.source_occurrence_id,
         "source": view.source,
         "notes_md": view.notes_md,
         "approved_by": view.approved_by,
@@ -489,6 +494,23 @@ def _find_open_shift_id(
     return session.scalars(stmt).first()
 
 
+def find_shift_by_source_occurrence(
+    session: Session,
+    ctx: WorkspaceContext,
+    *,
+    occurrence_id: str,
+) -> ShiftView | None:
+    """Return the shift derived from ``occurrence_id`` in this workspace."""
+    stmt = select(Shift).where(
+        Shift.workspace_id == ctx.workspace_id,
+        Shift.source_occurrence_id == occurrence_id,
+    )
+    row = session.scalars(stmt).first()
+    if row is None:
+        return None
+    return _row_to_view(row)
+
+
 def _write_geofence_audit(
     session: Session,
     ctx: WorkspaceContext,
@@ -524,6 +546,7 @@ def open_shift(
     user_id: str | None = None,
     property_id: str | None = None,
     source: ShiftSource = "manual",
+    source_occurrence_id: str | None = None,
     notes_md: str | None = None,
     client_lat: float | None = None,
     client_lon: float | None = None,
@@ -576,6 +599,10 @@ def open_shift(
         raise ValueError(
             f"shift.source={source!r} is not one of {_SHIFT_SOURCE_VALUES!r}"
         )
+    if source == "occurrence" and source_occurrence_id is None:
+        raise ValueError("occurrence-sourced shifts require source_occurrence_id")
+    if source != "occurrence" and source_occurrence_id is not None:
+        raise ValueError("source_occurrence_id is only valid for occurrence shifts")
 
     geofence = check_geofence(
         session,
@@ -603,6 +630,7 @@ def open_shift(
         starts_at=now,
         ends_at=None,
         property_id=property_id,
+        source_occurrence_id=source_occurrence_id,
         source=source,
         notes_md=notes_md,
         approved_by=None,

@@ -8,8 +8,8 @@ private :class:`EventBus` so subscriptions don't leak between tests.
 
 Covers cd-7am7:
 
-* :func:`start` drives ``pending → in_progress``; audit only, no
-  event.
+* :func:`start` drives ``pending → in_progress``, writes audit, and
+  fires :class:`TaskOccurrenceStarted`.
 * :func:`complete` drives ``pending | in_progress → done`` with
   the photo + checklist gates, writes the note, runs the inventory
   hook, fires :class:`TaskCompleted`, writes ``task.complete``.
@@ -87,6 +87,8 @@ from app.events.types import (
     TaskApprovalRequested,
     TaskCancelled,
     TaskCompleted,
+    TaskOccurrenceCompleted,
+    TaskOccurrenceStarted,
     TaskSkipped,
 )
 from app.tenancy.context import WorkspaceContext
@@ -324,14 +326,24 @@ def _bootstrap_inventory_item(
 
 def _record(
     bus: EventBus,
-) -> tuple[list[TaskCompleted], list[TaskSkipped], list[TaskCancelled]]:
+) -> tuple[
+    list[TaskCompleted],
+    list[TaskSkipped],
+    list[TaskCancelled],
+    list[TaskOccurrenceStarted],
+    list[TaskOccurrenceCompleted],
+]:
     completed: list[TaskCompleted] = []
     skipped: list[TaskSkipped] = []
     cancelled: list[TaskCancelled] = []
+    started: list[TaskOccurrenceStarted] = []
+    occurrence_completed: list[TaskOccurrenceCompleted] = []
     bus.subscribe(TaskCompleted)(completed.append)
     bus.subscribe(TaskSkipped)(skipped.append)
     bus.subscribe(TaskCancelled)(cancelled.append)
-    return completed, skipped, cancelled
+    bus.subscribe(TaskOccurrenceStarted)(started.append)
+    bus.subscribe(TaskOccurrenceCompleted)(occurrence_completed.append)
+    return completed, skipped, cancelled, started, occurrence_completed
 
 
 # ---------------------------------------------------------------------------
@@ -382,7 +394,7 @@ class TestAssertTransition:
 
 
 class TestStart:
-    """:func:`start` drives ``pending → in_progress`` with audit only."""
+    """:func:`start` drives ``pending → in_progress`` with audit + event."""
 
     def test_happy_path_flips_state(
         self, session: Session, clock: FrozenClock, bus: EventBus
@@ -394,6 +406,7 @@ class TestStart:
             session, workspace_id=ws, property_id=prop, assignee_user_id=worker
         )
         ctx = _ctx(ws, role="worker", owner=False, actor_id=worker)
+        _, _, _, started, _ = _record(bus)
 
         result = start(session, ctx, occ, clock=clock, event_bus=bus)
 
@@ -405,6 +418,9 @@ class TestStart:
         assert audit.action == "task.start"
         assert audit.diff["before"]["state"] == "pending"
         assert audit.diff["after"]["state"] == "in_progress"
+        assert len(started) == 1
+        assert started[0].task_id == occ
+        assert started[0].started_by == worker
 
     def test_worker_not_assigned_rejected(
         self, session: Session, clock: FrozenClock, bus: EventBus
@@ -475,7 +491,7 @@ class TestComplete:
             session, workspace_id=ws, property_id=prop, assignee_user_id=worker
         )
         ctx = _ctx(ws, role="worker", owner=False, actor_id=worker)
-        completed, _, _ = _record(bus)
+        completed, _, _, _, occurrence_completed = _record(bus)
 
         result = complete(session, ctx, occ, clock=clock, event_bus=bus)
 
@@ -496,6 +512,9 @@ class TestComplete:
         assert actions == ["task.complete"]
         assert len(completed) == 1
         assert completed[0].completed_by == worker
+        assert len(occurrence_completed) == 1
+        assert occurrence_completed[0].task_id == occ
+        assert occurrence_completed[0].completed_by == worker
 
     def test_required_approval_requests_review(
         self, session: Session, clock: FrozenClock, bus: EventBus
@@ -1024,7 +1043,7 @@ class TestSkip:
         ws = _bootstrap_workspace(session)
         prop = _bootstrap_property(session)
         occ = _bootstrap_occurrence(session, workspace_id=ws, property_id=prop)
-        _, skipped, _ = _record(bus)
+        _, skipped, _, _, _ = _record(bus)
 
         result = skip(
             session,
@@ -1180,7 +1199,7 @@ class TestCancel:
         ws = _bootstrap_workspace(session)
         prop = _bootstrap_property(session)
         occ = _bootstrap_occurrence(session, workspace_id=ws, property_id=prop)
-        _, _, cancelled = _record(bus)
+        _, _, cancelled, _, _ = _record(bus)
 
         result = cancel(
             session,

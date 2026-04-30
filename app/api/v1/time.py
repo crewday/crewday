@@ -130,6 +130,7 @@ class ShiftPayload(BaseModel):
     starts_at: datetime
     ends_at: datetime | None
     property_id: str | None
+    source_occurrence_id: str | None
     source: str
     notes_md: str | None
     approved_by: str | None
@@ -145,6 +146,7 @@ class ShiftPayload(BaseModel):
             starts_at=view.starts_at,
             ends_at=view.ends_at,
             property_id=view.property_id,
+            source_occurrence_id=view.source_occurrence_id,
             source=view.source,
             notes_md=view.notes_md,
             approved_by=view.approved_by,

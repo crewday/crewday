@@ -65,6 +65,7 @@ from app.adapters.db.base import Base
 # packages have been imported, so we register them here as a side
 # effect.
 from app.adapters.db.identity import models as _identity_models  # noqa: F401
+from app.adapters.db.tasks import models as _tasks_models  # noqa: F401
 from app.adapters.db.workspace import models as _workspace_models  # noqa: F401
 
 __all__ = ["GeofenceSetting", "Leave", "Shift"]
@@ -153,6 +154,11 @@ class Shift(Base):
     # a manager-entered manual shift (e.g. "driver ran airport
     # pickups") may not pin to a single property.
     property_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    source_occurrence_id: Mapped[str | None] = mapped_column(
+        String,
+        ForeignKey("occurrence.id", ondelete="RESTRICT"),
+        nullable=True,
+    )
     source: Mapped[str] = mapped_column(String, nullable=False)
     notes_md: Mapped[str | None] = mapped_column(String, nullable=True)
     # Soft-ref :class:`str` — see the module docstring. ``NULL``
@@ -176,6 +182,7 @@ class Shift(Base):
         # starts_at range". Leading ``workspace_id`` lets the tenant
         # filter's equality predicate ride the same B-tree.
         Index("ix_shift_workspace_starts", "workspace_id", "starts_at"),
+        Index("ix_shift_source_occurrence", "workspace_id", "source_occurrence_id"),
     )
 
 

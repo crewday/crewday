@@ -263,7 +263,11 @@ The canonical enum lives in §02 (`task_state`, 7 values including
   started or closed the task and a passive PATCH must not undo a
   deliberate move.
 - `pending` → `in_progress` is optional; workers may go directly
-  to `completed`.
+  to `completed`. The explicit start transition emits
+  `task.occurrence.started`; completion emits both the legacy
+  `task.completed` event and the lifecycle-specific
+  `task.occurrence.completed` event. Time/payroll subscribers use the
+  lifecycle events for optional occurrence-driven shifts (§09).
 - `completed` is terminal.
 - `overdue` is a soft state: a worker flips `state` from
   `scheduled | pending | in_progress` to `overdue` when `due_by_utc`

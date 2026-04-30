@@ -268,6 +268,7 @@ class _TaskTemplateBody(BaseModel):
         default_factory=list, max_length=_MAX_INSTRUCTION_LINKS
     )
     priority: Priority = "normal"
+    auto_shift_from_occurrence: bool = False
     # SKU → quantity map. Value must be a positive integer (count of
     # units consumed per occurrence). We validate the outer shape
     # here; the per-SKU reference is resolved at consume-on-task
@@ -340,6 +341,7 @@ class TaskTemplateView:
     photo_evidence: PhotoEvidence
     linked_instruction_ids: tuple[str, ...]
     priority: Priority
+    auto_shift_from_occurrence: bool
     inventory_consumption_json: dict[str, int]
     llm_hints_md: str | None
     created_at: datetime
@@ -586,6 +588,7 @@ def _row_to_view(row: TaskTemplate) -> TaskTemplateView:
         photo_evidence=_narrow_photo_evidence(row.photo_evidence),
         linked_instruction_ids=tuple(row.linked_instruction_ids or []),
         priority=_narrow_priority(row.priority),
+        auto_shift_from_occurrence=row.auto_shift_from_occurrence,
         inventory_consumption_json=_consumption_from_effects(
             row.inventory_effects_json
         ),
@@ -677,6 +680,7 @@ def _view_to_diff_dict(view: TaskTemplateView) -> dict[str, Any]:
         "photo_evidence": view.photo_evidence,
         "linked_instruction_ids": list(view.linked_instruction_ids),
         "priority": view.priority,
+        "auto_shift_from_occurrence": view.auto_shift_from_occurrence,
         "inventory_consumption_json": dict(view.inventory_consumption_json),
         "llm_hints_md": view.llm_hints_md,
         "created_at": view.created_at.isoformat(),
@@ -743,6 +747,7 @@ def _apply_body(row: TaskTemplate, body: _TaskTemplateBody) -> None:
     row.photo_evidence = body.photo_evidence
     row.linked_instruction_ids = list(body.linked_instruction_ids)
     row.priority = body.priority
+    row.auto_shift_from_occurrence = body.auto_shift_from_occurrence
     row.inventory_effects_json = _effects_from_consumption(
         body.inventory_consumption_json
     )
