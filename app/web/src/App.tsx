@@ -156,6 +156,7 @@ export default function App() {
               <Route path="/my/expenses" element={<MyExpensesPage />} />
               <Route path="/me" element={<MePage />} />
               <Route path="/scheduler" element={<SchedulerPage />} />
+              <Route path="/w/:slug/scheduler" element={<SchedulerPage />} />
               {/* Legacy /bookings and /shifts URLs — spec §14 collapses
                   the standalone bookings page into the /schedule day
                   drawer (§09 bookings render alongside rota / tasks /
