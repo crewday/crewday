@@ -14,6 +14,7 @@ dolt-server.port
 backup/
 
 # Runtime files
+.bv.lock
 bd.sock
 bd.sock.startlock
 sync-state.json

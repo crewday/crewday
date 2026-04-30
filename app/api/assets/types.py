@@ -40,6 +40,7 @@ __all__ = [
     "AssetTypeResponse",
     "AssetTypeUpdateRequest",
     "DefaultAssetActionRequest",
+    "build_asset_types_alias_router",
     "build_asset_types_router",
 ]
 
@@ -242,6 +243,66 @@ def _http_for_type_error(exc: Exception) -> HTTPException:
     )
 
 
+def _list_type_response(
+    session: Session,
+    ctx: WorkspaceContext,
+    *,
+    category: str | None,
+    workspace_only: bool,
+    include_archived: bool,
+    cursor: str | None,
+    limit: int,
+) -> AssetTypeListResponse:
+    views = list_types(
+        session,
+        ctx,
+        category=category,
+        workspace_only=workspace_only,
+        include_archived=include_archived,
+        after_id=decode_cursor(cursor),
+        limit=limit + 1,
+    )
+    page = paginate(views, limit=limit, key_getter=lambda view: view.id)
+    return AssetTypeListResponse(
+        data=[AssetTypeResponse.from_view(view) for view in page.items],
+        next_cursor=page.next_cursor,
+        has_more=page.has_more,
+    )
+
+
+def build_asset_types_alias_router() -> APIRouter:
+    api = APIRouter(tags=["assets", "asset_types"])
+    view_gate = Depends(Permission("scope.view", scope_kind="workspace"))
+
+    @api.get(
+        "/asset_types",
+        response_model=AssetTypeListResponse,
+        operation_id="asset_types.list_flat",
+        summary="List asset types visible to the caller's workspace",
+        dependencies=[view_gate],
+    )
+    def list_flat(
+        ctx: _Ctx,
+        session: _Db,
+        category: str | None = Query(default=None),
+        workspace_only: bool = Query(default=False),
+        include_archived: bool = Query(default=False),
+        cursor: PageCursorQuery = None,
+        limit: LimitQuery = DEFAULT_LIMIT,
+    ) -> AssetTypeListResponse:
+        return _list_type_response(
+            session,
+            ctx,
+            category=category,
+            workspace_only=workspace_only,
+            include_archived=include_archived,
+            cursor=cursor,
+            limit=limit,
+        )
+
+    return api
+
+
 def build_asset_types_router() -> APIRouter:
     api = APIRouter(
         prefix="/asset_types",
@@ -268,20 +329,14 @@ def build_asset_types_router() -> APIRouter:
         cursor: PageCursorQuery = None,
         limit: LimitQuery = DEFAULT_LIMIT,
     ) -> AssetTypeListResponse:
-        views = list_types(
+        return _list_type_response(
             session,
             ctx,
             category=category,
             workspace_only=workspace_only,
             include_archived=include_archived,
-            after_id=decode_cursor(cursor),
-            limit=limit + 1,
-        )
-        page = paginate(views, limit=limit, key_getter=lambda view: view.id)
-        return AssetTypeListResponse(
-            data=[AssetTypeResponse.from_view(view) for view in page.items],
-            next_cursor=page.next_cursor,
-            has_more=page.has_more,
+            cursor=cursor,
+            limit=limit,
         )
 
     @api.post(

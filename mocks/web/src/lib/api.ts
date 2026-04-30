@@ -19,6 +19,10 @@ export function withBase(path: string): string {
   return base ? `${base}${path}` : path;
 }
 
+export function resolveApiPath(path: string): string {
+  return withBase(path);
+}
+
 function readCookie(name: string): string | null {
   const target = name + "=";
   for (const chunk of document.cookie.split(";")) {

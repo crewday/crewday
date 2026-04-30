@@ -4,10 +4,14 @@ from __future__ import annotations
 
 import hashlib
 import io
+from base64 import b64encode
+from collections.abc import Sequence
 from dataclasses import asdict, dataclass
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
+from html import escape
 from typing import Annotated, Any, Literal
+from urllib.parse import quote
 
 from fastapi import (
     APIRouter,
@@ -24,10 +28,11 @@ from fastapi import (
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy import select
 from sqlalchemy.orm import Session
-from starlette.routing import NoMatchFound
+from weasyprint import HTML
 
 from app.adapters.db.assets.models import Asset as AssetRow
 from app.adapters.db.assets.models import AssetAction as AssetActionRow
+from app.adapters.db.assets.models import AssetType as AssetTypeRow
 from app.adapters.db.places.models import Area, Property, PropertyWorkspace
 from app.adapters.qr import render_qr
 from app.adapters.storage.ports import MimeSniffer, Storage
@@ -97,6 +102,7 @@ __all__ = [
     "AssetResponse",
     "AssetUpdateRequest",
     "build_asset_scan_router",
+    "build_assets_alias_router",
     "build_assets_router",
     "build_documents_router",
 ]
@@ -998,6 +1004,101 @@ def _detail_action_from_view(
     )
 
 
+def _asset_type_categories(session: Session, workspace_id: str) -> dict[str, str]:
+    with tenant_agnostic():
+        rows = session.execute(
+            select(AssetTypeRow.id, AssetTypeRow.category).where(
+                (AssetTypeRow.workspace_id.is_(None))
+                | (AssetTypeRow.workspace_id == workspace_id)
+            )
+        ).all()
+    return {str(row.id): str(row.category) for row in rows}
+
+
+def _render_qr_sheet_pdf(
+    request: Request,
+    ctx: WorkspaceContext,
+    views: Sequence[AssetView],
+) -> bytes:
+    cards = "\n".join(_qr_sheet_card(request, ctx, view) for view in views)
+    html = f"""
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <style>
+      @page {{ size: A4; margin: 12mm; }}
+      body {{ font-family: sans-serif; color: #1f2933; }}
+      .sheet {{ display: grid; grid-template-columns: repeat(3, 1fr); gap: 8mm; }}
+      .label {{ border: 1px solid #ccd3ca; padding: 6mm; break-inside: avoid; }}
+      .label img {{ width: 34mm; height: 34mm; display: block; margin-bottom: 3mm; }}
+      .label strong {{ display: block; font-size: 12pt; }}
+      .label span {{ display: block; font-size: 8pt; color: #5f6b5b; }}
+    </style>
+  </head>
+  <body>
+    <main class="sheet">{cards}</main>
+  </body>
+</html>
+"""
+    return bytes(HTML(string=html).write_pdf())
+
+
+def _qr_sheet_card(request: Request, ctx: WorkspaceContext, view: AssetView) -> str:
+    scan_url = _asset_scan_web_url(request, ctx, view.qr_token)
+    qr_png = b64encode(render_qr(scan_url, label=view.name)).decode("ascii")
+    return (
+        '<article class="label">'
+        f'<img alt="" src="data:image/png;base64,{qr_png}">'
+        f"<strong>{escape(view.name)}</strong>"
+        f"<span>{escape(ctx.workspace_slug)} / {escape(view.id)}</span>"
+        "</article>"
+    )
+
+
+def _asset_scan_web_url(request: Request, ctx: WorkspaceContext, qr_token: str) -> str:
+    slug = str(request.path_params.get("slug") or ctx.workspace_slug)
+    return (
+        str(request.base_url).rstrip("/")
+        + f"/w/{quote(slug, safe='')}/asset/scan/{quote(qr_token, safe='')}"
+    )
+
+
+def _asset_list_response(
+    session: Session,
+    ctx: WorkspaceContext,
+    *,
+    property_id: str | None,
+    area_id: str | None,
+    status_: str | None,
+    condition: str | None,
+    asset_type_id: str | None,
+    q: str | None,
+    include_archived: bool,
+    cursor: str | None,
+    limit: int,
+) -> AssetListResponse:
+    views = list_assets(
+        session,
+        ctx,
+        property_id=property_id,
+        area_id=area_id,
+        status=status_,
+        condition=condition,
+        asset_type_id=asset_type_id,
+        q=q,
+        include_archived=include_archived,
+        after_id=decode_cursor(cursor),
+        limit=limit + 1,
+    )
+    page = paginate(views, limit=limit, key_getter=lambda view: view.id)
+    return AssetListResponse(
+        data=[AssetResponse.from_view(view) for view in page.items],
+        next_cursor=page.next_cursor,
+        has_more=page.has_more,
+    )
+
+
 def _default_detail_actions(
     asset: AssetView,
     asset_type: AssetTypeView,
@@ -1464,6 +1565,71 @@ def build_documents_router() -> APIRouter:
     return api
 
 
+def build_assets_alias_router() -> APIRouter:
+    api = APIRouter(tags=["assets"], responses=_ASSET_ERROR_RESPONSES)
+    view_gate = Depends(Permission("scope.view", scope_kind="workspace"))
+    edit_gate = Depends(Permission("assets.edit", scope_kind="workspace"))
+
+    @api.get(
+        "/assets",
+        response_model=AssetListResponse,
+        operation_id="assets.list_flat",
+        summary="List tracked assets",
+        dependencies=[view_gate],
+    )
+    def list_flat(
+        ctx: _Ctx,
+        session: _Db,
+        property_id: str | None = Query(default=None),
+        area_id: str | None = Query(default=None),
+        status_: str | None = Query(default=None, alias="status"),
+        condition: str | None = Query(default=None),
+        asset_type_id: str | None = Query(default=None),
+        q: str | None = Query(default=None),
+        include_archived: bool = Query(default=False),
+        cursor: PageCursorQuery = None,
+        limit: LimitQuery = DEFAULT_LIMIT,
+    ) -> AssetListResponse:
+        return _asset_list_response(
+            session,
+            ctx,
+            property_id=property_id,
+            area_id=area_id,
+            status_=status_,
+            condition=condition,
+            asset_type_id=asset_type_id,
+            q=q,
+            include_archived=include_archived,
+            cursor=cursor,
+            limit=limit,
+        )
+
+    @api.post(
+        "/assets",
+        response_model=AssetResponse,
+        status_code=status.HTTP_201_CREATED,
+        include_in_schema=False,
+        dependencies=[edit_gate],
+    )
+    def create_flat(
+        body: AssetCreateRequest,
+        ctx: _Ctx,
+        session: _Db,
+    ) -> AssetResponse:
+        try:
+            view = create_asset(session, ctx, body=body.to_domain())
+        except (
+            AssetPlacementInvalid,
+            AssetQrTokenExhausted,
+            AssetTypeUnavailable,
+            AssetValidationError,
+        ) as exc:
+            raise _http_for_asset_error(exc) from exc
+        return AssetResponse.from_view(view)
+
+    return api
+
+
 def build_assets_router() -> APIRouter:
     api = APIRouter(tags=["assets"], responses=_ASSET_ERROR_RESPONSES)
 
@@ -1493,24 +1659,18 @@ def build_assets_router() -> APIRouter:
         cursor: PageCursorQuery = None,
         limit: LimitQuery = DEFAULT_LIMIT,
     ) -> AssetListResponse:
-        views = list_assets(
+        return _asset_list_response(
             session,
             ctx,
             property_id=property_id,
             area_id=area_id,
-            status=status_,
+            status_=status_,
             condition=condition,
             asset_type_id=asset_type_id,
             q=q,
             include_archived=include_archived,
-            after_id=decode_cursor(cursor),
-            limit=limit + 1,
-        )
-        page = paginate(views, limit=limit, key_getter=lambda view: view.id)
-        return AssetListResponse(
-            data=[AssetResponse.from_view(view) for view in page.items],
-            next_cursor=page.next_cursor,
-            has_more=page.has_more,
+            cursor=cursor,
+            limit=limit,
         )
 
     @api.post(
@@ -1536,6 +1696,43 @@ def build_assets_router() -> APIRouter:
         ) as exc:
             raise _http_for_asset_error(exc) from exc
         return AssetResponse.from_view(view)
+
+    @api.get(
+        "/qr-sheet",
+        operation_id="assets.qr_sheet",
+        summary="Render asset QR labels as a print-ready PDF",
+        dependencies=[view_gate],
+    )
+    def qr_sheet(
+        request: Request,
+        ctx: _Ctx,
+        session: _Db,
+        property_id: str | None = Query(default=None),
+        category: str | None = Query(default=None),
+    ) -> Response:
+        views = list_assets(
+            session,
+            ctx,
+            property_id=property_id,
+            limit=500,
+        )
+        if category:
+            type_categories = _asset_type_categories(session, ctx.workspace_id)
+            views = [
+                view
+                for view in views
+                if view.asset_type_id
+                and type_categories.get(view.asset_type_id) == category
+            ]
+        pdf = _render_qr_sheet_pdf(request, ctx, views)
+        return Response(
+            content=pdf,
+            media_type="application/pdf",
+            headers={
+                "Cache-Control": "no-store",
+                "Content-Disposition": 'inline; filename="asset-qr-labels.pdf"',
+            },
+        )
 
     @api.get(
         "/scan/{qr_token}",
@@ -1957,15 +2154,11 @@ def build_assets_router() -> APIRouter:
             view = get_asset(session, ctx, asset_id=asset_id)
         except AssetNotFound as exc:
             raise _http_for_asset_error(exc) from exc
-        url_params = {"qr_token": view.qr_token}
-        if "slug" in request.path_params:
-            url_params["slug"] = request.path_params["slug"]
-        try:
-            scan_url = str(request.url_for("asset.scan", **url_params))
-        except NoMatchFound:
-            scan_url = str(request.url_for("assets.scan", **url_params))
         return Response(
-            content=render_qr(scan_url, label=view.name),
+            content=render_qr(
+                _asset_scan_web_url(request, ctx, view.qr_token),
+                label=view.name,
+            ),
             media_type="image/png",
             headers={"Cache-Control": "no-store"},
         )

@@ -92,6 +92,8 @@ from app.api.middleware import (
 from app.api.transport.sse import router as sse_router
 from app.api.v1 import (
     APPROVALS_ROUTER,
+    ASSET_TYPES_ALIAS_ROUTER,
+    ASSETS_ALIAS_ROUTER,
     BILLING_PUBLIC_ROUTER,
     CONTEXT_ROUTERS,
     DOCUMENTS_ROUTER,
@@ -783,6 +785,8 @@ def _mount_context_routers(app: FastAPI, *, settings: Settings) -> None:
         app.include_router(router, prefix=f"{scoped_prefix}/{context_name}")
 
     app.include_router(asset_scan_router, prefix=f"{scoped_prefix}/asset")
+    app.include_router(ASSETS_ALIAS_ROUTER, prefix=scoped_prefix)
+    app.include_router(ASSET_TYPES_ALIAS_ROUTER, prefix=scoped_prefix)
     app.include_router(DOCUMENTS_ROUTER, prefix=scoped_prefix)
 
     # Workspace-scoped admin aggregator. Mounted OUTSIDE the

@@ -7,13 +7,16 @@ from datetime import UTC, datetime
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from pytest import MonkeyPatch
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.adapters.db.assets.models import AssetDocument, AssetType
 from app.adapters.db.audit.models import AuditLog
 from app.adapters.db.places.models import Area, Property, PropertyWorkspace
+from app.api.assets import assets as assets_api
 from app.api.deps import current_workspace_context, db_session
+from app.api.v1.assets import asset_types_alias_router, assets_alias_router
 from app.api.v1.assets import router as assets_router
 from app.api.v1.assets import scan_router as asset_scan_router
 from app.tenancy import WorkspaceContext
@@ -54,6 +57,8 @@ def _workspace_prefixed_client(session: Session, ctx: WorkspaceContext) -> TestC
     app = FastAPI()
     app.include_router(assets_router, prefix="/w/{slug}/api/v1/assets")
     app.include_router(asset_scan_router, prefix="/w/{slug}/api/v1/asset")
+    app.include_router(assets_alias_router, prefix="/w/{slug}/api/v1")
+    app.include_router(asset_types_alias_router, prefix="/w/{slug}/api/v1")
 
     def override_ctx() -> WorkspaceContext:
         return ctx
@@ -341,3 +346,68 @@ def test_qr_png_uses_workspace_prefixed_scan_route(db_session: Session) -> None:
     png = client.get(f"/w/{ctx.workspace_slug}/api/v1/assets/{asset['id']}/qr.png")
     assert png.status_code == 200
     assert png.content.startswith(b"\x89PNG\r\n\x1a\n")
+
+
+def test_flat_asset_types_alias_lists_types(db_session: Session) -> None:
+    ctx, _client, _property_id, _area_id = _seed_workspace(db_session)
+    client = _workspace_prefixed_client(db_session, ctx)
+
+    response = client.get(f"/w/{ctx.workspace_slug}/api/v1/asset_types")
+
+    assert response.status_code == 200
+    assert isinstance(response.json()["data"], list)
+
+
+def test_flat_assets_alias_lists_assets(db_session: Session) -> None:
+    ctx, _client, property_id, _area_id = _seed_workspace(db_session)
+    client = _workspace_prefixed_client(db_session, ctx)
+
+    created = client.post(
+        f"/w/{ctx.workspace_slug}/api/v1/assets",
+        json={"label": "Front gate", "property_id": property_id},
+    )
+    assert created.status_code == 201
+
+    response = client.get(f"/w/{ctx.workspace_slug}/api/v1/assets")
+
+    assert response.status_code == 200
+    assert [asset["id"] for asset in response.json()["data"]] == [created.json()["id"]]
+
+
+def test_qr_sheet_streams_pdf(
+    db_session: Session,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    ctx, _client, property_id, _area_id = _seed_workspace(db_session)
+    client = _workspace_prefixed_client(db_session, ctx)
+    rendered_qr_urls: list[str] = []
+    real_render_qr = assets_api.render_qr
+
+    def capture_render_qr(
+        data: str,
+        *,
+        size: int = 512,
+        label: str | None = None,
+    ) -> bytes:
+        rendered_qr_urls.append(data)
+        return real_render_qr(data, size=size, label=label)
+
+    monkeypatch.setattr(assets_api, "render_qr", capture_render_qr)
+
+    created = client.post(
+        f"/w/{ctx.workspace_slug}/api/v1/assets",
+        json={"label": "Front gate", "property_id": property_id},
+    )
+    assert created.status_code == 201
+
+    pdf = client.get(
+        f"/w/{ctx.workspace_slug}/api/v1/assets/qr-sheet",
+        params={"property_id": property_id},
+    )
+
+    assert pdf.status_code == 200
+    assert pdf.headers["content-type"] == "application/pdf"
+    assert pdf.content.startswith(b"%PDF")
+    assert rendered_qr_urls == [
+        f"http://testserver/w/{ctx.workspace_slug}/asset/scan/{created.json()['qr_token']}"
+    ]

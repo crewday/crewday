@@ -1,7 +1,6 @@
-import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Link } from "react-router-dom";
-import { fetchJson } from "@/lib/api";
+import { Link, useSearchParams } from "react-router-dom";
+import { fetchJson, resolveApiPath } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
 import DeskPage from "@/components/DeskPage";
 import { Chip, FilterChipGroup, Loading } from "@/components/common";
@@ -9,25 +8,84 @@ import { AssetIcon } from "@/components/AssetIcon";
 import { ASSET_CONDITION_TONE, ASSET_STATUS_TONE } from "@/lib/tones";
 import type { Asset, AssetType, Property } from "@/types/api";
 
+interface ListEnvelope<T> {
+  data: T[];
+}
+
+function unwrapList<T>(payload: T[] | ListEnvelope<T>): T[] {
+  return Array.isArray(payload) ? payload : payload.data;
+}
+
+async function fetchList<T>(path: string): Promise<T[]> {
+  return unwrapList(await fetchJson<T[] | ListEnvelope<T>>(path));
+}
+
+function setSearchParam(
+  current: URLSearchParams,
+  key: string,
+  value: string,
+): URLSearchParams {
+  const next = new URLSearchParams(current);
+  if (value) {
+    next.set(key, value);
+  } else {
+    next.delete(key);
+  }
+  return next;
+}
+
+function QrSheetButton({
+  category,
+  propertyId,
+}: {
+  category: string;
+  propertyId: string;
+}) {
+  const params = new URLSearchParams();
+  if (category) params.set("category", category);
+  if (propertyId) params.set("property_id", propertyId);
+  const suffix = params.toString() ? "?" + params.toString() : "";
+  return (
+    <button
+      className="btn"
+      onClick={() =>
+        window.open(
+          resolveApiPath("/api/v1/assets/qr-sheet" + suffix),
+          "_blank",
+          "noopener,noreferrer",
+        )
+      }
+    >
+      Print QR labels
+    </button>
+  );
+}
+
 export default function AssetsPage() {
-  const [activeCategory, setActiveCategory] = useState<string>("");
-  const [activeProperty, setActiveProperty] = useState<string>("");
+  const [searchParams, setSearchParams] = useSearchParams();
+  const activeCategory = searchParams.get("category") ?? "";
+  const activeProperty = searchParams.get("property_id") ?? "";
 
   const assetsQ = useQuery({
     queryKey: qk.assets(),
-    queryFn: () => fetchJson<Asset[]>("/api/v1/assets"),
+    queryFn: () => fetchList<Asset>("/api/v1/assets"),
   });
   const typesQ = useQuery({
     queryKey: qk.assetTypes(),
-    queryFn: () => fetchJson<AssetType[]>("/api/v1/asset_types"),
+    queryFn: () => fetchList<AssetType>("/api/v1/asset_types"),
   });
   const propsQ = useQuery({
     queryKey: qk.properties(),
-    queryFn: () => fetchJson<Property[]>("/api/v1/properties"),
+    queryFn: () => fetchList<Property>("/api/v1/properties"),
   });
 
   const sub = "Tracked equipment and appliances across all properties.";
-  const actions = <button className="btn btn--moss">+ New asset</button>;
+  const actions = (
+    <>
+      <QrSheetButton category={activeCategory} propertyId={activeProperty} />
+      <button className="btn btn--moss">+ New asset</button>
+    </>
+  );
 
   if (assetsQ.isPending || typesQ.isPending || propsQ.isPending) {
     return <DeskPage title="Assets" sub={sub} actions={actions}><Loading /></DeskPage>;
@@ -50,19 +108,30 @@ export default function AssetsPage() {
     return true;
   });
 
+  const categoryOptions = categories.map((cat) => ({ value: cat, label: cat }));
+  const propertyOptions = propsQ.data.map((p) => ({
+    value: p.id,
+    label: p.name,
+    tone: p.color,
+  }));
+
   return (
     <DeskPage title="Assets" sub={sub} actions={actions}>
       <section className="panel">
         <FilterChipGroup
           value={activeCategory}
-          onChange={setActiveCategory}
-          options={categories.map((cat) => ({ value: cat, label: cat }))}
+          onChange={(value) =>
+            setSearchParams(setSearchParam(searchParams, "category", value))
+          }
+          options={categoryOptions}
         />
         <FilterChipGroup
           value={activeProperty}
-          onChange={setActiveProperty}
+          onChange={(value) =>
+            setSearchParams(setSearchParam(searchParams, "property_id", value))
+          }
           allLabel="All properties"
-          options={propsQ.data.map((p) => ({ value: p.id, label: p.name, tone: p.color }))}
+          options={propertyOptions}
         />
 
         <table className="table">
