@@ -30,6 +30,23 @@
   --sky-soft:    rgba(79, 124, 168, 0.10);
   --shadow:      0 2px 4px rgba(63, 110, 59, 0.06), 0 8px 24px rgba(31, 26, 20, 0.06);
   --shadow-raised: 0 6px 18px rgba(31, 26, 20, 0.10);
+
+  /* Spacing scale from DESIGN.md frontmatter. */
+  --space-0: 0;
+  --space-1: 2px;
+  --space-2: 4px;
+  --space-3: 6px;
+  --space-4: 8px;
+  --space-5: 10px;
+  --space-6: 12px;
+  --space-7: 14px;
+  --space-8: 16px;
+  --space-9: 20px;
+  --space-10: 24px;
+  --space-11: 32px;
+  --space-12: 40px;
+  --space-13: 48px;
+  --space-14: 56px;
 }
 
 [data-theme="dark"] {
