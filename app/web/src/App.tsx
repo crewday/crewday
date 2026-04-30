@@ -251,6 +251,8 @@ export default function App() {
                 <Route path="/assets" element={<AssetsPage />} />
                 <Route path="/asset_types" element={<AssetTypesPage />} />
                 <Route path="/w/:slug/asset_types" element={<AssetTypesPage />} />
+                <Route path="/organizations" element={<OrganizationsPage />} />
+                <Route path="/w/:slug/organizations" element={<OrganizationsPage />} />
               </Route>
             </Route>
 
@@ -269,7 +271,6 @@ export default function App() {
               <Route path="/instructions/:iid" element={<InstructionDetailPage />} />
               <Route path="/inventory" element={<InventoryPage />} />
               <Route path="/permissions" element={<PermissionsPage />} />
-              <Route path="/organizations" element={<OrganizationsPage />} />
               <Route path="/tokens" element={<ApiTokensPage />} />
             </Route>
 
