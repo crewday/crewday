@@ -51,6 +51,7 @@ from app.api.admin.admins import build_admin_admins_router
 from app.api.admin.agent_docs import build_admin_agent_docs_router
 from app.api.admin.audit import build_admin_audit_router
 from app.api.admin.chat_gateway import build_admin_chat_gateway_router
+from app.api.admin.llm import build_admin_llm_router
 from app.api.admin.me import build_admin_me_router
 from app.api.admin.settings import build_admin_settings_router
 from app.api.admin.signup import build_admin_signup_router
@@ -70,3 +71,4 @@ admin_router.include_router(build_admin_audit_router())
 admin_router.include_router(build_admin_usage_router())
 admin_router.include_router(build_admin_chat_gateway_router())
 admin_router.include_router(build_admin_agent_docs_router())
+admin_router.include_router(build_admin_llm_router())
