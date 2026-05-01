@@ -1,6 +1,6 @@
 """Shared fixtures for the identity HTTP router suite (cd-dcfw).
 
-Mirrors :mod:`tests.unit.api.v1.admin.test_signups` — in-memory SQLite
+Mirrors the admin router unit harness — in-memory SQLite
 engine with every model loaded, workspace + owner/worker personas
 seeded via :mod:`tests.factories.identity`, a :class:`TestClient`
 with the tenancy + db-session dependencies overridden to pin the ctx

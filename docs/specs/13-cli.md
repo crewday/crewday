@@ -476,6 +476,7 @@ crewday deploy                          # HTTP-backed deployment-admin group
   workspaces archive <id>               # owners-group only
   signup settings show
   signup settings set <key> <value>     # signup_enabled, throttle_*, disposable_domains_path
+  signup abuse list [--kind] [--cursor] # deployment-wide /admin/signups feed (§15)
   settings list
   settings set <key> <value>            # owners-only for root-protected keys
   admins list

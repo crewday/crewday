@@ -17,13 +17,10 @@ import type {
   SignupsListResponse,
 } from "@/types/api";
 
-// Workspace-scoped admin surface — signup abuse signals (§15
-// "Self-serve abuse mitigations"). Mounts at /signups in the mock
-// SPA to avoid path collision with the existing /admin/* shell,
-// which serves the deployment-scoped admin tree. In production
-// the API endpoint is /w/<slug>/api/v1/admin/signups; the SPA
-// path can remain /admin/signups under the workspace tree since
-// the deployment admin lives at the bare host.
+// Deployment-scoped admin surface — signup abuse signals (§15
+// "Self-serve abuse mitigations"). Mounts at /admin/signups and reads
+// /admin/api/v1/signups; workspace managers do not get a separate
+// signup-abuse feed.
 //
 // The backing router is a placeholder (cd-g1ay) returning
 // {data: [], has_more: false}. cd-ovt4 wires the real query
@@ -91,9 +88,9 @@ export default function SignupsPage() {
   const [filter, setFilter] = useState<KindFilter | "">("");
 
   const q = useQuery({
-    queryKey: qk.workspaceSignups(),
+    queryKey: qk.adminSignups(),
     queryFn: () =>
-      fetchJson<SignupsListResponse>("/api/v1/admin/signups"),
+      fetchJson<SignupsListResponse>("/admin/api/v1/signups"),
   });
 
   const sub =

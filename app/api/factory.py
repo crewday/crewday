@@ -252,10 +252,9 @@ _NON_CONTEXT_OPENAPI_TAGS: Final[tuple[tuple[str, str], ...]] = (
     (
         "workspace_admin",
         (
-            "Workspace-scoped admin aggregator — owner/manager-only "
-            "read-only surfaces spanning multiple contexts (abuse "
-            "signals, security posture). See §15 'Self-serve abuse "
-            "mitigations'."
+            "Workspace-scoped admin aggregator reserved for future "
+            "owner/manager-only read-only surfaces spanning multiple "
+            "contexts."
         ),
     ),
     (
@@ -860,11 +859,9 @@ def _mount_context_routers(app: FastAPI, *, settings: Settings) -> None:
     context fan-out is easier to audit than scattering mounts:
 
     * :data:`app.api.v1.WORKSPACE_ADMIN_ROUTER` under
-      ``/w/{slug}/api/v1/admin`` — workspace-scoped owner/manager
-      admin aggregator (§15 "Self-serve abuse mitigations", cd-g1ay).
-      Declares its own ``workspace_admin`` tag so the OpenAPI
-      tag list stays distinct from the deployment admin tree's
-      ``admin`` tag.
+      ``/w/{slug}/api/v1/admin`` — reserved workspace-scoped
+      owner/manager admin aggregator. Signup abuse surfacing moved
+      to the deployment admin tree in cd-1h7k.
     * :data:`app.api.v1.APPROVALS_ROUTER` under
       ``/w/{slug}/api/v1/approvals`` — HITL approvals consumer
       (§12 "LLM and approvals", cd-9ghv). Conceptually owned by the

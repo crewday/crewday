@@ -879,9 +879,13 @@ outbound email. The following gates apply whenever
     integration-events transport.
   Caps lift on `human_verified` (see §02 `workspace`).
 - **Abuse signals written to audit log** and surfaced on the
-  operator-only `/admin/signups` page: burst-rate trips, same
-  IP across distinct emails, repeat provisioning from one email,
-  quota near-breach events.
+  deployment-operator-only `/admin/signups` page (API:
+  `GET /admin/api/v1/signups`): burst-rate trips, same IP across
+  distinct emails, repeat provisioning from one email, quota
+  near-breach events. This is deliberately not workspace-scoped:
+  the pre-workspace signals happen before a workspace exists, and
+  workspace owners/managers do not receive a separate signup-abuse
+  feed in v1.
 - **Signup GC worker.** `signup_gc` runs every 15 minutes;
   removes stalled signup attempts (magic-link redeemed but
   passkey never registered) after 1 hour, and archives

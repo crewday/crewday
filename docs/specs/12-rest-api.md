@@ -769,6 +769,7 @@ GET    /admin/api/v1/workspaces/{id}                 # summary card: counts, usa
 # Self-serve signup
 GET    /admin/api/v1/signup/settings                 # signup_enabled, throttles, disposable-domain path
 PUT    /admin/api/v1/signup/settings                 # edit any of the above
+GET    /admin/api/v1/signups                         # deployment-wide signup-abuse feed (§15); filters: ?kind=; operator-only, not workspace-scoped
 
 # Deployment settings + capability registry
 GET    /admin/api/v1/settings                        # every `deployment_setting` row, resolved

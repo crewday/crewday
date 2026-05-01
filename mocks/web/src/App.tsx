@@ -39,7 +39,6 @@ import AssetTypesPage from "@/pages/manager/AssetTypesPage";
 import DocumentsPage from "@/pages/manager/DocumentsPage";
 import PayPage from "@/pages/manager/PayPage";
 import AuditPage from "@/pages/manager/AuditPage";
-import SignupsPage from "@/pages/manager/SignupsPage";
 import OrganizationsPage from "@/pages/manager/OrganizationsPage";
 import PermissionsPage from "@/pages/manager/PermissionsPage";
 import WebhooksPage from "@/pages/manager/WebhooksPage";
@@ -55,6 +54,7 @@ import AdminWorkspacesPage from "@/pages/admin/WorkspacesPage";
 import AdminSettingsPage from "@/pages/admin/SettingsPage";
 import AdminAdminsPage from "@/pages/admin/AdminsPage";
 import AdminAuditPage from "@/pages/admin/AuditPage";
+import AdminSignupsPage from "@/pages/admin/SignupsPage";
 
 import LoginPage from "@/pages/public/LoginPage";
 import RecoverPage from "@/pages/public/RecoverPage";
@@ -160,12 +160,6 @@ export default function App() {
           <Route path="/documents" element={<DocumentsPage />} />
           <Route path="/pay" element={<PayPage />} />
           <Route path="/audit" element={<AuditPage />} />
-          {/* §15 "Self-serve abuse mitigations" — workspace-scoped
-              signup abuse-signal feed. The real SPA URL mirrors the
-              spec's /admin/signups; the mock uses /signups directly
-              so it does NOT collide with the deployment-scoped
-              /admin/* AdminLayout below. */}
-          <Route path="/signups" element={<SignupsPage />} />
           <Route path="/permissions" element={<PermissionsPage />} />
           <Route path="/organizations" element={<OrganizationsPage />} />
           <Route path="/webhooks" element={<WebhooksPage />} />
@@ -186,6 +180,7 @@ export default function App() {
           <Route path="/admin/settings" element={<AdminSettingsPage />} />
           <Route path="/admin/admins" element={<AdminAdminsPage />} />
           <Route path="/admin/audit" element={<AdminAuditPage />} />
+          <Route path="/admin/signups" element={<AdminSignupsPage />} />
         </Route>
 
         <Route element={<ClientLayout />}>

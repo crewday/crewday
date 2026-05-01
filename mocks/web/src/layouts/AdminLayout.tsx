@@ -9,6 +9,7 @@ import {
   MessageSquareMore,
   ScrollText,
   Settings,
+  ShieldAlert,
   Sparkles,
   Users,
 } from "lucide-react";
@@ -56,6 +57,7 @@ const NAV_ITEMS: SideNavItem[] = [
   { type: "link", to: "/admin/admins", label: "Admins", icon: NAV_ICON(Users) },
   { type: "link", to: "/admin/settings", label: "Settings", icon: NAV_ICON(Settings) },
   { type: "link", to: "/admin/audit", label: "Audit log", icon: NAV_ICON(ScrollText) },
+  { type: "link", to: "/admin/signups", label: "Signups", icon: NAV_ICON(ShieldAlert) },
 ];
 
 export default function AdminLayout() {

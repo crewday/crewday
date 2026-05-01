@@ -12,6 +12,8 @@ router; the wired surface today is:
   ``POST /workspaces/{id}/trust`` / ``POST /workspaces/{id}/archive``.
 * :mod:`app.api.admin.signup` — self-serve signup settings:
   ``GET /signup/settings`` / ``PUT /signup/settings``.
+* :mod:`app.api.admin.signups` — deployment signup-abuse feed:
+  ``GET /signups``.
 * :mod:`app.api.admin.settings` — deployment settings:
   ``GET /settings`` / ``PUT /settings/{key}``.
 * :mod:`app.api.admin.admins` — admin team CRUD + groups:
@@ -55,6 +57,7 @@ from app.api.admin.llm import build_admin_llm_router
 from app.api.admin.me import build_admin_me_router
 from app.api.admin.settings import build_admin_settings_router
 from app.api.admin.signup import build_admin_signup_router
+from app.api.admin.signups import build_admin_signups_router
 from app.api.admin.usage import build_admin_usage_router
 from app.api.admin.workspaces import build_admin_workspaces_router
 
@@ -65,6 +68,7 @@ admin_router = APIRouter(tags=["admin"])
 admin_router.include_router(build_admin_me_router())
 admin_router.include_router(build_admin_workspaces_router())
 admin_router.include_router(build_admin_signup_router())
+admin_router.include_router(build_admin_signups_router())
 admin_router.include_router(build_admin_settings_router())
 admin_router.include_router(build_admin_admins_router())
 admin_router.include_router(build_admin_audit_router())

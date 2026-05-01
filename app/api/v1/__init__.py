@@ -12,11 +12,12 @@ noticing.
 
 The workspace-scoped admin aggregator (:data:`WORKSPACE_ADMIN_ROUTER`)
 is exported **alongside** — not inside — :data:`CONTEXT_ROUTERS`.
-It is not one of the §01 13 bounded contexts (it aggregates
-owner/manager read-only surfaces spanning multiple contexts), so
-folding it into the context map would dilute that invariant and
-add a phantom ``admin`` tag to the OpenAPI seed. The factory
-mounts it directly at ``/w/{slug}/api/v1/admin/*``.
+It is not one of the §01 13 bounded contexts, so folding it into the
+context map would dilute that invariant and add a phantom ``admin``
+tag to the OpenAPI seed. The factory mounts it directly at
+``/w/{slug}/api/v1/admin/*`` for future workspace-scoped admin
+views; signup abuse surfacing lives on the deployment-admin tree
+after cd-1h7k.
 
 See ``docs/specs/01-architecture.md`` §"Context map",
 ``docs/specs/12-rest-api.md`` §"Base URL", and
@@ -74,13 +75,10 @@ CONTEXT_ROUTERS: Sequence[tuple[str, APIRouter]] = (
     ("llm", llm_router),
 )
 
-# Workspace-scoped admin aggregator — owner/manager-only cross-context
-# surfaces (abuse signals, security posture, workspace health). Kept
+# Workspace-scoped admin aggregator — currently empty after cd-1h7k
+# moved signup abuse surfacing to the deployment-admin tree. Kept
 # outside :data:`CONTEXT_ROUTERS` so the 13-context invariant survives
-# and the OpenAPI tag seed remains exactly the §01 contexts. The
-# router tags its operations ``workspace_admin`` (not ``admin``) to
-# avoid colliding with the deployment-admin tree's tag; see the
-# :mod:`app.api.v1.admin` module docstring for the full rationale.
+# and the future OpenAPI tag seed remains exactly the §01 contexts.
 WORKSPACE_ADMIN_ROUTER: APIRouter = _workspace_admin_router
 
 # Approvals consumer — HITL desk + inline approval HTTP surface.

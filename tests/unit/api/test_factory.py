@@ -170,7 +170,12 @@ class TestOpenapiShape:
             "name": "slug",
             "in": "path",
             "required": True,
-            "schema": {"type": "string", "minLength": 1, "maxLength": 64},
+            "schema": {
+                "type": "string",
+                "minLength": 3,
+                "maxLength": 40,
+                "pattern": "^[a-z][a-z0-9-]{1,38}[a-z0-9]$",
+            },
         }
         workspace_paths = {
             path: item
@@ -354,14 +359,15 @@ class TestContextRouterMount:
 
 
 # ---------------------------------------------------------------------------
-# Workspace-scoped admin aggregator (cd-g1ay)
+# Workspace-scoped admin aggregator
 # ---------------------------------------------------------------------------
 
 
 class TestWorkspaceAdminMount:
-    """The workspace-admin aggregator mounts alongside context routers
-    but is neither in ``CONTEXT_ROUTERS`` nor sharing the
-    deployment-admin tree's ``admin`` tag.
+    """The workspace-admin aggregator remains distinct from contexts.
+
+    cd-1h7k moved signup abuse surfacing to the deployment-admin tree,
+    so this router is currently an empty reserved seat.
     """
 
     def test_workspace_admin_router_exported(self) -> None:
@@ -388,45 +394,22 @@ class TestWorkspaceAdminMount:
         names = {name for name, _ in CONTEXT_ROUTERS}
         assert "admin" not in names
 
-    def test_workspace_admin_tag_is_workspace_admin_not_admin(self) -> None:
-        """Operations from :data:`WORKSPACE_ADMIN_ROUTER` tag as
-        ``workspace_admin`` — the deployment admin tree owns ``admin``.
-        """
+    def test_signups_route_is_not_workspace_scoped(self) -> None:
+        """Signup abuse signals have no workspace before provisioning."""
         client = _client(create_app(settings=_settings()))
         schema = client.get("/api/openapi.json").json()
-        admin_signups = (
-            schema["paths"].get("/w/{slug}/api/v1/admin/signups", {}).get("get")
-        )
-        assert admin_signups is not None, "workspace admin signups mount missing"
-        assert "workspace_admin" in admin_signups.get("tags", []), (
-            "expected workspace-admin ops tagged 'workspace_admin', "
-            f"got {admin_signups.get('tags')}"
-        )
-        assert "admin" not in admin_signups.get("tags", []), (
-            "workspace-admin ops must not tag 'admin' — that clashes "
-            "with the deployment-admin tree's tag"
-        )
+        assert "/w/{slug}/api/v1/admin/signups" not in schema["paths"]
 
-    def test_workspace_admin_operation_id_prefix(self) -> None:
-        """Operation IDs use ``workspace_admin.*`` — ``admin.*`` is
-        reserved for the host-CLI-only ``crewday admin`` group (§13).
-        """
+    def test_deployment_admin_signups_route_owns_admin_tag(self) -> None:
+        """The deployment admin tree owns the signup abuse feed."""
         client = _client(create_app(settings=_settings()))
         schema = client.get("/api/openapi.json").json()
-        op = schema["paths"]["/w/{slug}/api/v1/admin/signups"]["get"]
-        assert op["operationId"] == "workspace_admin.signups.list"
-
-    def test_workspace_admin_cli_group_not_reserved(self) -> None:
-        """``x-cli.group`` is ``workspace-admin`` — neither the
-        host-only ``admin`` nor the deployment-HTTP ``deploy`` (§13).
-        """
-        client = _client(create_app(settings=_settings()))
-        schema = client.get("/api/openapi.json").json()
-        op = schema["paths"]["/w/{slug}/api/v1/admin/signups"]["get"]
+        op = schema["paths"]["/admin/api/v1/signups"]["get"]
+        assert op["operationId"] == "admin.signups.list"
+        assert "admin" in op.get("tags", [])
         cli = op.get("x-cli", {})
-        assert cli.get("group") == "workspace-admin"
-        assert cli.get("group") != "admin"
-        assert cli.get("group") != "deploy"
+        assert cli.get("group") == "admin"
+        assert cli.get("verb") == "signups-list"
 
     def test_workspace_admin_tag_is_defined_with_description(self) -> None:
         """Schema-level ``tags[]`` carries a ``workspace_admin``

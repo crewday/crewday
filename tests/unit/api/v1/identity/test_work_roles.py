@@ -14,7 +14,7 @@ Covers:
 The unit-level tests exercise every handler against an in-memory
 SQLite engine with the router mounted at root. Tenancy + UoW deps
 are overridden to pin the ctx + session, matching the
-:mod:`tests.unit.api.v1.admin.test_signups` harness.
+shared v1 router harness.
 """
 
 from __future__ import annotations

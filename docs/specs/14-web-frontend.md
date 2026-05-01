@@ -109,6 +109,8 @@ workspace once and the rest of the tree is unaware of the prefix.
                              (/admin/signup redirects here.)
 /admin/admins              → admin-team membership, deployment permission rules
 /admin/audit               → deployment-scope audit log
+/admin/signups             → deployment-scope signup-abuse feed (§15): burst-rate,
+                             repeat-email/IP, and pre-verification quota signals.
 ```
 
 The `/admin` surface never carries a workspace prefix — it is
