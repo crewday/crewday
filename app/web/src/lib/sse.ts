@@ -156,6 +156,9 @@ export type EventKind =
   | "admin.workspace.budget_paused"
   | "chat_gateway.provider.changed"
   | "chat_gateway.template.changed"
+  | "chat_channel_binding.created"
+  | "chat_channel_binding.verified"
+  | "chat_channel_binding.revoked"
   // Catch-all workspace invalidation — e.g. owner flips a workspace
   // setting that reshapes policy. Drops every cached query under
   // the active workspace.
@@ -874,13 +877,27 @@ export const INVALIDATIONS: Record<EventKind, InvalidationHandler> = {
   },
 
   "chat_gateway.provider.changed": (_event, qc) => {
+    invalidate(qc, qk.chatChannelProviders());
     invalidate(qc, qk.adminChatProviders());
     invalidate(qc, qk.adminChatOverrides());
   },
 
   "chat_gateway.template.changed": (_event, qc) => {
+    invalidate(qc, qk.chatChannelProviders());
     invalidate(qc, qk.adminChatTemplates());
     invalidate(qc, qk.adminChatProviders());
+  },
+
+  "chat_channel_binding.created": (_event, qc) => {
+    invalidate(qc, qk.chatChannels());
+  },
+
+  "chat_channel_binding.verified": (_event, qc) => {
+    invalidate(qc, qk.chatChannels());
+  },
+
+  "chat_channel_binding.revoked": (_event, qc) => {
+    invalidate(qc, qk.chatChannels());
   },
 
   "workspace.changed": (_event, qc) => {

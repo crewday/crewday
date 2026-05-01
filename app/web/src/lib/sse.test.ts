@@ -149,6 +149,9 @@ describe("INVALIDATIONS — coverage", () => {
     "admin.workspace.budget_paused",
     "chat_gateway.provider.changed",
     "chat_gateway.template.changed",
+    "chat_channel_binding.created",
+    "chat_channel_binding.verified",
+    "chat_channel_binding.revoked",
     "workspace.changed",
   ];
 
@@ -1031,6 +1034,7 @@ describe("INVALIDATIONS — per-kind behaviour", () => {
     );
     expect(providerSpy.mock.calls.map((c) => c[0]?.queryKey)).toEqual(
       expect.arrayContaining([
+        qk.chatChannelProviders(),
         qk.adminChatProviders(),
         qk.adminChatOverrides(),
       ]),
@@ -1044,9 +1048,23 @@ describe("INVALIDATIONS — per-kind behaviour", () => {
     );
     expect(templateSpy.mock.calls.map((c) => c[0]?.queryKey)).toEqual(
       expect.arrayContaining([
+        qk.chatChannelProviders(),
         qk.adminChatTemplates(),
         qk.adminChatProviders(),
       ]),
+    );
+  });
+
+  it.each([
+    "chat_channel_binding.created",
+    "chat_channel_binding.verified",
+    "chat_channel_binding.revoked",
+  ] as const)("%s invalidates manager chat channel bindings", (kind) => {
+    const qc = makeClient();
+    const spy = vi.spyOn(qc, "invalidateQueries");
+    INVALIDATIONS[kind](makeEvent(kind), qc);
+    expect(spy.mock.calls.map((c) => c[0]?.queryKey)).toEqual(
+      expect.arrayContaining([qk.chatChannels()]),
     );
   });
 

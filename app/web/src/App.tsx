@@ -44,6 +44,7 @@ import OrganizationsPage from "@/pages/manager/OrganizationsPage";
 import PermissionsPage from "@/pages/manager/PermissionsPage";
 import WebhooksPage from "@/pages/manager/WebhooksPage";
 import ApiTokensPage from "@/pages/manager/ApiTokensPage";
+import ChatChannelsPage from "@/pages/manager/ChatChannelsPage";
 import SettingsPage from "@/pages/manager/SettingsPage";
 
 import AdminDashboardPage from "@/pages/admin/DashboardPage";
@@ -210,6 +211,13 @@ export default function App() {
               <Route element={<ManagerLayout />}>
                 <Route path="/settings" element={<SettingsPage />} />
                 <Route path="/webhooks" element={<WebhooksPage />} />
+              </Route>
+            </Route>
+
+            <Route element={<RequirePermission actionKey="chat_gateway.read" />}>
+              <Route element={<ManagerLayout />}>
+                <Route path="/chat/channels" element={<ChatChannelsPage />} />
+                <Route path="/w/:slug/chat/channels" element={<ChatChannelsPage />} />
               </Route>
             </Route>
 

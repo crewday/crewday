@@ -129,6 +129,12 @@ describe("<RequirePermission>", () => {
     );
   });
 
+  it("wraps the chat channels route before the manager shell", () => {
+    expect(appSource).toMatch(
+      /<Route element={<RequirePermission actionKey="chat_gateway\.read" \/>}>\s*<Route element={<ManagerLayout \/>}>\s*<Route path="\/chat\/channels" element={<ChatChannelsPage \/>} \/>[\s\S]*?<Route path="\/w\/:slug\/chat\/channels" element={<ChatChannelsPage \/>} \/>/,
+    );
+  });
+
   it("wraps the real stays route before the manager shell", () => {
     expect(appSource).toMatch(
       /<Route element={<RequirePermission actionKey="stays\.read" \/>}>\s*<Route element={<ManagerLayout \/>}>\s*<Route path="\/stays" element={<StaysPage \/>} \/>/,
