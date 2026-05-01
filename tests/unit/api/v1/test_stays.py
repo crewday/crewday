@@ -11,7 +11,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from pydantic import SecretStr
-from sqlalchemy import Engine
+from sqlalchemy import Engine, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.adapters.db.authz.models import RoleGrant
@@ -19,6 +19,7 @@ from app.adapters.db.base import Base
 from app.adapters.db.session import UnitOfWorkImpl, make_engine
 from app.adapters.db.stays.models import Reservation, StayBundle
 from app.adapters.ical.ports import IcalProvider, IcalValidation, IcalValidationError
+from app.adapters.ical.validator import Fetcher, FetchResponse, Resolver
 from app.api.deps import current_workspace_context, db_session
 from app.api.v1.stays import (
     build_stays_public_router,
@@ -27,6 +28,8 @@ from app.api.v1.stays import (
     get_clock,
     get_envelope,
     get_guest_settings_resolver,
+    get_ical_fetcher,
+    get_ical_resolver,
     get_ical_validator,
     get_provider_detector,
     get_tasks_create_occurrence_port,
@@ -293,6 +296,8 @@ def _build_client(
     envelope: FakeEnvelope,
     settings: Settings,
     task_port: RecordingTasksCreateOccurrencePort | None = None,
+    fetcher: Fetcher | None = None,
+    resolver: Resolver | None = None,
 ) -> TestClient:
     app = FastAPI()
     app.include_router(build_stays_router(), prefix="/stays")
@@ -321,6 +326,8 @@ def _build_client(
     )
     # Use the production minimal resolver for route coverage.
     app.dependency_overrides[get_welcome_resolver] = lambda: get_welcome_resolver()
+    app.dependency_overrides[get_ical_fetcher] = lambda: fetcher
+    app.dependency_overrides[get_ical_resolver] = lambda: resolver
     return TestClient(app, raise_server_exceptions=False)
 
 
@@ -689,6 +696,279 @@ def test_stays_actions_deny_worker_by_default(
     manage = client.post(f"/stays/stays/{stay_id}/welcome-link", json={})
     assert manage.status_code == 403
     assert manage.json()["detail"] == {
+        "error": "permission_denied",
+        "action_key": "stays.manage",
+    }
+
+
+# ---------------------------------------------------------------------------
+# /poll-once route (cd-jk6is)
+# ---------------------------------------------------------------------------
+
+
+_FAKE_PUBLIC_IP = "8.8.8.8"
+_VCALENDAR_BODY = (
+    b"BEGIN:VCALENDAR\r\n"
+    b"VERSION:2.0\r\n"
+    b"PRODID:-//crewday-test//EN\r\n"
+    b"BEGIN:VEVENT\r\n"
+    b"UID:poll-once-uid-1\r\n"
+    b"DTSTART:20260501T140000Z\r\n"
+    b"DTEND:20260504T110000Z\r\n"
+    b"SUMMARY:Reserved (Sam Test)\r\n"
+    b"END:VEVENT\r\n"
+    b"END:VCALENDAR\r\n"
+)
+
+
+class _ScriptedFetcher(Fetcher):
+    """Test :class:`Fetcher` that returns canned ``FetchResponse`` per URL.
+
+    Mirrors the unit-suite stub in ``tests/unit/worker/test_poll_ical.py``
+    but kept inline here so the route file stays self-contained — the
+    worker stub class is private to its module.
+    """
+
+    def __init__(self, responses: dict[str, list[FetchResponse]]) -> None:
+        self.responses = responses
+        self.calls: list[tuple[str, str]] = []
+
+    def fetch(
+        self,
+        parsed: object,
+        resolved_ip: str,
+        *,
+        deadline: float,
+        max_body_bytes: int,
+    ) -> FetchResponse:
+        del deadline, max_body_bytes
+        url = parsed.geturl()  # type: ignore[attr-defined]
+        self.calls.append((url, resolved_ip))
+        bucket = self.responses.get(url)
+        if not bucket:
+            raise AssertionError(f"_ScriptedFetcher: no canned response for {url!r}")
+        return bucket.pop(0)
+
+
+def _ok_response(body: bytes, *, etag: str | None = None) -> FetchResponse:
+    headers: list[tuple[str, str]] = [("Content-Type", "text/calendar")]
+    if etag is not None:
+        headers.append(("ETag", etag))
+    return FetchResponse(status=200, headers=tuple(headers), body=body)
+
+
+def _fixed_resolver(ip: str) -> Resolver:
+    def _resolve(host: str, port: int) -> list[str]:
+        del host, port
+        return [ip]
+
+    return _resolve
+
+
+def _register_feed(
+    client: TestClient, *, property_id: str, url: str
+) -> dict[str, object]:
+    created = client.post(
+        "/stays/ical-feeds",
+        json={"property_id": property_id, "url": url},
+    )
+    assert created.status_code == 201, created.text
+    body = created.json()
+    assert isinstance(body, dict)
+    return body
+
+
+def test_ical_poll_once_ingests_reservation_and_is_idempotent(
+    factory: sessionmaker[Session],
+    validator: FakeValidator,
+    envelope: FakeEnvelope,
+    settings: Settings,
+) -> None:
+    """The new ``/poll-once`` route fetches, parses, and upserts.
+
+    Re-running the same body must NOT duplicate the row (idempotency).
+    """
+    feed_url = "https://airbnb.example/feed.ics"
+    fetcher = _ScriptedFetcher(
+        responses={
+            feed_url: [
+                _ok_response(_VCALENDAR_BODY),
+                _ok_response(_VCALENDAR_BODY),
+            ]
+        }
+    )
+
+    with factory() as session:
+        ctx, workspace_id, _actor_id = _seed_workspace(session, slug="poll-once")
+        property_id = _seed_property(session, workspace_id=workspace_id)
+        session.commit()
+
+    client = _build_client(
+        factory=factory,
+        ctx=ctx,
+        validator=validator,
+        envelope=envelope,
+        settings=settings,
+        fetcher=fetcher,
+        resolver=_fixed_resolver(_FAKE_PUBLIC_IP),
+    )
+
+    feed = _register_feed(client, property_id=property_id, url=feed_url)
+    feed_id = feed["id"]
+
+    first = client.post(f"/stays/ical-feeds/{feed_id}/poll-once")
+    assert first.status_code == 200, first.text
+    payload = first.json()
+    assert payload["feed_id"] == feed_id
+    assert payload["status"] == "polled"
+    assert payload["error_code"] is None
+    assert payload["reservations_created"] == 1
+    assert payload["reservations_updated"] == 0
+    assert payload["reservations_cancelled"] == 0
+
+    with factory() as session:
+        rows = list(session.scalars(select(Reservation)).all())
+        assert len(rows) == 1
+        assert rows[0].external_uid == "poll-once-uid-1"
+        assert rows[0].source == "ical"
+        assert rows[0].ical_feed_id == feed_id
+        assert rows[0].workspace_id == workspace_id
+
+    # Second call with identical body — same reservation, no new row.
+    second = client.post(f"/stays/ical-feeds/{feed_id}/poll-once")
+    assert second.status_code == 200, second.text
+    second_payload = second.json()
+    assert second_payload["reservations_created"] == 0
+    assert second_payload["reservations_updated"] == 0
+    assert second_payload["reservations_cancelled"] == 0
+
+    with factory() as session:
+        rows = list(session.scalars(select(Reservation)).all())
+        assert len(rows) == 1
+
+
+def test_ical_poll_once_surfaces_fetch_failure(
+    factory: sessionmaker[Session],
+    validator: FakeValidator,
+    envelope: FakeEnvelope,
+    settings: Settings,
+) -> None:
+    """A fetch / parse failure is surfaced as 200 + ``status='error'``.
+
+    The poll path captures every per-feed error into the response
+    payload (``error_code`` populated, no rows landed) — same shape
+    the worker fan-out records. The HTTP status stays 200 because
+    the call itself succeeded; the payload signals the operator
+    diagnostic.
+    """
+    feed_url = "https://airbnb.example/feed.ics"
+    # text/html is OUTSIDE the allowed-content-type set; combined with
+    # a non-VCALENDAR body the fetcher gate raises
+    # ``ical_url_bad_content`` before the parse phase.
+    bad_response = FetchResponse(
+        status=200,
+        headers=(("Content-Type", "text/html"),),
+        body=b"<html>not-ics</html>",
+    )
+    fetcher = _ScriptedFetcher(responses={feed_url: [bad_response]})
+
+    with factory() as session:
+        ctx, workspace_id, _actor_id = _seed_workspace(session, slug="poll-fail")
+        property_id = _seed_property(session, workspace_id=workspace_id)
+        session.commit()
+
+    client = _build_client(
+        factory=factory,
+        ctx=ctx,
+        validator=validator,
+        envelope=envelope,
+        settings=settings,
+        fetcher=fetcher,
+        resolver=_fixed_resolver(_FAKE_PUBLIC_IP),
+    )
+    feed = _register_feed(client, property_id=property_id, url=feed_url)
+    feed_id = feed["id"]
+
+    response = client.post(f"/stays/ical-feeds/{feed_id}/poll-once")
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["feed_id"] == feed_id
+    assert payload["status"] == "error"
+    assert payload["error_code"] == "ical_url_bad_content"
+    assert payload["reservations_created"] == 0
+
+
+def test_ical_poll_once_404_for_unknown_feed(
+    factory: sessionmaker[Session],
+    validator: FakeValidator,
+    envelope: FakeEnvelope,
+    settings: Settings,
+) -> None:
+    with factory() as session:
+        ctx, _workspace_id, _actor_id = _seed_workspace(session, slug="poll-404")
+        session.commit()
+    client = _build_client(
+        factory=factory,
+        ctx=ctx,
+        validator=validator,
+        envelope=envelope,
+        settings=settings,
+    )
+
+    response = client.post("/stays/ical-feeds/does-not-exist/poll-once")
+    assert response.status_code == 404
+    assert response.json()["detail"] == {"error": "ical_feed_not_found"}
+
+
+def test_ical_poll_once_denies_worker_role(
+    factory: sessionmaker[Session],
+    validator: FakeValidator,
+    envelope: FakeEnvelope,
+    settings: Settings,
+) -> None:
+    """``/poll-once`` mirrors ``/poll`` permission scope (``stays.manage``).
+
+    A worker-grade actor is denied 403 before the route body runs.
+    """
+    with factory() as session:
+        _owner_ctx, workspace_id, _owner_id = _seed_workspace(
+            session, slug="poll-once-worker"
+        )
+        worker = bootstrap_user(
+            session,
+            email="poll-once-worker-staff@example.test",
+            display_name="Worker",
+        )
+        session.add(
+            RoleGrant(
+                id=new_ulid(),
+                workspace_id=workspace_id,
+                user_id=worker.id,
+                grant_role="worker",
+                scope_property_id=None,
+                created_at=_PINNED,
+                created_by_user_id=None,
+            )
+        )
+        ctx = _ctx(
+            workspace_id=workspace_id,
+            workspace_slug="poll-once-worker",
+            actor_id=worker.id,
+            role="worker",
+            owner=False,
+        )
+        session.commit()
+    client = _build_client(
+        factory=factory,
+        ctx=ctx,
+        validator=validator,
+        envelope=envelope,
+        settings=settings,
+    )
+
+    response = client.post("/stays/ical-feeds/anything/poll-once")
+    assert response.status_code == 403
+    assert response.json()["detail"] == {
         "error": "permission_denied",
         "action_key": "stays.manage",
     }

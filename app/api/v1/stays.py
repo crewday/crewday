@@ -29,12 +29,18 @@ from sqlalchemy.orm import Session
 
 from app.adapters.db.places.models import Property
 from app.adapters.db.secrets.repositories import SqlAlchemySecretEnvelopeRepository
-from app.adapters.db.stays.models import Reservation, StayBundle
+from app.adapters.db.session import bind_active_session
+from app.adapters.db.stays.models import IcalFeed, Reservation, StayBundle
 from app.adapters.db.tasks.repositories import SqlAlchemyTasksCreateOccurrencePort
 from app.adapters.db.workspace.models import Workspace
 from app.adapters.ical.ports import IcalProvider
 from app.adapters.ical.providers import HostProviderDetector
-from app.adapters.ical.validator import HttpxIcalValidator, IcalValidatorConfig
+from app.adapters.ical.validator import (
+    Fetcher,
+    HttpxIcalValidator,
+    IcalValidatorConfig,
+    Resolver,
+)
 from app.adapters.storage.envelope import Aes256GcmEnvelope
 from app.adapters.storage.ports import EnvelopeEncryptor
 from app.api.deps import current_workspace_context, db_session
@@ -80,7 +86,9 @@ from app.domain.stays.ical_service import (
 )
 from app.ports.tasks_create_occurrence import TasksCreateOccurrencePort
 from app.tenancy import WorkspaceContext
+from app.tenancy.current import reset_current, set_current
 from app.util.clock import Clock, SystemClock
+from app.worker.tasks.poll_ical import PolledFeedResult, poll_ical
 
 router: APIRouter
 public_router: APIRouter
@@ -91,6 +99,8 @@ __all__ = [
     "IcalFeedCreateRequest",
     "IcalFeedResponse",
     "IcalFeedUpdateRequest",
+    "IcalPollOnceResponse",
+    "IcalProbeResponse",
     "ReservationListResponse",
     "ReservationResponse",
     "StayBundleListResponse",
@@ -166,6 +176,29 @@ def get_app_settings() -> Settings:
     return get_settings()
 
 
+def get_ical_fetcher() -> Fetcher | None:
+    """Return the worker fetcher to use for manual ingest.
+
+    ``None`` (production default) lets
+    :func:`app.worker.tasks.poll_ical.poll_ical` construct its
+    SSRF-pinned :class:`StdlibHttpsFetcher` per call. Tests override
+    this dep with a deterministic stub (mirrors the
+    ``fetcher=`` injection point on the worker entry point).
+    """
+    return None
+
+
+def get_ical_resolver() -> Resolver | None:
+    """Return the worker DNS resolver to use for manual ingest.
+
+    ``None`` (production default) lets the fetcher resolve via
+    :func:`socket.getaddrinfo`. Tests override with a fixed-address
+    resolver so an ``8.8.8.8`` literal can pin the SSRF carve-out
+    without DNS.
+    """
+    return None
+
+
 _IcalValidatorDep = Annotated[HttpxIcalValidator, Depends(get_ical_validator)]
 _ProviderDetectorDep = Annotated[HostProviderDetector, Depends(get_provider_detector)]
 _EnvelopeDep = Annotated[EnvelopeEncryptor, Depends(get_envelope)]
@@ -178,6 +211,8 @@ _GuestSettingsResolverDep = Annotated[
 ]
 _ClockDep = Annotated[Clock, Depends(get_clock)]
 _SettingsDep = Annotated[Settings, Depends(get_app_settings)]
+_IcalFetcherDep = Annotated[Fetcher | None, Depends(get_ical_fetcher)]
+_IcalResolverDep = Annotated[Resolver | None, Depends(get_ical_resolver)]
 
 
 # ---------------------------------------------------------------------------
@@ -223,6 +258,30 @@ class IcalProbeResponse(BaseModel):
     ok: bool
     parseable_ics: bool
     error_code: str | None
+    polled_at: datetime
+
+
+class IcalPollOnceResponse(BaseModel):
+    """Outcome of one manual ``poll-once`` ingest call (cd-jk6is).
+
+    Mirrors the per-feed counters on the worker's
+    :class:`~app.worker.tasks.poll_ical.PolledFeedResult` so the
+    operator UI can render "ingested 3 reservations, 1 closure" without
+    a follow-up read. ``status`` is the closed enum from
+    :class:`~app.worker.tasks.poll_ical.PollOutcome` — ``"polled"`` on
+    happy path, ``"error"`` (with ``error_code``) when validation /
+    fetch / parse failed, ``"not_modified"`` on a 304 against the
+    stored ETag, ``"rate_limited"`` when an upstream 429 was hit, or
+    ``"skipped_disabled"`` when the feed is disabled.
+    """
+
+    feed_id: str
+    status: str
+    error_code: str | None
+    reservations_created: int
+    reservations_updated: int
+    reservations_cancelled: int
+    closures_created: int
     polled_at: datetime
 
 
@@ -523,6 +582,12 @@ def build_stays_router() -> APIRouter:
         envelope: _EnvelopeDep,
         clock: _ClockDep,
     ) -> IcalProbeResponse:
+        # Validate-only "probe" — re-runs URL validation + fetch
+        # against the stored URL and stamps ``last_polled_at`` /
+        # ``last_error`` / first-success ``enabled`` flip. Does NOT
+        # parse VEVENTs, upsert reservations, or fire
+        # ``ReservationUpserted``. The full ingest path lives at
+        # ``POST /ical-feeds/{feed_id}/poll-once`` (cd-jk6is).
         try:
             result = probe_feed(
                 session,
@@ -535,6 +600,73 @@ def build_stays_router() -> APIRouter:
         except IcalFeedNotFound as exc:
             raise _not_found("ical_feed_not_found") from exc
         return _ical_probe_response(result)
+
+    @api.post(
+        "/ical-feeds/{feed_id}/poll-once",
+        response_model=IcalPollOnceResponse,
+        operation_id="stays.ical_feeds.poll_once",
+        dependencies=[manage_gate],
+    )
+    def poll_once_ical_feed(
+        feed_id: _ID,
+        ctx: _Ctx,
+        session: _Db,
+        envelope: _EnvelopeDep,
+        clock: _ClockDep,
+        settings: _SettingsDep,
+        fetcher: _IcalFetcherDep,
+        resolver: _IcalResolverDep,
+    ) -> IcalPollOnceResponse:
+        # Manual ingest — the workspace-scoped equivalent of one
+        # iteration of the worker's 15-minute fan-out
+        # (:func:`app.worker.jobs.stays._make_poll_ical_fanout_body`)
+        # narrowed to a single feed. Bypasses the cadence guard
+        # (``force=True``) so a freshly-registered feed (whose
+        # ``last_polled_at`` was just stamped by the registration
+        # probe) ingests immediately rather than waiting up to 15 min
+        # for the next scheduled tick. Disabled feeds still skip —
+        # operators must re-enable a disabled feed explicitly.
+        #
+        # ``bind_active_session`` + ``set_current`` mirror the
+        # scheduler's fan-out so the FastAPI factory's
+        # ``_register_stays_subscriptions`` subscribers (bundle +
+        # turnover) recover the same UoW + workspace ctx through the
+        # ``session_provider`` and materialise ``StayBundle`` rows +
+        # ``Occurrence`` rows in the request transaction. Without
+        # both bindings the subscribers would no-op with
+        # ``no_session_for_event`` and the route would behave like
+        # the validate-only ``/poll`` path.
+        feed_row = session.scalars(
+            select(IcalFeed).where(
+                IcalFeed.id == feed_id,
+                IcalFeed.workspace_id == ctx.workspace_id,
+            )
+        ).one_or_none()
+        if feed_row is None:
+            raise _not_found("ical_feed_not_found")
+
+        token = set_current(ctx)
+        try:
+            with bind_active_session(session):
+                report = poll_ical(
+                    ctx,
+                    session=session,
+                    envelope=envelope,
+                    clock=clock,
+                    fetcher=fetcher,
+                    resolver=resolver,
+                    feed_ids=frozenset({feed_id}),
+                    force=True,
+                    allow_private_addresses=(settings.ical_allow_private_addresses),
+                )
+        finally:
+            reset_current(token)
+
+        return _poll_once_response(
+            feed_id=feed_id,
+            report_results=report.per_feed_results,
+            polled_at=report.tick_started_at,
+        )
 
     @api.get(
         "/reservations",
@@ -826,6 +958,46 @@ def _ical_probe_response(result: IcalProbeResult) -> IcalProbeResponse:
         parseable_ics=result.parseable_ics,
         error_code=result.error_code,
         polled_at=result.polled_at,
+    )
+
+
+def _poll_once_response(
+    *,
+    feed_id: str,
+    report_results: tuple[PolledFeedResult, ...],
+    polled_at: datetime,
+) -> IcalPollOnceResponse:
+    """Project the worker's :class:`PollReport` onto the route shape.
+
+    A single-feed ``poll_ical`` call yields exactly one entry in
+    ``per_feed_results`` (or zero when the workspace has no feed with
+    the targeted id, but the route's pre-check already 404s in that
+    case). Defensive: when the worker found the feed but skipped it
+    before producing a result tuple — for instance the disabled gate —
+    return a synthetic ``"skipped_disabled"`` shape so the response
+    schema stays stable.
+    """
+    for entry in report_results:
+        if entry.feed_id == feed_id:
+            return IcalPollOnceResponse(
+                feed_id=entry.feed_id,
+                status=entry.status,
+                error_code=entry.error_code,
+                reservations_created=entry.reservations_created,
+                reservations_updated=entry.reservations_updated,
+                reservations_cancelled=entry.reservations_cancelled,
+                closures_created=entry.closures_created,
+                polled_at=polled_at,
+            )
+    return IcalPollOnceResponse(
+        feed_id=feed_id,
+        status="skipped_disabled",
+        error_code=None,
+        reservations_created=0,
+        reservations_updated=0,
+        reservations_cancelled=0,
+        closures_created=0,
+        polled_at=polled_at,
     )
 
 

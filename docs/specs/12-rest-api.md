@@ -909,7 +909,8 @@ DELETE /stays/{id}/welcome_link
 
 GET    /ical_feeds                     # filter: ?unit_id=…&property_id=…
 POST   /ical_feeds                     # body may include unit_id
-POST   /ical_feeds/{id}/poll           # manual poll trigger
+POST   /ical_feeds/{id}/poll           # validate-only probe — see §04 "Probe vs. poll"
+POST   /ical_feeds/{id}/poll-once      # full manual ingest (cd-jk6is) — fires ReservationUpserted
 
 GET    /stay_lifecycle_rules           # filter: ?property_id=…&unit_id=…
 POST   /stay_lifecycle_rules

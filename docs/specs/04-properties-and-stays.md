@@ -366,6 +366,37 @@ units).
 | last_etag     | text      |
 | last_error    | text      |
 
+### Probe vs. poll (cd-jk6is)
+
+Two distinct verbs run against the stored URL — they share validation
+but differ on whether they ingest VEVENTs into rows:
+
+- **Probe** — `POST /ical_feeds/{id}/poll`. Validate-only health
+  check: re-runs the §"SSRF guard" gates, fetches the body, decides
+  whether it parses as a VCALENDAR envelope, and stamps
+  `ical_feed.last_polled_at` / `last_error` / first-success
+  `enabled = true`. **Does NOT** parse VEVENTs, upsert
+  `reservation` / `property_closure` rows, or publish
+  `ReservationUpserted`. Used by the manager UI's "Test this feed"
+  button and by the registration flow. (The route name is the v1
+  legacy spelling; the body returns the
+  `IcalProbeResponse`/`{ok, parseable_ics, error_code, polled_at}`
+  shape.)
+- **Poll** — `POST /ical_feeds/{id}/poll-once` (manual one-shot)
+  plus the scheduled `*/15 * * * *` worker tick. Full ingest:
+  validate → fetch → parse → diff against existing rows →
+  upsert / cancel reservations and write closures → publish
+  `ReservationUpserted` so the bundle and turnover subscribers
+  materialise downstream rows.  Manual `/poll-once` ingests only
+  the targeted feed and bypasses the cadence guard so a
+  freshly-registered feed lands rows immediately rather than waiting
+  up to 15 min for the next scheduler tick. Disabled feeds are still
+  skipped — operators must re-enable a disabled feed explicitly. The
+  per-host rate-limit window (§"Polling behavior") is still honoured —
+  `force` only bypasses the per-feed cadence; abusive operators
+  pounding `/poll-once` against the same upstream still hit the
+  in-tick throttle.
+
 ### Polling behavior
 
 - Use `If-None-Match` / `If-Modified-Since` to avoid re-downloads.
@@ -380,6 +411,12 @@ units).
   cancel.
 - Surface parse errors as `issue` against the feed.
 - Rate-limit per host; respect provider 429s.
+- **Idempotency.** Re-polling the same feed body produces zero new
+  rows + zero new events. The `(ical_feed_id, external_uid)` UNIQUE
+  index dedups reservations; `_apply_events` short-circuits the
+  publish when an existing row already matches the parsed VEVENT.
+  Manual `/poll-once` therefore replays cleanly when called twice
+  in quick succession.
 
 ### SSRF guard
 

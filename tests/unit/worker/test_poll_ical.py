@@ -1584,6 +1584,179 @@ class TestCadenceGuard:
         assert report.per_feed_results[0].status == PollOutcome.SKIPPED_NOT_DUE
 
 
+class TestForceBypassesCadence:
+    """``force=True`` (cd-jk6is) bypasses the cadence guard but not the
+    disabled gate. Backs the manual ``/poll-once`` route's contract."""
+
+    def test_force_polls_inside_cadence_window(
+        self,
+        session: Session,
+        bus: EventBus,
+        clock: FrozenClock,
+        envelope: FakeEnvelope,
+    ) -> None:
+        ws = _bootstrap_workspace(session)
+        prop = _bootstrap_property(session)
+        # Polled 1 minute ago — without ``force`` the feed would skip.
+        _bootstrap_feed(
+            session,
+            workspace_id=ws,
+            property_id=prop,
+            envelope=envelope,
+            last_polled_at=_PINNED - timedelta(minutes=1),
+        )
+        starts = datetime(2026, 5, 1, 14, 0, tzinfo=UTC)
+        ends = datetime(2026, 5, 4, 11, 0, tzinfo=UTC)
+        body = _vcalendar(_vevent_booked(uid="force-1", starts=starts, ends=ends))
+        fetcher = _ScriptedFetcher(responses={_FEED_URL: [_ok(body)]})
+
+        report = poll_ical(
+            _ctx(ws),
+            session=session,
+            envelope=envelope,
+            clock=clock,
+            event_bus=bus,
+            fetcher=fetcher,
+            resolver=_fixed_resolver([_FAKE_IP]),  # type: ignore[arg-type]
+            force=True,
+        )
+
+        # The feed polled — cadence was bypassed.
+        assert report.feeds_polled == 1
+        assert report.feeds_skipped == 0
+        assert report.per_feed_results[0].status == PollOutcome.POLLED
+        assert len(fetcher.calls) == 1
+
+    def test_force_does_not_bypass_disabled_gate(
+        self,
+        session: Session,
+        bus: EventBus,
+        clock: FrozenClock,
+        envelope: FakeEnvelope,
+    ) -> None:
+        ws = _bootstrap_workspace(session)
+        prop = _bootstrap_property(session)
+        _bootstrap_feed(
+            session,
+            workspace_id=ws,
+            property_id=prop,
+            envelope=envelope,
+            enabled=False,
+        )
+        fetcher = _ScriptedFetcher(responses={_FEED_URL: []})
+
+        report = poll_ical(
+            _ctx(ws),
+            session=session,
+            envelope=envelope,
+            clock=clock,
+            event_bus=bus,
+            fetcher=fetcher,
+            resolver=_fixed_resolver([_FAKE_IP]),  # type: ignore[arg-type]
+            force=True,
+        )
+
+        # Disabled feed still skips even with ``force``.
+        assert report.feeds_skipped == 1
+        assert fetcher.calls == []
+        assert report.per_feed_results[0].status == PollOutcome.SKIPPED_DISABLED
+
+
+class TestFeedIdsScope:
+    """``feed_ids=`` (cd-jk6is) narrows the workspace SELECT.
+
+    Used by the manual ``/poll-once`` route to ingest one specific
+    feed without walking the rest of the workspace.
+    """
+
+    def test_feed_ids_filters_to_subset(
+        self,
+        session: Session,
+        bus: EventBus,
+        clock: FrozenClock,
+        envelope: FakeEnvelope,
+    ) -> None:
+        ws = _bootstrap_workspace(session)
+        prop = _bootstrap_property(session)
+        target_feed_id = _bootstrap_feed(
+            session,
+            workspace_id=ws,
+            property_id=prop,
+            envelope=envelope,
+            url=_FEED_URL,
+        )
+        other_feed_id = _bootstrap_feed(
+            session,
+            workspace_id=ws,
+            property_id=prop,
+            envelope=envelope,
+            url=_OTHER_URL,
+        )
+        starts = datetime(2026, 5, 1, 14, 0, tzinfo=UTC)
+        ends = datetime(2026, 5, 4, 11, 0, tzinfo=UTC)
+        body = _vcalendar(
+            _vevent_booked(uid="filter-1", starts=starts, ends=ends),
+        )
+        # Only the target URL gets a canned response — if the filter
+        # leaks, the other-feed fetch raises "no canned response".
+        fetcher = _ScriptedFetcher(responses={_FEED_URL: [_ok(body)], _OTHER_URL: []})
+
+        report = poll_ical(
+            _ctx(ws),
+            session=session,
+            envelope=envelope,
+            clock=clock,
+            event_bus=bus,
+            fetcher=fetcher,
+            resolver=_fixed_resolver([_FAKE_IP]),  # type: ignore[arg-type]
+            feed_ids=frozenset({target_feed_id}),
+        )
+
+        assert report.feeds_walked == 1
+        assert report.feeds_polled == 1
+        assert report.per_feed_results[0].feed_id == target_feed_id
+        # The other feed is not in the report at all.
+        assert all(r.feed_id != other_feed_id for r in report.per_feed_results)
+        assert len(fetcher.calls) == 1
+
+    def test_feed_ids_empty_walks_zero_feeds(
+        self,
+        session: Session,
+        bus: EventBus,
+        clock: FrozenClock,
+        envelope: FakeEnvelope,
+    ) -> None:
+        """Defensive: an empty ``feed_ids`` set walks no feeds.
+
+        This is the route's behaviour when the pre-check 404 has
+        already short-circuited; ``feed_ids=frozenset()`` would not
+        match any row. Make sure the walker handles it gracefully.
+        """
+        ws = _bootstrap_workspace(session)
+        prop = _bootstrap_property(session)
+        _bootstrap_feed(
+            session,
+            workspace_id=ws,
+            property_id=prop,
+            envelope=envelope,
+        )
+        fetcher = _ScriptedFetcher(responses={})
+
+        report = poll_ical(
+            _ctx(ws),
+            session=session,
+            envelope=envelope,
+            clock=clock,
+            event_bus=bus,
+            fetcher=fetcher,
+            resolver=_fixed_resolver([_FAKE_IP]),  # type: ignore[arg-type]
+            feed_ids=frozenset(),
+        )
+
+        assert report.feeds_walked == 0
+        assert report.per_feed_results == ()
+
+
 # ---------------------------------------------------------------------------
 # Workspace scoping
 # ---------------------------------------------------------------------------

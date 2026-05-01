@@ -663,6 +663,8 @@ def poll_ical(
     poll_timeout_seconds: float = DEFAULT_POLL_FETCH_TIMEOUT_SECONDS,
     max_body_bytes: int = DEFAULT_PROBE_BODY_BYTES,
     allow_private_addresses: bool = False,
+    feed_ids: frozenset[str] | None = None,
+    force: bool = False,
 ) -> PollReport:
     """Run one poll tick for the caller's workspace.
 
@@ -683,6 +685,18 @@ def poll_ical(
     registration. Default ``False`` — loopback / RFC 1918 /
     link-local feed URLs are rejected at fetch time.
 
+    ``feed_ids`` narrows the walk to a specific subset of feed IDs;
+    ``None`` (the scheduler default) walks every feed in the workspace.
+    The manual ``poll-once`` route (cd-jk6is) passes a single ID so
+    the operator can force-ingest one feed without waiting for the
+    next tick. ``force=True`` bypasses the per-feed cadence guard so
+    a freshly-registered feed (whose ``last_polled_at`` was just
+    stamped by the registration probe) ingests immediately. The
+    disabled gate is **not** bypassed by ``force`` — operators must
+    re-enable a disabled feed explicitly. Per-host rate-limit windows
+    are also kept; a single-feed manual call has no peer feeds to
+    contend with.
+
     Does **not** commit the session; the caller's Unit-of-Work owns
     the transaction boundary (§01 "Key runtime invariants" #3).
     """
@@ -694,13 +708,14 @@ def poll_ical(
 
     tick_started_at = resolved_now
 
-    feeds = list(
-        session.scalars(
-            select(IcalFeed)
-            .where(IcalFeed.workspace_id == ctx.workspace_id)
-            .order_by(IcalFeed.id.asc())
-        ).all()
+    stmt = (
+        select(IcalFeed)
+        .where(IcalFeed.workspace_id == ctx.workspace_id)
+        .order_by(IcalFeed.id.asc())
     )
+    if feed_ids is not None:
+        stmt = stmt.where(IcalFeed.id.in_(feed_ids))
+    feeds = list(session.scalars(stmt).all())
 
     # Per-host last-fetched monotonic instant inside this tick. Spec
     # §04 says "Rate-limit per host"; we enforce a soft minimum gap
@@ -727,13 +742,14 @@ def poll_ical(
             )
             feeds_skipped += 1
             continue
-        next_due = _next_due(feed)
-        if next_due is not None and next_due > resolved_now:
-            per_feed_results.append(
-                _skipped_result(feed.id, PollOutcome.SKIPPED_NOT_DUE)
-            )
-            feeds_skipped += 1
-            continue
+        if not force:
+            next_due = _next_due(feed)
+            if next_due is not None and next_due > resolved_now:
+                per_feed_results.append(
+                    _skipped_result(feed.id, PollOutcome.SKIPPED_NOT_DUE)
+                )
+                feeds_skipped += 1
+                continue
 
         # Per-host rate-limit guard — applies inside one tick. The
         # check happens before decrypting the URL so a flood of
