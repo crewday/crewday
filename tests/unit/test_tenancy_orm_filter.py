@@ -581,24 +581,24 @@ def test_update_on_alias_of_scoped_table_filters(
     assert "UPDATE" in flattened.upper()
 
 
-# -- WHERE-clause subquery: documented limitation ------------------------
+# -- WHERE-clause subquery: recursively filtered (cd-fdac) ----------------
 
 
-def test_where_clause_subquery_scoped_table_is_currently_unfiltered(
+def test_where_clause_subquery_scoped_table_is_filtered(
     session_factory: sessionmaker[Session],
     sql_capture: list[str],
 ) -> None:
-    """Scoped table in a WHERE subquery is **not** walked (documented hole).
+    """Scoped table in a WHERE-clause subquery gets the inner filter injected.
 
-    The module docstring explicitly calls this out: ``get_final_froms()``
-    only exposes the top-level FROM clause, so a scoped table referenced
-    in a WHERE-clause subquery (``select(Bar).where(Bar.id.in_(select(
-    _Foo.id)))``) passes unchanged through the hook. Recursively
-    rewriting WHERE-clause subqueries is tracked as a follow-up chore.
-
-    This test nails down the current behaviour so any change — intended
-    or accidental — shows up as a test failure.
+    ``select(Bar).where(Bar.id.in_(select(Foo.id)))`` is non-scoped at
+    the outer level (``bar`` isn't registered) but the inner select
+    reaches scoped ``foo``. The recursive rewriter (cd-fdac) walks
+    every :class:`Select` in the AST and injects
+    ``foo.workspace_id = ?`` against the inner select; the outer
+    ``bar`` must stay untouched.
     """
+    import re
+
     token = set_current(_CTX_A)
     try:
         with session_factory() as session:
@@ -607,6 +607,238 @@ def test_where_clause_subquery_scoped_table_is_currently_unfiltered(
         reset_current(token)
 
     flattened = " ".join(sql_capture[-1].split())
-    # Outer FROM is ``bar`` (non-scoped) — no filter injected.
-    assert "foo.workspace_id = ?" not in flattened
-    assert "bar.workspace_id" not in flattened
+    # Inner scoped reference is filtered.
+    assert "foo.workspace_id = ?" in flattened
+    # Outer non-scoped FROM is left alone — word-boundary regex so the
+    # ``foo.workspace_id`` substring above doesn't satisfy ``bar.``.
+    assert re.search(r"(?<!_)\bbar\.workspace_id", flattened) is None
+
+
+def test_where_clause_subquery_without_ctx_raises_with_inner_offender(
+    session_factory: sessionmaker[Session],
+) -> None:
+    """Without a ctx, the inner scoped reference fails closed by name.
+
+    The rewriter doesn't get to run when no :class:`WorkspaceContext`
+    is active; the discovery walk still has to find the inner
+    ``foo`` and surface it on :class:`TenantFilterMissing`, otherwise
+    the developer sees no signal that an unfiltered query was about
+    to leak.
+    """
+    with session_factory() as session, pytest.raises(TenantFilterMissing) as exc:
+        session.execute(select(_Bar).where(_Bar.id.in_(select(_Foo.id))))
+    assert exc.value.table == "foo"
+
+
+def test_correlated_exists_subquery_filters_inner_scoped(
+    session_factory: sessionmaker[Session],
+    sql_capture: list[str],
+) -> None:
+    """A correlated EXISTS over a scoped table gets the inner filter.
+
+    Mirrors ``Bar.foos.any(Foo.id == 'x')``: outer is non-scoped,
+    correlated inner select reads scoped ``foo``. The inner select's
+    own ``_from_obj`` is what the rewriter walks, so the predicate
+    lands inside the EXISTS — the outer ``bar`` stays bare.
+    """
+    import re
+
+    from sqlalchemy import exists
+
+    inner = select(_Foo.id).where(_Foo.id == _Bar.id)
+    stmt = select(_Bar).where(exists(inner))
+
+    token = set_current(_CTX_A)
+    try:
+        with session_factory() as session:
+            session.execute(stmt)
+    finally:
+        reset_current(token)
+
+    flattened = " ".join(sql_capture[-1].split())
+    assert "foo.workspace_id = ?" in flattened
+    assert re.search(r"(?<!_)\bbar\.workspace_id", flattened) is None
+
+
+def test_union_all_legs_each_get_filter(
+    session_factory: sessionmaker[Session],
+    sql_capture: list[str],
+) -> None:
+    """Both legs of a UNION ALL get the workspace filter.
+
+    The rewriter descends into :class:`CompoundSelect` and visits each
+    inner :class:`Select`; the resulting SQL must carry the predicate
+    twice (once per leg).
+    """
+    from sqlalchemy import union_all
+
+    stmt = union_all(
+        select(_Foo).where(_Foo.id == "a"),
+        select(_Foo).where(_Foo.id == "b"),
+    )
+
+    token = set_current(_CTX_A)
+    try:
+        with session_factory() as session:
+            session.execute(stmt)
+    finally:
+        reset_current(token)
+
+    flattened = " ".join(sql_capture[-1].split())
+    # Each leg has its own ``foo.workspace_id = ?`` predicate.
+    assert flattened.count("foo.workspace_id = ?") == 2
+
+
+def test_subquery_in_where_inside_tenant_agnostic_skips_filter(
+    session_factory: sessionmaker[Session],
+    sql_capture: list[str],
+) -> None:
+    """``tenant_agnostic()`` still bypasses the recursive rewriter.
+
+    The escape hatch must short-circuit before walking; otherwise a
+    legitimate cross-tenant subquery read would have a workspace
+    filter injected anyway and silently return zero rows.
+    """
+    # justification: cross-tenant analytics in a unit test
+    with session_factory() as session, tenant_agnostic():
+        session.execute(select(_Bar).where(_Bar.id.in_(select(_Foo.id))))
+
+    flattened = " ".join(sql_capture[-1].split())
+    assert "workspace_id = ?" not in flattened
+
+
+def test_select_of_subquery_with_ctx_filters_inner(
+    session_factory: sessionmaker[Session],
+    sql_capture: list[str],
+) -> None:
+    """``select(scoped.subquery())`` with a ctx now filters the inner select.
+
+    Pre-cd-fdac, the rewriter failed closed on a Subquery in the
+    top-level FROM regardless of context — even with a workspace
+    active, the legitimate read raised. Now the recursive walker
+    descends into the subquery's inner :class:`Select` and injects
+    the predicate there. The outer Subquery wrapper is left bare,
+    which is correct: filtering the inner already constrains the
+    rows the wrapper exposes.
+    """
+    sub = select(_Foo).subquery()
+    token = set_current(_CTX_A)
+    try:
+        with session_factory() as session:
+            session.execute(select(sub))
+    finally:
+        reset_current(token)
+
+    flattened = " ".join(sql_capture[-1].split())
+    assert "foo.workspace_id = ?" in flattened
+
+
+def test_update_non_scoped_with_scoped_subquery_filters_inner(
+    session_factory: sessionmaker[Session],
+    sql_capture: list[str],
+) -> None:
+    """``update(Bar).where(Bar.id.in_(select(_Foo.id)))`` filters the inner select.
+
+    Outer ``bar`` is non-scoped so no top-level filter applies, but
+    the inner select reads scoped ``foo`` and must carry
+    ``foo.workspace_id = ?``. Without recursion the inner subquery
+    would silently return cross-workspace rows and the bulk UPDATE
+    would target ``bar`` rows that match other workspaces.
+    """
+    import re
+
+    token = set_current(_CTX_A)
+    try:
+        with session_factory() as session:
+            session.execute(
+                update(_Bar).where(_Bar.id.in_(select(_Foo.id))).values(label="x")
+            )
+    finally:
+        reset_current(token)
+
+    flattened = " ".join(sql_capture[-1].split())
+    assert "UPDATE" in flattened.upper()
+    assert "foo.workspace_id = ?" in flattened
+    # Outer non-scoped UPDATE target must stay bare; the scoped
+    # predicate belongs only to the inner select.
+    assert re.search(r"(?<!_)\bbar\.workspace_id", flattened) is None
+
+
+def test_aliased_scoped_table_in_where_subquery_filters_on_alias(
+    session_factory: sessionmaker[Session],
+    sql_capture: list[str],
+) -> None:
+    """An ``aliased(Foo)`` inside a WHERE subquery filters on the alias's column.
+
+    The cd-3yhd invariant — never inject ``foo.workspace_id`` against
+    a bare table when the caller wrote an alias — extends to the new
+    recursive path. If the inner-select visitor unwrapped to the bare
+    :class:`~sqlalchemy.Table`, SQLite would either render an extra
+    ``, foo`` FROM element (cartesian product) or filter the wrong
+    column entirely; the alias's own column is what must show up.
+    """
+    foo_alias = aliased(_Foo)
+    token = set_current(_CTX_A)
+    try:
+        with session_factory() as session:
+            session.execute(select(_Bar).where(_Bar.id.in_(select(foo_alias.id))))
+    finally:
+        reset_current(token)
+
+    flattened = " ".join(sql_capture[-1].split()).lower()
+    # Alias column gets the predicate, not the bare table column.
+    assert "foo_1.workspace_id = ?" in flattened
+    assert "where foo.workspace_id" not in flattened
+    # Inner select renders as ``FROM foo AS foo_1`` — no stray bare
+    # ``foo`` FROM element joined alongside.
+    assert "from foo as foo_1" in flattened
+
+
+def test_repeated_execution_of_same_statement_does_not_double_inject(
+    session_factory: sessionmaker[Session],
+    sql_capture: list[str],
+) -> None:
+    """Re-executing the same :class:`Select` keeps exactly one workspace filter.
+
+    The rewriter clones via :func:`cloned_traverse` rather than
+    mutating ``stmt`` in place, so the original statement object never
+    accumulates predicates. A regression here would surface as two
+    (or more) ``foo.workspace_id = ?`` clauses on the second run —
+    visible in the captured SQL even if the query still returned the
+    correct rows.
+    """
+    stmt = select(_Foo)
+    token = set_current(_CTX_A)
+    try:
+        with session_factory() as session:
+            session.execute(stmt)
+            session.execute(stmt)
+    finally:
+        reset_current(token)
+
+    assert len(sql_capture) >= 2
+    for rendered in sql_capture[-2:]:
+        flattened = " ".join(rendered.split())
+        assert flattened.count("foo.workspace_id = ?") == 1
+
+
+def test_offender_name_is_deterministic_across_multiple_inner_scopes(
+    session_factory: sessionmaker[Session],
+) -> None:
+    """When several scoped tables are reachable via subqueries, the offender
+    is the alphabetically-first name.
+
+    The cd-3yhd invariant ("error messages don't depend on walker
+    iteration order") still applies once offenders can come from
+    inner selects. With both ``foo`` and ``foo_with_bar`` reachable
+    via separate WHERE-clause subqueries, the rewriter must pick
+    ``foo`` regardless of the order the visitor encounters them.
+    """
+    stmt = (
+        select(_Bar)
+        .where(_Bar.id.in_(select(_FooWithBar.id)))
+        .where(_Bar.id.in_(select(_Foo.id)))
+    )
+    with session_factory() as session, pytest.raises(TenantFilterMissing) as exc:
+        session.execute(stmt)
+    assert exc.value.table == "foo"
