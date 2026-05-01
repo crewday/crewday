@@ -176,6 +176,59 @@
     "group": "admin",
     "http": {
       "method": "GET",
+      "path": "/admin/api/v1/agent_docs"
+    },
+    "idempotent": true,
+    "name": "agent-docs-list",
+    "operation_id": "admin.agent_docs.list",
+    "path_params": [],
+    "query_params": [],
+    "response_schema_ref": null,
+    "summary": "List deployment agent system docs",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "admin",
+      "mutates": false,
+      "summary": "List agent system docs",
+      "verb": "agent-docs-list"
+    }
+  },
+  {
+    "body_schema_ref": null,
+    "group": "admin",
+    "http": {
+      "method": "GET",
+      "path": "/admin/api/v1/agent_docs/{slug}"
+    },
+    "idempotent": true,
+    "name": "agent-docs-show",
+    "operation_id": "admin.agent_docs.show",
+    "path_params": [
+      {
+        "name": "slug",
+        "required": true,
+        "schema": {
+          "title": "Slug",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/AdminAgentDoc",
+    "summary": "Show a deployment agent system doc",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "admin",
+      "mutates": false,
+      "summary": "Show an agent system doc",
+      "verb": "agent-docs-show"
+    }
+  },
+  {
+    "body_schema_ref": null,
+    "group": "admin",
+    "http": {
+      "method": "GET",
       "path": "/admin/api/v1/audit"
     },
     "idempotent": true,
@@ -666,6 +719,77 @@
     }
   },
   {
+    "body_schema_ref": null,
+    "group": "admin",
+    "http": {
+      "method": "GET",
+      "path": "/admin/api/v1/signups"
+    },
+    "idempotent": true,
+    "name": "signups-list",
+    "operation_id": "admin.signups.list",
+    "path_params": [],
+    "query_params": [
+      {
+        "name": "kind",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "enum": [
+                "burst_rate",
+                "distinct_emails_one_ip",
+                "quota_near_breach",
+                "repeat_email"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Kind"
+        }
+      },
+      {
+        "name": "cursor",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Cursor"
+        }
+      },
+      {
+        "name": "limit",
+        "required": false,
+        "schema": {
+          "default": 50,
+          "maximum": 500,
+          "minimum": 1,
+          "title": "Limit",
+          "type": "integer"
+        }
+      }
+    ],
+    "response_schema_ref": "#/components/schemas/SignupsListResponse",
+    "summary": "List deployment signup abuse signals",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "admin",
+      "mutates": false,
+      "summary": "List deployment signup abuse signals",
+      "verb": "signups-list"
+    }
+  },
+  {
     "body_schema_ref": "#/components/schemas/UsageCapPayload",
     "group": "admin",
     "http": {
@@ -876,5 +1000,745 @@
       "summary": "Promote a workspace to trusted",
       "verb": "workspaces-trust"
     }
+  },
+  {
+    "body_schema_ref": "#/components/schemas/AssignmentPayload-Input",
+    "group": "llm",
+    "http": {
+      "method": "POST",
+      "path": "/admin/api/v1/llm/assignments"
+    },
+    "idempotent": false,
+    "name": "assignments",
+    "operation_id": "admin.llm.assignments.create",
+    "path_params": [],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/LlmAssignmentResponse",
+    "summary": "Create Assignment",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "llm",
+    "http": {
+      "method": "DELETE",
+      "path": "/admin/api/v1/llm/assignments/{assignment_id}"
+    },
+    "idempotent": true,
+    "name": "assignments-delete",
+    "operation_id": "admin.llm.assignments.delete",
+    "path_params": [
+      {
+        "name": "assignment_id",
+        "required": true,
+        "schema": {
+          "title": "Assignment Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": null,
+    "summary": "Delete Assignment",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "llm",
+    "http": {
+      "method": "GET",
+      "path": "/admin/api/v1/llm/assignments"
+    },
+    "idempotent": true,
+    "name": "assignments-list",
+    "operation_id": "admin.llm.assignments.list",
+    "path_params": [],
+    "query_params": [],
+    "response_schema_ref": null,
+    "summary": "List Assignments",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "llm",
+    "http": {
+      "method": "PATCH",
+      "path": "/admin/api/v1/llm/assignments/reorder"
+    },
+    "idempotent": false,
+    "name": "assignments-reorder-update",
+    "operation_id": "admin.llm.assignments.reorder",
+    "path_params": [],
+    "query_params": [],
+    "response_schema_ref": null,
+    "summary": "Reorder Assignments",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": "#/components/schemas/AssignmentUpdatePayload",
+    "group": "llm",
+    "http": {
+      "method": "PUT",
+      "path": "/admin/api/v1/llm/assignments/{assignment_id}"
+    },
+    "idempotent": true,
+    "name": "assignments-replace",
+    "operation_id": "admin.llm.assignments.update",
+    "path_params": [
+      {
+        "name": "assignment_id",
+        "required": true,
+        "schema": {
+          "title": "Assignment Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/LlmAssignmentResponse",
+    "summary": "Update Assignment",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "llm",
+    "http": {
+      "method": "GET",
+      "path": "/admin/api/v1/llm/assignments/{assignment_id}"
+    },
+    "idempotent": true,
+    "name": "assignments-show",
+    "operation_id": "admin.llm.assignments.get",
+    "path_params": [
+      {
+        "name": "assignment_id",
+        "required": true,
+        "schema": {
+          "title": "Assignment Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/LlmAssignmentResponse",
+    "summary": "Get Assignment",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "llm",
+    "http": {
+      "method": "GET",
+      "path": "/admin/api/v1/llm/calls"
+    },
+    "idempotent": true,
+    "name": "calls-list",
+    "operation_id": "admin.llm.calls.list",
+    "path_params": [],
+    "query_params": [
+      {
+        "name": "capability",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Capability"
+        }
+      },
+      {
+        "name": "provider_model_id",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Provider Model Id"
+        }
+      },
+      {
+        "name": "assignment_id",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Assignment Id"
+        }
+      },
+      {
+        "name": "fallback_attempts_gt",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Fallback Attempts Gt"
+        }
+      },
+      {
+        "name": "limit",
+        "required": false,
+        "schema": {
+          "default": 100,
+          "maximum": 500,
+          "minimum": 1,
+          "title": "Limit",
+          "type": "integer"
+        }
+      }
+    ],
+    "response_schema_ref": null,
+    "summary": "List Calls",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "llm",
+    "http": {
+      "method": "GET",
+      "path": "/admin/api/v1/llm/graph"
+    },
+    "idempotent": true,
+    "name": "graph-list",
+    "operation_id": "admin.llm.graph",
+    "path_params": [],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/LlmGraphPayload",
+    "summary": "Graph",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": "#/components/schemas/ModelPayload",
+    "group": "llm",
+    "http": {
+      "method": "POST",
+      "path": "/admin/api/v1/llm/models"
+    },
+    "idempotent": false,
+    "name": "models",
+    "operation_id": "admin.llm.models.create",
+    "path_params": [],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/LlmModelResponse",
+    "summary": "Create Model",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "llm",
+    "http": {
+      "method": "DELETE",
+      "path": "/admin/api/v1/llm/models/{model_id}"
+    },
+    "idempotent": true,
+    "name": "models-delete",
+    "operation_id": "admin.llm.models.delete",
+    "path_params": [
+      {
+        "name": "model_id",
+        "required": true,
+        "schema": {
+          "title": "Model Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": null,
+    "summary": "Delete Model",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "llm",
+    "http": {
+      "method": "GET",
+      "path": "/admin/api/v1/llm/models"
+    },
+    "idempotent": true,
+    "name": "models-list",
+    "operation_id": "admin.llm.models.list",
+    "path_params": [],
+    "query_params": [],
+    "response_schema_ref": null,
+    "summary": "List Models",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": "#/components/schemas/ModelPayload",
+    "group": "llm",
+    "http": {
+      "method": "PUT",
+      "path": "/admin/api/v1/llm/models/{model_id}"
+    },
+    "idempotent": true,
+    "name": "models-replace",
+    "operation_id": "admin.llm.models.update",
+    "path_params": [
+      {
+        "name": "model_id",
+        "required": true,
+        "schema": {
+          "title": "Model Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/LlmModelResponse",
+    "summary": "Update Model",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "llm",
+    "http": {
+      "method": "GET",
+      "path": "/admin/api/v1/llm/models/{model_id}"
+    },
+    "idempotent": true,
+    "name": "models-show",
+    "operation_id": "admin.llm.models.get",
+    "path_params": [
+      {
+        "name": "model_id",
+        "required": true,
+        "schema": {
+          "title": "Model Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/LlmModelResponse",
+    "summary": "Get Model",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "llm",
+    "http": {
+      "method": "GET",
+      "path": "/admin/api/v1/llm/prompts"
+    },
+    "idempotent": true,
+    "name": "prompts-list",
+    "operation_id": "admin.llm.prompts.list",
+    "path_params": [],
+    "query_params": [],
+    "response_schema_ref": null,
+    "summary": "List Prompts",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": "#/components/schemas/PromptUpdatePayload",
+    "group": "llm",
+    "http": {
+      "method": "PUT",
+      "path": "/admin/api/v1/llm/prompts/{prompt_id}"
+    },
+    "idempotent": true,
+    "name": "prompts-replace",
+    "operation_id": "admin.llm.prompts.update",
+    "path_params": [
+      {
+        "name": "prompt_id",
+        "required": true,
+        "schema": {
+          "title": "Prompt Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/LlmPromptTemplateDetail",
+    "summary": "Update Prompt",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "llm",
+    "http": {
+      "method": "GET",
+      "path": "/admin/api/v1/llm/prompts/{prompt_id}/revisions"
+    },
+    "idempotent": true,
+    "name": "prompts-revisions-list",
+    "operation_id": "admin.llm.prompts.revisions",
+    "path_params": [
+      {
+        "name": "prompt_id",
+        "required": true,
+        "schema": {
+          "title": "Prompt Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": null,
+    "summary": "Prompt Revisions",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "llm",
+    "http": {
+      "method": "GET",
+      "path": "/admin/api/v1/llm/prompts/{prompt_id}"
+    },
+    "idempotent": true,
+    "name": "prompts-show",
+    "operation_id": "admin.llm.prompts.get",
+    "path_params": [
+      {
+        "name": "prompt_id",
+        "required": true,
+        "schema": {
+          "title": "Prompt Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/LlmPromptTemplateDetail",
+    "summary": "Get Prompt",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": "#/components/schemas/ProviderModelPayload",
+    "group": "llm",
+    "http": {
+      "method": "POST",
+      "path": "/admin/api/v1/llm/provider-models"
+    },
+    "idempotent": false,
+    "name": "provider-models",
+    "operation_id": "admin.llm.provider_models.create",
+    "path_params": [],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/LlmProviderModelResponse",
+    "summary": "Create Provider Model",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "llm",
+    "http": {
+      "method": "DELETE",
+      "path": "/admin/api/v1/llm/provider-models/{provider_model_id}"
+    },
+    "idempotent": true,
+    "name": "provider-models-delete",
+    "operation_id": "admin.llm.provider_models.delete",
+    "path_params": [
+      {
+        "name": "provider_model_id",
+        "required": true,
+        "schema": {
+          "title": "Provider Model Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": null,
+    "summary": "Delete Provider Model",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "llm",
+    "http": {
+      "method": "GET",
+      "path": "/admin/api/v1/llm/provider-models"
+    },
+    "idempotent": true,
+    "name": "provider-models-list",
+    "operation_id": "admin.llm.provider_models.list",
+    "path_params": [],
+    "query_params": [
+      {
+        "name": "provider_id",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Provider Id"
+        }
+      },
+      {
+        "name": "model_id",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Model Id"
+        }
+      }
+    ],
+    "response_schema_ref": null,
+    "summary": "List Provider Models",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": "#/components/schemas/ProviderModelPayload",
+    "group": "llm",
+    "http": {
+      "method": "PUT",
+      "path": "/admin/api/v1/llm/provider-models/{provider_model_id}"
+    },
+    "idempotent": true,
+    "name": "provider-models-replace",
+    "operation_id": "admin.llm.provider_models.update",
+    "path_params": [
+      {
+        "name": "provider_model_id",
+        "required": true,
+        "schema": {
+          "title": "Provider Model Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/LlmProviderModelResponse",
+    "summary": "Update Provider Model",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "llm",
+    "http": {
+      "method": "GET",
+      "path": "/admin/api/v1/llm/provider-models/{provider_model_id}"
+    },
+    "idempotent": true,
+    "name": "provider-models-show",
+    "operation_id": "admin.llm.provider_models.get",
+    "path_params": [
+      {
+        "name": "provider_model_id",
+        "required": true,
+        "schema": {
+          "title": "Provider Model Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/LlmProviderModelResponse",
+    "summary": "Get Provider Model",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": "#/components/schemas/ProviderPayload",
+    "group": "llm",
+    "http": {
+      "method": "POST",
+      "path": "/admin/api/v1/llm/providers"
+    },
+    "idempotent": false,
+    "name": "providers",
+    "operation_id": "admin.llm.providers.create",
+    "path_params": [],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/LlmProviderResponse",
+    "summary": "Create Provider",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "llm",
+    "http": {
+      "method": "DELETE",
+      "path": "/admin/api/v1/llm/providers/{provider_id}"
+    },
+    "idempotent": true,
+    "name": "providers-delete",
+    "operation_id": "admin.llm.providers.delete",
+    "path_params": [
+      {
+        "name": "provider_id",
+        "required": true,
+        "schema": {
+          "title": "Provider Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": null,
+    "summary": "Delete Provider",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "llm",
+    "http": {
+      "method": "GET",
+      "path": "/admin/api/v1/llm/providers"
+    },
+    "idempotent": true,
+    "name": "providers-list",
+    "operation_id": "admin.llm.providers.list",
+    "path_params": [],
+    "query_params": [],
+    "response_schema_ref": null,
+    "summary": "List Providers",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": "#/components/schemas/ProviderPayload",
+    "group": "llm",
+    "http": {
+      "method": "PUT",
+      "path": "/admin/api/v1/llm/providers/{provider_id}"
+    },
+    "idempotent": true,
+    "name": "providers-replace",
+    "operation_id": "admin.llm.providers.update",
+    "path_params": [
+      {
+        "name": "provider_id",
+        "required": true,
+        "schema": {
+          "title": "Provider Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/LlmProviderResponse",
+    "summary": "Update Provider",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "llm",
+    "http": {
+      "method": "GET",
+      "path": "/admin/api/v1/llm/providers/{provider_id}"
+    },
+    "idempotent": true,
+    "name": "providers-show",
+    "operation_id": "admin.llm.providers.get",
+    "path_params": [
+      {
+        "name": "provider_id",
+        "required": true,
+        "schema": {
+          "title": "Provider Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/LlmProviderResponse",
+    "summary": "Get Provider",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "llm",
+    "http": {
+      "method": "POST",
+      "path": "/admin/api/v1/llm/prompts/{prompt_id}/reset-to-default"
+    },
+    "idempotent": false,
+    "name": "reset-to-default",
+    "operation_id": "admin.llm.prompts.reset",
+    "path_params": [
+      {
+        "name": "prompt_id",
+        "required": true,
+        "schema": {
+          "title": "Prompt Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/LlmPromptTemplateDetail",
+    "summary": "Reset Prompt",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "llm",
+    "http": {
+      "method": "POST",
+      "path": "/admin/api/v1/llm/sync-pricing"
+    },
+    "idempotent": false,
+    "name": "sync-pricing",
+    "operation_id": "admin.llm.sync_pricing",
+    "path_params": [],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/LlmSyncPricingResult",
+    "summary": "Sync Pricing",
+    "x_agent_confirm": null,
+    "x_cli": null
   }
 ]

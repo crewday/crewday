@@ -622,11 +622,11 @@
           "anyOf": [
             {
               "enum": [
-                "service",
+                "inspect",
+                "read",
                 "repair",
                 "replace",
-                "inspect",
-                "read"
+                "service"
               ],
               "type": "string"
             },
@@ -905,6 +905,7 @@
         "name": "page",
         "required": true,
         "schema": {
+          "minimum": 1,
           "title": "Page",
           "type": "integer"
         }
@@ -944,16 +945,16 @@
           "anyOf": [
             {
               "enum": [
-                "manual",
-                "warranty",
-                "invoice",
-                "receipt",
-                "photo",
                 "certificate",
                 "contract",
-                "permit",
                 "insurance",
-                "other"
+                "invoice",
+                "manual",
+                "other",
+                "permit",
+                "photo",
+                "receipt",
+                "warranty"
               ],
               "type": "string"
             },
@@ -1165,6 +1166,54 @@
     "query_params": [],
     "response_schema_ref": "#/components/schemas/AssetResponse",
     "summary": "Move an asset to a property or area",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "assets",
+    "http": {
+      "method": "GET",
+      "path": "/w/{slug}/api/v1/assets/qr-sheet"
+    },
+    "idempotent": true,
+    "name": "qr-sheet-list",
+    "operation_id": "assets.qr_sheet",
+    "path_params": [],
+    "query_params": [
+      {
+        "name": "property_id",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Property Id"
+        }
+      },
+      {
+        "name": "category",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Category"
+        }
+      }
+    ],
+    "response_schema_ref": null,
+    "summary": "Render asset QR labels as a print-ready PDF",
     "x_agent_confirm": null,
     "x_cli": null
   },
@@ -1513,6 +1562,23 @@
     }
   },
   {
+    "body_schema_ref": "#/components/schemas/MagicConsumeBody",
+    "group": "auth",
+    "http": {
+      "method": "POST",
+      "path": "/api/v1/auth/magic/consume"
+    },
+    "idempotent": false,
+    "name": "consume",
+    "operation_id": "post_consume_api_v1_auth_magic_consume_post",
+    "path_params": [],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/MagicConsumeResponse",
+    "summary": "Redeem a magic-link token (single-use)",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
     "body_schema_ref": null,
     "group": "auth",
     "http": {
@@ -1542,6 +1608,23 @@
       "summary": "Revoke one of your passkeys",
       "verb": "passkey-revoke"
     }
+  },
+  {
+    "body_schema_ref": "#/components/schemas/MagicRequestBody",
+    "group": "auth",
+    "http": {
+      "method": "POST",
+      "path": "/api/v1/auth/magic/request"
+    },
+    "idempotent": false,
+    "name": "request",
+    "operation_id": "post_request_api_v1_auth_magic_request_post",
+    "path_params": [],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/MagicRequestAcceptedResponse",
+    "summary": "Send a magic-link email (202 on enrolment; 429 on rate limit)",
+    "x_agent_confirm": null,
+    "x_cli": null
   },
   {
     "body_schema_ref": null,
@@ -1585,6 +1668,72 @@
       "mutates": false,
       "summary": "List the workspaces the caller can switch into",
       "verb": "workspaces"
+    }
+  },
+  {
+    "body_schema_ref": "#/components/schemas/EmailChangeRequestBody",
+    "group": "auth-email",
+    "http": {
+      "method": "POST",
+      "path": "/api/v1/me/email/change_request"
+    },
+    "idempotent": false,
+    "name": "change-request",
+    "operation_id": "auth.me.email.change_request",
+    "path_params": [],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/EmailChangeRequestResponse",
+    "summary": "Request to change the caller's email (passkey session only)",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "auth-email",
+      "mutates": true,
+      "summary": "Request changing your account email",
+      "verb": "change-request"
+    }
+  },
+  {
+    "body_schema_ref": "#/components/schemas/EmailRevertBody",
+    "group": "auth-email",
+    "http": {
+      "method": "POST",
+      "path": "/api/v1/auth/email/revert"
+    },
+    "idempotent": false,
+    "name": "revert",
+    "operation_id": "auth.email.revert",
+    "path_params": [],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/EmailRevertResponse",
+    "summary": "Consume the revert link and restore the previous email",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "auth-email",
+      "mutates": true,
+      "summary": "Revert a recent email change",
+      "verb": "revert"
+    }
+  },
+  {
+    "body_schema_ref": "#/components/schemas/EmailVerifyBody",
+    "group": "auth-email",
+    "http": {
+      "method": "POST",
+      "path": "/api/v1/auth/email/verify"
+    },
+    "idempotent": false,
+    "name": "verify",
+    "operation_id": "auth.email.verify",
+    "path_params": [],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/EmailVerifyResponse",
+    "summary": "Consume the new-address magic link and swap users.email",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "auth-email",
+      "mutates": true,
+      "summary": "Confirm a pending email change",
+      "verb": "verify"
     }
   },
   {
@@ -1958,6 +2107,40 @@
     "body_schema_ref": null,
     "group": "chat_gateway",
     "http": {
+      "method": "GET",
+      "path": "/w/{slug}/api/v1/chat/channels"
+    },
+    "idempotent": true,
+    "name": "chat-channels-list",
+    "operation_id": "chat.channel_bindings.list",
+    "path_params": [],
+    "query_params": [],
+    "response_schema_ref": null,
+    "summary": "List linked off-app chat channels",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "chat_gateway",
+    "http": {
+      "method": "GET",
+      "path": "/w/{slug}/api/v1/chat/channels/providers"
+    },
+    "idempotent": true,
+    "name": "chat-channels-providers-list",
+    "operation_id": "chat.channel_bindings.providers",
+    "path_params": [],
+    "query_params": [],
+    "response_schema_ref": null,
+    "summary": "List chat gateway provider status for this workspace",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "chat_gateway",
+    "http": {
       "method": "POST",
       "path": "/webhooks/chat/{provider}"
     },
@@ -1977,6 +2160,68 @@
     "query_params": [],
     "response_schema_ref": "#/components/schemas/ChatGatewayResponse",
     "summary": "Receive a signed inbound chat provider webhook",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": "#/components/schemas/LinkStartRequest",
+    "group": "chat_gateway",
+    "http": {
+      "method": "POST",
+      "path": "/w/{slug}/api/v1/chat/channels/link/start"
+    },
+    "idempotent": false,
+    "name": "start",
+    "operation_id": "chat.channel_bindings.link_start",
+    "path_params": [],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/LinkStartResponse",
+    "summary": "Start an off-app chat-channel link ceremony",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "chat_gateway",
+    "http": {
+      "method": "POST",
+      "path": "/w/{slug}/api/v1/chat/channels/{binding_id}/unlink"
+    },
+    "idempotent": false,
+    "name": "unlink",
+    "operation_id": "chat.channel_bindings.unlink",
+    "path_params": [
+      {
+        "name": "binding_id",
+        "required": true,
+        "schema": {
+          "title": "Binding Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/BindingStateResponse",
+    "summary": "Unlink an off-app chat-channel binding",
+    "x_agent_confirm": {
+      "message": "Unlink this chat channel?"
+    },
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": "#/components/schemas/LinkVerifyRequest",
+    "group": "chat_gateway",
+    "http": {
+      "method": "POST",
+      "path": "/w/{slug}/api/v1/chat/channels/link/verify"
+    },
+    "idempotent": false,
+    "name": "verify",
+    "operation_id": "chat.channel_bindings.link_verify",
+    "path_params": [],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/BindingStateResponse",
+    "summary": "Verify an off-app chat-channel link code; dev code is 424242",
     "x_agent_confirm": null,
     "x_cli": null
   },
@@ -2115,16 +2360,16 @@
           "anyOf": [
             {
               "enum": [
-                "manual",
-                "warranty",
-                "invoice",
-                "receipt",
-                "photo",
                 "certificate",
                 "contract",
-                "permit",
                 "insurance",
-                "other"
+                "invoice",
+                "manual",
+                "other",
+                "permit",
+                "photo",
+                "receipt",
+                "warranty"
               ],
               "type": "string"
             },
@@ -2722,6 +2967,421 @@
     "x_cli": null
   },
   {
+    "body_schema_ref": null,
+    "group": "instructions",
+    "http": {
+      "method": "POST",
+      "path": "/w/{slug}/api/v1/instructions/{instruction_id}/archive"
+    },
+    "idempotent": false,
+    "name": "archive",
+    "operation_id": "instructions.archive",
+    "path_params": [
+      {
+        "name": "instruction_id",
+        "required": true,
+        "schema": {
+          "title": "Instruction Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/InstructionPayload",
+    "summary": "Archive an instruction",
+    "x_agent_confirm": {
+      "risk": "medium",
+      "summary": "Archive instruction?",
+      "verb": "Archive instruction"
+    },
+    "x_cli": {
+      "group": "instructions",
+      "summary": "Archive an instruction",
+      "verb": "archive"
+    }
+  },
+  {
+    "body_schema_ref": "#/components/schemas/InstructionCreateRequest",
+    "group": "instructions",
+    "http": {
+      "method": "POST",
+      "path": "/w/{slug}/api/v1/instructions"
+    },
+    "idempotent": false,
+    "name": "create",
+    "operation_id": "instructions.create",
+    "path_params": [],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/InstructionWithRevisionPayload",
+    "summary": "Create an instruction",
+    "x_agent_confirm": {
+      "fields_to_show": [
+        "slug",
+        "title",
+        "scope"
+      ],
+      "risk": "low",
+      "summary": "Create instruction {title}?",
+      "verb": "Create instruction"
+    },
+    "x_cli": {
+      "group": "instructions",
+      "summary": "Create an instruction",
+      "verb": "create"
+    }
+  },
+  {
+    "body_schema_ref": null,
+    "group": "instructions",
+    "http": {
+      "method": "GET",
+      "path": "/w/{slug}/api/v1/instructions/{instruction_id}"
+    },
+    "idempotent": true,
+    "name": "get",
+    "operation_id": "instructions.get",
+    "path_params": [
+      {
+        "name": "instruction_id",
+        "required": true,
+        "schema": {
+          "title": "Instruction Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/InstructionWithRevisionPayload",
+    "summary": "Read an instruction",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "instructions",
+      "mutates": false,
+      "summary": "Read an instruction",
+      "verb": "get"
+    }
+  },
+  {
+    "body_schema_ref": null,
+    "group": "instructions",
+    "http": {
+      "method": "GET",
+      "path": "/w/{slug}/api/v1/instructions"
+    },
+    "idempotent": true,
+    "name": "list",
+    "operation_id": "instructions.list",
+    "path_params": [],
+    "query_params": [
+      {
+        "name": "include_archived",
+        "required": false,
+        "schema": {
+          "default": false,
+          "title": "Include Archived",
+          "type": "boolean"
+        }
+      },
+      {
+        "name": "cursor",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Opaque forward cursor from the previous page's ``next_cursor``. Omitted on the first call. Bounded to 256 chars to keep the URL below reverse-proxy header limits.",
+          "title": "Cursor"
+        }
+      },
+      {
+        "name": "limit",
+        "required": false,
+        "schema": {
+          "default": 50,
+          "description": "Maximum rows to return. Default 50, cap 500 per spec \u00a712 'Pagination'. Rejected with 422 outside ``[1, 500]``.",
+          "maximum": 500,
+          "minimum": 1,
+          "title": "Limit",
+          "type": "integer"
+        }
+      }
+    ],
+    "response_schema_ref": "#/components/schemas/InstructionListResponse",
+    "summary": "List instructions",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "instructions",
+      "mutates": false,
+      "summary": "List instructions",
+      "verb": "list"
+    }
+  },
+  {
+    "body_schema_ref": "#/components/schemas/InstructionPatchRequest",
+    "group": "instructions",
+    "http": {
+      "method": "PATCH",
+      "path": "/w/{slug}/api/v1/instructions/{instruction_id}"
+    },
+    "idempotent": false,
+    "name": "patch",
+    "operation_id": "instructions.patch",
+    "path_params": [
+      {
+        "name": "instruction_id",
+        "required": true,
+        "schema": {
+          "title": "Instruction Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/InstructionWithRevisionPayload",
+    "summary": "Patch instruction metadata or body",
+    "x_agent_confirm": {
+      "fields_to_show": [
+        "title",
+        "scope",
+        "change_note"
+      ],
+      "risk": "low",
+      "summary": "Update instruction?",
+      "verb": "Update instruction"
+    },
+    "x_cli": {
+      "group": "instructions",
+      "summary": "Patch instruction metadata or body",
+      "verb": "patch"
+    }
+  },
+  {
+    "body_schema_ref": null,
+    "group": "instructions",
+    "http": {
+      "method": "GET",
+      "path": "/w/{slug}/api/v1/instructions:scope"
+    },
+    "idempotent": true,
+    "name": "scope",
+    "operation_id": "instructions.scope",
+    "path_params": [],
+    "query_params": [
+      {
+        "name": "template",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Template"
+        }
+      },
+      {
+        "name": "property",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Property"
+        }
+      },
+      {
+        "name": "area",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Area"
+        }
+      },
+      {
+        "name": "asset",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Asset"
+        }
+      },
+      {
+        "name": "stay",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Stay"
+        }
+      },
+      {
+        "name": "role",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Role"
+        }
+      }
+    ],
+    "response_schema_ref": "#/components/schemas/ResolvedInstructionListResponse",
+    "summary": "Resolve instructions for a work context",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "instructions",
+      "mutates": false,
+      "summary": "Resolve instructions for a work context",
+      "verb": "scope"
+    }
+  },
+  {
+    "body_schema_ref": null,
+    "group": "instructions",
+    "http": {
+      "method": "GET",
+      "path": "/w/{slug}/api/v1/instructions/{instruction_id}/versions/{version}"
+    },
+    "idempotent": true,
+    "name": "version",
+    "operation_id": "instructions.versions.get",
+    "path_params": [
+      {
+        "name": "instruction_id",
+        "required": true,
+        "schema": {
+          "title": "Instruction Id",
+          "type": "string"
+        }
+      },
+      {
+        "name": "version",
+        "required": true,
+        "schema": {
+          "minimum": 1,
+          "title": "Version",
+          "type": "integer"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/InstructionRevisionPayload",
+    "summary": "Read one instruction version",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "instructions",
+      "mutates": false,
+      "summary": "Read one instruction version",
+      "verb": "version"
+    }
+  },
+  {
+    "body_schema_ref": null,
+    "group": "instructions",
+    "http": {
+      "method": "GET",
+      "path": "/w/{slug}/api/v1/instructions/{instruction_id}/versions"
+    },
+    "idempotent": true,
+    "name": "versions",
+    "operation_id": "instructions.versions.list",
+    "path_params": [
+      {
+        "name": "instruction_id",
+        "required": true,
+        "schema": {
+          "title": "Instruction Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [
+      {
+        "name": "cursor",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Opaque forward cursor from the previous page's ``next_cursor``. Omitted on the first call. Bounded to 256 chars to keep the URL below reverse-proxy header limits.",
+          "title": "Cursor"
+        }
+      },
+      {
+        "name": "limit",
+        "required": false,
+        "schema": {
+          "default": 50,
+          "description": "Maximum rows to return. Default 50, cap 500 per spec \u00a712 'Pagination'. Rejected with 422 outside ``[1, 500]``.",
+          "maximum": 500,
+          "minimum": 1,
+          "title": "Limit",
+          "type": "integer"
+        }
+      }
+    ],
+    "response_schema_ref": "#/components/schemas/InstructionRevisionListResponse",
+    "summary": "List instruction versions",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "instructions",
+      "mutates": false,
+      "summary": "List instruction versions",
+      "verb": "versions"
+    }
+  },
+  {
     "body_schema_ref": "#/components/schemas/InventoryItemCreateRequest",
     "group": "inventory",
     "http": {
@@ -3075,6 +3735,54 @@
     "body_schema_ref": null,
     "group": "inventory",
     "http": {
+      "method": "GET",
+      "path": "/w/{slug}/api/v1/inventory/reports/production_rate"
+    },
+    "idempotent": true,
+    "name": "production-rate",
+    "operation_id": "inventory.reports.production_rate",
+    "path_params": [],
+    "query_params": [
+      {
+        "name": "property_id",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "maxLength": 500,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Property Id"
+        }
+      },
+      {
+        "name": "days",
+        "required": false,
+        "schema": {
+          "default": 30,
+          "maximum": 366,
+          "minimum": 1,
+          "title": "Days",
+          "type": "integer"
+        }
+      }
+    ],
+    "response_schema_ref": "#/components/schemas/InventoryRateReportResponse",
+    "summary": "Production Rate Report",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "inventory",
+      "verb": "production-rate"
+    }
+  },
+  {
+    "body_schema_ref": null,
+    "group": "inventory",
+    "http": {
       "method": "POST",
       "path": "/w/{slug}/api/v1/inventory/properties/{property_id}/items/{item_id}/restore"
     },
@@ -3106,6 +3814,271 @@
     "x_cli": {
       "group": "inventory",
       "verb": "restore"
+    }
+  },
+  {
+    "body_schema_ref": null,
+    "group": "inventory",
+    "http": {
+      "method": "GET",
+      "path": "/w/{slug}/api/v1/inventory/reports/shrinkage"
+    },
+    "idempotent": true,
+    "name": "shrinkage",
+    "operation_id": "inventory.reports.shrinkage",
+    "path_params": [],
+    "query_params": [
+      {
+        "name": "property_id",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "maxLength": 500,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Property Id"
+        }
+      },
+      {
+        "name": "days",
+        "required": false,
+        "schema": {
+          "default": 30,
+          "maximum": 366,
+          "minimum": 1,
+          "title": "Days",
+          "type": "integer"
+        }
+      }
+    ],
+    "response_schema_ref": "#/components/schemas/InventoryShrinkageReportResponse",
+    "summary": "Shrinkage Report",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "inventory",
+      "verb": "shrinkage"
+    }
+  },
+  {
+    "body_schema_ref": null,
+    "group": "inventory",
+    "http": {
+      "method": "POST",
+      "path": "/w/{slug}/api/v1/stocktakes/{stocktake_id}/commit"
+    },
+    "idempotent": false,
+    "name": "stocktake-commit",
+    "operation_id": "inventory.stocktakes.commit",
+    "path_params": [
+      {
+        "name": "stocktake_id",
+        "required": true,
+        "schema": {
+          "title": "Stocktake Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/InventoryStocktakeCommitResponse",
+    "summary": "Commit Stocktake",
+    "x_agent_confirm": {
+      "message": "Commit this inventory stocktake?"
+    },
+    "x_cli": {
+      "group": "inventory",
+      "verb": "stocktake-commit"
+    }
+  },
+  {
+    "body_schema_ref": null,
+    "group": "inventory",
+    "http": {
+      "method": "GET",
+      "path": "/w/{slug}/api/v1/stocktakes/{stocktake_id}"
+    },
+    "idempotent": true,
+    "name": "stocktake-get",
+    "operation_id": "inventory.stocktakes.get",
+    "path_params": [
+      {
+        "name": "stocktake_id",
+        "required": true,
+        "schema": {
+          "title": "Stocktake Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/InventoryStocktakeDetailResponse",
+    "summary": "Get Stocktake",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "inventory",
+      "verb": "stocktake-get"
+    }
+  },
+  {
+    "body_schema_ref": "#/components/schemas/InventoryStocktakeLineRequest",
+    "group": "inventory",
+    "http": {
+      "method": "PATCH",
+      "path": "/w/{slug}/api/v1/stocktakes/{stocktake_id}/lines/{item_id}"
+    },
+    "idempotent": false,
+    "name": "stocktake-line",
+    "operation_id": "inventory.stocktakes.lines.update",
+    "path_params": [
+      {
+        "name": "stocktake_id",
+        "required": true,
+        "schema": {
+          "title": "Stocktake Id",
+          "type": "string"
+        }
+      },
+      {
+        "name": "item_id",
+        "required": true,
+        "schema": {
+          "title": "Item Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/InventoryStocktakeLineResponse",
+    "summary": "Save Stocktake Line",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "inventory",
+      "verb": "stocktake-line"
+    }
+  },
+  {
+    "body_schema_ref": null,
+    "group": "inventory",
+    "http": {
+      "method": "GET",
+      "path": "/w/{slug}/api/v1/properties/{property_id}/stocktakes"
+    },
+    "idempotent": true,
+    "name": "stocktake-list",
+    "operation_id": "inventory.stocktakes.list",
+    "path_params": [
+      {
+        "name": "property_id",
+        "required": true,
+        "schema": {
+          "title": "Property Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [
+      {
+        "name": "limit",
+        "required": false,
+        "schema": {
+          "default": 50,
+          "description": "Maximum rows to return. Default 50, cap 500 per spec \u00a712 'Pagination'. Rejected with 422 outside ``[1, 500]``.",
+          "maximum": 500,
+          "minimum": 1,
+          "title": "Limit",
+          "type": "integer"
+        }
+      }
+    ],
+    "response_schema_ref": "#/components/schemas/InventoryStocktakeListResponse",
+    "summary": "List Stocktakes",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "inventory",
+      "verb": "stocktake-list"
+    }
+  },
+  {
+    "body_schema_ref": "#/components/schemas/InventoryStocktakeOpenRequest",
+    "group": "inventory",
+    "http": {
+      "method": "POST",
+      "path": "/w/{slug}/api/v1/properties/{property_id}/stocktakes"
+    },
+    "idempotent": false,
+    "name": "stocktake-open",
+    "operation_id": "inventory.stocktakes.create",
+    "path_params": [
+      {
+        "name": "property_id",
+        "required": true,
+        "schema": {
+          "title": "Property Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/InventoryStocktakeResponse",
+    "summary": "Open Stocktake",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "inventory",
+      "verb": "stocktake-open"
+    }
+  },
+  {
+    "body_schema_ref": null,
+    "group": "inventory",
+    "http": {
+      "method": "GET",
+      "path": "/w/{slug}/api/v1/inventory/reports/stocktakes"
+    },
+    "idempotent": true,
+    "name": "stocktakes",
+    "operation_id": "inventory.reports.stocktakes",
+    "path_params": [],
+    "query_params": [
+      {
+        "name": "property_id",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "maxLength": 500,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Property Id"
+        }
+      },
+      {
+        "name": "limit",
+        "required": false,
+        "schema": {
+          "default": 50,
+          "description": "Maximum rows to return. Default 50, cap 500 per spec \u00a712 'Pagination'. Rejected with 422 outside ``[1, 500]``.",
+          "maximum": 500,
+          "minimum": 1,
+          "title": "Limit",
+          "type": "integer"
+        }
+      }
+    ],
+    "response_schema_ref": "#/components/schemas/InventoryStocktakeActivityListResponse",
+    "summary": "Stocktakes Report",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "inventory",
+      "verb": "stocktakes"
     }
   },
   {
@@ -3325,8 +4298,8 @@
           "anyOf": [
             {
               "enum": [
-                "open",
                 "in_progress",
+                "open",
                 "resolved",
                 "wont_fix"
               ],
@@ -3955,8 +4928,8 @@
             {
               "enum": [
                 "client",
-                "vendor",
-                "mixed"
+                "mixed",
+                "vendor"
               ],
               "type": "string"
             },
@@ -4899,8 +5872,8 @@
           "anyOf": [
             {
               "enum": [
-                "workspace",
-                "organization"
+                "organization",
+                "workspace"
               ],
               "type": "string"
             },
@@ -5203,10 +6176,10 @@
           "anyOf": [
             {
               "enum": [
-                "workspace",
-                "property",
+                "deployment",
                 "organization",
-                "deployment"
+                "property",
+                "workspace"
               ],
               "type": "string"
             },
@@ -5356,10 +6329,10 @@
         "schema": {
           "description": "Scope kind on which to evaluate the action.",
           "enum": [
-            "workspace",
-            "property",
+            "deployment",
             "organization",
-            "deployment"
+            "property",
+            "workspace"
           ],
           "title": "Scope Kind",
           "type": "string"
@@ -5416,10 +6389,10 @@
         "schema": {
           "description": "Scope kind on which to evaluate the action.",
           "enum": [
-            "workspace",
-            "property",
+            "deployment",
             "organization",
-            "deployment"
+            "property",
+            "workspace"
           ],
           "title": "Scope Kind",
           "type": "string"
@@ -6381,6 +7354,197 @@
     "x_cli": null
   },
   {
+    "body_schema_ref": "#/components/schemas/PublicHolidayCreateRequest",
+    "group": "public_holidays",
+    "http": {
+      "method": "POST",
+      "path": "/w/{slug}/api/v1/public_holidays"
+    },
+    "idempotent": false,
+    "name": "create",
+    "operation_id": "public_holidays.create",
+    "path_params": [],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/PublicHolidayResponse",
+    "summary": "Create a public holiday",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "public_holidays",
+    "http": {
+      "method": "DELETE",
+      "path": "/w/{slug}/api/v1/public_holidays/{public_holiday_id}"
+    },
+    "idempotent": true,
+    "name": "delete",
+    "operation_id": "public_holidays.delete",
+    "path_params": [
+      {
+        "name": "public_holiday_id",
+        "required": true,
+        "schema": {
+          "title": "Public Holiday Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": null,
+    "summary": "Soft-delete a public holiday",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "public_holidays",
+    "http": {
+      "method": "GET",
+      "path": "/w/{slug}/api/v1/public_holidays"
+    },
+    "idempotent": true,
+    "name": "list",
+    "operation_id": "public_holidays.list",
+    "path_params": [],
+    "query_params": [
+      {
+        "name": "from",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "format": "date",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "From"
+        }
+      },
+      {
+        "name": "to",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "format": "date",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "To"
+        }
+      },
+      {
+        "name": "country",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "maxLength": 2,
+              "minLength": 2,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Country"
+        }
+      },
+      {
+        "name": "cursor",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Opaque forward cursor from the previous page's ``next_cursor``. Omitted on the first call. Bounded to 256 chars to keep the URL below reverse-proxy header limits.",
+          "title": "Cursor"
+        }
+      },
+      {
+        "name": "limit",
+        "required": false,
+        "schema": {
+          "default": 50,
+          "description": "Maximum rows to return. Default 50, cap 500 per spec \u00a712 'Pagination'. Rejected with 422 outside ``[1, 500]``.",
+          "maximum": 500,
+          "minimum": 1,
+          "title": "Limit",
+          "type": "integer"
+        }
+      }
+    ],
+    "response_schema_ref": "#/components/schemas/PublicHolidayListResponse",
+    "summary": "List public holidays in the caller's workspace",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "public_holidays",
+    "http": {
+      "method": "GET",
+      "path": "/w/{slug}/api/v1/public_holidays/{public_holiday_id}"
+    },
+    "idempotent": true,
+    "name": "show",
+    "operation_id": "public_holidays.read",
+    "path_params": [
+      {
+        "name": "public_holiday_id",
+        "required": true,
+        "schema": {
+          "title": "Public Holiday Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/PublicHolidayResponse",
+    "summary": "Read a public holiday",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": "#/components/schemas/PublicHolidayUpdateRequest",
+    "group": "public_holidays",
+    "http": {
+      "method": "PATCH",
+      "path": "/w/{slug}/api/v1/public_holidays/{public_holiday_id}"
+    },
+    "idempotent": false,
+    "name": "update",
+    "operation_id": "public_holidays.update",
+    "path_params": [
+      {
+        "name": "public_holiday_id",
+        "required": true,
+        "schema": {
+          "title": "Public Holiday Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/PublicHolidayResponse",
+    "summary": "Update a public holiday",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
     "body_schema_ref": null,
     "group": "quotes",
     "http": {
@@ -6455,11 +7619,11 @@
           "anyOf": [
             {
               "enum": [
-                "draft",
-                "sent",
                 "accepted",
+                "draft",
+                "expired",
                 "rejected",
-                "expired"
+                "sent"
               ],
               "type": "string"
             },
@@ -6770,6 +7934,83 @@
     "x_cli": null
   },
   {
+    "body_schema_ref": "#/components/schemas/RecoveryFinishBody",
+    "group": "recovery",
+    "http": {
+      "method": "POST",
+      "path": "/api/v1/recover/passkey/finish"
+    },
+    "idempotent": false,
+    "name": "finish",
+    "operation_id": "post_finish_api_v1_recover_passkey_finish_post",
+    "path_params": [],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/RecoveryFinishResponse",
+    "summary": "Complete recovery \u2014 register the new passkey, revoke the old",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "recovery",
+    "http": {
+      "method": "GET",
+      "path": "/api/v1/recover/passkey/verify"
+    },
+    "idempotent": true,
+    "name": "recover-passkey-verify-list",
+    "operation_id": "get_verify_api_v1_recover_passkey_verify_get",
+    "path_params": [],
+    "query_params": [
+      {
+        "name": "token",
+        "required": true,
+        "schema": {
+          "title": "Token",
+          "type": "string"
+        }
+      }
+    ],
+    "response_schema_ref": "#/components/schemas/RecoveryVerifyResponse",
+    "summary": "Consume the recovery magic link; return the recovery session",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": "#/components/schemas/RecoveryRequestBody",
+    "group": "recovery",
+    "http": {
+      "method": "POST",
+      "path": "/api/v1/recover/passkey/request"
+    },
+    "idempotent": false,
+    "name": "request",
+    "operation_id": "post_request_api_v1_recover_passkey_request_post",
+    "path_params": [],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/RecoveryRequestResponse",
+    "summary": "Request a recovery magic link (202 on accept; 429 on rate limit)",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": "#/components/schemas/RecoveryPasskeyStartBody",
+    "group": "recovery",
+    "http": {
+      "method": "POST",
+      "path": "/api/v1/recover/passkey/start"
+    },
+    "idempotent": false,
+    "name": "start",
+    "operation_id": "post_passkey_start_api_v1_recover_passkey_start_post",
+    "path_params": [],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/RecoveryPasskeyStartResponse",
+    "summary": "Mint the WebAuthn challenge for the recovery ceremony",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
     "body_schema_ref": "#/components/schemas/RoleGrantCreateRequest",
     "group": "role-grants",
     "http": {
@@ -6950,6 +8191,87 @@
   },
   {
     "body_schema_ref": null,
+    "group": "scheduler",
+    "http": {
+      "method": "GET",
+      "path": "/w/{slug}/api/v1/scheduler/calendar"
+    },
+    "idempotent": true,
+    "name": "calendar-list",
+    "operation_id": "scheduler.calendar.get",
+    "path_params": [],
+    "query_params": [
+      {
+        "name": "from",
+        "required": true,
+        "schema": {
+          "format": "date",
+          "title": "From",
+          "type": "string"
+        }
+      },
+      {
+        "name": "to",
+        "required": true,
+        "schema": {
+          "format": "date",
+          "title": "To",
+          "type": "string"
+        }
+      },
+      {
+        "name": "user",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "User"
+        }
+      },
+      {
+        "name": "property",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Property"
+        }
+      },
+      {
+        "name": "role",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Role"
+        }
+      }
+    ],
+    "response_schema_ref": "#/components/schemas/SchedulerCalendarResponse",
+    "summary": "Who is booked where calendar feed",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
     "group": "settings",
     "http": {
       "method": "GET",
@@ -6962,6 +8284,23 @@
     "query_params": [],
     "response_schema_ref": null,
     "summary": "List workspace settings catalog",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": "#/components/schemas/VerifyOwnershipConsumeBody",
+    "group": "settings",
+    "http": {
+      "method": "POST",
+      "path": "/w/{slug}/api/v1/settings/verify-ownership/consume"
+    },
+    "idempotent": false,
+    "name": "consume",
+    "operation_id": "settings.workspace.verify_ownership.consume",
+    "path_params": [],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/VerifyOwnershipConsumeResponse",
+    "summary": "Consume workspace ownership verification link",
     "x_agent_confirm": null,
     "x_cli": null
   },
@@ -6996,6 +8335,57 @@
     "query_params": [],
     "response_schema_ref": "#/components/schemas/WorkspaceSettingsResponse",
     "summary": "Patch workspace settings",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "settings",
+    "http": {
+      "method": "POST",
+      "path": "/w/{slug}/api/v1/settings/verify-ownership"
+    },
+    "idempotent": false,
+    "name": "verify-ownership",
+    "operation_id": "settings.workspace.verify_ownership.request",
+    "path_params": [],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/VerifyOwnershipRequestResponse",
+    "summary": "Mail workspace ownership verification link",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": "#/components/schemas/SignupStartBody",
+    "group": "signup",
+    "http": {
+      "method": "POST",
+      "path": "/api/v1/signup/start"
+    },
+    "idempotent": false,
+    "name": "start",
+    "operation_id": "signup.start",
+    "path_params": [],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/SignupStartResponse",
+    "summary": "Start a self-serve signup; 404 if signup is disabled",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": "#/components/schemas/VerifyBody",
+    "group": "signup",
+    "http": {
+      "method": "POST",
+      "path": "/api/v1/signup/verify"
+    },
+    "idempotent": false,
+    "name": "verify",
+    "operation_id": "signup.verify",
+    "path_params": [],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/VerifyResponse",
+    "summary": "Consume the signup-verify magic link",
     "x_agent_confirm": null,
     "x_cli": null
   },
@@ -7187,6 +8577,34 @@
     "query_params": [],
     "response_schema_ref": "#/components/schemas/IcalProbeResponse",
     "summary": "Poll Ical Feed",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "stays",
+    "http": {
+      "method": "POST",
+      "path": "/w/{slug}/api/v1/stays/ical-feeds/{feed_id}/poll-once"
+    },
+    "idempotent": false,
+    "name": "poll-once",
+    "operation_id": "stays.ical_feeds.poll_once",
+    "path_params": [
+      {
+        "name": "feed_id",
+        "required": true,
+        "schema": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Feed Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/IcalPollOnceResponse",
+    "summary": "Poll Once Ical Feed",
     "x_agent_confirm": null,
     "x_cli": null
   },
@@ -7497,7 +8915,7 @@
       }
     ],
     "query_params": [],
-    "response_schema_ref": "#/components/schemas/AssignmentPayload",
+    "response_schema_ref": "#/components/schemas/AssignmentPayload-Output",
     "summary": "Assign a task to a specific user",
     "x_agent_confirm": null,
     "x_cli": null
@@ -7742,7 +9160,7 @@
     "x_cli": null
   },
   {
-    "body_schema_ref": "#/components/schemas/app__api__v1__tasks__CompleteRequest",
+    "body_schema_ref": "#/components/schemas/app__api__v1__tasks__payloads__CompleteRequest",
     "group": "tasks",
     "http": {
       "method": "POST",
@@ -7763,7 +9181,7 @@
     ],
     "query_params": [],
     "response_schema_ref": "#/components/schemas/TaskStatePayload",
-    "summary": "Mark a task done \u2014 gated by evidence + checklist policy",
+    "summary": "Mark a task completed \u2014 gated by evidence + checklist policy",
     "x_agent_confirm": null,
     "x_cli": null
   },
@@ -7904,13 +9322,13 @@
           "anyOf": [
             {
               "enum": [
-                "scheduled",
-                "pending",
-                "in_progress",
-                "done",
-                "skipped",
                 "cancelled",
-                "overdue"
+                "completed",
+                "in_progress",
+                "overdue",
+                "pending",
+                "scheduled",
+                "skipped"
               ],
               "type": "string"
             },
@@ -8907,10 +10325,10 @@
           "anyOf": [
             {
               "enum": [
-                "pending",
                 "approved",
-                "rejected",
-                "cancelled"
+                "cancelled",
+                "pending",
+                "rejected"
               ],
               "type": "string"
             },
@@ -9007,10 +10425,10 @@
           "anyOf": [
             {
               "enum": [
-                "pending",
                 "approved",
-                "rejected",
-                "cancelled"
+                "cancelled",
+                "pending",
+                "rejected"
               ],
               "type": "string"
             },
@@ -9855,6 +11273,205 @@
   },
   {
     "body_schema_ref": null,
+    "group": "users",
+    "http": {
+      "method": "POST",
+      "path": "/w/{slug}/api/v1/users/{user_id}/archive"
+    },
+    "idempotent": false,
+    "name": "archive",
+    "operation_id": "post_archive_w__slug__api_v1_users__user_id__archive_post",
+    "path_params": [
+      {
+        "name": "user_id",
+        "required": true,
+        "schema": {
+          "title": "User Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/app__api__v1__users__EmployeeProfileResponse",
+    "summary": "Archive a user's engagement + work roles in this workspace",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "users",
+    "http": {
+      "method": "DELETE",
+      "path": "/w/{slug}/api/v1/users/{user_id}/grants"
+    },
+    "idempotent": true,
+    "name": "grants-delete",
+    "operation_id": "delete_grants_w__slug__api_v1_users__user_id__grants_delete",
+    "path_params": [
+      {
+        "name": "user_id",
+        "required": true,
+        "schema": {
+          "title": "User Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/RemoveMemberResponse",
+    "summary": "Remove a user's grants + sessions in the caller's workspace",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": "#/components/schemas/InviteRequest",
+    "group": "users",
+    "http": {
+      "method": "POST",
+      "path": "/w/{slug}/api/v1/users/invite"
+    },
+    "idempotent": false,
+    "name": "invite",
+    "operation_id": "post_invite_w__slug__api_v1_users_invite_post",
+    "path_params": [],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/InviteResponse",
+    "summary": "Invite a user to the caller's workspace",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "users",
+    "http": {
+      "method": "POST",
+      "path": "/w/{slug}/api/v1/users/{user_id}/magic_link"
+    },
+    "idempotent": false,
+    "name": "magic_link",
+    "operation_id": "users.magic_link.issue",
+    "path_params": [
+      {
+        "name": "user_id",
+        "required": true,
+        "schema": {
+          "title": "User Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/MagicLinkReissueResponse",
+    "summary": "Re-mail a recovery magic link to a user (manager+)",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "users",
+    "http": {
+      "method": "POST",
+      "path": "/w/{slug}/api/v1/users/{user_id}/reinstate"
+    },
+    "idempotent": false,
+    "name": "reinstate",
+    "operation_id": "post_reinstate_w__slug__api_v1_users__user_id__reinstate_post",
+    "path_params": [
+      {
+        "name": "user_id",
+        "required": true,
+        "schema": {
+          "title": "User Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/app__api__v1__users__EmployeeProfileResponse",
+    "summary": "Reinstate a user's engagement + work roles in this workspace",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "users",
+    "http": {
+      "method": "POST",
+      "path": "/w/{slug}/api/v1/users/{user_id}/reset_passkey"
+    },
+    "idempotent": false,
+    "name": "reset_passkey",
+    "operation_id": "users.reset_passkey",
+    "path_params": [
+      {
+        "name": "user_id",
+        "required": true,
+        "schema": {
+          "title": "User Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/ResetPasskeyResponse",
+    "summary": "Owner-initiated worker passkey reset (owners only)",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
+    "group": "users",
+    "http": {
+      "method": "GET",
+      "path": "/w/{slug}/api/v1/users/{user_id}"
+    },
+    "idempotent": true,
+    "name": "show",
+    "operation_id": "get_user_w__slug__api_v1_users__user_id__get",
+    "path_params": [
+      {
+        "name": "user_id",
+        "required": true,
+        "schema": {
+          "title": "User Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/app__api__v1__users__EmployeeProfileResponse",
+    "summary": "Read a user's workspace-scoped profile",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": "#/components/schemas/EmployeeUpdateRequest",
+    "group": "users",
+    "http": {
+      "method": "PATCH",
+      "path": "/w/{slug}/api/v1/users/{user_id}"
+    },
+    "idempotent": false,
+    "name": "update",
+    "operation_id": "patch_user_w__slug__api_v1_users__user_id__patch",
+    "path_params": [
+      {
+        "name": "user_id",
+        "required": true,
+        "schema": {
+          "title": "User Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/app__api__v1__users__EmployeeProfileResponse",
+    "summary": "Update the profile of a user in the caller's workspace",
+    "x_agent_confirm": null,
+    "x_cli": null
+  },
+  {
+    "body_schema_ref": null,
     "group": "vendor-invoices",
     "http": {
       "method": "POST",
@@ -9913,10 +11530,10 @@
           "anyOf": [
             {
               "enum": [
-                "received",
                 "approved",
+                "disputed",
                 "paid",
-                "disputed"
+                "received"
               ],
               "type": "string"
             },
@@ -10330,11 +11947,11 @@
           "anyOf": [
             {
               "enum": [
-                "draft",
-                "sent",
-                "in_progress",
                 "completed",
-                "invoiced"
+                "draft",
+                "in_progress",
+                "invoiced",
+                "sent"
               ],
               "type": "string"
             },
@@ -10589,8 +12206,8 @@
           "anyOf": [
             {
               "enum": [
-                "true",
-                "false"
+                "false",
+                "true"
               ],
               "type": "string"
             },
@@ -10775,55 +12392,5 @@
     "summary": "Partial update of a work role",
     "x_agent_confirm": null,
     "x_cli": null
-  },
-  {
-    "body_schema_ref": null,
-    "group": "workspace-admin",
-    "http": {
-      "method": "GET",
-      "path": "/w/{slug}/api/v1/admin/signups"
-    },
-    "idempotent": true,
-    "name": "signups-list",
-    "operation_id": "workspace_admin.signups.list",
-    "path_params": [],
-    "query_params": [
-      {
-        "name": "cursor",
-        "required": false,
-        "schema": {
-          "anyOf": [
-            {
-              "maxLength": 256,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "title": "Cursor"
-        }
-      },
-      {
-        "name": "limit",
-        "required": false,
-        "schema": {
-          "default": 50,
-          "maximum": 500,
-          "minimum": 1,
-          "title": "Limit",
-          "type": "integer"
-        }
-      }
-    ],
-    "response_schema_ref": "#/components/schemas/SignupsListResponse",
-    "summary": "List workspace signup abuse signals",
-    "x_agent_confirm": null,
-    "x_cli": {
-      "group": "workspace-admin",
-      "mutates": false,
-      "summary": "List workspace signup abuse signals",
-      "verb": "signups-list"
-    }
   }
 ]

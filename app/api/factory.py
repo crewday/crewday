@@ -1221,24 +1221,26 @@ def _build_custom_openapi(app: FastAPI) -> dict[str, Any]:
     return schema
 
 
-_SET_ARRAY_KEYS: Final = frozenset({"required", "enum", "tags"})
+_SET_ARRAY_KEYS: Final = frozenset({"required", "enum"})
 
 
 def _sort_set_arrays(node: object) -> None:
     """Sort schema arrays whose order is semantically irrelevant.
 
-    OpenAPI / JSON Schema treat ``required``, ``enum``, and
-    operation-level ``tags`` as sets — their order does not affect
-    validation, routing, or client codegen. Pydantic, however, emits
-    them in field-declaration order, so a field rename or reorder
-    shuffles the array and produces noisy diffs in the committed
-    ``docs/api/openapi.json``. Sorting in place removes that noise.
+    OpenAPI / JSON Schema treat ``required`` and ``enum`` as sets —
+    their order does not affect validation, routing, or client codegen.
+    Pydantic, however, emits them in field-declaration order, so a
+    field rename or reorder shuffles the array and produces noisy diffs
+    in the committed ``docs/api/openapi.json``. Sorting in place removes
+    that noise.
 
-    The document-level ``tags: [{name, description}, ...]`` array is
-    intentionally preserved: its order drives Swagger UI grouping and
-    is established by :func:`_build_custom_openapi`. We detect it by the
-    list-of-dicts shape (operation-level ``tags`` is list-of-strings)
-    and skip sorting in that case.
+    Operation-level ``tags`` are deliberately **not** sorted: the CLI
+    codegen (``cli/crewday/_codegen.py``) reads ``tags[-1]`` as the
+    group-name heuristic, which depends on the FastAPI declaration
+    order — innermost router last. Sorting the array alphabetically
+    breaks that mapping (e.g. ``["assets", "asset_types"]`` →
+    ``["asset_types", "assets"]`` collapses asset-type routes into the
+    ``assets`` CLI group).
     """
     if isinstance(node, dict):
         for key, value in node.items():

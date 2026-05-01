@@ -33546,8 +33546,8 @@
         },
         "summary": "Consume the revert link and restore the previous email",
         "tags": [
-          "auth",
-          "identity"
+          "identity",
+          "auth"
         ],
         "x-cli": {
           "group": "auth-email",
@@ -33677,8 +33677,8 @@
         },
         "summary": "Consume the new-address magic link and swap users.email",
         "tags": [
-          "auth",
-          "identity"
+          "identity",
+          "auth"
         ],
         "x-cli": {
           "group": "auth-email",
@@ -33791,8 +33791,8 @@
         },
         "summary": "Invalidate the caller's session and clear the session cookie",
         "tags": [
-          "auth",
-          "identity"
+          "identity",
+          "auth"
         ],
         "x-cli": {
           "group": "auth",
@@ -33890,8 +33890,8 @@
         },
         "summary": "Redeem a magic-link token (single-use)",
         "tags": [
-          "auth",
-          "identity"
+          "identity",
+          "auth"
         ]
       }
     },
@@ -33981,8 +33981,8 @@
         },
         "summary": "Send a magic-link email (202 on enrolment; 429 on rate limit)",
         "tags": [
-          "auth",
-          "identity"
+          "identity",
+          "auth"
         ]
       }
     },
@@ -34096,8 +34096,8 @@
         },
         "summary": "Return the authenticated user + their available workspaces",
         "tags": [
-          "auth",
-          "identity"
+          "identity",
+          "auth"
         ],
         "x-cli": {
           "group": "auth",
@@ -34193,8 +34193,8 @@
         },
         "summary": "Verify the passkey assertion, issue a session cookie, return the authenticating user id",
         "tags": [
-          "auth",
           "identity",
+          "auth",
           "login"
         ],
         "x-cli": {
@@ -34273,8 +34273,8 @@
         },
         "summary": "Begin a passkey login; returns request options + a challenge id",
         "tags": [
-          "auth",
           "identity",
+          "auth",
           "login"
         ],
         "x-cli": {
@@ -34391,8 +34391,8 @@
         },
         "summary": "Redeem the invite magic link",
         "tags": [
-          "auth",
           "identity",
+          "auth",
           "invite"
         ],
         "x-cli": {
@@ -34487,8 +34487,8 @@
         },
         "summary": "Complete invite after new-user passkey ceremony",
         "tags": [
-          "auth",
           "identity",
+          "auth",
           "invite"
         ]
       }
@@ -34579,8 +34579,8 @@
         },
         "summary": "Verify + persist a new invitee's first passkey",
         "tags": [
-          "auth",
           "identity",
+          "auth",
           "invite"
         ],
         "x-cli": {
@@ -34679,8 +34679,8 @@
         },
         "summary": "Mint passkey-registration challenge for a new invitee",
         "tags": [
-          "auth",
           "identity",
+          "auth",
           "invite"
         ],
         "x-cli": {
@@ -34796,8 +34796,8 @@
         },
         "summary": "Confirm pending invite acceptance (existing-user branch)",
         "tags": [
-          "auth",
           "identity",
+          "auth",
           "invite"
         ]
       }
@@ -34905,8 +34905,8 @@
         },
         "summary": "Introspect an invite (read-only preview)",
         "tags": [
-          "auth",
           "identity",
+          "auth",
           "invite"
         ]
       }
@@ -35014,8 +35014,8 @@
         },
         "summary": "Redeem the invite magic link (token in path)",
         "tags": [
-          "auth",
           "identity",
+          "auth",
           "invite"
         ],
         "x-cli": {
@@ -35518,8 +35518,8 @@
         },
         "summary": "Request to change the caller's email (passkey session only)",
         "tags": [
-          "auth",
-          "identity"
+          "identity",
+          "auth"
         ],
         "x-cli": {
           "group": "auth-email",
@@ -35892,8 +35892,8 @@
         },
         "summary": "List every personal access token the caller owns",
         "tags": [
-          "auth",
           "identity",
+          "auth",
           "tokens"
         ],
         "x-cli": {
@@ -36022,8 +36022,8 @@
         },
         "summary": "Mint a personal access token \u2014 plaintext returned once",
         "tags": [
-          "auth",
           "identity",
+          "auth",
           "tokens"
         ],
         "x-cli": {
@@ -36146,8 +36146,8 @@
         },
         "summary": "Revoke one of the caller's personal access tokens",
         "tags": [
-          "auth",
           "identity",
+          "auth",
           "tokens"
         ],
         "x-cli": {
@@ -36272,8 +36272,8 @@
         },
         "summary": "Return the caller's workspaces (switcher payload)",
         "tags": [
-          "auth",
           "identity",
+          "auth",
           "workspaces"
         ],
         "x-cli": {
@@ -36370,8 +36370,8 @@
         },
         "summary": "Complete recovery \u2014 register the new passkey, revoke the old",
         "tags": [
-          "auth",
           "identity",
+          "auth",
           "recovery"
         ]
       }
@@ -36462,8 +36462,8 @@
         },
         "summary": "Request a recovery magic link (202 on accept; 429 on rate limit)",
         "tags": [
-          "auth",
           "identity",
+          "auth",
           "recovery"
         ]
       }
@@ -36554,8 +36554,8 @@
         },
         "summary": "Mint the WebAuthn challenge for the recovery ceremony",
         "tags": [
-          "auth",
           "identity",
+          "auth",
           "recovery"
         ]
       }
@@ -36647,8 +36647,8 @@
         },
         "summary": "Consume the recovery magic link; return the recovery session",
         "tags": [
-          "auth",
           "identity",
+          "auth",
           "recovery"
         ]
       }
@@ -36725,7 +36725,7 @@
     "/api/v1/signup/passkey/finish": {
       "post": {
         "description": "Delegate to :func:`app.auth.signup.complete_signup`.",
-        "operationId": "post_passkey_finish_api_v1_signup_passkey_finish_post",
+        "operationId": "signup.passkey.finish",
         "requestBody": {
           "content": {
             "application/json": {
@@ -36808,8 +36808,8 @@
         },
         "summary": "Complete signup \u2014 one-transaction workspace + user + passkey",
         "tags": [
-          "auth",
           "identity",
+          "auth",
           "signup"
         ]
       }
@@ -36817,7 +36817,7 @@
     "/api/v1/signup/passkey/start": {
       "post": {
         "description": "Delegate to :func:`app.auth.passkey.register_start_signup`.",
-        "operationId": "post_passkey_start_api_v1_signup_passkey_start_post",
+        "operationId": "signup.passkey.start",
         "requestBody": {
           "content": {
             "application/json": {
@@ -36900,8 +36900,8 @@
         },
         "summary": "Mint the signup-flow passkey registration challenge",
         "tags": [
-          "auth",
           "identity",
+          "auth",
           "signup"
         ]
       }
@@ -36909,7 +36909,7 @@
     "/api/v1/signup/start": {
       "post": {
         "description": "Kick off the signup flow \u2014 abuse gates + domain service.\n\nGate order (cheap checks before expensive ones, every gate\nrejects without opening the primary UoW so the DB never\ntouches a refused request):\n\n1. Signup-enabled check \u2014 404 the whole surface.\n2. Rate limits \u2014 per-global / per-IP / per-email fixed\n   windows (\u00a715). Hashes are peppered so plaintext IP /\n   email never reaches the throttle.\n3. Disposable-email blocklist (\u00a715) \u2014 cheap set membership.\n4. CAPTCHA \u2014 hits the Turnstile endpoint when required;\n   falls through to offline test-mode when no secret is\n   configured.\n5. :func:`signup.start_signup` \u2014 slug validation, attempt\n   insert, magic link mint. Its own errors carry the\n   existing mapping.\n\n**Outbox ordering (cd-9slq).** This handler manages its own\n:class:`UnitOfWork` instead of going through the shared\n:func:`db_session` FastAPI dep \u2014 we need to commit the\nsignup-attempt + magic-link nonce + audit rows *before*\ndispatching the SMTP send. The shared dep commits at handler\nreturn, which would put the SMTP send before the commit and\nleave a working magic-link token in the user's inbox while\nthe system rolled back its matching nonce on a commit-time\nfailure. With the explicit UoW we sequence: domain call\n(queues writes + returns :class:`PendingDispatch`) \u2192\n``UoW.__exit__`` (commits) \u2192 ``dispatch.deliver()`` (SMTP).",
-        "operationId": "post_start_api_v1_signup_start_post",
+        "operationId": "signup.start",
         "requestBody": {
           "content": {
             "application/json": {
@@ -36992,8 +36992,8 @@
         },
         "summary": "Start a self-serve signup; 404 if signup is disabled",
         "tags": [
-          "auth",
           "identity",
+          "auth",
           "signup"
         ]
       }
@@ -37001,7 +37001,7 @@
     "/api/v1/signup/verify": {
       "post": {
         "description": "Flip the signup_attempt to *verified* + return the session id.",
-        "operationId": "post_verify_api_v1_signup_verify_post",
+        "operationId": "signup.verify",
         "requestBody": {
           "content": {
             "application/json": {
@@ -37084,8 +37084,8 @@
         },
         "summary": "Consume the signup-verify magic link",
         "tags": [
-          "auth",
           "identity",
+          "auth",
           "signup"
         ]
       }
@@ -39316,10 +39316,10 @@
         },
         "summary": "List asset types visible to the caller's workspace",
         "tags": [
-          "asset_types",
+          "assets",
           "asset_types",
           "assets",
-          "assets"
+          "asset_types"
         ]
       },
       "parameters": [
@@ -41334,9 +41334,9 @@
         },
         "summary": "List asset types visible to the caller's workspace",
         "tags": [
-          "asset_types",
           "assets",
-          "assets"
+          "assets",
+          "asset_types"
         ]
       },
       "parameters": [
@@ -41586,9 +41586,9 @@
         },
         "summary": "Create a workspace-custom asset type",
         "tags": [
-          "asset_types",
           "assets",
-          "assets"
+          "assets",
+          "asset_types"
         ]
       }
     },
@@ -41821,9 +41821,9 @@
         },
         "summary": "Delete or archive a workspace-custom asset type",
         "tags": [
-          "asset_types",
           "assets",
-          "assets"
+          "assets",
+          "asset_types"
         ]
       },
       "get": {
@@ -42061,9 +42061,9 @@
         },
         "summary": "Get one asset type",
         "tags": [
-          "asset_types",
           "assets",
-          "assets"
+          "assets",
+          "asset_types"
         ]
       },
       "parameters": [
@@ -42324,9 +42324,9 @@
         },
         "summary": "Update a workspace-custom asset type",
         "tags": [
-          "asset_types",
           "assets",
-          "assets"
+          "assets",
+          "asset_types"
         ]
       }
     },
@@ -47507,8 +47507,8 @@
         },
         "summary": "Verify + persist a passkey for the authenticated user",
         "tags": [
-          "auth",
-          "identity"
+          "identity",
+          "auth"
         ],
         "x-cli": {
           "group": "auth",
@@ -47599,8 +47599,8 @@
         },
         "summary": "Begin passkey registration for the authenticated user",
         "tags": [
-          "auth",
-          "identity"
+          "identity",
+          "auth"
         ],
         "x-cli": {
           "group": "auth",
@@ -47692,8 +47692,8 @@
         },
         "summary": "Revoke one of the authenticated user's passkeys",
         "tags": [
-          "auth",
-          "identity"
+          "identity",
+          "auth"
         ],
         "x-cli": {
           "group": "auth",
@@ -47787,8 +47787,8 @@
         },
         "summary": "List every token on this workspace (active + revoked)",
         "tags": [
-          "auth",
           "identity",
+          "auth",
           "tokens"
         ],
         "x-cli": {
@@ -47896,8 +47896,8 @@
         },
         "summary": "Mint a new API token \u2014 plaintext returned once",
         "tags": [
-          "auth",
           "identity",
+          "auth",
           "tokens"
         ],
         "x-cli": {
@@ -47988,8 +47988,8 @@
         },
         "summary": "Revoke a token \u2014 idempotent",
         "tags": [
-          "auth",
           "identity",
+          "auth",
           "tokens"
         ],
         "x-cli": {
@@ -52253,8 +52253,8 @@
         },
         "summary": "List client billable hours",
         "tags": [
-          "billing",
-          "client"
+          "client",
+          "billing"
         ]
       },
       "parameters": [
@@ -52381,8 +52381,8 @@
         },
         "summary": "List client invoices",
         "tags": [
-          "billing",
-          "client"
+          "client",
+          "billing"
         ]
       },
       "parameters": [
@@ -52509,8 +52509,8 @@
         },
         "summary": "List client-owned properties",
         "tags": [
-          "billing",
-          "client"
+          "client",
+          "billing"
         ]
       },
       "parameters": [
@@ -52637,8 +52637,8 @@
         },
         "summary": "List client quotes",
         "tags": [
-          "billing",
-          "client"
+          "client",
+          "billing"
         ]
       },
       "parameters": [
@@ -54357,8 +54357,8 @@
         },
         "summary": "List employees in the caller's workspace (manager roster)",
         "tags": [
-          "employees",
-          "identity"
+          "identity",
+          "employees"
         ],
         "x-cli": {
           "group": "employees",
@@ -54467,8 +54467,8 @@
         },
         "summary": "List one employee's leave ledger",
         "tags": [
-          "employees",
-          "identity"
+          "identity",
+          "employees"
         ],
         "x-cli": {
           "group": "employees",
@@ -61361,9 +61361,9 @@
         },
         "summary": "List visible chat channels in the caller's workspace",
         "tags": [
-          "chat",
           "messaging",
-          "messaging"
+          "messaging",
+          "chat"
         ]
       },
       "parameters": [
@@ -61463,9 +61463,9 @@
         },
         "summary": "Create a chat channel",
         "tags": [
-          "chat",
           "messaging",
-          "messaging"
+          "messaging",
+          "chat"
         ]
       }
     },
@@ -61578,9 +61578,9 @@
         },
         "summary": "Rename or archive a chat channel",
         "tags": [
-          "chat",
           "messaging",
-          "messaging"
+          "messaging",
+          "chat"
         ]
       }
     },
@@ -61700,9 +61700,9 @@
         },
         "summary": "List chat messages in a channel",
         "tags": [
-          "chat",
           "messaging",
-          "messaging"
+          "messaging",
+          "chat"
         ]
       },
       "parameters": [
@@ -61813,9 +61813,9 @@
         },
         "summary": "Send a chat message",
         "tags": [
-          "chat",
           "messaging",
-          "messaging"
+          "messaging",
+          "chat"
         ]
       }
     },
@@ -70526,8 +70526,8 @@
         },
         "summary": "Who is booked where calendar feed",
         "tags": [
-          "scheduler",
-          "tasks"
+          "tasks",
+          "scheduler"
         ]
       },
       "parameters": [

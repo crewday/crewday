@@ -649,6 +649,7 @@ def build_signup_router(
         "/start",
         status_code=status.HTTP_202_ACCEPTED,
         response_model=SignupStartResponse,
+        operation_id="signup.start",
         summary="Start a self-serve signup; 404 if signup is disabled",
     )
     def post_start(
@@ -784,6 +785,7 @@ def build_signup_router(
     @router.post(
         "/verify",
         response_model=VerifyResponse,
+        operation_id="signup.verify",
         summary="Consume the signup-verify magic link",
     )
     def post_verify(
@@ -816,6 +818,7 @@ def build_signup_router(
     @router.post(
         "/passkey/start",
         response_model=PasskeyStartResponse,
+        operation_id="signup.passkey.start",
         summary="Mint the signup-flow passkey registration challenge",
     )
     def post_passkey_start(
@@ -866,6 +869,7 @@ def build_signup_router(
     @router.post(
         "/passkey/finish",
         response_model=PasskeyFinishResponse,
+        operation_id="signup.passkey.finish",
         summary="Complete signup — one-transaction workspace + user + passkey",
     )
     def post_passkey_finish(

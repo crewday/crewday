@@ -125,3 +125,13 @@ exclusions:
     reason: "guest welcome token surface; not a workspace CLI command"
   - operation_id: "asset.scan"
     reason: "singular asset scan alias; canonical CLI route is assets.scan"
+
+  # Flat aliases for assets / asset_types share their handlers with the
+  # canonical workspace routes (``/assets/`` and ``/assets/asset_types``).
+  # The aliases exist for SPA convenience; the CLI uses the canonical
+  # route, so the duplicates would otherwise collide on the same
+  # generated ``(group, verb)`` pair.
+  - operation_id: "assets.list_flat"
+    reason: "flat alias of /assets/; canonical CLI route is assets.list"
+  - operation_id: "asset_types.list_flat"
+    reason: "flat alias of /assets/asset_types; canonical CLI route is asset_types.list"
