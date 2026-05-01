@@ -137,16 +137,28 @@ because no workspace exists yet:
    and admin-init.
 
    **Homoglyph guard.** Reject any `desired_slug` whose
-   ASCII-folded, Punycode-normalized, digit-substituted form
-   (`0 → o`, `1 → l`) collides with an existing active slug.
-   Example: `rnicasa` is rejected when `micasa` is taken (rn vs
-   m); `0wner` is rejected when `owner` is taken. Error:
+   ASCII-folded, Punycode-normalized, substituted form collides
+   with an existing active slug. The canonical fold applies the
+   digit substitutions `0 → o`, `1 → l`, and `5 → s` first, then
+   the pair substitution `rn → m`. The `5 → s` digit pair shares
+   the same defensive intent as `0 → o` and `1 → l`: a glyph that
+   reads as a letter at a glance. Example: `0wner` is rejected
+   when `owner` is taken; `5unny` is rejected when `sunny` is
+   taken; `rnicasa` is rejected when `micasa` is taken. Error:
    `409 slug_homoglyph_collision` with the colliding existing
    slug in the error body so the signup UI can explain the
    rejection. The fold is purely defensive — the regex in §02
    already restricts the character set, but the fold catches
    typographic look-alikes registered before a similar slug gets
    trademarked.
+
+   The `rn → m` pair is applied **globally**, not just at word
+   start. That is intentional but has a known false-positive:
+   `corner` folds to `comer`, so the second of `corner` and
+   `comer` to arrive is rejected even though the human reading is
+   unambiguous. We accept this trade-off — defensive rejection
+   over admitting a look-alike — and operators who want either
+   slug should pick the one taken first.
 
    **Grace period.** On workspace archive (`archived_at IS NOT NULL`)
    or hard delete, the slug is

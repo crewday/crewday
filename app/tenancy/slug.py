@@ -12,10 +12,10 @@ reserved at the bare host MUST land here first.
 
 **Homoglyph guard.** :func:`normalise_for_collision` folds a candidate
 slug down to a collision key (ASCII-fold + Punycode-normalise +
-digit-substitute ``0→o``, ``1→l``, plus the deployment heuristics
-``5→s`` and ``rn→m`` that go beyond §03's explicit ``0→o, 1→l``).
-Two slugs that share a collision key look typographically similar and
-the signup flow rejects the newcomer — see spec §03 "Homoglyph guard".
+digit-substitute ``0→o``, ``1→l``, ``5→s``, plus the pair
+substitution ``rn→m``). All four substitutions are codified in spec
+§03 "Homoglyph guard". Two slugs that share a collision key look
+typographically similar and the signup flow rejects the newcomer.
 
 See ``docs/specs/01-architecture.md`` §"Workspace addressing" and
 ``docs/specs/03-auth-and-tokens.md`` §"Self-serve signup".
@@ -84,9 +84,8 @@ RESERVED_SLUGS: frozenset[str] = frozenset(
 
 
 # Homoglyph collision fold. The mapping catches common ASCII look-alikes
-# that bypass the §02 regex. Kept tiny and deliberate: ``0→o`` and
-# ``1→l`` are the pairs §03 spec explicitly flags; ``5→s`` is a
-# deployment heuristic going beyond the spec (same visual failure mode,
+# that bypass the §02 regex. Kept tiny and deliberate: ``0→o``, ``1→l``,
+# and ``5→s`` are all codified in §03 spec (same visual failure mode,
 # same defensive intent). Expanding this table without a spec bump
 # silently rejects previously-valid slugs — don't.
 _DIGIT_SUBSTITUTIONS: tuple[tuple[str, str], ...] = (
@@ -96,11 +95,12 @@ _DIGIT_SUBSTITUTIONS: tuple[tuple[str, str], ...] = (
 )
 
 # ASCII pair substitutions applied *after* digit folding. ``rn`` → ``m``
-# is a deployment heuristic beyond §03's explicit ``0→o, 1→l`` list —
-# the spec's worked example (``rnicasa`` vs ``micasa``) motivates it,
-# but the spec itself only pins the digit pairs. Pair-level rules
-# happen after single-char digit folds so ``m1cro`` → ``mlcro`` stays
-# stable.
+# is codified in §03 spec alongside the digit folds; it is applied
+# globally (not just at word start), so ``corner`` folds to ``comer``
+# — the spec accepts that false-positive trade-off explicitly. Pair-
+# level rules happen after single-char digit folds so ``m1cro`` →
+# ``mlcro`` stays stable. Expanding this table without a spec bump
+# silently rejects previously-valid slugs — don't.
 _PAIR_SUBSTITUTIONS: tuple[tuple[str, str], ...] = (
     ("rn", "m"),
     # ``vv`` and ``w`` look similar but ``w`` is reserved and an
@@ -170,11 +170,10 @@ def normalise_for_collision(slug: str) -> str:
        "re-encode via Punycode" instead of "drop". For now the slug
        regex already forbids non-ASCII so the drop is a safety net.
     3. Case-fold to lower (``strip`` too, for defensive callers).
-    4. Digit substitutions: ``0→o`` and ``1→l`` come from §03 spec;
-       ``5→s`` is a deployment heuristic going beyond §03.
-    5. Pair substitutions applied last — ``rn→m`` is another
-       deployment heuristic beyond §03 (motivated by the spec's
-       worked example, but not spelled out in its explicit list).
+    4. Digit substitutions ``0→o``, ``1→l``, ``5→s`` per §03 spec.
+    5. Pair substitution ``rn→m`` applied last, also per §03 spec.
+       Applied globally (not just at word start), so ``corner``
+       folds to ``comer`` — an accepted false-positive trade-off.
 
     Two slugs whose collision keys are equal are deemed typographically
     similar; :func:`is_homoglyph_collision` uses this to reject a
