@@ -17,13 +17,14 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from unittest.mock import Mock
 
-from sqlalchemy import Index
+from sqlalchemy import CheckConstraint, Index
 
 from app.adapters.db.identity.models import (
     ApiToken,
     PasskeyCredential,
     Session,
     User,
+    WebAuthnChallenge,
     _user_before_insert,
     _user_before_update,
     canonicalise_email,
@@ -219,3 +220,26 @@ class TestApiTokenModel:
         names = [i.name for i in indexes]
         assert "ix_api_token_user" in names
         assert "ix_api_token_workspace" in names
+
+
+class TestWebAuthnChallengeModel:
+    """The ``WebAuthnChallenge`` mapped class names its CHECK once.
+
+    The shared ``NAMING_CONVENTION`` template
+    ``ck_%(table_name)s_%(constraint_name)s`` prepends the
+    ``ck_<table>_`` prefix to whatever bare ``constraint_name`` the
+    model passes — so the model must declare ``name='subject'``, not
+    ``name='ck_webauthn_challenge_subject'``, otherwise the resolved
+    constraint ends up with the prefix doubled (cd-jtrc).
+    """
+
+    def test_subject_check_resolves_to_single_prefix(self) -> None:
+        check_names = {
+            c.name
+            for c in WebAuthnChallenge.__table_args__
+            if isinstance(c, CheckConstraint)
+        }
+        assert "ck_webauthn_challenge_subject" in check_names
+        assert "ck_webauthn_challenge_ck_webauthn_challenge_subject" not in (
+            check_names
+        )

@@ -451,10 +451,15 @@ class WebAuthnChallenge(Base):
     )
 
     __table_args__ = (
+        # ``name='subject'`` resolves through ``NAMING_CONVENTION``'s
+        # ``ck_%(table_name)s_%(constraint_name)s`` template to
+        # ``ck_webauthn_challenge_subject`` — passing the fully
+        # prefixed name here would double-prefix to
+        # ``ck_webauthn_challenge_ck_webauthn_challenge_subject``.
         CheckConstraint(
             "(user_id IS NOT NULL AND signup_session_id IS NULL) OR "
             "(user_id IS NULL AND signup_session_id IS NOT NULL)",
-            name="ck_webauthn_challenge_subject",
+            name="subject",
         ),
         Index("ix_webauthn_challenge_expires", "expires_at"),
         Index("ix_webauthn_challenge_user", "user_id"),
