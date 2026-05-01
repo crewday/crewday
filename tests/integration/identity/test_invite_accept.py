@@ -390,6 +390,9 @@ class TestAcceptSeedsEngagement:
         pre-existing active row to prove the idempotency the accept
         path relies on.
         """
+        from app.adapters.db.workspace.repositories import (
+            SqlAlchemyMembershipRepository,
+        )
         from app.services.employees.service import (
             seed_pending_work_engagement,
         )
@@ -415,10 +418,9 @@ class TestAcceptSeedsEngagement:
             )
             session.flush()
 
-        first = seed_pending_work_engagement(session, ctx, user_id=user.id, now=_PINNED)
-        second = seed_pending_work_engagement(
-            session, ctx, user_id=user.id, now=_PINNED
-        )
+        repo = SqlAlchemyMembershipRepository(session)
+        first = seed_pending_work_engagement(repo, ctx, user_id=user.id, now=_PINNED)
+        second = seed_pending_work_engagement(repo, ctx, user_id=user.id, now=_PINNED)
         assert first is not None
         assert second is not None
         assert first.id == second.id

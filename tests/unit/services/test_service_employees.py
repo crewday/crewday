@@ -62,6 +62,7 @@ from app.adapters.db.workspace.models import (
     WorkRole,
     Workspace,
 )
+from app.adapters.db.workspace.repositories import SqlAlchemyMembershipRepository
 from app.authz import PermissionDenied
 from app.services.employees.service import (
     EmployeeNotFound,
@@ -78,6 +79,17 @@ from app.util.clock import FrozenClock
 from app.util.ulid import new_ulid
 
 _PINNED = datetime(2026, 4, 19, 12, 0, 0, tzinfo=UTC)
+
+
+def _repo(session: Session) -> SqlAlchemyMembershipRepository:
+    """Construct the SA-backed membership repo for the test session.
+
+    The cd-hso7 refactor routes every employees-service entry point
+    through :class:`MembershipRepository`; the unit suite drives the
+    SA concretion against the in-memory SQLite engine the fixture
+    bootstraps.
+    """
+    return SqlAlchemyMembershipRepository(session)
 
 
 def _load_all_models() -> None:
@@ -307,7 +319,7 @@ class TestUpdateProfile:
         ctx = _ctx(ws.id, actor_id=user.id, slug=ws.slug)
 
         view = update_profile(
-            session,
+            _repo(session),
             ctx,
             user_id=user.id,
             body=EmployeeProfileUpdate(display_name="Alice Example"),
@@ -340,7 +352,7 @@ class TestUpdateProfile:
         ctx = _ctx(ws.id, actor_id=user.id, slug=ws.slug)
 
         view = update_profile(
-            session,
+            _repo(session),
             ctx,
             user_id=user.id,
             body=EmployeeProfileUpdate(display_name="Bob"),
@@ -359,7 +371,7 @@ class TestUpdateProfile:
         ctx = _ctx(ws.id, actor_id=user.id, slug=ws.slug)
 
         view = update_profile(
-            session,
+            _repo(session),
             ctx,
             user_id=user.id,
             body=EmployeeProfileUpdate(),
@@ -386,7 +398,7 @@ class TestUpdateProfile:
         ctx = _ctx(ws.id, actor_id=actor.id, slug=ws.slug)
         with pytest.raises(ProfileFieldForbidden):
             update_profile(
-                session,
+                _repo(session),
                 ctx,
                 user_id=target.id,
                 body=EmployeeProfileUpdate(display_name="New Name"),
@@ -408,7 +420,7 @@ class TestUpdateProfile:
         _attach(session, user_id=target.id, workspace_id=ws.id)
 
         view = update_profile(
-            session,
+            _repo(session),
             ctx,
             user_id=target.id,
             body=EmployeeProfileUpdate(display_name="Target New"),
@@ -435,7 +447,7 @@ class TestUpdateProfile:
 
         with pytest.raises(EmployeeNotFound):
             update_profile(
-                session,
+                _repo(session),
                 ctx,
                 user_id=target.id,
                 body=EmployeeProfileUpdate(display_name="X"),
@@ -476,7 +488,7 @@ class TestArchiveEmployee:
         wrole = _seed_work_role(session, ws=ws, key="maid")
         uwr = _seed_user_work_role(session, user=target, ws=ws, work_role=wrole)
 
-        view = archive_employee(session, ctx, user_id=target.id, clock=clock)
+        view = archive_employee(_repo(session), ctx, user_id=target.id, clock=clock)
         assert view.engagement_archived_on is None  # active view drops archived rows
 
         session.refresh(engagement)
@@ -511,7 +523,7 @@ class TestArchiveEmployee:
             session, user=target, ws=ws, archived_on=_PINNED.date()
         )
 
-        view = archive_employee(session, ctx, user_id=target.id, clock=clock)
+        view = archive_employee(_repo(session), ctx, user_id=target.id, clock=clock)
         assert view.engagement_archived_on is None
 
         session.refresh(engagement)
@@ -541,7 +553,7 @@ class TestArchiveEmployee:
         ctx = _ctx(ws.id, actor_id=actor.id, slug=ws.slug)
         _seed_engagement(session, user=target, ws=ws)
         with pytest.raises(PermissionDenied):
-            archive_employee(session, ctx, user_id=target.id, clock=clock)
+            archive_employee(_repo(session), ctx, user_id=target.id, clock=clock)
 
 
 class TestReinstateEmployee:
@@ -564,13 +576,13 @@ class TestReinstateEmployee:
         wrole = _seed_work_role(session, ws=ws, key="cook")
         uwr = _seed_user_work_role(session, user=target, ws=ws, work_role=wrole)
         # Archive first so we have something to reverse.
-        archive_employee(session, ctx, user_id=target.id, clock=clock)
+        archive_employee(_repo(session), ctx, user_id=target.id, clock=clock)
         session.refresh(engagement)
         session.refresh(uwr)
         assert engagement.archived_on is not None
         assert uwr.deleted_at is not None
 
-        view = reinstate_employee(session, ctx, user_id=target.id, clock=clock)
+        view = reinstate_employee(_repo(session), ctx, user_id=target.id, clock=clock)
         session.refresh(engagement)
         session.refresh(uwr)
         assert engagement.archived_on is None
@@ -601,7 +613,7 @@ class TestReinstateEmployee:
         _attach(session, user_id=target.id, workspace_id=ws.id)
         _seed_engagement(session, user=target, ws=ws)
 
-        reinstate_employee(session, ctx, user_id=target.id, clock=clock)
+        reinstate_employee(_repo(session), ctx, user_id=target.id, clock=clock)
         audit = _audit_rows(session, entity_id=target.id)
         assert [r.action for r in audit] == ["employee.reinstated"]
         diff = audit[0].diff
@@ -627,7 +639,7 @@ class TestSeedPendingWorkEngagement:
         _attach(session, user_id=target.id, workspace_id=ws.id)
 
         engagement = seed_pending_work_engagement(
-            session,
+            _repo(session),
             ctx,
             user_id=target.id,
             now=_PINNED,
@@ -657,10 +669,10 @@ class TestSeedPendingWorkEngagement:
         _attach(session, user_id=target.id, workspace_id=ws.id)
 
         first = seed_pending_work_engagement(
-            session, ctx, user_id=target.id, now=_PINNED, clock=clock
+            _repo(session), ctx, user_id=target.id, now=_PINNED, clock=clock
         )
         second = seed_pending_work_engagement(
-            session, ctx, user_id=target.id, now=_PINNED, clock=clock
+            _repo(session), ctx, user_id=target.id, now=_PINNED, clock=clock
         )
         assert first is not None
         assert second is not None
@@ -684,7 +696,7 @@ class TestGetEmployee:
         ctx = _ctx(ws.id, actor_id=user.id, slug=ws.slug)
         _seed_engagement(session, user=user, ws=ws)
 
-        view = get_employee(session, ctx, user_id=user.id)
+        view = get_employee(_repo(session), ctx, user_id=user.id)
         assert view.id == user.id
         assert view.email == "alice@example.com"
         assert view.engagement_archived_on is None
@@ -705,7 +717,7 @@ class TestGetEmployee:
         _attach(session, user_id=target.id, workspace_id=ws_b.id)
         ctx = _ctx(ws_a.id, actor_id=actor.id, slug=ws_a.slug)
         with pytest.raises(EmployeeNotFound):
-            get_employee(session, ctx, user_id=target.id)
+            get_employee(_repo(session), ctx, user_id=target.id)
 
 
 class TestInviteDoesNotSeedAtCreateTime:

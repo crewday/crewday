@@ -118,7 +118,7 @@ from app.adapters.db.identity.models import (
 from app.adapters.db.identity.models import (
     Session as SessionRow,
 )
-from app.adapters.db.workspace.models import UserWorkspace, Workspace
+from app.adapters.db.workspace.models import UserWorkspace, WorkEngagement, Workspace
 from app.adapters.mail.ports import MailDeliveryError, Mailer
 from app.audit import write_audit
 from app.auth import magic_link
@@ -1295,18 +1295,68 @@ def _activate_invite(
         g.get("grant_role") in {"worker", "manager"} for g in invite_row.grants_json
     )
     if needs_engagement_seed:
-        # Imported lazily to avoid a circular dependency between the
-        # identity membership module and the employees service
-        # (which re-uses the identity ORM models).
-        from app.services.employees.service import seed_pending_work_engagement
-
-        seed_pending_work_engagement(
-            session,
-            ctx,
-            user_id=user_id,
-            now=now,
-            clock=clock,
+        # cd-hso7 lifted the seed helper into
+        # :func:`app.domain.identity.work_engagements.seed_pending_work_engagement`
+        # behind the :class:`MembershipRepository` Protocol. This call
+        # site cannot use the helper directly: constructing the SA
+        # concretion (:class:`SqlAlchemyMembershipRepository`) here
+        # would re-introduce the forbidden domain → adapters edge that
+        # the seam was created to remove, and plumbing a repo
+        # parameter through ``complete_invite`` / ``confirm_invite``
+        # is out of scope for cd-hso7. Until cd-vc3r splits the invite
+        # lifecycle out of this module (at which point the new home
+        # can take a repo argument cleanly), we duplicate the helper's
+        # body here as an inline write. The ORM import is already
+        # stopgapped by cd-jpa (membership reads ``UserWorkspace`` /
+        # ``Workspace`` ORM models for its own joins) so adding
+        # ``WorkEngagement`` does not widen the contract surface.
+        #
+        # KEEP IN SYNC with
+        # :func:`app.domain.identity.work_engagements.seed_pending_work_engagement`
+        # — same idempotency rule, same row defaults, same audit
+        # action / diff shape.
+        #
+        # Idempotency: skip the insert if an active engagement already
+        # exists for the (user, workspace) pair, matching the
+        # accept-replay safety the helper offers.
+        existing_active = session.scalar(
+            select(WorkEngagement).where(
+                WorkEngagement.user_id == user_id,
+                WorkEngagement.workspace_id == workspace_id,
+                WorkEngagement.archived_on.is_(None),
+            )
         )
+        if existing_active is None:
+            engagement_id = new_ulid(clock=clock)
+            engagement = WorkEngagement(
+                id=engagement_id,
+                user_id=user_id,
+                workspace_id=workspace_id,
+                engagement_kind="payroll",
+                supplier_org_id=None,
+                pay_destination_id=None,
+                reimbursement_destination_id=None,
+                started_on=now.date(),
+                archived_on=None,
+                notes_md="",
+                created_at=now,
+                updated_at=now,
+            )
+            session.add(engagement)
+            session.flush()
+            write_audit(
+                session,
+                ctx,
+                entity_kind="work_engagement",
+                entity_id=engagement_id,
+                action="work_engagement.seeded_on_accept",
+                diff={
+                    "user_id": user_id,
+                    "engagement_kind": "payroll",
+                    "started_on": engagement.started_on.isoformat(),
+                },
+                clock=clock,
+            )
 
     invite_row.state = "accepted"
     invite_row.accepted_at = now

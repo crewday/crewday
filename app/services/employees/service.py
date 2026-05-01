@@ -1,5 +1,10 @@
 """Employees domain service — workspace-scoped CRUD for worker profiles.
 
+Routes every workspace-scoped read / write through the
+:class:`~app.domain.identity.ports.MembershipRepository` Protocol so
+this module never imports the ``user_workspace`` / ``work_engagement``
+/ ``user_work_role`` ORM classes directly (cd-dv2 / cd-hso7).
+
 Owns four operations on a user *as seen inside a single workspace*:
 
 * :func:`get_employee` — read a user's profile projection scoped to
@@ -12,30 +17,28 @@ Owns four operations on a user *as seen inside a single workspace*:
   self-edit); callers who target someone else must hold
   ``users.edit_profile_other`` (default ``owners``, ``managers`` per
   the action catalog).
-* :func:`archive_employee` — soft-archive the user's
-  :class:`~app.adapters.db.workspace.models.WorkEngagement` row for
-  this workspace AND every active
-  :class:`~app.adapters.db.workspace.models.UserWorkRole` row in the
+* :func:`archive_employee` — soft-archive the user's work engagement
+  row for this workspace AND every active user-work-role row in the
   same workspace. Idempotent — re-archiving a row that is already
   archived is a no-op that still writes an audit entry so the trail
   remains linear.
-* :func:`reinstate_employee` — reverse archive. Clears
-  ``WorkEngagement.archived_on`` and ``UserWorkRole.deleted_at`` for
-  the workspace. Idempotent. **Does NOT clear** ``users.archived_at``
-  in v1 — cross-workspace reinstate is deferred to a follow-up
-  (``cd-dv2-note`` in the docstring below). The default behaviour is
-  workspace-local.
-* :func:`seed_pending_work_engagement` — called from the invite
-  accept-side path (:func:`app.domain.identity.membership._activate_invite`)
-  to insert a minimal pending :class:`WorkEngagement` row at the
-  moment the invitee completes their passkey challenge. Nothing
-  workspace-scoped is seeded until accept time (§03 "Additional
-  users (invite → click-to-accept)").
+* :func:`reinstate_employee` — reverse archive. Clears the
+  engagement's ``archived_on`` and the matching user-work-role
+  ``deleted_at`` rows. Idempotent. **Does NOT clear**
+  ``users.archived_at`` in v1 — cross-workspace reinstate is deferred
+  to a follow-up. The default behaviour is workspace-local.
+* :func:`seed_pending_work_engagement` — re-export of the accept-time
+  seeder lifted into :mod:`app.domain.identity.work_engagements` so
+  :mod:`app.domain.identity.membership` can call it without crossing
+  the domain → services boundary (cd-hso7). Inserts a minimal pending
+  engagement row at the moment the invitee completes their passkey
+  challenge. Nothing workspace-scoped is seeded until accept time
+  (§03 "Additional users (invite → click-to-accept)").
 
 **Tenancy.** Every read / write passes through the ORM tenant
 filter on the registered workspace-scoped tables
-(``work_engagement``, ``user_work_role``). Each function also
-re-asserts the ``workspace_id`` predicate as defence-in-depth,
+(``work_engagement``, ``user_work_role``). The repo also re-asserts
+the ``workspace_id`` predicate explicitly as defence-in-depth,
 matching the convention used in :mod:`app.domain.places.property_service`
 and :mod:`app.domain.identity.role_grants`.
 
@@ -80,21 +83,15 @@ See ``docs/specs/05-employees-and-roles.md`` §"User (as worker)",
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
-from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from app.adapters.db.identity.models import User
-from app.adapters.db.workspace.models import (
-    UserWorkRole,
-    UserWorkspace,
-    WorkEngagement,
-)
 from app.audit import write_audit
 from app.authz import (
     InvalidScope,
@@ -102,9 +99,21 @@ from app.authz import (
     UnknownActionKey,
     require,
 )
+from app.domain.identity.ports import (
+    MembershipRepository,
+    UserWorkspaceRow,
+    WorkEngagementRow,
+)
+
+# Re-exported for back-compat: the seeder used to live here, and
+# tests + ``app.services.employees`` external surface still import
+# it from this module. The canonical home is now
+# :mod:`app.domain.identity.work_engagements` so the identity-side
+# call site (``membership._activate_invite``) does not have to cross
+# the domain → services boundary (cd-hso7).
+from app.domain.identity.work_engagements import seed_pending_work_engagement
 from app.tenancy import WorkspaceContext, tenant_agnostic
 from app.util.clock import Clock, SystemClock
-from app.util.ulid import new_ulid
 
 __all__ = [
     "EmployeeNotFound",
@@ -113,6 +122,7 @@ __all__ = [
     "ProfileFieldForbidden",
     "archive_employee",
     "get_employee",
+    "iter_active_engagements",
     "reinstate_employee",
     "seed_pending_work_engagement",
     "update_profile",
@@ -230,21 +240,20 @@ def _now(clock: Clock | None) -> datetime:
 
 
 def _assert_membership(
-    session: Session,
+    repo: MembershipRepository,
     ctx: WorkspaceContext,
     *,
     user_id: str,
-) -> UserWorkspace:
+) -> UserWorkspaceRow:
     """Return the caller-scoped membership row or raise.
 
     Workspace-scoped membership is the authority check for "is this
     user visible as an employee here?". No row → 404 (not 403), per
-    §01. The ORM tenant filter auto-constrains the lookup to
-    ``ctx.workspace_id``; we re-assert the predicate explicitly as
-    defence-in-depth against a misconfigured context.
+    §01. The repo's ``get_user_workspace`` already pins the lookup on
+    ``workspace_id`` as defence-in-depth.
     """
-    row = session.get(UserWorkspace, (user_id, ctx.workspace_id))
-    if row is None or row.workspace_id != ctx.workspace_id:
+    row = repo.get_user_workspace(workspace_id=ctx.workspace_id, user_id=user_id)
+    if row is None:
         raise EmployeeNotFound(user_id)
     return row
 
@@ -254,7 +263,13 @@ def _load_user(session: Session, *, user_id: str) -> User:
 
     ``user`` is identity-scoped, not workspace-scoped. The caller
     must have already verified workspace membership via
-    :func:`_assert_membership` before reaching this helper.
+    :func:`_assert_membership` before reaching this helper. The
+    identity-side ORM read still uses the bare session — the
+    ``users`` table sits outside the cd-dv2 stopgap (and the
+    email-change flow already has its own
+    :class:`~app.domain.identity.email_change_ports.EmailChangeRepository`
+    seam); a follow-up task can route this through a sibling
+    identity-side port if needed.
     """
     with tenant_agnostic():
         row = session.get(User, user_id)
@@ -263,78 +278,10 @@ def _load_user(session: Session, *, user_id: str) -> User:
     return row
 
 
-def _load_active_engagement(
-    session: Session,
-    ctx: WorkspaceContext,
-    *,
-    user_id: str,
-) -> WorkEngagement | None:
-    """Return the user's active engagement for this workspace, if any.
-
-    "Active" = ``archived_on IS NULL``. The partial UNIQUE index on
-    ``(user_id, workspace_id) WHERE archived_on IS NULL`` (§02
-    "work_engagement") guarantees at most one row matches.
-    """
-    stmt = select(WorkEngagement).where(
-        WorkEngagement.user_id == user_id,
-        WorkEngagement.workspace_id == ctx.workspace_id,
-        WorkEngagement.archived_on.is_(None),
-    )
-    return session.scalars(stmt).one_or_none()
-
-
-def _load_any_engagement(
-    session: Session,
-    ctx: WorkspaceContext,
-    *,
-    user_id: str,
-) -> WorkEngagement | None:
-    """Return the most recent engagement row (active OR archived).
-
-    Reinstate targets the most recent engagement — archived or not —
-    and flips it back to active. The ordering by ``created_at``
-    descending + ``id`` descending gives a deterministic pick when a
-    user has stacked historical rows.
-    """
-    stmt = (
-        select(WorkEngagement)
-        .where(
-            WorkEngagement.user_id == user_id,
-            WorkEngagement.workspace_id == ctx.workspace_id,
-        )
-        .order_by(WorkEngagement.created_at.desc(), WorkEngagement.id.desc())
-        .limit(1)
-    )
-    return session.scalars(stmt).one_or_none()
-
-
-def _load_user_work_roles(
-    session: Session,
-    ctx: WorkspaceContext,
-    *,
-    user_id: str,
-    active_only: bool,
-) -> list[UserWorkRole]:
-    """Return every ``user_work_role`` row for the (user, workspace) pair.
-
-    ``active_only`` narrows the result to rows whose ``deleted_at`` is
-    NULL — the set the archive path targets. ``active_only=False``
-    returns the full history for the reinstate path so the reverse
-    sweep can clear the tombstone on every row the archive touched.
-    """
-    stmt = select(UserWorkRole).where(
-        UserWorkRole.user_id == user_id,
-        UserWorkRole.workspace_id == ctx.workspace_id,
-    )
-    if active_only:
-        stmt = stmt.where(UserWorkRole.deleted_at.is_(None))
-    return list(session.scalars(stmt).all())
-
-
 def _row_to_view(
     user: User,
     *,
-    engagement: WorkEngagement | None,
+    engagement: WorkEngagementRow | None,
 ) -> EmployeeView:
     """Project a :class:`User` + optional engagement into an :class:`EmployeeView`."""
     return EmployeeView(
@@ -352,7 +299,7 @@ def _row_to_view(
 
 
 def _require_edit_other(
-    session: Session,
+    repo: MembershipRepository,
     ctx: WorkspaceContext,
 ) -> None:
     """Enforce ``users.edit_profile_other`` on the caller's workspace.
@@ -360,11 +307,14 @@ def _require_edit_other(
     Wraps :func:`app.authz.require` + translates a caller-bug
     (unknown key / invalid scope) into a :class:`RuntimeError` so the
     router can surface it as a 500 instead of a 403. Matches the
-    :func:`app.domain.time.shifts._require_capability` shape.
+    :func:`app.domain.time.shifts._require_capability` shape. The
+    threaded ``repo.session`` keeps the authz check inside the
+    caller's UoW; the authz module still takes a concrete session
+    until its own port lands.
     """
     try:
         require(
-            session,
+            repo.session,
             ctx,
             action_key="users.edit_profile_other",
             scope_kind="workspace",
@@ -382,7 +332,7 @@ def _require_edit_other(
 
 
 def get_employee(
-    session: Session,
+    repo: MembershipRepository,
     ctx: WorkspaceContext,
     *,
     user_id: str,
@@ -392,9 +342,11 @@ def get_employee(
     Raises :class:`EmployeeNotFound` when the user is unknown to this
     workspace.
     """
-    _assert_membership(session, ctx, user_id=user_id)
-    user = _load_user(session, user_id=user_id)
-    engagement = _load_active_engagement(session, ctx, user_id=user_id)
+    _assert_membership(repo, ctx, user_id=user_id)
+    user = _load_user(repo.session, user_id=user_id)
+    engagement = repo.get_active_engagement(
+        workspace_id=ctx.workspace_id, user_id=user_id
+    )
     return _row_to_view(user, engagement=engagement)
 
 
@@ -404,7 +356,7 @@ def get_employee(
 
 
 def update_profile(
-    session: Session,
+    repo: MembershipRepository,
     ctx: WorkspaceContext,
     *,
     user_id: str,
@@ -428,17 +380,17 @@ def update_profile(
     redacted before / after diff of the changed fields.
     """
     resolved_clock = clock if clock is not None else SystemClock()
-    _assert_membership(session, ctx, user_id=user_id)
+    _assert_membership(repo, ctx, user_id=user_id)
 
     if ctx.actor_id != user_id:
         try:
-            _require_edit_other(session, ctx)
+            _require_edit_other(repo, ctx)
         except PermissionDenied as exc:
             raise ProfileFieldForbidden(
                 f"caller {ctx.actor_id!r} may not edit profile of {user_id!r}"
             ) from exc
 
-    user = _load_user(session, user_id=user_id)
+    user = _load_user(repo.session, user_id=user_id)
 
     # ``model_fields_set`` is the Pydantic-v2 truth of "which fields
     # did the caller actually send?" — we use it to distinguish
@@ -450,7 +402,9 @@ def update_profile(
         # No-op update — still return the current view so the router
         # doesn't have to special-case an empty body. No audit row:
         # a zero-change write is not a forensic event.
-        engagement = _load_active_engagement(session, ctx, user_id=user_id)
+        engagement = repo.get_active_engagement(
+            workspace_id=ctx.workspace_id, user_id=user_id
+        )
         return _row_to_view(user, engagement=engagement)
 
     before: dict[str, Any] = {}
@@ -481,13 +435,15 @@ def update_profile(
 
     if not after:
         # Every sent field matched the current value — no actual change.
-        engagement = _load_active_engagement(session, ctx, user_id=user_id)
+        engagement = repo.get_active_engagement(
+            workspace_id=ctx.workspace_id, user_id=user_id
+        )
         return _row_to_view(user, engagement=engagement)
 
-    session.flush()
+    repo.session.flush()
 
     write_audit(
-        session,
+        repo.session,
         ctx,
         entity_kind="user",
         entity_id=user_id,
@@ -496,7 +452,9 @@ def update_profile(
         clock=resolved_clock,
     )
 
-    engagement = _load_active_engagement(session, ctx, user_id=user_id)
+    engagement = repo.get_active_engagement(
+        workspace_id=ctx.workspace_id, user_id=user_id
+    )
     return _row_to_view(user, engagement=engagement)
 
 
@@ -506,7 +464,7 @@ def update_profile(
 
 
 def archive_employee(
-    session: Session,
+    repo: MembershipRepository,
     ctx: WorkspaceContext,
     *,
     user_id: str,
@@ -534,40 +492,39 @@ def archive_employee(
     now = resolved_clock.now()
     today: date = now.date()
 
-    _assert_membership(session, ctx, user_id=user_id)
+    _assert_membership(repo, ctx, user_id=user_id)
     # Archive is a write on *other* users' workspace pipeline, so the
     # ``users.archive`` capability (not ``edit_profile_other``) gates
     # it. Matching §05 spec which lists archive among the capabilities
     # owners + managers hold by default.
-    _require_archive(session, ctx)
+    _require_archive(repo, ctx)
 
-    engagement = _load_active_engagement(session, ctx, user_id=user_id)
+    engagement = repo.get_active_engagement(
+        workspace_id=ctx.workspace_id, user_id=user_id
+    )
     engagement_was_active = engagement is not None
     if engagement is not None:
-        engagement.archived_on = today
-        engagement.updated_at = now
+        engagement = repo.set_engagement_archived_on(
+            workspace_id=ctx.workspace_id,
+            engagement_id=engagement.id,
+            archived_on=today,
+            updated_at=now,
+        )
 
-    active_roles = _load_user_work_roles(
-        session, ctx, user_id=user_id, active_only=True
+    active_roles = repo.list_user_work_roles(
+        workspace_id=ctx.workspace_id, user_id=user_id, active_only=True
     )
     archived_role_ids: list[str] = [r.id for r in active_roles]
-    if archived_role_ids:
-        # Bulk UPDATE — ``deleted_at`` + ``ended_on`` stamp as one DML.
-        # The partial-active predicate on the select matches exactly
-        # the rows we update, so the statement is safe against races
-        # within the caller's transaction.
-        session.execute(
-            update(UserWorkRole)
-            .where(
-                UserWorkRole.id.in_(archived_role_ids),
-            )
-            .values(deleted_at=now, ended_on=today)
-            .execution_options(synchronize_session="fetch")
-        )
-    session.flush()
+    repo.archive_user_work_roles(
+        workspace_id=ctx.workspace_id,
+        role_ids=archived_role_ids,
+        deleted_at=now,
+        ended_on=today,
+    )
+    repo.session.flush()
 
     write_audit(
-        session,
+        repo.session,
         ctx,
         entity_kind="user",
         entity_id=user_id,
@@ -581,13 +538,15 @@ def archive_employee(
         clock=resolved_clock,
     )
 
-    user = _load_user(session, user_id=user_id)
-    refreshed_engagement = _load_active_engagement(session, ctx, user_id=user_id)
+    user = _load_user(repo.session, user_id=user_id)
+    refreshed_engagement = repo.get_active_engagement(
+        workspace_id=ctx.workspace_id, user_id=user_id
+    )
     return _row_to_view(user, engagement=refreshed_engagement)
 
 
 def reinstate_employee(
-    session: Session,
+    repo: MembershipRepository,
     ctx: WorkspaceContext,
     *,
     user_id: str,
@@ -620,32 +579,37 @@ def reinstate_employee(
     resolved_clock = clock if clock is not None else SystemClock()
     now = resolved_clock.now()
 
-    _assert_membership(session, ctx, user_id=user_id)
-    _require_archive(session, ctx)
+    _assert_membership(repo, ctx, user_id=user_id)
+    _require_archive(repo, ctx)
 
-    engagement = _load_any_engagement(session, ctx, user_id=user_id)
+    engagement = repo.get_latest_engagement(
+        workspace_id=ctx.workspace_id, user_id=user_id
+    )
     engagement_was_archived = (
         engagement is not None and engagement.archived_on is not None
     )
     if engagement is not None and engagement.archived_on is not None:
-        engagement.archived_on = None
-        engagement.updated_at = now
+        engagement = repo.set_engagement_archived_on(
+            workspace_id=ctx.workspace_id,
+            engagement_id=engagement.id,
+            archived_on=None,
+            updated_at=now,
+        )
 
-    all_roles = _load_user_work_roles(session, ctx, user_id=user_id, active_only=False)
+    all_roles = repo.list_user_work_roles(
+        workspace_id=ctx.workspace_id, user_id=user_id, active_only=False
+    )
     reinstated_role_ids: list[str] = [
         r.id for r in all_roles if r.deleted_at is not None
     ]
-    if reinstated_role_ids:
-        session.execute(
-            update(UserWorkRole)
-            .where(UserWorkRole.id.in_(reinstated_role_ids))
-            .values(deleted_at=None, ended_on=None)
-            .execution_options(synchronize_session="fetch")
-        )
-    session.flush()
+    repo.reinstate_user_work_roles(
+        workspace_id=ctx.workspace_id,
+        role_ids=reinstated_role_ids,
+    )
+    repo.session.flush()
 
     write_audit(
-        session,
+        repo.session,
         ctx,
         entity_kind="user",
         entity_id=user_id,
@@ -659,13 +623,15 @@ def reinstate_employee(
         clock=resolved_clock,
     )
 
-    user = _load_user(session, user_id=user_id)
-    refreshed_engagement = _load_active_engagement(session, ctx, user_id=user_id)
+    user = _load_user(repo.session, user_id=user_id)
+    refreshed_engagement = repo.get_active_engagement(
+        workspace_id=ctx.workspace_id, user_id=user_id
+    )
     return _row_to_view(user, engagement=refreshed_engagement)
 
 
 def _require_archive(
-    session: Session,
+    repo: MembershipRepository,
     ctx: WorkspaceContext,
 ) -> None:
     """Enforce ``users.archive`` on the caller's workspace or raise.
@@ -674,7 +640,7 @@ def _require_archive(
     """
     try:
         require(
-            session,
+            repo.session,
             ctx,
             action_key="users.archive",
             scope_kind="workspace",
@@ -687,117 +653,23 @@ def _require_archive(
 
 
 # ---------------------------------------------------------------------------
-# Accept-time seed helper (called from membership._activate_invite)
-# ---------------------------------------------------------------------------
-
-
-def seed_pending_work_engagement(
-    session: Session,
-    ctx: WorkspaceContext,
-    *,
-    user_id: str,
-    now: datetime,
-    clock: Clock | None = None,
-) -> WorkEngagement:
-    """Insert a minimal pending :class:`WorkEngagement` at invite accept time.
-
-    Spec §03 "Additional users" mandates that nothing workspace-scoped
-    is materialised for the invitee until they complete their passkey
-    challenge. :func:`app.domain.identity.membership._activate_invite`
-    calls this helper *inside* the accept transaction so the
-    engagement row lands alongside the ``role_grant`` +
-    ``permission_group_member`` rows atomically.
-
-    The engagement is created with the Phase 1 defaults:
-
-    * ``engagement_kind = 'payroll'`` — the majority case for
-      direct-employment workers (§22 "Engagement kinds"); the
-      richer invite sub-payload that can override this is the work
-      of cd-1hd0 / cd-4o61.
-    * ``started_on = now.date()`` — the accept instant.
-    * ``archived_on = NULL`` — the engagement is active from the
-      moment the passkey challenge completes.
-    * ``supplier_org_id = NULL`` — required iff
-      ``engagement_kind = 'agency_supplied'`` (CHECK constraint).
-
-    **Idempotency.** If an active engagement already exists for
-    ``(user_id, workspace_id)``, the partial UNIQUE index would
-    reject a duplicate. We look up first and return the existing
-    row unchanged — safe for accept-replay scenarios where an
-    invite's ``_activate_invite`` runs twice.
-
-    Returns the engagement row (new or existing). The caller is
-    responsible for ensuring a :class:`UserWorkspace` row exists for
-    the ``(user_id, ctx.workspace_id)`` pair before invoking — the
-    sole production caller (:func:`app.domain.identity.membership._activate_invite`)
-    writes the junction row in the same transaction just upstream of
-    this call.
-    """
-    existing = _load_active_engagement(session, ctx, user_id=user_id)
-    if existing is not None:
-        return existing
-
-    resolved_clock = clock if clock is not None else SystemClock()
-    engagement_id = new_ulid(clock=clock)
-    row = WorkEngagement(
-        id=engagement_id,
-        user_id=user_id,
-        workspace_id=ctx.workspace_id,
-        engagement_kind="payroll",
-        supplier_org_id=None,
-        pay_destination_id=None,
-        reimbursement_destination_id=None,
-        started_on=now.date(),
-        archived_on=None,
-        notes_md="",
-        created_at=now,
-        updated_at=now,
-    )
-    session.add(row)
-    session.flush()
-
-    write_audit(
-        session,
-        ctx,
-        entity_kind="work_engagement",
-        entity_id=engagement_id,
-        action="work_engagement.seeded_on_accept",
-        diff={
-            "user_id": user_id,
-            "engagement_kind": "payroll",
-            "started_on": row.started_on.isoformat(),
-        },
-        clock=resolved_clock,
-    )
-    return row
-
-
-# ---------------------------------------------------------------------------
 # Utility — list iterable helper used by tests and potentially callers
 # ---------------------------------------------------------------------------
 
 
 def iter_active_engagements(
-    session: Session,
+    repo: MembershipRepository,
     ctx: WorkspaceContext,
     *,
     user_ids: Iterable[str],
-) -> dict[str, WorkEngagement]:
+) -> Mapping[str, WorkEngagementRow]:
     """Return a mapping ``user_id -> active engagement`` for a user set.
 
     Helper for roster views that need to annotate a batch of users
     with their engagement state without issuing N queries. Workspace-
-    scoped via both the ORM tenant filter and an explicit predicate.
+    scoped via the repo's explicit predicate (and the underlying ORM
+    tenant filter on the SA-backed concretion).
     """
-    ids = list(user_ids)
-    if not ids:
-        return {}
-    stmt = select(WorkEngagement).where(
-        WorkEngagement.user_id.in_(ids),
-        WorkEngagement.workspace_id == ctx.workspace_id,
-        WorkEngagement.archived_on.is_(None),
+    return repo.list_active_engagements_for_users(
+        workspace_id=ctx.workspace_id, user_ids=user_ids
     )
-    out: dict[str, WorkEngagement] = {}
-    for row in session.scalars(stmt).all():
-        out[row.user_id] = row
-    return out

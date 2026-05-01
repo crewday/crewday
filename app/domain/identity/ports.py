@@ -7,11 +7,14 @@ without importing SQLAlchemy model classes directly.
 
 Spec: ``docs/specs/01-architecture.md`` §"Boundary rules" rule 4 —
 each context defines its own repository port in its public surface and
-a SQLAlchemy adapter under ``app/adapters/db/<context>/``. The two
-SA-backed concretions live in :mod:`app.adapters.db.authz.repositories`;
-tests substitute fakes.
+a SQLAlchemy adapter under ``app/adapters/db/<context>/``. The
+SA-backed concretions for groups + role grants live in
+:mod:`app.adapters.db.authz.repositories`; the membership-side
+concretion (``user_workspace`` / ``work_engagement`` /
+``user_work_role``) lives in
+:mod:`app.adapters.db.workspace.repositories`. Tests substitute fakes.
 
-Two repositories live here:
+Three repositories live here:
 
 * :class:`PermissionGroupRepository` — group + member CRUD
   (``permission_group`` and ``permission_group_member``).
@@ -19,6 +22,13 @@ Two repositories live here:
   workspace property-scope check used by the §05 owner-authority
   policy. Returns immutable :class:`RoleGrantRef` projections so
   the domain never sees an ORM row.
+* :class:`MembershipRepository` — workspace-scoped membership +
+  engagement + user-work-role reads/writes consumed by
+  :mod:`app.services.employees.service` (profile / archive /
+  reinstate / accept-time engagement seed) and
+  :mod:`app.domain.identity.work_engagements` (the seed helper
+  called from :func:`app.domain.identity.membership._activate_invite`).
+  Closes the cd-dv2 stopgap.
 
 Both protocols expose a ``session`` accessor so callers that need
 to thread the same UoW through a sibling helper (``app.audit.write_audit``,
@@ -45,20 +55,24 @@ duck-typing shortcuts.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any, Protocol
 
 from sqlalchemy.orm import Session
 
 __all__ = [
+    "MembershipRepository",
     "PermissionGroupMemberRow",
     "PermissionGroupRepository",
     "PermissionGroupRow",
     "PermissionGroupSlugTakenError",
     "RoleGrantRepository",
     "RoleGrantRow",
+    "UserWorkRoleRow",
+    "UserWorkspaceRow",
+    "WorkEngagementRow",
 ]
 
 
@@ -379,5 +393,243 @@ class RoleGrantRepository(Protocol):
         Caller is responsible for the last-owner protection (§05
         "Surface grants at a glance"); v1 has no ``revoked_at``
         column so the row is removed outright.
+        """
+        ...
+
+
+# ---------------------------------------------------------------------------
+# Membership row shapes (cd-dv2 / cd-hso7)
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class UserWorkspaceRow:
+    """Immutable projection of a ``user_workspace`` derived-junction row.
+
+    The junction is populated by the role-grant refresh worker; the
+    employees service only reads it as the "is this user visible as a
+    member here?" check (§01 "tenant surface is not enumerable" maps a
+    missing row to 404).
+    """
+
+    user_id: str
+    workspace_id: str
+    source: str
+    added_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class WorkEngagementRow:
+    """Immutable projection of a ``work_engagement`` row.
+
+    Carries only the columns the employees service + the accept-time
+    seeder consume today; richer mutable shapes (settings overrides,
+    pay_destination_id, …) ride on
+    :mod:`app.domain.identity.work_engagements` directly until that
+    module also routes through this seam.
+    """
+
+    id: str
+    user_id: str
+    workspace_id: str
+    engagement_kind: str
+    supplier_org_id: str | None
+    started_on: date
+    archived_on: date | None
+    created_at: datetime
+    updated_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class UserWorkRoleRow:
+    """Immutable projection of a ``user_work_role`` row.
+
+    Narrow shape — only the columns the archive / reinstate sweep
+    needs. The richer columns (``pay_rule_id``, ``work_role_id``)
+    are not surfaced because the sweep operates by id only.
+    """
+
+    id: str
+    user_id: str
+    workspace_id: str
+    work_role_id: str
+    started_on: date
+    ended_on: date | None
+    deleted_at: datetime | None
+
+
+# ---------------------------------------------------------------------------
+# MembershipRepository
+# ---------------------------------------------------------------------------
+
+
+class MembershipRepository(Protocol):
+    """Read + write seam for the workspace-membership ORM tables.
+
+    Wraps ``user_workspace``, ``work_engagement`` and
+    ``user_work_role`` so the service layer never touches the SA
+    classes directly. Consumed by
+    :mod:`app.services.employees.service` (profile read,
+    profile update membership probe, archive + reinstate sweep,
+    accept-time engagement seed) and by
+    :mod:`app.domain.identity.work_engagements.seed_pending_work_engagement`
+    (called from :func:`app.domain.identity.membership._activate_invite`).
+    Closes the cd-dv2 stopgap by isolating the workspace-context ORM
+    classes behind this Protocol.
+
+    Carries an open SQLAlchemy ``Session`` via the :attr:`session`
+    accessor so callers that also write audit through
+    :func:`app.audit.write_audit` (which still takes a concrete
+    ``Session`` today) can thread the same UoW. Once the audit writer
+    gains its own seam, the accessor can drop.
+
+    Every method honours the workspace-scoping invariant: each read /
+    write pins on the ``workspace_id`` passed by the caller, mirroring
+    the ORM tenant filter as defence-in-depth (§01 "Key runtime
+    invariants" #2 — a misconfigured filter must fail loud).
+
+    The repo never commits and only flushes where the underlying
+    statements require — the caller's UoW owns the transaction
+    boundary (§01 "Key runtime invariants" #3).
+    """
+
+    @property
+    def session(self) -> Session:
+        """Return the underlying SQLAlchemy session for audit threading."""
+        ...
+
+    # -- user_workspace --------------------------------------------------
+
+    def get_user_workspace(
+        self, *, workspace_id: str, user_id: str
+    ) -> UserWorkspaceRow | None:
+        """Return the (user, workspace) junction row or ``None`` if absent.
+
+        A missing row collapses to "not visible as an employee here"
+        per §01 — the caller raises ``EmployeeNotFound`` on ``None``.
+        """
+        ...
+
+    # -- work_engagement reads -------------------------------------------
+
+    def get_active_engagement(
+        self, *, workspace_id: str, user_id: str
+    ) -> WorkEngagementRow | None:
+        """Return the user's active engagement (``archived_on IS NULL``).
+
+        The partial UNIQUE index on
+        ``(user_id, workspace_id) WHERE archived_on IS NULL``
+        guarantees at most one row matches.
+        """
+        ...
+
+    def get_latest_engagement(
+        self, *, workspace_id: str, user_id: str
+    ) -> WorkEngagementRow | None:
+        """Return the most recent engagement (active OR archived).
+
+        Reinstate flips the most recent engagement back to active.
+        Ordered by ``created_at`` desc with ``id`` desc as a stable
+        tiebreaker so a deterministic row is picked when the user has
+        stacked historical entries.
+        """
+        ...
+
+    def list_active_engagements_for_users(
+        self, *, workspace_id: str, user_ids: Iterable[str]
+    ) -> Mapping[str, WorkEngagementRow]:
+        """Return ``user_id -> active engagement`` for every requested user.
+
+        Helper for roster views that need to annotate a batch of users
+        without issuing N queries. Users with no active engagement are
+        omitted from the mapping.
+        """
+        ...
+
+    # -- work_engagement writes ------------------------------------------
+
+    def insert_work_engagement(
+        self,
+        *,
+        engagement_id: str,
+        workspace_id: str,
+        user_id: str,
+        engagement_kind: str,
+        supplier_org_id: str | None,
+        started_on: date,
+        created_at: datetime,
+        updated_at: datetime,
+    ) -> WorkEngagementRow:
+        """Insert a fresh engagement row.
+
+        The minimal shape used by the accept-time seeder; the richer
+        :mod:`app.domain.identity.work_engagements` surface uses its
+        own write paths and will route through this seam in a later
+        cleanup. Flushes so the audit writer's FK reference to
+        ``entity_id`` sees the new row.
+        """
+        ...
+
+    def set_engagement_archived_on(
+        self,
+        *,
+        workspace_id: str,
+        engagement_id: str,
+        archived_on: date | None,
+        updated_at: datetime,
+    ) -> WorkEngagementRow:
+        """Stamp ``archived_on`` (or clear it) on the named engagement.
+
+        Used by archive + reinstate. A pure date assignment plus
+        ``updated_at`` bump — caller is responsible for the
+        idempotency / loudness checks.
+        """
+        ...
+
+    # -- user_work_role reads --------------------------------------------
+
+    def list_user_work_roles(
+        self,
+        *,
+        workspace_id: str,
+        user_id: str,
+        active_only: bool,
+    ) -> Sequence[UserWorkRoleRow]:
+        """Return every ``user_work_role`` row for the (user, workspace) pair.
+
+        ``active_only=True`` narrows to ``deleted_at IS NULL`` — the
+        archive sweep target. ``active_only=False`` returns the full
+        history so the reinstate path can clear the tombstone on every
+        row the archive touched (cd-9vi3 narrowing tracked separately).
+        """
+        ...
+
+    # -- user_work_role writes -------------------------------------------
+
+    def archive_user_work_roles(
+        self,
+        *,
+        workspace_id: str,
+        role_ids: Sequence[str],
+        deleted_at: datetime,
+        ended_on: date,
+    ) -> None:
+        """Bulk-stamp ``deleted_at`` + ``ended_on`` on the named rows.
+
+        One UPDATE; caller has already filtered the id set to active
+        rows in ``workspace_id``. No-op when ``role_ids`` is empty.
+        """
+        ...
+
+    def reinstate_user_work_roles(
+        self,
+        *,
+        workspace_id: str,
+        role_ids: Sequence[str],
+    ) -> None:
+        """Bulk-clear ``deleted_at`` + ``ended_on`` on the named rows.
+
+        Reverse of :meth:`archive_user_work_roles`. No-op when
+        ``role_ids`` is empty.
         """
         ...

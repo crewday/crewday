@@ -47,12 +47,16 @@ from app.domain.identity.me_schedule_ports import (
     PublicHolidayRow,
 )
 from app.domain.identity.ports import (
+    MembershipRepository,
     PermissionGroupMemberRow,
     PermissionGroupRepository,
     PermissionGroupRow,
     PermissionGroupSlugTakenError,
     RoleGrantRepository,
     RoleGrantRow,
+    UserWorkRoleRow,
+    UserWorkspaceRow,
+    WorkEngagementRow,
 )
 
 __all__ = [
@@ -68,6 +72,7 @@ __all__ = [
     "MagicLinkPurposeMismatch",
     "MagicLinkTokenExpired",
     "MeScheduleQueryRepository",
+    "MembershipRepository",
     "OccurrenceRefRow",
     "PermissionGroupMemberRow",
     "PermissionGroupRepository",
@@ -83,4 +88,7 @@ __all__ = [
     "UserLeaveRepository",
     "UserLeaveRow",
     "UserWeeklyAvailabilityRow",
+    "UserWorkRoleRow",
+    "UserWorkspaceRow",
+    "WorkEngagementRow",
 ]

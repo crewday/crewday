@@ -69,8 +69,10 @@ from sqlalchemy.orm import Session
 
 from app.adapters.db.workspace.models import WorkEngagement
 from app.audit import write_audit
+from app.domain.identity.ports import MembershipRepository, WorkEngagementRow
 from app.tenancy import WorkspaceContext
 from app.util.clock import Clock, SystemClock
+from app.util.ulid import new_ulid
 
 __all__ = [
     "EngagementKind",
@@ -82,6 +84,7 @@ __all__ = [
     "get_work_engagement",
     "list_work_engagements",
     "reinstate_work_engagement",
+    "seed_pending_work_engagement",
     "update_work_engagement",
 ]
 
@@ -507,3 +510,91 @@ def reinstate_work_engagement(
         clock=resolved_clock,
     )
     return _row_to_view(row)
+
+
+# ---------------------------------------------------------------------------
+# Accept-time seed helper (called from membership._activate_invite)
+# ---------------------------------------------------------------------------
+
+
+def seed_pending_work_engagement(
+    repo: MembershipRepository,
+    ctx: WorkspaceContext,
+    *,
+    user_id: str,
+    now: datetime,
+    clock: Clock | None = None,
+) -> WorkEngagementRow:
+    """Insert a minimal pending engagement at invite accept time.
+
+    Spec §03 "Additional users" mandates that nothing workspace-scoped
+    is materialised for the invitee until they complete their passkey
+    challenge. :func:`app.domain.identity.membership._activate_invite`
+    calls this helper *inside* the accept transaction so the
+    engagement row lands alongside the ``role_grant`` +
+    ``permission_group_member`` rows atomically.
+
+    The engagement is created with the Phase 1 defaults:
+
+    * ``engagement_kind = 'payroll'`` — the majority case for
+      direct-employment workers (§22 "Engagement kinds"); the
+      richer invite sub-payload that can override this is the work
+      of cd-1hd0 / cd-4o61.
+    * ``started_on = now.date()`` — the accept instant.
+    * ``archived_on = NULL`` — the engagement is active from the
+      moment the passkey challenge completes.
+    * ``supplier_org_id = NULL`` — required iff
+      ``engagement_kind = 'agency_supplied'`` (CHECK constraint).
+
+    **Idempotency.** If an active engagement already exists for
+    ``(user_id, workspace_id)``, the partial UNIQUE index would
+    reject a duplicate. We look up first and return the existing
+    row unchanged — safe for accept-replay scenarios where an
+    invite's ``_activate_invite`` runs twice.
+
+    Returns the engagement row (new or existing) as a
+    :class:`WorkEngagementRow` projection. The caller is responsible
+    for ensuring a ``user_workspace`` row exists for the
+    ``(user_id, ctx.workspace_id)`` pair before invoking — the sole
+    production caller (:func:`app.domain.identity.membership._activate_invite`)
+    writes the junction row in the same transaction just upstream of
+    this call.
+
+    Lives here, not under :mod:`app.services.employees.service`, so
+    :mod:`app.domain.identity.membership` can call it without crossing
+    the domain → services boundary (cd-hso7). The services-layer
+    module re-exports this name for backward-compat callers.
+    """
+    existing = repo.get_active_engagement(
+        workspace_id=ctx.workspace_id, user_id=user_id
+    )
+    if existing is not None:
+        return existing
+
+    resolved_clock = clock if clock is not None else SystemClock()
+    engagement_id = new_ulid(clock=clock)
+    row = repo.insert_work_engagement(
+        engagement_id=engagement_id,
+        workspace_id=ctx.workspace_id,
+        user_id=user_id,
+        engagement_kind="payroll",
+        supplier_org_id=None,
+        started_on=now.date(),
+        created_at=now,
+        updated_at=now,
+    )
+
+    write_audit(
+        repo.session,
+        ctx,
+        entity_kind="work_engagement",
+        entity_id=engagement_id,
+        action="work_engagement.seeded_on_accept",
+        diff={
+            "user_id": user_id,
+            "engagement_kind": "payroll",
+            "started_on": row.started_on.isoformat(),
+        },
+        clock=resolved_clock,
+    )
+    return row

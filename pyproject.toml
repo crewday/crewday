@@ -371,18 +371,6 @@ ignore_imports = [
     # callback folds completion in and the auth layer routes through
     # a port.
     "app.domain.identity.membership -> app.auth.passkey",
-    # v1 stopgap (cd-dv2): the existing
-    # ``app.services.employees.service`` reads
-    # :class:`UserWorkspace` / :class:`WorkEngagement` /
-    # :class:`UserWorkRole` from ``app.adapters.db.workspace.models``
-    # (and identity models via existing seams). The transitive edge
-    # surfaces now that ``app.domain.identity.membership`` imports
-    # the seed-pending helper from
-    # ``app.services.employees.service``. Same Protocol-seam pattern
-    # as the other identity stopgaps; tracked by cd-duv6 — drops
-    # once the workspace + identity repositories land.
-    "app.services.employees.service -> app.adapters.db.workspace.models",
-    "app.domain.identity.membership -> app.services.employees.service",
     # v1 stopgap (cd-ckr): the owners-membership check lives under
     # ``app.authz.owners`` so the tenancy middleware (cd-7y4) and
     # the identity domain share one SELECT shape. ``app.authz``

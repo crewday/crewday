@@ -59,6 +59,7 @@ from sqlalchemy.orm import Session
 from app.adapters.db.identity.models import User
 from app.adapters.db.session import make_uow
 from app.adapters.db.workspace.models import UserWorkspace, Workspace
+from app.adapters.db.workspace.repositories import SqlAlchemyMembershipRepository
 from app.adapters.mail.ports import Mailer
 from app.api.deps import current_workspace_context, db_session
 from app.audit import write_audit
@@ -726,7 +727,7 @@ def build_users_router(
 
         try:
             view = update_profile(
-                session,
+                SqlAlchemyMembershipRepository(session),
                 ctx,
                 user_id=user_id,
                 body=service_body,
@@ -755,7 +756,9 @@ def build_users_router(
     ) -> EmployeeProfileResponse:
         """Soft-archive + idempotent. See §05 "Archive / reinstate"."""
         try:
-            view = archive_employee(session, ctx, user_id=user_id)
+            view = archive_employee(
+                SqlAlchemyMembershipRepository(session), ctx, user_id=user_id
+            )
         except EmployeeNotFound as exc:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -780,7 +783,9 @@ def build_users_router(
     ) -> EmployeeProfileResponse:
         """Reverse archive. Idempotent. See §05 "Archive / reinstate"."""
         try:
-            view = reinstate_employee(session, ctx, user_id=user_id)
+            view = reinstate_employee(
+                SqlAlchemyMembershipRepository(session), ctx, user_id=user_id
+            )
         except EmployeeNotFound as exc:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -805,7 +810,9 @@ def build_users_router(
     ) -> EmployeeProfileResponse:
         """Read-only projection the SPA keys off for the profile page."""
         try:
-            view = get_employee(session, ctx, user_id=user_id)
+            view = get_employee(
+                SqlAlchemyMembershipRepository(session), ctx, user_id=user_id
+            )
         except EmployeeNotFound as exc:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
