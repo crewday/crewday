@@ -381,12 +381,17 @@ def check_idempotency_round_trip(
     # Replay the same case — schemathesis ``Case.call`` re-derives the
     # prepared request from the case's data, so passing the same case
     # produces an identical body. We pin the same ``Idempotency-Key``
-    # header (and any ``Authorization`` header the first call carried)
-    # so the second call lands on the same cache row.
+    # header (and any ``Authorization`` / ``Cookie`` header the first
+    # call carried) so the second call lands on the same cache row.
+    # Session-cookie-only routes (no Bearer token) need the cookie
+    # forwarded or the replay 401s before reaching the cache.
     extra_headers: dict[str, Any] = {"Idempotency-Key": sent_key}
     auth = _request_header(response, "Authorization")
     if auth is not None:
         extra_headers["Authorization"] = auth
+    cookie = _request_header(response, "Cookie")
+    if cookie is not None:
+        extra_headers["Cookie"] = cookie
 
     try:
         replay = case.call(headers=extra_headers)
@@ -444,14 +449,19 @@ def check_etag_round_trip(ctx: CheckContext, response: Response, case: Case) -> 
     if etag is None:
         return
 
-    # Replay the GET with ``If-None-Match: <etag>``. Auth is forwarded
-    # so the second call lands on the same surface — the ETag cache
-    # is per-(token, resource) on §12 mutating routes, so dropping
-    # auth would let the server return a fresh body.
+    # Replay the GET with ``If-None-Match: <etag>``. Auth + session
+    # cookie are forwarded so the second call lands on the same
+    # surface — the ETag cache is per-(principal, resource) on §12
+    # mutating routes, so dropping the credential would let the
+    # server return a fresh body. Session-cookie-only routes (no
+    # Bearer token) rely on Cookie being forwarded.
     extra_headers: dict[str, Any] = {"If-None-Match": etag}
     auth = _request_header(response, "Authorization")
     if auth is not None:
         extra_headers["Authorization"] = auth
+    cookie = _request_header(response, "Cookie")
+    if cookie is not None:
+        extra_headers["Cookie"] = cookie
 
     try:
         replay = case.call(headers=extra_headers)

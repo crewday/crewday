@@ -417,3 +417,242 @@ def test_hooks_module_imports_clean() -> None:
         "check_etag_round_trip",
     ):
         assert hasattr(hooks_mod, attr), f"missing custom check {attr!r}"
+
+
+# ---------------------------------------------------------------------------
+# Cookie forwarding on replay (cd-qosy)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.skipif(
+    not _schemathesis_available(), reason="schemathesis is not installed"
+)
+class TestReplayForwardsCookie:
+    """The idempotency + ETag hooks must forward the original ``Cookie``.
+
+    Session-cookie-only routes (no ``Authorization`` header) need the
+    cookie carried into the replay or the second call 401s before the
+    cache / conditional-GET handler runs — surfacing as a false-positive
+    contract failure. These tests pin the forward behaviour with stub
+    ``Case`` / ``Response`` objects so the contract is enforced without
+    a live server.
+    """
+
+    @staticmethod
+    def _make_stubs(
+        *,
+        method: str,
+        first_status: int,
+        replay_status: int,
+        request_headers: dict[str, str],
+        response_headers: dict[str, str],
+        op_header_params: list[str],
+        response_header_decls: list[str],
+        body: bytes = b"{}",
+    ) -> tuple[Any, Any, list[dict[str, Any]]]:
+        """Build a ``(case, response, captured_headers)`` triple.
+
+        ``captured_headers`` records the ``headers=`` kwarg passed to
+        ``case.call(...)`` so the test can assert on what the hook
+        forwarded. The stub ``call`` returns a ``StubResponse`` whose
+        status / body match ``replay_status`` so the success path runs
+        through to completion.
+        """
+        from types import SimpleNamespace
+
+        class StubResponse:
+            def __init__(
+                self, status_code: int, headers: dict[str, str], content: bytes
+            ) -> None:
+                self.status_code = status_code
+                self.headers = headers
+                self.content = content
+                self.request = SimpleNamespace(headers=dict(request_headers))
+
+        captured: list[dict[str, Any]] = []
+
+        def fake_call(
+            base_url: str | None = None,
+            session: Any = None,
+            headers: dict[str, Any] | None = None,
+            params: dict[str, Any] | None = None,
+            cookies: dict[str, Any] | None = None,
+            **kwargs: Any,
+        ) -> StubResponse:
+            captured.append(dict(headers or {}))
+            return StubResponse(
+                status_code=replay_status,
+                headers=dict(response_headers),
+                content=body,
+            )
+
+        # Build the operation stub. ``operation.headers`` is the
+        # parsed parameter list (each entry needs a ``.name``);
+        # ``operation.definition.raw`` is the raw OpenAPI dict the
+        # ETag check walks for the response-header declaration.
+        parsed_params = [SimpleNamespace(name=name) for name in op_header_params]
+        responses_raw: dict[str, Any] = {
+            str(first_status): {
+                "headers": {
+                    name: {"schema": {"type": "string"}}
+                    for name in response_header_decls
+                }
+            }
+        }
+        operation = SimpleNamespace(
+            headers=parsed_params,
+            definition=SimpleNamespace(raw={"responses": responses_raw}),
+        )
+
+        case = SimpleNamespace(
+            method=method,
+            path="/api/v1/auth/me",
+            formatted_path="/api/v1/auth/me",
+            operation=operation,
+            call=fake_call,
+        )
+        response = StubResponse(
+            status_code=first_status,
+            headers=dict(response_headers),
+            content=body,
+        )
+        return case, response, captured
+
+    def test_idempotency_replay_forwards_cookie(self) -> None:
+        """``check_idempotency_round_trip`` carries ``Cookie`` into replay."""
+        from tests.contract.hooks import check_idempotency_round_trip
+
+        case, response, captured = self._make_stubs(
+            method="POST",
+            first_status=201,
+            replay_status=201,
+            request_headers={
+                "Idempotency-Key": "key-abc",
+                "Cookie": "__Host-crewday_session=abc",
+            },
+            response_headers={},
+            op_header_params=["Idempotency-Key"],
+            response_header_decls=[],
+            body=b'{"ok": true}',
+        )
+
+        check_idempotency_round_trip(
+            cast(Any, None), cast(Any, response), cast(Any, case)
+        )
+
+        assert len(captured) == 1, "expected exactly one replay call"
+        forwarded = captured[0]
+        assert forwarded.get("Cookie") == "__Host-crewday_session=abc"
+        assert forwarded.get("Idempotency-Key") == "key-abc"
+
+    def test_idempotency_replay_omits_cookie_when_absent(self) -> None:
+        """No ``Cookie`` header on the original means none on the replay."""
+        from tests.contract.hooks import check_idempotency_round_trip
+
+        case, response, captured = self._make_stubs(
+            method="POST",
+            first_status=201,
+            replay_status=201,
+            request_headers={
+                "Idempotency-Key": "key-abc",
+                "Authorization": "Bearer tok",
+            },
+            response_headers={},
+            op_header_params=["Idempotency-Key"],
+            response_header_decls=[],
+            body=b'{"ok": true}',
+        )
+
+        check_idempotency_round_trip(
+            cast(Any, None), cast(Any, response), cast(Any, case)
+        )
+
+        assert len(captured) == 1
+        forwarded = captured[0]
+        assert "Cookie" not in forwarded
+        assert forwarded.get("Authorization") == "Bearer tok"
+
+    def test_etag_replay_forwards_cookie(self) -> None:
+        """``check_etag_round_trip`` carries ``Cookie`` into the conditional GET."""
+        from tests.contract.hooks import check_etag_round_trip
+
+        case, response, captured = self._make_stubs(
+            method="GET",
+            first_status=200,
+            replay_status=304,
+            request_headers={"Cookie": "__Host-crewday_session=abc"},
+            response_headers={"ETag": '"v1"'},
+            op_header_params=[],
+            response_header_decls=["ETag"],
+            body=b'{"ok": true}',
+        )
+
+        check_etag_round_trip(cast(Any, None), cast(Any, response), cast(Any, case))
+
+        assert len(captured) == 1
+        forwarded = captured[0]
+        assert forwarded.get("Cookie") == "__Host-crewday_session=abc"
+        assert forwarded.get("If-None-Match") == '"v1"'
+
+    def test_etag_replay_omits_cookie_when_absent(self) -> None:
+        """ETag hook: no ``Cookie`` on the original means none on the replay.
+
+        Symmetric to the idempotency-hook variant; pins the same
+        conditional-forward shape so a refactor that accidentally
+        unconditionally inserts ``Cookie`` (e.g. with an empty string
+        when missing) is caught.
+        """
+        from tests.contract.hooks import check_etag_round_trip
+
+        case, response, captured = self._make_stubs(
+            method="GET",
+            first_status=200,
+            replay_status=304,
+            request_headers={"Authorization": "Bearer tok"},
+            response_headers={"ETag": '"v1"'},
+            op_header_params=[],
+            response_header_decls=["ETag"],
+            body=b'{"ok": true}',
+        )
+
+        check_etag_round_trip(cast(Any, None), cast(Any, response), cast(Any, case))
+
+        assert len(captured) == 1
+        forwarded = captured[0]
+        assert "Cookie" not in forwarded
+        assert forwarded.get("Authorization") == "Bearer tok"
+        assert forwarded.get("If-None-Match") == '"v1"'
+
+    def test_idempotency_replay_forwards_both_credentials(self) -> None:
+        """Both ``Authorization`` and ``Cookie`` ride the replay together.
+
+        The two forwards are independent — neither should suppress the
+        other. Pins the realistic dev-runner shape where the global
+        ``--header`` flags inject both at once.
+        """
+        from tests.contract.hooks import check_idempotency_round_trip
+
+        case, response, captured = self._make_stubs(
+            method="POST",
+            first_status=201,
+            replay_status=201,
+            request_headers={
+                "Idempotency-Key": "key-abc",
+                "Authorization": "Bearer tok",
+                "Cookie": "__Host-crewday_session=abc",
+            },
+            response_headers={},
+            op_header_params=["Idempotency-Key"],
+            response_header_decls=[],
+            body=b'{"ok": true}',
+        )
+
+        check_idempotency_round_trip(
+            cast(Any, None), cast(Any, response), cast(Any, case)
+        )
+
+        assert len(captured) == 1
+        forwarded = captured[0]
+        assert forwarded.get("Authorization") == "Bearer tok"
+        assert forwarded.get("Cookie") == "__Host-crewday_session=abc"
+        assert forwarded.get("Idempotency-Key") == "key-abc"
