@@ -347,11 +347,14 @@ Plain text to the user; CLI handles styling.
   root — palette, type scale, radii, elevation, component shapes,
   do's and don'ts. It carries normative tokens in YAML frontmatter
   and prose rationale below. Read it before any visual change.
-  The living CSS implementation is `mocks/web/src/styles/tokens.css`
-  and `mocks/web/src/styles/globals.css`. **If `DESIGN.md` and the
-  CSS disagree on any value, stop and ask the user which side is
-  correct, then fix the wrong side in the same turn. Never silently
-  match one to the other.
+  The living CSS source tree is `mocks/web/src/styles/`
+  (`tokens.css`, `globals.css`, `fonts.css`, `reset.css`);
+  `app/web/src/styles/` is the reviewed mirror for promoted production
+  UI, per
+  `docs/specs/14-web-frontend.md` "App / Mock Ownership". **If
+  `DESIGN.md` and the CSS disagree on any value, stop and ask the user
+  which side is correct, then fix the wrong side in the same turn. Never
+  silently match one to the other.
 - **No PII to upstream LLMs without explicit opt-in.** Use the
   model client's redaction layer.
 - **Time is UTC at rest, local for display.** Timestamp columns are

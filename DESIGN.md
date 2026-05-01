@@ -174,9 +174,10 @@ Style guide for agents writing code under `mocks/web/`, `app/web/`,
 and `site/web/`. Tokens above are normative; the prose below explains
 *why* and *when*.
 
-The living implementation lives in
-[`mocks/web/src/styles/tokens.css`](mocks/web/src/styles/tokens.css)
-and [`mocks/web/src/styles/globals.css`](mocks/web/src/styles/globals.css).
+The living CSS source tree is [`mocks/web/src/styles/`](mocks/web/src/styles/).
+Its matching files under [`app/web/src/styles/`](app/web/src/styles/) are
+reviewed mirrors for promoted production UI; ownership and drift rules
+live in `docs/specs/14-web-frontend.md` "App / Mock Ownership".
 
 **On divergence between this file and the CSS, neither side wins
 silently.** An agent who notices a token, type level, radius,
@@ -499,4 +500,5 @@ inherit `currentColor`.
 **Cross-references.** Frontend invariants: `docs/specs/14-web-frontend.md`.
 Marketing-site design: `docs/specs-site/00-overview.md` (tokens flow
 one-way app → site). Agent operating rules: `AGENTS.md`. Component
-source of truth: `mocks/web/src/`.
+ownership and app/mock drift policy:
+`docs/specs/14-web-frontend.md` "App / Mock Ownership".

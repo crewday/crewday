@@ -1,11 +1,3 @@
-// PLACEHOLDER — real impl lands in cd-qdsl. DO NOT USE FOR PRODUCTION
-// DECISIONS.
-//
-// Copied verbatim from `mocks/web/src/lib/routeParents.ts` so the
-// PageHeader component port compiles. The rules table is already the
-// production shape; cd-qdsl's lib port just lifts it into the final
-// module tree.
-//
 // Parent-route resolution for the header back button. Spec §14 "Page
 // header" — sub-pages get their back affordance from this map so
 // every one of them lands on the same consistent left-chevron

@@ -11,6 +11,45 @@ the React code — go there first. This file captures only the
 principles, the route contract, the design language, and the
 accessibility / performance / PWA gates.
 
+## App / Mock Ownership
+
+`mocks/web/` remains the visual and interaction source of truth until a
+surface is promoted into `app/web/`. `app/web/` is the production
+implementation: it may add real API wiring, offline queues, tests, and
+deployment-specific code, but it must preserve the promoted route,
+component anatomy, copy, and visual behavior unless this spec changes
+first.
+
+CSS has one source tree: `mocks/web/src/styles/`. `tokens.css`,
+`globals.css`, `fonts.css`, and `reset.css` are edited there first, and
+the matching files under `app/web/src/styles/` are reviewed mirrors for
+promoted surfaces. A CSS change that affects promoted UI must land in
+both trees in the same change unless the `app/web` copy is intentionally
+behind the mock because the surface has not been promoted yet; that
+intentional lag is called out in the task or PR. The style splitting
+work in `cd-x5fb` starts from `mocks/web/src/styles/`, then mirrors the
+same file layout into `app/web/src/styles/` for promoted selectors.
+
+Production-ready shared components and small pure helpers are owned by
+the promoted pair, not by a hidden third copy: when a file is copied
+from `mocks/web/src/{components,context,lib}/` into the same path under
+`app/web/src/`, the two files should stay byte-identical or differ only
+where production runtime concerns require it. Intentional divergence
+must be documented either in this section or in the file header with the
+reason and the owning tree. Runtime helpers that touch network behavior,
+SSE, cache invalidation, auth, offline persistence, or generated API
+types are allowed to diverge: `app/web` owns the production behavior,
+while `mocks/web` owns the mock contract.
+
+The page-header navigation family is intentionally unified:
+`components/PageHeader.tsx` and `lib/routeParents.ts` are production-ready
+shared files and must stay identical across `app/web` and `mocks/web`.
+Route-parent rule changes are made in both trees in the same change and
+validated by both frontend builds. Until this policy grows a dedicated
+import-boundary or mirror-check target, review catches accidental
+one-sided edits with `git diff --no-index` or `cmp -s` on each unified
+file pair, starting with `PageHeader.tsx` and `routeParents.ts`.
+
 ## Principles
 
 - **React SPA.** FastAPI serves `index.html` for any non-API GET;
@@ -737,9 +776,11 @@ the platform must guarantee*.
 
 Every authenticated route — worker, manager, client, admin — renders
 its chrome through a single `PageHeader` component
-(`mocks/web/src/components/PageHeader.tsx`). Consistency here is what
-makes the PWA feel like a native app: the same bar, in the same
-place, with the same three slots, regardless of surface.
+(`mocks/web/src/components/PageHeader.tsx`, mirrored byte-for-byte to
+`app/web/src/components/PageHeader.tsx` for promoted production UI).
+Consistency here is what makes the PWA feel like a native app: the
+same bar, in the same place, with the same three slots, regardless of
+surface.
 
 - **Three slots.** `leading` (navigation affordance: hamburger or
   back), `title` + `sub` (page identity), `trailing` (at most one
@@ -763,14 +804,14 @@ place, with the same three slots, regardless of surface.
   non-sticky and keeps the large Fraunces title.
 - **Back button from a route map.** `PageHeader` accepts a `back`
   prop, but sub-pages normally omit it — the component resolves the
-  parent through `mocks/web/src/lib/routeParents.ts` (`/task/:id →
-  /today`, `/asset/:id → /assets`, `/instructions/:id →
-  /instructions`, `/property/:id → /properties`,
-  `/user/:id → /users`, `/history → /me`, etc.). The leading slot
-  renders a left-chevron icon-button (Lucide `ChevronLeft`,
-  ≥44×44 tap target per Accessibility). This retires every
-  `className="back-link"` inside page bodies; a page that wants a
-  non-default parent passes `back={{ to, label }}`.
+  parent through `mocks/web/src/lib/routeParents.ts` and the matching
+  `app/web/src/lib/routeParents.ts` mirror (`/task/:id → /today`,
+  `/asset/:id → /assets`, `/instructions/:id → /instructions`,
+  `/property/:id → /properties`, `/user/:id → /users`, `/history →
+  /me`, etc.). The leading slot renders a left-chevron icon-button
+  (Lucide `ChevronLeft`, ≥44×44 tap target per Accessibility). This
+  retires every `className="back-link"` inside page bodies; a page
+  that wants a non-default parent passes `back={{ to, label }}`.
 - **Hamburger folds into the leading slot.** The legacy
   `.desk__mobile-bar` strip that showed a hamburger + "crew.day"
   wordmark above the page header on manager/admin phone is gone.
