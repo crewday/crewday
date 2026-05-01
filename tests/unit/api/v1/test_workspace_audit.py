@@ -17,7 +17,7 @@ from tests.unit.api.v1.identity.conftest import build_client, ctx_for
 pytest_plugins = ("tests.unit.api.v1.identity.conftest",)
 
 PINNED = datetime(2026, 4, 29, 12, 0, 0, tzinfo=UTC)
-AFTER_BOOTSTRAP = PINNED + timedelta(days=1)
+AFTER_BOOTSTRAP = datetime(2100, 1, 1, 12, 0, 0, tzinfo=UTC)
 
 
 def _client(ctx: WorkspaceContext, factory: sessionmaker[Session]) -> TestClient:

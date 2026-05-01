@@ -29,6 +29,7 @@ See ``docs/specs/12-rest-api.md`` §"Tasks / templates / schedules",
 
 from __future__ import annotations
 
+import hashlib
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -858,6 +859,9 @@ class TestTasksListing:
                 instruction_id=instruction_id,
                 version_num=2,
                 body_md="Lock the gate after cleaning.",
+                body_hash=hashlib.sha256(
+                    b"Lock the gate after cleaning."
+                ).hexdigest(),
                 author_id=seeded["owner_id"],
                 created_at=_PINNED + timedelta(minutes=5),
             )

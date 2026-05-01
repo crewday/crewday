@@ -15,6 +15,7 @@ from fastapi import (
     status,
 )
 
+from app.api.uploads import read_upload_capped, require_upload_content_type
 from app.domain.tasks.completion import (
     EvidenceContentTypeNotAllowed,
     EvidenceGpsPayloadInvalid,
@@ -133,28 +134,19 @@ async def _read_file_capped(upload: UploadFile, *, kind: str) -> bytes:
     advertised body **before** the multipart parser runs; this
     function bounds an unadvertised / lying body during the read.
     """
-    chunk_size = 64 * 1024
-    total = 0
-    pieces: list[bytes] = []
-    while True:
-        chunk = await upload.read(chunk_size)
-        if not chunk:
-            break
-        total += len(chunk)
-        if total > _MAX_FILE_EVIDENCE_BYTES:
-            await upload.close()
-            raise _http(
-                status.HTTP_413_CONTENT_TOO_LARGE,
-                "evidence_too_large",
-                kind=kind,
-                message=(
-                    f"upload exceeds the {_MAX_FILE_EVIDENCE_BYTES - 1}-byte "
-                    "router-level cap"
-                ),
-            )
-        pieces.append(chunk)
-    await upload.close()
-    return b"".join(pieces)
+    return await read_upload_capped(
+        upload,
+        max_bytes=_MAX_FILE_EVIDENCE_BYTES,
+        too_large=lambda: _http(
+            status.HTTP_413_CONTENT_TOO_LARGE,
+            "evidence_too_large",
+            kind=kind,
+            message=(
+                f"upload exceeds the {_MAX_FILE_EVIDENCE_BYTES - 1}-byte "
+                "router-level cap"
+            ),
+        ),
+    )
 
 
 @router.post(
@@ -261,18 +253,22 @@ async def upload_task_evidence_route(
                 "use kind='note' for notes"
             ),
         )
-    declared_type = file.content_type
-    if declared_type is None or declared_type == "":
-        await file.close()
-        raise _http(
-            status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
-            "evidence_content_type_missing",
-            kind=kind,
-            message=(
-                f"kind={kind!r} evidence requires a 'Content-Type' header on the "
-                "uploaded file part"
+    try:
+        declared_type = require_upload_content_type(
+            file,
+            missing=lambda: _http(
+                status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+                "evidence_content_type_missing",
+                kind=kind,
+                message=(
+                    f"kind={kind!r} evidence requires a 'Content-Type' header on the "
+                    "uploaded file part"
+                ),
             ),
         )
+    except HTTPException:
+        await file.close()
+        raise
 
     payload = await _read_file_capped(file, kind=kind)
     # Narrow ``kind`` from the loose ``str`` form field to the typed

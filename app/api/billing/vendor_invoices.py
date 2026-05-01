@@ -22,6 +22,11 @@ from app.api.deps import (
     get_mime_sniffer,
     get_storage,
 )
+from app.api.uploads import (
+    read_upload_capped,
+    require_upload_content_type,
+    sniff_allowed_upload_mime,
+)
 from app.authz.dep import Permission
 from app.domain.billing.vendor_invoices import (
     VendorInvoiceCreate,
@@ -164,33 +169,27 @@ def _http_for_vendor_invoice_error(exc: Exception) -> HTTPException:
 
 
 async def _read_pdf_capped(upload: UploadFile) -> bytes:
-    chunk_size = 64 * 1024
-    total = 0
-    pieces: list[bytes] = []
-    while True:
-        chunk = await upload.read(chunk_size)
-        if not chunk:
-            break
-        total += len(chunk)
-        if total > _MAX_PDF_BYTES:
-            await upload.close()
-            raise HTTPException(
-                status_code=status.HTTP_413_CONTENT_TOO_LARGE,
-                detail={"error": "vendor_invoice_pdf_too_large"},
-            )
-        pieces.append(chunk)
-    await upload.close()
-    return b"".join(pieces)
+    return await read_upload_capped(
+        upload,
+        max_bytes=_MAX_PDF_BYTES,
+        too_large=lambda: HTTPException(
+            status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+            detail={"error": "vendor_invoice_pdf_too_large"},
+        ),
+    )
 
 
 def _sniff_pdf(mime_sniffer: MimeSniffer, payload: bytes, declared_type: str) -> str:
-    sniffed = mime_sniffer.sniff(payload, hint=declared_type)
-    if sniffed != "application/pdf":
-        raise HTTPException(
+    return sniff_allowed_upload_mime(
+        mime_sniffer,
+        payload,
+        declared_type=declared_type,
+        allowed={"application/pdf"},
+        rejected=lambda _sniffed: HTTPException(
             status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
             detail={"error": "vendor_invoice_pdf_invalid_type"},
-        )
-    return sniffed
+        ),
+    )
 
 
 def _check_pdf_content_length(request: Request) -> None:
@@ -212,33 +211,27 @@ _PdfContentLengthGuard = Annotated[None, Depends(_check_pdf_content_length)]
 
 
 async def _read_proof_capped(upload: UploadFile) -> bytes:
-    chunk_size = 64 * 1024
-    total = 0
-    pieces: list[bytes] = []
-    while True:
-        chunk = await upload.read(chunk_size)
-        if not chunk:
-            break
-        total += len(chunk)
-        if total > _MAX_PROOF_BYTES:
-            await upload.close()
-            raise HTTPException(
-                status_code=status.HTTP_413_CONTENT_TOO_LARGE,
-                detail={"error": "vendor_invoice_proof_too_large"},
-            )
-        pieces.append(chunk)
-    await upload.close()
-    return b"".join(pieces)
+    return await read_upload_capped(
+        upload,
+        max_bytes=_MAX_PROOF_BYTES,
+        too_large=lambda: HTTPException(
+            status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+            detail={"error": "vendor_invoice_proof_too_large"},
+        ),
+    )
 
 
 def _sniff_proof(mime_sniffer: MimeSniffer, payload: bytes, declared_type: str) -> str:
-    sniffed = mime_sniffer.sniff(payload, hint=declared_type)
-    if sniffed not in _PROOF_MIME_TYPES:
-        raise HTTPException(
+    return sniff_allowed_upload_mime(
+        mime_sniffer,
+        payload,
+        declared_type=declared_type,
+        allowed=_PROOF_MIME_TYPES,
+        rejected=lambda _sniffed: HTTPException(
             status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
             detail={"error": "vendor_invoice_proof_invalid_type"},
-        )
-    return sniffed
+        ),
+    )
 
 
 def _check_proof_content_length(request: Request) -> None:
@@ -388,13 +381,17 @@ def build_vendor_invoices_router() -> APIRouter:
                 status_code=422,
                 detail={"error": "vendor_invoice_pdf_required"},
             )
-        declared_type = file.content_type
-        if declared_type is None or declared_type == "":
-            await file.close()
-            raise HTTPException(
-                status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
-                detail={"error": "vendor_invoice_pdf_content_type_missing"},
+        try:
+            declared_type = require_upload_content_type(
+                file,
+                missing=lambda: HTTPException(
+                    status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+                    detail={"error": "vendor_invoice_pdf_content_type_missing"},
+                ),
             )
+        except HTTPException:
+            await file.close()
+            raise
         payload = await _read_pdf_capped(file)
         sniffed_type = _sniff_pdf(mime_sniffer, payload, declared_type)
         blob_hash = hashlib.sha256(payload).hexdigest()
@@ -477,13 +474,17 @@ def build_vendor_invoices_router() -> APIRouter:
                 status_code=422,
                 detail={"error": "vendor_invoice_proof_required"},
             )
-        declared_type = file.content_type
-        if declared_type is None or declared_type == "":
-            await file.close()
-            raise HTTPException(
-                status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
-                detail={"error": "vendor_invoice_proof_content_type_missing"},
+        try:
+            declared_type = require_upload_content_type(
+                file,
+                missing=lambda: HTTPException(
+                    status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+                    detail={"error": "vendor_invoice_proof_content_type_missing"},
+                ),
             )
+        except HTTPException:
+            await file.close()
+            raise
         payload = await _read_proof_capped(file)
         sniffed_type = _sniff_proof(mime_sniffer, payload, declared_type)
         blob_hash = hashlib.sha256(payload).hexdigest()

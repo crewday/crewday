@@ -49,6 +49,11 @@ from app.api.pagination import (
     decode_cursor,
     paginate,
 )
+from app.api.uploads import (
+    read_upload_capped,
+    require_upload_content_type,
+    sniff_allowed_upload_mime,
+)
 from app.authz.dep import Permission
 from app.domain.assets.actions import (
     AssetActionAccessDenied,
@@ -1314,28 +1319,17 @@ def _stamp_completion_metadata(
 
 
 async def _read_document_capped(upload: UploadFile) -> bytes:
-    chunk_size = 64 * 1024
-    total = 0
-    pieces: list[bytes] = []
-    while True:
-        chunk = await upload.read(chunk_size)
-        if not chunk:
-            break
-        total += len(chunk)
-        if total > _MAX_ASSET_DOCUMENT_BYTES:
-            await upload.close()
-            raise HTTPException(
-                status_code=status.HTTP_413_CONTENT_TOO_LARGE,
-                detail={
-                    "error": "asset_document_too_large",
-                    "message": (
-                        f"upload exceeds the {_MAX_ASSET_DOCUMENT_BYTES}-byte cap"
-                    ),
-                },
-            )
-        pieces.append(chunk)
-    await upload.close()
-    return b"".join(pieces)
+    return await read_upload_capped(
+        upload,
+        max_bytes=_MAX_ASSET_DOCUMENT_BYTES,
+        too_large=lambda: HTTPException(
+            status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+            detail={
+                "error": "asset_document_too_large",
+                "message": f"upload exceeds the {_MAX_ASSET_DOCUMENT_BYTES}-byte cap",
+            },
+        ),
+    )
 
 
 def _sniff_document_mime(
@@ -1344,24 +1338,30 @@ def _sniff_document_mime(
     *,
     declared_type: str,
 ) -> str:
-    sniffed = mime_sniffer.sniff(payload, hint=declared_type)
-    if sniffed is None and declared_type.lower().startswith("text/"):
+    def _plain_text_fallback(payload: bytes, declared_type: str) -> str | None:
+        if not declared_type.lower().startswith("text/"):
+            return None
         try:
             payload.decode("utf-8")
         except UnicodeDecodeError:
-            sniffed = None
-        else:
-            sniffed = "text/plain"
-    if sniffed not in _ASSET_DOCUMENT_ALLOWED_MIME:
-        raise HTTPException(
+            return None
+        return "text/plain"
+
+    return sniff_allowed_upload_mime(
+        mime_sniffer,
+        payload,
+        declared_type=declared_type,
+        allowed=_ASSET_DOCUMENT_ALLOWED_MIME,
+        rejected=lambda sniffed: HTTPException(
             status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
             detail={
                 "error": "asset_document_content_type_rejected",
                 "content_type": sniffed,
                 "declared_type": declared_type,
             },
-        )
-    return sniffed
+        ),
+        fallback=_plain_text_fallback,
+    )
 
 
 def _storage_from_request(request: Request) -> Storage:
@@ -1971,13 +1971,17 @@ def build_assets_router() -> APIRouter:
                 status_code=422,
                 detail={"error": "asset_document_file_required"},
             )
-        declared_type = file.content_type
-        if declared_type is None or declared_type == "":
-            await file.close()
-            raise HTTPException(
-                status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
-                detail={"error": "asset_document_content_type_missing"},
+        try:
+            declared_type = require_upload_content_type(
+                file,
+                missing=lambda: HTTPException(
+                    status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+                    detail={"error": "asset_document_content_type_missing"},
+                ),
             )
+        except HTTPException:
+            await file.close()
+            raise
         try:
             get_asset(session, ctx, asset_id=asset_id)
             if category not in ASSET_DOCUMENT_CATEGORIES:

@@ -84,6 +84,10 @@ from sqlalchemy.orm import Session
 from app.adapters.db.identity.models import User
 from app.adapters.storage.ports import Storage
 from app.api.deps import db_session, get_storage
+from app.api.uploads import (
+    read_upload_file_capped,
+    require_allowed_upload_content_type,
+)
 from app.audit import write_audit
 from app.auth import session as auth_session
 from app.auth.session_cookie import DEV_SESSION_COOKIE_NAME
@@ -232,20 +236,28 @@ def _read_capped(upload: UploadFile) -> bytes:
     so the realistic payload is well under the cap; the guard is
     defence against a malicious / broken client.
     """
-    buffer = io.BytesIO()
-    total = 0
-    while True:
-        chunk = upload.file.read(_READ_CHUNK)
-        if not chunk:
-            break
-        total += len(chunk)
-        if total > _MAX_BYTES:
-            raise HTTPException(
-                status_code=status.HTTP_413_CONTENT_TOO_LARGE,
-                detail={"error": "avatar_too_large"},
-            )
-        buffer.write(chunk)
-    return buffer.getvalue()
+    return read_upload_file_capped(
+        upload,
+        max_bytes=_MAX_BYTES,
+        too_large=lambda: HTTPException(
+            status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+            detail={"error": "avatar_too_large"},
+        ),
+        chunk_size=_READ_CHUNK,
+    )
+
+
+def _avatar_content_type_rejected(content_type: str | None) -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+        detail={
+            "error": "avatar_content_type_rejected",
+            "message": (
+                f"content_type={content_type!r} is not one of "
+                f"{sorted(_ALLOWED_CONTENT_TYPES)}"
+            ),
+        },
+    )
 
 
 def _check_content_length(request: Request) -> None:
@@ -372,17 +384,11 @@ def build_me_avatar_router() -> APIRouter:
         ``avatar_blob_hash`` is updated to the new digest; the
         previous blob is NOT deleted — GC is a sweep concern.
         """
-        if image.content_type not in _ALLOWED_CONTENT_TYPES:
-            raise HTTPException(
-                status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
-                detail={
-                    "error": "avatar_content_type_rejected",
-                    "message": (
-                        f"content_type={image.content_type!r} is not one of "
-                        f"{sorted(_ALLOWED_CONTENT_TYPES)}"
-                    ),
-                },
-            )
+        content_type = require_allowed_upload_content_type(
+            image,
+            allowed=_ALLOWED_CONTENT_TYPES,
+            rejected=_avatar_content_type_rejected,
+        )
 
         user = _resolve_session_user(
             session,
@@ -406,7 +412,7 @@ def build_me_avatar_router() -> APIRouter:
         storage.put(
             digest,
             io.BytesIO(payload),
-            content_type=image.content_type,
+            content_type=content_type,
         )
 
         # The domain service layer would own this transition once an

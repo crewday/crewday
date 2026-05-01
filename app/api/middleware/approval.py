@@ -286,6 +286,13 @@ def _dispatch_cancel_task(
             mutated=False,
         )
     with make_uow() as session:
+        if not isinstance(session, Session):
+            return ToolResult(
+                call_id=call.id,
+                status_code=500,
+                body={"error": "unsupported_session"},
+                mutated=False,
+            )
         workspace_id = _workspace_id_for_slug(session, workspace_slug)
         if workspace_id is None:
             return ToolResult(
