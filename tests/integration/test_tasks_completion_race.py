@@ -247,7 +247,7 @@ class TestConcurrentCompletion:
             # with a distinguishable timestamp.
             clock.advance(timedelta(minutes=2))
 
-            # --- Writer B (second) lands on the same (already-done)
+            # --- Writer B (second) lands on the same (already-completed)
             # row. The two UoWs commit in sequence; writer B reads the
             # committed state left by writer A. -------------------------
             with factory() as session_b:
@@ -265,7 +265,7 @@ class TestConcurrentCompletion:
                 # Row state: writer B's fields win.
                 row = session_read.get(Occurrence, task_id)
                 assert row is not None
-                assert row.state == "done"
+                assert row.state == "completed"
                 assert row.completed_by_user_id == user_b
 
                 # Audit: one ``task.complete`` per writer + one

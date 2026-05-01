@@ -65,7 +65,13 @@ from .payloads import (
 router = APIRouter()
 
 _OccurrenceState = Literal[
-    "scheduled", "pending", "in_progress", "done", "skipped", "cancelled", "overdue"
+    "scheduled",
+    "pending",
+    "in_progress",
+    "completed",
+    "skipped",
+    "cancelled",
+    "overdue",
 ]
 
 
@@ -394,7 +400,7 @@ def start_task_route(
     "/tasks/{task_id}/complete",
     response_model=TaskStatePayload,
     operation_id="complete_task",
-    summary="Mark a task done — gated by evidence + checklist policy",
+    summary="Mark a task completed — gated by evidence + checklist policy",
 )
 def complete_task_route(
     task_id: str,

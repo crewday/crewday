@@ -211,7 +211,7 @@ describe("TaskDetailPage", () => {
     const env = installFetch({
       "/api/v1/tasks/t1/detail": [
         { body: baseTask() },
-        { body: baseTask({ state: "done" }) },
+        { body: baseTask({ state: "completed" }) },
       ],
       "/api/v1/tasks/t1/evidence": [
         { body: emptyEvidence() },
@@ -248,7 +248,7 @@ describe("TaskDetailPage", () => {
         {
           body: {
             task_id: "t1",
-            state: "done",
+            state: "completed",
             completed_at: "2026-04-28T09:50:00Z",
             completed_by_user_id: "u1",
             reason: null,

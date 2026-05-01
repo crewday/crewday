@@ -11,7 +11,7 @@
   "login.title": "Šíĝñ íñ ŵíŧĥ ýöúŕ ṕåššķéý ~~~~~~~",
   "notification.task_assigned": "Ŧåšķ åššíĝñéð:  ~~~~{task_title}",
   "task.status.cancelled": "Çåñçéĺĺéð ~~",
-  "task.status.done": "Ðöñé ~",
+  "task.status.completed": "Çöḿṕĺéţéð ~~",
   "task.status.in_progress": "Ĩñ ṕŕöĝŕéšš ~~~",
   "task.status.scheduled": "Šçĥéðúĺéð ~~"
 }

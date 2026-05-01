@@ -106,7 +106,7 @@ def request_review(
     resolved_bus = event_bus if event_bus is not None else default_event_bus
 
     task = _load_task(session, ctx, task_id)
-    if task.state != "done" or task.completed_at is None:
+    if task.state != "completed" or task.completed_at is None:
         raise TaskNotCompleted(f"task {task_id!r} is not completed")
 
     now = resolved_clock.now()

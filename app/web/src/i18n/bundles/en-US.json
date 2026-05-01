@@ -11,7 +11,7 @@
   "login.title": "Sign in with your passkey",
   "notification.task_assigned": "Task assigned: {task_title}",
   "task.status.cancelled": "Cancelled",
-  "task.status.done": "Done",
+  "task.status.completed": "Completed",
   "task.status.in_progress": "In progress",
   "task.status.scheduled": "Scheduled"
 }

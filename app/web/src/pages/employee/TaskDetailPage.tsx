@@ -32,7 +32,7 @@ type ApiTaskState =
   | "scheduled"
   | "pending"
   | "in_progress"
-  | "done"
+  | "completed"
   | "skipped"
   | "cancelled"
   | "overdue";
@@ -764,11 +764,11 @@ function normalizeTask(task: ApiTask): NormalizedTask {
 
 function statusToState(status: RenderTaskStatus | undefined): ApiTaskState | null {
   if (!status) return null;
-  return status === "completed" ? "done" : status;
+  return status;
 }
 
 function stateToStatus(state: ApiTaskState): RenderTaskStatus {
-  return state === "done" ? "completed" : state;
+  return state;
 }
 
 function normalizeChecklistItem(item: ApiChecklistItem): ChecklistItemView {

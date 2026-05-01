@@ -115,7 +115,7 @@ SETTINGS_KEY_OVERDUE_GRACE_MINUTES: Final[str] = "tasks.overdue_grace_minutes"
 SETTINGS_KEY_OVERDUE_TICK_SECONDS: Final[str] = "tasks.overdue_tick_seconds"
 
 
-# Source states the sweeper will flip. Any other state — ``done``,
+# Source states the sweeper will flip. Any other state — ``completed``,
 # ``skipped``, ``cancelled``, ``approved``, or already ``overdue`` —
 # is left untouched. Pulled out so the load-query filter and the
 # per-row UPDATE guard reference the same tuple (the manual-transition

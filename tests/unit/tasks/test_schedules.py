@@ -975,7 +975,7 @@ class TestApplyToExisting:
             schedule_id=view.id,
             template_id=tpl.id,
             property_id=prop,
-            state="done",
+            state="completed",
         )
 
         update(
@@ -1280,7 +1280,7 @@ class TestDelete:
             schedule_id=view.id,
             template_id=tpl.id,
             property_id=prop,
-            state="done",
+            state="completed",
         )
 
         delete(session, ctx, schedule_id=view.id, clock=FrozenClock(_PINNED))
@@ -1292,7 +1292,7 @@ class TestDelete:
         assert sched_occ.cancellation_reason == "schedule deleted"
         assert pending_occ.state == "pending"
         assert pending_occ.cancellation_reason is None
-        assert done_occ.state == "done"
+        assert done_occ.state == "completed"
         assert done_occ.cancellation_reason is None
 
     def test_cascade_writes_audit(self, session: Session) -> None:

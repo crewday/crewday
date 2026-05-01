@@ -9,7 +9,7 @@ from dateutil.rrule import rrulestr
 
 from app.domain.tasks.oneoff import TaskView
 
-_TERMINAL_STATES: frozenset[str] = frozenset({"done", "skipped", "cancelled"})
+_TERMINAL_STATES: frozenset[str] = frozenset({"completed", "skipped", "cancelled"})
 
 
 def _aware_utc(value: datetime | None) -> datetime | None:

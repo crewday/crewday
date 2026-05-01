@@ -275,7 +275,7 @@ class TestOccurrenceModel:
         ]
         assert len(checks) == 1
         sql = str(checks[0].sqltext)
-        for state in ("pending", "in_progress", "done", "skipped", "approved"):
+        for state in ("pending", "in_progress", "completed", "skipped", "approved"):
             assert state in sql, f"{state} missing from CHECK constraint"
 
     def test_ends_after_starts_check_present(self) -> None:

@@ -258,7 +258,7 @@ The canonical enum lives in §02 (`task_state`, 7 values including
   `scheduled_for_local` re-runs the `scheduled ↔ pending` gate at
   `starts_at <= now` (a task pulled into the past flips to `pending`,
   one pushed back into the future returns to `scheduled`); tasks
-  already past `pending` (`in_progress`, `done`, `skipped`,
+  already past `pending` (`in_progress`, `completed`, `skipped`,
   `cancelled`, `overdue`) keep their state — the worker has either
   started or closed the task and a passive PATCH must not undo a
   deliberate move.

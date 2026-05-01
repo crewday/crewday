@@ -56,7 +56,7 @@ LOCALIZED_ENUMS: Mapping[str, Mapping[str, str]] = {
     "task.status": {
         "scheduled": "task.status.scheduled",
         "in_progress": "task.status.in_progress",
-        "done": "task.status.done",
+        "completed": "task.status.completed",
         "cancelled": "task.status.cancelled",
     },
     "approval.status": {

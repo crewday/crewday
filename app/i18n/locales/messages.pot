@@ -40,7 +40,7 @@ msgstr ""
 msgid "task.status.cancelled"
 msgstr ""
 
-msgid "task.status.done"
+msgid "task.status.completed"
 msgstr ""
 
 msgid "task.status.in_progress"

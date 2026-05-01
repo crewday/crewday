@@ -1032,7 +1032,7 @@ def delete(
     schedule row and cancels every linked task with ``state =
     scheduled`` (sets ``state = cancelled``, ``cancellation_reason
     = 'schedule deleted'``). Already-actionable or in-progress
-    tasks (``state IN ('pending', 'in_progress', 'done', ...)``)
+    tasks (``state IN ('pending', 'in_progress', 'completed', ...)``)
     are **not** cancelled — the spec is explicit about
     ``scheduled`` only.
 

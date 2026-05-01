@@ -345,7 +345,7 @@ def _task_status(
     "cancelled",
     "overdue",
 ]:
-    if state in {"done", "approved"}:
+    if state in {"completed", "approved"}:
         return "completed"
     if state == "scheduled":
         return "scheduled"

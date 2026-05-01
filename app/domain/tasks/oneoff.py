@@ -392,7 +392,7 @@ class TaskView:
         "scheduled",
         "pending",
         "in_progress",
-        "done",
+        "completed",
         "skipped",
         "cancelled",
         "overdue",
@@ -498,7 +498,7 @@ class _Resolved:
     Split out from :func:`create_oneoff` so the template-copy logic
     has a single return shape the inserter trusts. Narrowing the
     priority / photo_evidence strings to their :class:`Literal` types
-    is done here so the inserter never sees a plain ``str``.
+    happens here so the inserter never sees a plain ``str``.
     """
 
     title: str
@@ -856,7 +856,7 @@ _TaskStateName = Literal[
     "scheduled",
     "pending",
     "in_progress",
-    "done",
+    "completed",
     "skipped",
     "cancelled",
     "overdue",
@@ -879,8 +879,8 @@ def _narrow_task_state(value: str) -> _TaskStateName:
         return "pending"
     if value == "in_progress":
         return "in_progress"
-    if value == "done":
-        return "done"
+    if value == "completed":
+        return "completed"
     if value == "skipped":
         return "skipped"
     if value == "cancelled":
@@ -1085,7 +1085,7 @@ def update_task(
       The §06 state gate runs after the recompute: a task whose new
       local timestamp is past now flips to ``pending``; a task
       moved into the future flips back to ``scheduled``. Tasks that
-      have left the auto-flip range (``in_progress`` / ``done`` /
+      have left the auto-flip range (``in_progress`` / ``completed`` /
       ``skipped`` / ``cancelled``) keep their state — the worker
       already started or the task is closed; a passive PATCH must
       not undo a deliberate state move.
@@ -1319,7 +1319,7 @@ def _maybe_flip_schedule_state(row: Occurrence, *, now: datetime) -> None:
 
     The state machine only auto-flips between ``scheduled`` and
     ``pending`` on the schedule axis: a task that has moved to
-    ``in_progress`` / ``done`` / ``skipped`` / ``cancelled`` /
+    ``in_progress`` / ``completed`` / ``skipped`` / ``cancelled`` /
     ``overdue`` keeps its state across a PATCH (the worker has
     started it, the task is closed, or the sweeper soft-flipped it).
     A ``scheduled`` task whose new ``starts_at`` is past now becomes

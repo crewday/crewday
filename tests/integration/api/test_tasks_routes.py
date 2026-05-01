@@ -12,7 +12,7 @@ Per the cd-sn26 test plan:
   ``property_id`` / ``scheduled_for_utc_gte`` filters;
 * cross-tenant GETs collapse to 404 (not 403);
 * completing twice does not break the state machine (§06 concurrent
-  completion); a ``start`` on an already-done task surfaces
+  completion); a ``start`` on an already-completed task surfaces
   ``invalid_state_transition`` (409) — the state-machine probe for
   the idempotency flavour the product requires;
 * bad RRULE posts → 422 ``invalid_rrule``;
@@ -729,7 +729,7 @@ class TestTasksListing:
             body = r.json()
             assert any(row["id"] == seeded["task_id"] for row in body["data"]), body
 
-            r = client.get("/api/v1/tasks", params={"state": "done"})
+            r = client.get("/api/v1/tasks", params={"state": "completed"})
             assert r.status_code == 200, r.text
             body = r.json()
             assert not any(row["id"] == seeded["task_id"] for row in body["data"])
@@ -1018,7 +1018,7 @@ class TestTasksListing:
         with session_factory() as s, tenant_agnostic():
             task = s.get(Occurrence, seeded["task_id"])
             assert task is not None
-            task.state = "done"
+            task.state = "completed"
             task.completed_at = _PINNED
             task.completed_by_user_id = seeded["worker_id"]
             s.add(
@@ -1174,7 +1174,7 @@ class TestStateMachine:
             # Regression (cd-me3q self-review): ``GET /tasks/{id}`` must
             # survive a state transition. The ``TaskView.state`` Literal
             # previously covered only ``'scheduled'`` / ``'pending'``, so
-            # re-projecting an ``'in_progress'`` / ``'done'`` row via
+            # re-projecting an ``'in_progress'`` / ``'completed'`` row via
             # :func:`read_task` blew up with a narrowing ``ValueError``.
             r = client.get(f"/api/v1/tasks/{seeded['task_id']}")
             assert r.status_code == 200, r.text
@@ -1182,25 +1182,25 @@ class TestStateMachine:
 
             r = client.post(f"/api/v1/tasks/{seeded['task_id']}/complete", json={})
             assert r.status_code == 200, r.text
-            assert r.json()["state"] == "done"
+            assert r.json()["state"] == "completed"
 
             r = client.get(f"/api/v1/tasks/{seeded['task_id']}")
             assert r.status_code == 200, r.text
-            assert r.json()["state"] == "done"
+            assert r.json()["state"] == "completed"
 
             # The list route re-projects every row via the same path —
-            # verify a ``done`` row is reachable in a plain listing too.
+            # verify a ``completed`` row is reachable in a plain listing too.
             r = client.get("/api/v1/tasks")
             assert r.status_code == 200, r.text
             states = {row["id"]: row["state"] for row in r.json()["data"]}
-            assert states.get(seeded["task_id"]) == "done"
+            assert states.get(seeded["task_id"]) == "completed"
 
-    def test_start_on_done_raises_invalid_state_transition(
+    def test_start_on_completed_raises_invalid_state_transition(
         self,
         session_factory: sessionmaker[Session],
         seeded: dict[str, Any],
     ) -> None:
-        """Once the task is ``done`` the state machine rejects ``start`` —
+        """Once the task is ``completed`` the state machine rejects ``start`` —
         the behaviour the SPA observes under idempotent retries of
         completion is that the row stabilises; here we verify that a
         fresh verb against the terminal state surfaces 409."""
@@ -1211,7 +1211,7 @@ class TestStateMachine:
             assert r.status_code == 409
             body = r.json()
             assert body["detail"]["error"] == "invalid_state_transition"
-            assert body["detail"]["current"] == "done"
+            assert body["detail"]["current"] == "completed"
 
     def test_complete_twice_second_supersedes(
         self,
@@ -1228,8 +1228,8 @@ class TestStateMachine:
             assert r1.status_code == 200, r1.text
             r2 = client.post(f"/api/v1/tasks/{seeded['task_id']}/complete", json={})
             assert r2.status_code == 200, r2.text
-            # Both land; row stays done.
-            assert r2.json()["state"] == "done"
+            # Both land; row stays completed.
+            assert r2.json()["state"] == "completed"
 
     def test_worker_cannot_cancel(
         self,

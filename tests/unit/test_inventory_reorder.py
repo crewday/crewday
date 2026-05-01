@@ -322,7 +322,7 @@ def test_closed_restock_task_allows_new_low_stock_event(
 
     check_reorder_points(session, ctx, clock=clock, event_bus=bus)
     task = _tasks(session)[0]
-    task.state = "done"
+    task.state = "completed"
     task.completed_at = clock.now() + timedelta(minutes=5)
     session.flush()
     check_reorder_points(session, ctx, clock=clock, event_bus=bus)

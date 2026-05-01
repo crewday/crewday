@@ -496,7 +496,7 @@ class TestManualTransitionPreserved:
         # the next sweeper tick.
         row = session.get(Occurrence, oid)
         assert row is not None
-        row.state = "done"
+        row.state = "completed"
         session.flush()
 
         report = detect_overdue(
@@ -506,7 +506,7 @@ class TestManualTransitionPreserved:
         assert report.flipped_count == 0
         assert captured == []
         post = session.get(Occurrence, oid)
-        assert post is not None and post.state == "done"
+        assert post is not None and post.state == "completed"
         assert post.overdue_since is None
 
     def test_where_clause_guard_skips_in_flight_manual_transition(
@@ -523,10 +523,10 @@ class TestManualTransitionPreserved:
         Drives the actual SELECT-then-UPDATE race by monkey-patching
         the session's ``execute`` so that the very first per-row
         UPDATE statement is preceded by a same-session ``UPDATE
-        occurrence SET state='done'`` against the same row id. The
+        occurrence SET state='completed'`` against the same row id. The
         sweeper's UPDATE then re-asserts ``state IN
         ('scheduled', 'pending', 'in_progress')`` and matches zero
-        rows; the row stays ``done`` and the report counts the skip
+        rows; the row stays ``completed`` and the report counts the skip
         under ``skipped_manual_transition``.
         """
         ws = _bootstrap_workspace(session)
@@ -547,7 +547,7 @@ class TestManualTransitionPreserved:
             # Detect the worker's per-row UPDATE by inspecting the
             # compiled SQL. The first time we see the sweeper's
             # ``UPDATE occurrence`` statement we land a manual
-            # transition into ``done`` *before* the worker's UPDATE
+            # transition into ``completed`` *before* the worker's UPDATE
             # runs — emulating the post-SELECT pre-UPDATE race a
             # concurrent transaction would create.
             sql_text = str(stmt)
@@ -559,7 +559,7 @@ class TestManualTransitionPreserved:
                 flipped["once"] = True
                 row = session.get(Occurrence, oid)
                 assert row is not None
-                row.state = "done"
+                row.state = "completed"
                 session.flush()
             return original_execute(stmt, *args, **kwargs)
 
@@ -579,7 +579,7 @@ class TestManualTransitionPreserved:
         assert report.skipped_manual_transition == 1
         post = session.get(Occurrence, oid)
         assert post is not None
-        assert post.state == "done"
+        assert post.state == "completed"
         assert post.overdue_since is None
 
 
@@ -959,10 +959,10 @@ class TestCompletionClearsOverdueSince:
         ctx = _ctx(ws, role="worker", owner=False, actor_id=worker)
 
         result = complete(session, ctx, oid, clock=clock, event_bus=bus)
-        assert result.state == "done"
+        assert result.state == "completed"
         row = session.get(Occurrence, oid)
         assert row is not None
-        assert row.state == "done"
+        assert row.state == "completed"
         assert row.overdue_since is None
 
     def test_skip_clears_overdue_since(
@@ -1092,12 +1092,12 @@ class TestTaskPayloadUsesColumnWhenPresent:
         assert _compute_overdue(view, _PINNED) is True
 
     def test_taskpayload_terminal_states_never_overdue(self) -> None:
-        # Terminal state masks the column entirely — a ``done`` row
+        # Terminal state masks the column entirely — a ``completed`` row
         # should never render as overdue even if the column was set
         # by the sweeper before the manual ``complete`` cleared it
         # (defensive — the completion path clears the column).
         view = self._make_view(
-            state="done",
+            state="completed",
             scheduled_for_utc=_PINNED - timedelta(hours=1),
             overdue_since=_PINNED - timedelta(minutes=10),
         )

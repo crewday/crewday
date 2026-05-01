@@ -86,7 +86,7 @@ __all__ = [
 
 
 # Allowed ``task_template.required_evidence`` values, enforced by a
-# CHECK constraint. ``none`` means the task can be marked done with
+# CHECK constraint. ``none`` means the task can be marked completed with
 # no artefact; the other four require the matching evidence kind.
 _REQUIRED_EVIDENCE_VALUES: tuple[str, ...] = (
     "none",
@@ -121,7 +121,7 @@ _OCCURRENCE_STATE_VALUES: tuple[str, ...] = (
     "scheduled",
     "pending",
     "in_progress",
-    "done",
+    "completed",
     "skipped",
     "approved",
     "cancelled",
@@ -146,7 +146,7 @@ _EVIDENCE_KIND_VALUES: tuple[str, ...] = (
 # workspace agent speaking in the thread (carries an
 # :attr:`Comment.llm_call_id`); ``system`` is an internal state-change
 # marker emitted by the completion / assignment services (e.g.
-# "marked done by Maya at 14:02"). Mirrors the ``Evidence.kind``
+# "marked completed by Maya at 14:02"). Mirrors the ``Evidence.kind``
 # CHECK-constraint pattern above.
 _COMMENT_KIND_VALUES: tuple[str, ...] = ("user", "agent", "system")
 
@@ -295,7 +295,7 @@ class TaskTemplate(Base):
     priority: Mapped[str] = mapped_column(String, nullable=False, default="normal")
     # cd-z2py manager-review gate. When true, completion creates a
     # sibling ``task_approval`` row; the occurrence itself remains
-    # terminal ``done`` per §06.
+    # terminal ``completed`` per §06.
     required_approval: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False
     )

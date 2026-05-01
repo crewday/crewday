@@ -170,7 +170,7 @@ tasks:
     assignee: ben
     starts_at: T-2h
     duration_minutes: 30
-    state: done
+    state: completed
     priority: normal
     photo_evidence: optional
     created_by: olivia

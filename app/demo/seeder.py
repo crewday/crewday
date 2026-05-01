@@ -785,7 +785,7 @@ def _seed_tasks(
         assignee = _str(raw, "assignee", default="")
         template_key = _str(raw, "template", default="")
         property_key = _str(raw, "property", default="")
-        completed_at = now if state in {"done", "approved"} else None
+        completed_at = now if state in {"completed", "approved"} else None
         session.add(
             Occurrence(
                 id=occurrence_id,
@@ -983,7 +983,7 @@ def _reservation_status(value: str) -> str:
 
 
 def _task_state(value: str) -> str:
-    return {"completed": "done"}.get(value, value)
+    return value
 
 
 def _required_evidence(data: Mapping[str, object]) -> str:

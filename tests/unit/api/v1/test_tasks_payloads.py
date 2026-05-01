@@ -85,7 +85,7 @@ class TestOverdue:
     def test_terminal_states_are_never_overdue(self) -> None:
         anchor = datetime(2026, 4, 20, 8, 0, 0, tzinfo=UTC)
         now = datetime(2026, 4, 20, 10, 0, 0, tzinfo=UTC)
-        for state in ("done", "skipped", "cancelled"):
+        for state in ("completed", "skipped", "cancelled"):
             view = _view(state=state, scheduled_for_utc=anchor)
             assert _compute_overdue(view, now) is False, (
                 f"{state=} should collapse overdue to False"

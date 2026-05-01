@@ -232,7 +232,7 @@ def test_allowed_staff_chat_mutation_writes_worker_audit_attribution(
                 ToolResult(
                     call_id="placeholder",
                     status_code=200,
-                    body={"id": "task_123", "state": "done"},
+                    body={"id": "task_123", "state": "completed"},
                     mutated=True,
                 )
             ]

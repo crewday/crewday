@@ -234,7 +234,7 @@ def _bootstrap_completed_task(
             ends_at=_PINNED,
             scheduled_for_local="2026-04-29T13:00",
             originally_scheduled_for="2026-04-29T13:00",
-            state="done",
+            state="completed",
             completed_at=_PINNED,
             completed_by_user_id=completed_by_user_id,
             cancellation_reason=None,

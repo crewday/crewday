@@ -194,7 +194,7 @@ describe("TodayPage", () => {
           body: taskPage([
             task("now", { title: "Turn over kitchen", scheduled_for_utc: "2026-04-28T09:30:00Z" }),
             task("later", { title: "Stock pantry", scheduled_for_utc: "2026-04-28T13:00:00Z" }),
-            task("done", { title: "Open shutters", state: "done", scheduled_for_utc: "2026-04-28T08:00:00Z" }),
+            task("completed", { title: "Open shutters", state: "completed", scheduled_for_utc: "2026-04-28T08:00:00Z" }),
           ]),
         },
       ],
@@ -269,7 +269,7 @@ describe("TodayPage", () => {
         },
         {
           body: taskPage([
-            task("t1", { title: "Reset towels", state: "done", scheduled_for_utc: "2026-04-28T09:00:00Z" }),
+            task("t1", { title: "Reset towels", state: "completed", scheduled_for_utc: "2026-04-28T09:00:00Z" }),
           ]),
         },
       ],
@@ -277,7 +277,7 @@ describe("TodayPage", () => {
         {
           body: {
             task_id: "t1",
-            state: "done",
+            state: "completed",
             completed_at: "2026-04-28T10:05:00Z",
             completed_by_user_id: "u1",
             reason: null,
@@ -430,7 +430,7 @@ describe("TodayPage", () => {
           body: taskPage([
             task("t1", {
               title: "Queued boiler complete",
-              state: "done",
+              state: "completed",
               scheduled_for_utc: "2026-04-28T09:00:00Z",
             }),
           ]),
@@ -440,7 +440,7 @@ describe("TodayPage", () => {
         {
           body: {
             task_id: "t1",
-            state: "done",
+            state: "completed",
             completed_at: "2026-04-28T10:05:00Z",
             completed_by_user_id: "u1",
             reason: null,

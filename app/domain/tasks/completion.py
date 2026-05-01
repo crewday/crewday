@@ -3,13 +3,13 @@
 Sibling of :mod:`app.domain.tasks.assignment` — where that module
 decides **who** a task is on, this module decides **what** happens
 to the task as it moves through its life cycle: ``pending →
-in_progress → done``, with ``skipped`` / ``cancelled`` as
+in_progress → completed``, with ``skipped`` / ``cancelled`` as
 terminal branches and ``overdue`` as a soft-state detour.
 
 ## Public surface
 
 * :func:`start` — drive ``pending → in_progress``.
-* :func:`complete` — drive ``pending | in_progress → done``; runs
+* :func:`complete` — drive ``pending | in_progress → completed``; runs
   the evidence-policy gate, the required-checklist gate, and the
   inventory + asset-action + tombstone side-effects.
 * :func:`skip` — drive any non-terminal state to ``skipped`` when
@@ -73,7 +73,7 @@ diff so reports can reconstruct the sequence.
 
 The implementation loads the row, inspects its ``state`` +
 ``completed_*`` fields, writes the new completion, and — when the
-row was already ``done`` — emits a second audit row
+row was already ``completed`` — emits a second audit row
 (``task.complete_superseded``) alongside the regular
 ``task.complete``. Locking is deliberately optimistic: the spec's
 rationale is that usability wins over strict serialisation here,
@@ -203,7 +203,7 @@ TaskStateName = Literal[
     "scheduled",
     "pending",
     "in_progress",
-    "done",
+    "completed",
     "skipped",
     "cancelled",
     "overdue",
@@ -299,7 +299,7 @@ class TaskState:
     without the risk of a service caller mutating the payload post
     hoc. Carries the canonical timestamps callers render: ``state``
     for the chip, ``completed_at`` / ``completed_by_user_id`` for
-    the "Marked done by … at …" byline, ``reason`` for the skip /
+    the "Marked completed by … at …" byline, ``reason`` for the skip /
     cancel copy.
     """
 
@@ -357,7 +357,7 @@ class EvidenceRequired(ValueError):
     """The resolved evidence policy is ``require`` but no photo landed.
 
     422-equivalent. The caller must upload a photo and link its
-    ``evidence`` id before the state flips to ``done``.
+    ``evidence`` id before the state flips to ``completed``.
     """
 
 
@@ -449,7 +449,7 @@ class EvidenceGpsPayloadInvalid(ValueError):
 # ---------------------------------------------------------------------------
 
 
-_TERMINAL: frozenset[TaskStateName] = frozenset({"done", "skipped", "cancelled"})
+_TERMINAL: frozenset[TaskStateName] = frozenset({"completed", "skipped", "cancelled"})
 """§06 "State machine": states no transition can leave (except the
 narrow ``overdue`` revert, which is not an edge **out** of a terminal
 — ``overdue`` itself is a soft state that never terminates)."""
@@ -465,22 +465,26 @@ narrow ``overdue`` revert, which is not an edge **out** of a terminal
 # cast; unknown keys collapse to ``None`` in ``.get()`` and raise
 # :class:`InvalidStateTransition` cleanly.
 _ALLOWED_EDGES: dict[str, frozenset[TaskStateName]] = {
-    "scheduled": frozenset({"pending", "in_progress", "done", "skipped", "cancelled"}),
-    "pending": frozenset({"in_progress", "done", "skipped", "cancelled"}),
-    "in_progress": frozenset({"done", "skipped", "cancelled"}),
+    "scheduled": frozenset(
+        {"pending", "in_progress", "completed", "skipped", "cancelled"}
+    ),
+    "pending": frozenset({"in_progress", "completed", "skipped", "cancelled"}),
+    "in_progress": frozenset({"completed", "skipped", "cancelled"}),
     # Terminal states — no outgoing transitions. Two writers racing
     # through ``complete()`` are handled by the concurrent-completion
     # path (second writer wins on field updates, audit records the
-    # supersession), not by an allowed ``done → done`` edge.
-    "done": frozenset(),
+    # supersession), not by an allowed ``completed → completed`` edge.
+    "completed": frozenset(),
     "skipped": frozenset(),
     "cancelled": frozenset(),
     # §06: ``overdue`` is a soft state; the only valid exits are
     # manual state changes back to ``pending`` / ``in_progress`` or
-    # forward to ``done`` / ``skipped`` / ``cancelled``. The spec's
+    # forward to ``completed`` / ``skipped`` / ``cancelled``. The spec's
     # bullet: "on any manual state change, ``state`` reverts to the
     # chosen value and ``overdue_since`` is cleared".
-    "overdue": frozenset({"pending", "in_progress", "done", "skipped", "cancelled"}),
+    "overdue": frozenset(
+        {"pending", "in_progress", "completed", "skipped", "cancelled"}
+    ),
 }
 
 
@@ -980,7 +984,7 @@ def start(
 ) -> TaskState:
     """Drive ``pending → in_progress``.
 
-    The spec lets workers go straight to ``done`` (see §06 "State
+    The spec lets workers go straight to ``completed`` (see §06 "State
     machine" — "``pending`` → ``in_progress`` is optional"); this
     entry point is the explicit "I am working on this now"
     signal the worker PWA sends when the user taps into the task
@@ -1045,7 +1049,7 @@ def complete(
     tombstone: TombstoneHook | None = None,
     required_approval: RequiredApprovalResolver | None = None,
 ) -> TaskState:
-    """Drive ``pending | in_progress → done``.
+    """Drive ``pending | in_progress → completed``.
 
     Flow:
 
@@ -1058,7 +1062,7 @@ def complete(
     3. **Checklist gate.** When :data:`ChecklistRequiredResolver`
        returns ``True`` and any required :class:`ChecklistItem` is
        still unchecked → :class:`RequiredChecklistIncomplete`.
-    4. **Write the completion.** Set ``state='done'``,
+    4. **Write the completion.** Set ``state='completed'``,
        ``completed_at``, ``completed_by_user_id``. When ``note_md``
        is supplied, persist as :class:`Evidence` of kind ``note``
        (bridge until the ``completion_note_md`` column lands — see
@@ -1067,7 +1071,7 @@ def complete(
        :data:`AssetActionHook`, :data:`TombstoneHook` in order.
     6. **Audit + event.** Emit :class:`TaskCompleted`; write the
        ``task.complete`` audit row. When the pre-state was already
-       ``done`` (concurrent completion), also write
+       ``completed`` (concurrent completion), also write
        ``task.complete_superseded`` carrying the displaced
        ``completed_by_user_id`` + ``completed_at`` in its diff.
     """
@@ -1103,16 +1107,16 @@ def complete(
     # Capture pre-state for the concurrent-completion branch. The
     # two writers racing through ``complete()`` both land; the later
     # one overwrites the fields and emits an extra audit row.
-    was_already_done = task.state == "done"
+    was_already_done = task.state == "completed"
     displaced_completed_at = task.completed_at
     displaced_completed_by = task.completed_by_user_id
     previous_state = task.state
 
     # Only run the transition validator for the non-racing path —
-    # ``done → done`` is not in the allowed-edge map, and the second
+    # ``completed → completed`` is not in the allowed-edge map, and the second
     # writer needs to land anyway per §06 "Concurrent completion".
     if not was_already_done:
-        _assert_transition(previous_state, "done")
+        _assert_transition(previous_state, "completed")
 
     # --- Gate 1: evidence policy. ---------------------------------
     policy = resolve_evidence(session, ctx, task)
@@ -1138,13 +1142,13 @@ def complete(
 
     # --- Write the completion row. --------------------------------
     now = resolved_clock.now()
-    task.state = "done"
+    task.state = "completed"
     task.completed_at = now
     task.completed_by_user_id = ctx.actor_id
     # §06 "State machine": clear ``overdue_since`` on any manual
     # transition. The completion path catches the most common
-    # "overdue → done" exit; the column reverts to NULL alongside
-    # the state flip so reports never see a "done" row that still
+    # "overdue → completed" exit; the column reverts to NULL alongside
+    # the state flip so reports never see a "completed" row that still
     # claims to be overdue.
     task.overdue_since = None
     session.flush()
@@ -1178,7 +1182,7 @@ def complete(
             "completed_by_user_id": displaced_completed_by,
         },
         "after": {
-            "state": "done",
+            "state": "completed",
             "completed_at": now.isoformat(),
             "completed_by_user_id": ctx.actor_id,
         },
@@ -1240,7 +1244,7 @@ def complete(
             clock=resolved_clock,
             event_bus=resolved_bus,
         )
-    return _state_view(task, state="done")
+    return _state_view(task, state="completed")
 
 
 def skip(

@@ -1573,7 +1573,7 @@ class TestReadTask:
         # it (the widening migration is tracked alongside cd-7am7).
         # Excluded here so the FK / CHECK layer doesn't reject the
         # force-set in the test fixture.
-        ["scheduled", "pending", "in_progress", "done", "skipped", "cancelled"],
+        ["scheduled", "pending", "in_progress", "completed", "skipped", "cancelled"],
     )
     def test_every_state_round_trips(
         self,

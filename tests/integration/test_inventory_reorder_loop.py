@@ -91,7 +91,7 @@ def test_movement_event_creates_restock_task_then_completion_allows_next_loop() 
             assert captured[0].restock_task_id == restock_task.id
             assert _auto_restock_audit_count(session, ctx) == 1
 
-            restock_task.state = "done"
+            restock_task.state = "completed"
             restock_task.completed_at = clock.now() + timedelta(minutes=10)
             session.add(
                 Movement(

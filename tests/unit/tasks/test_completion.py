@@ -10,7 +10,7 @@ Covers cd-7am7:
 
 * :func:`start` drives ``pending → in_progress``, writes audit, and
   fires :class:`TaskOccurrenceStarted`.
-* :func:`complete` drives ``pending | in_progress → done`` with
+* :func:`complete` drives ``pending | in_progress → completed`` with
   the photo + checklist gates, writes the note, runs the inventory
   hook, fires :class:`TaskCompleted`, writes ``task.complete``.
 * Photo-policy ``forbid`` rejects a supplied photo; ``require``
@@ -399,10 +399,10 @@ class TestAssertTransition:
         _assert_transition("pending", "in_progress")
 
     def test_pending_to_done_ok(self) -> None:
-        _assert_transition("pending", "done")
+        _assert_transition("pending", "completed")
 
     def test_in_progress_to_done_ok(self) -> None:
-        _assert_transition("in_progress", "done")
+        _assert_transition("in_progress", "completed")
 
     def test_overdue_to_pending_ok(self) -> None:
         _assert_transition("overdue", "pending")
@@ -412,17 +412,17 @@ class TestAssertTransition:
 
     def test_done_to_pending_rejected(self) -> None:
         with pytest.raises(InvalidStateTransition) as excinfo:
-            _assert_transition("done", "pending")
-        assert excinfo.value.current == "done"
+            _assert_transition("completed", "pending")
+        assert excinfo.value.current == "completed"
         assert excinfo.value.target == "pending"
 
     def test_skipped_to_done_rejected(self) -> None:
         with pytest.raises(InvalidStateTransition):
-            _assert_transition("skipped", "done")
+            _assert_transition("skipped", "completed")
 
     def test_cancelled_to_done_rejected(self) -> None:
         with pytest.raises(InvalidStateTransition):
-            _assert_transition("cancelled", "done")
+            _assert_transition("cancelled", "completed")
 
     def test_unknown_source_state_rejected(self) -> None:
         with pytest.raises(InvalidStateTransition):
@@ -508,7 +508,7 @@ class TestStart:
         ws = _bootstrap_workspace(session)
         prop = _bootstrap_property(session)
         occ = _bootstrap_occurrence(
-            session, workspace_id=ws, property_id=prop, state="done"
+            session, workspace_id=ws, property_id=prop, state="completed"
         )
         with pytest.raises(InvalidStateTransition):
             start(session, _ctx(ws), occ, clock=clock, event_bus=bus)
@@ -520,7 +520,7 @@ class TestStart:
 
 
 class TestComplete:
-    """:func:`complete` drives ``pending | in_progress → done``."""
+    """:func:`complete` drives ``pending | in_progress → completed``."""
 
     def test_happy_path_emits_event_and_audit(
         self, session: Session, clock: FrozenClock, bus: EventBus
@@ -536,10 +536,10 @@ class TestComplete:
 
         result = complete(session, ctx, occ, clock=clock, event_bus=bus)
 
-        assert result.state == "done"
+        assert result.state == "completed"
         row = session.get(Occurrence, occ)
         assert row is not None
-        assert row.state == "done"
+        assert row.state == "completed"
         assert row.completed_by_user_id == worker
         # SQLite strips tzinfo on round-trip; the service wrote an
         # aware UTC value, the DB reads back naive.
@@ -730,7 +730,7 @@ class TestComplete:
             clock=clock,
             event_bus=bus,
         )
-        assert result.state == "done"
+        assert result.state == "completed"
 
     def test_photo_require_ignores_deleted_prelinked_photo_evidence(
         self, session: Session, clock: FrozenClock, bus: EventBus
@@ -791,7 +791,7 @@ class TestComplete:
             clock=clock,
             event_bus=bus,
         )
-        assert result.state == "done"
+        assert result.state == "completed"
 
     def test_required_checklist_blocks_completion(
         self, session: Session, clock: FrozenClock, bus: EventBus
@@ -839,7 +839,7 @@ class TestComplete:
             event_bus=bus,
             checklist_required=off,
         )
-        assert result.state == "done"
+        assert result.state == "completed"
 
     def test_inventory_default_writes_movement_rows(
         self, session: Session, clock: FrozenClock, bus: EventBus
@@ -963,9 +963,7 @@ class TestComplete:
         }
         prop = _bootstrap_property(session)
         worker = _bootstrap_user(session)
-        item_id = _bootstrap_inventory_item(
-            session, workspace_id=ws, property_id=prop
-        )
+        item_id = _bootstrap_inventory_item(session, workspace_id=ws, property_id=prop)
         occ = _bootstrap_occurrence(
             session,
             workspace_id=ws,
@@ -1113,7 +1111,7 @@ class TestComplete:
             event_bus=bus,
         )
 
-        assert result.state == "done"
+        assert result.state == "completed"
         assert session.scalars(select(Movement)).all() == []
 
     def test_inventory_effect_failure_does_not_block_other_effects(
@@ -1269,7 +1267,7 @@ class TestComplete:
         ctx_first = _ctx(ws, role="worker", owner=False, actor_id=first)
         complete(session, ctx_first, occ, clock=clock, event_bus=bus)
 
-        # Second writer lands on the same (already-done) row.
+        # Second writer lands on the same (already-completed) row.
         clock.advance(timedelta(minutes=1))
         ctx_second = _ctx(ws, role="manager", owner=False, actor_id=second)
         complete(session, ctx_second, occ, clock=clock, event_bus=bus)
@@ -1546,7 +1544,7 @@ class TestCancel:
         ws = _bootstrap_workspace(session)
         prop = _bootstrap_property(session)
         occ = _bootstrap_occurrence(
-            session, workspace_id=ws, property_id=prop, state="done"
+            session, workspace_id=ws, property_id=prop, state="completed"
         )
 
         with pytest.raises(InvalidStateTransition):

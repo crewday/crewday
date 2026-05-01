@@ -21,7 +21,7 @@ type ApiTaskState =
   | "scheduled"
   | "pending"
   | "in_progress"
-  | "done"
+  | "completed"
   | "skipped"
   | "cancelled"
   | "overdue";
@@ -389,11 +389,11 @@ function formatHeaderDate(today: string): string {
 
 function statusToState(status: TaskStatus | undefined): ApiTaskState | null {
   if (!status) return null;
-  return status === "completed" ? "done" : status;
+  return status;
 }
 
 function stateToStatus(state: ApiTaskState): TaskStatus {
-  return state === "done" ? "completed" : state;
+  return state;
 }
 
 function isTerminalStatus(status: TaskStatus): boolean {

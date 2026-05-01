@@ -61686,7 +61686,7 @@
                     "scheduled",
                     "pending",
                     "in_progress",
-                    "done",
+                    "completed",
                     "skipped",
                     "cancelled",
                     "overdue"
@@ -63332,7 +63332,7 @@
             }
           }
         },
-        "summary": "Mark a task done \u2014 gated by evidence + checklist policy",
+        "summary": "Mark a task completed \u2014 gated by evidence + checklist policy",
         "tags": [
           "tasks"
         ]

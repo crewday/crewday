@@ -87,7 +87,7 @@ function dateOnly(iso: string): string {
 
 function mapTaskStatus(state: string, overdue: boolean): TaskStatus {
   if (overdue) return "overdue";
-  if (state === "done") return "completed";
+  if (state === "completed") return "completed";
   if (state === "scheduled" || state === "pending" || state === "in_progress" || state === "completed" || state === "skipped" || state === "cancelled" || state === "overdue") return state;
   return "pending";
 }
