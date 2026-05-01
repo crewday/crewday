@@ -26,7 +26,8 @@ the workspace's URL slug (§01 "Workspace addressing", §02
   `/api/openapi.json`, `/api/v1/signup/start`,
   `/api/v1/signup/verify`, `/api/v1/signup/passkey/start`,
   `/api/v1/signup/passkey/finish`,
-  `/api/v1/auth/{login,logout,magic-link/redeem,passkey/*}`,
+  `/api/v1/auth/{logout,magic/{request,consume},passkey/login/{start,finish}}`,
+  `/api/v1/recover/passkey/{request,verify,finish}`,
   `/api/v1/me/workspaces` (returns the caller's accessible
   workspaces for the switcher), `/api/v1/healthz`,
   `/api/v1/readyz`, `/api/v1/version`. Anything else 404s at the
@@ -355,9 +356,76 @@ POST   /api/v1/signup/passkey/start              # self-serve signup passkey cer
 POST   /api/v1/signup/passkey/finish             # self-serve signup completion; body: {signup_session_id, challenge_id, display_name, timezone, credential}; delegates to complete_signup which in one transaction creates the workspace + user + UserWorkspace + four system permission groups (owners seeded), persists the first passkey, and emits the signup.completed audit row. Returns {workspace_slug, redirect}; no Set-Cookie — the SPA follows the usual passkey login ceremony against the freshly-minted user
 POST   /api/v1/auth/passkey/login/start            # conditional-UI login ceremony (§03 "Login"); anonymous, rate-limited 10/min per IP (§15)
 POST   /api/v1/auth/passkey/login/finish           # verifies the assertion; on success sets `__Host-crewday_session` via Set-Cookie. 401 invalid_credential collapses every failure shape (no fingerprinting); 429 rate_limited on sustained pressure
-POST   /api/v1/auth/magic/send                   # owner or manager only (manual re-issue)
-POST   /api/v1/auth/magic/consume                # consume a break-glass code → magic link
-POST   /api/v1/auth/recover/start                # self-service lost-device; body: {email, break_glass_code?}. Always 200 {status:"sent_if_exists"}.
+# Magic-link self-service (cd-glaz, cd-9i7z). Bare-host, pre-auth —
+# both routes are tenant-agnostic because identity is not workspace-
+# scoped (§01, §03). The cryptographic envelope (`itsdangerous` blob,
+# single-use `jti`, commit-before-send invariant) is pinned by §03
+# "Magic link format"; this surface is just the HTTP shell.
+#
+# Throttling (§15 "Rate limiting and abuse controls") is process-local
+# and shared across every request the worker serves: per-IP + per-email
+# budgets gate `/request`; a per-IP failure window gates `/consume`
+# (3 fails / 60 s → 10-minute lockout). The `/request` budget check
+# fires **before** the DB or mailer are touched, so a 429 leaks
+# nothing about whether the email exists. The 202 enumeration guard
+# hides "user exists?" — the 429 sits *outside* it (independent of
+# user existence) and surfaces as `{"error": "rate_limited"}`.
+POST   /api/v1/auth/magic/request                # mint + email one magic link.
+                                                 #   Body: {email: str (3-320 chars), purpose: MagicLinkPurpose}.
+                                                 #     `purpose` is one of `signup_verify`, `recover_passkey`,
+                                                 #     `email_change_confirm`, `email_change_revert`,
+                                                 #     `grant_invite`, `workspace_verify_ownership`.
+                                                 #   202 {"status": "accepted"} — opaque body. Returned whether
+                                                 #     or not the email matched a user (the enumeration guard:
+                                                 #     do not parse a body shape for "sent vs missing").
+                                                 #   429 {"error": "rate_limited"} — per-IP or per-email budget
+                                                 #     exhausted. The throttle fires **before** the DB or mailer
+                                                 #     are touched, so a 429 leaks no information about whether
+                                                 #     the email exists; throttle status is independent of user
+                                                 #     existence (the 202 enumeration guard only applies to
+                                                 #     callers staying under budget).
+                                                 #   422 — Pydantic field error (empty / oversized email,
+                                                 #     unknown purpose); shape per §12 "Errors".
+POST   /api/v1/auth/magic/consume                # redeem a magic-link token (single-use).
+                                                 #   Body: {token: str (1-4096 chars), purpose: MagicLinkPurpose}.
+                                                 #     `token` is the `itsdangerous` `payload.timestamp.signature`
+                                                 #     blob from the email URL — see §03 "Magic link format" for
+                                                 #     the envelope.
+                                                 #   200 {purpose, subject_id, email_hash, ip_hash} — the
+                                                 #     `MagicLinkOutcome` projection. The SPA chains this into
+                                                 #     the matching follow-up flow (passkey enrolment, email
+                                                 #     verify, …); no `Set-Cookie` is issued here — the session
+                                                 #     cookie lands on the subsequent passkey-login finish.
+                                                 #   400 {"error": "invalid_token"} — signature / shape failure.
+                                                 #   400 {"error": "purpose_mismatch"} — token's purpose ≠ body.
+                                                 #   409 {"error": "already_consumed"} — single-use replay.
+                                                 #   410 {"error": "expired"} — TTL lapsed.
+                                                 #   429 {"error": "consume_locked_out"} — per-IP failure window
+                                                 #     tripped (3 fails / 60 s → 10-min lockout); pre-flight
+                                                 #     guard, never touches the nonce row, and is the only
+                                                 #     consume failure that does NOT advance the per-IP fail
+                                                 #     counter (charging it back into the counter that flipped
+                                                 #     the lockout would be circular). A rejected-audit row
+                                                 #     still lands on a fresh UoW so sustained abuse from a
+                                                 #     locked-out IP is visible in the trail.
+                                                 #   429 {"error": "rate_limited"} — domain-level RateLimited
+                                                 #     surfacing from inside `consume_link` (not the pre-flight
+                                                 #     lockout). Advances the per-IP fail counter exactly once.
+                                                 #   422 — Pydantic field error (empty token, token > 4096
+                                                 #     chars, unknown purpose); shape per §12 "Errors". The
+                                                 #     4096-char ceiling (cd-jt0v) is defence-in-depth; real
+                                                 #     itsdangerous tokens round-trip at ~150 chars.
+                                                 # Every domain failure (the 400/409/410 cases above and the
+                                                 # in-flow 429 `rate_limited`) advances the per-IP fail counter
+                                                 # and writes an `audit.magic_link.rejected` row on a fresh UoW
+                                                 # (independent of the caller's rolled-back primary UoW), so a
+                                                 # consume that hits any of those still leaves a trail. The
+                                                 # pre-flight 429 `consume_locked_out` is the lone exception
+                                                 # — it skips the counter (see above) but still writes the
+                                                 # rejected-audit row on a fresh UoW.
+POST   /api/v1/recover/passkey/request           # self-service lost-device (§03 "Self-service lost-device recovery"); body: {email, break_glass_code?}. Always 202 {status:"accepted"} regardless of lookup outcome (enumeration guard); break-glass code is required for the step-up population (manager surface grant or owners-group membership) and ignored for everyone else.
+GET    /api/v1/recover/passkey/verify             # consume the recovery magic link the email above delivered.
+POST   /api/v1/recover/passkey/finish             # register the new passkey, ending the recovery ceremony.
 GET    /api/v1/auth/me
 POST   /api/v1/auth/logout                       # invalidate every active session for the caller (cause `logout`, §15 "Session-invalidation causes"); always 204 + Set-Cookie clearing `__Host-crewday_session` (best-effort: no cookie / invalid cookie still 204 + clear, no audit row)
 GET    /api/v1/me/workspaces                     # cd-y5z3 — switcher payload for the

@@ -303,7 +303,7 @@ centrally in `app/config/demo.py` and asserted at boot.
 | Webhooks (§10)      | Delivery worker short-circuits; `webhook_delivery` rows land as `status='suppressed_demo'`. |
 | iCal polling (§04)  | Scheduled job is disabled entirely. Seed fixture pre-populates stays; the "Refresh feed" button returns 501. |
 | Passkeys (§03)      | `/auth/passkey/*` return 501. The Login / Profile pages hide the "Add passkey" button when `CREWDAY_DEMO_MODE=1`. |
-| Magic links (§03)   | `/auth/magic/send` returns 501. Break-glass codes are not issued. |
+| Magic links (§03)   | `/auth/magic/request` and `/auth/magic/consume` return 501. Break-glass codes are not issued. |
 | API tokens (§03)    | `POST /api/v1/auth/tokens` returns 501 (both scoped and delegated). The embedded agents get their delegated-token equivalent from the demo cookie's persona binding, bypassing the normal mint path. |
 | Payslip payout manifest (§09) | 501 always. The "Download payout manifest" button is hidden on demo. |
 | `admin.*` CLI       | Not available from the HTTP surface in prod either; on demo the admin container is simply not run. |

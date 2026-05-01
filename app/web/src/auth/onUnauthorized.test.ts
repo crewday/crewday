@@ -35,8 +35,11 @@ describe("isAuthEndpoint", () => {
     // parallel surface was removed per cd-ju0q).
     expect(isAuthEndpoint("/api/v1/signup/passkey/start")).toBe(true);
     expect(isAuthEndpoint("/api/v1/signup/passkey/finish")).toBe(true);
-    expect(isAuthEndpoint("/api/v1/auth/recover/start")).toBe(true);
-    expect(isAuthEndpoint("/api/v1/auth/magic/send")).toBe(true);
+    expect(isAuthEndpoint("/api/v1/recover/passkey/request")).toBe(true);
+    expect(isAuthEndpoint("/api/v1/recover/passkey/verify")).toBe(true);
+    expect(isAuthEndpoint("/api/v1/recover/passkey/finish")).toBe(true);
+    expect(isAuthEndpoint("/api/v1/auth/magic/request")).toBe(true);
+    expect(isAuthEndpoint("/api/v1/auth/magic/consume")).toBe(true);
     expect(isAuthEndpoint("/api/v1/signup/start")).toBe(true);
     expect(isAuthEndpoint("/api/v1/invites/01HZ_TOK")).toBe(true);
     expect(isAuthEndpoint("/api/v1/invites/01HZ_TOK/accept")).toBe(true);

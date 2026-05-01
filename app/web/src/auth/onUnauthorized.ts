@@ -58,9 +58,10 @@ export function isAuthEndpoint(path: string): boolean {
   // so the intent is obvious at the predicate level.
   if (bare.includes("/api/v1/signup/passkey/")) return true;
   // All recover-* endpoints are anonymous (they exist precisely because
-  // the user cannot sign in), magic-link send/consume is anonymous, and
-  // every /signup/ surface is pre-auth.
-  if (bare.includes("/api/v1/auth/recover/")) return true;
+  // the user cannot sign in), magic-link request/consume is anonymous,
+  // and every /signup/ surface is pre-auth. The recovery router is
+  // mounted at /api/v1/recover/passkey/* (bare-host) per §12.
+  if (bare.includes("/api/v1/recover/")) return true;
   if (bare.includes("/api/v1/auth/magic/")) return true;
   if (bare.includes("/api/v1/signup/")) return true;
   // Invite introspection / accept is anonymous (the token is the

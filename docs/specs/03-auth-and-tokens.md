@@ -491,8 +491,9 @@ workspaces, the server evaluates the flag as
 non-archived grant in has the flag `false`, self-service recovery
 is refused for that user (step 5 above). Managers may still
 re-issue a magic link manually; break-glass codes still redeem
-through `POST /auth/magic/consume`; and the host-CLI recovery
-remains available to the deployment operator (§"Recovery paths").
+through `POST /api/v1/recover/passkey/request` (the step-up
+population's recovery path); and the host-CLI recovery remains
+available to the deployment operator (§"Recovery paths").
 
 There is no per-user opt-out: a locked-out user cannot flip a
 personal setting. Users who want individual protection should ask
@@ -914,17 +915,19 @@ break_glass_code
 Redemption: the user (whose codes were issued because they hold a
 `manager` surface grant or `owners`-group membership) submits the
 plaintext code to
-`POST /auth/magic/consume` with their email. On success the code's
-`used_at` is set, a fresh `magic_link` is issued (15-min TTL), and its
-id is stored in `consumed_magic_link_id`. A used code is inert even
-if the resulting magic link expires unused.
+`POST /api/v1/recover/passkey/request` alongside their email
+(`{email, break_glass_code}`). On success the code's `used_at` is
+set, a fresh `magic_link` is issued (15-min TTL), and its id is
+stored in `consumed_magic_link_id`. A used code is inert even if
+the resulting magic link expires unused.
 
 **Redemption rate limit.** Break-glass redemption is capped at
 **3 failed attempts per user per 1-hour rolling window**. On the
 3rd failure, redemption locks for **24 hours** for that user
-(all subsequent `POST /auth/magic/consume` calls keyed to this
-user return `429 break_glass_locked_out`, regardless of source IP
-or client). The user and every workspace owner on any shared
+(all subsequent `POST /api/v1/recover/passkey/request` calls
+keyed to this user return `429 break_glass_locked_out`,
+regardless of source IP or client). The user and every workspace
+owner on any shared
 scope receive an `audit.break_glass.locked_out` notification
 through §10 messaging. Successful redemption burns the code
 immediately (no replay) and resets the failure counter.
