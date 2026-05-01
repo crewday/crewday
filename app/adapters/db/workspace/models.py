@@ -38,13 +38,7 @@ cd-4saj lands the third §05 sibling in the same package:
 
 * :class:`WorkEngagement` — the per-(user, workspace) employment
   relationship that carries the pay pipeline (§02 "work_engagement",
-  §22 "Engagement kinds"). The soft-ref columns
-  ``supplier_org_id`` / ``pay_destination_id`` /
-  ``reimbursement_destination_id`` are plain :class:`str` with no FK
-  declared because the ``organization`` and ``pay_destination``
-  tables do not exist yet — **cd-0ro4** (filed alongside cd-4saj)
-  is the follow-up that promotes these columns into real FKs once
-  the parent tables land.
+  §22 "Engagement kinds").
 
 These all land here rather than under a dedicated ``employees``
 package because their FKs target ``workspace.id`` and the upcoming
@@ -79,6 +73,11 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.adapters.db.base import Base
+
+# Cross-package FK targets — see :mod:`app.adapters.db` for the shared
+# metadata load-order contract.
+from app.adapters.db.billing import models as _billing_models  # noqa: F401
+from app.adapters.db.payroll import models as _payroll_models  # noqa: F401
 
 __all__ = [
     "UserWorkRole",
@@ -491,17 +490,11 @@ class WorkEngagement(Base):
     the same workspace and multiple active engagements across
     different workspaces.
 
-    **Soft-ref columns (no FK yet).** ``supplier_org_id``,
-    ``pay_destination_id``, and ``reimbursement_destination_id`` are
-    plain :class:`str` columns rather than :class:`~sqlalchemy.ForeignKey`
-    relations because the ``organization`` and ``pay_destination``
-    tables do not exist yet. **cd-0ro4** (filed alongside cd-4saj)
-    is the follow-up task that promotes these columns into real FKs
-    once the parent tables land; the column names and nullability
-    stay stable so domain callers are undisturbed. Same soft-ref
-    pattern as
-    :class:`~app.adapters.db.authz.models.RoleGrant.scope_property_id`
-    and :attr:`UserWorkRole.pay_rule_id`.
+    **Counterparty + destination FKs.** ``supplier_org_id`` points at
+    the supplying ``organization`` for ``agency_supplied`` engagements.
+    ``pay_destination_id`` and ``reimbursement_destination_id`` point
+    at ``payout_destination`` defaults for payslips / vendor invoices
+    and expense reimbursements.
 
     **CHECK: engagement_kind enum.** Matches §22 "Engagement kinds"
     — ``payroll`` / ``contractor`` / ``agency_supplied``. A bad value
@@ -561,19 +554,26 @@ class WorkEngagement(Base):
         nullable=False,
     )
     engagement_kind: Mapped[str] = mapped_column(String, nullable=False)
-    # Soft reference to the future ``organization`` table (cd-4saj
-    # follow-up). Required when ``engagement_kind = 'agency_supplied'``
-    # (enforced by CHECK); NULL otherwise.
-    supplier_org_id: Mapped[str | None] = mapped_column(String, nullable=True)
-    # Soft reference to the future ``pay_destination`` table (cd-4saj
-    # follow-up). Default payout target for payslips / vendor
-    # invoices on this engagement.
-    pay_destination_id: Mapped[str | None] = mapped_column(String, nullable=True)
-    # Soft reference — default target for expense reimbursements.
-    # NULL falls back to :attr:`pay_destination_id` at payout time
-    # (§09 "Expense claim").
+    # Required when ``engagement_kind = 'agency_supplied'`` (enforced
+    # by CHECK); NULL otherwise.
+    supplier_org_id: Mapped[str | None] = mapped_column(
+        String,
+        ForeignKey("organization.id", ondelete="RESTRICT"),
+        nullable=True,
+    )
+    # Default payout target for payslips / vendor invoices on this
+    # engagement.
+    pay_destination_id: Mapped[str | None] = mapped_column(
+        String,
+        ForeignKey("payout_destination.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    # Default target for expense reimbursements. NULL falls back to
+    # :attr:`pay_destination_id` at payout time (§09 "Expense claim").
     reimbursement_destination_id: Mapped[str | None] = mapped_column(
-        String, nullable=True
+        String,
+        ForeignKey("payout_destination.id", ondelete="SET NULL"),
+        nullable=True,
     )
     started_on: Mapped[date] = mapped_column(Date, nullable=False)
     # Engagement end — archives the pay pipeline, not the user.

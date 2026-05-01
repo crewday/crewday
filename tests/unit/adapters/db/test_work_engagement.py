@@ -35,12 +35,23 @@ from collections.abc import Iterator
 from datetime import UTC, date, datetime
 
 import pytest
-from sqlalchemy import CheckConstraint, Engine, Index, create_engine, event, select
+from sqlalchemy import (
+    CheckConstraint,
+    Engine,
+    ForeignKeyConstraint,
+    Index,
+    create_engine,
+    event,
+    select,
+)
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.adapters.db.base import Base
+from app.adapters.db.billing.models import Organization
+from app.adapters.db.identity.models import User
+from app.adapters.db.payroll.models import PayoutDestination
 
 # Importing the package (not just ``.models``) is critical so the
 # tenancy-registry side effect fires; the cross-workspace test then
@@ -185,6 +196,67 @@ def _seed_workspace(session: Session, workspace_id: str, slug: str) -> Workspace
     return ws
 
 
+def _seed_user(session: Session, user_id: str, email: str) -> User:
+    """Insert a minimal user for FK-backed payout destinations."""
+    user = User(
+        id=user_id,
+        email=email,
+        email_lower=email.lower(),
+        display_name=email.split("@", maxsplit=1)[0],
+        created_at=_PINNED,
+    )
+    session.add(user)
+    session.flush()
+    return user
+
+
+def _seed_organization(
+    session: Session,
+    *,
+    organization_id: str,
+    workspace_id: str,
+) -> Organization:
+    """Insert a minimal supplier organization for engagement FK tests."""
+    row = Organization(
+        id=organization_id,
+        workspace_id=workspace_id,
+        kind="vendor",
+        display_name=f"Supplier {organization_id[-4:]}",
+        billing_address={},
+        default_currency="EUR",
+        created_at=_PINNED,
+    )
+    session.add(row)
+    session.flush()
+    return row
+
+
+def _seed_payout_destination(
+    session: Session,
+    *,
+    destination_id: str,
+    workspace_id: str,
+    user_id: str,
+) -> PayoutDestination:
+    """Insert a minimal payout destination for engagement FK tests."""
+    row = PayoutDestination(
+        id=destination_id,
+        workspace_id=workspace_id,
+        user_id=user_id,
+        kind="bank_account",
+        currency="EUR",
+        display_stub="FR-12",
+        secret_ref_id=None,
+        country="FR",
+        label="Payroll",
+        created_at=_PINNED,
+        updated_at=_PINNED,
+    )
+    session.add(row)
+    session.flush()
+    return row
+
+
 def _engagement(
     *,
     id: str,
@@ -264,6 +336,43 @@ class TestWorkEngagementModelShape:
         ]
         names = [c.name for c in checks]
         assert "ck_work_engagement_supplier_org_pairing" in names
+
+    def test_counterparty_and_destination_fks_present(self) -> None:
+        """Counterparty and payout defaults are real DB FKs."""
+        constraints = {
+            constraint.name: constraint
+            for constraint in WorkEngagement.__table__.constraints
+            if isinstance(constraint, ForeignKeyConstraint)
+        }
+
+        supplier = constraints["fk_work_engagement_supplier_org_id_organization"]
+        assert [element.parent.name for element in supplier.elements] == [
+            "supplier_org_id"
+        ]
+        assert [element.target_fullname for element in supplier.elements] == [
+            "organization.id"
+        ]
+        assert supplier.ondelete == "RESTRICT"
+
+        pay = constraints["fk_work_engagement_pay_destination_id_payout_destination"]
+        assert [element.parent.name for element in pay.elements] == [
+            "pay_destination_id"
+        ]
+        assert [element.target_fullname for element in pay.elements] == [
+            "payout_destination.id"
+        ]
+        assert pay.ondelete == "SET NULL"
+
+        reimbursement = constraints[
+            "fk_work_engagement_reimbursement_destination_id_payout_destination"
+        ]
+        assert [element.parent.name for element in reimbursement.elements] == [
+            "reimbursement_destination_id"
+        ]
+        assert [element.target_fullname for element in reimbursement.elements] == [
+            "payout_destination.id"
+        ]
+        assert reimbursement.ondelete == "SET NULL"
 
     def test_partial_unique_index_present(self) -> None:
         """``uq_work_engagement_user_workspace_active`` carries the partial predicate.
@@ -350,6 +459,19 @@ class TestWorkEngagementRoundTrip:
 
     def test_insert_then_read_back(self, session: Session) -> None:
         _seed_workspace(session, "01HWA00000000000000000WSPA", "alpha")
+        _seed_user(session, "01HWA00000000000000000USRA", "worker-a@example.com")
+        _seed_payout_destination(
+            session,
+            destination_id="01HWA00000000000000000PAYX",
+            workspace_id="01HWA00000000000000000WSPA",
+            user_id="01HWA00000000000000000USRA",
+        )
+        _seed_payout_destination(
+            session,
+            destination_id="01HWA00000000000000000REIY",
+            workspace_id="01HWA00000000000000000WSPA",
+            user_id="01HWA00000000000000000USRA",
+        )
         row = WorkEngagement(
             id="01HWA00000000000000000WERT",
             user_id="01HWA00000000000000000USRA",
@@ -377,6 +499,96 @@ class TestWorkEngagementRoundTrip:
         assert loaded.supplier_org_id is None
         assert loaded.archived_on is None
         assert loaded.notes_md == "initial contractor engagement"
+
+    def test_destination_fk_rejects_missing_parent(self, fk_engine: Engine) -> None:
+        """SQLite FK-on path rejects unknown default destinations."""
+        factory = sessionmaker(bind=fk_engine, expire_on_commit=False, class_=Session)
+        with factory() as session:
+            _seed_workspace(session, "01HWA00000000000000000WSPF", "foxtrot")
+            row = WorkEngagement(
+                id="01HWA00000000000000000WEFK",
+                user_id="01HWA00000000000000000USRF",
+                workspace_id="01HWA00000000000000000WSPF",
+                engagement_kind="contractor",
+                pay_destination_id="01HWA00000000000000000MISS",
+                started_on=_TODAY,
+                notes_md="invalid destination",
+                created_at=_PINNED,
+                updated_at=_PINNED,
+            )
+            session.add(row)
+            with pytest.raises(IntegrityError):
+                session.flush()
+
+    def test_destination_fk_accepts_existing_parent(self, fk_engine: Engine) -> None:
+        """SQLite FK-on path accepts real payout destination parents."""
+        factory = sessionmaker(bind=fk_engine, expire_on_commit=False, class_=Session)
+        with factory() as session:
+            _seed_workspace(session, "01HWA00000000000000000WSPG", "golf")
+            _seed_user(session, "01HWA00000000000000000USRG", "worker-g@example.com")
+            _seed_payout_destination(
+                session,
+                destination_id="01HWA00000000000000000PAYG",
+                workspace_id="01HWA00000000000000000WSPG",
+                user_id="01HWA00000000000000000USRG",
+            )
+            row = WorkEngagement(
+                id="01HWA00000000000000000WEOK",
+                user_id="01HWA00000000000000000USRG",
+                workspace_id="01HWA00000000000000000WSPG",
+                engagement_kind="contractor",
+                pay_destination_id="01HWA00000000000000000PAYG",
+                started_on=_TODAY,
+                notes_md="valid destination",
+                created_at=_PINNED,
+                updated_at=_PINNED,
+            )
+            session.add(row)
+            session.flush()
+
+    def test_supplier_fk_rejects_missing_parent(self, fk_engine: Engine) -> None:
+        """SQLite FK-on path rejects unknown supplier organizations."""
+        factory = sessionmaker(bind=fk_engine, expire_on_commit=False, class_=Session)
+        with factory() as session:
+            _seed_workspace(session, "01HWA00000000000000000WSPH", "hotel")
+            row = WorkEngagement(
+                id="01HWA00000000000000000WEHS",
+                user_id="01HWA00000000000000000USRH",
+                workspace_id="01HWA00000000000000000WSPH",
+                engagement_kind="agency_supplied",
+                supplier_org_id="01HWA00000000000000000MISS",
+                started_on=_TODAY,
+                notes_md="invalid supplier",
+                created_at=_PINNED,
+                updated_at=_PINNED,
+            )
+            session.add(row)
+            with pytest.raises(IntegrityError):
+                session.flush()
+
+    def test_supplier_fk_accepts_existing_parent(self, fk_engine: Engine) -> None:
+        """SQLite FK-on path accepts real supplier organization parents."""
+        factory = sessionmaker(bind=fk_engine, expire_on_commit=False, class_=Session)
+        with factory() as session:
+            _seed_workspace(session, "01HWA00000000000000000WSPI", "india")
+            _seed_organization(
+                session,
+                organization_id="01HWA00000000000000000ORGI",
+                workspace_id="01HWA00000000000000000WSPI",
+            )
+            row = WorkEngagement(
+                id="01HWA00000000000000000WEIS",
+                user_id="01HWA00000000000000000USRI",
+                workspace_id="01HWA00000000000000000WSPI",
+                engagement_kind="agency_supplied",
+                supplier_org_id="01HWA00000000000000000ORGI",
+                started_on=_TODAY,
+                notes_md="valid supplier",
+                created_at=_PINNED,
+                updated_at=_PINNED,
+            )
+            session.add(row)
+            session.flush()
 
     def test_soft_archive_roundtrips(self, session: Session) -> None:
         """Setting ``archived_on`` and reading it back round-trips cleanly."""

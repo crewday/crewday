@@ -7,6 +7,7 @@ from datetime import UTC, date, datetime
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session, sessionmaker
 
+from app.adapters.db.payroll.models import PayoutDestination
 from app.adapters.db.workspace.models import WorkEngagement
 from app.api.v1.work_engagements import build_work_engagements_router
 from app.tenancy import WorkspaceContext
@@ -39,6 +40,31 @@ def _seed_engagement(
             started_on=date(2026, 4, 1),
             archived_on=archived_on,
             notes_md="",
+            created_at=datetime.now(tz=UTC),
+            updated_at=datetime.now(tz=UTC),
+        )
+        s.add(row)
+        s.commit()
+        return row.id
+
+
+def _seed_payout_destination(
+    factory: sessionmaker[Session],
+    *,
+    user_id: str,
+    workspace_id: str,
+) -> str:
+    with factory() as s:
+        row = PayoutDestination(
+            id=new_ulid(),
+            workspace_id=workspace_id,
+            user_id=user_id,
+            kind="bank_account",
+            currency="EUR",
+            display_stub="FR-12",
+            secret_ref_id=None,
+            country="FR",
+            label="Payroll",
             created_at=datetime.now(tz=UTC),
             updated_at=datetime.now(tz=UTC),
         )
@@ -126,15 +152,18 @@ class TestPatch:
         engagement_id = _seed_engagement(
             factory, user_id=ctx.actor_id, workspace_id=ws_id
         )
+        destination_id = _seed_payout_destination(
+            factory, user_id=ctx.actor_id, workspace_id=ws_id
+        )
         client = _owner_client(ctx, factory)
         resp = client.patch(
             f"/work_engagements/{engagement_id}",
-            json={"notes_md": "Added note", "pay_destination_id": "dest_123"},
+            json={"notes_md": "Added note", "pay_destination_id": destination_id},
         )
         assert resp.status_code == 200, resp.text
         body = resp.json()
         assert body["notes_md"] == "Added note"
-        assert body["pay_destination_id"] == "dest_123"
+        assert body["pay_destination_id"] == destination_id
 
     def test_switch_to_agency_without_supplier_returns_422(
         self,

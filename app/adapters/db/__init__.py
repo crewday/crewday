@@ -20,12 +20,11 @@ target:
     from app.adapters.db.<other_pkg> import models as _<other_pkg>_models  # noqa: F401
 
 The ``noqa: F401`` is intentional — the import is the registration,
-not a name. The dependency graph is acyclic with ``workspace`` as the
-single leaf (no cross-package FKs of its own); ``identity`` depends
-only on ``workspace``; everything else depends on
-``identity`` / ``workspace`` (and a small subset on ``places`` /
-``payroll``). Adding a new cross-package FK adds the matching side-
-effect import in the same change.
+not a name. ``workspace`` owns the tenant anchor and several central
+membership tables, so newer slices may point back from
+``work_engagement`` to counterparty / payout tables in sibling
+packages. Adding a new cross-package FK adds the matching side-effect
+import in the same change.
 
 The test suite enforces this indirectly via fixtures that walk every
 ``app.adapters.db.*`` subpackage before ``create_all``; the side-
