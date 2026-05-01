@@ -96,9 +96,11 @@ from app.api.client import build_client_portal_router
 from app.api.errors import add_exception_handlers
 from app.api.health import router as health_router
 from app.api.middleware import (
+    AgentApprovalMiddleware,
     DemoGuardrailMiddleware,
     HttpMetricsMiddleware,
     IdempotencyMiddleware,
+    InProcessApprovalDispatcher,
     RateLimitMiddleware,
     RequestIdMiddleware,
     SecurityHeadersMiddleware,
@@ -1473,6 +1475,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         lifespan=_build_worker_lifespan(cfg),
     )
     demo_guardrail_store = ShieldStore()
+    app.state.tool_dispatcher = InProcessApprovalDispatcher()
 
     # Middleware is applied OUTER → INNER at request time. FastAPI's
     # ``add_middleware`` prepends to ``user_middleware``, so the LAST
@@ -1503,11 +1506,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     #    inside HTTP metrics so 429s are counted, and after workspace
     #    resolution so bearer-token metadata is already on
     #    ``request.state``.
-    # 7. IdempotencyMiddleware — replay cache for ``POST`` retries
+    # 7. AgentApprovalMiddleware — delegated-token approval gate.
+    # 8. IdempotencyMiddleware — replay cache for ``POST`` retries
     #    carrying ``Idempotency-Key``. Runs AFTER auth (so
     #    ``token_id`` is known) and BEFORE the handler. Spec §12
     #    "Idempotency".
-    # 8. CSRFMiddleware — double-submit check on mutation verbs.
+    # 9. CSRFMiddleware — double-submit check on mutation verbs.
     #
     # To get that layout we register INNER → OUTER: CSRF first (ends up
     # innermost), CORS last (ends up outermost). CORS defaults to
@@ -1518,6 +1522,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # ``CREWDAY_CORS_ALLOW_ORIGINS`` with an explicit list.
     app.add_middleware(CSRFMiddleware)
     app.add_middleware(IdempotencyMiddleware)
+    app.add_middleware(AgentApprovalMiddleware)
     app.add_middleware(RateLimitMiddleware, settings=cfg)
     app.add_middleware(HttpMetricsMiddleware)
     app.add_middleware(WorkspaceContextMiddleware)

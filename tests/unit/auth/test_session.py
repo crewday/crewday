@@ -1115,6 +1115,14 @@ class TestCSRFMiddleware:
         )
         assert r.status_code == 403
 
+    def test_post_with_bearer_auth_bypasses_check(self) -> None:
+        client = TestClient(_make_csrf_app(), base_url="https://testserver")
+        r = client.post(
+            "/scoped/write",
+            headers={"Authorization": "Bearer mip_test_secret"},
+        )
+        assert r.status_code == 200, r.text
+
     def test_skip_path_bypasses_check(self) -> None:
         """``/healthz`` and other SKIP_PATHS never require CSRF pairs."""
         app = FastAPI()

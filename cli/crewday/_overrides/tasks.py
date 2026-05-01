@@ -32,6 +32,7 @@ from crewday._client import CrewdayClient
 from crewday._globals import CrewdayContext
 from crewday._main import ConfigError, CrewdayError
 from crewday._overrides import cli_override
+from crewday._runtime import _default_client_factory, _resolve_profile_context
 
 __all__ = ["register"]
 
@@ -43,6 +44,7 @@ __all__ = ["register"]
 # coordinate doc) and live behind future override flags rather than
 # squatting on ``--evidence``.
 _DEFAULT_EVIDENCE_KIND: Final[str] = "photo"
+_OCCURRENCE_ROUTE_PREFIX: Final[str] = "tasks"
 
 
 def _guess_content_type(path: pathlib.Path) -> str:
@@ -62,7 +64,7 @@ def _upload_one_evidence(
     client: CrewdayClient,
     *,
     ctx: CrewdayContext,
-    workspace_url_root: str,
+    task_route_root: str,
     task_id: str,
     file_path: pathlib.Path,
 ) -> str:
@@ -84,7 +86,7 @@ def _upload_one_evidence(
     contents = file_path.read_bytes()
     response = client.request(
         "POST",
-        f"{workspace_url_root}/tasks/{task_id}/evidence",
+        f"{task_route_root}/{task_id}/evidence",
         data={"kind": _DEFAULT_EVIDENCE_KIND},
         files={
             "file": (
@@ -159,26 +161,29 @@ def complete(
     count — followed by the JSON body so an agent that pipes through
     ``jq`` can still extract every field.
     """
-    if ctx.workspace is None or not ctx.workspace:
+    resolved_ctx = _resolve_profile_context(ctx, client_factory=_client_factory_for)
+    if resolved_ctx.workspace is None or not resolved_ctx.workspace:
         raise ConfigError(
             "this command targets /w/<slug>/... but no workspace is set "
             "(pass --workspace or set CREWDAY_WORKSPACE)."
         )
 
-    workspace_url_root = f"/w/{ctx.workspace}/api/v1"
-    with _client_factory_for(ctx) as client:
+    task_route_root = (
+        f"/w/{resolved_ctx.workspace}/api/v1/tasks/{_OCCURRENCE_ROUTE_PREFIX}"
+    )
+    with _client_factory_for(resolved_ctx) as client:
         # Sanity-check the task exists + caller can see it. A 404 here
         # raises ApiError with exit code 1 (CLIENT_ERROR) so the
         # message stays focused on the missing-task case rather than
         # confusing the user with a partial-upload state.
-        client.request("GET", f"{workspace_url_root}/tasks/{task_id}")
+        client.request("GET", f"{task_route_root}/{task_id}")
 
         evidence_ids: list[str] = []
         for path in evidence_paths:
             evidence_id = _upload_one_evidence(
                 client,
-                ctx=ctx,
-                workspace_url_root=workspace_url_root,
+                ctx=resolved_ctx,
+                task_route_root=task_route_root,
                 task_id=task_id,
                 file_path=path,
             )
@@ -190,9 +195,9 @@ def complete(
 
         response = client.request(
             "POST",
-            f"{workspace_url_root}/tasks/{task_id}/complete",
+            f"{task_route_root}/{task_id}/complete",
             json=body,
-            idempotency_key=ctx.idempotency_key_factory(),
+            idempotency_key=resolved_ctx.idempotency_key_factory(),
         )
         payload = response.json()
 
@@ -203,26 +208,13 @@ def complete(
     click.echo(json.dumps(payload, indent=2, sort_keys=False, default=str))
 
 
-def _client_factory_for(ctx: CrewdayContext) -> CrewdayClient:
-    """Return a configured :class:`CrewdayClient` for the active context.
+_client_factory_for = _default_client_factory
+"""Configured client factory for the active context.
 
-    Indirection point: production code resolves the profile via the
-    ``crewday._config`` loader (Beads cd-cksj) once it lands; tests
-    patch this symbol with a closure that returns a
-    :class:`CrewdayClient` wired to :class:`httpx.MockTransport`.
-    Until cd-cksj is in, raising :class:`ConfigError` from the
-    default factory mirrors the runtime's own behaviour and steers
-    callers toward the test seam.
-
-    The returned client is itself a context manager (subclass of
-    :class:`contextlib.AbstractContextManager`) so callers can wrap
-    it in a ``with`` block to get connection-pool cleanup on exit.
-    """
-    raise ConfigError(
-        "profile resolution is not yet implemented; the test suite patches "
-        "crewday._overrides.tasks._client_factory_for. Production wiring "
-        "lands with Beads cd-cksj."
-    )
+Tests patch this symbol with a mock-transport factory. Keeping it as a
+module-level variable lets the override share the generated runtime's
+profile/default-workspace handling without giving up that unit-test seam.
+"""
 
 
 # Stamp the override metadata. ``upload_task_evidence`` and

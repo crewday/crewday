@@ -95,9 +95,9 @@ def test_complete_no_evidence_calls_complete_immediately(
     # Two calls: GET sanity check + POST /complete.
     assert len(captured) == 2
     assert captured[0].method == "GET"
-    assert captured[0].url.path == "/w/smoke/api/v1/tasks/task-1"
+    assert captured[0].url.path == "/w/smoke/api/v1/tasks/tasks/task-1"
     assert captured[1].method == "POST"
-    assert captured[1].url.path == "/w/smoke/api/v1/tasks/task-1/complete"
+    assert captured[1].url.path == "/w/smoke/api/v1/tasks/tasks/task-1/complete"
 
     body = json.loads(captured[1].content)
     assert body == {"photo_evidence_ids": []}
@@ -271,6 +271,65 @@ def test_complete_requires_workspace(
         obj=no_workspace_ctx,
     )
     assert result.exit_code == ExitCode.CONFIG_ERROR
+
+
+def test_complete_uses_profile_default_workspace(
+    runner: CliRunner,
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The override applies profile defaults like generated commands do."""
+    config_dir = tmp_path / "config" / "crewday"
+    config_dir.mkdir(parents=True)
+    (config_dir / "profiles.toml").write_text(
+        """
+        default = "e2e"
+
+        [profile.e2e]
+        base_url = "https://api.test.local"
+        token = "test-token"
+        default_workspace = "smoke"
+        output = "json"
+        """,
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+    captured: list[tuple[str, str]] = []
+
+    class FakeClient:
+        def __init__(
+            self,
+            *,
+            base_url: str,
+            token: str | None,
+            workspace: str | None,
+        ) -> None:
+            assert base_url == "https://api.test.local"
+            assert token == "test-token"
+            assert workspace == "smoke"
+
+        def __enter__(self) -> FakeClient:
+            return self
+
+        def __exit__(self, *_exc: object) -> None:
+            return None
+
+        def request(self, method: str, url: str, **_kwargs: object) -> httpx.Response:
+            captured.append((method, url))
+            return httpx.Response(200, json={"id": "task-1", "state": "completed"})
+
+    monkeypatch.setattr("crewday._runtime.CrewdayClient", FakeClient)
+    result = runner.invoke(
+        tasks_override.complete,
+        ["task-1"],
+        obj=CrewdayContext(profile=None, workspace=None, output="json"),
+    )
+
+    assert result.exit_code == 0, result.output
+    assert captured == [
+        ("GET", "/w/smoke/api/v1/tasks/tasks/task-1"),
+        ("POST", "/w/smoke/api/v1/tasks/tasks/task-1/complete"),
+    ]
 
 
 def test_complete_metadata_attached() -> None:

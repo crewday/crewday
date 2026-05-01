@@ -26,10 +26,10 @@ even if the attacker guesses the right URL shape.
 its child-segment match so the bare-host ops probes
 (``/healthz``, ``/readyz``, ``/version``), auth entry points
 (``/auth/magic``, ``/auth/passkey``, ``/signup``, ``/login``,
-``/recover``), OpenAPI docs, and static assets stay callable from
-tools that don't carry the cookie (health checkers, agent scripts
-hitting ``/api/v1`` with a bearer token — which has its own auth
-shape, not a cookie session).
+``/recover``), OpenAPI docs, static assets, and requests carrying an
+``Authorization: Bearer`` credential stay callable from tools that
+don't carry the cookie. Bearer requests have their own non-cookie
+auth shape, so they are not vulnerable to browser cookie CSRF.
 
 **Exposed helpers:**
 
@@ -123,6 +123,11 @@ def _is_skip_path(path: str) -> bool:
     return any(path.startswith(f"{prefix}/") for prefix in SKIP_PATHS)
 
 
+def _has_bearer_auth(request: Request) -> bool:
+    auth = request.headers.get("Authorization")
+    return bool(auth and auth.lower().startswith("bearer ") and auth[7:].strip())
+
+
 def verify_csrf(request: Request) -> bool:
     """Return ``True`` if the ``X-CSRF`` header matches the cookie.
 
@@ -207,7 +212,7 @@ class CSRFMiddleware(BaseHTTPMiddleware):
         call_next: Callable[[Request], Awaitable[Response]],
     ) -> Response:
         path = request.url.path
-        skip = _is_skip_path(path)
+        skip = _is_skip_path(path) or _has_bearer_auth(request)
         method = request.method.upper()
 
         if not skip and method not in IDEMPOTENT_METHODS and not verify_csrf(request):

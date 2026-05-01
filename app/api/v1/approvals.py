@@ -473,6 +473,11 @@ def _build_replay(
         headers={
             "X-Agent-Channel": "approval-replay",
             "X-Crewday-Replay": "1",
+            "X-Crewday-Replay-Actor-Id": ctx.actor_id,
+            "X-Crewday-Replay-Actor-Role": ctx.actor_grant_role,
+            "X-Crewday-Replay-Actor-Is-Owner": (
+                "1" if ctx.actor_was_owner_member else "0"
+            ),
         },
     )
 
@@ -559,6 +564,7 @@ def get_approval(
     response_model=ApprovalPayload,
     status_code=status.HTTP_200_OK,
     summary="Approve a pending action and replay it",
+    dependencies=[_ApprovalReadGate],
 )
 def approve_approval(
     request: Request,
@@ -628,6 +634,7 @@ def _deny_handler(
     response_model=ApprovalPayload,
     status_code=status.HTTP_200_OK,
     summary="Reject a pending action",
+    dependencies=[_ApprovalReadGate],
 )
 def reject_approval(
     ctx: _DeciderCtx,
@@ -651,6 +658,7 @@ def reject_approval(
     status_code=status.HTTP_200_OK,
     summary="Deny a pending action (alias of /reject)",
     include_in_schema=False,
+    dependencies=[_ApprovalReadGate],
 )
 def deny_approval(
     ctx: _DeciderCtx,

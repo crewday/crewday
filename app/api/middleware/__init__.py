@@ -25,6 +25,10 @@ See ``docs/specs/15-security-privacy.md`` §"HTTP security headers",
 
 from __future__ import annotations
 
+from app.api.middleware.approval import (
+    AgentApprovalMiddleware,
+    InProcessApprovalDispatcher,
+)
 from app.api.middleware.demo_guardrails import DemoGuardrailMiddleware
 from app.api.middleware.idempotency import (
     IdempotencyMiddleware,
@@ -46,9 +50,11 @@ from app.api.middleware.security_headers import (
 
 __all__ = [
     "REQUEST_ID_HEADER",
+    "AgentApprovalMiddleware",
     "DemoGuardrailMiddleware",
     "HttpMetricsMiddleware",
     "IdempotencyMiddleware",
+    "InProcessApprovalDispatcher",
     "RateLimitMiddleware",
     "RequestIdMiddleware",
     "SecurityHeadersMiddleware",
