@@ -10,6 +10,7 @@ payloads.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any, Literal
 
@@ -82,6 +83,7 @@ from app.domain.stays.ical_service import (
     list_feeds,
     probe_feed,
     register_feed,
+    resolve_allow_self_signed,
     update_feed,
 )
 from app.ports.tasks_create_occurrence import TasksCreateOccurrencePort
@@ -122,19 +124,43 @@ _ID = Annotated[str, Path(min_length=1, max_length=64)]
 # ---------------------------------------------------------------------------
 
 
-def get_ical_validator(
+IcalValidatorBuilder = Callable[[bool], HttpxIcalValidator]
+
+
+def get_ical_validator_builder(
     settings: Annotated[Settings, Depends(get_settings)],
-) -> HttpxIcalValidator:
-    # The ``allow_private_addresses`` flag is the §04 "SSRF guard"
-    # private-address gate; defaults to ``False`` and only flips on
-    # under the dev/e2e compose override
-    # (``CREWDAY_ICAL_ALLOW_PRIVATE_ADDRESSES=1``). Production must
-    # keep it off so loopback / RFC 1918 feed URLs are rejected.
-    return HttpxIcalValidator(
-        IcalValidatorConfig(
-            allow_private_addresses=settings.ical_allow_private_addresses,
+) -> IcalValidatorBuilder:
+    """Build a per-call iCal validator with the right TLS posture.
+
+    Returns a closure the route handler invokes once it has resolved
+    the per-feed ``ical.allow_self_signed`` setting (cd-t2qtg). The
+    closure carries the deployment-level
+    ``allow_private_addresses`` knob (cd-xr652) which is per-process,
+    not per-feed; the caller-supplied ``allow_self_signed`` rides on
+    top.
+
+    Returning a builder rather than a fully-built validator keeps the
+    boundary clean: the cascade lookup is the route's job (it owns
+    the workspace context + DB session), the adapter wiring is this
+    function's job. A pre-built validator could only honour a single
+    flag combination per request, which would break the manage-
+    multiple-feeds case if the spec ever grew one.
+    """
+
+    # Production posture defaults: hardened TLS, no loopback. The
+    # ``allow_private_addresses`` knob is deployment-level (cd-xr652)
+    # so it lives in :class:`Settings`, not in the per-feed cascade.
+    allow_private_addresses = settings.ical_allow_private_addresses
+
+    def _build(allow_self_signed: bool) -> HttpxIcalValidator:
+        return HttpxIcalValidator(
+            IcalValidatorConfig(
+                allow_private_addresses=allow_private_addresses,
+                allow_self_signed=allow_self_signed,
+            )
         )
-    )
+
+    return _build
 
 
 def get_provider_detector() -> HostProviderDetector:
@@ -199,7 +225,9 @@ def get_ical_resolver() -> Resolver | None:
     return None
 
 
-_IcalValidatorDep = Annotated[HttpxIcalValidator, Depends(get_ical_validator)]
+_IcalValidatorBuilderDep = Annotated[
+    IcalValidatorBuilder, Depends(get_ical_validator_builder)
+]
 _ProviderDetectorDep = Annotated[HostProviderDetector, Depends(get_provider_detector)]
 _EnvelopeDep = Annotated[EnvelopeEncryptor, Depends(get_envelope)]
 _TasksPortDep = Annotated[
@@ -476,17 +504,29 @@ def build_stays_router() -> APIRouter:
         body: IcalFeedCreateRequest,
         ctx: _Ctx,
         session: _Db,
-        validator: _IcalValidatorDep,
+        validator_builder: _IcalValidatorBuilderDep,
         detector: _ProviderDetectorDep,
         envelope: _EnvelopeDep,
         clock: _ClockDep,
     ) -> IcalFeedResponse:
+        # §04 SSRF carve-out (cd-t2qtg) — resolve the per-feed
+        # ``ical.allow_self_signed`` cascade BEFORE the registration
+        # probe so a workspace / property that has opted in can
+        # register a self-signed iCal endpoint without tripping the
+        # default cert-verify gate. The cascade default is ``False``;
+        # production workspaces never opt in unless an operator
+        # flips the setting deliberately.
+        allow_self_signed = resolve_allow_self_signed(
+            session,
+            workspace_id=ctx.workspace_id,
+            property_id=body.property_id,
+        )
         try:
             view = register_feed(
                 session,
                 ctx,
                 body=IcalFeedCreate(**body.model_dump()),
-                validator=validator,
+                validator=validator_builder(allow_self_signed),
                 detector=detector,
                 envelope=envelope,
                 clock=clock,
@@ -506,18 +546,34 @@ def build_stays_router() -> APIRouter:
         body: IcalFeedUpdateRequest,
         ctx: _Ctx,
         session: _Db,
-        validator: _IcalValidatorDep,
+        validator_builder: _IcalValidatorBuilderDep,
         detector: _ProviderDetectorDep,
         envelope: _EnvelopeDep,
         clock: _ClockDep,
     ) -> IcalFeedResponse:
+        # Resolve ``ical.allow_self_signed`` from the cascade for the
+        # feed's existing ``(workspace_id, property_id)`` so a re-
+        # validation triggered by a URL swap honours the workspace /
+        # property opt-in. We pre-load just the property_id rather
+        # than re-validating against an unrelated feed's setting.
+        property_id = session.scalar(
+            select(IcalFeed.property_id).where(
+                IcalFeed.id == feed_id,
+                IcalFeed.workspace_id == ctx.workspace_id,
+            )
+        )
+        allow_self_signed = resolve_allow_self_signed(
+            session,
+            workspace_id=ctx.workspace_id,
+            property_id=property_id,
+        )
         try:
             view = update_feed(
                 session,
                 ctx,
                 feed_id=feed_id,
                 body=IcalFeedUpdate(**body.model_dump()),
-                validator=validator,
+                validator=validator_builder(allow_self_signed),
                 detector=detector,
                 envelope=envelope,
                 clock=clock,
@@ -578,7 +634,7 @@ def build_stays_router() -> APIRouter:
         feed_id: _ID,
         ctx: _Ctx,
         session: _Db,
-        validator: _IcalValidatorDep,
+        validator_builder: _IcalValidatorBuilderDep,
         envelope: _EnvelopeDep,
         clock: _ClockDep,
     ) -> IcalProbeResponse:
@@ -588,12 +644,23 @@ def build_stays_router() -> APIRouter:
         # parse VEVENTs, upsert reservations, or fire
         # ``ReservationUpserted``. The full ingest path lives at
         # ``POST /ical-feeds/{feed_id}/poll-once`` (cd-jk6is).
+        property_id = session.scalar(
+            select(IcalFeed.property_id).where(
+                IcalFeed.id == feed_id,
+                IcalFeed.workspace_id == ctx.workspace_id,
+            )
+        )
+        allow_self_signed = resolve_allow_self_signed(
+            session,
+            workspace_id=ctx.workspace_id,
+            property_id=property_id,
+        )
         try:
             result = probe_feed(
                 session,
                 ctx,
                 feed_id=feed_id,
-                validator=validator,
+                validator=validator_builder(allow_self_signed),
                 envelope=envelope,
                 clock=clock,
             )
@@ -645,6 +712,17 @@ def build_stays_router() -> APIRouter:
         if feed_row is None:
             raise _not_found("ical_feed_not_found")
 
+        # Resolve the per-feed ``ical.allow_self_signed`` cascade once
+        # (this route only processes a single feed); pass the closure
+        # so the worker's per-feed loop reads the same value the
+        # validator side did at registration time.
+        def _self_signed_for(_feed: IcalFeed) -> bool:
+            return resolve_allow_self_signed(
+                session,
+                workspace_id=ctx.workspace_id,
+                property_id=_feed.property_id,
+            )
+
         token = set_current(ctx)
         try:
             with bind_active_session(session):
@@ -658,6 +736,7 @@ def build_stays_router() -> APIRouter:
                     feed_ids=frozenset({feed_id}),
                     force=True,
                     allow_private_addresses=(settings.ical_allow_private_addresses),
+                    allow_self_signed_resolver=_self_signed_for,
                 )
         finally:
             reset_current(token)

@@ -307,6 +307,7 @@ def fetch_ical_body(
     max_body_bytes: int = DEFAULT_PROBE_BODY_BYTES,
     user_agent: str = "crewday-ical-poller/1.0",
     allow_private_addresses: bool = False,
+    allow_self_signed: bool = False,
 ) -> _PolledBody:
     """Fetch ``url`` through the SSRF-pinned HTTPS path.
 
@@ -333,6 +334,18 @@ def fetch_ical_body(
     (``CREWDAY_ICAL_ALLOW_PRIVATE_ADDRESSES=1``) lets the worker poll
     the same in-cluster ICS server that registration accepted.
     Production must keep it ``False``.
+
+    ``allow_self_signed`` is the §04 SSRF carve-out (cd-t2qtg) for
+    the per-feed ``ical.allow_self_signed`` workspace / property
+    setting. Default ``False`` — full TLS verification + hostname
+    checks. ``True`` flips :class:`StdlibHttpsFetcher` to
+    ``check_hostname=False`` + ``verify_mode=CERT_NONE`` for this fetch
+    only. The worker resolves the per-feed cascade in
+    :func:`_poll_one_feed` and forwards the result; every other gate
+    (scheme, DNS-rebind pin, body cap, redirects, timeout) still
+    applies. Production must keep the catalog default ``false`` —
+    flipping the setting on a workspace lets a malicious feed at a
+    self-signed endpoint avoid the chain-of-trust check.
 
     Rate-limit short-circuit: a 429 response returns a
     :class:`_PolledBody` with ``status=429`` and any ``Retry-After``
@@ -378,7 +391,17 @@ def fetch_ical_body(
         allow_private_addresses=allow_private_addresses,
     )
 
-    resolved_fetcher = fetcher if fetcher is not None else StdlibHttpsFetcher()
+    # Default fetcher honours ``allow_self_signed`` for the same
+    # reason the validator does: when no etag is set we delegate
+    # straight to :meth:`StdlibHttpsFetcher.fetch`, which builds its
+    # TLS context off the constructor flag. Passing the flag through
+    # the conditional path (``last_etag is not None``) is handled
+    # below in :func:`_fetch_conditional`.
+    resolved_fetcher = (
+        fetcher
+        if fetcher is not None
+        else StdlibHttpsFetcher(allow_self_signed=allow_self_signed)
+    )
     response = _fetch_conditional(
         resolved_fetcher,
         parsed=parsed,
@@ -387,6 +410,7 @@ def fetch_ical_body(
         max_body_bytes=max_body_bytes,
         last_etag=last_etag,
         user_agent=user_agent,
+        allow_self_signed=allow_self_signed,
     )
 
     if response.status == 304:
@@ -440,6 +464,7 @@ def _fetch_conditional(
     max_body_bytes: int,
     last_etag: str | None,
     user_agent: str,
+    allow_self_signed: bool = False,
 ) -> FetchResponse:
     """Issue one GET via ``fetcher`` with conditional headers.
 
@@ -482,6 +507,7 @@ def _fetch_conditional(
             max_body_bytes=max_body_bytes,
             last_etag=last_etag,
             user_agent=user_agent,
+            allow_self_signed=allow_self_signed,
         )
 
     # Test stubs that want conditional-GET semantics implement their
@@ -505,6 +531,7 @@ def _stdlib_conditional_fetch(
     max_body_bytes: int,
     last_etag: str,
     user_agent: str,
+    allow_self_signed: bool = False,
 ) -> FetchResponse:
     """Stdlib :mod:`http.client` GET with ``If-None-Match`` set.
 
@@ -515,14 +542,22 @@ def _stdlib_conditional_fetch(
     today and bolting one on would widen the validator's API
     surface for a poll-only need. Localising the
     duplication keeps the validator's contract narrow.
+
+    ``allow_self_signed`` is the §04 SSRF carve-out (cd-t2qtg);
+    forwarded via the per-feed ``ical.allow_self_signed`` setting
+    cascade. The TLS context is built through
+    :func:`app.adapters.ical.validator.build_tls_context` so the
+    validator and the worker share a single source of truth for the
+    TLS posture (no drift between registration-probe and poll-time
+    fetches).
     """
     import http.client
-    import ssl
     import time as _time
 
     from app.adapters.ical.validator import (
         _IpPinnedHTTPSConnection,
         _read_body_capped,
+        build_tls_context,
     )
 
     host = parsed.hostname or ""
@@ -533,9 +568,7 @@ def _stdlib_conditional_fetch(
             "ical_url_timeout", f"deadline exceeded before connect to {host!r}"
         )
 
-    ctx = ssl.create_default_context()
-    ctx.check_hostname = True
-    ctx.verify_mode = ssl.CERT_REQUIRED
+    ctx = build_tls_context(allow_self_signed=allow_self_signed)
     conn: http.client.HTTPSConnection = _IpPinnedHTTPSConnection(
         host=host,
         resolved_ip=resolved_ip,
@@ -665,6 +698,7 @@ def poll_ical(
     allow_private_addresses: bool = False,
     feed_ids: frozenset[str] | None = None,
     force: bool = False,
+    allow_self_signed_resolver: Callable[[IcalFeed], bool] | None = None,
 ) -> PollReport:
     """Run one poll tick for the caller's workspace.
 
@@ -684,6 +718,18 @@ def poll_ical(
     forwards it here so the worker honours the same gate as
     registration. Default ``False`` — loopback / RFC 1918 /
     link-local feed URLs are rejected at fetch time.
+
+    ``allow_self_signed_resolver`` is the §04 SSRF carve-out
+    (cd-t2qtg) for the per-feed ``ical.allow_self_signed`` workspace /
+    property setting. The resolver receives one
+    :class:`~app.adapters.db.stays.models.IcalFeed` and returns
+    whether self-signed certificates are accepted for that feed.
+    ``None`` (the default) means the worker treats every feed as
+    "verify the chain" — production posture. The fan-out body reads
+    the cascade through :func:`app.domain.settings.cascade.concrete_values`
+    and passes a closure here so the worker honours each feed's
+    workspace + property setting without coupling the worker to the
+    cascade module.
 
     ``feed_ids`` narrows the walk to a specific subset of feed IDs;
     ``None`` (the scheduler default) walks every feed in the workspace.
@@ -795,6 +841,11 @@ def poll_ical(
                 continue
             last_fetch_monotonic[host] = now_monotonic
 
+        feed_allow_self_signed = (
+            allow_self_signed_resolver(feed)
+            if allow_self_signed_resolver is not None
+            else False
+        )
         outcome = _poll_one_feed(
             session,
             ctx,
@@ -808,6 +859,7 @@ def poll_ical(
             poll_timeout_seconds=poll_timeout_seconds,
             max_body_bytes=max_body_bytes,
             allow_private_addresses=allow_private_addresses,
+            allow_self_signed=feed_allow_self_signed,
         )
         per_feed_results.append(outcome)
         if outcome.status == PollOutcome.POLLED:
@@ -879,6 +931,7 @@ def _poll_one_feed(
     poll_timeout_seconds: float,
     max_body_bytes: int,
     allow_private_addresses: bool,
+    allow_self_signed: bool,
 ) -> PolledFeedResult:
     """Fetch + parse + upsert one feed.
 
@@ -896,6 +949,7 @@ def _poll_one_feed(
             resolver=resolver,
             max_body_bytes=max_body_bytes,
             allow_private_addresses=allow_private_addresses,
+            allow_self_signed=allow_self_signed,
         )
     except IcalValidationError as exc:
         _record_feed_error(

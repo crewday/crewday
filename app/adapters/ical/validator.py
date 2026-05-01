@@ -66,6 +66,8 @@ __all__ = [
     "IcalValidator",
     "IcalValidatorConfig",
     "Resolver",
+    "StdlibHttpsFetcher",
+    "build_tls_context",
     "is_public_ip",
     "resolve_public_address",
 ]
@@ -324,6 +326,43 @@ class _IpPinnedHTTPSConnection(http.client.HTTPSConnection):
         self.sock = self._ssl_context.wrap_socket(sock, server_hostname=self.host)
 
 
+def build_tls_context(*, allow_self_signed: bool = False) -> ssl.SSLContext:
+    """Build the TLS context for an iCal HTTPS fetch.
+
+    Default: full hardening — :func:`ssl.create_default_context` with
+    explicit ``check_hostname=True`` + ``verify_mode=CERT_REQUIRED``
+    (the stdlib defaults, restated so a future stdlib change can't
+    silently weaken our posture).
+
+    ``allow_self_signed=True`` is the §04 SSRF guard's per-feed
+    "Allow self-signed iCal" carve-out, gated by the workspace /
+    property setting ``ical.allow_self_signed`` (default ``false``,
+    override scope ``W/P``). When the operator opts a feed in the
+    fetcher disables hostname verification and accepts any cert. **No
+    other gate is loosened** — scheme is still ``https://``, the
+    DNS-rebind pin still fires, the body cap still applies. The flag
+    exists for two narrow cases:
+
+    * crew.day's e2e stack pointing the GA journey 3 feed at an
+      in-cluster ICS sidecar with a self-signed cert (cd-zxvk).
+    * Self-hosters whose iCal endpoint sits inside a private network
+      with a custom CA the operator does not want to install
+      system-wide.
+
+    The setting is per-feed (workspace + property cascade); production
+    deployments default to ``False``. Callers must NEVER hard-code
+    ``True`` outside that gated path.
+    """
+    ctx = ssl.create_default_context()
+    if allow_self_signed:
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+    else:
+        ctx.check_hostname = True
+        ctx.verify_mode = ssl.CERT_REQUIRED
+    return ctx
+
+
 class StdlibHttpsFetcher(Fetcher):
     """Default :class:`Fetcher` backed by :mod:`http.client` + :mod:`ssl`.
 
@@ -331,7 +370,16 @@ class StdlibHttpsFetcher(Fetcher):
     TLS SNI + cert verification still work because the original
     hostname is used for the TLS wrap step. The ``Host:`` header
     carries the original hostname for virtual-host routing.
+
+    ``allow_self_signed`` is the §04 SSRF carve-out wired to the
+    workspace / property setting ``ical.allow_self_signed``. Default
+    ``False``; flipped to ``True`` per-feed by the route handler /
+    worker after resolving the cascade for the feed's
+    ``(workspace_id, property_id)``. See :func:`build_tls_context`.
     """
+
+    def __init__(self, *, allow_self_signed: bool = False) -> None:
+        self._allow_self_signed = allow_self_signed
 
     def fetch(
         self,
@@ -348,9 +396,7 @@ class StdlibHttpsFetcher(Fetcher):
             raise IcalValidationError(
                 _CODE_TIMEOUT, f"deadline exceeded before connect to {host!r}"
             )
-        ctx = ssl.create_default_context()
-        ctx.check_hostname = True
-        ctx.verify_mode = ssl.CERT_REQUIRED
+        ctx = build_tls_context(allow_self_signed=self._allow_self_signed)
         conn: http.client.HTTPSConnection = _IpPinnedHTTPSConnection(
             host=host,
             resolved_ip=resolved_ip,
@@ -465,7 +511,13 @@ class IcalValidatorConfig:
     # lookup (e.g. "first call returns 203.0.113.1, second returns
     # 127.0.0.1" to exercise the DNS-rebind guard).
     resolver: Resolver = field(default=_system_resolver)
-    fetcher: Fetcher = field(default_factory=StdlibHttpsFetcher)
+    # ``None`` lets :class:`HttpxIcalValidator.__init__` build the
+    # default :class:`StdlibHttpsFetcher` honouring
+    # :attr:`allow_self_signed`. Tests inject a stub fetcher
+    # explicitly; production passes ``None`` so the TLS posture flows
+    # through the config rather than being baked in at default-factory
+    # time (which would hide the per-feed setting from the fetcher).
+    fetcher: Fetcher | None = None
     # Dev / e2e escape hatch: allow loopback / RFC 1918 / link-local
     # targets. **Production default is ``False``** and must stay that
     # way — the §04 "SSRF guard" private-address rejection is what
@@ -478,6 +530,17 @@ class IcalValidatorConfig:
     # timeout) still applies when the gate is open. See cd-xr652 and
     # ``app.config.Settings.ical_allow_private_addresses``.
     allow_private_addresses: bool = False
+    # §04 SSRF carve-out (cd-t2qtg): per-feed "Allow self-signed iCal"
+    # opt-in. Default ``False`` — TLS verification + hostname checks
+    # are enforced. ``True`` flips :class:`StdlibHttpsFetcher` to
+    # ``check_hostname=False`` + ``verify_mode=CERT_NONE`` (see
+    # :func:`build_tls_context`). The route handler / worker resolves
+    # the per-feed setting ``ical.allow_self_signed`` (workspace +
+    # property cascade) and forwards the result here; the catalog
+    # default is ``false`` so production never opts in by accident.
+    # Every other validator gate (scheme, DNS-rebind, redirects, body
+    # cap, timeout) still applies when this flag is on.
+    allow_self_signed: bool = False
 
 
 class HttpxIcalValidator:
@@ -491,7 +554,19 @@ class HttpxIcalValidator:
     """
 
     def __init__(self, config: IcalValidatorConfig | None = None) -> None:
-        self._config = config if config is not None else IcalValidatorConfig()
+        resolved_config = config if config is not None else IcalValidatorConfig()
+        # Default fetcher honours ``allow_self_signed``; tests that
+        # inject their own fetcher own the TLS posture themselves
+        # (stubs never open a socket so the flag is moot for them).
+        # Narrow ``fetcher`` to non-None so the request loop can drop
+        # an ``Optional`` check on every hop.
+        fetcher: Fetcher = (
+            resolved_config.fetcher
+            if resolved_config.fetcher is not None
+            else StdlibHttpsFetcher(allow_self_signed=resolved_config.allow_self_signed)
+        )
+        self._config = resolved_config
+        self._fetcher: Fetcher = fetcher
 
     def validate(self, url: str) -> IcalValidation:
         """Run the §04 validation + probe pipeline on ``url``."""
@@ -518,7 +593,7 @@ class HttpxIcalValidator:
         resolved_ip = ""
         for hop in range(self._config.max_redirects + 1):
             resolved_ip = self._resolve(current)
-            response = self._config.fetcher.fetch(
+            response = self._fetcher.fetch(
                 current,
                 resolved_ip,
                 deadline=deadline,

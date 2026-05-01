@@ -30,7 +30,7 @@ from app.api.v1.stays import (
     get_guest_settings_resolver,
     get_ical_fetcher,
     get_ical_resolver,
-    get_ical_validator,
+    get_ical_validator_builder,
     get_provider_detector,
     get_tasks_create_occurrence_port,
     get_welcome_resolver,
@@ -313,7 +313,14 @@ def _build_client(
 
     app.dependency_overrides[current_workspace_context] = _override_ctx
     app.dependency_overrides[db_session] = _override_db
-    app.dependency_overrides[get_ical_validator] = lambda: validator
+    # Builder factory ignores ``allow_self_signed`` — the test
+    # validator is a stub that does not open sockets, so the TLS
+    # posture is irrelevant at this layer. Routes still call the
+    # builder once per request, exercising the cd-t2qtg cascade
+    # lookup the factory wires up.
+    app.dependency_overrides[get_ical_validator_builder] = lambda: (
+        lambda _allow_self_signed: validator
+    )
     app.dependency_overrides[get_provider_detector] = lambda: FakeDetector()
     app.dependency_overrides[get_envelope] = lambda: envelope
     app.dependency_overrides[get_clock] = lambda: FrozenClock(_PINNED)

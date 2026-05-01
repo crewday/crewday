@@ -495,7 +495,11 @@ fetches §11) MUST run through the shared fetch-guard module
   and the TCP connection opens to the pinned address with no
   subsequent re-resolution.
 - Certificate validation mandatory; self-signed only when the
-  caller opts in per-deployment (`settings.*_allow_self_signed`).
+  caller opts in via the per-feature workspace / property setting
+  (`ical.allow_self_signed` for §04, future webhook setting for
+  §10). The opt-in is per-feed (W/P scope) so one workspace can
+  trust a self-signed endpoint without weakening every other
+  workspace's TLS posture; catalog default `false`.
 - Redirect policy: same-origin only (scheme+host+port); cross-
   origin redirects abort.
 - Hard limits: per-call body cap, connect + read timeouts,

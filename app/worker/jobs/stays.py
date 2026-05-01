@@ -67,9 +67,11 @@ def _make_poll_ical_fanout_body(clock: Clock) -> Callable[[], None]:
             SqlAlchemySecretEnvelopeRepository,
         )
         from app.adapters.db.session import bind_active_session
+        from app.adapters.db.stays.models import IcalFeed
         from app.adapters.db.workspace.models import Workspace
         from app.adapters.storage.envelope import Aes256GcmEnvelope
         from app.config import get_settings
+        from app.domain.stays.ical_service import resolve_allow_self_signed
         from app.tenancy import tenant_agnostic
         from app.tenancy.current import reset_current, set_current
         from app.worker.tasks.poll_ical import poll_ical
@@ -142,6 +144,23 @@ def _make_poll_ical_fanout_body(clock: Clock) -> Callable[[], None]:
                     workspace_id=workspace_id,
                     workspace_slug=workspace_slug,
                 )
+
+                # Per-feed ``ical.allow_self_signed`` resolver. The
+                # worker walks every feed in the workspace; the
+                # closure delegates to :func:`resolve_allow_self_signed`
+                # so the cascade lookup hits the live ``session``
+                # bound to this tick's UoW. The lookup is cheap (one
+                # ``Workspace.settings_json`` row + one
+                # ``Property.settings_override_json`` row), runs
+                # once per feed, and never reaches the catalog
+                # default unless both layers are silent.
+                def _self_signed_for(_feed: IcalFeed, _ws: str = workspace_id) -> bool:
+                    return resolve_allow_self_signed(
+                        session,
+                        workspace_id=_ws,
+                        property_id=_feed.property_id,
+                    )
+
                 token = set_current(ctx)
                 try:
                     try:
@@ -162,6 +181,7 @@ def _make_poll_ical_fanout_body(clock: Clock) -> Callable[[], None]:
                                 allow_private_addresses=(
                                     settings.ical_allow_private_addresses
                                 ),
+                                allow_self_signed_resolver=_self_signed_for,
                             )
                     except Exception as exc:
                         total_workspaces_failed += 1

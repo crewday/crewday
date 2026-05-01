@@ -439,12 +439,20 @@ field is an **operator-supplied URL** subject to SSRF rules
   and connects only to that address (no re-resolution after
   connect). Rejected fetches record `error =
   "ical_url_private_address"`.
-- **TLS.** Certificate validation is required; no self-signed
-  certificates without explicit operator allowance per deployment
-  via `settings.ical_allow_self_signed` (default `false`,
-  override scope `D`). When `true`, the worker still verifies
-  the chain up to the operator-provided trust root; it does NOT
-  silently skip validation.
+- **TLS.** Certificate validation is required by default. Self-
+  signed certificates are accepted only when the workspace /
+  property setting `ical.allow_self_signed` (default `false`,
+  override scope `W/P`) is flipped to `true` for the feed's
+  workspace (and optionally narrowed at the property layer). When
+  the gate is open the validator and worker fetcher build the TLS
+  context with `check_hostname=False` + `verify_mode=CERT_NONE`
+  for that fetch only. **No other gate is loosened by this knob —
+  scheme stays `https://`, the DNS-rebind pin still fires, the
+  body cap still applies.** The setting is per-feed (cd-t2qtg) so
+  one workspace can opt a private-network endpoint into self-
+  signed acceptance without weakening every other workspace.
+  Operators must set the flag deliberately; the catalog default
+  `false` means production ships hardened.
 - **Redirects.** Followed only within the same origin
   (scheme+host+port). A cross-origin redirect aborts with
   `error = "ical_url_cross_origin_redirect"`. This prevents a
@@ -468,6 +476,33 @@ timeout, certificate validation) still applies when the
 private-address gate is open; only that one filter is loosened.
 See `docs/specs/16-deployment-operations.md` "Environment
 variables".
+
+**Self-signed TLS carve-out (cd-t2qtg).** The TLS gate is per-
+feed, gated by the workspace + property setting
+`ical.allow_self_signed` (W/P). The implementation chose option
+(b): wire the existing workspace-level setting into the
+validator and worker fetcher rather than a deployment-level env
+knob. Rationale:
+
+- Per-workspace opt-in survives in production: a self-hoster
+  whose iCal endpoint sits inside a private network with a
+  custom CA can opt that workspace in without weakening every
+  other workspace's TLS posture.
+- The setting was already registered in the catalog (no schema
+  change); only the validator / worker readers were missing.
+- The e2e stack (cd-zxvk) flips the setting at runtime from the
+  test fixture instead of forcing a self-signed HTTPS sidecar
+  into compose — the synthetic ICS body served on plain
+  loopback HTTPS with a dev cert is enough.
+
+When the setting is `true` the validator and worker build the
+TLS context with `check_hostname=False` and
+`verify_mode=CERT_NONE` for that fetch only. Every other gate
+(scheme stays `https://`, DNS-rebind pin, same-origin redirects,
+body cap, timeout, the cd-xr652 private-address gate) is
+unchanged. Operators must enable the setting deliberately; the
+catalog default `false` means a fresh deployment refuses self-
+signed certs.
 
 ### Supported providers
 

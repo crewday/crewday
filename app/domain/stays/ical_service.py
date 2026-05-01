@@ -72,6 +72,7 @@ from app.adapters.ical.ports import (
 )
 from app.adapters.storage.ports import EnvelopeEncryptor, EnvelopeOwner
 from app.audit import write_audit
+from app.domain.settings.cascade import SettingScopeChain, resolve_most_specific
 from app.tenancy import WorkspaceContext
 from app.util.clock import Clock, SystemClock
 from app.util.ulid import new_ulid
@@ -90,8 +91,13 @@ __all__ = [
     "list_feeds",
     "probe_feed",
     "register_feed",
+    "resolve_allow_self_signed",
     "update_feed",
 ]
+
+
+# §04 SSRF carve-out (cd-t2qtg) — workspace + property setting key.
+_ALLOW_SELF_SIGNED_KEY = "ical.allow_self_signed"
 
 
 # ---------------------------------------------------------------------------
@@ -607,6 +613,41 @@ def get_plaintext_url(
     row = _load_row(session, ctx, feed_id=feed_id)
     plaintext = envelope.decrypt(_str_to_ciphertext(row.url), purpose=_URL_PURPOSE)
     return plaintext.decode("utf-8")
+
+
+def resolve_allow_self_signed(
+    session: Session,
+    *,
+    workspace_id: str,
+    property_id: str | None,
+) -> bool:
+    """Resolve the ``ical.allow_self_signed`` setting for a feed.
+
+    Walks the §02 cascade for the (workspace, property) pair. Returns
+    ``True`` only when the setting evaluates truthy at the most-
+    specific layer found — workspace default is ``False`` (catalog),
+    property override wins when present.
+
+    Used by the API registration / probe / poll-once routes and by
+    the worker's per-feed loop. Both routes need the answer **before**
+    they construct the validator's TLS context (see
+    :func:`app.adapters.ical.validator.build_tls_context` and
+    :func:`app.worker.tasks.poll_ical.fetch_ical_body`). Centralising
+    the lookup here keeps the §15 "Allow self-signed iCal" policy
+    decision in one place — adapters never reach into the cascade.
+
+    ``property_id=None`` falls back to the workspace layer; the
+    catalog default ``False`` applies if neither layer overrides.
+
+    Production posture: every workspace ships with the catalog
+    default ``False``. The setting flips to ``True`` only when an
+    operator opts in for one workspace / property explicitly through
+    the settings API. See :doc:`docs/specs/04-properties-and-stays`
+    §"Dev / e2e carve-out".
+    """
+    chain = SettingScopeChain(workspace_id=workspace_id, property_id=property_id)
+    raw = resolve_most_specific(session, _ALLOW_SELF_SIGNED_KEY, chain, default=False)
+    return bool(raw)
 
 
 # ---------------------------------------------------------------------------

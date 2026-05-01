@@ -58,7 +58,7 @@ from app.api.v1.stays import (
     get_envelope,
     get_ical_fetcher,
     get_ical_resolver,
-    get_ical_validator,
+    get_ical_validator_builder,
     get_provider_detector,
     get_tasks_create_occurrence_port,
 )
@@ -393,7 +393,13 @@ def _build_app(
     app.dependency_overrides[db_session] = _override_db
     app.dependency_overrides[get_clock] = lambda: FrozenClock(_PINNED)
     app.dependency_overrides[get_app_settings] = lambda: settings
-    app.dependency_overrides[get_ical_validator] = _PassthroughValidator
+    # Builder factory ignores ``allow_self_signed`` for the
+    # passthrough validator — registration tests don't open a real
+    # socket, so the TLS posture is moot. The route still calls the
+    # factory once, which exercises the cd-t2qtg cascade lookup.
+    app.dependency_overrides[get_ical_validator_builder] = lambda: (
+        lambda _allow_self_signed: _PassthroughValidator()
+    )
     app.dependency_overrides[get_provider_detector] = HostProviderDetector
     app.dependency_overrides[get_envelope] = lambda: real_envelope
     app.dependency_overrides[get_ical_fetcher] = lambda: fetcher

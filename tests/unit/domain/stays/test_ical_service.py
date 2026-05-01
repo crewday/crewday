@@ -55,6 +55,7 @@ from app.domain.stays.ical_service import (
     list_feeds,
     probe_feed,
     register_feed,
+    resolve_allow_self_signed,
     update_feed,
 )
 from app.tenancy.context import WorkspaceContext
@@ -1254,3 +1255,126 @@ class TestAuditNeverLeaksPlaintext:
                 feed_id=feed_id,
                 envelope=envelope,
             )
+
+
+class TestResolveAllowSelfSigned:
+    """``resolve_allow_self_signed`` cascade lookup (cd-t2qtg).
+
+    The setting is workspace-default ``False`` (catalog) with an
+    optional property override (``W/P`` scope per §02). The helper is
+    the single source of truth used by:
+
+    - The API registration / probe / poll-once routes before they
+      build the validator's TLS context.
+    - The worker fan-out closure passed into ``poll_ical``.
+
+    Assertions cover the four corners of the cascade plus the
+    ``property_id=None`` fallback so a regression that flips the
+    catalog default or short-circuits the property layer trips here.
+    """
+
+    def _set_workspace_setting(
+        self, session: Session, *, workspace_id: str, value: bool | None
+    ) -> None:
+        from app.adapters.db.workspace.models import Workspace
+        from app.tenancy import tenant_agnostic
+
+        with tenant_agnostic():
+            ws = session.scalar(select(Workspace).where(Workspace.id == workspace_id))
+            assert ws is not None
+            settings = dict(ws.settings_json or {})
+            if value is None:
+                settings.pop("ical.allow_self_signed", None)
+            else:
+                settings["ical.allow_self_signed"] = value
+            ws.settings_json = settings
+            session.flush()
+
+    def _set_property_override(
+        self, session: Session, *, property_id: str, value: bool | None
+    ) -> None:
+        from app.adapters.db.places.models import Property
+        from app.tenancy import tenant_agnostic
+
+        with tenant_agnostic():
+            prop = session.scalar(select(Property).where(Property.id == property_id))
+            assert prop is not None
+            override = dict(prop.settings_override_json or {})
+            if value is None:
+                override.pop("ical.allow_self_signed", None)
+            else:
+                override["ical.allow_self_signed"] = value
+            prop.settings_override_json = override
+            session.flush()
+
+    def test_default_when_unset_returns_false(self, session_stays: Session) -> None:
+        """Catalog default ``False`` applies when neither layer overrides."""
+        ws = _bootstrap_workspace(session_stays, slug="ass-default")
+        prop = _bootstrap_property(session_stays, ws)
+        assert (
+            resolve_allow_self_signed(session_stays, workspace_id=ws, property_id=prop)
+            is False
+        )
+
+    def test_workspace_true_returns_true(self, session_stays: Session) -> None:
+        """Workspace opt-in propagates when the property is silent."""
+        ws = _bootstrap_workspace(session_stays, slug="ass-ws-on")
+        prop = _bootstrap_property(session_stays, ws)
+        self._set_workspace_setting(session_stays, workspace_id=ws, value=True)
+        assert (
+            resolve_allow_self_signed(session_stays, workspace_id=ws, property_id=prop)
+            is True
+        )
+
+    def test_property_override_true_wins(self, session_stays: Session) -> None:
+        """Property override flips a workspace ``False`` to ``True``."""
+        ws = _bootstrap_workspace(session_stays, slug="ass-prop-on")
+        prop = _bootstrap_property(session_stays, ws)
+        self._set_workspace_setting(session_stays, workspace_id=ws, value=False)
+        self._set_property_override(session_stays, property_id=prop, value=True)
+        assert (
+            resolve_allow_self_signed(session_stays, workspace_id=ws, property_id=prop)
+            is True
+        )
+
+    def test_property_override_false_wins_over_workspace_true(
+        self, session_stays: Session
+    ) -> None:
+        """Property override flips a workspace ``True`` back to ``False``.
+
+        Per §02, the most-specific concrete value wins. A property
+        opting out of self-signed acceptance must be honoured even
+        when the workspace is on.
+        """
+        ws = _bootstrap_workspace(session_stays, slug="ass-prop-off")
+        prop = _bootstrap_property(session_stays, ws)
+        self._set_workspace_setting(session_stays, workspace_id=ws, value=True)
+        self._set_property_override(session_stays, property_id=prop, value=False)
+        assert (
+            resolve_allow_self_signed(session_stays, workspace_id=ws, property_id=prop)
+            is False
+        )
+
+    def test_property_id_none_falls_back_to_workspace(
+        self, session_stays: Session
+    ) -> None:
+        """``property_id=None`` resolves the workspace layer alone.
+
+        The poll-once route may pass ``None`` if a feed lookup races
+        with a delete; the helper must still answer cleanly without
+        raising.
+        """
+        ws = _bootstrap_workspace(session_stays, slug="ass-no-prop")
+        self._set_workspace_setting(session_stays, workspace_id=ws, value=True)
+        assert (
+            resolve_allow_self_signed(session_stays, workspace_id=ws, property_id=None)
+            is True
+        )
+
+    def test_property_id_none_default_false(self, session_stays: Session) -> None:
+        """``property_id=None`` + no workspace setting → catalog default."""
+        ws = _bootstrap_workspace(session_stays, slug="ass-no-prop-default")
+        assert (
+            resolve_allow_self_signed(session_stays, workspace_id=ws, property_id=None)
+            is False
+        )

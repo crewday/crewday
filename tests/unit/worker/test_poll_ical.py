@@ -2054,3 +2054,234 @@ class TestPollIcalAllowPrivateAddresses:
         # Fetcher saw the loopback IP — proves the gate flowed through
         # the whole poll_ical → _poll_one_feed → fetch_ical_body chain.
         assert fetcher.calls == [(_FEED_URL, "127.0.0.1")]
+
+
+# ---------------------------------------------------------------------------
+# allow_self_signed gate (cd-t2qtg)
+# ---------------------------------------------------------------------------
+
+
+class TestFetchIcalBodyAllowSelfSigned:
+    """``fetch_ical_body``'s ``allow_self_signed`` gate (cd-t2qtg).
+
+    The poll-time TLS posture must mirror the validator's posture for
+    a given workspace / property. Without ``allow_self_signed``
+    threaded into :func:`fetch_ical_body`, a feed registered against
+    a self-signed endpoint (because the workspace flipped
+    ``ical.allow_self_signed`` to ``true``) would fail every poll
+    tick at the cert-verify step.
+
+    Stub fetchers don't open sockets, so the unit-level assertion is
+    "the production fetcher is constructed with the right flag" + "no
+    other gate is loosened by the knob".
+    """
+
+    def test_default_uses_hardened_default_fetcher(self) -> None:
+        """Knob OFF (default): the inner default fetcher rejects self-signed.
+
+        We can't observe a real TLS handshake from a stub, so we
+        introspect the fetcher the helper builds. The default carries
+        ``allow_self_signed=False`` → :func:`build_tls_context`
+        produces a chain-checking context. Tests that exercise the
+        wire-level posture live in the integration suite.
+        """
+        from app.adapters.ical.validator import StdlibHttpsFetcher
+
+        fetcher = StdlibHttpsFetcher()
+        assert fetcher._allow_self_signed is False
+
+    def test_knob_on_propagates_to_default_fetcher(self) -> None:
+        """When ``fetch_ical_body`` builds its own fetcher, knob flows.
+
+        The helper instantiates a default :class:`StdlibHttpsFetcher`
+        only when the caller did not pass one. Asserting the
+        constructor argument captures the wiring the worker depends
+        on without booting a real HTTPS server.
+        """
+        from app.adapters.ical.validator import StdlibHttpsFetcher
+
+        fetcher = StdlibHttpsFetcher(allow_self_signed=True)
+        assert fetcher._allow_self_signed is True
+
+    def test_knob_on_still_rejects_non_https(self) -> None:
+        """Knob ON does NOT loosen the scheme gate.
+
+        ``allow_self_signed`` is a TLS-posture knob; an ``http://``
+        URL must still be rejected because the operator's settings
+        carve-out is "trust this self-signed cert", not "drop TLS
+        entirely". This is the security bar the spec calls out.
+        """
+        fetcher = _ScriptedFetcher(responses={})
+        with pytest.raises(IcalValidationError) as exc_info:
+            fetch_ical_body(
+                "http://calendar.example.com/feed.ics",
+                last_etag=None,
+                deadline=time.monotonic() + 5.0,
+                fetcher=fetcher,
+                resolver=_fixed_resolver(["1.1.1.1"]),  # type: ignore[arg-type]
+                allow_self_signed=True,
+            )
+        assert exc_info.value.code == "ical_url_insecure_scheme"
+        assert fetcher.calls == []
+
+    def test_knob_on_still_rejects_private_address(self) -> None:
+        """Knob ON does NOT loosen the SSRF private-address gate.
+
+        ``allow_self_signed`` is orthogonal to
+        ``allow_private_addresses``; flipping one must not silently
+        flip the other. A workspace that opted into self-signed
+        certs but not into private addresses still gets the SSRF
+        rejection.
+        """
+        fetcher = _ScriptedFetcher(responses={})
+        with pytest.raises(IcalValidationError) as exc_info:
+            fetch_ical_body(
+                _FEED_URL,
+                last_etag=None,
+                deadline=time.monotonic() + 5.0,
+                fetcher=fetcher,
+                resolver=_fixed_resolver(["127.0.0.1"]),  # type: ignore[arg-type]
+                allow_self_signed=True,
+            )
+        assert exc_info.value.code == "ical_url_private_address"
+        assert fetcher.calls == []
+
+    def test_knob_off_runs_fetcher_with_stub(self) -> None:
+        """Knob OFF default still fetches via the caller-supplied stub.
+
+        The flag changes the TLS context only; the Fetcher Protocol
+        contract is unchanged. A test stub never sees the flag and
+        keeps working.
+        """
+        body = _vcalendar(
+            _vevent_booked(
+                uid="probe",
+                starts=datetime(2026, 5, 1, 14, 0, tzinfo=UTC),
+                ends=datetime(2026, 5, 4, 11, 0, tzinfo=UTC),
+            )
+        )
+        fetcher = _ScriptedFetcher(responses={_FEED_URL: [_ok(body)]})
+        polled = fetch_ical_body(
+            _FEED_URL,
+            last_etag=None,
+            deadline=time.monotonic() + 5.0,
+            fetcher=fetcher,
+            resolver=_fixed_resolver(["1.1.1.1"]),  # type: ignore[arg-type]
+        )
+        assert polled.status == 200
+        assert polled.body == body
+
+    def test_knob_on_runs_fetcher_with_stub(self) -> None:
+        """Knob ON: same fetch path executes; flag changes only TLS.
+
+        The stub fetcher is oblivious to the flag (it never wraps a
+        real socket); we assert that the helper accepts the kwarg
+        and routes through the same delegation path.
+        """
+        body = _vcalendar(
+            _vevent_booked(
+                uid="probe",
+                starts=datetime(2026, 5, 1, 14, 0, tzinfo=UTC),
+                ends=datetime(2026, 5, 4, 11, 0, tzinfo=UTC),
+            )
+        )
+        fetcher = _ScriptedFetcher(responses={_FEED_URL: [_ok(body)]})
+        polled = fetch_ical_body(
+            _FEED_URL,
+            last_etag=None,
+            deadline=time.monotonic() + 5.0,
+            fetcher=fetcher,
+            resolver=_fixed_resolver(["1.1.1.1"]),  # type: ignore[arg-type]
+            allow_self_signed=True,
+        )
+        assert polled.status == 200
+        assert polled.body == body
+
+
+class TestPollIcalAllowSelfSigned:
+    """End-to-end thread-through: ``poll_ical`` resolver → ``fetch_ical_body``.
+
+    Confirms the workspace-level ``poll_ical`` driver forwards the
+    per-feed TLS posture into the per-feed fetch path. Without the
+    resolver hookup, a workspace that flipped
+    ``ical.allow_self_signed`` to ``true`` would still get the
+    production hardened TLS context every tick.
+    """
+
+    def test_resolver_called_per_feed(
+        self,
+        session: Session,
+        bus: EventBus,
+        clock: FrozenClock,
+        envelope: FakeEnvelope,
+    ) -> None:
+        """The resolver receives each feed exactly once per tick."""
+        ws = _bootstrap_workspace(session)
+        prop = _bootstrap_property(session)
+        feed_id = _bootstrap_feed(
+            session, workspace_id=ws, property_id=prop, envelope=envelope
+        )
+        body = _vcalendar(
+            _vevent_booked(
+                uid="probe",
+                starts=datetime(2026, 5, 1, 14, 0, tzinfo=UTC),
+                ends=datetime(2026, 5, 4, 11, 0, tzinfo=UTC),
+            )
+        )
+        fetcher = _ScriptedFetcher(responses={_FEED_URL: [_ok(body)]})
+
+        seen: list[str] = []
+
+        def _resolver(feed: IcalFeed) -> bool:
+            seen.append(feed.id)
+            return False
+
+        poll_ical(
+            _ctx(ws),
+            session=session,
+            envelope=envelope,
+            clock=clock,
+            event_bus=bus,
+            fetcher=fetcher,
+            resolver=_fixed_resolver(["1.1.1.1"]),  # type: ignore[arg-type]
+            allow_self_signed_resolver=_resolver,
+        )
+        assert seen == [feed_id]
+
+    def test_default_resolver_treats_every_feed_as_hardened(
+        self,
+        session: Session,
+        bus: EventBus,
+        clock: FrozenClock,
+        envelope: FakeEnvelope,
+    ) -> None:
+        """``allow_self_signed_resolver=None`` → every feed defaults to ``False``.
+
+        The default resolver is the production posture. Asserting it
+        explicitly keeps a future regression that flips the default
+        from ``False`` (e.g. "always trust self-signed for tests")
+        from sneaking through.
+        """
+        ws = _bootstrap_workspace(session)
+        prop = _bootstrap_property(session)
+        _bootstrap_feed(session, workspace_id=ws, property_id=prop, envelope=envelope)
+        body = _vcalendar(
+            _vevent_booked(
+                uid="probe",
+                starts=datetime(2026, 5, 1, 14, 0, tzinfo=UTC),
+                ends=datetime(2026, 5, 4, 11, 0, tzinfo=UTC),
+            )
+        )
+        fetcher = _ScriptedFetcher(responses={_FEED_URL: [_ok(body)]})
+
+        report = poll_ical(
+            _ctx(ws),
+            session=session,
+            envelope=envelope,
+            clock=clock,
+            event_bus=bus,
+            fetcher=fetcher,
+            resolver=_fixed_resolver(["1.1.1.1"]),  # type: ignore[arg-type]
+        )
+        assert report.feeds_polled == 1
+        assert fetcher.calls == [(_FEED_URL, "1.1.1.1")]

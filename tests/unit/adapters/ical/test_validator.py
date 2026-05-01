@@ -402,6 +402,124 @@ class TestAllowPrivateAddressesGate:
         assert exc_info.value.code == "ical_url_cross_origin_redirect"
 
 
+class TestAllowSelfSignedGate:
+    """``IcalValidatorConfig.allow_self_signed`` carve-out (cd-t2qtg).
+
+    The gate flips the production hardened TLS context
+    (``check_hostname=True`` + ``verify_mode=CERT_REQUIRED``) to
+    accept self-signed certs (``check_hostname=False`` +
+    ``verify_mode=CERT_NONE``) for one fetch only. It is a per-feed
+    workspace / property opt-in; the catalog default is ``False`` so
+    production never accepts self-signed certs by accident.
+
+    The validator delegates the TLS handshake to the
+    :class:`StdlibHttpsFetcher`. Stub fetchers don't open sockets, so
+    we test two surfaces:
+
+    1. :func:`build_tls_context` — direct unit on the helper that
+       stamps ``check_hostname`` + ``verify_mode``.
+    2. :class:`StdlibHttpsFetcher` — the production fetcher honours
+       the constructor flag (no observable socket, so we read the
+       internal ``_allow_self_signed`` to assert the wiring).
+
+    The validator's other gates (scheme, DNS-rebind, redirects, body
+    cap) must still apply when this flag is on. We assert each one
+    explicitly so a future regression that loosens the wrong gate
+    alongside this one trips a test.
+    """
+
+    def test_default_context_hardens_tls(self) -> None:
+        """Default: full chain verification + hostname check enforced."""
+        from app.adapters.ical.validator import build_tls_context
+
+        ctx = build_tls_context()
+        assert ctx.check_hostname is True
+        assert ctx.verify_mode == ssl.CERT_REQUIRED
+
+    def test_allow_self_signed_disables_verification(self) -> None:
+        """Knob ON: ``check_hostname=False`` + ``verify_mode=CERT_NONE``.
+
+        These two flags together are what make a self-signed cert
+        accepted. Asserting both keeps a half-baked carve-out (e.g.
+        someone disables hostname check but keeps verify_mode) from
+        sneaking in.
+        """
+        from app.adapters.ical.validator import build_tls_context
+
+        ctx = build_tls_context(allow_self_signed=True)
+        assert ctx.check_hostname is False
+        assert ctx.verify_mode == ssl.CERT_NONE
+
+    def test_stdlib_fetcher_default_hardens_tls(self) -> None:
+        """``StdlibHttpsFetcher`` default carries the production posture."""
+        from app.adapters.ical.validator import StdlibHttpsFetcher
+
+        fetcher = StdlibHttpsFetcher()
+        assert fetcher._allow_self_signed is False
+
+    def test_stdlib_fetcher_honours_allow_self_signed(self) -> None:
+        """Constructor flag flows into the per-fetch TLS context."""
+        from app.adapters.ical.validator import StdlibHttpsFetcher
+
+        fetcher = StdlibHttpsFetcher(allow_self_signed=True)
+        assert fetcher._allow_self_signed is True
+
+    def test_validator_default_uses_hardened_fetcher(self) -> None:
+        """Validator without explicit fetcher gets a hardened default.
+
+        A workspace that never opts into ``ical.allow_self_signed``
+        sees the stdlib fetcher with full TLS verification — the
+        production posture.
+        """
+        from app.adapters.ical.validator import StdlibHttpsFetcher
+
+        validator = HttpxIcalValidator(IcalValidatorConfig())
+        fetcher = validator._fetcher
+        assert isinstance(fetcher, StdlibHttpsFetcher)
+        assert fetcher._allow_self_signed is False
+
+    def test_validator_propagates_allow_self_signed_to_default_fetcher(
+        self,
+    ) -> None:
+        """``allow_self_signed=True`` flows into the default fetcher."""
+        from app.adapters.ical.validator import StdlibHttpsFetcher
+
+        validator = HttpxIcalValidator(IcalValidatorConfig(allow_self_signed=True))
+        fetcher = validator._fetcher
+        assert isinstance(fetcher, StdlibHttpsFetcher)
+        assert fetcher._allow_self_signed is True
+
+    def test_knob_on_still_rejects_non_https(self) -> None:
+        """Knob ON does NOT loosen the scheme gate."""
+        validator = HttpxIcalValidator(
+            IcalValidatorConfig(
+                resolver=_fixed_resolver(["1.1.1.1"]),
+                fetcher=StubFetcher(responses=[]),
+                allow_self_signed=True,
+            )
+        )
+        with pytest.raises(IcalValidationError) as exc_info:
+            validator.validate("http://ics.example.com/feed.ics")
+        assert exc_info.value.code == "ical_url_insecure_scheme"
+
+    def test_knob_on_still_rejects_private_address(self) -> None:
+        """Knob ON does NOT loosen the SSRF private-address gate.
+
+        ``allow_self_signed`` is purely a TLS-posture knob; the host-
+        resolution gate stays bound to ``allow_private_addresses``.
+        """
+        validator = HttpxIcalValidator(
+            IcalValidatorConfig(
+                resolver=_fixed_resolver(["127.0.0.1"]),
+                fetcher=StubFetcher(responses=[]),
+                allow_self_signed=True,
+            )
+        )
+        with pytest.raises(IcalValidationError) as exc_info:
+            validator.validate("https://ics.local.test/feed.ics")
+        assert exc_info.value.code == "ical_url_private_address"
+
+
 class TestDnsRebindPin:
     """The validator pins the resolved IP so a second DNS call can't flip it."""
 
