@@ -17,7 +17,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from unittest.mock import Mock
 
-from sqlalchemy import CheckConstraint, Index
+from sqlalchemy import CheckConstraint, Index, String
 
 from app.adapters.db.identity.models import (
     ApiToken,
@@ -131,6 +131,36 @@ class TestPasskeyCredentialModel:
         assert cred.transports is None
         assert cred.label is None
         assert cred.last_used_at is None
+        # Legacy / minimal-construction rows leave AAGUID NULL — cd-8mf3.
+        assert cred.aaguid is None
+
+    def test_aaguid_column_shape(self) -> None:
+        """``aaguid`` is a nullable 36-char string (cd-8mf3, spec §03 Privacy).
+
+        py_webauthn returns the AAGUID as a hyphenated GUID string
+        (``"00000000-0000-0000-0000-000000000000"`` shape) on the
+        :class:`VerifiedRegistration` result; the column matches that
+        representation so :class:`PasskeyCredentialRef` round-trips
+        without a bytes ↔ string conversion.
+        """
+        col = PasskeyCredential.__table__.c["aaguid"]
+        assert col.nullable is True
+        col_type = col.type
+        assert isinstance(col_type, String)
+        assert col_type.python_type is str
+        assert col_type.length == 36
+
+    def test_aaguid_set_at_construction_round_trips(self) -> None:
+        cred = PasskeyCredential(
+            id=b"\x04\x05\x06",
+            user_id="01HWA00000000000000000USRA",
+            public_key=b"\xaa\xbb\xcc",
+            sign_count=0,
+            backup_eligible=False,
+            aaguid="00000000-0000-0000-0000-000000000077",
+            created_at=_PINNED,
+        )
+        assert cred.aaguid == "00000000-0000-0000-0000-000000000077"
 
     def test_tablename(self) -> None:
         assert PasskeyCredential.__tablename__ == "passkey_credential"

@@ -476,12 +476,18 @@ class TestRegisterFinishHappyPath:
         assert ref.user_id == user_ctx.actor_id
         assert ref.transports == "internal,hybrid"
         assert ref.sign_count == 0
+        assert ref.aaguid == verified.aaguid
         # Row landed with the verified bytes.
         row = session.get(PasskeyCredential, verified.credential_id)
         assert row is not None
         assert row.public_key == verified.credential_public_key
         assert row.transports == "internal,hybrid"
         assert row.backup_eligible is False
+        # cd-8mf3: the AAGUID py_webauthn surfaced on the verified
+        # response must round-trip onto the persisted row, matching
+        # the value :class:`PasskeyCredentialRef` carries.
+        assert row.aaguid == verified.aaguid
+        assert row.aaguid == ref.aaguid
 
     def test_writes_audit_row(
         self,

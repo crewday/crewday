@@ -122,6 +122,9 @@ class TestMigrationShape:
 
     def test_passkey_credential_columns(self, engine: Engine) -> None:
         cols = {c["name"]: c for c in inspect(engine).get_columns("passkey_credential")}
+        # cd-8mf3 added ``aaguid`` so the §03 "Privacy" whitelist is
+        # complete on the SQLAlchemy side too. Nullable: legacy rows
+        # enrolled before the column landed carry NULL.
         expected = {
             "id",
             "user_id",
@@ -129,11 +132,13 @@ class TestMigrationShape:
             "sign_count",
             "transports",
             "backup_eligible",
+            "aaguid",
             "label",
             "created_at",
             "last_used_at",
         }
         assert set(cols) == expected
+        assert cols["aaguid"]["nullable"] is True
 
     def test_passkey_credential_user_index(self, engine: Engine) -> None:
         indexes = {
@@ -373,6 +378,64 @@ class TestPasskeyBinaryRoundtrip:
             select(PasskeyCredential).where(PasskeyCredential.id == b"\xde\xad\xbe\xef")
         ).one()
         assert loaded.sign_count == 0
+
+    def test_aaguid_round_trip(self, db_session: SaSession) -> None:
+        """cd-8mf3: ``aaguid`` round-trips as the hyphenated GUID string.
+
+        Mirrors the representation py_webauthn returns on
+        :class:`VerifiedRegistration` and the value
+        :class:`PasskeyCredentialRef.aaguid` carries up to the HTTP
+        layer. Legacy rows that omit it stay NULL.
+        """
+        user = bootstrap_user(
+            db_session,
+            email="aaguid@example.com",
+            display_name="AAguid",
+            clock=FrozenClock(_PINNED),
+        )
+        cred = PasskeyCredential(
+            id=b"\xaa\x90\x10\x00",
+            user_id=user.id,
+            public_key=b"\x00" * 32,
+            sign_count=0,
+            backup_eligible=False,
+            aaguid="00000000-0000-0000-0000-000000000077",
+            created_at=_PINNED,
+        )
+        db_session.add(cred)
+        db_session.flush()
+        db_session.expire_all()
+
+        loaded = db_session.scalars(
+            select(PasskeyCredential).where(PasskeyCredential.id == b"\xaa\x90\x10\x00")
+        ).one()
+        assert loaded.aaguid == "00000000-0000-0000-0000-000000000077"
+
+    def test_aaguid_nullable_for_legacy_rows(self, db_session: SaSession) -> None:
+        """Rows that omit ``aaguid`` persist with NULL — the migration
+        does not require a backfill (cd-8mf3)."""
+        user = bootstrap_user(
+            db_session,
+            email="legacy-aaguid@example.com",
+            display_name="LegacyAAguid",
+            clock=FrozenClock(_PINNED),
+        )
+        cred = PasskeyCredential(
+            id=b"\x1e\x9a\xc1",
+            user_id=user.id,
+            public_key=b"\x00" * 32,
+            sign_count=0,
+            backup_eligible=False,
+            created_at=_PINNED,
+        )
+        db_session.add(cred)
+        db_session.flush()
+        db_session.expire_all()
+
+        loaded = db_session.scalars(
+            select(PasskeyCredential).where(PasskeyCredential.id == b"\x1e\x9a\xc1")
+        ).one()
+        assert loaded.aaguid is None
 
 
 class TestSessionNullableWorkspace:

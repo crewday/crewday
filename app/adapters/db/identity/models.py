@@ -148,6 +148,18 @@ class PasskeyCredential(Base):
     verification library wants bytes, not text. ``sign_count`` is
     the monotonic counter the RP enforces to detect cloned
     authenticators.
+
+    ``aaguid`` is the authenticator-model identifier py_webauthn
+    surfaces as a 36-char hyphenated GUID string on
+    :class:`webauthn.helpers.structs.VerifiedRegistration`. Spec §03
+    "Privacy" whitelists it as one of the seven fields we may keep
+    (it identifies the authenticator vendor / model, not the user),
+    and audit diffs already carry it on ``passkey.registered`` rows.
+    Stored as text in the same hyphenated form so the value-object
+    :class:`app.auth.passkey.PasskeyCredentialRef` round-trips without
+    a bytes ↔ string conversion. Nullable: rows enrolled before
+    cd-8mf3 carry NULL, since the original cd-w92 migration omitted
+    the column.
     """
 
     __tablename__ = "passkey_credential"
@@ -167,6 +179,10 @@ class PasskeyCredential(Base):
     backup_eligible: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False
     )
+    # 36-char hyphenated GUID (the form py_webauthn returns and the
+    # value object carries). NULL on legacy rows enrolled before the
+    # cd-8mf3 migration.
+    aaguid: Mapped[str | None] = mapped_column(String(36), nullable=True)
     label: Mapped[str | None] = mapped_column(String, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False

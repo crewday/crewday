@@ -229,11 +229,26 @@ class LoginResult:
 
 @dataclass(frozen=True, slots=True)
 class PasskeyCredentialRef:
-    """Immutable projection of a persisted ``passkey_credential`` row.
+    """Immutable projection of a freshly verified ``passkey_credential`` row.
 
     Matches the §03 "Privacy" whitelist verbatim. The credential id is
     surfaced as base64url text for the HTTP layer; the raw bytes live
     on the ORM row.
+
+    **Construction contract.** This dataclass is only built from a
+    :class:`~webauthn.registration.verify_registration_response.VerifiedRegistration`
+    inside :func:`_insert_passkey_and_audit` — never from an arbitrary
+    DB row. ``aaguid`` is therefore typed as ``str`` (non-Optional)
+    because py_webauthn always populates it on the verified response
+    (see :func:`webauthn.helpers.aaguid_to_string.aaguid_to_string`,
+    which returns the 36-char hyphenated GUID).
+
+    The matching column ``passkey_credential.aaguid`` is *nullable*
+    because rows enrolled before cd-8mf3 carry NULL. If a future
+    "load credential by id → Ref" reader is added, it must either
+    skip legacy rows or change this field to ``str | None`` in the
+    same change — silently coercing a NULL into ``str`` would lie
+    about the column's contents and break type-safety.
     """
 
     credential_id_b64url: str
@@ -581,6 +596,7 @@ def _insert_passkey_and_audit(
         sign_count=verified.sign_count,
         transports=transports,
         backup_eligible=bool(verified.credential_backed_up),
+        aaguid=verified.aaguid,
         label=None,
         created_at=now,
         last_used_at=None,
