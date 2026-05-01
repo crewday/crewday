@@ -1841,7 +1841,7 @@ GET    /files/{id}/blob            # signed redirect or stream
 Files are stored through a pluggable backend driver (§02 `file`
 entity). v1 ships the `local` driver only, writing under
 `$CREWDAY_DATA_DIR/files/{workspace_id}/{sha256[0:2]}/{sha256[2:4]}/{sha256}`.
-Setting `CREWDAY_STORAGE=s3` (recipe B) routes to the S3/MinIO
+Setting `CREWDAY_STORAGE_BACKEND=s3` (recipe B) routes to the S3/MinIO
 driver. API callers never see the storage path — only the ULID.
 
 `GET /files/{id}/blob` is authorized per the file's attach site:

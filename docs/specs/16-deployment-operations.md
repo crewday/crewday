@@ -399,7 +399,7 @@ The regular, non-demo job set (shared by recipes A / B / D) is:
   restart between webhook commit and task scheduling) and
   `dispatching` past a 5 min grace (task started but the process
   died before CASing the terminal state). Under the default
-  `CREWDAY_WORKER=inprocess` the sweeper re-publishes
+  `CREWDAY_WORKER=internal` the sweeper re-publishes
   `chat_message.received` on the in-process bus and the app-process
   subscriber retries. Under `CREWDAY_WORKER=external` the scheduler
   runs in a separate process whose bus the app subscriber does not
@@ -669,8 +669,8 @@ provisioned per visitor, not per operator.
 | `CREWDAY_ROOT_KEY`        | -                              | required                 |
 | `CREWDAY_STORAGE_BACKEND` | `localfs`                      | or `s3`                  |
 | `CREWDAY_WORKER`          | `internal`                     | or `external`            |
-| `CREWDAY_SESSION_IDLE_DAYS`| 14                            |                          |
-| `CREWDAY_SESSION_ABS_DAYS`| 30                             |                          |
+| `CREWDAY_SESSION_OWNER_TTL_DAYS`| 7                         | session lifetime (days) for users with a `manager` surface grant or `owners`-group membership; see §03 |
+| `CREWDAY_SESSION_USER_TTL_DAYS` | 30                        | session lifetime (days) for everyone else; see §03 |
 | `CREWDAY_ALLOW_PUBLIC_BIND`| 0                              | required for any bind that isn't loopback or on a trusted interface; compose recipes set it explicitly |
 | `CREWDAY_TRUSTED_INTERFACES`| `tailscale*`                  | comma-separated fnmatch globs of interface names whose addresses pass without the opt-in; set value **replaces** the default (no implicit baseline) |
 | `CREWDAY_SMTP_*`            | -                              | see §10                  |

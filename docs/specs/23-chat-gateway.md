@@ -320,7 +320,7 @@ matches the unified gateway.
    `agent_dispatch_sweep` (§16), which re-fires rows stuck in the
    dispatch state machine — `pending` past a 60 s grace (subscriber
    never picked up) or `dispatching` past a 5 min grace (task died
-   mid-turn). Under the default `CREWDAY_WORKER=inprocess` the
+   mid-turn). Under the default `CREWDAY_WORKER=internal` the
    sweeper shares the bus with the subscriber and simply re-publishes
    `chat_message.received`. Under `CREWDAY_WORKER=external` the
    scheduler runs in a separate process whose bus the app-process

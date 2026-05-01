@@ -65,8 +65,9 @@ environment-sniffing, no container-detection, no CIDR-based trust of
 generic ranges. We want one knob so that an operator can audit it at
 a glance.
 
-**Rule:** at start-up, the server resolves `CREWDAY_BIND` to a set
-of concrete addresses and applies this check:
+**Rule:** at start-up, the server resolves the configured bind
+(`CREWDAY_BIND_HOST`:`CREWDAY_BIND_PORT`) to a set of concrete
+addresses and applies this check:
 
 1. Loopback (`127.0.0.0/8`, `::1`) always passes.
 2. The server enumerates local network interfaces. `CREWDAY_
@@ -109,13 +110,15 @@ for their environment by setting the opt-in.
 
 - **Bare-metal / VM:** leave the default. Reverse-proxy via a local
   Caddy/Nginx that binds the Internet-facing port.
-- **Tailscale:** set `CREWDAY_BIND` to the node's Tailscale IP; no
-  opt-in needed, because the default `tailscale*` glob matches. If
-  the mesh interface has a different name, override
+- **Tailscale:** set `CREWDAY_BIND_HOST` to the node's Tailscale IP
+  (and `CREWDAY_BIND_PORT` to the listen port); no opt-in needed,
+  because the default `tailscale*` glob matches. If the mesh
+  interface has a different name, override
   `CREWDAY_TRUSTED_INTERFACES` with the full list you want trusted
   (remember the default is replaced, not extended).
-- **Single-container (§16 recipe A):** set `CREWDAY_BIND=0.0.0.0:8000`
-  inside the container and `CREWDAY_ALLOW_PUBLIC_BIND=1`. External
+- **Single-container (§16 recipe A):** set `CREWDAY_BIND_HOST=0.0.0.0`
+  + `CREWDAY_BIND_PORT=8000` inside the container and
+  `CREWDAY_ALLOW_PUBLIC_BIND=1`. External
   reachability is then gated by the host-side Docker port map
   (`ports: ["127.0.0.1:8000:8000"]`), which the operator inspects
   directly.
