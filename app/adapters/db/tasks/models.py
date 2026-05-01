@@ -289,6 +289,9 @@ class TaskTemplate(Base):
     photo_evidence: Mapped[str] = mapped_column(
         String, nullable=False, default="disabled"
     )
+    settings_override_json: Mapped[dict[str, Any]] = mapped_column(
+        JSON, nullable=False, default=dict
+    )
     # IDs of linked instructions (§07). Empty list by default.
     linked_instruction_ids: Mapped[list[str]] = mapped_column(
         JSON, nullable=False, default=list
@@ -758,6 +761,9 @@ class Occurrence(Base):
     priority: Mapped[str] = mapped_column(String, nullable=False, default="normal")
     photo_evidence: Mapped[str] = mapped_column(
         String, nullable=False, default="disabled"
+    )
+    settings_override_json: Mapped[dict[str, Any]] = mapped_column(
+        JSON, nullable=False, default=dict
     )
     # Per-occurrence duration override. Rendered values fall back to
     # ``ends_at - starts_at`` when NULL.

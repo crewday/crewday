@@ -40,7 +40,7 @@ See ``docs/specs/06-tasks-and-scheduling.md`` §"State machine",
 from __future__ import annotations
 
 from collections.abc import Iterator
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
@@ -53,7 +53,7 @@ from app.adapters.db.assets.models import Asset, AssetAction
 from app.adapters.db.audit.models import AuditLog
 from app.adapters.db.base import Base
 from app.adapters.db.inventory.models import Item, Movement
-from app.adapters.db.places.models import Property
+from app.adapters.db.places.models import Property, Unit
 from app.adapters.db.session import make_engine
 from app.adapters.db.tasks.models import (
     ChecklistItem,
@@ -63,7 +63,8 @@ from app.adapters.db.tasks.models import (
     TaskCompletion,
     TaskTemplate,
 )
-from app.adapters.db.workspace.models import Workspace
+from app.adapters.db.workspace.models import WorkEngagement, Workspace
+from app.domain.settings.cascade import resolve_setting, task_scope_chain
 from app.domain.tasks.completion import (
     EvidenceContentTypeNotAllowed,
     EvidenceGpsPayloadInvalid,
@@ -205,6 +206,32 @@ def _bootstrap_property(session: Session) -> str:
     return pid
 
 
+def _bootstrap_unit(session: Session, *, property_id: str) -> str:
+    uid = new_ulid()
+    session.add(
+        Unit(
+            id=uid,
+            property_id=property_id,
+            name="Suite",
+            ordinal=0,
+            default_checkin_time=None,
+            default_checkout_time=None,
+            max_guests=None,
+            welcome_overrides_json={},
+            settings_override_json={},
+            notes_md="",
+            label=None,
+            type=None,
+            capacity=1,
+            created_at=_PINNED,
+            updated_at=_PINNED,
+            deleted_at=None,
+        )
+    )
+    session.flush()
+    return uid
+
+
 def _bootstrap_user(session: Session) -> str:
     """Insert a minimal user row with a fresh id.
 
@@ -233,6 +260,31 @@ def _bootstrap_user(session: Session) -> str:
     return uid
 
 
+def _bootstrap_work_engagement(
+    session: Session, *, workspace_id: str, user_id: str
+) -> str:
+    eid = new_ulid()
+    session.add(
+        WorkEngagement(
+            id=eid,
+            user_id=user_id,
+            workspace_id=workspace_id,
+            engagement_kind="payroll",
+            supplier_org_id=None,
+            pay_destination_id=None,
+            reimbursement_destination_id=None,
+            started_on=date(2026, 1, 1),
+            archived_on=None,
+            notes_md="",
+            settings_override_json={},
+            created_at=_PINNED,
+            updated_at=_PINNED,
+        )
+    )
+    session.flush()
+    return eid
+
+
 def _bootstrap_occurrence(
     session: Session,
     *,
@@ -241,6 +293,7 @@ def _bootstrap_occurrence(
     assignee_user_id: str | None = None,
     state: str = "pending",
     photo_evidence: str = "disabled",
+    unit_id: str | None = None,
     inventory: dict[str, Any] | None = None,
     asset_id: str | None = None,
     asset_action_id: str | None = None,
@@ -270,7 +323,7 @@ def _bootstrap_occurrence(
             photo_evidence=photo_evidence,
             duration_minutes=30,
             area_id=None,
-            unit_id=None,
+            unit_id=unit_id,
             expected_role_id=None,
             asset_id=asset_id,
             asset_action_id=asset_action_id,
@@ -837,6 +890,36 @@ class TestComplete:
                 event_bus=bus,
             )
 
+    def test_photo_forbid_absolute_overrides_more_specific_require(
+        self, session: Session, clock: FrozenClock, bus: EventBus
+    ) -> None:
+        ws = _bootstrap_workspace(session)
+        workspace = session.get(Workspace, ws)
+        assert workspace is not None
+        workspace.settings_json = {"evidence.policy": "optional"}
+        prop = _bootstrap_property(session)
+        property_row = session.get(Property, prop)
+        assert property_row is not None
+        property_row.settings_override_json = {"evidence.policy": "forbid"}
+        worker = _bootstrap_user(session)
+        occ = _bootstrap_occurrence(
+            session,
+            workspace_id=ws,
+            property_id=prop,
+            assignee_user_id=worker,
+            photo_evidence="required",
+        )
+
+        with pytest.raises(PhotoForbidden):
+            complete(
+                session,
+                _ctx(ws, role="worker", owner=False, actor_id=worker),
+                occ,
+                photo_evidence_ids=["blob-1"],
+                clock=clock,
+                event_bus=bus,
+            )
+
     def test_photo_require_rejects_empty_completion(
         self, session: Session, clock: FrozenClock, bus: EventBus
     ) -> None:
@@ -964,6 +1047,9 @@ class TestComplete:
         self, session: Session, clock: FrozenClock, bus: EventBus
     ) -> None:
         ws = _bootstrap_workspace(session)
+        workspace = session.get(Workspace, ws)
+        assert workspace is not None
+        workspace.settings_json = {"tasks.checklist_required": True}
         prop = _bootstrap_property(session)
         worker = _bootstrap_user(session)
         occ = _bootstrap_occurrence(
@@ -982,6 +1068,33 @@ class TestComplete:
                 event_bus=bus,
             )
         assert item_id in excinfo.value.unchecked_ids
+
+    def test_checklist_required_reads_property_override(
+        self, session: Session, clock: FrozenClock, bus: EventBus
+    ) -> None:
+        ws = _bootstrap_workspace(session)
+        workspace = session.get(Workspace, ws)
+        assert workspace is not None
+        workspace.settings_json = {"tasks.checklist_required": True}
+        prop = _bootstrap_property(session)
+        property_row = session.get(Property, prop)
+        assert property_row is not None
+        property_row.settings_override_json = {"tasks.checklist_required": False}
+        worker = _bootstrap_user(session)
+        occ = _bootstrap_occurrence(
+            session, workspace_id=ws, property_id=prop, assignee_user_id=worker
+        )
+        _bootstrap_required_checklist(session, workspace_id=ws, occurrence_id=occ)
+
+        result = complete(
+            session,
+            _ctx(ws, role="worker", owner=False, actor_id=worker),
+            occ,
+            clock=clock,
+            event_bus=bus,
+        )
+
+        assert result.state == "completed"
 
     def test_checklist_resolver_off_bypasses_gate(
         self, session: Session, clock: FrozenClock, bus: EventBus
@@ -1118,6 +1231,108 @@ class TestComplete:
 
         assert session.scalars(select(Movement)).all() == []
 
+    def test_inventory_apply_reads_unit_override(
+        self, session: Session, clock: FrozenClock, bus: EventBus
+    ) -> None:
+        ws = _bootstrap_workspace(session)
+        workspace = session.get(Workspace, ws)
+        assert workspace is not None
+        workspace.settings_json = {"inventory.apply_on_task": True}
+        prop = _bootstrap_property(session)
+        unit = _bootstrap_unit(session, property_id=prop)
+        unit_row = session.get(Unit, unit)
+        assert unit_row is not None
+        unit_row.settings_override_json = {"inventory.apply_on_task": False}
+        worker = _bootstrap_user(session)
+        _bootstrap_inventory_item(session, workspace_id=ws, property_id=prop)
+        occ = _bootstrap_occurrence(
+            session,
+            workspace_id=ws,
+            property_id=prop,
+            unit_id=unit,
+            assignee_user_id=worker,
+            inventory={"BLEACH-1L": 2},
+        )
+
+        complete(
+            session,
+            _ctx(ws, role="worker", owner=False, actor_id=worker),
+            occ,
+            clock=clock,
+            event_bus=bus,
+        )
+
+        assert session.scalars(select(Movement)).all() == []
+
+    def test_resolved_setting_reports_work_engagement_source(
+        self, session: Session, clock: FrozenClock, bus: EventBus
+    ) -> None:
+        _ = clock, bus
+        ws = _bootstrap_workspace(session)
+        workspace = session.get(Workspace, ws)
+        assert workspace is not None
+        workspace.settings_json = {"tasks.allow_skip_with_reason": False}
+        prop = _bootstrap_property(session)
+        worker = _bootstrap_user(session)
+        engagement_id = _bootstrap_work_engagement(
+            session, workspace_id=ws, user_id=worker
+        )
+        engagement = session.get(WorkEngagement, engagement_id)
+        assert engagement is not None
+        engagement.settings_override_json = {"tasks.allow_skip_with_reason": True}
+        occ = _bootstrap_occurrence(
+            session, workspace_id=ws, property_id=prop, assignee_user_id=worker
+        )
+        task = session.get(Occurrence, occ)
+        assert task is not None
+
+        resolved = resolve_setting(
+            session,
+            "tasks.allow_skip_with_reason",
+            task_scope_chain(task, workspace_id=ws, actor_user_id=worker),
+            default=True,
+        )
+
+        assert resolved.value is True
+        assert resolved.source_layer == "work_engagement"
+        assert resolved.source_entity_id == engagement_id
+
+    def test_unit_override_is_ignored_when_unit_is_not_on_task_property(
+        self, session: Session, clock: FrozenClock, bus: EventBus
+    ) -> None:
+        _ = clock, bus
+        ws = _bootstrap_workspace(session)
+        workspace = session.get(Workspace, ws)
+        assert workspace is not None
+        workspace.settings_json = {"inventory.apply_on_task": True}
+        task_property = _bootstrap_property(session)
+        other_property = _bootstrap_property(session)
+        mismatched_unit = _bootstrap_unit(session, property_id=other_property)
+        unit_row = session.get(Unit, mismatched_unit)
+        assert unit_row is not None
+        unit_row.settings_override_json = {"inventory.apply_on_task": False}
+        worker = _bootstrap_user(session)
+        occ = _bootstrap_occurrence(
+            session,
+            workspace_id=ws,
+            property_id=task_property,
+            unit_id=mismatched_unit,
+            assignee_user_id=worker,
+        )
+        task = session.get(Occurrence, occ)
+        assert task is not None
+
+        resolved = resolve_setting(
+            session,
+            "inventory.apply_on_task",
+            task_scope_chain(task, workspace_id=ws, actor_user_id=worker),
+            default=True,
+        )
+
+        assert resolved.value is True
+        assert resolved.source_layer == "workspace"
+        assert resolved.source_entity_id == ws
+
     def test_inventory_apply_setting_true_overrides_legacy_consume_false(
         self, session: Session, clock: FrozenClock, bus: EventBus
     ) -> None:
@@ -1151,7 +1366,7 @@ class TestComplete:
         assert mov.item_id == item_id
         assert mov.delta == Decimal("-2")
 
-    def test_inventory_legacy_consume_setting_false_still_suppresses_default_hook(
+    def test_inventory_legacy_consume_setting_false_no_longer_suppresses_default_hook(
         self, session: Session, clock: FrozenClock, bus: EventBus
     ) -> None:
         ws = _bootstrap_workspace(session)
@@ -1160,7 +1375,7 @@ class TestComplete:
         workspace.settings_json = {"inventory.consume_on_task": False}
         prop = _bootstrap_property(session)
         worker = _bootstrap_user(session)
-        _bootstrap_inventory_item(session, workspace_id=ws, property_id=prop)
+        item_id = _bootstrap_inventory_item(session, workspace_id=ws, property_id=prop)
         occ = _bootstrap_occurrence(
             session,
             workspace_id=ws,
@@ -1177,7 +1392,9 @@ class TestComplete:
             event_bus=bus,
         )
 
-        assert session.scalars(select(Movement)).all() == []
+        mov = session.scalars(select(Movement)).one()
+        assert mov.item_id == item_id
+        assert mov.delta == Decimal("-2")
 
     def test_inventory_noop_hook_suppresses_movements(
         self, session: Session, clock: FrozenClock, bus: EventBus
@@ -1545,6 +1762,59 @@ class TestSkip:
             event_bus=bus,
         )
         assert result.state == "skipped"
+
+    def test_worker_skip_reads_work_engagement_override(
+        self, session: Session, clock: FrozenClock, bus: EventBus
+    ) -> None:
+        ws = _bootstrap_workspace(session)
+        workspace = session.get(Workspace, ws)
+        assert workspace is not None
+        workspace.settings_json = {"tasks.allow_skip_with_reason": False}
+        prop = _bootstrap_property(session)
+        worker = _bootstrap_user(session)
+        engagement_id = _bootstrap_work_engagement(
+            session, workspace_id=ws, user_id=worker
+        )
+        engagement = session.get(WorkEngagement, engagement_id)
+        assert engagement is not None
+        engagement.settings_override_json = {"tasks.allow_skip_with_reason": True}
+        occ = _bootstrap_occurrence(
+            session, workspace_id=ws, property_id=prop, assignee_user_id=worker
+        )
+
+        result = skip(
+            session,
+            _ctx(ws, role="worker", owner=False, actor_id=worker),
+            occ,
+            reason="weather_blocked",
+            clock=clock,
+            event_bus=bus,
+        )
+
+        assert result.state == "skipped"
+
+    def test_worker_skip_reads_workspace_default_false(
+        self, session: Session, clock: FrozenClock, bus: EventBus
+    ) -> None:
+        ws = _bootstrap_workspace(session)
+        workspace = session.get(Workspace, ws)
+        assert workspace is not None
+        workspace.settings_json = {"tasks.allow_skip_with_reason": False}
+        prop = _bootstrap_property(session)
+        worker = _bootstrap_user(session)
+        occ = _bootstrap_occurrence(
+            session, workspace_id=ws, property_id=prop, assignee_user_id=worker
+        )
+
+        with pytest.raises(SkipNotPermitted):
+            skip(
+                session,
+                _ctx(ws, role="worker", owner=False, actor_id=worker),
+                occ,
+                reason="weather_blocked",
+                clock=clock,
+                event_bus=bus,
+            )
 
     def test_worker_blocked_when_resolver_false(
         self, session: Session, clock: FrozenClock, bus: EventBus

@@ -26,27 +26,19 @@ API layer can surface the new row without re-reading the table.
 
 ## Injectable hooks
 
-Several §06 side-effects depend on tables that are not yet in the
-schema, or on a settings-cascade resolver that has not landed. Rather
-than paper over the gap with half-implementations, this module
-exposes every such touchpoint as an injectable callable with a
-default that is either permissive (for policy knobs) or no-op (for
-absent tables). Concrete downstream migrations plug in real bodies
-through the keyword-only parameters on the entry points.
+Several §06 side-effects remain injectable so tests, API routes, and
+future domain modules can replace persistence side effects without
+changing the state-machine transaction shape.
 
 * :data:`EvidencePolicyResolver` — resolves the photo policy per
-  §06 "Evidence policy inheritance". Default reads
-  :attr:`Occurrence.photo_evidence` directly (the narrow path that
-  works today); the real cascade (workspace → property → unit →
-  work-engagement → task, with ``forbid`` absolute) lands with
-  cd-settings-cascade.
+  §06 "Evidence policy inheritance". Default reads the §02 settings
+  cascade (workspace → property → unit → work-engagement → task), with
+  ``forbid`` absolute.
 * :data:`ChecklistRequiredResolver` — resolves
-  ``tasks.checklist_required``. Default ``True`` — safe: if no
-  required items exist the gate is vacuous, and if they do the
-  worker must tick them.
+  ``tasks.checklist_required`` through the same cascade.
 * :data:`SkipAllowedResolver` — resolves
-  ``tasks.allow_skip_with_reason``. Default ``True`` (permissive);
-  owners / managers bypass regardless.
+  ``tasks.allow_skip_with_reason`` through the cascade; owners /
+  managers bypass regardless.
 * :data:`InventoryApplyHook` — reads
   ``TaskTemplate.inventory_effects_json`` and writes one
   :class:`~app.adapters.db.inventory.models.Movement` row per effect
@@ -131,6 +123,11 @@ from app.adapters.storage.ports import (
     Storage,
 )
 from app.audit import write_audit
+from app.domain.settings.cascade import (
+    resolve_evidence_policy,
+    resolve_most_specific,
+    task_scope_chain,
+)
 from app.domain.tasks.evidence import (
     EvidencePolicyError,
     EvidenceUpload,
@@ -231,19 +228,14 @@ EvidencePolicyResolver = Callable[
 """Port: resolve the effective photo-evidence policy for a task.
 
 Default :func:`_default_evidence_policy` reads
-``Occurrence.photo_evidence`` directly (``disabled`` → ``forbid``;
-``required`` → ``require``; ``optional`` → ``optional``). The real
-cascade landing with cd-settings-cascade walks workspace → property
-→ unit → work-engagement → task with ``forbid`` absolute.
+the §02 cascade. Legacy ``photo_evidence`` columns are treated as a
+task-layer compatibility source while task settings overrides roll out.
 """
 
 ChecklistRequiredResolver = Callable[[Session, WorkspaceContext, Occurrence], bool]
 """Port: resolve ``tasks.checklist_required`` for a task.
 
-Default :func:`_default_checklist_required` returns ``True`` — if
-the template seeded required items, they must be ticked to
-complete. Override to ``False`` for workspaces that opt out via
-the settings cascade (cd-settings-cascade).
+Default :func:`_default_checklist_required` reads the §02 cascade.
 """
 
 RequiredApprovalResolver = Callable[[Session, WorkspaceContext, Occurrence], bool]
@@ -260,9 +252,9 @@ completion's transaction shape.
 SkipAllowedResolver = Callable[[Session, WorkspaceContext, Occurrence], bool]
 """Port: resolve ``tasks.allow_skip_with_reason`` for a task.
 
-Default :func:`_default_skip_allowed` returns ``True`` (permissive).
-Owners / managers bypass the resolver entirely — a ``False`` result
-only locks out workers.
+Default :func:`_default_skip_allowed` reads the §02 cascade. Owners /
+managers bypass the resolver entirely — a ``False`` result only locks
+out workers.
 """
 
 InventoryApplyHook = Callable[[Session, WorkspaceContext, Occurrence], None]
@@ -510,51 +502,49 @@ def _assert_transition(current: str, target: TaskStateName) -> None:
 def _default_evidence_policy(
     session: Session, ctx: WorkspaceContext, task: Occurrence
 ) -> EvidencePolicy:
-    """Read ``Occurrence.photo_evidence`` directly (narrow default).
+    """Resolve ``evidence.policy`` through the §02 cascade."""
 
-    The full cascade (§06 "Evidence policy inheritance") spans five
-    layers with ``forbid`` absolute. Until cd-settings-cascade lands
-    we can still honour the narrow task-scope rule because it is
-    stored on the row itself. Values map: ``disabled → forbid``,
-    ``required → require``, ``optional → optional``.
-    """
-    _ = session, ctx
-    raw = task.photo_evidence
-    if raw == "disabled":
-        return "forbid"
-    if raw == "required":
-        return "require"
-    # Any unknown value collapses to ``optional`` — the forgiving
-    # default — rather than raising mid-completion. The CHECK
-    # constraint on the column rules out new values in practice.
-    return "optional"
+    actor_user_id = ctx.actor_id if ctx.actor_kind == "user" else None
+    return resolve_evidence_policy(
+        session,
+        task_scope_chain(
+            task, workspace_id=ctx.workspace_id, actor_user_id=actor_user_id
+        ),
+    )
 
 
 def _default_checklist_required(
     session: Session, ctx: WorkspaceContext, task: Occurrence
 ) -> bool:
-    """Default to ``True`` — the safer answer.
+    """Resolve ``tasks.checklist_required`` through the §02 cascade."""
 
-    If the template seeded required items, the worker must tick them;
-    if no required items exist the gate is vacuous. A ``False``
-    override (``tasks.checklist_required = false``) is the opt-out.
-    """
-    _ = session, ctx, task
-    return True
+    actor_user_id = ctx.actor_id if ctx.actor_kind == "user" else None
+    raw = resolve_most_specific(
+        session,
+        "tasks.checklist_required",
+        task_scope_chain(
+            task, workspace_id=ctx.workspace_id, actor_user_id=actor_user_id
+        ),
+        default=False,
+    )
+    return raw is True
 
 
 def _default_skip_allowed(
     session: Session, ctx: WorkspaceContext, task: Occurrence
 ) -> bool:
-    """Default to permissive.
+    """Resolve ``tasks.allow_skip_with_reason`` through the §02 cascade."""
 
-    Owners / managers bypass this resolver entirely (see
-    :func:`skip`); only workers read it. Until cd-settings-cascade
-    lands the workspace-level policy defaults to "allow with
-    reason" (§06 "Skipping and cancellation").
-    """
-    _ = session, ctx, task
-    return True
+    actor_user_id = ctx.actor_id if ctx.actor_kind == "user" else None
+    raw = resolve_most_specific(
+        session,
+        "tasks.allow_skip_with_reason",
+        task_scope_chain(
+            task, workspace_id=ctx.workspace_id, actor_user_id=actor_user_id
+        ),
+        default=True,
+    )
+    return raw is True
 
 
 def _default_required_approval(
@@ -598,7 +588,7 @@ def _default_inventory_apply(
     item refs, bad quantities, or movement validation failures are
     logged/audited and never block task completion.
     """
-    if not _inventory_apply_enabled(session, ctx):
+    if not _inventory_apply_enabled(session, ctx, task):
         return
     effects = _inventory_effects_for_task(session, ctx, task)
     if not effects:
@@ -703,16 +693,19 @@ def _default_inventory_apply(
             continue
 
 
-def _inventory_apply_enabled(session: Session, ctx: WorkspaceContext) -> bool:
-    with tenant_agnostic():
-        workspace_settings = session.scalar(
-            select(Workspace.settings_json).where(Workspace.id == ctx.workspace_id)
-        )
-    if not isinstance(workspace_settings, dict):
-        return True
-    if "inventory.apply_on_task" in workspace_settings:
-        return workspace_settings.get("inventory.apply_on_task") is not False
-    return workspace_settings.get("inventory.consume_on_task") is not False
+def _inventory_apply_enabled(
+    session: Session, ctx: WorkspaceContext, task: Occurrence
+) -> bool:
+    actor_user_id = ctx.actor_id if ctx.actor_kind == "user" else None
+    raw = resolve_most_specific(
+        session,
+        "inventory.apply_on_task",
+        task_scope_chain(
+            task, workspace_id=ctx.workspace_id, actor_user_id=actor_user_id
+        ),
+        default=True,
+    )
+    return raw is True
 
 
 def _inventory_effects_for_task(

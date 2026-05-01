@@ -209,6 +209,9 @@ class Property(Base):
     welcome_defaults_json: Mapped[dict[str, Any]] = mapped_column(
         JSON, nullable=False, default=dict
     )
+    settings_override_json: Mapped[dict[str, Any]] = mapped_column(
+        JSON, nullable=False, default=dict
+    )
     # Internal staff-visible notes (§04 "Property" — property_notes_md).
     property_notes_md: Mapped[str] = mapped_column(String, nullable=False, default="")
     created_at: Mapped[datetime] = mapped_column(

@@ -585,6 +585,9 @@ class WorkEngagement(Base):
     notes_md: Mapped[str] = mapped_column(
         String, nullable=False, default="", server_default=""
     )
+    settings_override_json: Mapped[dict[str, Any]] = mapped_column(
+        JSON, nullable=False, default=dict, server_default="{}"
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
     )
