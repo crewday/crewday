@@ -40,6 +40,8 @@ from app.domain.stays.guest_link_service import mint_link
 from app.ports.tasks_create_occurrence import RecordingTasksCreateOccurrencePort
 from app.tenancy import WorkspaceContext
 from app.tenancy.context import ActorGrantRole
+from app.tenancy.current import reset_current, set_current
+from app.tenancy.orm_filter import install_tenant_filter
 from app.util.clock import FrozenClock
 from app.util.ulid import new_ulid
 from tests._fakes.envelope import FakeEnvelope
@@ -640,6 +642,70 @@ def test_public_welcome_route_is_anonymous_but_token_gated(
         "reason": "expired",
     }
     assert "Villa Sud" not in invalid.text
+
+
+def test_public_welcome_route_clears_tenant_filter(
+    engine: Engine,
+    settings: Settings,
+) -> None:
+    """Pin the public welcome path against the ORM tenant filter.
+
+    Regression guard for cd-zxvk: the public guest route runs
+    without a :class:`WorkspaceContext`, so any read of a
+    workspace-scoped table that does not run inside
+    :func:`tenant_agnostic` raises
+    :class:`~app.tenancy.orm_filter.TenantFilterMissing`. The
+    existing ``test_public_welcome_route_is_anonymous_but_token_gated``
+    builds the factory **without** the filter installed, so a
+    regression that re-adds an unscoped read silently passes there.
+    Mounting the filter here forces the resolver, settings resolver,
+    and ``record_access`` audit writer to all cooperate; a missing
+    ``tenant_agnostic`` / ``set_current`` shows up as an HTTP 500
+    instead of a 200.
+    """
+    factory = sessionmaker(bind=engine, expire_on_commit=False, class_=Session)
+    install_tenant_filter(factory)
+
+    # Seed under an explicit context — every helper below issues
+    # tenant-scoped reads/writes that the just-installed filter
+    # gates. The route under test runs without a context (that's
+    # the whole point), but the *seed phase* needs one bound or it
+    # would fail before we get to exercise the route.
+    with factory() as session:
+        ctx_seed, workspace_id, _actor_id = _seed_workspace(
+            session, slug="public-guest-tf"
+        )
+        token = set_current(ctx_seed)
+        try:
+            property_id = _seed_property(session, workspace_id=workspace_id)
+            stay_id = _seed_reservation(
+                session,
+                workspace_id=workspace_id,
+                property_id=property_id,
+                check_in=_PINNED + timedelta(days=1),
+                check_out=_PINNED + timedelta(days=3),
+            )
+            link = mint_link(
+                session,
+                ctx_seed,
+                stay_id=stay_id,
+                property_id=property_id,
+                check_out_at=_PINNED + timedelta(days=3),
+                settings=settings,
+                clock=FrozenClock(_PINNED),
+            )
+            session.commit()
+        finally:
+            reset_current(token)
+    client = _build_public_client(factory=factory, settings=settings)
+
+    # ``raise_server_exceptions=False`` (set inside ``_build_public_client``)
+    # means a TenantFilterMissing surfaces as a 500 with a JSON body
+    # rather than re-raising into the test. Either way a non-200 here
+    # is a regression.
+    valid = client.get(f"/api/v1/stays/welcome/{link.token}")
+    assert valid.status_code == 200, valid.text
+    assert valid.json()["property_name"] == "Villa Sud"
 
 
 def test_stays_actions_deny_worker_by_default(

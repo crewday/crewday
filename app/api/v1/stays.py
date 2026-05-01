@@ -87,7 +87,7 @@ from app.domain.stays.ical_service import (
     update_feed,
 )
 from app.ports.tasks_create_occurrence import TasksCreateOccurrencePort
-from app.tenancy import WorkspaceContext
+from app.tenancy import WorkspaceContext, tenant_agnostic
 from app.tenancy.current import reset_current, set_current
 from app.util.clock import Clock, SystemClock
 from app.worker.tasks.poll_ical import PolledFeedResult, poll_ical
@@ -423,12 +423,23 @@ class SqlAlchemyWelcomeResolver:
         workspace_id: str,
         stay_id: str,
     ) -> WelcomeMergeInput | None:
-        row = session.get(Reservation, stay_id)
-        if row is None or row.workspace_id != workspace_id:
-            return None
-        prop = session.get(Property, row.property_id)
-        if prop is None:
-            return None
+        # Public guest endpoint runs without a :class:`WorkspaceContext`
+        # (the signed token is the credential, not the cookie). The
+        # ORM tenant filter would otherwise raise
+        # :class:`TenantFilterMissing` on the very first read here.
+        # We re-check ``row.workspace_id == workspace_id`` immediately
+        # after the lookup so the absence of a ctx-bound filter does
+        # not widen the row visibility — the resolver upstream
+        # already verified the token's signature, which proves the
+        # caller knew the workspace's signing key.
+        # justification: token-verified workspace_id re-checked below.
+        with tenant_agnostic():
+            row = session.get(Reservation, stay_id)
+            if row is None or row.workspace_id != workspace_id:
+                return None
+            prop = session.get(Property, row.property_id)
+            if prop is None:
+                return None
         return WelcomeMergeInput(
             property_id=prop.id,
             property_name=prop.name if prop.name is not None else prop.address,
@@ -459,10 +470,16 @@ class SqlAlchemyGuestSettingsResolver:
         key: str,
     ) -> bool:
         del property_id, unit_id
-        row = session.get(Workspace, workspace_id)
-        if row is None:
-            return False
-        value = row.settings_json.get(key)
+        # Public guest endpoint — no :class:`WorkspaceContext` is
+        # bound, so the ORM tenant filter would refuse the read.
+        # We pass the workspace_id explicitly (it came from the
+        # already-verified token's row), so no widening occurs.
+        # justification: workspace_id sourced from token-verified row.
+        with tenant_agnostic():
+            row = session.get(Workspace, workspace_id)
+            if row is None:
+                return False
+            value = row.settings_json.get(key)
         return value is True
 
 
@@ -1364,7 +1381,16 @@ def _record_welcome_access(
         if request.client is not None:
             ip = request.client.host
         ua = request.headers.get("user-agent", "")
-    record_access(session, ctx, link_id=link_id, ip=ip, user_agent=ua, clock=clock)
+    # ``record_access`` (and the audit writer it calls) issue
+    # tenant-scoped ORM queries; the ORM filter reads the active
+    # ctx from the :mod:`app.tenancy.current` contextvar, not the
+    # function arg, so the public guest route must publish the
+    # synthetic ctx onto that contextvar before the call.
+    token = set_current(ctx)
+    try:
+        record_access(session, ctx, link_id=link_id, ip=ip, user_agent=ua, clock=clock)
+    finally:
+        reset_current(token)
 
 
 def _asset_response(asset: GuestAsset) -> GuestAssetResponse:
