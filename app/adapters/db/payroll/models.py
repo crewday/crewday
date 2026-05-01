@@ -550,6 +550,15 @@ class Payslip(Base):
     deductions_cents: Mapped[dict[str, int]] = mapped_column(
         JSON, nullable=False, default=dict
     )
+    # Aggregate of approved expense-reimbursement claims folded into
+    # ``net_cents`` per §09 §"Payslip". Plain ``Integer`` mirrors
+    # ``deductions_cents`` aggregate sizing — a single period's
+    # reimbursements fit comfortably in INT32, and the per-claim
+    # breakdown lives in ``components_json["reimbursements"]`` so the
+    # column itself carries only the rolled-up cents.
+    expense_reimbursements_cents: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0
+    )
     net_cents: Mapped[int] = mapped_column(BigInteger, nullable=False)
     components_json: Mapped[dict[str, object]] = mapped_column(
         JSON, nullable=False, default=dict

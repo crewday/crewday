@@ -8,12 +8,16 @@ from decimal import Decimal
 
 from sqlalchemy.orm import Session
 
-from app.domain.payroll.compute import PayslipComputation, compute_payslip
+from app.domain.payroll.compute import (
+    PayslipComputation,
+    compute_payslip,
+)
 from app.domain.payroll.ports import (
     BookingPayRow,
     PayPeriodEntryRow,
     PayPeriodRow,
     PayRuleRow,
+    PayslipReimbursableClaimRow,
     PayslipRow,
 )
 from app.tenancy import WorkspaceContext
@@ -41,10 +45,12 @@ class FakeRepo:
         bookings: Sequence[BookingPayRow],
         rules: Sequence[PayRuleRow],
         holidays: Mapping[tuple[date, str | None], Decimal] | None = None,
+        reimbursable: Sequence[PayslipReimbursableClaimRow] = (),
     ) -> None:
         self.bookings = list(bookings)
         self.rules = list(rules)
         self.holidays = dict(holidays or {})
+        self.reimbursable = list(reimbursable)
 
     @property
     def session(self) -> Session:
@@ -143,11 +149,26 @@ class FakeRepo:
         overtime_hours_decimal: Decimal,
         gross_cents: int,
         deductions_cents: dict[str, int],
+        expense_reimbursements_cents: int,
         net_cents: int,
         components_json: dict[str, object],
         now: datetime,
     ) -> PayslipRow:
         raise AssertionError("unit compute tests do not persist")
+
+    def list_reimbursable_claims_for_payslip(
+        self,
+        *,
+        workspace_id: str,
+        user_id: str,
+        starts_at: datetime,
+        ends_at: datetime,
+    ) -> Sequence[PayslipReimbursableClaimRow]:
+        return [
+            claim
+            for claim in self.reimbursable
+            if starts_at <= claim.purchased_at < ends_at
+        ]
 
 
 def _ctx() -> WorkspaceContext:
@@ -400,3 +421,199 @@ def test_country_specific_holiday_multiplier_applies_to_matching_property() -> N
         "base_pay": 1000,
         "holiday_200": 1000,
     }
+
+
+def _claim(
+    *,
+    claim_id: str = "01HWA0000000000000000CLM1",
+    purchased_at: datetime,
+    amount_cents: int,
+    currency: str = "USD",
+    description: str = "fuel",
+) -> PayslipReimbursableClaimRow:
+    return PayslipReimbursableClaimRow(
+        claim_id=claim_id,
+        work_engagement_id=_ENGAGEMENT_ID,
+        purchased_at=purchased_at,
+        decided_at=purchased_at + timedelta(days=1),
+        description=description,
+        currency=currency,
+        amount_cents=amount_cents,
+    )
+
+
+def test_approved_claim_in_period_folds_into_net_and_components() -> None:
+    repo = FakeRepo(
+        bookings=[
+            _booking(
+                booking_id="01HWA00000000000000000BKG1",
+                start=datetime(2026, 5, 4, 8, 0, tzinfo=UTC),
+                minutes=120,
+            )
+        ],
+        rules=[
+            _rule(
+                night_multiplier=Decimal("1"),
+                weekend_multiplier=Decimal("1"),
+            )
+        ],
+        reimbursable=[
+            _claim(
+                claim_id="01HWA0000000000000000CLM1",
+                purchased_at=datetime(2026, 5, 6, 12, 0, tzinfo=UTC),
+                amount_cents=4500,
+                description="fuel",
+            ),
+            _claim(
+                claim_id="01HWA0000000000000000CLM2",
+                purchased_at=datetime(2026, 5, 7, 12, 0, tzinfo=UTC),
+                amount_cents=1500,
+                description="parking",
+            ),
+        ],
+    )
+
+    result = compute_payslip(repo, _ctx(), period=_PERIOD, user_id=_USER_ID)
+
+    assert result.gross_cents == 2000
+    assert result.expense_reimbursements_cents == 6000
+    # net = gross - deductions + reimbursements
+    assert result.net_cents == 8000
+
+    reimbursements = result.components_json["reimbursements"]
+    assert isinstance(reimbursements, list)
+    assert len(reimbursements) == 2
+    first = reimbursements[0]
+    assert isinstance(first, dict)
+    assert first["claim_id"] == "01HWA0000000000000000CLM1"
+    assert first["amount_cents"] == 4500
+    assert first["description"] == "fuel"
+    assert first["currency"] == "USD"
+    second = reimbursements[1]
+    assert isinstance(second, dict)
+    assert second["claim_id"] == "01HWA0000000000000000CLM2"
+
+
+def test_claim_outside_period_window_is_excluded() -> None:
+    # Claim purchased before period.starts_at — must not be folded.
+    before = _claim(
+        claim_id="01HWA0000000000000000CLMB",
+        purchased_at=datetime(2026, 4, 30, 12, 0, tzinfo=UTC),
+        amount_cents=999,
+    )
+    # Claim purchased exactly at period.ends_at — exclusive bound, must
+    # not be folded either.
+    after = _claim(
+        claim_id="01HWA0000000000000000CLMA",
+        purchased_at=datetime(2026, 5, 15, 0, 0, tzinfo=UTC),
+        amount_cents=999,
+    )
+    repo = FakeRepo(
+        bookings=[
+            _booking(
+                booking_id="01HWA00000000000000000BKG1",
+                start=datetime(2026, 5, 4, 8, 0, tzinfo=UTC),
+                minutes=120,
+            )
+        ],
+        rules=[
+            _rule(
+                night_multiplier=Decimal("1"),
+                weekend_multiplier=Decimal("1"),
+            )
+        ],
+        reimbursable=[before, after],
+    )
+
+    result = compute_payslip(repo, _ctx(), period=_PERIOD, user_id=_USER_ID)
+
+    assert result.expense_reimbursements_cents == 0
+    assert result.net_cents == result.gross_cents
+    reimbursements = result.components_json["reimbursements"]
+    assert reimbursements == []
+
+
+def test_no_approved_claims_yields_empty_reimbursements() -> None:
+    repo = FakeRepo(
+        bookings=[
+            _booking(
+                booking_id="01HWA00000000000000000BKG1",
+                start=datetime(2026, 5, 4, 8, 0, tzinfo=UTC),
+                minutes=120,
+            )
+        ],
+        rules=[
+            _rule(
+                night_multiplier=Decimal("1"),
+                weekend_multiplier=Decimal("1"),
+            )
+        ],
+    )
+
+    result = compute_payslip(repo, _ctx(), period=_PERIOD, user_id=_USER_ID)
+
+    assert result.expense_reimbursements_cents == 0
+    assert result.components_json["reimbursements"] == []
+
+
+def test_cross_currency_claim_is_skipped_not_folded() -> None:
+    """Spec §09 §"Currency mismatch": cross-currency claims aren't a
+    payroll-blocking error. v1 leaves them for the manual
+    ``mark_reimbursed`` route — compute folds same-currency claims and
+    surfaces the skipped ones in
+    ``components_json["reimbursements_skipped"]`` so the PDF / API can
+    render a "settled out of band" hint.
+    """
+    repo = FakeRepo(
+        bookings=[
+            _booking(
+                booking_id="01HWA00000000000000000BKG1",
+                start=datetime(2026, 5, 4, 8, 0, tzinfo=UTC),
+                minutes=120,
+            )
+        ],
+        rules=[
+            _rule(
+                night_multiplier=Decimal("1"),
+                weekend_multiplier=Decimal("1"),
+            )
+        ],
+        reimbursable=[
+            _claim(
+                claim_id="01HWA0000000000000000CLM1",
+                purchased_at=datetime(2026, 5, 6, 12, 0, tzinfo=UTC),
+                amount_cents=4500,
+                currency="USD",
+                description="fuel",
+            ),
+            _claim(
+                claim_id="01HWA0000000000000000CLM2",
+                purchased_at=datetime(2026, 5, 7, 12, 0, tzinfo=UTC),
+                amount_cents=8800,
+                currency="EUR",
+                description="hotel",
+            ),
+        ],
+    )
+
+    result = compute_payslip(repo, _ctx(), period=_PERIOD, user_id=_USER_ID)
+
+    # Only the USD claim is folded; EUR claim lands in the skipped slot.
+    assert result.expense_reimbursements_cents == 4500
+    assert result.net_cents == result.gross_cents + 4500
+
+    folded = result.components_json["reimbursements"]
+    assert isinstance(folded, list)
+    assert len(folded) == 1
+    folded_first = folded[0]
+    assert isinstance(folded_first, dict)
+    assert folded_first["claim_id"] == "01HWA0000000000000000CLM1"
+    assert folded_first["currency"] == "USD"
+
+    skipped = result.components_json["reimbursements_skipped"]
+    assert isinstance(skipped, list)
+    assert len(skipped) == 1
+    skipped_first = skipped[0]
+    assert isinstance(skipped_first, dict)
+    assert skipped_first["claim_id"] == "01HWA0000000000000000CLM2"
+    assert skipped_first["currency"] == "EUR"

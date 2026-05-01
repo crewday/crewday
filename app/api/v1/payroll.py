@@ -126,7 +126,7 @@ from app.domain.payroll.rules import (
 )
 from app.domain.privacy import payout_manifest_available
 from app.events import bus as default_event_bus
-from app.events.types import PayrollExportReady
+from app.events.types import ExpenseReimbursed, PayrollExportReady
 from app.tenancy import WorkspaceContext
 from app.util.clock import SystemClock
 from app.util.ulid import new_ulid
@@ -136,6 +136,7 @@ __all__ = [
     "PayRuleListResponse",
     "PayRuleResponse",
     "PayRuleUpdateRequest",
+    "PayslipReimbursementResponse",
     "build_payroll_router",
     "router",
 ]
@@ -254,6 +255,17 @@ class MoneyResponse(BaseModel):
     currency: str
 
 
+class PayslipReimbursementResponse(BaseModel):
+    """One approved expense claim folded into a payslip."""
+
+    claim_id: str
+    work_engagement_id: str
+    purchased_at: datetime
+    decided_at: datetime | None = None
+    description: str
+    amount: MoneyResponse
+
+
 class PayslipResponse(BaseModel):
     """Response shape for payslip read/list operations."""
 
@@ -266,6 +278,8 @@ class PayslipResponse(BaseModel):
     overtime_hours_decimal: Decimal
     gross: MoneyResponse
     deductions: list[MoneyResponse]
+    expense_reimbursements: MoneyResponse
+    reimbursements: list[PayslipReimbursementResponse]
     net: MoneyResponse
     components: dict[str, object]
     status: str
@@ -339,7 +353,53 @@ def _period_to_response(view: PayPeriodView) -> PayPeriodResponse:
     )
 
 
+def _reimbursements_from_components(
+    components: dict[str, object], *, currency: str
+) -> list[PayslipReimbursementResponse]:
+    raw = components.get("reimbursements")
+    if not isinstance(raw, list):
+        return []
+    out: list[PayslipReimbursementResponse] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        claim_id = item.get("claim_id")
+        engagement_id = item.get("work_engagement_id")
+        purchased_at = item.get("purchased_at")
+        description = item.get("description")
+        amount_cents = item.get("amount_cents")
+        if not (
+            isinstance(claim_id, str)
+            and isinstance(engagement_id, str)
+            and isinstance(purchased_at, str)
+            and isinstance(description, str)
+            and isinstance(amount_cents, int)
+            and not isinstance(amount_cents, bool)
+        ):
+            continue
+        decided_raw = item.get("decided_at")
+        decided_at = (
+            datetime.fromisoformat(decided_raw)
+            if isinstance(decided_raw, str)
+            else None
+        )
+        out.append(
+            PayslipReimbursementResponse(
+                claim_id=claim_id,
+                work_engagement_id=engagement_id,
+                purchased_at=datetime.fromisoformat(purchased_at),
+                decided_at=decided_at,
+                description=description,
+                amount=MoneyResponse(cents=amount_cents, currency=currency),
+            )
+        )
+    return out
+
+
 def _payslip_to_response(row: PayslipReadRow) -> PayslipResponse:
+    reimbursements = _reimbursements_from_components(
+        row.components_json, currency=row.currency
+    )
     return PayslipResponse(
         id=row.id,
         workspace_id=row.workspace_id,
@@ -353,6 +413,11 @@ def _payslip_to_response(row: PayslipReadRow) -> PayslipResponse:
             MoneyResponse(cents=cents, currency=row.currency)
             for _key, cents in sorted(row.deductions_cents.items())
         ],
+        expense_reimbursements=MoneyResponse(
+            cents=row.expense_reimbursements_cents,
+            currency=row.currency,
+        ),
+        reimbursements=reimbursements,
         net=MoneyResponse(cents=row.net_cents, currency=row.currency),
         components=row.components_json,
         status=row.status,
@@ -440,8 +505,60 @@ def _http_for_payslip_conflict(message: str) -> HTTPException:
     )
 
 
-def _default_payout_snapshot() -> dict[str, object]:
-    return {"schema_version": 1, "destinations": [], "reimbursements": []}
+def _payout_snapshot_for(row: PayslipReadRow) -> dict[str, object]:
+    """Build the §09 §"Snapshot on the payslip" payload from a draft payslip.
+
+    The reimbursements slice is sourced from
+    ``components_json["reimbursements"]`` — the same per-claim breakdown
+    the compute folded into ``net_cents`` — so the issued payslip's
+    payout manifest stays consistent with the figure the recipient
+    sees on the slip itself. Per-destination fanout (``destinations``)
+    awaits the payout-destination work; until then we emit the shape
+    with an empty list so the JSON contract is stable.
+    """
+    raw = row.components_json.get("reimbursements")
+    reimbursements: list[dict[str, object]] = []
+    if isinstance(raw, list):
+        for item in raw:
+            if not isinstance(item, dict):
+                continue
+            claim_id = item.get("claim_id")
+            amount_cents = item.get("amount_cents")
+            description = item.get("description")
+            currency = item.get("currency")
+            if not (
+                isinstance(claim_id, str)
+                and isinstance(amount_cents, int)
+                and not isinstance(amount_cents, bool)
+                and isinstance(description, str)
+                and isinstance(currency, str)
+            ):
+                continue
+            # ``destination_id`` / ``display_stub`` / cross-currency
+            # snapshot fields land with the payout-destination work
+            # (§09 §"Currency alignment rule" + §02). Until then, the
+            # aligned single-currency shape is the source-currency
+            # amount and a label echoed from the claim's vendor /
+            # description so the manifest is self-explanatory.
+            reimbursements.append(
+                {
+                    "claim_id": claim_id,
+                    "destination_id": None,
+                    "label": description,
+                    "display_stub": None,
+                    "currency": currency,
+                    "amount_cents": amount_cents,
+                    "original_currency": currency,
+                    "original_amount_cents": amount_cents,
+                    "exchange_rate": None,
+                    "rate_source": None,
+                }
+            )
+    return {
+        "schema_version": 1,
+        "destinations": [],
+        "reimbursements": reimbursements,
+    }
 
 
 def _require_workspace_permission(
@@ -1110,7 +1227,7 @@ def build_payroll_router() -> APIRouter:
             status="issued",
             issued_at=now,
             paid_at=None,
-            payout_snapshot_json=_default_payout_snapshot(),
+            payout_snapshot_json=_payout_snapshot_for(row),
         )
         write_audit(
             session,
@@ -1149,6 +1266,16 @@ def build_payroll_router() -> APIRouter:
         if row.status != "issued":
             raise _http_for_payslip_conflict("only issued payslips can be paid")
 
+        period_repo = SqlAlchemyPayPeriodRepository(session)
+        period = period_repo.get(
+            workspace_id=ctx.workspace_id,
+            period_id=row.pay_period_id,
+        )
+        if period is None:
+            raise _http_for_payslip_conflict(
+                "payslip pay period not found for reimbursement settlement"
+            )
+
         clock = SystemClock()
         now = clock.now()
         updated = payslip_repo.set_payslip_state(
@@ -1168,18 +1295,58 @@ def build_payroll_router() -> APIRouter:
             clock=clock,
         )
 
-        period_repo = SqlAlchemyPayPeriodRepository(session)
-        period = period_repo.get(
+        # Spec §09 §"Reimbursement": a claim becomes ``reimbursed`` when
+        # the containing payslip moves to ``paid``. Settle inside the
+        # same UoW as the payslip flip so a downstream failure rolls
+        # both writes back atomically. ``reimbursed_via='bank'`` per
+        # the seam contract — the four-value enum's per-claim override
+        # path is the manual ``mark_reimbursed`` route, not this
+        # period-close fold-in.
+        settled = payslip_repo.settle_payslip_reimbursements(
+            workspace_id=ctx.workspace_id,
+            user_id=row.user_id,
+            starts_at=period.starts_at,
+            ends_at=period.ends_at,
+            currency=row.currency,
+            reimbursed_at=now,
+            reimbursed_by=ctx.actor_id,
+            reimbursed_via="bank",
+        )
+        for claim in settled:
+            write_audit(
+                session,
+                ctx,
+                entity_kind="expense_claim",
+                entity_id=claim.claim_id,
+                action="expense.claim.reimbursed",
+                diff={
+                    "before": {"state": "approved"},
+                    "after": {
+                        "state": "reimbursed",
+                        "reimbursed_via": "bank",
+                        "reimbursed_by": ctx.actor_id,
+                        "payslip_id": payslip_id,
+                    },
+                },
+                clock=clock,
+            )
+            default_event_bus.publish(
+                ExpenseReimbursed(
+                    workspace_id=ctx.workspace_id,
+                    actor_id=ctx.actor_id,
+                    correlation_id=ctx.audit_correlation_id,
+                    occurred_at=now,
+                    claim_id=claim.claim_id,
+                    work_engagement_id=claim.work_engagement_id,
+                    submitter_user_id=row.user_id,
+                    reimbursed_via="bank",
+                    reimbursed_by_user_id=ctx.actor_id,
+                )
+            )
+
+        if period.state == "locked" and not period_repo.has_unpaid_payslip(
             workspace_id=ctx.workspace_id,
             period_id=row.pay_period_id,
-        )
-        if (
-            period is not None
-            and period.state == "locked"
-            and not period_repo.has_unpaid_payslip(
-                workspace_id=ctx.workspace_id,
-                period_id=row.pay_period_id,
-            )
         ):
             mark_paid(
                 period_repo,

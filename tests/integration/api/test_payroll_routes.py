@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app.adapters.db.audit.models import AuditLog
 from app.adapters.db.authz.models import RoleGrant
+from app.adapters.db.expenses.models import ExpenseClaim
 from app.adapters.db.payroll.models import Booking, PayPeriod, PayRule, Payslip
 from app.adapters.db.workspace.models import WorkEngagement
 from app.api.deps import current_workspace_context
@@ -459,6 +460,250 @@ def test_payslip_state_routes_issue_pay_and_void(
             "destinations": [],
             "reimbursements": [],
         }
+
+
+def test_mark_paid_settles_approved_claims_for_period_window(
+    session_factory: sessionmaker[Session],
+    seeded: SeededPayroll,
+) -> None:
+    """A locked + issued payslip flips claims approved-in-window to reimbursed."""
+    purchased_at = datetime(2026, 5, 10, 12, 0, tzinfo=UTC)
+    claim_in_id = new_ulid()
+    claim_out_id = new_ulid()
+    with session_factory() as session, tenant_agnostic():
+        engagement_id = session.scalar(
+            select(WorkEngagement.id).where(
+                WorkEngagement.workspace_id == seeded.workspace_id,
+                WorkEngagement.user_id == seeded.worker_id,
+            )
+        )
+        assert engagement_id is not None
+
+        period = session.get(PayPeriod, seeded.worker_period_id)
+        assert period is not None
+        period.state = "locked"
+
+        slip = _payslip(
+            workspace_id=seeded.workspace_id,
+            period_id=seeded.worker_period_id,
+            user_id=seeded.worker_id,
+            gross_cents=4000,
+        )
+        slip.expense_reimbursements_cents = 1500
+        slip.net_cents = 5500
+        slip.components_json = {
+            "schema_version": 1,
+            "currency": "USD",
+            "reimbursements": [
+                {
+                    "claim_id": claim_in_id,
+                    "work_engagement_id": engagement_id,
+                    "purchased_at": purchased_at.isoformat(),
+                    "decided_at": None,
+                    "description": "fuel",
+                    "currency": "USD",
+                    "amount_cents": 1500,
+                }
+            ],
+        }
+        session.add(slip)
+
+        # In-window approved claim — must flip to ``reimbursed``.
+        session.add(
+            ExpenseClaim(
+                id=claim_in_id,
+                workspace_id=seeded.workspace_id,
+                work_engagement_id=engagement_id,
+                vendor="fuel",
+                purchased_at=purchased_at,
+                currency="USD",
+                total_amount_cents=1500,
+                category="supplies",
+                state="approved",
+                submitted_at=_NOW,
+                decided_at=_NOW,
+                decided_by=seeded.manager_id,
+                created_at=_NOW,
+            )
+        )
+        # Out-of-window approved claim (purchased before period start) —
+        # must stay ``approved``.
+        session.add(
+            ExpenseClaim(
+                id=claim_out_id,
+                workspace_id=seeded.workspace_id,
+                work_engagement_id=engagement_id,
+                vendor="parking",
+                purchased_at=datetime(2026, 4, 30, 12, 0, tzinfo=UTC),
+                currency="USD",
+                total_amount_cents=999,
+                category="supplies",
+                state="approved",
+                submitted_at=_NOW,
+                decided_at=_NOW,
+                decided_by=seeded.manager_id,
+                created_at=_NOW,
+            )
+        )
+        session.commit()
+        slip_id = slip.id
+
+    with _client_for(session_factory, seeded.manager_ctx) as client:
+        issue = client.post(f"/api/v1/payroll/payslips/{slip_id}/issue")
+        assert issue.status_code == 200, issue.text
+        paid = client.post(f"/api/v1/payroll/payslips/{slip_id}/mark_paid")
+
+    assert paid.status_code == 200, paid.text
+    payload = paid.json()
+    assert payload["status"] == "paid"
+    assert payload["expense_reimbursements"] == {"cents": 1500, "currency": "USD"}
+    assert payload["net"] == {"cents": 5500, "currency": "USD"}
+    assert len(payload["reimbursements"]) == 1
+    assert payload["reimbursements"][0]["claim_id"] == claim_in_id
+    assert payload["reimbursements"][0]["amount"] == {
+        "cents": 1500,
+        "currency": "USD",
+    }
+
+    with session_factory() as session, tenant_agnostic():
+        flipped = session.get(ExpenseClaim, claim_in_id)
+        assert flipped is not None
+        assert flipped.state == "reimbursed"
+        assert flipped.reimbursed_via == "bank"
+        assert flipped.reimbursed_by == seeded.manager_id
+        assert flipped.reimbursed_at is not None
+
+        untouched = session.get(ExpenseClaim, claim_out_id)
+        assert untouched is not None
+        assert untouched.state == "approved"
+        assert untouched.reimbursed_at is None
+
+        snapshot = session.get(Payslip, slip_id)
+        assert snapshot is not None
+        snap = snapshot.payout_snapshot_json
+        assert isinstance(snap, dict)
+        snap_reimbursements = snap["reimbursements"]
+        assert isinstance(snap_reimbursements, list)
+        assert len(snap_reimbursements) == 1
+        snap_first = snap_reimbursements[0]
+        assert isinstance(snap_first, dict)
+        assert snap_first["claim_id"] == claim_in_id
+        assert snap_first["amount_cents"] == 1500
+        assert snap_first["currency"] == "USD"
+
+    audit_count = _audit_count(
+        session_factory,
+        workspace_id=seeded.workspace_id,
+        entity_id=claim_in_id,
+        action="expense.claim.reimbursed",
+    )
+    assert audit_count == 1
+
+
+def test_mark_paid_is_idempotent_does_not_resettle_claims(
+    session_factory: sessionmaker[Session],
+    seeded: SeededPayroll,
+) -> None:
+    """Re-calling mark_paid on an already-paid slip is a no-op for claims/audit."""
+    purchased_at = datetime(2026, 5, 10, 12, 0, tzinfo=UTC)
+    claim_id = new_ulid()
+    with session_factory() as session, tenant_agnostic():
+        engagement_id = session.scalar(
+            select(WorkEngagement.id).where(
+                WorkEngagement.workspace_id == seeded.workspace_id,
+                WorkEngagement.user_id == seeded.worker_id,
+            )
+        )
+        assert engagement_id is not None
+
+        period = session.get(PayPeriod, seeded.worker_period_id)
+        assert period is not None
+        period.state = "locked"
+
+        slip = _payslip(
+            workspace_id=seeded.workspace_id,
+            period_id=seeded.worker_period_id,
+            user_id=seeded.worker_id,
+            gross_cents=4000,
+        )
+        slip.expense_reimbursements_cents = 1500
+        slip.net_cents = 5500
+        slip.components_json = {
+            "schema_version": 1,
+            "currency": "USD",
+            "reimbursements": [
+                {
+                    "claim_id": claim_id,
+                    "work_engagement_id": engagement_id,
+                    "purchased_at": purchased_at.isoformat(),
+                    "decided_at": None,
+                    "description": "fuel",
+                    "currency": "USD",
+                    "amount_cents": 1500,
+                }
+            ],
+        }
+        session.add(slip)
+        session.add(
+            ExpenseClaim(
+                id=claim_id,
+                workspace_id=seeded.workspace_id,
+                work_engagement_id=engagement_id,
+                vendor="fuel",
+                purchased_at=purchased_at,
+                currency="USD",
+                total_amount_cents=1500,
+                category="supplies",
+                state="approved",
+                submitted_at=_NOW,
+                decided_at=_NOW,
+                decided_by=seeded.manager_id,
+                created_at=_NOW,
+            )
+        )
+        session.commit()
+        slip_id = slip.id
+
+    with _client_for(session_factory, seeded.manager_ctx) as client:
+        issue = client.post(f"/api/v1/payroll/payslips/{slip_id}/issue")
+        assert issue.status_code == 200, issue.text
+        first = client.post(f"/api/v1/payroll/payslips/{slip_id}/mark_paid")
+        second = client.post(f"/api/v1/payroll/payslips/{slip_id}/mark_paid")
+
+    assert first.status_code == 200, first.text
+    assert second.status_code == 200, second.text
+    assert first.json()["status"] == "paid"
+    assert second.json()["status"] == "paid"
+    # paid_at stays stable across the replay — the second call is a noop.
+    # Strip any "Z" suffix from the reread payload (SQLite returns naive
+    # timestamps so Pydantic re-serializes without it) before comparing the
+    # wall-clock; the second call must point at the original mark_paid moment.
+    assert first.json()["paid_at"].rstrip("Z").replace("+00:00", "") == (
+        second.json()["paid_at"].rstrip("Z").replace("+00:00", "")
+    )
+
+    with session_factory() as session, tenant_agnostic():
+        claim = session.get(ExpenseClaim, claim_id)
+        assert claim is not None
+        assert claim.state == "reimbursed"
+        # Settlement metadata stays from the first mark_paid; not re-stamped.
+        assert claim.reimbursed_by == seeded.manager_id
+
+    # No double-write of the claim audit row; no re-flip attempted.
+    audit_count = _audit_count(
+        session_factory,
+        workspace_id=seeded.workspace_id,
+        entity_id=claim_id,
+        action="expense.claim.reimbursed",
+    )
+    assert audit_count == 1
+    payslip_paid_audit = _audit_count(
+        session_factory,
+        workspace_id=seeded.workspace_id,
+        entity_id=slip_id,
+        action="payslip.paid",
+    )
+    assert payslip_paid_audit == 1
 
 
 def test_period_export_returns_ready_job_and_event(

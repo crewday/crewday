@@ -55,7 +55,9 @@ from app.domain.payroll.ports import (
     PayRuleRow,
     PayslipExportRow,
     PayslipPdfRow,
+    PayslipReadRepository,
     PayslipReadRow,
+    PayslipReimbursableClaimRow,
     PayslipRow,
     TimesheetExportRow,
 )
@@ -202,6 +204,7 @@ def _payslip_to_row(row: Payslip) -> PayslipRow:
         overtime_hours_decimal=row.overtime_hours_decimal,
         gross_cents=row.gross_cents,
         deductions_cents=dict(row.deductions_cents),
+        expense_reimbursements_cents=row.expense_reimbursements_cents,
         net_cents=row.net_cents,
         components_json=dict(row.components_json),
         status=row.status,
@@ -220,6 +223,7 @@ def _payslip_read_to_row(row: Payslip, *, currency: str | None) -> PayslipReadRo
         overtime_hours_decimal=row.overtime_hours_decimal,
         gross_cents=row.gross_cents,
         deductions_cents=dict(row.deductions_cents),
+        expense_reimbursements_cents=row.expense_reimbursements_cents,
         net_cents=row.net_cents,
         components_json=dict(row.components_json),
         status=row.status,
@@ -827,6 +831,7 @@ class SqlAlchemyPayslipComputeRepository(SqlAlchemyBookingPayRepository):
         overtime_hours_decimal: Decimal,
         gross_cents: int,
         deductions_cents: dict[str, int],
+        expense_reimbursements_cents: int,
         net_cents: int,
         components_json: dict[str, object],
         now: datetime,
@@ -848,6 +853,7 @@ class SqlAlchemyPayslipComputeRepository(SqlAlchemyBookingPayRepository):
                 overtime_hours_decimal=overtime_hours_decimal,
                 gross_cents=gross_cents,
                 deductions_cents=deductions_cents,
+                expense_reimbursements_cents=expense_reimbursements_cents,
                 net_cents=net_cents,
                 components_json=components_json,
                 status="draft",
@@ -859,6 +865,7 @@ class SqlAlchemyPayslipComputeRepository(SqlAlchemyBookingPayRepository):
             row.overtime_hours_decimal = overtime_hours_decimal
             row.gross_cents = gross_cents
             row.deductions_cents = deductions_cents
+            row.expense_reimbursements_cents = expense_reimbursements_cents
             row.net_cents = net_cents
             row.components_json = components_json
             row.status = "draft"
@@ -869,8 +876,58 @@ class SqlAlchemyPayslipComputeRepository(SqlAlchemyBookingPayRepository):
         self._session.flush()
         return _payslip_to_row(row)
 
+    def list_reimbursable_claims_for_payslip(
+        self,
+        *,
+        workspace_id: str,
+        user_id: str,
+        starts_at: datetime,
+        ends_at: datetime,
+    ) -> Sequence[PayslipReimbursableClaimRow]:
+        # Window predicate ``[starts_at, ends_at)`` on ``purchased_at``
+        # — same convention §09 §"Approval" uses to attach a claim to
+        # the period that contains it. The user join goes through
+        # WorkEngagement (claim → engagement → user) because the claim
+        # row carries no direct user_id; the engagement is the only
+        # FK-stable bridge.
+        rows = (
+            self._session.execute(
+                select(ExpenseClaim)
+                .join(
+                    WorkEngagement,
+                    and_(
+                        WorkEngagement.id == ExpenseClaim.work_engagement_id,
+                        WorkEngagement.workspace_id == ExpenseClaim.workspace_id,
+                    ),
+                )
+                .where(
+                    ExpenseClaim.workspace_id == workspace_id,
+                    WorkEngagement.user_id == user_id,
+                    ExpenseClaim.state == "approved",
+                    ExpenseClaim.deleted_at.is_(None),
+                    ExpenseClaim.purchased_at >= starts_at,
+                    ExpenseClaim.purchased_at < ends_at,
+                )
+                .order_by(ExpenseClaim.purchased_at.asc(), ExpenseClaim.id.asc())
+            )
+            .scalars()
+            .all()
+        )
+        return [
+            PayslipReimbursableClaimRow(
+                claim_id=claim.id,
+                work_engagement_id=claim.work_engagement_id,
+                purchased_at=claim.purchased_at,
+                decided_at=claim.decided_at,
+                description=claim.vendor,
+                currency=claim.currency,
+                amount_cents=claim.total_amount_cents,
+            )
+            for claim in rows
+        ]
 
-class SqlAlchemyPayslipReadRepository:
+
+class SqlAlchemyPayslipReadRepository(PayslipReadRepository):
     """SA-backed read adapter for payslip REST routes."""
 
     def __init__(self, session: Session) -> None:
@@ -942,6 +999,71 @@ class SqlAlchemyPayslipReadRepository:
             row.payout_snapshot_json = payout_snapshot_json
         self._session.flush()
         return _payslip_read_to_row(row, currency=None)
+
+    def settle_payslip_reimbursements(
+        self,
+        *,
+        workspace_id: str,
+        user_id: str,
+        starts_at: datetime,
+        ends_at: datetime,
+        currency: str,
+        reimbursed_at: datetime,
+        reimbursed_by: str,
+        reimbursed_via: Literal["bank"],
+    ) -> Sequence[PayslipReimbursableClaimRow]:
+        # Mirror the selection criteria
+        # :meth:`PayslipComputeRepository.list_reimbursable_claims_for_payslip`
+        # uses so the rows we flip are the same set the compute folded
+        # into ``net_cents``. The ``currency`` predicate keeps us in
+        # lockstep with compute's same-currency-only fold (§"Currency
+        # mismatch" leaves cross-currency claims for the manual
+        # ``mark_reimbursed`` route). Walk the rows individually rather
+        # than an ORM-level UPDATE so the SA identity-map sees the new
+        # column values inside the same UoW.
+        rows = (
+            self._session.execute(
+                select(ExpenseClaim)
+                .join(
+                    WorkEngagement,
+                    and_(
+                        WorkEngagement.id == ExpenseClaim.work_engagement_id,
+                        WorkEngagement.workspace_id == ExpenseClaim.workspace_id,
+                    ),
+                )
+                .where(
+                    ExpenseClaim.workspace_id == workspace_id,
+                    WorkEngagement.user_id == user_id,
+                    ExpenseClaim.state == "approved",
+                    ExpenseClaim.deleted_at.is_(None),
+                    ExpenseClaim.currency == currency,
+                    ExpenseClaim.purchased_at >= starts_at,
+                    ExpenseClaim.purchased_at < ends_at,
+                )
+                .order_by(ExpenseClaim.purchased_at.asc(), ExpenseClaim.id.asc())
+            )
+            .scalars()
+            .all()
+        )
+        snapshots: list[PayslipReimbursableClaimRow] = []
+        for claim in rows:
+            snapshots.append(
+                PayslipReimbursableClaimRow(
+                    claim_id=claim.id,
+                    work_engagement_id=claim.work_engagement_id,
+                    purchased_at=claim.purchased_at,
+                    decided_at=claim.decided_at,
+                    description=claim.vendor,
+                    currency=claim.currency,
+                    amount_cents=claim.total_amount_cents,
+                )
+            )
+            claim.state = "reimbursed"
+            claim.reimbursed_at = reimbursed_at
+            claim.reimbursed_via = reimbursed_via
+            claim.reimbursed_by = reimbursed_by
+        self._session.flush()
+        return snapshots
 
 
 class SqlAlchemyPayslipPdfRepository:

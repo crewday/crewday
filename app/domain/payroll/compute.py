@@ -14,6 +14,7 @@ from app.domain.payroll.ports import (
     PayPeriodRow,
     PayRuleRow,
     PayslipComputeRepository,
+    PayslipReimbursableClaimRow,
     PayslipRow,
 )
 from app.events import EventBus
@@ -106,6 +107,7 @@ class PayslipComputation:
     overtime_hours_decimal: Decimal
     gross_cents: int
     deductions_cents: dict[str, int]
+    expense_reimbursements_cents: int
     net_cents: int
     components_json: dict[str, object]
 
@@ -243,11 +245,25 @@ def _add_component(
         components[key] += cents
 
 
+def _reimbursement_to_json(claim: PayslipReimbursableClaimRow) -> dict[str, object]:
+    return {
+        "claim_id": claim.claim_id,
+        "work_engagement_id": claim.work_engagement_id,
+        "purchased_at": claim.purchased_at.isoformat(),
+        "decided_at": claim.decided_at.isoformat() if claim.decided_at else None,
+        "description": claim.description,
+        "currency": claim.currency,
+        "amount_cents": claim.amount_cents,
+    }
+
+
 def _build_components_json(
     *,
     currency: str,
     gross_breakdown: dict[str, int],
     deductions_cents: dict[str, int],
+    reimbursements: Sequence[PayslipReimbursableClaimRow],
+    reimbursements_skipped: Sequence[PayslipReimbursableClaimRow],
     sources: Sequence[_BookingSource],
     total_minutes: int,
     regular_minutes: int,
@@ -268,6 +284,10 @@ def _build_components_json(
         "deductions": [
             {"key": key, "cents": cents, "reason": None}
             for key, cents in sorted(deductions_cents.items())
+        ],
+        "reimbursements": [_reimbursement_to_json(claim) for claim in reimbursements],
+        "reimbursements_skipped": [
+            _reimbursement_to_json(claim) for claim in reimbursements_skipped
         ],
         "statutory": [],
         "metadata": {
@@ -480,9 +500,36 @@ def compute_payslip(
             f"mixed currencies for user {user_id}: {', '.join(sorted(currencies))}"
         )
 
+    payslip_currency = next(iter(currencies))
+    reimbursable = repo.list_reimbursable_claims_for_payslip(
+        workspace_id=ctx.workspace_id,
+        user_id=user_id,
+        starts_at=period.starts_at,
+        ends_at=period.ends_at,
+    )
+    # Spec §09 §"Currency mismatch": a claim in currency X attached to
+    # a destination in currency Y is **not** a mismatch — expenses are
+    # fully multi-currency. v1 has no ``owed_amount_cents`` populated
+    # yet (payout_destination is deferred), so a cross-currency claim
+    # cannot be auto-folded into the single-currency payslip ``net``;
+    # we skip it here and leave it for the manual ``mark_reimbursed``
+    # path rather than wedging the whole payroll. The skipped set is
+    # echoed into ``components_json["reimbursements_skipped"]`` so the
+    # PDF / API can render a "settled out of band" hint.
+    folded: list[PayslipReimbursableClaimRow] = []
+    skipped: list[PayslipReimbursableClaimRow] = []
+    for claim in reimbursable:
+        if claim.currency == payslip_currency:
+            folded.append(claim)
+        else:
+            skipped.append(claim)
+    expense_reimbursements_cents = sum(claim.amount_cents for claim in folded)
+
     deductions_cents: dict[str, int] = {}
     gross_cents = sum(gross_breakdown.values())
-    net_cents = gross_cents - sum(deductions_cents.values())
+    net_cents = (
+        gross_cents - sum(deductions_cents.values()) + expense_reimbursements_cents
+    )
     sources = [
         _BookingSource(
             booking_id=str(source["booking_id"]),
@@ -503,16 +550,19 @@ def compute_payslip(
         workspace_id=ctx.workspace_id,
         pay_period_id=period.id,
         user_id=user_id,
-        currency=next(iter(currencies)),
+        currency=payslip_currency,
         shift_hours_decimal=_hours(total_minutes),
         overtime_hours_decimal=_hours(overtime_minutes),
         gross_cents=gross_cents,
         deductions_cents=deductions_cents,
+        expense_reimbursements_cents=expense_reimbursements_cents,
         net_cents=net_cents,
         components_json=_build_components_json(
-            currency=next(iter(currencies)),
+            currency=payslip_currency,
             gross_breakdown=gross_breakdown,
             deductions_cents=deductions_cents,
+            reimbursements=folded,
+            reimbursements_skipped=skipped,
             sources=sources,
             total_minutes=total_minutes,
             regular_minutes=regular_minutes,
@@ -576,6 +626,7 @@ def payslip_recompute(
             overtime_hours_decimal=computed.overtime_hours_decimal,
             gross_cents=computed.gross_cents,
             deductions_cents=computed.deductions_cents,
+            expense_reimbursements_cents=computed.expense_reimbursements_cents,
             net_cents=computed.net_cents,
             components_json=computed.components_json,
             now=now,

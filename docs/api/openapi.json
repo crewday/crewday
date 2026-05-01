@@ -15155,6 +15155,52 @@
         "title": "PayslipPdfRenderResponse",
         "type": "object"
       },
+      "PayslipReimbursementResponse": {
+        "description": "One approved expense claim folded into a payslip.",
+        "properties": {
+          "amount": {
+            "$ref": "#/components/schemas/MoneyResponse"
+          },
+          "claim_id": {
+            "title": "Claim Id",
+            "type": "string"
+          },
+          "decided_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decided At"
+          },
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "purchased_at": {
+            "format": "date-time",
+            "title": "Purchased At",
+            "type": "string"
+          },
+          "work_engagement_id": {
+            "title": "Work Engagement Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "amount",
+          "claim_id",
+          "description",
+          "purchased_at",
+          "work_engagement_id"
+        ],
+        "title": "PayslipReimbursementResponse",
+        "type": "object"
+      },
       "PayslipResponse": {
         "description": "Response shape for payslip read/list operations.",
         "properties": {
@@ -15178,6 +15224,9 @@
             },
             "title": "Deductions",
             "type": "array"
+          },
+          "expense_reimbursements": {
+            "$ref": "#/components/schemas/MoneyResponse"
           },
           "gross": {
             "$ref": "#/components/schemas/MoneyResponse"
@@ -15222,6 +15271,13 @@
             "title": "Pay Period Id",
             "type": "string"
           },
+          "reimbursements": {
+            "items": {
+              "$ref": "#/components/schemas/PayslipReimbursementResponse"
+            },
+            "title": "Reimbursements",
+            "type": "array"
+          },
           "shift_hours_decimal": {
             "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
             "title": "Shift Hours Decimal",
@@ -15245,6 +15301,7 @@
           "created_at",
           "currency",
           "deductions",
+          "expense_reimbursements",
           "gross",
           "id",
           "issued_at",
@@ -15252,6 +15309,7 @@
           "overtime_hours_decimal",
           "paid_at",
           "pay_period_id",
+          "reimbursements",
           "shift_hours_decimal",
           "status",
           "user_id",

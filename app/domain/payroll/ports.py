@@ -58,6 +58,7 @@ __all__ = [
     "PayslipPdfRow",
     "PayslipReadRepository",
     "PayslipReadRow",
+    "PayslipReimbursableClaimRow",
     "PayslipRow",
     "TimesheetExportRow",
 ]
@@ -164,6 +165,7 @@ class PayslipRow:
     overtime_hours_decimal: Decimal
     gross_cents: int
     deductions_cents: dict[str, int]
+    expense_reimbursements_cents: int
     net_cents: int
     components_json: dict[str, object]
     status: str
@@ -183,12 +185,35 @@ class PayslipReadRow:
     overtime_hours_decimal: Decimal
     gross_cents: int
     deductions_cents: dict[str, int]
+    expense_reimbursements_cents: int
     net_cents: int
     components_json: dict[str, object]
     status: str
     issued_at: datetime | None
     paid_at: datetime | None
     created_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class PayslipReimbursableClaimRow:
+    """Approved-but-not-reimbursed claim slice the compute consumes.
+
+    The compute needs only a tiny subset of the expense-claim shape —
+    enough to fold the cents into ``net_cents`` and render a per-claim
+    breakdown in ``components_json["reimbursements"]``. Carrying the
+    full :class:`~app.domain.expenses.ports.ExpenseClaimRow` would force
+    the payroll port to pull the expenses-context value object, so
+    payroll declares its own narrow read shape and the SA adapter
+    projects the underlying ``expense_claim`` row into it.
+    """
+
+    claim_id: str
+    work_engagement_id: str
+    purchased_at: datetime
+    decided_at: datetime | None
+    description: str
+    currency: str
+    amount_cents: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -362,6 +387,45 @@ class PayslipReadRepository(Protocol):
         """Persist a payslip state transition and return the refreshed row."""
         ...
 
+    def settle_payslip_reimbursements(
+        self,
+        *,
+        workspace_id: str,
+        user_id: str,
+        starts_at: datetime,
+        ends_at: datetime,
+        currency: str,
+        reimbursed_at: datetime,
+        reimbursed_by: str,
+        reimbursed_via: Literal["bank"],
+    ) -> Sequence[PayslipReimbursableClaimRow]:
+        """Flip approved claims attached to a paid payslip to ``reimbursed``.
+
+        Per spec §09 §"Reimbursement", a claim becomes ``reimbursed``
+        when the containing payslip moves to ``paid``. Called from
+        :meth:`set_payslip_state(status='paid')` so the transition
+        happens inside the same UoW as the payslip flip; if either
+        write fails the whole turn rolls back atomically.
+
+        Selection criteria match
+        :meth:`PayslipComputeRepository.list_reimbursable_claims_for_payslip`
+        — every approved-not-yet-reimbursed claim for ``user_id`` whose
+        ``purchased_at`` falls inside ``[starts_at, ends_at)`` **and**
+        whose ``currency`` matches the payslip's currency. Cross-
+        currency claims are left for the manual
+        :meth:`ExpensesRepository.mark_claim_reimbursed` route — they
+        were never folded into the payslip's ``net_cents`` and must
+        not be auto-flipped here. The ``reimbursed_via`` is fixed to
+        ``"bank"`` because v1 payslip rollups settle through the
+        worker's payout destination.
+
+        Returns the projection of every transitioned claim (snapshot
+        taken pre-update so the caller has ``work_engagement_id`` and
+        the originating amount on hand for audit rows / events without
+        a second read).
+        """
+        ...
+
 
 class PayslipPdfRepository(Protocol):
     """Read + write seam for payslip PDF rendering."""
@@ -469,11 +533,38 @@ class PayslipComputeRepository(Protocol):
         overtime_hours_decimal: Decimal,
         gross_cents: int,
         deductions_cents: dict[str, int],
+        expense_reimbursements_cents: int,
         net_cents: int,
         components_json: dict[str, object],
         now: datetime,
     ) -> PayslipRow:
         """Insert or update the draft payslip for ``(period, user)``."""
+        ...
+
+    def list_reimbursable_claims_for_payslip(
+        self,
+        *,
+        workspace_id: str,
+        user_id: str,
+        starts_at: datetime,
+        ends_at: datetime,
+    ) -> Sequence[PayslipReimbursableClaimRow]:
+        """Return approved-not-yet-reimbursed claims attached to the period.
+
+        The set is "every approved claim for ``user_id`` whose
+        ``purchased_at`` falls inside ``[starts_at, ends_at)`` and whose
+        ``state == 'approved'``" — those are the rows the compute folds
+        into ``net_cents`` and renders in
+        ``components_json["reimbursements"]``. Claims that have already
+        flipped to ``reimbursed`` (out-of-band settlement) and
+        soft-deleted rows are excluded by the read.
+
+        Order: ``purchased_at ASC, id ASC`` so the breakdown is
+        deterministic across recomputes. ``starts_at`` is inclusive,
+        ``ends_at`` exclusive — matches the pay-period interval
+        convention used elsewhere on the seam (``period.starts_at <=
+        purchased_at < period.ends_at``).
+        """
         ...
 
 
