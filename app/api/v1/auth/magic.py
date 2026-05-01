@@ -101,9 +101,23 @@ class MagicRequestBody(BaseModel):
 
 
 class MagicConsumeBody(BaseModel):
-    """Request body for ``POST /auth/magic/consume``."""
+    """Request body for ``POST /auth/magic/consume``.
 
-    token: str
+    ``token`` carries an :class:`itsdangerous.URLSafeTimedSerializer`
+    output of the form ``payload.timestamp.signature``. Real tokens
+    minted by :func:`app.auth.magic_link.request_link` round-trip at
+    ~150 chars; ``min_length=1, max_length=4096`` matches the
+    defence-in-depth bounds the other itsdangerous-signed token
+    bodies in this app already advertise (see
+    :class:`app.api.v1.auth.email_change.EmailVerifyBody`,
+    :class:`app.api.v1.messaging.RegisterMobilePushBody`). itsdangerous
+    fails fast on garbage (~1 ms for 1 MB), so this is belt-and-braces,
+    not a security fix — pinning a tight ceiling shifts the rejection
+    of multi-MB nuisance bodies and empty strings from the domain
+    layer into Pydantic where it costs nothing (cd-jt0v).
+    """
+
+    token: Annotated[str, Field(min_length=1, max_length=4096)]
     purpose: MagicLinkPurpose
 
 

@@ -12978,7 +12978,7 @@
         "type": "object"
       },
       "MagicConsumeBody": {
-        "description": "Request body for ``POST /auth/magic/consume``.",
+        "description": "Request body for ``POST /auth/magic/consume``.\n\n``token`` carries an :class:`itsdangerous.URLSafeTimedSerializer`\noutput of the form ``payload.timestamp.signature``. Real tokens\nminted by :func:`app.auth.magic_link.request_link` round-trip at\n~150 chars; ``min_length=1, max_length=4096`` matches the\ndefence-in-depth bounds the other itsdangerous-signed token\nbodies in this app already advertise (see\n:class:`app.api.v1.auth.email_change.EmailVerifyBody`,\n:class:`app.api.v1.messaging.RegisterMobilePushBody`). itsdangerous\nfails fast on garbage (~1 ms for 1 MB), so this is belt-and-braces,\nnot a security fix \u2014 pinning a tight ceiling shifts the rejection\nof multi-MB nuisance bodies and empty strings from the domain\nlayer into Pydantic where it costs nothing (cd-jt0v).",
         "properties": {
           "purpose": {
             "enum": [
@@ -12993,6 +12993,8 @@
             "type": "string"
           },
           "token": {
+            "maxLength": 4096,
+            "minLength": 1,
             "title": "Token",
             "type": "string"
           }
