@@ -42,10 +42,13 @@ from typing import Protocol
 from sqlalchemy.orm import Session
 
 __all__ = [
+    "ChatChannelBindingRepository",
+    "ChatChannelBindingRow",
     "ChatChannelRepository",
     "ChatChannelRow",
     "ChatGatewayBindingRow",
     "ChatGatewayRepository",
+    "ChatLinkChallengeRow",
     "ChatMessageRepository",
     "ChatMessageRow",
     "PushDeliveryRepository",
@@ -87,6 +90,39 @@ class ChatMessageRow:
     attachments_json: list[dict[str, str]]
     dispatched_to_agent_at: datetime | None
     created_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class ChatChannelBindingRow:
+    """Immutable projection of a ``chat_channel_binding`` row."""
+
+    id: str
+    workspace_id: str
+    user_id: str
+    user_display_name: str
+    channel_kind: str
+    address: str
+    address_hash: str
+    display_label: str
+    state: str
+    created_at: datetime
+    verified_at: datetime | None
+    revoked_at: datetime | None
+    revoke_reason: str | None
+    last_message_at: datetime | None
+
+
+@dataclass(frozen=True, slots=True)
+class ChatLinkChallengeRow:
+    """Immutable projection of a ``chat_link_challenge`` row."""
+
+    id: str
+    binding_id: str
+    code_hash: str
+    code_hash_params: str
+    attempts: int
+    expires_at: datetime
+    consumed_at: datetime | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -426,6 +462,103 @@ class ChatMessageRepository(Protocol):
         limit: int,
     ) -> Sequence[ChatMessageRow]:
         """Return messages newest-first, keyset-paged by ``created_at`` + ``id``."""
+        ...
+
+
+class ChatChannelBindingRepository(Protocol):
+    """Read/write seam for §23 chat-channel bindings."""
+
+    @property
+    def session(self) -> Session:
+        """Return the underlying SQLAlchemy session for audit/authz seams."""
+        ...
+
+    def list_bindings(
+        self,
+        *,
+        workspace_id: str,
+        user_id: str | None,
+        include_revoked: bool,
+    ) -> Sequence[ChatChannelBindingRow]:
+        """List workspace bindings, optionally narrowed to one user."""
+        ...
+
+    def get_binding(
+        self,
+        *,
+        workspace_id: str,
+        binding_id: str,
+    ) -> ChatChannelBindingRow | None:
+        """Return one binding in ``workspace_id`` or ``None``."""
+        ...
+
+    def user_exists(self, *, workspace_id: str, user_id: str) -> bool:
+        """Return true iff the user belongs to the workspace."""
+        ...
+
+    def insert_pending_binding(
+        self,
+        *,
+        binding_id: str,
+        workspace_id: str,
+        user_id: str,
+        channel_kind: str,
+        address: str,
+        address_hash: str,
+        display_label: str,
+        created_at: datetime,
+    ) -> ChatChannelBindingRow:
+        """Insert a pending binding and return it."""
+        ...
+
+    def insert_challenge(
+        self,
+        *,
+        challenge_id: str,
+        binding_id: str,
+        code_hash: str,
+        code_hash_params: str,
+        sent_via: str,
+        expires_at: datetime,
+        created_at: datetime,
+    ) -> None:
+        """Insert a fresh verification challenge."""
+        ...
+
+    def latest_open_challenge(
+        self,
+        *,
+        binding_id: str,
+    ) -> ChatLinkChallengeRow | None:
+        """Return the newest unconsumed challenge for the binding."""
+        ...
+
+    def increment_challenge_attempts(
+        self,
+        *,
+        challenge_id: str,
+    ) -> None:
+        """Increment failed attempts on the challenge."""
+        ...
+
+    def verify_binding(
+        self,
+        *,
+        binding_id: str,
+        challenge_id: str,
+        verified_at: datetime,
+    ) -> ChatChannelBindingRow:
+        """Mark binding active and consume the challenge."""
+        ...
+
+    def revoke_binding(
+        self,
+        *,
+        binding_id: str,
+        revoked_at: datetime,
+        reason: str,
+    ) -> ChatChannelBindingRow:
+        """Mark a binding revoked and return it."""
         ...
 
 

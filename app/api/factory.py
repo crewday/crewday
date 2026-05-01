@@ -91,7 +91,10 @@ from app.adapters.storage.localfs import LocalFsStorage
 from app.adapters.storage.mime import FiletypeMimeSniffer
 from app.adapters.storage.ports import MimeSniffer, Storage
 from app.api.admin import admin_router
-from app.api.chat_gateway import build_chat_gateway_router
+from app.api.chat_gateway import (
+    build_chat_channel_bindings_router,
+    build_chat_gateway_router,
+)
 from app.api.client import build_client_portal_router
 from app.api.errors import add_exception_handlers
 from app.api.health import router as health_router
@@ -418,7 +421,7 @@ def _stamp_inline_csp_nonces(html: str, nonce: str) -> str:
                 attrs,
                 count=1,
             )
-            return f'<{match.group("tag")}{attrs}>'
+            return f"<{match.group('tag')}{attrs}>"
         return f'<{match.group("tag")}{attrs} nonce="{nonce}">'
 
     return _INLINE_CSP_TAG_RE.sub(replace, html)
@@ -924,6 +927,7 @@ def _mount_context_routers(app: FastAPI, *, settings: Settings) -> None:
     # ``/api/v1/agent/{scope}/...`` surface consumed by the shared web
     # AgentSidebar, not ``/api/v1/llm/agent``.
     app.include_router(build_agent_router(), prefix=scoped_prefix)
+    app.include_router(build_chat_channel_bindings_router(), prefix=scoped_prefix)
 
     # Workspace-scoped SSE transport (``/w/<slug>/events``, cd-clz9).
     # Mounted outside the ``/api/v1`` tree because the SPA talks to

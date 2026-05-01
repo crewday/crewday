@@ -31,18 +31,23 @@ from sqlalchemy.orm import Session
 from app.adapters.db.identity.models import User
 from app.adapters.db.messaging.models import (
     ChatChannel,
+    ChatChannelBinding,
     ChatChannelMember,
     ChatGatewayBinding,
+    ChatLinkChallenge,
     ChatMessage,
     NotificationPushQueue,
     PushToken,
 )
 from app.adapters.db.workspace.models import UserWorkspace, Workspace
 from app.domain.messaging.ports import (
+    ChatChannelBindingRepository,
+    ChatChannelBindingRow,
     ChatChannelRepository,
     ChatChannelRow,
     ChatGatewayBindingRow,
     ChatGatewayRepository,
+    ChatLinkChallengeRow,
     ChatMessageRepository,
     ChatMessageRow,
     PushDeliveryRepository,
@@ -53,6 +58,7 @@ from app.domain.messaging.ports import (
 from app.tenancy import tenant_agnostic
 
 __all__ = [
+    "SqlAlchemyChatChannelBindingRepository",
     "SqlAlchemyChatChannelRepository",
     "SqlAlchemyChatGatewayRepository",
     "SqlAlchemyChatMessageRepository",
@@ -119,6 +125,45 @@ def _to_message_row(row: ChatMessage) -> ChatMessageRow:
             else None
         ),
         created_at=_as_utc(row.created_at),
+    )
+
+
+def _display_name_for_user(row: User) -> str:
+    return row.display_name or row.email
+
+
+def _to_channel_binding_row(
+    row: ChatChannelBinding, user: User
+) -> ChatChannelBindingRow:
+    return ChatChannelBindingRow(
+        id=row.id,
+        workspace_id=row.workspace_id,
+        user_id=row.user_id,
+        user_display_name=_display_name_for_user(user),
+        channel_kind=row.channel_kind,
+        address=row.address,
+        address_hash=row.address_hash,
+        display_label=row.display_label,
+        state=row.state,
+        created_at=_as_utc(row.created_at),
+        verified_at=_as_utc(row.verified_at) if row.verified_at is not None else None,
+        revoked_at=_as_utc(row.revoked_at) if row.revoked_at is not None else None,
+        revoke_reason=row.revoke_reason,
+        last_message_at=(
+            _as_utc(row.last_message_at) if row.last_message_at is not None else None
+        ),
+    )
+
+
+def _to_link_challenge_row(row: ChatLinkChallenge) -> ChatLinkChallengeRow:
+    return ChatLinkChallengeRow(
+        id=row.id,
+        binding_id=row.binding_id,
+        code_hash=row.code_hash,
+        code_hash_params=row.code_hash_params,
+        attempts=row.attempts,
+        expires_at=_as_utc(row.expires_at),
+        consumed_at=_as_utc(row.consumed_at) if row.consumed_at is not None else None,
     )
 
 
@@ -371,6 +416,200 @@ class SqlAlchemyChatMessageRepository(ChatMessageRepository):
             )
         rows = self._session.scalars(stmt).all()
         return [_to_message_row(row) for row in rows]
+
+
+class SqlAlchemyChatChannelBindingRepository(ChatChannelBindingRepository):
+    """SA-backed concretion for §23 user channel bindings."""
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    @property
+    def session(self) -> Session:
+        return self._session
+
+    def list_bindings(
+        self,
+        *,
+        workspace_id: str,
+        user_id: str | None,
+        include_revoked: bool,
+    ) -> Sequence[ChatChannelBindingRow]:
+        stmt = (
+            select(ChatChannelBinding, User)
+            .join(User, User.id == ChatChannelBinding.user_id)
+            .where(ChatChannelBinding.workspace_id == workspace_id)
+            .order_by(
+                ChatChannelBinding.created_at.desc(), ChatChannelBinding.id.desc()
+            )
+        )
+        if user_id is not None:
+            stmt = stmt.where(ChatChannelBinding.user_id == user_id)
+        if not include_revoked:
+            stmt = stmt.where(ChatChannelBinding.state != "revoked")
+        rows = self._session.execute(stmt).all()
+        return [_to_channel_binding_row(binding, user) for binding, user in rows]
+
+    def get_binding(
+        self,
+        *,
+        workspace_id: str,
+        binding_id: str,
+    ) -> ChatChannelBindingRow | None:
+        row = self._session.execute(
+            select(ChatChannelBinding, User)
+            .join(User, User.id == ChatChannelBinding.user_id)
+            .where(
+                ChatChannelBinding.workspace_id == workspace_id,
+                ChatChannelBinding.id == binding_id,
+            )
+        ).one_or_none()
+        if row is None:
+            return None
+        binding, user = row
+        return _to_channel_binding_row(binding, user)
+
+    def user_exists(self, *, workspace_id: str, user_id: str) -> bool:
+        return (
+            self._session.scalars(
+                select(UserWorkspace.user_id)
+                .where(
+                    UserWorkspace.workspace_id == workspace_id,
+                    UserWorkspace.user_id == user_id,
+                )
+                .limit(1)
+            ).first()
+            is not None
+        )
+
+    def insert_pending_binding(
+        self,
+        *,
+        binding_id: str,
+        workspace_id: str,
+        user_id: str,
+        channel_kind: str,
+        address: str,
+        address_hash: str,
+        display_label: str,
+        created_at: datetime,
+    ) -> ChatChannelBindingRow:
+        row = ChatChannelBinding(
+            id=binding_id,
+            workspace_id=workspace_id,
+            user_id=user_id,
+            channel_kind=channel_kind,
+            address=address,
+            address_hash=address_hash,
+            display_label=display_label,
+            state="pending",
+            created_at=created_at,
+            verified_at=None,
+            revoked_at=None,
+            revoke_reason=None,
+            last_message_at=None,
+            provider_metadata_json={},
+        )
+        self._session.add(row)
+        self._session.flush()
+        user = self._session.get(User, user_id)
+        if user is None:
+            raise LookupError(f"user {user_id!r} not found")
+        return _to_channel_binding_row(row, user)
+
+    def insert_challenge(
+        self,
+        *,
+        challenge_id: str,
+        binding_id: str,
+        code_hash: str,
+        code_hash_params: str,
+        sent_via: str,
+        expires_at: datetime,
+        created_at: datetime,
+    ) -> None:
+        self._session.add(
+            ChatLinkChallenge(
+                id=challenge_id,
+                binding_id=binding_id,
+                code_hash=code_hash,
+                code_hash_params=code_hash_params,
+                sent_via=sent_via,
+                attempts=0,
+                expires_at=expires_at,
+                consumed_at=None,
+                created_at=created_at,
+            )
+        )
+        self._session.flush()
+
+    def latest_open_challenge(
+        self,
+        *,
+        binding_id: str,
+    ) -> ChatLinkChallengeRow | None:
+        row = self._session.scalars(
+            select(ChatLinkChallenge)
+            .where(
+                ChatLinkChallenge.binding_id == binding_id,
+                ChatLinkChallenge.consumed_at.is_(None),
+            )
+            .order_by(ChatLinkChallenge.created_at.desc(), ChatLinkChallenge.id.desc())
+            .limit(1)
+        ).one_or_none()
+        return _to_link_challenge_row(row) if row is not None else None
+
+    def increment_challenge_attempts(self, *, challenge_id: str) -> None:
+        row = self._session.get(ChatLinkChallenge, challenge_id)
+        if row is None:
+            raise LookupError(f"chat_link_challenge {challenge_id!r} not found")
+        row.attempts += 1
+        self._session.flush()
+
+    def verify_binding(
+        self,
+        *,
+        binding_id: str,
+        challenge_id: str,
+        verified_at: datetime,
+    ) -> ChatChannelBindingRow:
+        binding = self._load_binding(binding_id)
+        challenge = self._session.get(ChatLinkChallenge, challenge_id)
+        if challenge is None:
+            raise LookupError(f"chat_link_challenge {challenge_id!r} not found")
+        binding.state = "active"
+        binding.verified_at = verified_at
+        binding.revoked_at = None
+        binding.revoke_reason = None
+        challenge.consumed_at = verified_at
+        self._session.flush()
+        user = self._session.get(User, binding.user_id)
+        if user is None:
+            raise LookupError(f"user {binding.user_id!r} not found")
+        return _to_channel_binding_row(binding, user)
+
+    def revoke_binding(
+        self,
+        *,
+        binding_id: str,
+        revoked_at: datetime,
+        reason: str,
+    ) -> ChatChannelBindingRow:
+        binding = self._load_binding(binding_id)
+        binding.state = "revoked"
+        binding.revoked_at = revoked_at
+        binding.revoke_reason = reason
+        self._session.flush()
+        user = self._session.get(User, binding.user_id)
+        if user is None:
+            raise LookupError(f"user {binding.user_id!r} not found")
+        return _to_channel_binding_row(binding, user)
+
+    def _load_binding(self, binding_id: str) -> ChatChannelBinding:
+        row = self._session.get(ChatChannelBinding, binding_id)
+        if row is None:
+            raise LookupError(f"chat_channel_binding {binding_id!r} not found")
+        return row
 
 
 class SqlAlchemyChatGatewayRepository(ChatGatewayRepository):

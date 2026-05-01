@@ -51,6 +51,9 @@ __all__ = [
     "ApprovalDecision",
     "AssetActionPerformed",
     "AssetChanged",
+    "ChatChannelBindingCreated",
+    "ChatChannelBindingRevoked",
+    "ChatChannelBindingVerified",
     "ChatMessageReceived",
     "ChatMessageSent",
     "ExpenseApproved",
@@ -738,6 +741,34 @@ class ChatMessageReceived(Event):
     channel_kind: Literal["staff", "manager", "chat_gateway"]
     binding_id: str
     source: str
+
+
+class _ChatChannelBindingEvent(Event):
+    """A §23 off-app chat-channel binding changed state."""
+
+    allowed_roles: ClassVar[tuple[EventRole, ...]] = ("manager",)
+
+    binding_id: str
+    user_id: str
+    channel_kind: Literal["offapp_whatsapp", "offapp_telegram"]
+    display_label: str
+
+
+@register
+class ChatChannelBindingCreated(_ChatChannelBindingEvent):
+    name: ClassVar[str] = "chat_channel_binding.created"
+
+
+@register
+class ChatChannelBindingVerified(_ChatChannelBindingEvent):
+    name: ClassVar[str] = "chat_channel_binding.verified"
+
+
+@register
+class ChatChannelBindingRevoked(_ChatChannelBindingEvent):
+    name: ClassVar[str] = "chat_channel_binding.revoked"
+
+    reason: Literal["user", "stop_keyword", "user_archived", "admin", "provider_error"]
 
 
 @register

@@ -705,6 +705,9 @@ _INVALIDATIONS: Final[dict[str, tuple[tuple[str, ...], ...]]] = {
     "asset_action.performed": (("assets",),),
     "chat.message.sent": (("chat", "channels"),),
     "chat.message.received": (("chat", "channels"),),
+    "chat_channel_binding.created": (("chat", "channels"),),
+    "chat_channel_binding.verified": (("chat", "channels"),),
+    "chat_channel_binding.revoked": (("chat", "channels"),),
     # Bell-menu unread count + the notification list. Both query keys
     # are per-recipient; the event is user-scoped so only the
     # addressee's tabs receive it — the invalidation fires against

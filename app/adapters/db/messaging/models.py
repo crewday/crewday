@@ -58,8 +58,10 @@ from app.adapters.db.workspace import models as _workspace_models  # noqa: F401
 
 __all__ = [
     "ChatChannel",
+    "ChatChannelBinding",
     "ChatChannelMember",
     "ChatGatewayBinding",
+    "ChatLinkChallenge",
     "ChatMessage",
     "DigestRecord",
     "EmailDelivery",
@@ -124,6 +126,25 @@ _CHAT_CHANNEL_SOURCE_VALUES: tuple[str, ...] = (
     "whatsapp",
     "sms",
     "email",
+)
+
+_CHAT_CHANNEL_BINDING_KIND_VALUES: tuple[str, ...] = (
+    "offapp_whatsapp",
+    "offapp_telegram",
+)
+
+_CHAT_CHANNEL_BINDING_STATE_VALUES: tuple[str, ...] = (
+    "pending",
+    "active",
+    "revoked",
+)
+
+_CHAT_CHANNEL_BINDING_REVOKE_REASON_VALUES: tuple[str, ...] = (
+    "user",
+    "stop_keyword",
+    "user_archived",
+    "admin",
+    "provider_error",
 )
 
 # Allowed ``email_opt_out.source`` values per §10. ``unsubscribe_link``
@@ -584,6 +605,116 @@ class ChatGatewayBinding(Base):
             unique=True,
         ),
         Index("ix_chat_gateway_binding_workspace", "workspace_id"),
+    )
+
+
+class ChatChannelBinding(Base):
+    """User-owned off-app channel binding from §23."""
+
+    __tablename__ = "chat_channel_binding"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    workspace_id: Mapped[str] = mapped_column(
+        String,
+        ForeignKey("workspace.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    user_id: Mapped[str] = mapped_column(
+        String,
+        ForeignKey("user.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    channel_kind: Mapped[str] = mapped_column(String, nullable=False)
+    address: Mapped[str] = mapped_column(String, nullable=False)
+    address_hash: Mapped[str] = mapped_column(String, nullable=False)
+    display_label: Mapped[str] = mapped_column(String, nullable=False)
+    state: Mapped[str] = mapped_column(String, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    verified_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    revoked_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    revoke_reason: Mapped[str | None] = mapped_column(String, nullable=True)
+    last_message_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    provider_metadata_json: Mapped[dict[str, Any]] = mapped_column(
+        JSON, nullable=False, default=dict
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            f"channel_kind IN ({_in_clause(_CHAT_CHANNEL_BINDING_KIND_VALUES)})",
+            name="chat_channel_binding_channel_kind",
+        ),
+        CheckConstraint(
+            f"state IN ({_in_clause(_CHAT_CHANNEL_BINDING_STATE_VALUES)})",
+            name="chat_channel_binding_state",
+        ),
+        CheckConstraint(
+            "revoke_reason IS NULL OR revoke_reason IN "
+            f"({_in_clause(_CHAT_CHANNEL_BINDING_REVOKE_REASON_VALUES)})",
+            name="chat_channel_binding_revoke_reason",
+        ),
+        CheckConstraint(
+            "(state = 'active' AND verified_at IS NOT NULL) OR state != 'active'",
+            name="chat_channel_binding_active_verified",
+        ),
+        Index(
+            "uq_chat_channel_binding_workspace_kind_address_active",
+            "workspace_id",
+            "channel_kind",
+            "address_hash",
+            unique=True,
+            sqlite_where=text("state != 'revoked'"),
+            postgresql_where=text("state != 'revoked'"),
+        ),
+        Index(
+            "uq_chat_channel_binding_workspace_user_kind_active",
+            "workspace_id",
+            "user_id",
+            "channel_kind",
+            unique=True,
+            sqlite_where=text("state != 'revoked'"),
+            postgresql_where=text("state != 'revoked'"),
+        ),
+        Index("ix_chat_channel_binding_workspace_user", "workspace_id", "user_id"),
+    )
+
+
+class ChatLinkChallenge(Base):
+    """Verification challenge for a pending chat-channel binding."""
+
+    __tablename__ = "chat_link_challenge"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    binding_id: Mapped[str] = mapped_column(
+        String,
+        ForeignKey("chat_channel_binding.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    code_hash: Mapped[str] = mapped_column(String, nullable=False)
+    code_hash_params: Mapped[str] = mapped_column(String, nullable=False)
+    sent_via: Mapped[str] = mapped_column(String, nullable=False)
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    consumed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+
+    __table_args__ = (
+        CheckConstraint("sent_via IN ('channel', 'email')", name="sent_via"),
+        CheckConstraint("attempts >= 0", name="attempts_non_negative"),
+        Index("ix_chat_link_challenge_binding", "binding_id"),
     )
 
 
