@@ -94,6 +94,7 @@ export default function AdminLayout() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [navOpen]);
+  const toggleNav = useCallback(() => setNavOpen((v) => !v), []);
 
   const denied = adminMeQ.isError || meQ.data?.is_deployment_admin === false;
   const hasAccess = adminMeQ.isSuccess && meQ.data?.is_deployment_admin === true;
@@ -135,8 +136,6 @@ export default function AdminLayout() {
       </div>
     );
   }
-
-  const toggleNav = useCallback(() => setNavOpen((v) => !v), []);
 
   return (
     <ShellNavProvider hasDrawer={true} isOpen={navOpen} toggle={toggleNav}>
