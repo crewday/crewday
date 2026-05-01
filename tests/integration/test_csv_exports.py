@@ -10,7 +10,7 @@ from decimal import Decimal
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from sqlalchemy import Engine, select
+from sqlalchemy import Engine, select, text
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.adapters.db.audit.models import AuditLog
@@ -236,6 +236,63 @@ def seeded(session_factory: sessionmaker[Session]) -> Iterator[SeededCsvExport]:
                 select(AuditLog).where(AuditLog.workspace_id == workspace_id)
             ):
                 s.delete(row)
+            s.flush()
+            # Drop cross-table state in dependency order so SQLite's
+            # eager FK checks don't trip on a delete chain that needs
+            # several cascades to complete in lockstep (workspace →
+            # engagement → org/payout RESTRICT). DELETE statements via
+            # ``s.execute`` issue raw DML so the unit-of-work isn't
+            # involved in ordering.
+            #
+            # TODO(test-cleanup): hand-maintained list. Any future
+            # workspace-child table that lands without ON DELETE CASCADE
+            # to ``workspace`` must be appended here, or the final
+            # ``s.delete(workspace)`` below will trip a RESTRICT FK on
+            # PG. Replace with a topological sweep driven by FK
+            # introspection (``inspect(engine).get_foreign_keys`` over
+            # every table referencing ``workspace.id``) once a shared
+            # ``cascade_workspace_rows`` test helper exists.
+            s.execute(
+                text("DELETE FROM expense_claim WHERE workspace_id = :w").bindparams(
+                    w=workspace_id
+                )
+            )
+            s.execute(
+                text("DELETE FROM payslip WHERE workspace_id = :w").bindparams(
+                    w=workspace_id
+                )
+            )
+            s.execute(
+                text("DELETE FROM pay_rule WHERE workspace_id = :w").bindparams(
+                    w=workspace_id
+                )
+            )
+            s.execute(
+                text("DELETE FROM pay_period WHERE workspace_id = :w").bindparams(
+                    w=workspace_id
+                )
+            )
+            s.execute(
+                text("DELETE FROM shift WHERE workspace_id = :w").bindparams(
+                    w=workspace_id
+                )
+            )
+            s.execute(
+                text("DELETE FROM work_engagement WHERE workspace_id = :w").bindparams(
+                    w=workspace_id
+                )
+            )
+            s.execute(
+                text(
+                    "DELETE FROM property_workspace WHERE workspace_id = :w"
+                ).bindparams(w=workspace_id)
+            )
+            s.execute(
+                text("DELETE FROM role_grant WHERE workspace_id = :w").bindparams(
+                    w=workspace_id
+                )
+            )
+            s.flush()
             workspace = s.get(type(ws), workspace_id)
             if workspace is not None:
                 s.delete(workspace)

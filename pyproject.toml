@@ -635,6 +635,20 @@ ignore_imports = [
     "app.domain.time.geofence_settings -> app.adapters.db.time.models",
     "app.domain.time.geofence_settings -> app.authz",
     "app.domain.time.shifts -> app.adapters.db.billing.repositories",
+    # v1 stopgaps surfaced by recent feature drops. Same Protocol-seam
+    # pattern as the older entries above; tracked by cd-duv6 (extended
+    # scope) — drops once the repositories land for these contexts.
+    "app.domain.agent.compaction -> app.adapters.db.llm.models",
+    "app.domain.agent.compaction -> app.adapters.db.messaging.models",
+    "app.domain.agent.compaction -> app.services.llm",
+    "app.services.llm.prompts -> app.adapters.db.llm.models",
+    "app.domain.identity.public_holidays -> app.adapters.db.holidays.models",
+    "app.domain.llm.budget -> app.adapters.db.workspace.models",
+    "app.domain.messaging.channel_bindings -> app.authz",
+    "app.domain.settings.cascade -> app.adapters.db.places.models",
+    "app.domain.settings.cascade -> app.adapters.db.tasks.models",
+    "app.domain.settings.cascade -> app.adapters.db.workspace.models",
+    "app.domain.tasks.completion -> app.adapters.db.assets.models",
 ]
 unmatched_ignore_imports_alerting = "none"
 
@@ -765,6 +779,8 @@ ignore_imports = [
     "crewday._overrides.admin -> app.adapters.db.session",
     "crewday._overrides.admin -> app.admin.backup",
     "crewday._overrides.admin -> app.admin.init",
+    "crewday._overrides.admin -> app.admin.rotate_root_key",
+    "crewday._overrides.admin -> app.admin.rotate_secrets",
     "crewday._overrides.admin -> app.domain.privacy",
 ]
 unmatched_ignore_imports_alerting = "none"

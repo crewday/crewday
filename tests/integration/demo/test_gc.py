@@ -74,6 +74,13 @@ def test_demo_gc_purges_expired_workspace_rows_and_upload_dir(
     upload_dir.mkdir(parents=True)
     (upload_dir / "photo.jpg").write_bytes(b"demo")
 
+    # Baseline orphans from any other tests sharing this DB (xdist
+    # workers don't roll back; see the integration conftest). The purge
+    # must not introduce *new* orphans regardless of whatever residue
+    # earlier tests left behind.
+    with factory() as session:
+        baseline_orphans = demo_jobs.count_workspace_id_orphans(session)
+
     report = demo_jobs.purge_expired_demo_workspaces(
         settings=_settings(tmp_path),
         clock=FrozenClock(now),
@@ -91,7 +98,7 @@ def test_demo_gc_purges_expired_workspace_rows_and_upload_dir(
             )
             is None
         )
-        assert demo_jobs.count_workspace_id_orphans(session) == 0
+        assert demo_jobs.count_workspace_id_orphans(session) == baseline_orphans
 
 
 def _settings(data_dir) -> Settings:

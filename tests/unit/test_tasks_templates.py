@@ -283,6 +283,7 @@ class TestTaskTemplateView:
             photo_evidence="disabled",
             linked_instruction_ids=(),
             priority="normal",
+            auto_shift_from_occurrence=False,
             inventory_consumption_json={},
             llm_hints_md=None,
             created_at=_PINNED,

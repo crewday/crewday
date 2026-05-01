@@ -39,9 +39,7 @@ from app.util.ulid import new_ulid
 __all__ = ["AgentApprovalMiddleware", "InProcessApprovalDispatcher"]
 
 
-_MUTATING_METHODS: Final[frozenset[str]] = frozenset(
-    {"POST", "PUT", "PATCH", "DELETE"}
-)
+_MUTATING_METHODS: Final[frozenset[str]] = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 _APPROVAL_PATH_MARKER: Final[str] = "/api/v1/approvals"
 _REPLAY_HEADER: Final[str] = "X-Crewday-Replay"
 

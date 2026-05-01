@@ -102,7 +102,7 @@ def client(
                 settings=DeploymentSettings(
                     signup_enabled=True,
                     captcha_required=False,
-                )
+                ),
             ),
             base_url="https://crew.day",
             settings=settings,

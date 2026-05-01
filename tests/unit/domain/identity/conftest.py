@@ -16,7 +16,9 @@ from sqlalchemy import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.adapters.db.base import Base
+from app.adapters.db.billing.models import Organization
 from app.adapters.db.identity.models import User, canonicalise_email
+from app.adapters.db.payroll.models import PayoutDestination
 from app.adapters.db.session import make_engine
 from app.adapters.db.workspace.models import (
     UserWorkspace,
@@ -166,6 +168,40 @@ def make_engagement(
         notes_md="",
         created_at=_PINNED,
         updated_at=_PINNED,
+    )
+    session.add(row)
+    session.flush()
+    return row
+
+
+def make_payout_destination(
+    session: Session, *, id: str, workspace_id: str, user_id: str
+) -> PayoutDestination:
+    row = PayoutDestination(
+        id=id,
+        workspace_id=workspace_id,
+        user_id=user_id,
+        kind="bank_account",
+        currency="USD",
+        created_at=_PINNED,
+        updated_at=_PINNED,
+    )
+    session.add(row)
+    session.flush()
+    return row
+
+
+def make_organization(
+    session: Session, *, id: str, workspace_id: str, kind: str = "vendor"
+) -> Organization:
+    row = Organization(
+        id=id,
+        workspace_id=workspace_id,
+        kind=kind,
+        display_name="Acme",
+        billing_address={},
+        default_currency="USD",
+        created_at=_PINNED,
     )
     session.add(row)
     session.flush()

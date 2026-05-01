@@ -1149,9 +1149,12 @@ class LlmPromptTemplateRevision(Base):
     )
 
     __table_args__ = (
+        # Short name avoids the doubled-table prefix overflowing
+        # Postgres' 63-char identifier limit once the
+        # ``ck_<table>_<name>`` convention is applied (cd-4if3).
         CheckConstraint(
             "version >= 1",
-            name="llm_prompt_template_revision_version",
+            name="version_min",
         ),
         UniqueConstraint(
             "template_id",

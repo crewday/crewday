@@ -185,6 +185,8 @@ class TestMigrationShape:
             "property_notes_md",
             "updated_at",
             "deleted_at",
+            # cd-ro6v — per-property settings cascade override.
+            "settings_override_json",
         }
         assert set(cols) == expected
         # Nullable columns per the model / migration.
@@ -220,6 +222,8 @@ class TestMigrationShape:
             "share_guest_identity",
             "status",
             "created_at",
+            # cd-1ak — per-membership auto-shift opt-out.
+            "auto_shift_from_occurrence",
         }
         assert set(cols) == expected
         for name in expected:

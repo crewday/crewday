@@ -191,6 +191,54 @@ def client(
 
     factory = sessionmaker(bind=engine, expire_on_commit=False, class_=Session)
 
+    def _sweep() -> None:
+        # SQLite path uses ``PRAGMA foreign_keys = OFF`` so the broad
+        # cleanup can run even if a sibling test on the same xdist
+        # worker has populated workspace-child tables we don't
+        # enumerate here (payroll, places, tasks, time, llm, ...).
+        #
+        # Postgres has no equivalent per-connection FK toggle. Running
+        # the broad ``DELETE FROM workspace`` on PG would trip a RESTRICT
+        # FK whenever a sibling left workspace-child rows behind, so the
+        # PG branch only sweeps the FK-leaf rows this test asserts on
+        # (AuditLog + MagicLinkNonce); other tests own their own
+        # cleanup on PG.
+        with engine.connect() as conn:
+            if conn.dialect.name == "sqlite":
+                conn.exec_driver_sql("PRAGMA foreign_keys = OFF")
+                try:
+                    for table_model in (
+                        BreakGlassCode,
+                        PasskeyCredential,
+                        AuthSession,
+                        ApiToken,
+                        MagicLinkNonce,
+                        RoleGrant,
+                        UserWorkspace,
+                        Workspace,
+                        User,
+                        AuditLog,
+                    ):
+                        conn.execute(delete(table_model))
+                    conn.commit()
+                finally:
+                    conn.exec_driver_sql("PRAGMA foreign_keys = ON")
+            else:
+                for table_model in (MagicLinkNonce, AuditLog):
+                    conn.execute(delete(table_model))
+                conn.commit()
+
+    # Pre-sweep the row families this test asserts on so a pre-existing
+    # leak from an unrelated test on the same xdist worker doesn't
+    # pollute this test's row counts. Scoped narrowly: AuditLog and
+    # MagicLinkNonce are FK-leaf rows that no other table references, so
+    # clearing them does not trip the FK constraints sibling tests'
+    # rows can carry (workspace children in payroll/places, etc.).
+    with factory() as s:
+        s.execute(delete(MagicLinkNonce))
+        s.execute(delete(AuditLog))
+        s.commit()
+
     def _session() -> Iterator[Session]:
         s = factory()
         try:
@@ -223,27 +271,7 @@ def client(
         _session_mod._default_sessionmaker_ = original_factory
 
     # Sweep committed rows so sibling tests see a clean table.
-    with factory() as s:
-        # ``RoleGrant`` sweeps before ``Workspace`` because the FK
-        # cascade would otherwise hard-delete grants under the
-        # workspace-delete, and SQLAlchemy's per-row ``delete()`` in
-        # the loop below would fail to find them the second pass.
-        # Ordering deletes FK-children first also mirrors how a real
-        # tenant hard-delete would run.
-        for table_model in (
-            BreakGlassCode,
-            PasskeyCredential,
-            AuthSession,
-            ApiToken,
-            MagicLinkNonce,
-            RoleGrant,
-            UserWorkspace,
-            Workspace,
-            User,
-            AuditLog,
-        ):
-            s.execute(delete(table_model))
-        s.commit()
+    _sweep()
 
 
 def _seed_user_with_state(

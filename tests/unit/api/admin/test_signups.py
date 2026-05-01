@@ -238,9 +238,7 @@ class TestAdminSignups:
     ) -> None:
         install_admin_cookie(client, session_factory, settings)
 
-        resp = client.get(
-            "/admin/api/v1/signups?kind=burst_rate&cursor=abc&limit=25"
-        )
+        resp = client.get("/admin/api/v1/signups?kind=burst_rate&cursor=abc&limit=25")
 
         assert resp.status_code == 200, resp.text
 

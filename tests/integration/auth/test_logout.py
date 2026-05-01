@@ -127,11 +127,14 @@ def client(
     ) as c:
         yield c
 
-    # Sweep committed rows so sibling integration tests see a clean
-    # slate. Scoped to the families this test touches.
+    # Sweep committed AuditLog rows so sibling integration tests see a
+    # clean audit table. SessionRow / ApiToken / User are owned by the
+    # ``seed_user`` fixture which scopes its cleanup to the user_id it
+    # created — broad deletes here would trip FK constraints from
+    # unrelated tables (passkey_credential, role_grant, break_glass_code,
+    # ...) that other tests on the same xdist worker may have populated.
     with session_factory() as s:
-        for table_model in (SessionRow, ApiToken, AuditLog, User):
-            s.execute(delete(table_model))
+        s.execute(delete(AuditLog))
         s.commit()
 
 

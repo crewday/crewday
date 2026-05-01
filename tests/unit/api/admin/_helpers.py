@@ -23,7 +23,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from pydantic import SecretStr
-from sqlalchemy import Engine
+from sqlalchemy import Engine, select
 from sqlalchemy.orm import Session, sessionmaker
 
 # Eagerly load the ORM packages the production factory pulls so
@@ -34,6 +34,7 @@ import app.adapters.db.places.models
 import app.adapters.db.secrets.models  # noqa: F401
 from app.adapters.db.authz.models import DeploymentOwner, RoleGrant
 from app.adapters.db.base import Base
+from app.adapters.db.identity.models import User, canonicalise_email
 from app.adapters.db.session import make_engine
 from app.adapters.db.workspace.models import Workspace
 from app.api.admin import admin_router
@@ -250,11 +251,31 @@ def seed_admin(
     Bundles the recurring "make me an admin and a session" pair
     every cd-jlms test repeats. Keeps each test's setup narrow
     enough to fit in 88 columns even after the cookie install.
+
+    Idempotent on ``email``: when the integration suite shares a DB
+    across tests in the same xdist worker, re-seeding the same admin
+    must not trip the ``user.email_lower`` UNIQUE constraint.
     """
-    with session_factory() as s:
-        user_id = seed_user(s, email=email, display_name=display_name)
-        grant_deployment_admin(s, user_id=user_id)
-        if owner:
+    with session_factory() as s, tenant_agnostic():
+        existing = s.scalar(
+            select(User).where(User.email_lower == canonicalise_email(email))
+        )
+        if existing is not None:
+            user_id = existing.id
+        else:
+            user_id = seed_user(s, email=email, display_name=display_name)
+        existing_grant = s.scalar(
+            select(RoleGrant).where(
+                RoleGrant.user_id == user_id,
+                RoleGrant.scope_kind == "deployment",
+            )
+        )
+        if existing_grant is None:
+            grant_deployment_admin(s, user_id=user_id)
+        existing_owner = s.scalar(
+            select(DeploymentOwner).where(DeploymentOwner.user_id == user_id)
+        )
+        if owner and existing_owner is None:
             grant_deployment_owner(s, user_id=user_id)
         s.commit()
     cookie = issue_session(session_factory, user_id=user_id, settings=settings)

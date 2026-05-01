@@ -76,9 +76,7 @@ def upgrade() -> None:
             ondelete="SET NULL",
         )
         batch_op.create_foreign_key(
-            op.f(
-                "fk_work_engagement_reimbursement_destination_id_payout_destination"
-            ),
+            op.f("fk_work_engagement_reimbursement_destination_id_payout_destination"),
             "payout_destination",
             ["reimbursement_destination_id"],
             ["id"],

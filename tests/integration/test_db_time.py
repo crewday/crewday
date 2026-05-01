@@ -137,23 +137,22 @@ class TestMigrationShape:
             "notes_md",
             "approved_by",
             "approved_at",
+            # cd-1ak — derived-shift idempotency seam.
+            "source_occurrence_id",
         }
         assert set(cols) == expected
-        for nullable in (
+        nullable = {
             "ends_at",
             "property_id",
             "notes_md",
             "approved_by",
             "approved_at",
-        ):
-            assert cols[nullable]["nullable"] is True, f"{nullable} must be nullable"
-        for notnull in expected - {
-            "ends_at",
-            "property_id",
-            "notes_md",
-            "approved_by",
-            "approved_at",
-        }:
+            # cd-1ak — manual shifts have no source occurrence.
+            "source_occurrence_id",
+        }
+        for name in nullable:
+            assert cols[name]["nullable"] is True, f"{name} must be nullable"
+        for notnull in expected - nullable:
             assert cols[notnull]["nullable"] is False, f"{notnull} must be NOT NULL"
 
     def test_shift_fks(self, engine: Engine) -> None:

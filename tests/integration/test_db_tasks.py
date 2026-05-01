@@ -259,6 +259,10 @@ class TestMigrationShape:
             "inventory_effects_json",
             "llm_hints_md",
             "deleted_at",
+            # cd-1ak — auto-shift from completed occurrence.
+            "auto_shift_from_occurrence",
+            # cd-ro6v — per-template settings cascade override.
+            "settings_override_json",
         }
         assert set(cols) == expected
         assert cols["default_assignee_role"]["nullable"] is True

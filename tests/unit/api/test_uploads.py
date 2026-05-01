@@ -24,9 +24,7 @@ class _StaticSniffer:
 
 
 class _TrackingUpload(UploadFile):
-    def __init__(
-        self, payload: bytes, content_type: str | None = "text/plain"
-    ) -> None:
+    def __init__(self, payload: bytes, content_type: str | None = "text/plain") -> None:
         super().__init__(
             file=io.BytesIO(payload),
             filename="upload.bin",

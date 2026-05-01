@@ -22,6 +22,8 @@ from tests.unit.domain.identity.conftest import (
     attach_user,
     ctx_for,
     make_engagement,
+    make_organization,
+    make_payout_destination,
     make_user,
     make_workspace,
 )
@@ -128,6 +130,9 @@ class TestUpdate:
         attach_user(session, user_id=user.id, workspace_id=ws.id)
         ctx = ctx_for(workspace=ws, actor_id=user.id)
         eng = make_engagement(session, user_id=user.id, workspace_id=ws.id)
+        make_payout_destination(
+            session, id="dest_123", workspace_id=ws.id, user_id=user.id
+        )
 
         view = update_work_engagement(
             session,
@@ -170,6 +175,7 @@ class TestUpdate:
         attach_user(session, user_id=user.id, workspace_id=ws.id)
         ctx = ctx_for(workspace=ws, actor_id=user.id)
         eng = make_engagement(session, user_id=user.id, workspace_id=ws.id)
+        make_organization(session, id="org_abc", workspace_id=ws.id)
 
         view = update_work_engagement(
             session,
@@ -191,6 +197,7 @@ class TestUpdate:
         user = make_user(session, email="u@e.com", display_name="U")
         attach_user(session, user_id=user.id, workspace_id=ws.id)
         ctx = ctx_for(workspace=ws, actor_id=user.id)
+        make_organization(session, id="org_abc", workspace_id=ws.id)
         eng = make_engagement(
             session,
             user_id=user.id,

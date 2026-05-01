@@ -333,21 +333,26 @@ class TestMigrationShape:
             "gateway_binding_id",
             "dispatched_to_agent_at",
             "created_at",
+            # cd-cn7v — chat compaction columns.
+            "kind",
+            "compacted_into_id",
+            "summary_range_from_id",
+            "summary_range_to_id",
         }
         assert set(cols) == expected
-        for nullable in (
+        nullable = {
             "author_user_id",
             "provider_message_id",
             "gateway_binding_id",
             "dispatched_to_agent_at",
-        ):
-            assert cols[nullable]["nullable"] is True
-        for notnull in expected - {
-            "author_user_id",
-            "provider_message_id",
-            "gateway_binding_id",
-            "dispatched_to_agent_at",
-        }:
+            # cd-cn7v — compaction pointers are NULL on live messages.
+            "compacted_into_id",
+            "summary_range_from_id",
+            "summary_range_to_id",
+        }
+        for name in nullable:
+            assert cols[name]["nullable"] is True
+        for notnull in expected - nullable:
             assert cols[notnull]["nullable"] is False, f"{notnull} must be NOT NULL"
 
     def test_chat_message_fks(self, engine: Engine) -> None:

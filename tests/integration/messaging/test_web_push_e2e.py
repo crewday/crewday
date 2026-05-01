@@ -30,7 +30,7 @@ from typing import Final
 import pytest
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ec
-from sqlalchemy import Engine, select
+from sqlalchemy import Engine, delete, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.adapters.db.identity.models import User, canonicalise_email
@@ -118,6 +118,28 @@ def session_factory(engine: Engine) -> Iterator[sessionmaker[Session]]:
 def session(session_factory: sessionmaker[Session]) -> Iterator[Session]:
     with session_factory() as s:
         yield s
+
+    # Sweep the rows this test commits so sibling integration tests on
+    # the same xdist worker see a clean slate. The e2e test commits a
+    # workspace + user + push tokens / queue rows directly via the
+    # production session factory (not the rollback-wrapping
+    # ``db_session``), so SAVEPOINT isolation does not apply.
+    # Scope the sweep to the slug ("e2e") and email
+    # ("alice@example.com") this test always uses; broader deletes
+    # would silently clobber rows committed by other tests sharing the
+    # worker DB.
+    with session_factory() as s:
+        ws_id = s.scalar(select(Workspace.id).where(Workspace.slug == "e2e"))
+        if ws_id is not None:
+            for table_model in (NotificationPushQueue, Notification, PushToken):
+                s.execute(delete(table_model).where(table_model.workspace_id == ws_id))
+            s.execute(delete(Workspace).where(Workspace.id == ws_id))
+        s.execute(
+            delete(User).where(
+                User.email_lower == canonicalise_email("alice@example.com")
+            )
+        )
+        s.commit()
 
 
 @pytest.fixture(autouse=True)

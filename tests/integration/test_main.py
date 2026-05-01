@@ -122,8 +122,7 @@ class TestSpaProdMountAgainstRealDist:
         assert "SPA not built" not in resp.text
         assert (
             f'<script id="crewday-bootstrap" nonce="{nonce}">'
-            f'window.__CREWDAY__={{"cspNonce":"{nonce}"}};</script>'
-            in resp.text
+            f'window.__CREWDAY__={{"cspNonce":"{nonce}"}};</script>' in resp.text
         )
 
     def test_deep_link_returns_spa_index(
@@ -179,14 +178,10 @@ class TestSpaProdMountAgainstRealDist:
         )
         assert match is not None
         nonce = match.group("nonce")
-        assert (
-            f'<script nonce="{nonce}">window.n = "{nonce}";</script>'
-            in resp.text
-        )
+        assert f'<script nonce="{nonce}">window.n = "{nonce}";</script>' in resp.text
         assert (
             f'<script id="crewday-bootstrap" nonce="{nonce}">'
-            f'window.__CREWDAY__={{"cspNonce":"{nonce}"}};</script>'
-            in resp.text
+            f'window.__CREWDAY__={{"cspNonce":"{nonce}"}};</script>' in resp.text
         )
         assert 'nonce="stale"' not in resp.text
 

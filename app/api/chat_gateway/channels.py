@@ -205,8 +205,7 @@ def build_chat_channel_bindings_router() -> APIRouter:
         response_model=BindingStateResponse,
         operation_id="chat.channel_bindings.link_verify",
         summary=(
-            "Verify an off-app chat-channel link code; "
-            f"dev code is {MOCK_LINK_CODE}"
+            f"Verify an off-app chat-channel link code; dev code is {MOCK_LINK_CODE}"
         ),
     )
     def verify_link(

@@ -121,6 +121,13 @@ def tenant_settings() -> Settings:
         session_owner_ttl_days=7,
         session_user_ttl_days=30,
         phase0_stub_enabled=False,
+        # Cross-tenant probe samples easily exceed the default
+        # 30-anonymous / 60-token per-minute IP buckets; raise the cap
+        # so the matrix test isn't gated by rate limits before it can
+        # finish probing.
+        rate_limit_anonymous_per_minute=10_000,
+        rate_limit_token_per_minute=10_000,
+        rate_limit_personal_me_per_minute=10_000,
     )
 
 

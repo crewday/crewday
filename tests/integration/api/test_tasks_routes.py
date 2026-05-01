@@ -859,9 +859,7 @@ class TestTasksListing:
                 instruction_id=instruction_id,
                 version_num=2,
                 body_md="Lock the gate after cleaning.",
-                body_hash=hashlib.sha256(
-                    b"Lock the gate after cleaning."
-                ).hexdigest(),
+                body_hash=hashlib.sha256(b"Lock the gate after cleaning.").hexdigest(),
                 author_id=seeded["owner_id"],
                 created_at=_PINNED + timedelta(minutes=5),
             )

@@ -152,6 +152,11 @@ def seed_workspace(
         owner_onboarded_at=resolved_now,
     )
     session.add(workspace)
+    # Flush the workspace before the FK-bearing rows below; the unit-of-work
+    # only orders writes when an ORM ``relationship()`` exposes the link,
+    # and ``BudgetLedger`` carries a bare ``ForeignKey`` column so its
+    # insert can otherwise race ahead of the workspace it references.
+    session.flush()
     session.add(
         BudgetLedger(
             id=new_ulid(),

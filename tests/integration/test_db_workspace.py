@@ -135,13 +135,17 @@ class TestMigrationShape:
             "updated_at",
             "created_at",
             "owner_onboarded_at",
+            # cd-1i7s — anti-abuse signup IP audit columns.
+            "signup_ip",
+            "signup_ip_key",
         }
         assert set(cols) == expected
-        # Only tombstone / onboarding timestamps are nullable in the v1
-        # slice; all other columns carry NOT NULL.
-        assert cols["owner_onboarded_at"]["nullable"] is True
-        assert cols["archived_at"]["nullable"] is True
-        for name in expected - {"owner_onboarded_at", "archived_at"}:
+        # Only tombstone / onboarding timestamps + signup-IP audit
+        # columns are nullable; all other columns carry NOT NULL.
+        nullable = {"owner_onboarded_at", "archived_at", "signup_ip", "signup_ip_key"}
+        for name in nullable:
+            assert cols[name]["nullable"] is True, f"{name} must be nullable"
+        for name in expected - nullable:
             assert cols[name]["nullable"] is False, f"{name} must be NOT NULL"
         pk = inspect(engine).get_pk_constraint("workspace")
         assert pk["constrained_columns"] == ["id"]

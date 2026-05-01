@@ -58,9 +58,7 @@ def upgrade() -> None:
             ["channel_id"],
             unique=True,
             sqlite_where=sa.text("kind = 'summary' AND compacted_into_id IS NULL"),
-            postgresql_where=sa.text(
-                "kind = 'summary' AND compacted_into_id IS NULL"
-            ),
+            postgresql_where=sa.text("kind = 'summary' AND compacted_into_id IS NULL"),
         )
         batch_op.create_index(
             "ix_chat_message_compacted_into",

@@ -57,6 +57,20 @@ HTTP_PATH_OPTOUTS: frozenset[str] = frozenset(
         # intentionally handles every non-API GET that didn't match a
         # real route (§14 "SPA fallback") and is not a tenant surface.
         "/{full_path:path}",
+        # justification: SSE event stream is a long-lived workspace
+        # connection, not a per-request API call. The cross-tenant
+        # behaviour is enforced upstream by the same middleware that
+        # produces the 404 envelope, but the response carries no
+        # ``X-RateLimit-*`` headers because :func:`api_route_class`
+        # only classifies ``/w/{slug}/api/*`` paths. Listed here so
+        # the envelope-equality probe stays focused on the API
+        # surface (§16 "Realtime").
+        # TODO(cd-sse-cross-tenant): add a focused probe that asserts
+        # ``/w/{other-slug}/events`` returns the canonical 404 envelope
+        # body (without requiring header-set parity) so the SSE branch
+        # of the membership-miss check is auto-validated, not just
+        # trusted-by-construction.
+        "/w/{slug}/events",
     }
 )
 

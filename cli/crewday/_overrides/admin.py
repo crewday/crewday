@@ -499,9 +499,7 @@ def rotate_root_key(
                 rotate_mod.zero_key_material(key)
         elif new_key_stdin:
             if os.isatty(0):
-                raise click.UsageError(
-                    "--new-key-stdin refuses an interactive TTY"
-                )
+                raise click.UsageError("--new-key-stdin refuses an interactive TTY")
             key = rotate_mod.normalise_new_key_material(
                 click.get_binary_stream("stdin").read()
             )

@@ -1435,7 +1435,7 @@ def build_admin_llm_router() -> APIRouter:
         session: _Db,
         assignment_id: str,
         payload: AssignmentUpdatePayload,
-        ) -> LlmAssignmentResponse:
+    ) -> LlmAssignmentResponse:
         with tenant_agnostic():
             row = _assignment(session, assignment_id)
             sent = payload.model_fields_set
