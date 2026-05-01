@@ -143,6 +143,7 @@ from app.api.v1.places import build_properties_router
 from app.api.v1.property_work_role_assignments import (
     build_property_work_role_assignments_router,
 )
+from app.api.v1.public_holidays import build_public_holidays_router
 from app.api.v1.role_grants import (
     build_role_grants_router,
     build_users_role_grants_router,
@@ -796,6 +797,7 @@ def _mount_auth_routers(
     # §06 "Approval logic (hybrid model)" by comparing the override
     # against the user's weekly availability pattern.
     app.include_router(build_user_availability_overrides_router(), prefix=scoped_prefix)
+    app.include_router(build_public_holidays_router(), prefix=scoped_prefix)
     # Workspace-scoped self-service shortcuts (cd-6uij). Mounted at
     # the top of the workspace tree per §12 "Self-service shortcuts"
     # — the router carries the ``/me`` prefix so the final paths read
