@@ -99,6 +99,25 @@ a request you disagree with.
 
 Use these when the task needs a running app, API smoke, or UI smoke.
 
+**Default to the wrappers** — they cache + refresh the dev session and
+replace several tool calls per check:
+
+- `./scripts/agent-status.sh` — compose health, `/readyz`, `/healthz`,
+  alembic current vs head, git branch + dirty count. Exit 0 when the
+  stack is ready. Run first when a smoke fails.
+- `./scripts/agent-curl.sh <ws> <METHOD> <path> [body]` — authenticated
+  curl against `http://127.0.0.1:8100`. Caches the cookie per
+  workspace+email, auto-refreshes on stale sessions, pretty-prints JSON,
+  writes `[<status> <METHOD> <path>]` to stderr, exits non-zero on
+  4xx/5xx. Path is appended verbatim — include `/w/<slug>/api/v1/...`.
+  ```bash
+  ./scripts/agent-curl.sh dev GET  /w/dev/api/v1/employees
+  ./scripts/agent-curl.sh dev POST /w/dev/api/v1/tasks '{"title":"smoke"}'
+  ```
+
+Reach for the primitives below when you need the raw cookie (Playwright,
+multi-step scripts) or the wrappers misbehave.
+
 - Bring the stack up with:
   ```bash
   docker compose -f mocks/docker-compose.yml up -d --build
