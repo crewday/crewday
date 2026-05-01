@@ -11,7 +11,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
-import app.api.assets.assets as asset_api
+import app.api.assets._shared as asset_shared
 from app.adapters.db.authz.models import RoleGrant
 from app.adapters.db.places.models import Property, PropertyWorkspace
 from app.api.deps import (
@@ -245,7 +245,7 @@ def test_document_upload_rejects_oversized_body(
         token_factory=lambda: "D0CMNT000002",
         clock=FrozenClock(_NOW),
     )
-    monkeypatch.setattr(asset_api, "_MAX_ASSET_DOCUMENT_BYTES", 4)
+    monkeypatch.setattr(asset_shared, "MAX_ASSET_DOCUMENT_BYTES", 4)
     client = _client(
         db_session,
         ctx,
