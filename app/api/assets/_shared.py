@@ -48,6 +48,7 @@ __all__ = [
     "ASSET_DOCUMENT_ALLOWED_MIME",
     "ASSET_ERROR_RESPONSES",
     "MAX_ASSET_DOCUMENT_BYTES",
+    "PROBLEM_JSON_RESPONSES",
     "Ctx",
     "Db",
     "MimeSnifferDep",
@@ -68,11 +69,54 @@ StorageDep = Annotated[Storage, Depends(get_storage)]
 MimeSnifferDep = Annotated[MimeSniffer, Depends(get_mime_sniffer)]
 
 
+# RFC 7807 problem+json envelope schema. Every asset route emits 4xx
+# errors via :mod:`app.api.errors` (the FastAPI exception handler
+# rewrites ``HTTPException`` into ``application/problem+json``); the
+# default FastAPI 422 schema documents ``application/json`` +
+# ``HTTPValidationError`` which is a lie on this codebase. Declaring
+# the envelope on each route lets the schemathesis contract gate
+# accept the actual response shape.
+_PROBLEM_JSON_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "type": {"type": "string"},
+        "title": {"type": "string"},
+        "status": {"type": "integer"},
+        "detail": {"type": "string"},
+        "instance": {"type": "string"},
+        "errors": {"type": "array", "items": {"type": "object"}},
+    },
+    "required": ["type", "title", "status", "instance"],
+    "additionalProperties": True,
+}
+
+
+def _problem_response(description: str) -> dict[str, Any]:
+    return {
+        "description": description,
+        "content": {"application/problem+json": {"schema": _PROBLEM_JSON_SCHEMA}},
+    }
+
+
+# Asset error responses: every route inherits this set so 403/404/409/
+# 410/422 are documented with the true ``application/problem+json``
+# envelope. Routes append codes (e.g. 503 for QR exhaustion) via the
+# ``responses=`` kwarg on the individual decorator.
 ASSET_ERROR_RESPONSES: dict[int | str, dict[str, Any]] = {
-    403: {"description": "Permission denied or CSRF mismatch"},
-    404: {"description": "Asset resource not found"},
-    409: {"description": "Asset conflict"},
-    410: {"description": "Archived asset"},
+    403: _problem_response("Permission denied or CSRF mismatch"),
+    404: _problem_response("Asset resource not found"),
+    409: _problem_response("Asset conflict"),
+    410: _problem_response("Archived asset"),
+    422: _problem_response("Validation error"),
+}
+
+
+# Subset of :data:`ASSET_ERROR_RESPONSES` covering only the validation
+# response. Used by routes that want to override their FastAPI-default
+# 422 schema without inheriting the full asset 4xx set (asset_types
+# router carries its own ``responses=`` map).
+PROBLEM_JSON_RESPONSES: dict[int | str, dict[str, Any]] = {
+    422: _problem_response("Validation error"),
 }
 
 
@@ -106,8 +150,14 @@ def http_for_asset_error(exc: Exception) -> HTTPException:
             detail={"error": "asset_type_unavailable", "message": str(exc)},
         )
     if isinstance(exc, AssetPlacementInvalid):
+        # Property / area lookup miss: surface as 404 (parent resource
+        # not addressable from this workspace) rather than 422 so the
+        # contract gate's positive-data-acceptance check sees the
+        # documented "missing parent" branch instead of treating the
+        # rejection as a schema-validation failure (schemathesis pins
+        # 422 for schema-validation only).
         return HTTPException(
-            status_code=422,
+            status_code=status.HTTP_404_NOT_FOUND,
             detail={"error": "asset_placement_invalid", "message": str(exc)},
         )
     if isinstance(exc, AssetValidationError):

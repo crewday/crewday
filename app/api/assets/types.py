@@ -6,9 +6,19 @@ from datetime import datetime
 from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    GetJsonSchemaHandler,
+    model_validator,
+)
+from pydantic.json_schema import JsonSchemaValue
+from pydantic_core import CoreSchema
 from sqlalchemy.orm import Session
 
+from app.api.assets._shared import PROBLEM_JSON_RESPONSES
+from app.api.assets.schemas import refine_request_schema
 from app.api.deps import current_workspace_context, db_session
 from app.api.pagination import (
     DEFAULT_LIMIT,
@@ -48,10 +58,25 @@ __all__ = [
 _Ctx = Annotated[WorkspaceContext, Depends(current_workspace_context)]
 _Db = Annotated[Session, Depends(db_session)]
 
+# Asset-type error envelope. Mirrors the asset router's
+# ``ASSET_ERROR_RESPONSES`` shape so the OpenAPI contract describes
+# what the server actually emits (``application/problem+json``), not
+# FastAPI's default ``HTTPValidationError`` shape which the runtime
+# never returns.
 _ASSET_TYPE_ERROR_RESPONSES: dict[int | str, dict[str, Any]] = {
-    403: {"description": "Permission denied or read-only asset type"},
-    404: {"description": "Asset type not found"},
-    409: {"description": "Asset type key conflict"},
+    403: {
+        "description": "Permission denied or read-only asset type",
+        "content": PROBLEM_JSON_RESPONSES[422]["content"],
+    },
+    404: {
+        "description": "Asset type not found",
+        "content": PROBLEM_JSON_RESPONSES[422]["content"],
+    },
+    409: {
+        "description": "Asset type key conflict",
+        "content": PROBLEM_JSON_RESPONSES[422]["content"],
+    },
+    422: PROBLEM_JSON_RESPONSES[422],
 }
 
 
@@ -96,6 +121,22 @@ class AssetTypeCreateRequest(BaseModel):
         ):
             raise ValueError("send only one of default_actions or default_actions_json")
         return self
+
+    @classmethod
+    def __get_pydantic_json_schema__(
+        cls, schema: CoreSchema, handler: GetJsonSchemaHandler
+    ) -> JsonSchemaValue:
+        # Public schema advertises only the canonical fields; the
+        # legacy aliases (``slug``, ``icon``, ``default_actions_json``)
+        # still ride through the runtime ``model_validator`` for
+        # back-compat but are not part of the documented surface.
+        return refine_request_schema(
+            cls,
+            schema,
+            handler,
+            drop_aliases=("slug", "icon", "default_actions_json"),
+            promote_to_required=("key",),
+        )
 
     def to_domain(self) -> AssetTypeCreate:
         return AssetTypeCreate(
@@ -152,6 +193,20 @@ class AssetTypeUpdateRequest(BaseModel):
         if not self.model_fields_set:
             raise ValueError("PATCH body must include at least one field")
         return self
+
+    @classmethod
+    def __get_pydantic_json_schema__(
+        cls, schema: CoreSchema, handler: GetJsonSchemaHandler
+    ) -> JsonSchemaValue:
+        # PATCH body must carry at least one field; legacy aliases are
+        # not advertised on the public surface (back-compat only).
+        return refine_request_schema(
+            cls,
+            schema,
+            handler,
+            drop_aliases=("slug", "icon", "default_actions_json"),
+            min_properties=1,
+        )
 
     def to_domain(self) -> AssetTypeUpdate:
         payload: dict[str, object | None] = {}
@@ -271,7 +326,7 @@ def _list_type_response(
 
 
 def build_asset_types_alias_router() -> APIRouter:
-    api = APIRouter(tags=["assets", "asset_types"])
+    api = APIRouter(tags=["assets", "asset_types"], responses=PROBLEM_JSON_RESPONSES)
     view_gate = Depends(Permission("scope.view", scope_kind="workspace"))
 
     @api.get(

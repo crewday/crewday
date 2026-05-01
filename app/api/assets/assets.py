@@ -300,6 +300,18 @@ def build_assets_router() -> APIRouter:
         operation_id="assets.qr_sheet",
         summary="Render asset QR labels as a print-ready PDF",
         dependencies=[view_gate],
+        # Document the actual ``application/pdf`` body so the contract
+        # gate stops flagging the response Content-Type as undocumented.
+        responses={
+            200: {
+                "description": "PDF QR-label sheet",
+                "content": {
+                    "application/pdf": {
+                        "schema": {"type": "string", "format": "binary"}
+                    }
+                },
+            },
+        },
     )
     def qr_sheet(
         request: Request,
@@ -472,6 +484,14 @@ def build_assets_router() -> APIRouter:
         operation_id="assets.qr_png",
         summary="Render an asset QR code as PNG",
         dependencies=[view_gate],
+        responses={
+            200: {
+                "description": "PNG QR code",
+                "content": {
+                    "image/png": {"schema": {"type": "string", "format": "binary"}}
+                },
+            },
+        },
     )
     def qr_png(asset_id: str, request: Request, ctx: Ctx, session: Db) -> Response:
         try:

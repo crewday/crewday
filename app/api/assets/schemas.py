@@ -8,12 +8,21 @@ on their endpoint glue.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import asdict
 from datetime import date, datetime
 from decimal import Decimal
-from typing import Literal
+from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    GetJsonSchemaHandler,
+    model_validator,
+)
+from pydantic.json_schema import JsonSchemaValue
+from pydantic_core import CoreSchema
 
 from app.domain.assets.actions import AssetActionView, AssetNextDueView
 from app.domain.assets.assets import AssetCreate, AssetUpdate, AssetView
@@ -43,14 +52,115 @@ __all__ = [
     "DocumentExtractionResponse",
     "WorkspaceDocumentListResponse",
     "WorkspaceDocumentResponse",
+    "refine_request_schema",
 ]
+
+
+def refine_request_schema(
+    cls: type[BaseModel],
+    schema: CoreSchema,
+    handler: GetJsonSchemaHandler,
+    *,
+    drop_aliases: Iterable[str] = (),
+    promote_to_required: Iterable[str] = (),
+    min_properties: int | None = None,
+    non_negative_decimals: Iterable[str] = (),
+) -> JsonSchemaValue:
+    """Tighten a pydantic-generated request schema to match runtime invariants.
+
+    Helper for the asset request DTOs: pydantic produces a permissive
+    ``str | null`` shape for every nullable optional field, but the
+    ``model_validator`` on these models enforces stricter invariants
+    at runtime (``exactly one of name or label``, ``PATCH body must
+    include at least one field``, …).
+
+    The contract gate (`schemathesis run --include-tag assets`) treats
+    "schema-valid input that the server rejects" as a contract bug.
+    Bringing the public schema into line with the validators keeps the
+    public surface honest while preserving back-compat for the
+    legacy aliases the validators still accept (``label``,
+    ``purchased_at``, ``warranty_ends_at``, ``metadata``, ``slug``,
+    ``icon``, ``default_actions_json``).
+
+    Operations:
+
+    * ``drop_aliases`` — remove transitional alias fields from the
+      public properties map. The runtime ``model_validator`` still
+      accepts them so existing clients keep working; we just stop
+      *advertising* them as alternatives. The spec (``docs/specs/21-assets.md``)
+      only documents the canonical names.
+    * ``promote_to_required`` — list canonical fields that must
+      appear in the body. Strips the ``null`` branch from each
+      field's ``anyOf``, drops the ``default`` value, and adds the
+      name to the schema's ``required`` array. Mirrors the runtime
+      "name or label must be present, and not both" invariant.
+    * ``min_properties`` — when set, adds ``minProperties`` to the
+      object schema. Used on PATCH bodies that the runtime rejects
+      with "PATCH body must include at least one field".
+    * ``non_negative_decimals`` — ``Decimal | None`` fields whose
+      runtime ``Field(ge=0)`` constraint is dropped from the
+      pydantic-emitted JSON Schema (pydantic ships a permissive
+      ``[+-]?…`` regex for the string variant that also matches
+      ``"-1"``). Replaces the field's ``anyOf`` with a tight
+      ``number | string-of-digits | null`` shape that excludes the
+      negative branch.
+    """
+
+    out = dict(handler(schema))
+    properties = dict(out.get("properties") or {})
+    for alias in drop_aliases:
+        properties.pop(alias, None)
+
+    required = list(out.get("required") or [])
+    for canonical in promote_to_required:
+        if canonical not in required:
+            required.append(canonical)
+        if canonical in properties:
+            field_schema: dict[str, Any] = dict(properties[canonical])
+            any_of = field_schema.get("anyOf")
+            if isinstance(any_of, list):
+                non_null = [b for b in any_of if b.get("type") != "null"]
+                if len(non_null) == 1:
+                    field_schema.pop("anyOf", None)
+                    field_schema.update(non_null[0])
+                elif non_null:
+                    field_schema["anyOf"] = non_null
+            field_schema.pop("default", None)
+            properties[canonical] = field_schema
+
+    for decimal_field in non_negative_decimals:
+        if decimal_field not in properties:
+            continue
+        field_schema = dict(properties[decimal_field])
+        # Replace the permissive pydantic union with a non-negative
+        # number-or-numeric-string variant (plus null). The string
+        # branch keeps wire compatibility with clients that send
+        # decimals as strings to dodge JSON's float lossiness.
+        title = field_schema.get("title")
+        new_branches: list[dict[str, Any]] = [
+            {"type": "number", "minimum": 0},
+            {"type": "string", "pattern": r"^\d+(\.\d+)?$"},
+            {"type": "null"},
+        ]
+        field_schema = {"anyOf": new_branches}
+        if title is not None:
+            field_schema["title"] = title
+        properties[decimal_field] = field_schema
+
+    if properties:
+        out["properties"] = properties
+    if required:
+        out["required"] = required
+    if min_properties is not None:
+        out["minProperties"] = min_properties
+    return out
 
 
 class AssetCreateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     asset_type_id: str | None = None
-    property_id: str
+    property_id: str = Field(..., min_length=1)
     area_id: str | None = None
     name: str | None = Field(default=None, min_length=1, max_length=200)
     label: str | None = Field(default=None, min_length=1, max_length=200)
@@ -87,6 +197,25 @@ class AssetCreateRequest(BaseModel):
         if self.settings_override_json is not None and self.metadata is not None:
             raise ValueError("send only one of settings_override_json or metadata")
         return self
+
+    @classmethod
+    def __get_pydantic_json_schema__(
+        cls, schema: CoreSchema, handler: GetJsonSchemaHandler
+    ) -> JsonSchemaValue:
+        # Public schema advertises only the canonical fields; the
+        # legacy aliases (``label``, ``purchased_at``, …) still ride
+        # through the runtime ``model_validator`` for back-compat but
+        # are not part of the documented surface (§21 only spells the
+        # canonical names). Promotes ``name`` to required so the
+        # contract gate stops generating bodies with both ``name`` and
+        # ``label`` null.
+        return refine_request_schema(
+            cls,
+            schema,
+            handler,
+            drop_aliases=("label", "purchased_at", "warranty_ends_at", "metadata"),
+            promote_to_required=("name",),
+        )
 
     def to_domain(self) -> AssetCreate:
         return AssetCreate(
@@ -171,6 +300,21 @@ class AssetUpdateRequest(BaseModel):
             raise ValueError("send only one of settings_override_json or metadata")
         return self
 
+    @classmethod
+    def __get_pydantic_json_schema__(
+        cls, schema: CoreSchema, handler: GetJsonSchemaHandler
+    ) -> JsonSchemaValue:
+        # PATCH bodies must carry at least one field (the runtime
+        # validator rejects ``{}``); aliases stay accepted runtime-side
+        # but are not part of the public schema.
+        return refine_request_schema(
+            cls,
+            schema,
+            handler,
+            drop_aliases=("label", "purchased_at", "warranty_ends_at", "metadata"),
+            min_properties=1,
+        )
+
     def to_domain(self) -> AssetUpdate:
         payload: dict[str, object | None] = {}
         sent = self.model_fields_set
@@ -219,7 +363,7 @@ class AssetUpdateRequest(BaseModel):
 class AssetMoveRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    property_id: str
+    property_id: str = Field(..., min_length=1)
     area_id: str | None = None
 
 
@@ -314,6 +458,22 @@ class AssetActionCreateRequest(BaseModel):
     meter_reading: Decimal | None = Field(default=None, ge=0)
     evidence_blob_hash: str | None = Field(default=None, min_length=64, max_length=64)
 
+    @classmethod
+    def __get_pydantic_json_schema__(
+        cls, schema: CoreSchema, handler: GetJsonSchemaHandler
+    ) -> JsonSchemaValue:
+        # Pydantic's emitted schema for ``Decimal | None`` with
+        # ``ge=0`` carries a permissive ``[+-]?…`` regex on the string
+        # variant that also matches ``"-1"`` — the contract gate then
+        # generates negatives we reject at runtime. Encode the
+        # non-negative invariant on the public schema instead.
+        return refine_request_schema(
+            cls,
+            schema,
+            handler,
+            non_negative_decimals=("meter_reading",),
+        )
+
 
 class AssetActionUpdateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -329,6 +489,21 @@ class AssetActionUpdateRequest(BaseModel):
         if not self.model_fields_set:
             raise ValueError("PATCH body must include at least one field")
         return self
+
+    @classmethod
+    def __get_pydantic_json_schema__(
+        cls, schema: CoreSchema, handler: GetJsonSchemaHandler
+    ) -> JsonSchemaValue:
+        # Mirrors :class:`AssetUpdateRequest` — PATCH body cannot be
+        # empty. Also encodes the non-negative ``meter_reading``
+        # invariant (see :class:`AssetActionCreateRequest`).
+        return refine_request_schema(
+            cls,
+            schema,
+            handler,
+            min_properties=1,
+            non_negative_decimals=("meter_reading",),
+        )
 
 
 class AssetActionResponse(BaseModel):

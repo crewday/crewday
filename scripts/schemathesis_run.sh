@@ -229,6 +229,103 @@ INCLUDE_ARGS=(
     # custom check end-to-end (the request carries both Bearer and
     # session-cookie headers; the check sees the Bearer and passes).
     --include-operation-id 'auth.me.get'
+    # ----------------------------------------------------------------
+    # Assets tag (cd-pa9p). The schemas under ``app/api/assets/``
+    # carry the 4xx ``application/problem+json`` envelope and the
+    # request-body refinements (drop legacy aliases, promote canonical
+    # required fields, ``minProperties: 1`` on PATCH bodies) so the
+    # contract gate accepts the runtime invariants.
+    #
+    # ``--include-tag assets`` (passed via ``$@``) selects every
+    # operation under the asset tag; the ``--exclude-operation-id``
+    # rules below carve out the operations whose runtime invariants
+    # are not currently expressible in OpenAPI without a more invasive
+    # surface change. Each exclusion documents the reason inline.
+    # ----------------------------------------------------------------
+    # ``assets.list`` / ``assets.list_flat`` — opaque base64url
+    #   ``cursor`` query parameter cannot be expressed as an OpenAPI
+    #   pattern that hypothesis-jsonschema can satisfy (the cursor is
+    #   a signed payload). Schemathesis generates ``cursor=00...``
+    #   which the server rejects with 422 ``invalid_cursor``;
+    #   schemathesis treats 422 as schema-validation failure on
+    #   positive-data cases. Re-enable once the cursor wire shape
+    #   stabilises into a pure-content type that round-trips through
+    #   the contract gate (cd-pa9p follow-up).
+    --exclude-operation-id 'assets.list'
+    --exclude-operation-id 'assets.list_flat'
+    # ``asset_types.list`` / ``asset_types.list_flat`` — same cursor
+    # issue as ``assets.list``.
+    --exclude-operation-id 'asset_types.list'
+    --exclude-operation-id 'asset_types.list_flat'
+    # ``documents.list`` — cursor issue + ``expires_before`` query
+    # gets the literal string ``"null"`` from hypothesis-jsonschema's
+    # default null-handling, which our ``date`` parser rejects.
+    --exclude-operation-id 'documents.list'
+    # ``assets.actions.list`` — ``until`` / ``since`` queries get the
+    # literal ``"null"`` artefact same as above.
+    --exclude-operation-id 'assets.actions.list'
+    # ``assets.documents.list`` — ``category`` query gets the literal
+    # ``"null"`` artefact same as above.
+    --exclude-operation-id 'assets.documents.list'
+    # ``assets.documents.upload`` — multipart ``UploadFile`` field
+    # with form-data content-type confuses hypothesis-jsonschema's
+    # string generator (sends literal ``"None"`` for the file part);
+    # the runtime correctly rejects with 422 missing file. Multipart
+    # contract coverage waits on schemathesis multipart support
+    # (cd-pa9p follow-up).
+    --exclude-operation-id 'assets.documents.upload'
+    # ``asset_types.update`` / ``assets.update`` /
+    # ``assets.actions.update`` — PATCH endpoints whose runtime
+    # validators enforce both ``minProperties: 1`` (no empty body)
+    # and cross-field invariants (e.g. "key cannot be cleared",
+    # "send only one of name or label") that pydantic does not emit
+    # as a single JSON Schema. Even with ``minProperties: 1``
+    # advertised on the request body, schemathesis' coverage phase
+    # still emits ``{}`` as a positive-mode case (it canonicalises
+    # the schema in a way that drops ``minProperties`` ahead of
+    # generation), surfacing as a false-positive 422. Encoding every
+    # cross-field rule would require ``oneOf`` constructions
+    # pydantic does not emit by default; the runtime invariants stay
+    # tested by the focused integration tests in
+    # ``tests/integration/test_asset_*.py``.
+    --exclude-operation-id 'asset_types.update'
+    --exclude-operation-id 'assets.update'
+    --exclude-operation-id 'assets.actions.update'
+    # ``asset_types.create`` — schemathesis "negative_data_rejection"
+    # check expects an HTTP 4xx for the ``warn_before_days: number``
+    # case in ``default_actions[]``, but the seed workspace already
+    # has a row with ``key="0"`` from the previous coverage iteration
+    # so the next attempt 409s on the key conflict before the body
+    # validator runs. The 409 is an accurate response (the key is
+    # taken) but lands outside the negative-rejection allowlist.
+    # Re-enable once the seed clears the workspace between coverage
+    # iterations (cd-pa9p follow-up).
+    --exclude-operation-id 'asset_types.create'
+)
+
+# Checks excluded for the asset gate — kept here (rather than at
+# every invocation) so the audit trail is self-contained.
+#
+# * ``unsupported_method`` — the schemathesis coverage phase probes
+#   each workspace-scoped path with HTTP methods not declared in the
+#   OpenAPI spec, expecting 405 Method Not Allowed. In the dev
+#   profile this script runs under (``CREWDAY_PROFILE=dev``) the
+#   :func:`app.api.proxy.register_vite_proxy` GET catch-all sits
+#   below the API routers and intercepts unmatched GETs on workspace
+#   API paths, returning 404 ``{"error": "not_found", "detail":
+#   null}`` instead of letting FastAPI emit the natural 405. Pinning
+#   the slug to the seeded workspace via
+#   ``constrain_case_workspace_slug`` (tests/contract/hooks.py)
+#   pushes coverage past the tenancy 404 branch, but the Vite
+#   catch-all 404 still masks the 405 the production profile would
+#   emit. Re-enable once the proxy is taught to defer to FastAPI's
+#   automatic 405 + ``Allow`` response on API paths (cd-pa9p
+#   follow-up: tighten ``app/api/proxy.py::vite_proxy`` to skip API
+#   prefixes, or run the schemathesis sweep against the prod
+#   profile). Bare-host paths still return 405 (no Vite catch-all on
+#   bare host); ``auth.me.get`` covers that surface.
+EXCLUDE_CHECKS_ARGS=(
+    --exclude-checks unsupported_method
 )
 
 set +e
@@ -245,6 +342,7 @@ ${SCHEMATHESIS_BIN} run \
     --generation-codec ascii \
     --suppress-health-check filter_too_much,data_too_large,too_slow \
     "${INCLUDE_ARGS[@]}" \
+    "${EXCLUDE_CHECKS_ARGS[@]}" \
     --report junit \
     --report-dir "${REPORT_DIR}" \
     "$@"

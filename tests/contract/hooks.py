@@ -43,6 +43,7 @@ __all__ = [
     "check_authorization_present",
     "check_etag_round_trip",
     "check_idempotency_round_trip",
+    "constrain_case_workspace_slug",
     "constrain_generated_workspace_slug",
     "constrain_workspace_slug",
 ]
@@ -305,12 +306,45 @@ def constrain_generated_workspace_slug(
 ) -> Any:
     """Pin generated workspace slugs before coverage/negative-case checks run."""
 
-    def rewrite(path_parameters: dict[str, Any] | None) -> dict[str, Any] | None:
-        if path_parameters is not None and "slug" in path_parameters:
+    def rewrite(path_parameters: Any) -> Any:
+        # Stateful generation hands :class:`GeneratedValue` instances
+        # through this seam; only dict-shaped containers carry the
+        # ``slug`` placeholder, so ignore everything else and let the
+        # downstream strategy keep the original.
+        if isinstance(path_parameters, dict) and "slug" in path_parameters:
             return {**path_parameters, "slug": _WORKSPACE_SLUG}
         return path_parameters
 
     return strategy.map(rewrite)
+
+
+@schemathesis.hook("map_case")
+def constrain_case_workspace_slug(ctx: schemathesis.HookContext, case: Case) -> Case:
+    """Pin ``{slug}`` on every generated :class:`Case`, including coverage cases.
+
+    The strategy-level hooks above (``map_path_parameters`` /
+    ``before_generate_path_parameters``) run only for the path-parameter
+    *strategy* path. Schemathesis' coverage phase builds Cases from a
+    pre-baked template (see ``schemathesis.generation.hypothesis.builder``
+    ``generate_coverage_cases`` — `data = template.unmodified()`), so
+    the unspecified-HTTP-method scenarios (``TRACE`` / ``CONNECT`` / …)
+    skip the strategy hooks and arrive at the server with the schema's
+    minimum-pattern slug (``a00`` for the ``^[a-z][a-z0-9-]{1,38}[a-z0-9]$``
+    pattern). That's a workspace which does not exist on the seeded DB,
+    so the request hits the tenancy-membership 404 branch instead of
+    the route's 405 Method Not Allowed.
+
+    ``map_case`` is the universal seam: ``generate_coverage_cases``
+    dispatches every emitted ``Case`` through it. Rewriting
+    ``case.path_parameters['slug']`` here normalises every coverage
+    case onto the seeded workspace so the request reaches the real
+    handler and the unsupported-method check sees the route's true
+    405 / handler 200, not a tenancy 404.
+    """
+    path_parameters = getattr(case, "path_parameters", None)
+    if isinstance(path_parameters, dict) and "slug" in path_parameters:
+        path_parameters["slug"] = _WORKSPACE_SLUG
+    return case
 
 
 # ---------------------------------------------------------------------------

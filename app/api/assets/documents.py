@@ -26,6 +26,7 @@ from fastapi import (
     File,
     Form,
     HTTPException,
+    Path,
     Query,
     Response,
     UploadFile,
@@ -249,15 +250,10 @@ def build_documents_router() -> APIRouter:
     )
     def extraction_page(
         document_id: str,
-        page: int,
         ctx: Ctx,
         session: Db,
+        page: Annotated[int, Path(ge=1)],
     ) -> DocumentExtractionPageResponse:
-        if page < 1:
-            raise HTTPException(
-                status_code=422,
-                detail={"error": "invalid", "field": "page"},
-            )
         try:
             _load_workspace_document(session, ctx, document_id)
         except AssetDocumentNotFound as exc:
