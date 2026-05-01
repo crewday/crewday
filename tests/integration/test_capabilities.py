@@ -37,6 +37,7 @@ def _empty_capabilities() -> Capabilities:
         email_bounce_webhooks=False,
         llm_voice_input=False,
         postgis=False,
+        webauthn_configured=False,
     )
     return Capabilities(features=features, settings=DeploymentSettings())
 

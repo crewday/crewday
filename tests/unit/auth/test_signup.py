@@ -275,6 +275,7 @@ def capabilities_enabled() -> Capabilities:
             email_bounce_webhooks=False,
             llm_voice_input=False,
             postgis=False,
+            webauthn_configured=False,
         ),
         settings=DeploymentSettings(signup_enabled=True, captcha_required=False),
     )
@@ -292,6 +293,7 @@ def capabilities_disabled() -> Capabilities:
             email_bounce_webhooks=False,
             llm_voice_input=False,
             postgis=False,
+            webauthn_configured=False,
         ),
         settings=DeploymentSettings(signup_enabled=False),
     )
@@ -1653,6 +1655,7 @@ def _capabilities_with_cap(cap_cents: int) -> Capabilities:
             email_bounce_webhooks=False,
             llm_voice_input=False,
             postgis=False,
+            webauthn_configured=False,
         ),
         settings=DeploymentSettings(
             signup_enabled=True,

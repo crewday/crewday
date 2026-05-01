@@ -32,6 +32,7 @@ from sqlalchemy import select
 
 from app.adapters.db.capabilities.models import DeploymentSetting
 from app.adapters.db.ports import DbSession
+from app.auth.webauthn import RelyingPartyMisconfigured, make_relying_party
 from app.config import Settings
 
 __all__ = [
@@ -80,6 +81,12 @@ class Features:
     email_bounce_webhooks: bool
     llm_voice_input: bool
     postgis: bool
+    # ``True`` when :func:`app.auth.webauthn.make_relying_party` accepted
+    # the boot settings — i.e. ``rp_id`` and ``origin`` agree and neither
+    # is missing. Probed once at boot so the rest of the app can branch
+    # on a single boolean instead of catching ``RelyingPartyMisconfigured``
+    # at every passkey call site.
+    webauthn_configured: bool
 
 
 @dataclass(slots=True)
@@ -247,6 +254,28 @@ def _sqlite_has_fts5() -> bool:
         conn.close()
 
 
+def _probe_webauthn_configured(settings: Settings) -> bool:
+    """Try to build the WebAuthn relying party; return whether it succeeded.
+
+    A misconfiguration (``rp_id`` / origin mismatch, missing hostname,
+    bad scheme) is logged at WARNING with ``settings.public_url`` so an
+    operator can diagnose, but does NOT crash boot — passkey ceremonies
+    will reject themselves through the same exception when they try to
+    use the relying party. Other exceptions are programming bugs and
+    propagate so they surface during development.
+    """
+    try:
+        make_relying_party(settings)
+    except RelyingPartyMisconfigured as exc:
+        _LOGGER.warning(
+            "capabilities: webauthn relying-party misconfigured (public_url=%r): %s",
+            settings.public_url,
+            exc,
+        )
+        return False
+    return True
+
+
 def _probe_features(settings: Settings) -> Features:
     """Boot-time probe of every :class:`Features` field.
 
@@ -282,6 +311,7 @@ def _probe_features(settings: Settings) -> Features:
         # is registered now so future PostGIS migrations can flip it
         # without changing route/service call sites.
         postgis=False,
+        webauthn_configured=_probe_webauthn_configured(settings),
     )
 
 

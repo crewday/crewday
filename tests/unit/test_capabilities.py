@@ -19,6 +19,7 @@ from typing import Literal
 
 import pytest
 
+from app.auth.webauthn import RelyingPartyMisconfigured
 from app.capabilities import (
     Capabilities,
     DeploymentSettings,
@@ -281,3 +282,56 @@ class TestSqliteFts5Probe:
         """Sanity check: the probe always returns a bool, never raises."""
         result = _sqlite_has_fts5()
         assert isinstance(result, bool)
+
+
+class TestProbeWebauthnConfigured:
+    """``webauthn_configured`` reflects ``make_relying_party`` outcome.
+
+    The dev fallback (``CREWDAY_PUBLIC_URL`` unset, bind on
+    ``127.0.0.1``) is a valid WebAuthn origin — browsers grant
+    ``localhost`` / ``127.0.0.1`` a secure-context exemption — so the
+    boot probe must report ``True`` without an explicit ``public_url``.
+    """
+
+    def test_dev_fallback_yields_configured_true(self) -> None:
+        features = _probe_features(_sqlite_settings())
+        assert features.webauthn_configured is True
+
+    def test_explicit_public_url_yields_configured_true(self) -> None:
+        settings = _sqlite_settings()
+        settings = Settings.model_construct(
+            **{**settings.model_dump(), "public_url": "https://app.example.com"}
+        )
+        features = _probe_features(settings)
+        assert features.webauthn_configured is True
+
+    def test_misconfiguration_does_not_crash_boot(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+        allow_propagated_log_capture: Callable[..., None],
+    ) -> None:
+        """A bad RP config logs at WARNING and lands the flag as ``False``.
+
+        We monkeypatch the seam ``make_relying_party`` rather than feed
+        a real bad URL so the test is decoupled from the validator's
+        exact rules — what matters is that any ``RelyingPartyMisconfigured``
+        is converted to ``webauthn_configured=False`` without raising.
+        """
+
+        def _raise(_settings: Settings) -> None:
+            raise RelyingPartyMisconfigured("rp_id mismatch (test)")
+
+        monkeypatch.setattr("app.capabilities.make_relying_party", _raise)
+        allow_propagated_log_capture("app.capabilities")
+        caplog.set_level(logging.WARNING, logger="app.capabilities")
+        features = _probe_features(_sqlite_settings())
+        assert features.webauthn_configured is False
+        warnings = [
+            record
+            for record in caplog.records
+            if record.name == "app.capabilities"
+            and record.levelno == logging.WARNING
+            and "webauthn relying-party misconfigured" in record.getMessage()
+        ]
+        assert len(warnings) == 1

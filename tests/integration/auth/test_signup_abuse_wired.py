@@ -99,6 +99,7 @@ def capabilities_captcha_required() -> Capabilities:
             email_bounce_webhooks=False,
             llm_voice_input=False,
             postgis=False,
+            webauthn_configured=False,
         ),
         settings=DeploymentSettings(signup_enabled=True, captcha_required=True),
     )
@@ -116,6 +117,7 @@ def capabilities_captcha_optional() -> Capabilities:
             email_bounce_webhooks=False,
             llm_voice_input=False,
             postgis=False,
+            webauthn_configured=False,
         ),
         settings=DeploymentSettings(signup_enabled=True, captcha_required=False),
     )

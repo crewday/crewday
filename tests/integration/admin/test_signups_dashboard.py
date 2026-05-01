@@ -98,6 +98,7 @@ def client(
                     email_bounce_webhooks=False,
                     llm_voice_input=False,
                     postgis=False,
+                    webauthn_configured=False,
                 ),
                 settings=DeploymentSettings(
                     signup_enabled=True,
