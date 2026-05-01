@@ -54,8 +54,7 @@ through the keyword-only parameters on the entry points.
   ``Occurrence.inventory_consumption_json`` remains a consume-only
   fallback while older generated rows are phased out.
 * :data:`AssetActionHook` — updates ``asset_action.last_performed_*``
-  (§21) when the task has ``asset_action_id``. Default no-op —
-  the ``asset_action`` table is not in the schema yet.
+  (§21) when the task has ``asset_action_id``.
 * :data:`TombstoneHook` — writes the ``task_completion`` tombstone
   (§06 "Completing a task" #5).
 
@@ -113,9 +112,10 @@ from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from typing import Any, Literal
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
+from app.adapters.db.assets.models import AssetAction
 from app.adapters.db.inventory.models import Item
 from app.adapters.db.tasks.models import (
     ChecklistItem,
@@ -278,9 +278,9 @@ effects while older generators are phased out.
 AssetActionHook = Callable[[Session, WorkspaceContext, Occurrence], None]
 """Port: stamp ``asset_action.last_performed_*`` at completion.
 
-Default :func:`_default_asset_action` is a no-op — the
-``asset_action`` table is not in the schema yet. The real body
-plugs in with the cd-asset-action-v1 follow-up.
+Default :func:`_default_asset_action` writes the linked
+``asset_action.last_performed_at`` and ``last_performed_task_id`` cache
+when the task carries ``asset_action_id``.
 """
 
 TombstoneHook = Callable[[Session, WorkspaceContext, Occurrence], None]
@@ -789,14 +789,26 @@ def _audit_inventory_effect_issue(
 def _default_asset_action(
     session: Session, ctx: WorkspaceContext, task: Occurrence
 ) -> None:
-    """No-op: the ``asset_action`` table is not in the schema yet.
-
-    Filed as a spec-drift follow-up alongside cd-7am7 — the real
-    body stamps ``asset_action.last_performed_at`` and
-    ``asset_action.last_performed_task_id`` per §21.
-    """
-    _ = session, ctx, task
-    return None
+    """Stamp the linked asset action cache after task completion."""
+    if task.asset_action_id is None:
+        return
+    if task.completed_at is None:
+        raise ValueError("cannot stamp asset_action before completed_at is set")
+    with tenant_agnostic():
+        session.execute(
+            update(AssetAction)
+            .where(
+                AssetAction.workspace_id == ctx.workspace_id,
+                AssetAction.id == task.asset_action_id,
+                AssetAction.deleted_at.is_(None),
+            )
+            .values(
+                last_performed_at=task.completed_at,
+                last_performed_task_id=task.id,
+                updated_at=task.completed_at,
+            )
+        )
+    session.flush()
 
 
 def _default_tombstone(

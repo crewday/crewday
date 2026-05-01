@@ -9,8 +9,8 @@ surface can support it:
   uniqueness scoped to the workspace.
 * ``asset_action`` is the scheduled/performable action definition
   shape from §21. The table stores ``last_performed_at`` as the
-  history ordering/cache timestamp; it does not add the occurrence
-  ``asset_action_id`` hook reserved for cd-vajl.
+  history ordering/cache timestamp used by the cd-vajl occurrence
+  completion hook.
 * ``asset_document`` uses the spec-shaped asset-or-property attachment
   contract. ``file_id`` is a soft reference until the shared ``file``
   table from §02 lands.

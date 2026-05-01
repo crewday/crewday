@@ -768,6 +768,10 @@ class Occurrence(Base):
     area_id: Mapped[str | None] = mapped_column(String, nullable=True)
     unit_id: Mapped[str | None] = mapped_column(String, nullable=True)
     expected_role_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    # §21 asset traceability links. Kept as soft pointers to avoid
+    # hard-deleting maintenance history when an asset/action is retired.
+    asset_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    asset_action_id: Mapped[str | None] = mapped_column(String, nullable=True)
     # §07 linked instructions + §08 SKU → qty inventory consumption.
     # Both copied down from the template on the ad-hoc path; the
     # authoritative per-task lists live on the parent template until
@@ -832,6 +836,12 @@ class Occurrence(Base):
             "workspace_id",
             "state",
             "overdue_since",
+        ),
+        Index("ix_occurrence_workspace_asset", "workspace_id", "asset_id"),
+        Index(
+            "ix_occurrence_workspace_asset_action",
+            "workspace_id",
+            "asset_action_id",
         ),
         # cd-22e idempotency guard: two generator runs over the same
         # window must not materialise the same ``(schedule_id,

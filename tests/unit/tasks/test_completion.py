@@ -49,6 +49,7 @@ from pydantic import ValidationError
 from sqlalchemy import Engine, select
 from sqlalchemy.orm import Session, sessionmaker
 
+from app.adapters.db.assets.models import Asset, AssetAction
 from app.adapters.db.audit.models import AuditLog
 from app.adapters.db.base import Base
 from app.adapters.db.inventory.models import Item, Movement
@@ -241,6 +242,8 @@ def _bootstrap_occurrence(
     state: str = "pending",
     photo_evidence: str = "disabled",
     inventory: dict[str, Any] | None = None,
+    asset_id: str | None = None,
+    asset_action_id: str | None = None,
 ) -> str:
     oid = new_ulid()
     session.add(
@@ -269,6 +272,8 @@ def _bootstrap_occurrence(
             area_id=None,
             unit_id=None,
             expected_role_id=None,
+            asset_id=asset_id,
+            asset_action_id=asset_action_id,
             linked_instruction_ids=[],
             inventory_consumption_json=inventory or {},
             is_personal=False,
@@ -278,6 +283,47 @@ def _bootstrap_occurrence(
     )
     session.flush()
     return oid
+
+
+def _bootstrap_asset_action(
+    session: Session,
+    *,
+    workspace_id: str,
+    property_id: str,
+) -> tuple[str, str]:
+    asset_id = new_ulid()
+    action_id = new_ulid()
+    session.add(
+        Asset(
+            id=asset_id,
+            workspace_id=workspace_id,
+            property_id=property_id,
+            asset_type_id=None,
+            name="Living room AC",
+            condition="good",
+            status="active",
+            qr_token="ACTEST000001",
+            created_at=_PINNED,
+            updated_at=_PINNED,
+        )
+    )
+    session.add(
+        AssetAction(
+            id=action_id,
+            workspace_id=workspace_id,
+            asset_id=asset_id,
+            key="filter_clean",
+            kind="service",
+            label="Clean filter",
+            interval_days=30,
+            last_performed_at=None,
+            last_performed_task_id=None,
+            created_at=_PINNED,
+            updated_at=_PINNED,
+        )
+    )
+    session.flush()
+    return asset_id, action_id
 
 
 def _bootstrap_template(
@@ -609,6 +655,34 @@ class TestComplete:
             ).all()
         ]
         assert actions == ["task.complete", "task.approval_requested"]
+
+    def test_default_asset_action_hook_stamps_linked_action(
+        self, session: Session, clock: FrozenClock, bus: EventBus
+    ) -> None:
+        ws = _bootstrap_workspace(session)
+        prop = _bootstrap_property(session)
+        worker = _bootstrap_user(session)
+        asset_id, action_id = _bootstrap_asset_action(
+            session, workspace_id=ws, property_id=prop
+        )
+        occ = _bootstrap_occurrence(
+            session,
+            workspace_id=ws,
+            property_id=prop,
+            assignee_user_id=worker,
+            asset_id=asset_id,
+            asset_action_id=action_id,
+        )
+        ctx = _ctx(ws, role="worker", owner=False, actor_id=worker)
+
+        complete(session, ctx, occ, clock=clock, event_bus=bus)
+
+        action = session.get(AssetAction, action_id)
+        assert action is not None
+        assert action.last_performed_at is not None
+        assert action.last_performed_at.replace(tzinfo=UTC) == _PINNED
+        assert action.last_performed_task_id == occ
+        assert action.updated_at.replace(tzinfo=UTC) == _PINNED
 
     def test_note_md_persisted_on_occurrence(
         self, session: Session, clock: FrozenClock, bus: EventBus

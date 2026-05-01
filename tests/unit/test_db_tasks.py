@@ -266,6 +266,8 @@ class TestOccurrenceModel:
         assert occ.due_by_utc == _LATER
         assert occ.reviewer_user_id is None
         assert occ.reviewed_at is None
+        assert occ.asset_id is None
+        assert occ.asset_action_id is None
         assert occ.state == "pending"
 
     def test_tablename(self) -> None:
@@ -300,6 +302,8 @@ class TestOccurrenceModel:
         assert columns.overdue_since.type.timezone is True
         assert isinstance(columns.due_by_utc.type, DateTime)
         assert columns.due_by_utc.type.timezone is True
+        assert "asset_id" in columns
+        assert "asset_action_id" in columns
 
     def test_ends_after_starts_check_present(self) -> None:
         checks = [
@@ -319,6 +323,8 @@ class TestOccurrenceModel:
         names = [i.name for i in indexes]
         assert "ix_occurrence_workspace_assignee_starts" in names
         assert "ix_occurrence_workspace_state_starts" in names
+        assert "ix_occurrence_workspace_asset" in names
+        assert "ix_occurrence_workspace_asset_action" in names
         assignee_ix = next(
             i for i in indexes if i.name == "ix_occurrence_workspace_assignee_starts"
         )
@@ -334,6 +340,13 @@ class TestOccurrenceModel:
             "workspace_id",
             "state",
             "starts_at",
+        ]
+        asset_action_ix = next(
+            i for i in indexes if i.name == "ix_occurrence_workspace_asset_action"
+        )
+        assert [c.name for c in asset_action_ix.columns] == [
+            "workspace_id",
+            "asset_action_id",
         ]
 
 
