@@ -78,6 +78,27 @@ export interface AdminAuditListResponse {
   has_more: boolean;
 }
 
+export type AdminSignupSignalKind =
+  | "burst_rate"
+  | "distinct_emails_one_ip"
+  | "repeat_email"
+  | "quota_near_breach";
+
+export interface AdminSignupSignal {
+  event_id: string;
+  kind: AdminSignupSignalKind;
+  occurred_at: string;
+  ip_hash: string | null;
+  email_hash: string | null;
+  detail: JsonValue;
+}
+
+export interface AdminSignupsResponse {
+  data: AdminSignupSignal[];
+  next_cursor: string | null;
+  has_more: boolean;
+}
+
 export interface AdminChatProviderCredential {
   field: string;
   label: string;

@@ -52,6 +52,7 @@ import AdminLlmPage from "@/pages/admin/LlmPage";
 import AdminAgentDocsPage from "@/pages/admin/AgentDocsPage";
 import AdminUsagePage from "@/pages/admin/UsagePage";
 import AdminWorkspacesPage from "@/pages/admin/WorkspacesPage";
+import AdminSignupsPage from "@/pages/admin/SignupsPage";
 import AdminSettingsPage from "@/pages/admin/SettingsPage";
 import AdminAdminsPage from "@/pages/admin/AdminsPage";
 import AdminAuditPage from "@/pages/admin/AuditPage";
@@ -307,6 +308,7 @@ export default function App() {
             <Route path="/admin/agent-docs" element={<AdminAgentDocsPage />} />
             <Route path="/admin/usage" element={<AdminUsagePage />} />
             <Route path="/admin/workspaces" element={<AdminWorkspacesPage />} />
+            <Route path="/admin/signups" element={<AdminSignupsPage />} />
             <Route path="/admin/signup" element={<Navigate to="/admin/settings#signup" replace />} />
             <Route path="/admin/settings" element={<AdminSettingsPage />} />
             <Route path="/admin/admins" element={<AdminAdminsPage />} />

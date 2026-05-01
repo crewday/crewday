@@ -35,17 +35,20 @@ See ``docs/specs/03-auth-and-tokens.md`` §"Self-serve signup" and
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timedelta
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.adapters.db.audit.models import AuditLog
 from app.adapters.db.identity.models import SignupAttempt, canonicalise_email
 from app.adapters.db.session import make_uow
 from app.adapters.mail.ports import Mailer
 from app.api.deps import db_session
-from app.audit import write_audit
+from app.audit import write_audit, write_deployment_audit
 from app.auth import passkey, signup, signup_abuse
 from app.auth._hashing import hash_with_pepper
 from app.auth._throttle import SignupRateLimited, Throttle
@@ -65,6 +68,7 @@ from app.capabilities import Capabilities
 from app.config import Settings, get_settings
 from app.tenancy import InvalidSlug, tenant_agnostic
 from app.util.clock import SystemClock
+from app.util.ulid import new_ulid
 
 __all__ = [
     "PasskeyFinishBody",
@@ -82,6 +86,9 @@ __all__ = [
 _Db = Annotated[Session, Depends(db_session)]
 
 _log = logging.getLogger(__name__)
+
+_SUSPICIOUS_DISTINCT_EMAILS_PER_IP = 3
+_SUSPICIOUS_IP_WINDOW = timedelta(hours=1)
 
 
 # ---------------------------------------------------------------------------
@@ -437,6 +444,123 @@ def _audit_signup_refusal(
         _log.exception("signup refusal audit write failed on fresh UoW")
 
 
+def _suspicious_kind(exc: SignupRateLimited) -> str:
+    """Map a signup-start throttle scope to the admin feed kind."""
+    if exc.scope == "email":
+        return "repeat_email"
+    if exc.scope == "ip":
+        return "distinct_emails_one_ip"
+    return "burst_rate"
+
+
+def _audit_signup_suspicious(
+    *,
+    exc: SignupRateLimited,
+    email_hash: str,
+    ip_hash: str,
+    reason: str,
+) -> None:
+    """Emit the deployment-scoped suspicious-signup signal for admins."""
+    try:
+        with make_uow() as uow_session:
+            assert isinstance(uow_session, Session)
+            write_deployment_audit(
+                uow_session,
+                actor_id="00000000000000000000000000",
+                actor_kind="system",
+                actor_grant_role="manager",
+                actor_was_owner_member=False,
+                correlation_id=new_ulid(),
+                entity_kind="signup_attempt",
+                entity_id=email_hash if exc.scope == "email" else ip_hash,
+                action="audit.signup.suspicious",
+                diff={
+                    "kind": _suspicious_kind(exc),
+                    "scope": exc.scope,
+                    "reason": reason,
+                    "email_hash": email_hash,
+                    "ip_hash": ip_hash,
+                    "retry_after_seconds": exc.retry_after_seconds,
+                },
+            )
+    except Exception:
+        _log.exception("signup suspicious audit write failed on fresh UoW")
+
+
+def _has_recent_distinct_ip_signal(
+    session: Session,
+    *,
+    ip_hash: str,
+    since: datetime,
+) -> bool:
+    rows = session.scalars(
+        select(AuditLog).where(
+            AuditLog.scope_kind == "deployment",
+            AuditLog.action == "audit.signup.suspicious",
+            AuditLog.created_at >= since,
+        )
+    ).all()
+    for row in rows:
+        diff = row.diff
+        if (
+            isinstance(diff, dict)
+            and diff.get("kind") == "distinct_emails_one_ip"
+            and diff.get("ip_hash") == ip_hash
+        ):
+            return True
+    return False
+
+
+def _audit_distinct_emails_one_ip_if_suspicious(
+    *,
+    email_hash: str,
+    ip_hash: str,
+    now: datetime,
+) -> None:
+    """Emit the lower-threshold same-IP/many-emails signal for admins."""
+    window_start = now - _SUSPICIOUS_IP_WINDOW
+    try:
+        with make_uow() as uow_session:
+            assert isinstance(uow_session, Session)
+            with tenant_agnostic():
+                email_hashes = set(
+                    uow_session.scalars(
+                        select(SignupAttempt.email_hash).where(
+                            SignupAttempt.ip_hash == ip_hash,
+                            SignupAttempt.created_at >= window_start,
+                        )
+                    ).all()
+                )
+                if len(email_hashes) < _SUSPICIOUS_DISTINCT_EMAILS_PER_IP:
+                    return
+                if _has_recent_distinct_ip_signal(
+                    uow_session, ip_hash=ip_hash, since=window_start
+                ):
+                    return
+            write_deployment_audit(
+                uow_session,
+                actor_id="00000000000000000000000000",
+                actor_kind="system",
+                actor_grant_role="manager",
+                actor_was_owner_member=False,
+                correlation_id=new_ulid(),
+                entity_kind="signup_attempt",
+                entity_id=ip_hash,
+                action="audit.signup.suspicious",
+                diff={
+                    "kind": "distinct_emails_one_ip",
+                    "scope": "ip",
+                    "reason": "distinct_emails_one_ip",
+                    "email_hash": email_hash,
+                    "ip_hash": ip_hash,
+                    "distinct_email_count": len(email_hashes),
+                    "window_seconds": int(_SUSPICIOUS_IP_WINDOW.total_seconds()),
+                },
+            )
+    except Exception:
+        _log.exception("signup distinct-email audit write failed on fresh UoW")
+
+
 def _abuse_audit_action(exc: Exception) -> str:
     """Return the ``audit.signup.*`` action symbol for ``exc``."""
     if isinstance(exc, SignupRateLimited):
@@ -617,6 +741,13 @@ def build_signup_router(
                 ip_hash=ip_hash,
                 reason=reason,
             )
+            if isinstance(exc, SignupRateLimited):
+                _audit_signup_suspicious(
+                    exc=exc,
+                    email_hash=email_hash,
+                    ip_hash=ip_hash,
+                    reason=reason,
+                )
             raise _http_for_abuse(exc) from exc
 
         dispatch: PendingDispatch | None = None
@@ -639,6 +770,11 @@ def build_signup_router(
             # the SMTP send. A commit failure on the line above raises
             # out of this ``try`` and ``dispatch.deliver()`` is never
             # reached — no email leaves the host with a stale nonce.
+            _audit_distinct_emails_one_ip_if_suspicious(
+                email_hash=email_hash,
+                ip_hash=ip_hash,
+                now=now,
+            )
         except _StartDomainError as exc:
             raise _http_for_start(exc) from exc
         if dispatch is not None:
