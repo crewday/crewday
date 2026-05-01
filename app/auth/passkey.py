@@ -41,7 +41,9 @@ pass the gate and land a 6th row.
 **Replay protection.** The challenge row is deleted on a successful
 ``finish`` and exposed finish callers burn it on verification failure
 via :func:`burn_challenge_on_failure`. A second call with the same
-``challenge_id`` returns :class:`ChallengeAlreadyConsumed` (409).
+``challenge_id`` raises :class:`ChallengeNotFound` (409) — the row is
+already gone, so a replay is indistinguishable from a genuinely
+unknown id and the HTTP layer collapses both onto the same envelope.
 Mismatched challenge, origin, or rp_id values raise
 :class:`InvalidRegistration` (400) — we rewrap py_webauthn's
 `InvalidRegistrationResponse` so the HTTP layer doesn't need to know
@@ -106,7 +108,6 @@ from app.util.ulid import new_ulid
 
 __all__ = [
     "AuthenticationOptions",
-    "ChallengeAlreadyConsumed",
     "ChallengeExpired",
     "ChallengeNotFound",
     "ChallengeSubjectMismatch",
@@ -285,9 +286,11 @@ class InvalidRegistration(ValueError):
 class ChallengeNotFound(LookupError):
     """No ``webauthn_challenge`` row with that id.
 
-    Indistinguishable from a replay whose row was already deleted; the
-    HTTP layer maps both to 409 so the API doesn't leak whether a
-    challenge ever existed.
+    Also the canonical surface for a replayed ``finish``: the row is
+    deleted atomically with the credential insert, so a second call
+    with the same id observes the same "row missing" shape as a
+    genuine unknown id. The HTTP layer maps both onto the same 409 so
+    the API doesn't leak whether a challenge ever existed.
     """
 
 
@@ -295,16 +298,6 @@ class ChallengeExpired(ValueError):
     """Challenge TTL elapsed before ``finish`` was called.
 
     400-equivalent. The client must call ``/start`` again.
-    """
-
-
-class ChallengeAlreadyConsumed(LookupError):
-    """Reserved alias of :class:`ChallengeNotFound` for clarity at call sites.
-
-    The row is deleted atomically with the credential insert, so a
-    replay observes the same "row missing" shape as a genuine unknown
-    id. We surface the two as separate types so tests can assert the
-    specific HTTP 409 mapping intended by the spec (AC #5).
     """
 
 
@@ -783,7 +776,8 @@ def register_finish(
     Writes one ``passkey_credential`` row and one
     ``audit.passkey.registered`` audit row in the caller's open
     transaction, then deletes the consumed challenge so a replay
-    raises :class:`ChallengeAlreadyConsumed`.
+    raises :class:`ChallengeNotFound` (the canonical replay surface;
+    the row is gone, indistinguishable from a never-existed id).
 
     ``now`` lets callers forward an already-resolved wall-clock time
     so the challenge-TTL comparison and the credential row's

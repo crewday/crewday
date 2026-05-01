@@ -264,7 +264,6 @@ _InviteDomainError = (
 # error envelope stays consistent across the two enrolment surfaces.
 _PasskeyDomainError = (
     passkey_service.ChallengeNotFound,
-    passkey_service.ChallengeAlreadyConsumed,
     passkey_service.ChallengeExpired,
     passkey_service.ChallengeSubjectMismatch,
     passkey_service.InvalidRegistration,
@@ -349,10 +348,10 @@ def _http_for_invite_passkey(exc: Exception) -> HTTPException:
     branches so the SPA's enrolment-error renderer can reuse one
     handler for both signup-flow and invite-flow ceremonies.
     """
-    if isinstance(
-        exc,
-        passkey_service.ChallengeNotFound | passkey_service.ChallengeAlreadyConsumed,
-    ):
+    if isinstance(exc, passkey_service.ChallengeNotFound):
+        # ChallengeNotFound covers both a never-existed id and a
+        # replayed finish (the row is deleted atomically with the
+        # credential insert), so the two shapes share the 409 envelope.
         return HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail={"error": "challenge_consumed_or_unknown"},

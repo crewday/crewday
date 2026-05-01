@@ -36,7 +36,6 @@ from app.adapters.db.session import make_engine
 from app.adapters.db.workspace.models import Workspace
 from app.auth import passkey as passkey_module
 from app.auth.passkey import (
-    ChallengeAlreadyConsumed,
     ChallengeExpired,
     ChallengeNotFound,
     ChallengeSubjectMismatch,
@@ -1012,25 +1011,6 @@ class TestRegisterSignupFlow:
                 clock=clock,
                 rp=rp,
             )
-
-
-# ---------------------------------------------------------------------------
-# Alias types
-# ---------------------------------------------------------------------------
-
-
-class TestErrorAliases:
-    """``ChallengeAlreadyConsumed`` is a distinct type from
-    ``ChallengeNotFound`` so tests can pin the spec mapping, even
-    though the router collapses both to 409."""
-
-    def test_distinct_types(self) -> None:
-        # Both subclass ``LookupError`` but are declared in separate
-        # ``class`` statements; mypy sees them as non-overlapping, which
-        # is the contract we want the suite to lock in.
-        assert ChallengeAlreadyConsumed.__qualname__ != ChallengeNotFound.__qualname__
-        assert issubclass(ChallengeAlreadyConsumed, LookupError)
-        assert issubclass(ChallengeNotFound, LookupError)
 
 
 # ---------------------------------------------------------------------------

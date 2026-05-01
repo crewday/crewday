@@ -212,7 +212,6 @@ _CompleteDomainError = (
     signup.SignupAttemptMissing,
     signup.SignupAttemptExpired,
     passkey.ChallengeNotFound,
-    passkey.ChallengeAlreadyConsumed,
     passkey.ChallengeExpired,
     passkey.ChallengeSubjectMismatch,
     passkey.InvalidRegistration,
@@ -348,7 +347,10 @@ def _http_for_complete(exc: Exception) -> HTTPException:
             status_code=status.HTTP_409_CONFLICT,
             detail={"error": exc.state},
         )
-    if isinstance(exc, passkey.ChallengeNotFound | passkey.ChallengeAlreadyConsumed):
+    if isinstance(exc, passkey.ChallengeNotFound):
+        # ChallengeNotFound covers both a never-existed id and a
+        # replayed finish (the row is deleted atomically with the
+        # credential insert), so the two shapes share the 409 envelope.
         return HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail={"error": "challenge_consumed_or_unknown"},
@@ -854,7 +856,6 @@ def build_signup_router(
             )
         except (
             passkey.ChallengeNotFound,
-            passkey.ChallengeAlreadyConsumed,
             passkey.ChallengeExpired,
             passkey.ChallengeSubjectMismatch,
             passkey.InvalidRegistration,

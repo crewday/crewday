@@ -34167,7 +34167,7 @@
     },
     "/api/v1/auth/passkey/login/finish": {
       "post": {
-        "description": "Run :func:`login_finish`, stamp the session cookie on success.\n\nOn failure we hash the observable identifiers for audit and\nthrottle advancement. The HTTP envelope collapses\n:class:`InvalidLoginAttempt`, :class:`CloneDetected`,\n:class:`ChallengeSubjectMismatch`, :class:`ChallengeNotFound`,\n:class:`ChallengeAlreadyConsumed`, and :class:`ChallengeExpired`\ninto the same ``401 invalid_credential`` shape so the client\ncan't fingerprint which internal gate refused the request.\n:class:`PasskeyLoginLockout` maps to ``429 rate_limited``\nbecause the lockout is the one failure the SPA can act on\n(back off).",
+        "description": "Run :func:`login_finish`, stamp the session cookie on success.\n\nOn failure we hash the observable identifiers for audit and\nthrottle advancement. The HTTP envelope collapses\n:class:`InvalidLoginAttempt`, :class:`CloneDetected`,\n:class:`ChallengeSubjectMismatch`, :class:`ChallengeNotFound`,\nand :class:`ChallengeExpired` into the same\n``401 invalid_credential`` shape so the client can't\nfingerprint which internal gate refused the request.\n:class:`PasskeyLoginLockout` maps to ``429 rate_limited``\nbecause the lockout is the one failure the SPA can act on\n(back off).",
         "operationId": "auth.passkey.login_finish",
         "requestBody": {
           "content": {

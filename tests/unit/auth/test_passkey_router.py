@@ -502,11 +502,12 @@ class TestRegisterFinishChallengeSingleUse:
 
     The failing paths for :func:`register_finish` are enumerated in
     its docstring — ChallengeExpired, ChallengeSubjectMismatch,
-    InvalidRegistration, TooManyPasskeys. ChallengeNotFound /
-    ChallengeAlreadyConsumed are naturally idempotent (the row is
-    already gone) so they exercise the zero-rows-affected branch.
-    Every failure must leave the DB without the challenge row, even
-    though the primary UoW rolled back on the raise.
+    InvalidRegistration, TooManyPasskeys. ChallengeNotFound (also the
+    canonical surface for a replayed finish — the row is already
+    gone) is naturally idempotent and exercises the
+    zero-rows-affected branch. Every failure must leave the DB
+    without the challenge row, even though the primary UoW rolled
+    back on the raise.
     """
 
     def test_invalid_registration_burns_challenge(

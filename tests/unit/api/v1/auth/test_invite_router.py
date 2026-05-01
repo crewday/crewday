@@ -140,19 +140,19 @@ class TestInvitePasskeyErrorMapping:
     def test_challenge_consumed_or_unknown_maps_to_409(self) -> None:
         """Replay safety: a burnt or never-issued challenge is 409.
 
-        The two cases collapse onto one error envelope so the SPA's
-        retry-or-restart heuristic doesn't have to differentiate
-        them — ``register_finish_signup`` sees both classes as
-        "this challenge cannot be verified" and re-running ``start``
-        is the right next step in either case.
+        ``ChallengeNotFound`` is the canonical surface for both shapes
+        — the row is deleted atomically with the credential insert so
+        a replayed finish is indistinguishable from a never-existed id.
+        The error envelope collapses onto one shape so the SPA's
+        retry-or-restart heuristic doesn't differentiate them; re-running
+        ``start`` is the right next step in either case.
         """
         from app.api.v1.auth.invite import _http_for_invite_passkey
-        from app.auth.passkey import ChallengeAlreadyConsumed, ChallengeNotFound
+        from app.auth.passkey import ChallengeNotFound
 
-        for exc in (ChallengeNotFound("gone"), ChallengeAlreadyConsumed("gone")):
-            http = _http_for_invite_passkey(exc)
-            assert http.status_code == status.HTTP_409_CONFLICT
-            assert self._detail_dict(http) == {"error": "challenge_consumed_or_unknown"}
+        http = _http_for_invite_passkey(ChallengeNotFound("gone"))
+        assert http.status_code == status.HTTP_409_CONFLICT
+        assert self._detail_dict(http) == {"error": "challenge_consumed_or_unknown"}
 
     def test_too_many_passkeys_maps_to_422(self) -> None:
         """Concurrent enrolment race: a 6th-passkey insert hits the cap."""

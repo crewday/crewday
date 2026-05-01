@@ -66,7 +66,6 @@ from app.auth._throttle import PasskeyLoginLockout, Throttle
 from app.auth.keys import derive_subkey
 from app.auth.passkey import (
     AuthenticationOptions,
-    ChallengeAlreadyConsumed,
     ChallengeExpired,
     ChallengeNotFound,
     ChallengeSubjectMismatch,
@@ -157,7 +156,6 @@ _DomainError = (
     TooManyPasskeys,
     InvalidRegistration,
     ChallengeNotFound,
-    ChallengeAlreadyConsumed,
     ChallengeExpired,
     ChallengeSubjectMismatch,
     LookupError,
@@ -182,9 +180,10 @@ def _http_for(exc: Exception) -> HTTPException:
             status_code=422,
             detail={"error": "too_many_passkeys"},
         )
-    if isinstance(exc, ChallengeNotFound | ChallengeAlreadyConsumed):
-        # AC #5 — a replayed finish raises ChallengeAlreadyConsumed;
-        # a genuinely unknown id is indistinguishable for privacy and
+    if isinstance(exc, ChallengeNotFound):
+        # AC #5 — a replayed finish raises ChallengeNotFound (the row
+        # was deleted atomically with the credential insert); a
+        # genuinely unknown id is indistinguishable for privacy and
         # maps to the same 409. The HTTP body does NOT reveal which.
         return HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -838,9 +837,9 @@ def build_login_router(
         throttle advancement. The HTTP envelope collapses
         :class:`InvalidLoginAttempt`, :class:`CloneDetected`,
         :class:`ChallengeSubjectMismatch`, :class:`ChallengeNotFound`,
-        :class:`ChallengeAlreadyConsumed`, and :class:`ChallengeExpired`
-        into the same ``401 invalid_credential`` shape so the client
-        can't fingerprint which internal gate refused the request.
+        and :class:`ChallengeExpired` into the same
+        ``401 invalid_credential`` shape so the client can't
+        fingerprint which internal gate refused the request.
         :class:`PasskeyLoginLockout` maps to ``429 rate_limited``
         because the lockout is the one failure the SPA can act on
         (back off).
@@ -959,7 +958,6 @@ def build_login_router(
         except (
             InvalidLoginAttempt,
             ChallengeNotFound,
-            ChallengeAlreadyConsumed,
             ChallengeExpired,
             ChallengeSubjectMismatch,
         ) as exc:
@@ -985,7 +983,7 @@ def build_login_router(
             )
             # cd-qx1f: single-use even on failure. ``ChallengeNotFound``
             # naturally lands in a no-op delete (row already gone);
-            # the other four burn the row so a leaked id can't be
+            # the other three burn the row so a leaked id can't be
             # replayed until TTL. Idempotent.
             burn_challenge_on_failure(body.challenge_id)
             raise HTTPException(
