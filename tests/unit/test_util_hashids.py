@@ -32,12 +32,18 @@ class TestRoundTrip:
 
 
 class TestTampering:
-    def test_flipped_byte_raises_token_invalid(self) -> None:
+    def test_payload_byte_mutation_raises_token_invalid(self) -> None:
+        # itsdangerous tokens are ``payload.timestamp.signature``. Mutating a
+        # byte in the trailing signature segment can be silently absorbed by
+        # base64 padding bits (the last char may only contribute a partial
+        # byte), so flip a character in the *payload* segment instead — any
+        # change there forces the HMAC over ``payload.timestamp`` to differ
+        # and guarantees ``TokenInvalid``.
         token = encode_token({"k": "v"}, _SECRET, _SALT)
-        # Flip the last character — sits inside the signature tail.
-        last = token[-1]
-        swap = "A" if last != "A" else "B"
-        tampered = token[:-1] + swap
+        head, sep, tail = token.rpartition(".")
+        assert sep == ".", token
+        new_head = ("X" if head[0] != "X" else "Y") + head[1:]
+        tampered = new_head + sep + tail
         with pytest.raises(TokenInvalid):
             decode_token(tampered, _SECRET, _SALT, max_age_seconds=60)
 
