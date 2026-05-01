@@ -25,11 +25,11 @@
 * ``/healthz``, ``/readyz``, ``/version`` are the unconditional ops
   probes (§16 "Healthchecks");
 * the SPA seam depends on :attr:`Settings.profile`: the ``prod`` path
-  mounts ``app/web/dist/`` as :class:`StaticFiles` with a catch-all
-  that returns ``index.html`` for any non-API GET (§14 "SPA
-  fallback"); the ``dev`` path installs an HTTP proxy to the Vite
-  dev server at :attr:`Settings.vite_dev_url` so HMR keeps working
-  while an engineer edits ``app/web/src/`` (cd-q1be).
+  mounts ``app/web/dist/assets`` as :class:`StaticFiles` with a
+  catch-all that renders ``index.html`` for any non-API GET (§14 "SPA
+  fallback"); the ``dev`` path installs an HTTP proxy to the Vite dev
+  server at :attr:`Settings.vite_dev_url` so HMR keeps working while
+  an engineer edits ``app/web/src/`` (cd-q1be).
 
 The factory is deliberately the single seam between ``Settings`` and
 every other module. Tests pass a pinned :class:`Settings` via
@@ -50,6 +50,7 @@ URL", §"OpenAPI"; ``docs/specs/16-deployment-operations.md``
 from __future__ import annotations
 
 import logging
+import re
 from collections.abc import AsyncIterator, Callable, Iterator
 from contextlib import AbstractAsyncContextManager, asynccontextmanager, contextmanager
 from datetime import timedelta
@@ -69,6 +70,7 @@ from fastapi.responses import (
     Response,
 )
 from fastapi.staticfiles import StaticFiles
+from jinja2 import Environment, StrictUndefined, select_autoescape
 from pydantic import SecretStr
 from sqlalchemy.orm import Session
 from starlette.middleware.cors import CORSMiddleware
@@ -213,6 +215,25 @@ _SPA_DIST: Final[Path] = _REPO_ROOT / "app" / "web" / "dist"
 _SPA_STUB_HTML: Final[str] = (
     "<!doctype html><html><head><title>crewday</title></head>"
     "<body><h1>SPA not built — run pnpm build in app/web</h1></body></html>"
+)
+_SPA_TEMPLATE_ENV: Final[Environment] = Environment(
+    autoescape=select_autoescape(
+        enabled_extensions=("html",),
+        default_for_string=True,
+        default=True,
+    ),
+    undefined=StrictUndefined,
+)
+_INLINE_CSP_TAG_RE: Final[re.Pattern[str]] = re.compile(
+    r"<(?P<tag>script|style)\b(?P<attrs>[^>]*)>",
+    re.IGNORECASE,
+)
+_HTML_ATTR_RE: Final[re.Pattern[str]] = re.compile(
+    r"(?P<name>[A-Za-z_:][A-Za-z0-9_.:-]*)\s*="
+)
+_HTML_NONCE_ATTR_RE: Final[re.Pattern[str]] = re.compile(
+    r"(?P<prefix>\snonce\s*=\s*)(?P<quote>[\"'])(?P<value>.*?)(?P=quote)",
+    re.IGNORECASE,
 )
 
 # OpenAPI document version we emit. FastAPI 0.111+ emits 3.1 by default
@@ -372,6 +393,40 @@ def _is_api_path(path: str) -> bool:
         # ``api/...`` is the JSON API; everything else is SPA chrome.
         return len(segments) >= 3 and segments[2] == "api"
     return False
+
+
+def _stamp_inline_csp_nonces(html: str, nonce: str) -> str:
+    """Add ``nonce`` to inline ``script`` / ``style`` tags.
+
+    External scripts and styles are deliberately left alone: CSP nonces
+    are only needed for inline code, and the strict header already
+    allows same-origin external assets.
+    """
+
+    def replace(match: re.Match[str]) -> str:
+        attrs = match.group("attrs")
+        attr_names = {m.group("name").lower() for m in _HTML_ATTR_RE.finditer(attrs)}
+        if attr_names.intersection({"href", "src"}):
+            return match.group(0)
+        if "nonce" in attr_names:
+            attrs = _HTML_NONCE_ATTR_RE.sub(
+                rf'\g<prefix>"{nonce}"',
+                attrs,
+                count=1,
+            )
+            return f'<{match.group("tag")}{attrs}>'
+        return f'<{match.group("tag")}{attrs} nonce="{nonce}">'
+
+    return _INLINE_CSP_TAG_RE.sub(replace, html)
+
+
+def _render_spa_index(index: Path, request: Request) -> HTMLResponse:
+    """Render the Vite index with the request-scoped CSP nonce seam."""
+    csp_nonce = request.state.csp_nonce
+    template = _SPA_TEMPLATE_ENV.from_string(index.read_text(encoding="utf-8"))
+    rendered = template.render(csp_nonce=csp_nonce, request=request)
+    rendered = _stamp_inline_csp_nonces(rendered, csp_nonce)
+    return HTMLResponse(content=rendered, status_code=200)
 
 
 def _wire_services(
@@ -1012,14 +1067,16 @@ def _register_spa_catch_all(app: FastAPI) -> None:
             )
 
     @app.get("/{full_path:path}", include_in_schema=False)
-    def spa_catch_all(full_path: str) -> Response:
-        """Serve ``index.html`` for any non-API GET.
+    def spa_catch_all(request: Request, full_path: str) -> Response:
+        """Render ``index.html`` for any non-API GET.
 
         ``full_path`` is the match FastAPI captures — empty on the
         root ``/``. API prefixes are already peeled off by the earlier
         routers; we defensively re-check via :func:`_is_api_path` here
         so a bad API path returns a JSON 404 rather than leaking the
-        SPA shell.
+        SPA shell. Rendering the index instead of returning it as a
+        static file gives future inline bootstraps access to
+        ``request.state.csp_nonce``.
         """
         path = "/" + full_path
         if _is_api_path(path):
@@ -1044,12 +1101,12 @@ def _register_spa_catch_all(app: FastAPI) -> None:
                 except ValueError:
                     pass
                 else:
-                    if candidate.is_file():
+                    if candidate.is_file() and candidate.name != "index.html":
                         return FileResponse(candidate)
 
             index = dist / "index.html"
             if index.is_file():
-                return FileResponse(index)
+                return _render_spa_index(index, request)
 
         return HTMLResponse(content=_SPA_STUB_HTML, status_code=200)
 

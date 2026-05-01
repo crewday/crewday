@@ -26,9 +26,13 @@ See ``docs/specs/01-architecture.md`` §"High-level picture",
 
 from __future__ import annotations
 
+import importlib.util
 import logging
+import re
+import sys
 from collections.abc import Callable, Iterator
 from pathlib import Path
+from types import ModuleType
 from typing import Literal
 
 import httpx
@@ -110,6 +114,21 @@ def app_factory(
 
 def _client(app: FastAPI) -> TestClient:
     return TestClient(app, raise_server_exceptions=False)
+
+
+def _load_csp_linter() -> ModuleType:
+    module_name = "scripts_check_csp_inlines"
+    if module_name in sys.modules:
+        return sys.modules[module_name]
+
+    script = Path(__file__).resolve().parents[2] / "scripts" / "check_csp_inlines.py"
+    spec = importlib.util.spec_from_file_location(module_name, script)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"Cannot load {script}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+    return module
 
 
 def _mw_name(mw: object) -> str:
@@ -377,6 +396,57 @@ class TestSpaCatchAll:
         resp = client.get("/some/spa/route")
         assert resp.status_code == 200
         assert resp.headers["content-type"].startswith("text/html")
+
+    def test_root_renders_index_with_matching_inline_csp_nonces(
+        self,
+        app_factory: Settings,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        """The rendered SPA index can use the per-request CSP nonce."""
+        dist = tmp_path / "dist"
+        assets = dist / "assets"
+        assets.mkdir(parents=True)
+        (assets / "app.js").write_text("console.log('external');\n", encoding="utf-8")
+        (dist / "index.html").write_text(
+            """<!doctype html>
+<html>
+<head>
+  <script nonce="stale">window.n = "{{ request.state.csp_nonce }}";</script>
+  <style>body { color: black; }</style>
+  <script src="/assets/app.js"></script>
+</head>
+<body><div id="root"></div></body>
+</html>
+""",
+            encoding="utf-8",
+        )
+        monkeypatch.setattr("app.api.factory._SPA_DIST", dist)
+
+        client = _client(create_app(settings=app_factory))
+        resp = client.get("/")
+
+        assert resp.status_code == 200
+        match = re.search(
+            r"script-src 'self' 'nonce-(?P<nonce>[^']+)'",
+            resp.headers["Content-Security-Policy"],
+        )
+        assert match is not None
+        nonce = match.group("nonce")
+        assert (
+            f'<script nonce="{nonce}">window.n = "{nonce}";</script>'
+            in resp.text
+        )
+        assert 'nonce="stale"' not in resp.text
+        assert f'<style nonce="{nonce}">body {{ color: black; }}</style>' in resp.text
+        assert '<script src="/assets/app.js"></script>' in resp.text
+        asset_resp = client.get("/assets/app.js")
+        assert asset_resp.status_code == 200
+        assert asset_resp.text == "console.log('external');\n"
+
+        rendered = tmp_path / "rendered-index.html"
+        rendered.write_text(resp.text, encoding="utf-8")
+        assert _load_csp_linter().main([str(rendered)]) == 0
 
     def test_unknown_api_path_returns_json_404(self, app_factory: Settings) -> None:
         """API paths never fall through to the SPA — they get the §12 envelope."""

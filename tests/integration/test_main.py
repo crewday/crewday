@@ -18,7 +18,9 @@ See ``docs/specs/16-deployment-operations.md`` §"Healthchecks",
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterator
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -131,6 +133,46 @@ class TestSpaProdMountAgainstRealDist:
         assert resp.status_code == 200
         assert resp.headers["content-type"].startswith("text/html")
         assert "SPA not built" not in resp.text
+
+    def test_rendered_index_stamps_inline_script_nonce(
+        self,
+        pinned_settings: Settings,
+        real_make_uow: None,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        """Rendered SPA HTML gets inline nonces matching the CSP header."""
+        dist = tmp_path / "dist"
+        dist.mkdir()
+        (dist / "index.html").write_text(
+            """<!doctype html>
+<html>
+<head>
+  <script nonce="stale">window.n = "{{ request.state.csp_nonce }}";</script>
+</head>
+<body><div id="root"></div></body>
+</html>
+""",
+            encoding="utf-8",
+        )
+        monkeypatch.setattr("app.api.factory._SPA_DIST", dist)
+
+        app = create_app(settings=pinned_settings)
+        client = TestClient(app, raise_server_exceptions=False)
+        resp = client.get("/")
+
+        assert resp.status_code == 200
+        match = re.search(
+            r"script-src 'self' 'nonce-(?P<nonce>[^']+)'",
+            resp.headers["Content-Security-Policy"],
+        )
+        assert match is not None
+        nonce = match.group("nonce")
+        assert (
+            f'<script nonce="{nonce}">window.n = "{nonce}";</script>'
+            in resp.text
+        )
+        assert 'nonce="stale"' not in resp.text
 
     def test_api_404_stays_json(
         self, pinned_settings: Settings, real_make_uow: None
