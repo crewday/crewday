@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from sqlalchemy import CheckConstraint, DateTime, Index, Text, UniqueConstraint
+from sqlalchemy import JSON, CheckConstraint, DateTime, Index, Text, UniqueConstraint
 
 from app.adapters.db.tasks import (
     ChecklistItem,
@@ -26,6 +26,7 @@ from app.adapters.db.tasks import (
     Occurrence,
     Schedule,
     TaskApproval,
+    TaskCompletion,
     TaskTemplate,
 )
 from app.adapters.db.tasks import models as tasks_models
@@ -364,6 +365,55 @@ class TestChecklistItemModel:
         assert [c.name for c in uniques[0].columns] == ["occurrence_id", "position"]
 
 
+class TestTaskCompletionModel:
+    """The ``TaskCompletion`` mapped class carries completion tombstones."""
+
+    def test_minimal_construction(self) -> None:
+        row = TaskCompletion(
+            id="01HWA00000000000000000TC0",
+            workspace_id="01HWA00000000000000000WSPA",
+            occurrence_id="01HWA00000000000000000OCCA",
+            completed_at=_PINNED,
+            completed_by_user_id="01HWA00000000000000000USRA",
+            completion_note_md="Done.",
+            evidence_blob_hashes=["sha256-photo"],
+            checklist_snapshot_json=[{"label": "Wipe", "checked": True}],
+            created_at=_PINNED,
+        )
+        assert row.occurrence_id == "01HWA00000000000000000OCCA"
+        assert row.completed_at == _PINNED
+        assert row.completed_by_user_id == "01HWA00000000000000000USRA"
+        assert row.completion_note_md == "Done."
+        assert row.evidence_blob_hashes == ["sha256-photo"]
+        assert row.checklist_snapshot_json == [{"label": "Wipe", "checked": True}]
+
+    def test_tablename(self) -> None:
+        assert TaskCompletion.__tablename__ == "task_completion"
+
+    def test_json_and_timestamp_columns_present(self) -> None:
+        columns = TaskCompletion.__table__.c
+        assert isinstance(columns.completed_at.type, DateTime)
+        assert columns.completed_at.type.timezone is True
+        assert isinstance(columns.created_at.type, DateTime)
+        assert columns.created_at.type.timezone is True
+        assert isinstance(columns.completion_note_md.type, Text)
+        assert isinstance(columns.evidence_blob_hashes.type, JSON)
+        assert isinstance(columns.checklist_snapshot_json.type, JSON)
+
+    def test_workspace_occurrence_created_index_present(self) -> None:
+        indexes = [i for i in TaskCompletion.__table_args__ if isinstance(i, Index)]
+        target = next(
+            i
+            for i in indexes
+            if i.name == "ix_task_completion_workspace_occurrence_created"
+        )
+        assert [c.name for c in target.columns] == [
+            "workspace_id",
+            "occurrence_id",
+            "created_at",
+        ]
+
+
 class TestEvidenceModel:
     """The ``Evidence`` mapped class constructs from the v1 slice."""
 
@@ -556,6 +606,7 @@ class TestPackageReExports:
         assert Evidence is tasks_models.Evidence
         assert Comment is tasks_models.Comment
         assert TaskApproval is tasks_models.TaskApproval
+        assert TaskCompletion is tasks_models.TaskCompletion
 
 
 class TestRegistryIntent:
@@ -581,6 +632,7 @@ class TestRegistryIntent:
             "schedule",
             "occurrence",
             "task_approval",
+            "task_completion",
             "checklist_item",
             "evidence",
             "comment",
@@ -593,6 +645,7 @@ class TestRegistryIntent:
             "schedule",
             "occurrence",
             "task_approval",
+            "task_completion",
             "checklist_item",
             "evidence",
             "comment",

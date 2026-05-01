@@ -1,5 +1,5 @@
 """TaskTemplate / ChecklistTemplateItem / Schedule / Occurrence /
-ChecklistItem / Evidence / Comment SQLAlchemy models.
+ChecklistItem / TaskCompletion / Evidence / Comment SQLAlchemy models.
 
 v1 slice per cd-chd, extended by cd-0tg (template CRUD) to carry
 the full §02 / §06 task-template shape needed by the manager UI
@@ -82,6 +82,7 @@ __all__ = [
     "Occurrence",
     "Schedule",
     "TaskApproval",
+    "TaskCompletion",
     "TaskTemplate",
 ]
 
@@ -892,6 +893,57 @@ class ChecklistItem(Base):
             name="uq_checklist_item_occurrence_position",
         ),
         Index("ix_checklist_item_occurrence", "occurrence_id"),
+    )
+
+
+class TaskCompletion(Base):
+    """Immutable completion tombstone for an :class:`Occurrence`.
+
+    Written once per completion attempt so history survives later
+    task edits and concurrent completion overwrites. The occurrence FK
+    uses ``SET NULL`` because the tombstone is historical evidence,
+    not a child row to sweep with the operational task.
+    """
+
+    __tablename__ = "task_completion"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    workspace_id: Mapped[str] = mapped_column(
+        String,
+        ForeignKey("workspace.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    occurrence_id: Mapped[str | None] = mapped_column(
+        String,
+        ForeignKey("occurrence.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    completed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    completed_by_user_id: Mapped[str | None] = mapped_column(
+        String,
+        ForeignKey("user.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    completion_note_md: Mapped[str | None] = mapped_column(Text, nullable=True)
+    evidence_blob_hashes: Mapped[list[str]] = mapped_column(
+        JSON, nullable=False, default=list
+    )
+    checklist_snapshot_json: Mapped[list[Any]] = mapped_column(
+        JSON, nullable=False, default=list
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+
+    __table_args__ = (
+        Index(
+            "ix_task_completion_workspace_occurrence_created",
+            "workspace_id",
+            "occurrence_id",
+            "created_at",
+        ),
     )
 
 

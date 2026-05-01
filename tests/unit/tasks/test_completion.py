@@ -59,6 +59,7 @@ from app.adapters.db.tasks.models import (
     Evidence,
     Occurrence,
     TaskApproval,
+    TaskCompletion,
     TaskTemplate,
 )
 from app.adapters.db.workspace.models import Workspace
@@ -549,6 +550,15 @@ class TestComplete:
         # aware UTC value, the DB reads back naive.
         assert row.completed_at is not None
         assert row.completed_at.replace(tzinfo=UTC) == _PINNED
+        tombstones = session.scalars(
+            select(TaskCompletion).where(TaskCompletion.occurrence_id == occ)
+        ).all()
+        assert len(tombstones) == 1
+        assert tombstones[0].completed_at.replace(tzinfo=UTC) == _PINNED
+        assert tombstones[0].completed_by_user_id == worker
+        assert tombstones[0].completion_note_md is None
+        assert tombstones[0].evidence_blob_hashes == []
+        assert tombstones[0].checklist_snapshot_json == []
 
         audits = session.scalars(
             select(AuditLog).where(AuditLog.entity_id == occ)
@@ -622,10 +632,84 @@ class TestComplete:
         row = session.get(Occurrence, occ)
         assert row is not None
         assert row.completion_note_md == "  all clean, filter replaced\n"
+        tombstone = session.scalars(
+            select(TaskCompletion).where(TaskCompletion.occurrence_id == occ)
+        ).one()
+        assert tombstone.completion_note_md == "  all clean, filter replaced\n"
         evs = session.scalars(
             select(Evidence).where(Evidence.occurrence_id == occ)
         ).all()
         assert evs == []
+
+    def test_tombstone_snapshots_evidence_and_checklist(
+        self, session: Session, clock: FrozenClock, bus: EventBus
+    ) -> None:
+        ws = _bootstrap_workspace(session)
+        prop = _bootstrap_property(session)
+        worker = _bootstrap_user(session)
+        occ = _bootstrap_occurrence(
+            session, workspace_id=ws, property_id=prop, assignee_user_id=worker
+        )
+        item_id = _bootstrap_required_checklist(
+            session, workspace_id=ws, occurrence_id=occ, label="wipe counter"
+        )
+        item = session.get(ChecklistItem, item_id)
+        assert item is not None
+        item.checked = True
+        item.checked_at = _PINNED - timedelta(minutes=5)
+        item.evidence_blob_hash = "sha256-item-photo"
+        session.add_all(
+            [
+                Evidence(
+                    id=new_ulid(),
+                    workspace_id=ws,
+                    occurrence_id=occ,
+                    kind="photo",
+                    blob_hash="sha256-active-photo",
+                    note_md=None,
+                    created_at=_PINNED - timedelta(minutes=4),
+                    created_by_user_id=worker,
+                    deleted_at=None,
+                ),
+                Evidence(
+                    id=new_ulid(),
+                    workspace_id=ws,
+                    occurrence_id=occ,
+                    kind="photo",
+                    blob_hash="sha256-deleted-photo",
+                    note_md=None,
+                    created_at=_PINNED - timedelta(minutes=3),
+                    created_by_user_id=worker,
+                    deleted_at=_PINNED - timedelta(minutes=2),
+                ),
+            ]
+        )
+        session.flush()
+
+        complete(
+            session,
+            _ctx(ws, role="worker", owner=False, actor_id=worker),
+            occ,
+            note_md="done",
+            clock=clock,
+            event_bus=bus,
+        )
+
+        tombstone = session.scalars(
+            select(TaskCompletion).where(TaskCompletion.occurrence_id == occ)
+        ).one()
+        assert tombstone.evidence_blob_hashes == ["sha256-active-photo"]
+        assert tombstone.checklist_snapshot_json == [
+            {
+                "id": item_id,
+                "label": "wipe counter",
+                "position": 0,
+                "required": True,
+                "checked": True,
+                "checked_at": (_PINNED - timedelta(minutes=5)).isoformat(),
+                "evidence_blob_hash": "sha256-item-photo",
+            }
+        ]
 
     def test_empty_note_md_is_not_persisted(
         self, session: Session, clock: FrozenClock, bus: EventBus
@@ -1301,6 +1385,17 @@ class TestComplete:
         row = session.get(Occurrence, occ)
         assert row is not None
         assert row.completed_by_user_id == second
+
+        tombstones = session.scalars(
+            select(TaskCompletion)
+            .where(TaskCompletion.occurrence_id == occ)
+            .order_by(TaskCompletion.created_at, TaskCompletion.id)
+        ).all()
+        assert [row.completed_by_user_id for row in tombstones] == [first, second]
+        assert [row.completed_at.replace(tzinfo=UTC) for row in tombstones] == [
+            _PINNED,
+            _PINNED + timedelta(minutes=1),
+        ]
 
     def test_permission_denied_for_non_assignee_worker(
         self, session: Session, clock: FrozenClock, bus: EventBus

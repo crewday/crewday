@@ -57,8 +57,7 @@ through the keyword-only parameters on the entry points.
   (§21) when the task has ``asset_action_id``. Default no-op —
   the ``asset_action`` table is not in the schema yet.
 * :data:`TombstoneHook` — writes the ``task_completion`` tombstone
-  (§06 "Completing a task" #5). Default no-op — the
-  ``task_completion`` table is not in the schema yet.
+  (§06 "Completing a task" #5).
 
 ## Concurrent completion
 
@@ -122,6 +121,7 @@ from app.adapters.db.tasks.models import (
     ChecklistItem,
     Evidence,
     Occurrence,
+    TaskCompletion,
     TaskTemplate,
 )
 from app.adapters.db.workspace.models import Workspace
@@ -134,6 +134,7 @@ from app.audit import write_audit
 from app.domain.tasks.evidence import (
     EvidencePolicyError,
     EvidenceUpload,
+    checklist_item_snapshot,
     delete_evidence,
     normalize_photo_bytes,
     snapshot_checklist,
@@ -285,9 +286,8 @@ plugs in with the cd-asset-action-v1 follow-up.
 TombstoneHook = Callable[[Session, WorkspaceContext, Occurrence], None]
 """Port: write the ``task_completion`` tombstone row.
 
-Default :func:`_default_tombstone` is a no-op — the
-``task_completion`` table is not in the schema yet. The real body
-plugs in with the cd-task-completion-tombstone follow-up.
+Default :func:`_default_tombstone` writes the durable completion
+tombstone row.
 """
 
 
@@ -802,15 +802,53 @@ def _default_asset_action(
 def _default_tombstone(
     session: Session, ctx: WorkspaceContext, task: Occurrence
 ) -> None:
-    """No-op: the ``task_completion`` table is not in the schema yet.
+    """Write one durable tombstone for this completion attempt."""
+    if task.completed_at is None:
+        raise ValueError("cannot write task_completion before completed_at is set")
+    row = TaskCompletion(
+        id=new_ulid(),
+        workspace_id=ctx.workspace_id,
+        occurrence_id=task.id,
+        completed_at=task.completed_at,
+        completed_by_user_id=task.completed_by_user_id,
+        completion_note_md=task.completion_note_md,
+        evidence_blob_hashes=_active_photo_blob_hashes(session, ctx, task),
+        checklist_snapshot_json=_task_checklist_snapshot(session, ctx, task),
+        created_at=task.completed_at,
+    )
+    session.add(row)
+    session.flush()
 
-    Filed as a spec-drift follow-up alongside cd-7am7. The real
-    body writes a :class:`task_completion` row per §06 "Completing
-    a task" #5 so reports can reconstruct history even if the task
-    is later edited.
-    """
-    _ = session, ctx, task
-    return None
+
+def _active_photo_blob_hashes(
+    session: Session, ctx: WorkspaceContext, task: Occurrence
+) -> list[str]:
+    rows = session.scalars(
+        select(Evidence.blob_hash)
+        .where(
+            Evidence.workspace_id == ctx.workspace_id,
+            Evidence.occurrence_id == task.id,
+            Evidence.kind == "photo",
+            Evidence.blob_hash.is_not(None),
+            Evidence.deleted_at.is_(None),
+        )
+        .order_by(Evidence.created_at.asc(), Evidence.id.asc())
+    ).all()
+    return [row for row in rows if row is not None]
+
+
+def _task_checklist_snapshot(
+    session: Session, ctx: WorkspaceContext, task: Occurrence
+) -> list[dict[str, object | None]]:
+    items = session.scalars(
+        select(ChecklistItem)
+        .where(
+            ChecklistItem.workspace_id == ctx.workspace_id,
+            ChecklistItem.occurrence_id == task.id,
+        )
+        .order_by(ChecklistItem.position.asc(), ChecklistItem.id.asc())
+    ).all()
+    return [checklist_item_snapshot(item) for item in items]
 
 
 # ---------------------------------------------------------------------------

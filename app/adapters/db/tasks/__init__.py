@@ -1,6 +1,6 @@
-"""tasks — templates, schedules, occurrences, checklist items, evidence, comments.
+"""tasks — templates, schedules, occurrences, checklist, evidence, comments.
 
-All seven tables in this package are workspace-scoped: each row
+All tables in this package are workspace-scoped: each row
 carries a ``workspace_id`` column and is registered in
 :mod:`app.tenancy.registry` so the ORM tenant filter auto-injects a
 ``workspace_id`` predicate on every SELECT / UPDATE / DELETE. A bare
@@ -36,6 +36,7 @@ from app.adapters.db.tasks.models import (
     Occurrence,
     Schedule,
     TaskApproval,
+    TaskCompletion,
     TaskTemplate,
 )
 from app.tenancy.registry import register
@@ -47,6 +48,7 @@ for _table in (
     "nl_task_preview",
     "occurrence",
     "task_approval",
+    "task_completion",
     "checklist_item",
     "evidence",
     "comment",
@@ -62,5 +64,6 @@ __all__ = [
     "Occurrence",
     "Schedule",
     "TaskApproval",
+    "TaskCompletion",
     "TaskTemplate",
 ]

@@ -304,7 +304,7 @@ def snapshot_checklist(
         )
         .order_by(ChecklistItem.position.asc(), ChecklistItem.id.asc())
     ).all()
-    snapshot = [_checklist_item_snapshot(item) for item in items]
+    snapshot = [checklist_item_snapshot(item) for item in items]
     row = Evidence(
         id=new_ulid(),
         workspace_id=ctx.workspace_id,
@@ -616,7 +616,7 @@ def _emit_added(
     )
 
 
-def _checklist_item_snapshot(item: ChecklistItem) -> dict[str, object | None]:
+def checklist_item_snapshot(item: ChecklistItem) -> dict[str, object | None]:
     return {
         "id": item.id,
         "label": item.label,
