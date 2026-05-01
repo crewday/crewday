@@ -842,3 +842,69 @@ def test_offender_name_is_deterministic_across_multiple_inner_scopes(
     with session_factory() as session, pytest.raises(TenantFilterMissing) as exc:
         session.execute(stmt)
     assert exc.value.table == "foo"
+
+
+# -- Class-level install (cd-nf8p): listener survives sessionmaker churn --
+
+
+def test_filtered_session_class_install_survives_sessionmaker_churn(
+    engine: Engine,
+    sql_capture: list[str],
+) -> None:
+    """Regression for cd-nf8p: installing the tenant filter on the
+    :class:`FilteredSession` class — not per-sessionmaker — must keep
+    the listener alive through any number of fresh sessionmakers
+    built on the same engine.
+
+    The pre-fix path installed on each new ``sessionmaker`` and could
+    silently leave a fresh session's ``do_orm_execute`` list empty
+    even when :func:`sqlalchemy.event.contains` reported True. By
+    pinning the listener on a :class:`Session` subclass, the
+    Session-class dispatch carries it regardless of which factory
+    built the session.
+
+    This test deliberately does **not** call
+    :func:`install_tenant_filter` on the per-iteration factories;
+    success therefore proves the class-level install is what's
+    catching the query.
+    """
+    from app.adapters.db.session import FilteredSession
+    from app.tenancy.orm_filter import _do_orm_execute
+
+    factories: list[sessionmaker[FilteredSession]] = [
+        sessionmaker(bind=engine, expire_on_commit=False, class_=FilteredSession)
+        for _ in range(5)
+    ]
+
+    # Every spawned session must have the listener attached via the
+    # class dispatch — not the per-factory dispatch.
+    for factory in factories:
+        with factory() as session:
+            listeners = list(session.dispatch.do_orm_execute)
+            assert _do_orm_execute in listeners, (
+                "FilteredSession class-level install must surface the "
+                "tenant-filter listener on every session, regardless "
+                "of which sessionmaker spawned it"
+            )
+
+    # With an active context, every session compiles SQL that carries
+    # the workspace_id predicate. Checking the **most recent** capture
+    # entry per iteration confirms each session's listener fired.
+    token = set_current(_CTX_A)
+    try:
+        for factory in factories:
+            before = len(sql_capture)
+            with factory() as session:
+                session.execute(select(_Foo))
+            assert len(sql_capture) > before, (
+                "expected the session to issue at least one cursor execution"
+            )
+            flattened = " ".join(sql_capture[-1].split())
+            assert "foo.workspace_id = ?" in flattened
+    finally:
+        reset_current(token)
+
+    # Without a context, every session must still fail closed.
+    for factory in factories:
+        with factory() as session, pytest.raises(TenantFilterMissing):
+            session.execute(select(_Foo))

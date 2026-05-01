@@ -33,6 +33,7 @@ from app.config import get_settings
 from app.tenancy.orm_filter import install_tenant_filter
 
 __all__ = [
+    "FilteredSession",
     "UnitOfWorkImpl",
     "bind_active_session",
     "get_active_session",
@@ -153,13 +154,47 @@ def _enable_sqlite_foreign_keys(engine: Engine) -> None:
             cursor.close()
 
 
+class FilteredSession(Session):
+    """:class:`~sqlalchemy.orm.Session` subclass with the tenant filter listener.
+
+    The :func:`~app.tenancy.orm_filter.install_tenant_filter` hook is
+    registered on this class exactly once, at module import (see the
+    call below the class definition). Production code uses
+    ``sessionmaker(..., class_=FilteredSession)`` so every session
+    spawned from the default factory inherits the listener — no
+    per-sessionmaker registration required.
+
+    Why a class-level install instead of per-sessionmaker:
+
+    cd-nf8p (this fix) recorded a latent SQLAlchemy heisenbug where
+    building multiple ``sessionmaker`` instances against the same
+    engine could leave a fresh session's ``do_orm_execute`` listener
+    list empty even when ``event.contains(factory, ...)`` returned
+    ``True``. Installing on the ``Session`` subclass instead makes
+    listener attachment immune to per-sessionmaker dispatch churn —
+    every ``FilteredSession`` instance carries the listener via the
+    class dispatch, regardless of which factory built it.
+    """
+
+
 # Lazy module-level defaults. We do NOT build the engine at import time:
 # ``Settings`` requires ``CREWDAY_DATABASE_URL`` in env, so eager
 # construction would break test collection on machines where that
 # isn't set. The first caller of :func:`_default_sessionmaker` pays
 # the one-off cost; subsequent callers reuse the cached factory.
 _default_engine: Engine | None = None
-_default_sessionmaker_: sessionmaker[Session] | None = None
+_default_sessionmaker_: sessionmaker[FilteredSession] | None = None
+
+
+# Install the tenant filter on the ``FilteredSession`` class exactly
+# once at import time. The :class:`weakref.WeakSet`-based idempotence
+# in :func:`install_tenant_filter` makes re-imports safe (the second
+# call sees the already-installed class and no-ops). Doing this here
+# — rather than inside :func:`_default_sessionmaker` — closes the
+# cd-nf8p heisenbug: any production code path that builds multiple
+# sessionmakers against the same engine would otherwise risk losing
+# the listener silently.
+install_tenant_filter(FilteredSession)
 
 
 # Active publishing session carrier. Synchronous publishers (today:
@@ -212,15 +247,21 @@ def bind_active_session(session: Session) -> Iterator[None]:
         _active_session.set(previous)
 
 
-def _default_sessionmaker() -> sessionmaker[Session]:
+def _default_sessionmaker() -> sessionmaker[FilteredSession]:
     """Return the process-wide default ``sessionmaker``, building on first use.
 
-    The tenancy ``do_orm_execute`` hook is installed here so every query
-    routed through the production sessionmaker auto-injects the
-    ``workspace_id`` filter. UoW unit tests that build their own
-    ``sessionmaker`` directly bypass this and don't get the hook — they
-    exercise raw transaction mechanics against tables that are not
-    registered as scoped, so the un-hooked path is safe there.
+    The factory is bound to :class:`FilteredSession`, which already
+    carries the tenancy ``do_orm_execute`` hook (installed once at
+    module import). Every session spawned from this factory therefore
+    auto-injects the ``workspace_id`` filter without needing a
+    per-sessionmaker :func:`install_tenant_filter` call — see
+    :class:`FilteredSession` for the cd-nf8p rationale.
+
+    UoW unit tests that build their own ``sessionmaker`` with a plain
+    :class:`~sqlalchemy.orm.Session` class bypass this entirely and
+    don't get the hook — they exercise raw transaction mechanics
+    against tables that are not registered as scoped, so the un-hooked
+    path is safe there.
     """
     global _default_engine, _default_sessionmaker_
     if _default_sessionmaker_ is None:
@@ -228,9 +269,8 @@ def _default_sessionmaker() -> sessionmaker[Session]:
         _default_sessionmaker_ = sessionmaker(
             bind=_default_engine,
             expire_on_commit=False,
-            class_=Session,
+            class_=FilteredSession,
         )
-        install_tenant_filter(_default_sessionmaker_)
     return _default_sessionmaker_
 
 

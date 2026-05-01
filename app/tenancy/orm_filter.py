@@ -113,6 +113,19 @@ def install_tenant_filter(target: type[Session] | sessionmaker[Session]) -> None
     :class:`~sqlalchemy.orm.sessionmaker`. SQLAlchemy's event system
     accepts either. The hook fires on every ``session.execute()``.
 
+    **Production wiring installs the hook on a Session subclass, not
+    a sessionmaker.** :class:`app.adapters.db.session.FilteredSession`
+    receives this call exactly once at module import; the production
+    ``sessionmaker(class_=FilteredSession, ...)`` then inherits the
+    listener via the class dispatch. This immunises production
+    against the cd-nf8p heisenbug, where building multiple
+    sessionmakers against the same engine could leave a fresh
+    session's ``do_orm_execute`` list empty even when
+    :func:`sqlalchemy.event.contains` reported the listener as
+    attached. Tests that build their own per-fixture sessionmaker
+    can still pass it here — the function works on either target —
+    but new code paths should prefer the class-level install.
+
     Idempotent by **identity**: a module-level :class:`weakref.WeakSet`
     tracks installed targets so a second call on the same live object
     is a no-op. A double ``event.listen`` appends a *second* identical
