@@ -255,6 +255,10 @@ def _bootstrap_occurrence(
             scheduled_for_local="2026-04-19T14:00",
             originally_scheduled_for="2026-04-19T14:00",
             state=state,
+            overdue_since=None,
+            due_by_utc=None,
+            completion_note_md=None,
+            skipped_reason=None,
             cancellation_reason=None,
             title="Pool clean",
             description_md="",
@@ -596,7 +600,7 @@ class TestComplete:
         ]
         assert actions == ["task.complete", "task.approval_requested"]
 
-    def test_note_md_persisted_as_evidence_note(
+    def test_note_md_persisted_on_occurrence(
         self, session: Session, clock: FrozenClock, bus: EventBus
     ) -> None:
         ws = _bootstrap_workspace(session)
@@ -610,16 +614,18 @@ class TestComplete:
             session,
             _ctx(ws, role="worker", owner=False, actor_id=worker),
             occ,
-            note_md="all clean, filter replaced",
+            note_md="  all clean, filter replaced\n",
             clock=clock,
             event_bus=bus,
         )
 
-        ev = session.scalars(
+        row = session.get(Occurrence, occ)
+        assert row is not None
+        assert row.completion_note_md == "  all clean, filter replaced\n"
+        evs = session.scalars(
             select(Evidence).where(Evidence.occurrence_id == occ)
-        ).one()
-        assert ev.kind == "note"
-        assert ev.note_md == "all clean, filter replaced"
+        ).all()
+        assert evs == []
 
     def test_empty_note_md_is_not_persisted(
         self, session: Session, clock: FrozenClock, bus: EventBus
@@ -643,6 +649,9 @@ class TestComplete:
         evs = session.scalars(
             select(Evidence).where(Evidence.occurrence_id == occ)
         ).all()
+        row = session.get(Occurrence, occ)
+        assert row is not None
+        assert row.completion_note_md is None
         assert evs == []
 
     def test_photo_forbid_rejects_supplied_photo(
@@ -1343,7 +1352,8 @@ class TestSkip:
         row = session.get(Occurrence, occ)
         assert row is not None
         assert row.state == "skipped"
-        assert row.cancellation_reason == "guest_left_early"
+        assert row.skipped_reason == "guest_left_early"
+        assert row.cancellation_reason is None
         assert len(skipped) == 1
         assert skipped[0].reason == "guest_left_early"
 
@@ -1593,16 +1603,11 @@ class TestRevertOverdue:
         occ = _bootstrap_occurrence(
             session, workspace_id=ws, property_id=prop, assignee_user_id=worker
         )
-        # Set the in-memory state to ``overdue`` without flushing so
-        # the DB CHECK doesn't reject it (the enum widening lands
-        # with the §06 spec-drift follow-up). ``no_autoflush`` keeps
-        # the SELECT inside :func:`revert_overdue` from triggering an
-        # autoflush — the service then mutates ``state`` again and
-        # the eventual flush writes the legal ``pending`` value.
         row = session.get(Occurrence, occ)
         assert row is not None
         with session.no_autoflush:
             row.state = "overdue"
+            row.overdue_since = _PINNED
             result = revert_overdue(
                 session,
                 _ctx(ws, role="worker", owner=False, actor_id=worker),
@@ -1616,10 +1621,12 @@ class TestRevertOverdue:
         fresh = session.get(Occurrence, occ)
         assert fresh is not None
         assert fresh.state == "pending"
+        assert fresh.overdue_since is None
 
         audit = session.scalars(select(AuditLog).where(AuditLog.entity_id == occ)).one()
         assert audit.action == "task.revert_overdue"
         assert audit.diff["after"]["state"] == "pending"
+        assert audit.diff["after"]["overdue_since"] is None
 
     def test_overdue_back_to_in_progress(
         self, session: Session, clock: FrozenClock
@@ -1634,6 +1641,7 @@ class TestRevertOverdue:
         assert row is not None
         with session.no_autoflush:
             row.state = "overdue"
+            row.overdue_since = _PINNED
             result = revert_overdue(
                 session,
                 _ctx(ws, role="manager", owner=False),

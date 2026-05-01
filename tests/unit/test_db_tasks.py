@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from sqlalchemy import CheckConstraint, Index, UniqueConstraint
+from sqlalchemy import CheckConstraint, DateTime, Index, Text, UniqueConstraint
 
 from app.adapters.db.tasks import (
     ChecklistItem,
@@ -251,6 +251,7 @@ class TestOccurrenceModel:
             property_id="01HWA00000000000000000PRPA",
             starts_at=_PINNED,
             ends_at=_LATER,
+            due_by_utc=_LATER,
             state="pending",
             created_at=_PINNED,
         )
@@ -258,6 +259,10 @@ class TestOccurrenceModel:
         assert occ.assignee_user_id is None
         assert occ.completed_at is None
         assert occ.completed_by_user_id is None
+        assert occ.completion_note_md is None
+        assert occ.skipped_reason is None
+        assert occ.overdue_since is None
+        assert occ.due_by_utc == _LATER
         assert occ.reviewer_user_id is None
         assert occ.reviewed_at is None
         assert occ.state == "pending"
@@ -275,8 +280,25 @@ class TestOccurrenceModel:
         ]
         assert len(checks) == 1
         sql = str(checks[0].sqltext)
-        for state in ("pending", "in_progress", "completed", "skipped", "approved"):
+        for state in (
+            "scheduled",
+            "pending",
+            "in_progress",
+            "completed",
+            "skipped",
+            "cancelled",
+            "overdue",
+        ):
             assert state in sql, f"{state} missing from CHECK constraint"
+
+    def test_state_machine_columns_present(self) -> None:
+        columns = Occurrence.__table__.c
+        assert isinstance(columns.completion_note_md.type, Text)
+        assert isinstance(columns.skipped_reason.type, Text)
+        assert isinstance(columns.overdue_since.type, DateTime)
+        assert columns.overdue_since.type.timezone is True
+        assert isinstance(columns.due_by_utc.type, DateTime)
+        assert columns.due_by_utc.type.timezone is True
 
     def test_ends_after_starts_check_present(self) -> None:
         checks = [

@@ -56,6 +56,7 @@ from sqlalchemy import (
     Index,
     Integer,
     String,
+    Text,
     UniqueConstraint,
     text,
 )
@@ -715,6 +716,13 @@ class Occurrence(Base):
     overdue_since: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    # §06 completion / SLA state-machine columns. Nullable so
+    # pre-existing scheduled rows survive migration; the completion
+    # service owns writes to the note / skip fields, and the overdue
+    # sweeper owns ``due_by_utc`` comparisons.
+    due_by_utc: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     completed_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
@@ -731,6 +739,8 @@ class Occurrence(Base):
     reviewed_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    completion_note_md: Mapped[str | None] = mapped_column(Text, nullable=True)
+    skipped_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     # cd-k4l cancellation reason. Free-form text set alongside
     # ``state='cancelled'`` by the schedule-delete cascade
     # (``'schedule deleted'``), task-cancel flow, etc. Nullable on

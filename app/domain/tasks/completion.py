@@ -902,36 +902,6 @@ def _has_checklist_items(session: Session, task: Occurrence) -> bool:
     return row is not None
 
 
-def _write_note_evidence(
-    session: Session,
-    ctx: WorkspaceContext,
-    *,
-    task: Occurrence,
-    note_md: str,
-    clock: Clock,
-) -> None:
-    """Persist ``note_md`` as an :class:`Evidence` row of kind ``note``.
-
-    The spec places ``completion_note_md`` on the task row; until
-    the column lands (filed as a spec-drift follow-up) this service
-    writes the note as an :class:`Evidence` row so the information
-    survives and surfaces in reports. The kind/note pairing is
-    enforced by the Evidence table's CHECK constraint.
-    """
-    session.add(
-        Evidence(
-            id=new_ulid(),
-            workspace_id=ctx.workspace_id,
-            occurrence_id=task.id,
-            kind="note",
-            blob_hash=None,
-            note_md=note_md,
-            created_at=clock.now(),
-            created_by_user_id=ctx.actor_id,
-        )
-    )
-
-
 # ---------------------------------------------------------------------------
 # Audit + event helpers
 # ---------------------------------------------------------------------------
@@ -1064,9 +1034,7 @@ def complete(
        still unchecked → :class:`RequiredChecklistIncomplete`.
     4. **Write the completion.** Set ``state='completed'``,
        ``completed_at``, ``completed_by_user_id``. When ``note_md``
-       is supplied, persist as :class:`Evidence` of kind ``note``
-       (bridge until the ``completion_note_md`` column lands — see
-       the module docstring and the spec-drift follow-up).
+       is supplied, persist it on ``completion_note_md``.
     5. **Side-effects.** Run :data:`InventoryApplyHook`,
        :data:`AssetActionHook`, :data:`TombstoneHook` in order.
     6. **Audit + event.** Emit :class:`TaskCompleted`; write the
@@ -1145,6 +1113,9 @@ def complete(
     task.state = "completed"
     task.completed_at = now
     task.completed_by_user_id = ctx.actor_id
+    task.completion_note_md = (
+        note_md if note_md is not None and note_md.strip() else None
+    )
     # §06 "State machine": clear ``overdue_since`` on any manual
     # transition. The completion path catches the most common
     # "overdue → completed" exit; the column reverts to NULL alongside
@@ -1152,11 +1123,6 @@ def complete(
     # claims to be overdue.
     task.overdue_since = None
     session.flush()
-
-    if note_md is not None and note_md.strip():
-        _write_note_evidence(
-            session, ctx, task=task, note_md=note_md, clock=resolved_clock
-        )
 
     if _has_checklist_items(session, task):
         snapshot_checklist(
@@ -1264,12 +1230,8 @@ def skip(
     (:data:`SkipAllowedResolver` returns ``True``). Owners / managers
     bypass the resolver; they can always skip.
 
-    ``reason`` is stored in :attr:`Occurrence.cancellation_reason`
-    (the only free-text column the v1 schema carries — the dedicated
-    ``skipped_reason`` column is part of the §06 spec-drift
-    follow-up). The column name is misleading in this bridge form;
-    the audit trail makes the distinction explicit via the
-    ``task.skip`` action.
+    ``reason`` is stored in :attr:`Occurrence.skipped_reason`, distinct
+    from cancellation's :attr:`Occurrence.cancellation_reason`.
     """
     resolved_clock = clock if clock is not None else SystemClock()
     resolved_bus = event_bus if event_bus is not None else default_event_bus
@@ -1300,7 +1262,7 @@ def skip(
     _assert_transition(previous, "skipped")
 
     task.state = "skipped"
-    task.cancellation_reason = reason
+    task.skipped_reason = reason
     # §06 "State machine": clear ``overdue_since`` on any manual
     # transition. A worker / manager skipping an overdue task moves
     # it out of the sweeper's purview; the marker reverts to NULL
