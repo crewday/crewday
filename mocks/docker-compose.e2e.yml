@@ -22,3 +22,14 @@ services:
       # still applies. The default ``mocks/docker-compose.yml`` does
       # NOT set this knob — it only flips on for the e2e override.
       CREWDAY_ICAL_ALLOW_PRIVATE_ADDRESSES: "1"
+      # DEV / E2E ONLY — DO NOT enable in production (cd-tblly).
+      # Swaps the runtime LLMClient for the in-process
+      # ``app.adapters.llm.fake.FakeLLMClient`` so GA journey 4
+      # (cd-9cdn) can exercise expense autofill without an upstream
+      # OpenRouter key. ``CREWDAY_LLM_OCR_MODEL`` is the deployment-
+      # level capability gate inside ``_build_attach_runner``
+      # (``app/api/v1/expenses.py``); both knobs must be set together
+      # for attach-time autofill to fire. The model id is opaque to
+      # the fake — any non-empty string clears the gate.
+      CREWDAY_LLM_PROVIDER: "fake"
+      CREWDAY_LLM_OCR_MODEL: "fake-ocr"

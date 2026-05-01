@@ -519,3 +519,93 @@ class TestStorageWiring:
         # 401 because no cookie; anything else (especially 503) would
         # mean the storage wiring regressed.
         assert resp.status_code == 401, resp.text
+
+
+# ---------------------------------------------------------------------------
+# LLM provider dispatch (cd-tblly)
+# ---------------------------------------------------------------------------
+
+
+class TestBuildLlm:
+    """``_build_llm`` honours ``CREWDAY_LLM_PROVIDER`` (§16, §11)."""
+
+    def _llm_settings(
+        self,
+        *,
+        llm_provider: Literal["openrouter", "fake"] | None = None,
+        openrouter_api_key: SecretStr | None = None,
+        root_key: SecretStr | None = None,
+    ) -> Settings:
+        return Settings.model_construct(
+            database_url="sqlite:///:memory:",
+            root_key=root_key,
+            openrouter_api_key=openrouter_api_key,
+            llm_provider=llm_provider,
+            bind_host="127.0.0.1",
+            bind_port=8000,
+            allow_public_bind=False,
+            worker="internal",
+            smtp_use_tls=False,
+            log_level="INFO",
+            cors_allow_origins=[],
+            profile="prod",
+            vite_dev_url="http://127.0.0.1:5173",
+        )
+
+    def test_provider_fake_returns_fake_client(self) -> None:
+        from app.adapters.llm.fake import FakeLLMClient
+        from app.api.factory import _build_llm
+
+        settings = self._llm_settings(llm_provider="fake")
+        client = _build_llm(settings)
+
+        assert isinstance(client, FakeLLMClient)
+
+    def test_provider_fake_ignores_missing_openrouter_key(self) -> None:
+        """``fake`` short-circuits before the OpenRouter gate."""
+        from app.adapters.llm.fake import FakeLLMClient
+        from app.api.factory import _build_llm
+
+        settings = self._llm_settings(
+            llm_provider="fake",
+            openrouter_api_key=None,
+            root_key=None,
+        )
+        client = _build_llm(settings)
+
+        assert isinstance(client, FakeLLMClient)
+
+    def test_provider_openrouter_with_key_returns_openrouter_client(self) -> None:
+        from app.adapters.llm.openrouter import OpenRouterClient
+        from app.api.factory import _build_llm
+
+        settings = self._llm_settings(
+            llm_provider="openrouter",
+            openrouter_api_key=SecretStr("sk-test"),
+        )
+        client = _build_llm(settings)
+
+        assert isinstance(client, OpenRouterClient)
+
+    def test_provider_unset_with_no_key_source_returns_none(self) -> None:
+        """Legacy default: no provider, no key → ``None``."""
+        from app.api.factory import _build_llm
+
+        settings = self._llm_settings(
+            llm_provider=None, openrouter_api_key=None, root_key=None
+        )
+
+        assert _build_llm(settings) is None
+
+    def test_provider_unset_with_root_key_builds_openrouter(self) -> None:
+        """Legacy default: a root-key alone enables the DB-backed path."""
+        from app.adapters.llm.openrouter import OpenRouterClient
+        from app.api.factory import _build_llm
+
+        settings = self._llm_settings(
+            llm_provider=None,
+            openrouter_api_key=None,
+            root_key=SecretStr("a" * 64),
+        )
+
+        assert isinstance(_build_llm(settings), OpenRouterClient)

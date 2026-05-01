@@ -675,6 +675,8 @@ provisioned per visitor, not per operator.
 | `CREWDAY_TRUSTED_INTERFACES`| `tailscale*`                  | comma-separated fnmatch globs of interface names whose addresses pass without the opt-in; set value **replaces** the default (no implicit baseline) |
 | `CREWDAY_SMTP_*`            | -                              | see §10                  |
 | `CREWDAY_OPENROUTER_API_KEY`| -                              | see §11                  |
+| `CREWDAY_LLM_PROVIDER`      | -                              | Runtime `LLMClient` selector. Unset / `openrouter` keeps the production wiring (`OpenRouterClient` when an API key is reachable, `None` otherwise). `fake` swaps in the in-process `app.adapters.llm.fake.FakeLLMClient` so the e2e / Playwright stack exercises LLM autofill without an upstream key — gated to `mocks/docker-compose.e2e.yml`. Never enable in production. Pair with `CREWDAY_LLM_OCR_MODEL` for the receipt-autofill capability gate. cd-tblly. |
+| `CREWDAY_LLM_OCR_MODEL`     | -                              | Model id used by `app.domain.expenses.autofill` for receipt OCR + structured extraction. `None` disables the capability deployment-wide (`POST /expenses/scan` returns 503 `scan_not_configured`; attach-time autofill skips the runner). The fake provider accepts any non-empty string. See §11. |
 | `CREWDAY_DEMO_MODE`         | 0                              | Recipe C only; refuses to boot outside the demo URL allowlist. §24 |
 | `CREWDAY_DEMO_COOKIE_KEY`   | -                              | Recipe C only; 32 bytes base64; signs `__Host-crewday_demo`. §24 |
 | `CREWDAY_DEMO_FRAME_ANCESTORS` | -                           | Recipe C only; whitespace-separated CSP `frame-ancestors` allowlist. §15 |

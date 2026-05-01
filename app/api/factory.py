@@ -78,6 +78,7 @@ from starlette.middleware.cors import CORSMiddleware
 
 from app.abuse.throttle import ShieldStore
 from app.adapters.db.session import make_uow
+from app.adapters.llm.fake import FakeLLMClient
 from app.adapters.llm.openrouter import (
     DeploymentOpenRouterConfigSource,
     OpenRouterClient,
@@ -510,10 +511,18 @@ def _build_mailer(settings: Settings) -> Mailer | None:
 def _build_llm(settings: Settings) -> LLMClient | None:
     """Return the configured :class:`LLMClient`, or ``None``.
 
-    The v1 wiring instantiates :class:`OpenRouterClient` when an env
-    key is present or a root key can decrypt the DB-backed deployment
-    setting. The DB source is resolved per request, so an admin key
-    rotation takes effect without rebuilding the app.
+    Provider dispatch is keyed on :attr:`Settings.llm_provider`:
+
+    * ``"fake"`` — swap in the in-process
+      :class:`~app.adapters.llm.fake.FakeLLMClient` so e2e / dev stacks
+      exercise the LLM seam without an upstream key. Gated to dev/e2e
+      via ``mocks/docker-compose.e2e.yml`` (§16 "Environment
+      variables", §11 "Provider types"). Never enabled in production.
+    * ``"openrouter"`` (or ``None``, the legacy default) —
+      :class:`OpenRouterClient` when an env key is present or a root
+      key can decrypt the DB-backed deployment setting. The DB source
+      is resolved per request, so an admin key rotation takes effect
+      without rebuilding the app.
 
     The OCR-autofill capability layers an additional gate on
     :attr:`Settings.llm_ocr_model` — both the API key AND a model id
@@ -522,12 +531,22 @@ def _build_llm(settings: Settings) -> LLMClient | None:
     capability by clearing either side without booting a half-wired
     state machine.
     """
+    if settings.llm_provider == "fake":
+        _log.info(
+            "LLM client wired: in-process FakeLLMClient (dev/e2e only)",
+            extra={"event": "llm.wired", "provider": "fake"},
+        )
+        return FakeLLMClient()
     if settings.openrouter_api_key is None and settings.root_key is None:
         _log.info(
             "LLM client unavailable: OpenRouter env key and CREWDAY_ROOT_KEY are unset",
             extra={"event": "llm.unwired", "reason": "missing_api_key_source"},
         )
         return None
+    _log.info(
+        "LLM client wired: OpenRouterClient",
+        extra={"event": "llm.wired", "provider": "openrouter"},
+    )
     return OpenRouterClient(
         DeploymentOpenRouterConfigSource(
             env_api_key=settings.openrouter_api_key,

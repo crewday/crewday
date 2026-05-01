@@ -124,9 +124,12 @@ def get_llm(request: Request) -> LLMClient:
     """FastAPI dep — return the configured :class:`LLMClient`.
 
     Reads :attr:`app.state.llm`, populated by the app factory at boot
-    when a static OpenRouter env key or DB decrypt key is available.
-    Raises :class:`HTTPException` 503 when no client is wired, or when
-    the wired client cannot currently resolve an API key.
+    based on :attr:`Settings.llm_provider` — ``OpenRouterClient`` when
+    a static OpenRouter env key or DB decrypt key is available
+    (default), or :class:`~app.adapters.llm.fake.FakeLLMClient` when
+    the dev/e2e ``CREWDAY_LLM_PROVIDER=fake`` knob is set. Raises
+    :class:`HTTPException` 503 when no client is wired, or when the
+    wired client cannot currently resolve an API key.
 
     Tests override via ``app.dependency_overrides[get_llm] = …`` to
     inject :class:`tests._fakes.llm.EchoLLMClient` or a stub.

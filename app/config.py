@@ -99,6 +99,17 @@ class Settings(BaseSettings):
 
     # --- LLM (optional; see §11 llm-and-agents) ---
     openrouter_api_key: SecretStr | None = None
+    # Runtime LLM provider selector. ``None`` (default) preserves the
+    # historical behaviour: the factory wires :class:`OpenRouterClient`
+    # iff an API key is reachable, or returns ``None`` when both env
+    # and root-key are unset. ``"openrouter"`` is the explicit prod
+    # form. ``"fake"`` swaps in the in-process
+    # :class:`~app.adapters.llm.fake.FakeLLMClient` so e2e / dev stacks
+    # exercise the LLM path without an upstream key — gated to dev/e2e
+    # via ``mocks/docker-compose.e2e.yml`` (see §16 "Environment
+    # variables"). Production deployments leave this unset; the §11
+    # ``fake`` provider type is dev/test only.
+    llm_provider: Literal["openrouter", "fake"] | None = None
     # Model id used by :mod:`app.domain.expenses.autofill` for receipt
     # OCR + structured extraction. ``None`` disables the capability at
     # the deployment level: :func:`~app.domain.expenses.claims.attach_receipt`
