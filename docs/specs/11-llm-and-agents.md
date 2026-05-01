@@ -311,7 +311,7 @@ separate each resolved topic into one of two buckets:
   them is redundant. Example: "*asked to swap Thursday, swap was
   granted*" (the `booking` row carries the swap), "*thanks for the
   list*" (no entity at all), "*uploaded task evidence photo*" (the
-  `task_evidence` row carries the photo). These are **omitted
+  `evidence` row carries the photo). These are **omitted
   entirely** from the summary prose. The originals stay in
   `chat_message` and remain reachable via `search_chat_archive` if
   a later turn references them.

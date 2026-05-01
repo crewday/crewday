@@ -1008,14 +1008,15 @@ whether or not self-serve signup is enabled:
 ### Personal task visibility
 
 Tasks with `is_personal = true` (§06) are visible only to: (a) the
-user identified by `task.created_by`, and (b) members of the `owners`
-permission group for the workspace. Non-owner managers never see
-personal tasks in listings, team dashboards, approval queues, reports,
-or audit surfaces — the same `workspace_id` workspace-tenancy filter
-applies, but an additional application-layer check enforces
+user identified by `occurrence.created_by`, and (b) members of the
+`owners` permission group for the workspace. Non-owner managers never
+see personal tasks in listings, team dashboards, approval queues,
+reports, or audit surfaces — the same `workspace_id` workspace-tenancy
+filter applies, but an additional application-layer check enforces
 `is_personal = false OR created_by = caller_id OR caller_is_owner`.
-On Postgres this is an additional RLS predicate on the `tasks` table;
-on SQLite it is enforced as a query-time filter in the ORM layer.
+On Postgres this is an additional RLS predicate on the `occurrence`
+table; on SQLite it is enforced as a query-time filter in the ORM
+layer.
 
 Workers may originate tasks via `tasks.create` (§05) but the quick-add
 default is `is_personal = true` — sharing to team requires an explicit

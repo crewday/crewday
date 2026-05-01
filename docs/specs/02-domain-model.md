@@ -190,16 +190,17 @@ erDiagram
 
     WORKSPACE ||--o{ PUBLIC_HOLIDAY : observes
 
-    TASK_TEMPLATE ||--o{ TASK : generates
+    TASK_TEMPLATE ||--o{ OCCURRENCE : generates
     TASK_TEMPLATE ||--o{ SCHEDULE : described_by
-    TASK ||--o{ TASK_CHECKLIST_ITEM : contains
-    TASK ||--o{ TASK_COMPLETION : completed_by
-    TASK ||--o{ TASK_COMMENT : discussed_in
-    TASK ||--o{ TASK_EVIDENCE : proves
-    TASK }o--o{ INSTRUCTION : linked_to
+    OCCURRENCE ||--o{ CHECKLIST_ITEM : contains
+    OCCURRENCE ||--o{ TASK_COMPLETION : completed_by
+    OCCURRENCE ||--o{ COMMENT : discussed_in
+    OCCURRENCE ||--o{ EVIDENCE : proves
+    OCCURRENCE ||--o{ TASK_APPROVAL : reviewed_by
+    OCCURRENCE }o--o{ INSTRUCTION : linked_to
 
     STAY ||--o{ STAY_TASK_BUNDLE : triggers
-    STAY_TASK_BUNDLE ||--o{ TASK : materializes
+    STAY_TASK_BUNDLE ||--o{ OCCURRENCE : materializes
 
     WORK_ENGAGEMENT ||--o{ BOOKING : commits
     BOOKING ||--o{ TASK_COMPLETION : groups
@@ -215,7 +216,7 @@ erDiagram
 
     INSTRUCTION ||--o{ INSTRUCTION_REVISION : versioned_by
 
-    FILE ||--o{ TASK_EVIDENCE : backs
+    FILE ||--o{ EVIDENCE : backs
     FILE ||--o{ EXPENSE_ATTACHMENT : backs
     FILE ||--o{ ISSUE : backs
 
@@ -231,7 +232,7 @@ erDiagram
     ORGANIZATION ||--o{ PAYOUT_DESTINATION : receives
 
     PROPERTY ||--o{ WORK_ORDER : hosts
-    WORK_ORDER ||--o{ TASK : groups
+    WORK_ORDER ||--o{ OCCURRENCE : groups
     WORK_ORDER ||--o{ QUOTE : priced_by
     WORK_ORDER ||--o{ VENDOR_INVOICE : billed_by
 
@@ -244,7 +245,7 @@ erDiagram
 Entities in the diagram but not detailed inline here have their
 columns defined in the section referenced in the catalog below.
 `task_assignment` is not an entity — task assignment is captured as
-`task.assigned_user_id` (see §06). Worker-facing operational policy
+`occurrence.assigned_user_id` (see §06). Worker-facing operational policy
 is resolved through the structured settings cascade below; there is
 no separate runtime "capability" resolver. Authority
 (who-may-do-what) lives on the `permission_rule` + action
@@ -264,9 +265,11 @@ catalog pair (see `permission_rule` below and the catalog in
 - **People, work roles, engagements** (§05, §22): `work_role`,
   `user_work_role`, `property_work_role_assignment`,
   `work_engagement`.
-- **Work** (§06): `task_template`, `schedule`, `task`,
-  `task_approval`, `task_checklist_item`, `task_completion`, `task_evidence`,
-  `task_comment`, `stay_lifecycle_rule`, `stay_task_bundle`,
+- **Work** (§06): `task_template`, `schedule`, `occurrence`
+  (the user-facing "task" row — one materialised unit of work, see
+  §06 "Task row"), `task_approval`, `checklist_item`,
+  `task_completion`, `evidence`, `comment`, `stay_lifecycle_rule`,
+  `stay_task_bundle`,
   `user_leave`, `user_weekly_availability`,
   `user_availability_override`, `public_holiday`,
   `property_closure`. (Pre-cd-l2r9 these availability tables were
@@ -305,7 +308,7 @@ catalog pair (see `permission_rule` below and the catalog in
   `llm_usage_daily`, `agent_action`, `anomaly_suppression`,
   `agent_preference`, `agent_preference_revision`.
 - **Files** (§02 "Shared tables", storage backend in §15): `file` —
-  shared blob-reference table used by `task_evidence`,
+  shared blob-reference table used by `evidence`,
   `expense_attachment`, `issue.attachment_file_ids`,
   `instruction_revision.attachment_file_ids`, and
   `user.avatar_file_id`.
@@ -1444,8 +1447,8 @@ user does; archiving a user disables every token atomically.
 Derived fields are computed and persisted **only** when recomputing on
 read is too expensive:
 
-- `task.scheduled_for_local` — stored alongside UTC for fast day-view
-  queries.
+- `occurrence.scheduled_for_local` — stored alongside UTC for fast
+  day-view queries.
 - `booking.actual_minutes_paid` — defaults to scheduled minutes minus
   break, advances only on approved amend (§09).
 - `expense_claim.total_amount_cents` — recomputed on line add/remove.
@@ -1489,7 +1492,9 @@ The cascade has five layers, from broadest to most specific:
    Scoped per (user, workspace); settings here apply to every
    task/booking the user performs under that engagement. Replaces
    what v0 called the "employee layer".
-5. **Task** — `tasks.settings_override_json`.
+5. **Task** — `occurrence.settings_override_json` (per-occurrence
+   override; the per-template default lives on
+   `task_template.settings_override_json`).
 
 **Most specific wins.** Resolution walks from the task inward:
 task → work_engagement → unit → property → workspace, stopping at
@@ -1570,7 +1575,7 @@ scope, and the spec that defines the feature:
 
 The **permission system** (§02 `permission_rule` + §05 action
 catalog) answers *who may do what* on explicit actions
-(`expenses.approve`, `users.invite`, `task_comment.create`, …).
+(`expenses.approve`, `users.invite`, `tasks.comment`, …).
 The settings cascade answers *how a feature behaves once the user is
 allowed to use it* (`bookings.pay_basis`, `evidence.policy`,
 `inventory.apply_on_task`, …).
@@ -1776,7 +1781,7 @@ ranked by a simple weighted sum:
 - checklist item text: weight 2
 - description_md: weight 2
 - completion_note_md: weight 1
-- task_comment.body_md: weight 1
+- comment.body_md: weight 1
 
 SQLite uses FTS5 `bm25()` with the same weight vector; Postgres uses
 `ts_rank_cd` against a `tsvector` built with the same weights.

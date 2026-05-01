@@ -315,7 +315,7 @@ draft → quoted → accepted → in_progress → completed → invoiced → pai
 cancelled is reachable from any non-terminal state.
 ```
 
-Tasks referencing a work_order (`task.work_order_id FK?`) inherit
+Tasks referencing a work_order (`occurrence.work_order_id FK?`) inherit
 its `assigned_user_id` as a default but may be re-assigned; all
 such tasks appear grouped under the work_order in the
 owner/manager UI.

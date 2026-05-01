@@ -226,7 +226,7 @@ conversation regardless of surface.
 | binding_id          | ULID FK? | set for off-app channels; null for web                                 |
 | provider_message_id | text?    | the channel-native id (Meta `wamid`, Telegram `message_id`, etc.) — used for replay defeat and delivery correlation |
 | body_md             | text?    | post-translation copy in the workspace default language               |
-| body_md_original    | text?    | as received; mirrors `task_comment.body_md_original` (§10)            |
+| body_md_original    | text?    | as received; mirrors `comment.body_md_original` (§10)                 |
 | language_original   | text?    | BCP-47 detected language                                              |
 | translation_llm_call_id | ULID? | `llm_call.id` for the translation pass (§11)                        |
 | agent_action_id     | ULID FK? | for `kind = 'action'` rows, the linked approval row (§11)             |
@@ -484,7 +484,7 @@ Three primary consumers:
 - **Task evidence** (§06) — when the agent has an open task
   requesting photo evidence, the inbound image can satisfy the
   evidence requirement. The agent confirms the task and uploads
-  the photo to `task_evidence` under a delegated token.
+  the photo to `evidence` under a delegated token.
 - **Issue report** (§10) — when the user describes a problem with
   an attached photo, the agent drafts an `issue` row and confirms
   via an approval card.

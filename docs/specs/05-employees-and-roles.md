@@ -202,7 +202,7 @@ Examples:
 - Whether submitted expenses should trigger OCR autofill is a setting
   (`expenses.autofill_receipts`) resolved through the settings cascade.
 - Whether a worker can comment on a task is a permission decision
-  (`task_comment.create`).
+  (`tasks.comment`).
 - Whether a task requires a full checklist or photo evidence is a
   settings decision (`tasks.checklist_required`,
   `evidence.policy`).

@@ -134,7 +134,7 @@ fix the offender.
   visible.
 - **Assignment.** The linkage of a user to a work_role+property
   (`property_work_role_assignment`) and, per task, the pointer
-  `task.assigned_user_id`. There is no separate `task_assignment`
+  `occurrence.assigned_user_id`. There is no separate `task_assignment`
   entity — task assignment is just a column.
 - **Audit log.** Append-only ledger of all state-changing actions.
 - **Availability override.** A date-specific override of a user's
@@ -157,7 +157,7 @@ fix the offender.
 - **Condition (asset).** The physical state of an asset: `new | good |
   fair | poor | needs_replacement`. Changes are audit-logged as
   `asset.condition_changed`. See §21.
-- **Checklist item.** A row in `task_checklist_item` — one tickable
+- **Checklist item.** A row in `checklist_item` — one tickable
   line on a task, seeded from the template's
   `checklist_template_json`. Per-item tick state is authoritative.
 - **Client (grant role).** A user granted read-visibility to data
@@ -217,7 +217,7 @@ fix the offender.
   Feed URLs are stored in `secret_envelope` (§15). See §04.
 - **Instruction.** A standing SOP attached at global / property /
   area / link scope (§07). `instruction_link` is canonical;
-  `task.linked_instruction_ids` is a denormalized cache.
+  `occurrence.linked_instruction_ids` is a denormalized cache.
 - **Inventory movement.** An append-only ledger row recording a change
   to `inventory_item.on_hand`. Reason enum: `restock | consume |
   produce | waste | theft | loss | found | returned_to_vendor |

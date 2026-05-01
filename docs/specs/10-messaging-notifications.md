@@ -139,7 +139,7 @@ worker. Retries if SMTP fails; skipped if no noteworthy content.
 ## In-app messaging
 
 The in-app messaging surface is the **task-scoped agent thread**
-(§06 "Task notes are the agent inbox"). A `task_comment` row is no
+(§06 "Task notes are the agent inbox"). A `comment` row is no
 longer a free list of user comments — it is an **event in the log
 of a workspace-agent-mediated conversation** scoped to that task.
 
@@ -278,13 +278,13 @@ When a user writes a message in a language other than the workspace's
    capability `chat.detect_language`).
 2. Stores **both** the detected original message **and** a machine-
    translated copy in the workspace default language on the
-   `task_comment` row:
+   `comment` row:
 
    ```
-   task_comment.body_md                # translated copy (workspace default lang)
-   task_comment.body_md_original       # as written
-   task_comment.language_original      # BCP-47, detected
-   task_comment.translation_llm_call_id
+   comment.body_md                # translated copy (workspace default lang)
+   comment.body_md_original       # as written
+   comment.language_original      # BCP-47, detected
+   comment.translation_llm_call_id
    ```
 
 3. Owners and managers see the workspace-default-language copy by

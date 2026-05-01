@@ -348,8 +348,8 @@ The flow from asset type to completed maintenance:
 
 4. **Completion updates `last_performed_at`.** When a task with
    `asset_action_id` is completed (§06 "Completing a task"), the
-   server updates `asset_action.last_performed_at = task.completed_at`
-   and `asset_action.last_performed_task_id = task.id` in the same
+   server updates `asset_action.last_performed_at = occurrence.completed_at`
+   and `asset_action.last_performed_task_id = occurrence.id` in the same
    transaction.
 
 5. **One-off maintenance.** A manager or agent can create a one-off

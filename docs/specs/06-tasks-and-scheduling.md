@@ -20,7 +20,8 @@ or reports on tasks.
 5. **Subtask.** A child of another task (used sparingly — prefer
    checklist items).
 
-All five are rows in the same `tasks` table; the kind is derivable
+All five are rows in the same `occurrence` table (the user-facing
+"task" — see "Task row" below for the schema); the kind is derivable
 from `schedule_id IS NULL`, `stay_task_bundle_id IS NULL`, etc.
 
 ## Task template
@@ -73,7 +74,7 @@ Field semantics:
   reports so two revisions of the same item stay identifiable across
   edits.
 - **`text`**, **`required`**, **`guest_visible`** — as on
-  `task_checklist_item` (see "Checklist items" below).
+  `checklist_item` (see "Checklist items" below).
 - **`rrule`** (optional, RFC 5545) — calendar-anchored recurrence
   filter. When present, the item is materialised onto a generated
   task **only** if the task's `scheduled_for_local.date()` is an
@@ -148,9 +149,9 @@ A worker job `generate_task_occurrences` runs every hour:
    within **14 days** of the horizon, compute the next RRULE
    occurrences up to `now + 30 days`.
 2. Apply `exdate_local` and then `rdate_local`.
-3. For each new occurrence not yet materialized, create a `task` row
-   with `originally_scheduled_for = occurrence`, copying fields from
-   the template and the schedule defaults.
+3. For each new occurrence not yet materialized, create an
+   `occurrence` row with `originally_scheduled_for = occurrence`,
+   copying fields from the template and the schedule defaults.
 4. Run the assignment algorithm (below).
 5. Apply blackout dates (user leave, property closures) → may
    leave tasks **unassigned**.
@@ -182,6 +183,10 @@ range is evaluated only when `paused_at` is null.
 
 ## Task row
 
+The user-facing "task" is stored in the `occurrence` table. Every
+materialised unit of work — scheduled, ad-hoc, stay-lifecycle, or
+triggered — is one `occurrence` row. The schema:
+
 | field                        | type      | notes                                         |
 |------------------------------|-----------|-----------------------------------------------|
 | id                           | ULID PK   |                                               |
@@ -204,7 +209,7 @@ range is evaluated only when `paused_at` is null.
 | due_by_utc                   | tstz?     | SLA; default = `scheduled_for + duration`     |
 | duration_minutes             | int       |                                               |
 | photo_evidence               | enum      | copied from template; editable                |
-| checklist_snapshot_json      | jsonb     | initial snapshot from template; authoritative list is in `task_checklist_item` rows |
+| checklist_snapshot_json      | jsonb     | initial snapshot from template; authoritative list is in `checklist_item` rows |
 | linked_instruction_ids       | ULID[]    |                                               |
 | expected_role_id             | ULID FK?  |                                               |
 | assigned_user_id             | ULID FK?  | null = unassigned                             |
@@ -693,7 +698,7 @@ From the worker PWA: tap → "Mark done". If `photo_evidence =
 required`, the camera picker opens; the file is uploaded and linked
 before state flips. If the resolved setting
 `tasks.checklist_required = true`,
-every `task_checklist_item` with `required = true` must have
+every `checklist_item` with `required = true` must have
 `completed_at` set.
 
 Server-side:
@@ -707,7 +712,7 @@ Server-side:
    (§08).
 4. If `asset_action_id` is set, update
    `asset_action.last_performed_at = completed_at` and
-   `asset_action.last_performed_task_id = task.id` (§21).
+   `asset_action.last_performed_task_id = occurrence.id` (§21).
 5. Insert `task_completion` row (a tombstone used for history even if
    the task is later edited).
 6. If the task template or resolved setting
@@ -720,16 +725,16 @@ Server-side:
 
 ## Checklist items
 
-`task_checklist_item` is the authoritative list of ticks for a task.
-The template's `checklist_template_json` seeds the items at task
-creation and is then denormalized into rows so each tick carries its
-own timestamp and actor.
+`checklist_item` is the authoritative list of ticks for a task. The
+template's `checklist_template_json` seeds the items at task creation
+and is then denormalized into rows so each tick carries its own
+timestamp and actor.
 
 | field               | type     | notes                                   |
 |---------------------|----------|-----------------------------------------|
 | id                  | ULID PK  |                                         |
 | workspace_id        | ULID FK  |                                         |
-| task_id             | ULID FK  |                                         |
+| occurrence_id       | ULID FK  | parent task row (`occurrence.id`)       |
 | ordinal             | int      | display order                           |
 | text                | text     | the line as it appears to the worker    |
 | required            | bool     | if `tasks.checklist_required = true`, all required items must be ticked to complete |
@@ -745,7 +750,7 @@ entries.
 
 **Seeding is RRULE-filtered.** At task generation, the bundle/schedule
 worker expands `task_template.checklist_template_json` into
-`task_checklist_item` rows by evaluating each item's optional
+`checklist_item` rows by evaluating each item's optional
 `rrule` against the task's `scheduled_for_local.date()` (see "Checklist
 template shape" above). Items whose RRULE does not match on that date
 are **not** inserted for this task. Items with no RRULE are always
@@ -760,7 +765,7 @@ items never consult the RRULE afterwards).
 ## Evidence
 
 Photos, voice memos, GPS coordinates, and free-form notes. Stored per
-completion as `task_evidence {kind: photo|note|voice|gps, blob_hash?,
+completion as `evidence {kind: photo|note|voice|gps, blob_hash?,
 note_md?}`:
 
 - `kind=note` carries the body inline in `note_md` (markdown). No
@@ -786,8 +791,8 @@ API" for the wire shape and error envelopes.
 > Pre-cd-jl0g, an early draft of this spec listed
 > `kind: checklist_snapshot` as a third evidence kind for v0
 > backwards compatibility. v1 dropped that — the snapshot lives on
-> `task.checklist_snapshot_json` (see "Snapshot at completion time"
-> in §02 "Data model"), not on a separate `task_evidence` row.
+> `occurrence.checklist_snapshot_json` (see "Snapshot at completion
+> time" in §02 "Data model"), not on a separate `evidence` row.
 
 **The worker UI exposes the photo picker only.** There is no
 free-form "note" textarea on the task detail page. Observations
@@ -795,9 +800,9 @@ flow through the task-scoped chat with the workspace agent (see
 "Task notes are the agent inbox" below): the employee tells the
 agent what they saw, and the agent — reading the task's
 instructions (§07) and the workspace / user preference stack (§11)
-— decides whether the turn is worth persisting as a
-`task_evidence {kind: note}` row or folded into
-`task.completion_note_md`. The write is a normal delegated-token
+— decides whether the turn is worth persisting as an
+`evidence {kind: note}` row or folded into
+`occurrence.completion_note_md`. The write is a normal delegated-token
 tool call (§11), so it honours the user's `agent_approval_mode`
 (the inline confirmation card is declared by the route's
 `x-agent-confirm` annotation, §11). If the agent is unavailable,
@@ -814,7 +819,7 @@ summarise, answer questions grounded in the task's instructions
 (§07) and history, and reply on behalf of the employee or the
 manager when delegated.
 
-Data-model shape (persisted to `task_comment`):
+Data-model shape (persisted to `comment`):
 
 - Rows are ordered messages of kind `user | agent | system`.
 - The `agent` kind is the embedded workspace agent speaking in the
@@ -837,7 +842,7 @@ Data-model shape (persisted to `task_comment`):
   appears on the other without per-page reimplementation. The
   difference is scope only: the global tab shows the user's whole
   thread with their agent, while the task-detail view is scoped to
-  this task's `task_comment` rows.
+  this task's `comment` rows.
 
 The agent enforces only the rules it is told to enforce (task-local
 instructions, workspace defaults); it does not silently moderate.
@@ -894,7 +899,7 @@ user-facing surface is now the task-scoped chat described in
 "Task notes are the agent inbox" above. Threaded, markdown,
 `@mentions` resolve to workspace members, email fallback via §10.
 
-The `task_comment` row carries the full agent-inbox shape:
+The `comment` row carries the full agent-inbox shape:
 
 | column                | type      | notes                                                                                                                 |
 |-----------------------|-----------|-----------------------------------------------------------------------------------------------------------------------|
@@ -921,7 +926,7 @@ Write rules (`app/domain/tasks/comments.py`):
   wrong user. Once `User.display_name_slug` lands with a
   per-workspace uniqueness constraint, the ambiguous branch is
   unreachable.
-- Attachments must resolve to `task_evidence` rows anchored to the
+- Attachments must resolve to `evidence` rows anchored to the
   **same** occurrence and workspace (cross-thread / cross-workspace
   ids are rejected).
 - Moderator delete flows through `app.authz.require` on the

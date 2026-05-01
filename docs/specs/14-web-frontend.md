@@ -341,7 +341,7 @@ clocked to its own hour:
 3. **Tasks render as luggage-tag chips inside their parent block**,
    each chip absolutely positioned at its scheduled clock time
    relative to the block's top. For each task, the parent block is
-   matched by `property_id` + whether `task.scheduled_start` falls
+   matched by `property_id` + whether `occurrence.scheduled_start` falls
    inside the block's time range — tasks belong to the booking
    they run during, not to a standalone clock time (§06). Tasks
    with no matching parent (personal tasks on a day off, or
