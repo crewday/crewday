@@ -49,6 +49,7 @@ URL", §"OpenAPI"; ``docs/specs/16-deployment-operations.md``
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 from collections.abc import AsyncIterator, Callable, Iterator
@@ -235,6 +236,7 @@ _HTML_NONCE_ATTR_RE: Final[re.Pattern[str]] = re.compile(
     r"(?P<prefix>\snonce\s*=\s*)(?P<quote>[\"'])(?P<value>.*?)(?P=quote)",
     re.IGNORECASE,
 )
+_HTML_HEAD_CLOSE_RE: Final[re.Pattern[str]] = re.compile(r"</head\s*>", re.IGNORECASE)
 
 # OpenAPI document version we emit. FastAPI 0.111+ emits 3.1 by default
 # but we pin the string explicitly so a future FastAPI version that
@@ -420,11 +422,29 @@ def _stamp_inline_csp_nonces(html: str, nonce: str) -> str:
     return _INLINE_CSP_TAG_RE.sub(replace, html)
 
 
+def _spa_bootstrap_tag(nonce: str) -> str:
+    payload = json.dumps({"cspNonce": nonce}, separators=(",", ":"))
+    payload = payload.replace("</", "<\\/")
+    return (
+        f'<script id="crewday-bootstrap" nonce="{nonce}">'
+        f"window.__CREWDAY__={payload};"
+        "</script>"
+    )
+
+
+def _inject_spa_bootstrap(html: str, nonce: str) -> str:
+    bootstrap = _spa_bootstrap_tag(nonce)
+    if _HTML_HEAD_CLOSE_RE.search(html):
+        return _HTML_HEAD_CLOSE_RE.sub(f"{bootstrap}</head>", html, count=1)
+    return f"{bootstrap}{html}"
+
+
 def _render_spa_index(index: Path, request: Request) -> HTMLResponse:
     """Render the Vite index with the request-scoped CSP nonce seam."""
     csp_nonce = request.state.csp_nonce
     template = _SPA_TEMPLATE_ENV.from_string(index.read_text(encoding="utf-8"))
     rendered = template.render(csp_nonce=csp_nonce, request=request)
+    rendered = _inject_spa_bootstrap(rendered, csp_nonce)
     rendered = _stamp_inline_csp_nonces(rendered, csp_nonce)
     return HTMLResponse(content=rendered, status_code=200)
 

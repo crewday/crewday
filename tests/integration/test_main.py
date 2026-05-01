@@ -110,10 +110,21 @@ class TestSpaProdMountAgainstRealDist:
         resp = client.get("/")
         assert resp.status_code == 200
         assert resp.headers["content-type"].startswith("text/html")
+        match = re.search(
+            r"script-src 'self' 'nonce-(?P<nonce>[^']+)'",
+            resp.headers["Content-Security-Policy"],
+        )
+        assert match is not None
+        nonce = match.group("nonce")
         # The real index carries the SPA module script; the stub
         # banner doesn't — we assert the former so a silent fall-through
         # to the stub fails here loudly.
         assert "SPA not built" not in resp.text
+        assert (
+            f'<script id="crewday-bootstrap" nonce="{nonce}">'
+            f'window.__CREWDAY__={{"cspNonce":"{nonce}"}};</script>'
+            in resp.text
+        )
 
     def test_deep_link_returns_spa_index(
         self, pinned_settings: Settings, real_make_uow: None
@@ -170,6 +181,11 @@ class TestSpaProdMountAgainstRealDist:
         nonce = match.group("nonce")
         assert (
             f'<script nonce="{nonce}">window.n = "{nonce}";</script>'
+            in resp.text
+        )
+        assert (
+            f'<script id="crewday-bootstrap" nonce="{nonce}">'
+            f'window.__CREWDAY__={{"cspNonce":"{nonce}"}};</script>'
             in resp.text
         )
         assert 'nonce="stale"' not in resp.text
