@@ -196,6 +196,15 @@ __all__ = ["DemoModeRefused", "PublicBindRefused", "create_app"]
 
 _log = logging.getLogger(__name__)
 
+# Set on the first ``_register_stays_subscriptions`` call per process so
+# the placeholder-port warning fires exactly once (not on every
+# ``create_app`` rebuild in tests). Reset only by the test helper that
+# scrubs the singleton bus's stays subscriptions; the symmetry keeps
+# the warning observable in test runs that explicitly re-wire from
+# zero, while staying silent for the routine "second factory build in
+# the same process" path.
+_STAYS_NOOP_PORT_WARNED: bool = False
+
 # Package name we look up via :mod:`importlib.metadata`. Matches
 # ``pyproject.toml`` ``[project].name`` — kept as a module constant so a
 # rename lands in one place.
@@ -1363,6 +1372,93 @@ def _seed_agent_docs_for_lifespan() -> None:
         seed_agent_docs(session)
 
 
+def _register_stays_subscriptions() -> None:
+    """Wire stay-bundle + turnover subscribers onto the process bus.
+
+    The two ``register_subscriptions`` entry points each subscribe a
+    handler for :class:`~app.events.types.ReservationUpserted` against
+    the singleton :data:`app.events.bus.bus`. Both are idempotent on
+    the bus identity, so calling this from every factory build is
+    safe — a re-import or a test that builds a second app just no-ops.
+
+    Both handlers need the *publishing* :class:`~sqlalchemy.orm.Session`
+    + the active :class:`~app.tenancy.WorkspaceContext` for the
+    in-flight event. Synchronous publishers (the iCal poll worker
+    via :func:`app.adapters.db.session.bind_active_session`, plus
+    integration tests) bind the session, and the tenancy middleware
+    / worker job binds the context via :func:`app.tenancy.set_current`;
+    the ``session_provider`` reads both back. Returning ``None`` when
+    either is missing lets the handler short-circuit cleanly (the
+    bundle / turnover modules log a structured ``no_session_for_event``
+    line in that case).
+
+    The :class:`NoopTasksCreateOccurrencePort` is the placeholder
+    until cd-ncbdb wires the SQLAlchemy concretion of
+    :class:`TasksCreateOccurrencePort`. Both handlers tolerate the
+    no-op shape — a fired event records the call and returns
+    ``"noop"`` from the port without persisting any task occurrence.
+    See ``docs/specs/04-properties-and-stays.md`` §"Stay task bundles".
+    """
+
+    from app.adapters.db.session import get_active_session
+    from app.domain.stays import bundle_service, turnover_generator
+    from app.events.bus import bus as default_event_bus
+    from app.events.types import ReservationUpserted
+    from app.ports.tasks_create_occurrence import NoopTasksCreateOccurrencePort
+    from app.tenancy import WorkspaceContext, get_current
+
+    port = NoopTasksCreateOccurrencePort()
+
+    def _session_provider(
+        event: ReservationUpserted,
+    ) -> tuple[Session, WorkspaceContext] | None:
+        # Cancelled events still want to reach the bundle handler so
+        # it can sweep existing bundles; the handlers themselves
+        # discriminate on ``change_kind``. This provider just supplies
+        # the active session + ctx and never inspects the event.
+        del event
+        session = get_active_session()
+        ctx = get_current()
+        if session is None or ctx is None:
+            return None
+        return session, ctx
+
+    # Order matters: the turnover generator runs the per-reservation
+    # rule path independently of the bundle service today, but both
+    # subscribe to the same event. Registering the bundle service
+    # first is consistent with §04 "Stay task bundles" being the
+    # broader surface — a future refactor that has the bundle
+    # service own turnover wholesale will only need to drop the
+    # turnover registration here.
+    bundle_service.register_subscriptions(
+        default_event_bus,
+        port=port,
+        session_provider=_session_provider,
+    )
+    turnover_generator.register_subscriptions(
+        default_event_bus,
+        port=port,
+        session_provider=_session_provider,
+    )
+
+    # The placeholder port is wired in production until cd-ncbdb lands
+    # the SQLAlchemy concretion. Logged once per process (the dedup
+    # below guards against noise across re-imports / repeated factory
+    # builds in tests) so ops sees the placeholder in startup output
+    # rather than chasing silent ``port_outcome="noop"`` lines deep
+    # inside ``bundle.tasks_json``.
+    global _STAYS_NOOP_PORT_WARNED
+    if not _STAYS_NOOP_PORT_WARNED:
+        _STAYS_NOOP_PORT_WARNED = True
+        _log.warning(
+            "stays subscribers wired with NoopTasksCreateOccurrencePort placeholder",
+            extra={
+                "event": "stays.factory.noop_port_wired",
+                "follow_up_task": "cd-ncbdb",
+            },
+        )
+
+
 def _build_worker_lifespan(
     cfg: Settings,
 ) -> Callable[[FastAPI], AbstractAsyncContextManager[None]]:
@@ -1457,6 +1553,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # stream with the redaction filter already installed.
     setup_logging(level=cfg.log_level)
     register_inventory_reorder_subscriber()
+    _register_stays_subscriptions()
 
     _enforce_demo_guard(cfg)
     _enforce_bind_guard(cfg)

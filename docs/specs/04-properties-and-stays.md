@@ -301,6 +301,28 @@ edits, and show in the UI as coherent groups. **Edit semantics:**
   with `cancellation_reason = 'stay rescheduled'` and regenerate from
   the rule's template.
 
+The bundle and turnover generators are **event-driven**: both
+`bundle_service.register_subscriptions` and
+`turnover_generator.register_subscriptions` MUST be wired at FastAPI
+factory startup so a real `ReservationUpserted` published from the
+iCal poller (or a manual reservation upsert) triggers bundle creation
++ turnover materialisation. The wiring lives inside `app/api/factory.py`
+and is idempotent on the singleton bus, mirroring how the inventory
+reorder subscriber bootstraps. Both subscribers recover the publishing
+`Session` + `WorkspaceContext` via the per-task carriers
+(`app.adapters.db.session.get_active_session` +
+`app.tenancy.get_current`) so the handler runs inside the publisher's
+unit of work. **Every `ReservationUpserted` publisher MUST run inside
+both carriers** — `set_current(ctx)` for tenancy and
+`bind_active_session(session)` for the publishing `Session` — across
+the synchronous publish region. A publisher that omits either carrier
+is a silent no-op: the subscribers log
+`stays.bundle_service.no_session_for_event` /
+`stays.turnover_generator.no_session_for_event` and exit without
+materialising bundles or turnover tasks. The iCal poll worker job
+already wraps `poll_ical` accordingly; future reservation-upsert API
+endpoints must do the same before publishing.
+
 ### Overlap detection
 
 Two stays for the same **unit** whose `[check_in_at, check_out_at)`

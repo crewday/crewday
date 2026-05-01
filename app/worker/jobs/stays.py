@@ -66,6 +66,7 @@ def _make_poll_ical_fanout_body(clock: Clock) -> Callable[[], None]:
         from app.adapters.db.secrets.repositories import (
             SqlAlchemySecretEnvelopeRepository,
         )
+        from app.adapters.db.session import bind_active_session
         from app.adapters.db.workspace.models import Workspace
         from app.adapters.storage.envelope import Aes256GcmEnvelope
         from app.config import get_settings
@@ -144,7 +145,14 @@ def _make_poll_ical_fanout_body(clock: Clock) -> Callable[[], None]:
                 token = set_current(ctx)
                 try:
                     try:
-                        with session.begin_nested():
+                        with session.begin_nested(), bind_active_session(session):
+                            # ``bind_active_session`` exposes the
+                            # publishing :class:`Session` to the
+                            # synchronous stays subscribers wired by
+                            # the FastAPI factory's
+                            # ``_register_stays_subscriptions`` so the
+                            # ReservationUpserted handlers can read /
+                            # write through the same UoW (cd-87u7m).
                             report = poll_ical(
                                 ctx,
                                 session=session,

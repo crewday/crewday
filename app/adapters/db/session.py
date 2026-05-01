@@ -19,6 +19,9 @@ from __future__ import annotations
 import logging
 import sqlite3
 import weakref
+from collections.abc import Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from types import TracebackType
 
 from sqlalchemy import Engine, create_engine, event, make_url
@@ -29,7 +32,14 @@ from app.adapters.db.ports import DbSession
 from app.config import get_settings
 from app.tenancy.orm_filter import install_tenant_filter
 
-__all__ = ["UnitOfWorkImpl", "make_engine", "make_uow", "normalise_sync_url"]
+__all__ = [
+    "UnitOfWorkImpl",
+    "bind_active_session",
+    "get_active_session",
+    "make_engine",
+    "make_uow",
+    "normalise_sync_url",
+]
 
 _log = logging.getLogger(__name__)
 
@@ -150,6 +160,56 @@ def _enable_sqlite_foreign_keys(engine: Engine) -> None:
 # the one-off cost; subsequent callers reuse the cached factory.
 _default_engine: Engine | None = None
 _default_sessionmaker_: sessionmaker[Session] | None = None
+
+
+# Active publishing session carrier. Synchronous publishers (today:
+# the iCal poll worker, plus integration tests) wrap their open
+# :class:`Session` with :func:`bind_active_session` so any in-flight
+# event-bus subscriber driven by the publisher's ``flush()`` can fetch
+# the same session without threading it as an argument. Mirrors the
+# :data:`app.tenancy.current._current_ctx` carrier — the two
+# context-vars together let a subscriber recover the publisher's
+# (session, ctx) without a new DI container.
+#
+# This is intentionally NOT bound from :class:`UnitOfWorkImpl`: the
+# UoW yields a session into FastAPI dep generators that cross asyncio
+# thread-pool boundaries, where the :class:`~contextvars.Token`-based
+# reset would fire in the wrong context. The explicit
+# :func:`bind_active_session` helper keeps the binding scoped to a
+# synchronous publish region the caller controls.
+_active_session: ContextVar[Session | None] = ContextVar(
+    "crewday_active_session",
+    default=None,
+)
+
+
+def get_active_session() -> Session | None:
+    """Return the active publishing session for this task, or ``None``."""
+    return _active_session.get()
+
+
+@contextmanager
+def bind_active_session(session: Session) -> Iterator[None]:
+    """Bind ``session`` for the duration of the ``with`` block.
+
+    Use this around synchronous publish points (the iCal poll worker,
+    integration tests) so subscribers wired by the FastAPI factory's
+    ``_register_stays_subscriptions`` can recover the publishing
+    session via :func:`get_active_session` without a DI container.
+
+    The binding is task-local. When the publish path crosses an
+    asyncio thread-pool boundary (FastAPI ``db_session`` dep) the
+    :class:`~contextvars.Token`-based reset can fire from a different
+    context than the ``set``; we set + restore the previous value
+    inline rather than rely on token semantics so the helper is safe
+    in any execution model.
+    """
+    previous = _active_session.get()
+    _active_session.set(session)
+    try:
+        yield
+    finally:
+        _active_session.set(previous)
 
 
 def _default_sessionmaker() -> sessionmaker[Session]:
