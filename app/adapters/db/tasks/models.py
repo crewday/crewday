@@ -800,6 +800,19 @@ class Occurrence(Base):
         ForeignKey("user.id", ondelete="SET NULL"),
         nullable=True,
     )
+    # cd-ncbdb stay-driven idempotency triple. Soft pointers — no FK
+    # so losing the reservation row (cancel cascade etc.) does not
+    # orphan the historical occurrence. ``occurrence_key`` is the
+    # per-rule identity for recurring rules (``during_stay:0``);
+    # single-shot rules persist an empty string so the partial
+    # unique index keys the same pair the same way every time.
+    # Populated only by the
+    # :class:`~app.ports.tasks_create_occurrence.TasksCreateOccurrencePort`
+    # SQLAlchemy concretion; schedule-driven (cd-22e) and one-off
+    # (cd-0rf) occurrences leave the triple ``NULL``.
+    reservation_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    lifecycle_rule_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    occurrence_key: Mapped[str | None] = mapped_column(String, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
     )
@@ -865,6 +878,29 @@ class Occurrence(Base):
             unique=True,
             sqlite_where=text("schedule_id IS NOT NULL"),
             postgresql_where=text("schedule_id IS NOT NULL"),
+        ),
+        # cd-ncbdb idempotency guard for the
+        # :class:`TasksCreateOccurrencePort` SQLAlchemy concretion.
+        # The triple matches the port's "Idempotency contract"
+        # docstring — re-firing the same ``ReservationUpserted`` event
+        # MUST NOT create a duplicate live ``occurrence`` row. Scoped
+        # to ``reservation_id IS NOT NULL`` so non-stay occurrences
+        # (the cd-22e schedule path, the cd-0rf one-off path) do not
+        # collide on three-NULL keys; also scoped to
+        # ``state != 'cancelled'`` so a regenerate flow that cancels
+        # the existing row and inserts a fresh one with the same
+        # triple does not collide on the historical tombstone.
+        Index(
+            "uq_occurrence_reservation_rule_key",
+            "workspace_id",
+            "reservation_id",
+            "lifecycle_rule_id",
+            "occurrence_key",
+            unique=True,
+            sqlite_where=text("reservation_id IS NOT NULL AND state != 'cancelled'"),
+            postgresql_where=text(
+                "reservation_id IS NOT NULL AND state != 'cancelled'"
+            ),
         ),
     )
 

@@ -196,15 +196,6 @@ __all__ = ["DemoModeRefused", "PublicBindRefused", "create_app"]
 
 _log = logging.getLogger(__name__)
 
-# Set on the first ``_register_stays_subscriptions`` call per process so
-# the placeholder-port warning fires exactly once (not on every
-# ``create_app`` rebuild in tests). Reset only by the test helper that
-# scrubs the singleton bus's stays subscriptions; the symmetry keeps
-# the warning observable in test runs that explicitly re-wire from
-# zero, while staying silent for the routine "second factory build in
-# the same process" path.
-_STAYS_NOOP_PORT_WARNED: bool = False
-
 # Package name we look up via :mod:`importlib.metadata`. Matches
 # ``pyproject.toml`` ``[project].name`` — kept as a module constant so a
 # rename lands in one place.
@@ -1392,22 +1383,23 @@ def _register_stays_subscriptions() -> None:
     bundle / turnover modules log a structured ``no_session_for_event``
     line in that case).
 
-    The :class:`NoopTasksCreateOccurrencePort` is the placeholder
-    until cd-ncbdb wires the SQLAlchemy concretion of
-    :class:`TasksCreateOccurrencePort`. Both handlers tolerate the
-    no-op shape — a fired event records the call and returns
-    ``"noop"`` from the port without persisting any task occurrence.
+    The :class:`SqlAlchemyTasksCreateOccurrencePort` (cd-ncbdb) is
+    the live concretion that turns a fired event into a persisted
+    ``occurrence`` row. The port keys idempotency on
+    ``(workspace_id, reservation_id, lifecycle_rule_id, occurrence_key)``
+    (partial unique index added in the same migration) so the iCal
+    poller re-firing the same ``ReservationUpserted`` is a no-op.
     See ``docs/specs/04-properties-and-stays.md`` §"Stay task bundles".
     """
 
     from app.adapters.db.session import get_active_session
+    from app.adapters.db.tasks.repositories import SqlAlchemyTasksCreateOccurrencePort
     from app.domain.stays import bundle_service, turnover_generator
     from app.events.bus import bus as default_event_bus
     from app.events.types import ReservationUpserted
-    from app.ports.tasks_create_occurrence import NoopTasksCreateOccurrencePort
     from app.tenancy import WorkspaceContext, get_current
 
-    port = NoopTasksCreateOccurrencePort()
+    port = SqlAlchemyTasksCreateOccurrencePort()
 
     def _session_provider(
         event: ReservationUpserted,
@@ -1440,23 +1432,6 @@ def _register_stays_subscriptions() -> None:
         port=port,
         session_provider=_session_provider,
     )
-
-    # The placeholder port is wired in production until cd-ncbdb lands
-    # the SQLAlchemy concretion. Logged once per process (the dedup
-    # below guards against noise across re-imports / repeated factory
-    # builds in tests) so ops sees the placeholder in startup output
-    # rather than chasing silent ``port_outcome="noop"`` lines deep
-    # inside ``bundle.tasks_json``.
-    global _STAYS_NOOP_PORT_WARNED
-    if not _STAYS_NOOP_PORT_WARNED:
-        _STAYS_NOOP_PORT_WARNED = True
-        _log.warning(
-            "stays subscribers wired with NoopTasksCreateOccurrencePort placeholder",
-            extra={
-                "event": "stays.factory.noop_port_wired",
-                "follow_up_task": "cd-ncbdb",
-            },
-        )
 
 
 def _build_worker_lifespan(

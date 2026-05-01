@@ -5,12 +5,15 @@ The stays context's turnover generator
 ``reservation.upserted`` events and decides that a turnover
 :class:`~app.adapters.db.tasks.models.Occurrence` row should exist
 in a particular gap window. The actual persistence belongs to the
-tasks context (cd-4qr Phase 5; the real adapter lands as part of
-``p5.tasks.*``). Until the tasks-side service exists this Protocol
-gives the stays generator a precise contract to call against —
-production wiring injects the live concretion in
-:mod:`app.main`; tests inject :class:`NoopTasksCreateOccurrencePort`
-or a recording fake.
+tasks context: production wiring injects
+:class:`~app.adapters.db.tasks.repositories.SqlAlchemyTasksCreateOccurrencePort`
+(cd-ncbdb) via
+:func:`app.api.factory._register_stays_subscriptions`; tests inject
+:class:`NoopTasksCreateOccurrencePort` or a recording fake. The
+port surface stays here (and not under ``app.domain.tasks.ports``)
+because it is a cross-context seam owned by both: the stays
+generator emits the request shape and the tasks adapter persists
+the row.
 
 **Idempotency contract.** Implementations MUST treat
 ``(reservation_id, rule_id, occurrence_key)`` as the dedup key,
@@ -191,10 +194,10 @@ class TasksCreateOccurrencePort(Protocol):
 class NoopTasksCreateOccurrencePort:
     """Test / dev double: records every call but does nothing.
 
-    Used by the stays generator's tests (no real tasks adapter to
-    hit) and as the default wired into :mod:`app.main` until the
-    Phase 5 tasks-side service lands. Once the live adapter lands
-    the bootstrap swaps this for the production concretion.
+    Used by the stays generator's tests that exercise the call
+    surface without a real DB to hit. Production wiring uses
+    :class:`~app.adapters.db.tasks.repositories.SqlAlchemyTasksCreateOccurrencePort`
+    (cd-ncbdb) instead.
 
     Every call returns ``("noop", None)``. The class explicitly does
     NOT pretend to track state — pretending would invite tests to

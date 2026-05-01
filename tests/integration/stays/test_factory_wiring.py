@@ -6,14 +6,15 @@ both :func:`app.domain.stays.bundle_service.register_subscriptions`
 and :func:`app.domain.stays.turnover_generator.register_subscriptions`
 against the singleton :data:`app.events.bus.bus`. Publishing a real
 :class:`~app.events.types.ReservationUpserted` then materialises a
-:class:`~app.adapters.db.stays.models.StayBundle` row and invokes the
-no-op :class:`~app.ports.tasks_create_occurrence.TasksCreateOccurrencePort`
-twice — once per subscriber.
+:class:`~app.adapters.db.stays.models.StayBundle` row and persists
+:class:`~app.adapters.db.tasks.models.Occurrence` rows through the
+live :class:`~app.adapters.db.tasks.repositories.SqlAlchemyTasksCreateOccurrencePort`.
 
-The SQLAlchemy concretion of the tasks-side port lands with cd-ncbdb;
-until then both subscribers run against the no-op port. The test
-asserts the port was *called* (not that an :class:`Occurrence` row
-persisted) so the noop scope is honest, per the cd-87u7m intake.
+cd-ncbdb flipped this test from "no-op port records the call" to
+"SA port persists rows": the assertions below cover the bundle row,
+the per-bundle ``port_outcome="created"`` entry on ``tasks_json``,
+and a real :class:`Occurrence` row keyed on
+``(reservation_id, lifecycle_rule_id)``.
 
 See ``docs/specs/04-properties-and-stays.md`` §"Stay task bundles"
 and ``docs/specs/17-testing-quality.md`` §"Integration".
@@ -33,6 +34,8 @@ import app.adapters.db.session as _session_mod
 from app.adapters.db.places.models import Property
 from app.adapters.db.session import bind_active_session
 from app.adapters.db.stays.models import Reservation, StayBundle
+from app.adapters.db.tasks.models import Occurrence
+from app.adapters.db.tasks.repositories import SqlAlchemyTasksCreateOccurrencePort
 from app.adapters.db.workspace.models import Workspace
 from app.config import Settings
 from app.domain.stays import bundle_service, turnover_generator
@@ -40,7 +43,6 @@ from app.events.bus import bus as singleton_bus
 from app.events.types import ReservationUpserted
 from app.main import create_app
 from app.ports.tasks_create_occurrence import (
-    NoopTasksCreateOccurrencePort,
     TurnoverOccurrenceRequest,
     TurnoverOccurrenceResult,
 )
@@ -236,7 +238,7 @@ def _ctx_for(workspace_id: str) -> WorkspaceContext:
 class TestFactoryWiresStaysSubscriptions:
     """``create_app`` wires both stays subscribers; events drive the handlers."""
 
-    def test_publish_materialises_bundle_and_calls_port(
+    def test_publish_materialises_bundle_and_persists_occurrence(
         self,
         db_session: Session,
         pinned_settings: Settings,
@@ -244,16 +246,18 @@ class TestFactoryWiresStaysSubscriptions:
         reset_stays_subscriptions: None,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        # Record every port call the noop double services. We
-        # monkeypatch the class method so the real wiring (which
-        # constructs the noop port inside ``_register_stays_subscriptions``)
-        # routes through our recorder without us threading a custom
-        # port into the factory.
+        # Record every port call the live SA concretion services. We
+        # monkeypatch the class method so the production wiring (which
+        # constructs ``SqlAlchemyTasksCreateOccurrencePort`` inside
+        # ``_register_stays_subscriptions``) routes through a thin
+        # recorder without losing the persistence side effect.
         port_calls: list[TurnoverOccurrenceRequest] = []
-        original = NoopTasksCreateOccurrencePort.create_or_patch_turnover_occurrence
+        original = (
+            SqlAlchemyTasksCreateOccurrencePort.create_or_patch_turnover_occurrence
+        )
 
         def _recording_call(
-            self: NoopTasksCreateOccurrencePort,
+            self: SqlAlchemyTasksCreateOccurrencePort,
             session: Session,
             ctx: WorkspaceContext,
             *,
@@ -264,7 +268,7 @@ class TestFactoryWiresStaysSubscriptions:
             return original(self, session, ctx, request=request, now=now)
 
         monkeypatch.setattr(
-            NoopTasksCreateOccurrencePort,
+            SqlAlchemyTasksCreateOccurrencePort,
             "create_or_patch_turnover_occurrence",
             _recording_call,
         )
@@ -322,8 +326,8 @@ class TestFactoryWiresStaysSubscriptions:
             reset_current(ctx_token)
 
         # bundle_service materialised a StayBundle row and recorded
-        # the port outcome on it. The noop port returns ``"noop"``
-        # without persisting anything.
+        # the live port outcome on it. The SA concretion persists
+        # an Occurrence on first call, so ``port_outcome="created"``.
         bundles = db_session.scalars(
             select(StayBundle).where(StayBundle.reservation_id == rid)
         ).all()
@@ -331,13 +335,12 @@ class TestFactoryWiresStaysSubscriptions:
         bundle = bundles[0]
         assert bundle.kind == "turnover"
         assert any(
-            entry.get("port_outcome") == "noop" for entry in bundle.tasks_json
+            entry.get("port_outcome") == "created" for entry in bundle.tasks_json
         ), bundle.tasks_json
 
-        # The noop port saw two calls — one from each subscriber.
-        # bundle_service's call carries a ``stay_task_bundle_id``;
-        # turnover_generator's call does not. Asserting both shapes
-        # were observed pins both wirings end-to-end.
+        # Both subscribers reached the port — bundle_service threads
+        # a ``stay_task_bundle_id`` on its request, turnover_generator
+        # does not. Asserting both shapes pins both wirings.
         assert len(port_calls) == 2, port_calls
         bundle_call = next(
             (call for call in port_calls if call.stay_task_bundle_id is not None),
@@ -351,6 +354,25 @@ class TestFactoryWiresStaysSubscriptions:
         assert turnover_call is not None, port_calls
         assert bundle_call.reservation_id == rid
         assert turnover_call.reservation_id == rid
+
+        # The end-to-end chain landed real Occurrence rows. The
+        # bundle service writes its bundle-keyed row with the
+        # ``occurrence_key`` it carries (``"after_checkout"``) while
+        # the turnover generator writes its own row with no key
+        # (empty string after the SA port's normalisation). The two
+        # rows are persisted as a result of the same publish.
+        occurrences = db_session.scalars(
+            select(Occurrence)
+            .where(Occurrence.reservation_id == rid)
+            .order_by(Occurrence.created_at.asc())
+        ).all()
+        assert len(occurrences) == 2, [
+            (row.lifecycle_rule_id, row.occurrence_key) for row in occurrences
+        ]
+        assert all(row.workspace_id == workspace_id for row in occurrences)
+        assert all(row.property_id == prop for row in occurrences)
+        keys = {row.occurrence_key for row in occurrences}
+        assert keys == {"", "after_checkout"}, keys
 
     def test_factory_subscription_is_idempotent(
         self,

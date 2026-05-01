@@ -30,6 +30,7 @@ from sqlalchemy.orm import Session
 from app.adapters.db.places.models import Property
 from app.adapters.db.secrets.repositories import SqlAlchemySecretEnvelopeRepository
 from app.adapters.db.stays.models import Reservation, StayBundle
+from app.adapters.db.tasks.repositories import SqlAlchemyTasksCreateOccurrencePort
 from app.adapters.db.workspace.models import Workspace
 from app.adapters.ical.ports import IcalProvider
 from app.adapters.ical.providers import HostProviderDetector
@@ -77,10 +78,7 @@ from app.domain.stays.ical_service import (
     register_feed,
     update_feed,
 )
-from app.ports.tasks_create_occurrence import (
-    NoopTasksCreateOccurrencePort,
-    TasksCreateOccurrencePort,
-)
+from app.ports.tasks_create_occurrence import TasksCreateOccurrencePort
 from app.tenancy import WorkspaceContext
 from app.util.clock import Clock, SystemClock
 
@@ -138,7 +136,7 @@ def get_envelope(
 
 
 def get_tasks_create_occurrence_port() -> TasksCreateOccurrencePort:
-    return NoopTasksCreateOccurrencePort()
+    return SqlAlchemyTasksCreateOccurrencePort()
 
 
 def get_welcome_resolver() -> WelcomeResolver:

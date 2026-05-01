@@ -299,7 +299,18 @@ edits, and show in the UI as coherent groups. **Edit semantics:**
   `check_in_at` shift.
 - Otherwise: cancel the existing bundle's `scheduled | pending` tasks
   with `cancellation_reason = 'stay rescheduled'` and regenerate from
-  the rule's template.
+  the rule's template. Tasks already in a terminal / in-flight state
+  (`completed`, `approved`, `skipped`, `overdue`, `in_progress`) are
+  left untouched — the historical row stands and the bundle's
+  tasks_json continues to point at it.
+
+The persistence side of this state machine lives in the
+`TasksCreateOccurrencePort` SQLAlchemy concretion
+(`app/adapters/db/tasks/repositories.py`); idempotency is keyed on
+`(workspace_id, reservation_id, lifecycle_rule_id, occurrence_key)`
+via a partial unique index scoped to
+`reservation_id IS NOT NULL AND state != 'cancelled'`, so re-firing
+the same `ReservationUpserted` cannot duplicate the live row.
 
 The bundle and turnover generators are **event-driven**: both
 `bundle_service.register_subscriptions` and
