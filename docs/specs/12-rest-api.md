@@ -350,10 +350,151 @@ non-obvious ones.
 workspace-scoped; §01, §03):
 
 ```
-POST   /api/v1/signup/start                      # SaaS self-serve
-POST   /api/v1/signup/verify                     # magic link redeem + WS provisioning
-POST   /api/v1/signup/passkey/start              # self-serve signup passkey ceremony (§03 "Self-serve signup"); body: {signup_session_id, display_name}; mints the passkey registration challenge bound to the signup_session_id returned by /signup/verify — no user row or session cookie exists yet
-POST   /api/v1/signup/passkey/finish             # self-serve signup completion; body: {signup_session_id, challenge_id, display_name, timezone, credential}; delegates to complete_signup which in one transaction creates the workspace + user + UserWorkspace + four system permission groups (owners seeded), persists the first passkey, and emits the signup.completed audit row. Returns {workspace_slug, redirect}; no Set-Cookie — the SPA follows the usual passkey login ceremony against the freshly-minted user
+# Self-serve signup (§03 "Self-serve signup"). Bare-host, pre-auth,
+# tenant-agnostic; the entire surface 404s when
+# ``capabilities.settings.signup_enabled`` is false (self-host
+# default). Four routes form one linear flow: start → verify →
+# passkey/start → passkey/finish. No `Set-Cookie` on any of them —
+# the session cookie lands on the subsequent `/auth/passkey/login/finish`
+# the SPA runs against the freshly-minted user. CSRF is not enforced
+# (every route is unauthenticated; the abuse model is rate-limit /
+# CAPTCHA / disposable-email gates, not cookie replay).
+POST   /api/v1/signup/start                      # kick off the SaaS self-serve flow.
+                                                 #   Body: {email: str (3-320 chars), desired_slug: str
+                                                 #     (3-40 chars), captcha_token?: str}.
+                                                 #     `captcha_token` is optional on the wire so self-host
+                                                 #     deployments with `capabilities.captcha_required=false`
+                                                 #     can omit it; required deployments reject an absent
+                                                 #     token with 422 `captcha_required` (§15 "Self-serve
+                                                 #     abuse mitigations").
+                                                 #   202 {"status": "accepted"} — opaque body so the response
+                                                 #     leaks nothing about whether the email already exists
+                                                 #     (the enumeration guard). Slug-related errors still
+                                                 #     surface via 409 below.
+                                                 #   404 {"error": "not_found"} — `signup_enabled=false`.
+                                                 #   422 {"error": "invalid_slug", "message": str} — slug
+                                                 #     fails the §03 charset / length / reserved-prefix rules.
+                                                 #   409 {"error": "slug_taken", "suggested_alternative": str}
+                                                 #     — slug is held by a live workspace (alternative is the
+                                                 #     §03 step-1 one-click suggestion).
+                                                 #   409 {"error": "slug_reserved"} — slug is in the §03
+                                                 #     reserved-prefix list (admin, healthz, signup, …).
+                                                 #   409 {"error": "slug_homoglyph_collision",
+                                                 #     "colliding_slug": str} — homoglyph guard tripped (§03
+                                                 #     `5→s` / `rn→m`); body carries the colliding slug so
+                                                 #     the UI can surface "you typed rnicasa but micasa is
+                                                 #     taken".
+                                                 #   409 {"error": "slug_in_grace_period"} — slug held by an
+                                                 #     archived/deleted workspace inside the reservation
+                                                 #     window.
+                                                 #   422 {"error": "captcha_required" | "captcha_failed"} —
+                                                 #     CAPTCHA absent or rejected by Turnstile.
+                                                 #   422 {"error": "disposable_email"} — domain on the
+                                                 #     §15 disposable-email blocklist.
+                                                 #   429 {"error": "rate_limited", "retry_after_seconds": int}
+                                                 #     + `Retry-After` header — per-global / per-IP / per-email
+                                                 #     abuse budget exhausted (§15). The throttle fires before
+                                                 #     the DB or mailer are touched, so a 429 leaks nothing
+                                                 #     about email existence; refusal audit row + suspicious
+                                                 #     signal land on a fresh UoW.
+                                                 #   429 {"error": "rate_limited"} — magic-link mint throttle
+                                                 #     (own per-purpose limiter inside `signup.start_signup`,
+                                                 #     no `retry_after_seconds` field). Distinct from the
+                                                 #     abuse-layer 429 above only by payload shape.
+                                                 # Outbox ordering (cd-9slq): the handler runs its own UoW
+                                                 # so the signup_attempt + magic-link nonce + audit rows
+                                                 # commit BEFORE the SMTP send. A commit-time failure
+                                                 # therefore leaves no working link in the user's inbox.
+POST   /api/v1/signup/verify                     # consume the signup-verify magic link.
+                                                 #   Body: {token: str} — the `itsdangerous` blob from the
+                                                 #     emailed `/signup/verify?token=...` link.
+                                                 #   200 {signup_session_id: str, desired_slug: str} — the
+                                                 #     SPA forwards `signup_session_id` to
+                                                 #     `/signup/passkey/start`. JSON, not a 302: §14 is
+                                                 #     SPA-first.
+                                                 #   Marks the signup_attempt's email as verified by flipping
+                                                 #     `verified_at` and writing `audit.signup.verified`.
+                                                 #     **Does NOT provision the workspace** — that moved to
+                                                 #     `/signup/passkey/finish`, where workspace + user +
+                                                 #     groups + first passkey land in one transaction.
+                                                 #   404 {"error": "not_found"} — `signup_enabled=false`.
+                                                 #   404 {"error": "signup_attempt_not_found"} — token's
+                                                 #     subject_id does not resolve to a `signup_attempt` row.
+                                                 #   400 {"error": "invalid_token"} — signature / shape failure.
+                                                 #   400 {"error": "purpose_mismatch"} — token's purpose is
+                                                 #     not `signup_verify`.
+                                                 #   409 {"error": "already_consumed"} — single-use replay.
+                                                 #   409 {"error": "already_completed"} — the attempt already
+                                                 #     reached `completed_at` (the passkey finish ran).
+                                                 #   410 {"error": "expired"} — token TTL or attempt TTL lapsed.
+                                                 #   429 {"error": "consume_locked_out"} — per-IP failure
+                                                 #     window tripped (3 fails / 60 s → 10-min lockout).
+                                                 #   429 {"error": "rate_limited"} — domain-level RateLimited.
+POST   /api/v1/signup/passkey/start              # mint the passkey registration challenge for the signup flow.
+                                                 #   Body: {signup_session_id: str, display_name: str
+                                                 #     (1-160 chars)}.
+                                                 #     `signup_session_id` is the value `/signup/verify`
+                                                 #     returned. The route loads the `signup_attempt` for
+                                                 #     its canonical email so the WebAuthn user entity's
+                                                 #     `name` field is sourced from the DB, not the body
+                                                 #     — callers cannot smuggle a different email here.
+                                                 #     `display_name` is collected at this step (and again at
+                                                 #     `/signup/passkey/finish`) so the WebAuthn user entity
+                                                 #     has a real value before the `User` row exists.
+                                                 #   200 {challenge_id: str, options: object} — parsed
+                                                 #     `PublicKeyCredentialCreationOptions` the SPA passes
+                                                 #     to `navigator.credentials.create()`. The
+                                                 #     `challenge_id` round-trips to `/signup/passkey/finish`.
+                                                 #   No `Set-Cookie`: there is no user row or session yet.
+                                                 #   404 {"error": "not_found"} — `signup_enabled=false`.
+                                                 #   404 {"error": "signup_attempt_not_found"} — unknown
+                                                 #     `signup_session_id`.
+                                                 #   422 — Pydantic field error (missing
+                                                 #     `signup_session_id`, missing / oversized
+                                                 #     `display_name`); shape per §12 "Errors".
+POST   /api/v1/signup/passkey/finish             # complete the signup — workspace + user + groups + passkey, all in one transaction.
+                                                 #   Body: {signup_session_id: str, challenge_id: str,
+                                                 #     display_name: str (1-160 chars), timezone: str
+                                                 #     (1-80 chars), credential: object}.
+                                                 #     `credential` is the WebAuthn attestation
+                                                 #     `navigator.credentials.create()` produced.
+                                                 #   200 {workspace_slug: str, redirect: str} —
+                                                 #     `redirect` is `/w/<slug>/today`; the SPA
+                                                 #     navigates there and runs the usual
+                                                 #     `/auth/passkey/login/{start,finish}` ceremony to land
+                                                 #     the `__Host-crewday_session` cookie. **No
+                                                 #     `Set-Cookie` on this response** — see §03 "Self-serve
+                                                 #     signup" step 4 for the rationale (the bare-host login
+                                                 #     ceremony is the single place a session cookie is
+                                                 #     issued, so the post-signup state is identical to
+                                                 #     "user logged in normally").
+                                                 #   In one transaction `complete_signup` inserts the
+                                                 #     `workspaces` row, the `users` row, the
+                                                 #     `user_workspace` row, all four system permission
+                                                 #     groups (`owners` seeded with the new user, the other
+                                                 #     three empty), the `manager` `role_grant` on the
+                                                 #     workspace, the first `passkey_credential`, flips the
+                                                 #     `signup_attempt`'s `completed_at` / `workspace_id`,
+                                                 #     and writes `audit.workspace.owners_bootstrapped` +
+                                                 #     `audit.signup.completed` (sharing one
+                                                 #     `audit_correlation_id`). Any failure rolls back the
+                                                 #     whole transaction; the challenge is burned out-of-band
+                                                 #     so a retry cannot replay the attestation.
+                                                 #   404 {"error": "not_found"} — `signup_enabled=false`.
+                                                 #   404 {"error": "signup_attempt_not_found"} — unknown
+                                                 #     `signup_session_id`.
+                                                 #   409 {"error": "not_verified"} — `/signup/verify` has
+                                                 #     not run for this attempt.
+                                                 #   409 {"error": "already_completed"} — finish already ran.
+                                                 #   409 {"error": "challenge_consumed_or_unknown"} —
+                                                 #     `challenge_id` already burned or never existed.
+                                                 #   410 {"error": "expired"} — the attempt's TTL lapsed.
+                                                 #   400 {"error": "challenge_expired"} — challenge aged out.
+                                                 #   400 {"error": "invalid_registration"} — attestation
+                                                 #     verification failed or `challenge_id` did not bind to
+                                                 #     this `signup_session_id`.
+                                                 #   422 {"error": "too_many_passkeys"} — per-user ceiling
+                                                 #     reached (concurrent enrol only).
 POST   /api/v1/auth/passkey/login/start            # conditional-UI login ceremony (§03 "Login"); anonymous, rate-limited 10/min per IP (§15)
 POST   /api/v1/auth/passkey/login/finish           # verifies the assertion; on success sets `__Host-crewday_session` via Set-Cookie. 401 invalid_credential collapses every failure shape (no fingerprinting); 429 rate_limited on sustained pressure
 # Magic-link self-service (cd-glaz, cd-9i7z). Bare-host, pre-auth —

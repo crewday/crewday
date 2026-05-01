@@ -174,34 +174,51 @@ because no workspace exists yet:
    archives a workspace by mistake can recover the slug within
    the window via `crewday admin workspace unarchive`, which
    clears the reservation atomically.
-2. **Magic-link verification.** Visitor clicks the link. `GET
-   /signup/verify` redeems the token. The server atomically, in a
-   single transaction:
-   - inserts the `workspaces` row
+2. **Magic-link verification.** Visitor clicks the link. The SPA
+   posts the token to `POST /signup/verify`, which only flips the
+   `signup_attempt`'s `verified_at` and writes
+   `audit.signup.verified`. **No workspace, user, or membership
+   rows are inserted at this step** — those moved to
+   `/signup/passkey/finish` (cd-3i5) so a stranded magic-link
+   click cannot strand an orphan workspace. The response carries
+   `{signup_session_id, desired_slug}`; the SPA forwards
+   `signup_session_id` to the passkey ceremony.
+3. **Passkey enrollment + break-glass codes.** Same ritual as the
+   self-hosted first-owner flow: display name + timezone, register
+   a passkey, receive break-glass codes, confirm "I wrote them
+   down". `POST /signup/passkey/start` mints the WebAuthn
+   challenge bound to the `signup_session_id`. `POST
+   /signup/passkey/finish` verifies the attestation and runs
+   `complete_signup`, which atomically — in a single transaction —
+   inserts:
+   - the `workspaces` row
      (`created_via='self_serve'`, `verification_state='email_verified'`,
      `plan='free'`, `quota_json` copied from the free-tier caps,
      `signup_ip` set to the `POST /signup/start` request's source
      IP — see §15 "Per-IP aggregate LLM spend cap");
-   - inserts the `users` row, a `role_grants` row with
+   - the `users` row, a `role_grants` row with
      `(scope_kind='workspace', scope_id=<ws>, grant_role='manager')`,
      the four system permission groups on the new workspace, and
      the `permission_group_member` row placing the user in
      `owners@<ws>`;
-   - writes `audit.signup.completed` with `actor_kind='system'`
-     (pre-session) and `ip_hash` for abuse tracing.
-3. **Passkey enrollment + break-glass codes.** Same ritual as the
-   self-hosted first-owner flow: display name + timezone, register
-   a passkey, receive break-glass codes, confirm "I wrote them
-   down". The signup session is issued only after passkey
-   registration succeeds — a stranded magic-link click followed by
-   an abandoned passkey ceremony leaves a row in `workspaces` with
-   no user and no session; the `signup_gc` worker prunes these
-   after 1 hour (see §15).
-4. **Ready.** Browser is redirected to
-   `https://crew.day/w/<slug>/today`. The workspace is now
-   addressable; session cookies (`__Host-crewday_sess`) are
-   set on the bare host and used for every workspace the user
-   later joins.
+   - the first `passkey_credential`, then flips the
+     `signup_attempt`'s `completed_at` / `workspace_id`;
+   - `audit.workspace.owners_bootstrapped` and
+     `audit.signup.completed` (sharing one `audit_correlation_id`,
+     `actor_kind='system'` pre-session, with `ip_hash` for abuse
+     tracing).
+   Any failure rolls the whole transaction back; the
+   one-shot challenge is burned out-of-band so a retry cannot
+   replay the attestation. An abandoned passkey ceremony therefore
+   leaves no workspace at all — only the `signup_attempt` row,
+   which `signup_gc` prunes after 1 hour (see §15).
+4. **Ready.** The handler returns `{workspace_slug, redirect}`
+   (`/w/<slug>/today`) — **no `Set-Cookie`**. The SPA navigates to
+   the redirect target and runs the usual `/auth/passkey/login/{start,finish}`
+   ceremony against the freshly-minted user; the bare-host login
+   ceremony is the single place a session cookie
+   (`__Host-crewday_session`) is issued, so the post-signup state
+   is identical to "user logged in normally".
 
 **Tight initial caps.** Until the workspace reaches
 `verification_state='human_verified'` (defined in §02), the LLM
