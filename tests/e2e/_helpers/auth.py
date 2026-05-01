@@ -60,10 +60,13 @@ __all__ = [
     "MailpitMessage",
     "RPIDMismatch",
     "consume_magic_link_via_mailpit",
+    "create_passkey_attestation",
     "enroll_owner",
     "extract_magic_link_token",
+    "get_passkey_assertion",
     "install_virtual_authenticator",
     "login_with_dev_session",
+    "mirror_dev_cookie_alias",
     "wait_for_magic_link",
 ]
 
@@ -617,7 +620,7 @@ def enroll_owner(
         },
         expected_status=200,
     )
-    attestation = _create_passkey_attestation(page, start["options"])
+    attestation = create_passkey_attestation(page, start["options"])
     _post_json(
         page,
         f"{base_url.rstrip('/')}/api/v1/signup/passkey/finish",
@@ -637,7 +640,7 @@ def enroll_owner(
         {},
         expected_status=200,
     )
-    assertion = _get_passkey_assertion(page, login_start["options"])
+    assertion = get_passkey_assertion(page, login_start["options"])
     login_finish = _post_json_response(
         page,
         f"{base_url.rstrip('/')}/api/v1/auth/passkey/login/finish",
@@ -647,7 +650,7 @@ def enroll_owner(
         },
         expected_status=200,
     )
-    _mirror_dev_cookie_alias(
+    mirror_dev_cookie_alias(
         page,
         base_url=base_url,
         set_cookie=login_finish.headers.get("set-cookie"),
@@ -699,9 +702,25 @@ def _expect_str(payload: Mapping[str, object], key: str) -> str:
     return value
 
 
-def _mirror_dev_cookie_alias(
+def mirror_dev_cookie_alias(
     page: Page, *, base_url: str, set_cookie: str | None
 ) -> None:
+    """Project a passkey-login ``Set-Cookie`` onto the dev fallback alias.
+
+    The deployment-canonical cookie carries the ``__Host-`` prefix
+    which Chromium refuses to ship over plain HTTP (loopback is a
+    Secure context for ``set`` purposes, but ``send`` requires
+    HTTPS). The dev-only ``crewday_session`` alias has no prefix
+    invariants, so re-emitting the same opaque session value under
+    that name lets the next ``page.goto`` arrive authenticated.
+
+    The helper is reused by every test that drives the real
+    ``/api/v1/auth/passkey/login/finish`` ceremony — the bare
+    underscore-prefixed sibling exposed only to :func:`enroll_owner`
+    forced callers to either re-implement the alias dance or reach
+    into a private function. Promoting it keeps the cookie shape
+    canonical and lets new flows (invitee enrolment) reuse it.
+    """
     if not set_cookie:
         raise RuntimeError("passkey login finish did not return a Set-Cookie header")
     first = set_cookie.split(";", 1)[0]
@@ -728,11 +747,31 @@ def _mirror_dev_cookie_alias(
     )
 
 
-def _create_passkey_attestation(page: Page, options: object) -> dict[str, object]:
+def create_passkey_attestation(page: Page, options: object) -> dict[str, object]:
+    """Drive ``navigator.credentials.create()`` against the active page.
+
+    ``options`` is the parsed ``PublicKeyCredentialCreationOptions``
+    JSON envelope as the server returned it (challenge / user.id /
+    excludeCredentials carry base64url strings; the in-page helper
+    re-decodes them to ``ArrayBuffer`` before handing them to the
+    browser API). Returns the JSON-safe attestation envelope ready to
+    POST back to ``/api/v1/.../finish``.
+
+    The Chromium WebAuthn virtual authenticator (installed via
+    :func:`install_virtual_authenticator`) auto-confirms presence + UV
+    so the call resolves without operator interaction.
+    """
     return _evaluate_webauthn(page, "create", options)
 
 
-def _get_passkey_assertion(page: Page, options: object) -> dict[str, object]:
+def get_passkey_assertion(page: Page, options: object) -> dict[str, object]:
+    """Drive ``navigator.credentials.get()`` against the active page.
+
+    Mirror of :func:`create_passkey_attestation` for the assertion leg
+    (passkey login). ``options`` is the parsed
+    ``PublicKeyCredentialRequestOptions``; the returned envelope is
+    ready for ``/api/v1/auth/passkey/login/finish``.
+    """
     return _evaluate_webauthn(page, "get", options)
 
 

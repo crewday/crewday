@@ -136,6 +136,7 @@ from app.domain.identity.permission_groups import (
 from app.mail.templates import invite_accept as invite_accept_template
 from app.mail.templates import render as render_template
 from app.tenancy import WorkspaceContext, tenant_agnostic
+from app.tenancy.current import reset_current, set_current
 from app.util.clock import Clock, SystemClock
 from app.util.ulid import new_ulid
 
@@ -1452,14 +1453,27 @@ def complete_invite(
         principal_kind="system",
     )
 
-    _activate_invite(
-        session,
-        real_ctx,
-        invite_row=invite_row,
-        now=resolved_now,
-        audit_action="user.enrolled",
-        clock=clock,
-    )
+    # ``POST /invite/complete`` is a bare-host route: the tenancy
+    # middleware never installed a :class:`WorkspaceContext`, so the
+    # ContextVar the orm tenant filter reads is unset. Without this
+    # explicit push, ``seed_pending_work_engagement``'s SELECT against
+    # :class:`WorkEngagement` (a workspace-scoped table) raises
+    # :class:`~app.tenancy.orm_filter.TenantFilterMissing`. Mirror the
+    # FastAPI tenancy middleware's set/reset pair (see
+    # :class:`app.tenancy.middleware.TenancyMiddleware`) so the same
+    # filter rules apply on this synthesised context.
+    token = set_current(real_ctx)
+    try:
+        _activate_invite(
+            session,
+            real_ctx,
+            invite_row=invite_row,
+            now=resolved_now,
+            audit_action="user.enrolled",
+            clock=clock,
+        )
+    finally:
+        reset_current(token)
     return invite_row.workspace_id
 
 
@@ -1487,14 +1501,26 @@ def confirm_invite(
             f"invite {invite_id!r}: acting user {ctx.actor_id!r} "
             f"does not match invite user {invite_row.user_id!r}"
         )
-    _activate_invite(
-        session,
-        ctx,
-        invite_row=invite_row,
-        now=resolved_now,
-        audit_action="user.grant_accepted",
-        clock=clock,
-    )
+    # ``POST /invite/{invite_id}/confirm`` is a bare-host route just
+    # like ``/invite/complete``: the tenancy middleware skipped, so
+    # the ContextVar the orm tenant filter reads is unset and
+    # :func:`_activate_invite`'s downstream call to
+    # ``seed_pending_work_engagement`` would raise
+    # :class:`~app.tenancy.orm_filter.TenantFilterMissing`. Mirror the
+    # FastAPI tenancy middleware's set/reset pair so the same filter
+    # rules apply on the synthesised context the router built.
+    token = set_current(ctx)
+    try:
+        _activate_invite(
+            session,
+            ctx,
+            invite_row=invite_row,
+            now=resolved_now,
+            audit_action="user.grant_accepted",
+            clock=clock,
+        )
+    finally:
+        reset_current(token)
     return invite_row.workspace_id
 
 
