@@ -127,11 +127,12 @@ class DisposableEmail(ValueError):
     """Email address belongs to a known throwaway / disposable provider.
 
     The HTTP router maps this to ``422 disposable_email`` (spec §15
-    stipulates 400; the app's broader convention uses 422 for
-    "request was well-formed but semantically invalid" — see the
-    ``SignupStartBody`` 422 paths in the router). Carries only the
-    canonical domain (``user@mailinator.com`` → ``"mailinator.com"``)
-    so audit rows never accidentally log the local-part.
+    "Self-serve abuse mitigations"; aligns with the app-wide
+    validation convention — request was well-formed but semantically
+    invalid — see the ``SignupStartBody`` 422 paths in the router).
+    Carries only the canonical domain (``user@mailinator.com`` →
+    ``"mailinator.com"``) so audit rows never accidentally log the
+    local-part.
     """
 
     def __init__(self, domain: str) -> None:

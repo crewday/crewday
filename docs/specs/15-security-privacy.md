@@ -858,8 +858,10 @@ outbound email. The following gates apply whenever
   (the `disposable-email-domains` dataset, pinned release);
   operators override via the deployment setting
   `settings.signup_disposable_domains_path` (§01 "Capability
-  registry"). A blocked domain returns `400 disposable_email`
-  with copy inviting the user to use a different address.
+  registry"). A blocked domain returns `422 disposable_email`
+  with copy inviting the user to use a different address. (422
+  matches the app-wide convention that maps validation-class
+  rejections to 422 — see §12 canonical error `type` URIs.)
 
   **Freshness.** The bundled list MUST be refreshed weekly by a
   CI job `refresh-disposable-domains.yml` that pulls from the
