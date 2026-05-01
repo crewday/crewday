@@ -1568,9 +1568,7 @@ def _load_pending_invite_for_passkey(
       has at least one passkey credential; the bare-host enrolment
       route is closed.
     """
-    invite_row = _load_pending_invite_for_accept(
-        session, invite_id=invite_id, now=now
-    )
+    invite_row = _load_pending_invite_for_accept(session, invite_id=invite_id, now=now)
     _assert_magic_link_consumed(session, invite_id=invite_id)
     user_id = invite_row.user_id
     if user_id is None:
@@ -1661,11 +1659,26 @@ def register_invite_passkey_finish(
     Mirrors :func:`register_invite_passkey_start` for the second leg.
     Reuses :func:`app.auth.passkey.register_finish_signup` so the
     challenge-TTL, attestation verification, and challenge-burn
-    semantics match the self-serve signup ceremony exactly. No audit
-    row is written here — the ``user.enrolled`` row lands inside
-    :func:`complete_invite` once the SPA POSTs the final ``invite/complete``
-    request, mirroring how :func:`app.auth.signup.complete_signup`
-    sequences the audit alongside grant activation.
+    semantics match the self-serve signup ceremony exactly.
+
+    A ``passkey.registered`` audit row lands inline (scoped to the
+    invite's workspace, attributing the actor to the freshly-enrolled
+    invitee) so a §03 "Every enrollment writes to the audit log"
+    invariant holds even if the SPA never reaches
+    :func:`complete_invite`. The complementary ``user.enrolled`` audit
+    is emitted by :func:`complete_invite` itself once the grants
+    activate. cd-kd26 will fold both into one callback.
+
+    **Concurrency** — the ``_user_has_passkey`` gate inside
+    :func:`_load_pending_invite_for_passkey` is point-in-time. Two
+    concurrent ``/passkey/finish`` calls for the same invite could
+    both pass the gate before either commits. We take a row-level
+    lock on the invitee's :class:`User` row before the gate re-check
+    so the check-then-insert sequence serialises across processes
+    (Postgres). SQLite ignores ``with_for_update`` but already
+    serialises writes at the engine level, so the same invariant
+    holds. The loser of the race observes one passkey on the user
+    and raises :class:`InvitePasskeyAlreadyRegistered`.
 
     Raises the same state errors as :func:`register_invite_passkey_start`
     plus the passkey domain errors :func:`register_finish_signup`
@@ -1677,10 +1690,21 @@ def register_invite_passkey_finish(
     # Reload the invite + user so a finish call posted after the user
     # already has a passkey (e.g. a stale tab replaying a finish that
     # already succeeded) is rejected with the same shape as start.
-    _invite_row, user = _load_pending_invite_for_passkey(
+    invite_row, user = _load_pending_invite_for_passkey(
         session, invite_id=invite_id, now=resolved_now
     )
-    return passkey_service.register_finish_signup(
+    # Race defence: serialise concurrent finishes against the same
+    # user row, then re-check under the lock — another transaction
+    # may have just committed the first credential between the
+    # initial gate read and our lock acquisition.
+    with tenant_agnostic():
+        session.execute(select(User.id).where(User.id == user.id).with_for_update())
+    if _user_has_passkey(session, user_id=user.id):
+        raise InvitePasskeyAlreadyRegistered(
+            f"invite {invite_id!r}: concurrent enrolment registered "
+            f"a passkey for user {user.id!r}"
+        )
+    ref = passkey_service.register_finish_signup(
         session,
         signup_session_id=invite_id,
         user_id=user.id,
@@ -1689,6 +1713,37 @@ def register_invite_passkey_finish(
         clock=clock,
         now=resolved_now,
     )
+    # §03 audit: the credential row landed; emit before /complete is
+    # reachable so an abandoned flow still leaves a forensic trail.
+    # ``principal_kind="system"`` matches :func:`complete_invite` —
+    # the invitee has no session at this seam, so the request is
+    # system-driven even though the actor is the invitee.
+    audit_ctx = WorkspaceContext(
+        workspace_id=invite_row.workspace_id,
+        workspace_slug="",
+        actor_id=user.id,
+        actor_kind="user",
+        actor_grant_role="manager",
+        actor_was_owner_member=False,
+        audit_correlation_id=new_ulid(clock=clock),
+        principal_kind="system",
+    )
+    write_audit(
+        session,
+        audit_ctx,
+        entity_kind="passkey_credential",
+        entity_id=ref.credential_id_b64url,
+        action="passkey.registered",
+        diff={
+            "user_id": user.id,
+            "aaguid": ref.aaguid,
+            "transports": ref.transports,
+            "backup_eligible": ref.backup_eligible,
+            "via": "invite",
+        },
+        clock=clock,
+    )
+    return ref
 
 
 # ---------------------------------------------------------------------------

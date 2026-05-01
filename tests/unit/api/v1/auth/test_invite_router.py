@@ -117,9 +117,7 @@ class TestInvitePasskeyErrorMapping:
             InvitePasskeyAlreadyRegistered,
         )
 
-        http = _http_for_invite(
-            InvitePasskeyAlreadyRegistered("user already enrolled")
-        )
+        http = _http_for_invite(InvitePasskeyAlreadyRegistered("user already enrolled"))
         assert http.status_code == status.HTTP_409_CONFLICT
         assert self._detail_dict(http) == {"error": "passkey_already_registered"}
 
@@ -154,9 +152,7 @@ class TestInvitePasskeyErrorMapping:
         for exc in (ChallengeNotFound("gone"), ChallengeAlreadyConsumed("gone")):
             http = _http_for_invite_passkey(exc)
             assert http.status_code == status.HTTP_409_CONFLICT
-            assert self._detail_dict(http) == {
-                "error": "challenge_consumed_or_unknown"
-            }
+            assert self._detail_dict(http) == {"error": "challenge_consumed_or_unknown"}
 
     def test_too_many_passkeys_maps_to_422(self) -> None:
         """Concurrent enrolment race: a 6th-passkey insert hits the cap."""

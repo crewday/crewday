@@ -254,12 +254,15 @@ def _seed_invite(
     invitee_email: str,
     invitee_display_name: str = "Invitee Pat",
     seed_passkey: bool = False,
+    invite_ttl: timedelta = timedelta(hours=24),
 ) -> tuple[str, str, str]:
     """Seed an :class:`Invite` row + magic-link nonce.
 
     Returns ``(invite_id, token, invitee_user_id)``. When
     ``seed_passkey`` is ``True``, plants a fake passkey row so the
-    "already enrolled" branch can be exercised.
+    "already enrolled" branch can be exercised. ``invite_ttl`` lets
+    callers seed an already-expired invite by passing a negative
+    delta, exercising the :class:`InviteExpired` → 410 mapping.
     """
     with session_factory() as s:
         invitee_id = new_ulid()
@@ -312,7 +315,7 @@ def _seed_invite(
             group_memberships_json=[],
             invited_by_user_id=inviter_id,
             created_at=_PINNED,
-            expires_at=_PINNED + timedelta(hours=24),
+            expires_at=_PINNED + invite_ttl,
             accepted_at=None,
             revoked_at=None,
         )
@@ -457,14 +460,28 @@ class TestInvitePasskeyHappyPath:
         assert finish_body["user_id"] == invitee_id
 
         # 4. The PasskeyCredential row landed against the invitee's
-        #    pre-existing user_id (no new user created).
+        #    pre-existing user_id (no new user created), and the
+        #    inline ``passkey.registered`` audit landed alongside so
+        #    the credential is never audit-orphaned even if /complete
+        #    never runs (§03 "Every enrollment writes to the audit
+        #    log").
         with session_factory() as s:
             cred = s.scalars(
-                select(PasskeyCredential).where(
-                    PasskeyCredential.user_id == invitee_id
-                )
+                select(PasskeyCredential).where(PasskeyCredential.user_id == invitee_id)
             ).one()
             assert cred.id == credential_id
+            with tenant_agnostic():
+                audit_row = s.scalars(
+                    select(AuditLog).where(
+                        AuditLog.action == "passkey.registered",
+                        AuditLog.actor_id == invitee_id,
+                    )
+                ).one()
+            assert audit_row.workspace_id == ws_id
+            assert audit_row.entity_kind == "passkey_credential"
+            assert isinstance(audit_row.diff, dict)
+            assert audit_row.diff.get("via") == "invite"
+            assert audit_row.diff.get("user_id") == invitee_id
 
         # 5. /invite/complete activates the grants.
         r = client.post(
@@ -572,6 +589,42 @@ class TestInvitePasskeyStateGuards:
         )
         assert r.status_code == 409, r.text
         assert r.json()["detail"]["error"] == "passkey_already_registered"
+
+    def test_expired_invite_returns_410(
+        self,
+        client: TestClient,
+        session_factory: sessionmaker[Session],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Expired invite → 410 ``expired`` (mirrors ``/invite/accept``).
+
+        ``_load_pending_invite_for_accept`` raises
+        :class:`InviteExpired` once ``expires_at <= now``. The check
+        runs before the magic-link gate, so the test does not need
+        to call ``/accept`` first — the expired-invite envelope
+        leaks no information about whether the magic link was ever
+        consumed.
+        """
+        _stub_passkey_verifier(monkeypatch)
+        ws_id, owner_id = _seed_workspace_with_owner(
+            session_factory,
+            slug="cd-9q6bb-expired",
+            owner_email="owner-expired@acme.test",
+        )
+        invite_id, _token, _invitee_id = _seed_invite(
+            session_factory,
+            workspace_id=ws_id,
+            inviter_id=owner_id,
+            invitee_email="invitee-expired@acme.test",
+            invite_ttl=timedelta(hours=-1),
+        )
+
+        r = client.post(
+            "/api/v1/invite/passkey/start",
+            json={"invite_id": invite_id},
+        )
+        assert r.status_code == 410, r.text
+        assert r.json()["detail"]["error"] == "expired"
 
     def test_finish_replay_after_success_rejects_with_409(
         self,

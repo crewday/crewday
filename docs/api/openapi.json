@@ -10821,6 +10821,82 @@
         "title": "InviteIntrospectionResponse",
         "type": "object"
       },
+      "InvitePasskeyFinishRequest": {
+        "description": "Request body for ``POST /invite/passkey/finish``.",
+        "properties": {
+          "challenge_id": {
+            "minLength": 1,
+            "title": "Challenge Id",
+            "type": "string"
+          },
+          "credential": {
+            "additionalProperties": true,
+            "title": "Credential",
+            "type": "object"
+          },
+          "invite_id": {
+            "minLength": 1,
+            "title": "Invite Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "invite_id",
+          "challenge_id",
+          "credential"
+        ],
+        "title": "InvitePasskeyFinishRequest",
+        "type": "object"
+      },
+      "InvitePasskeyFinishResponse": {
+        "description": "Response body for ``POST /invite/passkey/finish``.\n\nCarries the freshly-enrolled invitee's ``user_id`` so the SPA\ncan stamp it on its auth store before posting\n``/invite/complete``. The credential metadata\n(``credential_id`` / ``transports`` / ``aaguid``) is intentionally\nomitted: the SPA already has it from\n``navigator.credentials.create``'s return, and re-emitting it\nhere would force the SPA to reconcile two views of the same\nbytes.",
+        "properties": {
+          "user_id": {
+            "title": "User Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "user_id"
+        ],
+        "title": "InvitePasskeyFinishResponse",
+        "type": "object"
+      },
+      "InvitePasskeyStartRequest": {
+        "description": "Request body for ``POST /invite/passkey/start``.\n\nBare-host bridge between ``/invite/accept`` (which left the\ninvite ``pending`` with the user_id known but no passkey on\nfile) and ``/invite/complete`` (which requires a passkey).\nThe ``invite_id`` is the bearer-of-capability \u2014 gated by\ninvite-state + passkey-absence checks; see\n:func:`app.domain.identity.membership.register_invite_passkey_start`.",
+        "properties": {
+          "invite_id": {
+            "minLength": 1,
+            "title": "Invite Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "invite_id"
+        ],
+        "title": "InvitePasskeyStartRequest",
+        "type": "object"
+      },
+      "InvitePasskeyStartResponse": {
+        "description": "Parsed PublicKeyCredentialCreationOptions + its challenge handle.\n\nMirrors :class:`app.api.v1.auth.signup.PasskeyStartResponse` so\nthe SPA can pass the same options dict to\n``navigator.credentials.create()`` regardless of which flow\nminted it.",
+        "properties": {
+          "challenge_id": {
+            "title": "Challenge Id",
+            "type": "string"
+          },
+          "options": {
+            "additionalProperties": true,
+            "title": "Options",
+            "type": "object"
+          }
+        },
+        "required": [
+          "challenge_id",
+          "options"
+        ],
+        "title": "InvitePasskeyStartResponse",
+        "type": "object"
+      },
       "InviteRequest": {
         "description": "Request body for ``POST /users/invite``.\n\n``work_engagement`` + ``user_work_roles`` are intentionally absent:\ntheir backing tables don't exist in Phase 1. A future body-shape\nbump will add them without breaking callers that send the current\npayload. Tracked as cd-1hd0.",
         "properties": {
@@ -28517,6 +28593,206 @@
           "auth",
           "invite"
         ]
+      }
+    },
+    "/api/v1/invite/passkey/finish": {
+      "post": {
+        "description": "Verify the attestation, insert the passkey row.",
+        "operationId": "auth.invite.passkey_finish",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InvitePasskeyFinishRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InvitePasskeyFinishResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "properties": {
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    },
+                    "retry_after_seconds": {
+                      "minimum": 1,
+                      "type": "integer"
+                    },
+                    "status": {
+                      "const": 429,
+                      "type": "integer"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "type": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "title",
+                    "status",
+                    "instance"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Rate limited",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until the caller should retry.",
+                "schema": {
+                  "minimum": 1,
+                  "type": "integer"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Verify + persist a new invitee's first passkey",
+        "tags": [
+          "identity",
+          "auth",
+          "invite"
+        ],
+        "x-cli": {
+          "group": "invite",
+          "hidden": true,
+          "mutates": true,
+          "summary": "Verify and persist a new invitee's first passkey",
+          "verb": "passkey-finish"
+        },
+        "x-interactive-only": true
+      }
+    },
+    "/api/v1/invite/passkey/start": {
+      "post": {
+        "description": "Bridge ``/invite/accept`` \u2192 ``navigator.credentials.create``.",
+        "operationId": "auth.invite.passkey_start",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InvitePasskeyStartRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InvitePasskeyStartResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "properties": {
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    },
+                    "retry_after_seconds": {
+                      "minimum": 1,
+                      "type": "integer"
+                    },
+                    "status": {
+                      "const": 429,
+                      "type": "integer"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "type": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "title",
+                    "status",
+                    "instance"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Rate limited",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until the caller should retry.",
+                "schema": {
+                  "minimum": 1,
+                  "type": "integer"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Mint passkey-registration challenge for a new invitee",
+        "tags": [
+          "identity",
+          "auth",
+          "invite"
+        ],
+        "x-cli": {
+          "group": "invite",
+          "hidden": true,
+          "mutates": true,
+          "summary": "Mint passkey-registration challenge for a new invitee",
+          "verb": "passkey-start"
+        },
+        "x-interactive-only": true
       }
     },
     "/api/v1/invite/{invite_id}/confirm": {

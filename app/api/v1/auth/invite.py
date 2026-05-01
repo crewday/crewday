@@ -85,10 +85,10 @@ __all__ = [
     "CompleteRequest",
     "ConfirmResponse",
     "InviteIntrospectionResponse",
-    "PasskeyFinishRequest",
-    "PasskeyFinishResponse",
-    "PasskeyStartRequest",
-    "PasskeyStartResponse",
+    "InvitePasskeyFinishRequest",
+    "InvitePasskeyFinishResponse",
+    "InvitePasskeyStartRequest",
+    "InvitePasskeyStartResponse",
     "build_invite_router",
     "build_invites_router",
 ]
@@ -153,7 +153,7 @@ class CompleteRequest(BaseModel):
     invite_id: str = Field(..., min_length=1)
 
 
-class PasskeyStartRequest(BaseModel):
+class InvitePasskeyStartRequest(BaseModel):
     """Request body for ``POST /invite/passkey/start``.
 
     Bare-host bridge between ``/invite/accept`` (which left the
@@ -167,7 +167,7 @@ class PasskeyStartRequest(BaseModel):
     invite_id: str = Field(..., min_length=1)
 
 
-class PasskeyStartResponse(BaseModel):
+class InvitePasskeyStartResponse(BaseModel):
     """Parsed PublicKeyCredentialCreationOptions + its challenge handle.
 
     Mirrors :class:`app.api.v1.auth.signup.PasskeyStartResponse` so
@@ -180,7 +180,7 @@ class PasskeyStartResponse(BaseModel):
     options: dict[str, Any]
 
 
-class PasskeyFinishRequest(BaseModel):
+class InvitePasskeyFinishRequest(BaseModel):
     """Request body for ``POST /invite/passkey/finish``."""
 
     invite_id: str = Field(..., min_length=1)
@@ -188,7 +188,7 @@ class PasskeyFinishRequest(BaseModel):
     credential: dict[str, Any]
 
 
-class PasskeyFinishResponse(BaseModel):
+class InvitePasskeyFinishResponse(BaseModel):
     """Response body for ``POST /invite/passkey/finish``.
 
     Carries the freshly-enrolled invitee's ``user_id`` so the SPA
@@ -607,7 +607,7 @@ def build_invite_router(
 
     @router.post(
         "/passkey/start",
-        response_model=PasskeyStartResponse,
+        response_model=InvitePasskeyStartResponse,
         operation_id="auth.invite.passkey_start",
         summary="Mint passkey-registration challenge for a new invitee",
         openapi_extra={
@@ -628,9 +628,9 @@ def build_invite_router(
         },
     )
     def post_passkey_start(
-        body: PasskeyStartRequest,
+        body: InvitePasskeyStartRequest,
         session: _Db,
-    ) -> PasskeyStartResponse:
+    ) -> InvitePasskeyStartResponse:
         """Bridge ``/invite/accept`` → ``navigator.credentials.create``."""
         try:
             opts = membership.register_invite_passkey_start(
@@ -640,14 +640,14 @@ def build_invite_router(
             )
         except _InviteDomainError as exc:
             raise _http_for_invite(exc) from exc
-        return PasskeyStartResponse(
+        return InvitePasskeyStartResponse(
             challenge_id=opts.challenge_id,
             options=opts.options,
         )
 
     @router.post(
         "/passkey/finish",
-        response_model=PasskeyFinishResponse,
+        response_model=InvitePasskeyFinishResponse,
         operation_id="auth.invite.passkey_finish",
         summary="Verify + persist a new invitee's first passkey",
         openapi_extra={
@@ -662,9 +662,9 @@ def build_invite_router(
         },
     )
     def post_passkey_finish(
-        body: PasskeyFinishRequest,
+        body: InvitePasskeyFinishRequest,
         session: _Db,
-    ) -> PasskeyFinishResponse:
+    ) -> InvitePasskeyFinishResponse:
         """Verify the attestation, insert the passkey row."""
         try:
             ref = membership.register_invite_passkey_finish(
@@ -689,7 +689,7 @@ def build_invite_router(
             # on its own connection.
             passkey_service.burn_challenge_on_failure(body.challenge_id)
             raise _http_for_invite_passkey(exc) from exc
-        return PasskeyFinishResponse(user_id=ref.user_id)
+        return InvitePasskeyFinishResponse(user_id=ref.user_id)
 
     return router
 
