@@ -33,6 +33,7 @@ from app.adapters.llm.ports import (
     LLMClient,
     LLMResponse,
     LLMUsage,
+    Tool,
 )
 from app.adapters.mail.ports import Mailer
 from app.adapters.storage.ports import Blob, BlobNotFound, Storage
@@ -356,6 +357,7 @@ class _EchoLLMClient:
         messages: Sequence[ChatMessage],
         max_tokens: int = 1024,
         temperature: float = 0.0,
+        tools: Sequence[Tool] | None = None,
     ) -> LLMResponse:
         last = messages[-1]["content"] if messages else ""
         return LLMResponse(
@@ -379,6 +381,7 @@ class _EchoLLMClient:
         messages: Sequence[ChatMessage],
         max_tokens: int = 1024,
         temperature: float = 0.0,
+        tools: Sequence[Tool] | None = None,
     ) -> Iterator[str]:
         last = messages[-1]["content"] if messages else ""
         yield from last.split()

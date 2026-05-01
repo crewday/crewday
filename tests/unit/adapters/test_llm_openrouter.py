@@ -39,7 +39,7 @@ from app.adapters.llm.openrouter import (
     LlmTransportError,
     OpenRouterClient,
 )
-from app.adapters.llm.ports import ChatMessage, LLMResponse
+from app.adapters.llm.ports import ChatMessage, LLMResponse, Tool
 from app.util.clock import FrozenClock
 
 # ---------------------------------------------------------------------------
@@ -212,6 +212,152 @@ class TestChatHappyPath:
         assert resp.text.startswith("Block the Tuesday morning slot")
         body = _json_body(handler.requests[0])
         assert body["messages"] == messages
+
+
+_SAMPLE_TOOL: Tool = {
+    "name": "tasks.list",
+    "description": "List tasks for a property.",
+    "input_schema": {
+        "type": "object",
+        "properties": {"property_id": {"type": "string"}},
+        "required": ["property_id"],
+    },
+}
+
+
+class TestNativeToolCalls:
+    """Native function-calling: ``tools`` payload + ``tool_calls`` parse."""
+
+    def _tool_call_response(
+        self, *, arguments: str = '{"property_id":"p1"}'
+    ) -> dict[str, object]:
+        return {
+            "id": "gen-tool-1",
+            "model": _MODEL,
+            "choices": [
+                {
+                    "index": 0,
+                    "message": {
+                        "role": "assistant",
+                        "content": None,
+                        "tool_calls": [
+                            {
+                                "id": "call_abc123",
+                                "type": "function",
+                                "function": {
+                                    "name": "tasks.list",
+                                    "arguments": arguments,
+                                },
+                            }
+                        ],
+                    },
+                    "finish_reason": "tool_calls",
+                }
+            ],
+            "usage": {
+                "prompt_tokens": 32,
+                "completion_tokens": 7,
+                "total_tokens": 39,
+            },
+        }
+
+    def test_chat_forwards_tools_in_openai_wire_shape(self) -> None:
+        handler = _RecordingHandler(
+            responses=[httpx.Response(200, json=self._tool_call_response())]
+        )
+        client = _make_client(handler)
+
+        client.chat(
+            model_id=_MODEL,
+            messages=[{"role": "user", "content": "what's on for property 1?"}],
+            tools=[_SAMPLE_TOOL],
+        )
+
+        body = _json_body(handler.requests[0])
+        assert body["tools"] == [
+            {
+                "type": "function",
+                "function": {
+                    "name": "tasks.list",
+                    "description": "List tasks for a property.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {"property_id": {"type": "string"}},
+                        "required": ["property_id"],
+                    },
+                },
+            }
+        ]
+
+    def test_chat_omits_tools_when_argument_is_none(self) -> None:
+        """Default callers must not see a ``tools`` field on the wire."""
+        handler = _RecordingHandler(responses=[httpx.Response(200, json=_CHAT_FIXTURE)])
+        client = _make_client(handler)
+
+        client.chat(
+            model_id=_MODEL,
+            messages=[{"role": "user", "content": "hi"}],
+        )
+
+        body = _json_body(handler.requests[0])
+        assert "tools" not in body
+
+    def test_chat_omits_tools_when_argument_is_empty(self) -> None:
+        handler = _RecordingHandler(responses=[httpx.Response(200, json=_CHAT_FIXTURE)])
+        client = _make_client(handler)
+
+        client.chat(
+            model_id=_MODEL,
+            messages=[{"role": "user", "content": "hi"}],
+            tools=[],
+        )
+
+        body = _json_body(handler.requests[0])
+        assert "tools" not in body
+
+    def test_response_surfaces_tool_calls_with_decoded_arguments(self) -> None:
+        handler = _RecordingHandler(
+            responses=[httpx.Response(200, json=self._tool_call_response())]
+        )
+        client = _make_client(handler)
+
+        resp = client.chat(
+            model_id=_MODEL,
+            messages=[{"role": "user", "content": "list tasks"}],
+            tools=[_SAMPLE_TOOL],
+        )
+
+        assert isinstance(resp, LLMResponse)
+        assert resp.text == ""
+        assert resp.finish_reason == "tool_calls"
+        assert len(resp.tool_calls) == 1
+        call = resp.tool_calls[0]
+        assert call.id == "call_abc123"
+        assert call.name == "tasks.list"
+        assert call.arguments == {"property_id": "p1"}
+
+    def test_response_default_tool_calls_empty_for_plain_text(self) -> None:
+        handler = _RecordingHandler(responses=[httpx.Response(200, json=_CHAT_FIXTURE)])
+        client = _make_client(handler)
+
+        resp = client.chat(
+            model_id=_MODEL,
+            messages=[{"role": "user", "content": "hi"}],
+        )
+
+        assert resp.tool_calls == ()
+
+    def test_malformed_tool_call_arguments_raise_transport_error(self) -> None:
+        bad_payload = self._tool_call_response(arguments="not-json{{{")
+        handler = _RecordingHandler(responses=[httpx.Response(200, json=bad_payload)])
+        client = _make_client(handler)
+
+        with pytest.raises(LlmTransportError, match="non-JSON arguments"):
+            client.chat(
+                model_id=_MODEL,
+                messages=[{"role": "user", "content": "list tasks"}],
+                tools=[_SAMPLE_TOOL],
+            )
 
 
 class TestOcrHappyPath:

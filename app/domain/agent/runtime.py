@@ -87,12 +87,15 @@ Tenant + permission isolation:
 What this module deliberately does NOT do (filed as Beads
 follow-ups before coding so the carve-outs are explicit):
 
-* **Native LLM tool-use** (cd-um36). The MVP parses tool calls
-  from a free-text protocol (XML-style ``<tool_call name="…">``)
-  emitted by the model. This works on every adapter today; the
-  port extension (``Tool`` / ``ToolCall`` / ``LLMResponse.
-  tool_calls``) lands separately so the OpenRouter wiring can be
-  reviewed independently.
+* **Parallel native tool dispatch.** cd-um36 wires the
+  ``LLMResponse.tool_calls`` surface (and the OpenRouter
+  adapter's wire forwarding + parsing) so the runtime resolves
+  tool calls structurally when the adapter supplies them; the
+  free-text ``<tool_call …/>`` parser remains as a fallback
+  for adapters that don't emit native calls. Multiple native
+  calls per LLM iteration are still single-dispatched here —
+  the §11 acceptance criteria pin "MVP single tool" — and the
+  runtime logs a warning when it has to drop extras.
 * **OpenAPI in-process dispatcher** (cd-z3b7). The runtime calls
   a :class:`ToolDispatcher` Protocol; the production
   implementation that walks the FastAPI router lands separately
@@ -224,20 +227,19 @@ DELEGATED_TOKEN_TTL: Final[timedelta] = timedelta(minutes=10)
 APPROVAL_REQUEST_TTL: Final[timedelta] = timedelta(days=7)
 
 # Budget pre-flight projection. The router doesn't yet expose a
-# per-capability default ``max_tokens`` — until cd-um36 surfaces the
-# native tool-use schema, every chat call is projected at 1024
-# completion tokens, matching the existing :class:`LLMClient.chat`
-# default. The estimator walks per-token pricing; an unknown model
-# falls back to ``(0, 0)`` per §11 "Pricing source", so the
-# projection on a free-tier model is zero and the call always
-# clears the envelope.
+# per-capability default ``max_tokens``; every chat call is projected
+# at 1024 completion tokens, matching the existing
+# :class:`LLMClient.chat` default. The estimator walks per-token
+# pricing; an unknown model falls back to ``(0, 0)`` per §11 "Pricing
+# source", so the projection on a free-tier model is zero and the
+# call always clears the envelope.
 _PROJECTED_COMPLETION_TOKENS: Final[int] = 1024
 # Same pre-flight projection on the prompt side. The runtime can't
 # count tokens at this layer (no tokenizer port today); a rough
 # 500-token estimate covers the system prompt + a typical
 # 30-message history without inflating the projection so much that
-# small calls trip the envelope. cd-um36's port extension is the
-# right seat for a real tokenizer hook.
+# small calls trip the envelope. A future tokenizer hook on the LLM
+# port is the right seat for a real estimate.
 _PROJECTED_PROMPT_TOKENS: Final[int] = 500
 
 
@@ -318,12 +320,13 @@ class DelegatedToken:
 class ToolCall:
     """A single tool invocation request emitted by the LLM.
 
-    The MVP runtime parses tool calls from a free-text protocol
-    (``<tool_call name="…" input="…"/>``) — see :func:`_parse_tool_call`.
-    The native tool-use port extension lands in cd-um36; once that
-    ships, the runtime resolves :attr:`tool_calls` off the
-    :class:`LLMResponse` directly and this dataclass is the surface
-    both paths feed.
+    Two shapes feed this dataclass: the native function-calling
+    surface on :class:`LLMResponse.tool_calls` (preferred when the
+    adapter populates it) and the legacy free-text protocol
+    parser :func:`_parse_tool_call` (``<tool_call name="…" input="…"/>``).
+    :func:`_resolve_tool_call` picks native first and falls back to
+    the text parse so a single iteration of the runtime loop has one
+    canonical resolution path.
 
     ``input`` is a parsed JSON object — the dispatcher revalidates
     against the route's request model. ``id`` is a turn-local
@@ -730,7 +733,7 @@ def run_turn(
             )
             llm_calls_made += 1
 
-            tool_call = _parse_tool_call(response.text)
+            tool_call = _resolve_tool_call(response)
             if tool_call is None:
                 # Plain-text reply path: write the chat message,
                 # emit ``finished``, return. The reply lands as an
@@ -1316,6 +1319,44 @@ _TOOL_CALL_RE: Final[re.Pattern[str]] = re.compile(
     r"(?P<input>.*?)(?P=quote)\s*/>",
     re.DOTALL,
 )
+
+
+def _resolve_tool_call(response: LLMResponse) -> ToolCall | None:
+    """Return the runtime-shaped tool call for ``response``, if any.
+
+    Prefers the native ``response.tool_calls`` surface (filled by
+    adapters that support OpenAI-compatible function calling) and
+    falls back to the free-text ``<tool_call …/>`` parser. The runtime
+    today executes a single tool call per LLM iteration; if the model
+    returned multiple native calls we pick the first and log a
+    warning so an operator notices the runtime is dropping intent.
+    Parallel dispatch is intentionally out of scope for v1 — the §11
+    "Embedded agents" MVP pins single-tool-per-turn semantics.
+    """
+    native_calls = response.tool_calls
+    if native_calls:
+        if len(native_calls) > 1:
+            # MVP single-tool-per-turn: log the names of every dropped
+            # call so an operator triaging "agent dropped a tool call"
+            # can see exactly which intents were lost without round-
+            # tripping to the LLM provider trace. The §11 acceptance
+            # carve-out for parallel dispatch lifts this branch.
+            dropped_names = [c.name for c in native_calls[1:]]
+            _log.warning(
+                "agent.runtime.native_tool_calls_dropped_extras",
+                extra={
+                    "count": len(native_calls),
+                    "dispatched": native_calls[0].name,
+                    "dropped": dropped_names,
+                },
+            )
+        first = native_calls[0]
+        return ToolCall(
+            id=first.id or new_ulid(),
+            name=first.name,
+            input=dict(first.arguments),
+        )
+    return _parse_tool_call(response.text)
 
 
 def _parse_tool_call(text: str) -> ToolCall | None:

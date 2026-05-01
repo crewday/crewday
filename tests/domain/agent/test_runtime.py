@@ -22,14 +22,17 @@ Covers each acceptance criterion on the Beads ticket:
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import timedelta
 
+import pytest
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.adapters.db.audit.models import AuditLog
 from app.adapters.db.llm.models import ApprovalRequest, LlmPromptTemplate, LlmUsage
 from app.adapters.db.messaging.models import ChatMessage
+from app.adapters.llm.ports import LLMResponse
 from app.domain.agent.preferences import PreferenceUpdate, save_preference
 from app.domain.agent.runtime import (
     APPROVAL_REQUEST_TTL,
@@ -1151,3 +1154,203 @@ def test_runtime_treats_malformed_block_as_plain_reply(
     chat_row = db_session.get(ChatMessage, outcome.chat_message_id)
     assert chat_row is not None
     assert chat_row.body_md == malformed
+
+
+# ---------------------------------------------------------------------------
+# Native function-calling path (cd-um36)
+# ---------------------------------------------------------------------------
+
+
+def _native_tool_response(
+    name: str,
+    arguments: dict[str, object],
+    *,
+    call_id: str = "call_native_1",
+) -> LLMResponse:
+    """Build an :class:`LLMResponse` carrying a single native tool call."""
+    from app.adapters.llm.ports import LLMResponse, LLMUsage
+    from app.adapters.llm.ports import ToolCall as LlmToolCall
+
+    return LLMResponse(
+        text="",
+        usage=LLMUsage(prompt_tokens=8, completion_tokens=2, total_tokens=10),
+        model_id="fake/model",
+        finish_reason="tool_calls",
+        tool_calls=(LlmToolCall(id=call_id, name=name, arguments=arguments),),
+    )
+
+
+def test_runtime_prefers_native_tool_calls_over_text_parse(
+    db_session: Session,
+    bus: EventBus,
+    captured_events: CapturedEvents,
+    clock: FrozenClock,
+) -> None:
+    """Native ``response.tool_calls`` short-circuits the free-text parser."""
+    _ws, ctx, channel_id = _bind_and_seed(db_session)
+
+    llm = ScriptedLLMClient(
+        replies=[
+            _native_tool_response("tasks.list", {"property_id": "p1"}),
+            make_text_response("There are 2 open tasks."),
+        ]
+    )
+    dispatcher = FakeToolDispatcher(
+        responses={
+            "tasks.list": [
+                ToolResult(
+                    call_id="placeholder",
+                    status_code=200,
+                    body={"tasks": [{"id": "t1"}, {"id": "t2"}]},
+                    mutated=False,
+                ),
+            ]
+        }
+    )
+    outcome = run_turn(
+        ctx,
+        session=db_session,
+        scope="manager",
+        thread_id=channel_id,
+        user_message="how many open tasks?",
+        trigger="event",
+        llm_client=llm,
+        tool_dispatcher=dispatcher,
+        token_factory=FakeTokenFactory(),
+        agent_label=_AGENT_LABEL,
+        capability=_CAPABILITY,
+        event_bus=bus,
+        clock=clock,
+    )
+
+    assert outcome.outcome == "replied"
+    assert outcome.tool_calls_made == 1
+    assert outcome.llm_calls_made == 2
+    assert len(dispatcher.captured) == 1
+    captured = dispatcher.captured[0]
+    assert captured.call.name == "tasks.list"
+    assert captured.call.input == {"property_id": "p1"}
+
+
+def test_runtime_falls_back_to_text_parse_when_no_native_calls(
+    db_session: Session,
+    bus: EventBus,
+    captured_events: CapturedEvents,
+    clock: FrozenClock,
+) -> None:
+    """Text-protocol path remains for adapters that don't surface tool_calls."""
+    _ws, ctx, channel_id = _bind_and_seed(db_session)
+
+    llm = ScriptedLLMClient(
+        replies=[
+            # Free-text protocol, ``tool_calls`` empty by default.
+            make_tool_call_response("tasks.list", {"property_id": "p2"}),
+            make_text_response("Just one open task."),
+        ]
+    )
+    dispatcher = FakeToolDispatcher(
+        responses={
+            "tasks.list": [
+                ToolResult(
+                    call_id="placeholder",
+                    status_code=200,
+                    body={"tasks": [{"id": "t1"}]},
+                    mutated=False,
+                ),
+            ]
+        }
+    )
+    outcome = run_turn(
+        ctx,
+        session=db_session,
+        scope="manager",
+        thread_id=channel_id,
+        user_message="any tasks?",
+        trigger="event",
+        llm_client=llm,
+        tool_dispatcher=dispatcher,
+        token_factory=FakeTokenFactory(),
+        agent_label=_AGENT_LABEL,
+        capability=_CAPABILITY,
+        event_bus=bus,
+        clock=clock,
+    )
+
+    assert outcome.outcome == "replied"
+    assert outcome.tool_calls_made == 1
+    assert dispatcher.captured[0].call.name == "tasks.list"
+    assert dispatcher.captured[0].call.input == {"property_id": "p2"}
+
+
+def test_runtime_drops_extra_native_tool_calls_with_warning(
+    db_session: Session,
+    bus: EventBus,
+    captured_events: CapturedEvents,
+    clock: FrozenClock,
+    caplog: pytest.LogCaptureFixture,
+    allow_propagated_log_capture: Callable[..., None],
+) -> None:
+    """Multiple native calls in one response: dispatch first, log a warning."""
+    from app.adapters.llm.ports import LLMResponse, LLMUsage
+    from app.adapters.llm.ports import ToolCall as LlmToolCall
+
+    _ws, ctx, channel_id = _bind_and_seed(db_session)
+
+    multi_call = LLMResponse(
+        text="",
+        usage=LLMUsage(prompt_tokens=8, completion_tokens=2, total_tokens=10),
+        model_id="fake/model",
+        finish_reason="tool_calls",
+        tool_calls=(
+            LlmToolCall(
+                id="call_a", name="tasks.list", arguments={"property_id": "p1"}
+            ),
+            LlmToolCall(
+                id="call_b", name="tasks.list", arguments={"property_id": "p2"}
+            ),
+        ),
+    )
+    llm = ScriptedLLMClient(replies=[multi_call, make_text_response("Done.")])
+    dispatcher = FakeToolDispatcher(
+        responses={
+            "tasks.list": [
+                ToolResult(
+                    call_id="placeholder",
+                    status_code=200,
+                    body={"tasks": []},
+                    mutated=False,
+                ),
+            ]
+        }
+    )
+
+    import logging
+
+    allow_propagated_log_capture("app.domain.agent.runtime")
+    with caplog.at_level(logging.WARNING, logger="app.domain.agent.runtime"):
+        outcome = run_turn(
+            ctx,
+            session=db_session,
+            scope="manager",
+            thread_id=channel_id,
+            user_message="check both",
+            trigger="event",
+            llm_client=llm,
+            tool_dispatcher=dispatcher,
+            token_factory=FakeTokenFactory(),
+            agent_label=_AGENT_LABEL,
+            capability=_CAPABILITY,
+            event_bus=bus,
+            clock=clock,
+        )
+
+    assert outcome.outcome == "replied"
+    assert outcome.tool_calls_made == 1
+    # Only the first native call was dispatched.
+    assert len(dispatcher.captured) == 1
+    assert dispatcher.captured[0].call.input == {"property_id": "p1"}
+    # The drop is loud so an operator notices.
+    assert any(
+        "native_tool_calls_dropped_extras" in record.getMessage()
+        for record in caplog.records
+    )

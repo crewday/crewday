@@ -59,6 +59,7 @@ import json
 import logging
 import time
 from collections.abc import Callable, Iterator, Mapping, Sequence
+from types import MappingProxyType
 from typing import Final, Protocol, TypedDict, cast
 
 import httpx
@@ -69,7 +70,7 @@ from app.adapters.db.capabilities.models import DeploymentSetting
 from app.adapters.db.ports import UnitOfWork
 from app.adapters.db.secrets.repositories import SqlAlchemySecretEnvelopeRepository
 from app.adapters.db.session import make_uow
-from app.adapters.llm.ports import ChatMessage, LLMResponse, LLMUsage
+from app.adapters.llm.ports import ChatMessage, LLMResponse, LLMUsage, Tool, ToolCall
 from app.adapters.storage.envelope import Aes256GcmEnvelope
 from app.adapters.storage.ports import EnvelopeDecryptError
 from app.tenancy import tenant_agnostic
@@ -151,9 +152,21 @@ class OpenRouterConfigSource(Protocol):
 # ``isinstance``/``in`` check before access.
 
 
-class _Message(TypedDict):
+class _WireToolCallFunction(TypedDict, total=False):
+    name: str
+    arguments: str
+
+
+class _WireToolCall(TypedDict, total=False):
+    id: str
+    type: str
+    function: _WireToolCallFunction
+
+
+class _Message(TypedDict, total=False):
     role: str
-    content: str
+    content: str | None
+    tool_calls: list[_WireToolCall]
 
 
 class _Delta(TypedDict, total=False):
@@ -379,17 +392,26 @@ class OpenRouterClient:
         messages: Sequence[ChatMessage],
         max_tokens: int = 1024,
         temperature: float = 0.0,
+        tools: Sequence[Tool] | None = None,
         consents: ConsentSet | None = None,
     ) -> LLMResponse:
         """Multi-turn chat. See :class:`LLMClient.chat`.
 
         See :meth:`complete` for the ``consents`` argument semantics.
+
+        ``tools`` is forwarded to OpenRouter using the OpenAI-compatible
+        ``tools`` payload; the response's ``tool_calls`` field surfaces
+        on :attr:`LLMResponse.tool_calls`. Tool definitions describe the
+        schema, not user data, so they pass through redaction unchanged.
+        Inbound tool-call arguments echoed back into the prompt on the
+        next turn still ride the regular per-call redaction rules.
         """
         return self._chat_completion(
             model_id=model_id,
             messages=list(messages),
             max_tokens=max_tokens,
             temperature=temperature,
+            tools=tools,
             consents=consents,
         )
 
@@ -445,6 +467,7 @@ class OpenRouterClient:
         messages: Sequence[ChatMessage],
         max_tokens: int = 1024,
         temperature: float = 0.0,
+        tools: Sequence[Tool] | None = None,
         consents: ConsentSet | None = None,
     ) -> Iterator[str]:
         """Stream chat tokens. See :class:`LLMClient.stream_chat`.
@@ -467,6 +490,7 @@ class OpenRouterClient:
             max_tokens=max_tokens,
             temperature=temperature,
             stream=True,
+            tools=tools,
         )
         return self._stream_request(_redact_body(body, consents))
 
@@ -482,6 +506,7 @@ class OpenRouterClient:
         max_tokens: int,
         temperature: float,
         consents: ConsentSet | None,
+        tools: Sequence[Tool] | None = None,
     ) -> LLMResponse:
         wire_messages: list[_WireMessage] = [
             {"role": m["role"], "content": m["content"]} for m in messages
@@ -492,6 +517,7 @@ class OpenRouterClient:
             max_tokens=max_tokens,
             temperature=temperature,
             stream=False,
+            tools=tools,
         )
         response = self._post_with_retry(_redact_body(body, consents))
         return _parse_completion(response)
@@ -725,6 +751,7 @@ def _build_request_body(
     max_tokens: int,
     temperature: float,
     stream: bool,
+    tools: Sequence[Tool] | None = None,
 ) -> dict[str, object]:
     """Assemble the JSON body for ``/chat/completions``.
 
@@ -732,6 +759,11 @@ def _build_request_body(
     :meth:`stream_chat` all share one serialisation path — there's
     exactly one place where "what does OpenRouter expect on the wire"
     is answered.
+
+    ``tools`` is serialised into the OpenAI-compatible
+    ``[{"type": "function", "function": {...}}]`` envelope. The field
+    is omitted when ``tools`` is empty / ``None`` so non-tool callers
+    keep their existing wire snapshot.
     """
     body: dict[str, object] = {
         "model": model_id,
@@ -741,7 +773,21 @@ def _build_request_body(
     }
     if stream:
         body["stream"] = True
+    if tools:
+        body["tools"] = [_serialise_tool(t) for t in tools]
     return body
+
+
+def _serialise_tool(tool: Tool) -> dict[str, object]:
+    """Map a port-shaped :class:`Tool` onto the OpenAI wire envelope."""
+    return {
+        "type": "function",
+        "function": {
+            "name": tool["name"],
+            "description": tool["description"],
+            "parameters": tool["input_schema"],
+        },
+    }
 
 
 def _build_data_url(image_bytes: bytes, *, mime_type: str) -> str:
@@ -808,7 +854,8 @@ def _parse_completion(payload: _ChatCompletion) -> LLMResponse:
     message = first.get("message")
     if message is None:
         raise LlmTransportError("openrouter response choice lacked a message")
-    text = message.get("content", "")
+    raw_content = message.get("content", "")
+    text = raw_content if isinstance(raw_content, str) else ""
 
     finish_reason_raw = first.get("finish_reason")
     finish_reason = finish_reason_raw if finish_reason_raw is not None else "stop"
@@ -824,12 +871,58 @@ def _parse_completion(payload: _ChatCompletion) -> LLMResponse:
     # the requested id (e.g. ``:free`` suffix is stripped server-side).
     model_id = payload.get("model", "") or ""
 
+    tool_calls = _parse_tool_calls(message.get("tool_calls") or [])
+
     return LLMResponse(
         text=text,
         usage=usage,
         model_id=model_id,
         finish_reason=finish_reason,
+        tool_calls=tool_calls,
     )
+
+
+def _parse_tool_calls(raw_calls: Sequence[_WireToolCall]) -> tuple[ToolCall, ...]:
+    """Decode native ``tool_calls`` blocks into port-shaped :class:`ToolCall`.
+
+    OpenAI / OpenRouter serialise ``function.arguments`` as a JSON-
+    encoded string; we decode it once here and surface a typed mapping.
+    Malformed JSON is fatal: the model has committed to a tool call,
+    retrying without editing the payload will re-fail, so we raise
+    :class:`LlmTransportError` rather than swallow.
+
+    The decoded arguments are wrapped in :class:`types.MappingProxyType`
+    so the ``Mapping[str, object]`` contract on
+    :attr:`ToolCall.arguments` is genuinely immutable — callers can
+    stash the reference without worrying that an unrelated path will
+    mutate it. The runtime still copies into its own ``dict`` when it
+    feeds the result to the dispatcher.
+    """
+    decoded: list[ToolCall] = []
+    for raw in raw_calls:
+        function = raw.get("function") or {}
+        name = function.get("name", "") or ""
+        if not name:
+            continue
+        arguments_raw = function.get("arguments", "") or ""
+        try:
+            arguments = json.loads(arguments_raw) if arguments_raw.strip() else {}
+        except json.JSONDecodeError as exc:
+            raise LlmTransportError(
+                "openrouter returned tool_call with non-JSON arguments"
+            ) from exc
+        if not isinstance(arguments, dict):
+            raise LlmTransportError(
+                "openrouter returned tool_call arguments that are not a JSON object"
+            )
+        decoded.append(
+            ToolCall(
+                id=raw.get("id", "") or "",
+                name=name,
+                arguments=MappingProxyType(arguments),
+            )
+        )
+    return tuple(decoded)
 
 
 def _parse_sse_line(line: str) -> str | None:

@@ -15,7 +15,7 @@ exception.
 
 from __future__ import annotations
 
-from collections.abc import Iterator, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Literal, Protocol, TypedDict
 
@@ -25,6 +25,8 @@ __all__ = [
     "LLMClient",
     "LLMResponse",
     "LLMUsage",
+    "Tool",
+    "ToolCall",
 ]
 
 
@@ -48,6 +50,44 @@ class ChatMessage(TypedDict):
     content: str
 
 
+class Tool(TypedDict):
+    """A function-calling tool advertised to the model.
+
+    Mirrors the OpenAI ``function`` shape (``name`` / ``description`` /
+    ``parameters``) but uses ``input_schema`` to match the in-tree
+    convention. Adapters serialise these into whatever wire shape the
+    upstream provider expects (see :class:`OpenRouterClient` for the
+    OpenAI-compatible mapping).
+
+    ``input_schema`` is a JSON-Schema-shaped dict that is passed
+    through to the provider verbatim — the runtime / adapter does not
+    rewrite or validate it. Tool definitions are deployment-controlled
+    (the dispatcher knows which tools exist), not user-input, so they
+    skip the per-call PII redaction tuning.
+    """
+
+    name: str
+    description: str
+    input_schema: dict[str, object]
+
+
+@dataclass(frozen=True, slots=True)
+class ToolCall:
+    """A single native function-call request emitted by the model.
+
+    ``arguments`` is decoded from the provider's wire format (OpenAI
+    serialises it as a JSON-encoded string under ``function.arguments``;
+    the OpenRouter adapter calls :func:`json.loads` once when parsing
+    the response). The runtime feeds ``arguments`` into its own
+    ``ToolCall.input`` dict — the seam stays mapping-typed so adapters
+    are free to hand back an immutable view.
+    """
+
+    id: str
+    name: str
+    arguments: Mapping[str, object]
+
+
 @dataclass(frozen=True, slots=True)
 class LLMUsage:
     """Token accounting returned alongside every completion."""
@@ -59,12 +99,19 @@ class LLMUsage:
 
 @dataclass(frozen=True, slots=True)
 class LLMResponse:
-    """A non-streaming completion result."""
+    """A non-streaming completion result.
+
+    ``tool_calls`` carries the model's native function-calling output
+    when the adapter supports it (OpenAI-compatible providers fill it
+    from ``message.tool_calls``); the field defaults to an empty tuple
+    so existing call sites keep working unchanged.
+    """
 
     text: str
     usage: LLMUsage
     model_id: str
     finish_reason: str
+    tool_calls: tuple[ToolCall, ...] = ()
 
 
 class LLMClient(Protocol):
@@ -92,8 +139,16 @@ class LLMClient(Protocol):
         messages: Sequence[ChatMessage],
         max_tokens: int = 1024,
         temperature: float = 0.0,
+        tools: Sequence[Tool] | None = None,
     ) -> LLMResponse:
-        """Multi-turn chat completion."""
+        """Multi-turn chat completion.
+
+        ``tools`` advertises native function-calling tools to the
+        model. Adapters that surface the call structurally fill
+        :attr:`LLMResponse.tool_calls`; adapters without function-
+        calling support either ignore the argument or fall back to a
+        text protocol (the agent runtime parses both).
+        """
         ...
 
     def ocr(self, *, model_id: str, image_bytes: bytes) -> str:
@@ -111,10 +166,16 @@ class LLMClient(Protocol):
         messages: Sequence[ChatMessage],
         max_tokens: int = 1024,
         temperature: float = 0.0,
+        tools: Sequence[Tool] | None = None,
     ) -> Iterator[str]:
         """Stream chat tokens as they arrive.
 
         Optional capability; adapters without streaming raise
         :class:`LLMCapabilityMissing` with ``"stream_chat"``.
+
+        ``tools`` mirrors :meth:`chat`; streaming tool-call deltas are
+        out of scope for v1, but the surface stays symmetric so a
+        future adapter can light up streaming function calls without a
+        port revision.
         """
         ...

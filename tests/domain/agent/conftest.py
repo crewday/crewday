@@ -19,7 +19,7 @@ See ``docs/specs/11-llm-and-agents.md`` §"Embedded agents",
 
 from __future__ import annotations
 
-from collections.abc import Iterator, Mapping
+from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Literal
@@ -29,7 +29,7 @@ from sqlalchemy import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.adapters.db.workspace.models import Workspace
-from app.adapters.llm.ports import ChatMessage, LLMResponse, LLMUsage
+from app.adapters.llm.ports import ChatMessage, LLMResponse, LLMUsage, Tool
 from app.domain.agent.runtime import (
     DelegatedToken,
     GateDecision,
@@ -346,9 +346,10 @@ class ScriptedLLMClient:
         self,
         *,
         model_id: str,
-        messages,  # type: ignore[no-untyped-def]
+        messages: Sequence[ChatMessage],
         max_tokens: int = 1024,
         temperature: float = 0.0,
+        tools: Sequence[Tool] | None = None,
     ) -> LLMResponse:
         self.chat_calls += 1
         self.last_messages = list(messages)
@@ -368,10 +369,11 @@ class ScriptedLLMClient:
         self,
         *,
         model_id: str,
-        messages,  # type: ignore[no-untyped-def]
+        messages: Sequence[ChatMessage],
         max_tokens: int = 1024,
         temperature: float = 0.0,
-    ):  # type: ignore[no-untyped-def]
+        tools: Sequence[Tool] | None = None,
+    ) -> Iterator[str]:
         raise NotImplementedError("ScriptedLLMClient does not support stream_chat")
 
 
