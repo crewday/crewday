@@ -48,10 +48,11 @@ through the keyword-only parameters on the entry points.
   ``tasks.allow_skip_with_reason``. Default ``True`` (permissive);
   owners / managers bypass regardless.
 * :data:`InventoryApplyHook` — reads
-  ``Occurrence.inventory_consumption_json`` and writes one
-  :class:`~app.adapters.db.inventory.models.Movement` row per SKU
-  with a negative delta. Override with a no-op hook to suppress
-  per ``inventory.apply_on_task = false``.
+  ``TaskTemplate.inventory_effects_json`` and writes one
+  :class:`~app.adapters.db.inventory.models.Movement` row per effect
+  with the direction determined by ``kind``. Legacy
+  ``Occurrence.inventory_consumption_json`` remains a consume-only
+  fallback while older generated rows are phased out.
 * :data:`AssetActionHook` — updates ``asset_action.last_performed_*``
   (§21) when the task has ``asset_action_id``. Default no-op —
   the ``asset_action`` table is not in the schema yet.
@@ -106,10 +107,11 @@ from __future__ import annotations
 import hashlib
 import io
 import json
+import logging
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import datetime
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from typing import Any, Literal
 
 from sqlalchemy import select
@@ -184,6 +186,8 @@ __all__ = [
     "snapshot_checklist",
     "start",
 ]
+
+_log = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -261,12 +265,13 @@ only locks out workers.
 """
 
 InventoryApplyHook = Callable[[Session, WorkspaceContext, Occurrence], None]
-"""Port: apply ``inventory_consumption_json`` at completion time.
+"""Port: apply inventory effects at completion time.
 
-Default :func:`_default_inventory_apply` reads the task's
-consumption map and writes one :class:`Movement` row per SKU with
-a negative delta and ``reason='consume'``. Override with a no-op
-to suppress per ``inventory.apply_on_task = false`` (§08).
+Default :func:`_default_inventory_apply` reads the linked
+``TaskTemplate.inventory_effects_json`` list and writes one
+:class:`Movement` row per effect. Legacy occurrence-level
+``inventory_consumption_json`` maps are still accepted as consume-only
+effects while older generators are phased out.
 """
 
 AssetActionHook = Callable[[Session, WorkspaceContext, Occurrence], None]
@@ -580,70 +585,201 @@ def _default_required_approval(
 def _default_inventory_apply(
     session: Session, ctx: WorkspaceContext, task: Occurrence
 ) -> None:
-    """Write one inventory consume movement per SKU in the consumption map.
+    """Write inventory movements for the completed task's effects.
 
-    Reads :attr:`Occurrence.inventory_consumption_json` — a
-    ``{sku: qty}`` mapping copied down from the template — and
-    writes a ``reason='consume'`` ledger entry with a negative
-    ``delta`` for each pair. SKUs that don't resolve to an
-    :class:`Item` in the workspace are skipped (the v1 contract:
-    unknown SKUs on a template are data hygiene problems surfaced
-    by CRUD, not a completion-time hard error).
-
-    Quantities land as :class:`Decimal` so fractional units
-    (``0.25`` kg) survive round-trip on both SQLite (TEXT) and
-    PostgreSQL (NUMERIC 18, 4) — the column type
-    (:attr:`Movement.delta`) expects ``Decimal`` and a stray
-    ``float`` would pin the precision to the backing storage.
+    The current schema stores the authoritative effect list on the
+    linked template. Older generated occurrences can still carry the
+    legacy consume-only map, so this hook falls back to it when the
+    template has no effects. Every effect stays soft-coupled: stale
+    item refs, bad quantities, or movement validation failures are
+    logged/audited and never block task completion.
     """
-    payload = task.inventory_consumption_json or {}
-    if not payload:
+    if not _inventory_apply_enabled(session, ctx):
         return
-    # Resolve SKUs → item ids in one query so we don't re-visit the
-    # DB per SKU on a template that ships five items. ``sku`` is the
-    # map key; ``Item.id`` is what the movement row points at.
-    skus = [str(k) for k in payload]
-    items = session.scalars(
-        select(Item).where(
-            Item.workspace_id == ctx.workspace_id,
-            Item.property_id == task.property_id,
-            Item.sku.in_(skus),
-            Item.deleted_at.is_(None),
-        )
-    ).all()
-    sku_to_id = {row.sku: row.id for row in items}
-
+    effects = _inventory_effects_for_task(session, ctx, task)
+    if not effects:
+        return
     now = task.completed_at or task.created_at
-    for sku, qty in payload.items():
-        item_id = sku_to_id.get(str(sku))
+    for idx, effect in enumerate(effects):
+        item_ref = str(effect.get("item_ref", "")).strip()
+        kind = str(effect.get("kind", "")).strip()
+        item_id = _resolve_inventory_item_ref(session, ctx, task, item_ref)
         if item_id is None:
-            # Unknown SKU — silently skip; the CRUD service validates
-            # template shape at write time, so this is a stale template
-            # referencing an archived item rather than a user error.
-            continue
-        try:
-            delta = Decimal(str(qty))
-        except ArithmeticError, ValueError:
-            # Non-numeric value in the consumption map — skip for the
-            # same reason as unknown-sku above. Data hygiene is a CRUD
-            # concern, not a completion-time hard error.
-            continue
-        try:
-            movement_service.consume(
+            _audit_inventory_effect_issue(
                 session,
                 ctx,
-                item_id=item_id,
-                qty=abs(delta),
-                source_task_id=task.id,
+                task,
+                action="task.inventory_ref_missing",
                 clock=_FixedClock(now),
+                effect_index=idx,
+                item_ref=item_ref,
+                kind=kind,
+                reason="item_not_found",
             )
+            _log.warning(
+                "skipping inventory effect with missing item ref",
+                extra={"task_id": task.id, "item_ref": item_ref, "kind": kind},
+            )
+            continue
+        try:
+            qty = _effect_qty(effect.get("qty"))
+        except (InvalidOperation, ValueError) as exc:
+            _audit_inventory_effect_issue(
+                session,
+                ctx,
+                task,
+                action="inventory.consumption_failed",
+                clock=_FixedClock(now),
+                effect_index=idx,
+                item_ref=item_ref,
+                kind=kind,
+                reason="invalid_qty",
+            )
+            _log.warning(
+                "skipping malformed inventory effect quantity",
+                extra={"task_id": task.id, "item_ref": item_ref, "kind": kind},
+                exc_info=exc,
+            )
+            continue
+        try:
+            if kind == "consume":
+                movement_service.consume(
+                    session,
+                    ctx,
+                    item_id=item_id,
+                    qty=qty,
+                    source_task_id=task.id,
+                    clock=_FixedClock(now),
+                )
+            elif kind == "produce":
+                movement_service.produce(
+                    session,
+                    ctx,
+                    item_id=item_id,
+                    qty=qty,
+                    source_task_id=task.id,
+                    clock=_FixedClock(now),
+                )
+            else:
+                _audit_inventory_effect_issue(
+                    session,
+                    ctx,
+                    task,
+                    action="inventory.consumption_failed",
+                    clock=_FixedClock(now),
+                    effect_index=idx,
+                    item_ref=item_ref,
+                    kind=kind,
+                    reason="invalid_kind",
+                )
+                _log.warning(
+                    "skipping inventory effect with invalid kind",
+                    extra={"task_id": task.id, "item_ref": item_ref, "kind": kind},
+                )
         except (
             movement_service.InventoryItemNotFound,
             movement_service.InventoryMovementValidationError,
-        ):
-            # Preserve the completion service's soft coupling: stale or
-            # malformed inventory metadata never blocks task completion.
+        ) as exc:
+            _audit_inventory_effect_issue(
+                session,
+                ctx,
+                task,
+                action="inventory.consumption_failed",
+                clock=_FixedClock(now),
+                effect_index=idx,
+                item_ref=item_ref,
+                kind=kind,
+                reason=exc.__class__.__name__,
+            )
+            _log.warning(
+                "inventory effect failed during task completion",
+                extra={"task_id": task.id, "item_ref": item_ref, "kind": kind},
+                exc_info=exc,
+            )
             continue
+
+
+def _inventory_apply_enabled(session: Session, ctx: WorkspaceContext) -> bool:
+    with tenant_agnostic():
+        workspace_settings = session.scalar(
+            select(Workspace.settings_json).where(Workspace.id == ctx.workspace_id)
+        )
+    if not isinstance(workspace_settings, dict):
+        return True
+    if "inventory.apply_on_task" in workspace_settings:
+        return workspace_settings.get("inventory.apply_on_task") is not False
+    return workspace_settings.get("inventory.consume_on_task") is not False
+
+
+def _inventory_effects_for_task(
+    session: Session, ctx: WorkspaceContext, task: Occurrence
+) -> list[dict[str, object]]:
+    if task.template_id is not None:
+        raw = session.scalar(
+            select(TaskTemplate.inventory_effects_json).where(
+                TaskTemplate.id == task.template_id,
+                TaskTemplate.workspace_id == ctx.workspace_id,
+            )
+        )
+        if isinstance(raw, list) and raw:
+            return [entry for entry in raw if isinstance(entry, dict)]
+    legacy = task.inventory_consumption_json or {}
+    return [
+        {"item_ref": str(item_ref), "kind": "consume", "qty": qty}
+        for item_ref, qty in legacy.items()
+    ]
+
+
+def _resolve_inventory_item_ref(
+    session: Session, ctx: WorkspaceContext, task: Occurrence, item_ref: str
+) -> str | None:
+    if not item_ref:
+        return None
+    row = session.scalar(
+        select(Item.id)
+        .where(
+            Item.workspace_id == ctx.workspace_id,
+            Item.property_id == task.property_id,
+            Item.deleted_at.is_(None),
+            (Item.id == item_ref) | (Item.sku == item_ref),
+        )
+        .limit(1)
+    )
+    return row
+
+
+def _effect_qty(raw: object) -> Decimal:
+    qty = Decimal(str(raw))
+    if qty <= 0:
+        raise ValueError("qty must be positive")
+    return qty
+
+
+def _audit_inventory_effect_issue(
+    session: Session,
+    ctx: WorkspaceContext,
+    task: Occurrence,
+    *,
+    action: str,
+    clock: Clock,
+    effect_index: int,
+    item_ref: str,
+    kind: str,
+    reason: str,
+) -> None:
+    _audit(
+        session,
+        ctx,
+        clock,
+        task=task,
+        action=action,
+        diff={
+            "effect_index": effect_index,
+            "item_ref": item_ref,
+            "kind": kind,
+            "reason": reason,
+        },
+    )
 
 
 def _default_asset_action(

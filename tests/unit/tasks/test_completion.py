@@ -59,6 +59,7 @@ from app.adapters.db.tasks.models import (
     Evidence,
     Occurrence,
     TaskApproval,
+    TaskTemplate,
 )
 from app.adapters.db.workspace.models import Workspace
 from app.domain.tasks.completion import (
@@ -272,6 +273,46 @@ def _bootstrap_occurrence(
     )
     session.flush()
     return oid
+
+
+def _bootstrap_template(
+    session: Session,
+    *,
+    workspace_id: str,
+    effects: list[dict[str, Any]],
+) -> str:
+    tid = new_ulid()
+    session.add(
+        TaskTemplate(
+            id=tid,
+            workspace_id=workspace_id,
+            title="Turn linen",
+            name="Turn linen",
+            role_id=None,
+            description_md="",
+            default_duration_min=30,
+            duration_minutes=30,
+            required_evidence="none",
+            photo_required=False,
+            default_assignee_role=None,
+            property_scope="any",
+            listed_property_ids=[],
+            area_scope="any",
+            listed_area_ids=[],
+            checklist_template_json=[],
+            photo_evidence="disabled",
+            linked_instruction_ids=[],
+            priority="normal",
+            required_approval=False,
+            auto_shift_from_occurrence=False,
+            inventory_effects_json=effects,
+            llm_hints_md=None,
+            deleted_at=None,
+            created_at=_PINNED,
+        )
+    )
+    session.flush()
+    return tid
 
 
 def _bootstrap_required_checklist(
@@ -832,6 +873,147 @@ class TestComplete:
         assert mov.delta == Decimal("-2")
         assert mov.reason == "consume"
 
+    def test_inventory_template_effects_write_consume_and_produce_movements(
+        self, session: Session, clock: FrozenClock, bus: EventBus
+    ) -> None:
+        ws = _bootstrap_workspace(session)
+        prop = _bootstrap_property(session)
+        worker = _bootstrap_user(session)
+        clean_id = _bootstrap_inventory_item(
+            session, workspace_id=ws, property_id=prop, sku="LINEN-Q-CLEAN"
+        )
+        dirty_id = _bootstrap_inventory_item(
+            session, workspace_id=ws, property_id=prop, sku="LINEN-Q-DIRTY"
+        )
+        template_id = _bootstrap_template(
+            session,
+            workspace_id=ws,
+            effects=[
+                {"item_ref": "LINEN-Q-CLEAN", "kind": "consume", "qty": "1.5"},
+                {"item_ref": "LINEN-Q-DIRTY", "kind": "produce", "qty": "1.5"},
+            ],
+        )
+        occ = _bootstrap_occurrence(
+            session,
+            workspace_id=ws,
+            property_id=prop,
+            assignee_user_id=worker,
+        )
+        task = session.get(Occurrence, occ)
+        assert task is not None
+        task.template_id = template_id
+        session.flush()
+
+        complete(
+            session,
+            _ctx(ws, role="worker", owner=False, actor_id=worker),
+            occ,
+            clock=clock,
+            event_bus=bus,
+        )
+
+        movements = session.scalars(
+            select(Movement).order_by(Movement.reason.asc())
+        ).all()
+        movement_rows = [
+            (m.item_id, m.delta, m.reason, m.source_task_id) for m in movements
+        ]
+        assert movement_rows == [
+            (clean_id, Decimal("-1.5000"), "consume", occ),
+            (dirty_id, Decimal("1.5000"), "produce", occ),
+        ]
+
+    def test_inventory_apply_setting_false_suppresses_default_hook(
+        self, session: Session, clock: FrozenClock, bus: EventBus
+    ) -> None:
+        ws = _bootstrap_workspace(session)
+        workspace = session.get(Workspace, ws)
+        assert workspace is not None
+        workspace.settings_json = {"inventory.apply_on_task": False}
+        prop = _bootstrap_property(session)
+        worker = _bootstrap_user(session)
+        _bootstrap_inventory_item(session, workspace_id=ws, property_id=prop)
+        occ = _bootstrap_occurrence(
+            session,
+            workspace_id=ws,
+            property_id=prop,
+            assignee_user_id=worker,
+            inventory={"BLEACH-1L": 2},
+        )
+
+        complete(
+            session,
+            _ctx(ws, role="worker", owner=False, actor_id=worker),
+            occ,
+            clock=clock,
+            event_bus=bus,
+        )
+
+        assert session.scalars(select(Movement)).all() == []
+
+    def test_inventory_apply_setting_true_overrides_legacy_consume_false(
+        self, session: Session, clock: FrozenClock, bus: EventBus
+    ) -> None:
+        ws = _bootstrap_workspace(session)
+        workspace = session.get(Workspace, ws)
+        assert workspace is not None
+        workspace.settings_json = {
+            "inventory.apply_on_task": True,
+            "inventory.consume_on_task": False,
+        }
+        prop = _bootstrap_property(session)
+        worker = _bootstrap_user(session)
+        item_id = _bootstrap_inventory_item(
+            session, workspace_id=ws, property_id=prop
+        )
+        occ = _bootstrap_occurrence(
+            session,
+            workspace_id=ws,
+            property_id=prop,
+            assignee_user_id=worker,
+            inventory={"BLEACH-1L": 2},
+        )
+
+        complete(
+            session,
+            _ctx(ws, role="worker", owner=False, actor_id=worker),
+            occ,
+            clock=clock,
+            event_bus=bus,
+        )
+
+        mov = session.scalars(select(Movement)).one()
+        assert mov.item_id == item_id
+        assert mov.delta == Decimal("-2")
+
+    def test_inventory_legacy_consume_setting_false_still_suppresses_default_hook(
+        self, session: Session, clock: FrozenClock, bus: EventBus
+    ) -> None:
+        ws = _bootstrap_workspace(session)
+        workspace = session.get(Workspace, ws)
+        assert workspace is not None
+        workspace.settings_json = {"inventory.consume_on_task": False}
+        prop = _bootstrap_property(session)
+        worker = _bootstrap_user(session)
+        _bootstrap_inventory_item(session, workspace_id=ws, property_id=prop)
+        occ = _bootstrap_occurrence(
+            session,
+            workspace_id=ws,
+            property_id=prop,
+            assignee_user_id=worker,
+            inventory={"BLEACH-1L": 2},
+        )
+
+        complete(
+            session,
+            _ctx(ws, role="worker", owner=False, actor_id=worker),
+            occ,
+            clock=clock,
+            event_bus=bus,
+        )
+
+        assert session.scalars(select(Movement)).all() == []
+
     def test_inventory_noop_hook_suppresses_movements(
         self, session: Session, clock: FrozenClock, bus: EventBus
     ) -> None:
@@ -933,6 +1115,111 @@ class TestComplete:
 
         assert result.state == "done"
         assert session.scalars(select(Movement)).all() == []
+
+    def test_inventory_effect_failure_does_not_block_other_effects(
+        self,
+        session: Session,
+        clock: FrozenClock,
+        bus: EventBus,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        ws = _bootstrap_workspace(session)
+        prop = _bootstrap_property(session)
+        worker = _bootstrap_user(session)
+        first_id = _bootstrap_inventory_item(
+            session, workspace_id=ws, property_id=prop, sku="FIRST"
+        )
+        second_id = _bootstrap_inventory_item(
+            session, workspace_id=ws, property_id=prop, sku="SECOND"
+        )
+        template_id = _bootstrap_template(
+            session,
+            workspace_id=ws,
+            effects=[
+                {"item_ref": "FIRST", "kind": "consume", "qty": 1},
+                {"item_ref": "SECOND", "kind": "consume", "qty": 2},
+            ],
+        )
+        occ = _bootstrap_occurrence(
+            session,
+            workspace_id=ws,
+            property_id=prop,
+            assignee_user_id=worker,
+        )
+        task = session.get(Occurrence, occ)
+        assert task is not None
+        task.template_id = template_id
+        session.flush()
+        from app.services.inventory import movement_service
+
+        original_consume = movement_service.consume
+
+        def fail_first(*args: Any, **kwargs: Any) -> Any:
+            if kwargs.get("item_id") == first_id:
+                raise movement_service.InventoryMovementValidationError(
+                    "qty", "synthetic"
+                )
+            return original_consume(*args, **kwargs)
+
+        monkeypatch.setattr(movement_service, "consume", fail_first)
+
+        complete(
+            session,
+            _ctx(ws, role="worker", owner=False, actor_id=worker),
+            occ,
+            clock=clock,
+            event_bus=bus,
+        )
+
+        movements = session.scalars(select(Movement)).all()
+        assert [(m.item_id, m.delta, m.source_task_id) for m in movements] == [
+            (second_id, Decimal("-2.0000"), occ)
+        ]
+        audit_actions = session.scalars(
+            select(AuditLog.action).where(AuditLog.entity_id == occ)
+        ).all()
+        assert "inventory.consumption_failed" in audit_actions
+
+    def test_inventory_effect_missing_item_is_audited_and_skipped(
+        self, session: Session, clock: FrozenClock, bus: EventBus
+    ) -> None:
+        ws = _bootstrap_workspace(session)
+        other_ws = _bootstrap_workspace(session, slug="other")
+        prop = _bootstrap_property(session)
+        worker = _bootstrap_user(session)
+        other_item = _bootstrap_inventory_item(
+            session, workspace_id=other_ws, property_id=prop, sku="OTHER"
+        )
+        template_id = _bootstrap_template(
+            session,
+            workspace_id=ws,
+            effects=[{"item_ref": other_item, "kind": "consume", "qty": 1}],
+        )
+        occ = _bootstrap_occurrence(
+            session,
+            workspace_id=ws,
+            property_id=prop,
+            assignee_user_id=worker,
+        )
+        task = session.get(Occurrence, occ)
+        assert task is not None
+        task.template_id = template_id
+        session.flush()
+
+        complete(
+            session,
+            _ctx(ws, role="worker", owner=False, actor_id=worker),
+            occ,
+            clock=clock,
+            event_bus=bus,
+        )
+
+        assert session.scalars(select(Movement)).all() == []
+        ref_missing = session.scalars(
+            select(AuditLog).where(AuditLog.action == "task.inventory_ref_missing")
+        ).one()
+        assert ref_missing.entity_id == occ
+        assert ref_missing.diff["item_ref"] == other_item
 
     def test_inventory_unknown_sku_skipped(
         self, session: Session, clock: FrozenClock, bus: EventBus
