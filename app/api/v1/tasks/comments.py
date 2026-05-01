@@ -6,6 +6,10 @@ from typing import Literal
 
 from fastapi import APIRouter, status
 
+from app.adapters.db.tasks.repositories import (
+    AuthzCommentModerationAuthorizer,
+    SqlAlchemyCommentsRepository,
+)
 from app.api.pagination import DEFAULT_LIMIT, LimitQuery, PageCursorQuery
 from app.domain.tasks.comments import (
     CommentAttachmentInvalid,
@@ -52,8 +56,9 @@ def post_task_comment_route(
     assignment services with ``internal_caller=True``.
     """
     kind: Literal["user", "agent"] = "agent" if ctx.actor_kind == "agent" else "user"
+    repo = SqlAlchemyCommentsRepository(session)
     try:
-        view = post_comment(session, ctx, task_id, body, kind=kind)
+        view = post_comment(repo, ctx, task_id, body, kind=kind)
     except CommentNotFound as exc:
         # ``post_comment`` raises :class:`CommentNotFound` when the
         # parent task is missing / cross-tenant / gated by the
@@ -90,11 +95,12 @@ def list_task_comments_route(
     The cursor is a tuple ``(created_at, id)`` so two comments
     sharing a clock tick still paginate deterministically.
     """
+    repo = SqlAlchemyCommentsRepository(session)
     try:
         after_ts, after_id = _decode_comment_cursor(cursor)
         views = list(
             list_comments(
-                session,
+                repo,
                 ctx,
                 task_id,
                 after=after_ts,
@@ -139,8 +145,9 @@ def patch_task_comment_route(
     allow cross-task rewrites. We still enforce the pairing defensively
     here so a caller that scraped the wrong id learns loudly.
     """
+    repo = SqlAlchemyCommentsRepository(session)
     try:
-        view = edit_comment(session, ctx, comment_id, body.body_md)
+        view = edit_comment(repo, ctx, comment_id, body.body_md)
     except (
         CommentNotFound,
         CommentKindForbidden,
@@ -171,8 +178,10 @@ def delete_task_comment_route(
     session: _Db,
 ) -> CommentPayload:
     """Delegate to :func:`app.domain.tasks.comments.delete_comment`."""
+    repo = SqlAlchemyCommentsRepository(session)
+    authorizer = AuthzCommentModerationAuthorizer(session)
     try:
-        view = delete_comment(session, ctx, comment_id)
+        view = delete_comment(repo, ctx, comment_id, authorizer=authorizer)
     except (
         CommentNotFound,
         CommentKindForbidden,

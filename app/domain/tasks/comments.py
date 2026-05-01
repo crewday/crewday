@@ -2,10 +2,10 @@
 
 The previous v0 "comments" surface is replaced by a
 **workspace-agent-mediated conversation** scoped to each task
-occurrence: every note is a row in :class:`~app.adapters.db.tasks.models.Comment`
-ordered by ``created_at``, typed ``user | agent | system``, with
-``@mentions`` resolving to workspace members and the offline-mention
-email fanout consumed by §10 messaging.
+occurrence: every note is a row in the ``comment`` table ordered by
+``created_at``, typed ``user | agent | system``, with ``@mentions``
+resolving to workspace members and the offline-mention email fanout
+consumed by §10 messaging.
 
 ## Public surface
 
@@ -20,8 +20,31 @@ email fanout consumed by §10 messaging.
   / :class:`CommentEditWindowExpired` / :class:`CommentNotEditable` /
   :class:`CommentMentionInvalid` / :class:`CommentMentionAmbiguous` /
   :class:`CommentAttachmentInvalid`. Each subclasses the stdlib parent
-  the router's error map points at (``LookupError`` → 404,
-  ``PermissionError`` → 403, ``ValueError`` → 409 / 422).
+  the router's error map points at (``LookupError`` -> 404,
+  ``PermissionError`` -> 403, ``ValueError`` -> 409 / 422).
+
+## Repository + authorizer seams
+
+cd-ayvn closed the cd-cfe4 stopgap by routing every adapter touch
+through two protocols on :mod:`app.domain.tasks.ports`:
+
+* :class:`~app.domain.tasks.ports.CommentsRepository` — comment CRUD
+  plus the small occurrence / evidence / mention reads the service
+  performs. The SA-backed concretion lives at
+  :class:`app.adapters.db.tasks.repositories.SqlAlchemyCommentsRepository`.
+* :class:`~app.domain.tasks.ports.CommentModerationAuthorizer` —
+  the ``tasks.comment_moderate`` capability check the
+  moderator-delete branch invokes. The SA concretion at
+  :class:`app.adapters.db.tasks.repositories.AuthzCommentModerationAuthorizer`
+  delegates to :func:`app.authz.require`. The domain catches the
+  seam-level :class:`~app.domain.tasks.ports.ModerationDenied` and
+  collapses it to :class:`CommentKindForbidden` so HTTP error
+  mapping stays untouched.
+
+The repo carries the same UoW :func:`app.audit.write_audit` and the
+request-local event bus operate on; threading it via the
+:attr:`CommentsRepository.session` accessor lets the audit row +
+event publish land in the same transaction the repo writes commit.
 
 ## Kind gating
 
@@ -42,43 +65,43 @@ email fanout consumed by §10 messaging.
 
 ## Personal-task visibility
 
-The Occurrence model carries an :attr:`Occurrence.is_personal` flag
-(§06 "Self-created and personal tasks"). When the flag is set, the
-task is visible only to its creator and to workspace owners — the
-shift the agent inbox honours at read / write time. The service
-enforces the gate here as defence-in-depth; the §15 read layer carries
-the same rule for list surfaces.
+The Occurrence row carries an ``is_personal`` flag (§06
+"Self-created and personal tasks"). When the flag is set, the task
+is visible only to its creator and to workspace owners — the shift
+the agent inbox honours at read / write time. The service enforces
+the gate here as defence-in-depth; the §15 read layer carries the
+same rule for list surfaces.
 
 ## @mention resolution
 
 ``@<slug>`` patterns in ``body_md`` resolve at write time against
-workspace members (users carrying a :class:`UserWorkspace` row for
+workspace members (users carrying a ``user_workspace`` row for
 ``ctx.workspace_id``). The slug is the user's ``display_name``
 normalised to lowercase alphanumerics + ``-`` / ``_``, capped at 40
 chars — a pragmatic v1 that survives until a proper
 ``User.display_name_slug`` column lands. The textual ``@slug``
 survives verbatim in ``body_md``; the resolved user ids ride on the
-:attr:`Comment.mentioned_user_ids` column for the §10 fanout.
+``Comment.mentioned_user_ids`` column for the §10 fanout.
 
 Mentions of users who are not members raise
 :class:`CommentMentionInvalid` (422); a mention that matches nobody
 in the workspace is a payload error, not a silent drop. A slug that
 matches **more than one** workspace member (the
-``display_name`` → slug normalisation collapses two handles)
+``display_name`` -> slug normalisation collapses two handles)
 raises :class:`CommentMentionAmbiguous` (422) — the service
 refuses to silently pick one so the §10 fanout cannot deliver to
 the wrong user. The ambiguous branch goes away once
-:attr:`User.display_name_slug` lands with a per-workspace
-uniqueness constraint.
+``User.display_name_slug`` lands with a per-workspace uniqueness
+constraint.
 
 ## Transaction boundary
 
 Every mutation writes one :mod:`app.audit` row in the same
-transaction, then publishes a
-:class:`~app.events.types.TaskCommentAdded` event AFTER the audit
-write (so a failed publish still leaves the audit row in the UoW).
-The service never calls ``session.commit()``; the caller's
-Unit-of-Work owns transaction boundaries.
+transaction (via the seam ``repo.session`` accessor), then
+publishes a :class:`~app.events.types.TaskCommentAdded` event AFTER
+the audit write (so a failed publish still leaves the audit row in
+the UoW). The service never calls ``session.commit()``; the
+caller's Unit-of-Work owns transaction boundaries.
 
 See ``docs/specs/06-tasks-and-scheduling.md`` §"Task notes are the
 agent inbox", §"Comments"; ``docs/specs/02-domain-model.md``
@@ -94,18 +117,14 @@ from datetime import UTC, datetime, timedelta
 from typing import Any, Final, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import select
-from sqlalchemy.orm import Session
 
-from app.adapters.db.identity.models import User
-from app.adapters.db.tasks.models import Comment, Evidence, Occurrence
-from app.adapters.db.workspace.models import UserWorkspace
 from app.audit import write_audit
-from app.authz import (
-    EmptyPermissionRuleRepository,
-    PermissionDenied,
-    PermissionRuleRepository,
-    require,
+from app.domain.tasks.ports import (
+    CommentModerationAuthorizer,
+    CommentRow,
+    CommentsRepository,
+    ModerationDenied,
+    OccurrenceCommentScopeRow,
 )
 from app.events.bus import EventBus
 from app.events.bus import bus as default_event_bus
@@ -188,10 +207,9 @@ class CommentNotFound(LookupError):
     """The comment id is unknown in the caller's workspace (404).
 
     Also raised on the personal-task gate: if the target occurrence's
-    :attr:`Occurrence.is_personal` is set and the caller is neither
-    the creator nor a workspace owner, every read / write path
-    collapses to a 404 so the mere existence of the comment is never
-    leaked to an outsider.
+    ``is_personal`` is set and the caller is neither the creator nor
+    a workspace owner, every read / write path collapses to a 404 so
+    the mere existence of the comment is never leaked to an outsider.
     """
 
 
@@ -255,7 +273,7 @@ class CommentMentionAmbiguous(ValueError):
     one would mis-route the §10 offline-mention email and leave an
     audit trail that names the wrong recipient, so the service refuses
     the write and surfaces every offending slug. The caller (or a
-    future :attr:`User.display_name_slug` column with a uniqueness
+    future ``User.display_name_slug`` column with a uniqueness
     constraint) must disambiguate before retrying.
 
     This is the defensive pair of :class:`CommentMentionInvalid`: the
@@ -274,11 +292,11 @@ class CommentMentionAmbiguous(ValueError):
 class CommentAttachmentInvalid(ValueError):
     """An attachment file_id is unknown or foreign to this task (422).
 
-    The payload's ``attachments`` list carries :class:`Evidence`
-    ids. Each must resolve to a row in the caller's workspace AND
-    anchored to the same occurrence — an evidence id from a
-    different task (or a different workspace) is rejected here so
-    the agent inbox never cross-links attachments across threads.
+    The payload's ``attachments`` list carries evidence ids. Each
+    must resolve to a row in the caller's workspace AND anchored to
+    the same occurrence — an evidence id from a different task (or a
+    different workspace) is rejected here so the agent inbox never
+    cross-links attachments across threads.
     """
 
     def __init__(self, unknown_ids: Sequence[str]) -> None:
@@ -297,9 +315,9 @@ class CommentAttachmentInvalid(ValueError):
 class CommentCreate(BaseModel):
     """Request body for ``POST /tasks/{occurrence_id}/chat``.
 
-    ``attachments`` is a list of :class:`Evidence` ids (not blob
-    hashes) — the same pipeline the §06 evidence surface uses, so the
-    upload path stays identical (one file pipeline, two consumers).
+    ``attachments`` is a list of evidence ids (not blob hashes) — the
+    same pipeline the §06 evidence surface uses, so the upload path
+    stays identical (one file pipeline, two consumers).
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -319,9 +337,9 @@ class CommentView:
     :class:`~app.domain.tasks.templates.TaskTemplateView`.
 
     ``attachments`` round-trips the denormalised list persisted on
-    :attr:`Comment.attachments_json` (one ``{evidence_id, blob_hash,
+    ``Comment.attachments_json`` (one ``{evidence_id, blob_hash,
     kind}`` dict per resolved file); callers rendering the thread
-    walk it directly without re-visiting :class:`Evidence`.
+    walk it directly without re-visiting evidence rows.
     """
 
     id: str
@@ -376,8 +394,8 @@ def _narrow_kind(value: str) -> CommentKind:
     raise ValueError(f"unknown comment.kind {value!r} on loaded row")
 
 
-def _row_to_view(row: Comment) -> CommentView:
-    """Project a loaded :class:`Comment` row into a read view.
+def _row_to_view(row: CommentRow) -> CommentView:
+    """Project a seam-level :class:`CommentRow` into the read view.
 
     Datetime columns pass through :func:`_ensure_utc` so SQLite-
     stripped rows come back comparable to ``clock.now()`` without
@@ -389,8 +407,8 @@ def _row_to_view(row: Comment) -> CommentView:
         kind=_narrow_kind(row.kind),
         author_user_id=row.author_user_id,
         body_md=row.body_md,
-        mentioned_user_ids=tuple(row.mentioned_user_ids),
-        attachments=tuple(dict(item) for item in row.attachments_json),
+        mentioned_user_ids=row.mentioned_user_ids,
+        attachments=row.attachments,
         created_at=_ensure_utc(row.created_at),
         edited_at=(_ensure_utc(row.edited_at) if row.edited_at is not None else None),
         deleted_at=(
@@ -436,19 +454,19 @@ def _extract_mention_slugs(body_md: str) -> tuple[str, ...]:
 
 
 def _resolve_mentions(
-    session: Session,
+    repo: CommentsRepository,
     ctx: WorkspaceContext,
     slugs: Sequence[str],
 ) -> tuple[list[str], tuple[str, ...], tuple[str, ...]]:
-    """Resolve slugs → (mentioned user ids, unknown slugs, ambiguous slugs).
+    """Resolve slugs -> (mentioned user ids, unknown slugs, ambiguous slugs).
 
-    Walks every :class:`UserWorkspace` in ``ctx.workspace_id`` and
-    matches on the normalised ``display_name`` slug. Returns the
-    ordered list of resolved user ids (preserving the first-mention
-    order from the body), the tuple of slugs that didn't match
-    anyone (caller raises :class:`CommentMentionInvalid`), and the
-    tuple of slugs that matched **more than one** workspace member
-    (caller raises :class:`CommentMentionAmbiguous`).
+    Walks every workspace member returned by the seam and matches on
+    the normalised ``display_name`` slug. Returns the ordered list
+    of resolved user ids (preserving the first-mention order from
+    the body), the tuple of slugs that didn't match anyone (caller
+    raises :class:`CommentMentionInvalid`), and the tuple of slugs
+    that matched **more than one** workspace member (caller raises
+    :class:`CommentMentionAmbiguous`).
 
     Collisions are a real hazard in the v1 bridge: two members whose
     ``display_name`` normalises to the same token (e.g. "Maya P" and
@@ -456,46 +474,42 @@ def _resolve_mentions(
     first walking match wins, and the §10 offline-mention email goes
     to the wrong user. Surfacing collisions as an explicit 422 makes
     the failure loud instead of silent; once
-    :attr:`User.display_name_slug` lands with a per-workspace unique
+    ``User.display_name_slug`` lands with a per-workspace unique
     constraint, this branch becomes unreachable.
     """
     if not slugs:
         return [], (), ()
-    rows = session.execute(
-        select(User.id, User.display_name)
-        .join(UserWorkspace, UserWorkspace.user_id == User.id)
-        .where(UserWorkspace.workspace_id == ctx.workspace_id)
-    ).all()
+    candidates = repo.list_mention_candidates(workspace_id=ctx.workspace_id)
     # Collect *every* user id that normalises to each slug, preserving
     # insertion order for deterministic error messages. A slug mapping
     # to more than one id is a collision the service refuses to
     # silently disambiguate.
     slug_to_user_ids: dict[str, list[str]] = {}
-    for user_id, display_name in rows:
-        slug = _normalise_slug(display_name)
+    for candidate in candidates:
+        slug = _normalise_slug(candidate.display_name)
         if not slug:
             continue
-        slug_to_user_ids.setdefault(slug, []).append(user_id)
+        slug_to_user_ids.setdefault(slug, []).append(candidate.id)
     resolved: list[str] = []
     unknown: list[str] = []
     ambiguous: list[str] = []
     for slug in slugs:
-        candidates = slug_to_user_ids.get(slug)
-        if candidates is None:
+        matches = slug_to_user_ids.get(slug)
+        if matches is None:
             unknown.append(slug)
             continue
-        if len(candidates) > 1:
+        if len(matches) > 1:
             if slug not in ambiguous:
                 ambiguous.append(slug)
             continue
-        user_id = candidates[0]
+        user_id = matches[0]
         if user_id not in resolved:
             resolved.append(user_id)
     return resolved, tuple(unknown), tuple(ambiguous)
 
 
 def _resolve_attachments(
-    session: Session,
+    repo: CommentsRepository,
     ctx: WorkspaceContext,
     *,
     occurrence_id: str,
@@ -503,7 +517,7 @@ def _resolve_attachments(
 ) -> list[dict[str, Any]]:
     """Resolve a list of evidence ids to persisted attachment payloads.
 
-    Each id must resolve to an :class:`Evidence` row in the caller's
+    Each id must resolve to an evidence row in the caller's
     workspace AND the target occurrence; an unknown or foreign id
     raises :class:`CommentAttachmentInvalid`. The returned list
     carries one ``{evidence_id, blob_hash, kind}`` dict per resolved
@@ -516,14 +530,12 @@ def _resolve_attachments(
     """
     if not evidence_ids:
         return []
-    rows = session.scalars(
-        select(Evidence).where(
-            Evidence.workspace_id == ctx.workspace_id,
-            Evidence.occurrence_id == occurrence_id,
-            Evidence.id.in_(list(evidence_ids)),
-        )
-    ).all()
-    by_id: dict[str, Evidence] = {row.id: row for row in rows}
+    rows = repo.list_evidence_attachments(
+        workspace_id=ctx.workspace_id,
+        occurrence_id=occurrence_id,
+        evidence_ids=evidence_ids,
+    )
+    by_id = {row.id: row for row in rows}
     unknown: list[str] = [fid for fid in evidence_ids if fid not in by_id]
     if unknown:
         raise CommentAttachmentInvalid(unknown)
@@ -540,21 +552,18 @@ def _resolve_attachments(
 
 
 def _load_occurrence(
-    session: Session,
+    repo: CommentsRepository,
     ctx: WorkspaceContext,
     occurrence_id: str,
-) -> Occurrence:
+) -> OccurrenceCommentScopeRow:
     """Load ``occurrence_id`` scoped to the caller's workspace.
 
     The ORM tenant filter already constrains SELECTs to
-    ``ctx.workspace_id``; the explicit predicate below is
-    defence-in-depth.
+    ``ctx.workspace_id``; the explicit predicate inside the seam
+    is defence-in-depth.
     """
-    row = session.scalar(
-        select(Occurrence).where(
-            Occurrence.id == occurrence_id,
-            Occurrence.workspace_id == ctx.workspace_id,
-        )
+    row = repo.get_occurrence_scope(
+        workspace_id=ctx.workspace_id, occurrence_id=occurrence_id
     )
     if row is None:
         raise CommentNotFound(f"task {occurrence_id!r} not visible in workspace")
@@ -563,13 +572,13 @@ def _load_occurrence(
 
 def _personal_task_gate(
     ctx: WorkspaceContext,
-    occurrence: Occurrence,
+    occurrence: OccurrenceCommentScopeRow,
 ) -> None:
     """Enforce §06 "Self-created and personal tasks" visibility.
 
     A personal task is readable + writable only by:
 
-    * the user who created it (``Occurrence.created_by_user_id ==
+    * the user who created it (``occurrence.created_by_user_id ==
       ctx.actor_id``), OR
     * a workspace owner (``ctx.actor_was_owner_member``).
 
@@ -589,10 +598,10 @@ def _personal_task_gate(
 
 
 def _load_comment(
-    session: Session,
+    repo: CommentsRepository,
     ctx: WorkspaceContext,
     comment_id: str,
-) -> tuple[Comment, Occurrence]:
+) -> tuple[CommentRow, OccurrenceCommentScopeRow]:
     """Load a comment + its occurrence with the personal-task gate.
 
     Returns both rows so call sites (edit / delete / get) avoid a
@@ -601,15 +610,10 @@ def _load_comment(
     refusal — the three shapes all collapse to 404 to keep the
     existence of a personal-task comment opaque.
     """
-    row = session.scalar(
-        select(Comment).where(
-            Comment.id == comment_id,
-            Comment.workspace_id == ctx.workspace_id,
-        )
-    )
+    row = repo.get_comment(workspace_id=ctx.workspace_id, comment_id=comment_id)
     if row is None:
         raise CommentNotFound(f"comment {comment_id!r} not visible in workspace")
-    occurrence = _load_occurrence(session, ctx, row.occurrence_id)
+    occurrence = _load_occurrence(repo, ctx, row.occurrence_id)
     _personal_task_gate(ctx, occurrence)
     return row, occurrence
 
@@ -645,7 +649,7 @@ def _view_to_diff_dict(view: CommentView) -> dict[str, Any]:
 
 
 def post_comment(
-    session: Session,
+    repo: CommentsRepository,
     ctx: WorkspaceContext,
     occurrence_id: str,
     payload: CommentCreate,
@@ -668,14 +672,14 @@ def post_comment(
     2. **Load + personal-task gate.** Load the target occurrence,
        enforce the personal-task visibility rule.
     3. **Resolve mentions.** Parse ``@slug`` tokens, match against
-       :class:`UserWorkspace` rows. Any unknown slug raises
+       workspace members. Any unknown slug raises
        :class:`CommentMentionInvalid`.
     4. **Resolve attachments.** Each id in ``payload.attachments``
-       must match an :class:`Evidence` row anchored to the target
-       occurrence. Unknown / foreign ids raise
-       :class:`CommentAttachmentInvalid`.
-    5. **Write.** Insert the :class:`Comment` row; flush so the id
-       is visible to the subsequent audit + event writes.
+       must match an evidence row anchored to the target occurrence.
+       Unknown / foreign ids raise :class:`CommentAttachmentInvalid`.
+    5. **Write.** Insert the comment row through the seam; the repo
+       flushes so the id is visible to the subsequent audit + event
+       writes.
     6. **Audit + event.** ``task_comment.create`` with the full
        view as the ``after`` diff; then publish
        :class:`TaskCommentAdded` on the bus.
@@ -701,7 +705,7 @@ def post_comment(
             f"kind='agent' requires actor_kind='agent' (got {ctx.actor_kind!r})"
         )
 
-    occurrence = _load_occurrence(session, ctx, occurrence_id)
+    occurrence = _load_occurrence(repo, ctx, occurrence_id)
     _personal_task_gate(ctx, occurrence)
 
     # --- Mention resolution. --------------------------------------
@@ -712,7 +716,7 @@ def post_comment(
     mentioned_user_ids: list[str] = []
     if kind == "user":
         slugs = _extract_mention_slugs(payload.body_md)
-        resolved, unknown, ambiguous = _resolve_mentions(session, ctx, slugs)
+        resolved, unknown, ambiguous = _resolve_mentions(repo, ctx, slugs)
         if unknown:
             raise CommentMentionInvalid(unknown)
         if ambiguous:
@@ -721,7 +725,7 @@ def post_comment(
 
     # --- Attachment resolution. -----------------------------------
     attachments_payload = _resolve_attachments(
-        session,
+        repo,
         ctx,
         occurrence_id=occurrence_id,
         evidence_ids=payload.attachments,
@@ -735,26 +739,22 @@ def post_comment(
     author_user_id: str | None = None if kind == "system" else ctx.actor_id
 
     now = resolved_clock.now()
-    row = Comment(
-        id=new_ulid(),
+    row = repo.insert_comment(
+        comment_id=new_ulid(),
         workspace_id=ctx.workspace_id,
         occurrence_id=occurrence_id,
         author_user_id=author_user_id,
-        body_md=payload.body_md,
-        created_at=now,
-        attachments_json=attachments_payload,
         kind=kind,
+        body_md=payload.body_md,
         mentioned_user_ids=mentioned_user_ids,
-        edited_at=None,
-        deleted_at=None,
+        attachments=attachments_payload,
         llm_call_id=llm_call_id,
+        created_at=now,
     )
-    session.add(row)
-    session.flush()
 
     view = _row_to_view(row)
     write_audit(
-        session,
+        repo.session,
         ctx,
         entity_kind="task_comment",
         entity_id=row.id,
@@ -779,7 +779,7 @@ def post_comment(
 
 
 def edit_comment(
-    session: Session,
+    repo: CommentsRepository,
     ctx: WorkspaceContext,
     comment_id: str,
     body_md: str,
@@ -806,7 +806,7 @@ def edit_comment(
     """
     resolved_clock = clock if clock is not None else SystemClock()
 
-    row, _occurrence = _load_comment(session, ctx, comment_id)
+    row, _occurrence = _load_comment(repo, ctx, comment_id)
 
     if row.kind != "user":
         raise CommentNotEditable(
@@ -836,20 +836,23 @@ def edit_comment(
     before_view = _row_to_view(row)
 
     slugs = _extract_mention_slugs(body_md)
-    resolved_mentions, unknown, ambiguous = _resolve_mentions(session, ctx, slugs)
+    resolved_mentions, unknown, ambiguous = _resolve_mentions(repo, ctx, slugs)
     if unknown:
         raise CommentMentionInvalid(unknown)
     if ambiguous:
         raise CommentMentionAmbiguous(ambiguous)
 
-    row.body_md = body_md
-    row.mentioned_user_ids = resolved_mentions
-    row.edited_at = resolved_clock.now()
-    session.flush()
+    updated = repo.update_comment_body(
+        workspace_id=ctx.workspace_id,
+        comment_id=row.id,
+        body_md=body_md,
+        mentioned_user_ids=resolved_mentions,
+        edited_at=resolved_clock.now(),
+    )
 
-    after_view = _row_to_view(row)
+    after_view = _row_to_view(updated)
     write_audit(
-        session,
+        repo.session,
         ctx,
         entity_kind="task_comment",
         entity_id=row.id,
@@ -864,12 +867,12 @@ def edit_comment(
 
 
 def delete_comment(
-    session: Session,
+    repo: CommentsRepository,
     ctx: WorkspaceContext,
     comment_id: str,
     *,
     clock: Clock | None = None,
-    rule_repo: PermissionRuleRepository | None = None,
+    authorizer: CommentModerationAuthorizer | None = None,
 ) -> CommentView:
     """Soft-delete ``comment_id`` (sets ``deleted_at``).
 
@@ -878,8 +881,10 @@ def delete_comment(
     * The author may delete their own comment at any time (no
       grace-window gate — deletions are cheaper than edits for the
       reader, and a late delete still honours the author's intent).
-    * Every other caller flows through :func:`app.authz.require` on
-      the ``tasks.comment_moderate`` capability (§05 rule-driven
+    * Every other caller flows through the
+      :class:`CommentModerationAuthorizer` seam (the SA concretion
+      delegates to :func:`app.authz.require` on the
+      ``tasks.comment_moderate`` capability — §05 rule-driven
       actions). The check resolves the occurrence's property scope
       when available (so a property-scoped rule can grant /
       revoke moderation per property) and falls back to the
@@ -892,39 +897,44 @@ def delete_comment(
       receive a stable domain error shape regardless of whether the
       denial came from the authz enforcer or the author shortcut.
 
-    ``rule_repo`` defaults to :class:`EmptyPermissionRuleRepository`
-    (v1 has no ``permission_rule`` table yet). Tests pin this
-    explicitly when they want to assert a rule-driven branch; the
-    REST router (cd-sn26) will inject the production repo.
+    ``authorizer`` is required for the moderator-delete branch;
+    callers that only ever exercise the author shortcut may pass
+    ``None`` and the moderator path raises :class:`CommentKindForbidden`
+    immediately. Production wiring (the v1 router) always passes a
+    live :class:`AuthzCommentModerationAuthorizer`.
 
     Already-deleted rows raise :class:`CommentNotEditable` — a
     second delete would be a no-op, but silently accepting it would
     mask a buggy client. The row is returned in its deleted shape.
     """
     resolved_clock = clock if clock is not None else SystemClock()
-    resolved_repo = (
-        rule_repo if rule_repo is not None else EmptyPermissionRuleRepository()
-    )
 
-    row, occurrence = _load_comment(session, ctx, comment_id)
+    row, occurrence = _load_comment(repo, ctx, comment_id)
 
     if row.deleted_at is not None:
         raise CommentNotEditable(f"comment {comment_id!r} is already deleted")
 
     is_author = row.author_user_id is not None and row.author_user_id == ctx.actor_id
     if not is_author and not ctx.actor_was_owner_member:
-        # Non-author, non-owner. Defence-in-depth: call the authz
-        # enforcer on ``tasks.comment_moderate``. The service is the
-        # domain truth, so this re-check protects the CLI / agent /
-        # integration-test entry points that don't flow through the
-        # REST dependency chain. Owners short-circuit above via
-        # ``actor_was_owner_member`` (a cached mirror of the
-        # ``owners@<workspace>`` group membership that the middleware
-        # populated) so the common "workspace owner moderating in
-        # the chat" path doesn't require seeded ``role_grants`` in
-        # test fixtures. Property scope when available, so a
-        # property-scoped allow / deny rule is honoured for
-        # managers / contractors.
+        # Non-author, non-owner. Defence-in-depth: invoke the
+        # moderation authorizer on ``tasks.comment_moderate``. The
+        # service is the domain truth, so this re-check protects the
+        # CLI / agent / integration-test entry points that don't
+        # flow through the REST dependency chain. Owners short-
+        # circuit above via ``actor_was_owner_member`` (a cached
+        # mirror of the ``owners@<workspace>`` group membership that
+        # the middleware populated) so the common "workspace owner
+        # moderating in the chat" path doesn't require seeded
+        # ``role_grants`` in test fixtures. Property scope when
+        # available, so a property-scoped allow / deny rule is
+        # honoured for managers / contractors.
+        if authorizer is None:
+            # No authorizer wired → only the author shortcut + owner
+            # fast-path are reachable; surface the same 403 the
+            # router would have produced if the enforcer denied.
+            raise CommentKindForbidden(
+                f"caller {ctx.actor_id!r} may not moderate comment {comment_id!r}"
+            )
         scope_kind = "property" if occurrence.property_id is not None else "workspace"
         scope_id = (
             occurrence.property_id
@@ -932,29 +942,29 @@ def delete_comment(
             else ctx.workspace_id
         )
         try:
-            require(
-                session,
+            authorizer.require_moderator(
                 ctx,
-                action_key="tasks.comment_moderate",
                 scope_kind=scope_kind,
                 scope_id=scope_id,
-                rule_repo=resolved_repo,
             )
-        except PermissionDenied as exc:
-            # Collapse to the domain's 403 shape. The enforcer already
-            # logged the structured denial; the caller doesn't need
-            # the capability name.
+        except ModerationDenied as exc:
+            # Collapse to the domain's 403 shape. The authorizer's
+            # underlying enforcer already logged the structured
+            # denial; the caller doesn't need the capability name.
             raise CommentKindForbidden(
                 f"caller {ctx.actor_id!r} may not moderate comment {comment_id!r}"
             ) from exc
 
     before_view = _row_to_view(row)
-    row.deleted_at = resolved_clock.now()
-    session.flush()
+    updated = repo.soft_delete_comment(
+        workspace_id=ctx.workspace_id,
+        comment_id=row.id,
+        deleted_at=resolved_clock.now(),
+    )
 
-    after_view = _row_to_view(row)
+    after_view = _row_to_view(updated)
     write_audit(
-        session,
+        repo.session,
         ctx,
         entity_kind="task_comment",
         entity_id=row.id,
@@ -974,7 +984,7 @@ def delete_comment(
 
 
 def get_comment(
-    session: Session,
+    repo: CommentsRepository,
     ctx: WorkspaceContext,
     comment_id: str,
 ) -> CommentView:
@@ -985,7 +995,7 @@ def get_comment(
     deleted row is returned to owners but 404's for everyone else,
     parity with :func:`list_comments`.
     """
-    row, _occurrence = _load_comment(session, ctx, comment_id)
+    row, _occurrence = _load_comment(repo, ctx, comment_id)
     if row.deleted_at is not None and not ctx.actor_was_owner_member:
         raise CommentNotFound(
             f"comment {comment_id!r} is deleted; not visible to non-owner"
@@ -994,7 +1004,7 @@ def get_comment(
 
 
 def list_comments(
-    session: Session,
+    repo: CommentsRepository,
     ctx: WorkspaceContext,
     occurrence_id: str,
     *,
@@ -1033,30 +1043,15 @@ def list_comments(
         )
     effective_limit = min(limit, 1000)
 
-    occurrence = _load_occurrence(session, ctx, occurrence_id)
+    occurrence = _load_occurrence(repo, ctx, occurrence_id)
     _personal_task_gate(ctx, occurrence)
 
-    stmt = select(Comment).where(
-        Comment.workspace_id == ctx.workspace_id,
-        Comment.occurrence_id == occurrence_id,
+    rows = repo.list_comments(
+        workspace_id=ctx.workspace_id,
+        occurrence_id=occurrence_id,
+        include_deleted=ctx.actor_was_owner_member,
+        after=after,
+        after_id=after_id,
+        limit=effective_limit,
     )
-    if not ctx.actor_was_owner_member:
-        stmt = stmt.where(Comment.deleted_at.is_(None))
-    if after is not None:
-        if after_id is None:
-            stmt = stmt.where(Comment.created_at > after)
-        else:
-            # Tuple-cursor: strictly greater than (after, after_id).
-            # Emulated as a disjunction for portability across SQLite
-            # (no row-value tuple comparison) and Postgres (supports
-            # it, but the disjunction is equally readable in the
-            # query plan and avoids a dialect-specific path).
-            stmt = stmt.where(
-                (Comment.created_at > after)
-                | ((Comment.created_at == after) & (Comment.id > after_id))
-            )
-    stmt = stmt.order_by(Comment.created_at.asc(), Comment.id.asc()).limit(
-        effective_limit
-    )
-    rows = session.scalars(stmt).all()
     return [_row_to_view(row) for row in rows]

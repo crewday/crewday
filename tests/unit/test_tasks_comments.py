@@ -52,6 +52,10 @@ from app.adapters.db.tasks.models import (
     Evidence,
     Occurrence,
 )
+from app.adapters.db.tasks.repositories import (
+    AuthzCommentModerationAuthorizer,
+    SqlAlchemyCommentsRepository,
+)
 from app.adapters.db.workspace.models import UserWorkspace, Workspace
 from app.domain.tasks.comments import (
     EDIT_WINDOW,
@@ -312,7 +316,7 @@ class TestPostCommentUser:
         captured = _record(bus)
 
         view = post_comment(
-            session,
+            SqlAlchemyCommentsRepository(session),
             ctx,
             occ,
             CommentCreate(body_md="All set."),
@@ -355,7 +359,7 @@ class TestPostCommentUser:
         ctx = _ctx(ws, role="worker", owner=False, actor_id=author)
 
         view = post_comment(
-            session,
+            SqlAlchemyCommentsRepository(session),
             ctx,
             occ,
             CommentCreate(body_md="Hey @maya, filter replaced."),
@@ -383,7 +387,7 @@ class TestPostCommentUser:
 
         with pytest.raises(CommentMentionInvalid) as excinfo:
             post_comment(
-                session,
+                SqlAlchemyCommentsRepository(session),
                 ctx,
                 occ,
                 CommentCreate(body_md="cc @stranger"),
@@ -406,7 +410,7 @@ class TestPostCommentUser:
         ctx = _ctx(ws, role="worker", owner=False, actor_id=author)
 
         view = post_comment(
-            session,
+            SqlAlchemyCommentsRepository(session),
             ctx,
             occ,
             CommentCreate(body_md="cc @maya and @alex — also again @maya"),
@@ -430,7 +434,7 @@ class TestPostCommentUser:
         ctx = _ctx(ws, role="worker", owner=False, actor_id=author)
 
         view = post_comment(
-            session,
+            SqlAlchemyCommentsRepository(session),
             ctx,
             occ,
             CommentCreate(body_md="email me at author@foo.com"),
@@ -461,7 +465,7 @@ class TestPostCommentUser:
 
         with pytest.raises(CommentMentionAmbiguous) as excinfo:
             post_comment(
-                session,
+                SqlAlchemyCommentsRepository(session),
                 ctx,
                 occ,
                 CommentCreate(body_md="cc @maya"),
@@ -489,7 +493,7 @@ class TestPostCommentAgentKind:
         ctx = _ctx(ws, role="worker", owner=False, actor_id=agent, actor_kind="agent")
 
         view = post_comment(
-            session,
+            SqlAlchemyCommentsRepository(session),
             ctx,
             occ,
             CommentCreate(body_md="I summarised the thread."),
@@ -518,7 +522,7 @@ class TestPostCommentAgentKind:
 
         with pytest.raises(CommentKindForbidden):
             post_comment(
-                session,
+                SqlAlchemyCommentsRepository(session),
                 ctx,
                 occ,
                 CommentCreate(body_md="Pretending to be the agent"),
@@ -541,7 +545,7 @@ class TestPostCommentSystemKind:
         ctx = _ctx(ws, role="manager", owner=True, actor_id=user)
 
         view = post_comment(
-            session,
+            SqlAlchemyCommentsRepository(session),
             ctx,
             occ,
             CommentCreate(body_md="Task marked done by Maya at 14:02"),
@@ -567,7 +571,7 @@ class TestPostCommentSystemKind:
 
         with pytest.raises(CommentKindForbidden):
             post_comment(
-                session,
+                SqlAlchemyCommentsRepository(session),
                 ctx,
                 occ,
                 CommentCreate(body_md="Forged system marker"),
@@ -599,7 +603,7 @@ class TestPostCommentAttachments:
         ctx = _ctx(ws, role="worker", owner=False, actor_id=author)
 
         view = post_comment(
-            session,
+            SqlAlchemyCommentsRepository(session),
             ctx,
             occ,
             CommentCreate(body_md="See photo", attachments=[eid]),
@@ -626,7 +630,7 @@ class TestPostCommentAttachments:
 
         with pytest.raises(CommentAttachmentInvalid) as excinfo:
             post_comment(
-                session,
+                SqlAlchemyCommentsRepository(session),
                 ctx,
                 occ,
                 CommentCreate(body_md="body", attachments=["ev-missing"]),
@@ -652,7 +656,7 @@ class TestPostCommentAttachments:
 
         with pytest.raises(CommentAttachmentInvalid):
             post_comment(
-                session,
+                SqlAlchemyCommentsRepository(session),
                 ctx_a,
                 occ_a,
                 CommentCreate(body_md="cross-ws", attachments=[foreign]),
@@ -681,7 +685,7 @@ class TestPostCommentAttachments:
 
         with pytest.raises(CommentAttachmentInvalid):
             post_comment(
-                session,
+                SqlAlchemyCommentsRepository(session),
                 ctx,
                 occ_a,
                 CommentCreate(body_md="other task", attachments=[ev_b]),
@@ -712,7 +716,7 @@ class TestEditComment:
         )
         ctx = _ctx(ws, role="worker", owner=False, actor_id=author)
         view = post_comment(
-            session,
+            SqlAlchemyCommentsRepository(session),
             ctx,
             occ,
             CommentCreate(body_md="original"),
@@ -727,7 +731,13 @@ class TestEditComment:
         _, _, ctx, view = self._seed(session, clock, bus)
         # Advance inside the window.
         clock.advance(timedelta(minutes=2))
-        updated = edit_comment(session, ctx, view.id, "edited body", clock=clock)
+        updated = edit_comment(
+            SqlAlchemyCommentsRepository(session),
+            ctx,
+            view.id,
+            "edited body",
+            clock=clock,
+        )
         assert updated.body_md == "edited body"
         assert updated.edited_at is not None
         audits = session.scalars(
@@ -742,7 +752,13 @@ class TestEditComment:
         _, _, ctx, view = self._seed(session, clock, bus)
         clock.advance(EDIT_WINDOW + timedelta(seconds=1))
         with pytest.raises(CommentEditWindowExpired):
-            edit_comment(session, ctx, view.id, "too late", clock=clock)
+            edit_comment(
+                SqlAlchemyCommentsRepository(session),
+                ctx,
+                view.id,
+                "too late",
+                clock=clock,
+            )
 
     def test_other_user_rejected_403(
         self, session: Session, clock: FrozenClock, bus: EventBus
@@ -751,7 +767,13 @@ class TestEditComment:
         outsider = _bootstrap_user(session, workspace_id=ws)
         outsider_ctx = _ctx(ws, role="worker", owner=False, actor_id=outsider)
         with pytest.raises(CommentKindForbidden):
-            edit_comment(session, outsider_ctx, view.id, "hijack", clock=clock)
+            edit_comment(
+                SqlAlchemyCommentsRepository(session),
+                outsider_ctx,
+                view.id,
+                "hijack",
+                clock=clock,
+            )
 
     def test_agent_row_never_editable(
         self, session: Session, clock: FrozenClock, bus: EventBus
@@ -764,7 +786,7 @@ class TestEditComment:
             ws, role="worker", owner=False, actor_id=agent, actor_kind="agent"
         )
         view = post_comment(
-            session,
+            SqlAlchemyCommentsRepository(session),
             agent_ctx,
             occ,
             CommentCreate(body_md="agent reply"),
@@ -773,7 +795,13 @@ class TestEditComment:
             event_bus=bus,
         )
         with pytest.raises(CommentNotEditable):
-            edit_comment(session, agent_ctx, view.id, "amended", clock=clock)
+            edit_comment(
+                SqlAlchemyCommentsRepository(session),
+                agent_ctx,
+                view.id,
+                "amended",
+                clock=clock,
+            )
 
     def test_system_row_never_editable(
         self, session: Session, clock: FrozenClock, bus: EventBus
@@ -784,7 +812,7 @@ class TestEditComment:
         occ = _bootstrap_occurrence(session, workspace_id=ws, property_id=prop)
         ctx = _ctx(ws, role="manager", owner=True, actor_id=user)
         view = post_comment(
-            session,
+            SqlAlchemyCommentsRepository(session),
             ctx,
             occ,
             CommentCreate(body_md="marker"),
@@ -794,15 +822,33 @@ class TestEditComment:
             event_bus=bus,
         )
         with pytest.raises(CommentNotEditable):
-            edit_comment(session, ctx, view.id, "amended", clock=clock)
+            edit_comment(
+                SqlAlchemyCommentsRepository(session),
+                ctx,
+                view.id,
+                "amended",
+                clock=clock,
+            )
 
     def test_deleted_row_not_editable(
         self, session: Session, clock: FrozenClock, bus: EventBus
     ) -> None:
         _, _, ctx, view = self._seed(session, clock, bus)
-        delete_comment(session, ctx, view.id, clock=clock)
+        delete_comment(
+            SqlAlchemyCommentsRepository(session),
+            ctx,
+            view.id,
+            clock=clock,
+            authorizer=AuthzCommentModerationAuthorizer(session),
+        )
         with pytest.raises(CommentNotEditable):
-            edit_comment(session, ctx, view.id, "amended", clock=clock)
+            edit_comment(
+                SqlAlchemyCommentsRepository(session),
+                ctx,
+                view.id,
+                "amended",
+                clock=clock,
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -824,9 +870,20 @@ class TestDeleteComment:
         )
         ctx = _ctx(ws, role="worker", owner=False, actor_id=author)
         view = post_comment(
-            session, ctx, occ, CommentCreate(body_md="oops"), clock=clock, event_bus=bus
+            SqlAlchemyCommentsRepository(session),
+            ctx,
+            occ,
+            CommentCreate(body_md="oops"),
+            clock=clock,
+            event_bus=bus,
         )
-        deleted = delete_comment(session, ctx, view.id, clock=clock)
+        deleted = delete_comment(
+            SqlAlchemyCommentsRepository(session),
+            ctx,
+            view.id,
+            clock=clock,
+            authorizer=AuthzCommentModerationAuthorizer(session),
+        )
         assert deleted.deleted_at is not None
         audits = session.scalars(
             select(AuditLog).where(AuditLog.entity_id == view.id)
@@ -845,7 +902,7 @@ class TestDeleteComment:
         )
         author_ctx = _ctx(ws, role="worker", owner=False, actor_id=author)
         view = post_comment(
-            session,
+            SqlAlchemyCommentsRepository(session),
             author_ctx,
             occ,
             CommentCreate(body_md="rude"),
@@ -853,7 +910,13 @@ class TestDeleteComment:
             event_bus=bus,
         )
         owner_ctx = _ctx(ws, role="manager", owner=True)
-        deleted = delete_comment(session, owner_ctx, view.id, clock=clock)
+        deleted = delete_comment(
+            SqlAlchemyCommentsRepository(session),
+            owner_ctx,
+            view.id,
+            clock=clock,
+            authorizer=AuthzCommentModerationAuthorizer(session),
+        )
         assert deleted.deleted_at is not None
 
     def test_non_author_non_owner_rejected_403(
@@ -868,7 +931,7 @@ class TestDeleteComment:
         )
         author_ctx = _ctx(ws, role="worker", owner=False, actor_id=author)
         view = post_comment(
-            session,
+            SqlAlchemyCommentsRepository(session),
             author_ctx,
             occ,
             CommentCreate(body_md="note"),
@@ -877,7 +940,13 @@ class TestDeleteComment:
         )
         stranger_ctx = _ctx(ws, role="worker", owner=False, actor_id=stranger)
         with pytest.raises(CommentKindForbidden):
-            delete_comment(session, stranger_ctx, view.id, clock=clock)
+            delete_comment(
+                SqlAlchemyCommentsRepository(session),
+                stranger_ctx,
+                view.id,
+                clock=clock,
+                authorizer=AuthzCommentModerationAuthorizer(session),
+            )
 
     def test_already_deleted_409(
         self, session: Session, clock: FrozenClock, bus: EventBus
@@ -890,11 +959,28 @@ class TestDeleteComment:
         )
         ctx = _ctx(ws, role="worker", owner=False, actor_id=author)
         view = post_comment(
-            session, ctx, occ, CommentCreate(body_md="x"), clock=clock, event_bus=bus
+            SqlAlchemyCommentsRepository(session),
+            ctx,
+            occ,
+            CommentCreate(body_md="x"),
+            clock=clock,
+            event_bus=bus,
         )
-        delete_comment(session, ctx, view.id, clock=clock)
+        delete_comment(
+            SqlAlchemyCommentsRepository(session),
+            ctx,
+            view.id,
+            clock=clock,
+            authorizer=AuthzCommentModerationAuthorizer(session),
+        )
         with pytest.raises(CommentNotEditable):
-            delete_comment(session, ctx, view.id, clock=clock)
+            delete_comment(
+                SqlAlchemyCommentsRepository(session),
+                ctx,
+                view.id,
+                clock=clock,
+                authorizer=AuthzCommentModerationAuthorizer(session),
+            )
 
     def test_manager_with_role_grant_can_moderate(
         self, session: Session, clock: FrozenClock, bus: EventBus
@@ -928,7 +1014,7 @@ class TestDeleteComment:
         )
         author_ctx = _ctx(ws, role="worker", owner=False, actor_id=author)
         view = post_comment(
-            session,
+            SqlAlchemyCommentsRepository(session),
             author_ctx,
             occ,
             CommentCreate(body_md="chatter"),
@@ -939,7 +1025,13 @@ class TestDeleteComment:
         # and NOT the author — the only path through the service is
         # the ``require()`` call on ``tasks.comment_moderate``.
         manager_ctx = _ctx(ws, role="manager", owner=False, actor_id=manager)
-        deleted = delete_comment(session, manager_ctx, view.id, clock=clock)
+        deleted = delete_comment(
+            SqlAlchemyCommentsRepository(session),
+            manager_ctx,
+            view.id,
+            clock=clock,
+            authorizer=AuthzCommentModerationAuthorizer(session),
+        )
         assert deleted.deleted_at is not None
 
 
@@ -963,7 +1055,7 @@ class TestListComments:
         ctx = _ctx(ws, role="worker", owner=False, actor_id=author)
 
         v1 = post_comment(
-            session,
+            SqlAlchemyCommentsRepository(session),
             ctx,
             occ,
             CommentCreate(body_md="first"),
@@ -972,7 +1064,7 @@ class TestListComments:
         )
         clock.advance(timedelta(seconds=30))
         v2 = post_comment(
-            session,
+            SqlAlchemyCommentsRepository(session),
             ctx,
             occ,
             CommentCreate(body_md="second"),
@@ -981,7 +1073,7 @@ class TestListComments:
         )
         clock.advance(timedelta(seconds=30))
         v3 = post_comment(
-            session,
+            SqlAlchemyCommentsRepository(session),
             ctx,
             occ,
             CommentCreate(body_md="third"),
@@ -989,7 +1081,7 @@ class TestListComments:
             event_bus=bus,
         )
 
-        listing = list_comments(session, ctx, occ)
+        listing = list_comments(SqlAlchemyCommentsRepository(session), ctx, occ)
         assert [v.id for v in listing] == [v1.id, v2.id, v3.id]
 
     def test_after_cursor_narrows_result(
@@ -1004,7 +1096,7 @@ class TestListComments:
         ctx = _ctx(ws, role="worker", owner=False, actor_id=author)
 
         v1 = post_comment(
-            session,
+            SqlAlchemyCommentsRepository(session),
             ctx,
             occ,
             CommentCreate(body_md="first"),
@@ -1013,7 +1105,7 @@ class TestListComments:
         )
         clock.advance(timedelta(seconds=30))
         v2 = post_comment(
-            session,
+            SqlAlchemyCommentsRepository(session),
             ctx,
             occ,
             CommentCreate(body_md="second"),
@@ -1021,7 +1113,9 @@ class TestListComments:
             event_bus=bus,
         )
 
-        listing = list_comments(session, ctx, occ, after=v1.created_at)
+        listing = list_comments(
+            SqlAlchemyCommentsRepository(session), ctx, occ, after=v1.created_at
+        )
         assert [v.id for v in listing] == [v2.id]
 
     def test_soft_deleted_hidden_for_non_owner_visible_to_owner(
@@ -1036,7 +1130,7 @@ class TestListComments:
         author_ctx = _ctx(ws, role="worker", owner=False, actor_id=author)
 
         live = post_comment(
-            session,
+            SqlAlchemyCommentsRepository(session),
             author_ctx,
             occ,
             CommentCreate(body_md="live"),
@@ -1045,20 +1139,30 @@ class TestListComments:
         )
         clock.advance(timedelta(seconds=10))
         deleted = post_comment(
-            session,
+            SqlAlchemyCommentsRepository(session),
             author_ctx,
             occ,
             CommentCreate(body_md="to be removed"),
             clock=clock,
             event_bus=bus,
         )
-        delete_comment(session, author_ctx, deleted.id, clock=clock)
+        delete_comment(
+            SqlAlchemyCommentsRepository(session),
+            author_ctx,
+            deleted.id,
+            clock=clock,
+            authorizer=AuthzCommentModerationAuthorizer(session),
+        )
 
-        non_owner_listing = list_comments(session, author_ctx, occ)
+        non_owner_listing = list_comments(
+            SqlAlchemyCommentsRepository(session), author_ctx, occ
+        )
         assert [v.id for v in non_owner_listing] == [live.id]
 
         owner_ctx = _ctx(ws, role="manager", owner=True)
-        owner_listing = list_comments(session, owner_ctx, occ)
+        owner_listing = list_comments(
+            SqlAlchemyCommentsRepository(session), owner_ctx, occ
+        )
         assert sorted(v.id for v in owner_listing) == sorted([live.id, deleted.id])
 
     def test_zero_limit_rejected(
@@ -1072,7 +1176,7 @@ class TestListComments:
         )
         ctx = _ctx(ws, role="worker", owner=False, actor_id=author)
         with pytest.raises(ValueError):
-            list_comments(session, ctx, occ, limit=0)
+            list_comments(SqlAlchemyCommentsRepository(session), ctx, occ, limit=0)
 
     def test_after_id_without_after_rejected(
         self, session: Session, clock: FrozenClock, bus: EventBus
@@ -1086,7 +1190,12 @@ class TestListComments:
         )
         ctx = _ctx(ws, role="worker", owner=False, actor_id=author)
         with pytest.raises(ValueError):
-            list_comments(session, ctx, occ, after_id="01HWA00000000000000000CMX")
+            list_comments(
+                SqlAlchemyCommentsRepository(session),
+                ctx,
+                occ,
+                after_id="01HWA00000000000000000CMX",
+            )
 
     def test_cursor_tie_breaks_on_id_when_clock_ticks_collide(
         self, session: Session, clock: FrozenClock, bus: EventBus
@@ -1105,7 +1214,7 @@ class TestListComments:
         # Same clock tick for both posts — simulates an agent batch
         # writing several messages inside one APScheduler second.
         v1 = post_comment(
-            session,
+            SqlAlchemyCommentsRepository(session),
             ctx,
             occ,
             CommentCreate(body_md="tick-a"),
@@ -1113,7 +1222,7 @@ class TestListComments:
             event_bus=bus,
         )
         v2 = post_comment(
-            session,
+            SqlAlchemyCommentsRepository(session),
             ctx,
             occ,
             CommentCreate(body_md="tick-b"),
@@ -1125,12 +1234,16 @@ class TestListComments:
         # the expected pair by the id ordering the DB will return.
         first, second = sorted([v1, v2], key=lambda v: v.id)
         # Full listing carries both in (created_at, id) order.
-        listing = list_comments(session, ctx, occ)
+        listing = list_comments(SqlAlchemyCommentsRepository(session), ctx, occ)
         assert [v.id for v in listing] == [first.id, second.id]
         # Cursor after the first row must still surface the second
         # — the plain ``created_at > after`` predicate would drop it.
         next_page = list_comments(
-            session, ctx, occ, after=first.created_at, after_id=first.id
+            SqlAlchemyCommentsRepository(session),
+            ctx,
+            occ,
+            after=first.created_at,
+            after_id=first.id,
         )
         assert [v.id for v in next_page] == [second.id]
 
@@ -1160,7 +1273,7 @@ class TestPersonalTaskGate:
         creator_ctx = _ctx(ws, role="worker", owner=False, actor_id=creator)
         # Creator can post:
         view = post_comment(
-            session,
+            SqlAlchemyCommentsRepository(session),
             creator_ctx,
             occ,
             CommentCreate(body_md="private note"),
@@ -1172,12 +1285,12 @@ class TestPersonalTaskGate:
         # on every read surface.
         stranger_ctx = _ctx(ws, role="worker", owner=False, actor_id=stranger)
         with pytest.raises(CommentNotFound):
-            list_comments(session, stranger_ctx, occ)
+            list_comments(SqlAlchemyCommentsRepository(session), stranger_ctx, occ)
         with pytest.raises(CommentNotFound):
-            get_comment(session, stranger_ctx, view.id)
+            get_comment(SqlAlchemyCommentsRepository(session), stranger_ctx, view.id)
         with pytest.raises(CommentNotFound):
             post_comment(
-                session,
+                SqlAlchemyCommentsRepository(session),
                 stranger_ctx,
                 occ,
                 CommentCreate(body_md="sneaky"),
@@ -1200,7 +1313,7 @@ class TestPersonalTaskGate:
         )
         creator_ctx = _ctx(ws, role="worker", owner=False, actor_id=creator)
         view = post_comment(
-            session,
+            SqlAlchemyCommentsRepository(session),
             creator_ctx,
             occ,
             CommentCreate(body_md="private"),
@@ -1208,7 +1321,7 @@ class TestPersonalTaskGate:
             event_bus=bus,
         )
         owner_ctx = _ctx(ws, role="manager", owner=True)
-        fetched = get_comment(session, owner_ctx, view.id)
+        fetched = get_comment(SqlAlchemyCommentsRepository(session), owner_ctx, view.id)
         assert fetched.id == view.id
 
 
@@ -1232,7 +1345,7 @@ class TestTenantIsolation:
         )
         ctx_a = _ctx(ws_a, role="worker", owner=False, actor_id=author_a)
         view = post_comment(
-            session,
+            SqlAlchemyCommentsRepository(session),
             ctx_a,
             occ,
             CommentCreate(body_md="tenant a"),
@@ -1241,4 +1354,4 @@ class TestTenantIsolation:
         )
         ctx_b = _ctx(ws_b, role="manager", owner=True)
         with pytest.raises(CommentNotFound):
-            get_comment(session, ctx_b, view.id)
+            get_comment(SqlAlchemyCommentsRepository(session), ctx_b, view.id)

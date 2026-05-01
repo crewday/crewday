@@ -523,22 +523,6 @@ ignore_imports = [
     # entry covers the concrete fallback. Drops when a sniffer factory
     # is wired at boot.
     "app.domain.tasks.completion -> app.adapters.storage.mime",
-    # v1 stopgap (cd-cfe4): ``app.domain.tasks.comments`` reads
-    # :class:`Comment` / :class:`Occurrence` / :class:`Evidence` from
-    # ``app.adapters.db.tasks.models``, :class:`User` from
-    # ``app.adapters.db.identity.models`` and
-    # :class:`UserWorkspace` from ``app.adapters.db.workspace.models``
-    # (author resolution + workspace-membership filter). It also
-    # invokes :func:`app.authz.require` for the moderator-delete
-    # capability check — same transitive-walk reasoning as the
-    # ``app.domain.tasks.oneoff -> app.authz`` stopgap above. Same
-    # Protocol-seam pattern as the other tasks services; tracked by
-    # cd-duv6 — drops once the tasks / identity / workspace
-    # repositories land.
-    "app.domain.tasks.comments -> app.adapters.db.tasks.models",
-    "app.domain.tasks.comments -> app.adapters.db.identity.models",
-    "app.domain.tasks.comments -> app.adapters.db.workspace.models",
-    "app.domain.tasks.comments -> app.authz",
     # v1 stopgap (cd-dcfw): ``app.domain.identity.work_roles`` /
     # ``user_work_roles`` / ``work_engagements`` read
     # :class:`WorkRole` / :class:`UserWorkRole` /

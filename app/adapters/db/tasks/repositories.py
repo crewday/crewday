@@ -1,4 +1,16 @@
-"""SA-backed concretion of :mod:`app.ports.tasks_create_occurrence`.
+"""SA-backed concretions for the tasks-context Protocol seams.
+
+Two surfaces live here:
+
+* :class:`SqlAlchemyTasksCreateOccurrencePort` — the cd-ncbdb stay-
+  driven occurrence create-or-patch state machine.
+* :class:`SqlAlchemyCommentsRepository` plus
+  :class:`AuthzCommentModerationAuthorizer` — the cd-ayvn /
+  cd-cfe4 seams that close
+  :mod:`app.domain.tasks.comments`'s direct ORM and authz imports.
+  Mirror the cd-hso7 ``MembershipRepository`` shape — frozen row
+  projections, workspace-scoping pinned per call, no commit (caller
+  UoW owns the boundary).
 
 The cd-ncbdb adapter persists a turnover :class:`Occurrence` row
 when the stays-side bundle service / turnover generator decides one
@@ -50,14 +62,28 @@ See ``docs/specs/04-properties-and-stays.md`` §"Stay task bundles"
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import UTC, datetime
+from typing import Any
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.adapters.db.identity.models import User
 from app.adapters.db.places.models import Property
-from app.adapters.db.tasks.models import Occurrence
+from app.adapters.db.tasks.models import Comment, Evidence, Occurrence
+from app.adapters.db.workspace.models import UserWorkspace
+from app.authz import PermissionDenied, require
+from app.domain.tasks.ports import (
+    CommentModerationAuthorizer,
+    CommentRow,
+    CommentsRepository,
+    EvidenceAttachmentRow,
+    MentionCandidateRow,
+    ModerationDenied,
+    OccurrenceCommentScopeRow,
+)
 from app.ports.tasks_create_occurrence import (
     TasksCreateOccurrenceOutcome,
     TurnoverOccurrenceRequest,
@@ -66,7 +92,11 @@ from app.ports.tasks_create_occurrence import (
 from app.tenancy import WorkspaceContext
 from app.util.ulid import new_ulid
 
-__all__ = ["SqlAlchemyTasksCreateOccurrencePort"]
+__all__ = [
+    "AuthzCommentModerationAuthorizer",
+    "SqlAlchemyCommentsRepository",
+    "SqlAlchemyTasksCreateOccurrencePort",
+]
 
 
 # Occurrence states the spec gates in-place patches on. cd-04
@@ -261,3 +291,279 @@ def _to_utc(value: datetime) -> datetime:
     if value.tzinfo is None:
         return value.replace(tzinfo=UTC)
     return value.astimezone(UTC)
+
+
+# ---------------------------------------------------------------------------
+# Comments repository (cd-ayvn / cd-cfe4)
+# ---------------------------------------------------------------------------
+
+
+def _to_occurrence_scope_row(row: Occurrence) -> OccurrenceCommentScopeRow:
+    """Project an ORM ``Occurrence`` into the seam-level scope shape."""
+    return OccurrenceCommentScopeRow(
+        id=row.id,
+        workspace_id=row.workspace_id,
+        property_id=row.property_id,
+        is_personal=row.is_personal,
+        created_by_user_id=row.created_by_user_id,
+    )
+
+
+def _to_evidence_attachment_row(row: Evidence) -> EvidenceAttachmentRow:
+    """Project an ORM ``Evidence`` into the seam-level attachment shape."""
+    return EvidenceAttachmentRow(id=row.id, blob_hash=row.blob_hash, kind=row.kind)
+
+
+def _to_comment_row(row: Comment) -> CommentRow:
+    """Project an ORM ``Comment`` into the seam-level row.
+
+    ``mentioned_user_ids`` and ``attachments_json`` are tuple-ified so
+    the seam shape stays immutable; the domain re-projects to its
+    own ``CommentView`` shape on the way out.
+    """
+    return CommentRow(
+        id=row.id,
+        workspace_id=row.workspace_id,
+        occurrence_id=row.occurrence_id,
+        kind=row.kind,
+        author_user_id=row.author_user_id,
+        body_md=row.body_md,
+        mentioned_user_ids=tuple(row.mentioned_user_ids),
+        attachments=tuple(dict(item) for item in row.attachments_json),
+        created_at=row.created_at,
+        edited_at=row.edited_at,
+        deleted_at=row.deleted_at,
+        llm_call_id=row.llm_call_id,
+    )
+
+
+class SqlAlchemyCommentsRepository(CommentsRepository):
+    """SA-backed concretion of :class:`CommentsRepository`.
+
+    Wraps an open :class:`~sqlalchemy.orm.Session` and never commits —
+    the caller's UoW owns the transaction boundary (§01 "Key runtime
+    invariants" #3). Mutating methods flush so the audit writer's FK
+    reference to ``entity_id`` and the request-local event bus see
+    the new row.
+    """
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    @property
+    def session(self) -> Session:
+        return self._session
+
+    # -- occurrence + evidence + mention reads ---------------------------
+
+    def get_occurrence_scope(
+        self, *, workspace_id: str, occurrence_id: str
+    ) -> OccurrenceCommentScopeRow | None:
+        # Defence-in-depth: pin ``workspace_id`` even though the ORM
+        # tenant filter narrows it. The comments service relies on
+        # the predicate to make the personal-task gate cross-tenant
+        # safe.
+        row = self._session.scalar(
+            select(Occurrence).where(
+                Occurrence.id == occurrence_id,
+                Occurrence.workspace_id == workspace_id,
+            )
+        )
+        if row is None:
+            return None
+        return _to_occurrence_scope_row(row)
+
+    def list_evidence_attachments(
+        self,
+        *,
+        workspace_id: str,
+        occurrence_id: str,
+        evidence_ids: Sequence[str],
+    ) -> Sequence[EvidenceAttachmentRow]:
+        if not evidence_ids:
+            return []
+        rows = self._session.scalars(
+            select(Evidence).where(
+                Evidence.workspace_id == workspace_id,
+                Evidence.occurrence_id == occurrence_id,
+                Evidence.id.in_(list(evidence_ids)),
+            )
+        ).all()
+        return [_to_evidence_attachment_row(r) for r in rows]
+
+    def list_mention_candidates(
+        self, *, workspace_id: str
+    ) -> Sequence[MentionCandidateRow]:
+        rows = self._session.execute(
+            select(User.id, User.display_name)
+            .join(UserWorkspace, UserWorkspace.user_id == User.id)
+            .where(UserWorkspace.workspace_id == workspace_id)
+        ).all()
+        return [MentionCandidateRow(id=uid, display_name=name) for uid, name in rows]
+
+    # -- comment reads ---------------------------------------------------
+
+    def get_comment(self, *, workspace_id: str, comment_id: str) -> CommentRow | None:
+        row = self._session.scalar(
+            select(Comment).where(
+                Comment.id == comment_id,
+                Comment.workspace_id == workspace_id,
+            )
+        )
+        if row is None:
+            return None
+        return _to_comment_row(row)
+
+    def list_comments(
+        self,
+        *,
+        workspace_id: str,
+        occurrence_id: str,
+        include_deleted: bool,
+        after: datetime | None,
+        after_id: str | None,
+        limit: int,
+    ) -> Sequence[CommentRow]:
+        stmt = select(Comment).where(
+            Comment.workspace_id == workspace_id,
+            Comment.occurrence_id == occurrence_id,
+        )
+        if not include_deleted:
+            stmt = stmt.where(Comment.deleted_at.is_(None))
+        if after is not None:
+            if after_id is None:
+                stmt = stmt.where(Comment.created_at > after)
+            else:
+                # Tuple cursor — strictly greater than (after, after_id).
+                # Emulated as a disjunction so SQLite (no row-value tuple
+                # comparison) and Postgres share one query plan.
+                stmt = stmt.where(
+                    (Comment.created_at > after)
+                    | ((Comment.created_at == after) & (Comment.id > after_id))
+                )
+        stmt = stmt.order_by(Comment.created_at.asc(), Comment.id.asc()).limit(limit)
+        rows = self._session.scalars(stmt).all()
+        return [_to_comment_row(r) for r in rows]
+
+    # -- comment writes --------------------------------------------------
+
+    def insert_comment(
+        self,
+        *,
+        comment_id: str,
+        workspace_id: str,
+        occurrence_id: str,
+        author_user_id: str | None,
+        kind: str,
+        body_md: str,
+        mentioned_user_ids: Sequence[str],
+        attachments: Sequence[dict[str, Any]],
+        llm_call_id: str | None,
+        created_at: datetime,
+    ) -> CommentRow:
+        row = Comment(
+            id=comment_id,
+            workspace_id=workspace_id,
+            occurrence_id=occurrence_id,
+            author_user_id=author_user_id,
+            body_md=body_md,
+            created_at=created_at,
+            attachments_json=[dict(item) for item in attachments],
+            kind=kind,
+            mentioned_user_ids=list(mentioned_user_ids),
+            edited_at=None,
+            deleted_at=None,
+            llm_call_id=llm_call_id,
+        )
+        self._session.add(row)
+        self._session.flush()
+        return _to_comment_row(row)
+
+    def update_comment_body(
+        self,
+        *,
+        workspace_id: str,
+        comment_id: str,
+        body_md: str,
+        mentioned_user_ids: Sequence[str],
+        edited_at: datetime,
+    ) -> CommentRow:
+        # Re-fetch the row so the UPDATE flushes against fresh ORM
+        # state. The caller already loaded it through
+        # :meth:`get_comment` for the guards; that read goes through
+        # the same session so the identity map returns the same
+        # mapped instance here without an extra round-trip.
+        row = self._session.scalars(
+            select(Comment).where(
+                Comment.id == comment_id,
+                Comment.workspace_id == workspace_id,
+            )
+        ).one()
+        row.body_md = body_md
+        row.mentioned_user_ids = list(mentioned_user_ids)
+        row.edited_at = edited_at
+        self._session.flush()
+        return _to_comment_row(row)
+
+    def soft_delete_comment(
+        self,
+        *,
+        workspace_id: str,
+        comment_id: str,
+        deleted_at: datetime,
+    ) -> CommentRow:
+        row = self._session.scalars(
+            select(Comment).where(
+                Comment.id == comment_id,
+                Comment.workspace_id == workspace_id,
+            )
+        ).one()
+        row.deleted_at = deleted_at
+        self._session.flush()
+        return _to_comment_row(row)
+
+
+# ---------------------------------------------------------------------------
+# Authz adapter for the comments-moderation seam (cd-ayvn / cd-cfe4)
+# ---------------------------------------------------------------------------
+
+
+class AuthzCommentModerationAuthorizer(CommentModerationAuthorizer):
+    """SA-backed concretion of :class:`CommentModerationAuthorizer`.
+
+    Adapter-layer module so calling :func:`app.authz.require` does
+    not pull :mod:`app.authz` back into :mod:`app.domain` (the cd-cfe4
+    stopgap that this seam closes). The authorizer threads the
+    enforcer's session through the same UoW the comments service
+    runs in.
+
+    Collapses :class:`app.authz.PermissionDenied` to the seam-level
+    :class:`ModerationDenied` so the domain catches a dependency-free
+    exception type. Re-raises ``UnknownActionKey`` / ``InvalidScope``
+    untouched — those are programmer errors and should fail loudly.
+    """
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def require_moderator(
+        self,
+        ctx: WorkspaceContext,
+        *,
+        scope_kind: str,
+        scope_id: str,
+    ) -> None:
+        try:
+            # ``rule_repo=None`` lets ``app.authz.require`` fall through
+            # to its process-wide default (an empty-rule repo) — the
+            # v1 surface has no ``permission_rule`` table yet, so a
+            # caller-pinned repo would be dead weight.
+            require(
+                self._session,
+                ctx,
+                action_key="tasks.comment_moderate",
+                scope_kind=scope_kind,
+                scope_id=scope_id,
+            )
+        except PermissionDenied as exc:
+            raise ModerationDenied("tasks.comment_moderate") from exc
