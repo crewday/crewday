@@ -89,15 +89,26 @@ def _ensure_places_registered() -> None:
     wipes the process-wide registry. Without this fixture the
     import-time registration loses the race and our tenant-filter
     assertions pass in isolation yet silently drop the filter under
-    the full suite. ``property`` / ``unit`` / ``area`` /
-    ``property_closure`` are intentionally NOT re-registered — see
-    the package docstring.
+    the full suite. ``property`` is intentionally NOT re-registered
+    (it's shared across workspaces via ``property_workspace``).
     """
     registry.register("property_workspace")
     # cd-e4m3 — the per-property pinning of a ``user_work_role``
     # carries a denormalised ``workspace_id`` column and rides the
     # tenant filter directly (same pattern as ``work_engagement``).
     registry.register("property_work_role_assignment")
+    # cd-014h — ``unit`` / ``area`` / ``property_closure`` reach the
+    # workspace boundary through ``property_workspace`` on
+    # ``property_id``. Mirror the production wiring in
+    # :mod:`app.adapters.db.places` so a sibling test that wipes the
+    # registry doesn't silently drop the boundary mid-suite.
+    for _scoped_through_property in ("unit", "area", "property_closure"):
+        registry.register_scope_through_join(
+            _scoped_through_property,
+            via_table="property_workspace",
+            via_local_column="property_id",
+            via_remote_column="property_id",
+        )
 
 
 def _ctx_for(workspace: Workspace, actor_id: str) -> WorkspaceContext:
@@ -919,7 +930,9 @@ class TestCascadeOnWorkspaceDelete:
 
 
 class TestTenantFilter:
-    """``property_workspace`` is scoped; ``property`` is agnostic."""
+    """``property_workspace`` and ``unit`` / ``area`` / ``property_closure``
+    are scoped (the latter via scope-through-join on ``property_workspace``
+    per cd-014h); ``property`` itself stays agnostic."""
 
     def test_property_workspace_read_without_ctx_raises(
         self, filtered_factory: sessionmaker[Session]
@@ -942,33 +955,55 @@ class TestTenantFilter:
             # point is that the call reached the DB without raising.
             assert isinstance(result, list)
 
-    def test_unit_read_without_ctx_does_not_raise(
+    def test_unit_read_without_ctx_raises(
         self, filtered_factory: sessionmaker[Session]
     ) -> None:
-        """``unit`` is NOT registered in v1 — bare SELECT must succeed.
+        """``unit`` is registered as scope-through-join (cd-014h).
 
-        Service-layer code joins through ``property_workspace`` to get
-        tenant isolation; the filter doesn't enforce it at this layer.
+        It carries no ``workspace_id`` of its own; the boundary is
+        enforced by joining through ``property_workspace`` on
+        ``property_id``. A bare SELECT without a
+        :class:`WorkspaceContext` has nowhere to inject the
+        ``IN (SELECT …)`` predicate, so the hook fails closed before
+        the query reaches the DB.
         """
-        with filtered_factory() as session:
-            result = session.scalars(select(Unit)).all()
-            assert isinstance(result, list)
+        with (
+            filtered_factory() as session,
+            pytest.raises(TenantFilterMissing) as exc,
+        ):
+            session.execute(select(Unit))
+        assert exc.value.table == "unit"
 
-    def test_area_read_without_ctx_does_not_raise(
+    def test_area_read_without_ctx_raises(
         self, filtered_factory: sessionmaker[Session]
     ) -> None:
-        """``area`` is NOT registered in v1 — bare SELECT must succeed."""
-        with filtered_factory() as session:
-            result = session.scalars(select(Area)).all()
-            assert isinstance(result, list)
+        """``area`` is registered as scope-through-join (cd-014h).
 
-    def test_property_closure_read_without_ctx_does_not_raise(
+        Same shape as :class:`Unit` — boundary via ``property_workspace``
+        on ``property_id``; bare read without a context fails closed.
+        """
+        with (
+            filtered_factory() as session,
+            pytest.raises(TenantFilterMissing) as exc,
+        ):
+            session.execute(select(Area))
+        assert exc.value.table == "area"
+
+    def test_property_closure_read_without_ctx_raises(
         self, filtered_factory: sessionmaker[Session]
     ) -> None:
-        """``property_closure`` is NOT registered in v1 — bare SELECT must succeed."""
-        with filtered_factory() as session:
-            result = session.scalars(select(PropertyClosure)).all()
-            assert isinstance(result, list)
+        """``property_closure`` is registered as scope-through-join (cd-014h).
+
+        Same shape as :class:`Unit` / :class:`Area` — boundary via
+        ``property_workspace`` on ``property_id``; bare read without
+        a context fails closed.
+        """
+        with (
+            filtered_factory() as session,
+            pytest.raises(TenantFilterMissing) as exc,
+        ):
+            session.execute(select(PropertyClosure))
+        assert exc.value.table == "property_closure"
 
     def test_property_work_role_assignment_read_without_ctx_raises(
         self, filtered_factory: sessionmaker[Session]

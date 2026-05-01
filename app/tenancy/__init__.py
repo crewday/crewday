@@ -25,7 +25,15 @@ from app.tenancy.deployment import (
     DeploymentActorKind,
     DeploymentContext,
 )
-from app.tenancy.registry import is_scoped, register, scoped_tables
+from app.tenancy.registry import (
+    ScopeThroughJoin,
+    get_scope_through_join,
+    is_scoped,
+    register,
+    register_scope_through_join,
+    scope_through_join_tables,
+    scoped_tables,
+)
 from app.tenancy.slug import (
     RESERVED_SLUGS,
     SLUG_PATTERN,
@@ -48,8 +56,10 @@ __all__ = [
     "DeploymentContext",
     "InvalidSlug",
     "PrincipalKind",
+    "ScopeThroughJoin",
     "WorkspaceContext",
     "get_current",
+    "get_scope_through_join",
     "is_homoglyph_collision",
     "is_reserved",
     "is_scoped",
@@ -57,7 +67,9 @@ __all__ = [
     "normalise_for_collision",
     "normalise_slug",
     "register",
+    "register_scope_through_join",
     "reset_current",
+    "scope_through_join_tables",
     "scoped_tables",
     "set_current",
     "tenant_agnostic",

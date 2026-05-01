@@ -20,22 +20,20 @@ Importing this package registers per-table tenancy behaviour:
   the spec. Services that need a workspace-scoped read of properties
   MUST join through ``property_workspace`` — the junction carries the
   tenancy boundary.
-* ``unit``, ``area``, ``property_closure``: intentionally **NOT**
-  registered in the v1 slice. These tables reach the workspace
-  boundary through their parent property's ``property_workspace``
-  rows; they do not carry ``workspace_id`` columns themselves. A
-  naive auto-inject on such a table would crash in the ORM filter
-  (no column to filter on). The service layer is responsible for
-  joining ``unit`` / ``area`` / ``property_closure`` → ``property`` →
-  ``property_workspace`` for tenant isolation.
-
-  Extending the filter to handle "scoped-but-no-workspace_id-column"
-  tables via a mandatory join through the junction is tracked in a
-  follow-up Beads task (``cd-8u5`` domain service will thread the
-  join; a later filter-side enhancement will make the guarantee
-  automatic). For v1 we fail closed by policy, not by automation:
-  any bare SELECT against these three tables without a join is a bug
-  the service-layer review must catch.
+* ``unit`` / ``area`` / ``property_closure``: registered as
+  **scope-through-join** tables (cd-014h). They have no
+  ``workspace_id`` column of their own, but the workspace boundary
+  is enforced by joining through ``property_workspace`` on
+  ``property_id``. The ORM tenant filter either accepts a query
+  that already joins the junction with a matching ``workspace_id``
+  predicate or auto-injects an
+  ``IN (SELECT property_id FROM property_workspace WHERE
+  workspace_id = :ctx)`` filter; bare reads without a
+  :class:`~app.tenancy.WorkspaceContext` still raise
+  :class:`~app.tenancy.orm_filter.TenantFilterMissing`. UPDATE /
+  DELETE on these tables fail closed — services thread the
+  predicate by hand or wrap in
+  :func:`~app.tenancy.current.tenant_agnostic`.
 
 See ``docs/specs/02-domain-model.md`` §"property_workspace",
 ``docs/specs/04-properties-and-stays.md`` §"Property" / §"Unit" /
@@ -54,14 +52,28 @@ from app.adapters.db.places.models import (
     PropertyWorkspace,
     Unit,
 )
-from app.tenancy.registry import register
+from app.tenancy.registry import register, register_scope_through_join
 
 register("property_workspace")
 register("property_work_role_assignment")
 # ``property`` is intentionally NOT registered — a property can belong
 # to multiple workspaces via ``property_workspace``. See module
-# docstring for the full rationale; unit / area / property_closure
-# follow the same "service-layer joins the junction" contract.
+# docstring for the full rationale.
+
+# ``unit`` / ``area`` / ``property_closure`` reach the workspace
+# boundary through ``property_workspace`` on ``property_id``. The
+# ORM tenant filter (cd-014h) verifies the junction is joined with
+# a matching ``workspace_id`` predicate, otherwise it auto-injects
+# the ``IN (SELECT ... FROM property_workspace WHERE workspace_id =
+# :ctx)`` equivalent.
+for _scoped_through_property in ("unit", "area", "property_closure"):
+    register_scope_through_join(
+        _scoped_through_property,
+        via_table="property_workspace",
+        via_local_column="property_id",
+        via_remote_column="property_id",
+    )
+del _scoped_through_property
 
 __all__ = [
     "Area",
