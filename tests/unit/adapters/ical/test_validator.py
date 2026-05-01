@@ -299,6 +299,109 @@ def test_private_address_rejected(label: str, ip: str, code: str) -> None:
     assert exc_info.value.code == code
 
 
+class TestAllowPrivateAddressesGate:
+    """``IcalValidatorConfig.allow_private_addresses`` carve-out (cd-xr652).
+
+    Default ``False`` — the validator rejects loopback / RFC 1918 /
+    link-local with ``ical_url_private_address``. Flipping the gate
+    to ``True`` (only ``mocks/docker-compose.e2e.yml`` does so) lets
+    those addresses through so the GA journey 3 e2e (cd-zxvk) can
+    point a feed at an in-cluster ICS server. Every other validator
+    check still applies; we assert that explicitly so a future regress
+    that loosens the scheme / size / DNS-rebind gate alongside the
+    private-address gate trips a test.
+    """
+
+    def test_default_rejects_loopback(self) -> None:
+        """Knob OFF (default): loopback resolution still rejected."""
+        validator = HttpxIcalValidator(
+            IcalValidatorConfig(
+                resolver=_fixed_resolver(["127.0.0.1"]),
+                fetcher=StubFetcher(responses=[_ok(_ics_body())]),
+            )
+        )
+        with pytest.raises(IcalValidationError) as exc_info:
+            validator.validate("https://ics.local.test/feed.ics")
+        assert exc_info.value.code == "ical_url_private_address"
+
+    def test_knob_on_accepts_loopback(self) -> None:
+        """Knob ON: loopback resolution passes; the fetcher runs."""
+        fetcher = StubFetcher(responses=[_ok(_ics_body())])
+        validator = HttpxIcalValidator(
+            IcalValidatorConfig(
+                resolver=_fixed_resolver(["127.0.0.1"]),
+                fetcher=fetcher,
+                allow_private_addresses=True,
+            )
+        )
+        validation = validator.validate("https://ics.local.test/feed.ics")
+        assert validation.resolved_ip == "127.0.0.1"
+        assert validation.parseable_ics is True
+        assert len(fetcher.calls) == 1
+
+    def test_knob_on_accepts_rfc1918(self) -> None:
+        """Knob ON also covers the RFC 1918 ranges, not just loopback."""
+        fetcher = StubFetcher(responses=[_ok(_ics_body())])
+        validator = HttpxIcalValidator(
+            IcalValidatorConfig(
+                resolver=_fixed_resolver(["10.0.0.5"]),
+                fetcher=fetcher,
+                allow_private_addresses=True,
+            )
+        )
+        validation = validator.validate("https://ics.local.test/feed.ics")
+        assert validation.resolved_ip == "10.0.0.5"
+
+    def test_knob_on_still_rejects_non_https(self) -> None:
+        """Knob ON does NOT loosen the scheme gate."""
+        validator = HttpxIcalValidator(
+            IcalValidatorConfig(
+                resolver=_fixed_resolver(["127.0.0.1"]),
+                fetcher=StubFetcher(responses=[]),
+                allow_private_addresses=True,
+            )
+        )
+        with pytest.raises(IcalValidationError) as exc_info:
+            validator.validate("http://ics.local.test/feed.ics")
+        assert exc_info.value.code == "ical_url_insecure_scheme"
+
+    def test_knob_on_still_pins_dns(self) -> None:
+        """Knob ON does NOT loosen the DNS-rebind one-call-per-hop pin.
+
+        If the validator re-resolved between resolve and fetch, the
+        sequence resolver would be drained twice; the second call
+        returns a public IP that nothing in this hop should ever see.
+        Asserting the single call is the direct observation that the
+        first answer is pinned even when the gate is open.
+        """
+        fetcher = StubFetcher(responses=[_ok(_ics_body())])
+        validator = HttpxIcalValidator(
+            IcalValidatorConfig(
+                resolver=_sequence_resolver([["127.0.0.1"], ["1.1.1.1"]]),
+                fetcher=fetcher,
+                allow_private_addresses=True,
+            )
+        )
+        validation = validator.validate("https://ics.local.test/feed.ics")
+        assert validation.resolved_ip == "127.0.0.1"
+        assert len(fetcher.calls) == 1
+
+    def test_knob_on_still_rejects_cross_origin_redirect(self) -> None:
+        """Knob ON does NOT loosen the same-origin redirect gate."""
+        validator = HttpxIcalValidator(
+            IcalValidatorConfig(
+                resolver=_fixed_resolver(["127.0.0.1"]),
+                fetcher=StubFetcher(
+                    responses=[_redirect("https://other.local.test/feed.ics")]
+                ),
+                allow_private_addresses=True,
+            )
+        )
+        with pytest.raises(IcalValidationError) as exc_info:
+            validator.validate("https://ics.local.test/feed.ics")
+        assert exc_info.value.code == "ical_url_cross_origin_redirect"
+
+
 class TestDnsRebindPin:
     """The validator pins the resolved IP so a second DNS call can't flip it."""
 

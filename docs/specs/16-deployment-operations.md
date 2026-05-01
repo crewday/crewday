@@ -684,6 +684,7 @@ provisioned per visitor, not per operator.
 | `CREWDAY_FEEDBACK_URL`      | -                              | Marketing-site bridge: redirect target for `GET /feedback-redirect`; must end in `/suggest`. Set together with the next two or none. See `docs/specs-site/03-app-integration.md`. |
 | `CREWDAY_FEEDBACK_SIGN_KEY` | -                              | 32-byte base64 HMAC key used to sign the magic-link token; matches the site's `SITE_FEEDBACK_SIGN_KEY`. See `docs/specs-site/03-app-integration.md`. |
 | `CREWDAY_FEEDBACK_HASH_SALT`| -                              | 32-byte base64 salt used to derive the opaque `user_hash` / `workspace_hash` the site keys writes off. App-only — never sent to the site. See `docs/specs-site/03-app-integration.md`. |
+| `CREWDAY_ICAL_ALLOW_PRIVATE_ADDRESSES` | `0`                 | **Dev / e2e ONLY — DO NOT enable in production.** Disables the §04 "SSRF guard" private-address rejection inside `IcalValidatorConfig` so a feed URL whose host resolves to loopback / RFC 1918 / link-local is accepted at registration. Sole supported caller is `mocks/docker-compose.e2e.yml`, which needs the GA journey 3 test (cd-zxvk) to register a feed against an in-cluster ICS server. Every other validator gate (scheme, DNS-rebind pin, redirects, body cap, timeout) still applies. cd-xr652. |
 
 
 Signup behaviour, throttles, and disposable-domain paths are

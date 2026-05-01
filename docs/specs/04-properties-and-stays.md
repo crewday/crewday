@@ -418,6 +418,20 @@ field is an **operator-supplied URL** subject to SSRF rules
   `error = "ical_url_oversize"` or `"ical_url_timeout"` and
   back off the feed.
 
+**Dev / e2e carve-out (cd-xr652).** The host-resolution gate
+recognises a single deployment knob,
+`CREWDAY_ICAL_ALLOW_PRIVATE_ADDRESSES` (default `0`). When `1`,
+the private-address rejection is bypassed so the e2e compose
+stack (`mocks/docker-compose.e2e.yml`) can register a feed
+pointing at an in-cluster ICS server for the GA journey 3
+Playwright test (cd-zxvk). **The flag is dev / e2e ONLY — every
+production deployment must keep it unset / `0`.** Every other
+gate (scheme, DNS-rebind pin, same-origin redirects, body cap,
+timeout, certificate validation) still applies when the
+private-address gate is open; only that one filter is loosened.
+See `docs/specs/16-deployment-operations.md` "Environment
+variables".
+
 ### Supported providers
 
 - **Airbnb** export feeds (`*.ics` per listing).

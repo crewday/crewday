@@ -306,6 +306,7 @@ def fetch_ical_body(
     resolver: Resolver | None = None,
     max_body_bytes: int = DEFAULT_PROBE_BODY_BYTES,
     user_agent: str = "crewday-ical-poller/1.0",
+    allow_private_addresses: bool = False,
 ) -> _PolledBody:
     """Fetch ``url`` through the SSRF-pinned HTTPS path.
 
@@ -321,6 +322,17 @@ def fetch_ical_body(
     The optional ``resolver`` parameter overrides the validator's
     default :func:`socket.getaddrinfo`-backed resolver — production
     leaves it ``None`` and tests inject a deterministic stub.
+
+    ``allow_private_addresses`` is the §04 SSRF carve-out (cd-xr652).
+    Default ``False`` — loopback / RFC 1918 / link-local are rejected
+    with ``ical_url_private_address``, matching the registration-time
+    validator. The fan-out body in
+    :func:`app.worker.jobs.stays._make_poll_ical_fanout_body` reads
+    :attr:`app.config.Settings.ical_allow_private_addresses` and
+    forwards it here so the e2e compose override
+    (``CREWDAY_ICAL_ALLOW_PRIVATE_ADDRESSES=1``) lets the worker poll
+    the same in-cluster ICS server that registration accepted.
+    Production must keep it ``False``.
 
     Rate-limit short-circuit: a 429 response returns a
     :class:`_PolledBody` with ``status=429`` and any ``Retry-After``
@@ -359,7 +371,12 @@ def fetch_ical_body(
         resolved_resolver: Resolver = _system_resolver
     else:
         resolved_resolver = resolver
-    resolved_ip = resolve_public_address(host, port, resolver=resolved_resolver)
+    resolved_ip = resolve_public_address(
+        host,
+        port,
+        resolver=resolved_resolver,
+        allow_private_addresses=allow_private_addresses,
+    )
 
     resolved_fetcher = fetcher if fetcher is not None else StdlibHttpsFetcher()
     response = _fetch_conditional(
@@ -645,6 +662,7 @@ def poll_ical(
     rate_limit_seconds: float = DEFAULT_PER_HOST_RATE_LIMIT_SECONDS,
     poll_timeout_seconds: float = DEFAULT_POLL_FETCH_TIMEOUT_SECONDS,
     max_body_bytes: int = DEFAULT_PROBE_BODY_BYTES,
+    allow_private_addresses: bool = False,
 ) -> PollReport:
     """Run one poll tick for the caller's workspace.
 
@@ -657,6 +675,13 @@ def poll_ical(
     also omitted). ``envelope`` is the
     :class:`~app.adapters.storage.ports.EnvelopeEncryptor` the
     decrypts each feed's stored URL.
+
+    ``allow_private_addresses`` is the §04 SSRF carve-out (cd-xr652);
+    the fan-out body reads
+    :attr:`app.config.Settings.ical_allow_private_addresses` and
+    forwards it here so the worker honours the same gate as
+    registration. Default ``False`` — loopback / RFC 1918 /
+    link-local feed URLs are rejected at fetch time.
 
     Does **not** commit the session; the caller's Unit-of-Work owns
     the transaction boundary (§01 "Key runtime invariants" #3).
@@ -766,6 +791,7 @@ def poll_ical(
             resolved_now=resolved_now,
             poll_timeout_seconds=poll_timeout_seconds,
             max_body_bytes=max_body_bytes,
+            allow_private_addresses=allow_private_addresses,
         )
         per_feed_results.append(outcome)
         if outcome.status == PollOutcome.POLLED:
@@ -836,6 +862,7 @@ def _poll_one_feed(
     resolved_now: datetime,
     poll_timeout_seconds: float,
     max_body_bytes: int,
+    allow_private_addresses: bool,
 ) -> PolledFeedResult:
     """Fetch + parse + upsert one feed.
 
@@ -852,6 +879,7 @@ def _poll_one_feed(
             fetcher=fetcher,
             resolver=resolver,
             max_body_bytes=max_body_bytes,
+            allow_private_addresses=allow_private_addresses,
         )
     except IcalValidationError as exc:
         _record_feed_error(

@@ -66,6 +66,7 @@ class TestDefaults:
         assert s.demo_db_denylist == []
         assert s.worker == "internal"
         assert s.storage_backend == "localfs"
+        assert s.ical_allow_private_addresses is False
 
 
 class TestEnvOverride:
@@ -102,6 +103,27 @@ class TestEnvOverride:
         monkeypatch.setenv("CREWDAY_STORAGE_BACKEND", "gcs")
         with pytest.raises(ValidationError):
             Settings()
+
+
+class TestIcalAllowPrivateAddresses:
+    """``CREWDAY_ICAL_ALLOW_PRIVATE_ADDRESSES`` env knob (cd-xr652).
+
+    The default must stay ``False`` everywhere — the §04 SSRF guard
+    private-address rejection is what keeps a malicious feed URL from
+    probing the operator's internal network. Only the e2e compose
+    override (``mocks/docker-compose.e2e.yml``) flips it on.
+    """
+
+    def test_default_is_false(self, monkeypatch: MonkeyPatch) -> None:
+        monkeypatch.setenv("CREWDAY_DATABASE_URL", "sqlite:///:memory:")
+        s = Settings()
+        assert s.ical_allow_private_addresses is False
+
+    def test_env_override_flips_on(self, monkeypatch: MonkeyPatch) -> None:
+        monkeypatch.setenv("CREWDAY_DATABASE_URL", "sqlite:///:memory:")
+        monkeypatch.setenv("CREWDAY_ICAL_ALLOW_PRIVATE_ADDRESSES", "1")
+        s = Settings()
+        assert s.ical_allow_private_addresses is True
 
 
 class TestRateLimitConfig:

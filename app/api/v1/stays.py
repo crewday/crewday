@@ -34,7 +34,7 @@ from app.adapters.db.tasks.repositories import SqlAlchemyTasksCreateOccurrencePo
 from app.adapters.db.workspace.models import Workspace
 from app.adapters.ical.ports import IcalProvider
 from app.adapters.ical.providers import HostProviderDetector
-from app.adapters.ical.validator import HttpxIcalValidator
+from app.adapters.ical.validator import HttpxIcalValidator, IcalValidatorConfig
 from app.adapters.storage.envelope import Aes256GcmEnvelope
 from app.adapters.storage.ports import EnvelopeEncryptor
 from app.api.deps import current_workspace_context, db_session
@@ -112,8 +112,19 @@ _ID = Annotated[str, Path(min_length=1, max_length=64)]
 # ---------------------------------------------------------------------------
 
 
-def get_ical_validator() -> HttpxIcalValidator:
-    return HttpxIcalValidator()
+def get_ical_validator(
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> HttpxIcalValidator:
+    # The ``allow_private_addresses`` flag is the §04 "SSRF guard"
+    # private-address gate; defaults to ``False`` and only flips on
+    # under the dev/e2e compose override
+    # (``CREWDAY_ICAL_ALLOW_PRIVATE_ADDRESSES=1``). Production must
+    # keep it off so loopback / RFC 1918 feed URLs are rejected.
+    return HttpxIcalValidator(
+        IcalValidatorConfig(
+            allow_private_addresses=settings.ical_allow_private_addresses,
+        )
+    )
 
 
 def get_provider_detector() -> HostProviderDetector:

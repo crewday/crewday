@@ -46,6 +46,7 @@ behavior".
 
 from __future__ import annotations
 
+import time
 from collections.abc import Iterator
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
@@ -61,6 +62,7 @@ from app.adapters.db.places.models import Property, PropertyClosure, Unit
 from app.adapters.db.session import make_engine
 from app.adapters.db.stays.models import IcalFeed, Reservation
 from app.adapters.db.workspace.models import Workspace
+from app.adapters.ical.ports import IcalValidationError
 from app.adapters.ical.validator import Fetcher, FetchResponse
 from app.events.bus import EventBus
 from app.events.types import (
@@ -75,6 +77,7 @@ from app.worker.tasks.poll_ical import (
     DEFAULT_PER_HOST_RATE_LIMIT_SECONDS,
     PollOutcome,
     PollReport,
+    fetch_ical_body,
     poll_ical,
 )
 from tests._fakes.envelope import FakeEnvelope
@@ -1686,3 +1689,195 @@ class TestTickAudit:
         assert len(rows) == 1
         assert rows[0].entity_kind == "workspace"
         assert rows[0].entity_id == ws
+
+
+# ---------------------------------------------------------------------------
+# allow_private_addresses gate (cd-xr652)
+# ---------------------------------------------------------------------------
+
+
+class TestFetchIcalBodyAllowPrivateAddresses:
+    """``fetch_ical_body``'s ``allow_private_addresses`` gate (cd-xr652).
+
+    The validator side of the §04 SSRF carve-out flows through the
+    registration handler; the worker side flows here. Without this
+    flag threaded into :func:`fetch_ical_body`, a feed that registers
+    successfully against a loopback ICS server (because the e2e
+    compose stack flips ``CREWDAY_ICAL_ALLOW_PRIVATE_ADDRESSES=1``)
+    would still be rejected on the very next poll tick with
+    ``ical_url_private_address``, blocking GA journey 3 (cd-zxvk).
+
+    Default ``False`` — loopback / RFC 1918 / link-local raise
+    ``ical_url_private_address``. Flipping the gate to ``True`` lets
+    those resolutions through; every other guard (scheme, body cap,
+    DNS rebind pin) still applies.
+    """
+
+    def test_default_rejects_loopback(self) -> None:
+        """Knob OFF (default): loopback resolution still rejected."""
+        body = _vcalendar(
+            _vevent_booked(
+                uid="probe",
+                starts=datetime(2026, 5, 1, 14, 0, tzinfo=UTC),
+                ends=datetime(2026, 5, 4, 11, 0, tzinfo=UTC),
+            )
+        )
+        fetcher = _ScriptedFetcher(responses={_FEED_URL: [_ok(body)]})
+        with pytest.raises(IcalValidationError) as exc_info:
+            fetch_ical_body(
+                _FEED_URL,
+                last_etag=None,
+                deadline=time.monotonic() + 5.0,
+                fetcher=fetcher,
+                resolver=_fixed_resolver(["127.0.0.1"]),  # type: ignore[arg-type]
+            )
+        assert exc_info.value.code == "ical_url_private_address"
+        # The fetcher must NOT have been called — the SSRF gate trips
+        # before we open a TCP connection.
+        assert fetcher.calls == []
+
+    def test_knob_on_accepts_loopback(self) -> None:
+        """Knob ON: loopback resolution passes; the fetcher runs."""
+        body = _vcalendar(
+            _vevent_booked(
+                uid="probe",
+                starts=datetime(2026, 5, 1, 14, 0, tzinfo=UTC),
+                ends=datetime(2026, 5, 4, 11, 0, tzinfo=UTC),
+            )
+        )
+        fetcher = _ScriptedFetcher(responses={_FEED_URL: [_ok(body)]})
+        polled = fetch_ical_body(
+            _FEED_URL,
+            last_etag=None,
+            deadline=time.monotonic() + 5.0,
+            fetcher=fetcher,
+            resolver=_fixed_resolver(["127.0.0.1"]),  # type: ignore[arg-type]
+            allow_private_addresses=True,
+        )
+        assert polled.status == 200
+        assert polled.body == body
+        # Fetcher saw exactly the loopback IP we resolved to — proves
+        # the gate let the address through to the pinned-IP TCP path.
+        assert fetcher.calls == [(_FEED_URL, "127.0.0.1")]
+
+    def test_knob_on_accepts_rfc1918(self) -> None:
+        """Knob ON also covers the RFC 1918 ranges, not just loopback."""
+        body = _vcalendar(
+            _vevent_booked(
+                uid="probe",
+                starts=datetime(2026, 5, 1, 14, 0, tzinfo=UTC),
+                ends=datetime(2026, 5, 4, 11, 0, tzinfo=UTC),
+            )
+        )
+        fetcher = _ScriptedFetcher(responses={_FEED_URL: [_ok(body)]})
+        polled = fetch_ical_body(
+            _FEED_URL,
+            last_etag=None,
+            deadline=time.monotonic() + 5.0,
+            fetcher=fetcher,
+            resolver=_fixed_resolver(["10.0.0.5"]),  # type: ignore[arg-type]
+            allow_private_addresses=True,
+        )
+        assert polled.status == 200
+        assert fetcher.calls == [(_FEED_URL, "10.0.0.5")]
+
+    def test_knob_on_still_rejects_non_https(self) -> None:
+        """Knob ON does NOT loosen the scheme gate."""
+        fetcher = _ScriptedFetcher(responses={})
+        with pytest.raises(IcalValidationError) as exc_info:
+            fetch_ical_body(
+                "http://calendar.example.com/feed.ics",
+                last_etag=None,
+                deadline=time.monotonic() + 5.0,
+                fetcher=fetcher,
+                resolver=_fixed_resolver(["127.0.0.1"]),  # type: ignore[arg-type]
+                allow_private_addresses=True,
+            )
+        assert exc_info.value.code == "ical_url_insecure_scheme"
+        assert fetcher.calls == []
+
+
+class TestPollIcalAllowPrivateAddresses:
+    """End-to-end thread-through: ``poll_ical`` → ``fetch_ical_body``.
+
+    Confirms the workspace-level ``poll_ical`` driver forwards the
+    gate to the per-feed fetch path. Without this thread-through, the
+    fan-out body in ``app/worker/jobs/stays.py`` would read the
+    ``Settings.ical_allow_private_addresses`` knob but the value
+    would never reach :func:`fetch_ical_body`.
+    """
+
+    def test_default_records_private_address_error(
+        self,
+        session: Session,
+        bus: EventBus,
+        clock: FrozenClock,
+        envelope: FakeEnvelope,
+    ) -> None:
+        """Knob OFF (default): a loopback feed lands as ``last_error``."""
+        ws = _bootstrap_workspace(session)
+        prop = _bootstrap_property(session)
+        feed_id = _bootstrap_feed(
+            session, workspace_id=ws, property_id=prop, envelope=envelope
+        )
+        body = _vcalendar(
+            _vevent_booked(
+                uid="loopback",
+                starts=datetime(2026, 5, 1, 14, 0, tzinfo=UTC),
+                ends=datetime(2026, 5, 4, 11, 0, tzinfo=UTC),
+            )
+        )
+        fetcher = _ScriptedFetcher(responses={_FEED_URL: [_ok(body)]})
+
+        report = poll_ical(
+            _ctx(ws),
+            session=session,
+            envelope=envelope,
+            clock=clock,
+            event_bus=bus,
+            fetcher=fetcher,
+            resolver=_fixed_resolver(["127.0.0.1"]),  # type: ignore[arg-type]
+        )
+        assert report.feeds_errored == 1
+        feed = session.get(IcalFeed, feed_id)
+        assert feed is not None
+        assert feed.last_error == "ical_url_private_address"
+        # No HTTPS GET was issued — the SSRF gate tripped first.
+        assert fetcher.calls == []
+
+    def test_knob_on_polls_loopback_feed(
+        self,
+        session: Session,
+        bus: EventBus,
+        clock: FrozenClock,
+        envelope: FakeEnvelope,
+    ) -> None:
+        """Knob ON: a loopback feed polls cleanly + creates reservations."""
+        ws = _bootstrap_workspace(session)
+        prop = _bootstrap_property(session)
+        _bootstrap_feed(session, workspace_id=ws, property_id=prop, envelope=envelope)
+        body = _vcalendar(
+            _vevent_booked(
+                uid="loopback",
+                starts=datetime(2026, 5, 1, 14, 0, tzinfo=UTC),
+                ends=datetime(2026, 5, 4, 11, 0, tzinfo=UTC),
+            )
+        )
+        fetcher = _ScriptedFetcher(responses={_FEED_URL: [_ok(body)]})
+
+        report = poll_ical(
+            _ctx(ws),
+            session=session,
+            envelope=envelope,
+            clock=clock,
+            event_bus=bus,
+            fetcher=fetcher,
+            resolver=_fixed_resolver(["127.0.0.1"]),  # type: ignore[arg-type]
+            allow_private_addresses=True,
+        )
+        assert report.feeds_polled == 1
+        assert report.feeds_errored == 0
+        assert report.reservations_created == 1
+        # Fetcher saw the loopback IP — proves the gate flowed through
+        # the whole poll_ical → _poll_one_feed → fetch_ical_body chain.
+        assert fetcher.calls == [(_FEED_URL, "127.0.0.1")]

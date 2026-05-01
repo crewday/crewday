@@ -223,6 +223,21 @@ class Settings(BaseSettings):
         default_factory=list,
     )
 
+    # --- iCal SSRF guard (cd-xr652) ---
+    # **Dev / e2e ONLY — never enable in production.** Disables the
+    # §04 "SSRF guard" private-address rejection inside
+    # :class:`app.adapters.ical.validator.IcalValidatorConfig`, so a
+    # feed URL whose host resolves to loopback / RFC 1918 / link-local
+    # passes registration. The sole supported caller is
+    # ``mocks/docker-compose.e2e.yml`` — Playwright's GA journey 3
+    # (cd-zxvk) needs to point a feed at an in-cluster ICS server. No
+    # other validator gate (scheme, DNS-rebind pin, redirects, size,
+    # timeout) is loosened by this knob; only the public-IP filter.
+    # Default ``False`` everywhere else; the production app refuses
+    # any private-IP feed URL on registration regardless of how the
+    # operator's compose file is shaped.
+    ical_allow_private_addresses: bool = False
+
     # --- Tenancy (cd-iwsv, cd-9il) ---
     # Gates the Phase-0 ``X-Test-Workspace-Id`` header path inside
     # :mod:`app.tenancy.middleware`. Default **off** in every

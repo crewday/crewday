@@ -159,6 +159,9 @@ def _make_poll_ical_fanout_body(clock: Clock) -> Callable[[], None]:
                                 envelope=envelope,
                                 now=now,
                                 clock=clock,
+                                allow_private_addresses=(
+                                    settings.ical_allow_private_addresses
+                                ),
                             )
                     except Exception as exc:
                         total_workspaces_failed += 1

@@ -14,3 +14,11 @@ services:
       CREWDAY_RATE_LIMIT_ANONYMOUS_PER_MINUTE: "10000"
       CREWDAY_RATE_LIMIT_TOKEN_PER_MINUTE: "10000"
       CREWDAY_RATE_LIMIT_PERSONAL_ME_PER_MINUTE: "10000"
+      # DEV / E2E ONLY — DO NOT enable in production (cd-xr652).
+      # Disables the §04 iCal SSRF "private address" rejection so the
+      # GA journey 3 test (cd-zxvk) can register a feed pointing at an
+      # in-cluster ICS server. Every other validator gate (scheme,
+      # DNS-rebind pin, same-origin redirects, body cap, timeout)
+      # still applies. The default ``mocks/docker-compose.yml`` does
+      # NOT set this knob — it only flips on for the e2e override.
+      CREWDAY_ICAL_ALLOW_PRIVATE_ADDRESSES: "1"

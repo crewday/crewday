@@ -179,18 +179,38 @@ def is_public_ip(ip_str: str) -> bool:
     return not (isinstance(addr, ipaddress.IPv4Address) and addr in _CGNAT_V4)
 
 
-def resolve_public_address(host: str, port: int, *, resolver: Resolver) -> str:
+def resolve_public_address(
+    host: str,
+    port: int,
+    *,
+    resolver: Resolver,
+    allow_private_addresses: bool = False,
+) -> str:
     """Resolve ``host`` and return the first public IP, or raise.
 
     Rejects the whole lookup if ANY returned address is non-public —
     a mixed result set is the classic DNS-rebinding signal (a later
     re-resolve could easily flip to the private leg).
+
+    The ``allow_private_addresses`` carve-out (cd-xr652) is the §04
+    "SSRF guard" dev / e2e escape hatch wired to
+    :class:`app.config.Settings.ical_allow_private_addresses`. When
+    ``True`` the public-IP filter is skipped so loopback / RFC 1918 /
+    link-local resolutions pass; every other gate (scheme, body cap,
+    redirects, certificate validation) is enforced upstream by the
+    fetch layer. **Production must keep it ``False``** — flipping it
+    on lets a malicious feed URL probe the operator's internal
+    network. The validator's :meth:`HttpxIcalValidator._resolve` and
+    the worker's :func:`app.worker.tasks.poll_ical.fetch_ical_body`
+    both delegate here so the gate has a single source of truth.
     """
     addresses = list(resolver(host, port))
     if not addresses:
         raise IcalValidationError(
             _CODE_UNREACHABLE, f"DNS returned no addresses for {host!r}"
         )
+    if allow_private_addresses:
+        return addresses[0]
     for ip in addresses:
         if not is_public_ip(ip):
             raise IcalValidationError(
@@ -446,9 +466,17 @@ class IcalValidatorConfig:
     # 127.0.0.1" to exercise the DNS-rebind guard).
     resolver: Resolver = field(default=_system_resolver)
     fetcher: Fetcher = field(default_factory=StdlibHttpsFetcher)
-    # Test-only escape hatch: allow localhost / private targets.
-    # Production default is ``False``; integration tests flip it to
-    # ``True`` while pointing at a fake iCal server bound to 127.0.0.1.
+    # Dev / e2e escape hatch: allow loopback / RFC 1918 / link-local
+    # targets. **Production default is ``False``** and must stay that
+    # way — the §04 "SSRF guard" private-address rejection is what
+    # keeps a malicious feed URL from probing the operator's internal
+    # network. Flipped to ``True`` only by the e2e compose override
+    # (``CREWDAY_ICAL_ALLOW_PRIVATE_ADDRESSES=1`` in
+    # ``mocks/docker-compose.e2e.yml``) so Playwright's GA journey 3
+    # can point a feed at an in-cluster ICS server. Every other
+    # validator check (scheme, DNS-rebind pin, redirects, body cap,
+    # timeout) still applies when the gate is open. See cd-xr652 and
+    # ``app.config.Settings.ical_allow_private_addresses``.
     allow_private_addresses: bool = False
 
 
@@ -552,23 +580,20 @@ class HttpxIcalValidator:
         )
 
     def _resolve(self, parsed: SplitResult) -> str:
-        """Return a pinned IP for ``parsed`` or raise."""
+        """Return a pinned IP for ``parsed`` or raise.
+
+        Thin wrapper over :func:`resolve_public_address` so the gate
+        + DNS-rebind rules stay single-sourced between the validator
+        path (registration) and the worker path (poll).
+        """
         port = parsed.port if parsed.port is not None else _DEFAULT_PORT_HTTPS
         host = parsed.hostname or ""
-        addresses = list(self._config.resolver(host, port))
-        if not addresses:
-            raise IcalValidationError(
-                _CODE_UNREACHABLE, f"DNS returned no addresses for {host!r}"
-            )
-        if self._config.allow_private_addresses:
-            return addresses[0]
-        for ip in addresses:
-            if not is_public_ip(ip):
-                raise IcalValidationError(
-                    _CODE_PRIVATE_ADDRESS,
-                    f"host {host!r} resolved to non-public address {ip!r}",
-                )
-        return addresses[0]
+        return resolve_public_address(
+            host,
+            port,
+            resolver=self._config.resolver,
+            allow_private_addresses=self._config.allow_private_addresses,
+        )
 
 
 # -----------------------------------------------------------------------------
