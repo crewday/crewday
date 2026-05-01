@@ -13,8 +13,8 @@ from app.adapters.db.audit.models import AuditLog
 from app.adapters.db.identity.models import Invite, MagicLinkNonce, PasskeyCredential
 from app.adapters.db.workspace.models import UserWorkspace
 from app.admin.init import invite_user, workspace_bootstrap
-from app.auth import magic_link
 from app.auth._throttle import Throttle
+from app.auth.magic_link_port import MagicLinkAdapter
 from app.config import Settings
 from app.domain.identity import membership
 from app.tenancy import tenant_agnostic
@@ -135,15 +135,17 @@ def test_user_invite_printed_link_consumes_once_and_activates_membership(
         ip="127.0.0.1",
         throttle=throttle,
         settings=settings,
+        link_port=MagicLinkAdapter(db_session),
     )
     assert isinstance(acceptance, membership.NewUserAcceptance)
-    with pytest.raises(magic_link.AlreadyConsumed):
+    with pytest.raises(membership.AlreadyConsumed):
         membership.consume_invite_token(
             db_session,
             token=token,
             ip="127.0.0.1",
             throttle=throttle,
             settings=settings,
+            link_port=MagicLinkAdapter(db_session),
         )
 
     _seed_passkey(db_session, user_id=acceptance.session.user_id)

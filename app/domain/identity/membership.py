@@ -121,14 +121,20 @@ from app.adapters.db.identity.models import (
 from app.adapters.db.workspace.models import UserWorkspace, WorkEngagement, Workspace
 from app.adapters.mail.ports import MailDeliveryError, Mailer
 from app.audit import write_audit
-from app.auth import magic_link
 from app.auth import passkey as passkey_service
 from app.auth._hashing import hash_with_pepper
 from app.auth._throttle import Throttle
 from app.auth.keys import derive_subkey
-from app.auth.magic_link import PendingDispatch
 from app.config import Settings, get_settings
 from app.domain.agent.preferences import default_approval_mode_for_workspace
+from app.domain.identity.email_change_ports import (
+    MagicLinkAlreadyConsumed,
+    MagicLinkDispatch,
+    MagicLinkInvalidToken,
+    MagicLinkPort,
+    MagicLinkPurposeMismatch,
+    MagicLinkTokenExpired,
+)
 from app.domain.identity.permission_groups import (
     LastOwnerMember,
     write_member_remove_rejected_audit,
@@ -142,7 +148,9 @@ from app.util.ulid import new_ulid
 
 __all__ = [
     "AcceptanceCard",
+    "AlreadyConsumed",
     "ExistingUserAcceptance",
+    "InvalidToken",
     "InviteAlreadyAccepted",
     "InviteBodyInvalid",
     "InviteExpired",
@@ -156,6 +164,8 @@ __all__ = [
     "NewUserAcceptance",
     "NotAMember",
     "PasskeySessionRequired",
+    "PurposeMismatch",
+    "TokenExpired",
     "WorkspaceMembership",
     "complete_invite",
     "confirm_invite",
@@ -169,6 +179,18 @@ __all__ = [
     "switch_session_workspace",
     "write_member_remove_rejected_audit",
 ]
+
+
+# Re-export the seam-level magic-link exceptions under the legacy
+# names this module's callers (the invite HTTP router) historically
+# caught from :mod:`app.auth.magic_link`. The :class:`MagicLinkPort`
+# concretion raises these instead of the auth-layer types so the
+# domain stays decoupled from :mod:`app.auth.magic_link` (cd-opmw).
+# Mirrors :mod:`app.domain.identity.email_change`'s re-export pattern.
+InvalidToken = MagicLinkInvalidToken
+PurposeMismatch = MagicLinkPurposeMismatch
+TokenExpired = MagicLinkTokenExpired
+AlreadyConsumed = MagicLinkAlreadyConsumed
 
 
 _log = logging.getLogger(__name__)
@@ -609,10 +631,11 @@ def invite(
     base_url: str,
     inviter_display_name: str,
     workspace_name: str,
+    link_port: MagicLinkPort,
     now: datetime | None = None,
     settings: Settings | None = None,
     clock: Clock | None = None,
-    dispatch: PendingDispatch | None = None,
+    dispatch: MagicLinkDispatch | None = None,
 ) -> InviteOutcome:
     """Insert (or refresh) a pending :class:`Invite` and mail the magic link.
 
@@ -647,12 +670,14 @@ def invite(
     invite-flavoured template is queued onto it for post-commit
     delivery, mirroring the cd-9i7z pattern: the calling HTTP router
     runs this function inside ``with make_uow() as session:`` and
-    invokes :meth:`PendingDispatch.deliver` only after the ``with``
+    invokes :meth:`MagicLinkDispatch.deliver` only after the ``with``
     exits, so a commit failure short-circuits the SMTP send. When
     ``dispatch`` is ``None`` the function falls back to the legacy
     synchronous send for tests / direct callers that own the commit
     boundary themselves; production wiring always supplies a
-    :class:`PendingDispatch`.
+    :class:`MagicLinkDispatch` (the SA-backed
+    :class:`app.auth.magic_link.PendingDispatch` satisfies the
+    Protocol structurally).
     """
     resolved_now = now if now is not None else _now(clock)
     email_lower = canonicalise_email(email)
@@ -736,8 +761,7 @@ def invite(
     # the generic magic-link mailer and hands us the signed URL so
     # :func:`_send_invite_email` can ship it with the invite-flavoured
     # template (workspace + inviter in the subject, TTL in hours).
-    invite_link = magic_link.request_link(
-        session,
+    invite_link = link_port.request_link(
         email=email_lower,
         purpose="grant_invite",
         # ``ip`` is a forensic hint; the invite HTTP handler forwards
@@ -761,7 +785,7 @@ def invite(
         # indicate a bug in the magic-link service rather than a
         # legitimate enumeration-guard short-circuit.
         raise RuntimeError(
-            f"magic_link.request_link returned None for invite {invite_id!r}"
+            f"link_port.request_link returned None for invite {invite_id!r}"
         )
     # ``send_email=False`` so ``deliver()`` is a no-op; we send the
     # invite-flavoured template ourselves below. Calling it anyway
@@ -906,6 +930,7 @@ def introspect_invite(
     token: str,
     ip: str,
     throttle: Throttle,
+    link_port: MagicLinkPort,
     settings: Settings | None = None,
     active_user_id: str | None = None,
     now: datetime | None = None,
@@ -914,10 +939,10 @@ def introspect_invite(
     """Read-only preview of an invite — does NOT burn the magic-link nonce.
 
     Mirrors :func:`consume_invite_token`'s validation surface but
-    delegates to :func:`app.auth.magic_link.peek_link` so the
-    underlying nonce stays redeemable. Returns enough data for the
-    SPA's AcceptInvitePage to render an informed Accept card before
-    the user clicks Accept (inviter, workspace, grants, expiry).
+    delegates to :meth:`MagicLinkPort.peek_link` so the underlying
+    nonce stays redeemable. Returns enough data for the SPA's
+    AcceptInvitePage to render an informed Accept card before the
+    user clicks Accept (inviter, workspace, grants, expiry).
 
     Branch decision (``kind``) matches
     :func:`consume_invite_token`: a user with at least one
@@ -938,15 +963,14 @@ def introspect_invite(
 
     Raises:
 
-    * :class:`~app.auth.magic_link.InvalidToken` — signature failed
-      / payload malformed.
-    * :class:`~app.auth.magic_link.PurposeMismatch` — token purpose
-      != ``"grant_invite"``.
-    * :class:`~app.auth.magic_link.TokenExpired` — token / row
-      lapsed.
-    * :class:`~app.auth.magic_link.AlreadyConsumed` — the underlying
-      nonce was already redeemed (the user already clicked Accept).
-    * :class:`~app.auth.magic_link.ConsumeLockout` — IP locked out.
+    * :class:`MagicLinkInvalidToken` — signature failed / payload
+      malformed.
+    * :class:`MagicLinkPurposeMismatch` — token purpose !=
+      ``"grant_invite"``.
+    * :class:`MagicLinkTokenExpired` — token / row lapsed.
+    * :class:`MagicLinkAlreadyConsumed` — the underlying nonce was
+      already redeemed (the user already clicked Accept).
+    * :class:`~app.auth._throttle.ConsumeLockout` — IP locked out.
     * :class:`InviteNotFound` — token's subject doesn't match any
       invite row.
     * :class:`InviteStateInvalid` — invite is revoked / corrupted.
@@ -970,8 +994,7 @@ def introspect_invite(
 
     resolved_now = now if now is not None else _now(clock)
 
-    outcome = magic_link.peek_link(
-        session,
+    outcome = link_port.peek_link(
         token=token,
         expected_purpose="grant_invite",
         ip=ip,
@@ -1050,6 +1073,7 @@ def consume_invite_token(
     token: str,
     ip: str,
     throttle: Throttle,
+    link_port: MagicLinkPort,
     now: datetime | None = None,
     settings: Settings | None = None,
     clock: Clock | None = None,
@@ -1082,20 +1106,19 @@ def consume_invite_token(
     * :class:`InviteStateInvalid` — the row has already been
       accepted or revoked.
     * :class:`InviteExpired` — the row's ``expires_at`` has passed
-      (or the magic-link token expired, which maps through the
-      magic-link service's own :class:`~app.auth.magic_link.TokenExpired`).
+      (or the magic-link token expired, which surfaces as the seam-
+      level :class:`MagicLinkTokenExpired`).
     * :class:`PasskeySessionRequired` — the invited email resolves
       to an existing user but no active session is present.
-    * Re-raises from :mod:`app.auth.magic_link`:
-      :class:`~app.auth.magic_link.InvalidToken`,
-      :class:`~app.auth.magic_link.PurposeMismatch`,
-      :class:`~app.auth.magic_link.AlreadyConsumed`,
-      :class:`~app.auth.magic_link.TokenExpired`.
+    * Re-raises from the :class:`MagicLinkPort` seam:
+      :class:`MagicLinkInvalidToken`,
+      :class:`MagicLinkPurposeMismatch`,
+      :class:`MagicLinkAlreadyConsumed`,
+      :class:`MagicLinkTokenExpired`.
     """
     resolved_now = now if now is not None else _now(clock)
 
-    outcome = magic_link.consume_link(
-        session,
+    outcome = link_port.consume_link(
         token=token,
         expected_purpose="grant_invite",
         ip=ip,

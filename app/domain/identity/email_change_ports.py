@@ -1,7 +1,8 @@
-"""Identity context — repository + magic-link seams for email_change (cd-24im).
+"""Identity context — repository + magic-link seams shared by domain consumers.
 
-Defines the seams :mod:`app.domain.identity.email_change` uses to read
-and write the self-service email-change rows
+Defines the seams :mod:`app.domain.identity.email_change` (cd-24im) and
+:mod:`app.domain.identity.membership` (cd-opmw) use to read and write
+the self-service email-change rows
 (:class:`~app.adapters.db.identity.models.User`,
 :class:`~app.adapters.db.identity.models.PasskeyCredential`,
 :class:`~app.adapters.db.identity.models.EmailChangePending`,
@@ -9,6 +10,25 @@ and write the self-service email-change rows
 delegate magic-link mint / consume / peek to :mod:`app.auth.magic_link`
 — without importing SQLAlchemy model classes or :mod:`app.auth.magic_link`
 directly.
+
+The :class:`MagicLinkPort` seam is shared by two domain consumers
+today: the self-service email-change flow (cd-24im) and the membership
+invite flow (cd-opmw). The Literal pin (:data:`MagicLinkPurpose`)
+covers every purpose that has migrated off the direct
+``app.auth.magic_link`` import — adding a new purpose is a one-line
+widening here, not a fresh seam.
+
+File-name caveat: this module is still called ``email_change_ports``
+for historical reasons (it predates the ``MagicLinkPort`` extension).
+The shared port lives here so the membership invite flow does not
+have to declare a parallel seam for an identical contract; the
+intended cleanup is cd-vc3r, which splits invite lifecycle out of
+``membership.py`` and can promote the port to a context-neutral
+``identity_ports`` (or sibling) location at the same time. Until
+then, do not rename this file — every domain consumer imports
+``MagicLinkPort`` from here and the existing back-compat alias
+(:data:`EmailChangeMagicLinkPurpose`) keeps cd-24im call sites
+unchanged.
 
 Spec: ``docs/specs/01-architecture.md`` §"Boundary rules" rule 4 —
 each context defines its own repository port in its public surface
@@ -29,10 +49,13 @@ Two seams live here:
   projections so the domain never sees an ORM row.
 
 * :class:`MagicLinkPort` — narrow seam over :mod:`app.auth.magic_link`
-  exposing only the four operations email-change calls
+  exposing only the four operations its domain consumers call
   (``request_link``, ``peek_link``, ``consume_link``,
-  ``inspect_token_jti``). Translates magic-link-layer exceptions into
-  domain-side equivalents (:class:`MagicLinkInvalidToken`,
+  ``inspect_token_jti``). Today consumed by both email_change
+  (``email_change_confirm`` / ``email_change_revert``) and the
+  membership invite flow (``grant_invite``). Translates magic-link-layer
+  exceptions into domain-side equivalents
+  (:class:`MagicLinkInvalidToken`,
   :class:`MagicLinkPurposeMismatch`, :class:`MagicLinkTokenExpired`,
   :class:`MagicLinkAlreadyConsumed`) and surfaces a
   :class:`MagicLinkHandle` value object that abstracts the
@@ -45,14 +68,15 @@ deferred sends onto the caller-owned outbox queue (today,
 class — same structural-typing contract as the rest of the seams.
 
 Rationale for option (a) of the cd-24im task brief: a ``MagicLinkPort``
-keeps email_change's import surface free of ``app.auth.magic_link``
+keeps each consumer's import surface free of ``app.auth.magic_link``
 entirely (and therefore of the transitive ``app.adapters.db.identity.models``
-walk that's the actual cd-7qxh reason for the ignore_imports). The
-underlying :mod:`app.auth.magic_link` module still reads identity ORM
-models directly — that stopgap is tracked at the auth-layer level (see
-the ``app.domain.identity.membership -> app.auth.magic_link`` ignore
-in pyproject.toml) — but it no longer leaks through email_change's
-import contract.
+walk that's the actual cd-7qxh reason for the ignore_imports). cd-opmw
+extended the same pattern to ``app.domain.identity.membership`` so the
+matching ignore could drop on that edge too. The underlying
+:mod:`app.auth.magic_link` module still reads identity ORM models
+directly — that stopgap is tracked at the auth-layer level (cd-jpa /
+cd-4zz) — but it no longer leaks through any domain consumer's import
+contract.
 
 Protocols are deliberately **not** ``runtime_checkable``: structural
 compatibility is checked statically by mypy. Runtime ``isinstance``
@@ -75,6 +99,7 @@ from app.config import Settings
 from app.util.clock import Clock
 
 __all__ = [
+    "EmailChangeMagicLinkPurpose",
     "EmailChangePendingRow",
     "EmailChangeRepository",
     "MagicLinkAlreadyConsumed",
@@ -83,6 +108,7 @@ __all__ = [
     "MagicLinkInvalidToken",
     "MagicLinkOutcome",
     "MagicLinkPort",
+    "MagicLinkPurpose",
     "MagicLinkPurposeMismatch",
     "MagicLinkTokenExpired",
     "UserIdentityRow",
@@ -257,25 +283,38 @@ class MagicLinkDispatch(Protocol):
 # ---------------------------------------------------------------------------
 
 
-# The set of magic-link purposes email_change mints / redeems. Mirrors
-# the ``MagicLinkPurpose`` Literal in :mod:`app.auth.magic_link`; the
-# seam pins the two values it actually uses so a typo at the call site
-# fails at type-check time without forcing the domain to import the
-# auth-layer alias.
-EmailChangeMagicLinkPurpose = Literal[
+# The set of magic-link purposes domain seam callers mint / redeem.
+# Mirrors the ``MagicLinkPurpose`` Literal in :mod:`app.auth.magic_link`;
+# the seam pins the values its consumers actually use so a typo at the
+# call site fails at type-check time without forcing the domain to
+# import the auth-layer alias. Today this covers email_change (cd-24im)
+# and the membership invite flow (cd-opmw); widening to a new purpose is
+# a one-line addition here plus a fresh router wiring.
+MagicLinkPurpose = Literal[
     "email_change_confirm",
     "email_change_revert",
+    "grant_invite",
 ]
 
 
-class MagicLinkPort(Protocol):
-    """Narrow seam over :mod:`app.auth.magic_link` for the email-change flow.
+# Legacy alias retained for backwards compatibility with cd-24im
+# call sites and tests that imported the original narrower name. New
+# call sites should use :data:`MagicLinkPurpose` directly.
+EmailChangeMagicLinkPurpose = MagicLinkPurpose
 
-    Exposes only the four operations email-change calls. Hides the
-    auth-layer's identity-ORM reads (cd-4zz stopgap) from
-    :mod:`app.domain.identity.email_change`'s import surface so the
-    cd-7qxh ``email_change -> app.auth.magic_link`` ignore_imports can
-    drop without refactoring magic_link itself.
+
+class MagicLinkPort(Protocol):
+    """Narrow seam over :mod:`app.auth.magic_link` for domain consumers.
+
+    Exposes only the four operations its consumers call. Today shared
+    by :mod:`app.domain.identity.email_change` (cd-24im, purposes
+    ``email_change_confirm`` / ``email_change_revert``) and
+    :mod:`app.domain.identity.membership` (cd-opmw, purpose
+    ``grant_invite``). Hides the auth-layer's identity-ORM reads
+    (cd-4zz stopgap) from the domain's import surface so the cd-7qxh
+    ``email_change -> app.auth.magic_link`` and
+    ``membership -> app.auth.magic_link`` ignore_imports can drop
+    without refactoring magic_link itself.
 
     The concretion in :mod:`app.auth.magic_link_port` delegates to
     :mod:`app.auth.magic_link` and translates the auth-layer exceptions
@@ -293,7 +332,7 @@ class MagicLinkPort(Protocol):
         self,
         *,
         email: str,
-        purpose: EmailChangeMagicLinkPurpose,
+        purpose: MagicLinkPurpose,
         ip: str,
         mailer: Mailer | None,
         base_url: str,
@@ -326,7 +365,7 @@ class MagicLinkPort(Protocol):
         self,
         *,
         token: str,
-        expected_purpose: EmailChangeMagicLinkPurpose,
+        expected_purpose: MagicLinkPurpose,
         ip: str,
         now: datetime,
         throttle: Throttle,
@@ -348,7 +387,7 @@ class MagicLinkPort(Protocol):
         self,
         *,
         token: str,
-        expected_purpose: EmailChangeMagicLinkPurpose,
+        expected_purpose: MagicLinkPurpose,
         ip: str,
         now: datetime,
         throttle: Throttle,

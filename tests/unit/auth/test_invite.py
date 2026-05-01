@@ -31,6 +31,7 @@ from app.adapters.db.session import make_engine
 from app.adapters.mail.ports import MailDeliveryError
 from app.auth._throttle import Throttle
 from app.auth.magic_link import PendingDispatch
+from app.auth.magic_link_port import MagicLinkAdapter
 from app.config import Settings
 from app.domain.identity import membership
 from app.tenancy import registry
@@ -214,6 +215,7 @@ class TestInviteMailDeliveryGuard:
             settings=settings,
             inviter_display_name="Owner",
             workspace_name=ctx.workspace_slug,
+            link_port=MagicLinkAdapter(session),
         )
         # The :class:`Invite` row committed so an operator can
         # re-issue the mail straight from this row.
@@ -278,6 +280,7 @@ class TestInviteOutboxOrdering:
             inviter_display_name="Owner",
             workspace_name=ctx.workspace_slug,
             dispatch=dispatch,
+            link_port=MagicLinkAdapter(session),
         )
         # Invite + magic-link nonce queued on the session.
         assert session.get(Invite, outcome.id) is not None
@@ -327,6 +330,7 @@ class TestInviteOutboxOrdering:
                 inviter_display_name="Owner",
                 workspace_name=ctx.workspace_slug,
                 dispatch=dispatch,
+                link_port=MagicLinkAdapter(session),
             )
             with pytest.raises(RuntimeError, match="simulated commit failure"):
                 session.commit()

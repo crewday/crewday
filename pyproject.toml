@@ -355,21 +355,13 @@ ignore_imports = [
     "app.domain.identity.membership -> app.adapters.db.authz.models",
     "app.domain.identity.membership -> app.adapters.db.identity.models",
     "app.domain.identity.membership -> app.adapters.db.workspace.models",
-    # The invite flow delegates token mint + consume to
-    # :mod:`app.auth.magic_link`, which itself reads identity ORM
-    # models directly (cd-4zz stopgap at the auth-layer level).
-    # Shielding the transitive edge keeps the "domain can't touch
-    # adapters" contract honest without forcing every auth domain
-    # call to route through a port.
-    "app.domain.identity.membership -> app.auth.magic_link",
-    # Same stopgap covers the bare-host invitee passkey enrolment seam
-    # added in cd-9q6bb: ``register_invite_passkey_{start,finish}``
-    # delegates verification + persistence to
-    # :mod:`app.auth.passkey` so the WebAuthn envelope stays in one
-    # place. The auth layer itself reads identity ORM models directly
-    # (cd-4zz). Drops with cd-duv6 / cd-kd26 when the passkey-finish
-    # callback folds completion in and the auth layer routes through
-    # a port.
+    # v1 stopgap (cd-9q6bb): the bare-host invitee passkey enrolment
+    # seam (``register_invite_passkey_{start,finish}``) delegates
+    # verification + persistence to :mod:`app.auth.passkey` so the
+    # WebAuthn envelope stays in one place. The auth layer itself
+    # reads identity ORM models directly (cd-4zz). Drops with
+    # cd-duv6 / cd-kd26 when the passkey-finish callback folds
+    # completion in and the auth layer routes through a port.
     "app.domain.identity.membership -> app.auth.passkey",
     # v1 stopgap (cd-ckr): the owners-membership check lives under
     # ``app.authz.owners`` so the tenancy middleware (cd-7y4) and

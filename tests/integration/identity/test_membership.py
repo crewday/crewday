@@ -38,6 +38,7 @@ from app.adapters.db.identity.models import (
 )
 from app.adapters.db.workspace.models import UserWorkspace
 from app.auth._throttle import Throttle
+from app.auth.magic_link_port import MagicLinkAdapter
 from app.domain.identity import membership
 from app.domain.identity.permission_groups import (
     add_member,
@@ -236,6 +237,7 @@ class TestInvite:
             settings=_TEST_SETTINGS,
             inviter_display_name="Owner",
             workspace_name=ctx.workspace_slug,
+            link_port=MagicLinkAdapter(session),
         )
 
         assert outcome.user_created is True
@@ -303,6 +305,7 @@ class TestInvite:
             settings=_TEST_SETTINGS,
             inviter_display_name="Owner",
             workspace_name=ctx.workspace_slug,
+            link_port=MagicLinkAdapter(session),
         )
         assert outcome.user_created is False
         assert outcome.user_id == existing.id
@@ -330,6 +333,7 @@ class TestInvite:
             settings=_TEST_SETTINGS,
             inviter_display_name="Owner",
             workspace_name=ctx.workspace_slug,
+            link_port=MagicLinkAdapter(session),
         )
         second = membership.invite(
             session,
@@ -349,6 +353,7 @@ class TestInvite:
             settings=_TEST_SETTINGS,
             inviter_display_name="Owner",
             workspace_name=ctx.workspace_slug,
+            link_port=MagicLinkAdapter(session),
         )
         assert first.id == second.id  # Same row, refreshed
         invite_row = session.get(Invite, second.id)
@@ -380,6 +385,7 @@ class TestInvite:
                 settings=_TEST_SETTINGS,
                 inviter_display_name="Owner",
                 workspace_name=ctx.workspace_slug,
+                link_port=MagicLinkAdapter(session),
             )
 
     def test_invite_rejects_cross_workspace_scope_id(
@@ -406,6 +412,7 @@ class TestInvite:
                 settings=_TEST_SETTINGS,
                 inviter_display_name="Owner",
                 workspace_name=ctx.workspace_slug,
+                link_port=MagicLinkAdapter(session),
             )
 
     def test_invite_rejects_bad_grant_role(
@@ -432,6 +439,7 @@ class TestInvite:
                 settings=_TEST_SETTINGS,
                 inviter_display_name="Owner",
                 workspace_name=ctx.workspace_slug,
+                link_port=MagicLinkAdapter(session),
             )
 
     def test_invite_audit_carries_email_hash_not_plaintext(
@@ -457,6 +465,7 @@ class TestInvite:
             settings=_TEST_SETTINGS,
             inviter_display_name="Owner",
             workspace_name=ctx.workspace_slug,
+            link_port=MagicLinkAdapter(session),
         )
         rows = _all_audit_for(session, entity_id=outcome.id)
         assert rows, "invite audit row missing"
@@ -496,6 +505,7 @@ class TestAcceptNewUser:
             settings=_TEST_SETTINGS,
             inviter_display_name="Owner",
             workspace_name=ctx.workspace_slug,
+            link_port=MagicLinkAdapter(session),
         )
         # Extract the signed token from the captured email body.
         body = mailer.sent[0].body_text
@@ -509,6 +519,7 @@ class TestAcceptNewUser:
             ip="127.0.0.1",
             throttle=throttle,
             settings=_TEST_SETTINGS,
+            link_port=MagicLinkAdapter(session),
         )
         assert isinstance(acceptance, membership.NewUserAcceptance)
         assert acceptance.session.invite_id == outcome.id
@@ -583,6 +594,7 @@ class TestAcceptNewUser:
             settings=_TEST_SETTINGS,
             inviter_display_name="Owner",
             workspace_name=ctx.workspace_slug,
+            link_port=MagicLinkAdapter(session),
         )
         assert outcome.user_id is not None
         _seed_passkey(session, user_id=outcome.user_id, clock=FrozenClock(_PINNED))
@@ -620,6 +632,7 @@ class TestAcceptNewUser:
             settings=_TEST_SETTINGS,
             inviter_display_name="Owner",
             workspace_name=ctx.workspace_slug,
+            link_port=MagicLinkAdapter(session),
         )
         # No passkey seeded — the guard must fire.
         with pytest.raises(membership.PasskeySessionRequired):
@@ -681,6 +694,7 @@ class TestAcceptExistingUser:
             settings=_TEST_SETTINGS,
             inviter_display_name="Owner",
             workspace_name=ctx.workspace_slug,
+            link_port=MagicLinkAdapter(session),
         )
         token = _extract_token_from_body(mailer.sent[0].body_text)
         acceptance = membership.consume_invite_token(
@@ -690,6 +704,7 @@ class TestAcceptExistingUser:
             throttle=throttle,
             settings=_TEST_SETTINGS,
             active_user_id=invitee.id,
+            link_port=MagicLinkAdapter(session),
         )
         assert isinstance(acceptance, membership.ExistingUserAcceptance)
         assert acceptance.card.workspace_slug == ctx.workspace_slug
@@ -746,6 +761,7 @@ class TestAcceptExistingUser:
             settings=_TEST_SETTINGS,
             inviter_display_name="Owner",
             workspace_name=ctx.workspace_slug,
+            link_port=MagicLinkAdapter(session),
         )
         del outcome
         token = _extract_token_from_body(mailer.sent[0].body_text)
@@ -761,6 +777,7 @@ class TestAcceptExistingUser:
                 throttle=throttle,
                 settings=_TEST_SETTINGS,
                 active_user_id=None,
+                link_port=MagicLinkAdapter(session),
             )
 
 

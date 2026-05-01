@@ -14,7 +14,7 @@ availability services consume (cd-r5j2, cd-2upg), the read-only
 :class:`MeScheduleQueryRepository` the §12 worker calendar feed uses
 (cd-lot5), and the :class:`EmailChangeRepository` /
 :class:`MagicLinkPort` seams the self-service email-change flow
-consumes (cd-24im).
+(cd-24im) and the membership invite flow (cd-opmw) consume.
 """
 
 from __future__ import annotations
@@ -37,6 +37,7 @@ from app.domain.identity.email_change_ports import (
     MagicLinkInvalidToken,
     MagicLinkOutcome,
     MagicLinkPort,
+    MagicLinkPurpose,
     MagicLinkPurposeMismatch,
     MagicLinkTokenExpired,
     UserIdentityRow,
@@ -69,6 +70,7 @@ __all__ = [
     "MagicLinkInvalidToken",
     "MagicLinkOutcome",
     "MagicLinkPort",
+    "MagicLinkPurpose",
     "MagicLinkPurposeMismatch",
     "MagicLinkTokenExpired",
     "MeScheduleQueryRepository",

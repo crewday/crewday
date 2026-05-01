@@ -4,7 +4,8 @@ Narrow scope on purpose: cd-rpxd acceptance criterion #5 — invite
 accept rejects a token whose ``purpose`` is not ``accept``. The
 domain service
 (:func:`app.domain.identity.membership.consume_invite_token`) raises
-:class:`app.auth.magic_link.PurposeMismatch` on that branch; the HTTP
+the seam-level :class:`MagicLinkPurposeMismatch` (re-exported as
+:class:`membership.PurposeMismatch`) on that branch; the HTTP
 router's :func:`_http_for_token` mapping collapses that to a
 ``purpose_mismatch`` error envelope. This test pins the mapping so a
 future refactor of the error taxonomy cannot silently drop the guard.
@@ -26,12 +27,11 @@ from __future__ import annotations
 from fastapi import status
 
 from app.api.v1.auth.invite import _http_for_token
-from app.auth.magic_link import (
+from app.auth._throttle import ConsumeLockout, RateLimited
+from app.domain.identity.membership import (
     AlreadyConsumed,
-    ConsumeLockout,
     InvalidToken,
     PurposeMismatch,
-    RateLimited,
     TokenExpired,
 )
 

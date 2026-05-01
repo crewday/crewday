@@ -33,6 +33,7 @@ from app.adapters.db.identity.models import (
 from app.adapters.db.workspace.models import Workspace
 from app.auth import magic_link
 from app.auth._throttle import Throttle
+from app.auth.magic_link_port import MagicLinkAdapter
 from app.config import Settings
 from app.domain.identity import membership
 from app.tenancy import tenant_agnostic
@@ -232,6 +233,7 @@ class TestNewUserPreview:
             throttle=Throttle(),
             settings=_TEST_SETTINGS,
             now=_PINNED,
+            link_port=MagicLinkAdapter(session),
         )
 
         assert preview.kind == "new_user"
@@ -279,6 +281,7 @@ class TestExistingUserPreview:
             throttle=Throttle(),
             settings=_TEST_SETTINGS,
             now=_PINNED,
+            link_port=MagicLinkAdapter(session),
         )
 
         assert preview.kind == "existing_user"
@@ -318,6 +321,7 @@ class TestReadOnly:
             throttle=Throttle(),
             settings=_TEST_SETTINGS,
             now=_PINNED,
+            link_port=MagicLinkAdapter(session),
         )
 
         # Nonce still pending — introspect did NOT flip ``consumed_at``.
@@ -348,6 +352,7 @@ class TestReadOnly:
             throttle=Throttle(),
             settings=_TEST_SETTINGS,
             now=_PINNED,
+            link_port=MagicLinkAdapter(session),
         )
 
         post_count = len(list(session.scalars(select(AuditLog)).all()))
@@ -379,6 +384,7 @@ class TestReadOnly:
             throttle=Throttle(),
             settings=_TEST_SETTINGS,
             now=_PINNED,
+            link_port=MagicLinkAdapter(session),
         )
 
         # The same token must still consume — peek did not flip the nonce.
@@ -389,6 +395,7 @@ class TestReadOnly:
             throttle=Throttle(),
             settings=_TEST_SETTINGS,
             now=_PINNED,
+            link_port=MagicLinkAdapter(session),
         )
         assert isinstance(outcome, membership.NewUserAcceptance)
 
@@ -402,7 +409,7 @@ class TestErrorModes:
     """Each domain error path raises the right typed exception."""
 
     def test_invalid_token_raises(self, session: Session) -> None:
-        with pytest.raises(magic_link.InvalidToken):
+        with pytest.raises(membership.InvalidToken):
             membership.introspect_invite(
                 session,
                 token="garbage.not.a.valid.token",
@@ -410,6 +417,7 @@ class TestErrorModes:
                 throttle=Throttle(),
                 settings=_TEST_SETTINGS,
                 now=_PINNED,
+                link_port=MagicLinkAdapter(session),
             )
 
     def test_expired_token_raises(self, session: Session) -> None:
@@ -424,7 +432,7 @@ class TestErrorModes:
 
         # Move "now" past the token's exp claim (24h TTL on grant_invite).
         future = _PINNED + timedelta(hours=25)
-        with pytest.raises(magic_link.TokenExpired):
+        with pytest.raises(membership.TokenExpired):
             membership.introspect_invite(
                 session,
                 token=token,
@@ -432,6 +440,7 @@ class TestErrorModes:
                 throttle=Throttle(),
                 settings=_TEST_SETTINGS,
                 now=future,
+                link_port=MagicLinkAdapter(session),
             )
 
     def test_already_consumed_token_raises(self, session: Session) -> None:
@@ -453,9 +462,10 @@ class TestErrorModes:
             throttle=Throttle(),
             settings=_TEST_SETTINGS,
             now=_PINNED,
+            link_port=MagicLinkAdapter(session),
         )
 
-        with pytest.raises(magic_link.AlreadyConsumed):
+        with pytest.raises(membership.AlreadyConsumed):
             membership.introspect_invite(
                 session,
                 token=token,
@@ -463,6 +473,7 @@ class TestErrorModes:
                 throttle=Throttle(),
                 settings=_TEST_SETTINGS,
                 now=_PINNED,
+                link_port=MagicLinkAdapter(session),
             )
 
     def test_invite_state_revoked_raises(self, session: Session) -> None:
@@ -488,6 +499,7 @@ class TestErrorModes:
                 throttle=Throttle(),
                 settings=_TEST_SETTINGS,
                 now=_PINNED,
+                link_port=MagicLinkAdapter(session),
             )
 
     def test_invite_already_accepted_raises(self, session: Session) -> None:
@@ -514,6 +526,7 @@ class TestErrorModes:
                 throttle=Throttle(),
                 settings=_TEST_SETTINGS,
                 now=_PINNED,
+                link_port=MagicLinkAdapter(session),
             )
 
     def test_invite_row_expired_raises(self, session: Session) -> None:
@@ -541,6 +554,7 @@ class TestErrorModes:
                 throttle=Throttle(),
                 settings=_TEST_SETTINGS,
                 now=_PINNED,
+                link_port=MagicLinkAdapter(session),
             )
 
     def test_does_not_raise_passkey_session_required(self, session: Session) -> None:
@@ -573,6 +587,7 @@ class TestErrorModes:
             settings=_TEST_SETTINGS,
             active_user_id=None,
             now=_PINNED,
+            link_port=MagicLinkAdapter(session),
         )
         assert preview.kind == "existing_user"
 
@@ -618,4 +633,5 @@ class TestThrottleBucketShared:
                 throttle=throttle,
                 settings=_TEST_SETTINGS,
                 now=_PINNED,
+                link_port=MagicLinkAdapter(session),
             )

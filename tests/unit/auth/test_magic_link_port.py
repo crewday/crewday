@@ -332,3 +332,85 @@ class TestRequestLinkExceptionPassthrough:
         assert mailer.sent == []
         handle.deliver()
         assert len(mailer.sent) == 1
+
+
+# ---------------------------------------------------------------------------
+# grant_invite purpose accepted (cd-opmw)
+# ---------------------------------------------------------------------------
+
+
+class TestMagicLinkPortGrantInvitePurpose:
+    """The seam Literal accepts ``grant_invite`` post-cd-opmw.
+
+    The membership invite flow mints / consumes magic links with
+    ``purpose="grant_invite"``; widening
+    :data:`MagicLinkPurpose` was the cd-opmw decision so the
+    adapter forwards the literal verbatim into the auth layer.
+    """
+
+    def test_request_link_accepts_grant_invite(
+        self,
+        adapter: MagicLinkAdapter,
+        throttle: Throttle,
+        settings: Settings,
+    ) -> None:
+        """``request_link(purpose="grant_invite")`` returns a handle.
+
+        ``send_email=False`` mirrors the invite flow's call shape — the
+        mailer is bypassed because the membership service ships its
+        own template; the seam still produces a redeemable URL.
+        """
+        handle = adapter.request_link(
+            email="invitee@example.com",
+            purpose="grant_invite",
+            ip="127.0.0.1",
+            mailer=None,
+            base_url=_BASE_URL,
+            now=_PINNED,
+            throttle=throttle,
+            settings=settings,
+            subject_id="01HWA0000000000000000INV1",
+            send_email=False,
+        )
+        assert handle is not None
+        assert "/auth/magic/" in handle.url
+
+    def test_consume_link_round_trip_under_grant_invite(
+        self,
+        adapter: MagicLinkAdapter,
+        throttle: Throttle,
+        settings: Settings,
+    ) -> None:
+        """A token minted with ``grant_invite`` consumes cleanly.
+
+        Round-trip through both ``request_link`` and ``consume_link``
+        on the seam — proves the Literal pin reaches the auth-layer
+        ``_VALID_PURPOSES`` allow-list and the consume path returns
+        the same purpose verbatim on the outcome.
+        """
+        invite_id = "01HWA0000000000000000INV2"
+        handle = adapter.request_link(
+            email="redeem@example.com",
+            purpose="grant_invite",
+            ip="127.0.0.1",
+            mailer=None,
+            base_url=_BASE_URL,
+            now=_PINNED,
+            throttle=throttle,
+            settings=settings,
+            subject_id=invite_id,
+            send_email=False,
+        )
+        assert handle is not None
+        token = handle.url.rsplit("/", 1)[-1]
+
+        outcome = adapter.consume_link(
+            token=token,
+            expected_purpose="grant_invite",
+            ip="127.0.0.1",
+            now=_PINNED,
+            throttle=throttle,
+            settings=settings,
+        )
+        assert outcome.purpose == "grant_invite"
+        assert outcome.subject_id == invite_id

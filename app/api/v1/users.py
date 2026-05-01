@@ -65,6 +65,7 @@ from app.api.deps import current_workspace_context, db_session
 from app.audit import write_audit
 from app.auth import magic_link as magic_link_module
 from app.auth._throttle import Throttle
+from app.auth.magic_link_port import MagicLinkAdapter
 from app.authz import PermissionDenied, require
 from app.authz.dep import Permission
 from app.config import Settings, get_settings
@@ -676,6 +677,7 @@ def build_users_router(
                     settings=cfg,
                     inviter_display_name=inviter_display_name,
                     workspace_name=workspace_name,
+                    link_port=MagicLinkAdapter(session),
                     dispatch=dispatch,
                 )
         except membership.InviteBodyInvalid as exc:

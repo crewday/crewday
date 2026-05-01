@@ -34,6 +34,7 @@ from app.adapters.db.identity.models import (
 )
 from app.adapters.db.workspace.models import WorkEngagement
 from app.auth._throttle import Throttle
+from app.auth.magic_link_port import MagicLinkAdapter
 from app.config import Settings
 from app.domain.identity import membership
 from app.tenancy import registry, tenant_agnostic
@@ -161,6 +162,7 @@ def _invite_worker(
         settings=_TEST_SETTINGS,
         inviter_display_name="Owner",
         workspace_name=ctx.workspace_slug,
+        link_port=MagicLinkAdapter(session),
     )
 
 
@@ -260,6 +262,7 @@ class TestAcceptSeedsEngagement:
             ip="127.0.0.1",
             throttle=throttle,
             settings=_TEST_SETTINGS,
+            link_port=MagicLinkAdapter(session),
         )
         assert isinstance(acceptance, membership.NewUserAcceptance)
 
@@ -320,6 +323,7 @@ class TestAcceptSeedsEngagement:
             ip="127.0.0.1",
             throttle=throttle,
             settings=_TEST_SETTINGS,
+            link_port=MagicLinkAdapter(session),
         )
         assert isinstance(acceptance, membership.NewUserAcceptance)
         _seed_passkey(
@@ -363,6 +367,7 @@ class TestAcceptSeedsEngagement:
             ip="127.0.0.1",
             throttle=throttle,
             settings=_TEST_SETTINGS,
+            link_port=MagicLinkAdapter(session),
         )
         assert isinstance(acceptance, membership.NewUserAcceptance)
         _seed_passkey(

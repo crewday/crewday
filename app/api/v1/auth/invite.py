@@ -67,14 +67,8 @@ from sqlalchemy.orm import Session
 from app.api.deps import db_session
 from app.auth import passkey as passkey_service
 from app.auth import session as auth_session
-from app.auth._throttle import ConsumeLockout, Throttle
-from app.auth.magic_link import (
-    AlreadyConsumed,
-    InvalidToken,
-    PurposeMismatch,
-    RateLimited,
-    TokenExpired,
-)
+from app.auth._throttle import ConsumeLockout, RateLimited, Throttle
+from app.auth.magic_link_port import MagicLinkAdapter
 from app.config import Settings, get_settings
 from app.domain.identity import membership
 from app.tenancy import WorkspaceContext
@@ -246,10 +240,10 @@ class InviteIntrospectionResponse(BaseModel):
 
 
 _TokenDomainError = (
-    InvalidToken,
-    PurposeMismatch,
-    TokenExpired,
-    AlreadyConsumed,
+    membership.InvalidToken,
+    membership.PurposeMismatch,
+    membership.TokenExpired,
+    membership.AlreadyConsumed,
     ConsumeLockout,
     RateLimited,
 )
@@ -280,17 +274,17 @@ _PasskeyDomainError = (
 
 def _http_for_token(exc: Exception) -> HTTPException:
     """Map a magic-link domain error onto an HTTP response."""
-    if isinstance(exc, TokenExpired):
+    if isinstance(exc, membership.TokenExpired):
         return HTTPException(
             status_code=status.HTTP_410_GONE,
             detail={"error": "expired"},
         )
-    if isinstance(exc, AlreadyConsumed):
+    if isinstance(exc, membership.AlreadyConsumed):
         return HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail={"error": "already_consumed"},
         )
-    if isinstance(exc, PurposeMismatch):
+    if isinstance(exc, membership.PurposeMismatch):
         return HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={"error": "purpose_mismatch"},
@@ -470,6 +464,7 @@ def build_invite_router(
                 token=body.token,
                 ip=_client_ip(request),
                 throttle=throttle,
+                link_port=MagicLinkAdapter(session),
                 settings=cfg,
                 active_user_id=active_user_id,
             )
@@ -715,8 +710,8 @@ def _http_for_invites_token(exc: Exception) -> HTTPException:
     mismatch) is collapsed onto a single 404 so the introspect
     endpoint cannot be used as a token-validity oracle.
 
-    :class:`~app.auth.magic_link.ConsumeLockout` and
-    :class:`~app.auth.magic_link.RateLimited` keep their 429 mapping
+    :class:`~app.auth._throttle.ConsumeLockout` and
+    :class:`~app.auth._throttle.RateLimited` keep their 429 mapping
     — those signal abuse-mitigation activity, not invite existence,
     and the SPA needs to render a "try later" hint.
     """
@@ -810,6 +805,7 @@ def build_invites_router(
                 token=token,
                 ip=_client_ip(request),
                 throttle=throttle,
+                link_port=MagicLinkAdapter(session),
                 settings=cfg,
                 active_user_id=active_user_id,
             )
@@ -859,6 +855,7 @@ def build_invites_router(
                 token=token,
                 ip=_client_ip(request),
                 throttle=throttle,
+                link_port=MagicLinkAdapter(session),
                 settings=cfg,
                 active_user_id=active_user_id,
             )

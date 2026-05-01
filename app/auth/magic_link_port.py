@@ -3,7 +3,7 @@
 Implements
 :class:`app.domain.identity.email_change_ports.MagicLinkPort`.
 Wraps :mod:`app.auth.magic_link` to expose only the four operations
-the email-change domain service calls (``request_link``, ``peek_link``,
+the domain seam consumers call (``request_link``, ``peek_link``,
 ``consume_link``, ``inspect_token_jti``) and translates the auth-layer
 exceptions
 (:class:`~app.auth.magic_link.InvalidToken` /
@@ -13,11 +13,18 @@ exceptions
 equivalents declared on
 :mod:`app.domain.identity.email_change_ports`.
 
+Two domain consumers share the seam: the self-service email-change flow
+(:mod:`app.domain.identity.email_change`, cd-24im) and the membership
+invite flow (:mod:`app.domain.identity.membership`, cd-opmw). Both
+catch the seam-level exceptions; the adapter is purpose-agnostic
+beyond the :data:`MagicLinkPurpose` Literal pin.
+
 The translation lives here (rather than at the domain call site)
 because the seam contract is "the domain catches the seam-level
 exceptions, the concretion does the bridging". Without this layer
 the domain would have to ``except`` on the auth-layer types and the
 cd-7qxh ``app.domain.identity.email_change -> app.auth.magic_link``
+and ``app.domain.identity.membership -> app.auth.magic_link``
 ignore_imports could not drop.
 
 Throttle-layer exceptions (:class:`app.auth._throttle.RateLimited` /
@@ -34,7 +41,8 @@ the domain and the auth layer; siting it under ``app.auth`` keeps
 the dependency arrow pointing at the right tree.
 
 See ``docs/specs/01-architecture.md`` §"Boundary rules" rule 4 and
-``docs/specs/03-auth-and-tokens.md`` §"Self-service email change".
+``docs/specs/03-auth-and-tokens.md`` §"Self-service email change" /
+§"Additional users (invite → click-to-accept)".
 """
 
 from __future__ import annotations
@@ -48,12 +56,12 @@ from app.auth import magic_link
 from app.auth._throttle import Throttle
 from app.config import Settings
 from app.domain.identity.email_change_ports import (
-    EmailChangeMagicLinkPurpose,
     MagicLinkAlreadyConsumed,
     MagicLinkHandle,
     MagicLinkInvalidToken,
     MagicLinkOutcome,
     MagicLinkPort,
+    MagicLinkPurpose,
     MagicLinkPurposeMismatch,
     MagicLinkTokenExpired,
 )
@@ -85,13 +93,15 @@ class MagicLinkAdapter(MagicLinkPort):
     domain call site doesn't have to thread it as an extra argument
     on every Protocol method. The router constructs one instance per
     UoW (inside the ``with make_uow() as session:`` block) and passes
-    it into the email-change service alongside the
-    :class:`EmailChangeRepository`.
+    it into the consumer service (email_change alongside the
+    :class:`EmailChangeRepository`, or membership alongside the invite
+    flow's direct Session reads).
 
-    The adapter is stateless beyond the session reference. The
-    underlying functions take all their other dependencies (mailer,
-    throttle, settings, clock) as keyword arguments forwarded by the
-    seam call site.
+    The adapter is stateless beyond the session reference and
+    purpose-agnostic — the only purpose vocabulary lives on
+    :data:`MagicLinkPurpose`. The underlying functions take all their
+    other dependencies (mailer, throttle, settings, clock) as keyword
+    arguments forwarded by the seam call site.
     """
 
     def __init__(self, session: Session) -> None:
@@ -101,7 +111,7 @@ class MagicLinkAdapter(MagicLinkPort):
         self,
         *,
         email: str,
-        purpose: EmailChangeMagicLinkPurpose,
+        purpose: MagicLinkPurpose,
         ip: str,
         mailer: Mailer | None,
         base_url: str,
@@ -114,10 +124,10 @@ class MagicLinkAdapter(MagicLinkPort):
         send_email: bool = True,
     ) -> MagicLinkHandle | None:
         # :func:`request_link` raises :class:`InvalidToken` on an
-        # unknown purpose; the email-change service only ever passes
-        # the two purposes the seam Literal pins, so the translation
-        # below is defensive — a programming error elsewhere would
-        # surface as the seam-level exception, not the auth-layer one.
+        # unknown purpose; domain consumers only ever pass the
+        # purposes the seam Literal pins, so the translation below is
+        # defensive — a programming error elsewhere would surface as
+        # the seam-level exception, not the auth-layer one.
         try:
             return magic_link.request_link(
                 self._session,
@@ -141,7 +151,7 @@ class MagicLinkAdapter(MagicLinkPort):
         self,
         *,
         token: str,
-        expected_purpose: EmailChangeMagicLinkPurpose,
+        expected_purpose: MagicLinkPurpose,
         ip: str,
         now: datetime,
         throttle: Throttle,
@@ -173,7 +183,7 @@ class MagicLinkAdapter(MagicLinkPort):
         self,
         *,
         token: str,
-        expected_purpose: EmailChangeMagicLinkPurpose,
+        expected_purpose: MagicLinkPurpose,
         ip: str,
         now: datetime,
         throttle: Throttle,
