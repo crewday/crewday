@@ -23,6 +23,13 @@ cutting concerns the spec calls out:
   ``only-on-failure`` respectively, so the operator opts in via the
   CLI; AGENTS.md §"End-to-end Playwright suite" pins the
   recommended invocation that turns all three on.
+* **WebKit auto-skip.** Hosts missing libicu74 cannot launch the
+  WebKit driver. We wrap pytest-playwright's ``launch_browser``
+  fixture so the "Host system is missing dependencies" error
+  surfaces as a focused ``pytest.skip`` (whole-suite when the user
+  ran ``--browser webkit`` only, per-test parametrisation otherwise).
+  AGENTS.md §"End-to-end Playwright suite" documents the install
+  hint; we surface the same hint at skip time.
 
 The pytest-playwright defaults already cover screenshot + video on
 failure; we extend the storage location so artefacts land beside the
@@ -36,14 +43,17 @@ the autouse fixture; pytest discovers it through the parent.
 
 from __future__ import annotations
 
+import json
 import os
 import urllib.error
 import urllib.request
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from pathlib import Path
-from typing import Final
+from typing import Any, Final
 
 import pytest
+from playwright.sync_api import Browser, BrowserType
+from playwright.sync_api import Error as PlaywrightError
 
 __all__ = [
     "DEFAULT_BASE_URL",
@@ -51,6 +61,7 @@ __all__ = [
     "base_url",
     "browser_context_args",
     "dev_stack_ready",
+    "launch_browser",
 ]
 
 
@@ -170,3 +181,59 @@ def _require_dev_stack_for_e2e(dev_stack_ready: str) -> Iterator[None]:
     """
     del dev_stack_ready  # consumed for its side effect (readiness probe)
     yield
+
+
+# ``pytest_playwright``'s missing-deps message ships inside an
+# ``Error`` from ``BrowserType.launch``; we substring-match the stable
+# leading sentence so the wrapper survives Playwright's banner edits.
+_MISSING_DEPS_MARKER: Final[str] = "Host system is missing dependencies"
+
+
+@pytest.fixture(scope="session")
+def launch_browser(
+    browser_type_launch_args: dict[str, Any],
+    browser_type: BrowserType,
+    connect_options: dict[str, Any] | None,
+) -> Callable[..., Browser]:
+    """Wrap pytest-playwright's launcher to convert missing-deps to ``skip``.
+
+    AGENTS.md §"End-to-end Playwright suite" documents that WebKit
+    needs ``libicu74`` (and friends) installed before the driver can
+    launch. Without this wrapper the missing-deps error becomes a
+    pytest fixture ERROR, not a SKIP — turning a documented dev-host
+    limitation into a noisy red bar that can mask real regressions.
+
+    We mirror :func:`pytest_playwright.pytest_playwright.launch_browser`
+    1:1 (including the ``connect_options`` branch that supports the
+    ``--browser-channel`` remote-runner mode) and only add the
+    skip-on-missing-deps adapter. The substring marker ``Host system
+    is missing dependencies`` is stable across Playwright releases —
+    it leads the multi-line banner that points the operator at
+    ``sudo playwright install-deps`` / ``apt-get install libicu74``.
+    """
+
+    def launch(**kwargs: Any) -> Browser:
+        launch_options = {**browser_type_launch_args, **kwargs}
+        try:
+            if connect_options:
+                return browser_type.connect(
+                    **{
+                        **connect_options,
+                        "headers": {
+                            "x-playwright-launch-options": json.dumps(launch_options),
+                            **(connect_options.get("headers") or {}),
+                        },
+                    }
+                )
+            return browser_type.launch(**launch_options)
+        except PlaywrightError as exc:
+            if _MISSING_DEPS_MARKER in str(exc):
+                pytest.skip(
+                    f"{browser_type.name} driver missing host dependencies "
+                    "(install with `sudo playwright install-deps` or "
+                    "`apt-get install libicu74 libxml2`); skipping per "
+                    "AGENTS.md §End-to-end Playwright suite."
+                )
+            raise
+
+    return launch
