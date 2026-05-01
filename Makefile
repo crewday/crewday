@@ -1,4 +1,4 @@
-.PHONY: lint fmt type test coverage schemathesis i18n-extract i18n-check
+.PHONY: lint fmt type test coverage schemathesis i18n-extract i18n-check openapi openapi-check
 
 lint:
 	uv run ruff check .
@@ -21,6 +21,15 @@ i18n-extract:
 i18n-check:
 	uv run python scripts/i18n_extract.py
 	git diff --exit-code -- app/i18n/locales app/web/src/i18n/bundles mocks/web/src/i18n/bundles
+
+# Regenerate the committed ``docs/api/openapi.json`` from the live
+# FastAPI app. ``openapi-check`` is the CI gate: fails when the
+# committed file has drifted. See ``scripts/regen_openapi.py``.
+openapi:
+	uv run python -m scripts.regen_openapi
+
+openapi-check:
+	uv run python -m scripts.regen_openapi --check
 
 # API contract sweep (cd-3j25).
 #

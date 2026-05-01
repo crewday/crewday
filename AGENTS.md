@@ -254,11 +254,13 @@ update in your wrap-up.
   workflow YAML may use normal shell control flow.
 - **JSON with `jq`**, not Python. Use `gh`'s `--jq` for GitHub
   payloads.
-- **OpenAPI regeneration needs a root key.** If you regenerate
-  `docs/api/openapi.json` from `create_app().openapi()`, set a
-  throwaway local `CREWDAY_ROOT_KEY` in the command; otherwise auth
-  subkey derivation fails after the shell has already opened the
-  output file.
+- **Regenerate OpenAPI with `make openapi`.** Wraps
+  `python -m scripts.regen_openapi`; sets a dummy `CREWDAY_ROOT_KEY`
+  if unset, silences app-boot logs, and writes
+  `docs/api/openapi.json` with stable formatting (`sort_keys=True`,
+  `required` / `enum` / operation-level `tags` arrays sorted in
+  the factory). Use `make openapi-check` to fail when the committed
+  file has drifted from the live schema.
 - **Modern CLI tools**: `rg` over `grep`, `fd` over `find`, `sd` over
   `sed`.
 - **Let Ruff do Ruff work.** For Ruff-only formatting/import issues,

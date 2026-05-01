@@ -1217,7 +1217,42 @@ def _build_custom_openapi(app: FastAPI) -> dict[str, Any]:
     schema["tags"] = merged_tags
     _declare_workspace_slug_path_parameters(schema)
     _declare_rate_limit_responses(schema)
+    _sort_set_arrays(schema)
     return schema
+
+
+_SET_ARRAY_KEYS: Final = frozenset({"required", "enum", "tags"})
+
+
+def _sort_set_arrays(node: object) -> None:
+    """Sort schema arrays whose order is semantically irrelevant.
+
+    OpenAPI / JSON Schema treat ``required``, ``enum``, and
+    operation-level ``tags`` as sets — their order does not affect
+    validation, routing, or client codegen. Pydantic, however, emits
+    them in field-declaration order, so a field rename or reorder
+    shuffles the array and produces noisy diffs in the committed
+    ``docs/api/openapi.json``. Sorting in place removes that noise.
+
+    The document-level ``tags: [{name, description}, ...]`` array is
+    intentionally preserved: its order drives Swagger UI grouping and
+    is established by :func:`_build_custom_openapi`. We detect it by the
+    list-of-dicts shape (operation-level ``tags`` is list-of-strings)
+    and skip sorting in that case.
+    """
+    if isinstance(node, dict):
+        for key, value in node.items():
+            if (
+                key in _SET_ARRAY_KEYS
+                and isinstance(value, list)
+                and all(isinstance(item, str) for item in value)
+            ):
+                node[key] = sorted(value)
+                continue
+            _sort_set_arrays(value)
+    elif isinstance(node, list):
+        for item in node:
+            _sort_set_arrays(item)
 
 
 def _slug_path_parameter() -> dict[str, Any]:
