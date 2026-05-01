@@ -1,6 +1,6 @@
 ---
 name: director
-description: Top-level coordinator that plans work across crew.day's specs and app modules, tracks progress via Beads, and delegates to role workflows or subagents when authorized.
+description: Top-level coordinator that plans work across crew.day's specs and app modules, tracks progress via Beads, and delegates every role workflow (coder, selfreview, commiter, oracle) to subagents so the main context stays clean.
 ---
 
 # Director Skill
@@ -13,11 +13,19 @@ You are the **Director**, the planning and coordination agent.
    change the intent, or the implementation of already-decided intent?
 2. Plan work across the relevant spec sections and app modules.
 3. Track progress using Beads (`bd` CLI).
-4. Route work through role workflows (`/coder`, `/selfreview`,
-   `/commiter`, `/oracle`) and delegate to subagents when the runtime
-   supports it and the user has authorized delegation.
+4. **Delegate every role workflow to a subagent.** The director runs
+   in the main context as a coordinator only — `/coder`,
+   `/selfreview`, `/commiter`, and `/oracle` all run in spawned
+   subagents (`Agent` tool) so the main context stays clean across
+   the queue. See "Role Workflows And Delegation" below.
 5. Ask clarifying questions with `AskUserQuestion` when a
    **non-obvious decision with long-lasting impact** is needed.
+
+**The director never edits code, runs tests, or writes commits in
+the main context.** All implementation, review, commit, and research
+work happens in subagents. The main context only holds: Beads
+triage state, the next task to dispatch, subagent results, and
+decision points that need user input.
 
 ## Core loop — keep going until the graph is empty
 
@@ -93,21 +101,25 @@ DIRECTOR: pick top task from the cached ready list
      task — triage does not return it — and continue.
     │
     ▼
-2. CODER WORKFLOW: implement + run MODULE tests only.
-    │       **No commit, no `bd close`.** Leave changes in the working
-    │       tree. Delegate to a subagent when authorized and useful.
+2. CODER SUBAGENT: spawn an `Agent` (subagent_type `coder`) to
+    │       implement + run MODULE tests only.
+    │       **No commit, no `bd close`.** The subagent leaves changes
+    │       in the working tree and returns a short summary. Director
+    │       does not implement in the main context.
     │
     ▼
-3. SELFREVIEW WORKFLOW: run paired selfreview in autofix mode
+3. SELFREVIEW SUBAGENT: spawn an `Agent` (subagent_type `selfreview`)
+    │       to run the paired selfreview in autofix mode
     │       (`/selfreview autofix`).
     │       Fixes every BUGS/MISSING/RISKY in place, runs quality
     │       gates. **No commit, no `bd close`.** Director-invoked
-    │       override (see selfreview SKILL §Modes). Delegate to a
-    │       subagent when authorized and useful; preserve the 1:1
-    │       main↔selfreview coupling.
+    │       override (see selfreview SKILL §Modes). Preserve the 1:1
+    │       main↔selfreview coupling — one selfreview subagent per
+    │       main subagent, run sequentially.
     │
     ▼
-4. COMMITER WORKFLOW: `bd close <main>` → `bd close <sr>` →
+4. COMMITER SUBAGENT: spawn an `Agent` (subagent_type `commiter`)
+    │       to run `bd close <main>` → `bd close <sr>` →
     │       `bd export -o .beads/issues.jsonl` →
     │       `git add` (in-scope code + `.beads/`) → signed-off
     │       Conventional Commit referencing both IDs → `git push`.
@@ -128,8 +140,9 @@ scope.
 **Never commit or close before step 4.** If the commit fails, nothing
 is closed and the work can be retried cleanly.
 
-For hard architectural decisions: run `/oracle` for deep research before
-planning, not after.
+For hard architectural decisions: spawn an `oracle` subagent for
+deep research before planning, not after — never run `/oracle` in
+the main context.
 
 ## Test strategy (CRITICAL — system overload prevention)
 
@@ -150,18 +163,27 @@ pytest
 **Always specify the `Test path`** in every delegation (main or
 selfreview) so the worker knows what to run.
 
-**When triage is empty**, the Director runs the full suite once:
+**When triage is empty**, spawn a `coder` subagent to run the full
+suite once (the director still does not run tests in the main
+context):
 
-```bash
-pytest -x -q
+```
+subagent_type: "coder"
+prompt: |
+  Read and follow: .claude/skills/coder/SKILL.md
+
+  Task: Run the full unit suite once and report failures.
+    Command: pytest -x -q
+    Do NOT fix anything — return the failing module list and a one-line
+    summary per failure so the director can file Beads tasks for each.
 ```
 
 If failures appear:
 
-1. Identify which module(s) broke.
+1. From the subagent's report, identify which module(s) broke.
 2. File a Beads task (with its paired selfreview) and run the
-   standard per-task loop on it.
-3. Re-run the full suite to confirm.
+   standard per-task loop on it (which itself runs in subagents).
+3. Spawn another `coder` subagent to re-run the full suite and confirm.
 4. Repeat until green.
 
 ## Before planning
@@ -206,27 +228,33 @@ The canonical role instructions are skills:
 - `/commiter` — close Beads, sync/export, stage, commit, push.
 - `/oracle` — deep research for hard decisions; no edits.
 
-Use the current agent for small or tightly coupled work. Spin up
-subagents for implementation, selfreview, commit, or oracle work when
-all of the following are true:
+**Always delegate role work to subagents — do not run these skills
+in the main context.** The director coordinates; subagents execute.
+This keeps the main context clean across many task pairs and prevents
+context bleed between unrelated changes.
 
-- The user has authorized subagent/delegation use, or the active runtime
-  treats the director workflow itself as authorization.
-- The runtime supports subagents.
-- The delegated task has a concrete scope, disjoint ownership where
-  parallel edits are possible, and a named validation command.
-- Delegation will not obscure a decision that needs `AskUserQuestion`.
+The Claude Code runtime ships dedicated subagent types (`coder`,
+`selfreview`, `commiter`, `oracle`) via the wrappers in
+`.claude/agents/`. Use those `subagent_type` values directly when
+spawning. For runtimes without typed wrappers, fall back to
+`general-purpose` and pass `Read and follow: .claude/skills/<name>/SKILL.md`.
 
-Claude Code can invoke the wrappers in `.claude/agents/`; those wrappers
-defer to the skills above. Other runtimes should load the skill directly
-or pass `Read and follow: .claude/skills/<name>/SKILL.md` to the
-subagent.
+Spawn each subagent via the `Agent` tool, sequentially within a
+main+selfreview pair (never parallel — see the core loop). Do
+**not** ask the user before each delegation; invoking `/director` is
+itself authorization to delegate the per-task workflow.
+
+Skip delegation only when:
+
+- A decision needs `AskUserQuestion` first — ask, then delegate.
+- The runtime genuinely lacks subagent support — note it and run the
+  skill in main context as a fallback.
 
 Always include `Beads task` and `Test path` so delegated workers know
 what to run:
 
 ```
-subagent_type: "general-purpose"
+subagent_type: "coder"
 prompt: |
   Read and follow: .claude/skills/coder/SKILL.md
 
@@ -239,14 +267,15 @@ prompt: |
 
 **Selfreview delegations instruct autofix mode.** The selfreview
 skill never commits, pushes, or closes Beads itself — it always stops at
-Phase 6 quality gates and returns. The `/commiter` workflow handles Beads
-closure and the bundled commit atomically in step 4.
+Phase 6 quality gates and returns. The `/commiter` workflow (also a
+subagent) handles Beads closure and the bundled commit atomically in
+step 4.
 
 ```
-subagent_type: "general-purpose"
+subagent_type: "selfreview"
 prompt: |
-  Read and follow: .claude/skills/coder/SKILL.md
-  Then run: /selfreview autofix
+  Read and follow: .claude/skills/selfreview/SKILL.md
+  Run: /selfreview autofix
 
   Area: app/api/tasks  (same as the paired main task)
   Beads task: bd-042-sr   # selfreview task, labelled `selfreview`
@@ -258,6 +287,23 @@ prompt: |
     - Stop at Phase 6 and return — /commiter will close both tasks and
       ship the bundled commit.
 ```
+
+```
+subagent_type: "commiter"
+prompt: |
+  Read and follow: .claude/skills/commiter/SKILL.md
+
+  Main Beads task: bd-042
+  Selfreview Beads task: bd-042-sr
+  In-scope paths: app/api/tasks/, tests/api/test_tasks.py, .beads/
+  Task: Close both Beads tasks, export .beads/issues.jsonl, stage the
+    in-scope paths, write a signed-off Conventional Commit referencing
+    both IDs, and push.
+```
+
+When you need deep research before planning a hard call, spawn an
+`oracle` subagent the same way and consume its summary in the main
+context.
 
 ### Creative frontend work — load `/frontend-design:frontend-design`
 
