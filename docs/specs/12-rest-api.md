@@ -422,6 +422,22 @@ POST   /api/v1/invites/{token}/accept            # activate the pending grants a
 # the SPA cutover only. New callers MUST target /api/v1/invites/{token}.
 POST   /api/v1/invite/accept                     # body: {token}; superseded by POST /invites/{token}/accept (cd-z6vm)
 
+# Bare-host invitee passkey enrolment (cd-9q6bb). Bridges the
+# `/invite/accept` response (kind=new_user → invite_id, user_id) and
+# `/invite/complete`: the SPA runs `navigator.credentials.create()` then
+# the finish handler verifies + persists the credential against the
+# invitee's pre-existing user row. Three authorisation gates: (1) the
+# matching `magic_link_nonce` must be consumed (i.e. `/invite/accept`
+# ran first — email-control proof against a leaked invite_id;
+# `passkey_session_required` 401 otherwise); (2) the invite is `pending`
+# and within TTL; (3) the linked user holds zero passkeys. Once the
+# first credential lands the route is closed for that invite, so a
+# leaked `invite_id` cannot mint a second uninvited passkey
+# (`passkey_already_registered` 409 signals the closure).
+POST   /api/v1/invite/passkey/start              # body: {invite_id}; mints WebAuthn challenge
+POST   /api/v1/invite/passkey/finish             # body: {invite_id, challenge_id, credential}
+POST   /api/v1/invite/complete                   # body: {invite_id}; activates grants once the passkey is on file
+
 # Personal access tokens (§03 "Personal access tokens"). Identity-
 # scoped, passkey-session only, `me:*` scopes only, subject is always
 # the authenticated user. Not listed on the workspace admin page.

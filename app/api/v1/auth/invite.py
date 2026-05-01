@@ -20,23 +20,28 @@ The router branches on invite shape:
 * ``POST /invites/{token}/accept`` (or legacy ``POST /invite/accept``
   ``{token}``) — redeems the magic link and returns either a
   ``NewUserAcceptance`` (brand-new invitee — the SPA forwards to the
-  passkey ceremony, which on finish calls
-  :func:`app.domain.identity.membership.complete_invite` via
-  :mod:`app.api.v1.auth.passkey`) or an ``ExistingUserAcceptance``
-  (known user with an active session — the SPA renders the
-  acceptance card).
+  passkey ceremony at ``/invite/passkey/{start,finish}`` and then
+  POSTs ``/invite/complete``, which calls
+  :func:`app.domain.identity.membership.complete_invite`) or an
+  ``ExistingUserAcceptance`` (known user with an active session —
+  the SPA renders the acceptance card).
 * ``GET /invites/{token}`` — read-only introspect; returns the same
   preview the SPA needs to render an Accept card before the user
   clicks Accept (inviter, workspace, grants, expiry, ``kind``).
   Does NOT burn the underlying magic-link nonce.
 * ``POST /invite/{invite_id}/confirm`` — existing-user second leg
   (legacy router): confirms the pending invite activation.
-* ``POST /invite/complete`` — new-user second leg (legacy router,
-  post passkey-finish hook). Today
-  :func:`app.auth.passkey.register_finish_signup` does not carry
-  invite awareness; the SPA posts here with the ``invite_id`` it
-  kept from the ``/invite/accept`` response once the passkey
-  ceremony completes. A later consolidation (cd-kd26) folds this
+* ``POST /invite/passkey/start`` / ``POST /invite/passkey/finish``
+  (cd-9q6bb) — bridge ``/invite/accept`` and the browser's
+  ``navigator.credentials.create()`` for a brand-new invitee. Both
+  are gated on the invite being ``pending`` + within TTL AND the
+  linked user holding zero passkeys; the gate closes once the first
+  credential lands so a leaked ``invite_id`` cannot mint a second
+  uninvited credential.
+* ``POST /invite/complete`` — new-user second leg (post passkey-finish
+  hook). The SPA posts here once ``/invite/passkey/finish`` returned
+  200 so :func:`app.domain.identity.membership.complete_invite` can
+  activate the grants. A later consolidation (cd-kd26) folds this
   into the passkey-finish callback.
 
 Existence-leak guard: on the plural surface, every token-validity
@@ -60,6 +65,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.api.deps import db_session
+from app.auth import passkey as passkey_service
 from app.auth import session as auth_session
 from app.auth._throttle import ConsumeLockout, Throttle
 from app.auth.magic_link import (
@@ -79,6 +85,10 @@ __all__ = [
     "CompleteRequest",
     "ConfirmResponse",
     "InviteIntrospectionResponse",
+    "PasskeyFinishRequest",
+    "PasskeyFinishResponse",
+    "PasskeyStartRequest",
+    "PasskeyStartResponse",
     "build_invite_router",
     "build_invites_router",
 ]
@@ -143,6 +153,57 @@ class CompleteRequest(BaseModel):
     invite_id: str = Field(..., min_length=1)
 
 
+class PasskeyStartRequest(BaseModel):
+    """Request body for ``POST /invite/passkey/start``.
+
+    Bare-host bridge between ``/invite/accept`` (which left the
+    invite ``pending`` with the user_id known but no passkey on
+    file) and ``/invite/complete`` (which requires a passkey).
+    The ``invite_id`` is the bearer-of-capability — gated by
+    invite-state + passkey-absence checks; see
+    :func:`app.domain.identity.membership.register_invite_passkey_start`.
+    """
+
+    invite_id: str = Field(..., min_length=1)
+
+
+class PasskeyStartResponse(BaseModel):
+    """Parsed PublicKeyCredentialCreationOptions + its challenge handle.
+
+    Mirrors :class:`app.api.v1.auth.signup.PasskeyStartResponse` so
+    the SPA can pass the same options dict to
+    ``navigator.credentials.create()`` regardless of which flow
+    minted it.
+    """
+
+    challenge_id: str
+    options: dict[str, Any]
+
+
+class PasskeyFinishRequest(BaseModel):
+    """Request body for ``POST /invite/passkey/finish``."""
+
+    invite_id: str = Field(..., min_length=1)
+    challenge_id: str = Field(..., min_length=1)
+    credential: dict[str, Any]
+
+
+class PasskeyFinishResponse(BaseModel):
+    """Response body for ``POST /invite/passkey/finish``.
+
+    Carries the freshly-enrolled invitee's ``user_id`` so the SPA
+    can stamp it on its auth store before posting
+    ``/invite/complete``. The credential metadata
+    (``credential_id`` / ``transports`` / ``aaguid``) is intentionally
+    omitted: the SPA already has it from
+    ``navigator.credentials.create``'s return, and re-emitting it
+    here would force the SPA to reconcile two views of the same
+    bytes.
+    """
+
+    user_id: str
+
+
 class InviteIntrospectionResponse(BaseModel):
     """Response body for ``GET /api/v1/invites/{token}``.
 
@@ -199,7 +260,21 @@ _InviteDomainError = (
     membership.InviteStateInvalid,
     membership.InviteExpired,
     membership.InviteAlreadyAccepted,
+    membership.InvitePasskeyAlreadyRegistered,
     membership.PasskeySessionRequired,
+)
+
+
+# Passkey-domain errors raised by the bare-host invite passkey routes.
+# Mirrors :data:`app.api.v1.auth.signup._CompleteDomainError` so the
+# error envelope stays consistent across the two enrolment surfaces.
+_PasskeyDomainError = (
+    passkey_service.ChallengeNotFound,
+    passkey_service.ChallengeAlreadyConsumed,
+    passkey_service.ChallengeExpired,
+    passkey_service.ChallengeSubjectMismatch,
+    passkey_service.InvalidRegistration,
+    passkey_service.TooManyPasskeys,
 )
 
 
@@ -254,6 +329,11 @@ def _http_for_invite(exc: Exception) -> HTTPException:
             status_code=status.HTTP_409_CONFLICT,
             detail={"error": "already_accepted"},
         )
+    if isinstance(exc, membership.InvitePasskeyAlreadyRegistered):
+        return HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"error": "passkey_already_registered"},
+        )
     if isinstance(exc, membership.InviteStateInvalid):
         return HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -265,6 +345,41 @@ def _http_for_invite(exc: Exception) -> HTTPException:
     return HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail={"error": "passkey_session_required"},
+    )
+
+
+def _http_for_invite_passkey(exc: Exception) -> HTTPException:
+    """Map a passkey-domain error onto an HTTP response for invite routes.
+
+    Mirrors :func:`app.api.v1.auth.signup._http_for_complete`'s passkey
+    branches so the SPA's enrolment-error renderer can reuse one
+    handler for both signup-flow and invite-flow ceremonies.
+    """
+    if isinstance(
+        exc,
+        passkey_service.ChallengeNotFound | passkey_service.ChallengeAlreadyConsumed,
+    ):
+        return HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"error": "challenge_consumed_or_unknown"},
+        )
+    if isinstance(exc, passkey_service.ChallengeExpired):
+        return HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"error": "challenge_expired"},
+        )
+    if isinstance(
+        exc,
+        passkey_service.InvalidRegistration | passkey_service.ChallengeSubjectMismatch,
+    ):
+        return HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"error": "invalid_registration"},
+        )
+    # TooManyPasskeys — concurrent enrolment race; map for completeness.
+    return HTTPException(
+        status_code=422,
+        detail={"error": "too_many_passkeys"},
     )
 
 
@@ -489,6 +604,92 @@ def build_invite_router(
             ws = session.scalar(select(Workspace).where(Workspace.id == workspace_id))
         redirect = f"/w/{ws.slug}/today" if ws is not None else "/"
         return ConfirmResponse(workspace_id=workspace_id, redirect=redirect)
+
+    @router.post(
+        "/passkey/start",
+        response_model=PasskeyStartResponse,
+        operation_id="auth.invite.passkey_start",
+        summary="Mint passkey-registration challenge for a new invitee",
+        openapi_extra={
+            # Browser-only WebAuthn ceremony — no meaningful CLI surface.
+            # Same rationale as the sibling ``/signup/passkey/start`` and
+            # the authenticated ``/auth/passkey/register/start`` (see
+            # :mod:`app.api.v1.auth.passkey`). ``hidden`` keeps the CLI
+            # generator quiet; ``x-interactive-only`` satisfies the §12
+            # "mutating route" annotation gate.
+            "x-cli": {
+                "group": "invite",
+                "verb": "passkey-start",
+                "summary": "Mint passkey-registration challenge for a new invitee",
+                "mutates": True,
+                "hidden": True,
+            },
+            "x-interactive-only": True,
+        },
+    )
+    def post_passkey_start(
+        body: PasskeyStartRequest,
+        session: _Db,
+    ) -> PasskeyStartResponse:
+        """Bridge ``/invite/accept`` → ``navigator.credentials.create``."""
+        try:
+            opts = membership.register_invite_passkey_start(
+                session,
+                invite_id=body.invite_id,
+                settings=cfg,
+            )
+        except _InviteDomainError as exc:
+            raise _http_for_invite(exc) from exc
+        return PasskeyStartResponse(
+            challenge_id=opts.challenge_id,
+            options=opts.options,
+        )
+
+    @router.post(
+        "/passkey/finish",
+        response_model=PasskeyFinishResponse,
+        operation_id="auth.invite.passkey_finish",
+        summary="Verify + persist a new invitee's first passkey",
+        openapi_extra={
+            "x-cli": {
+                "group": "invite",
+                "verb": "passkey-finish",
+                "summary": "Verify and persist a new invitee's first passkey",
+                "mutates": True,
+                "hidden": True,
+            },
+            "x-interactive-only": True,
+        },
+    )
+    def post_passkey_finish(
+        body: PasskeyFinishRequest,
+        session: _Db,
+    ) -> PasskeyFinishResponse:
+        """Verify the attestation, insert the passkey row."""
+        try:
+            ref = membership.register_invite_passkey_finish(
+                session,
+                invite_id=body.invite_id,
+                challenge_id=body.challenge_id,
+                credential=body.credential,
+                settings=cfg,
+            )
+        except _InviteDomainError as exc:
+            # Invite-state errors (invite_not_found / expired / already
+            # accepted / passkey_already_registered) ride on the same
+            # mapper as `/accept`. The challenge row is untouched on
+            # this branch — a finish replay against the wrong invite
+            # state is rejected before any verification work runs.
+            raise _http_for_invite(exc) from exc
+        except _PasskeyDomainError as exc:
+            # Match the authenticated register-finish handler: a verification
+            # failure burns the challenge row on a fresh UoW so the same
+            # challenge cannot be retried with a forged credential. The
+            # primary UoW rolls back on the raise, so the burn must land
+            # on its own connection.
+            passkey_service.burn_challenge_on_failure(body.challenge_id)
+            raise _http_for_invite_passkey(exc) from exc
+        return PasskeyFinishResponse(user_id=ref.user_id)
 
     return router
 

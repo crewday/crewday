@@ -85,3 +85,84 @@ class TestInvitePurposeMismatchMapping:
         http = _http_for_token(InvalidToken("bad signature"))
         assert http.status_code == status.HTTP_400_BAD_REQUEST
         assert http.detail == {"error": "invalid_token"}
+
+
+class TestInvitePasskeyErrorMapping:
+    """`_http_for_invite` + `_http_for_invite_passkey` cd-9q6bb branches.
+
+    The bare-host invite passkey routes share `_http_for_invite` for
+    invite-state errors and `_http_for_invite_passkey` for passkey
+    domain errors. These tests pin the new mappings so a refactor of
+    the error taxonomy cannot silently drop a guard the SPA + e2e
+    suite (cd-db0g) rely on.
+
+    ``_detail_dict`` re-types the Starlette-typed ``HTTPException.detail``
+    (``str | None``) to the dict shape FastAPI's RFC 7807 seam actually
+    emits. The widening keeps ``mypy --strict`` honest without sprinkling
+    ``# type: ignore[comparison-overlap]`` on every assertion.
+    """
+
+    @staticmethod
+    def _detail_dict(http: object) -> dict[str, object]:
+        from fastapi import HTTPException
+
+        assert isinstance(http, HTTPException)
+        detail = http.detail
+        assert isinstance(detail, dict)
+        return detail
+
+    def test_passkey_already_registered_maps_to_409(self) -> None:
+        from app.api.v1.auth.invite import _http_for_invite
+        from app.domain.identity.membership import (
+            InvitePasskeyAlreadyRegistered,
+        )
+
+        http = _http_for_invite(
+            InvitePasskeyAlreadyRegistered("user already enrolled")
+        )
+        assert http.status_code == status.HTTP_409_CONFLICT
+        assert self._detail_dict(http) == {"error": "passkey_already_registered"}
+
+    def test_invalid_registration_maps_to_400(self) -> None:
+        from app.api.v1.auth.invite import _http_for_invite_passkey
+        from app.auth.passkey import InvalidRegistration
+
+        http = _http_for_invite_passkey(InvalidRegistration("bad attestation"))
+        assert http.status_code == status.HTTP_400_BAD_REQUEST
+        assert self._detail_dict(http) == {"error": "invalid_registration"}
+
+    def test_challenge_expired_maps_to_400(self) -> None:
+        from app.api.v1.auth.invite import _http_for_invite_passkey
+        from app.auth.passkey import ChallengeExpired
+
+        http = _http_for_invite_passkey(ChallengeExpired("ttl elapsed"))
+        assert http.status_code == status.HTTP_400_BAD_REQUEST
+        assert self._detail_dict(http) == {"error": "challenge_expired"}
+
+    def test_challenge_consumed_or_unknown_maps_to_409(self) -> None:
+        """Replay safety: a burnt or never-issued challenge is 409.
+
+        The two cases collapse onto one error envelope so the SPA's
+        retry-or-restart heuristic doesn't have to differentiate
+        them — ``register_finish_signup`` sees both classes as
+        "this challenge cannot be verified" and re-running ``start``
+        is the right next step in either case.
+        """
+        from app.api.v1.auth.invite import _http_for_invite_passkey
+        from app.auth.passkey import ChallengeAlreadyConsumed, ChallengeNotFound
+
+        for exc in (ChallengeNotFound("gone"), ChallengeAlreadyConsumed("gone")):
+            http = _http_for_invite_passkey(exc)
+            assert http.status_code == status.HTTP_409_CONFLICT
+            assert self._detail_dict(http) == {
+                "error": "challenge_consumed_or_unknown"
+            }
+
+    def test_too_many_passkeys_maps_to_422(self) -> None:
+        """Concurrent enrolment race: a 6th-passkey insert hits the cap."""
+        from app.api.v1.auth.invite import _http_for_invite_passkey
+        from app.auth.passkey import TooManyPasskeys
+
+        http = _http_for_invite_passkey(TooManyPasskeys("cap"))
+        assert http.status_code == 422
+        assert self._detail_dict(http) == {"error": "too_many_passkeys"}

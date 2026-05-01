@@ -22,14 +22,18 @@ The signup flow's WebAuthn ceremony lives in
 :mod:`app.api.v1.auth.signup` (``/api/v1/signup/passkey/{start,finish}``)
 — its finish handler delegates to :func:`app.auth.signup.complete_signup`
 which atomically creates the user, workspace, owners permission
-group, and first passkey credential in one transaction. A parallel
+group, and first passkey credential in one transaction. The
+invite-flow ceremony is the parallel pair on
+:mod:`app.api.v1.auth.invite` (``/api/v1/invite/passkey/{start,finish}``,
+cd-9q6bb) — same :func:`app.auth.passkey.register_start_signup` /
+:func:`app.auth.passkey.register_finish_signup` helpers, scoped to
+an ``invite_id`` instead of a ``signup_session_id``. A parallel
 bare-host ``/api/v1/auth/passkey/signup/register/{start,finish}``
-router used to live in this module (still calling the same
-:func:`app.auth.passkey.register_start_signup` /
-:func:`app.auth.passkey.register_finish_signup` domain helpers the
-canonical flow uses today); cd-ju0q retired the router itself in
-favour of the single canonical signup flow above. The domain helpers
-remain in active use by :func:`app.auth.signup.complete_signup`.
+router used to live in this module; cd-ju0q retired it in favour
+of the single canonical signup flow above. The domain helpers remain
+in active use by :func:`app.auth.signup.complete_signup` and
+:func:`app.domain.identity.membership.register_invite_passkey_start` /
+:func:`app.domain.identity.membership.register_invite_passkey_finish`.
 
 Handlers are intentionally thin: unpack the body, call the domain
 service under the request's Unit-of-Work, shape the response. The

@@ -110,6 +110,7 @@ from app.adapters.db.authz.models import (
 )
 from app.adapters.db.identity.models import (
     Invite,
+    MagicLinkNonce,
     PasskeyCredential,
     User,
     canonicalise_email,
@@ -121,6 +122,7 @@ from app.adapters.db.workspace.models import UserWorkspace, Workspace
 from app.adapters.mail.ports import MailDeliveryError, Mailer
 from app.audit import write_audit
 from app.auth import magic_link
+from app.auth import passkey as passkey_service
 from app.auth._hashing import hash_with_pepper
 from app.auth._throttle import Throttle
 from app.auth.keys import derive_subkey
@@ -146,6 +148,7 @@ __all__ = [
     "InviteIntrospection",
     "InviteNotFound",
     "InviteOutcome",
+    "InvitePasskeyAlreadyRegistered",
     "InviteSession",
     "InviteStateInvalid",
     "LastOwnerMember",
@@ -159,6 +162,8 @@ __all__ = [
     "introspect_invite",
     "invite",
     "list_workspaces_for_user",
+    "register_invite_passkey_finish",
+    "register_invite_passkey_start",
     "remove_member",
     "switch_session_workspace",
     "write_member_remove_rejected_audit",
@@ -375,6 +380,22 @@ class PasskeySessionRequired(PermissionError):
     :class:`Session` is present for them — per spec, the Acceptance
     card is gated on a passkey sign-in so a stolen magic link alone
     can't attach grants.
+    """
+
+
+class InvitePasskeyAlreadyRegistered(ValueError):
+    """The invitee already holds a passkey; the new-user enrolment
+    flow is closed.
+
+    409-equivalent. Raised by :func:`register_invite_passkey_start`
+    and :func:`register_invite_passkey_finish` when the invite's
+    linked user already holds at least one
+    :class:`PasskeyCredential`. Once the invitee has a key on file,
+    new credentials must go through the authenticated
+    "add another passkey" flow (`/auth/passkey/register/{start,finish}`)
+    or the recovery flow — not the bare-host invite enrolment route.
+    Closing the route post-enrolment also stops a leaked
+    ``invite_id`` from minting a second uninvited credential.
     """
 
 
@@ -1475,6 +1496,199 @@ def confirm_invite(
         clock=clock,
     )
     return invite_row.workspace_id
+
+
+# ---------------------------------------------------------------------------
+# Invitee passkey enrolment (bridges /invite/accept and /invite/complete)
+# ---------------------------------------------------------------------------
+
+
+def _assert_magic_link_consumed(session: DbSession, *, invite_id: str) -> None:
+    """Reject when no ``grant_invite`` magic link has been consumed yet.
+
+    The invite_id alone is not authority — §03 says a leaked invite_id
+    must not let an attacker mint a passkey. The legitimate flow must
+    have called :func:`consume_invite_token` (i.e. ``POST /invite/accept``),
+    which flips the matching :class:`MagicLinkNonce`'s ``consumed_at``
+    to the current wall-clock. We re-discover that signal here rather
+    than threading per-invite state through the :class:`Invite` row,
+    so the gate works on existing data without a schema migration.
+
+    Re-issued invites delete prior unconsumed nonces in
+    :func:`_invalidate_pending_invite_nonces` but leave consumed rows
+    intact — once the invitee proved email control once, that proof
+    rides through subsequent re-sends. Stolen invite_id can still
+    reach this guard but the magic-link nonce delivered only to the
+    invitee is the seed an attacker cannot synthesise.
+
+    Raises :class:`PasskeySessionRequired` (mapped to 401 by the
+    router) when no consumed grant_invite nonce exists for the
+    invite. The class is reused rather than introducing a fourth
+    invite-state error so the SPA's existing "redirect to /accept"
+    handler covers this case naturally.
+    """
+    with tenant_agnostic():
+        consumed = session.scalar(
+            select(MagicLinkNonce)
+            .where(
+                MagicLinkNonce.subject_id == invite_id,
+                MagicLinkNonce.purpose == "grant_invite",
+                MagicLinkNonce.consumed_at.is_not(None),
+            )
+            .limit(1)
+        )
+    if consumed is None:
+        raise PasskeySessionRequired(
+            f"invite {invite_id!r}: magic link not consumed; "
+            "POST /invite/accept must run before /invite/passkey/{start,finish}"
+        )
+
+
+def _load_pending_invite_for_passkey(
+    session: DbSession, *, invite_id: str, now: datetime
+) -> tuple[Invite, User]:
+    """Return ``(invite, user)`` for an invite ready for passkey enrolment.
+
+    Reuses :func:`_load_pending_invite_for_accept` to enforce the
+    invite-state contract (pending, not expired, not revoked), then
+    re-checks via :func:`_assert_magic_link_consumed` that the
+    invitee actually clicked the magic link (proves email control
+    against a leaked / guessed invite_id), then loads the linked user
+    row tenant-agnostically (``user`` is identity-scoped), and
+    rejects when the user is already enrolled.
+
+    Raises:
+
+    * :class:`InviteNotFound` / :class:`InviteAlreadyAccepted` /
+      :class:`InviteStateInvalid` / :class:`InviteExpired` — same as
+      :func:`complete_invite` (state machine).
+    * :class:`PasskeySessionRequired` — the magic link was never
+      consumed; ``/invite/accept`` must run first.
+    * :class:`InvitePasskeyAlreadyRegistered` — the user already
+      has at least one passkey credential; the bare-host enrolment
+      route is closed.
+    """
+    invite_row = _load_pending_invite_for_accept(
+        session, invite_id=invite_id, now=now
+    )
+    _assert_magic_link_consumed(session, invite_id=invite_id)
+    user_id = invite_row.user_id
+    if user_id is None:
+        raise InviteStateInvalid(
+            f"invite {invite_id!r} carries no user_id; cannot enrol passkey"
+        )
+    if _user_has_passkey(session, user_id=user_id):
+        raise InvitePasskeyAlreadyRegistered(
+            f"invite {invite_id!r}: user {user_id!r} already has a passkey"
+        )
+    with tenant_agnostic():
+        user = session.get(User, user_id)
+    if user is None:
+        raise InviteStateInvalid(
+            f"invite {invite_id!r}: linked user {user_id!r} missing"
+        )
+    return invite_row, user
+
+
+def register_invite_passkey_start(
+    session: DbSession,
+    *,
+    invite_id: str,
+    now: datetime | None = None,
+    settings: Settings | None = None,
+    clock: Clock | None = None,
+) -> passkey_service.RegistrationOptions:
+    """Mint a registration challenge for a brand-new invitee's first passkey.
+
+    Bridges :func:`consume_invite_token` (which left the invite in
+    ``state=pending`` with ``user_id`` set but no passkey) and
+    :func:`complete_invite` (which requires a passkey on file). The
+    challenge is stamped against the ``invite_id`` (carried in the
+    challenge row's ``signup_session_id`` slot — the column is a
+    free-form challenge subject, not exclusive to signups) so the
+    finish call can verify the credential lands under the right user
+    without taking an authenticated session.
+
+    **Authorisation gates.**
+
+    1. **Magic-link consumed.** ``/invite/accept`` must have run (the
+       matching :class:`MagicLinkNonce`'s ``consumed_at`` is set).
+       This is the email-control proof — the magic link is delivered
+       only to the invitee, so the gate stops a leaked / guessed
+       ``invite_id`` from skipping straight to passkey enrolment.
+       Failure raises :class:`PasskeySessionRequired` (401).
+    2. **Invite still pending.** Not accepted / revoked / expired
+       (TTL).
+    3. **No passkey on file yet.** Once a credential lands, this
+       route rejects further calls — the invitee must follow the
+       recovery / "add another passkey" flow instead. Closing the
+       route post-enrolment stops a leaked ``invite_id`` from minting
+       a second uninvited credential.
+
+    The caller's UoW owns the transaction boundary.
+    """
+    # ``settings`` reserved for future per-deployment knobs (e.g.
+    # rate-limit overrides); the symmetry with :func:`complete_invite`
+    # keeps the router's wiring uniform.
+    del settings
+    resolved_now = now if now is not None else _now(clock)
+    invite_row, user = _load_pending_invite_for_passkey(
+        session, invite_id=invite_id, now=resolved_now
+    )
+    return passkey_service.register_start_signup(
+        session,
+        signup_session_id=invite_id,
+        email=user.email_lower,
+        display_name=invite_row.display_name,
+        user_handle=user.id.encode("utf-8"),
+        clock=clock,
+        now=resolved_now,
+    )
+
+
+def register_invite_passkey_finish(
+    session: DbSession,
+    *,
+    invite_id: str,
+    challenge_id: str,
+    credential: dict[str, Any],
+    now: datetime | None = None,
+    settings: Settings | None = None,
+    clock: Clock | None = None,
+) -> passkey_service.PasskeyCredentialRef:
+    """Verify the attestation + persist the invitee's first passkey.
+
+    Mirrors :func:`register_invite_passkey_start` for the second leg.
+    Reuses :func:`app.auth.passkey.register_finish_signup` so the
+    challenge-TTL, attestation verification, and challenge-burn
+    semantics match the self-serve signup ceremony exactly. No audit
+    row is written here — the ``user.enrolled`` row lands inside
+    :func:`complete_invite` once the SPA POSTs the final ``invite/complete``
+    request, mirroring how :func:`app.auth.signup.complete_signup`
+    sequences the audit alongside grant activation.
+
+    Raises the same state errors as :func:`register_invite_passkey_start`
+    plus the passkey domain errors :func:`register_finish_signup`
+    surfaces (challenge unknown / consumed / expired / subject
+    mismatch / invalid attestation / too-many-passkeys).
+    """
+    del settings
+    resolved_now = now if now is not None else _now(clock)
+    # Reload the invite + user so a finish call posted after the user
+    # already has a passkey (e.g. a stale tab replaying a finish that
+    # already succeeded) is rejected with the same shape as start.
+    _invite_row, user = _load_pending_invite_for_passkey(
+        session, invite_id=invite_id, now=resolved_now
+    )
+    return passkey_service.register_finish_signup(
+        session,
+        signup_session_id=invite_id,
+        user_id=user.id,
+        challenge_id=challenge_id,
+        credential=credential,
+        clock=clock,
+        now=resolved_now,
+    )
 
 
 # ---------------------------------------------------------------------------

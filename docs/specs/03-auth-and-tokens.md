@@ -235,12 +235,26 @@ they take effect; grants never attach silently.
   single-use; `jti` recorded). The same endpoint handles both
   cases:
   - **New user**: the redemption is followed inline by the
-    passkey enrollment ceremony (display name confirmation,
-    timezone, `passkey/register/finish`). On success the
-    pending grants are activated, and — for invitees into a
-    `manager` surface grant or any `owners` permission group —
-    a set of break-glass codes is generated (same ritual as the
-    self-serve signup flow).
+    passkey enrollment ceremony. The ceremony runs against
+    bare-host endpoints scoped to the `invite_id` — `POST
+    /api/v1/invite/passkey/start` mints the WebAuthn challenge
+    and `POST /api/v1/invite/passkey/finish` verifies the
+    attestation and persists the credential against the
+    pre-existing `user` row that the invite spawned. On success
+    the SPA POSTs `/api/v1/invite/complete`, which activates the
+    pending grants in a single transaction, and — for invitees
+    into a `manager` surface grant or any `owners` permission
+    group — a set of break-glass codes is generated (same
+    ritual as the self-serve signup flow). The two passkey
+    endpoints carry three independent authorisation gates: (a)
+    the matching `magic_link_nonce` row must already have
+    `consumed_at` set — i.e. `/invite/accept` ran first, which
+    is the email-control proof against a leaked / guessed
+    `invite_id`; (b) the invite is in `pending` state and within
+    its TTL; (c) the linked user holds zero passkey credentials.
+    Once the first credential lands the pair is closed for that
+    invite, so a leaked `invite_id` cannot mint a second
+    uninvited passkey.
   - **Existing user**: the redemption prompts a passkey sign-in
     if no active session is present, then renders the Acceptance
     card. The card lists the exact grants, group memberships, and

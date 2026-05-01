@@ -362,6 +362,15 @@ ignore_imports = [
     # adapters" contract honest without forcing every auth domain
     # call to route through a port.
     "app.domain.identity.membership -> app.auth.magic_link",
+    # Same stopgap covers the bare-host invitee passkey enrolment seam
+    # added in cd-9q6bb: ``register_invite_passkey_{start,finish}``
+    # delegates verification + persistence to
+    # :mod:`app.auth.passkey` so the WebAuthn envelope stays in one
+    # place. The auth layer itself reads identity ORM models directly
+    # (cd-4zz). Drops with cd-duv6 / cd-kd26 when the passkey-finish
+    # callback folds completion in and the auth layer routes through
+    # a port.
+    "app.domain.identity.membership -> app.auth.passkey",
     # v1 stopgap (cd-dv2): the existing
     # ``app.services.employees.service`` reads
     # :class:`UserWorkspace` / :class:`WorkEngagement` /
