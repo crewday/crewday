@@ -16,8 +16,9 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from sqlalchemy import JSON, CheckConstraint, DateTime, Index, Text, UniqueConstraint
+from sqlalchemy import JSON, CheckConstraint, Index, Text, UniqueConstraint
 
+from app.adapters.db._columns import UtcDateTime
 from app.adapters.db.tasks import (
     ChecklistItem,
     ChecklistTemplateItem,
@@ -298,13 +299,16 @@ class TestOccurrenceModel:
             assert state in sql, f"{state} missing from CHECK constraint"
 
     def test_state_machine_columns_present(self) -> None:
+        # Timestamp columns use ``UtcDateTime`` (cd-xma93) — a
+        # ``TypeDecorator`` over ``DateTime(timezone=True)`` that
+        # guarantees aware UTC reads on every dialect.
         columns = Occurrence.__table__.c
         assert isinstance(columns.completion_note_md.type, Text)
         assert isinstance(columns.skipped_reason.type, Text)
-        assert isinstance(columns.overdue_since.type, DateTime)
-        assert columns.overdue_since.type.timezone is True
-        assert isinstance(columns.due_by_utc.type, DateTime)
-        assert columns.due_by_utc.type.timezone is True
+        assert isinstance(columns.overdue_since.type, UtcDateTime)
+        assert columns.overdue_since.type.impl_instance.timezone is True
+        assert isinstance(columns.due_by_utc.type, UtcDateTime)
+        assert columns.due_by_utc.type.impl_instance.timezone is True
         assert "asset_id" in columns
         assert "asset_action_id" in columns
 
@@ -407,11 +411,14 @@ class TestTaskCompletionModel:
         assert TaskCompletion.__tablename__ == "task_completion"
 
     def test_json_and_timestamp_columns_present(self) -> None:
+        # Timestamp columns use ``UtcDateTime`` (cd-xma93) — a
+        # ``TypeDecorator`` over ``DateTime(timezone=True)`` that
+        # guarantees aware UTC reads on every dialect.
         columns = TaskCompletion.__table__.c
-        assert isinstance(columns.completed_at.type, DateTime)
-        assert columns.completed_at.type.timezone is True
-        assert isinstance(columns.created_at.type, DateTime)
-        assert columns.created_at.type.timezone is True
+        assert isinstance(columns.completed_at.type, UtcDateTime)
+        assert columns.completed_at.type.impl_instance.timezone is True
+        assert isinstance(columns.created_at.type, UtcDateTime)
+        assert columns.created_at.type.impl_instance.timezone is True
         assert isinstance(columns.completion_note_md.type, Text)
         assert isinstance(columns.evidence_blob_hashes.type, JSON)
         assert isinstance(columns.checklist_snapshot_json.type, JSON)

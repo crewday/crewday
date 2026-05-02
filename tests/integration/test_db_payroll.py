@@ -223,6 +223,7 @@ class TestMigrationShape:
             "overtime_hours_decimal",
             "gross_cents",
             "deductions_cents",
+            "expense_reimbursements_cents",
             "net_cents",
             "components_json",
             "pdf_blob_hash",

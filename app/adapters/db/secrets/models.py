@@ -35,13 +35,13 @@ from datetime import datetime
 
 from sqlalchemy import (
     Boolean,
-    DateTime,
     Index,
     LargeBinary,
     String,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
+from app.adapters.db._columns import UtcDateTime
 from app.adapters.db.base import Base
 
 __all__ = [
@@ -65,15 +65,9 @@ class RootKeySlot(Base):
     key_fp: Mapped[bytes] = mapped_column(LargeBinary, nullable=False, unique=True)
     key_ref: Mapped[str] = mapped_column(String, nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    activated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
-    retired_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
-    purge_after: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    activated_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
+    retired_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), nullable=True)
+    purge_after: Mapped[datetime | None] = mapped_column(UtcDateTime(), nullable=True)
     notes: Mapped[str | None] = mapped_column(String, nullable=True)
 
     __table_args__ = (
@@ -137,12 +131,8 @@ class SecretEnvelope(Base):
     # SQLite's batch-rebuild doesn't try to reproject a length-pinned
     # type that the dialect can't represent.
     key_fp: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
-    rotated_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
+    rotated_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), nullable=True)
 
     __table_args__ = (
         # Hot path for the rotation worker — see class docstring.

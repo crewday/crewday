@@ -34,7 +34,6 @@ from sqlalchemy import (
     JSON,
     Boolean,
     CheckConstraint,
-    DateTime,
     ForeignKey,
     Index,
     Integer,
@@ -42,6 +41,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
+from app.adapters.db._columns import UtcDateTime
 from app.adapters.db.base import Base
 
 # Cross-package FK target — see :mod:`app.adapters.db` package
@@ -116,12 +116,8 @@ class WebhookSubscription(Base):
     # ...). Empty = invalid; service refuses.
     events_json: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
     active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
 
     __table_args__ = (
         # Tenant-filter hot path — every read is workspace-scoped.
@@ -178,7 +174,7 @@ class WebhookDelivery(Base):
     status: Mapped[str] = mapped_column(String, nullable=False)
     attempt: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     next_attempt_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
+        UtcDateTime(), nullable=True
     )
     last_status_code: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # Free-form short error label ("connect_timeout", "tls_error",
@@ -186,22 +182,18 @@ class WebhookDelivery(Base):
     # non-2xx attempt; cleared on success.
     last_error: Mapped[str | None] = mapped_column(String, nullable=True)
     last_attempted_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
+        UtcDateTime(), nullable=True
     )
-    succeeded_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    succeeded_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), nullable=True)
     dead_lettered_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
+        UtcDateTime(), nullable=True
     )
     replayed_from_id: Mapped[str | None] = mapped_column(
         String,
         ForeignKey("webhook_delivery.id", ondelete="SET NULL"),
         nullable=True,
     )
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
 
     __table_args__ = (
         CheckConstraint(

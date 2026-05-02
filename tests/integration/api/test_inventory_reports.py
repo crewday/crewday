@@ -192,10 +192,12 @@ def test_stocktake_activity_report_summarises_sessions(
         {
             "stocktake_id": stocktake.id,
             "property_id": property_id,
-            "started_at": _PINNED.replace(tzinfo=None).isoformat(),
-            "completed_at": (_PINNED + timedelta(minutes=5))
-            .replace(tzinfo=None)
-            .isoformat(),
+            # Aware UTC roundtrip — pydantic v2 serialises ``DateTime(timezone=
+            # True)`` columns as RFC 3339 with a ``+00:00`` suffix after the
+            # cd-xma93 ``UtcDateTime`` TypeDecorator landed (was naive on
+            # SQLite before).
+            "started_at": _PINNED.isoformat(),
+            "completed_at": (_PINNED + timedelta(minutes=5)).isoformat(),
             "actor_kind": "user",
             "actor_id": ctx.actor_id,
             "movement_count": 1,

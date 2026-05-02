@@ -47,7 +47,6 @@ from datetime import datetime
 from sqlalchemy import (
     Boolean,
     CheckConstraint,
-    DateTime,
     Float,
     ForeignKey,
     Index,
@@ -57,6 +56,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
+from app.adapters.db._columns import UtcDateTime
 from app.adapters.db.base import Base
 
 # Cross-package FK targets — see :mod:`app.adapters.db` package
@@ -141,13 +141,11 @@ class Shift(Base):
         ForeignKey("user.id", ondelete="RESTRICT"),
         nullable=False,
     )
-    starts_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    starts_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
     # ``NULL`` means the shift is still open — the worker clocked in
     # but hasn't clocked out yet. The ``(user_id, ends_at)`` index
     # makes the "is there an open shift for this user?" check cheap.
-    ends_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    ends_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), nullable=True)
     # Soft-ref :class:`str` — the domain layer resolves it against
     # :mod:`app.adapters.db.places.models` once §05's
     # ``property_workspace`` intersection settles. Nullable because
@@ -165,9 +163,7 @@ class Shift(Base):
     # until a manager approves the shift; once set, the ``approved_at``
     # column is the authoritative wall-clock for payroll.
     approved_by: Mapped[str | None] = mapped_column(String, nullable=True)
-    approved_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    approved_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), nullable=True)
 
     __table_args__ = (
         CheckConstraint(
@@ -219,20 +215,16 @@ class Leave(Base):
         nullable=False,
     )
     kind: Mapped[str] = mapped_column(String, nullable=False)
-    starts_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    ends_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    starts_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
+    ends_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
     status: Mapped[str] = mapped_column(String, nullable=False, default="pending")
     reason_md: Mapped[str | None] = mapped_column(String, nullable=True)
     # Soft-ref :class:`str` — see the module docstring. Null until
     # a manager decides the request; ``decided_at`` wall-clocks the
     # transition for audit.
     decided_by: Mapped[str | None] = mapped_column(String, nullable=True)
-    decided_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
+    decided_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
 
     __table_args__ = (
         CheckConstraint(

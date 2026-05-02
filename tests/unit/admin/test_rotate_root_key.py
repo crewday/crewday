@@ -89,10 +89,9 @@ def test_start_rotation_creates_active_and_retired_slots(
     assert len([slot for slot in slots if slot.is_active]) == 1
     retired = next(slot for slot in slots if not slot.is_active)
     assert retired.key_ref == rotate_root_key.ENV_ROOT_KEY_REF
-    assert retired.retired_at == PINNED.replace(tzinfo=None)
-    assert retired.purge_after == (PINNED + rotate_root_key.ROTATION_WINDOW).replace(
-        tzinfo=None
-    )
+    # ``UtcDateTime`` (cd-xma93) returns aware UTC on every dialect.
+    assert retired.retired_at == PINNED
+    assert retired.purge_after == PINNED + rotate_root_key.ROTATION_WINDOW
     assert audit.action == "key_rotation.started"
     assert audit.via == "cli"
 
@@ -146,7 +145,8 @@ def test_reencrypt_and_finalize_rotation(
         plaintext = new_env.decrypt(pointer, purpose="smtp.password")
 
     assert row.key_fp == compute_key_fingerprint(SecretStr(NEW_KEY))
-    assert row.rotated_at == PINNED.replace(tzinfo=None)
+    # ``UtcDateTime`` (cd-xma93) returns aware UTC on every dialect.
+    assert row.rotated_at == PINNED
     assert plaintext == b"secret"
     assert len(slots) == 1
     assert slots[0].is_active is True

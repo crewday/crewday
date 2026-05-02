@@ -117,7 +117,6 @@ from sqlalchemy import (
     BigInteger,
     Boolean,
     CheckConstraint,
-    DateTime,
     ForeignKey,
     Index,
     Integer,
@@ -126,6 +125,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
+from app.adapters.db._columns import UtcDateTime
 from app.adapters.db.base import Base
 
 # Cross-package FK targets — see :mod:`app.adapters.db` package
@@ -242,17 +242,13 @@ class ExpenseClaim(Base):
     # ``NULL`` while the claim is still ``draft`` — the worker hasn't
     # submitted yet. Set to the server-side submit wall-clock on the
     # draft → submitted transition; immutable from then on.
-    submitted_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    submitted_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), nullable=True)
     vendor: Mapped[str] = mapped_column(String, nullable=False)
     # ``DateTime`` rather than ``Date``: §09 §"Submission flow" notes
     # "date + approximate time if legible"; a datetime column holds
     # both shapes at the cost of one minor units of storage. The
     # domain layer is free to strip the time portion for display.
-    purchased_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
+    purchased_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
     # ISO-4217 currency code — any code valid per §02 §"Multi-currency
     # expenses". Stored as a 3-char text with a CHECK on length; the
     # domain layer validates against a known-codes set before write.
@@ -321,9 +317,7 @@ class ExpenseClaim(Base):
     state: Mapped[str] = mapped_column(String, nullable=False, default="draft")
     # Soft-ref :class:`str` — see the module docstring.
     decided_by: Mapped[str | None] = mapped_column(String, nullable=True)
-    decided_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    decided_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), nullable=True)
     # Markdown reason attached by the decider. NULL until a decision
     # is recorded; empty-string default would hide the "decided but
     # reason omitted" case.
@@ -346,20 +340,14 @@ class ExpenseClaim(Base):
     # (a different manager, the operator running treasury, an admin
     # cleaning up after period close), so the two columns must not be
     # collapsed.
-    reimbursed_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    reimbursed_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), nullable=True)
     reimbursed_via: Mapped[str | None] = mapped_column(String, nullable=True)
     reimbursed_by: Mapped[str | None] = mapped_column(String, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
     # NULL = live; set to the wall-clock of a soft-delete. The
     # domain layer enforces the "only ``draft`` claims can be
     # soft-deleted" rule; later states are immutable audit records.
-    deleted_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    deleted_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), nullable=True)
 
     __table_args__ = (
         CheckConstraint(
@@ -579,9 +567,7 @@ class ExpenseAttachment(Base):
     # NULL for single-image receipts — an unset page count is
     # distinct from a one-page document.
     pages: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
 
     __table_args__ = (
         CheckConstraint(

@@ -36,7 +36,6 @@ from sqlalchemy import (
     JSON,
     Boolean,
     CheckConstraint,
-    DateTime,
     ForeignKey,
     Index,
     Integer,
@@ -45,6 +44,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
+from app.adapters.db._columns import UtcDateTime
 from app.adapters.db.base import Base
 
 # Cross-package FK targets — see :mod:`app.adapters.db` package
@@ -176,7 +176,7 @@ class IcalFeed(Base):
     # ``NULL`` means the feed has never been polled — a fresh
     # registration. The poller treats a null value as "due now".
     last_polled_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
+        UtcDateTime(), nullable=True
     )
     # Last ``ETag`` seen on a 200; the next poll sends it as
     # ``If-None-Match`` to save bandwidth.
@@ -187,9 +187,7 @@ class IcalFeed(Base):
     # so the operator UI can surface a live-vs-stale indicator.
     last_error: Mapped[str | None] = mapped_column(String, nullable=True)
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
 
     __table_args__ = (
         CheckConstraint(
@@ -251,8 +249,8 @@ class Reservation(Base):
     # Provider UID (Airbnb HMAC id, VRBO reservation id, etc.). Kept
     # as plain text — callers never parse it.
     external_uid: Mapped[str] = mapped_column(String, nullable=False)
-    check_in: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    check_out: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    check_in: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
+    check_out: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
     guest_name: Mapped[str | None] = mapped_column(String, nullable=True)
     guest_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     status: Mapped[str] = mapped_column(String, nullable=False, default="scheduled")
@@ -277,9 +275,7 @@ class Reservation(Base):
     # cleanup paths sweep this column on revoke / delete. cd-l0k
     # landed the column.
     guest_link_id: Mapped[str | None] = mapped_column(String, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
 
     __table_args__ = (
         CheckConstraint(
@@ -335,9 +331,7 @@ class StayBundle(Base):
     tasks_json: Mapped[list[dict[str, Any]]] = mapped_column(
         JSON, nullable=False, default=list
     )
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
 
     __table_args__ = (
         CheckConstraint(
@@ -405,23 +399,17 @@ class GuestLink(Base):
     # (the timestamp + jti embedded in the signature changes), so
     # collisions never occur in practice.
     token: Mapped[str] = mapped_column(String, nullable=False, unique=True)
-    expires_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
+    expires_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
     # ``NULL`` while the link is active; the domain service's revoke
     # path stamps a non-null timestamp and the resolver treats any
     # non-null value as "gone".
-    revoked_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    revoked_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), nullable=True)
     # Last 10 ``{ip_prefix_sha256, ua_family, at}`` records. List of
     # dicts — the outer ``Any`` is a SQLAlchemy JSON-column quirk;
     # callers writing typed payloads narrow locally.
     access_log_json: Mapped[list[dict[str, Any]]] = mapped_column(
         JSON, nullable=False, default=list
     )
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
 
     __table_args__ = (Index("ix_guest_link_workspace_stay", "workspace_id", "stay_id"),)

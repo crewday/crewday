@@ -281,7 +281,8 @@ class TestChatChannelCrud:
         with factory() as s:
             row = s.get(ChatChannel, channel.id)
             assert row is not None
-            assert row.archived_at == _PINNED.replace(tzinfo=None)
+            # ``UtcDateTime`` (cd-xma93) returns aware UTC on every dialect.
+            assert row.archived_at == _PINNED
             assert archived.archived_at == _PINNED
             actions = s.scalars(
                 select(AuditLog.action).order_by(AuditLog.created_at.asc())

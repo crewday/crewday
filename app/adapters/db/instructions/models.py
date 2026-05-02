@@ -56,7 +56,6 @@ from datetime import datetime
 from sqlalchemy import (
     JSON,
     CheckConstraint,
-    DateTime,
     ForeignKey,
     Index,
     Integer,
@@ -65,6 +64,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
+from app.adapters.db._columns import UtcDateTime
 from app.adapters.db.base import Base
 
 # Cross-package FK targets — see :mod:`app.adapters.db` package
@@ -175,13 +175,9 @@ class Instruction(Base):
     # back to null on restore. Mirrors the
     # ``messaging.chat_channel.archived_at`` / ``billing.organization
     # .archived_at`` / ``user.archived_at`` pattern across the app.
-    archived_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    archived_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), nullable=True)
     created_by: Mapped[str | None] = mapped_column(String, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
 
     __table_args__ = (
         CheckConstraint(
@@ -288,9 +284,7 @@ class InstructionVersion(Base):
     # Optional human-authored revision summary. ``NULL`` on rows
     # written by a system actor or a caller that didn't supply one.
     change_note: Mapped[str | None] = mapped_column(String, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
 
     __table_args__ = (
         CheckConstraint("version_num >= 1", name="version_num_positive"),
@@ -334,7 +328,7 @@ class InstructionLink(Base):
     target_kind: Mapped[str] = mapped_column(String, nullable=False)
     target_id: Mapped[str] = mapped_column(String, nullable=False)
     added_by: Mapped[str] = mapped_column(String, nullable=False)
-    added_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    added_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
 
     __table_args__ = (
         CheckConstraint(

@@ -32,7 +32,6 @@ from sqlalchemy import (
     JSON,
     Boolean,
     CheckConstraint,
-    DateTime,
     Float,
     ForeignKey,
     Index,
@@ -42,6 +41,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
+from app.adapters.db._columns import UtcDateTime
 from app.adapters.db.base import Base
 
 # Cross-package FK targets — see :mod:`app.adapters.db` package
@@ -214,20 +214,14 @@ class Property(Base):
     )
     # Internal staff-visible notes (§04 "Property" — property_notes_md).
     property_notes_md: Mapped[str] = mapped_column(String, nullable=False, default="")
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
     # Mutation timestamp — bumped on every domain-service update.
     # Nullable for the cd-8u5 migration's cheap backfill path; the
     # service always writes it on insert + update.
-    updated_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    updated_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), nullable=True)
     # Soft-delete marker; live rows carry ``NULL``. The service's
     # default list excludes non-null rows.
-    deleted_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    deleted_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), nullable=True)
 
     __table_args__ = (
         CheckConstraint(
@@ -288,9 +282,7 @@ class PropertyWorkspace(Base):
     # are always seeded ``active``. CHECK-enforced via ``ck_property_workspace_status``.
     # Lands with cd-hsk.
     status: Mapped[str] = mapped_column(String, nullable=False, default="active")
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
 
     __table_args__ = (
         CheckConstraint(
@@ -388,22 +380,16 @@ class Unit(Base):
     # skip it on insert.
     type: Mapped[str | None] = mapped_column(String, nullable=True)
     capacity: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
     # Mutation timestamp — bumped on every domain-service update.
     # Nullable for the cd-y62 migration's cheap backfill path; the
     # service always writes it on insert + update.
-    updated_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    updated_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), nullable=True)
     # Soft-delete marker; live rows carry ``NULL``. The service's
     # default list excludes non-null rows; the partial UNIQUE on
     # ``(property_id, name)`` excludes tombstoned rows so a re-
     # create after a soft-delete works.
-    deleted_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    deleted_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), nullable=True)
 
     __table_args__ = (
         CheckConstraint(
@@ -477,15 +463,9 @@ class Area(Base):
         nullable=True,
     )
     notes_md: Mapped[str] = mapped_column(String, nullable=False, default="")
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
-    updated_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
-    deleted_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
+    updated_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), nullable=True)
+    deleted_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), nullable=True)
 
     __table_args__ = (
         CheckConstraint(
@@ -532,8 +512,8 @@ class PropertyClosure(Base):
         ForeignKey("unit.id", ondelete="SET NULL"),
         nullable=True,
     )
-    starts_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    ends_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    starts_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
+    ends_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
     reason: Mapped[str] = mapped_column(String, nullable=False)
     # Attribution back to the upstream ``ical_feed`` row when the
     # closure was minted from a Blocked-pattern VEVENT (§04 "iCal
@@ -547,19 +527,15 @@ class PropertyClosure(Base):
     )
     source_external_uid: Mapped[str | None] = mapped_column(String, nullable=True)
     source_last_seen_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
+        UtcDateTime(), nullable=True
     )
     created_by_user_id: Mapped[str | None] = mapped_column(
         String,
         ForeignKey("user.id", ondelete="SET NULL"),
         nullable=True,
     )
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
-    deleted_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
+    deleted_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), nullable=True)
 
     __table_args__ = (
         CheckConstraint("ends_at > starts_at", name="ends_after_starts"),
@@ -684,18 +660,12 @@ class PropertyWorkRoleAssignment(Base):
         ForeignKey("pay_rule.id", ondelete="SET NULL"),
         nullable=True,
     )
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
     # Soft-delete tombstone; live rows carry NULL. The partial UNIQUE
     # below excludes tombstoned rows so a re-pin after an archive
     # mints a fresh row without colliding with the historical one.
-    deleted_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    deleted_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), nullable=True)
 
     __table_args__ = (
         # Identity key — one live row per (user_work_role, property).

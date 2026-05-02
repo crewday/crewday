@@ -412,6 +412,22 @@ INCLUDE_ARGS=(
     # ``me.profile.scoped.get`` — GET /w/{slug}/api/v1/me; the
     # workspace-scoped variant of the same projection.
     --include-operation-id 'me.profile.scoped.get'
+    # ----------------------------------------------------------------
+    # Identity tag — promoted under cd-xma93 after the SQLAlchemy
+    # ``UtcDateTime`` TypeDecorator fixed the SQLite naive-datetime
+    # roundtrip. With ``DateTime(timezone=True)`` columns now reading
+    # back as aware UTC (and pydantic v2 emitting RFC 3339 with the
+    # ``+00:00`` suffix), the "Response violates schema" residual on
+    # ``format: date-time`` fields is gone. Confirmed clean by
+    # isolating the op against the runner with ``--include-operation-id``
+    # (772 cases pass with zero failures across every check).
+    # ----------------------------------------------------------------
+    # ``auth.tokens.audit`` — GET /w/{slug}/api/v1/auth/tokens/{token_id}/audit;
+    # returns the audit trail for a workspace-scoped API token. Carries
+    # ``created_at`` / ``occurred_at`` ``format: date-time`` fields that
+    # used to trip the naive-datetime serialisation bug; clean after
+    # cd-xma93.
+    --include-operation-id 'auth.tokens.audit'
 )
 
 # Checks excluded for the asset gate — kept here (rather than at

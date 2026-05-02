@@ -425,7 +425,8 @@ def test_delete_soft_deletes_and_hides_from_list(
 
     row = session.get(Evidence, view.id)
     assert row is not None
-    assert row.deleted_at == _PINNED.replace(tzinfo=None)
+    # ``UtcDateTime`` (cd-xma93) returns aware UTC on every dialect.
+    assert row.deleted_at == _PINNED
     assert list_evidence(session, _ctx(ws), task_id=task_id) == ()
     assert "task_evidence.delete" in session.scalars(select(AuditLog.action)).all()
 

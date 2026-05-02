@@ -19,7 +19,6 @@ from sqlalchemy import (
     BigInteger,
     CheckConstraint,
     Date,
-    DateTime,
     ForeignKey,
     ForeignKeyConstraint,
     Index,
@@ -29,6 +28,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
+from app.adapters.db._columns import UtcDateTime
 from app.adapters.db.base import Base
 
 # Cross-package FK targets — see :mod:`app.adapters.db` for the shared
@@ -95,12 +95,8 @@ class Organization(Base):
     contact_email: Mapped[str | None] = mapped_column(String, nullable=True)
     contact_phone: Mapped[str | None] = mapped_column(String, nullable=True)
     notes_md: Mapped[str | None] = mapped_column(String, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
-    archived_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
+    archived_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), nullable=True)
 
     __table_args__ = (
         CheckConstraint(
@@ -193,10 +189,8 @@ class WorkOrder(Base):
     property_id: Mapped[str] = mapped_column(String, nullable=False)
     title: Mapped[str] = mapped_column(String, nullable=False)
     status: Mapped[str] = mapped_column(String, nullable=False)
-    starts_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    ends_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    starts_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
+    ends_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), nullable=True)
     rate_card_id: Mapped[str | None] = mapped_column(String, nullable=True)
     total_hours_decimal: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False)
     total_cents: Mapped[int] = mapped_column(BigInteger, nullable=False)
@@ -261,9 +255,7 @@ class WorkOrderShiftAccrual(Base):
     hours_decimal: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False)
     hourly_rate_cents: Mapped[int] = mapped_column(BigInteger, nullable=False)
     accrued_cents: Mapped[int] = mapped_column(BigInteger, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
 
     __table_args__ = (
         CheckConstraint("hours_decimal >= 0", name="hours_decimal_nonneg"),
@@ -305,12 +297,8 @@ class Quote(Base):
     total_cents: Mapped[int] = mapped_column(BigInteger, nullable=False)
     currency: Mapped[str] = mapped_column(String, nullable=False)
     status: Mapped[str] = mapped_column(String, nullable=False)
-    sent_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
-    decided_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    sent_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), nullable=True)
+    decided_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), nullable=True)
 
     __table_args__ = (
         CheckConstraint(
@@ -358,20 +346,14 @@ class VendorInvoice(Base):
     currency: Mapped[str] = mapped_column(String, nullable=False)
     status: Mapped[str] = mapped_column(String, nullable=False)
     pdf_blob_hash: Mapped[str | None] = mapped_column(String, nullable=True)
-    approved_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
-    paid_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    approved_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), nullable=True)
+    paid_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), nullable=True)
     payment_method: Mapped[str | None] = mapped_column(String, nullable=True)
     proof_blob_hash: Mapped[str | None] = mapped_column(String, nullable=True)
     proof_of_payment_file_ids: Mapped[list[str]] = mapped_column(
         JSON, nullable=False, default=list
     )
-    disputed_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    disputed_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), nullable=True)
     notes_md: Mapped[str | None] = mapped_column(String, nullable=True)
 
     __table_args__ = (

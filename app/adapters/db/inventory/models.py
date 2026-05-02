@@ -47,7 +47,6 @@ from sqlalchemy import (
     JSON,
     Boolean,
     CheckConstraint,
-    DateTime,
     Enum,
     ForeignKey,
     Index,
@@ -59,6 +58,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column, synonym
 
+from app.adapters.db._columns import UtcDateTime
 from app.adapters.db.base import Base
 
 # Cross-package FK targets — see :mod:`app.adapters.db` package
@@ -173,15 +173,9 @@ class Item(Base):
     unit_cost_cents: Mapped[int | None] = mapped_column(nullable=True)
     tags_json: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
     notes_md: Mapped[str | None] = mapped_column(String, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
-    updated_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
-    deleted_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
+    updated_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), nullable=True)
+    deleted_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), nullable=True)
 
     __table_args__ = (
         Index(
@@ -245,12 +239,8 @@ class Stocktake(Base):
         ForeignKey("property.id", ondelete="CASCADE"),
         nullable=False,
     )
-    started_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
-    completed_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    started_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
+    completed_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), nullable=True)
     actor_kind: Mapped[str] = mapped_column(String, nullable=False)
     actor_id: Mapped[str | None] = mapped_column(
         String,
@@ -298,9 +288,7 @@ class StocktakeLine(Base):
     )
     reason: Mapped[str] = mapped_column(_MOVEMENT_REASON_ENUM, nullable=False)
     note: Mapped[str | None] = mapped_column(String, nullable=True)
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
+    updated_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
 
     __table_args__ = (
         PrimaryKeyConstraint(
@@ -375,7 +363,7 @@ class Movement(Base):
         ForeignKey("user.id", ondelete="SET NULL"),
         nullable=True,
     )
-    at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
     note: Mapped[str | None] = mapped_column(String, nullable=True)
 
     __table_args__ = (

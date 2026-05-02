@@ -30,7 +30,6 @@ from sqlalchemy import (
     JSON,
     Boolean,
     CheckConstraint,
-    DateTime,
     ForeignKey,
     ForeignKeyConstraint,
     Index,
@@ -40,6 +39,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
+from app.adapters.db._columns import UtcDateTime
 from app.adapters.db.base import Base
 from app.adapters.db.billing import models as _billing_models  # noqa: F401
 
@@ -104,9 +104,7 @@ class PermissionGroup(Base):
     capabilities_json: Mapped[dict[str, Any]] = mapped_column(
         JSON, nullable=False, default=dict
     )
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
 
     __table_args__ = (
         UniqueConstraint(
@@ -142,7 +140,7 @@ class PermissionGroupMember(Base):
         ForeignKey("workspace.id", ondelete="CASCADE"),
         nullable=False,
     )
-    added_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    added_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
     # ``added_by_user_id`` is NULL for the self-bootstrap row seeded
     # at workspace creation (there is no prior actor); every other
     # membership write records the acting user for audit.
@@ -172,7 +170,7 @@ class DeploymentOwner(Base):
         ForeignKey("user.id", ondelete="CASCADE"),
         primary_key=True,
     )
-    added_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    added_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
     added_by_user_id: Mapped[str | None] = mapped_column(
         String,
         ForeignKey("user.id", ondelete="SET NULL"),
@@ -248,9 +246,7 @@ class RoleGrant(Base):
     scope_kind: Mapped[str] = mapped_column(String, nullable=False, default="workspace")
     scope_property_id: Mapped[str | None] = mapped_column(String, nullable=True)
     binding_org_id: Mapped[str | None] = mapped_column(String, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
     # ``created_by_user_id`` is NULL for the self-grant emitted at
     # workspace creation (there is no prior actor); every other
     # role-grant write records the acting user for audit.

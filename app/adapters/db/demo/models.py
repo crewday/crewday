@@ -4,9 +4,10 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Index, String
+from sqlalchemy import ForeignKey, Index, String
 from sqlalchemy.orm import Mapped, mapped_column
 
+from app.adapters.db._columns import UtcDateTime
 from app.adapters.db.base import Base
 from app.adapters.db.workspace import models as _workspace_models  # noqa: F401
 
@@ -25,15 +26,9 @@ class DemoWorkspace(Base):
     )
     scenario_key: Mapped[str] = mapped_column(String, nullable=False)
     seed_digest: Mapped[str] = mapped_column(String, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
-    last_activity_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
-    expires_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
+    last_activity_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
     cookie_binding_digest: Mapped[str] = mapped_column(String, nullable=False)
 
     __table_args__ = (Index("ix_demo_workspace_expires_at", "expires_at"),)

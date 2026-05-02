@@ -63,7 +63,6 @@ from sqlalchemy import (
     JSON,
     CheckConstraint,
     Date,
-    DateTime,
     ForeignKey,
     Index,
     String,
@@ -72,6 +71,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
+from app.adapters.db._columns import UtcDateTime
 from app.adapters.db.base import Base
 
 # Cross-package FK targets — see :mod:`app.adapters.db` for the shared
@@ -177,9 +177,7 @@ class Workspace(Base):
     default_currency: Mapped[str] = mapped_column(
         String, nullable=False, default="USD", server_default="USD"
     )
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
     # Mutation timestamp — bumped on every basics edit so SSE
     # subscribers can refresh the workspace picker after an owner
     # renames the workspace or changes the default formatting (§14).
@@ -191,7 +189,7 @@ class Workspace(Base):
     # service always writes an explicit value, so the server default
     # is purely a safety net.
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
+        UtcDateTime(),
         nullable=False,
         server_default=text("CURRENT_TIMESTAMP"),
     )
@@ -199,7 +197,7 @@ class Workspace(Base):
     # the welcome UI keys off it so quota banners know whether to show
     # getting-started hints vs. upgrade prompts.
     owner_onboarded_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
+        UtcDateTime(), nullable=True
     )
     verification_state: Mapped[str] = mapped_column(
         String,
@@ -209,9 +207,7 @@ class Workspace(Base):
     )
     signup_ip: Mapped[str | None] = mapped_column(String, nullable=True)
     signup_ip_key: Mapped[str | None] = mapped_column(String, nullable=True)
-    archived_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    archived_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), nullable=True)
 
     __table_args__ = (
         CheckConstraint(
@@ -265,7 +261,7 @@ class UserWorkspace(Base):
         primary_key=True,
     )
     source: Mapped[str] = mapped_column(String, nullable=False)
-    added_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    added_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
 
     __table_args__ = (
         CheckConstraint(
@@ -349,12 +345,8 @@ class WorkRole(Base):
     icon_name: Mapped[str] = mapped_column(
         String, nullable=False, default="", server_default=""
     )
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
-    deleted_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
+    deleted_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), nullable=True)
 
     __table_args__ = (
         UniqueConstraint(
@@ -439,12 +431,8 @@ class UserWorkRole(Base):
     # Soft reference to the future ``pay_rule`` table (cd-ea7).
     # Nullable — most workspaces inherit the engagement-level rule.
     pay_rule_id: Mapped[str | None] = mapped_column(String, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
-    deleted_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
+    deleted_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), nullable=True)
 
     __table_args__ = (
         # §05 identity key: the same (user, workspace, role) can only
@@ -588,12 +576,8 @@ class WorkEngagement(Base):
     settings_override_json: Mapped[dict[str, Any]] = mapped_column(
         JSON, nullable=False, default=dict, server_default="{}"
     )
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
 
     __table_args__ = (
         CheckConstraint(

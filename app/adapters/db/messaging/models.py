@@ -35,7 +35,6 @@ from typing import Any
 from sqlalchemy import (
     JSON,
     CheckConstraint,
-    DateTime,
     ForeignKey,
     Index,
     Integer,
@@ -46,6 +45,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
+from app.adapters.db._columns import UtcDateTime
 from app.adapters.db.base import Base
 
 # Cross-package FK targets — see :mod:`app.adapters.db` package
@@ -252,12 +252,8 @@ class Notification(Base):
     # ``(workspace_id, recipient_user_id, read_at)`` keeps the
     # "unread count" cheap because NULL stays sortable as a leading
     # value on SQLite and PG.
-    read_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
+    read_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
     # Free-form render payload — the locale-specific context the
     # renderer consults (task title, property name, amount, actor).
     # The outer ``Any`` is scoped to SQLAlchemy's JSON column type —
@@ -344,15 +340,11 @@ class PushToken(Base):
     # ``User-Agent`` snapshot at registration. Rendered on ``/me``
     # alongside an unlink action; see class docstring.
     user_agent: Mapped[str | None] = mapped_column(String, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
     # Bumped on every successful push delivery. Drives the 60-day
     # freshness check in the §10 delivery worker; stale tokens are
     # skipped silently (and the row eventually purged by a sweep).
-    last_used_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    last_used_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), nullable=True)
 
     __table_args__ = (
         # "All active tokens for this user in this workspace" — the
@@ -401,12 +393,8 @@ class DigestRecord(Base):
     # recipient's timezone before computing these bounds. ``DateTime
     # (timezone=True)`` keeps the round-trip portable (Postgres
     # ``TIMESTAMP WITH TIME ZONE``, SQLite ISO-8601 UTC text).
-    period_start: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
-    period_end: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
+    period_start: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
+    period_end: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
     # ``daily`` | ``weekly``. See ``_DIGEST_KIND_VALUES`` for the v1
     # cadence options.
     kind: Mapped[str] = mapped_column(String, nullable=False)
@@ -418,9 +406,7 @@ class DigestRecord(Base):
     # the domain layer guards against; the column stays nullable so
     # the row can be inserted atomically alongside the retry-later
     # paths a later worker surfaces.
-    sent_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    sent_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), nullable=True)
 
     __table_args__ = (
         CheckConstraint(
@@ -494,12 +480,8 @@ class ChatChannel(Base):
     # Display label. Nullable for freshly-minted gateway channels
     # pending backfill.
     title: Mapped[str | None] = mapped_column(String, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
-    archived_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
+    archived_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), nullable=True)
 
     __table_args__ = (
         CheckConstraint(
@@ -555,7 +537,7 @@ class ChatChannelMember(Base):
         ForeignKey("workspace.id", ondelete="CASCADE"),
         nullable=False,
     )
-    added_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    added_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
 
     __table_args__ = (
         Index("ix_chat_channel_member_workspace_user", "workspace_id", "user_id"),
@@ -590,11 +572,9 @@ class ChatGatewayBinding(Base):
     provider_metadata_json: Mapped[dict[str, Any]] = mapped_column(
         JSON, nullable=False, default=dict
     )
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
     last_message_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
+        UtcDateTime(), nullable=True
     )
 
     __table_args__ = (
@@ -629,18 +609,12 @@ class ChatChannelBinding(Base):
     address_hash: Mapped[str] = mapped_column(String, nullable=False)
     display_label: Mapped[str] = mapped_column(String, nullable=False)
     state: Mapped[str] = mapped_column(String, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
-    verified_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
-    revoked_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
+    verified_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), nullable=True)
+    revoked_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), nullable=True)
     revoke_reason: Mapped[str | None] = mapped_column(String, nullable=True)
     last_message_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
+        UtcDateTime(), nullable=True
     )
     provider_metadata_json: Mapped[dict[str, Any]] = mapped_column(
         JSON, nullable=False, default=dict
@@ -701,15 +675,9 @@ class ChatLinkChallenge(Base):
     code_hash_params: Mapped[str] = mapped_column(String, nullable=False)
     sent_via: Mapped[str] = mapped_column(String, nullable=False)
     attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    expires_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
-    consumed_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
+    expires_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
+    consumed_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
 
     __table_args__ = (
         CheckConstraint("sent_via IN ('channel', 'email')", name="sent_via"),
@@ -809,7 +777,7 @@ class ChatMessage(Base):
     # dispatcher CASes them out of ``pending``. See class docstring
     # for the fuller state-machine follow-up.
     dispatched_to_agent_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
+        UtcDateTime(), nullable=True
     )
     summary_range_from_id: Mapped[str | None] = mapped_column(
         String,
@@ -826,9 +794,7 @@ class ChatMessage(Base):
         ForeignKey("chat_message.id", ondelete="SET NULL"),
         nullable=True,
     )
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
 
     __table_args__ = (
         # Per-acceptance: "messages in this channel, newest / oldest
@@ -909,9 +875,7 @@ class EmailOptOut(Base):
     # ``places`` / ``payroll`` — new keys land without a migration
     # (the column is a plain string rather than an enum).
     category: Mapped[str] = mapped_column(String, nullable=False)
-    opted_out_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
+    opted_out_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
     # ``unsubscribe_link`` | ``profile`` | ``admin`` per §10. See
     # ``_EMAIL_OPT_OUT_SOURCE_VALUES`` for the v1 enum body.
     source: Mapped[str] = mapped_column(String, nullable=False)
@@ -1010,9 +974,7 @@ class EmailDelivery(Base):
     # Set when the SMTP / ESP dispatch returned success. ``NULL`` on
     # queued rows and on rows the worker bounced off before the
     # first dispatch attempt.
-    sent_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    sent_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), nullable=True)
     # Provider-issued id for bounce-reply correlation. ``NULL`` until
     # the first dispatch attempt lands; then carries the ESP's
     # message id (conventionally the RFC 5322 Message-ID header).
@@ -1039,9 +1001,7 @@ class EmailDelivery(Base):
     inbound_linkage: Mapped[str | None] = mapped_column(String, nullable=True)
     # Row-create timestamp — set when the worker queues the email.
     # NOT NULL and never updated after insert.
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
 
     __table_args__ = (
         CheckConstraint(
@@ -1157,7 +1117,7 @@ Service` enqueues one row for every active token of the recipient at
     # counter; ``attempt >= 5`` forces a dead-letter on the next tick.
     attempt: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     next_attempt_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
+        UtcDateTime(), nullable=True
     )
     last_status_code: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # Free-form short error label (``http_500``, ``timeout:ReadTimeout``,
@@ -1165,17 +1125,13 @@ Service` enqueues one row for every active token of the recipient at
     # non-2xx; cleared on success.
     last_error: Mapped[str | None] = mapped_column(String, nullable=True)
     last_attempted_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
+        UtcDateTime(), nullable=True
     )
-    sent_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    sent_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), nullable=True)
     dead_lettered_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
+        UtcDateTime(), nullable=True
     )
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
 
     __table_args__ = (
         CheckConstraint(

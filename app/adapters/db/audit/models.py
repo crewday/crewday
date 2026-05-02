@@ -45,9 +45,10 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import JSON, Boolean, CheckConstraint, DateTime, Index, String
+from sqlalchemy import JSON, Boolean, CheckConstraint, Index, String
 from sqlalchemy.orm import Mapped, mapped_column
 
+from app.adapters.db._columns import UtcDateTime
 from app.adapters.db.base import Base
 
 __all__ = ["AuditLog"]
@@ -110,9 +111,7 @@ class AuditLog(Base):
     # workspace-scoped row.
     scope_kind: Mapped[str] = mapped_column(String, nullable=False, default="workspace")
     via: Mapped[str] = mapped_column(String, nullable=False, default="web")
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
 
     # Two composite indexes the spec calls for (§02 "audit_log"): a
     # per-workspace timeline feed (list newest-first) and a

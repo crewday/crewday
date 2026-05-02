@@ -55,7 +55,6 @@ from sqlalchemy import (
     Boolean,
     CheckConstraint,
     Date,
-    DateTime,
     ForeignKey,
     Index,
     Integer,
@@ -65,6 +64,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
+from app.adapters.db._columns import UtcDateTime
 from app.adapters.db.base import Base
 
 # Cross-package FK targets — see :mod:`app.adapters.db` package
@@ -151,12 +151,8 @@ class Booking(Base):
     status: Mapped[str] = mapped_column(String, nullable=False)
     kind: Mapped[str] = mapped_column(String, nullable=False, default="work")
     pay_basis: Mapped[str] = mapped_column(String, nullable=False, default="scheduled")
-    scheduled_start: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
-    scheduled_end: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
+    scheduled_start: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
+    scheduled_end: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
     actual_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True)
     actual_minutes_paid: Mapped[int] = mapped_column(Integer, nullable=False)
     break_seconds: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
@@ -165,13 +161,9 @@ class Booking(Base):
     adjustment_reason: Mapped[str | None] = mapped_column(String, nullable=True)
     pending_amend_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True)
     pending_amend_reason: Mapped[str | None] = mapped_column(String, nullable=True)
-    declined_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    declined_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), nullable=True)
     declined_reason: Mapped[str | None] = mapped_column(String, nullable=True)
-    cancelled_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    cancelled_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), nullable=True)
     cancellation_window_hours: Mapped[int] = mapped_column(
         Integer, nullable=False, default=24
     )
@@ -180,15 +172,9 @@ class Booking(Base):
     )
     created_by_actor_kind: Mapped[str | None] = mapped_column(String, nullable=True)
     created_by_actor_id: Mapped[str | None] = mapped_column(String, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
-    deleted_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
+    deleted_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), nullable=True)
 
     __table_args__ = (
         CheckConstraint(
@@ -283,12 +269,8 @@ class PayPeriodEntry(Base):
     source_details_json: Mapped[list[dict[str, object]]] = mapped_column(
         JSON, nullable=False, default=list
     )
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
 
     __table_args__ = (
         CheckConstraint("minutes >= 0", name="minutes_nonneg"),
@@ -374,21 +356,15 @@ class PayRule(Base):
     weekend_multiplier: Mapped[Decimal] = mapped_column(
         Numeric(4, 2), nullable=False, default=Decimal("1.5")
     )
-    effective_from: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
+    effective_from: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
     # NULL means "open-ended" — the rule applies until a successor
     # row with a later ``effective_from`` supersedes it.
-    effective_to: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    effective_to: Mapped[datetime | None] = mapped_column(UtcDateTime(), nullable=True)
     # Soft-ref :class:`str` — the creator may be a user id or a
     # system-actor id (e.g. the signup wizard that seeded the first
     # rule). Audit linkage lives in :mod:`app.adapters.db.audit`.
     created_by: Mapped[str | None] = mapped_column(String, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
 
     __table_args__ = (
         # ISO-4217 codes are exactly 3 characters. A CHECK on length
@@ -443,8 +419,8 @@ class PayPeriod(Base):
         ForeignKey("workspace.id", ondelete="CASCADE"),
         nullable=False,
     )
-    starts_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    ends_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    starts_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
+    ends_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
     # Three-state lifecycle: ``open`` (the worker is still
     # accumulating hours), ``locked`` (the period is closed, all
     # payslips are drafted, no new hours accrue), ``paid`` (every
@@ -454,16 +430,12 @@ class PayPeriod(Base):
     # native ENUM on Postgres is a portability loss not worth it yet.
     # Matches the canonical ``pay_period_status`` enum in §02 §"Enums".
     state: Mapped[str] = mapped_column(String, nullable=False, default="open")
-    locked_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    locked_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), nullable=True)
     # Soft-ref :class:`str` — see the module docstring. NULL until
     # the period is locked; once locked, the pair is the authoritative
     # wall-clock + actor for the close audit.
     locked_by: Mapped[str | None] = mapped_column(String, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
 
     __table_args__ = (
         CheckConstraint(
@@ -568,21 +540,15 @@ class Payslip(Base):
     # can drop it while keeping the row intact.
     pdf_blob_hash: Mapped[str | None] = mapped_column(String, nullable=True)
     status: Mapped[str] = mapped_column(String, nullable=False, default="draft")
-    issued_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
-    paid_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    issued_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), nullable=True)
+    paid_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), nullable=True)
     payout_snapshot_json: Mapped[dict[str, object] | None] = mapped_column(
         JSON, nullable=True
     )
     payout_manifest_purged_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
+        UtcDateTime(), nullable=True
     )
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
 
     __table_args__ = (
         CheckConstraint("shift_hours_decimal >= 0", name="shift_hours_decimal_nonneg"),
@@ -636,15 +602,9 @@ class PayoutDestination(Base):
     secret_ref_id: Mapped[str | None] = mapped_column(String, nullable=True)
     country: Mapped[str | None] = mapped_column(String, nullable=True)
     label: Mapped[str | None] = mapped_column(String, nullable=True)
-    archived_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
+    archived_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
 
     __table_args__ = (
         CheckConstraint("LENGTH(currency) = 3", name="currency_length"),

@@ -29,7 +29,6 @@ from typing import Any
 
 from sqlalchemy import (
     JSON,
-    DateTime,
     Float,
     Index,
     Integer,
@@ -39,6 +38,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
+from app.adapters.db._columns import UtcDateTime
 from app.adapters.db.base import Base
 
 __all__ = ["IdempotencyKey", "RateLimitBucket", "WorkerHeartbeat"]
@@ -62,9 +62,7 @@ class WorkerHeartbeat(Base):
 
     id: Mapped[str] = mapped_column(String, primary_key=True)
     worker_name: Mapped[str] = mapped_column(String, nullable=False)
-    heartbeat_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
+    heartbeat_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
 
     __table_args__ = (
         UniqueConstraint("worker_name", name="uq_worker_heartbeat_worker_name"),
@@ -104,9 +102,7 @@ class IdempotencyKey(Base):
     # ``Any`` is the SQLAlchemy-typed ``JSON`` column type; readers
     # narrow to ``dict[str, str]`` at the middleware boundary.
     headers: Mapped[Any] = mapped_column(JSON, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
 
     __table_args__ = (
         UniqueConstraint("token_id", "key", name="uq_idempotency_key_token_id_key"),

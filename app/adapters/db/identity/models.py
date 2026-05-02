@@ -34,7 +34,6 @@ from sqlalchemy import (
     JSON,
     Boolean,
     CheckConstraint,
-    DateTime,
     ForeignKey,
     Index,
     Integer,
@@ -46,6 +45,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
+from app.adapters.db._columns import UtcDateTime
 from app.adapters.db.base import Base
 
 # Cross-package FK targets — see :mod:`app.adapters.db` package
@@ -116,20 +116,14 @@ class User(Base):
     agent_approval_mode: Mapped[str] = mapped_column(
         String, nullable=False, default="strict", server_default="strict"
     )
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
-    last_login_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
+    last_login_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), nullable=True)
     # Soft-delete tombstone. NULL = live identity; non-NULL = archived
     # at that instant. The token verifier consults this column to
     # return 401 for delegated / PAT requests whose delegating /
     # subject user is no longer active. Reinstate clears it back to
     # NULL; the row stays in place to preserve audit + FK joins.
-    archived_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    archived_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), nullable=True)
 
     __table_args__ = (
         CheckConstraint(
@@ -185,12 +179,8 @@ class PasskeyCredential(Base):
     # cd-8mf3 migration.
     aaguid: Mapped[str | None] = mapped_column(String(36), nullable=True)
     label: Mapped[str | None] = mapped_column(String, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
-    last_used_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
+    last_used_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), nullable=True)
 
     __table_args__ = (Index("ix_passkey_credential_user", "user_id"),)
 
@@ -238,19 +228,15 @@ class Session(Base):
         ForeignKey("workspace.id", ondelete="CASCADE"),
         nullable=True,
     )
-    expires_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
+    expires_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
     # Hard 90-day cap — see class docstring. Nullable so the initial
     # migration can land without a blanket backfill from the config's
     # cap (reading Settings from Alembic is awkward); new rows ALWAYS
     # carry a value, enforced by :func:`app.auth.session.issue`.
     absolute_expires_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
+        UtcDateTime(), nullable=True
     )
-    last_seen_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
+    last_seen_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
     ua_hash: Mapped[str | None] = mapped_column(String, nullable=True)
     ip_hash: Mapped[str | None] = mapped_column(String, nullable=True)
     # SHA-256(ua + "\n" + accept_language + hkdf_subkey). Nullable so
@@ -258,11 +244,9 @@ class Session(Base):
     # the raw UA + Accept-Language which we never stored). Pre-
     # hardening rows validate without the fingerprint gate.
     fingerprint_hash: Mapped[str | None] = mapped_column(String, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
     invalidated_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
+        UtcDateTime(), nullable=True
     )
     # Free-text slug (``"passkey_registered"``, ``"recovery_consumed"``,
     # ``"clone_detected"``, ``"fingerprint_mismatch"``). NULL when the
@@ -359,18 +343,10 @@ class ApiToken(Base):
     )
     prefix: Mapped[str] = mapped_column(String, nullable=False)
     hash: Mapped[str] = mapped_column(String, nullable=False, unique=True)
-    expires_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
-    last_used_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
-    revoked_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
+    expires_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), nullable=True)
+    last_used_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), nullable=True)
+    revoked_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
 
     __table_args__ = (
         CheckConstraint(
@@ -460,12 +436,8 @@ class WebAuthnChallenge(Base):
     exclude_credentials: Mapped[list[str]] = mapped_column(
         JSON, nullable=False, default=list
     )
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
-    expires_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
 
     __table_args__ = (
         # ``name='subject'`` resolves through ``NAMING_CONVENTION``'s
@@ -528,19 +500,13 @@ class MagicLinkNonce(Base):
     jti: Mapped[str] = mapped_column(String, primary_key=True)
     purpose: Mapped[str] = mapped_column(String, nullable=False)
     subject_id: Mapped[str] = mapped_column(String, nullable=False)
-    consumed_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
-    expires_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
+    consumed_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), nullable=True)
+    expires_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
     # SHA-256 of ``ip + hkdf_subkey``; 64 hex chars.
     created_ip_hash: Mapped[str] = mapped_column(String, nullable=False)
     # SHA-256 of ``canonicalise_email(email) + hkdf_subkey``; 64 hex chars.
     created_email_hash: Mapped[str] = mapped_column(String, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
 
     __table_args__ = (
         Index("ix_magic_link_nonce_expires", "expires_at"),
@@ -595,18 +561,10 @@ class SignupAttempt(Base):
     # SHA-256 of ``ip + hkdf_subkey``; 64 hex chars.
     ip_hash: Mapped[str] = mapped_column(String, nullable=False)
     signup_ip: Mapped[str | None] = mapped_column(String, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
-    expires_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
-    verified_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
-    completed_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
+    verified_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), nullable=True)
     # Set on successful completion. Soft FK — the workspace table is
     # workspace-scoped and this row is tenant-agnostic, so carrying a
     # hard FK would force the write to cross the tenancy seam on
@@ -756,18 +714,10 @@ class Invite(Base):
         ForeignKey("user.id", ondelete="SET NULL"),
         nullable=True,
     )
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
-    expires_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
-    accepted_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
-    revoked_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
+    accepted_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), nullable=True)
+    revoked_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), nullable=True)
 
     __table_args__ = (
         CheckConstraint(
@@ -857,18 +807,12 @@ class EmailChangePending(Base):
     previous_email_lower: Mapped[str] = mapped_column(String, nullable=False)
     new_email: Mapped[str] = mapped_column(String, nullable=False)
     new_email_lower: Mapped[str] = mapped_column(String, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
-    verified_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
+    verified_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), nullable=True)
     revert_expires_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
+        UtcDateTime(), nullable=True
     )
-    reverted_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    reverted_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), nullable=True)
 
     __table_args__ = (
         Index("ix_email_change_pending_user", "user_id"),
@@ -965,15 +909,11 @@ class BreakGlassCode(Base):
     hash_params: Mapped[dict[str, Any]] = mapped_column(
         JSON, nullable=False, default=dict
     )
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
     # Flipped to ``now()`` on a successful redemption. NULL means
     # "still spendable". Indexed by the partial-unused index below for
     # fast lookup on the redemption path.
-    used_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    used_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), nullable=True)
     # The ``magic_link_nonce.jti`` minted on successful redemption.
     # NULL until the matching magic link is created; populated within
     # the same UoW that flips ``used_at``. Soft reference (no FK)
@@ -1083,15 +1023,9 @@ class UserPushToken(Base):
     # Free-form app-version marker (``crewday-android/1.2.3``). Debug
     # aid only — not surfaced in audit diffs.
     app_version: Mapped[str | None] = mapped_column(String, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
-    last_seen_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
-    disabled_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
+    last_seen_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
+    disabled_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), nullable=True)
 
     __table_args__ = (
         CheckConstraint(

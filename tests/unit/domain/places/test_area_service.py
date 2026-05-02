@@ -282,10 +282,11 @@ class TestAreaCrud:
         deleted_parent = get_area(
             session_area, ctx, area_id=parent_id, include_deleted=True
         )
-        assert deleted_parent.deleted_at == _PINNED.replace(tzinfo=None)
+        # ``UtcDateTime`` (cd-xma93) returns aware UTC on every dialect.
+        assert deleted_parent.deleted_at == _PINNED
         child = session_area.get(Area, child_id)
         assert child is not None
-        assert child.deleted_at == _PINNED.replace(tzinfo=None)
+        assert child.deleted_at == _PINNED
         audits = _area_audits(session_area, action="delete")
         assert len(audits) == 1
         assert audits[0].diff["deleted_child_ids"] == [child_id]

@@ -74,7 +74,6 @@ from sqlalchemy import (
     Boolean,
     CheckConstraint,
     Date,
-    DateTime,
     ForeignKey,
     Index,
     Integer,
@@ -84,6 +83,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
+from app.adapters.db._columns import UtcDateTime
 from app.adapters.db.base import Base
 
 # Cross-package FK targets — see :mod:`app.adapters.db` package
@@ -168,22 +168,14 @@ class UserLeave(Base):
     # Approval state — null until an owner/manager approves. The
     # write boundary in the (forthcoming) leaves domain service
     # (cd-oydd) sets ``approved_at`` + ``approved_by`` together.
-    approved_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    approved_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), nullable=True)
     approved_by: Mapped[str | None] = mapped_column(String, nullable=True)
     # Worker-provided context. Markdown body; the agent inbox / digest
     # surfaces honour the rendering convention.
     note_md: Mapped[str | None] = mapped_column(String, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
-    deleted_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
+    deleted_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), nullable=True)
 
     __table_args__ = (
         CheckConstraint(
@@ -256,9 +248,7 @@ class UserWeeklyAvailability(Base):
     weekday: Mapped[int] = mapped_column(Integer, nullable=False)
     starts_local: Mapped[time | None] = mapped_column(Time, nullable=True)
     ends_local: Mapped[time | None] = mapped_column(Time, nullable=True)
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
+    updated_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
 
     __table_args__ = (
         # ISO weekday guard — Mon..Sun.
@@ -350,19 +340,11 @@ class UserAvailabilityOverride(Base):
     # so the audit log can replay "did this override need approval?"
     # without re-running the resolver.
     approval_required: Mapped[bool] = mapped_column(Boolean, nullable=False)
-    approved_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    approved_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), nullable=True)
     approved_by: Mapped[str | None] = mapped_column(String, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
-    deleted_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
+    deleted_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), nullable=True)
 
     __table_args__ = (
         # BOTH-OR-NEITHER — same biconditional as the weekly pattern.

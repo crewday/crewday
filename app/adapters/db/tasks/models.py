@@ -50,7 +50,6 @@ from sqlalchemy import (
     JSON,
     Boolean,
     CheckConstraint,
-    DateTime,
     Float,
     ForeignKey,
     Index,
@@ -62,6 +61,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
+from app.adapters.db._columns import UtcDateTime
 from app.adapters.db.base import Base
 
 # Cross-package FK targets — see :mod:`app.adapters.db` package
@@ -318,15 +318,9 @@ class TaskTemplate(Base):
     # Soft-delete marker. ``NULL`` means live; non-null means the
     # template is retired. The ``occurrence.template_id`` FK is
     # ``RESTRICT``, so history survives the soft-delete.
-    deleted_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
+    deleted_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
 
     @property
     def inventory_consumption_json(self) -> dict[str, int]:
@@ -409,9 +403,7 @@ class ChecklistTemplateItem(Base):
     label: Mapped[str] = mapped_column(String, nullable=False)
     position: Mapped[int] = mapped_column(Integer, nullable=False)
     requires_photo: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
 
     __table_args__ = (
         UniqueConstraint(
@@ -489,16 +481,14 @@ class Schedule(Base):
     # The domain layer parses + evaluates against the parent
     # property's timezone.
     rrule_text: Mapped[str] = mapped_column(String, nullable=False)
-    dtstart: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    dtstart: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
     # cd-k4l spec ``dtstart_local`` column. ISO-8601 string in the
     # property's local timezone (e.g. ``2026-04-20T09:00``). The
     # scheduler worker resolves to UTC via ``property.timezone`` at
     # occurrence-generation time. Nullable for backward compat;
     # new writes populate it.
     dtstart_local: Mapped[str | None] = mapped_column(String, nullable=True)
-    until: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    until: Mapped[datetime | None] = mapped_column(UtcDateTime(), nullable=True)
     # cd-k4l duration override. Nullable → fall back to the
     # template's ``duration_minutes``. Matches the §06 schedule
     # table.
@@ -520,16 +510,12 @@ class Schedule(Base):
     # cd-k4l pause marker. ``NULL`` = live. ``paused_at`` wins over
     # ``active_from`` / ``active_until`` per §06 "Pause vs active
     # range" — a paused schedule never generates occurrences.
-    paused_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    paused_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), nullable=True)
     # cd-k4l soft-delete marker. The template `delete()` in
     # :mod:`app.domain.tasks.templates` reads this column when
     # deciding whether a schedule still references the template;
     # matches the convention on :class:`TaskTemplate.deleted_at`.
-    deleted_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    deleted_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), nullable=True)
     assignee_user_id: Mapped[str | None] = mapped_column(
         String,
         ForeignKey("user.id", ondelete="SET NULL"),
@@ -553,11 +539,9 @@ class Schedule(Base):
     # ``NULL`` means "not scheduled yet" — the generator treats a
     # freshly-inserted row as due immediately.
     next_generation_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
+        UtcDateTime(), nullable=True
     )
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
 
     __table_args__ = (
         CheckConstraint(
@@ -612,15 +596,9 @@ class NlTaskPreview(Base):
     ambiguities_json: Mapped[list[Any]] = mapped_column(
         JSON, nullable=False, default=list
     )
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
-    expires_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
-    committed_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
+    committed_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), nullable=True)
 
     __table_args__ = (
         Index("ix_nl_task_preview_workspace_expires", "workspace_id", "expires_at"),
@@ -695,8 +673,8 @@ class Occurrence(Base):
         ForeignKey("user.id", ondelete="SET NULL"),
         nullable=True,
     )
-    starts_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    ends_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    starts_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
+    ends_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
     # cd-22e property-local ISO-8601 timestamp mirroring ``starts_at``.
     # Stored as text (not ``DateTime``) for parity with
     # ``Schedule.dtstart_local``: the value is intentionally tz-naive
@@ -720,19 +698,13 @@ class Occurrence(Base):
     # revert_overdue) clears it back to NULL. NULL therefore means
     # "not currently overdue", whether the row never slipped or
     # whether a manual transition recovered it.
-    overdue_since: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    overdue_since: Mapped[datetime | None] = mapped_column(UtcDateTime(), nullable=True)
     # §06 completion / SLA state-machine columns. Nullable so
     # pre-existing scheduled rows survive migration; the completion
     # service owns writes to the note / skip fields, and the overdue
     # sweeper owns ``due_by_utc`` comparisons.
-    due_by_utc: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
-    completed_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    due_by_utc: Mapped[datetime | None] = mapped_column(UtcDateTime(), nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), nullable=True)
     completed_by_user_id: Mapped[str | None] = mapped_column(
         String,
         ForeignKey("user.id", ondelete="SET NULL"),
@@ -743,9 +715,7 @@ class Occurrence(Base):
         ForeignKey("user.id", ondelete="SET NULL"),
         nullable=True,
     )
-    reviewed_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    reviewed_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), nullable=True)
     completion_note_md: Mapped[str | None] = mapped_column(Text, nullable=True)
     skipped_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     # cd-k4l cancellation reason. Free-form text set alongside
@@ -816,9 +786,7 @@ class Occurrence(Base):
     reservation_id: Mapped[str | None] = mapped_column(String, nullable=True)
     lifecycle_rule_id: Mapped[str | None] = mapped_column(String, nullable=True)
     occurrence_key: Mapped[str | None] = mapped_column(String, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
 
     __table_args__ = (
         CheckConstraint(
@@ -936,9 +904,7 @@ class ChecklistItem(Base):
     position: Mapped[int] = mapped_column(Integer, nullable=False)
     requires_photo: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     checked: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    checked_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    checked_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), nullable=True)
     evidence_blob_hash: Mapped[str | None] = mapped_column(String, nullable=True)
 
     __table_args__ = (
@@ -973,9 +939,7 @@ class TaskCompletion(Base):
         ForeignKey("occurrence.id", ondelete="SET NULL"),
         nullable=True,
     )
-    completed_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
+    completed_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
     completed_by_user_id: Mapped[str | None] = mapped_column(
         String,
         ForeignKey("user.id", ondelete="SET NULL"),
@@ -988,9 +952,7 @@ class TaskCompletion(Base):
     checklist_snapshot_json: Mapped[list[Any]] = mapped_column(
         JSON, nullable=False, default=list
     )
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
 
     __table_args__ = (
         Index(
@@ -1036,17 +998,13 @@ class Evidence(Base):
     checklist_snapshot_json: Mapped[list[Any] | None] = mapped_column(
         JSON, nullable=True
     )
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
     created_by_user_id: Mapped[str | None] = mapped_column(
         String,
         ForeignKey("user.id", ondelete="SET NULL"),
         nullable=True,
     )
-    deleted_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    deleted_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), nullable=True)
 
     __table_args__ = (
         CheckConstraint(
@@ -1101,9 +1059,7 @@ class Comment(Base):
         nullable=True,
     )
     body_md: Mapped[str] = mapped_column(String, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
     # Flat list of ``{blob_hash, filename, …}`` payloads. The outer
     # ``Any`` is scoped to SQLAlchemy's JSON column type — callers
     # writing a typed payload should use a TypedDict locally and
@@ -1127,16 +1083,12 @@ class Comment(Base):
     # service only allows :func:`app.domain.tasks.comments.edit_comment`
     # within the 5-minute grace window on ``kind='user'`` rows; agent
     # / system messages never flip this column.
-    edited_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    edited_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), nullable=True)
     # cd-cfe4 soft-delete marker. ``NULL`` = live. :func:`list_comments`
     # hides non-null rows for every reader except workspace owners,
     # so moderation history survives without bleeding into the
     # worker / manager thread view.
-    deleted_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    deleted_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), nullable=True)
     # Soft pointer to the :class:`llm_call` row that produced this
     # message. NULL for ``user`` / ``system`` rows, populated for
     # ``agent`` rows when the domain service knows the call id. No
@@ -1182,30 +1134,22 @@ class TaskApproval(Base):
         ForeignKey("occurrence.id", ondelete="CASCADE"),
         nullable=False,
     )
-    requested_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
+    requested_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
     requested_by_user_id: Mapped[str | None] = mapped_column(
         String,
         ForeignKey("user.id", ondelete="SET NULL"),
         nullable=True,
     )
     state: Mapped[str] = mapped_column(String, nullable=False, default="pending")
-    decided_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    decided_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), nullable=True)
     decided_by_user_id: Mapped[str | None] = mapped_column(
         String,
         ForeignKey("user.id", ondelete="SET NULL"),
         nullable=True,
     )
     note_md: Mapped[str | None] = mapped_column(String, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
 
     __table_args__ = (
         CheckConstraint(
