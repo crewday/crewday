@@ -11710,6 +11710,21 @@
         "title": "IssueUpdateRequest",
         "type": "object"
       },
+      "LastCredentialResponse": {
+        "description": "422 envelope when the caller tries to revoke their last passkey.\n\nLeaving the user credential-less would force them through the\nrecovery flow; the SPA must guide them to enrol another passkey\nfirst or call ``/recover`` intentionally.",
+        "properties": {
+          "error": {
+            "const": "last_credential",
+            "title": "Error",
+            "type": "string"
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "title": "LastCredentialResponse",
+        "type": "object"
+      },
       "LeaveConflictsPayload": {
         "description": "HTTP projection of advisory leave conflicts.",
         "properties": {
@@ -14680,6 +14695,21 @@
           "workspace_slug"
         ],
         "title": "PasskeyFinishResponse",
+        "type": "object"
+      },
+      "PasskeyNotFoundResponse": {
+        "description": "404 envelope returned by ``DELETE /auth/passkey/{credential_id}``.\n\nUnknown ids, ids owned by a different user, and malformed\nbase64url all collapse into the same shape so the credential-id\nspace is not an enumeration oracle (\u00a703 \"Additional passkeys\").",
+        "properties": {
+          "error": {
+            "const": "passkey_not_found",
+            "title": "Error",
+            "type": "string"
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "title": "PasskeyNotFoundResponse",
         "type": "object"
       },
       "PasskeyStartBody": {
@@ -47669,15 +47699,25 @@
           "204": {
             "description": "Successful Response"
           },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PasskeyNotFoundResponse"
+                }
+              }
+            },
+            "description": "Unknown / not-owned / malformed credential id"
+          },
           "422": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/LastCredentialResponse"
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "Refused: would leave the user credential-less"
           },
           "429": {
             "content": {

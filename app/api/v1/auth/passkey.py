@@ -49,7 +49,7 @@ See ``docs/specs/03-auth-and-tokens.md`` §"WebAuthn specifics",
 from __future__ import annotations
 
 import logging
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel, Field
@@ -142,6 +142,28 @@ class RegisterFinishResponse(BaseModel):
     transports: str | None
     backup_eligible: bool
     aaguid: str
+
+
+class PasskeyNotFoundResponse(BaseModel):
+    """404 envelope returned by ``DELETE /auth/passkey/{credential_id}``.
+
+    Unknown ids, ids owned by a different user, and malformed
+    base64url all collapse into the same shape so the credential-id
+    space is not an enumeration oracle (§03 "Additional passkeys").
+    """
+
+    error: Literal["passkey_not_found"]
+
+
+class LastCredentialResponse(BaseModel):
+    """422 envelope when the caller tries to revoke their last passkey.
+
+    Leaving the user credential-less would force them through the
+    recovery flow; the SPA must guide them to enrol another passkey
+    first or call ``/recover`` intentionally.
+    """
+
+    error: Literal["last_credential"]
 
 
 # ---------------------------------------------------------------------------
@@ -317,6 +339,22 @@ def post_register_finish(
     status_code=status.HTTP_204_NO_CONTENT,
     operation_id="auth.passkey.revoke",
     summary="Revoke one of the authenticated user's passkeys",
+    responses={
+        # The router emits ``HTTPException(detail={"error": <symbol>})``
+        # directly — the production problem+json transformer wraps that
+        # at the boundary, but the OpenAPI shape we publish here is the
+        # raw FastAPI envelope clients see in unit harnesses and via
+        # the test client. Both errors collapse on a single key so
+        # the credential-id space stays opaque.
+        status.HTTP_404_NOT_FOUND: {
+            "model": PasskeyNotFoundResponse,
+            "description": "Unknown / not-owned / malformed credential id",
+        },
+        422: {
+            "model": LastCredentialResponse,
+            "description": "Refused: would leave the user credential-less",
+        },
+    },
     openapi_extra={
         # Unlike the register ceremonies, the CLI surface for
         # ``passkey-revoke`` is meaningful — an operator listing
