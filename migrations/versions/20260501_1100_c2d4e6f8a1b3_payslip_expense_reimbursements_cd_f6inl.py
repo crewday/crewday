@@ -43,9 +43,7 @@ def upgrade() -> None:
         )
 
     with op.batch_alter_table("payslip", schema=None) as batch_op:
-        batch_op.alter_column(
-            "expense_reimbursements_cents", server_default=None
-        )
+        batch_op.alter_column("expense_reimbursements_cents", server_default=None)
 
 
 def downgrade() -> None:
