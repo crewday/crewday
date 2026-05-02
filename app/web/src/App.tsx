@@ -308,7 +308,12 @@ export default function App() {
               />
               <Route path="/templates" element={<TemplatesPage />} />
               <Route path="/schedules" element={<SchedulesPage />} />
-              <Route path="/permissions" element={<PermissionsPage />} />
+            </Route>
+
+            <Route element={<RequirePermission actionKey="permissions.edit_rules" />}>
+              <Route element={<ManagerLayout />}>
+                <Route path="/permissions" element={<PermissionsPage />} />
+              </Route>
             </Route>
 
             <Route element={<RequirePermission actionKey="api_tokens.manage" />}>
