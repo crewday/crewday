@@ -383,6 +383,35 @@ INCLUDE_ARGS=(
     # ``session_invalid`` / 409 ``passkey_already_registered`` / 422
     # validation on the 4xx envelope.
     --include-operation-id 'auth.passkey.register_finish'
+    # ----------------------------------------------------------------
+    # Identity tag — additional clean ops promoted under cd-9q0fn after
+    # confirming the 422 problem+json envelope (cd-kcebs) covers every
+    # identity-tagged op (113 ops, all carry ``application/problem+json``
+    # with ``detail: string`` per ``IDENTITY_PROBLEM_RESPONSES``). The
+    # ops below were isolated against the runner with
+    # ``--include-operation-id`` and pass cleanly (812-748 generated
+    # cases each batch, zero failures across every check).
+    #
+    # Selection criterion: response schemas without ``format: date-time``
+    # fields, so the residual SQLite-roundtrip naive-datetime serialisation
+    # bug (separate scope: 32 "Response violates schema" failures on
+    # ``format: date-time`` properties of 200 OK responses) doesn't trip
+    # the gate. Ops whose success schema includes ``created_at`` /
+    # ``updated_at`` / ``expires_at`` etc. wait on the datetime-roundtrip
+    # follow-up.
+    # ----------------------------------------------------------------
+    # ``auth.me.workspaces.list`` — GET /api/v1/me/workspaces; lists the
+    # workspaces the session user belongs to. No datetime fields in the
+    # response shape, so the remaining naive-datetime issue can't trip
+    # the gate.
+    --include-operation-id 'auth.me.workspaces.list'
+    # ``me.profile.get`` — GET /api/v1/me; bare-host singleton for the
+    # session user's app-shell profile read surface (legacy SPA shell
+    # chrome consumer; distinct from ``auth.me.get`` at /api/v1/auth/me).
+    --include-operation-id 'me.profile.get'
+    # ``me.profile.scoped.get`` — GET /w/{slug}/api/v1/me; the
+    # workspace-scoped variant of the same projection.
+    --include-operation-id 'me.profile.scoped.get'
 )
 
 # Checks excluded for the asset gate — kept here (rather than at
