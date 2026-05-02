@@ -2,14 +2,20 @@
 
 Walks every scoped v1 endpoint the app factory registers, issues an
 owner-``A`` request against a workspace-``B`` slug path (and, for
-contrast, a request against a slug that never existed), and asserts:
+contrast, a request against a slug-equivalent path that never
+existed), and asserts:
 
 1. Every probe returns **404** (never 200, never 403 — a 403 leaks
    workspace existence; §15 "Constant-time cross-tenant responses").
-2. The response body is **byte-identical** between "slug exists but
-   caller isn't a member" and "slug never existed" — the envelope
-   is the shared ``{"error": "not_found", "detail": null}`` shape the
-   tenancy middleware funnels every rejection branch through.
+2. For **the same URL**, the response body is **byte-identical**
+   between "slug exists but caller isn't a member" and "slug never
+   existed" — the envelope is the shared RFC 7807 ``problem+json``
+   shape the tenancy middleware funnels every rejection branch
+   through (§12 "Errors", §15). The body's ``instance`` field is the
+   request URL itself, so it is deterministic from input and matches
+   trivially across the two branches when the URL matches; an
+   attacker-controlled value already known to the attacker cannot
+   leak DB state.
 3. The response **header set** matches across both branches (order is
    not required; set equality is — any branch-specific header would
    be a timing/identification leak).
@@ -233,16 +239,34 @@ def client(app: FastAPI) -> Iterator[TestClient]:
 # ---------------------------------------------------------------------------
 
 
-# The middleware's canonical 404 envelope. Any variation on this byte
-# sequence is a constant-time leak.
-_EXPECTED_ENVELOPE_BODY: bytes = b'{"error":"not_found","detail":null}'
+# The middleware's canonical 404 envelope (§12 "Errors", RFC 7807).
+# ``instance`` is filled in per probe — it reflects the request URL,
+# which the caller chose, so it carries no DB state and is identical
+# across the slug-miss and member-miss branches for any single URL.
+_EXPECTED_ENVELOPE_FIELDS: dict[str, object] = {
+    "type": "https://crewday.dev/errors/not_found",
+    "title": "Not found",
+    "status": 404,
+}
+
+
+def _expected_envelope_for(path: str) -> dict[str, object]:
+    """Return the canonical 404 envelope a request to ``path`` should yield.
+
+    Both rejection branches (slug-miss + member-miss) flow through the
+    same :func:`app.tenancy.middleware._not_found` helper with the same
+    ``Request``, so ``instance`` lands identical across the two for
+    any single URL — the §15 byte-identical invariant.
+    """
+    return {**_EXPECTED_ENVELOPE_FIELDS, "instance": path}
 
 
 # Headers we intentionally allow to VARY per response:
 #
-# * ``content-length`` varies with body length; body is identical so
-#   it is too — but we still exclude it from header-set comparison so
-#   a future envelope-body fix doesn't cascade through this test.
+# * ``content-length`` varies with body length; the body is identical
+#   per-URL but differs across URLs because ``instance`` carries the
+#   request path — exclude it from header-set comparison so the
+#   per-URL slug-vs-member byte-equality stays the load-bearing check.
 # * ``x-request-id`` is a fresh ULID per request (§12 "Agent audit
 #   headers"); equality by name + presence, not by value.
 # * ``set-cookie`` may be emitted by session-refresh when the cookie
@@ -295,39 +319,63 @@ class TestHttpCrossTenantMatrix:
         tenant_b: TenantSeed,
         app: FastAPI,
     ) -> None:
-        """For each probe: 404 + byte-identical body + matching header set.
+        """For each probe: 404 + per-URL byte-identical body + matching header set.
 
-        The probe is executed with tenant-A's owner session cookie;
-        the path targets tenant-B's slug. The middleware rejects it
-        at the membership-miss branch — the body + headers must
-        match the slug-miss branch byte-for-byte.
+        For each ``(path_template, verb)`` in the sample we issue two
+        probes from tenant-A's owner session:
+
+        * ``member_miss`` — path bound to tenant-B's slug. Rejected at
+          the membership-miss branch (the actor is a real user but
+          not a member of B).
+        * ``slug_miss`` — same path-tail, slug rewritten to a value
+          that never existed. Rejected at the slug-miss branch.
+
+        §15 requires: same URL ⇒ same body bytes regardless of branch.
+        We compare the two responses for the **same URL** (well, two
+        URLs that differ only in the slug segment, which is by design
+        — the slug-miss branch can't run on tenant-B's real slug). The
+        envelope's ``instance`` field is the request URL itself, so it
+        is deterministic from input and matches trivially when the
+        URLs match. Each response is also asserted against the
+        per-path canonical envelope so a regression in shape (missing
+        ``type`` URI, wrong title, …) fails loudly.
         """
         sample = _sample_endpoints(app, min_count=100)
         client.cookies.set(SESSION_COOKIE_NAME, tenant_a.owner_session_cookie)
 
-        slug_miss_path = "/w/never-existed-slug/api/v1/ping"
-        slug_miss = client.get(slug_miss_path)
-        assert slug_miss.status_code == 404
-        assert slug_miss.content == _EXPECTED_ENVELOPE_BODY
-        baseline_headers = _header_set(slug_miss)
+        slug_miss_baseline_path = "/w/never-existed-slug/api/v1/ping"
+        slug_miss_baseline = client.get(slug_miss_baseline_path)
+        assert slug_miss_baseline.status_code == 404
+        assert slug_miss_baseline.json() == _expected_envelope_for(
+            slug_miss_baseline_path
+        )
+        baseline_headers = _header_set(slug_miss_baseline)
 
         for path_template, verb in sample:
-            target_path = _instantiate_path(path_template, slug=tenant_b.slug)
-            response = client.request(verb, target_path)
-            assert response.status_code == 404, (
-                f"{verb} {target_path} returned {response.status_code}; "
-                f"cross-tenant probe must always be 404 "
-                f"(never 200, never 403 — §15)"
-            )
-            assert response.content == _EXPECTED_ENVELOPE_BODY, (
-                f"{verb} {target_path} envelope drifted: "
-                f"{response.content!r} != {_EXPECTED_ENVELOPE_BODY!r}"
-            )
-            headers = _header_set(response)
-            assert headers == baseline_headers, (
-                f"{verb} {target_path} header-set drift: "
-                f"{sorted(headers ^ baseline_headers)} differ"
-            )
+            member_miss_path = _instantiate_path(path_template, slug=tenant_b.slug)
+            slug_miss_path = _instantiate_path(path_template, slug="never-existed-slug")
+
+            member_miss = client.request(verb, member_miss_path)
+            slug_miss = client.request(verb, slug_miss_path)
+
+            for tag, response, expected_path in (
+                ("member-miss", member_miss, member_miss_path),
+                ("slug-miss", slug_miss, slug_miss_path),
+            ):
+                assert response.status_code == 404, (
+                    f"{verb} {expected_path} ({tag}) returned "
+                    f"{response.status_code}; cross-tenant probe must "
+                    f"always be 404 (never 200, never 403 — §15)"
+                )
+                assert response.json() == _expected_envelope_for(expected_path), (
+                    f"{verb} {expected_path} ({tag}) envelope drifted: "
+                    f"{response.json()!r}"
+                )
+                headers = _header_set(response)
+                assert headers == baseline_headers, (
+                    f"{verb} {expected_path} ({tag}) header-set drift: "
+                    f"{sorted(headers ^ baseline_headers)} differ"
+                )
 
     def test_bearer_token_cross_workspace_probe(
         self,
@@ -345,14 +393,22 @@ class TestHttpCrossTenantMatrix:
         """
         # Session cookie baseline for comparison.
         client.cookies.set(SESSION_COOKIE_NAME, tenant_a.owner_session_cookie)
-        baseline = client.get(f"/w/{tenant_b.slug}/api/v1/time/shifts")
+        target_path = f"/w/{tenant_b.slug}/api/v1/time/shifts"
+        baseline = client.get(target_path)
         token_probe = client.get(
-            f"/w/{tenant_b.slug}/api/v1/time/shifts",
+            target_path,
             headers={"Authorization": f"Bearer {tenant_a.owner_token}"},
         )
         assert baseline.status_code == 404
         assert token_probe.status_code == 404
-        assert baseline.content == token_probe.content == _EXPECTED_ENVELOPE_BODY
+        # Same URL on both probes ⇒ byte-identical body. Both responses
+        # carry the canonical RFC 7807 envelope with ``instance`` ==
+        # ``target_path`` (§12 "Errors", §15 "Constant-time cross-tenant
+        # responses").
+        expected = _expected_envelope_for(target_path)
+        assert baseline.json() == expected
+        assert token_probe.json() == expected
+        assert baseline.content == token_probe.content
 
     @pytest.mark.skipif(
         os.environ.get("CREWDAY_SKIP_TIMING_TEST") == "1",

@@ -64,6 +64,7 @@ from starlette.responses import JSONResponse, Response
 from app.adapters.db.authz.models import RoleGrant
 from app.adapters.db.session import make_uow
 from app.adapters.db.workspace.models import UserWorkspace, Workspace
+from app.api.errors import problem_response
 from app.auth.session import (
     SESSION_COOKIE_NAME,
     SessionExpired,
@@ -299,16 +300,31 @@ def _is_scoped_api_path(path: str) -> bool:
     return len(segments) >= 5 and segments[1] == "w" and segments[3] == "api"
 
 
-def _not_found() -> JSONResponse:
-    """Return the canonical 404 shape.
+def _not_found(request: Request) -> JSONResponse:
+    """Return the canonical 404 problem+json envelope.
 
-    Spec §15 mandates a byte-identical envelope across every
-    rejection branch so an enumerator cannot tell "unknown slug" from
-    "not a member of a known workspace" apart. The envelope is the
-    shared ``{"error": "not_found", "detail": null}`` shape spec §15
-    pins — not the Starlette default ``{"detail": "Not Found"}``.
+    Spec §15 "Constant-time cross-tenant responses" mandates a
+    byte-identical body across every rejection branch for the same
+    URL, so an enumerator cannot tell "unknown slug" from "not a
+    member of a known workspace" apart. Spec §12 "Errors" pins the
+    RFC 7807 ``application/problem+json`` envelope — same shape every
+    other ``404 not_found`` on the surface emits, routed through
+    :func:`app.api.errors.problem_response` so the wire contract
+    cannot drift between handlers.
+
+    Both rejection branches (slug-miss + member-miss) call this with
+    the same :class:`Request`, so ``instance`` (request path) lands
+    identical between them and the §15 byte-identical guarantee
+    holds. We deliberately omit ``detail`` — a branch-specific detail
+    string would distinguish "unknown slug" from "exists elsewhere"
+    on the wire and break the constant-time invariant.
     """
-    return JSONResponse(status_code=404, content={"error": "not_found", "detail": None})
+    return problem_response(
+        request,
+        status=404,
+        type_name="not_found",
+        title="Not found",
+    )
 
 
 def _archived_user_401(error_code: str) -> JSONResponse:
@@ -323,12 +339,16 @@ def _archived_user_401(error_code: str) -> JSONResponse:
     discriminator (``delegating_user_archived`` /
     ``subject_user_archived``) the agent / SDK surfaces in its own UI.
 
-    The envelope mirrors :func:`_not_found`: a single-key ``error`` +
-    ``detail`` shape so the OpenAPI surface and clients share one
-    parser. We do not carry the user_id in ``detail`` — even though
-    a token holder already proved knowledge of the secret, a non-
-    enumerable error keeps the audit trail (and any inadvertent log
-    capture) PII-clean.
+    The envelope is the legacy ``{"error": <code>, "detail": null}``
+    shape spec §03 names by field (``error = "delegating_user_archived"``
+    / ``error = "subject_user_archived"``). It deliberately diverges
+    from :func:`_not_found`'s RFC 7807 ``problem+json`` envelope —
+    migrating this 401 to ``problem+json`` is its own follow-up
+    because §03 contracts the ``error`` field name, not the §12
+    ``type`` URI. We do not carry the user_id in ``detail`` — even
+    though a token holder already proved knowledge of the secret, a
+    non-enumerable error keeps the audit trail (and any inadvertent
+    log capture) PII-clean.
     """
     return JSONResponse(
         status_code=401,
@@ -864,7 +884,7 @@ class WorkspaceContextMiddleware(BaseHTTPMiddleware):
                 skip_path=False,
                 outcome=outcome,
             )
-            not_found_response: Response = _not_found()
+            not_found_response: Response = _not_found(request)
             not_found_response.headers[CORRELATION_ID_HEADER] = correlation_id
             if _is_scoped_api_path(path):
                 setattr(request.state, ACTOR_STATE_ATTR, actor)

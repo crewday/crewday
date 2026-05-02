@@ -67,6 +67,30 @@ _ULID_RE = re.compile(r"^[0-9A-HJKMNP-TV-Z]{26}$")
 _PINNED = datetime(2026, 4, 19, 12, 0, 0, tzinfo=UTC)
 
 
+def _assert_canonical_not_found(response: object, *, instance: str) -> None:
+    """Assert the response carries the canonical 404 problem+json envelope.
+
+    Spec §12 "Errors" pins the RFC 7807 shape; spec §15 "Constant-time
+    cross-tenant responses" pins byte-identical bodies for the same URL
+    across the slug-miss and member-miss branches. ``instance`` is the
+    request path the caller hit — required so the per-test caller is
+    explicit about which URL it expects to see echoed back.
+    """
+    headers = getattr(response, "headers", {})
+    content_type = headers.get("content-type", "") if hasattr(headers, "get") else ""
+    assert content_type.startswith("application/problem+json"), content_type
+    body = response.json()  # type: ignore[attr-defined]
+    assert body["type"] == "https://crewday.dev/errors/not_found"
+    assert body["title"] == "Not found"
+    assert body["status"] == 404
+    assert body["instance"] == instance
+    # No ``detail`` or ``errors[]`` on the constant-time envelope —
+    # a branch-specific detail would distinguish "unknown slug" from
+    # "exists elsewhere" on the wire and break §15.
+    assert "detail" not in body
+    assert "errors" not in body
+
+
 # ---------------------------------------------------------------------------
 # Shared fixtures
 # ---------------------------------------------------------------------------
@@ -307,7 +331,7 @@ class TestPhase0Stub:
         with _client() as client:
             response = client.get("/w/villa-sud/api/v1/ping")
         assert response.status_code == 404
-        assert response.json() == {"error": "not_found", "detail": None}
+        _assert_canonical_not_found(response, instance="/w/villa-sud/api/v1/ping")
         assert CORRELATION_ID_HEADER in response.headers
 
     def test_stub_header_ignored_when_flag_off(
@@ -329,7 +353,7 @@ class TestPhase0Stub:
                 },
             )
         assert response.status_code == 404
-        assert response.json() == {"error": "not_found", "detail": None}
+        _assert_canonical_not_found(response, instance="/w/villa-sud/api/v1/ping")
 
     def test_consumed_scoped_api_rejection_keeps_correlation_header(
         self, stub_settings: Settings
@@ -363,7 +387,7 @@ class TestSlugRejection:
             )
         assert response.status_code == 404
         assert CORRELATION_ID_HEADER in response.headers
-        assert response.json() == {"error": "not_found", "detail": None}
+        _assert_canonical_not_found(response, instance="/w/UPPER/api/v1/ping")
 
     def test_reserved_slug_returns_404(self, stub_settings: Settings) -> None:
         with _client() as client:
@@ -1015,7 +1039,7 @@ class TestRealResolverHTTP:
                 headers={"Authorization": f"Bearer {minted.token}"},
             )
         assert response.status_code == 404
-        assert response.json() == {"error": "not_found", "detail": None}
+        _assert_canonical_not_found(response, instance=f"/w/{ws_b.slug}/api/v1/ping")
 
     def test_no_auth_returns_404_not_401(
         self,
@@ -1039,7 +1063,7 @@ class TestRealResolverHTTP:
         with _client(app) as client:
             response = client.get("/w/real-ws/api/v1/ping")
         assert response.status_code == 404
-        assert response.json() == {"error": "not_found", "detail": None}
+        _assert_canonical_not_found(response, instance="/w/real-ws/api/v1/ping")
 
     def test_session_expired_returns_404(
         self,
@@ -1106,7 +1130,7 @@ class TestRealResolverHTTP:
             client.cookies.set(SESSION_COOKIE_NAME, issued.cookie_value)
             response = client.get("/w/only-members/api/v1/ping")
         assert response.status_code == 404
-        assert response.json() == {"error": "not_found", "detail": None}
+        _assert_canonical_not_found(response, instance="/w/only-members/api/v1/ping")
 
     def test_bearer_invalid_token_returns_404(
         self,
@@ -1282,6 +1306,21 @@ class TestConstantTimeEnvelope:
 
         assert slug_miss.status_code == 404
         assert member_miss.status_code == 404
-        # Byte-identical envelopes (§15 tenant-isolation test suite).
-        assert slug_miss.content == member_miss.content
-        assert slug_miss.json() == {"error": "not_found", "detail": None}
+        # §15 tenant-isolation test suite — both branches must emit the
+        # same canonical RFC 7807 envelope. The ``instance`` field
+        # reflects the URL the caller chose (deterministic from input,
+        # not from DB state) and varies across these two probes; every
+        # other field must match byte-for-byte. Stripping ``instance``
+        # before the equality check keeps the §15 invariant honest:
+        # for any single URL, the slug-miss and member-miss bodies
+        # produce identical bytes.
+        slug_miss_body = slug_miss.json()
+        member_miss_body = member_miss.json()
+        assert slug_miss_body.pop("instance") == "/w/unknown-slug/api/v1/ping"
+        assert member_miss_body.pop("instance") == "/w/members-club/api/v1/ping"
+        assert slug_miss_body == member_miss_body
+        assert slug_miss_body == {
+            "type": "https://crewday.dev/errors/not_found",
+            "title": "Not found",
+            "status": 404,
+        }

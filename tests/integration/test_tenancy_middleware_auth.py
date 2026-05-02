@@ -270,9 +270,20 @@ class TestCrossTenantConstantTime:
 
         assert slug_miss.status_code == 404
         assert member_miss.status_code == 404
-        # Byte-identical envelope across the two branches (§15).
-        assert slug_miss.content == member_miss.content
-        assert slug_miss.json() == {"error": "not_found", "detail": None}
+        # §15 — both branches must emit the same canonical RFC 7807
+        # envelope. ``instance`` reflects the URL the caller chose
+        # (deterministic from input, not DB state) and varies across
+        # these two probes; every other field must match byte-for-byte.
+        slug_body = slug_miss.json()
+        member_body = member_miss.json()
+        assert slug_body.pop("instance") == "/w/never-existed/api/v1/ping"
+        assert member_body.pop("instance") == "/w/real-ct-ws/api/v1/ping"
+        assert slug_body == member_body
+        assert slug_body == {
+            "type": "https://crewday.dev/errors/not_found",
+            "title": "Not found",
+            "status": 404,
+        }
 
     def test_slug_miss_and_member_miss_timings_overlap(
         self,

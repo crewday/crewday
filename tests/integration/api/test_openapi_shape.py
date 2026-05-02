@@ -219,7 +219,9 @@ class TestScopedEmptyContextReturns404:
     The tenancy middleware returns 404 before the router sees the
     request (spec §01 "Workspace addressing") — every workspace-scoped
     context path under ``/w/<unknown-slug>/api/v1/<ctx>/...`` must
-    collapse to the canonical 404 JSON envelope.
+    collapse to the canonical RFC 7807 ``problem+json`` envelope
+    (spec §12 "Errors") so the wire contract matches every other
+    404 on the surface.
     """
 
     def test_unknown_slug_scoped_context_path_404s(
@@ -229,9 +231,13 @@ class TestScopedEmptyContextReturns404:
         # Any of the 13 contexts will do — pick ``tasks`` for realism.
         resp = client.get("/w/nosuch/api/v1/tasks/ping")
         assert resp.status_code == 404
-        assert resp.headers["content-type"].startswith("application/json")
-        # §15 "Constant-time cross-tenant responses" canonical envelope.
-        assert resp.json() == {"error": "not_found", "detail": None}
+        # §12 "Errors" — every error response is RFC 7807 problem+json.
+        assert resp.headers["content-type"].startswith("application/problem+json")
+        body = resp.json()
+        assert body["type"] == "https://crewday.dev/errors/not_found"
+        assert body["title"] == "Not found"
+        assert body["status"] == 404
+        assert body["instance"] == "/w/nosuch/api/v1/tasks/ping"
 
     def test_admin_api_unknown_path_returns_canonical_404(
         self, pinned_settings: Settings, real_make_uow: None
