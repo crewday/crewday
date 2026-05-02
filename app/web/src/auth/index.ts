@@ -37,4 +37,5 @@ export {
   encodeAssertion,
 } from "./passkey";
 export { createOnUnauthorized, isAuthEndpoint, sanitizeNext } from "./onUnauthorized";
+export { ROLE_LANDING, pickRoleLanding } from "./roleLanding";
 export type { AuthMe, PasskeyLoginFinish, PasskeyLoginStart } from "./types";

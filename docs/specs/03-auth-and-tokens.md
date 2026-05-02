@@ -102,7 +102,11 @@ offline and does not change any other codepath.
 When disabled, `POST /api/v1/signup/start` returns `404` and the
 `/signup` SPA route renders a "Signups are closed on this
 deployment — ask your admin" page; all other flows are
-unaffected.
+unaffected. The SPA uses the `404` from `/signup/start` itself as
+the closed-deployment signal — there is no separate capabilities
+probe — so the page renders the entry form optimistically and
+swaps in the closed copy only if the first submission comes back
+404.
 
 The flow lives entirely at the bare host (no `/w/<slug>/` prefix)
 because no workspace exists yet:
@@ -116,7 +120,12 @@ because no workspace exists yet:
    against live `workspaces` rows; `409 slug_taken` returns a
    suggested alternative. The server stores a `signup_attempt`
    row keyed by `(email, desired_slug)` with a 15-minute TTL and
-   emails a magic link (`/signup/verify?token=...`).
+   emails a magic link. The mailer's shared template emits the
+   generic `/auth/magic/<token>` URL (`app/mail/templates/magic_link.py`),
+   which the SPA routes to its `SignupVerifyPage`; the page also
+   accepts the equivalent `/signup/verify?token=...` shape so
+   deployments that template the SPA-native URL directly continue
+   to work.
 
    **Reserved slugs.** The following labels are permanently
    reserved — `POST /signup/start` rejects them with

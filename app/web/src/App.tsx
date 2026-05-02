@@ -63,6 +63,9 @@ import RecoverPage from "@/pages/public/RecoverPage";
 import EnrollPage from "@/pages/public/EnrollPage";
 import AcceptPage from "@/pages/public/AcceptPage";
 import GuestPage from "@/pages/public/GuestPage";
+import SignupPage from "@/pages/public/SignupPage";
+import SignupVerifyPage from "@/pages/public/SignupVerifyPage";
+import SignupEnrollPage from "@/pages/public/SignupEnrollPage";
 
 import SchedulerPage from "@/pages/SchedulerPage";
 
@@ -116,6 +119,21 @@ export default function App() {
           <Route path="/login" element={<LoginPage />} />
           <Route path="/recover" element={<RecoverPage />} />
           <Route path="/recover/enroll" element={<EnrollPage />} />
+          <Route path="/signup" element={<SignupPage />} />
+          <Route path="/signup/verify" element={<SignupVerifyPage />} />
+          <Route path="/signup/enroll" element={<SignupEnrollPage />} />
+          {/* Generic magic-link URL emitted by the default mailer
+              template (`app/mail/templates/magic_link.py`). The mailer
+              uses this shape for ALL purposes that go through the
+              shared template — signup_verify, email_change_confirm,
+              email_change_revert, grant_invite, workspace_verify_ownership.
+              Today only signup_verify has an SPA handler; the other
+              purposes will surface a `purpose_mismatch` 400 from
+              `/api/v1/signup/verify` and the verify page renders the
+              standard "expired / invalid" copy. Recovery is the
+              exception — it emits its own `/recover/enroll?token=…`
+              URL and never lands on this route. */}
+          <Route path="/auth/magic/:token" element={<SignupVerifyPage />} />
           <Route path="/accept/:token" element={<AcceptPage />} />
           <Route path="/guest/:token" element={<GuestPage />} />
           <Route path="/w/:slug/guest/:token" element={<GuestPage />} />

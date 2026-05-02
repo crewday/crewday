@@ -1849,6 +1849,12 @@
 .login__recover { display: inline-block; margin-top: 14px; color: var(--ink-3); font-size: 12px; text-decoration: underline; }
 .login__footnote { color: var(--ink-3); font-size: 12px; margin-top: 18px; max-width: 400px; text-align: center; }
 .login__card--wide .login__footnote { text-align: left; }
+/* Inline hint copy for form fields and below-form notes — sits in
+   the body of the login card (as opposed to .login__footnote which
+   trails the card). Used by SignupPage / SignupEnrollPage for the
+   "lowercase letters and digits…" + "we'll set your timezone to…"
+   advisories. */
+.login__hint { color: var(--ink-3); font-size: 12px; }
 /* Inline notice slot used by LoginPage for passkey-ceremony errors —
    absent from the mock (which is static) but required by §14 so the
    typed PasskeyCancelled / Unsupported / ApiError 429 paths have
