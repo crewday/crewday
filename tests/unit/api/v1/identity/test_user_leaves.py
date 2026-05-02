@@ -478,7 +478,7 @@ class TestList:
         client = _client(ctx, factory)
         resp = client.get("/user_leaves?cursor=!!!not-base64")
         assert resp.status_code == 422
-        assert resp.json()["detail"]["error"] == "invalid_cursor"
+        assert resp.json()["type"].endswith("/invalid_cursor")
 
     def test_list_filter_date_window(
         self,

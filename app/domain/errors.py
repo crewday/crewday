@@ -6,11 +6,13 @@ RFC 7807 ``problem+json`` envelope with the canonical ``type`` URIs
 listed in ``docs/specs/12-rest-api.md`` §"Errors":
 
 * :class:`Validation` → ``validation``
+* :class:`InvalidCursor` → ``invalid_cursor``
 * :class:`NotFound` → ``not_found``
 * :class:`Conflict` → ``conflict``
 * :class:`Unauthorized` → ``unauthorized``
 * :class:`Forbidden` → ``forbidden``
 * :class:`RateLimited` → ``rate_limited``
+* :class:`ServiceUnavailable` → ``service_unavailable``
 * :class:`UpstreamUnavailable` → ``upstream_unavailable``
 * :class:`ApprovalRequired` → ``approval_required``
 
@@ -54,8 +56,10 @@ __all__ = [
     "DomainError",
     "Forbidden",
     "IdempotencyConflict",
+    "InvalidCursor",
     "NotFound",
     "RateLimited",
+    "ServiceUnavailable",
     "Unauthorized",
     "UpstreamUnavailable",
     "Validation",
@@ -144,6 +148,21 @@ class NotFound(DomainError):
     type_name: ClassVar[str] = "not_found"
 
 
+class InvalidCursor(Validation):
+    """Pagination cursor is malformed, tampered, or otherwise unusable. HTTP 422.
+
+    Subclass of :class:`Validation` so the status maps to 422
+    automatically; the dedicated ``type`` URI lets clients distinguish
+    a cursor problem from a generic body-validation failure without
+    grepping the human-facing ``detail`` string. Spec §12 "Pagination"
+    lists the canonical reasons (signature mismatch, version skew,
+    payload corruption, sort-value type mismatch).
+    """
+
+    title: ClassVar[str] = "Invalid cursor"
+    type_name: ClassVar[str] = "invalid_cursor"
+
+
 class Conflict(DomainError):
     """Request conflicts with current server state. HTTP 409.
 
@@ -211,6 +230,24 @@ class RateLimited(DomainError):
 
     title: ClassVar[str] = "Rate limited"
     type_name: ClassVar[str] = "rate_limited"
+
+
+class ServiceUnavailable(DomainError):
+    """A locally wired dependency is not ready. HTTP 503.
+
+    Used for storage, MIME sniffer, LLM and similar deps that the
+    factory wires from settings at boot. Distinct from
+    :class:`UpstreamUnavailable` (502): a 503 here means
+    the local deployment booted without the dep wired (missing
+    ``CREWDAY_ROOT_KEY``, incomplete S3 config, ...) — a configuration
+    bug, not a transient external outage. Populate ``extra`` with
+    ``upstream`` naming the missing component (``"storage"``,
+    ``"mime_sniffer"``, ``"llm"``, ...) so operators can pinpoint
+    which knob is unset.
+    """
+
+    title: ClassVar[str] = "Service unavailable"
+    type_name: ClassVar[str] = "service_unavailable"
 
 
 class UpstreamUnavailable(DomainError):

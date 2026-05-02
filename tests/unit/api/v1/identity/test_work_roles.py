@@ -70,7 +70,7 @@ class TestList:
         client = _owner_client(ctx, factory)
         resp = client.get("/work_roles?cursor=%20%20%20invalid%20%20%20")
         assert resp.status_code == 422
-        assert resp.json()["detail"]["error"] == "invalid_cursor"
+        assert resp.json()["type"].endswith("/invalid_cursor")
 
 
 class TestCreate:

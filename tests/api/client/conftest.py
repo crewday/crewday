@@ -10,9 +10,10 @@ from decimal import Decimal
 from typing import Literal
 
 import pytest
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from sqlalchemy import Engine
 from sqlalchemy.orm import Session, sessionmaker
+from starlette.responses import JSONResponse
 
 from app.adapters.db.authz.models import RoleGrant
 from app.adapters.db.base import Base
@@ -29,6 +30,8 @@ from app.adapters.db.session import UnitOfWorkImpl, make_engine
 from app.adapters.db.workspace.models import UserWorkspace, Workspace
 from app.api.client.portal import build_client_portal_router
 from app.api.deps import current_workspace_context, db_session
+from app.api.errors import _handle_domain_error
+from app.domain.errors import DomainError
 from app.tenancy import WorkspaceContext
 from app.util.ulid import new_ulid
 
@@ -84,6 +87,12 @@ def ctx(
 
 def build_app(factory: sessionmaker[Session], context: WorkspaceContext) -> FastAPI:
     app = FastAPI()
+
+    async def _on_domain_error(request: Request, exc: Exception) -> JSONResponse:
+        assert isinstance(exc, DomainError)
+        return _handle_domain_error(request, exc)
+
+    app.add_exception_handler(DomainError, _on_domain_error)
     app.include_router(build_client_portal_router())
 
     def _override_db() -> Iterator[Session]:

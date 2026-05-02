@@ -56,8 +56,10 @@ from app.domain.errors import (
     DomainError,
     Forbidden,
     IdempotencyConflict,
+    InvalidCursor,
     NotFound,
     RateLimited,
+    ServiceUnavailable,
     Unauthorized,
     UpstreamUnavailable,
     Validation,
@@ -94,6 +96,7 @@ CORRELATION_HEADERS: Final[tuple[str, ...]] = ("X-Correlation-Id", "X-Request-Id
 # at import time rather than at first 500.
 _DOMAIN_STATUS_MAP: Final[dict[type[DomainError], int]] = {
     Validation: 422,
+    InvalidCursor: 422,
     WouldOrphanOwnersGroup: 422,
     NotFound: 404,
     Conflict: 409,
@@ -101,6 +104,7 @@ _DOMAIN_STATUS_MAP: Final[dict[type[DomainError], int]] = {
     Unauthorized: 401,
     Forbidden: 403,
     RateLimited: 429,
+    ServiceUnavailable: 503,
     UpstreamUnavailable: 502,
     ApprovalRequired: 409,
 }
@@ -120,6 +124,7 @@ _HTTP_STATUS_TYPE_MAP: Final[dict[int, str]] = {
     422: "validation",
     429: "rate_limited",
     502: "upstream_unavailable",
+    503: "service_unavailable",
 }
 
 
@@ -138,6 +143,7 @@ _HTTP_STATUS_TITLE_MAP: Final[dict[int, str]] = {
     429: "Rate limited",
     500: "Internal server error",
     502: "Upstream unavailable",
+    503: "Service unavailable",
 }
 
 

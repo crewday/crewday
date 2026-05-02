@@ -25,7 +25,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Annotated, Literal, NoReturn
 
-from fastapi import HTTPException, Query
+from fastapi import Query
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import and_, asc, desc, func, or_, select
 from sqlalchemy.orm import Session
@@ -33,6 +33,7 @@ from sqlalchemy.sql import ColumnElement, Select
 
 from app.auth.keys import derive_subkey
 from app.config import get_settings
+from app.domain.errors import InvalidCursor, Validation
 
 __all__ = [
     "DEFAULT_LIMIT",
@@ -155,20 +156,11 @@ def validate_limit(limit: int) -> int:
     """Return ``limit`` if it satisfies §12 bounds, else raise 422."""
     if 1 <= limit <= MAX_LIMIT:
         return limit
-    raise HTTPException(
-        status_code=422,
-        detail={
-            "error": "validation",
-            "message": f"limit must be between 1 and {MAX_LIMIT}",
-        },
-    )
+    raise Validation(f"limit must be between 1 and {MAX_LIMIT}")
 
 
 def _invalid_cursor(message: str) -> NoReturn:
-    raise HTTPException(
-        status_code=422,
-        detail={"error": "invalid_cursor", "message": message},
-    )
+    raise InvalidCursor(message)
 
 
 def _b64encode(raw: bytes) -> str:
@@ -273,10 +265,11 @@ def encode_cursor(key: str) -> str:
 def decode_cursor(cursor: str | None) -> str | None:
     """Return the underlying row key, or ``None`` if ``cursor`` is ``None``.
 
-    A malformed or tampered cursor raises :class:`HTTPException` 422
-    rather than silently resetting to the first page. Existing router
-    tests assert this ``invalid_cursor`` shape, so the helper keeps 422
-    even though older Beads text mentioned 400.
+    A malformed or tampered cursor raises :class:`InvalidCursor`
+    (422) rather than silently resetting to the first page. The HTTP
+    seam translates this to a problem+json envelope with
+    ``type=invalid_cursor``; older Beads text mentioned 400 but the
+    status remains 422 to match router-level tests.
     """
     if cursor is None or cursor == "":
         return None
@@ -343,12 +336,8 @@ def _seek_condition[T, S: CursorScalar](
     try:
         sort_value = sort.parse_value(cursor.last_sort_value)
     except (TypeError, ValueError) as exc:
-        raise HTTPException(
-            status_code=422,
-            detail={
-                "error": "invalid_cursor",
-                "message": "cursor sort value is invalid for this resource",
-            },
+        raise InvalidCursor(
+            "cursor sort value is invalid for this resource",
         ) from exc
     id_after = id_column > cursor.last_id_ulid
     id_before = id_column < cursor.last_id_ulid

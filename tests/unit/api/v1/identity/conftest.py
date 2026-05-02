@@ -13,15 +13,18 @@ from collections.abc import Iterator
 from datetime import UTC, datetime
 
 import pytest
-from fastapi import APIRouter, FastAPI
+from fastapi import APIRouter, FastAPI, Request
 from fastapi.testclient import TestClient
 from sqlalchemy import Engine
 from sqlalchemy.orm import Session, sessionmaker
+from starlette.responses import JSONResponse
 
 from app.adapters.db.authz.models import RoleGrant
 from app.adapters.db.base import Base
 from app.adapters.db.session import UnitOfWorkImpl, make_engine
 from app.api.deps import current_workspace_context, db_session
+from app.api.errors import _handle_domain_error
+from app.domain.errors import DomainError
 from app.tenancy import WorkspaceContext
 from app.tenancy.context import ActorGrantRole
 from app.util.ulid import new_ulid
@@ -121,6 +124,21 @@ def build_client(
     test needs more than one router in the same TestClient.
     """
     app = FastAPI()
+
+    # Render :class:`DomainError` subclasses raised by shared deps
+    # (``current_workspace_context``, pagination helpers, …) as the
+    # spec §12 envelope rather than letting them propagate as 500.
+    # Legacy ``HTTPException(detail={"error": ...})`` sites still flow
+    # through FastAPI's default handler unchanged so the existing
+    # assertions in this suite (``resp.json()["detail"]["error"]``)
+    # keep working until each context's per-Beads cleanup converts
+    # them too (cd-649m).
+    async def _on_domain_error(request: Request, exc: Exception) -> JSONResponse:
+        assert isinstance(exc, DomainError)
+        return _handle_domain_error(request, exc)
+
+    app.add_exception_handler(DomainError, _on_domain_error)
+
     for prefix, router in router_mounts:
         app.include_router(router, prefix=prefix)
 

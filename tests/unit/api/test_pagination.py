@@ -6,7 +6,6 @@ from collections.abc import Iterator
 from dataclasses import dataclass
 
 import pytest
-from fastapi import HTTPException
 from sqlalchemy import Engine, Integer, String, create_engine, select
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
 
@@ -27,6 +26,7 @@ from app.api.pagination import (
     validate_limit,
 )
 from app.config import get_settings
+from app.domain.errors import InvalidCursor, Validation
 
 
 @pytest.fixture(autouse=True)
@@ -75,12 +75,6 @@ def session() -> Iterator[Session]:
         yield db
 
 
-def _invalid_cursor_detail(exc: HTTPException) -> dict[str, object]:
-    detail = exc.detail
-    assert isinstance(detail, dict)
-    return detail
-
-
 class TestCursorRoundTrip:
     """A key survives signed encode / decode unchanged."""
 
@@ -102,27 +96,21 @@ class TestCursorRoundTrip:
         assert decode_cursor("") is None
         assert decode_page_cursor("") is None
 
-    def test_unsigned_base64_cursor_raises_422(self) -> None:
+    def test_unsigned_base64_cursor_raises_invalid_cursor(self) -> None:
         unsigned = "MDFIVzlBQUFBQUFBQUFBQUFBQUFBQUFBQUFB"
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(InvalidCursor):
             decode_cursor(unsigned)
-        assert exc_info.value.status_code == 422
-        assert _invalid_cursor_detail(exc_info.value)["error"] == "invalid_cursor"
 
-    def test_tampered_cursor_raises_422(self) -> None:
+    def test_tampered_cursor_raises_invalid_cursor(self) -> None:
         encoded = encode_cursor("01HW9ZABCDE1234567890ABCDE")
         replacement = "A" if encoded[-1] != "A" else "B"
         tampered = f"{encoded[:-1]}{replacement}"
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(InvalidCursor):
             decode_cursor(tampered)
-        assert exc_info.value.status_code == 422
-        assert _invalid_cursor_detail(exc_info.value)["error"] == "invalid_cursor"
 
-    def test_malformed_cursor_raises_422(self) -> None:
-        with pytest.raises(HTTPException) as exc_info:
+    def test_malformed_cursor_raises_invalid_cursor(self) -> None:
+        with pytest.raises(InvalidCursor):
             decode_cursor("not a cursor!!!!")
-        assert exc_info.value.status_code == 422
-        assert _invalid_cursor_detail(exc_info.value)["error"] == "invalid_cursor"
 
     def test_missing_root_key_still_signs_with_process_local_key(
         self, monkeypatch: pytest.MonkeyPatch
@@ -165,10 +153,9 @@ class TestPaginate:
         assert page.next_cursor is None
         assert page.has_more is False
 
-    def test_invalid_limit_raises_422(self) -> None:
-        with pytest.raises(HTTPException) as exc_info:
+    def test_invalid_limit_raises_validation(self) -> None:
+        with pytest.raises(Validation):
             paginate([], limit=0, key_getter=lambda row: row.id)
-        assert exc_info.value.status_code == 422
 
     def test_overflow_without_key_raises(self) -> None:
         rows = [_Row(id="id0"), _Row(id="id1")]
@@ -191,13 +178,11 @@ class TestBounds:
     def test_max_limit(self) -> None:
         assert MAX_LIMIT == 500
 
-    def test_limit_over_max_raises_422_validation(self) -> None:
-        with pytest.raises(HTTPException) as exc_info:
+    def test_limit_over_max_raises_validation(self) -> None:
+        with pytest.raises(Validation) as exc_info:
             validate_limit(MAX_LIMIT + 1)
-        assert exc_info.value.status_code == 422
-        detail = exc_info.value.detail
-        assert isinstance(detail, dict)
-        assert detail["error"] == "validation"
+        assert exc_info.value.detail is not None
+        assert str(MAX_LIMIT) in exc_info.value.detail
 
 
 class TestPageEnvelope:
@@ -365,14 +350,16 @@ class TestPaginateQuery:
         assert [row.id for row in page2.data] == ["id-03"]
         assert page2.has_more is False
 
-    def test_cursor_for_wrong_sort_shape_returns_422(self, session: Session) -> None:
+    def test_cursor_for_wrong_sort_shape_raises_invalid_cursor(
+        self, session: Session
+    ) -> None:
         session.add(_Thing(id="id-01", rank=1, label="one"))
         session.commit()
         wrong_shape = encode_page_cursor(
             Cursor(last_sort_value="not-an-int", last_id_ulid="id-01")
         )
 
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(InvalidCursor):
             paginate_query(
                 session,
                 select(_Thing),
@@ -382,6 +369,3 @@ class TestPaginateQuery:
                 limit=2,
                 cursor=wrong_shape,
             )
-
-        assert exc_info.value.status_code == 422
-        assert _invalid_cursor_detail(exc_info.value)["error"] == "invalid_cursor"

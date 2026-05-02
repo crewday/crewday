@@ -435,9 +435,20 @@ class TestDeletePasskeyRouter:
         factory: sessionmaker[Session],
     ) -> None:
         """No ctx override → the shared dep raises 401."""
+        from fastapi import Request
+        from starlette.responses import JSONResponse
+
         from app.api.deps import current_workspace_context, db_session
+        from app.api.errors import _handle_domain_error
+        from app.domain.errors import DomainError
 
         app = FastAPI()
+
+        async def _on_domain_error(request: Request, exc: Exception) -> JSONResponse:
+            assert isinstance(exc, DomainError)
+            return _handle_domain_error(request, exc)
+
+        app.add_exception_handler(DomainError, _on_domain_error)
         app.include_router(router, prefix="/api/v1")
 
         def _override_db() -> Iterator[Session]:
@@ -459,7 +470,7 @@ class TestDeletePasskeyRouter:
         # Any base64url id — the auth gate fires before we decode it.
         resp = client.delete("/api/v1/auth/passkey/AAAAAAAAAAAAAAAAAAAAAAAAAAAA")
         assert resp.status_code == 401
-        assert resp.json()["detail"]["error"] == "not_authenticated"
+        assert resp.json()["type"].endswith("/unauthorized")
 
 
 # ---------------------------------------------------------------------------

@@ -9,10 +9,11 @@ from datetime import UTC, datetime
 from typing import Literal
 
 import pytest
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 from sqlalchemy import Engine, select
 from sqlalchemy.orm import Session, sessionmaker
+from starlette.responses import JSONResponse
 
 from app.adapters.db.audit.models import AuditLog
 from app.adapters.db.authz.models import RoleGrant
@@ -22,7 +23,9 @@ from app.adapters.db.messaging.models import ChatChannel
 from app.adapters.db.session import UnitOfWorkImpl, make_engine
 from app.adapters.db.workspace.models import UserWorkspace, Workspace
 from app.api.deps import current_workspace_context, db_session
+from app.api.errors import _handle_domain_error
 from app.api.v1.messaging import build_messaging_router
+from app.domain.errors import DomainError
 from app.tenancy.context import WorkspaceContext
 from app.util.ulid import new_ulid
 
@@ -137,6 +140,15 @@ def _ctx(
 
 def _build_app(factory: sessionmaker[Session], ctx: WorkspaceContext) -> FastAPI:
     app = FastAPI()
+
+    # Render :class:`DomainError` raised by shared deps as the §12
+    # envelope; legacy ``HTTPException(detail=...)`` sites keep their
+    # FastAPI default shape until per-context cleanup lands (cd-649m).
+    async def _on_domain_error(request: Request, exc: Exception) -> JSONResponse:
+        assert isinstance(exc, DomainError)
+        return _handle_domain_error(request, exc)
+
+    app.add_exception_handler(DomainError, _on_domain_error)
     app.include_router(build_messaging_router())
 
     def _override_ctx() -> WorkspaceContext:
@@ -219,7 +231,7 @@ class TestChatChannelApi:
         resp = client.get("/chat/channels", params={"cursor": "\xff"})
 
         assert resp.status_code == 422
-        assert resp.json()["detail"]["error"] == "invalid_cursor"
+        assert resp.json()["type"].endswith("/invalid_cursor")
 
     def test_worker_never_sees_manager_or_gateway_channels(
         self,

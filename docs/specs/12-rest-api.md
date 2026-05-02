@@ -263,8 +263,9 @@ header when `retry_after_seconds` is present in the envelope `extra`.
 Canonical error `type` URIs — full URI is
 `https://crewday.dev/errors/<name>` (see `app/domain/errors.py:CANONICAL_TYPE_BASE`):
 
-- `validation` (422), `not_found` (404), `conflict` (409),
-  `unauthorized` (401), `forbidden` (403), `rate_limited` (429),
+- `validation` (422), `invalid_cursor` (422), `not_found` (404),
+  `conflict` (409), `unauthorized` (401), `forbidden` (403),
+  `rate_limited` (429), `service_unavailable` (503),
   `upstream_unavailable` (502), `idempotency_conflict` (409),
   `would_orphan_owners_group` (422), `approval_required` (409).
 - `internal` (500) — fallback when an unregistered `DomainError`

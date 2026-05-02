@@ -195,4 +195,7 @@ def test_portal_rejects_cursor_from_different_sort_type(
     response = client.get("/client/quotes", params={"cursor": cursor})
 
     assert response.status_code == 422
+    # The portal route still uses ``HTTPException(detail=...)`` for its
+    # own cursor-shape check (separate cleanup task); the FastAPI
+    # default handler runs and the body keeps the legacy shape.
     assert response.json()["detail"]["error"] == "invalid_cursor"

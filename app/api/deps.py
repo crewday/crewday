@@ -15,12 +15,13 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 
-from fastapi import HTTPException, Request, status
+from fastapi import Request
 from sqlalchemy.orm import Session
 
 from app.adapters.db.session import make_uow
 from app.adapters.llm.ports import LLMClient
 from app.adapters.storage.ports import MimeSniffer, Storage
+from app.domain.errors import ServiceUnavailable, Unauthorized
 from app.tenancy import WorkspaceContext
 from app.tenancy.current import get_current
 
@@ -36,17 +37,14 @@ __all__ = [
 def current_workspace_context() -> WorkspaceContext:
     """FastAPI dep — return the ambient :class:`WorkspaceContext`.
 
-    Raises :class:`HTTPException` 401 when no context is set. The
-    production middleware (cd-ika7) resolves the context from the
-    session cookie + URL slug before the handler runs; this dep is
-    the read-side of that contract.
+    Raises :class:`Unauthorized` (401 ``unauthorized``) when no
+    context is set. The production middleware (cd-ika7) resolves the
+    context from the session cookie + URL slug before the handler
+    runs; this dep is the read-side of that contract.
     """
     ctx = get_current()
     if ctx is None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail={"error": "not_authenticated"},
-        )
+        raise Unauthorized("Authentication required")
     return ctx
 
 
@@ -74,9 +72,9 @@ def get_storage(request: Request) -> Storage:
 
     Reads :attr:`app.state.storage`, populated by the app factory at
     boot time from :attr:`Settings.storage_backend`. Raises
-    :class:`HTTPException` 503 when no backend is wired — this is a
-    deployment misconfiguration (missing ``CREWDAY_ROOT_KEY`` or an
-    incomplete S3 config) rather than a client bug, so the surface
+    :class:`ServiceUnavailable` (503) when no backend is wired — this
+    is a deployment misconfiguration (missing ``CREWDAY_ROOT_KEY`` or
+    an incomplete S3 config) rather than a client bug, so the surface
     error is "service not ready" rather than a generic 500.
 
     Tests override via ``app.dependency_overrides[get_storage] = …``
@@ -89,9 +87,9 @@ def get_storage(request: Request) -> Storage:
     # themselves or override this dep.
     storage: Storage | None = getattr(request.app.state, "storage", None)
     if storage is None:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail={"error": "storage_unavailable"},
+        raise ServiceUnavailable(
+            "Storage backend is not configured",
+            extra={"upstream": "storage"},
         )
     return storage
 
@@ -113,9 +111,9 @@ def get_mime_sniffer(request: Request) -> MimeSniffer:
     """
     sniffer: MimeSniffer | None = getattr(request.app.state, "mime_sniffer", None)
     if sniffer is None:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail={"error": "mime_sniffer_unavailable"},
+        raise ServiceUnavailable(
+            "MIME sniffer is not configured",
+            extra={"upstream": "mime_sniffer"},
         )
     return sniffer
 
@@ -128,29 +126,29 @@ def get_llm(request: Request) -> LLMClient:
     a static OpenRouter env key or DB decrypt key is available
     (default), or :class:`~app.adapters.llm.fake.FakeLLMClient` when
     the dev/e2e ``CREWDAY_LLM_PROVIDER=fake`` knob is set. Raises
-    :class:`HTTPException` 503 when no client is wired, or when the
-    wired client cannot currently resolve an API key.
+    :class:`ServiceUnavailable` (503) when no client is wired, or when
+    the wired client cannot currently resolve an API key.
 
     Tests override via ``app.dependency_overrides[get_llm] = …`` to
     inject :class:`tests._fakes.llm.EchoLLMClient` or a stub.
     """
     llm: LLMClient | None = getattr(request.app.state, "llm", None)
     if llm is None:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail={"error": "llm_unavailable"},
+        raise ServiceUnavailable(
+            "LLM client is not configured",
+            extra={"upstream": "llm"},
         )
     configured = getattr(llm, "is_configured", None)
     try:
         is_configured = bool(configured()) if callable(configured) else True
     except RuntimeError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail={"error": "llm_unavailable"},
+        raise ServiceUnavailable(
+            "LLM client is not configured",
+            extra={"upstream": "llm"},
         ) from exc
     if not is_configured:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail={"error": "llm_unavailable"},
+        raise ServiceUnavailable(
+            "LLM client is not configured",
+            extra={"upstream": "llm"},
         )
     return llm

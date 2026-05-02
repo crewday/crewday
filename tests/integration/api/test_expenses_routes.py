@@ -1643,7 +1643,7 @@ class TestReceiptScan:
         storage: InMemoryStorage,
     ) -> None:
         """An unauthenticated caller (no ambient :class:`WorkspaceContext`)
-        surfaces 401 ``not_authenticated`` from the
+        surfaces 401 ``unauthorized`` from the
         :func:`app.api.deps.current_workspace_context` dep — the scan
         route never reaches its body.
 
@@ -1652,9 +1652,20 @@ class TestReceiptScan:
         runs and raises 401 (the test-helper ``_client_for`` always
         injects a context, which would shadow this path).
         """
+        from fastapi import Request
+        from starlette.responses import JSONResponse
+
         from app.api.deps import get_llm
+        from app.api.errors import _handle_domain_error
+        from app.domain.errors import DomainError
 
         app = FastAPI()
+
+        async def _on_domain_error(request: Request, exc: Exception) -> JSONResponse:
+            assert isinstance(exc, DomainError)
+            return _handle_domain_error(request, exc)
+
+        app.add_exception_handler(DomainError, _on_domain_error)
         app.include_router(expenses_router, prefix="/api/v1/expenses")
 
         def _session() -> Iterator[Session]:
@@ -1676,7 +1687,7 @@ class TestReceiptScan:
                 files={"image": ("r.jpg", b"x", "image/jpeg")},
             )
             assert r.status_code == 401, r.text
-            assert r.json()["detail"]["error"] == "not_authenticated"
+            assert r.json()["type"].endswith("/unauthorized")
 
     def test_cross_workspace_blocked_for_disabled_deployment(
         self,

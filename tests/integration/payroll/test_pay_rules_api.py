@@ -37,16 +37,19 @@ from decimal import Decimal
 from typing import Any
 
 import pytest
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 from sqlalchemy import Engine, select
 from sqlalchemy.orm import Session, sessionmaker
+from starlette.responses import JSONResponse
 
 from app.adapters.db.audit.models import AuditLog
 from app.adapters.db.payroll.models import PayPeriod, PayRule, Payslip
 from app.api.deps import current_workspace_context
 from app.api.deps import db_session as _db_session_dep
+from app.api.errors import _handle_domain_error
 from app.api.v1.payroll import build_payroll_router
+from app.domain.errors import DomainError
 from app.tenancy import WorkspaceContext, tenant_agnostic
 from app.util.ulid import new_ulid
 from tests.factories.identity import (
@@ -129,6 +132,12 @@ def client(
     """:class:`TestClient` mounted on the payroll router."""
     ctx, _ = seeded
     app = FastAPI()
+
+    async def _on_domain_error(request: Request, exc: Exception) -> JSONResponse:
+        assert isinstance(exc, DomainError)
+        return _handle_domain_error(request, exc)
+
+    app.add_exception_handler(DomainError, _on_domain_error)
     app.include_router(build_payroll_router(), prefix="/api/v1/payroll")
 
     def _session() -> Iterator[Session]:
@@ -450,7 +459,7 @@ class TestList:
             params={"cursor": bad},
         )
         assert r.status_code == 422, r.text
-        assert r.json()["detail"]["error"] == "invalid_cursor"
+        assert r.json()["type"].endswith("/invalid_cursor")
 
 
 # ---------------------------------------------------------------------------

@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
+from starlette.responses import JSONResponse
 
+from app.api.errors import _handle_domain_error
 from app.api.v1.messaging import build_messaging_router
+from app.domain.errors import DomainError
 
 
 def test_messaging_router_declares_notifications_and_push_management_routes() -> None:
@@ -30,6 +33,12 @@ def test_messaging_router_declares_notifications_and_push_management_routes() ->
 
 def test_native_push_registration_requires_workspace_context() -> None:
     app = FastAPI()
+
+    async def _on_domain_error(request: Request, exc: Exception) -> JSONResponse:
+        assert isinstance(exc, DomainError)
+        return _handle_domain_error(request, exc)
+
+    app.add_exception_handler(DomainError, _on_domain_error)
     app.include_router(build_messaging_router())
     client = TestClient(app, raise_server_exceptions=False)
 
@@ -39,4 +48,4 @@ def test_native_push_registration_requires_workspace_context() -> None:
     )
 
     assert resp.status_code == 401
-    assert resp.json()["detail"]["error"] == "not_authenticated"
+    assert resp.json()["type"].endswith("/unauthorized")

@@ -179,17 +179,17 @@ class TestCommentCursor:
         assert _decode_comment_cursor(None) == (None, None)
         assert _decode_comment_cursor("") == (None, None)
 
-    def test_tampered_cursor_raises_422(self) -> None:
+    def test_tampered_cursor_raises_invalid_cursor(self) -> None:
         """A base64-valid blob missing the ``|`` separator collapses to 422."""
         # "no-pipe" base64 encoded.
         import base64
 
-        bad = base64.urlsafe_b64encode(b"nopipehere").rstrip(b"=").decode("ascii")
-        from fastapi import HTTPException
+        from app.domain.errors import InvalidCursor
 
-        with pytest.raises(HTTPException) as excinfo:
+        bad = base64.urlsafe_b64encode(b"nopipehere").rstrip(b"=").decode("ascii")
+
+        with pytest.raises(InvalidCursor):
             _decode_comment_cursor(bad)
-        assert excinfo.value.status_code == 422
 
 
 class TestOverdueAcrossTimezones:
