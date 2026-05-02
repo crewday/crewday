@@ -8,19 +8,25 @@ group on every workspace to honour two related write-side invariants:
    422 ``would_orphan_owners_group``.
 2. **Administrative reach.** ``owners@<ws>`` has at least one active
    member who **also carries a live ``manager`` role grant on the
-   workspace**. Revoking the last manager grant on a member of the
-   owners group fails with 409 ``last_owner_grant_protected``.
+   workspace**. Either write surface that would tip the count of
+   manager-grant-holding owners to zero refuses with 409
+   ``last_owner_grant_protected``: ``role_grants.revoke`` for the
+   grant-side path (cd-nj8m) and ``permission_groups.remove_member``
+   for the membership-side cross-path race (cd-j5pu).
 
 Both invariants share a count-then-act pattern. Without a lock, the
 pattern is a textbook TOCTOU: two concurrent transactions both read
 ``count == 2`` and both commit their write, leaving the workspace
-either un-rostered (cd-mb5n) or administratively decapitated (cd-nj8m).
+either un-rostered (cd-mb5n) or administratively decapitated
+(cd-nj8m, plus the cross-path race fixed by cd-j5pu).
 
 This module exposes two helpers — :func:`count_owner_members_locked`
-(for the membership-removal guard) and
+(for the roster invariant) and
 :func:`count_owner_members_with_manager_grant_locked` (for the
-manager-grant-revoke guard) — that share a common locking primitive
-:func:`_lock_owners_group`. Both:
+administrative-reach invariant; called from both
+``role_grants.revoke`` and ``permission_groups.remove_member`` so
+the cross-path race in cd-j5pu cannot wedge the workspace) — that
+share a common locking primitive :func:`_lock_owners_group`. Both:
 
 1. Lock the system ``owners`` ``permission_group`` row for the
    caller's workspace, using the dialect's native write-lock
@@ -61,7 +67,13 @@ See:
 * ``docs/specs/02-domain-model.md`` §"permission_group"
   §"Invariants".
 * cd-mb5n — the original TOCTOU fix (membership-removal scenario).
-* cd-nj8m — the manager-grant-revoke scenario (this file).
+* cd-nj8m — the manager-grant-revoke scenario.
+* cd-j5pu — the cross-path race: thread 1 revokes A's manager grant
+  while thread 2 drops B from owners, both threads observe a
+  too-narrow invariant and the workspace ends up decapitated.
+  ``permission_groups.remove_member`` now consults the same admin-
+  reach helper (with ``exclude_user_id``) so the lock serialises
+  the two paths against each other.
 * cd-ckr — the v1 last-owner guard on ``remove_member``.
 * cd-79r — the v1 last-owner guard on ``revoke``.
 """
@@ -194,22 +206,37 @@ def count_owner_members_with_manager_grant_locked(
     *,
     workspace_id: str,
     exclude_grant_id: str | None = None,
+    exclude_user_id: str | None = None,
 ) -> int:
     """Count owners-group members who would still hold a manager grant.
 
     Returns the number of distinct users who are BOTH (a) members of
     ``owners@workspace_id`` AND (b) carry at least one ``manager``
     :class:`~app.adapters.db.authz.models.RoleGrant` on the workspace,
-    after **excluding** the grant identified by ``exclude_grant_id``
-    (the row about to be deleted by the caller). When
-    ``exclude_grant_id`` is ``None`` the count is the unconditional
+    after applying any of the two pending-write exclusions:
+
+    * ``exclude_grant_id`` — a ``role_grant`` row the caller is about
+      to delete (used by :func:`role_grants.revoke`). Filters the
+      manager-grant EXISTS sub-query so the row in flight does not
+      contribute to the post-write tally.
+    * ``exclude_user_id`` — a user the caller is about to drop from
+      ``owners@workspace_id`` (used by
+      :func:`permission_groups.remove_member`). Filters the
+      owners-membership predicate so the user in flight does not
+      contribute to the post-write tally even though their
+      ``permission_group_member`` row is still committed at lock
+      acquisition time.
+
+    Both exclusions are independent: a caller may set either, both,
+    or neither. With neither set the count is the unconditional
     "manager-holding owners" tally.
 
     The helper takes the same lock as
     :func:`count_owner_members_locked` so both last-owner guards
     serialise against each other — a concurrent ``remove_member`` and
     ``revoke`` on the same workspace can't slip past each other to a
-    state that violates either §02 invariant.
+    state that violates either §02 invariant (cd-mb5n + cd-nj8m +
+    cd-j5pu).
 
     If the owners group does not exist for the given workspace the
     helper returns ``0``; the caller's guard then trips on that
@@ -228,7 +255,8 @@ def count_owner_members_with_manager_grant_locked(
 
     # Count distinct users who are owners-group members AND have at
     # least one ``manager`` grant on the workspace, optionally minus
-    # the grant about to be revoked. ``DISTINCT user_id`` collapses
+    # the grant about to be revoked AND/OR the user about to be
+    # removed from the owners roster. ``DISTINCT user_id`` collapses
     # users with multiple manager grants (e.g. one workspace-wide and
     # one property-scoped) to a single contributing user, matching the
     # invariant's "≥ 1 manager-holding owner" shape.
@@ -240,13 +268,17 @@ def count_owner_members_with_manager_grant_locked(
     if exclude_grant_id is not None:
         grant_predicates.append(RoleGrant.id != exclude_grant_id)
 
+    member_predicates = [
+        PermissionGroupMember.group_id == owners_group_id,
+        PermissionGroupMember.workspace_id == workspace_id,
+    ]
+    if exclude_user_id is not None:
+        member_predicates.append(PermissionGroupMember.user_id != exclude_user_id)
+
     count_stmt = (
         select(func.count(func.distinct(PermissionGroupMember.user_id)))
         .select_from(PermissionGroupMember)
-        .where(
-            PermissionGroupMember.group_id == owners_group_id,
-            PermissionGroupMember.workspace_id == workspace_id,
-        )
+        .where(*member_predicates)
         .where(select(RoleGrant.id).where(and_(*grant_predicates)).exists())
     )
     count = session.scalar(count_stmt)

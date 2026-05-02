@@ -39,11 +39,15 @@ from sqlalchemy.orm import Session
 
 from app.adapters.db.audit.models import AuditLog
 from app.adapters.db.authz.bootstrap import seed_system_permission_groups
-from app.adapters.db.authz.models import PermissionGroupMember
-from app.adapters.db.authz.repositories import SqlAlchemyPermissionGroupRepository
+from app.adapters.db.authz.models import PermissionGroupMember, RoleGrant
+from app.adapters.db.authz.repositories import (
+    SqlAlchemyPermissionGroupRepository,
+    SqlAlchemyRoleGrantRepository,
+)
 from app.adapters.db.workspace.models import UserWorkspace, Workspace
 from app.authz import resolve_is_owner
 from app.domain.identity.permission_groups import (
+    LastOwnerGrantProtected,
     WouldOrphanOwnersGroup,
     add_member,
     list_groups,
@@ -701,3 +705,183 @@ class TestRejectedAuditHelper:
             "group_id": owners_id,
             "user_id": user_id,
         }
+
+    def test_rejection_audit_lands_with_last_owner_grant_protected_reason(
+        self, env: tuple[Session, WorkspaceContext, str]
+    ) -> None:
+        """Caller-supplied ``reason`` round-trips into the forensic row.
+
+        The router uses ``reason="last_owner_grant_protected"`` for
+        the cd-j5pu admin-reach refusal so log readers can tell that
+        path apart from the cd-ckr roster-empty path. Without this
+        coverage the two refusals look identical at the audit layer
+        and operators lose the forensic distinction.
+        """
+        session, ctx, user_id = env
+        owners_id = _owners_group_id(session, ctx)
+
+        write_member_remove_rejected_audit(
+            session,
+            ctx,
+            group_id=owners_id,
+            user_id=user_id,
+            reason="last_owner_grant_protected",
+            clock=FrozenClock(_PINNED),
+        )
+        session.flush()
+
+        rows = session.scalars(
+            select(AuditLog).where(
+                AuditLog.action == "member_remove_rejected",
+                AuditLog.entity_id == f"{owners_id}:{user_id}",
+            )
+        ).all()
+        assert len(rows) == 1
+        assert rows[0].diff == {
+            "reason": "last_owner_grant_protected",
+            "group_id": owners_id,
+            "user_id": user_id,
+        }
+
+
+# ---------------------------------------------------------------------------
+# Admin-reach guard on remove_member (cd-j5pu — sibling of cd-nj8m)
+# ---------------------------------------------------------------------------
+
+
+class TestLastOwnerGrantProtectedRemoveMember:
+    """``remove_member`` enforces the §02 admin-reach invariant.
+
+    The cross-path race covered in ``test_last_owner_race.py`` only
+    asserts "≥ 1 refusal" because either thread can win the lock; a
+    deterministic single-thread test is needed so a future regression
+    that breaks the guard but happens to land on the lock-loser
+    revoke side stays caught (cd-j5pu).
+    """
+
+    def test_remove_only_manager_holding_owner_with_decoration_co_owner_raises(
+        self, env: tuple[Session, WorkspaceContext, str]
+    ) -> None:
+        """Owner A holds the only manager grant; B is a decoration owner.
+
+        Removing A must trip :class:`LastOwnerGrantProtected` —
+        the roster would still have B, but B carries no manager
+        grant so the workspace would be administratively
+        decapitated. Mirrors cd-nj8m's revoke-side reverse case.
+        """
+        session, ctx, user_a = env
+        clock = FrozenClock(_PINNED)
+        owners_id = _owners_group_id(session, ctx)
+
+        # Add a decoration owner with NO manager grant.
+        user_b = _second_user_with_membership(
+            session,
+            workspace_id=ctx.workspace_id,
+            suffix="deco-owner",
+            clock=clock,
+        )
+        add_member(_repo(session), ctx, group_id=owners_id, user_id=user_b, clock=clock)
+
+        with pytest.raises(LastOwnerGrantProtected):
+            remove_member(
+                _repo(session),
+                ctx,
+                group_id=owners_id,
+                user_id=user_a,
+                clock=clock,
+            )
+
+        # Membership untouched — the typed exception fired before
+        # the DELETE; A is still committed in the owners group.
+        remaining = session.scalars(
+            select(PermissionGroupMember).where(
+                PermissionGroupMember.group_id == owners_id
+            )
+        ).all()
+        assert {m.user_id for m in remaining} == {user_a, user_b}
+
+    def test_remove_decoration_owner_does_not_trip_admin_reach_guard(
+        self, env: tuple[Session, WorkspaceContext, str]
+    ) -> None:
+        """Owner B has no manager grant; removing B must NOT trip the guard.
+
+        Admin reach is unaffected because A still holds the only
+        manager grant after the removal — exactly the §05 prose
+        "owners can exist without a manager grant, and vice versa"
+        case.
+        """
+        session, ctx, user_a = env
+        clock = FrozenClock(_PINNED)
+        owners_id = _owners_group_id(session, ctx)
+
+        user_b = _second_user_with_membership(
+            session,
+            workspace_id=ctx.workspace_id,
+            suffix="deco-only",
+            clock=clock,
+        )
+        add_member(_repo(session), ctx, group_id=owners_id, user_id=user_b, clock=clock)
+
+        # Must succeed — A keeps the manager grant, admin reach
+        # stays at 1 after the removal.
+        remove_member(
+            _repo(session), ctx, group_id=owners_id, user_id=user_b, clock=clock
+        )
+
+        remaining = session.scalars(
+            select(PermissionGroupMember).where(
+                PermissionGroupMember.group_id == owners_id
+            )
+        ).all()
+        assert [m.user_id for m in remaining] == [user_a]
+
+    def test_remove_one_of_two_manager_holding_owners_succeeds(
+        self, env: tuple[Session, WorkspaceContext, str]
+    ) -> None:
+        """Both A and B hold manager grants; removing either must succeed.
+
+        Admin reach drops 2 → 1 which still satisfies the invariant.
+        Pinning the happy path keeps the new guard from drifting into
+        a "always refuse" failure mode.
+        """
+        from app.domain.identity.role_grants import grant as _grant
+
+        session, ctx, user_a = env
+        clock = FrozenClock(_PINNED)
+        owners_id = _owners_group_id(session, ctx)
+
+        user_b = _second_user_with_membership(
+            session,
+            workspace_id=ctx.workspace_id,
+            suffix="dual-mgr",
+            clock=clock,
+        )
+        add_member(_repo(session), ctx, group_id=owners_id, user_id=user_b, clock=clock)
+        _grant(
+            SqlAlchemyRoleGrantRepository(session),
+            ctx,
+            user_id=user_b,
+            grant_role="manager",
+            clock=clock,
+        )
+
+        # B now has a manager grant + owners membership; remove B.
+        remove_member(
+            _repo(session), ctx, group_id=owners_id, user_id=user_b, clock=clock
+        )
+
+        # A still in owners; A's manager grant still live.
+        remaining = session.scalars(
+            select(PermissionGroupMember).where(
+                PermissionGroupMember.group_id == owners_id
+            )
+        ).all()
+        assert [m.user_id for m in remaining] == [user_a]
+        a_manager_grants = session.scalars(
+            select(RoleGrant).where(
+                RoleGrant.workspace_id == ctx.workspace_id,
+                RoleGrant.user_id == user_a,
+                RoleGrant.grant_role == "manager",
+            )
+        ).all()
+        assert len(a_manager_grants) == 1

@@ -66095,7 +66095,7 @@
     },
     "/w/{slug}/api/v1/permission_groups/{group_id}/members/{user_id}": {
       "delete": {
-        "description": "Delete a (group, user) membership row.\n\nThe last-owner guard at the domain layer prevents stripping\nthe sole member of the system ``owners`` group; the typed\nexception rolls back the caller's UoW, so the rejection audit\nrow is written on a fresh UoW via\n:func:`write_member_remove_rejected_audit`.",
+        "description": "Delete a (group, user) membership row.\n\nTwo domain-layer guards fire on the system ``owners`` group:\n:class:`WouldOrphanOwnersGroup` (422\n``would_orphan_owners_group``) when the removal would empty\nthe roster, and :class:`LastOwnerGrantProtected` (409\n``last_owner_grant_protected``) when the removal would leave\n``owners@<ws>`` with no member holding a live ``manager``\ngrant \u2014 \u00a702 administrative-reach invariant, cd-j5pu (sibling\nof cd-nj8m's revoke-side guard). Either typed exception\nrolls back the caller's UoW, so the rejection audit row is\nwritten on a fresh UoW via\n:func:`write_member_remove_rejected_audit` with the matching\n``reason`` so log readers can tell the two refusals apart.",
         "operationId": "permission_groups.members.remove",
         "parameters": [
           {

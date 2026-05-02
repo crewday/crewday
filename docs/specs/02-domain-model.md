@@ -767,13 +767,24 @@ Primary key on `id`; unique `(scope_kind, scope_id, key)` where
   **administrative reach** — a workspace whose `owners` group
   members all lack a `manager` surface grant cannot be
   administered (no governance UI, no permission-rule edits, no
-  membership writes). A `role_grants.revoke` of a `manager`
-  grant whose removal would tip the count of
-  manager-grant-holding `owners` members to zero fails with
-  409 `error = "last_owner_grant_protected"`. The matching
-  `permission_group_member` removal is already covered by the
-  preceding invariant: removing a sole owner who carried the
-  only `manager` grant trips `would_orphan_owners_group` first.
+  membership writes). Both write surfaces enforce the rule:
+  - `role_grants.revoke` on a `manager` grant whose removal
+    would tip the count of manager-grant-holding `owners`
+    members to zero fails with 409
+    `error = "last_owner_grant_protected"` (cd-nj8m).
+  - `permission_group_member` removal from `owners@<scope>`
+    that would leave the group with no remaining member
+    holding a live `manager` grant fails with 409
+    `error = "last_owner_grant_protected"` (cd-j5pu — sibling
+    of the revoke-side guard, closing the cross-path race
+    where one thread revokes A's grant while another thread
+    drops B from `owners`). When removing the user would also
+    empty the roster, the roster-side
+    `would_orphan_owners_group` (422) trips first.
+  Both guards take a shared row-level lock on the owners-group
+  row before counting so concurrent `revoke` and
+  `remove_member` calls on the same scope serialise against
+  each other and cannot race past either invariant.
 - A user cannot be archived (`users.archived_at`) while they
   are the sole active member of any `owners` group across the
   deployment. The error code is

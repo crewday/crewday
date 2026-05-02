@@ -19,9 +19,13 @@ surface:
 * ``GET /permission_groups/{id}/members`` — list explicit members.
 * ``POST /permission_groups/{id}/members`` — add a member; idempotent.
 * ``DELETE /permission_groups/{id}/members/{user_id}`` — remove a
-  member; idempotent. Last-owner guard at the domain layer fires 422
-  ``would_orphan_owners_group`` and writes a forensic rejection
-  audit row on a fresh UoW.
+  member; idempotent. Two domain-layer guards fire on the system
+  ``owners`` group: 422 ``would_orphan_owners_group`` when the
+  removal would empty the roster (cd-ckr), and 409
+  ``last_owner_grant_protected`` when the removal would leave
+  ``owners@<ws>`` with no member holding a live ``manager`` grant
+  (cd-j5pu — administrative-reach invariant). Both refusals write a
+  forensic ``member_remove_rejected`` audit row on a fresh UoW.
 
 Action gates per §05:
 
@@ -70,6 +74,7 @@ from app.authz import require
 from app.authz.dep import Permission
 from app.authz.enforce import PermissionDenied
 from app.domain.identity.permission_groups import (
+    LastOwnerGrantProtected,
     PermissionGroupMemberRef,
     PermissionGroupNotFound,
     PermissionGroupRef,
@@ -250,6 +255,23 @@ def _http_for_would_orphan_owners_group(exc: WouldOrphanOwnersGroup) -> HTTPExce
     return HTTPException(
         status_code=422,
         detail={"error": "would_orphan_owners_group", "message": str(exc)},
+    )
+
+
+def _http_for_last_owner_grant_protected(
+    exc: LastOwnerGrantProtected,
+) -> HTTPException:
+    """Map the admin-reach refusal raised by ``remove_member``.
+
+    Mirrors the role-grants surface (``role_grants.delete``): the
+    cross-path race fixed by cd-j5pu surfaces 409
+    ``last_owner_grant_protected`` so the SPA can prompt the operator
+    to mint a replacement ``manager`` grant on a remaining owners-
+    group member before dropping this seat.
+    """
+    return HTTPException(
+        status_code=409,
+        detail={"error": "last_owner_grant_protected", "message": str(exc)},
     )
 
 
@@ -650,11 +672,18 @@ def build_permission_groups_router() -> APIRouter:
     ) -> Response:
         """Delete a (group, user) membership row.
 
-        The last-owner guard at the domain layer prevents stripping
-        the sole member of the system ``owners`` group; the typed
-        exception rolls back the caller's UoW, so the rejection audit
-        row is written on a fresh UoW via
-        :func:`write_member_remove_rejected_audit`.
+        Two domain-layer guards fire on the system ``owners`` group:
+        :class:`WouldOrphanOwnersGroup` (422
+        ``would_orphan_owners_group``) when the removal would empty
+        the roster, and :class:`LastOwnerGrantProtected` (409
+        ``last_owner_grant_protected``) when the removal would leave
+        ``owners@<ws>`` with no member holding a live ``manager``
+        grant — §02 administrative-reach invariant, cd-j5pu (sibling
+        of cd-nj8m's revoke-side guard). Either typed exception
+        rolls back the caller's UoW, so the rejection audit row is
+        written on a fresh UoW via
+        :func:`write_member_remove_rejected_audit` with the matching
+        ``reason`` so log readers can tell the two refusals apart.
         """
         _gate_member_write(session, ctx, group_id=group_id)
         try:
@@ -666,9 +695,18 @@ def build_permission_groups_router() -> APIRouter:
             )
         except PermissionGroupNotFound as exc:
             raise _http_for_not_found() from exc
-        except WouldOrphanOwnersGroup as exc:
+        except (WouldOrphanOwnersGroup, LastOwnerGrantProtected) as exc:
             # Open a fresh UoW so the forensic ``member_remove_rejected``
-            # row survives the primary UoW's rollback.
+            # row survives the primary UoW's rollback. Both refusals
+            # surface the same forensic shape; the rejection ``reason``
+            # tracks the typed exception so log readers can tell the
+            # roster-empty path (cd-ckr) from the admin-reach path
+            # (cd-j5pu).
+            reason = (
+                "would_orphan_owners_group"
+                if isinstance(exc, WouldOrphanOwnersGroup)
+                else "last_owner_grant_protected"
+            )
             try:
                 with make_uow() as audit_session:
                     assert isinstance(audit_session, Session)
@@ -677,19 +715,22 @@ def build_permission_groups_router() -> APIRouter:
                         ctx,
                         group_id=group_id,
                         user_id=user_id,
+                        reason=reason,
                     )
             except Exception:
-                # Rescue audit must never shadow the primary 422; log
+                # Rescue audit must never shadow the primary 4xx; log
                 # and continue. The primary UoW already rolled back so
                 # the membership stays intact regardless. Mirrors the
                 # canon in :mod:`app.api.v1.users` for the workspace-
                 # member remove path.
                 _log.warning(
                     "permission_groups.member_remove_rejected audit failed; "
-                    "primary 422 still surfaced",
+                    "primary refusal still surfaced",
                     exc_info=True,
                 )
-            raise _http_for_would_orphan_owners_group(exc) from exc
+            if isinstance(exc, WouldOrphanOwnersGroup):
+                raise _http_for_would_orphan_owners_group(exc) from exc
+            raise _http_for_last_owner_grant_protected(exc) from exc
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 
     return api

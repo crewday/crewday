@@ -15,15 +15,23 @@ groups (``owners``, ``managers``, ``all_workers``, ``all_clients``):
 * Membership writes (``add_member`` / ``remove_member``) are
   allowed on every group including system ones, and both are
   idempotent: a duplicate add or a missing remove is a no-op that
-  still emits an audit row (§02 "Audit"). Removing the last member
-  of the system ``owners`` group raises :class:`WouldOrphanOwnersGroup`
-  (cd-ckr): §02's "owners has ≥ 1 active member at all times"
-  invariant would otherwise break. The caller-visible forensic row
-  for the refusal lands on a **fresh** UoW via
-  :func:`write_member_remove_rejected_audit` — the typed exception
-  rolls back the primary UoW (and with it any audit row we queued
-  there), so the HTTP router opens a fresh session, emits the
-  rejection row, then re-raises for the caller.
+  still emits an audit row (§02 "Audit"). ``remove_member``
+  enforces the two §02 ``owners`` invariants in lock-step:
+  removing the last member of the system ``owners`` group raises
+  :class:`WouldOrphanOwnersGroup` (cd-ckr) — the "owners has ≥ 1
+  active member at all times" roster invariant would otherwise
+  break; removing an owners-group member when no remaining owner
+  would still hold a live ``manager`` role grant raises
+  :class:`LastOwnerGrantProtected` (cd-j5pu — cross-path sibling
+  of cd-nj8m's revoke-side guard) — the matching administrative-
+  reach invariant ("owners has ≥ 1 member who also carries a live
+  ``manager`` grant") would otherwise break, leaving the workspace
+  decapitated even though the roster itself stays populated. The
+  caller-visible forensic row for either refusal lands on a
+  **fresh** UoW via :func:`write_member_remove_rejected_audit` —
+  the typed exception rolls back the primary UoW (and with it any
+  audit row we queued there), so the HTTP router opens a fresh
+  session, emits the rejection row, then re-raises for the caller.
 
 Every write goes through :func:`app.audit.write_audit` so the domain
 side of the audit trail lives here — §02 "Permission resolution"
@@ -65,18 +73,23 @@ from sqlalchemy.orm import Session
 from app.audit import write_audit
 from app.domain.errors import Validation
 from app.domain.identity._action_catalog import ACTION_CATALOG
-from app.domain.identity._owner_guard import count_owner_members_locked
+from app.domain.identity._owner_guard import (
+    count_owner_members_locked,
+    count_owner_members_with_manager_grant_locked,
+)
 from app.domain.identity.ports import (
     PermissionGroupMemberRow,
     PermissionGroupRepository,
     PermissionGroupRow,
     PermissionGroupSlugTakenError,
 )
+from app.domain.identity.role_grants import LastOwnerGrantProtected
 from app.tenancy import WorkspaceContext
 from app.util.clock import Clock, SystemClock
 from app.util.ulid import new_ulid
 
 __all__ = [
+    "LastOwnerGrantProtected",
     "PermissionGroupMemberRef",
     "PermissionGroupNotFound",
     "PermissionGroupRef",
@@ -547,15 +560,25 @@ def remove_member(
       zero members. §02 "permission_group" §"Invariants" forbids an
       empty ``owners`` group; the guard fires BEFORE the DELETE so
       the caller's UoW keeps the row intact on rollback.
+    * :class:`LastOwnerGrantProtected` — the target group is the
+      system ``owners`` group and removing ``user_id`` would leave
+      ``owners@<workspace>`` with **zero** members holding a live
+      ``manager`` role grant on the workspace, even though the
+      roster itself stays populated. §02 "permission_group"
+      §"Invariants" — administrative-reach invariant (cd-j5pu, the
+      cross-path sibling of cd-nj8m). The caller must mint a
+      replacement ``manager`` grant on a remaining owners-group
+      member (or move the manager grant to a user who is in
+      ``owners@<ws>``) before dropping this seat.
 
     A missing *member* row (the user was never in the group, or was
     already removed) is a no-op write — we still emit the audit row
     because the caller deliberately acted on the membership, and
     absence + re-emit is what §02 "Audit" expects for idempotent
-    admin operations. The last-owner guard only fires when the
-    member row exists AND deleting it would tip the count to zero;
-    a stale "remove me again" on a non-last owner-member slot is
-    idempotent (no DB write, audit row emitted).
+    admin operations. The last-owner guards only fire when the
+    member row exists AND deleting it would tip the relevant count
+    to zero; a stale "remove me again" on a non-last owner-member
+    slot is idempotent (no DB write, audit row emitted).
 
     ``clock`` is optional; tests pin the audit row's ``created_at``
     via a :class:`~app.util.clock.FrozenClock`.
@@ -564,15 +587,17 @@ def remove_member(
 
     member = repo.get_member(group_id=group_id, user_id=user_id)
 
-    # Last-owner guard: fire only when the target is the system
-    # ``owners`` group, the member row actually exists (otherwise
+    # Last-owner guards: fire only when the target is the system
+    # ``owners`` group and the member row actually exists (otherwise
     # this is an idempotent no-op removal that does not change
-    # membership count), and the remove would leave the group empty.
-    # :func:`count_owner_members_locked` takes a write lock on the
-    # owners-group row BEFORE counting so a concurrent ``remove_member``
-    # on the same workspace can't observe the pre-delete count and
-    # race us to zero (cd-mb5n).
+    # membership count or admin reach).
+    #
+    # Both helpers take the same lock on the owners-group row BEFORE
+    # counting so a concurrent ``remove_member`` / ``revoke`` on the
+    # same workspace can't observe the pre-delete count and race us
+    # to zero across either invariant (cd-mb5n + cd-nj8m + cd-j5pu).
     if member is not None and group.slug == "owners" and group.system:
+        # Roster invariant (cd-mb5n): owners@<ws> keeps ≥1 member.
         owner_count = count_owner_members_locked(
             repo.session, workspace_id=ctx.workspace_id
         )
@@ -585,6 +610,28 @@ def remove_member(
             raise WouldOrphanOwnersGroup(
                 f"cannot remove the last member of the 'owners' group "
                 f"({group.id!r}); transfer owners membership first"
+            )
+
+        # Administrative-reach invariant (cd-j5pu): after this
+        # removal at least one owners-group member must still hold a
+        # live ``manager`` grant. The user being removed is still
+        # committed as an owners member at lock-acquisition time, so
+        # we exclude them from the count via ``exclude_user_id`` —
+        # the helper simulates the post-DELETE state. Manager grants
+        # belonging to that user are NOT touched by ``remove_member``
+        # (only their owners-group seat is dropped), so no
+        # ``exclude_grant_id`` is needed here.
+        admin_reach = count_owner_members_with_manager_grant_locked(
+            repo.session,
+            workspace_id=ctx.workspace_id,
+            exclude_user_id=user_id,
+        )
+        if admin_reach == 0:
+            raise LastOwnerGrantProtected(
+                "cannot remove this owners-group member; doing so would "
+                "leave 'owners' with zero members holding a live manager "
+                "grant. Mint a replacement manager grant on a remaining "
+                "owners-group member first."
             )
 
     if member is not None:

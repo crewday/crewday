@@ -91,6 +91,12 @@ pytestmark = pytest.mark.integration
 _PINNED = datetime(2026, 4, 19, 12, 0, 0, tzinfo=UTC)
 _ITERATIONS = 5
 
+# ``remove_member`` may now raise ``LastOwnerGrantProtected`` for
+# cross-path races (cd-j5pu) in addition to the historical
+# ``WouldOrphanOwnersGroup`` for roster emptying (cd-ckr). Worker
+# threads catch the union so the test loop can classify outcomes.
+_RemoveMemberRefusal = (WouldOrphanOwnersGroup, LastOwnerGrantProtected)
+
 
 @pytest.fixture(autouse=True)
 def _reset_ctx() -> Iterator[None]:
@@ -401,7 +407,10 @@ def _remove_member_worker(
     Opens its own :class:`Session`, sets a :class:`WorkspaceContext`
     tied to ``actor_id``, waits on ``start`` so both workers execute
     the service call as close to simultaneously as :mod:`threading`
-    allows, commits on success, rolls back on :class:`WouldOrphanOwnersGroup`.
+    allows, commits on success, rolls back on either
+    :class:`WouldOrphanOwnersGroup` (roster invariant, cd-ckr /
+    cd-mb5n) or :class:`LastOwnerGrantProtected` (administrative-
+    reach invariant on the membership-removal path, cd-j5pu).
     Outcomes land on ``result``'s shared lists under its mutex.
     """
     try:
@@ -421,7 +430,7 @@ def _remove_member_worker(
                     session.commit()
                     with result.lock:
                         result.successes.append(f"remove:{target_user_id}")
-                except WouldOrphanOwnersGroup as exc:
+                except _RemoveMemberRefusal as exc:
                     session.rollback()
                     with result.lock:
                         result.errors.append(exc)
@@ -758,6 +767,119 @@ class TestRevokeManagerGrantRace:
                     f"iteration {i}: owners-group membership unexpectedly "
                     f"changed (count="
                     f"{_owners_member_count(factory, ws.workspace_id)})"
+                )
+            finally:
+                _scrub_workspace(factory, ws.workspace_id)
+
+
+class TestCrossPathRace:
+    """Cross-path race: ``revoke`` x ``remove_member`` on a 2-owner workspace.
+
+    Pre-state: ``owners@<ws>`` has members A and B; each holds one
+    ``manager`` grant on the workspace. Two threads run concurrently:
+
+    * Thread A: ``revoke(A-manager-grant)``.
+    * Thread B: ``remove_member(B from owners)``.
+
+    Without the cross-path fix:
+
+    * Thread A acquires the lock first, sees admin-reach == 2 (A and
+      B are both manager-holding owners), counts excluding A's grant
+      → 1 ≥ 1, proceeds, deletes A's grant. Commits.
+    * Thread B acquires the lock, sees roster == 2 (B is still in
+      owners) → passes the roster check; the historical
+      ``remove_member`` did NOT consult the admin-reach helper, so
+      it proceeded to drop B from owners.
+    * Final state: A is in ``owners@<ws>`` without a manager grant,
+      B holds a manager grant but is no longer in ``owners``. The
+      workspace is administratively decapitated (admin reach == 0)
+      even though both invariants looked safe to each thread in
+      isolation.
+
+    With cd-j5pu in place, the ``remove_member`` guard now also
+    consults :func:`count_owner_members_with_manager_grant_locked`
+    via ``exclude_user_id=B``. Whichever thread loses the shared
+    lock race re-reads the post-write state and refuses with the
+    appropriate typed exception, so exactly one operation succeeds
+    and the workspace stays administrable.
+    """
+
+    def test_exactly_one_succeeds_under_concurrency(
+        self, isolated_engine: Engine
+    ) -> None:
+        factory = _session_factory(isolated_engine)
+
+        for i in range(_ITERATIONS):
+            ws = _bootstrap_two_owner_workspace(factory, slug_suffix=f"cx-{i:02d}")
+
+            start = threading.Barrier(2)
+            result = _new_race_result()
+
+            # Thread A revokes A's own manager grant (acting as A).
+            # Thread B removes B from ``owners@<ws>`` (acting as A so
+            # the actor in B's :class:`WorkspaceContext` is a still-
+            # valid manager-grant-holding owner regardless of which
+            # thread wins the race; using B as the actor would risk
+            # auditing a row whose actor was decapitated mid-flight).
+            t1 = threading.Thread(
+                target=_revoke_worker,
+                kwargs={
+                    "factory": factory,
+                    "workspace_id": ws.workspace_id,
+                    "workspace_slug": ws.workspace_slug,
+                    "actor_id": ws.owner_a_id,
+                    "grant_id": ws.owner_a_grant_id,
+                    "start": start,
+                    "result": result,
+                },
+            )
+            t2 = threading.Thread(
+                target=_remove_member_worker,
+                kwargs={
+                    "factory": factory,
+                    "ws": ws,
+                    "actor_id": ws.owner_a_id,
+                    "target_user_id": ws.owner_b_id,
+                    "start": start,
+                    "result": result,
+                },
+            )
+            t1.start()
+            t2.start()
+            t1.join(timeout=15)
+            t2.join(timeout=15)
+
+            try:
+                # Invariant (§02 admin-reach): the workspace always
+                # has at least one owners-group member holding a
+                # manager grant after the race settles.
+                assert (
+                    _owners_with_manager_grant_count(factory, ws.workspace_id) >= 1
+                ), (
+                    f"iteration {i}: workspace decapitated — "
+                    f"successes={result.successes}, errors={result.errors}"
+                )
+                # Invariant (§02 roster): owners stays populated.
+                assert _owners_member_count(factory, ws.workspace_id) >= 1, (
+                    f"iteration {i}: owners group emptied — "
+                    f"successes={result.successes}, errors={result.errors}"
+                )
+                # Exactly one operation succeeded; the other refused.
+                assert len(result.successes) == 1, (
+                    f"iteration {i}: expected 1 success, got "
+                    f"{len(result.successes)} (successes={result.successes}, "
+                    f"errors={result.errors})"
+                )
+                # Whichever path lost the lock race surfaced the
+                # administrative-reach guard — :class:`LastOwnerGrantProtected`
+                # is raised by both ``revoke`` (cd-nj8m) and
+                # ``remove_member`` (cd-j5pu) when the post-write
+                # state would have admin-reach == 0.
+                assert any(
+                    isinstance(e, LastOwnerGrantProtected) for e in result.errors
+                ), (
+                    f"iteration {i}: expected a LastOwnerGrantProtected refusal, "
+                    f"got errors={result.errors}"
                 )
             finally:
                 _scrub_workspace(factory, ws.workspace_id)
