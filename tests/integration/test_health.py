@@ -25,7 +25,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from fastapi.testclient import TestClient
 from pydantic import SecretStr
-from sqlalchemy import Engine, delete, insert
+from sqlalchemy import Connection, insert
 from sqlalchemy.orm import Session, sessionmaker
 
 import app.adapters.db.session as _session_mod
@@ -52,19 +52,47 @@ def pinned_settings(db_url: str) -> Settings:
 
 
 @pytest.fixture
-def real_make_uow(engine: Engine) -> Iterator[None]:
-    """Redirect the process-wide default UoW to the integration engine.
+def real_make_uow(db_session: Session) -> Iterator[None]:
+    """Redirect the process-wide default UoW onto the savepointed connection.
 
     ``/readyz`` opens :func:`app.adapters.db.session.make_uow` directly
     — FastAPI dep overrides do not apply. Patching the module-level
     defaults keeps the test self-contained; teardown restores the
     originals so sibling tests see a clean slate.
+
+    Crucially we bind ``_default_sessionmaker_`` to the *connection*
+    that backs ``db_session`` (rather than to the engine), with
+    ``join_transaction_mode="create_savepoint"``. That way the
+    handler's independent UoW lands on the same outer transaction the
+    test's SAVEPOINT lives on, so:
+
+    * heartbeat rows written through ``db_session`` are visible to
+      the handler's read-side probe (same connection, same SAVEPOINT);
+    * the outer rollback at ``db_session`` teardown undoes every
+      handler-side write too — no per-test cleanup fixture needed.
+
+    The pysqlite SAVEPOINT-isolation fix lives in the
+    :func:`tests.integration.conftest.db_session` fixture (per-connection
+    ``isolation_level=None`` + manual ``BEGIN`` / ``ROLLBACK``) — without
+    it pysqlite would auto-commit on ``RELEASE SAVEPOINT`` and writes
+    would still leak across tests.
     """
+    # ``db_session`` is bound to a live :class:`Connection` (not the
+    # raw engine), so ``get_bind()`` returns a Connection instance —
+    # narrow with ``isinstance`` so the type ignore on ``.engine``
+    # is unnecessary and mypy stays clean.
+    bind = db_session.get_bind()
+    assert isinstance(bind, Connection)
+    factory = sessionmaker(
+        bind=bind,
+        expire_on_commit=False,
+        class_=Session,
+        join_transaction_mode="create_savepoint",
+    )
+    install_tenant_filter(factory)
     original_engine = _session_mod._default_engine
     original_factory = _session_mod._default_sessionmaker_
-    factory = sessionmaker(bind=engine, expire_on_commit=False, class_=Session)
-    install_tenant_filter(factory)
-    _session_mod._default_engine = engine
+    _session_mod._default_engine = bind.engine
     _session_mod._default_sessionmaker_ = factory
     try:
         yield
@@ -73,43 +101,23 @@ def real_make_uow(engine: Engine) -> Iterator[None]:
         _session_mod._default_sessionmaker_ = original_factory
 
 
-@pytest.fixture
-def clean_heartbeat(engine: Engine) -> Iterator[None]:
-    """Delete every ``worker_heartbeat`` row before and after each test.
+def _insert_heartbeat(session: Session, *, at: datetime) -> None:
+    """Insert a fresh ``worker_heartbeat`` row through the test session.
 
-    The shared session fixture in ``tests/integration/conftest.py`` uses
-    a SAVEPOINT pattern that doesn't fully isolate ``INSERT`` statements
-    on SQLite (the pysqlite driver commits the outer transaction's
-    writes on ``RELEASE SAVEPOINT`` due to a long-standing isolation-
-    level quirk). Rather than fight that — and because
-    ``worker_heartbeat`` is a tiny cross-tenant ops table — each test
-    clears the table explicitly against the engine so no sibling test
-    inherits leftover rows.
+    Routed through the SAVEPOINT-backed ``db_session`` so the outer
+    rollback at fixture teardown reverts the row alongside any writes
+    the handler's UoW makes. The flush is explicit — the handler reads
+    via a sibling session on the same connection, and that session
+    only sees rows the writer has already pushed to the connection.
     """
-    with engine.begin() as conn:
-        conn.execute(delete(WorkerHeartbeat))
-    yield
-    with engine.begin() as conn:
-        conn.execute(delete(WorkerHeartbeat))
-
-
-def _insert_heartbeat(engine: Engine, *, at: datetime) -> None:
-    """Insert a fresh ``worker_heartbeat`` row via the engine directly.
-
-    Writes through ``engine.begin()`` so the row is COMMITTED (visible
-    to the handler's independent UoW) without going through the
-    SAVEPOINT-based ``db_session`` fixture. The writer-side domain
-    module is out of scope for cd-leif — this test-local helper
-    bootstraps the row so the read-side probe has something to see.
-    """
-    with engine.begin() as conn:
-        conn.execute(
-            insert(WorkerHeartbeat).values(
-                id=new_ulid(),
-                worker_name="scheduler",
-                heartbeat_at=at,
-            ),
-        )
+    session.execute(
+        insert(WorkerHeartbeat).values(
+            id=new_ulid(),
+            worker_name="scheduler",
+            heartbeat_at=at,
+        ),
+    )
+    session.flush()
 
 
 # ---------------------------------------------------------------------------
@@ -124,8 +132,7 @@ class TestReadyzAgainstRealDb:
         self,
         pinned_settings: Settings,
         real_make_uow: None,
-        clean_heartbeat: None,
-        engine: Engine,
+        db_session: Session,
     ) -> None:
         """Every check passes → 200 ``{status: ok, checks: []}``.
 
@@ -134,7 +141,7 @@ class TestReadyzAgainstRealDb:
         the in-repo script head; the pinned :class:`Settings` has a
         non-empty root key. No other setup required.
         """
-        _insert_heartbeat(engine, at=datetime.now(UTC))
+        _insert_heartbeat(db_session, at=datetime.now(UTC))
 
         app = create_app(settings=pinned_settings)
         client = TestClient(app, raise_server_exceptions=False)
@@ -148,7 +155,6 @@ class TestReadyzAgainstRealDb:
         self,
         pinned_settings: Settings,
         real_make_uow: None,
-        clean_heartbeat: None,
     ) -> None:
         """No ``worker_heartbeat`` row → 503 with ``no_heartbeat``."""
         app = create_app(settings=pinned_settings)
@@ -164,12 +170,11 @@ class TestReadyzAgainstRealDb:
         self,
         pinned_settings: Settings,
         real_make_uow: None,
-        clean_heartbeat: None,
-        engine: Engine,
+        db_session: Session,
     ) -> None:
         """Heartbeat older than 60 s → 503 with ``heartbeat_stale``."""
         stale = datetime.now(UTC) - timedelta(seconds=120)
-        _insert_heartbeat(engine, at=stale)
+        _insert_heartbeat(db_session, at=stale)
 
         app = create_app(settings=pinned_settings)
         client = TestClient(app, raise_server_exceptions=False)

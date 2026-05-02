@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import sqlite3
 import time
 from collections.abc import Iterator
 from contextlib import contextmanager, suppress
@@ -226,7 +227,10 @@ def engine(db_url: str) -> Iterator[Engine]:
     """Session-scoped SQLAlchemy engine bound to :func:`db_url`.
 
     Shared across every integration test; disposal happens at session
-    teardown.
+    teardown. The pysqlite SAVEPOINT-isolation workaround needed by
+    :func:`db_session` is applied per-connection inside that fixture
+    rather than via engine-wide listeners — see :func:`db_session`
+    for why.
     """
     eng = make_engine(db_url)
     try:
@@ -274,9 +278,43 @@ def db_session(engine: Engine) -> Iterator[Session]:
     out as the canonical way to isolate tests without per-test
     schema reset. Much faster than ``TRUNCATE`` on Postgres and
     completely free on SQLite.
+
+    **SQLite (pysqlite) workaround.** pysqlite carries a long-standing
+    isolation-level quirk: it auto-issues ``BEGIN`` / ``COMMIT`` around
+    statements and treats ``RELEASE SAVEPOINT`` as a transaction
+    boundary, which auto-commits the outer transaction's writes — so
+    INSERTs from one test leak into the next under the SAVEPOINT
+    pattern alone. The SQLAlchemy docs document the fix under
+    `Serializable isolation / Savepoints / Transactional DDL
+    <https://docs.sqlalchemy.org/en/20/dialects/sqlite.html#serializable-isolation-savepoints-transactional-ddl>`_:
+    set the DBAPI ``isolation_level`` to ``None`` to disable pysqlite's
+    autobegin, then manage ``BEGIN`` explicitly.
+
+    Rather than attach those as engine-wide event listeners (the docs'
+    canonical shape), we apply the workaround on this single
+    connection only. The broader integration suite holds many
+    ``session_factory()`` sessions against the same shared engine
+    that don't use SAVEPOINTs and rely on pysqlite's legacy autobegin
+    — global engine listeners would either fire spurious nested
+    ``BEGIN`` statements on those sessions ("cannot start a
+    transaction within a transaction") or break their own commit
+    bookkeeping. Keeping the tweak per-connection isolates the fix
+    to exactly the connection that needs it.
+
+    The Postgres path is untouched and uses SQLAlchemy's normal
+    transaction wrapper.
     """
-    with engine.connect() as raw_connection:
-        outer = raw_connection.begin()
+    raw_connection = engine.connect()
+    is_sqlite = engine.dialect.name == "sqlite"
+    try:
+        if is_sqlite:
+            dbapi_conn = raw_connection.connection.dbapi_connection
+            assert isinstance(dbapi_conn, sqlite3.Connection)
+            dbapi_conn.isolation_level = None
+            raw_connection.exec_driver_sql("BEGIN")
+        else:
+            raw_connection.begin()
+
         factory = sessionmaker(
             bind=raw_connection,
             expire_on_commit=False,
@@ -288,5 +326,36 @@ def db_session(engine: Engine) -> Iterator[Session]:
             yield session
         finally:
             session.close()
-            if outer.is_active:
-                outer.rollback()
+            if is_sqlite:
+                # The DBAPI rollback unwinds the explicit BEGIN we
+                # issued above (and every SAVEPOINT layered on it).
+                # SQLAlchemy does record a ``RootTransaction`` for the
+                # ``exec_driver_sql("BEGIN")`` call, so its own
+                # ``rollback()`` would also unwind correctly — going
+                # through the DBAPI keeps the rollback paired with
+                # the ``isolation_level`` restore that has to happen
+                # at the same layer.
+                dbapi_conn = raw_connection.connection.dbapi_connection
+                assert isinstance(dbapi_conn, sqlite3.Connection)
+                try:
+                    dbapi_conn.rollback()
+                finally:
+                    # Restore pysqlite's default autobegin mode so the
+                    # pool can hand the connection back to a sibling
+                    # caller that relies on that shape.
+                    dbapi_conn.isolation_level = ""
+            else:
+                outer = raw_connection.get_transaction()
+                if outer is not None and outer.is_active:
+                    outer.rollback()
+    finally:
+        # Always release the pool connection. On the SQLite path,
+        # also defensively restore ``isolation_level`` even if setup
+        # raised before the inner try block — otherwise a poisoned
+        # connection returns to the pool with autobegin disabled and
+        # breaks sibling checkouts.
+        if is_sqlite:
+            dbapi_conn = raw_connection.connection.dbapi_connection
+            if isinstance(dbapi_conn, sqlite3.Connection):
+                dbapi_conn.isolation_level = ""
+        raw_connection.close()
