@@ -1,6 +1,5 @@
 import { useState } from "react";
 import DeskPage from "@/components/DeskPage";
-import type { RoleGrant } from "@/types/api";
 import GroupsTab from "./permissions/GroupsTab";
 import RulesTab from "./permissions/RulesTab";
 
@@ -38,7 +37,3 @@ export default function PermissionsPage() {
     </DeskPage>
   );
 }
-
-// Re-export `RoleGrant` so the type is referenced (keeps linter quiet
-// when future extensions consult role_grants from this page).
-export type { RoleGrant };

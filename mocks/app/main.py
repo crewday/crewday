@@ -1084,6 +1084,55 @@ def _resolve_action(user_id: str, action_key: str,
     }
 
 
+def _project_group(g: "md.PermissionGroup") -> dict[str, Any]:
+    """Project a mock ``PermissionGroup`` onto the production wire shape.
+
+    The router's ``PermissionGroupResponse`` is flat-system-bool, slug-
+    keyed, capabilities-bag — no ``key`` / ``description_md`` /
+    ``group_kind`` / ``is_derived`` / ``scope_*`` / ``deleted_at``.
+    Mock data still carries those for sim logic (derived-group
+    expansion, scope filters); this projection keeps the wire shape
+    identical to production.
+    """
+    return {
+        "id": g.id,
+        "slug": g.key,
+        "name": g.name,
+        "system": g.group_kind == "system",
+        "capabilities": {},
+        "created_at": "2026-01-01T00:00:00",
+    }
+
+
+def _project_rule(r: "md.PermissionRule") -> dict[str, Any]:
+    """Project a mock ``PermissionRule`` — the router omits
+    ``revoke_reason`` (revoked rows are filtered out at the SQL layer)."""
+    return {
+        "id": r.id,
+        "scope_kind": r.scope_kind,
+        "scope_id": r.scope_id,
+        "action_key": r.action_key,
+        "subject_kind": r.subject_kind,
+        "subject_id": r.subject_id,
+        "effect": r.effect,
+        "created_at": _encode(r.created_at),
+        "created_by_user_id": r.created_by_user_id,
+        "revoked_at": _encode(r.revoked_at),
+    }
+
+
+def _project_action(entry: "md.ActionCatalogEntry") -> dict[str, Any]:
+    """Project a mock ``ActionCatalogEntry`` — production drops the
+    ``description`` and ``spec`` fields."""
+    return {
+        "key": entry.key,
+        "valid_scope_kinds": list(entry.valid_scope_kinds),
+        "default_allow": list(entry.default_allow),
+        "root_only": entry.root_only,
+        "root_protected_deny": entry.root_protected_deny,
+    }
+
+
 @app.get("/api/v1/permission_groups")
 def api_permission_groups(scope_kind: str = "", scope_id: str = "") -> Response:
     rows = [
@@ -1092,7 +1141,11 @@ def api_permission_groups(scope_kind: str = "", scope_id: str = "") -> Response:
         and (not scope_kind or g.scope_kind == scope_kind)
         and (not scope_id or g.scope_id == scope_id)
     ]
-    return ok(rows)
+    return ok({
+        "data": [_project_group(g) for g in rows],
+        "next_cursor": None,
+        "has_more": False,
+    })
 
 
 @app.get("/api/v1/permission_groups/{gid}")
@@ -1100,7 +1153,7 @@ def api_permission_group(gid: str) -> Response:
     g = _find_group(gid)
     if g is None:
         return JSONResponse({"detail": "not found"}, status_code=404)
-    return ok(g)
+    return ok(_project_group(g))
 
 
 @app.get("/api/v1/permission_groups/{gid}/members")
@@ -1110,12 +1163,17 @@ def api_permission_group_members(gid: str) -> Response:
         return JSONResponse({"detail": "not found"}, status_code=404)
     member_ids = _group_member_ids(g)
     return ok({
-        "group_id": gid,
-        "is_derived": g.is_derived,
-        "members": [
-            {"user_id": uid, "derived": g.is_derived}
+        "data": [
+            {
+                "group_id": gid,
+                "user_id": uid,
+                "added_at": "2026-01-01T00:00:00",
+                "added_by_user_id": None,
+            }
             for uid in member_ids
         ],
+        "next_cursor": None,
+        "has_more": False,
     })
 
 
@@ -1129,12 +1187,17 @@ def api_permission_rules(scope_kind: str = "", scope_id: str = "",
         and (not scope_id or r.scope_id == scope_id)
         and (not action_key or r.action_key == action_key)
     ]
-    return ok(rows)
+    return ok({
+        "data": [_project_rule(r) for r in rows],
+        "next_cursor": None,
+        "has_more": False,
+    })
 
 
 @app.get("/api/v1/permissions/action_catalog")
 def api_action_catalog() -> Response:
-    return ok(md.ACTION_CATALOG)
+    entries = [_project_action(e) for e in md.ACTION_CATALOG]
+    return ok({"entries": entries, "count": len(entries)})
 
 
 @app.get("/api/v1/permissions/resolved")
@@ -1193,6 +1256,30 @@ def api_user_work_roles(user_id: str = "", workspace_id: str = "") -> Response:
 @app.get("/api/v1/workspaces")
 def api_workspaces() -> Response:
     return ok(md.WORKSPACES)
+
+
+@app.get("/api/v1/me/workspaces")
+def api_me_workspaces(request: Request) -> Response:
+    """Workspace switcher payload — see `WorkspaceSwitcherEntry` (§12).
+
+    Mirrors the production shape: a flat array of switcher rows with
+    ``workspace_id`` / ``slug`` / ``name`` / ``current_role`` /
+    ``last_seen_at`` / ``settings_override``. The mock has no slug
+    column on Workspace, so the id doubles as the slug.
+    """
+    available = md.workspaces_for_user(current_user_id(request))
+    rows = [
+        {
+            "workspace_id": entry["workspace"].id,
+            "slug": entry["workspace"].id,
+            "name": entry["workspace"].name,
+            "current_role": entry["grant_role"],
+            "last_seen_at": None,
+            "settings_override": {},
+        }
+        for entry in available
+    ]
+    return ok(rows)
 
 
 @app.get("/api/v1/property_workspaces")

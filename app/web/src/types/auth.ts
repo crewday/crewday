@@ -7,7 +7,6 @@ import type { Workspace } from "./core";
 // ── Permission model (§02, §05) ───────────────────────────────────
 
 export type ScopeKind = "workspace" | "property" | "organization" | "deployment";
-export type GroupScopeKind = "workspace" | "organization" | "deployment";
 export type RuleEffect = "allow" | "deny";
 export type GrantRole = "manager" | "worker" | "client" | "guest" | "admin";
 
@@ -35,32 +34,31 @@ export interface RoleGrant {
   revoke_reason: string | null;
 }
 
+// Mirrors `app.api.v1.permission_groups.PermissionGroupResponse`. The
+// `group_kind` / `is_derived` projections are not in v1 — the router
+// emits a flat `system: bool` and the derived/role-grant joining is
+// deferred (cd-zkr). Re-add once the router does (paired follow-up
+// task referenced below by id in the consuming components).
 export interface PermissionGroup {
   id: string;
-  scope_kind: GroupScopeKind;
-  scope_id: string;
-  key: string;
+  slug: string;
   name: string;
-  description_md: string;
-  group_kind: "system" | "user";
-  is_derived: boolean;
-  deleted_at: string | null;
+  system: boolean;
+  capabilities: Record<string, unknown>;
+  created_at: string;
 }
 
+// Mirrors `PermissionGroupMemberResponse` — one row per explicit
+// (group, user) pair. v1 derived groups carry no rows.
 export interface PermissionGroupMember {
   group_id: string;
   user_id: string;
+  added_at: string;
   added_by_user_id: string | null;
-  added_at: string | null;
-  revoked_at: string | null;
 }
 
-export interface PermissionGroupMembersResponse {
-  group_id: string;
-  is_derived: boolean;
-  members: { user_id: string; derived: boolean }[];
-}
-
+// Mirrors `PermissionRuleResponse`. The router never returns
+// `revoke_reason` — revoked rows are filtered out at the SQL layer.
 export interface PermissionRule {
   id: string;
   scope_kind: ScopeKind;
@@ -69,20 +67,20 @@ export interface PermissionRule {
   subject_kind: "user" | "group";
   subject_id: string;
   effect: RuleEffect;
+  created_at: string;
   created_by_user_id: string | null;
-  created_at: string | null;
   revoked_at: string | null;
-  revoke_reason: string | null;
 }
 
+// Mirrors `ActionCatalogEntryResponse`. v1 omits `description` /
+// `spec` — the catalog is identified solely by its action `key`;
+// human-readable copy lives in spec docs, not on the wire.
 export interface ActionCatalogEntry {
   key: string;
-  description: string;
   valid_scope_kinds: ScopeKind[];
   default_allow: string[];
   root_only: boolean;
   root_protected_deny: boolean;
-  spec: string;
 }
 
 export interface ResolvedPermission {

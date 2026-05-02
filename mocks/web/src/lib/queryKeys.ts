@@ -76,6 +76,12 @@ export const qk = {
   documents: () => ["documents"] as const,
   users: (workspaceId?: string) => ["users", workspaceId ?? "all"] as const,
   workspaces: () => ["workspaces"] as const,
+  // `/api/v1/me/workspaces` switcher rows. Distinct slot from
+  // `workspaces()` so pages that map raw rows into a richer
+  // `Workspace` shape (PropertiesPage, PortfolioPage) don't collide
+  // with pages that consume the switcher payload directly
+  // (PermissionsPage).
+  meWorkspaces: () => ["me", "workspaces"] as const,
   organizations: (workspaceId?: string) => ["organizations", workspaceId ?? "active"] as const,
   organization: (oid: string) => ["organization", oid] as const,
   workOrders: (workspaceId?: string) => ["work_orders", workspaceId ?? "active"] as const,

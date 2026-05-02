@@ -135,6 +135,12 @@ export const qk = {
   documents: () => [...ws(), "documents"] as const,
   users: (workspaceId?: string) => [...ws(), "users", workspaceId ?? "all"] as const,
   workspaces: () => [...ws(), "workspaces"] as const,
+  // `/api/v1/me/workspaces` switcher rows. Distinct slot from
+  // `workspaces()` so pages that map raw rows into a richer
+  // `PageWorkspace`/`Workspace` shape (PropertiesPage, PortfolioPage)
+  // don't collide with pages that consume the switcher payload
+  // directly (PermissionsPage).
+  meWorkspaces: () => [...ws(), "me", "workspaces"] as const,
   clientPortfolio: () => [...ws(), "client", "portfolio"] as const,
   clientInvoices: () => [...ws(), "client", "invoices"] as const,
   clientQuotes: () => [...ws(), "client", "quotes"] as const,
