@@ -276,8 +276,12 @@ catalog pair (see `permission_rule` below and the catalog in
   named `employee_*`; the rename happens in the same change that
   lands the SQLAlchemy models, since rows are keyed by `user_id`
   rather than a separate `employee_id`.)
-- **Instructions / SOPs** (§07): `instruction`, `instruction_revision`,
-  `instruction_link`.
+- **Instructions / SOPs** (§07): `instruction`, `instruction_version`,
+  `instruction_link`. The link table is the explicit cross-reference
+  between an instruction and the `task_template` / `schedule` /
+  `work_role` / `task` / `asset` / `stay` it pins to; scope-based
+  reachability on `instruction.scope_kind` / `scope_id` is the
+  implicit complement. See §07 §"Data model".
 - **Inventory** (§08): `inventory_item`, `inventory_movement`.
 - **Time / pay / expenses** (§09): `shift`, `booking`, `pay_rule`,
   `pay_period`, `pay_period_entry`, `payslip`, `payout_destination`,
@@ -310,7 +314,7 @@ catalog pair (see `permission_rule` below and the catalog in
 - **Files** (§02 "Shared tables", storage backend in §15): `file` —
   shared blob-reference table used by `evidence`,
   `expense_attachment`, `issue.attachment_file_ids`,
-  `instruction_revision.attachment_file_ids`, and
+  `instruction_version.attachment_file_ids`, and
   `user.avatar_file_id`.
 - **Cross-cutting** (§15): `audit_log`, `secret_envelope`.
 
@@ -1793,7 +1797,7 @@ interface backs the agent's `search_kb` tool (§11 "Agent knowledge
 tools") and the worker / manager UI's KB search box. It walks two
 shapes in a single ranked pass:
 
-- `instruction_revision.body_md` (current revision only) — weights
+- `instruction_version.body_md` (current version only) — weights
   4 on `instruction.title`, 3 on `instruction.tags`, 2 on
   `body_md`, 1 on `summary_md`.
 - `file_extraction.body_text` for rows where `extraction_status =
@@ -1815,8 +1819,8 @@ search UI shows the standard page bar.
 
 The index is rebuilt incrementally:
 
-- Instruction edits write the new revision and re-index the
-  current revision in the same transaction (already true in §07's
+- Instruction edits write the new version and re-index the
+  current version in the same transaction (already true in §07's
   prose; called out here for the joined index).
 - The extraction worker writes `file_extraction` and re-indexes in
   the same transaction. Restoring a soft-deleted document re-indexes

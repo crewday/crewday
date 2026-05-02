@@ -215,8 +215,10 @@ fix the offender.
 - **iCal feed.** An external calendar subscription (Airbnb, VRBO,
   Booking, generic) polled periodically to import stays into a unit.
   Feed URLs are stored in `secret_envelope` (§15). See §04.
-- **Instruction.** A standing SOP attached at global / property /
-  area / link scope (§07). `instruction_link` is canonical;
+- **Instruction.** A standing SOP attached at workspace / property /
+  area / template / asset / stay / role scope, plus explicit
+  `instruction_link` cross-references (§07). Scope-based
+  reachability and `instruction_link` rows together are canonical;
   `occurrence.linked_instruction_ids` is a denormalized cache.
 - **Inventory movement.** An append-only ledger row recording a change
   to `inventory_item.on_hand`. Reason enum: `restock | consume |
@@ -558,8 +560,11 @@ fix the offender.
   view" and §06 "Availability precedence stack" for the
   resolution rules. Team-wide equivalent is `/scheduler`.
 - **Scope (instruction).** The visibility level of an instruction:
-  `global` (all properties), `property` (one property), `area` (one
-  area within a property), or linked via `instruction_link`. See §07.
+  `workspace` (whole workspace, the v0 "global" bucket), `property`
+  (one property), `area` (one area within a property), `template`
+  (a single task template), `asset`, `stay`, or `role` (a
+  `work_role`). Explicit cross-references via `instruction_link`
+  are an additive overlay. See §07.
 - **Session.** Browser-bound server-side record tied to a passkey.
 - **Shift.** *(Removed in v1.)* Replaced by **Booking** (above).
   Historical references to "shift" in older specs / commits map 1:1
