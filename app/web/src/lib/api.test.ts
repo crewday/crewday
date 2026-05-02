@@ -104,6 +104,16 @@ describe("resolveApiPath", () => {
     expect(resolveApiPath("/api/v1/me/workspaces", "acme")).toBe("/api/v1/me/workspaces");
   });
 
+  it("passes /api/v1/me/tokens through untouched — PATs are bare-host", () => {
+    // §03 PATs live outside any workspace; the server only mounts
+    // ``/api/v1/me/tokens`` at the bare host. A workspace rewrite
+    // would 404 every PAT call from the `/me` page.
+    expect(resolveApiPath("/api/v1/me/tokens", "acme")).toBe("/api/v1/me/tokens");
+    expect(resolveApiPath("/api/v1/me/tokens/tok_01", "acme")).toBe(
+      "/api/v1/me/tokens/tok_01",
+    );
+  });
+
   it("keeps workspace-scoped auth routes under the active workspace", () => {
     expect(resolveApiPath("/api/v1/auth/tokens", "acme")).toBe("/w/acme/api/v1/auth/tokens");
     expect(resolveApiPath("/api/v1/auth/passkey/register/start", "acme")).toBe(

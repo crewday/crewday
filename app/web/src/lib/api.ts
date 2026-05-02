@@ -93,11 +93,17 @@ export function resolveApiPath(path: string, slug: string | null = workspaceSlug
   // Identity bootstrap and workspace switcher endpoints are bare-host
   // APIs. Auth token and passkey registration routes remain workspace-
   // scoped, so keep this list exact.
+  // `/api/v1/me/tokens` is also bare-host: PATs are tenant-agnostic
+  // (mounted with `bare_prefix` in `app/api/factory.py`, see §03
+  // "Personal access tokens"). Without this exemption the workspace
+  // rewrite would 404 every PAT call from `/me`.
   if (
     path === "/api/v1/auth/me" ||
     path === "/api/v1/auth/logout" ||
     path.startsWith("/api/v1/auth/passkey/login/") ||
-    path === "/api/v1/me/workspaces"
+    path === "/api/v1/me/workspaces" ||
+    path === "/api/v1/me/tokens" ||
+    path.startsWith("/api/v1/me/tokens/")
   ) return path;
   // Deployment-runtime info is bare-host shell metadata, not tenant data.
   if (path.startsWith("/api/v1/runtime/")) return path;
