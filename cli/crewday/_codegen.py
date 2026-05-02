@@ -1,10 +1,20 @@
 """CLI surface codegen — produce ``_surface.json`` / ``_surface_admin.json``.
 
-This module is the build-time bridge between the live FastAPI schema
-and the runtime CLI dispatcher. Its job is to serialise the subset of
-the OpenAPI document the CLI cares about into two small, committed
-JSON files that :mod:`crewday._runtime` (cd-lato) will load at import
-time to register Click groups and commands.
+This module is a pure transformer over the committed OpenAPI document
+at :file:`docs/api/openapi.json`. Its job is to serialise the subset
+of that schema the CLI cares about into two small, committed JSON
+files that :mod:`crewday._runtime` (cd-lato) will load at import time
+to register Click groups and commands.
+
+**Why read the committed schema, not boot the app.**  Booting
+:func:`app.api.factory.create_app` would force the codegen to import
+``app.api`` and pull every router, middleware, and worker into the
+graph — a build-time-only edge that breaks the "CLI forbids app
+server internals" import-linter contract (cd-uky5). The committed
+``docs/api/openapi.json`` is already the canonical schema artefact:
+``make openapi`` regenerates it from the live app, ``make
+openapi-check`` is the CI parity gate. Codegen consumes that file
+and stays a leaf transformer with no dependency on app internals.
 
 **Two surfaces, one generator.**  Every operation is partitioned into
 one of:
@@ -20,29 +30,27 @@ one of:
 
 **Pipeline** (documented here; each step is a helper below):
 
-1. Set ``CREWDAY_ROOT_KEY`` to a zeroed dummy if unset — the app
-   factory refuses to boot without one, but codegen does not need a
-   real secret (we never actually decrypt anything).
-2. Import :func:`app.api.factory.create_app` and call ``app.openapi()``.
-3. Load :file:`cli/crewday/_exclusions.yaml` (operation-id or path-glob
+1. Read :file:`docs/api/openapi.json` (or ``--openapi`` override).
+2. Load :file:`cli/crewday/_exclusions.yaml` (operation-id or path-glob
    based, each entry carries a mandatory ``reason``).
-4. Walk ``schema["paths"]``; for each ``(path, method, operation)``
+3. Walk ``schema["paths"]``; for each ``(path, method, operation)``
    skip if excluded, otherwise classify into the workspace / admin
    surface by path prefix and derive ``(group, name)`` via the
    heuristic described in ``docs/specs/13-cli.md`` §"CLI generation
    from OpenAPI".
-5. Build a compact per-entry dict (see :func:`_build_entry`) preserving
+4. Build a compact per-entry dict (see :func:`_build_entry`) preserving
    path / query params, request and response schema refs, idempotency,
    ``x-cli`` and ``x-agent-confirm`` extensions.
-6. Sort entries deterministically by ``(group, name, method, path)``.
-7. Write both surface files as ``json.dumps(..., indent=2,
+5. Sort entries deterministically by ``(group, name, method, path)``.
+6. Write both surface files as ``json.dumps(..., indent=2,
    sort_keys=True) + "\\n"`` so the diff stays line-oriented and
    agnostic to Python's ``dict`` insertion order.
 
 **Modes.**  ``python -m crewday._codegen`` writes both files;
 ``--check`` diffs the in-memory output against the committed copy
 (exit 1 when they differ); ``--dry-run`` prints the would-be files to
-stdout without touching disk.
+stdout without touching disk. Run ``make openapi`` first when the
+FastAPI surface has changed — codegen reads what is on disk.
 
 See ``docs/specs/13-cli.md`` §"Surface descriptor
 (``_surface.json`` + ``_surface_admin.json``)", §"Runtime command
@@ -58,7 +66,6 @@ import difflib
 import fnmatch
 import json
 import logging
-import os
 import re
 import sys
 from dataclasses import dataclass
@@ -69,26 +76,32 @@ import yaml
 
 __all__ = [
     "DEFAULT_EXCLUSIONS_PATH",
+    "DEFAULT_OPENAPI_PATH",
     "DEFAULT_SURFACE_ADMIN_PATH",
     "DEFAULT_SURFACE_PATH",
     "CollisionError",
-    "DummyRootKey",
     "Exclusion",
     "ExclusionError",
     "classify_surface",
     "derive_group_name",
     "generate_surfaces",
+    "load_committed_schema",
     "load_exclusions",
     "main",
 ]
 
 _log = logging.getLogger(__name__)
 
-# Canonical on-disk paths for the three committed artefacts.
+# Canonical on-disk paths for the four committed artefacts.
+# ``cli/crewday/_codegen.py`` lives two levels under the repo root, so
+# the OpenAPI file resolves through ``parents[2]``. Tests can override
+# every default via ``main(argv=...)``.
 _PACKAGE_DIR: Final[Path] = Path(__file__).resolve().parent
+_REPO_ROOT: Final[Path] = _PACKAGE_DIR.parents[1]
 DEFAULT_SURFACE_PATH: Final[Path] = _PACKAGE_DIR / "_surface.json"
 DEFAULT_SURFACE_ADMIN_PATH: Final[Path] = _PACKAGE_DIR / "_surface_admin.json"
 DEFAULT_EXCLUSIONS_PATH: Final[Path] = _PACKAGE_DIR / "_exclusions.yaml"
+DEFAULT_OPENAPI_PATH: Final[Path] = _REPO_ROOT / "docs" / "api" / "openapi.json"
 
 
 # Idempotent HTTP verbs per RFC 9110. ``POST`` and ``PATCH`` are
@@ -105,23 +118,6 @@ _PATH_PARAM_RE: Final[re.Pattern[str]] = re.compile(r"\{[^}]+\}")
 _CLI_METHODS: Final[frozenset[str]] = frozenset(
     {"get", "post", "put", "patch", "delete", "head"}
 )
-
-# Dummy envelope-key value used when running codegen without a real
-# deployment key set. ``CREWDAY_ROOT_KEY`` is validated as hex by the
-# settings layer; 64 zeros is syntactically valid and never decrypts
-# anything useful.
-_DUMMY_ROOT_KEY: Final[str] = "00" * 32
-
-
-class DummyRootKey:
-    """Namespace constant so tests can reference the exact dummy value.
-
-    Kept as a class (not a module-level ``Final``) so
-    ``DummyRootKey.VALUE`` reads as a named intent rather than a magic
-    literal at call sites.
-    """
-
-    VALUE: Final[str] = _DUMMY_ROOT_KEY
 
 
 class ExclusionError(ValueError):
@@ -648,8 +644,7 @@ def generate_surfaces(
     Pure function (no I/O): takes the schema + exclusions, returns a
     mapping from surface kind to sorted entry list. Keeping the core
     pure means the tests can exercise the full pipeline on synthetic
-    schemas without booting FastAPI — much faster and no
-    ``CREWDAY_ROOT_KEY`` dance.
+    schemas without touching disk.
 
     Sorting is deterministic on ``(group, name, method, path)`` so
     regenerating from the same schema twice yields byte-identical
@@ -743,33 +738,31 @@ def _check_collisions(
         )
 
 
-def _ensure_root_key() -> None:
-    """Set ``CREWDAY_ROOT_KEY`` to a dummy when unset.
+def load_committed_schema(path: Path = DEFAULT_OPENAPI_PATH) -> dict[str, Any]:
+    """Return the parsed OpenAPI schema from ``docs/api/openapi.json``.
 
-    The app factory refuses to boot without an envelope key; codegen
-    never decrypts anything, so the dummy value is fine. Leaving an
-    operator-set key untouched matches the guarantee that running
-    codegen against a real deployment does not accidentally overwrite
-    secrets.
+    The codegen is a transform-only build step: it reads the canonical
+    schema artefact instead of booting the FastAPI app. Freshness is
+    enforced upstream by ``make openapi-check`` (the CI gate that
+    fails when the committed JSON drifts from the live schema), so
+    reaching for the file here is equivalent to calling
+    ``app.openapi()`` without dragging ``app.api.*`` into the import
+    graph (cd-uky5).
+
+    Run ``make openapi`` first when the FastAPI surface has changed.
     """
-    os.environ.setdefault("CREWDAY_ROOT_KEY", DummyRootKey.VALUE)
-
-
-def load_live_schema() -> dict[str, Any]:
-    """Boot the FastAPI app and return ``app.openapi()``.
-
-    Imported lazily so the module stays cheap to import — the test
-    suite exercises :func:`generate_surfaces` on synthetic inputs
-    without paying the app-boot cost.
-    """
-    _ensure_root_key()
-    # Lazy import: the runtime descriptor reader should never reach
-    # :mod:`app.api.factory`, so keeping the edge inside the function
-    # keeps the import graph clean.
-    from app.api.factory import create_app
-
-    app = create_app()
-    return app.openapi()
+    if not path.is_file():
+        raise FileNotFoundError(
+            f"OpenAPI schema not found at {path}. "
+            f"Run 'make openapi' to regenerate it from the live FastAPI app."
+        )
+    with path.open("rb") as fh:
+        loaded = json.load(fh)
+    if not isinstance(loaded, dict):
+        raise ValueError(
+            f"{path}: top-level must be a JSON object, got {type(loaded).__name__}"
+        )
+    return loaded
 
 
 def _serialise(entries: list[dict[str, Any]]) -> str:
@@ -839,7 +832,7 @@ def _check_surface(
 
 def _run(args: argparse.Namespace) -> int:
     """Execute the selected mode. Returns a process exit code."""
-    schema = load_live_schema()
+    schema = load_committed_schema(args.openapi)
     exclusions = load_exclusions(args.exclusions)
     try:
         surfaces = generate_surfaces(schema=schema, exclusions=exclusions)
@@ -919,7 +912,8 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         prog="python -m crewday._codegen",
         description=(
             "Generate cli/crewday/_surface.json + _surface_admin.json "
-            "from the live FastAPI OpenAPI schema."
+            "from the committed docs/api/openapi.json. Run 'make openapi' "
+            "first when the live FastAPI surface has changed."
         ),
     )
     mode = parser.add_mutually_exclusive_group()
@@ -953,6 +947,15 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         type=Path,
         default=DEFAULT_EXCLUSIONS_PATH,
         help="Path to the exclusions YAML (default: %(default)s)",
+    )
+    parser.add_argument(
+        "--openapi",
+        type=Path,
+        default=DEFAULT_OPENAPI_PATH,
+        help=(
+            "Path to the committed OpenAPI schema "
+            "(default: %(default)s). Regenerate via 'make openapi'."
+        ),
     )
     return parser
 

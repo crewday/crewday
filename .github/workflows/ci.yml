@@ -4,12 +4,17 @@
 # docs/specs/01-architecture.md §"Enforcement"). The e2e job is cd-asvl
 # (spec: docs/specs/17-testing-quality.md §"End-to-end").
 #
-# Eight jobs:
+# Nine jobs:
 #   * lint         — ruff check + ruff format --check
 #   * type         — mypy --strict on app/ (extends to cli/ via cd-j202
 #                    once that tree exists)
 #   * i18n-keys    — committed gettext catalogs and SPA JSON bundles
 #                    match the extracted source keys.
+#   * openapi      — ``docs/api/openapi.json`` matches the live FastAPI
+#                    schema (cd-uky5). Standalone gate because the CLI
+#                    codegen and parity check both read this file as
+#                    their source of truth — without this job a stale
+#                    commit would silently pass cli-parity.
 #   * cli-parity   — committed CLI surfaces match current OpenAPI and
 #                    the resolved Click command tree.
 #   * boundaries   — import-linter. Blocking check as of cd-ev0 — a
@@ -109,6 +114,30 @@ jobs:
         run: uv sync --group dev
       - name: i18n catalog freshness
         run: make i18n-check
+
+  openapi:
+    # Committed ``docs/api/openapi.json`` must match the live FastAPI
+    # schema. Before cd-uky5 the cli-parity job booted the live app
+    # and used its schema directly, so drift between live and
+    # committed openapi.json was caught implicitly. Post-refactor the
+    # CLI codegen + parity check both read the committed file, so an
+    # explicit gate is needed — otherwise a stale commit silently
+    # passes cli-parity. Pairs with ``make openapi`` for local
+    # regeneration; failure prints the path the developer should run.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - name: Install deps
+        run: uv sync --group dev
+      - name: openapi schema freshness
+        run: make openapi-check
 
   cli-parity:
     runs-on: ubuntu-latest

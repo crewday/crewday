@@ -81,13 +81,17 @@ its verbs.
   `/admin/api/v1/...`. Powers `crewday deploy <verb>` and the
   admin embedded agent's tool catalog.
 
-A build step (`python -m cli.codegen`) imports the FastAPI app, calls
-`app.openapi()`, walks every operation, sorts it into the matching
-descriptor by URL prefix, merges `x-cli` metadata with inferred
-OpenAPI params, and writes both files. Both are committed and
-CI-verified (same pattern as `docs/api/openapi.json`). If either
-committed copy diverges from a fresh generation, the `cli-parity`
-gate (§17) fails the build.
+A build step (`python -m crewday._codegen`, wrapped by `make codegen`)
+reads the committed `docs/api/openapi.json`, walks every operation,
+sorts it into the matching descriptor by URL prefix, merges `x-cli`
+metadata with inferred OpenAPI params, and writes both files. The
+codegen is transform-only — it never imports `app.api.*` (cd-uky5),
+which keeps the "CLI forbids app server internals" import-linter
+contract clean. Run `make openapi` first when the FastAPI surface
+has changed; `make codegen` depends on that target. Both surface
+files are committed and CI-verified (same pattern as
+`docs/api/openapi.json`). If either committed copy diverges from a
+fresh generation, the `cli-parity` gate (§17) fails the build.
 
 ### Runtime command construction
 

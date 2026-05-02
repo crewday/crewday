@@ -776,20 +776,6 @@ ignore_imports = [
     # ``forbidden_modules`` above, but the name is recorded here so a
     # future reviewer grepping for ``app.util`` lands on this note.
     "crewday._globals -> app.util.ulid",
-    # Build-time-only edge: :func:`crewday._codegen.load_live_schema`
-    # boots the FastAPI app via :func:`app.api.factory.create_app` to
-    # read ``app.openapi()``. The import is lazy (inside the function
-    # body — see its docstring) and is only reached by the codegen
-    # script that regenerates ``cli/crewday/_surface.json``; the CLI
-    # runtime entrypoint never imports :mod:`crewday._codegen`. The
-    # long-term fix is to teach the codegen to read the committed
-    # ``docs/api/openapi.json`` instead of booting the app — tracked
-    # by cd-uky5. Whitelisting only this root edge is sufficient:
-    # import-linter's ``forbidden`` contract stops walking once the
-    # edge it would flag is ignored, so transitive edges through
-    # :mod:`app.api.factory` (routers, middleware, ``app.worker``)
-    # don't need listing and won't rot as the factory evolves.
-    "crewday._codegen -> app.api.factory",
     # v1 stopgap (cd-j7wt): the local admin overrides are privileged
     # maintenance commands that currently reuse server-side admin,
     # privacy, and session helpers directly. Keep the exception narrow

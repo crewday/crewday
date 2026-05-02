@@ -192,9 +192,9 @@ def _diff_help_tree(
 
 def _load_schema(path: Path | None) -> Mapping[str, Any]:
     if path is None:
-        loaded = _codegen.load_live_schema()
+        loaded = _codegen.load_committed_schema()
         if not isinstance(loaded, Mapping):
-            raise TypeError("live OpenAPI schema must be a mapping")
+            raise TypeError("committed OpenAPI schema must be a mapping")
         return loaded
     with path.open("rb") as fh:
         loaded = json.load(fh)
@@ -348,7 +348,10 @@ def _build_parser() -> argparse.ArgumentParser:
         "--schema",
         type=Path,
         default=None,
-        help="Committed OpenAPI JSON to compare; defaults to the live app schema.",
+        help=(
+            "Path to an OpenAPI JSON file to compare against; "
+            "defaults to docs/api/openapi.json (regenerate via 'make openapi')."
+        ),
     )
     return parser
 
@@ -356,17 +359,22 @@ def _build_parser() -> argparse.ArgumentParser:
 def main(argv: Sequence[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
-    codegen_status = _codegen.main(
-        [
-            "--check",
-            "--surface",
-            str(args.surface),
-            "--surface-admin",
-            str(args.surface_admin),
-            "--exclusions",
-            str(args.exclusions),
-        ]
-    )
+    codegen_argv = [
+        "--check",
+        "--surface",
+        str(args.surface),
+        "--surface-admin",
+        str(args.surface_admin),
+        "--exclusions",
+        str(args.exclusions),
+    ]
+    if args.schema is not None:
+        # Keep the parity check's view of the schema consistent across
+        # the codegen drift check and the report build — without this
+        # the codegen would silently fall back to ``docs/api/openapi.json``
+        # while ``build_report`` reads the user-supplied file.
+        codegen_argv.extend(["--openapi", str(args.schema)])
+    codegen_status = _codegen.main(codegen_argv)
     if codegen_status != 0:
         return codegen_status
 

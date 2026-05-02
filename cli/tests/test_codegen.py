@@ -13,17 +13,20 @@ Covers the Beads ``cd-1cfg`` contract:
 * Determinism: generating twice from the same schema yields
   byte-identical output.
 * ``--check`` mode exits non-zero when the committed file diverges.
-* End-to-end: booting the real FastAPI app and asserting the
+* End-to-end: the codegen reads ``docs/api/openapi.json`` and the
   committed surface files round-trip without drift (CI parity gate).
+* Boundary: the codegen module imports nothing under ``app.*`` —
+  reading the committed schema keeps it a pure transformer
+  (cd-uky5).
 
 Tests feed synthetic OpenAPI dicts into the pure helpers wherever
-possible so the suite stays fast (no FastAPI boot cost). The one
-end-to-end test is opt-out via ``CREWDAY_TEST_DB`` skip semantics if
-the environment can't import the app factory.
+possible so the suite stays fast (no I/O).
 """
 
 from __future__ import annotations
 
+import ast
+import inspect
 import json
 from pathlib import Path
 from typing import Any
@@ -33,6 +36,7 @@ import yaml
 from crewday import _codegen
 from crewday._codegen import (
     DEFAULT_EXCLUSIONS_PATH,
+    DEFAULT_OPENAPI_PATH,
     DEFAULT_SURFACE_ADMIN_PATH,
     DEFAULT_SURFACE_PATH,
     CollisionError,
@@ -42,6 +46,7 @@ from crewday._codegen import (
     derive_group_name,
     generate_surfaces,
     is_excluded,
+    load_committed_schema,
     load_exclusions,
     main,
 )
@@ -655,13 +660,21 @@ def test_generate_surfaces_collision_allows_cross_surface() -> None:
     assert [e["operation_id"] for e in surfaces["admin"]] == ["admin.tokens.list"]
 
 
-def test_main_exits_two_on_collision(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """``main`` renders CollisionError as a clean exit-2 without traceback."""
+def _write_schema(path: Path, schema: dict[str, Any]) -> Path:
+    """Write ``schema`` as JSON at ``path`` and return ``path``.
 
-    def colliding_schema() -> dict[str, Any]:
-        return {
+    Tests pass the resulting path through ``--openapi`` so the codegen
+    reads it instead of the committed ``docs/api/openapi.json``.
+    """
+    path.write_text(json.dumps(schema), encoding="utf-8")
+    return path
+
+
+def test_main_exits_two_on_collision(tmp_path: Path) -> None:
+    """``main`` renders CollisionError as a clean exit-2 without traceback."""
+    schema_path = _write_schema(
+        tmp_path / "openapi.json",
+        {
             "paths": {
                 "/api/v1/me/tokens": {
                     "post": {
@@ -678,9 +691,8 @@ def test_main_exits_two_on_collision(
                     }
                 },
             }
-        }
-
-    monkeypatch.setattr(_codegen, "load_live_schema", colliding_schema)
+        },
+    )
     surface = tmp_path / "_surface.json"
     surface_admin = tmp_path / "_surface_admin.json"
     excl = tmp_path / "excl.yaml"
@@ -694,6 +706,8 @@ def test_main_exits_two_on_collision(
             str(surface_admin),
             "--exclusions",
             str(excl),
+            "--openapi",
+            str(schema_path),
         ]
     )
     assert exit_code == 2
@@ -731,10 +745,9 @@ def test_x_agent_confirm_copied_verbatim() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_main_writes_files(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_main_writes_files(tmp_path: Path) -> None:
     """``python -m crewday._codegen`` writes both surface files."""
-    # Stub ``load_live_schema`` to skip the FastAPI boot cost.
-    monkeypatch.setattr(_codegen, "load_live_schema", _synthetic_schema)
+    schema_path = _write_schema(tmp_path / "openapi.json", _synthetic_schema())
     surface = tmp_path / "_surface.json"
     surface_admin = tmp_path / "_surface_admin.json"
     excl = tmp_path / "excl.yaml"
@@ -748,6 +761,8 @@ def test_main_writes_files(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> N
             str(surface_admin),
             "--exclusions",
             str(excl),
+            "--openapi",
+            str(schema_path),
         ]
     )
     assert exit_code == 0
@@ -761,11 +776,9 @@ def test_main_writes_files(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> N
     assert [e["operation_id"] for e in admin] == ["workspaces.list"]
 
 
-def test_main_check_mode_detects_drift(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_main_check_mode_detects_drift(tmp_path: Path) -> None:
     """``--check`` exits 1 when the committed file is stale."""
-    monkeypatch.setattr(_codegen, "load_live_schema", _synthetic_schema)
+    schema_path = _write_schema(tmp_path / "openapi.json", _synthetic_schema())
     surface = tmp_path / "_surface.json"
     surface_admin = tmp_path / "_surface_admin.json"
     surface.write_text("[]\n")
@@ -782,54 +795,44 @@ def test_main_check_mode_detects_drift(
             str(surface_admin),
             "--exclusions",
             str(excl),
+            "--openapi",
+            str(schema_path),
         ]
     )
     assert exit_code == 1
 
 
-def test_main_check_mode_passes_when_in_sync(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_main_check_mode_passes_when_in_sync(tmp_path: Path) -> None:
     """``--check`` exits 0 when committed == fresh."""
-    monkeypatch.setattr(_codegen, "load_live_schema", _synthetic_schema)
+    schema_path = _write_schema(tmp_path / "openapi.json", _synthetic_schema())
     surface = tmp_path / "_surface.json"
     surface_admin = tmp_path / "_surface_admin.json"
     excl = tmp_path / "excl.yaml"
     excl.write_text("exclusions: []\n")
 
+    base_argv = [
+        "--surface",
+        str(surface),
+        "--surface-admin",
+        str(surface_admin),
+        "--exclusions",
+        str(excl),
+        "--openapi",
+        str(schema_path),
+    ]
     # Seed with a fresh write.
-    main(
-        [
-            "--surface",
-            str(surface),
-            "--surface-admin",
-            str(surface_admin),
-            "--exclusions",
-            str(excl),
-        ]
-    )
+    main(base_argv)
     # Then --check from the same schema should succeed.
-    exit_code = main(
-        [
-            "--check",
-            "--surface",
-            str(surface),
-            "--surface-admin",
-            str(surface_admin),
-            "--exclusions",
-            str(excl),
-        ]
-    )
+    exit_code = main(["--check", *base_argv])
     assert exit_code == 0
 
 
 def test_main_dry_run_does_not_touch_disk(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     """``--dry-run`` prints JSON to stdout and writes nothing."""
-    monkeypatch.setattr(_codegen, "load_live_schema", _synthetic_schema)
+    schema_path = _write_schema(tmp_path / "openapi.json", _synthetic_schema())
     surface = tmp_path / "_surface.json"
     surface_admin = tmp_path / "_surface_admin.json"
     excl = tmp_path / "excl.yaml"
@@ -844,6 +847,8 @@ def test_main_dry_run_does_not_touch_disk(
             str(surface_admin),
             "--exclusions",
             str(excl),
+            "--openapi",
+            str(schema_path),
         ]
     )
     assert exit_code == 0
@@ -855,45 +860,62 @@ def test_main_dry_run_does_not_touch_disk(
     assert set(payload.keys()) == {"_surface.json", "_surface_admin.json"}
 
 
-def test_main_write_is_idempotent(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_main_write_is_idempotent(tmp_path: Path) -> None:
     """A re-run over an in-sync file does not rewrite the mtime.
 
     Prevents spurious diffs when an agent runs the codegen for a
     sanity check; important because the committed files are part of
     the CI parity gate.
     """
-    monkeypatch.setattr(_codegen, "load_live_schema", _synthetic_schema)
+    schema_path = _write_schema(tmp_path / "openapi.json", _synthetic_schema())
     surface = tmp_path / "_surface.json"
     surface_admin = tmp_path / "_surface_admin.json"
     excl = tmp_path / "excl.yaml"
     excl.write_text("exclusions: []\n")
 
-    main(
-        [
-            "--surface",
-            str(surface),
-            "--surface-admin",
-            str(surface_admin),
-            "--exclusions",
-            str(excl),
-        ]
-    )
+    argv = [
+        "--surface",
+        str(surface),
+        "--surface-admin",
+        str(surface_admin),
+        "--exclusions",
+        str(excl),
+        "--openapi",
+        str(schema_path),
+    ]
+    main(argv)
     mtime = surface.stat().st_mtime_ns
 
     # Second run: contents identical → no rewrite.
-    main(
-        [
-            "--surface",
-            str(surface),
-            "--surface-admin",
-            str(surface_admin),
-            "--exclusions",
-            str(excl),
-        ]
-    )
+    main(argv)
     assert surface.stat().st_mtime_ns == mtime
+
+
+def test_load_committed_schema_missing_file_raises(tmp_path: Path) -> None:
+    """Missing schema file gets a pointer to ``make openapi``."""
+    with pytest.raises(FileNotFoundError, match="make openapi"):
+        load_committed_schema(tmp_path / "nope.json")
+
+
+def test_load_committed_schema_rejects_non_object(tmp_path: Path) -> None:
+    """A JSON array at the top level fails fast with a clear message."""
+    path = tmp_path / "bad.json"
+    path.write_text("[]")
+    with pytest.raises(ValueError, match="must be a JSON object"):
+        load_committed_schema(path)
+
+
+def test_default_openapi_path_points_at_committed_schema() -> None:
+    """``DEFAULT_OPENAPI_PATH`` resolves to the canonical artefact."""
+    # Don't load the file (it's large) — just confirm the layout
+    # ``<repo>/docs/api/openapi.json`` matches what ``make openapi``
+    # writes from ``scripts/regen_openapi.py``.
+    assert DEFAULT_OPENAPI_PATH.name == "openapi.json"
+    assert DEFAULT_OPENAPI_PATH.parent.name == "api"
+    assert DEFAULT_OPENAPI_PATH.parent.parent.name == "docs"
+    assert DEFAULT_OPENAPI_PATH.is_file(), (
+        "docs/api/openapi.json missing; run 'make openapi' to regenerate"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -901,21 +923,20 @@ def test_main_write_is_idempotent(
 # ---------------------------------------------------------------------------
 
 
-def test_live_schema_matches_committed_surfaces(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_committed_schema_matches_committed_surfaces() -> None:
     """The committed surface files match a fresh codegen run.
 
-    Equivalent to ``python -m crewday._codegen --check`` in CI. Boots
-    the real FastAPI factory — expensive, but the single end-to-end
-    test this suite carries. If this fails, either:
+    Equivalent to ``python -m crewday._codegen --check`` in CI. Reads
+    ``docs/api/openapi.json`` (kept fresh by ``make openapi-check``)
+    so the codegen stays a transform-only build step (cd-uky5). If
+    this fails, either:
 
     * someone added an endpoint without running the codegen — run
-      ``uv run python -m crewday._codegen`` and commit the result; or
+      ``make openapi`` then ``uv run python -m crewday._codegen`` and
+      commit both; or
     * the exclusions file is out of sync — update it with a reason.
     """
-    monkeypatch.setenv("CREWDAY_ROOT_KEY", _codegen.DummyRootKey.VALUE)
-    schema = _codegen.load_live_schema()
+    schema = load_committed_schema()
     exclusions = load_exclusions(DEFAULT_EXCLUSIONS_PATH)
     surfaces = generate_surfaces(schema=schema, exclusions=exclusions)
 
@@ -931,9 +952,7 @@ def test_live_schema_matches_committed_surfaces(
     )
 
 
-def test_live_schema_has_no_duplicate_group_name_pairs(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_committed_schema_has_no_duplicate_group_name_pairs() -> None:
     """Each ``(group, name)`` pair on every surface is unique.
 
     The runtime (cd-lato) registers at most one Click command per
@@ -944,8 +963,7 @@ def test_live_schema_has_no_duplicate_group_name_pairs(
     belt-and-braces guard against a future refactor that moves the
     check elsewhere.
     """
-    monkeypatch.setenv("CREWDAY_ROOT_KEY", _codegen.DummyRootKey.VALUE)
-    schema = _codegen.load_live_schema()
+    schema = load_committed_schema()
     exclusions = load_exclusions(DEFAULT_EXCLUSIONS_PATH)
     surfaces = generate_surfaces(schema=schema, exclusions=exclusions)
 
@@ -954,6 +972,40 @@ def test_live_schema_has_no_duplicate_group_name_pairs(
         assert len(pairs) == len(set(pairs)), (
             f"duplicate (group, name) pairs on the {surface_kind} surface: {pairs}"
         )
+
+
+# ---------------------------------------------------------------------------
+# Boundary contract: codegen never reaches into ``app.*``
+# ---------------------------------------------------------------------------
+
+
+def test_codegen_module_does_not_import_app() -> None:
+    """The codegen module statically imports nothing under ``app.*``.
+
+    The whole point of cd-uky5 is to make the codegen a pure
+    transformer over ``docs/api/openapi.json``. A static AST sweep is
+    cheaper and more precise than waiting for ``uv run lint-imports``
+    to flag a regression: it pins the contract directly inside the
+    test suite a future refactor would already be running.
+    """
+    source = inspect.getsource(_codegen)
+    tree = ast.parse(source)
+    forbidden_roots = {"app"}
+    bad: list[str] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                root = alias.name.split(".")[0]
+                if root in forbidden_roots:
+                    bad.append(alias.name)
+        elif isinstance(node, ast.ImportFrom) and node.module is not None:
+            root = node.module.split(".")[0]
+            if root in forbidden_roots:
+                bad.append(node.module)
+    assert bad == [], (
+        "crewday._codegen must not import app.* — it is a transform-only "
+        f"build step over docs/api/openapi.json (cd-uky5). Found: {bad}"
+    )
 
 
 # ---------------------------------------------------------------------------
