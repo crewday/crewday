@@ -355,6 +355,12 @@ ignore_imports = [
     "app.domain.identity.membership -> app.adapters.db.authz.models",
     "app.domain.identity.membership -> app.adapters.db.identity.models",
     "app.domain.identity.membership -> app.adapters.db.workspace.models",
+    # cd-dagg follow-up: property- + organization-scope invite grants
+    # cross-check against ``property_workspace`` and ``organization``
+    # at invite() time. Same Protocol-seam stopgap as the siblings
+    # above; drops with cd-duv6.
+    "app.domain.identity.membership -> app.adapters.db.billing.models",
+    "app.domain.identity.membership -> app.adapters.db.places.models",
     # v1 stopgap (cd-9q6bb): the bare-host invitee passkey enrolment
     # seam (``register_invite_passkey_{start,finish}``) delegates
     # verification + persistence to :mod:`app.auth.passkey` so the

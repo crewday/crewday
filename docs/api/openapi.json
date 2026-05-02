@@ -8397,7 +8397,7 @@
         "type": "object"
       },
       "GrantInput": {
-        "description": "One entry in the ``grants`` list on ``POST /users/invite``.\n\nv1 only accepts ``scope_kind='workspace'`` (property / organization\nscopes land in a follow-up). ``scope_id`` must match the caller's\nworkspace \u2014 the domain service rejects mismatches with\n:class:`~app.domain.identity.membership.InviteBodyInvalid`.",
+        "description": "One entry in the ``grants`` list on ``POST /users/invite``.\n\nThree scope kinds (\u00a703 \"Additional users\"):\n\n* ``workspace`` \u2014 ``scope_id`` matches the caller's workspace.\n  ``scope_property_id`` MUST be NULL. ``binding_org_id`` is\n  optional and only legal on ``grant_role='client'`` (the\n  role_grant ``client_binding_org_scope`` CHECK).\n* ``property`` \u2014 ``scope_id`` matches the caller's workspace and\n  ``scope_property_id`` names a property linked to it via\n  :class:`PropertyWorkspace`. ``binding_org_id`` MUST be NULL.\n* ``organization`` \u2014 ``scope_id`` is the workspace-local\n  :class:`Organization` id; the row materialises as a workspace-\n  scope ``role_grant`` with ``binding_org_id=scope_id`` and\n  ``grant_role='client'``.\n\nThe domain service does the cross-workspace + existence checks\nand surfaces failures as\n:class:`~app.domain.identity.membership.InviteBodyInvalid`.",
         "properties": {
           "binding_org_id": {
             "anyOf": [
@@ -8416,13 +8416,13 @@
             "type": "string"
           },
           "scope_id": {
-            "description": "Target workspace id (ULID).",
+            "description": "Target id: the workspace id for workspace / property scope; the organization id for organization scope.",
             "title": "Scope Id",
             "type": "string"
           },
           "scope_kind": {
             "default": "workspace",
-            "description": "Always 'workspace' in v1.",
+            "description": "One of 'workspace' | 'property' | 'organization'.",
             "title": "Scope Kind",
             "type": "string"
           },

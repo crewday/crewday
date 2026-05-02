@@ -27,6 +27,7 @@ from app.adapters.db.authz.models import (
     RoleGrant,
 )
 from app.adapters.db.authz.repositories import SqlAlchemyPermissionGroupRepository
+from app.adapters.db.billing.models import Organization
 from app.adapters.db.identity.models import (
     Invite,
     PasskeyCredential,
@@ -36,6 +37,7 @@ from app.adapters.db.identity.models import (
 from app.adapters.db.identity.models import (
     Session as SessionRow,
 )
+from app.adapters.db.places.models import Property, PropertyWorkspace
 from app.adapters.db.workspace.models import UserWorkspace
 from app.auth._throttle import Throttle
 from app.auth.magic_link_port import MagicLinkAdapter
@@ -99,6 +101,11 @@ def _ensure_tables_registered() -> None:
     registry.register("audit_log")
     registry.register("invite")
     registry.register("user_workspace")
+    # cd-dagg: property + organization scope cross-checks query the
+    # ``property_workspace`` junction; ``organization`` is filtered by
+    # an explicit ``workspace_id`` predicate so it does not need a
+    # registry entry.
+    registry.register("property_workspace")
 
 
 def _ctx_for(workspace_id: str, workspace_slug: str, actor_id: str) -> WorkspaceContext:
@@ -209,6 +216,76 @@ def _invite_payload(
             }
         ],
     }
+
+
+def _seed_property(
+    session: Session,
+    *,
+    workspace_id: str,
+    label: str,
+) -> Property:
+    """Insert a :class:`Property` + :class:`PropertyWorkspace` junction.
+
+    Mirrors the helper in ``tests/integration/test_api_instructions.py``
+    — the cd-dagg invite-time cross-check joins through the junction,
+    so the property must show up under ``workspace_id`` for the
+    happy-path test to pass.
+    """
+    prop = Property(
+        id=new_ulid(),
+        name=label,
+        kind="vacation",
+        address=label,
+        address_json={},
+        country="FR",
+        timezone="Europe/Paris",
+        tags_json=[],
+        welcome_defaults_json={},
+        property_notes_md="",
+        created_at=_PINNED,
+        updated_at=_PINNED,
+        deleted_at=None,
+    )
+    session.add(prop)
+    session.flush()
+    junction = PropertyWorkspace(
+        property_id=prop.id,
+        workspace_id=workspace_id,
+        label=label,
+        membership_role="owner_workspace",
+        share_guest_identity=False,
+        auto_shift_from_occurrence=False,
+        status="active",
+        created_at=_PINNED,
+    )
+    session.add(junction)
+    session.flush()
+    return prop
+
+
+def _seed_organization(
+    session: Session,
+    *,
+    workspace_id: str,
+    display_name: str,
+) -> Organization:
+    """Insert an :class:`Organization` row in ``workspace_id``."""
+    org = Organization(
+        id=new_ulid(),
+        workspace_id=workspace_id,
+        kind="client",
+        display_name=display_name,
+        billing_address={},
+        tax_id=None,
+        default_currency="EUR",
+        contact_email=None,
+        contact_phone=None,
+        notes_md=None,
+        created_at=_PINNED,
+    )
+    session.add(org)
+    session.flush()
+    return org
 
 
 # ---------------------------------------------------------------------------
@@ -472,6 +549,417 @@ class TestInvite:
         diff_str = str(rows[0].diff)
         assert "private@example.com" not in diff_str.lower()
         assert "@" not in rows[0].diff.get("email_hash", "")
+
+
+# ---------------------------------------------------------------------------
+# invite — scope variants (cd-dagg)
+# ---------------------------------------------------------------------------
+
+
+class TestInviteScopeVariants:
+    """Property + organization scope acceptance, cross-workspace rejection.
+
+    cd-dagg widens the invite-payload ``scope_kind`` enum from
+    ``workspace`` only to ``workspace | property | organization``.
+    The pure-shape unit tests in
+    ``tests/unit/identity/test_membership.py`` cover the structural
+    validation; this class proves the DB cross-checks (junction join
+    for property scope, workspace-local lookup for organization
+    scope) and that activation persists the right anchor columns
+    on :class:`RoleGrant` (``scope_property_id`` for property scope,
+    ``binding_org_id`` for organization scope or workspace+client+
+    ``binding_org_id``).
+    """
+
+    def _accept_with_passkey(
+        self,
+        session: Session,
+        *,
+        invite_id: str,
+        user_id: str,
+    ) -> None:
+        """Seed a passkey + complete the invite for activation."""
+        _seed_passkey(session, user_id=user_id, clock=FrozenClock(_PINNED))
+        membership.complete_invite(
+            session, invite_id=invite_id, settings=_TEST_SETTINGS
+        )
+
+    def test_property_scope_happy_path_persists_scope_property_id(
+        self,
+        env: tuple[Session, WorkspaceContext, InMemoryMailer, Throttle],
+    ) -> None:
+        session, ctx, mailer, throttle = env
+        prop = _seed_property(
+            session, workspace_id=ctx.workspace_id, label="Villa Test"
+        )
+        outcome = membership.invite(
+            session,
+            ctx,
+            email="property-worker@example.com",
+            display_name="Property Worker",
+            grants=[
+                {
+                    "scope_kind": "property",
+                    "scope_id": ctx.workspace_id,
+                    "scope_property_id": prop.id,
+                    "grant_role": "worker",
+                }
+            ],
+            mailer=mailer,
+            throttle=throttle,
+            base_url=_BASE_URL,
+            settings=_TEST_SETTINGS,
+            inviter_display_name="Owner",
+            workspace_name=ctx.workspace_slug,
+            link_port=MagicLinkAdapter(session),
+        )
+        assert outcome.user_id is not None
+        self._accept_with_passkey(
+            session, invite_id=outcome.id, user_id=outcome.user_id
+        )
+
+        grants = session.scalars(
+            select(RoleGrant).where(
+                RoleGrant.workspace_id == ctx.workspace_id,
+                RoleGrant.user_id == outcome.user_id,
+            )
+        ).all()
+        assert len(grants) == 1
+        assert grants[0].grant_role == "worker"
+        assert grants[0].scope_property_id == prop.id
+        assert grants[0].binding_org_id is None
+        # Storage invariant (§02 "Scope-kind invariants" + role_grant
+        # CHECK ``ck_role_grant_scope_kind_workspace_pairing``): the
+        # invite-payload ``property`` scope materialises as a
+        # workspace-scope grant narrowed by ``scope_property_id``.
+        assert grants[0].scope_kind == "workspace"
+
+    def test_property_scope_cross_workspace_rejected(
+        self,
+        env: tuple[Session, WorkspaceContext, InMemoryMailer, Throttle],
+    ) -> None:
+        session, ctx, mailer, throttle = env
+        # Seed a sibling workspace and put the property there only.
+        sibling_owner = bootstrap_user(
+            session,
+            email=f"sibling-{ctx.workspace_slug}@example.com",
+            display_name="Sibling",
+            clock=FrozenClock(_PINNED),
+        )
+        sibling_ws = bootstrap_workspace(
+            session,
+            slug=f"{ctx.workspace_slug}-sibling",
+            name="Sibling WS",
+            owner_user_id=sibling_owner.id,
+            clock=FrozenClock(_PINNED),
+        )
+        # justification: foreign-workspace seed must skip the tenant
+        # filter so the row lands under ``sibling_ws.id`` rather than
+        # the active ctx's workspace.
+        with tenant_agnostic():
+            foreign_prop = _seed_property(
+                session, workspace_id=sibling_ws.id, label="Foreign Villa"
+            )
+        with pytest.raises(membership.InviteBodyInvalid) as exc:
+            membership.invite(
+                session,
+                ctx,
+                email="cross-prop@example.com",
+                display_name="Cross",
+                grants=[
+                    {
+                        "scope_kind": "property",
+                        "scope_id": ctx.workspace_id,
+                        "scope_property_id": foreign_prop.id,
+                        "grant_role": "worker",
+                    }
+                ],
+                mailer=mailer,
+                throttle=throttle,
+                base_url=_BASE_URL,
+                settings=_TEST_SETTINGS,
+                inviter_display_name="Owner",
+                workspace_name=ctx.workspace_slug,
+                link_port=MagicLinkAdapter(session),
+            )
+        assert "scope_property_id" in str(exc.value)
+
+    def test_organization_scope_happy_path_persists_binding_org_id(
+        self,
+        env: tuple[Session, WorkspaceContext, InMemoryMailer, Throttle],
+    ) -> None:
+        session, ctx, mailer, throttle = env
+        org = _seed_organization(
+            session, workspace_id=ctx.workspace_id, display_name="Acme Inc"
+        )
+        outcome = membership.invite(
+            session,
+            ctx,
+            email="org-client@example.com",
+            display_name="Org Client",
+            grants=[
+                {
+                    "scope_kind": "organization",
+                    "scope_id": org.id,
+                    "grant_role": "client",
+                }
+            ],
+            mailer=mailer,
+            throttle=throttle,
+            base_url=_BASE_URL,
+            settings=_TEST_SETTINGS,
+            inviter_display_name="Owner",
+            workspace_name=ctx.workspace_slug,
+            link_port=MagicLinkAdapter(session),
+        )
+        assert outcome.user_id is not None
+        self._accept_with_passkey(
+            session, invite_id=outcome.id, user_id=outcome.user_id
+        )
+
+        grants = session.scalars(
+            select(RoleGrant).where(
+                RoleGrant.workspace_id == ctx.workspace_id,
+                RoleGrant.user_id == outcome.user_id,
+            )
+        ).all()
+        assert len(grants) == 1
+        # Organization scope materialises as a workspace-scope
+        # role_grant carrying binding_org_id=scope_id; spec §03 +
+        # role_grant CHECK pin this to grant_role='client'.
+        assert grants[0].grant_role == "client"
+        assert grants[0].binding_org_id == org.id
+        assert grants[0].scope_property_id is None
+        # §02 "Scope-kind invariants": only the invite-payload
+        # vocabulary widens to ``organization``; the persisted
+        # ``role_grant.scope_kind`` stays ``workspace``.
+        assert grants[0].scope_kind == "workspace"
+
+    def test_organization_scope_cross_workspace_rejected(
+        self,
+        env: tuple[Session, WorkspaceContext, InMemoryMailer, Throttle],
+    ) -> None:
+        session, ctx, mailer, throttle = env
+        sibling_owner = bootstrap_user(
+            session,
+            email=f"sibling-org-{ctx.workspace_slug}@example.com",
+            display_name="Sibling",
+            clock=FrozenClock(_PINNED),
+        )
+        sibling_ws = bootstrap_workspace(
+            session,
+            slug=f"{ctx.workspace_slug}-org-sibling",
+            name="Sibling Org WS",
+            owner_user_id=sibling_owner.id,
+            clock=FrozenClock(_PINNED),
+        )
+        with tenant_agnostic():
+            foreign_org = _seed_organization(
+                session, workspace_id=sibling_ws.id, display_name="Foreign Inc"
+            )
+        with pytest.raises(membership.InviteBodyInvalid) as exc:
+            membership.invite(
+                session,
+                ctx,
+                email="cross-org@example.com",
+                display_name="Cross",
+                grants=[
+                    {
+                        "scope_kind": "organization",
+                        "scope_id": foreign_org.id,
+                        "grant_role": "client",
+                    }
+                ],
+                mailer=mailer,
+                throttle=throttle,
+                base_url=_BASE_URL,
+                settings=_TEST_SETTINGS,
+                inviter_display_name="Owner",
+                workspace_name=ctx.workspace_slug,
+                link_port=MagicLinkAdapter(session),
+            )
+        assert "organization" in str(exc.value)
+
+    def test_organization_scope_rejects_non_client_role(
+        self,
+        env: tuple[Session, WorkspaceContext, InMemoryMailer, Throttle],
+    ) -> None:
+        session, ctx, mailer, throttle = env
+        org = _seed_organization(
+            session, workspace_id=ctx.workspace_id, display_name="Acme Inc"
+        )
+        with pytest.raises(membership.InviteBodyInvalid) as exc:
+            membership.invite(
+                session,
+                ctx,
+                email="org-manager@example.com",
+                display_name="Bad",
+                grants=[
+                    {
+                        "scope_kind": "organization",
+                        "scope_id": org.id,
+                        "grant_role": "manager",  # non-client rejected
+                    }
+                ],
+                mailer=mailer,
+                throttle=throttle,
+                base_url=_BASE_URL,
+                settings=_TEST_SETTINGS,
+                inviter_display_name="Owner",
+                workspace_name=ctx.workspace_slug,
+                link_port=MagicLinkAdapter(session),
+            )
+        assert "client" in str(exc.value)
+
+    def test_workspace_scope_with_binding_org_id_happy_path(
+        self,
+        env: tuple[Session, WorkspaceContext, InMemoryMailer, Throttle],
+    ) -> None:
+        session, ctx, mailer, throttle = env
+        org = _seed_organization(
+            session, workspace_id=ctx.workspace_id, display_name="Tenant Co"
+        )
+        outcome = membership.invite(
+            session,
+            ctx,
+            email="ws-bound-client@example.com",
+            display_name="Bound Client",
+            grants=[
+                {
+                    "scope_kind": "workspace",
+                    "scope_id": ctx.workspace_id,
+                    "grant_role": "client",
+                    "binding_org_id": org.id,
+                }
+            ],
+            mailer=mailer,
+            throttle=throttle,
+            base_url=_BASE_URL,
+            settings=_TEST_SETTINGS,
+            inviter_display_name="Owner",
+            workspace_name=ctx.workspace_slug,
+            link_port=MagicLinkAdapter(session),
+        )
+        assert outcome.user_id is not None
+        self._accept_with_passkey(
+            session, invite_id=outcome.id, user_id=outcome.user_id
+        )
+
+        grants = session.scalars(
+            select(RoleGrant).where(
+                RoleGrant.workspace_id == ctx.workspace_id,
+                RoleGrant.user_id == outcome.user_id,
+            )
+        ).all()
+        assert len(grants) == 1
+        assert grants[0].grant_role == "client"
+        assert grants[0].binding_org_id == org.id
+        assert grants[0].scope_property_id is None
+        assert grants[0].scope_kind == "workspace"
+
+    def test_workspace_scope_unknown_binding_org_rejected(
+        self,
+        env: tuple[Session, WorkspaceContext, InMemoryMailer, Throttle],
+    ) -> None:
+        session, ctx, mailer, throttle = env
+        with pytest.raises(membership.InviteBodyInvalid) as exc:
+            membership.invite(
+                session,
+                ctx,
+                email="ws-unknown-binding@example.com",
+                display_name="Unknown",
+                grants=[
+                    {
+                        "scope_kind": "workspace",
+                        "scope_id": ctx.workspace_id,
+                        "grant_role": "client",
+                        "binding_org_id": "01HWA00000000000000000NONE",
+                    }
+                ],
+                mailer=mailer,
+                throttle=throttle,
+                base_url=_BASE_URL,
+                settings=_TEST_SETTINGS,
+                inviter_display_name="Owner",
+                workspace_name=ctx.workspace_slug,
+                link_port=MagicLinkAdapter(session),
+            )
+        assert "binding_org_id" in str(exc.value)
+
+    def test_organization_scope_rejects_archived_org(
+        self,
+        env: tuple[Session, WorkspaceContext, InMemoryMailer, Throttle],
+    ) -> None:
+        """A retired :class:`Organization` cannot anchor a fresh invite.
+
+        Mirrors the ``archived_at IS NULL`` filter every other live-org
+        lookup in :mod:`app.adapters.db.billing.repositories` carries —
+        landing a stale FK on ``binding_org_id`` would grant client
+        visibility tied to a counterparty the workspace already retired.
+        """
+        session, ctx, mailer, throttle = env
+        org = _seed_organization(
+            session, workspace_id=ctx.workspace_id, display_name="Retired Co"
+        )
+        org.archived_at = _PINNED
+        session.flush()
+        with pytest.raises(membership.InviteBodyInvalid) as exc:
+            membership.invite(
+                session,
+                ctx,
+                email="archived-org-client@example.com",
+                display_name="Archived",
+                grants=[
+                    {
+                        "scope_kind": "organization",
+                        "scope_id": org.id,
+                        "grant_role": "client",
+                    }
+                ],
+                mailer=mailer,
+                throttle=throttle,
+                base_url=_BASE_URL,
+                settings=_TEST_SETTINGS,
+                inviter_display_name="Owner",
+                workspace_name=ctx.workspace_slug,
+                link_port=MagicLinkAdapter(session),
+            )
+        assert "live organization" in str(exc.value)
+
+    def test_workspace_scope_rejects_archived_binding_org(
+        self,
+        env: tuple[Session, WorkspaceContext, InMemoryMailer, Throttle],
+    ) -> None:
+        """Same archived-org filter applies to the workspace+binding_org_id path."""
+        session, ctx, mailer, throttle = env
+        org = _seed_organization(
+            session, workspace_id=ctx.workspace_id, display_name="Retired Tenant"
+        )
+        org.archived_at = _PINNED
+        session.flush()
+        with pytest.raises(membership.InviteBodyInvalid) as exc:
+            membership.invite(
+                session,
+                ctx,
+                email="archived-binding@example.com",
+                display_name="Archived Binding",
+                grants=[
+                    {
+                        "scope_kind": "workspace",
+                        "scope_id": ctx.workspace_id,
+                        "grant_role": "client",
+                        "binding_org_id": org.id,
+                    }
+                ],
+                mailer=mailer,
+                throttle=throttle,
+                base_url=_BASE_URL,
+                settings=_TEST_SETTINGS,
+                inviter_display_name="Owner",
+                workspace_name=ctx.workspace_slug,
+                link_port=MagicLinkAdapter(session),
+            )
+        assert "live organization" in str(exc.value)
 
 
 # ---------------------------------------------------------------------------

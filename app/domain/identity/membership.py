@@ -80,8 +80,6 @@ Protocol-seam refactor for every identity service at once.
 
 Deferred to follow-ups (see report at handoff):
 
-* ``binding_org_id`` scope_transfer on grants — the ``organization``
-  table is not part of Phase 1.
 * Nightly ``invite`` TTL sweeper ("expired" state flip) — runs
   alongside the existing ``signup_gc`` worker.
 
@@ -106,6 +104,7 @@ from app.adapters.db.authz.models import (
     PermissionGroupMember,
     RoleGrant,
 )
+from app.adapters.db.billing.models import Organization
 from app.adapters.db.identity.models import (
     Invite,
     MagicLinkNonce,
@@ -116,6 +115,7 @@ from app.adapters.db.identity.models import (
 from app.adapters.db.identity.models import (
     Session as SessionRow,
 )
+from app.adapters.db.places.models import PropertyWorkspace
 from app.adapters.db.workspace.models import (
     UserWorkRole,
     UserWorkspace,
@@ -216,15 +216,18 @@ _VALID_GRANT_ROLES: Final[frozenset[str]] = frozenset(
     {"manager", "worker", "client", "guest"}
 )
 
-# Scope kinds the invite flow accepts in v1. The spec lists
-# ``workspace``, ``property`` and ``organization``; Phase 1 only
-# supports workspace because the ``organization`` table is not yet
-# in the schema and property-scoped invite grants need the
-# ``property_workspace`` junction cross-check already implemented
-# in :mod:`app.domain.identity.role_grants` — adding it to the
-# invite flow means cross-importing that guard. Tracked as
-# cd-dagg follow-ups; see module docstring.
-_VALID_SCOPE_KINDS: Final[frozenset[str]] = frozenset({"workspace"})
+# Scope kinds the invite flow accepts (§03 "Additional users").
+# ``workspace`` is the bare workspace surface; ``property`` narrows
+# the grant to a single property in the workspace via
+# :class:`PropertyWorkspace` (same junction as
+# :func:`app.domain.identity.role_grants._assert_scope_property_in_workspace`);
+# ``organization`` targets a workspace-local :class:`Organization`
+# row — used for client-flavoured grants where the invitee should
+# only see data billed to that org (``binding_org_id`` is the
+# storage anchor on the persisted ``role_grant`` row).
+_VALID_SCOPE_KINDS: Final[frozenset[str]] = frozenset(
+    {"workspace", "property", "organization"}
+)
 
 # Engagement kinds the invite flow accepts (cd-4o61). Mirrors §22
 # "Engagement kinds" and the DB CHECK on ``work_engagement.engagement_kind``;
@@ -479,35 +482,206 @@ def _email_pepper(settings: Settings | None) -> bytes:
     return derive_subkey(s.root_key, purpose=_HKDF_PURPOSE)
 
 
-def _validate_grants(grants: list[dict[str, Any]], *, workspace_id: str) -> None:
+def _validate_grants(
+    grants: list[dict[str, Any]],
+    *,
+    workspace_id: str,
+    session: DbSession | None = None,
+) -> None:
     """Raise :class:`InviteBodyInvalid` unless every grant is well-shaped.
 
-    v1 only accepts workspace-scoped grants. Cross-workspace
-    scope_ids are rejected so a rogue invite can't bait-and-switch
-    the invitee into a sibling workspace mid-acceptance.
+    Three scope kinds are accepted (§03 "Additional users"):
+
+    * ``workspace`` — ``scope_id`` MUST equal ``workspace_id``;
+      ``scope_property_id`` MUST be NULL. ``binding_org_id`` is
+      optional but, when present, must reference a workspace-local
+      :class:`Organization` and the role_grant CHECK
+      (``client_binding_org_scope``) only allows it on
+      ``grant_role='client'`` grants. We mirror the CHECK at the
+      domain boundary so a bad pair surfaces as 422 rather than at
+      DB flush.
+    * ``property`` — ``scope_id`` MUST equal ``workspace_id`` (the
+      grant lives in *this* workspace, narrowed to a property);
+      ``scope_property_id`` MUST be present and the property MUST be
+      linked to the caller's workspace via :class:`PropertyWorkspace`
+      (same cross-check as
+      :func:`app.domain.identity.role_grants._assert_scope_property_in_workspace`).
+      ``binding_org_id`` is rejected at property scope — the
+      role_grant CHECK forbids ``binding_org_id`` whenever
+      ``scope_property_id`` is non-NULL.
+    * ``organization`` — ``scope_id`` is the organization id and MUST
+      resolve to a **live** (``archived_at IS NULL``) workspace-local
+      :class:`Organization` row. The persisted ``role_grant`` carries
+      ``binding_org_id=scope_id``, which the CHECK gates to
+      ``grant_role='client'``; non-client organization-scope invite
+      grants are therefore rejected here so the caller learns at
+      invite time, not at accept-time DB flush. The persisted
+      ``role_grant.scope_kind`` stays ``'workspace'`` per §02
+      "Scope-kind invariants" — only the invite-payload vocabulary
+      widens; the storage layout is unchanged (cd-8jrd).
+
+    Cross-workspace ids in any of the three slots are rejected so a
+    rogue invite can't bait-and-switch the invitee into a sibling
+    workspace mid-acceptance.
+
+    The ``session`` parameter is required for the property /
+    organization / binding_org_id DB cross-checks. It defaults to
+    ``None`` so unit tests covering the pure shape rules (workspace
+    scope only) don't have to pin a live :class:`DbSession`; passing
+    a property- or organization-scoped grant without a session
+    raises :class:`InviteBodyInvalid` (the cross-check is
+    structurally required for those scope kinds).
     """
     if not grants:
         raise InviteBodyInvalid("grants list must carry at least one entry")
+    property_ids: list[tuple[int, str]] = []
+    organization_ids: list[tuple[int, str]] = []
+    binding_org_ids: list[tuple[int, str]] = []
     for idx, g in enumerate(grants):
         scope_kind = g.get("scope_kind")
         scope_id = g.get("scope_id")
         grant_role = g.get("grant_role")
+        scope_property_id = g.get("scope_property_id")
+        binding_org_id = g.get("binding_org_id")
         if scope_kind not in _VALID_SCOPE_KINDS:
             raise InviteBodyInvalid(
                 f"grants[{idx}].scope_kind {scope_kind!r} is not in "
-                f"{sorted(_VALID_SCOPE_KINDS)} "
-                f"(property / organization scopes land in a follow-up)"
-            )
-        if scope_id != workspace_id:
-            raise InviteBodyInvalid(
-                f"grants[{idx}].scope_id must match the target workspace; "
-                f"got {scope_id!r} vs {workspace_id!r}"
+                f"{sorted(_VALID_SCOPE_KINDS)}"
             )
         if grant_role not in _VALID_GRANT_ROLES:
             raise InviteBodyInvalid(
                 f"grants[{idx}].grant_role {grant_role!r} is not in "
                 f"{sorted(_VALID_GRANT_ROLES)}"
             )
+        if scope_kind == "workspace":
+            if scope_id != workspace_id:
+                raise InviteBodyInvalid(
+                    f"grants[{idx}].scope_id must match the target workspace; "
+                    f"got {scope_id!r} vs {workspace_id!r}"
+                )
+            if scope_property_id is not None:
+                raise InviteBodyInvalid(
+                    f"grants[{idx}].scope_property_id must be NULL when "
+                    f"scope_kind == 'workspace'"
+                )
+            if binding_org_id is not None:
+                # Mirror role_grant's ``client_binding_org_scope`` CHECK.
+                if grant_role != "client":
+                    raise InviteBodyInvalid(
+                        f"grants[{idx}].binding_org_id is only allowed on "
+                        f"client grants; got grant_role={grant_role!r}"
+                    )
+                if not isinstance(binding_org_id, str) or not binding_org_id:
+                    raise InviteBodyInvalid(
+                        f"grants[{idx}].binding_org_id must be a non-empty string"
+                    )
+                binding_org_ids.append((idx, binding_org_id))
+        elif scope_kind == "property":
+            if scope_id != workspace_id:
+                raise InviteBodyInvalid(
+                    f"grants[{idx}].scope_id must match the target workspace; "
+                    f"got {scope_id!r} vs {workspace_id!r}"
+                )
+            if not isinstance(scope_property_id, str) or not scope_property_id:
+                raise InviteBodyInvalid(
+                    f"grants[{idx}].scope_property_id must be a non-empty "
+                    f"string when scope_kind == 'property'"
+                )
+            if binding_org_id is not None:
+                # role_grant CHECK forbids binding_org_id when
+                # scope_property_id is non-NULL.
+                raise InviteBodyInvalid(
+                    f"grants[{idx}].binding_org_id must be NULL when "
+                    f"scope_kind == 'property'"
+                )
+            property_ids.append((idx, scope_property_id))
+        elif scope_kind == "organization":
+            # Organization-scope invite grants land as a workspace-scope
+            # role_grant with ``binding_org_id=scope_id``. The
+            # role_grant CHECK only allows ``binding_org_id`` on
+            # ``grant_role='client'`` rows, so reject other roles up
+            # front rather than failing the accept transaction.
+            if grant_role != "client":
+                raise InviteBodyInvalid(
+                    f"grants[{idx}].grant_role must be 'client' when "
+                    f"scope_kind == 'organization'; got {grant_role!r}"
+                )
+            if not isinstance(scope_id, str) or not scope_id:
+                raise InviteBodyInvalid(
+                    f"grants[{idx}].scope_id must be a non-empty organization "
+                    f"id when scope_kind == 'organization'"
+                )
+            if scope_property_id is not None:
+                raise InviteBodyInvalid(
+                    f"grants[{idx}].scope_property_id must be NULL when "
+                    f"scope_kind == 'organization'"
+                )
+            if binding_org_id is not None and binding_org_id != scope_id:
+                # Spec ambiguity-buster: the persisted row's binding_org_id
+                # is the scope_id itself; an explicit, divergent value is
+                # almost certainly a wire-shape bug.
+                raise InviteBodyInvalid(
+                    f"grants[{idx}].binding_org_id must equal scope_id when "
+                    f"scope_kind == 'organization'; got "
+                    f"{binding_org_id!r} vs {scope_id!r}"
+                )
+            organization_ids.append((idx, scope_id))
+
+    # DB cross-checks. Batched by kind so each lookup stays O(1)
+    # regardless of grants-list length, matching
+    # :func:`_validate_group_memberships`'s shape.
+    if property_ids or organization_ids or binding_org_ids:
+        if session is None:
+            raise InviteBodyInvalid(
+                "property / organization scope cross-checks require a database session"
+            )
+        if property_ids:
+            wanted = {pid for _idx, pid in property_ids}
+            known = set(
+                session.scalars(
+                    select(PropertyWorkspace.property_id).where(
+                        PropertyWorkspace.workspace_id == workspace_id,
+                        PropertyWorkspace.property_id.in_(wanted),
+                    )
+                ).all()
+            )
+            for idx, pid in property_ids:
+                if pid not in known:
+                    raise InviteBodyInvalid(
+                        f"grants[{idx}].scope_property_id {pid!r} is not "
+                        f"linked to this workspace"
+                    )
+        org_lookup_ids = {oid for _idx, oid in organization_ids} | {
+            oid for _idx, oid in binding_org_ids
+        }
+        if org_lookup_ids:
+            # ``Organization.archived_at IS NULL`` mirrors every other
+            # live-org lookup in :mod:`app.adapters.db.billing.repositories`
+            # — pinning a fresh role_grant to a retired counterparty
+            # would leave a stale FK on ``binding_org_id`` and grant
+            # client visibility tied to data the workspace has already
+            # retired.
+            known_orgs = set(
+                session.scalars(
+                    select(Organization.id).where(
+                        Organization.workspace_id == workspace_id,
+                        Organization.id.in_(org_lookup_ids),
+                        Organization.archived_at.is_(None),
+                    )
+                ).all()
+            )
+            for idx, oid in organization_ids:
+                if oid not in known_orgs:
+                    raise InviteBodyInvalid(
+                        f"grants[{idx}].scope_id {oid!r} does not resolve to "
+                        f"a live organization in this workspace"
+                    )
+            for idx, oid in binding_org_ids:
+                if oid not in known_orgs:
+                    raise InviteBodyInvalid(
+                        f"grants[{idx}].binding_org_id {oid!r} does not "
+                        f"resolve to a live organization in this workspace"
+                    )
 
 
 def _validate_group_memberships(
@@ -789,7 +963,7 @@ def invite(
         raise InviteBodyInvalid("email must be a non-empty address")
     if not display_name.strip():
         raise InviteBodyInvalid("display_name must be a non-empty string")
-    _validate_grants(grants, workspace_id=ctx.workspace_id)
+    _validate_grants(grants, workspace_id=ctx.workspace_id, session=session)
     memberships = group_memberships or []
     _validate_group_memberships(
         session,
@@ -1403,12 +1577,34 @@ def _activate_invite(
             # Defensive — :func:`invite` already validated; this
             # fires only if the JSON was tampered with post-insert.
             continue
+        scope_kind = g.get("scope_kind") or "workspace"
+        # Map the invite-payload scope vocabulary onto the role_grant
+        # row's storage anchors. ``property`` invite scope → narrow
+        # via ``scope_property_id``; ``organization`` invite scope →
+        # store the org id on ``binding_org_id`` (the role_grant
+        # CHECK gates this to ``grant_role='client'`` rows;
+        # :func:`_validate_grants` already enforces that pairing).
+        scope_property_id: str | None = None
+        binding_org_id: str | None = None
+        if scope_kind == "property":
+            raw_property = g.get("scope_property_id")
+            if isinstance(raw_property, str) and raw_property:
+                scope_property_id = raw_property
+        elif scope_kind == "organization":
+            raw_org = g.get("scope_id")
+            if isinstance(raw_org, str) and raw_org:
+                binding_org_id = raw_org
+        else:
+            raw_binding = g.get("binding_org_id")
+            if isinstance(raw_binding, str) and raw_binding:
+                binding_org_id = raw_binding
         grant = RoleGrant(
             id=new_ulid(clock=clock),
             workspace_id=workspace_id,
             user_id=user_id,
             grant_role=grant_role,
-            scope_property_id=None,
+            scope_property_id=scope_property_id,
+            binding_org_id=binding_org_id,
             created_at=now,
             created_by_user_id=invite_row.invited_by_user_id,
         )

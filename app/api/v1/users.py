@@ -121,20 +121,39 @@ _Db = Annotated[Session, Depends(db_session)]
 class GrantInput(BaseModel):
     """One entry in the ``grants`` list on ``POST /users/invite``.
 
-    v1 only accepts ``scope_kind='workspace'`` (property / organization
-    scopes land in a follow-up). ``scope_id`` must match the caller's
-    workspace — the domain service rejects mismatches with
+    Three scope kinds (§03 "Additional users"):
+
+    * ``workspace`` — ``scope_id`` matches the caller's workspace.
+      ``scope_property_id`` MUST be NULL. ``binding_org_id`` is
+      optional and only legal on ``grant_role='client'`` (the
+      role_grant ``client_binding_org_scope`` CHECK).
+    * ``property`` — ``scope_id`` matches the caller's workspace and
+      ``scope_property_id`` names a property linked to it via
+      :class:`PropertyWorkspace`. ``binding_org_id`` MUST be NULL.
+    * ``organization`` — ``scope_id`` is the workspace-local
+      :class:`Organization` id; the row materialises as a workspace-
+      scope ``role_grant`` with ``binding_org_id=scope_id`` and
+      ``grant_role='client'``.
+
+    The domain service does the cross-workspace + existence checks
+    and surfaces failures as
     :class:`~app.domain.identity.membership.InviteBodyInvalid`.
     """
 
-    scope_kind: str = Field("workspace", description="Always 'workspace' in v1.")
-    scope_id: str = Field(..., description="Target workspace id (ULID).")
+    scope_kind: str = Field(
+        "workspace",
+        description="One of 'workspace' | 'property' | 'organization'.",
+    )
+    scope_id: str = Field(
+        ...,
+        description=(
+            "Target id: the workspace id for workspace / property scope; "
+            "the organization id for organization scope."
+        ),
+    )
     grant_role: str = Field(
         ..., description="One of 'manager' | 'worker' | 'client' | 'guest'."
     )
-    # Reserved fields present for spec parity; ignored by the v1
-    # domain service. Keeping them on the wire means a follow-up
-    # (organization-scope) lands without a breaking body shape.
     binding_org_id: str | None = None
     scope_property_id: str | None = None
 

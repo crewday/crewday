@@ -19,6 +19,7 @@ import pytest
 from pydantic import ValidationError
 
 from app.api.v1.users import (
+    GrantInput,
     InviteRequest,
     UserWorkRoleInput,
     WorkEngagementInput,
@@ -153,3 +154,52 @@ class TestInviteRequest:
         assert body.work_engagement.supplier_org_id == "01HWA00000000000000000ORG1"
         assert body.user_work_roles is not None
         assert len(body.user_work_roles) == 1
+
+
+class TestGrantInputScopeKinds:
+    """``GrantInput`` parses the three accepted scope kinds (cd-dagg).
+
+    The wire shape carries ``scope_property_id`` and ``binding_org_id``
+    as optional fields. The domain service does the cross-tenant
+    validation; this class only proves the body parses without
+    raising.
+    """
+
+    _WS_ID = "01HWA00000000000000000WS01"
+    _PROPERTY_ID = "01HWA0000000000000000P001"
+    _ORG_ID = "01HWA00000000000000000ORG1"
+
+    def test_workspace_scope_with_binding_org_id(self) -> None:
+        grant = GrantInput.model_validate(
+            {
+                "scope_kind": "workspace",
+                "scope_id": self._WS_ID,
+                "grant_role": "client",
+                "binding_org_id": self._ORG_ID,
+            }
+        )
+        assert grant.binding_org_id == self._ORG_ID
+        assert grant.scope_property_id is None
+
+    def test_property_scope_with_scope_property_id(self) -> None:
+        grant = GrantInput.model_validate(
+            {
+                "scope_kind": "property",
+                "scope_id": self._WS_ID,
+                "grant_role": "worker",
+                "scope_property_id": self._PROPERTY_ID,
+            }
+        )
+        assert grant.scope_kind == "property"
+        assert grant.scope_property_id == self._PROPERTY_ID
+
+    def test_organization_scope_parses(self) -> None:
+        grant = GrantInput.model_validate(
+            {
+                "scope_kind": "organization",
+                "scope_id": self._ORG_ID,
+                "grant_role": "client",
+            }
+        )
+        assert grant.scope_kind == "organization"
+        assert grant.scope_id == self._ORG_ID

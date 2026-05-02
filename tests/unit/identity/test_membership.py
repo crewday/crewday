@@ -62,7 +62,11 @@ class TestGrantValidation:
     """``_validate_grants`` enforces the v1 scope + role enum.
 
     Private helper but exercised here so we catch shape drift early —
-    the integration tests take longer to fail on a regression.
+    the integration tests take longer to fail on a regression. The
+    cross-tenant DB joins for ``property`` and ``organization`` scope
+    are exercised in ``tests/integration/identity/test_membership.py``;
+    this class covers the workspace-scope shape rules + the structural
+    rejections that fire before any DB lookup.
     """
 
     _WORKSPACE_ID = "01HWA000000000000000WS001"
@@ -71,19 +75,19 @@ class TestGrantValidation:
         with pytest.raises(membership.InviteBodyInvalid):
             membership._validate_grants([], workspace_id=self._WORKSPACE_ID)
 
-    def test_unsupported_scope_kind_rejected(self) -> None:
+    def test_unknown_scope_kind_rejected(self) -> None:
         with pytest.raises(membership.InviteBodyInvalid) as exc:
             membership._validate_grants(
                 [
                     {
-                        "scope_kind": "organization",
+                        "scope_kind": "deployment",
                         "scope_id": self._WORKSPACE_ID,
                         "grant_role": "worker",
                     }
                 ],
                 workspace_id=self._WORKSPACE_ID,
             )
-        assert "organization" in str(exc.value)
+        assert "deployment" in str(exc.value)
 
     def test_scope_id_must_match_workspace(self) -> None:
         with pytest.raises(membership.InviteBodyInvalid) as exc:
@@ -125,6 +129,114 @@ class TestGrantValidation:
                 ],
                 workspace_id=self._WORKSPACE_ID,
             )
+
+    def test_workspace_scope_rejects_scope_property_id(self) -> None:
+        with pytest.raises(membership.InviteBodyInvalid) as exc:
+            membership._validate_grants(
+                [
+                    {
+                        "scope_kind": "workspace",
+                        "scope_id": self._WORKSPACE_ID,
+                        "grant_role": "worker",
+                        "scope_property_id": "01HWA0000000000000000P001",
+                    }
+                ],
+                workspace_id=self._WORKSPACE_ID,
+            )
+        assert "scope_property_id" in str(exc.value)
+
+    def test_workspace_scope_binding_org_only_on_client(self) -> None:
+        # Non-client roles cannot carry binding_org_id even at workspace
+        # scope (mirrors the role_grant ``client_binding_org_scope`` CHECK).
+        with pytest.raises(membership.InviteBodyInvalid) as exc:
+            membership._validate_grants(
+                [
+                    {
+                        "scope_kind": "workspace",
+                        "scope_id": self._WORKSPACE_ID,
+                        "grant_role": "worker",
+                        "binding_org_id": "01HWA00000000000000000ORG1",
+                    }
+                ],
+                workspace_id=self._WORKSPACE_ID,
+            )
+        assert "binding_org_id" in str(exc.value)
+
+    def test_property_scope_requires_scope_property_id(self) -> None:
+        with pytest.raises(membership.InviteBodyInvalid) as exc:
+            membership._validate_grants(
+                [
+                    {
+                        "scope_kind": "property",
+                        "scope_id": self._WORKSPACE_ID,
+                        "grant_role": "worker",
+                    }
+                ],
+                workspace_id=self._WORKSPACE_ID,
+            )
+        assert "scope_property_id" in str(exc.value)
+
+    def test_property_scope_rejects_binding_org_id(self) -> None:
+        with pytest.raises(membership.InviteBodyInvalid) as exc:
+            membership._validate_grants(
+                [
+                    {
+                        "scope_kind": "property",
+                        "scope_id": self._WORKSPACE_ID,
+                        "grant_role": "worker",
+                        "scope_property_id": "01HWA0000000000000000P001",
+                        "binding_org_id": "01HWA00000000000000000ORG1",
+                    }
+                ],
+                workspace_id=self._WORKSPACE_ID,
+            )
+        assert "binding_org_id" in str(exc.value)
+
+    def test_property_scope_requires_session_for_cross_check(self) -> None:
+        # Pure-shape unit path: a property-scoped grant without a
+        # session reaches the cross-check and surfaces a clear error.
+        with pytest.raises(membership.InviteBodyInvalid) as exc:
+            membership._validate_grants(
+                [
+                    {
+                        "scope_kind": "property",
+                        "scope_id": self._WORKSPACE_ID,
+                        "grant_role": "worker",
+                        "scope_property_id": "01HWA0000000000000000P001",
+                    }
+                ],
+                workspace_id=self._WORKSPACE_ID,
+            )
+        assert "database session" in str(exc.value)
+
+    def test_organization_scope_only_for_client_grants(self) -> None:
+        with pytest.raises(membership.InviteBodyInvalid) as exc:
+            membership._validate_grants(
+                [
+                    {
+                        "scope_kind": "organization",
+                        "scope_id": "01HWA00000000000000000ORG1",
+                        "grant_role": "manager",
+                    }
+                ],
+                workspace_id=self._WORKSPACE_ID,
+            )
+        assert "client" in str(exc.value)
+
+    def test_organization_scope_binding_must_match_scope_id(self) -> None:
+        with pytest.raises(membership.InviteBodyInvalid) as exc:
+            membership._validate_grants(
+                [
+                    {
+                        "scope_kind": "organization",
+                        "scope_id": "01HWA00000000000000000ORG1",
+                        "grant_role": "client",
+                        "binding_org_id": "01HWA00000000000000000ORG2",
+                    }
+                ],
+                workspace_id=self._WORKSPACE_ID,
+            )
+        assert "binding_org_id" in str(exc.value)
 
 
 class TestTimezoneNormalisation:

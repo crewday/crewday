@@ -668,11 +668,17 @@ class Invite(Base):
           ...
         ]
 
-    Only ``workspace`` scope and the four v1 grant roles (``manager
-    | worker | client | guest``) are validated on insert; the
-    ``binding_org_id`` / ``organization`` scope variants are
-    deferred to a follow-up (the ``organization`` table doesn't
-    land in Phase 1).
+    Three scope kinds and the four v1 grant roles (``manager |
+    worker | client | guest``) are validated on insert by
+    :func:`app.domain.identity.membership._validate_grants`:
+
+    * ``workspace`` — workspace-wide, optional ``binding_org_id``
+      gated to ``grant_role='client'``;
+    * ``property`` — narrows via ``scope_property_id`` cross-checked
+      against :class:`PropertyWorkspace`;
+    * ``organization`` — targets an :class:`Organization` row in
+      the workspace and lands as a workspace-scope grant with
+      ``binding_org_id=scope_id`` (gated to ``grant_role='client'``).
 
     **``group_memberships_json``** is a list of group ids the
     invitee lands in on accept. The domain service validates each
