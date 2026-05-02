@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   __resetApiProvidersForTests,
   registerWorkspaceSlugGetter,
@@ -13,53 +13,13 @@ import {
   type ExpenseClaimPayload,
 } from "@/lib/expenses";
 import type { Expense } from "@/types/expense";
+import { installFetchSequence } from "@/test/helpers";
 
 // The helper unwraps the `{data, next_cursor, has_more}` envelope from
 // `GET /api/v1/expenses` and projects each row into the SPA's
-// `Expense` shape. The tests below stub `fetch` directly because
-// `fetchJson` only ever calls `fetch(url, init)` — same approach as
-// `lib/api.test.ts`, so a single fake transport covers every case
-// without pulling in msw.
-
-interface FakeResponse {
-  status?: number;
-  body: unknown;
-}
-
-function installFetch(responses: FakeResponse[]): {
-  calls: Array<{ url: string; init: RequestInit }>;
-  restore: () => void;
-} {
-  const calls: Array<{ url: string; init: RequestInit }> = [];
-  const original = globalThis.fetch;
-  const spy = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
-    const resolved = typeof url === "string" ? url : url.toString();
-    calls.push({ url: resolved, init: init ?? {} });
-    const next = responses.shift();
-    if (!next) throw new Error(`Unexpected fetch call: ${resolved}`);
-    const status = next.status ?? 200;
-    const ok = status >= 200 && status < 300;
-    const text =
-      typeof next.body === "string"
-        ? next.body
-        : next.body === null || next.body === undefined
-          ? ""
-          : JSON.stringify(next.body);
-    return {
-      ok,
-      status,
-      statusText: ok ? "OK" : "Error",
-      text: async () => text,
-    } as unknown as Response;
-  });
-  (globalThis as { fetch: typeof fetch }).fetch = spy as unknown as typeof fetch;
-  return {
-    calls,
-    restore: () => {
-      (globalThis as { fetch: typeof fetch }).fetch = original;
-    },
-  };
-}
+// `Expense` shape. We stub `fetch` directly because `fetchJson` only
+// ever calls `fetch(url, init)` — the shared `installFetchSequence`
+// (`@/test/helpers`) covers every case without pulling in msw.
 
 function payload(overrides: Partial<ExpenseClaimPayload> = {}): ExpenseClaimPayload {
   return {
@@ -151,7 +111,7 @@ describe("mapExpenseClaimPayload", () => {
 describe("fetchExpenseClaimsPage", () => {
   it("unwraps the data/next_cursor/has_more envelope", async () => {
     const wire = payload();
-    const env = installFetch([
+    const env = installFetchSequence([
       {
         body: {
           data: [wire],
@@ -175,7 +135,7 @@ describe("fetchExpenseClaimsPage", () => {
   });
 
   it("propagates user_id, state, cursor, and limit as query parameters", async () => {
-    const env = installFetch([
+    const env = installFetchSequence([
       { body: { data: [], next_cursor: null, has_more: false } },
     ]);
     try {
@@ -201,7 +161,7 @@ describe("fetchExpenseClaimsPage", () => {
     // server pins the listing to the caller without checking the
     // `expenses.approve` cap. Pin the URL exactly so a regression
     // (param renamed, default flipped) shows up here.
-    const env = installFetch([
+    const env = installFetchSequence([
       { body: { data: [], next_cursor: null, has_more: false } },
     ]);
     try {
@@ -217,7 +177,7 @@ describe("fetchExpenseClaimsPage", () => {
     // param, since the server's default is already "caller's own
     // claims". Sending `mine=false` would still be valid but would
     // bloat the URL and create cache-key drift in TanStack Query.
-    const env = installFetch([
+    const env = installFetchSequence([
       { body: { data: [], next_cursor: null, has_more: false } },
       { body: { data: [], next_cursor: null, has_more: false } },
     ]);
@@ -232,7 +192,7 @@ describe("fetchExpenseClaimsPage", () => {
   });
 
   it("emits the bare /api/v1/expenses path when no filters are set", async () => {
-    const env = installFetch([
+    const env = installFetchSequence([
       { body: { data: [], next_cursor: null, has_more: false } },
     ]);
     try {
@@ -244,7 +204,7 @@ describe("fetchExpenseClaimsPage", () => {
   });
 
   it("returns an empty list when the server reports no rows", async () => {
-    const env = installFetch([
+    const env = installFetchSequence([
       { body: { data: [], next_cursor: null, has_more: false } },
     ]);
     try {
@@ -263,7 +223,7 @@ describe("fetchAllExpenseClaims", () => {
     const a = payload({ id: "claim-1" });
     const b = payload({ id: "claim-2" });
     const c = payload({ id: "claim-3" });
-    const env = installFetch([
+    const env = installFetchSequence([
       { body: { data: [a], next_cursor: "cur-2", has_more: true } },
       { body: { data: [b], next_cursor: "cur-3", has_more: true } },
       { body: { data: [c], next_cursor: null, has_more: false } },
@@ -285,7 +245,7 @@ describe("fetchAllExpenseClaims", () => {
     // more pages but doesn't supply a cursor — bailing out is
     // safer than a forever-loop.
     const a = payload({ id: "claim-1" });
-    const env = installFetch([
+    const env = installFetchSequence([
       { body: { data: [a], next_cursor: null, has_more: true } },
     ]);
     try {
@@ -298,7 +258,7 @@ describe("fetchAllExpenseClaims", () => {
   });
 
   it("returns an empty array when the first page is empty", async () => {
-    const env = installFetch([
+    const env = installFetchSequence([
       { body: { data: [], next_cursor: null, has_more: false } },
     ]);
     try {
@@ -312,7 +272,7 @@ describe("fetchAllExpenseClaims", () => {
   it("forwards the filter options on every page request", async () => {
     const a = payload({ id: "a" });
     const b = payload({ id: "b" });
-    const env = installFetch([
+    const env = installFetchSequence([
       { body: { data: [a], next_cursor: "cur-2", has_more: true } },
       { body: { data: [b], next_cursor: null, has_more: false } },
     ]);
@@ -336,7 +296,7 @@ describe("fetchAllExpenseClaims", () => {
     // the workspace-wide branch). Pin both URLs.
     const a = payload({ id: "a" });
     const b = payload({ id: "b" });
-    const env = installFetch([
+    const env = installFetchSequence([
       { body: { data: [a], next_cursor: "cur-2", has_more: true } },
       { body: { data: [b], next_cursor: null, has_more: false } },
     ]);
@@ -365,7 +325,7 @@ describe("fetchAllExpenseClaims", () => {
         has_more: true,
       },
     }));
-    const env = installFetch(responses);
+    const env = installFetchSequence(responses);
     try {
       await expect(fetchAllExpenseClaims()).rejects.toThrow(
         /exceeded 50 pages/,
@@ -511,7 +471,7 @@ describe("buildExpenseClaimCreatePayload", () => {
 
 describe("fetchActiveEngagementId", () => {
   it("returns the first non-archived engagement id", async () => {
-    const env = installFetch([
+    const env = installFetchSequence([
       {
         body: {
           data: [
@@ -545,7 +505,7 @@ describe("fetchActiveEngagementId", () => {
     // exclude archived rows server-side, but the SPA double-checks
     // so a server bug doesn't bind a worker's expense claim to a
     // wound-down engagement.
-    const env = installFetch([
+    const env = installFetchSequence([
       {
         body: {
           data: [
@@ -576,7 +536,7 @@ describe("fetchActiveEngagementId", () => {
   });
 
   it("returns null when the user has no active engagement", async () => {
-    const env = installFetch([
+    const env = installFetchSequence([
       { body: { data: [], next_cursor: null, has_more: false } },
     ]);
     try {

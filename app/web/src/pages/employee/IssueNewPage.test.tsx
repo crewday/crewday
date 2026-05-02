@@ -7,54 +7,13 @@ import {
   __resetApiProvidersForTests,
   registerWorkspaceSlugGetter,
 } from "@/lib/api";
+import { installFetchRoutes } from "@/test/helpers";
 import IssueNewPage from "./IssueNewPage";
 
-interface FakeResponse {
-  status?: number;
-  body: unknown;
-}
-
-interface FetchCall {
-  url: string;
-  init: RequestInit;
-}
-
-function installFetch(scripted: Record<string, FakeResponse[]>): {
-  calls: FetchCall[];
-  restore: () => void;
-} {
-  const calls: FetchCall[] = [];
-  const original = globalThis.fetch;
-  const queues: Record<string, FakeResponse[]> = {};
-  for (const [suffix, responses] of Object.entries(scripted)) {
-    queues[suffix] = [...responses];
-  }
-  const suffixes = Object.keys(queues).sort((a, b) => b.length - a.length);
-  const spy = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
-    const resolved = typeof url === "string" ? url : url.toString();
-    calls.push({ url: resolved, init: init ?? {} });
-    const suffix = suffixes.find((candidate) => resolved.endsWith(candidate));
-    if (!suffix) throw new Error(`Unscripted fetch: ${resolved}`);
-    const next = queues[suffix]!.shift();
-    if (!next) throw new Error(`No more responses for: ${resolved}`);
-    const status = next.status ?? 200;
-    const ok = status >= 200 && status < 300;
-    return {
-      ok,
-      status,
-      statusText: ok ? "OK" : "Error",
-      text: async () => JSON.stringify(next.body),
-    } as unknown as Response;
-  });
-  (globalThis as { fetch: typeof fetch }).fetch = spy as unknown as typeof fetch;
-  return {
-    calls,
-    restore: () => {
-      (globalThis as { fetch: typeof fetch }).fetch = original;
-    },
-  };
-}
-
+// `IssueNewPage` mounts inside a `<Routes>` tree so the redirect to
+// `/me` after submit is observable. We keep the routing harness local
+// (the shared `renderWithProviders` is single-element) and only hoist
+// the fetch stubs.
 function Harness(): ReactElement {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return (
@@ -119,10 +78,13 @@ afterEach(() => {
 
 describe("IssueNewPage", () => {
   it("submits a worker issue to the real JSON API contract", async () => {
-    const env = installFetch({
-      "/api/v1/properties": [{ body: [property()] }],
-      "/api/v1/issues": [{ status: 201, body: issue() }],
-    });
+    const env = installFetchRoutes(
+      {
+        "/api/v1/properties": [{ body: [property()] }],
+        "/api/v1/issues": [{ status: 201, body: issue() }],
+      },
+      { match: "endsWith" },
+    );
     render(<Harness />);
 
     await screen.findByText("Villa Sud");
@@ -161,9 +123,10 @@ describe("IssueNewPage", () => {
   });
 
   it("renders the property load failure state", async () => {
-    const env = installFetch({
-      "/api/v1/properties": [{ status: 500, body: { title: "Broken" } }],
-    });
+    const env = installFetchRoutes(
+      { "/api/v1/properties": [{ status: 500, body: { title: "Broken" } }] },
+      { match: "endsWith" },
+    );
     render(<Harness />);
 
     expect(await screen.findByText("Failed to load.")).toBeInTheDocument();

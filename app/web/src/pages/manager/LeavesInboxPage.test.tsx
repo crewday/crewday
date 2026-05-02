@@ -6,24 +6,26 @@ import { WorkspaceProvider } from "@/context/WorkspaceContext";
 import { __resetApiProvidersForTests } from "@/lib/api";
 import { __resetQueryKeyGetterForTests } from "@/lib/queryKeys";
 import * as preferences from "@/lib/preferences";
+import {
+  installFetch as installFetchSpy,
+  jsonResponse,
+  type FetchCall,
+} from "@/test/helpers";
 import LeavesInboxPage from "./LeavesInboxPage";
 
-function jsonResponse(body: unknown, status = 200): Response {
-  return {
-    ok: status >= 200 && status < 300,
-    status,
-    statusText: status >= 200 && status < 300 ? "OK" : "Error",
-    text: async () => JSON.stringify(body),
-  } as unknown as Response;
-}
-
-function installFetch({ failLeaves = false }: { failLeaves?: boolean } = {}) {
-  const calls: { url: string; method: string }[] = [];
-  const original = globalThis.fetch;
-  const spy = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
-    const resolved = typeof url === "string" ? url : url.toString();
-    const method = init?.method ?? "GET";
-    calls.push({ url: resolved, method });
+/**
+ * Closure-style stub: every URL is hand-routed because two of the
+ * endpoints share a prefix and one needs a `failLeaves` toggle.
+ * Hoists the global-fetch swap and `Response` builder into the shared
+ * helper module; the routing logic stays local because it's specific
+ * to the page's contract surface.
+ */
+function installFetch({ failLeaves = false }: { failLeaves?: boolean } = {}): {
+  calls: FetchCall[];
+  callsBy(): { url: string; method: string }[];
+  restore: () => void;
+} {
+  const env = installFetchSpy(({ url: resolved }) => {
     if (resolved === "/api/v1/auth/me") {
       return jsonResponse({
         user_id: "mgr_1",
@@ -122,12 +124,14 @@ function installFetch({ failLeaves = false }: { failLeaves?: boolean } = {}) {
     }
     throw new Error(`Unexpected fetch call: ${resolved}`);
   });
-  (globalThis as { fetch: typeof fetch }).fetch = spy as unknown as typeof fetch;
   return {
-    calls,
-    restore: () => {
-      (globalThis as { fetch: typeof fetch }).fetch = original;
-    },
+    calls: env.calls,
+    callsBy: () =>
+      env.calls.map((call) => ({
+        url: call.url,
+        method: call.init.method ?? "GET",
+      })),
+    restore: env.restore,
   };
 }
 
@@ -168,7 +172,7 @@ describe("<LeavesInboxPage>", () => {
       expect(screen.getByText("Family trip")).toBeInTheDocument();
       expect(screen.getByText("Checkup")).toBeInTheDocument();
       expect(screen.getByText("Approved (upcoming)")).toBeInTheDocument();
-      expect(fake.calls).toEqual(
+      expect(fake.callsBy()).toEqual(
         expect.arrayContaining([
           { url: "/w/acme/api/v1/leaves", method: "GET" },
           { url: "/w/acme/api/v1/employees", method: "GET" },
@@ -187,7 +191,7 @@ describe("<LeavesInboxPage>", () => {
       fireEvent.click(await screen.findByRole("button", { name: "Approve" }));
 
       await waitFor(() => {
-        expect(fake.calls).toContainEqual({
+        expect(fake.callsBy()).toContainEqual({
           url: "/w/acme/api/v1/leaves/leave_pending/approve",
           method: "POST",
         });
@@ -205,7 +209,7 @@ describe("<LeavesInboxPage>", () => {
       fireEvent.click(await screen.findByRole("button", { name: "Reject" }));
 
       await waitFor(() => {
-        expect(fake.calls).toContainEqual({
+        expect(fake.callsBy()).toContainEqual({
           url: "/w/acme/api/v1/leaves/leave_pending/reject",
           method: "POST",
         });

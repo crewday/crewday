@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   __resetApiProvidersForTests,
   registerWorkspaceSlugGetter,
@@ -7,47 +7,8 @@ import {
   approvalRequestFromPayload,
   fetchApprovals,
 } from "@/lib/approvals";
+import { installFetchSequence as installFetch } from "@/test/helpers";
 import type { ApprovalRequestPayload } from "@/types/api";
-
-interface FakeResponse {
-  status?: number;
-  body: unknown;
-}
-
-function installFetch(responses: FakeResponse[]): {
-  calls: Array<{ url: string; init: RequestInit }>;
-  restore: () => void;
-} {
-  const calls: Array<{ url: string; init: RequestInit }> = [];
-  const original = globalThis.fetch;
-  const spy = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
-    const resolved = typeof url === "string" ? url : url.toString();
-    calls.push({ url: resolved, init: init ?? {} });
-    const next = responses.shift();
-    if (!next) throw new Error(`Unexpected fetch call: ${resolved}`);
-    const status = next.status ?? 200;
-    const ok = status >= 200 && status < 300;
-    const text =
-      typeof next.body === "string"
-        ? next.body
-        : next.body === null || next.body === undefined
-          ? ""
-          : JSON.stringify(next.body);
-    return {
-      ok,
-      status,
-      statusText: ok ? "OK" : "Error",
-      text: async () => text,
-    } as unknown as Response;
-  });
-  (globalThis as { fetch: typeof fetch }).fetch = spy as unknown as typeof fetch;
-  return {
-    calls,
-    restore: () => {
-      (globalThis as { fetch: typeof fetch }).fetch = original;
-    },
-  };
-}
 
 function payload(overrides: Partial<ApprovalRequestPayload> = {}): ApprovalRequestPayload {
   return {
