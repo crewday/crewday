@@ -772,3 +772,4 @@
 {"id":"int-72c38fc4","kind":"field_change","created_at":"2026-05-02T12:29:00.990456653Z","actor":"tubededentifrice-dev","issue_id":"cd-f57qu","extra":{"field":"status","new_value":"closed","old_value":"open","reason":"Closed"}}
 {"id":"int-c034fba0","kind":"field_change","created_at":"2026-05-02T12:48:28.13097517Z","actor":"tubededentifrice-dev","issue_id":"cd-j5pu","extra":{"field":"status","new_value":"closed","old_value":"open","reason":"Closed"}}
 {"id":"int-a35ace0c","kind":"field_change","created_at":"2026-05-02T12:48:29.831083323Z","actor":"tubededentifrice-dev","issue_id":"cd-5ey2c","extra":{"field":"status","new_value":"closed","old_value":"open","reason":"Closed"}}
+{"id":"int-753d3212","kind":"field_change","created_at":"2026-05-02T12:50:20.349936207Z","actor":"tubededentifrice-dev","issue_id":"cd-p46e","extra":{"field":"status","new_value":"closed","old_value":"open","reason":"Closed"}}
