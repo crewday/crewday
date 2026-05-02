@@ -324,7 +324,8 @@ catalog pair (see `permission_rule` below and the catalog in
   `expense_attachment`, `issue.attachment_file_ids`,
   `instruction_version.attachment_file_ids`, and
   `user.avatar_file_id`.
-- **Cross-cutting** (§15): `audit_log`, `secret_envelope`.
+- **Cross-cutting** (§15): `audit_log`, `secret_envelope`,
+  `idempotency_key` (§12 "Idempotency").
 
 All human mutations emit `user.*` events. Non-human actors (scoped
 agents, the worker) emit `agent.*` / `system.*` events. There is no
@@ -1044,6 +1045,49 @@ share the same `correlation_id`.
 Retention: default 2 years; configurable per workspace. Worker job
 `rotate_audit_log` moves rows older than retention into
 `audit_log_archive.jsonl.gz` under `$DATA_DIR/archive/`.
+
+### `idempotency_key`
+
+Persisted replay cache for the `Idempotency-Key` middleware (§12
+"Idempotency"). One row per `(token_id, key)` pair, written by the
+middleware in a short-lived UoW after the handler returns. The
+table is **deployment-wide** (no `workspace_id`) — the cache lookup
+runs before tenancy resolution and the row must be readable across
+the deployment regardless of which workspace the request was
+addressed to. Writers wrap reads/writes in
+`app.tenancy.tenant_agnostic` with an explicit justification.
+
+| column          | type        | notes                                                                                       |
+|-----------------|-------------|---------------------------------------------------------------------------------------------|
+| id              | ULID PK     |                                                                                             |
+| token_id        | text        | acting `api_token.id`; no FK by design (see below)                                          |
+| key             | text        | client-supplied `Idempotency-Key` header value                                               |
+| status          | int         | response status code; only 2xx and 4xx are stored (§12 "5xx skip policy")                   |
+| body_hash       | text        | sha256 of the inbound *request* body (canonical JSON form when the body parses as JSON; raw bytes otherwise — file uploads / non-JSON payloads); used to detect "same key, different body" → 409 `idempotency_conflict` |
+| body            | bytea / BLOB | exact response bytes the handler emitted; replayed verbatim                                 |
+| headers         | jsonb       | replayable response-header subset (`content-type`, `content-length`, `content-encoding`, `content-language`, `etag`, `location`, `last-modified`, `cache-control`); other headers (`Set-Cookie`, CSP, HSTS) are deliberately not captured so they restamp on replay |
+| created_at      | tstz        | clock time of the cache write; the TTL sweep predicate                                       |
+
+Indexes:
+
+- `UNIQUE (token_id, key)` — `uq_idempotency_key_token_id_key`. The
+  uniqueness constraint is what serialises concurrent retries: the
+  second writer catches `IntegrityError`, re-reads the winning row,
+  and replays it instead of double-executing the handler.
+- `INDEX (created_at)` — `ix_idempotency_key_created_at`. Supports
+  the TTL sweep's `WHERE created_at < cutoff` range scan.
+
+**No FK on `token_id` by design.** The cache must survive a token
+revoke or rotation: a legitimate in-flight retry stays valid for the
+full 24 h window even if the operator revokes the token in the
+meantime. Same convention as `audit_log.token_id` above.
+
+**TTL.** 24 h, set in `IDEMPOTENCY_TTL_HOURS` on
+`app/api/middleware/idempotency.py`. The daily
+`idempotency_sweep` background job (registered by
+`app.worker.scheduler.register_jobs`) calls
+`prune_expired_idempotency_keys` to delete rows older than the TTL.
+Source-of-truth model: `app.adapters.db.ops.models.IdempotencyKey`.
 
 ### `file`
 

@@ -274,10 +274,34 @@ Canonical error `type` URIs — full URI is
 ### Idempotency
 
 - All `POST` mutating endpoints accept `Idempotency-Key` header.
-- Server stores `(token_id, idempotency_key) -> (status, body_hash)`
-  for 24h. Replays return the stored response.
+- Server stores `(token_id, key, status, body, response_headers,
+  created_at)` keyed on `(token_id, key)` uniqueness; TTL 24 h. The
+  cache row carries the exact response bytes so a replay re-emits the
+  original payload byte-for-byte (content-type, ETag, Location, …).
+  A request `body_hash` is computed at insert time (sha256 of the
+  canonical JSON form of the inbound request body, falling back to
+  sha256 of the raw bytes for non-JSON / file-upload payloads) and
+  persisted alongside the row so a later attempt under the same key
+  with a different body can be rejected. The hash is an
+  implementation detail of the row, not part of the externally-
+  visible API contract — clients never see it. See §02
+  §"`idempotency_key`" for the full row shape and
+  `app/api/middleware/idempotency.py` for the writer.
+- Replays return the stored response with the
+  `Idempotency-Replay: true` response header attached. A fresh
+  request omits the header; a replay (server-cache hit) carries it.
+  Clients use the header to distinguish "we just succeeded" from "we
+  already succeeded earlier" — useful for retry-budget metrics and
+  for suppressing duplicate user-facing toasts on a retry storm.
 - Different body hash with the same key → 409
   `idempotency_conflict`.
+- **5xx skip policy.** Only terminal responses are cached: 2xx and
+  4xx responses are persisted and replay verbatim, while 5xx
+  responses are **not** persisted. A transient server failure (DB
+  timeout, upstream flap) leaves no cache entry, and a retry
+  re-executes the handler. Pinning a 5xx to the key for 24 h would
+  defeat the retry mechanism. This matches the convention used by
+  Stripe's `Idempotency-Key` and by AWS-style request signers.
 - **Exempt endpoints** (interactive-session-only, §11):
   `POST /payslips/{id}/payout_manifest`. Its response is not stored in the idempotency
   cache; the header is accepted but ignored. A replay re-executes,
