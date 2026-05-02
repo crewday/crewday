@@ -27,7 +27,7 @@ the workspace's URL slug (§01 "Workspace addressing", §02
   `/api/v1/signup/verify`, `/api/v1/signup/passkey/start`,
   `/api/v1/signup/passkey/finish`,
   `/api/v1/auth/{logout,magic/{request,consume},passkey/login/{start,finish}}`,
-  `/api/v1/recover/passkey/{request,verify,finish}`,
+  `/api/v1/recover/passkey/{request,verify,start,finish}`,
   `/api/v1/me/workspaces` (returns the caller's accessible
   workspaces for the switcher), `/api/v1/healthz`,
   `/api/v1/readyz`, `/api/v1/version`. Anything else 404s at the
@@ -564,9 +564,137 @@ POST   /api/v1/auth/magic/consume                # redeem a magic-link token (si
                                                  # pre-flight 429 `consume_locked_out` is the lone exception
                                                  # — it skips the counter (see above) but still writes the
                                                  # rejected-audit row on a fresh UoW.
-POST   /api/v1/recover/passkey/request           # self-service lost-device (§03 "Self-service lost-device recovery"); body: {email, break_glass_code?}. Always 202 {status:"accepted"} regardless of lookup outcome (enumeration guard); break-glass code is required for the step-up population (manager surface grant or owners-group membership) and ignored for everyone else.
-GET    /api/v1/recover/passkey/verify             # consume the recovery magic link the email above delivered.
-POST   /api/v1/recover/passkey/finish             # register the new passkey, ending the recovery ceremony.
+# Self-service lost-device recovery (§03 "Self-service lost-device
+# recovery"). Bare-host, pre-auth, tenant-agnostic; four routes walk
+# the user from "lost every device" to "new passkey in hand" in at
+# most one 15-minute recovery window: request → verify → passkey/start
+# → passkey/finish. `complete_recovery` revokes every prior credential
+# and invalidates every active session for the user atomically with the
+# new passkey insert (cause `recovery_consumed`, see §15 "Session-
+# invalidation causes"); the SPA re-runs `/auth/passkey/login/{start,finish}` with
+# the freshly-registered credential so the post-recovery state is
+# identical to "user just logged in normally" (no `Set-Cookie` is
+# issued by any route in this group).
+POST   /api/v1/recover/passkey/request           # kick off recovery — emails a single-use magic link (15-min TTL).
+                                                 #   Body: {email: str (3-320 chars), break_glass_code?: str
+                                                 #     (max 64 chars)}.
+                                                 #     `break_glass_code` is the §03 step-up secondary credential;
+                                                 #     required for users in the step-up population (manager
+                                                 #     surface grant or owners-group membership), ignored for the
+                                                 #     worker / client / guest population. Trimmed by the domain
+                                                 #     layer before use.
+                                                 #   202 {"status": "accepted"} — opaque body. Returned for both
+                                                 #     hit and miss branches (enumeration guard); the audit trail
+                                                 #     distinguishes them via `audit.recovery.requested`
+                                                 #     (`hit=True/False`).
+                                                 #   429 {"error": "rate_limited", "retry_after_seconds": int}
+                                                 #     + `Retry-After` header — per-IP / per-email / global
+                                                 #     recovery budget exhausted (§15). Throttle fires before the
+                                                 #     DB or mailer are touched, so a 429 leaks nothing about
+                                                 #     email existence; an `audit.recovery.rejected` row lands on
+                                                 #     a fresh UoW (independent of any rolled-back primary UoW),
+                                                 #     mirroring the signup + magic-link refusal trail.
+                                                 #   429 {"error": "rate_limited"} — magic-link mint throttle
+                                                 #     surfacing from inside `recovery.request_recovery`. Same
+                                                 #     wire shape as the abuse-layer 429 above, distinguished
+                                                 #     only by the absence of `retry_after_seconds`.
+                                                 #   422 — Pydantic field error (empty / oversized `email`,
+                                                 #     oversized `break_glass_code`); shape per §12 "Errors".
+                                                 # Outbox ordering (cd-9slq): the handler owns its own UoW so the
+                                                 # recovery audit + magic-link nonce rows commit BEFORE the SMTP
+                                                 # send is scheduled. SMTP delivery runs as response background
+                                                 # work so the 202 latency is identical for hit and miss branches
+                                                 # (relay timing cannot be used as an enumeration oracle).
+GET    /api/v1/recover/passkey/verify            # consume the recovery magic link the email above delivered.
+                                                 #   Query: ?token=<itsdangerous blob>.
+                                                 #     `token` is the `payload.timestamp.signature` blob from the
+                                                 #     emailed `/recover/passkey/verify?token=...` link.
+                                                 #   200 {recovery_session_id: str} — transient handle the SPA
+                                                 #     threads into `/recover/passkey/start` + `/finish`. The
+                                                 #     handle is accepted ONLY by those two routes — it is not a
+                                                 #     web session and authenticates nothing else (the recovery
+                                                 #     store is a dedicated in-memory dict, distinct from
+                                                 #     `Session`).
+                                                 #   `GET` rather than `POST` because the SPA lands on this route
+                                                 #     by following the magic-link URL (hard navigation, not a
+                                                 #     form submission). The token is consumed single-use inside
+                                                 #     the service call, so a replay 409s — the spec's single-use
+                                                 #     contract still holds.
+                                                 #   400 {"error": "invalid_token"} — signature / shape failure.
+                                                 #   400 {"error": "purpose_mismatch"} — token's purpose ≠
+                                                 #     `recover_passkey`.
+                                                 #   404 {"error": "recovery_session_not_found"} — token resolved
+                                                 #     but the user behind it can no longer be loaded (account
+                                                 #     deleted between request and verify). Shares the symbol
+                                                 #     with the `start` / `finish` 404 so the missing-account
+                                                 #     branch isn't a separate enumeration oracle.
+                                                 #   409 {"error": "already_consumed"} — single-use replay.
+                                                 #   410 {"error": "expired"} — token TTL lapsed.
+                                                 #   429 {"error": "rate_limited"} — magic-link domain
+                                                 #     `RateLimited` from inside `consume_link` (no
+                                                 #     `retry_after_seconds`). The recovery-specific abuse
+                                                 #     budget gates `request` only — `verify` doesn't re-check
+                                                 #     it, so the `Retry-After`-bearing 429 shape never fires
+                                                 #     on this route.
+                                                 #   429 {"error": "consume_locked_out"} — per-IP failure window
+                                                 #     tripped (3 fails / 60 s → 10-min lockout); pre-flight
+                                                 #     guard, never touches the nonce row.
+                                                 #   422 — missing `token` query param; shape per §12 "Errors".
+POST   /api/v1/recover/passkey/start             # mint the WebAuthn challenge for the recovery ceremony.
+                                                 #   Body: {recovery_session_id: str}.
+                                                 #     The id pins the ceremony to the verified recovery session
+                                                 #     so only its owner can request a challenge against it.
+                                                 #   200 {challenge_id: str, options: object} — parsed
+                                                 #     `PublicKeyCredentialCreationOptions` the SPA passes to
+                                                 #     `navigator.credentials.create()`. The challenge skips the
+                                                 #     per-user passkey cap (the prior credentials are about to
+                                                 #     be revoked by `/recover/passkey/finish`); the `challenge_id`
+                                                 #     round-trips to `/recover/passkey/finish`.
+                                                 #   No `Set-Cookie`: the session cookie lands on the post-recovery
+                                                 #     `/auth/passkey/login/finish` ceremony.
+                                                 #   404 {"error": "recovery_session_not_found"} — unknown or
+                                                 #     expired `recovery_session_id` (collapsed for privacy).
+                                                 #   422 {"error": "too_many_passkeys"} — kept for symmetry with
+                                                 #     `/signup/passkey/start`; unreachable in practice because
+                                                 #     `register_start_recovery` skips the cap.
+                                                 #   422 — Pydantic field error (missing `recovery_session_id`);
+                                                 #     shape per §12 "Errors".
+POST   /api/v1/recover/passkey/finish            # complete recovery — register the new passkey, revoke the old, invalidate every session.
+                                                 #   Body: {recovery_session_id: str, challenge_id: str,
+                                                 #     credential: object}.
+                                                 #     `credential` is the WebAuthn attestation
+                                                 #     `navigator.credentials.create()` produced.
+                                                 #   200 {user_id: str, credential_id: str,
+                                                 #     revoked_credential_count: int, revoked_session_count: int}
+                                                 #     — the SPA shows a "we revoked N passkeys + signed out M
+                                                 #     sessions" confirmation so the user sees the destructive
+                                                 #     blast radius of the action they just took.
+                                                 #   In one transaction `complete_recovery` inserts the new
+                                                 #     `passkey_credential`, revokes every prior credential for
+                                                 #     the user, invalidates every active session (cause
+                                                 #     `recovery_consumed`, §15), and writes the recovery audit.
+                                                 #     Any failure rolls back the whole transaction; the
+                                                 #     challenge is burned out-of-band so a retry cannot replay
+                                                 #     the attestation.
+                                                 #   No `Set-Cookie`: the SPA re-runs `/auth/passkey/login/{start,
+                                                 #     finish}` with the freshly-registered credential.
+                                                 #   404 {"error": "recovery_session_not_found"} — unknown or
+                                                 #     expired `recovery_session_id`.
+                                                 #   400 {"error": "challenge_expired"} — challenge aged out.
+                                                 #   400 {"error": "invalid_registration"} — attestation
+                                                 #     verification failed or `challenge_id` did not bind to this
+                                                 #     `recovery_session_id` (covers `ChallengeSubjectMismatch`).
+                                                 #   409 {"error": "challenge_consumed_or_unknown"} —
+                                                 #     `challenge_id` already burned or never existed (covers
+                                                 #     replays — the row is deleted atomically with the credential
+                                                 #     insert).
+                                                 #   422 {"error": "too_many_passkeys"} — per-user ceiling
+                                                 #     reached. Impossible after the full revoke runs as part of
+                                                 #     this transaction; mapped for completeness so a future
+                                                 #     change that tweaks the revoke step still produces a typed
+                                                 #     422 rather than a 500.
+                                                 #   422 — Pydantic field error (missing `recovery_session_id` /
+                                                 #     `challenge_id` / `credential`); shape per §12 "Errors".
 GET    /api/v1/auth/me
 POST   /api/v1/auth/logout                       # invalidate every active session for the caller (cause `logout`, §15 "Session-invalidation causes"); always 204 + Set-Cookie clearing `__Host-crewday_session` (best-effort: no cookie / invalid cookie still 204 + clear, no audit row)
 GET    /api/v1/me/workspaces                     # cd-y5z3 — switcher payload for the
