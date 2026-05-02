@@ -263,10 +263,12 @@ update in your wrap-up.
   file has drifted from the live schema.
 - **Modern CLI tools**: `rg` over `grep`, `fd` over `find`, `sd` over
   `sed`.
-- **Let Ruff do Ruff work.** For Ruff-only formatting/import issues,
-  run `uv run ruff check --fix <paths>` and
-  `uv run ruff format <paths>` on the narrowest affected path set.
-  Trust the tool unless it touches unexpected files or asks for help.
+- **Quality gate wrapper.** Run `./scripts/agent-quality.sh` to apply
+  `ruff format` + `ruff check --fix` autofixes, re-check the remaining
+  lint/format issues, and run `mypy --strict app` (CI parity). Exit 0
+  means clean; non-zero prints exactly what still needs a manual fix.
+  Use it instead of running the individual `uv run ruff …` / `uv run
+  mypy …` commands by hand.
 - **Read dependencies from the local env**: Python packages under
   the active venv; do not curl GitHub for dependency source.
 - **Never `cd` out of the worktree root** — always use absolute
@@ -309,12 +311,21 @@ work and follow-ups that should survive the session; do not create issues
 for tiny same-file fixes.
 
 ```bash
-bd ready
-bd show <id>
+./scripts/agent-next-task.sh           # next ready non-selfreview task + its paired selfreview
+./scripts/agent-next-task.sh <id>      # specific task + its paired selfreview
 bd update <id> --claim
 bd close <id>
 bd export -o .beads/issues.jsonl
 ```
+
+`agent-next-task.sh` prefers `bv --robot-triage` rankings (matching the
+director skill's "pick from the top of the triage list" rule), falls
+back to `bd ready` when `bv` is missing, skips entries labelled
+`selfreview`, and surfaces the paired selfreview task (dependent with
+the `selfreview` label) via `bd show`. The output banner names the
+ranking source it used. `--id-only` prints just the main id (handy to
+pipe into `bd update <id> --claim`); `--no-bv` forces the `bd ready`
+path.
 
 After any Beads change, export `.beads/issues.jsonl` and include it in
 the same commit. Link dependencies only when one task literally cannot

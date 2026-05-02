@@ -36,25 +36,25 @@ main task is coupled to its selfreview; parallel implementation
 breaks that coupling (reviews would batch, context bleeds across
 changes, and failures can't be attributed cleanly).
 
-Prefer the prioritised queue from **`bv --robot-triage | jq '.triage.quick_ref.top_picks[:3]'`**;
-it ranks the next issues better than raw `bd ready`. Keep that list
-in your working memory and **pick the next task from the top of it** each iteration;
-do **not** re-run the command after every pair (the output is
-verbose and rarely changes mid-batch). Only refresh the list when
-you've worked through it (or when a graph edit you just made
-invalidates it).
+Pick the next pair with **`./scripts/agent-next-task.sh`**. It
+prefers `bv --robot-triage` rankings (better than raw `bd ready`),
+skips `selfreview`-labelled entries from the ranked queue, and
+prints the main task + its paired selfreview (the dependent with
+the `selfreview` label) in one shot:
 
-**`bd ready` does not surface paired selfreview tasks** — they are
-blocked by their main task and only become ready once the main task
-closes. For every main task you pick, locate its paired selfreview
-(search Beads for one that blocks / is blocked by the main task,
-e.g. `bd list --status open | rg -i selfreview`). If none exists,
-create one via `/beads` **before** closing the main task. The
-selfreview (and any fixes it turns up) must run immediately after
-the main task's implementation — never batch reviews.
+```bash
+./scripts/agent-next-task.sh              # next ranked non-selfreview task + pair
+./scripts/agent-next-task.sh <main-id>    # specific task + its pair
+```
 
-When the cached list is exhausted, re-run the triage command to refresh it
-— closed tasks often unblock new ones.
+If the trailing `ids` line shows an empty selfreview field, create
+one via `/beads` **before** closing the main task. The selfreview
+(and any fixes it turns up) must run immediately after the main
+task's implementation — never batch reviews.
+
+The script re-queries each call, so you don't need to cache the
+triage list yourself — just rerun it after each pair closes (closed
+tasks often unblock new ones).
 
 You only stop when:
 
@@ -85,20 +85,20 @@ implementation + review fixes + `.beads/` delta in a single signed-off
 commit. Closure and commit are atomic.
 
 ```
-DIRECTOR: pick top task from the cached ready list
-    │       (run `bv --robot-triage | jq '.triage.quick_ref.top_picks[:3]'`
-    │        once to seed the list; take the next
-    │        entry each loop; only refresh when the list runs out)
+DIRECTOR: pick the next pair via `./scripts/agent-next-task.sh`
+    │       (script prefers `bv --robot-triage` rankings, falls back
+    │        to `bd ready`, skips `selfreview`-labelled entries, and
+    │        prints the main task + its paired selfreview)
     ▼
-1. DIRECTOR: `bd show <id>` → sanity-check dependencies.
+1. DIRECTOR: sanity-check the printed main task's dependencies.
    • If a prerequisite is obviously missing (e.g. an API task whose
      schema migration is still open), add the link
      `bd dep <blocker> --blocks <picked>` → **the picked task is now
-     blocked; do NOT start it.** Drop it from your cached list and
-     pick the next entry. The graph fix ships with the next pair's
-   commit (`/commiter`'s Beads export step).
-   • Otherwise, locate (or create via `/beads`) the paired selfreview
-     task — triage does not return it — and continue.
+     blocked; do NOT start it.** Rerun `agent-next-task.sh` for the
+     next pair. The graph fix ships with the next pair's commit
+     (`/commiter`'s Beads export step).
+   • If the script's trailing `ids` line shows an empty selfreview
+     field, create one via `/beads` before continuing.
     │
     ▼
 2. CODER SUBAGENT: spawn an `Agent` (subagent_type `coder`) to
@@ -126,10 +126,9 @@ DIRECTOR: pick top task from the cached ready list
     │       Single atomic step: closure ships with the commit.
     │
     ▼
-5. DIRECTOR: pick the next entry from your cached ready list and
-   loop to step 1. Only re-run triage when the list is empty
-   (or stale because of a graph edit). Stop only when a refreshed
-   list returns nothing.
+5. DIRECTOR: rerun `./scripts/agent-next-task.sh` and loop to
+   step 1. Stop only when the script reports no ready
+   non-selfreview tasks.
 ```
 
 **No Reviewer or Documenter role.** Review = paired selfreview task
@@ -212,11 +211,11 @@ Read, in order:
   obviously depends on another open task (schema before API, API
   before CLI, foundational refactor before consumers), add the
   dependency *before* starting: `bd dep <blocker> --blocks <blocked>`.
-  Then **drop the picked task** — it's now blocked — and pick the
-  next entry from your cached ready list (refresh via triage
-  only if the list is empty). Wrong-order picks waste a coder run
-  and leave the graph misleading. The dep edit ships with the next
-  commit (`/commiter`'s Beads export step covers it).
+  Then **drop the picked task** — it's now blocked — and rerun
+  `./scripts/agent-next-task.sh` for the next pair. Wrong-order
+  picks waste a coder run and leave the graph misleading. The dep
+  edit ships with the next commit (`/commiter`'s Beads export step
+  covers it).
 
 ## Role Workflows And Delegation
 
@@ -342,17 +341,12 @@ Before delegating implementation:
 ## Beads workflow
 
 ```bash
-bv --robot-triage | jq '.triage.quick_ref.top_picks[:3]'
-                                      # preferred prioritized top picks;
-                                      # cache the list and take entries off
-                                      # the top one at a time. Don't re-run
-                                      # after every pair — the output is
-                                      # verbose. Refresh only when the cached
-                                      # list runs out.
-                                      # NB: selfreview tasks are NOT surfaced
-                                      # (blocked by their main task) —
-                                      # find or create the pair for each main
-bd show <id>                          # full context
+./scripts/agent-next-task.sh          # next pair: ranked main task +
+                                      # paired selfreview. Prefers
+                                      # `bv --robot-triage`, falls back to
+                                      # `bd ready`, skips selfreview entries.
+                                      # Rerun each loop — selfreview pair is
+                                      # included so no separate lookup needed.
 bd update <id> --claim                # claim it (in_progress)
 # … implement …
 bd close <id>                         # done — /commiter runs this in step 4

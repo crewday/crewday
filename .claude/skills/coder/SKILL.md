@@ -62,15 +62,15 @@ extension over duplication.
 
 ### 4. Test
 
-Run the narrow gates for the touched module. Prefer existing wrappers
-when present:
+Run the narrow gates for the touched module:
 
 ```bash
-./scripts/lint.sh
-./scripts/format.sh --check
-./scripts/typecheck.sh
+./scripts/agent-quality.sh             # ruff format + ruff check --fix, then re-check + mypy --strict app
 pytest <test path> -x -q
 ```
+
+`agent-quality.sh` autofixes everything Ruff can fix and surfaces only
+what still needs a manual edit (lint or mypy). Exit 0 = clean.
 
 For delegated coder work, run only the named module tests; the director
 or final caller owns broader suite selection.
