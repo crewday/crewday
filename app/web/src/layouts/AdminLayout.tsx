@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { Outlet, useLocation, useNavigate } from "react-router-dom";
+import { Navigate, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import {
   ActivitySquare,
@@ -32,11 +32,16 @@ import type { AdminMe, Me } from "@/types/api";
 // route changes) but swaps the nav for deployment-level entries
 // and the agent for the admin-side agent (role="admin", §11).
 //
-// Access: the caller must pass GET /admin/api/v1/me. A 404
-// renders the "ask your operator" card; the component doesn't
-// try to be clever about redirects (the guard is a render-time
-// concern, not a routing concern — matches §14's "polite card,
-// not /login").
+// Access: the caller must pass GET /admin/api/v1/me AND have
+// `is_deployment_admin: true` on the bare-host /auth/me payload.
+// A non-admin caller is redirected to `RoleHome` (`/`) rather than
+// shown a polite-card — the LoginPage filters `?next=/admin/...`
+// for non-admins (cd-28s7), so the only paths that reach this
+// guard are direct navigation / stale bookmarks. Sending those
+// users home is clearer than dropping them on a denied surface
+// they didn't ask to see. While the admin probe is still in
+// flight we render a quiet "Checking access…" placeholder so
+// child queries don't fire before authorisation is known.
 
 const ICON_SIZE = 16;
 const ICON_STROKE = 1.75;
@@ -102,27 +107,12 @@ export default function AdminLayout() {
   const hasAccess = adminMeQ.isSuccess && meQ.data?.is_deployment_admin === true;
 
   if (denied) {
-    return (
-      <div className="desk desk--admin-denied">
-        <section className="desk__main">
-          <div className="admin-denied">
-            <h1>Administration</h1>
-            <p>
-              You don't have access to the deployment admin surface.
-              Ask your operator to grant you admin rights, or head back
-              to your workspace.
-            </p>
-            <button
-              type="button"
-              className="btn btn--moss"
-              onClick={() => navigate("/")}
-            >
-              Back to workspace
-            </button>
-          </div>
-        </section>
-      </div>
-    );
+    // Bounce non-admins back to RoleHome (§14 "Admin shell"). The
+    // root `<RoleHome>` routes by grant role — managers to /dashboard,
+    // workers to /today, clients to /portfolio — so the user lands
+    // on a surface that matches their identity rather than on the
+    // admin chrome they have no business seeing. cd-28s7.
+    return <Navigate to="/" replace />;
   }
 
   if (!hasAccess) {

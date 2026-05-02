@@ -155,9 +155,20 @@ workspace once and the rest of the tree is unaware of the prefix.
 The `/admin` surface never carries a workspace prefix — it is
 deployment-level by construction. Routes return `404` for
 callers without any deployment grant (§12 "Admin surface");
-the React shell renders a "you don't have access, ask your
-operator" card when `GET /admin/api/v1/me` 404s so deep-links
-from a password manager don't silently land on `/login`.
+when the caller is unauthenticated, `<RequireAuth>` bounces
+them to `/login?next=/admin/...` exactly like every other
+protected page so password-manager deep-links resolve cleanly
+on the next sign-in. When the caller is authenticated but is
+not a deployment admin (`is_deployment_admin === false` on
+the bare-host `/auth/me`, or `GET /admin/api/v1/me` 404s),
+`AdminLayout` redirects to `RoleHome` so they land on the
+surface that matches their identity (`/dashboard` for
+managers, `/today` for workers, `/portfolio` for clients).
+The same role check happens in `LoginPage`: a phishing-style
+`/login?next=/admin/...` aimed at an already-signed-in
+non-admin drops the `next` and falls back to the role landing
+rather than bouncing the user onto a surface they didn't ask
+to see (cd-28s7).
 
 ### Per-workspace public
 

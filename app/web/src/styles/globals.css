@@ -3739,15 +3739,6 @@
 /* §14: no workspace switcher on /admin (deployment-wide surface). */
 .desk--admin .ws-switcher { display: none; }
 
-.admin-denied {
-  max-width: 480px;
-  margin: 10vh auto;
-  text-align: center;
-  padding: 24px;
-}
-.admin-denied h1 { font-family: "Fraunces", serif; margin-bottom: 12px; }
-.admin-denied p { color: var(--ink-2); margin-bottom: 20px; line-height: 1.5; }
-
 .admin-backlink { width: 100%; text-align: left; }
 
 .form-grid {

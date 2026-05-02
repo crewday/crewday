@@ -714,3 +714,109 @@ describe("<LoginPage> — already-signed-in bounce", () => {
     }
   });
 });
+
+describe("<LoginPage> — admin-next role check (closes cd-28s7)", () => {
+  it("drops ?next=/admin/dashboard for a non-admin already-signed-in worker and lands on /today", async () => {
+    // Phishing surface: a crafted `/login?next=/admin/dashboard` would
+    // otherwise honour `next` verbatim and bounce the worker onto the
+    // admin shell. The role gate in `pickLanding` filters `/admin/*`
+    // when the caller is not `is_deployment_admin`, so the user lands
+    // on their role home (worker → /today) instead.
+    const { restore } = installFetch({
+      "/api/v1/auth/me": [
+        {
+          status: 200,
+          body: {
+            user_id: "01HZ_USER",
+            display_name: "Maria",
+            email: "maria@example.com",
+            available_workspaces: [
+              {
+                workspace: { id: "ws_1", name: "Villa Sud", timezone: "UTC", default_currency: "EUR", default_country: "FR", default_locale: "fr" },
+                grant_role: "worker",
+                binding_org_id: null,
+                source: "workspace_grant",
+              },
+            ],
+            current_workspace_id: null,
+            is_deployment_admin: false,
+          },
+        },
+      ],
+    });
+
+    try {
+      render(<Harness initial="/login?next=%2Fadmin%2Fdashboard" />);
+      await flush();
+      expect(screen.getByTestId("landed-today").textContent).toBe("/today");
+      // Defensive: the catch-all probe never fired with an admin path.
+      expect(screen.queryByTestId("landed-other")).toBeNull();
+    } finally {
+      restore();
+    }
+  });
+
+  it("honours ?next=/admin/dashboard for a deployment admin", async () => {
+    // The same path is legitimate for a deployment admin. The role
+    // filter must not over-block.
+    const { restore } = installFetch({
+      "/api/v1/auth/me": [
+        {
+          status: 200,
+          body: {
+            user_id: "01HZ_ADMIN",
+            display_name: "Olivier",
+            email: "olivier@example.com",
+            available_workspaces: [],
+            current_workspace_id: null,
+            is_deployment_admin: true,
+          },
+        },
+      ],
+    });
+
+    try {
+      render(<Harness initial="/login?next=%2Fadmin%2Fdashboard" />);
+      await flush();
+      // Admin path lives under the `*` catch-all in this harness.
+      expect(screen.getByTestId("landed-other").textContent).toBe("/admin/dashboard");
+    } finally {
+      restore();
+    }
+  });
+
+  it("drops bare ?next=/admin (no trailing slash) for a non-admin", async () => {
+    // Without the explicit `===` check, the prefix-only test would let
+    // `/admin` itself slip through.
+    const { restore } = installFetch({
+      "/api/v1/auth/me": [
+        {
+          status: 200,
+          body: {
+            user_id: "01HZ_USER",
+            display_name: "Maria",
+            email: "maria@example.com",
+            available_workspaces: [
+              {
+                workspace: { id: "ws_1", name: "Villa Sud", timezone: "UTC", default_currency: "EUR", default_country: "FR", default_locale: "fr" },
+                grant_role: "worker",
+                binding_org_id: null,
+                source: "workspace_grant",
+              },
+            ],
+            current_workspace_id: null,
+            is_deployment_admin: false,
+          },
+        },
+      ],
+    });
+
+    try {
+      render(<Harness initial="/login?next=%2Fadmin" />);
+      await flush();
+      expect(screen.getByTestId("landed-today").textContent).toBe("/today");
+    } finally {
+      restore();
+    }
+  });
+});
