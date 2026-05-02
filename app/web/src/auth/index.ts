@@ -14,6 +14,8 @@ export {
   useAuth,
   useAuthBootstrap,
   PasskeyCancelledError,
+  PasskeyTimeoutError,
+  PasskeyTransientError,
   PasskeyUnsupportedError,
   __resetAuthStoreForTests,
 } from "./useAuth";

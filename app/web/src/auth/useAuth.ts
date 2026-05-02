@@ -38,6 +38,8 @@ import {
 } from "./authStore";
 import {
   PasskeyCancelledError,
+  PasskeyTimeoutError,
+  PasskeyTransientError,
   PasskeyUnsupportedError,
   runPasskeyLoginCeremony,
 } from "./passkey";
@@ -206,4 +208,9 @@ export const __resetAuthStoreForTests = _resetForTests;
 
 // Re-export the typed errors so the LoginPage doesn't have to import
 // `passkey.ts` directly.
-export { PasskeyCancelledError, PasskeyUnsupportedError };
+export {
+  PasskeyCancelledError,
+  PasskeyTimeoutError,
+  PasskeyTransientError,
+  PasskeyUnsupportedError,
+};

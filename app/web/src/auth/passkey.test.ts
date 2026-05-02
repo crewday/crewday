@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   PasskeyCancelledError,
+  PasskeyTimeoutError,
+  PasskeyTransientError,
   PasskeyUnsupportedError,
   beginPasskeyLogin,
   decodeRequestOptions,
@@ -216,49 +218,112 @@ describe("beginPasskeyLogin / finishPasskeyLogin", () => {
 });
 
 describe("runPasskeyLoginCeremony — error mapping", () => {
-  it("throws PasskeyUnsupportedError when navigator.credentials is missing", async () => {
+  /**
+   * Drive `runPasskeyLoginCeremony` to the point where
+   * `navigator.credentials.get()` throws `domException`, then return
+   * the rejection so the caller can assert on the typed error class
+   * and (optionally) its `kind` discriminant.
+   *
+   * Folds the `installFetch` + `Object.defineProperty(navigator, …)`
+   * boilerplate so the per-DOMException assertions read like a
+   * mapping table.
+   */
+  async function mapDomException(domException: DOMException): Promise<unknown> {
+    const { restore } = installFetch([
+      { status: 200, body: { challenge_id: "ch_1", options: { challenge: "AQID" } } },
+    ]);
+    const fakeCreds = {
+      get: vi.fn(async () => {
+        throw domException;
+      }),
+    };
+    Object.defineProperty(navigator, "credentials", { value: fakeCreds, configurable: true });
+    try {
+      try {
+        await runPasskeyLoginCeremony();
+        throw new Error("expected runPasskeyLoginCeremony to reject");
+      } catch (err) {
+        return err;
+      }
+    } finally {
+      restore();
+      Object.defineProperty(navigator, "credentials", { value: undefined, configurable: true });
+    }
+  }
+
+  it("throws PasskeyUnsupportedError(platform_unsupported) when navigator.credentials is missing", async () => {
     const orig = navigator.credentials;
     Object.defineProperty(navigator, "credentials", { value: undefined, configurable: true });
     try {
-      await expect(runPasskeyLoginCeremony()).rejects.toBeInstanceOf(PasskeyUnsupportedError);
+      const err = await runPasskeyLoginCeremony().catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(PasskeyUnsupportedError);
+      expect((err as PasskeyUnsupportedError).kind).toBe("platform_unsupported");
     } finally {
       Object.defineProperty(navigator, "credentials", { value: orig, configurable: true });
     }
   });
 
-  it("translates DOMException(NotAllowedError) from navigator.credentials.get into PasskeyCancelledError", async () => {
-    const { restore } = installFetch([
-      { status: 200, body: { challenge_id: "ch_1", options: { challenge: "AQID" } } },
-    ]);
-    const fakeCreds = {
-      get: vi.fn(async () => {
-        throw new DOMException("user cancelled", "NotAllowedError");
-      }),
-    };
-    Object.defineProperty(navigator, "credentials", { value: fakeCreds, configurable: true });
-    try {
-      await expect(runPasskeyLoginCeremony()).rejects.toBeInstanceOf(PasskeyCancelledError);
-    } finally {
-      restore();
-      Object.defineProperty(navigator, "credentials", { value: undefined, configurable: true });
-    }
+  it("maps NotAllowedError → PasskeyCancelledError", async () => {
+    const err = await mapDomException(new DOMException("user cancelled", "NotAllowedError"));
+    expect(err).toBeInstanceOf(PasskeyCancelledError);
   });
 
-  it("translates DOMException(SecurityError) into PasskeyUnsupportedError", async () => {
-    const { restore } = installFetch([
-      { status: 200, body: { challenge_id: "ch_1", options: { challenge: "AQID" } } },
-    ]);
-    const fakeCreds = {
-      get: vi.fn(async () => {
-        throw new DOMException("insecure context", "SecurityError");
-      }),
-    };
-    Object.defineProperty(navigator, "credentials", { value: fakeCreds, configurable: true });
-    try {
-      await expect(runPasskeyLoginCeremony()).rejects.toBeInstanceOf(PasskeyUnsupportedError);
-    } finally {
-      restore();
-      Object.defineProperty(navigator, "credentials", { value: undefined, configurable: true });
-    }
+  it("maps AbortError → PasskeyCancelledError", async () => {
+    const err = await mapDomException(new DOMException("aborted", "AbortError"));
+    expect(err).toBeInstanceOf(PasskeyCancelledError);
+  });
+
+  it("maps TimeoutError → PasskeyTimeoutError", async () => {
+    const err = await mapDomException(new DOMException("ceremony timed out", "TimeoutError"));
+    expect(err).toBeInstanceOf(PasskeyTimeoutError);
+  });
+
+  it("maps UnknownError → PasskeyTransientError", async () => {
+    const err = await mapDomException(new DOMException("authenticator hiccup", "UnknownError"));
+    expect(err).toBeInstanceOf(PasskeyTransientError);
+  });
+
+  it("maps NetworkError → PasskeyTransientError", async () => {
+    const err = await mapDomException(new DOMException("transport blew up", "NetworkError"));
+    expect(err).toBeInstanceOf(PasskeyTransientError);
+  });
+
+  it("maps SecurityError → PasskeyUnsupportedError(kind='security')", async () => {
+    const err = await mapDomException(new DOMException("insecure context", "SecurityError"));
+    expect(err).toBeInstanceOf(PasskeyUnsupportedError);
+    expect((err as PasskeyUnsupportedError).kind).toBe("security");
+  });
+
+  it("maps NotSupportedError → PasskeyUnsupportedError(kind='platform_unsupported')", async () => {
+    const err = await mapDomException(
+      new DOMException("alg not supported", "NotSupportedError"),
+    );
+    expect(err).toBeInstanceOf(PasskeyUnsupportedError);
+    expect((err as PasskeyUnsupportedError).kind).toBe("platform_unsupported");
+  });
+
+  it("maps InvalidStateError → PasskeyUnsupportedError(kind='invalid_state')", async () => {
+    const err = await mapDomException(
+      new DOMException("already registered", "InvalidStateError"),
+    );
+    expect(err).toBeInstanceOf(PasskeyUnsupportedError);
+    expect((err as PasskeyUnsupportedError).kind).toBe("invalid_state");
+  });
+
+  it("maps ConstraintError → PasskeyUnsupportedError(kind='constraint')", async () => {
+    const err = await mapDomException(
+      new DOMException("constraint not satisfied", "ConstraintError"),
+    );
+    expect(err).toBeInstanceOf(PasskeyUnsupportedError);
+    expect((err as PasskeyUnsupportedError).kind).toBe("constraint");
+  });
+
+  it("falls through to a generic Error for unrecognised DOMException names", async () => {
+    const err = await mapDomException(new DOMException("???", "EncodingError"));
+    expect(err).toBeInstanceOf(Error);
+    expect(err).not.toBeInstanceOf(PasskeyCancelledError);
+    expect(err).not.toBeInstanceOf(PasskeyTimeoutError);
+    expect(err).not.toBeInstanceOf(PasskeyTransientError);
+    expect(err).not.toBeInstanceOf(PasskeyUnsupportedError);
   });
 });

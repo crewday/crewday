@@ -28,6 +28,8 @@ import { KeyRound } from "lucide-react";
 import { ApiError } from "@/lib/api";
 import {
   PasskeyCancelledError,
+  PasskeyTimeoutError,
+  PasskeyTransientError,
   PasskeyUnsupportedError,
 } from "@/auth/passkey";
 import {
@@ -286,7 +288,42 @@ function enrollMessageFor(err: unknown): EnrollMessage {
       tone: "info",
     };
   }
+  if (err instanceof PasskeyTimeoutError) {
+    return {
+      message:
+        "Your authenticator didn't respond in time. Click “Register passkey” to try again.",
+      tone: "info",
+    };
+  }
+  if (err instanceof PasskeyTransientError) {
+    return {
+      message:
+        "Couldn't reach your authenticator. Wait a moment and try again — the link stays valid for 10 minutes.",
+      tone: "danger",
+    };
+  }
   if (err instanceof PasskeyUnsupportedError) {
+    if (err.kind === "invalid_state") {
+      return {
+        message:
+          "This device already has a passkey for your account. Try another device — the link stays valid for 10 minutes.",
+        tone: "danger",
+      };
+    }
+    if (err.kind === "constraint") {
+      return {
+        message:
+          "Your authenticator can't satisfy the passkey requirements for this workspace. Try another device — the link stays valid for 10 minutes.",
+        tone: "danger",
+      };
+    }
+    if (err.kind === "security") {
+      return {
+        message:
+          "This page can't run a passkey ceremony from an insecure context. Open crew.day over HTTPS and try again.",
+        tone: "danger",
+      };
+    }
     return {
       message:
         "This browser or device can't register a passkey here. Try another device — the link stays valid for 10 minutes.",

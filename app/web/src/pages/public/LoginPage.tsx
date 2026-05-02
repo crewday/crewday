@@ -30,6 +30,8 @@ import { Navigate, useLocation } from "react-router-dom";
 import { KeyRound } from "lucide-react";
 import {
   PasskeyCancelledError,
+  PasskeyTimeoutError,
+  PasskeyTransientError,
   PasskeyUnsupportedError,
   sanitizeNext,
   useAuth,
@@ -202,7 +204,45 @@ function messageFor(err: unknown): ResolvedMessage {
       tone: "info",
     };
   }
+  if (err instanceof PasskeyTimeoutError) {
+    return {
+      message:
+        "Your authenticator didn't respond in time. Click “Use passkey” to try again.",
+      tone: "info",
+    };
+  }
+  if (err instanceof PasskeyTransientError) {
+    return {
+      message:
+        "Couldn't reach your authenticator. Wait a moment and try again.",
+      tone: "danger",
+    };
+  }
   if (err instanceof PasskeyUnsupportedError) {
+    if (err.kind === "invalid_state") {
+      return {
+        message:
+          "This passkey is already registered or in an unexpected state. Try another device, or use the recovery link below.",
+        tone: "danger",
+      };
+    }
+    if (err.kind === "constraint") {
+      return {
+        message:
+          "Your authenticator can't satisfy the passkey requirements for this workspace. Try another device, or use the recovery link below.",
+        tone: "danger",
+      };
+    }
+    if (err.kind === "security") {
+      return {
+        message:
+          "This page can't run a passkey ceremony from an insecure context. Open crew.day over HTTPS and try again.",
+        tone: "danger",
+      };
+    }
+    // `platform_unsupported` and any future kind fall back to the
+    // generic copy. The recovery affordance is the same: switch
+    // device or enrol a fresh one.
     return {
       message:
         "This browser or device can't use a passkey here. Try another device, or use the recovery link below.",

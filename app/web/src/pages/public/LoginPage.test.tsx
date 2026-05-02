@@ -395,7 +395,7 @@ describe("<LoginPage> — error branches", () => {
     }
   });
 
-  it("surfaces a danger notice when the browser doesn't support WebAuthn", async () => {
+  it("surfaces an HTTPS-prompt danger notice when the browser raises SecurityError", async () => {
     const { restore } = installFetch({
       "/api/v1/auth/me": [{ status: 401, body: { detail: "no session" } }],
       "/api/v1/auth/passkey/login/start": [
@@ -417,7 +417,100 @@ describe("<LoginPage> — error branches", () => {
       await flush();
 
       const notice = screen.getByTestId("login-error");
-      expect(notice.textContent).toContain("can't use a passkey");
+      // SecurityError now maps to PasskeyUnsupportedError(kind="security"),
+      // which surfaces a more specific "open over HTTPS" hint instead of the
+      // generic "this device can't use a passkey" copy.
+      expect(notice.textContent).toContain("insecure context");
+      expect(notice.className).toContain("login__notice--danger");
+    } finally {
+      restore();
+    }
+  });
+
+  it("surfaces a soft retry hint when the authenticator times out", async () => {
+    const { restore } = installFetch({
+      "/api/v1/auth/me": [{ status: 401, body: { detail: "no session" } }],
+      "/api/v1/auth/passkey/login/start": [
+        { status: 200, body: { challenge_id: "ch_1", options: { challenge: "AQID" } } },
+      ],
+    });
+    installCredentialsGet(() => {
+      throw new DOMException("ceremony timed out", "TimeoutError");
+    });
+
+    try {
+      render(<Harness initial="/login" />);
+      await flush();
+
+      const button = screen.getByTestId("login-passkey") as HTMLButtonElement;
+      await act(async () => {
+        fireEvent.click(button);
+        await new Promise((r) => setTimeout(r, 0));
+      });
+      await flush();
+
+      const notice = screen.getByTestId("login-error");
+      expect(notice.textContent).toContain("didn't respond in time");
+      // Timeout is recoverable — info tone, not danger.
+      expect(notice.className).not.toContain("login__notice--danger");
+      expect(button.disabled).toBe(false);
+    } finally {
+      restore();
+    }
+  });
+
+  it("surfaces a backoff danger notice on transient WebAuthn errors", async () => {
+    const { restore } = installFetch({
+      "/api/v1/auth/me": [{ status: 401, body: { detail: "no session" } }],
+      "/api/v1/auth/passkey/login/start": [
+        { status: 200, body: { challenge_id: "ch_1", options: { challenge: "AQID" } } },
+      ],
+    });
+    installCredentialsGet(() => {
+      throw new DOMException("transport blew up", "NetworkError");
+    });
+
+    try {
+      render(<Harness initial="/login" />);
+      await flush();
+
+      await act(async () => {
+        fireEvent.click(screen.getByTestId("login-passkey"));
+        await new Promise((r) => setTimeout(r, 0));
+      });
+      await flush();
+
+      const notice = screen.getByTestId("login-error");
+      expect(notice.textContent).toContain("Couldn't reach your authenticator");
+      expect(notice.className).toContain("login__notice--danger");
+    } finally {
+      restore();
+    }
+  });
+
+  it("surfaces a constraint-specific danger notice when ConstraintError fires", async () => {
+    const { restore } = installFetch({
+      "/api/v1/auth/me": [{ status: 401, body: { detail: "no session" } }],
+      "/api/v1/auth/passkey/login/start": [
+        { status: 200, body: { challenge_id: "ch_1", options: { challenge: "AQID" } } },
+      ],
+    });
+    installCredentialsGet(() => {
+      throw new DOMException("constraint not satisfied", "ConstraintError");
+    });
+
+    try {
+      render(<Harness initial="/login" />);
+      await flush();
+
+      await act(async () => {
+        fireEvent.click(screen.getByTestId("login-passkey"));
+        await new Promise((r) => setTimeout(r, 0));
+      });
+      await flush();
+
+      const notice = screen.getByTestId("login-error");
+      expect(notice.textContent).toContain("can't satisfy the passkey requirements");
       expect(notice.className).toContain("login__notice--danger");
     } finally {
       restore();

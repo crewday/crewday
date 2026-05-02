@@ -17,7 +17,7 @@
 
 import { fetchJson } from "@/lib/api";
 import {
-  PasskeyCancelledError,
+  mapNavigatorError,
   PasskeyUnsupportedError,
 } from "./passkey";
 
@@ -226,8 +226,9 @@ export function encodeAttestation(credential: PublicKeyCredential): PasskeyRegis
  * Drive the full recovery-enrol ceremony: start → create() → finish.
  * Callers supply the `recovery_session_id` obtained from the verify
  * step. Translates platform errors into the module's typed errors
- * (`PasskeyCancelledError`, `PasskeyUnsupportedError`); anything
- * else propagates (usually `ApiError`).
+ * (`PasskeyCancelledError`, `PasskeyTimeoutError`,
+ * `PasskeyTransientError`, `PasskeyUnsupportedError`); anything else
+ * propagates (usually `ApiError`).
  */
 export async function runRecoveryEnrollCeremony(
   recoverySessionId: string,
@@ -236,6 +237,7 @@ export async function runRecoveryEnrollCeremony(
   if (typeof navigator === "undefined" || !navigator.credentials) {
     throw new PasskeyUnsupportedError(
       "This browser does not support WebAuthn passkeys.",
+      "platform_unsupported",
     );
   }
 
@@ -255,6 +257,7 @@ export async function runRecoveryEnrollCeremony(
   if (!isPublicKeyCredential(attestation)) {
     throw new PasskeyUnsupportedError(
       "Browser returned an unexpected credential type for passkey registration.",
+      "platform_unsupported",
     );
   }
 
@@ -272,22 +275,6 @@ function isPublicKeyCredential(value: unknown): value is PublicKeyCredential {
     && v.rawId instanceof ArrayBuffer
     && typeof v.response === "object"
   );
-}
-
-function mapNavigatorError(err: unknown): Error {
-  if (err instanceof DOMException) {
-    if (err.name === "NotAllowedError" || err.name === "AbortError") {
-      return new PasskeyCancelledError(err);
-    }
-    if (
-      err.name === "SecurityError"
-      || err.name === "NotSupportedError"
-      || err.name === "InvalidStateError"
-    ) {
-      return new PasskeyUnsupportedError(err.message || err.name, err);
-    }
-  }
-  return err instanceof Error ? err : new Error(String(err));
 }
 
 function base64UrlToBytes(value: string): ArrayBuffer {

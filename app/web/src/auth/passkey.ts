@@ -13,9 +13,10 @@
 // from JavaScript (it's `HttpOnly`).
 //
 // Callers are expected to handle errors (`PasskeyCancelledError`,
-// `PasskeyUnsupportedError`, generic `ApiError`) and surface them
-// in the LoginPage UI; this module raises typed errors so the UI
-// can branch on them without parsing strings.
+// `PasskeyUnsupportedError`, `PasskeyTimeoutError`,
+// `PasskeyTransientError`, generic `ApiError`) and surface them in
+// the LoginPage UI; this module raises typed errors so the UI can
+// branch on them without parsing strings.
 
 import { fetchJson } from "@/lib/api";
 import type {
@@ -39,16 +40,71 @@ export class PasskeyCancelledError extends Error {
 }
 
 /**
+ * Discriminant for `PasskeyUnsupportedError`. Lets the LoginPage
+ * branch on the underlying reason without re-`instanceof`-ing the
+ * cause:
+ *
+ * - `platform_unsupported` — the browser/platform itself can't run
+ *   the ceremony (no `navigator.credentials`, `NotSupportedError`,
+ *   or an unexpected credential shape).
+ * - `security` — `SecurityError` from the user agent (e.g. insecure
+ *   context, RP-ID / origin mismatch).
+ * - `invalid_state` — `InvalidStateError`, typically a duplicate
+ *   passkey for this RP on the current authenticator.
+ * - `constraint` — `ConstraintError`, the credential parameters
+ *   the server requested can't be satisfied by the authenticator.
+ */
+export type PasskeyUnsupportedKind =
+  | "platform_unsupported"
+  | "security"
+  | "invalid_state"
+  | "constraint";
+
+/**
  * Thrown when the platform reports no WebAuthn support, no passkey
  * exists for this RP, or the call site is in an insecure context
  * (HTTPS is required by the spec). Distinct from `Cancelled` because
  * the UI should surface the recovery / enrol affordance instead of
  * just an inline "try again".
+ *
+ * The `kind` discriminant lets the LoginPage branch on the underlying
+ * reason without poking at `cause`.
  */
 export class PasskeyUnsupportedError extends Error {
-  constructor(message: string, cause?: unknown) {
+  readonly kind: PasskeyUnsupportedKind;
+  constructor(message: string, kind: PasskeyUnsupportedKind, cause?: unknown) {
     super(message);
     this.name = "PasskeyUnsupportedError";
+    this.kind = kind;
+    if (cause instanceof Error) this.cause = cause;
+  }
+}
+
+/**
+ * Thrown when the WebAuthn ceremony hits a `TimeoutError` — the
+ * authenticator didn't respond inside the requested `timeout`
+ * window. The LoginPage should hint at retrying ("try again — your
+ * authenticator didn't respond in time").
+ */
+export class PasskeyTimeoutError extends Error {
+  constructor(cause?: unknown) {
+    super("Passkey ceremony timed out before the authenticator responded.");
+    this.name = "PasskeyTimeoutError";
+    if (cause instanceof Error) this.cause = cause;
+  }
+}
+
+/**
+ * Thrown for transient platform-level failures: `UnknownError`
+ * (the authenticator stack hit an internal error) and
+ * `NetworkError` (the user agent failed to talk to a roaming
+ * authenticator over its transport). The LoginPage should hint at
+ * retry-with-backoff — these are usually self-healing.
+ */
+export class PasskeyTransientError extends Error {
+  constructor(message: string, cause?: unknown) {
+    super(message);
+    this.name = "PasskeyTransientError";
     if (cause instanceof Error) this.cause = cause;
   }
 }
@@ -200,6 +256,7 @@ export async function runPasskeyLoginCeremony(
   if (typeof navigator === "undefined" || !navigator.credentials) {
     throw new PasskeyUnsupportedError(
       "This browser does not support WebAuthn passkeys.",
+      "platform_unsupported",
     );
   }
 
@@ -224,6 +281,7 @@ export async function runPasskeyLoginCeremony(
   if (!isPublicKeyCredential(assertion)) {
     throw new PasskeyUnsupportedError(
       "Browser returned an unexpected credential type for passkey login.",
+      "platform_unsupported",
     );
   }
 
@@ -247,19 +305,39 @@ function isPublicKeyCredential(value: unknown): value is PublicKeyCredential {
 
 // ── Internals ─────────────────────────────────────────────────────
 
-function mapNavigatorError(err: unknown): Error {
+/**
+ * Translate a WebAuthn ceremony failure into one of the module's
+ * typed errors. Shared between the login (`get()`) and register
+ * (`create()`) ceremonies — both surfaces emit the same DOMException
+ * names per the spec, so the mapping table is identical.
+ *
+ * Exported (under-the-hood, no `index.ts` re-export) so
+ * `passkey-register.ts` can reuse the table without copy-pasting it.
+ */
+export function mapNavigatorError(err: unknown): Error {
   if (err instanceof DOMException) {
     // `NotAllowedError` covers both user-cancel and authenticator
     // refusal — they're indistinguishable per the WebAuthn spec.
     if (err.name === "NotAllowedError" || err.name === "AbortError") {
       return new PasskeyCancelledError(err);
     }
-    if (
-      err.name === "SecurityError"
-      || err.name === "NotSupportedError"
-      || err.name === "InvalidStateError"
-    ) {
-      return new PasskeyUnsupportedError(err.message || err.name, err);
+    if (err.name === "TimeoutError") {
+      return new PasskeyTimeoutError(err);
+    }
+    if (err.name === "UnknownError" || err.name === "NetworkError") {
+      return new PasskeyTransientError(err.message || err.name, err);
+    }
+    if (err.name === "SecurityError") {
+      return new PasskeyUnsupportedError(err.message || err.name, "security", err);
+    }
+    if (err.name === "NotSupportedError") {
+      return new PasskeyUnsupportedError(err.message || err.name, "platform_unsupported", err);
+    }
+    if (err.name === "InvalidStateError") {
+      return new PasskeyUnsupportedError(err.message || err.name, "invalid_state", err);
+    }
+    if (err.name === "ConstraintError") {
+      return new PasskeyUnsupportedError(err.message || err.name, "constraint", err);
     }
   }
   // Last-resort: surface the raw error so devtools still show the
