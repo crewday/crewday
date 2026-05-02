@@ -537,6 +537,7 @@ configuration.
 | `assets.edit`                           | `workspace`, `property`        | `owners, managers`            | —  | §21 |
 | `assets.manage_types`                   | `workspace`                    | `owners, managers`            | —  | §21 |
 | `api_tokens.manage`                     | `workspace`                    | `owners, managers`            | ✅ | §03 |
+| `admin.view`                            | `workspace`, `property`, `organization` | `owners, managers`            | ✅ | §15 — gates workspace-admin read surfaces (the ``/w/<slug>/api/v1/admin/*`` tree). Operator-only by default, mirroring `audit_log.view`'s posture; carved off so per-surface tuning ("managers may view audit but NOT admin") is expressible without overloading the audit-log bit (cd-z5rd). |
 | `audit_log.view`                        | `workspace`, `property`, `organization` | `owners, managers`            | ✅ | §02 |
 | `organizations.create`                  | `workspace`                    | `owners, managers`            | —  | §22 |
 | `organizations.edit`                    | `workspace`, `organization`    | `owners, managers`            | —  | §22 |

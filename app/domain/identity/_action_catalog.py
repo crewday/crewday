@@ -141,6 +141,26 @@ _ROOT_ONLY: tuple[ActionSpec, ...] = (
 # ---------------------------------------------------------------------------
 _RULE_DRIVEN: tuple[ActionSpec, ...] = (
     ActionSpec(
+        key="admin.view",
+        # cd-z5rd — workspace-admin read surface gate. cd-g1ay scaffolded
+        # the workspace ``/admin/*`` router with ``audit_log.view`` as a
+        # placeholder ("the closest existing key") explicitly anticipating
+        # a dedicated bit; this is that bit. Routing every workspace-admin
+        # read through an audit-log capability obscured intent and
+        # blocked per-surface policy tuning ("managers may view audit but
+        # NOT admin"). Owners + managers by default — same operator-only
+        # posture as ``audit_log.view``. ``root_protected_deny=True`` so
+        # an owner cannot be denied governance visibility into their own
+        # workspace. Listed in ``docs/specs/05-employees-and-roles.md``
+        # §"Rule-driven actions". No production data exists yet (the
+        # ``app/`` tree is pre-deploy); rules referencing this key ship
+        # empty in fresh installs, so no data migration is required.
+        valid_scope_kinds=("workspace", "property", "organization"),
+        default_allow=("owners", "managers"),
+        root_only=False,
+        root_protected_deny=True,
+    ),
+    ActionSpec(
         key="agent_prefs.edit_property",
         valid_scope_kinds=("workspace", "property"),
         default_allow=("owners", "managers"),

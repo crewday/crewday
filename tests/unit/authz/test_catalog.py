@@ -77,9 +77,10 @@ class TestShape:
         for manager decisions on completed-task approval rows. cd-ryxp
         added work-order actions, cd-5b35 added asset action /
         document permissions, cd-14m3 added ``inventory.stocktake``, and
-        cd-om4v added ``vendor_invoices.mark_paid``.
+        cd-om4v added ``vendor_invoices.mark_paid``. cd-z5rd added
+        ``admin.view`` for the workspace-admin read surfaces.
         """
-        assert len(ACTION_CATALOG) == 102
+        assert len(ACTION_CATALOG) == 103
 
     def test_entries_are_action_spec_instances(self) -> None:
         for key, spec in ACTION_CATALOG.items():
@@ -179,6 +180,7 @@ class TestRootFlags:
             "payroll.lock_period",
             "payroll.issue_payslip",
             "expenses.reimburse",
+            "admin.view",
             "api_tokens.manage",
             "audit_log.view",
             "organizations.edit_pay_destination",
@@ -192,7 +194,10 @@ class TestRootFlags:
         ],
     )
     def test_known_root_protected_deny(self, key: str) -> None:
-        """These are the 22 ✅ entries from §05 "Rule-driven actions"."""
+        """Spot-check a representative slice of the ✅ entries from §05
+        "Rule-driven actions" — not exhaustive; new additions don't
+        have to be appended unless the test starts missing real drift.
+        """
         spec = ACTION_CATALOG[key]
         assert spec.root_protected_deny is True, (
             f"{key!r}: expected root_protected_deny=True per §05"
