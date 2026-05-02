@@ -28,10 +28,16 @@ when UTC offset shifts), which is what the spec wants — a weekly
 
 **Idempotency.** The partial unique index
 ``UNIQUE(schedule_id, scheduled_for_local) WHERE schedule_id IS NOT
-NULL`` (cd-22e migration) is the backstop. The worker still checks
-existence before insert so it can report skipped duplicates in
-:attr:`GenerationReport.skipped_duplicate` without relying on the
-per-dialect integrity-error surface.
+NULL`` (cd-22e migration) is the backstop. The worker pre-flights
+a SELECT on the pair so it can report the common-case duplicate
+(re-running over the same horizon) cheaply, and the actual INSERT
+goes out as a dialect-native ``INSERT ... ON CONFLICT DO NOTHING``
+keyed on the same partial index — so a concurrent tick that wins
+the race (e.g. two APScheduler instances, or a manual ``crewday
+tick`` overlapping the hourly tick) lands its row first and the
+losing tick's INSERT no-ops (rowcount 0) and is counted under
+:attr:`GenerationReport.skipped_duplicate` instead of raising
+``IntegrityError`` and rolling the whole tick back.
 
 **WorkspaceContext** is threaded through every DB read. The worker
 never reads tenancy from the environment; the caller (APScheduler
@@ -61,11 +67,13 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from dateutil.rrule import rrulestr
-from sqlalchemy import select
+from sqlalchemy import CursorResult, Insert, select, text
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 
 from app.adapters.db.places.models import Area, Property, PropertyClosure
@@ -366,26 +374,45 @@ def generate_task_occurrences(
             starts_utc = _to_utc(candidate_local, tz)
             ends_utc = starts_utc + timedelta(minutes=duration_minutes)
 
-            row = Occurrence(
-                id=new_ulid(),
-                workspace_id=ctx.workspace_id,
-                schedule_id=schedule.id,
-                template_id=schedule.template_id,
-                property_id=schedule_property_id,
-                assignee_user_id=schedule.assignee_user_id,
-                starts_at=starts_utc,
-                ends_at=ends_utc,
-                scheduled_for_local=scheduled_for_local_iso,
-                originally_scheduled_for=scheduled_for_local_iso,
-                state="scheduled",
-                cancellation_reason=None,
-                created_at=resolved_clock.now(),
-            )
-            session.add(row)
-            session.flush()
+            row_id = new_ulid()
+            values: dict[str, Any] = {
+                "id": row_id,
+                "workspace_id": ctx.workspace_id,
+                "schedule_id": schedule.id,
+                "template_id": schedule.template_id,
+                "property_id": schedule_property_id,
+                "assignee_user_id": schedule.assignee_user_id,
+                "starts_at": starts_utc,
+                "ends_at": ends_utc,
+                "scheduled_for_local": scheduled_for_local_iso,
+                "originally_scheduled_for": scheduled_for_local_iso,
+                "state": "scheduled",
+                "cancellation_reason": None,
+                "created_at": resolved_clock.now(),
+            }
+            stmt = _build_occurrence_insert(session, values)
+            result = session.execute(stmt)
+            # ``Session.execute`` returns ``Result[Any]`` in the
+            # public type stubs; bulk-DML paths actually return a
+            # :class:`CursorResult` with a concrete ``rowcount``.
+            # Mirrors :mod:`app.worker.tasks.overdue` — a non-cursor
+            # result would mean SQLAlchemy's INSERT seam regressed
+            # and we want the failure to be loud.
+            assert isinstance(result, CursorResult)
+            # rowcount == 0 means the partial unique index
+            # ``uq_occurrence_schedule_scheduled_for_local`` (cd-22e)
+            # blocked the insert because a concurrent tick — or a
+            # row written between the SELECT pre-flight and this
+            # INSERT — already materialised the same
+            # ``(schedule_id, scheduled_for_local)`` pair. Count it
+            # as a duplicate; the spec's idempotency contract makes
+            # it indistinguishable from "the prior tick wrote it".
+            if result.rowcount == 0:
+                skipped_duplicate += 1
+                continue
 
-            resolved_expand(session, ctx, row.id, template, candidate_local)
-            resolved_assign(session, ctx, row.id)
+            resolved_expand(session, ctx, row_id, template, candidate_local)
+            resolved_assign(session, ctx, row_id)
 
             resolved_bus.publish(
                 TaskCreated(
@@ -393,11 +420,11 @@ def generate_task_occurrences(
                     actor_id=ctx.actor_id,
                     correlation_id=ctx.audit_correlation_id,
                     occurred_at=resolved_clock.now(),
-                    task_id=row.id,
+                    task_id=row_id,
                 )
             )
 
-            new_task_ids.append(row.id)
+            new_task_ids.append(row_id)
 
     _write_generation_tick_audit(
         session,
@@ -542,12 +569,15 @@ def _already_materialised(
 ) -> bool:
     """Return ``True`` iff ``(schedule_id, scheduled_for_local)`` already exists.
 
-    The partial unique index (cd-22e migration) backs this check —
-    an INSERT race would raise ``IntegrityError``, but the worker
-    runs one tick at a time per workspace so the SELECT-then-INSERT
-    window is narrow. Pre-flighting lets us report skipped
-    duplicates in the report without probing per-dialect
-    integrity-error surfaces.
+    The partial unique index (cd-22e migration) backs the INSERT
+    via ``ON CONFLICT DO NOTHING`` (see
+    :func:`_build_occurrence_insert`); this pre-flight stays in
+    place so the common case (a re-run over the same horizon,
+    where every candidate is already materialised) is reported as
+    ``skipped_duplicate`` without dispatching a no-op INSERT per
+    candidate. A concurrent tick that slips a row in between this
+    SELECT and the INSERT is caught by the ON CONFLICT clause and
+    counted under the same bucket.
     """
     stmt = (
         select(Occurrence.id)
@@ -557,6 +587,57 @@ def _already_materialised(
         .limit(1)
     )
     return session.scalars(stmt).first() is not None
+
+
+def _build_occurrence_insert(session: Session, values: dict[str, Any]) -> Insert:
+    """Build a dialect-native ``INSERT ... ON CONFLICT DO NOTHING``.
+
+    Both SQLite (3.24+) and PostgreSQL accept ``ON CONFLICT`` keyed
+    on the same ``(schedule_id, scheduled_for_local)`` columns the
+    cd-22e partial unique index
+    (``uq_occurrence_schedule_scheduled_for_local``) covers. The
+    index is partial (``WHERE schedule_id IS NOT NULL``); both
+    dialects require the matching ``index_where`` predicate to be
+    repeated on the conflict clause so the planner can target the
+    partial index instead of looking for a full one. The values
+    on this code path always set ``schedule_id`` (the generator
+    only inserts schedule-driven occurrences), so the predicate
+    holds.
+
+    SQLAlchemy's ``do_orm_execute`` tenant filter only fires for
+    ORM ``execute()`` calls; this Core insert deliberately ships
+    with ``workspace_id`` baked into ``values`` so the row is
+    correctly tenanted without depending on the filter. The
+    return type is the upstream ``Insert`` so callers can
+    dispatch via ``session.execute`` without branching on the
+    dialect-specific subclass again.
+    """
+    index_elements = ["schedule_id", "scheduled_for_local"]
+    index_where = text("schedule_id IS NOT NULL")
+    # ``get_bind()`` is the canonical public API and matches the
+    # other dialect-dispatch sites in the repo (see e.g.
+    # ``app.domain.identity._owner_guard``, ``app.domain.llm.budget``,
+    # ``app.admin.backup``, ``app.api.health``). It raises
+    # ``UnboundExecutionError`` if no bind is reachable — the right
+    # loud failure for a worker tick that can't tell its dialect.
+    dialect = session.get_bind().dialect.name
+    if dialect == "postgresql":
+        return (
+            pg_insert(Occurrence)
+            .values(**values)
+            .on_conflict_do_nothing(
+                index_elements=index_elements,
+                index_where=index_where,
+            )
+        )
+    return (
+        sqlite_insert(Occurrence)
+        .values(**values)
+        .on_conflict_do_nothing(
+            index_elements=index_elements,
+            index_where=index_where,
+        )
+    )
 
 
 # ---------------------------------------------------------------------------

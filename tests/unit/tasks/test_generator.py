@@ -447,6 +447,95 @@ class TestHappyPath:
         total = session.scalars(select(Occurrence)).all()
         assert len(total) == first.tasks_created
 
+    def test_concurrent_tick_race_is_caught_by_on_conflict(
+        self,
+        session: Session,
+        bus: EventBus,
+        clock: FrozenClock,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A row that lands between the SELECT pre-flight and the INSERT
+        no-ops via ``ON CONFLICT DO NOTHING`` instead of raising.
+
+        Simulates the cd-864j race: two ticks both pass the SELECT
+        pre-flight (one APScheduler instance + one manual ``crewday
+        tick`` overlapping the hourly tick); the second one's INSERT
+        must come back with ``rowcount == 0`` and the candidate must
+        be counted under :attr:`GenerationReport.skipped_duplicate`,
+        not raise ``IntegrityError`` and roll the whole tick back.
+
+        We pin the schedule to a single occurrence
+        (``BYDAY=SA;COUNT=1``) so the race is deterministic — one
+        candidate, one pre-inserted collider, one ON CONFLICT
+        no-op. ``_already_materialised`` is forced to return
+        ``False`` so the pre-flight does not pre-empt the INSERT;
+        without this stub the test would only exercise the SELECT
+        path the cd-864j change was *not* about.
+        """
+        workspace_id = _bootstrap_workspace(session, slug="ws1")
+        property_id = _bootstrap_property(session)
+        template_id = _bootstrap_template(session, workspace_id=workspace_id)
+        schedule_id = _bootstrap_schedule(
+            session,
+            workspace_id=workspace_id,
+            template_id=template_id,
+            property_id=property_id,
+            rrule="FREQ=WEEKLY;BYDAY=SA;COUNT=1",
+        )
+
+        # The lone occurrence the schedule above will materialise.
+        scheduled_for_local_iso = "2026-04-18T09:00:00"
+
+        # Pre-insert the racing row (the "winning" tick's row).
+        starts_utc = datetime(2026, 4, 18, 7, 0, tzinfo=UTC)
+        session.add(
+            Occurrence(
+                id=new_ulid(),
+                workspace_id=workspace_id,
+                schedule_id=schedule_id,
+                template_id=template_id,
+                property_id=property_id,
+                assignee_user_id=None,
+                starts_at=starts_utc,
+                ends_at=starts_utc + timedelta(minutes=60),
+                scheduled_for_local=scheduled_for_local_iso,
+                originally_scheduled_for=scheduled_for_local_iso,
+                state="scheduled",
+                cancellation_reason=None,
+                created_at=_PINNED,
+            )
+        )
+        session.flush()
+
+        # Force the SELECT pre-flight to return False so we exercise
+        # the ON CONFLICT path (the pre-flight covers the easier
+        # "nothing changed between ticks" case in
+        # ``test_idempotent_across_runs``).
+        from app.worker.tasks import generator as generator_mod
+
+        monkeypatch.setattr(
+            generator_mod,
+            "_already_materialised",
+            lambda *args, **kwargs: False,
+        )
+
+        report = generate_task_occurrences(
+            _ctx(workspace_id),
+            session=session,
+            now=datetime(2026, 4, 20, 8, 0, tzinfo=UTC),
+            clock=clock,
+            event_bus=bus,
+        )
+
+        assert report.tasks_created == 0
+        assert report.skipped_duplicate == 1
+        # The pre-inserted row is still the only one for this pair —
+        # the racing INSERT silently no-opped.
+        rows = session.scalars(
+            select(Occurrence).where(Occurrence.schedule_id == schedule_id)
+        ).all()
+        assert len(rows) == 1
+
 
 # ---------------------------------------------------------------------------
 # Skip cases: paused, deleted, active range
