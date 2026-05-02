@@ -197,6 +197,7 @@ class TestScopedRowIsolation:
                     priority="normal",
                     inventory_consumption_json={},
                     created_at=_dt.datetime(2026, 4, 20, tzinfo=_dt.UTC),
+                    updated_at=_dt.datetime(2026, 4, 20, tzinfo=_dt.UTC),
                 )
             )
             s.commit()
@@ -288,6 +289,7 @@ class TestScopedRowIsolation:
                     priority="normal",
                     inventory_consumption_json={},
                     created_at=_dt.datetime(2026, 4, 20, tzinfo=_dt.UTC),
+                    updated_at=_dt.datetime(2026, 4, 20, tzinfo=_dt.UTC),
                 )
             )
             s.commit()

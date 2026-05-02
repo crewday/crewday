@@ -293,6 +293,7 @@ def seeded_schedules(
                     priority="normal",
                     inventory_consumption_json={},
                     created_at=_ACTIVE_NOW,
+                    updated_at=_ACTIVE_NOW,
                 )
             )
         s.flush()
