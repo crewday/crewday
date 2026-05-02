@@ -760,6 +760,20 @@ Primary key on `id`; unique `(scope_kind, scope_id, key)` where
   fails with 422 `error = "would_orphan_owners_group"`. This
   replaces the v0 "exactly one `owner` grant per scope"
   invariant.
+- The `owners` group on any scope has at least one active
+  member who **also carries a live `manager` `role_grants` row
+  on that scope** at all times. The two preceding invariants
+  protect the governance roster; this one protects its
+  **administrative reach** — a workspace whose `owners` group
+  members all lack a `manager` surface grant cannot be
+  administered (no governance UI, no permission-rule edits, no
+  membership writes). A `role_grants.revoke` of a `manager`
+  grant whose removal would tip the count of
+  manager-grant-holding `owners` members to zero fails with
+  409 `error = "last_owner_grant_protected"`. The matching
+  `permission_group_member` removal is already covered by the
+  preceding invariant: removing a sole owner who carried the
+  only `manager` grant trips `would_orphan_owners_group` first.
 - A user cannot be archived (`users.archived_at`) while they
   are the sole active member of any `owners` group across the
   deployment. The error code is

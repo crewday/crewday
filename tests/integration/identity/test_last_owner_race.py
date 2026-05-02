@@ -334,6 +334,40 @@ def _owners_member_count(factory: sessionmaker[Session], workspace_id: str) -> i
         return len(session.scalars(stmt).all())
 
 
+def _owners_with_manager_grant_count(
+    factory: sessionmaker[Session], workspace_id: str
+) -> int:
+    """Return the count of owners-group members who hold a manager grant.
+
+    Probes the §02 "administrative reach" invariant directly: a
+    workspace whose count drops to zero is administratively
+    decapitated even when the ``owners`` roster itself is populated
+    (cd-nj8m). Wrapped in :func:`tenant_agnostic` so the test can
+    inspect the post-commit state without juggling a context.
+    """
+    with factory() as session, tenant_agnostic():
+        stmt = (
+            select(PermissionGroupMember.user_id)
+            .join(
+                PermissionGroup,
+                PermissionGroup.id == PermissionGroupMember.group_id,
+            )
+            .join(
+                RoleGrant,
+                (RoleGrant.user_id == PermissionGroupMember.user_id)
+                & (RoleGrant.workspace_id == workspace_id)
+                & (RoleGrant.grant_role == "manager"),
+            )
+            .where(
+                PermissionGroup.workspace_id == workspace_id,
+                PermissionGroup.slug == "owners",
+                PermissionGroup.system.is_(True),
+            )
+            .distinct()
+        )
+        return len(session.scalars(stmt).all())
+
+
 @dataclass
 class _RaceResult:
     """Aggregate outcomes across two racing threads.
@@ -627,3 +661,103 @@ class TestRevokeSoloOwnerRace:
                 )
             finally:
                 _scrub_workspace(factory, workspace.id)
+
+
+class TestRevokeManagerGrantRace:
+    """Two threads race :func:`revoke` on different owners' manager grants.
+
+    Pre-state: ``owners@<ws>`` has members A and B; each holds one
+    ``manager`` grant on the workspace. Two threads simultaneously
+    call ``revoke(A-manager-grant)`` and ``revoke(B-manager-grant)``.
+
+    Without the broader §02 invariant — "owners has at least one
+    member who carries a live manager grant" — both threads serialise
+    on the cd-mb5n lock, both observe ``owners_member_count == 2``
+    (membership doesn't change when only a grant is deleted), both
+    proceed, and the workspace is left with 2 owners-group members
+    and **0** manager grants. Nobody can administer it.
+
+    With the cd-nj8m fix in place, the count under the lock counts
+    owners who would *still* hold a manager grant after the pending
+    delete. The first revoke takes the count from 2 → 1, the second
+    re-reads 1 → 0 and refuses with :class:`LastOwnerGrantProtected`.
+
+    This is the exact scenario cd-nj8m exists to fix.
+    """
+
+    def test_exactly_one_revoke_succeeds_under_concurrency(
+        self, isolated_engine: Engine
+    ) -> None:
+        factory = _session_factory(isolated_engine)
+
+        for i in range(_ITERATIONS):
+            ws = _bootstrap_two_owner_workspace(factory, slug_suffix=f"mgr-{i:02d}")
+
+            start = threading.Barrier(2)
+            result = _new_race_result()
+
+            # Thread A revokes owner B's manager grant (acting as A).
+            # Thread B revokes owner A's manager grant (acting as B).
+            # Each worker holds its own owner's :class:`WorkspaceContext`
+            # so the audit row's actor field reflects the human who
+            # initiated the revoke, not a shared bystander.
+            t1 = threading.Thread(
+                target=_revoke_worker,
+                kwargs={
+                    "factory": factory,
+                    "workspace_id": ws.workspace_id,
+                    "workspace_slug": ws.workspace_slug,
+                    "actor_id": ws.owner_a_id,
+                    "grant_id": ws.owner_b_grant_id,
+                    "start": start,
+                    "result": result,
+                },
+            )
+            t2 = threading.Thread(
+                target=_revoke_worker,
+                kwargs={
+                    "factory": factory,
+                    "workspace_id": ws.workspace_id,
+                    "workspace_slug": ws.workspace_slug,
+                    "actor_id": ws.owner_b_id,
+                    "grant_id": ws.owner_a_grant_id,
+                    "start": start,
+                    "result": result,
+                },
+            )
+            t1.start()
+            t2.start()
+            t1.join(timeout=15)
+            t2.join(timeout=15)
+
+            try:
+                # Invariant (§02 admin-reach): the workspace always has
+                # at least one owners-group member holding a manager
+                # grant after the race settles.
+                assert (
+                    _owners_with_manager_grant_count(factory, ws.workspace_id) >= 1
+                ), (
+                    f"iteration {i}: workspace decapitated — "
+                    f"successes={result.successes}, errors={result.errors}"
+                )
+                # Exactly one revoke succeeded; the other refused.
+                assert len(result.successes) == 1, (
+                    f"iteration {i}: expected 1 success, got "
+                    f"{len(result.successes)} (successes={result.successes}, "
+                    f"errors={result.errors})"
+                )
+                assert any(
+                    isinstance(e, LastOwnerGrantProtected) for e in result.errors
+                ), (
+                    f"iteration {i}: expected a LastOwnerGrantProtected refusal, "
+                    f"got errors={result.errors}"
+                )
+                # Membership is untouched — only one of the two
+                # ``manager`` grants was deleted.
+                assert _owners_member_count(factory, ws.workspace_id) == 2, (
+                    f"iteration {i}: owners-group membership unexpectedly "
+                    f"changed (count="
+                    f"{_owners_member_count(factory, ws.workspace_id)})"
+                )
+            finally:
+                _scrub_workspace(factory, ws.workspace_id)

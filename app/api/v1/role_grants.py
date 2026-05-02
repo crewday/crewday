@@ -450,10 +450,14 @@ def build_role_grants_router() -> APIRouter:
     ) -> Response:
         """Hard-delete the row (v1 has no ``revoked_at`` column yet).
 
-        The last-owner guard fires at the domain layer for ``manager``
-        grants belonging to the sole owners-group member; the router
-        maps it to 409 ``last_owner_grant_protected`` so the SPA can
-        prompt the operator to transfer owners-membership first.
+        The last-owner guard fires at the domain layer for any
+        ``manager`` revoke whose removal would leave
+        ``owners@<workspace>`` with **zero** members holding a live
+        ``manager`` grant on the workspace (§02 admin-reach
+        invariant, cd-nj8m); the router maps it to 409
+        ``last_owner_grant_protected`` so the SPA can prompt the
+        operator to mint a replacement ``manager`` grant on another
+        owners-group member first.
         """
         try:
             revoke(SqlAlchemyRoleGrantRepository(session), ctx, grant_id=grant_id)

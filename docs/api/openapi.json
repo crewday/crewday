@@ -70251,7 +70251,7 @@
     },
     "/w/{slug}/api/v1/role_grants/{grant_id}": {
       "delete": {
-        "description": "Hard-delete the row (v1 has no ``revoked_at`` column yet).\n\nThe last-owner guard fires at the domain layer for ``manager``\ngrants belonging to the sole owners-group member; the router\nmaps it to 409 ``last_owner_grant_protected`` so the SPA can\nprompt the operator to transfer owners-membership first.",
+        "description": "Hard-delete the row (v1 has no ``revoked_at`` column yet).\n\nThe last-owner guard fires at the domain layer for any\n``manager`` revoke whose removal would leave\n``owners@<workspace>`` with **zero** members holding a live\n``manager`` grant on the workspace (\u00a702 admin-reach\ninvariant, cd-nj8m); the router maps it to 409\n``last_owner_grant_protected`` so the SPA can prompt the\noperator to mint a replacement ``manager`` grant on another\nowners-group member first.",
         "operationId": "role_grants.revoke",
         "parameters": [
           {

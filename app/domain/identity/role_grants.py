@@ -31,15 +31,17 @@ Summary of the rules enforced in this module:
   with cd-8u5; until then the junction join is the authoritative
   scoping gate.)
 * **Last-owner protection.** ``revoke`` refuses to remove a
-  ``manager`` grant that belongs to the **only** member of the
-  workspace's ``owners`` permission group. Owners-membership is a
-  distinct concept from role_grant (§02 "permission_group" —
-  owners is an explicit group), so losing the last
-  ``owners@<workspace>`` seat would lock every subsequent
-  governance operation out of the tenant. Other revokes are
-  unconstrained — the test matrix in
-  ``tests/integration/identity/test_role_grants.py`` documents the
-  full V1 boundary.
+  ``manager`` grant when doing so would leave ``owners@<workspace>``
+  with **zero** members who still hold a live ``manager`` grant on
+  the workspace (§02 "permission_group" §"Invariants" —
+  administrative-reach invariant, cd-nj8m). Owners-membership and
+  manager-grant-holding are two related but distinct concepts:
+  losing the last manager-holding owner locks every governance UI
+  out of the tenant even when the ``owners`` roster itself is
+  populated. Other revokes — non-manager grants, or manager grants
+  whose holder is not in ``owners`` — are unconstrained. The test
+  matrix in ``tests/integration/identity/test_role_grants.py``
+  documents the full V1 boundary.
 
 **Capability gates are NOT enforced here.** ``users.grant_role`` /
 ``users.revoke_grant`` (the §05 action-catalog entries) are the
@@ -64,7 +66,7 @@ adapters can import each other; only ``app.domain → app.adapters``
 is forbidden). The repo also threads its open
 :class:`~sqlalchemy.orm.Session` through ``repo.session`` so the
 audit writer (``app.audit.write_audit``), the locking primitive
-(:func:`app.domain.identity._owner_guard.count_owner_members_locked`),
+(:func:`app.domain.identity._owner_guard.count_owner_members_with_manager_grant_locked`),
 and the owners-membership lookup
 (:func:`app.authz.owners.is_owner_member`) keep using the same UoW.
 
@@ -83,7 +85,9 @@ from datetime import datetime
 
 from app.audit import write_audit
 from app.authz.owners import is_owner_member
-from app.domain.identity._owner_guard import count_owner_members_locked
+from app.domain.identity._owner_guard import (
+    count_owner_members_with_manager_grant_locked,
+)
 from app.domain.identity.ports import RoleGrantRepository, RoleGrantRow
 from app.tenancy import WorkspaceContext
 from app.util.clock import Clock, SystemClock
@@ -176,14 +180,16 @@ class CrossWorkspaceProperty(ValueError):
 
 
 class LastOwnerGrantProtected(ValueError):
-    """Refuse to revoke the last ``manager`` grant of the sole owner.
+    """Refuse to revoke the last ``manager`` grant held by an owner.
 
-    409-equivalent. Removing that row would leave the workspace with
-    a sole ``owners@<workspace>`` member who no longer carries the
-    manager surface — every governance UI would be out of reach
-    even though the permission-group row still exists. The caller
-    must transfer ``owners`` membership (or grant a replacement
-    ``manager`` grant first) before revoking the seat.
+    409-equivalent. Removing this row would leave ``owners@<workspace>``
+    with **zero** members who still carry a live ``manager`` grant on
+    the workspace — every governance UI would be out of reach even
+    though the ``owners`` roster itself remains populated. §02
+    "permission_group" §"Invariants" forbids that state (cd-nj8m).
+    The caller must mint a replacement ``manager`` grant on another
+    owners-group member (or move ``owners`` membership to a user who
+    already holds one) before revoking this seat.
     """
 
 
@@ -402,9 +408,10 @@ def revoke(
     * :class:`RoleGrantNotFound` — no row in the caller's workspace
       with that id.
     * :class:`LastOwnerGrantProtected` — the grant is a ``manager``
-      grant belonging to the sole member of
-      ``owners@<workspace>``. Transfer ``owners`` membership or
-      grant a replacement ``manager`` before removing this seat.
+      grant whose removal would leave ``owners@<workspace>`` with
+      zero members holding a live ``manager`` grant (§02 admin-reach
+      invariant, cd-nj8m). Mint a replacement ``manager`` grant on
+      another owners-group member before revoking this seat.
 
     ``clock`` is optional; tests pin the audit row's ``created_at``
     via a :class:`~app.util.clock.FrozenClock`.
@@ -412,25 +419,29 @@ def revoke(
     row = _load_grant(repo, ctx, grant_id=grant_id)
 
     # V1 pragmatic rule (see module docstring): only ``manager`` revokes
-    # interact with owners-membership. Worker / client / guest revokes
-    # never affect the owners governance anchor, so they always pass.
-    if row.grant_role == "manager" and is_owner_member(
-        repo.session, workspace_id=ctx.workspace_id, user_id=row.user_id
-    ):
-        # :func:`count_owner_members_locked` takes a write lock on the
-        # owners-group row before counting so a concurrent
-        # ``remove_member`` / ``revoke`` can't observe the pre-change
-        # count and race us to an empty governance seat (cd-mb5n).
-        owner_count = count_owner_members_locked(
-            repo.session, workspace_id=ctx.workspace_id
+    # can ever reduce the count of "owners-group members holding a live
+    # manager grant" — worker / client / guest revokes never affect the
+    # governance anchor and always pass.
+    if row.grant_role == "manager":
+        # :func:`count_owner_members_with_manager_grant_locked` takes
+        # the same lock on the owners-group row as
+        # :func:`count_owner_members_locked` does, then counts the
+        # users who are BOTH in ``owners@<ws>`` AND hold at least one
+        # ``manager`` grant — excluding the row we're about to delete.
+        # The shared lock serialises the membership-removal and
+        # grant-revoke guards so a concurrent ``remove_member`` /
+        # ``revoke`` on the same workspace cannot race us to a state
+        # where the count silently tips to zero (cd-mb5n + cd-nj8m).
+        remaining = count_owner_members_with_manager_grant_locked(
+            repo.session,
+            workspace_id=ctx.workspace_id,
+            exclude_grant_id=grant_id,
         )
-        # The caller's workspace always has ≥ 1 owner (§02
-        # "permission_group" §"Invariants"); the count check protects
-        # against the ``owner_count == 1`` lockout specifically.
-        if owner_count <= 1:
+        if remaining == 0:
             raise LastOwnerGrantProtected(
-                "cannot remove last owner's manager grant; "
-                "transfer owners-membership first"
+                "cannot remove last manager grant on owners group; "
+                "mint a replacement manager grant on another owners "
+                "member first"
             )
 
     # Snapshot the fields the audit row needs before the DELETE; once
