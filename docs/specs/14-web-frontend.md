@@ -241,6 +241,17 @@ tokens                         settings
 kb
 ```
 
+No workspace-admin SPA pages exist in v1. The
+`/w/<slug>/api/v1/admin/*` tree (OpenAPI tag `workspace_admin`,
+CLI group `workspace-admin` per §13) is a reserved seat for
+future per-workspace security or health views — when the first
+one lands, add it to the list above. The deployment-scope
+signup-abuse feed at `/admin/signups` (§15 "Self-serve abuse
+mitigations") is **not** part of this list: it lives in the
+"Admin (bare host, deployment-admin grant only)" tree above
+because pre-verification signup signals have no workspace to
+scope to (cd-1h7k).
+
 The `documents` page renders an **Extraction** badge per row
 (`pending`, `extracting`, `succeeded`, `failed`, `unsupported`,
 `empty`) sourced from the `asset_document.extraction_status`

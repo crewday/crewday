@@ -548,15 +548,16 @@ crewday surface
   --json                            # dump _surface.json for programmatic discovery
 ```
 
-### `crewday admin` vs `crewday deploy`
+### `crewday admin` vs `crewday deploy` vs `crewday workspace-admin`
 
-The CLI has two distinct administrative surfaces; they are
+The CLI has three distinct administrative surfaces; they are
 intentionally separate groups with different security models.
 
-| group              | transport                          | auth                                     | typical caller                     |
-|--------------------|------------------------------------|------------------------------------------|-----------------------------------|
-| `crewday admin`    | **no HTTP** — runs in-process      | shell access to the container            | the operator on the host          |
-| `crewday deploy`   | HTTP → `/admin/api/v1/*`           | passkey session or deployment-scoped token | any deployment admin, from anywhere |
+| group                     | transport                          | auth                                     | typical caller                     |
+|---------------------------|------------------------------------|------------------------------------------|-----------------------------------|
+| `crewday admin`           | **no HTTP** — runs in-process      | shell access to the container            | the operator on the host          |
+| `crewday deploy`          | HTTP → `/admin/api/v1/*`           | passkey session or deployment-scoped token | any deployment admin, from anywhere |
+| `crewday workspace-admin` | HTTP → `/w/<slug>/api/v1/admin/*`  | workspace passkey session or workspace-scoped token; future routes will gate on `admin.view` (§05 action catalog) | any workspace owner / manager with the bit |
 
 `crewday admin` keeps its existing host-CLI-only verb list
 (`init`, `user invite`, `workspace bootstrap`, `recover`,
@@ -586,6 +587,26 @@ the default model runs `crewday deploy` from their laptop.
 workspaces set-cap` do the same write to the same row — the
 difference is which principal is allowed to issue it and how
 the audit row is tagged.
+
+`crewday workspace-admin` is the workspace-scoped HTTP admin
+group. Its routes mount under `/w/<slug>/api/v1/admin/*` and
+target the OpenAPI tag `workspace_admin`. The group is the
+reserved seat for workspace-level security and health views that
+don't fit any single bounded context; pre-workspace signup-abuse
+signals do **not** live here — cd-1h7k resolved `/admin/signups`
+as a deployment-admin surface, since pre-verification signals
+have no workspace to scope to (see §15 "Self-serve abuse
+mitigations"). v1 ships no verbs in this group yet; the first
+verb lands with the next workspace-admin route. The group is
+selected by the global `--workspace <slug>` flag (§12 "Workspace
+slug in the CLI") like any other workspace-scoped group.
+
+Naming convention reminder: per §12 "`operationId` convention",
+operation ids are dotted and underscored (`workspace_admin.*`);
+per §13 "Command tree", CLI groups are dashed
+(`workspace-admin`). The mismatch between the OpenAPI tag /
+operation-id prefix and the CLI group name is by design — do not
+"harmonise" one to match the other.
 
 ### Host-CLI-only admin commands vs interactive-session-only endpoints
 
