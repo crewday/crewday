@@ -70,6 +70,7 @@ __all__ = [
     "PermissionGroupSlugTakenError",
     "RoleGrantRepository",
     "RoleGrantRow",
+    "RoleGrantUserNotFoundError",
     "UserWorkRoleRow",
     "UserWorkspaceRow",
     "WorkEngagementRow",
@@ -147,6 +148,23 @@ class PermissionGroupSlugTakenError(Exception):
     The domain re-raises this as the public-surface
     :class:`app.domain.identity.permission_groups.PermissionGroupSlugTaken`
     so HTTP handlers keep their existing 409 mapping.
+    """
+
+
+class RoleGrantUserNotFoundError(Exception):
+    """The ``role_grant.user_id -> user.id`` FK rejected an insert.
+
+    Seam-level analogue of :class:`PermissionGroupSlugTakenError` —
+    the SA concretion wraps the deferred FK :class:`IntegrityError`
+    in a SAVEPOINT so the outer transaction survives, then re-raises
+    this typed exception so the domain layer can ``except`` on it
+    without importing :class:`sqlalchemy.exc.IntegrityError`. The
+    domain pre-flight already calls
+    :meth:`RoleGrantRepository.user_exists`; this fallback only
+    fires under READ COMMITTED Postgres if the user is archived
+    between the probe and the insert. The domain re-raises as
+    :class:`app.domain.identity.role_grants.RoleGrantUserNotFound`
+    so the HTTP router maps it to a 404 ``user_not_found`` envelope.
     """
 
 
@@ -368,6 +386,22 @@ class RoleGrantRepository(Protocol):
         property id returns ``False`` the same way a sibling-workspace
         id does; the caller maps both to a single
         ``CrossWorkspaceProperty`` error.
+        """
+        ...
+
+    def user_exists(self, *, user_id: str) -> bool:
+        """Return ``True`` iff ``user_id`` references a live ``user`` row.
+
+        The ``user`` table is tenant-agnostic (one row per human across
+        the deployment) so this is a pure existence probe — the caller
+        :func:`~app.domain.identity.role_grants.grant` uses it as a
+        pre-flight check so a non-existent ``user_id`` lands a clean
+        404 ``user_not_found`` rather than an ``IntegrityError`` at
+        flush time on the ``role_grant.user_id -> user.id`` FK.
+        Archived users (``user.archived_at IS NOT NULL``) are excluded
+        so a fresh grant cannot land on a tombstoned identity —
+        mirrors the admin-side precedent at
+        :func:`app.api.admin.admins._resolve_user`.
         """
         ...
 

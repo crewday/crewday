@@ -34,6 +34,7 @@ from app.adapters.db.authz.models import (
     PermissionGroupMember,
     RoleGrant,
 )
+from app.adapters.db.identity.models import User
 from app.adapters.db.places.models import PropertyWorkspace
 from app.domain.identity.ports import (
     PermissionGroupMemberRow,
@@ -42,6 +43,7 @@ from app.domain.identity.ports import (
     PermissionGroupSlugTakenError,
     RoleGrantRepository,
     RoleGrantRow,
+    RoleGrantUserNotFoundError,
 )
 
 __all__ = [
@@ -338,6 +340,19 @@ class SqlAlchemyRoleGrantRepository(RoleGrantRepository):
         )
         return bool(self._session.scalar(stmt))
 
+    def user_exists(self, *, user_id: str) -> bool:
+        # ``user`` is tenant-agnostic (registered without scope in
+        # :mod:`app.adapters.db.identity.__init__`) so the ORM filter
+        # leaves the SELECT alone — a plain primary-key probe is the
+        # cheapest existence check and avoids loading any columns into
+        # the identity map. Archived users (``archived_at IS NOT NULL``)
+        # are excluded so a fresh grant cannot land on a tombstoned
+        # identity — matches the admin-side precedent at
+        # :func:`app.api.admin.admins._resolve_user` which surfaces
+        # archived rows as ``user_not_found``.
+        stmt = select(exists().where(User.id == user_id, User.archived_at.is_(None)))
+        return bool(self._session.scalar(stmt))
+
     # -- Writes ----------------------------------------------------------
 
     def insert_grant(
@@ -361,8 +376,22 @@ class SqlAlchemyRoleGrantRepository(RoleGrantRepository):
             created_at=created_at,
             created_by_user_id=created_by_user_id,
         )
+        # Wrap the flush in a SAVEPOINT so a deferred FK violation
+        # (``role_grant.user_id -> user.id``) rolls back only the
+        # failed INSERT — the caller's outer transaction stays
+        # intact. The domain service runs a pre-flight existence
+        # check (:func:`RoleGrantRepository.user_exists`); this catch
+        # is the race-safety fallback under READ COMMITTED Postgres
+        # where a concurrent user-archive could win between the probe
+        # and the insert.
+        nested = self._session.begin_nested()
         self._session.add(row)
-        self._session.flush()
+        try:
+            self._session.flush()
+        except IntegrityError as exc:
+            nested.rollback()
+            raise RoleGrantUserNotFoundError(user_id) from exc
+        nested.commit()
         return _to_grant_row(row)
 
     def delete_grant(self, *, workspace_id: str, grant_id: str) -> None:

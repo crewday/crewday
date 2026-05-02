@@ -64,6 +64,7 @@ from app.api.pagination import (
     paginate,
 )
 from app.domain.identity.user_availability_overrides import (
+    UserAvailabilityOverrideAlreadyExists,
     UserAvailabilityOverrideCreate,
     UserAvailabilityOverrideInvariantViolated,
     UserAvailabilityOverrideListFilter,
@@ -336,6 +337,22 @@ def _http_for_transition(
     )
 
 
+def _http_for_override_exists(
+    exc: UserAvailabilityOverrideAlreadyExists,
+) -> HTTPException:
+    """Map the duplicate-``(user_id, date)`` rejection to 409.
+
+    Replaces the previous opaque 500 from the
+    ``UNIQUE(workspace_id, user_id, date)`` IntegrityError so callers
+    receive a documented ``override_exists`` envelope (§12 REST API,
+    409 conflict).
+    """
+    return HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail={"error": "override_exists", "message": str(exc)},
+    )
+
+
 def _approved_to_status(
     approved: bool | None,
 ) -> Literal["approved", "pending"] | None:
@@ -442,6 +459,22 @@ def build_user_availability_overrides_router() -> APIRouter:
         response_model=UserAvailabilityOverrideResponse,
         operation_id="user_availability_overrides.create",
         summary="Create a user_availability_override row",
+        responses={
+            status.HTTP_409_CONFLICT: {
+                "description": (
+                    "An override row already covers this ``(user_id, date)`` "
+                    "pair (``override_exists``)."
+                ),
+                "content": {
+                    "application/problem+json": {
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": True,
+                        }
+                    }
+                },
+            },
+        },
     )
     def create(
         body: UserAvailabilityOverrideCreateRequest,
@@ -455,7 +488,10 @@ def build_user_availability_overrides_router() -> APIRouter:
         create is gated on ``availability_overrides.edit_others`` and
         always lands auto-approved. Server computes
         ``approval_required`` per §06 "Approval logic (hybrid model)";
-        when ``False``, the row also auto-approves.
+        when ``False``, the row also auto-approves. A duplicate
+        ``(user_id, date)`` lands a 409 ``override_exists`` envelope
+        rather than the previous opaque 500 from the UNIQUE
+        IntegrityError.
         """
         service_body = UserAvailabilityOverrideCreate.model_validate(body.model_dump())
         repo, checker = make_seam_pair(session, ctx)
@@ -465,6 +501,8 @@ def build_user_availability_overrides_router() -> APIRouter:
             raise _http_for_permission_denied(exc) from exc
         except UserAvailabilityOverrideInvariantViolated as exc:
             raise _http_for_invariant(exc) from exc
+        except UserAvailabilityOverrideAlreadyExists as exc:
+            raise _http_for_override_exists(exc) from exc
         return _view_to_response(view)
 
     @api.patch(

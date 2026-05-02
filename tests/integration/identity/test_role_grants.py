@@ -44,6 +44,7 @@ from app.domain.identity.role_grants import (
     LastOwnerGrantProtected,
     NotAuthorizedForRole,
     RoleGrantNotFound,
+    RoleGrantUserNotFound,
     grant,
     list_grants,
     revoke,
@@ -298,6 +299,73 @@ class TestGrantRoleValidation:
             clock=FrozenClock(_PINNED),
         )
         assert ref.grant_role == role
+
+    def test_unknown_user_id_raises_user_not_found(
+        self, env: tuple[Session, WorkspaceContext]
+    ) -> None:
+        """An unknown ``user_id`` lands the typed 404 path, not a 500.
+
+        Previously, the FK ``role_grant.user_id -> user.id`` would only
+        trip at flush time and surface as :class:`IntegrityError` (HTTP
+        500). The pre-flight existence probe now raises
+        :class:`RoleGrantUserNotFound` so the router maps it to a 404
+        ``user_not_found`` envelope.
+        """
+        session, ctx = env
+        with pytest.raises(RoleGrantUserNotFound) as exc:
+            grant(
+                _rg_repo(session),
+                ctx,
+                user_id="0",
+                grant_role="worker",
+                clock=FrozenClock(_PINNED),
+            )
+        assert "0" in str(exc.value)
+        # No row landed (the pre-flight short-circuits before the INSERT
+        # runs, and even under the IntegrityError fallback the SAVEPOINT
+        # in :meth:`insert_grant` would have rolled it back).
+        leaked = session.scalars(
+            select(RoleGrant).where(RoleGrant.user_id == "0")
+        ).all()
+        assert leaked == []
+
+    def test_archived_user_id_raises_user_not_found(
+        self, env: tuple[Session, WorkspaceContext]
+    ) -> None:
+        """Archived users are tombstoned and reject the same as unknown ids.
+
+        ``user.archived_at IS NOT NULL`` means the identity has been
+        soft-deleted; the FK row physically remains so the insert
+        would silently succeed. Mirrors the admin-side precedent at
+        :func:`app.api.admin.admins._resolve_user` which collapses
+        archived rows into ``user_not_found`` so a fresh authority
+        cannot land on a tombstoned identity.
+        """
+        session, ctx = env
+        target = _add_second_user(
+            session, suffix="archived", clock=FrozenClock(_PINNED)
+        )
+        # Archive the user row directly — no service helper exists at
+        # this layer, and the DB-level ``archived_at`` flip is the
+        # canonical tombstone form.
+        from app.adapters.db.identity.models import User
+
+        user_row = session.scalars(select(User).where(User.id == target)).one()
+        user_row.archived_at = _PINNED
+        session.flush()
+
+        with pytest.raises(RoleGrantUserNotFound):
+            grant(
+                _rg_repo(session),
+                ctx,
+                user_id=target,
+                grant_role="worker",
+                clock=FrozenClock(_PINNED),
+            )
+        leaked = session.scalars(
+            select(RoleGrant).where(RoleGrant.user_id == target)
+        ).all()
+        assert leaked == []
 
 
 # ---------------------------------------------------------------------------

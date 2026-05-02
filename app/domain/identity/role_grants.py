@@ -88,7 +88,11 @@ from app.authz.owners import is_owner_member
 from app.domain.identity._owner_guard import (
     count_owner_members_with_manager_grant_locked,
 )
-from app.domain.identity.ports import RoleGrantRepository, RoleGrantRow
+from app.domain.identity.ports import (
+    RoleGrantRepository,
+    RoleGrantRow,
+    RoleGrantUserNotFoundError,
+)
 from app.tenancy import WorkspaceContext
 from app.util.clock import Clock, SystemClock
 from app.util.ulid import new_ulid
@@ -100,6 +104,7 @@ __all__ = [
     "NotAuthorizedForRole",
     "RoleGrantNotFound",
     "RoleGrantRef",
+    "RoleGrantUserNotFound",
     "grant",
     "list_grants",
     "revoke",
@@ -147,6 +152,18 @@ class RoleGrantRef:
 
 class RoleGrantNotFound(LookupError):
     """The requested grant does not exist in the caller's workspace."""
+
+
+class RoleGrantUserNotFound(LookupError):
+    """``user_id`` does not reference a live ``user`` row.
+
+    404-equivalent. Raised when the caller asks to mint a grant for a
+    user id that no ``user`` row carries — the ``user`` table is
+    tenant-agnostic, so this is a pure existence probe and is
+    independent of whether the user is currently a member of the
+    workspace. The HTTP router maps this to a ``user_not_found``
+    envelope rather than letting the FK violation surface as a 500.
+    """
 
 
 class GrantRoleInvalid(ValueError):
@@ -349,6 +366,11 @@ def grant(
       sufficient for the requested role.
     * :class:`CrossWorkspaceProperty` — ``scope_property_id`` does
       not reference a property linked to the caller's workspace.
+    * :class:`RoleGrantUserNotFound` — ``user_id`` does not reference
+      a live ``user`` row. Raised by the pre-flight existence probe
+      (cheap path) and by the seam-level fallback that catches the
+      deferred FK violation if the user is archived between the
+      probe and the flush under READ COMMITTED Postgres.
 
     ``clock`` is optional; tests pin ``created_at`` via a
     :class:`~app.util.clock.FrozenClock`.
@@ -363,16 +385,29 @@ def grant(
             repo, ctx, scope_property_id=scope_property_id
         )
 
+    # Pre-flight existence probe so an unknown ``user_id`` lands a
+    # clean 404 ``user_not_found`` instead of a deferred FK
+    # ``IntegrityError`` at flush time on
+    # ``role_grant.user_id -> user.id``. The seam-level
+    # ``RoleGrantUserNotFoundError`` (raised inside ``insert_grant``'s
+    # SAVEPOINT) is the race-safety fallback under READ COMMITTED
+    # Postgres if the user is archived between the probe and the insert.
+    if not repo.user_exists(user_id=user_id):
+        raise RoleGrantUserNotFound(user_id)
+
     now = (clock if clock is not None else SystemClock()).now()
-    row = repo.insert_grant(
-        grant_id=new_ulid(),
-        workspace_id=ctx.workspace_id,
-        user_id=user_id,
-        grant_role=grant_role,
-        scope_property_id=scope_property_id,
-        created_at=now,
-        created_by_user_id=ctx.actor_id,
-    )
+    try:
+        row = repo.insert_grant(
+            grant_id=new_ulid(),
+            workspace_id=ctx.workspace_id,
+            user_id=user_id,
+            grant_role=grant_role,
+            scope_property_id=scope_property_id,
+            created_at=now,
+            created_by_user_id=ctx.actor_id,
+        )
+    except RoleGrantUserNotFoundError as exc:
+        raise RoleGrantUserNotFound(user_id) from exc
 
     write_audit(
         repo.session,

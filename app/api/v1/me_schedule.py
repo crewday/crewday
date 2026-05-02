@@ -86,6 +86,7 @@ from app.domain.identity.me_schedule import (
     aggregate_schedule,
 )
 from app.domain.identity.user_availability_overrides import (
+    UserAvailabilityOverrideAlreadyExists,
     UserAvailabilityOverrideCreate,
     UserAvailabilityOverrideInvariantViolated,
     UserAvailabilityOverrideListFilter,
@@ -480,6 +481,22 @@ def build_me_schedule_router() -> APIRouter:
         response_model=UserAvailabilityOverrideResponse,
         operation_id="me.availability_overrides.create",
         summary="Create an availability override for the caller (always self-target)",
+        responses={
+            status.HTTP_409_CONFLICT: {
+                "description": (
+                    "An override row already covers this ``(user_id, date)`` "
+                    "pair (``override_exists``)."
+                ),
+                "content": {
+                    "application/problem+json": {
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": True,
+                        }
+                    }
+                },
+            },
+        },
     )
     def create_self_override(
         body: MeAvailabilityOverrideCreateRequest,
@@ -492,7 +509,9 @@ def build_me_schedule_router() -> APIRouter:
         logic (hybrid model)" matrix — adding hours auto-approves,
         narrowing or removing requires manager sign-off. The resolved
         state lands on the response so the UI does not need to
-        re-derive it.
+        re-derive it. A duplicate ``(user_id, date)`` lands a 409
+        ``override_exists`` envelope rather than the previous opaque
+        500 from the UNIQUE IntegrityError.
         """
         service_body = UserAvailabilityOverrideCreate(
             user_id=ctx.actor_id,
@@ -512,6 +531,11 @@ def build_me_schedule_router() -> APIRouter:
             ) from exc
         except UserAvailabilityOverrideInvariantViolated as exc:
             raise _http_for_override_invariant(exc) from exc
+        except UserAvailabilityOverrideAlreadyExists as exc:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={"error": "override_exists", "message": str(exc)},
+            ) from exc
         return _override_view_to_response(view)
 
     return api

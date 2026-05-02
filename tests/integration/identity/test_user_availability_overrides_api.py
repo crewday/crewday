@@ -518,3 +518,46 @@ class TestEndToEnd:
         ).json()
         assert page3["has_more"] is False
         assert len(page3["data"]) == 1
+
+    def test_duplicate_date_returns_409_override_exists(
+        self, api_factory: sessionmaker[Session]
+    ) -> None:
+        """Two overrides for the same ``(user_id, date)`` collide loudly.
+
+        The ``UNIQUE(workspace_id, user_id, date)`` constraint on
+        ``user_availability_override`` is unconditional. Previously,
+        a duplicate submit landed an ``IntegrityError`` (HTTP 500);
+        the pre-flight existence probe now raises
+        :class:`UserAvailabilityOverrideAlreadyExists` so the router
+        returns a typed 409 ``override_exists`` envelope.
+        """
+        ws_id, ws_slug, owner_id = _seed_workspace_with_owner(
+            api_factory, slug="uao-int-dup"
+        )
+        ctx = _ctx(
+            workspace_id=ws_id,
+            workspace_slug=ws_slug,
+            actor_id=owner_id,
+            grant_role="manager",
+            actor_was_owner_member=True,
+        )
+        client = TestClient(_build_app(api_factory, ctx), raise_server_exceptions=False)
+        first = client.post(
+            "/user_availability_overrides",
+            json={"date": "2026-05-04", "available": False, "user_id": owner_id},
+        )
+        assert first.status_code == 201, first.text
+
+        # Second submit for the same (user_id, date) must conflict.
+        second = client.post(
+            "/user_availability_overrides",
+            json={"date": "2026-05-04", "available": False, "user_id": owner_id},
+        )
+        assert second.status_code == 409, second.text
+        body = second.json()
+        assert body["detail"]["error"] == "override_exists"
+        # The earlier write survives — the SAVEPOINT keeps the outer UoW
+        # alive so the first row is still visible after the second
+        # request rolls back.
+        listing = client.get("/user_availability_overrides").json()
+        assert len(listing["data"]) == 1

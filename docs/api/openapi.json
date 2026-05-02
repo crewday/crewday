@@ -62410,7 +62410,7 @@
         }
       ],
       "post": {
-        "description": "Forward to :func:`create_override` with ``user_id = ctx.actor_id``.\n\nServer computes ``approval_required`` per the \u00a706 \"Approval\nlogic (hybrid model)\" matrix \u2014 adding hours auto-approves,\nnarrowing or removing requires manager sign-off. The resolved\nstate lands on the response so the UI does not need to\nre-derive it.",
+        "description": "Forward to :func:`create_override` with ``user_id = ctx.actor_id``.\n\nServer computes ``approval_required`` per the \u00a706 \"Approval\nlogic (hybrid model)\" matrix \u2014 adding hours auto-approves,\nnarrowing or removing requires manager sign-off. The resolved\nstate lands on the response so the UI does not need to\nre-derive it. A duplicate ``(user_id, date)`` lands a 409\n``override_exists`` envelope rather than the previous opaque\n500 from the UNIQUE IntegrityError.",
         "operationId": "me.availability_overrides.create",
         "requestBody": {
           "content": {
@@ -62432,6 +62432,17 @@
               }
             },
             "description": "Successful Response"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "An override row already covers this ``(user_id, date)`` pair (``override_exists``)."
           },
           "422": {
             "content": {
@@ -71576,7 +71587,7 @@
         }
       ],
       "post": {
-        "description": "Insert a new ``role_grant`` row.\n\nThe action gate (``role_grants.create``) cleared the caller for\nthe *write* operation; the \u00a705 owner-authority rule layered on\ntop \u2014 only owners may grant ``manager``, owners or active\nmanagers may grant ``worker`` / ``client`` / ``guest`` \u2014 fires\nat the domain layer and surfaces here as\n:class:`NotAuthorizedForRole` \u2192 403 ``not_authorized_for_role``.",
+        "description": "Insert a new ``role_grant`` row.\n\nThe action gate (``role_grants.create``) cleared the caller for\nthe *write* operation; the \u00a705 owner-authority rule layered on\ntop \u2014 only owners may grant ``manager``, owners or active\nmanagers may grant ``worker`` / ``client`` / ``guest`` \u2014 fires\nat the domain layer and surfaces here as\n:class:`NotAuthorizedForRole` \u2192 403 ``not_authorized_for_role``.\nAn unknown ``user_id`` lands a 404 ``user_not_found`` envelope\nrather than the previous opaque 500 from the FK violation.",
         "operationId": "role_grants.create",
         "requestBody": {
           "content": {
@@ -71598,6 +71609,17 @@
               }
             },
             "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Referenced ``user_id`` does not exist."
           },
           "422": {
             "content": {
@@ -80478,7 +80500,7 @@
         }
       ],
       "post": {
-        "description": "Insert a new user_availability_override row.\n\nSelf-submit (``user_id`` omitted or equal to the caller) is\ngated on ``availability_overrides.create_self``. Cross-user\ncreate is gated on ``availability_overrides.edit_others`` and\nalways lands auto-approved. Server computes\n``approval_required`` per \u00a706 \"Approval logic (hybrid model)\";\nwhen ``False``, the row also auto-approves.",
+        "description": "Insert a new user_availability_override row.\n\nSelf-submit (``user_id`` omitted or equal to the caller) is\ngated on ``availability_overrides.create_self``. Cross-user\ncreate is gated on ``availability_overrides.edit_others`` and\nalways lands auto-approved. Server computes\n``approval_required`` per \u00a706 \"Approval logic (hybrid model)\";\nwhen ``False``, the row also auto-approves. A duplicate\n``(user_id, date)`` lands a 409 ``override_exists`` envelope\nrather than the previous opaque 500 from the UNIQUE\nIntegrityError.",
         "operationId": "user_availability_overrides.create",
         "requestBody": {
           "content": {
@@ -80500,6 +80522,17 @@
               }
             },
             "description": "Successful Response"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "An override row already covers this ``(user_id, date)`` pair (``override_exists``)."
           },
           "422": {
             "content": {

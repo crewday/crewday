@@ -123,6 +123,7 @@ from app.audit import write_audit
 from app.domain.identity.availability_ports import (
     CapabilityChecker,
     SeamPermissionDenied,
+    UserAvailabilityOverrideExistsError,
     UserAvailabilityOverrideRepository,
     UserAvailabilityOverrideRow,
     UserWeeklyAvailabilityRow,
@@ -132,6 +133,7 @@ from app.util.clock import Clock, SystemClock
 from app.util.ulid import new_ulid
 
 __all__ = [
+    "UserAvailabilityOverrideAlreadyExists",
     "UserAvailabilityOverrideCreate",
     "UserAvailabilityOverrideInvariantViolated",
     "UserAvailabilityOverrideListFilter",
@@ -200,6 +202,20 @@ class UserAvailabilityOverrideTransitionForbidden(ValueError):
     Idempotency at the HTTP layer is the router's call — the service
     surfaces every "wrong state" as this single exception so the
     router can decide whether to short-circuit to 200 or surface 409.
+    """
+
+
+class UserAvailabilityOverrideAlreadyExists(ValueError):
+    """An override row already occupies ``(user_id, date)`` in this workspace.
+
+    409-equivalent. Raised by :func:`create_override` when the
+    pre-flight existence probe finds an existing row (live or
+    tombstoned — the ``UNIQUE(workspace_id, user_id, date)`` index is
+    unconditional) **or** when the seam-level
+    :class:`~app.domain.identity.availability_ports.UserAvailabilityOverrideExistsError`
+    bubbles up under a race. The HTTP router maps this to a
+    ``override_exists`` envelope so callers stop conflating "duplicate
+    submission" with the §06 BOTH-OR-NEITHER 422 invariant.
     """
 
 
@@ -684,21 +700,45 @@ def create_override(
     approved_at: datetime | None = now if auto_approve else None
     approved_by: str | None = ctx.actor_id if auto_approve else None
 
-    row_id = new_ulid(clock=clock)
-    row = repo.insert(
-        override_id=row_id,
+    # Pre-flight existence probe so a duplicate ``(user_id, date)`` lands
+    # a clean 409 ``override_exists`` rather than the unconditional
+    # ``UNIQUE(workspace_id, user_id, date)`` IntegrityError at flush
+    # time. The seam-level :class:`UserAvailabilityOverrideExistsError`
+    # raised inside ``insert``'s SAVEPOINT is the race-safety fallback
+    # under READ COMMITTED Postgres if a concurrent insert wins between
+    # the probe and the flush.
+    existing = repo.find_for_date(
         workspace_id=ctx.workspace_id,
         user_id=target_user_id,
         date=body.date,
-        available=body.available,
-        starts_local=body.starts_local,
-        ends_local=body.ends_local,
-        reason=body.reason,
-        approval_required=approval_required,
-        approved_at=approved_at,
-        approved_by=approved_by,
-        now=now,
     )
+    if existing is not None:
+        raise UserAvailabilityOverrideAlreadyExists(
+            f"override already exists for user {target_user_id!r} "
+            f"on {body.date.isoformat()}"
+        )
+
+    row_id = new_ulid(clock=clock)
+    try:
+        row = repo.insert(
+            override_id=row_id,
+            workspace_id=ctx.workspace_id,
+            user_id=target_user_id,
+            date=body.date,
+            available=body.available,
+            starts_local=body.starts_local,
+            ends_local=body.ends_local,
+            reason=body.reason,
+            approval_required=approval_required,
+            approved_at=approved_at,
+            approved_by=approved_by,
+            now=now,
+        )
+    except UserAvailabilityOverrideExistsError as exc:
+        raise UserAvailabilityOverrideAlreadyExists(
+            f"override already exists for user {target_user_id!r} "
+            f"on {body.date.isoformat()}"
+        ) from exc
 
     view = _row_to_view(row)
     write_audit(

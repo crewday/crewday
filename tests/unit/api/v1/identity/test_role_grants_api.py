@@ -173,6 +173,27 @@ class TestCreate:
         assert resp.status_code == 201, resp.text
         assert resp.json()["scope_property_id"] == prop_id
 
+    def test_unknown_user_id_returns_404_user_not_found(
+        self,
+        owner_ctx: tuple[WorkspaceContext, sessionmaker[Session], str],
+    ) -> None:
+        """A non-existent ``user_id`` lands a typed 404, not a 500.
+
+        Replaces the previous opaque 500 from the deferred FK
+        ``role_grant.user_id -> user.id`` violation. The pre-flight
+        existence probe in :func:`grant` raises
+        :class:`RoleGrantUserNotFound`; the router maps it to a 404
+        ``user_not_found`` envelope.
+        """
+        ctx, factory, _ = owner_ctx
+        client = _client(ctx, factory)
+        resp = client.post(
+            "/role_grants",
+            json={"user_id": "0", "grant_role": "worker"},
+        )
+        assert resp.status_code == 404, resp.text
+        assert resp.json()["detail"]["error"] == "user_not_found"
+
     def test_cross_workspace_property_returns_422(
         self,
         owner_ctx: tuple[WorkspaceContext, sessionmaker[Session], str],

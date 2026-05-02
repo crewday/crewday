@@ -37,6 +37,7 @@ from datetime import datetime, time
 from typing import Literal
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.adapters.db.availability.models import (
@@ -53,6 +54,7 @@ from app.authz import (
 from app.domain.identity.availability_ports import (
     CapabilityChecker,
     SeamPermissionDenied,
+    UserAvailabilityOverrideExistsError,
     UserAvailabilityOverrideRepository,
     UserAvailabilityOverrideRow,
     UserLeaveRepository,
@@ -192,6 +194,28 @@ class SqlAlchemyUserAvailabilityOverrideRepository(UserAvailabilityOverrideRepos
         ).one_or_none()
         return _to_weekly_row(row) if row is not None else None
 
+    def find_for_date(
+        self,
+        *,
+        workspace_id: str,
+        user_id: str,
+        date: _date_cls,
+    ) -> UserAvailabilityOverrideRow | None:
+        # The UNIQUE on ``(workspace_id, user_id, date)`` is
+        # unconditional — tombstoned rows still occupy the slot and
+        # would still trip the constraint on insert — so we look
+        # across both live and soft-deleted rows here. The caller in
+        # :func:`create_override` translates "any row exists" into a
+        # 409 ``override_exists`` envelope.
+        row = self._session.scalars(
+            select(UserAvailabilityOverride).where(
+                UserAvailabilityOverride.workspace_id == workspace_id,
+                UserAvailabilityOverride.user_id == user_id,
+                UserAvailabilityOverride.date == date,
+            )
+        ).one_or_none()
+        return _to_override_row(row) if row is not None else None
+
     # -- Writes ----------------------------------------------------------
 
     def insert(
@@ -226,8 +250,24 @@ class SqlAlchemyUserAvailabilityOverrideRepository(UserAvailabilityOverrideRepos
             updated_at=now,
             deleted_at=None,
         )
+        # Wrap the flush in a SAVEPOINT so the
+        # ``UNIQUE(workspace_id, user_id, date)`` IntegrityError rolls
+        # back only the failed INSERT — the caller's outer transaction
+        # stays intact along with any prior writes in the same UoW.
+        # The domain runs a pre-flight existence probe
+        # (:meth:`find_for_date`); this catch is the race-safety
+        # fallback under READ COMMITTED Postgres if a concurrent insert
+        # wins between the probe and the flush.
+        nested = self._session.begin_nested()
         self._session.add(row)
-        self._session.flush()
+        try:
+            self._session.flush()
+        except IntegrityError as exc:
+            nested.rollback()
+            raise UserAvailabilityOverrideExistsError(
+                f"override already exists for user {user_id!r} on {date.isoformat()!r}"
+            ) from exc
+        nested.commit()
         return _to_override_row(row)
 
     def update_fields(

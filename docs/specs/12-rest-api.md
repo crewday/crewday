@@ -1428,7 +1428,15 @@ POST   /me/avatar                 # multipart; self-only; replaces users.avatar_
 DELETE /me/avatar                 # self-only; clears avatar_file_id → initials fallback
 
 GET    /users/{id}/role_grants
-POST   /role_grants
+POST   /role_grants                          # body: {user_id, grant_role,
+                                             #   scope_property_id?}. 404
+                                             #   ``user_not_found`` when ``user_id``
+                                             #   does not reference a live user;
+                                             #   422 ``cross_workspace_property``
+                                             #   when ``scope_property_id`` is
+                                             #   not linked to the workspace;
+                                             #   403 ``not_authorized_for_role``
+                                             #   per §05 owner-authority.
 PATCH  /role_grants/{id}
 DELETE /role_grants/{id}
 
@@ -1547,7 +1555,11 @@ POST   /user_availability_overrides    # body: {user_id?, date, available,
                                        #   auto-approve regardless. ``starts_local``
                                        #   / ``ends_local`` are paired (BOTH-OR-NEITHER
                                        #   per §06); ``available=false`` requires both
-                                       #   null. 422 on a bad window or half-set hours.
+                                       #   null. 422 on a bad window or half-set hours;
+                                       #   409 ``override_exists`` when an override
+                                       #   already covers ``(user_id, date)`` —
+                                       #   the ``UNIQUE(workspace_id, user_id, date)``
+                                       #   index is unconditional (§02 "user_availability_override").
 PATCH  /user_availability_overrides/{id}  # body: {available?, starts_local?,
                                        #   ends_local?, reason?}. Pending-only; an
                                        #   approved override collapses to 409
@@ -1613,7 +1625,9 @@ POST   /me/availability_overrides         # body: {date, available, starts_local
                                           #     adding hours → auto-approved,
                                           #     reducing hours → pending.
                                           #   Returns 201 with resolved state so the
-                                          #   UI does not need to re-derive it.
+                                          #   UI does not need to re-derive it. 409
+                                          #   `override_exists` when an override
+                                          #   already covers `(caller, date)`.
 ```
 
 ### Tasks / templates / schedules

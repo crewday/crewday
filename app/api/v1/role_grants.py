@@ -71,6 +71,7 @@ from app.domain.identity.role_grants import (
     NotAuthorizedForRole,
     RoleGrantNotFound,
     RoleGrantRef,
+    RoleGrantUserNotFound,
     grant,
     list_grants,
     revoke,
@@ -221,6 +222,21 @@ def _http_for_cross_workspace(exc: CrossWorkspaceProperty) -> HTTPException:
     )
 
 
+def _http_for_user_not_found(exc: RoleGrantUserNotFound) -> HTTPException:
+    """Map the unknown-``user_id`` rejection to 404.
+
+    The domain pre-flight (:func:`RoleGrantRepository.user_exists`)
+    raised :class:`RoleGrantUserNotFound` so the FK ``role_grant.user_id
+    -> user.id`` never trips at flush time. The router projects it to a
+    404 ``user_not_found`` envelope so callers get the documented 4xx
+    instead of the previous opaque 500.
+    """
+    return HTTPException(
+        status_code=status.HTTP_404_NOT_FOUND,
+        detail={"error": "user_not_found", "message": str(exc)},
+    )
+
+
 def _http_for_unauthorised(exc: NotAuthorizedForRole) -> HTTPException:
     """Map the §05 owner-authority rejection to 403.
 
@@ -284,6 +300,19 @@ def build_role_grants_router() -> APIRouter:
         operation_id="role_grants.create",
         summary="Mint a new role grant in the caller's workspace",
         dependencies=[create_gate],
+        responses={
+            status.HTTP_404_NOT_FOUND: {
+                "description": "Referenced ``user_id`` does not exist.",
+                "content": {
+                    "application/problem+json": {
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": True,
+                        }
+                    }
+                },
+            },
+        },
         openapi_extra={
             "x-cli": {
                 "group": "role-grants",
@@ -306,6 +335,8 @@ def build_role_grants_router() -> APIRouter:
         managers may grant ``worker`` / ``client`` / ``guest`` — fires
         at the domain layer and surfaces here as
         :class:`NotAuthorizedForRole` → 403 ``not_authorized_for_role``.
+        An unknown ``user_id`` lands a 404 ``user_not_found`` envelope
+        rather than the previous opaque 500 from the FK violation.
         """
         try:
             ref = grant(
@@ -321,6 +352,8 @@ def build_role_grants_router() -> APIRouter:
             raise _http_for_unauthorised(exc) from exc
         except CrossWorkspaceProperty as exc:
             raise _http_for_cross_workspace(exc) from exc
+        except RoleGrantUserNotFound as exc:
+            raise _http_for_user_not_found(exc) from exc
         return _ref_to_response(ref)
 
     @api.patch(

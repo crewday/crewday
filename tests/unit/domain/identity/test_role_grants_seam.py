@@ -88,9 +88,17 @@ class _FakeRepo(RoleGrantRepository):
         *,
         property_in_workspace: bool = False,
         grants: list[RoleGrantRow] | None = None,
+        known_user_ids: frozenset[str] | None = None,
     ) -> None:
         self._property_in_workspace = property_in_workspace
         self._grants: dict[str, RoleGrantRow] = {g.id: g for g in (grants or [])}
+        # The pre-flight existence probe in :func:`grant` looks up
+        # ``user_id`` against this table; tests that don't care about
+        # the probe leave it empty and rely on the validation paths
+        # firing earlier (``GrantRoleInvalid`` etc.).
+        self._users: frozenset[str] = (
+            known_user_ids if known_user_ids is not None else frozenset()
+        )
         self._session = _FakeSession()
 
     @property
@@ -126,6 +134,9 @@ class _FakeRepo(RoleGrantRepository):
 
     def is_property_in_workspace(self, *, workspace_id: str, property_id: str) -> bool:
         return self._property_in_workspace
+
+    def user_exists(self, *, user_id: str) -> bool:
+        return user_id in self._users
 
     def insert_grant(
         self,

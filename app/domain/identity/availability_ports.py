@@ -80,6 +80,7 @@ from sqlalchemy.orm import Session
 __all__ = [
     "CapabilityChecker",
     "SeamPermissionDenied",
+    "UserAvailabilityOverrideExistsError",
     "UserAvailabilityOverrideRepository",
     "UserAvailabilityOverrideRow",
     "UserLeaveRepository",
@@ -110,6 +111,24 @@ class SeamPermissionDenied(Exception):
     :class:`~app.domain.identity.user_availability_overrides.UserAvailabilityOverridePermissionDenied`)
     so the router's error map stays narrow — one domain exception
     type per 403 envelope.
+    """
+
+
+class UserAvailabilityOverrideExistsError(Exception):
+    """The ``UNIQUE(workspace_id, user_id, date)`` constraint rejected an insert.
+
+    Seam-level analogue of
+    :class:`app.domain.identity.ports.PermissionGroupSlugTakenError` —
+    the SA concretion catches the :class:`sqlalchemy.exc.IntegrityError`
+    raised by the ``user_availability_override``
+    ``UNIQUE(workspace_id, user_id, date)`` constraint inside a
+    SAVEPOINT so the caller's outer transaction survives the rollback.
+    The domain service runs a pre-flight existence probe
+    (:meth:`UserAvailabilityOverrideRepository.find_for_date`); this
+    exception is the race-safety fallback under READ COMMITTED Postgres
+    if a concurrent insert wins between the probe and the flush. The domain re-raises as
+    :class:`app.domain.identity.user_availability_overrides.UserAvailabilityOverrideAlreadyExists`
+    so the HTTP router maps it to a 409 ``override_exists`` envelope.
     """
 
 
@@ -298,6 +317,26 @@ class UserAvailabilityOverrideRepository(Protocol):
         """
         ...
 
+    def find_for_date(
+        self,
+        *,
+        workspace_id: str,
+        user_id: str,
+        date: date,
+    ) -> UserAvailabilityOverrideRow | None:
+        """Return any existing override row for ``(user, date)`` or ``None``.
+
+        Used by :func:`~app.domain.identity.user_availability_overrides.create_override`
+        as a pre-flight probe so a duplicate-date submit lands a clean
+        409 ``override_exists`` rather than the ``UNIQUE(workspace_id,
+        user_id, date)`` :class:`IntegrityError` at flush time. The
+        UNIQUE is unconditional — tombstoned rows still occupy the
+        slot — so this method intentionally does **not** filter on
+        ``deleted_at`` (a soft-deleted row would still trip the
+        constraint on insert).
+        """
+        ...
+
     # -- Writes ----------------------------------------------------------
 
     def insert(
@@ -318,10 +357,15 @@ class UserAvailabilityOverrideRepository(Protocol):
     ) -> UserAvailabilityOverrideRow:
         """Insert a new ``user_availability_override`` row and return its projection.
 
-        Flushes so the caller's next read (and the audit writer's
-        FK reference to ``entity_id``) sees the new row. ``now`` is
-        the caller's clock-resolved insertion time — used for both
-        ``created_at`` and ``updated_at``.
+        Flushes inside a SAVEPOINT so a ``UNIQUE(workspace_id, user_id,
+        date)`` violation rolls back only the failed INSERT and the
+        caller's outer transaction (plus any earlier writes in the
+        same UoW) survives. Raises
+        :class:`UserAvailabilityOverrideExistsError` on the constraint
+        bounce — the domain re-raises it as a 409
+        ``override_exists`` envelope. ``now`` is the caller's
+        clock-resolved insertion time, used for both ``created_at``
+        and ``updated_at``.
         """
         ...
 
