@@ -26,11 +26,13 @@ hits before they can do real work:
    invite passkey trio (``/api/v1/invite/accept`` →
    ``/api/v1/invite/passkey/start`` →
    ``navigator.credentials.create()`` against the Chromium WebAuthn
-   virtual authenticator → ``/api/v1/invite/passkey/finish`` →
-   ``/api/v1/invite/complete``). cd-9q6bb shipped the bridging
-   ``/invite/passkey/{start,finish}`` routes precisely so this
-   journey could complete the ceremony without first holding a
-   session. Spec §03 "Additional users (invite → click-to-accept)".
+   virtual authenticator → ``/api/v1/invite/passkey/finish``).
+   cd-9q6bb shipped the bridging ``/invite/passkey/{start,finish}``
+   routes; cd-kd26 then folded the former ``/invite/complete``
+   second leg into the finish callback so the SPA gets the
+   ``workspace_id`` + redirect target back in one round trip
+   without a second public endpoint. Spec §03 "Additional users
+   (invite → click-to-accept)".
 4. **Worker login.** A real passkey assertion via
    ``/api/v1/auth/passkey/login/{start,finish}`` mints the worker's
    session cookie; :func:`mirror_dev_cookie_alias` projects it onto
@@ -187,15 +189,13 @@ def test_owner_invites_worker_and_worker_completes_first_task(
             },
             expected_status=200,
         )
+        # cd-kd26: ``/invite/passkey/finish`` now atomically lands the
+        # credential AND activates the pending grants, so the response
+        # body carries the redirect target directly — no second
+        # ``/invite/complete`` call required.
         assert finish_body["user_id"] == invitee_user_id
-
-        complete_body = _post_json(
-            invitee_page,
-            f"{base_url.rstrip('/')}/api/v1/invite/complete",
-            {"invite_id": invite_id},
-            expected_status=200,
-        )
-        assert complete_body["workspace_id"] == workspace_id
+        assert finish_body["workspace_id"] == workspace_id
+        assert finish_body["redirect"].endswith("/today")
 
         # ----- Worker phase: passkey login then task completion ------
         login_start = _post_json(

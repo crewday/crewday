@@ -759,21 +759,24 @@ POST   /api/v1/invites/{token}/accept            # activate the pending grants a
 # the SPA cutover only. New callers MUST target /api/v1/invites/{token}.
 POST   /api/v1/invite/accept                     # body: {token}; superseded by POST /invites/{token}/accept (cd-z6vm)
 
-# Bare-host invitee passkey enrolment (cd-9q6bb). Bridges the
-# `/invite/accept` response (kind=new_user → invite_id, user_id) and
-# `/invite/complete`: the SPA runs `navigator.credentials.create()` then
-# the finish handler verifies + persists the credential against the
-# invitee's pre-existing user row. Three authorisation gates: (1) the
+# Bare-host invitee passkey enrolment (cd-9q6bb, cd-kd26). The SPA
+# runs `navigator.credentials.create()` against the start-mintled
+# challenge, then the finish handler verifies + persists the credential
+# against the invitee's pre-existing user row AND activates the pending
+# grants in the same UoW (cd-kd26 folded the former
+# `/invite/complete` second leg in here so the SPA gets the redirect
+# target back in one round trip). Three authorisation gates: (1) the
 # matching `magic_link_nonce` must be consumed (i.e. `/invite/accept`
 # ran first — email-control proof against a leaked invite_id;
 # `passkey_session_required` 401 otherwise); (2) the invite is `pending`
 # and within TTL; (3) the linked user holds zero passkeys. Once the
 # first credential lands the route is closed for that invite, so a
 # leaked `invite_id` cannot mint a second uninvited passkey
-# (`passkey_already_registered` 409 signals the closure).
+# (`passkey_already_registered` 409 signals the closure; a finish
+# replay after the first success collapses onto 409 `already_accepted`
+# because the invite row is now in `state='accepted'`).
 POST   /api/v1/invite/passkey/start              # body: {invite_id}; mints WebAuthn challenge
-POST   /api/v1/invite/passkey/finish             # body: {invite_id, challenge_id, credential}
-POST   /api/v1/invite/complete                   # body: {invite_id}; activates grants once the passkey is on file
+POST   /api/v1/invite/passkey/finish             # body: {invite_id, challenge_id, credential}; persists passkey + activates grants atomically; returns {user_id, workspace_id, redirect}
 
 # Personal access tokens (§03 "Personal access tokens"). Identity-
 # scoped, passkey-session only, `me:*` scopes only, subject is always

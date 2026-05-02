@@ -45,7 +45,8 @@ HTTP_PATH_OPTOUTS: frozenset[str] = frozenset(
         "/api/v1/auth/passkey/login/start",
         "/api/v1/auth/passkey/login/finish",
         "/api/v1/invite/accept",
-        "/api/v1/invite/complete",
+        "/api/v1/invite/passkey/start",
+        "/api/v1/invite/passkey/finish",
         "/api/v1/invite/{invite_id}/confirm",
         # justification: OpenAPI + docs are documentation surfaces,
         # deployment-scoped and read-only (§12 "Base URL").

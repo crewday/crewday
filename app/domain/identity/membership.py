@@ -21,8 +21,10 @@ High-level surface:
   render a "here's what will activate" confirmation dialog. A
   missing passkey session surfaces as :class:`PasskeySessionRequired`
   so the SPA can prompt sign-in first.
-* :func:`complete_invite` — second leg of acceptance for a brand-new
-  invitee, called by the passkey-finish hook. One transaction:
+* :func:`complete_invite` — activates the pending invite for a
+  brand-new invitee. cd-kd26: invoked **only** from
+  :func:`register_invite_passkey_finish` inside the same UoW as the
+  credential insert (no public HTTP surface). One transaction:
   insert the ``role_grant`` + ``permission_group_member`` rows, flip
   the invite to ``accepted``, emit ``user.enrolled`` audit. The
   derived :class:`UserWorkspace` row materialises on the next
@@ -164,6 +166,7 @@ __all__ = [
     "InviteNotFound",
     "InviteOutcome",
     "InvitePasskeyAlreadyRegistered",
+    "InvitePasskeyFinishOutcome",
     "InviteSession",
     "InviteStateInvalid",
     "NewUserAcceptance",
@@ -381,6 +384,23 @@ class PruneStaleInvitesReport:
 
     expired_count: int
     expired_ids: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class InvitePasskeyFinishOutcome:
+    """Return payload of :func:`register_invite_passkey_finish`.
+
+    cd-kd26 folded the new-user invite-complete second leg into the
+    passkey-finish callback: the same UoW that verifies the
+    attestation and inserts the credential now also activates the
+    pending grants and emits the ``user.enrolled`` audit. The HTTP
+    handler returns the freshly-resolved ``workspace_id`` so the SPA
+    can redirect to ``/w/<slug>/today`` in one round trip — no second
+    ``/invite/complete`` call required.
+    """
+
+    credential: passkey_service.PasskeyCredentialRef
+    workspace_id: str
 
 
 # ---------------------------------------------------------------------------
@@ -1526,7 +1546,9 @@ def consume_invite_token(
       ``user.created_at`` equals the invite's own ``created_at``
       (i.e. we spawned the user row at invite time, no passkey yet).
       Caller pipes the :class:`InviteSession` into the passkey
-      enrol ceremony and calls :func:`complete_invite` on finish.
+      enrol ceremony; cd-kd26 folded the second leg into
+      :func:`register_invite_passkey_finish`, so finish-success now
+      activates the grants atomically.
     * :class:`ExistingUserAcceptance` — the token matches an invite
       whose user already has a passkey. Requires an active session
       scoped to that user; the SPA renders an Acceptance card and
@@ -1595,8 +1617,10 @@ def consume_invite_token(
     has_passkey = _user_has_passkey(session, user_id=user_id)
 
     if not has_passkey:
-        # New user — no passkey yet. The passkey ceremony runs next,
-        # and :func:`complete_invite` completes the accept.
+        # New user — no passkey yet. The passkey ceremony runs next;
+        # cd-kd26 folded the accept-completion into
+        # :func:`register_invite_passkey_finish`, so finish-success
+        # activates the grants atomically.
         with tenant_agnostic():
             user = session.get(User, user_id)
         if user is None:
@@ -1984,23 +2008,27 @@ def complete_invite(
     settings: Settings | None = None,
     clock: Clock | None = None,
 ) -> str:
-    """Second leg — activate the invite for a brand-new invitee.
+    """Activate the pending invite for a brand-new invitee.
 
-    Called from the passkey-finish hook after the invitee's fresh
-    credential lands. One transaction: insert role_grant +
-    permission_group_member + user_workspace, flip the invite to
-    ``accepted``, audit ``user.enrolled``.
+    cd-kd26: invoked **only** from
+    :func:`register_invite_passkey_finish` inside the same UoW as the
+    credential insert. Not exposed over HTTP — the SPA receives the
+    redirect target from ``/invite/passkey/finish`` directly. One
+    transaction: insert role_grant + permission_group_member +
+    user_workspace, flip the invite to ``accepted``, audit
+    ``user.enrolled``.
 
-    **Authorisation gate.** The only client evidence this function
+    **Authorisation gate.** The only domain evidence this function
     receives is the ``invite_id``; a ULID is not a secret. To stop a
-    bare ``POST /invite/complete`` with a guessed / leaked id from
-    activating grants, we require that the invite's linked user
-    holds at least one registered :class:`PasskeyCredential` at the
-    moment of this call. The passkey enrol ceremony writes the
-    credential row before the SPA reaches this hook, so on the happy
-    path the check is a single cheap SELECT; on the attack path, the
-    invite is pending + user has no passkey yet and we raise
-    :class:`PasskeySessionRequired` (mapped to 401 by the router).
+    guessed / leaked id from activating grants, we require that the
+    invite's linked user holds at least one registered
+    :class:`PasskeyCredential` at the moment of this call. The
+    passkey enrol ceremony writes the credential row immediately
+    before this call, so on the happy path the check is a single
+    cheap SELECT; defensively, we still raise
+    :class:`PasskeySessionRequired` (mapped to 401 by the router) if
+    a future caller invokes this function without the credential row
+    in place.
 
     Returns the target workspace's id so the router can redirect
     the SPA to ``/w/<slug>/today``.
@@ -2022,22 +2050,25 @@ def complete_invite(
             f"invite {invite_id!r} carries no user_id; cannot complete"
         )
 
-    # Authorisation gate — see docstring. Until cd-kd26 folds the
-    # completion into the passkey-finish hook, we guard on
-    # passkey-presence: the enrolment ceremony MUST have landed a
-    # credential before ``/invite/complete`` is reachable.
+    # Authorisation gate — see docstring. The caller
+    # (:func:`register_invite_passkey_finish`) inserts the credential
+    # row in the same UoW immediately before reaching this point, so
+    # the check is a defence-in-depth assertion: a future caller that
+    # forgets to land the credential would otherwise activate grants
+    # on a half-built user.
     if not _user_has_passkey(session, user_id=user_id):
         raise PasskeySessionRequired(
             f"invite {invite_id!r}: linked user {user_id!r} has no "
             "passkey registered; the enrolment ceremony must complete "
-            "before /invite/complete is called"
+            "before complete_invite is called"
         )
 
     # Build a user-scoped ctx attributing the audit row to the
     # freshly-enrolled user (same pattern as :func:`app.auth.signup.complete_signup`).
     #
-    # ``principal_kind="system"``: ``POST /invite/complete`` is the
-    # public new-user passkey-finish hook — the invitee has no
+    # ``principal_kind="system"``: this runs from the bare-host
+    # ``/invite/passkey/finish`` callback (cd-kd26 folded the former
+    # ``/invite/complete`` second leg in here) — the invitee has no
     # session cookie yet (they were just created), so the request
     # carries neither cookie nor bearer header. The audit row keeps
     # ``actor_kind="user"`` (attributing the enrolment to the
@@ -2056,7 +2087,7 @@ def complete_invite(
         principal_kind="system",
     )
 
-    # ``POST /invite/complete`` is a bare-host route: the tenancy
+    # ``/invite/passkey/finish`` is a bare-host route: the tenancy
     # middleware never installed a :class:`WorkspaceContext`, so the
     # ContextVar the orm tenant filter reads is unset. Without this
     # explicit push, ``seed_pending_work_engagement``'s SELECT against
@@ -2105,8 +2136,8 @@ def confirm_invite(
             f"does not match invite user {invite_row.user_id!r}"
         )
     # ``POST /invite/{invite_id}/confirm`` is a bare-host route just
-    # like ``/invite/complete``: the tenancy middleware skipped, so
-    # the ContextVar the orm tenant filter reads is unset and
+    # like ``/invite/passkey/finish``: the tenancy middleware skipped,
+    # so the ContextVar the orm tenant filter reads is unset and
     # :func:`_activate_invite`'s downstream call to
     # ``seed_pending_work_engagement`` would raise
     # :class:`~app.tenancy.orm_filter.TenantFilterMissing`. Mirror the
@@ -2128,7 +2159,8 @@ def confirm_invite(
 
 
 # ---------------------------------------------------------------------------
-# Invitee passkey enrolment (bridges /invite/accept and /invite/complete)
+# Invitee passkey enrolment (cd-9q6bb bridge; cd-kd26 folded the second
+# leg into ``register_invite_passkey_finish``)
 # ---------------------------------------------------------------------------
 
 
@@ -2229,12 +2261,13 @@ def register_invite_passkey_start(
 
     Bridges :func:`consume_invite_token` (which left the invite in
     ``state=pending`` with ``user_id`` set but no passkey) and
-    :func:`complete_invite` (which requires a passkey on file). The
-    challenge is stamped against the ``invite_id`` (carried in the
-    challenge row's ``signup_session_id`` slot — the column is a
-    free-form challenge subject, not exclusive to signups) so the
-    finish call can verify the credential lands under the right user
-    without taking an authenticated session.
+    :func:`register_invite_passkey_finish` (which lands the credential
+    and folds in :func:`complete_invite` so the grants activate
+    atomically — cd-kd26). The challenge is stamped against the
+    ``invite_id`` (carried in the challenge row's ``signup_session_id``
+    slot — the column is a free-form challenge subject, not exclusive
+    to signups) so the finish call can verify the credential lands
+    under the right user without taking an authenticated session.
 
     **Authorisation gates.**
 
@@ -2282,21 +2315,22 @@ def register_invite_passkey_finish(
     now: datetime | None = None,
     settings: Settings | None = None,
     clock: Clock | None = None,
-) -> passkey_service.PasskeyCredentialRef:
-    """Verify the attestation + persist the invitee's first passkey.
+) -> InvitePasskeyFinishOutcome:
+    """Verify the attestation, persist the passkey, **and activate the invite**.
 
     Mirrors :func:`register_invite_passkey_start` for the second leg.
     Reuses :func:`app.auth.passkey.register_finish_signup` so the
     challenge-TTL, attestation verification, and challenge-burn
     semantics match the self-serve signup ceremony exactly.
 
-    A ``passkey.registered`` audit row lands inline (scoped to the
-    invite's workspace, attributing the actor to the freshly-enrolled
-    invitee) so a §03 "Every enrollment writes to the audit log"
-    invariant holds even if the SPA never reaches
-    :func:`complete_invite`. The complementary ``user.enrolled`` audit
-    is emitted by :func:`complete_invite` itself once the grants
-    activate. cd-kd26 will fold both into one callback.
+    cd-kd26: this function is the single seam for the new-user accept
+    second leg. After the credential row lands, it calls
+    :func:`complete_invite` inside the same UoW so the
+    ``passkey_credential`` insert, the ``role_grant`` /
+    ``permission_group_member`` rows, the invite-state flip, and both
+    audit rows (``passkey.registered`` and ``user.enrolled``) commit
+    atomically. The SPA no longer needs a follow-up
+    ``POST /invite/complete``.
 
     **Concurrency** — the ``_user_has_passkey`` gate inside
     :func:`_load_pending_invite_for_passkey` is point-in-time. Two
@@ -2314,7 +2348,6 @@ def register_invite_passkey_finish(
     surfaces (challenge unknown / consumed / expired / subject
     mismatch / invalid attestation / too-many-passkeys).
     """
-    del settings
     resolved_now = now if now is not None else _now(clock)
     # Reload the invite + user so a finish call posted after the user
     # already has a passkey (e.g. a stale tab replaying a finish that
@@ -2342,11 +2375,16 @@ def register_invite_passkey_finish(
         clock=clock,
         now=resolved_now,
     )
-    # §03 audit: the credential row landed; emit before /complete is
-    # reachable so an abandoned flow still leaves a forensic trail.
-    # ``principal_kind="system"`` matches :func:`complete_invite` —
-    # the invitee has no session at this seam, so the request is
-    # system-driven even though the actor is the invitee.
+    # §03 audit: emit ``passkey.registered`` before invoking
+    # :func:`complete_invite` so the audit row order on the wire is
+    # ``passkey.registered → user.enrolled`` — credential first, then
+    # the grants it gated. Both writes commit in the same UoW
+    # (cd-kd26), so an abandoned flow that crashes between them rolls
+    # both back together rather than leaving a credential without a
+    # matching enrolment trail. ``principal_kind="system"`` matches
+    # :func:`complete_invite` — the invitee has no session at this
+    # seam, so the request is system-driven even though the actor is
+    # the invitee.
     audit_ctx = WorkspaceContext(
         workspace_id=invite_row.workspace_id,
         workspace_slug="",
@@ -2372,7 +2410,21 @@ def register_invite_passkey_finish(
         },
         clock=clock,
     )
-    return ref
+    # cd-kd26: activate the pending grants in the same UoW. The
+    # ``passkey_credential`` row inserted above is the very gate
+    # :func:`complete_invite` checks via :func:`_user_has_passkey`, so
+    # the call always passes the auth gate when reached from this
+    # path. Folding the second leg in here means the SPA gets the
+    # redirect target back from ``/invite/passkey/finish`` directly
+    # and ``user.enrolled`` commits atomically with the credential.
+    workspace_id = complete_invite(
+        session,
+        invite_id=invite_id,
+        now=resolved_now,
+        settings=settings,
+        clock=clock,
+    )
+    return InvitePasskeyFinishOutcome(credential=ref, workspace_id=workspace_id)
 
 
 # ---------------------------------------------------------------------------

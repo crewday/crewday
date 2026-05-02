@@ -1098,9 +1098,12 @@ class TestAcceptNewUser:
         self,
         env: tuple[Session, WorkspaceContext, InMemoryMailer, Throttle],
     ) -> None:
-        """Auth gate: ``/invite/complete`` with an invite_id alone is a
-        guessable path, so :func:`complete_invite` refuses unless the
-        linked user holds a registered passkey."""
+        """Auth gate: an ``invite_id`` alone is a guessable identifier,
+        so :func:`complete_invite` refuses unless the linked user holds
+        a registered passkey. cd-kd26 folded the call into
+        :func:`register_invite_passkey_finish` (which always inserts the
+        credential first), but the guard remains as defence-in-depth
+        against a future caller that forgets to land the credential."""
         session, ctx, mailer, throttle = env
         outcome = membership.invite(
             session,

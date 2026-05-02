@@ -110,12 +110,16 @@ _PUBLIC_PATTERNS: Final[tuple[re.Pattern[str], ...]] = (
     #   * POST /invite/accept           — invite-id branch (existing user
     #     and new user paths share the same accept handler)
     #   * POST /invite/{invite_id}/confirm — confirm pending acceptance
-    #   * POST /invite/complete         — complete signup-via-invite
+    #   * POST /invite/passkey/start    — mint passkey-registration challenge
+    #   * POST /invite/passkey/finish   — verify + persist passkey AND
+    #     activate grants atomically (cd-kd26 folded the former
+    #     ``/invite/complete`` second leg into this callback)
     #   * GET  /invites/{token}         — introspect invite by token
     #   * POST /invites/{token}/accept  — redeem invite by token
     re.compile(r"^/api/v1/invite/accept$"),
     re.compile(r"^/api/v1/invite/[^/]+/confirm$"),
-    re.compile(r"^/api/v1/invite/complete$"),
+    re.compile(r"^/api/v1/invite/passkey/start$"),
+    re.compile(r"^/api/v1/invite/passkey/finish$"),
     re.compile(r"^/api/v1/invites/[^/]+$"),
     re.compile(r"^/api/v1/invites/[^/]+/accept$"),
     # Recovery codes — §03 "Recovery". Same shape as magic-link: the

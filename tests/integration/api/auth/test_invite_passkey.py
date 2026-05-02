@@ -12,9 +12,10 @@ Coverage:
 
 * **Happy path.** Start mints a challenge bound to the
   ``invite_id``; finish lands a :class:`PasskeyCredential` for the
-  pre-existing user row; the subsequent ``/invite/complete`` call
-  activates grants exactly as the integration-level
-  ``test_invite_accept`` suite covers via the direct domain seed.
+  pre-existing user row AND activates the pending grants atomically
+  (cd-kd26 folded the former ``/invite/complete`` second leg into
+  this callback). The response carries ``user_id`` plus the redirect
+  target (``workspace_id`` + ``redirect``).
 * **Authorisation gates.** Unknown invite → 404; finish replay
   after success → 409 (``passkey_already_registered``); missing
   invite_id → 422 (FastAPI body validation).
@@ -408,9 +409,9 @@ def _force_burn_magic_link(
 
 
 class TestInvitePasskeyHappyPath:
-    """start → finish → /complete drives every downstream row."""
+    """cd-kd26: start → finish atomically lands credential + activates grants."""
 
-    def test_full_enrolment_lands_passkey_then_completes(
+    def test_full_enrolment_lands_passkey_and_completes(
         self,
         client: TestClient,
         session_factory: sessionmaker[Session],
@@ -446,7 +447,8 @@ class TestInvitePasskeyHappyPath:
         assert isinstance(challenge_id, str) and challenge_id
         assert start_body["options"], "missing CreationOptions payload"
 
-        # 3. Passkey finish verifies + persists the credential.
+        # 3. Passkey finish verifies + persists the credential AND
+        #    activates the pending grants in the same UoW (cd-kd26).
         r = client.post(
             "/api/v1/invite/passkey/finish",
             json={
@@ -458,41 +460,39 @@ class TestInvitePasskeyHappyPath:
         assert r.status_code == 200, r.text
         finish_body = r.json()
         assert finish_body["user_id"] == invitee_id
+        assert finish_body["workspace_id"] == ws_id
+        assert finish_body["redirect"].endswith("/today")
 
         # 4. The PasskeyCredential row landed against the invitee's
-        #    pre-existing user_id (no new user created), and the
-        #    inline ``passkey.registered`` audit landed alongside so
-        #    the credential is never audit-orphaned even if /complete
-        #    never runs (§03 "Every enrollment writes to the audit
-        #    log").
+        #    pre-existing user_id (no new user created), the
+        #    ``passkey.registered`` audit landed (§03 "Every
+        #    enrollment writes to the audit log"), and the
+        #    ``user.enrolled`` audit landed atomically alongside it
+        #    (cd-kd26).
         with session_factory() as s:
             cred = s.scalars(
                 select(PasskeyCredential).where(PasskeyCredential.user_id == invitee_id)
             ).one()
             assert cred.id == credential_id
             with tenant_agnostic():
-                audit_row = s.scalars(
-                    select(AuditLog).where(
-                        AuditLog.action == "passkey.registered",
-                        AuditLog.actor_id == invitee_id,
-                    )
-                ).one()
-            assert audit_row.workspace_id == ws_id
-            assert audit_row.entity_kind == "passkey_credential"
-            assert isinstance(audit_row.diff, dict)
-            assert audit_row.diff.get("via") == "invite"
-            assert audit_row.diff.get("user_id") == invitee_id
+                audit_rows = list(
+                    s.scalars(
+                        select(AuditLog).where(
+                            AuditLog.actor_id == invitee_id,
+                        )
+                    ).all()
+                )
+            actions = {r.action for r in audit_rows}
+            assert "passkey.registered" in actions
+            assert "user.enrolled" in actions
+            registered = next(r for r in audit_rows if r.action == "passkey.registered")
+            assert registered.workspace_id == ws_id
+            assert registered.entity_kind == "passkey_credential"
+            assert isinstance(registered.diff, dict)
+            assert registered.diff.get("via") == "invite"
+            assert registered.diff.get("user_id") == invitee_id
 
-        # 5. /invite/complete activates the grants.
-        r = client.post(
-            "/api/v1/invite/complete",
-            json={"invite_id": invite_id},
-        )
-        assert r.status_code == 200, r.text
-        complete_body = r.json()
-        assert complete_body["workspace_id"] == ws_id
-
-        # 6. The invite row flipped to accepted.
+        # 5. The invite row flipped to accepted.
         with session_factory() as s:
             with tenant_agnostic():
                 row = s.get(Invite, invite_id)
@@ -661,8 +661,11 @@ class TestInvitePasskeyStateGuards:
         )
         assert finish.status_code == 200
 
-        # Replay against the same invite — the user now has a passkey,
-        # so the state guard fires before any challenge work.
+        # Replay against the same invite — cd-kd26 folded
+        # ``complete_invite`` into the finish callback so the invite
+        # row is now in ``state='accepted'``. The state guard at the
+        # top of ``_load_pending_invite_for_accept`` fires before any
+        # challenge work, collapsing onto 409 ``already_accepted``.
         replay = client.post(
             "/api/v1/invite/passkey/finish",
             json={
@@ -672,7 +675,7 @@ class TestInvitePasskeyStateGuards:
             },
         )
         assert replay.status_code == 409, replay.text
-        assert replay.json()["detail"]["error"] == "passkey_already_registered"
+        assert replay.json()["detail"]["error"] == "already_accepted"
 
 
 # ---------------------------------------------------------------------------

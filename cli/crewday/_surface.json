@@ -4168,23 +4168,6 @@
     }
   },
   {
-    "body_schema_ref": "#/components/schemas/app__api__v1__auth__invite__CompleteRequest",
-    "group": "invite",
-    "http": {
-      "method": "POST",
-      "path": "/api/v1/invite/complete"
-    },
-    "idempotent": false,
-    "name": "complete",
-    "operation_id": "auth.invite.complete",
-    "path_params": [],
-    "query_params": [],
-    "response_schema_ref": "#/components/schemas/ConfirmResponse",
-    "summary": "Complete invite after new-user passkey ceremony",
-    "x_agent_confirm": null,
-    "x_cli": null
-  },
-  {
     "body_schema_ref": null,
     "group": "invite",
     "http": {
@@ -9160,7 +9143,7 @@
     "x_cli": null
   },
   {
-    "body_schema_ref": "#/components/schemas/app__api__v1__tasks__payloads__CompleteRequest",
+    "body_schema_ref": "#/components/schemas/CompleteRequest",
     "group": "tasks",
     "http": {
       "method": "POST",

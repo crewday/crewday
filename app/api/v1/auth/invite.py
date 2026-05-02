@@ -10,19 +10,20 @@ here side-by-side:
   with the token in the URL. Every new SPA flow targets this shape.
 * :func:`build_invite_router` (singular ``/invite/``, **legacy**) —
   the original Phase-0 SPA shape: ``POST /invite/accept`` with the
-  token in the body, plus ``/invite/{invite_id}/confirm`` and
-  ``/invite/complete``. Kept alive verbatim during the cutover (see
-  cd-z6vm) so the in-flight SPA build does not break; **deprecated**
-  for new callers and slated for removal once the SPA cuts over.
+  token in the body, plus ``/invite/{invite_id}/confirm`` and the
+  bare-host invitee passkey trio (cd-9q6bb). Kept alive verbatim
+  during the cutover (see cd-z6vm) so the in-flight SPA build does
+  not break; **deprecated** for new callers and slated for removal
+  once the SPA cuts over.
 
 The router branches on invite shape:
 
 * ``POST /invites/{token}/accept`` (or legacy ``POST /invite/accept``
   ``{token}``) — redeems the magic link and returns either a
   ``NewUserAcceptance`` (brand-new invitee — the SPA forwards to the
-  passkey ceremony at ``/invite/passkey/{start,finish}`` and then
-  POSTs ``/invite/complete``, which calls
-  :func:`app.domain.identity.membership.complete_invite`) or an
+  passkey ceremony at ``/invite/passkey/{start,finish}``; cd-kd26
+  folded the second leg into ``/invite/passkey/finish`` so its
+  response carries the redirect target directly) or an
   ``ExistingUserAcceptance`` (known user with an active session —
   the SPA renders the acceptance card).
 * ``GET /invites/{token}`` — read-only introspect; returns the same
@@ -37,12 +38,10 @@ The router branches on invite shape:
   are gated on the invite being ``pending`` + within TTL AND the
   linked user holding zero passkeys; the gate closes once the first
   credential lands so a leaked ``invite_id`` cannot mint a second
-  uninvited credential.
-* ``POST /invite/complete`` — new-user second leg (post passkey-finish
-  hook). The SPA posts here once ``/invite/passkey/finish`` returned
-  200 so :func:`app.domain.identity.membership.complete_invite` can
-  activate the grants. A later consolidation (cd-kd26) folds this
-  into the passkey-finish callback.
+  uninvited credential. cd-kd26: ``/passkey/finish`` now also
+  activates the pending grants and emits ``user.enrolled`` in the
+  same UoW, so its response shape mirrors the former
+  ``/invite/complete`` body (``workspace_id`` + ``redirect``).
 
 Existence-leak guard: on the plural surface, every token-validity
 error (invalid signature, expired, already consumed) collapses onto
@@ -76,7 +75,6 @@ from app.tenancy import WorkspaceContext
 __all__ = [
     "AcceptRequest",
     "AcceptResponse",
-    "CompleteRequest",
     "ConfirmResponse",
     "InviteIntrospectionResponse",
     "InvitePasskeyFinishRequest",
@@ -136,23 +134,13 @@ class ConfirmResponse(BaseModel):
     redirect: str
 
 
-class CompleteRequest(BaseModel):
-    """Request body for ``POST /invite/complete``.
-
-    Called by the SPA after the passkey ceremony completes for a
-    brand-new invitee. Follow-up cd-kd26 folds this into the
-    passkey-finish callback; until then the SPA owns the handoff.
-    """
-
-    invite_id: str = Field(..., min_length=1)
-
-
 class InvitePasskeyStartRequest(BaseModel):
     """Request body for ``POST /invite/passkey/start``.
 
     Bare-host bridge between ``/invite/accept`` (which left the
     invite ``pending`` with the user_id known but no passkey on
-    file) and ``/invite/complete`` (which requires a passkey).
+    file) and ``/invite/passkey/finish`` (which lands the credential
+    AND, since cd-kd26, activates the pending grants atomically).
     The ``invite_id`` is the bearer-of-capability — gated by
     invite-state + passkey-absence checks; see
     :func:`app.domain.identity.membership.register_invite_passkey_start`.
@@ -185,17 +173,25 @@ class InvitePasskeyFinishRequest(BaseModel):
 class InvitePasskeyFinishResponse(BaseModel):
     """Response body for ``POST /invite/passkey/finish``.
 
-    Carries the freshly-enrolled invitee's ``user_id`` so the SPA
-    can stamp it on its auth store before posting
-    ``/invite/complete``. The credential metadata
-    (``credential_id`` / ``transports`` / ``aaguid``) is intentionally
-    omitted: the SPA already has it from
+    cd-kd26: this leg now atomically verifies the attestation,
+    persists the credential, AND completes the invite (grants
+    activate, ``user.enrolled`` audit lands) inside the same UoW. The
+    response carries the freshly-enrolled invitee's ``user_id`` so
+    the SPA can stamp it on its auth store, plus the redirect target
+    (``workspace_id`` + ``redirect``) — same shape as the previous
+    ``/invite/complete`` body so the SPA gets the post-accept
+    landing page in one round trip.
+
+    The credential metadata (``credential_id`` / ``transports`` /
+    ``aaguid``) is intentionally omitted: the SPA already has it from
     ``navigator.credentials.create``'s return, and re-emitting it
     here would force the SPA to reconcile two views of the same
     bytes.
     """
 
     user_id: str
+    workspace_id: str
+    redirect: str
 
 
 class InviteIntrospectionResponse(BaseModel):
@@ -570,36 +566,6 @@ def build_invite_router(
         return ConfirmResponse(workspace_id=workspace_id, redirect=redirect)
 
     @router.post(
-        "/complete",
-        response_model=ConfirmResponse,
-        operation_id="auth.invite.complete",
-        summary="Complete invite after new-user passkey ceremony",
-    )
-    def post_complete(
-        body: CompleteRequest,
-        session: _Db,
-    ) -> ConfirmResponse:
-        """Second leg for a brand-new invitee."""
-        try:
-            workspace_id = membership.complete_invite(
-                session,
-                invite_id=body.invite_id,
-                settings=cfg,
-            )
-        except _InviteDomainError as exc:
-            raise _http_for_invite(exc) from exc
-
-        from sqlalchemy import select
-
-        from app.adapters.db.workspace.models import Workspace
-        from app.tenancy import tenant_agnostic
-
-        with tenant_agnostic():
-            ws = session.scalar(select(Workspace).where(Workspace.id == workspace_id))
-        redirect = f"/w/{ws.slug}/today" if ws is not None else "/"
-        return ConfirmResponse(workspace_id=workspace_id, redirect=redirect)
-
-    @router.post(
         "/passkey/start",
         response_model=InvitePasskeyStartResponse,
         operation_id="auth.invite.passkey_start",
@@ -659,9 +625,14 @@ def build_invite_router(
         body: InvitePasskeyFinishRequest,
         session: _Db,
     ) -> InvitePasskeyFinishResponse:
-        """Verify the attestation, insert the passkey row."""
+        """Verify the attestation, insert the passkey row, activate grants.
+
+        cd-kd26: the domain seam folds the former ``/invite/complete``
+        second leg into this finish callback so the SPA gets the
+        redirect target back in one round trip.
+        """
         try:
-            ref = membership.register_invite_passkey_finish(
+            outcome = membership.register_invite_passkey_finish(
                 session,
                 invite_id=body.invite_id,
                 challenge_id=body.challenge_id,
@@ -683,7 +654,22 @@ def build_invite_router(
             # on its own connection.
             passkey_service.burn_challenge_on_failure(body.challenge_id)
             raise _http_for_invite_passkey(exc) from exc
-        return InvitePasskeyFinishResponse(user_id=ref.user_id)
+
+        from sqlalchemy import select
+
+        from app.adapters.db.workspace.models import Workspace
+        from app.tenancy import tenant_agnostic
+
+        with tenant_agnostic():
+            ws = session.scalar(
+                select(Workspace).where(Workspace.id == outcome.workspace_id)
+            )
+        redirect = f"/w/{ws.slug}/today" if ws is not None else "/"
+        return InvitePasskeyFinishResponse(
+            user_id=outcome.credential.user_id,
+            workspace_id=outcome.workspace_id,
+            redirect=redirect,
+        )
 
     return router
 
