@@ -21929,6 +21929,39 @@
         "title": "TaskTemplateUpdate",
         "type": "object"
       },
+      "TokenListResponse": {
+        "description": "Collection envelope for ``GET /auth/tokens``.\n\nMatches \u00a712 \"Pagination\" verbatim \u2014 ``{data, next_cursor,\nhas_more}``. Mirrors the shape used by every other paginated\nlist router on the workspace surface (e.g. ``WorkRoleListResponse``)\nso the SPA + CLI surfaces have one envelope to special-case.",
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/app__api__v1__auth__tokens__TokenSummaryResponse"
+            },
+            "title": "Data",
+            "type": "array"
+          },
+          "has_more": {
+            "default": false,
+            "title": "Has More",
+            "type": "boolean"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "TokenListResponse",
+        "type": "object"
+      },
       "UnitCreate": {
         "additionalProperties": false,
         "description": "Request body for :func:`create_unit`.\n\nThe ``property_id`` is supplied as a function argument rather\nthan carried in the body so the router can route on\n``/properties/{property_id}/units`` cleanly without a\nredundant body field. The service still validates that the\nparent property is reachable from the caller's workspace.",
@@ -48460,22 +48493,63 @@
     },
     "/w/{slug}/api/v1/auth/tokens": {
       "get": {
-        "description": "Return every token on the workspace, most recent first.",
+        "description": "Return a cursor-paginated page of workspace tokens.\n\nMost recent first (``id DESC`` \u2014 ULIDs are time-ordered, so the\nnatural id sort matches the spec's \"most recent first\" wording\nwithout needing a composite cursor key).\n\nCursor semantics: ``cursor`` is the opaque ``next_cursor`` from\nthe previous page; omit it on the first call. ``limit`` defaults\nto :data:`~app.api.pagination.DEFAULT_LIMIT` and is bounded to\n``[1, 500]`` per \u00a712 \"Pagination\". A malformed / tampered cursor\nraises :class:`~app.domain.errors.InvalidCursor`, which the\nproblem+json seam returns as 422 ``invalid_cursor``.",
         "operationId": "auth.tokens.list",
+        "parameters": [
+          {
+            "description": "Opaque forward cursor from the previous page's ``next_cursor``. Omitted on the first call. Bounded to 256 chars to keep the URL below reverse-proxy header limits.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 256,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Opaque forward cursor from the previous page's ``next_cursor``. Omitted on the first call. Bounded to 256 chars to keep the URL below reverse-proxy header limits.",
+              "title": "Cursor"
+            }
+          },
+          {
+            "description": "Maximum rows to return. Default 50, cap 500 per spec \u00a712 'Pagination'. Rejected with 422 outside ``[1, 500]``.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "description": "Maximum rows to return. Default 50, cap 500 per spec \u00a712 'Pagination'. Rejected with 422 outside ``[1, 500]``.",
+              "maximum": 500,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "items": {
-                    "$ref": "#/components/schemas/app__api__v1__auth__tokens__TokenSummaryResponse"
-                  },
-                  "title": "Response Auth.Tokens.List",
-                  "type": "array"
+                  "$ref": "#/components/schemas/TokenListResponse"
                 }
               }
             },
             "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
           },
           "429": {
             "content": {

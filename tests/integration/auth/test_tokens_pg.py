@@ -162,6 +162,12 @@ def client(
     shape.
     """
     app = FastAPI()
+    # Wire the same problem+json error handlers the production factory
+    # installs (cd-waq3) so domain errors like ``InvalidCursor`` surface
+    # as 422 with the canonical type URI rather than bubbling as 500.
+    from app.api.errors import add_exception_handlers
+
+    add_exception_handlers(app)
     app.include_router(build_tokens_router(), prefix="/api/v1")
 
     def _session() -> Iterator[Session]:
@@ -216,10 +222,14 @@ class TestTokensHttpFlow:
         assert body["prefix"]
         assert body["expires_at"] is not None
 
-        # 2. List — returns the row we just inserted.
+        # 2. List — returns the row we just inserted, wrapped in the
+        # §12 cursor envelope (cd-msu2).
         r = client.get("/api/v1/auth/tokens")
         assert r.status_code == 200, r.text
-        rows = r.json()
+        envelope = r.json()
+        assert envelope["has_more"] is False
+        assert envelope["next_cursor"] is None
+        rows = envelope["data"]
         assert len(rows) == 1
         assert rows[0]["key_id"] == key_id
         assert rows[0]["label"] == "hermes-scheduler"
@@ -254,7 +264,7 @@ class TestTokensHttpFlow:
     def test_revoke_unknown_token_is_404(self, client: TestClient) -> None:
         r = client.delete("/api/v1/auth/tokens/01HWA00000000000000000NOPE")
         assert r.status_code == 404
-        assert r.json()["detail"]["error"] == "token_not_found"
+        assert r.json()["error"] == "token_not_found"
 
     def test_double_revoke_is_idempotent(
         self,
@@ -308,7 +318,7 @@ class TestTokensHttpFlow:
             json={"label": "6th", "scopes": {}, "expires_at_days": 30},
         )
         assert r.status_code == 422
-        assert r.json()["detail"]["error"] == "too_many_tokens"
+        assert r.json()["error"] == "too_many_tokens"
 
 
 # ---------------------------------------------------------------------------
@@ -348,7 +358,7 @@ class TestDelegatedTokensHttp:
         # GET /auth/tokens surfaces the row with the discriminator.
         r_list = client.get("/api/v1/auth/tokens")
         assert r_list.status_code == 200
-        rows = r_list.json()
+        rows = r_list.json()["data"]
         match = next(row for row in rows if row["key_id"] == key_id)
         assert match["kind"] == "delegated"
         assert match["delegate_for_user_id"] == seeded_ctx.actor_id
@@ -368,7 +378,7 @@ class TestDelegatedTokensHttp:
             },
         )
         assert r.status_code == 422
-        assert r.json()["detail"]["error"] == "delegated_requires_empty_scopes"
+        assert r.json()["error"] == "delegated_requires_empty_scopes"
 
     def test_scoped_with_me_scope_is_422_conflict(
         self,
@@ -384,7 +394,7 @@ class TestDelegatedTokensHttp:
             },
         )
         assert r.status_code == 422
-        assert r.json()["detail"]["error"] == "me_scope_conflict"
+        assert r.json()["error"] == "me_scope_conflict"
 
     def test_delegated_default_ttl_is_30_days(
         self,
@@ -457,11 +467,15 @@ class TestDelegatedRequiresSession:
         """Mount the tokens router with a ctx that pins ``principal_kind``."""
         from dataclasses import replace
 
+        from app.api.errors import add_exception_handlers
         from app.api.v1.auth.tokens import build_tokens_router
 
         token_ctx = replace(seeded_ctx, principal_kind=principal_kind)
 
         app = FastAPI()
+        # Mirror the shared ``client`` fixture — production parity for
+        # the problem+json envelope (cd-waq3).
+        add_exception_handlers(app)
         app.include_router(build_tokens_router(), prefix="/api/v1")
 
         def _session() -> Iterator[Session]:
@@ -508,7 +522,7 @@ class TestDelegatedRequiresSession:
                 },
             )
         assert r.status_code == 422, r.text
-        assert r.json()["detail"]["error"] == "delegated_requires_session"
+        assert r.json()["error"] == "delegated_requires_session"
 
     def test_delegated_mint_from_system_caller_is_422(
         self,
@@ -539,7 +553,7 @@ class TestDelegatedRequiresSession:
                 },
             )
         assert r.status_code == 422, r.text
-        assert r.json()["detail"]["error"] == "delegated_requires_session"
+        assert r.json()["error"] == "delegated_requires_session"
 
     def test_scoped_mint_from_token_caller_is_allowed(
         self,
@@ -594,3 +608,174 @@ class TestDelegatedRequiresSession:
         )
         assert r.status_code == 201, r.text
         assert r.json()["kind"] == "delegated"
+
+
+# ---------------------------------------------------------------------------
+# cd-msu2 — cursor pagination on the workspace tokens listing
+# ---------------------------------------------------------------------------
+
+
+class TestTokensCursorPagination:
+    """``GET /auth/tokens`` pages through tokens via the §12 envelope.
+
+    Each test mints rows directly through the API so the round-trip
+    exercises the same code path the SPA / CLI hit. The per-user cap
+    of 5 active workspace tokens (§03 "Guardrails") would otherwise
+    block multi-page fixtures, so the corpus is built across multiple
+    seeded users (one extra user mints into the same workspace).
+    """
+
+    @staticmethod
+    def _seed_extra_users(
+        session_factory: sessionmaker[Session],
+        seeded_ctx: WorkspaceContext,
+        *,
+        count: int,
+    ) -> list[str]:
+        """Bootstrap ``count`` extra users into ``seeded_ctx``'s workspace.
+
+        Returns their ids so the test can mint tokens on each user's
+        behalf via the domain :func:`mint` (the route only mints on
+        the caller's id, but the §03 cap is per-user-per-workspace —
+        spreading the corpus across users sidesteps the 5-token cap
+        without weakening the production route guard).
+        """
+        from app.util.ulid import new_ulid as _new_ulid
+
+        ids: list[str] = []
+        with session_factory() as s:
+            for _ in range(count):
+                tag = _new_ulid()[-8:].lower()
+                user = bootstrap_user(
+                    s, email=f"alt-{tag}@example.com", display_name="Alt"
+                )
+                ids.append(user.id)
+            s.commit()
+        return ids
+
+    @staticmethod
+    def _mint_n(
+        session_factory: sessionmaker[Session],
+        seeded_ctx: WorkspaceContext,
+        *,
+        owners: list[str],
+    ) -> list[str]:
+        """Mint one token per owner directly through the domain layer.
+
+        Returns the resulting ``key_id`` list in mint order so the
+        caller can correlate against the response. Domain mint avoids
+        the route-level cap collapse (each user is independently below
+        their 5-token allowance) without simulating multiple sessions.
+        """
+        from app.auth.tokens import mint as domain_mint
+
+        now = datetime.now(tz=UTC)
+        key_ids: list[str] = []
+        with session_factory() as s:
+            for owner in owners:
+                result = domain_mint(
+                    s,
+                    seeded_ctx,
+                    user_id=owner,
+                    label=f"page-{owner[-6:]}",
+                    scopes={"tasks:read": True},
+                    expires_at=now + timedelta(days=30),
+                    now=now,
+                )
+                key_ids.append(result.key_id)
+            s.commit()
+        return key_ids
+
+    def test_single_page_under_default_limit_no_cursor(
+        self,
+        client: TestClient,
+        session_factory: sessionmaker[Session],
+        seeded_ctx: WorkspaceContext,
+    ) -> None:
+        """Default-limit page returns every row with ``has_more=False``."""
+        # Mint 3 rows on the seeded user (well under the 5-token cap).
+        for i in range(3):
+            r = client.post(
+                "/api/v1/auth/tokens",
+                json={
+                    "label": f"single-{i}",
+                    "scopes": {"tasks:read": True},
+                    "expires_at_days": 30,
+                },
+            )
+            assert r.status_code == 201, r.text
+
+        r = client.get("/api/v1/auth/tokens")
+        assert r.status_code == 200, r.text
+        envelope = r.json()
+        assert envelope["has_more"] is False
+        assert envelope["next_cursor"] is None
+        assert len(envelope["data"]) == 3
+
+    def test_multi_page_traversal_no_dupes_no_skips(
+        self,
+        client: TestClient,
+        session_factory: sessionmaker[Session],
+        seeded_ctx: WorkspaceContext,
+    ) -> None:
+        """Walk forward through 2 pages — every row appears exactly once."""
+        # Mint 7 rows total so a limit=3 walk produces 3 + 3 + 1.
+        # Spread across 2 extra users to clear the per-user 5-token cap.
+        extras = self._seed_extra_users(session_factory, seeded_ctx, count=2)
+        owners = [seeded_ctx.actor_id] * 4 + [extras[0]] * 2 + [extras[1]] * 1
+        seeded_key_ids = self._mint_n(session_factory, seeded_ctx, owners=owners)
+        assert len(seeded_key_ids) == 7
+
+        # Page 1.
+        r1 = client.get("/api/v1/auth/tokens?limit=3")
+        assert r1.status_code == 200, r1.text
+        page1 = r1.json()
+        assert page1["has_more"] is True
+        assert page1["next_cursor"] is not None
+        assert len(page1["data"]) == 3
+
+        # Page 2.
+        r2 = client.get(f"/api/v1/auth/tokens?limit=3&cursor={page1['next_cursor']}")
+        assert r2.status_code == 200, r2.text
+        page2 = r2.json()
+        assert page2["has_more"] is True
+        assert page2["next_cursor"] is not None
+        assert len(page2["data"]) == 3
+
+        # Page 3 — last partial page.
+        r3 = client.get(f"/api/v1/auth/tokens?limit=3&cursor={page2['next_cursor']}")
+        assert r3.status_code == 200, r3.text
+        page3 = r3.json()
+        assert page3["has_more"] is False
+        assert page3["next_cursor"] is None
+        assert len(page3["data"]) == 1
+
+        seen = (
+            [r["key_id"] for r in page1["data"]]
+            + [r["key_id"] for r in page2["data"]]
+            + [r["key_id"] for r in page3["data"]]
+        )
+        # No duplicates and exactly the seeded set surfaces.
+        assert len(set(seen)) == len(seen) == 7
+        assert set(seen) == set(seeded_key_ids)
+
+    def test_invalid_cursor_is_422_invalid_cursor(
+        self,
+        client: TestClient,
+    ) -> None:
+        """A tampered cursor surfaces the §12 ``invalid_cursor`` error."""
+        r = client.get("/api/v1/auth/tokens?cursor=garbage")
+        assert r.status_code == 422, r.text
+        body = r.json()
+        # The problem+json envelope sets the canonical ``type`` URI.
+        assert body["type"].endswith("/invalid_cursor")
+
+    def test_limit_above_max_is_422(self, client: TestClient) -> None:
+        """``limit > 500`` is rejected at the FastAPI Query validator."""
+        r = client.get("/api/v1/auth/tokens?limit=501")
+        assert r.status_code == 422
+
+    def test_limit_zero_is_422(self, client: TestClient) -> None:
+        """``limit < 1`` is rejected at the FastAPI Query validator."""
+        r = client.get("/api/v1/auth/tokens?limit=0")
+        assert r.status_code == 422

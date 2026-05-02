@@ -78,6 +78,13 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.api.deps import current_workspace_context, db_session
+from app.api.pagination import (
+    DEFAULT_LIMIT,
+    LimitQuery,
+    PageCursorQuery,
+    decode_cursor,
+    paginate,
+)
 from app.auth.tokens import (
     DELEGATED_DEFAULT_TTL_DAYS,
     SCOPED_DEFAULT_TTL_DAYS,
@@ -98,6 +105,7 @@ from app.util.clock import SystemClock
 __all__ = [
     "MintTokenBody",
     "MintTokenResponse",
+    "TokenListResponse",
     "TokenSummaryResponse",
     "build_tokens_router",
     "router",
@@ -192,6 +200,20 @@ class TokenSummaryResponse(BaseModel):
     created_at: datetime
     kind: TokenKind
     delegate_for_user_id: str | None
+
+
+class TokenListResponse(BaseModel):
+    """Collection envelope for ``GET /auth/tokens``.
+
+    Matches §12 "Pagination" verbatim — ``{data, next_cursor,
+    has_more}``. Mirrors the shape used by every other paginated
+    list router on the workspace surface (e.g. ``WorkRoleListResponse``)
+    so the SPA + CLI surfaces have one envelope to special-case.
+    """
+
+    data: list[TokenSummaryResponse]
+    next_cursor: str | None = None
+    has_more: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -380,7 +402,7 @@ def build_tokens_router() -> APIRouter:
 
     @api.get(
         "",
-        response_model=list[TokenSummaryResponse],
+        response_model=TokenListResponse,
         operation_id="auth.tokens.list",
         summary="List every token on this workspace (active + revoked)",
         dependencies=[permission_gate],
@@ -396,10 +418,41 @@ def build_tokens_router() -> APIRouter:
     def get_tokens(
         ctx: _Ctx,
         session: _Db,
-    ) -> list[TokenSummaryResponse]:
-        """Return every token on the workspace, most recent first."""
-        summaries = list_tokens(session, ctx)
-        return [_summary_to_response(s) for s in summaries]
+        cursor: PageCursorQuery = None,
+        limit: LimitQuery = DEFAULT_LIMIT,
+    ) -> TokenListResponse:
+        """Return a cursor-paginated page of workspace tokens.
+
+        Most recent first (``id DESC`` — ULIDs are time-ordered, so the
+        natural id sort matches the spec's "most recent first" wording
+        without needing a composite cursor key).
+
+        Cursor semantics: ``cursor`` is the opaque ``next_cursor`` from
+        the previous page; omit it on the first call. ``limit`` defaults
+        to :data:`~app.api.pagination.DEFAULT_LIMIT` and is bounded to
+        ``[1, 500]`` per §12 "Pagination". A malformed / tampered cursor
+        raises :class:`~app.domain.errors.InvalidCursor`, which the
+        problem+json seam returns as 422 ``invalid_cursor``.
+        """
+        after_id = decode_cursor(cursor)
+        # Service returns up to ``limit + 1`` rows so :func:`paginate`
+        # can decide ``has_more`` without a second query.
+        summaries = list_tokens(
+            session,
+            ctx,
+            limit=limit,
+            after_id=after_id,
+        )
+        page = paginate(
+            summaries,
+            limit=limit,
+            key_getter=lambda s: s.key_id,
+        )
+        return TokenListResponse(
+            data=[_summary_to_response(s) for s in page.items],
+            next_cursor=page.next_cursor,
+            has_more=page.has_more,
+        )
 
     @api.delete(
         "/{token_id}",

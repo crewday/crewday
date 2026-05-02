@@ -8,7 +8,12 @@ import { fmtDateTime } from "@/lib/dates";
 import DeskPage from "@/components/DeskPage";
 import { Loading } from "@/components/common";
 import TokenRevealPanel from "@/components/TokenRevealPanel";
-import type { ApiToken, ApiTokenAuditEntry, ApiTokenCreated } from "@/types/api";
+import type {
+  ApiToken,
+  ApiTokenAuditEntry,
+  ApiTokenCreated,
+  ApiTokenListResponse,
+} from "@/types/api";
 
 // §03 API tokens — manager surface. Scoped + delegated workspace
 // tokens live here. Personal access tokens (kind === "personal")
@@ -45,9 +50,12 @@ const STATUS_LABEL: Record<Status, string> = {
 
 export default function ApiTokensPage() {
   const qc = useQueryClient();
+  // §12 cursor envelope (cd-msu2). The page renders a single page —
+  // pagination UI lands as a follow-up; today's per-user/per-workspace
+  // caps keep the corpus well below the default limit.
   const listQ = useQuery({
     queryKey: qk.apiTokens(),
-    queryFn: () => fetchJson<ApiToken[]>("/api/v1/auth/tokens"),
+    queryFn: () => fetchJson<ApiTokenListResponse>("/api/v1/auth/tokens"),
   });
 
   const [showCreate, setShowCreate] = useState(false);
@@ -91,11 +99,12 @@ export default function ApiTokensPage() {
   });
 
   const liveCount = useMemo(
-    () => (listQ.data ?? []).filter((t) => !t.revoked_at).length,
+    () => (listQ.data?.data ?? []).filter((t) => !t.revoked_at).length,
     [listQ.data],
   );
   const delegatedCount = useMemo(
-    () => (listQ.data ?? []).filter((t) => t.kind === "delegated" && !t.revoked_at).length,
+    () =>
+      (listQ.data?.data ?? []).filter((t) => t.kind === "delegated" && !t.revoked_at).length,
     [listQ.data],
   );
 
@@ -122,7 +131,7 @@ export default function ApiTokensPage() {
     return <DeskPage title="API tokens" sub={sub} actions={actions}>Failed to load.</DeskPage>;
   }
 
-  const rows = listQ.data;
+  const rows = listQ.data.data;
 
   function togglePick(key: string) {
     setPicked((prev) => {

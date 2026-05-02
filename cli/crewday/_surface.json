@@ -4555,6 +4555,112 @@
     }
   },
   {
+    "body_schema_ref": null,
+    "group": "me-push-tokens",
+    "http": {
+      "method": "GET",
+      "path": "/api/v1/me/push-tokens"
+    },
+    "idempotent": true,
+    "name": "list",
+    "operation_id": "auth.me.push_tokens.list",
+    "path_params": [],
+    "query_params": [],
+    "response_schema_ref": null,
+    "summary": "List every native push token the caller has registered",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "me-push-tokens",
+      "mutates": false,
+      "summary": "List your native push tokens",
+      "verb": "list"
+    }
+  },
+  {
+    "body_schema_ref": "#/components/schemas/PushTokenRefreshBody",
+    "group": "me-push-tokens",
+    "http": {
+      "method": "PUT",
+      "path": "/api/v1/me/push-tokens/{token_id}"
+    },
+    "idempotent": true,
+    "name": "refresh",
+    "operation_id": "auth.me.push_tokens.refresh",
+    "path_params": [
+      {
+        "name": "token_id",
+        "required": true,
+        "schema": {
+          "title": "Token Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/PushTokenResponse",
+    "summary": "Refresh last_seen_at (and optionally swap token) on a row",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "me-push-tokens",
+      "mutates": true,
+      "summary": "Refresh a native push token (last_seen + rotation)",
+      "verb": "refresh"
+    }
+  },
+  {
+    "body_schema_ref": "#/components/schemas/PushTokenRegisterBody",
+    "group": "me-push-tokens",
+    "http": {
+      "method": "POST",
+      "path": "/api/v1/me/push-tokens"
+    },
+    "idempotent": false,
+    "name": "register",
+    "operation_id": "auth.me.push_tokens.register",
+    "path_params": [],
+    "query_params": [],
+    "response_schema_ref": "#/components/schemas/PushTokenResponse",
+    "summary": "Register a native-app push token for the caller's device",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "me-push-tokens",
+      "mutates": true,
+      "summary": "Register a native-app push token",
+      "verb": "register"
+    }
+  },
+  {
+    "body_schema_ref": null,
+    "group": "me-push-tokens",
+    "http": {
+      "method": "DELETE",
+      "path": "/api/v1/me/push-tokens/{token_id}"
+    },
+    "idempotent": true,
+    "name": "unregister",
+    "operation_id": "auth.me.push_tokens.unregister",
+    "path_params": [
+      {
+        "name": "token_id",
+        "required": true,
+        "schema": {
+          "title": "Token Id",
+          "type": "string"
+        }
+      }
+    ],
+    "query_params": [],
+    "response_schema_ref": null,
+    "summary": "Unregister one of the caller's native push tokens",
+    "x_agent_confirm": null,
+    "x_cli": {
+      "group": "me-push-tokens",
+      "mutates": true,
+      "summary": "Unregister a native push token",
+      "verb": "unregister"
+    }
+  },
+  {
     "body_schema_ref": "#/components/schemas/MintPersonalTokenBody",
     "group": "me-tokens",
     "http": {
@@ -10617,8 +10723,38 @@
     "name": "list",
     "operation_id": "auth.tokens.list",
     "path_params": [],
-    "query_params": [],
-    "response_schema_ref": null,
+    "query_params": [
+      {
+        "name": "cursor",
+        "required": false,
+        "schema": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Opaque forward cursor from the previous page's ``next_cursor``. Omitted on the first call. Bounded to 256 chars to keep the URL below reverse-proxy header limits.",
+          "title": "Cursor"
+        }
+      },
+      {
+        "name": "limit",
+        "required": false,
+        "schema": {
+          "default": 50,
+          "description": "Maximum rows to return. Default 50, cap 500 per spec \u00a712 'Pagination'. Rejected with 422 outside ``[1, 500]``.",
+          "maximum": 500,
+          "minimum": 1,
+          "title": "Limit",
+          "type": "integer"
+        }
+      }
+    ],
+    "response_schema_ref": "#/components/schemas/TokenListResponse",
     "summary": "List every token on this workspace (active + revoked)",
     "x_agent_confirm": null,
     "x_cli": {

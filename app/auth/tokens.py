@@ -997,13 +997,28 @@ def list_tokens(
     ctx: WorkspaceContext,
     *,
     user_id: str | None = None,
+    limit: int | None = None,
+    after_id: str | None = None,
 ) -> list[TokenSummary]:
-    """Return every ``scoped`` / ``delegated`` token on the caller's workspace.
+    """Return ``scoped`` / ``delegated`` tokens on the caller's workspace.
 
     ``user_id`` narrows to one subject when set. Workspace managers
     call with ``user_id=None`` to audit every workspace token; the
     list includes both active and revoked rows (the UI shows the
     revoked-history tail).
+
+    **Pagination.** When ``limit`` is provided the service returns up
+    to ``limit + 1`` rows so the router's
+    :func:`~app.api.pagination.paginate` helper can compute
+    ``has_more`` without a second query. Rows are ordered by
+    ``id DESC`` (newest first); ULIDs are time-ordered, so this maps
+    cleanly to the spec's "most recent first" wording without
+    materialising a composite ``(created_at, id)`` cursor key.
+    ``after_id`` is the previously-returned last-row id (decoded from
+    the opaque cursor); rows with ``id >= after_id`` are skipped so a
+    forward traversal is strictly monotonic. ``limit=None`` keeps the
+    historic "fetch everything" shape so non-router callers (audits,
+    workers) don't have to thread a cap through.
 
     **Personal access tokens are deliberately excluded** — §03 "PATs
     are not listed on the workspace-wide /tokens admin page". A
@@ -1017,16 +1032,19 @@ def list_tokens(
     # justification: api_token is identity-scoped; reuse of the
     # tenant-agnostic gate mirrors ``_count_active_workspace``.
     with tenant_agnostic():
-        stmt = (
-            select(ApiToken)
-            .where(
-                ApiToken.workspace_id == ctx.workspace_id,
-                ApiToken.kind != "personal",
-            )
-            .order_by(ApiToken.created_at.desc())
+        stmt = select(ApiToken).where(
+            ApiToken.workspace_id == ctx.workspace_id,
+            ApiToken.kind != "personal",
         )
         if user_id is not None:
             stmt = stmt.where(ApiToken.user_id == user_id)
+        if after_id is not None:
+            # DESC traversal — "after" the previous page's last row
+            # means strictly smaller id (older).
+            stmt = stmt.where(ApiToken.id < after_id)
+        stmt = stmt.order_by(ApiToken.id.desc())
+        if limit is not None:
+            stmt = stmt.limit(limit + 1)
         rows = list(session.scalars(stmt).all())
     return [_project(row) for row in rows]
 

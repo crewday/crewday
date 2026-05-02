@@ -867,12 +867,17 @@ POST   /w/<slug>/api/v1/auth/tokens              # mint a scoped or delegated to
 GET    /w/<slug>/api/v1/auth/tokens              # list every token on the workspace (active + revoked, most
                                                  # recent first). PATs are NOT included — they live on
                                                  # `/me/tokens` per §03 "Personal access tokens".
-                                                 #   200 [{key_id, label, prefix, scopes, expires_at,
-                                                 #     last_used_at, revoked_at, created_at}, …]. `scopes`
-                                                 #     is returned in the same dict shape the body accepts.
-                                                 #     The argon2id hash is never surfaced.
+                                                 # Cursor-paginated per §"Pagination" — accepts ?cursor=&limit=
+                                                 # (default 50, cap 500). Sort key: `id DESC` (ULID time-order
+                                                 # = "most recent first" without a composite cursor).
+                                                 #   200 {"data": [{key_id, label, prefix, scopes, expires_at,
+                                                 #     last_used_at, revoked_at, created_at, kind,
+                                                 #     delegate_for_user_id}, …], "next_cursor": "…"|null,
+                                                 #     "has_more": bool}. `scopes` is returned in the same dict
+                                                 #     shape the body accepts. The argon2id hash is never surfaced.
                                                  #   401 {"error": "not_authenticated"}.
                                                  #   403 {"error": "permission_denied"}.
+                                                 #   422 `type: invalid_cursor` — malformed / tampered `cursor`.
 DELETE /w/<slug>/api/v1/auth/tokens/{token_id}   # revoke — flips `revoked_at`. Idempotent: a second call
                                                  # on an already-revoked row still lands a
                                                  # `api_token.revoked_noop` audit entry but returns 204
