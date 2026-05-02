@@ -152,6 +152,7 @@ describe("INVALIDATIONS — coverage", () => {
     "chat_channel_binding.created",
     "chat_channel_binding.verified",
     "chat_channel_binding.revoked",
+    "llm.assignment.changed",
     "workspace.changed",
   ];
 
@@ -1066,6 +1067,21 @@ describe("INVALIDATIONS — per-kind behaviour", () => {
     expect(spy.mock.calls.map((c) => c[0]?.queryKey)).toEqual(
       expect.arrayContaining([qk.chatChannels()]),
     );
+  });
+
+  it("llm.assignment.changed invalidates the admin LLM graph", () => {
+    // §11 LLM router cache invalidation — when an admin mutates
+    // `model_assignment` or `llm_capability_inheritance`, the SPA
+    // drops `qk.adminLlmGraph()` so a second admin tab observes
+    // the new chain without a reload (cd-cui2).
+    const qc = makeClient();
+    const spy = vi.spyOn(qc, "invalidateQueries");
+    INVALIDATIONS["llm.assignment.changed"](
+      makeEvent("llm.assignment.changed"),
+      qc,
+    );
+    const called = spy.mock.calls.map((c) => c[0]?.queryKey);
+    expect(called).toEqual(expect.arrayContaining([qk.adminLlmGraph()]));
   });
 
   it("workspace.changed invalidates everything", () => {

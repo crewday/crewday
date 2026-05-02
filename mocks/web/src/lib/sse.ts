@@ -98,6 +98,7 @@ export function startEventStream(client: QueryClient): () => void {
     "booking.rejected",
     "booking.cancelled",
     "booking.reassigned",
+    "llm.assignment.changed",
   ];
   for (const ev of events) {
     es.addEventListener(ev, handler as EventListener);
@@ -112,7 +113,7 @@ export function startEventStream(client: QueryClient): () => void {
   };
 }
 
-function dispatch(client: QueryClient, evt: TypedEvent): void {
+export function dispatch(client: QueryClient, evt: TypedEvent): void {
   let data: unknown;
   try {
     data = JSON.parse(evt.data);
@@ -219,6 +220,16 @@ function dispatch(client: QueryClient, evt: TypedEvent): void {
       client.invalidateQueries({ queryKey: ["my-schedule"] });
       client.invalidateQueries({ queryKey: qk.bookings() });
       client.invalidateQueries({ queryKey: qk.dashboard() });
+      return;
+    case "llm.assignment.changed":
+      // §11 LLM router (`app/domain/llm/router.py`) drops its
+      // workspace-scoped resolver cache on this event; the admin
+      // `/admin/llm` graph reads `qk.adminLlmGraph()` for the
+      // assignment chain + capability inheritance. Whole-workspace
+      // invalidation matches the backend posture (the event payload
+      // does not name the affected capability, so narrowing here
+      // would miss inheritance ripples).
+      client.invalidateQueries({ queryKey: qk.adminLlmGraph() });
       return;
   }
 }

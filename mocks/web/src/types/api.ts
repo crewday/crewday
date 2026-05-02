@@ -1563,7 +1563,12 @@ export type SseEvent =
   | { event: "booking.approved"; data: { booking: Booking } }
   | { event: "booking.rejected"; data: { booking: Booking } }
   | { event: "booking.cancelled"; data: { booking: Booking } }
-  | { event: "booking.reassigned"; data: { booking: Booking } };
+  | { event: "booking.reassigned"; data: { booking: Booking } }
+  // §11 LLM router cache invalidation. Workspace-scoped, manager-only.
+  // Fires whenever an admin mutates `model_assignment` or
+  // `llm_capability_inheritance`; the SPA drops the admin LLM graph
+  // cache so a second tab sees the chain update without a reload.
+  | { event: "llm.assignment.changed"; data: { workspace_id: string } };
 
 // §06 — per-property recurring rota (Schedule ruleset).
 export interface ScheduleRuleset {

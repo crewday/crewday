@@ -159,6 +159,11 @@ export type EventKind =
   | "chat_channel_binding.created"
   | "chat_channel_binding.verified"
   | "chat_channel_binding.revoked"
+  // §11 LLM router cache invalidation — workspace-scoped, manager-only.
+  // Fires on any mutation to `model_assignment` /
+  // `llm_capability_inheritance`; the SPA drops the admin LLM graph
+  // cache so a second tab sees the chain update without a reload.
+  | "llm.assignment.changed"
   // Catch-all workspace invalidation — e.g. owner flips a workspace
   // setting that reshapes policy. Drops every cached query under
   // the active workspace.
@@ -898,6 +903,17 @@ export const INVALIDATIONS: Record<EventKind, InvalidationHandler> = {
 
   "chat_channel_binding.revoked": (_event, qc) => {
     invalidate(qc, qk.chatChannels());
+  },
+
+  "llm.assignment.changed": (_event, qc) => {
+    // §11 LLM router (`app/domain/llm/router.py`) drops its
+    // workspace-scoped resolver cache on this event; the admin
+    // `/admin/llm` graph reads `qk.adminLlmGraph()` for the
+    // assignment chain + capability inheritance. Whole-workspace
+    // invalidation matches the backend posture (the event payload
+    // does not name the affected capability, so narrowing here
+    // would miss inheritance ripples).
+    invalidate(qc, qk.adminLlmGraph());
   },
 
   "workspace.changed": (_event, qc) => {
