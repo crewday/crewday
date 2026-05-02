@@ -105,7 +105,7 @@ def _approval_target_for(
     request: Request, *, ctx: WorkspaceContext
 ) -> _ApprovalTarget | None:
     path = request.url.path
-    prefix = f"/w/{ctx.workspace_slug}/api/v1/tasks/tasks/"
+    prefix = f"/w/{ctx.workspace_slug}/api/v1/tasks/"
     if not path.startswith(prefix) or not path.endswith("/cancel"):
         return None
     task_id = path.removeprefix(prefix).removesuffix("/cancel").strip("/")

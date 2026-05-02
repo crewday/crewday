@@ -168,7 +168,7 @@ def test_demo_cookie_authenticates_followup_workspace_requests(
         path="/",
     )
 
-    response = demo_client.get(f"/w/{slug}/api/v1/tasks/tasks")
+    response = demo_client.get(f"/w/{slug}/api/v1/tasks")
 
     assert response.status_code == 200
     titles = {item["title"] for item in response.json()["data"]}

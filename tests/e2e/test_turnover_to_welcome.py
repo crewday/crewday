@@ -282,7 +282,7 @@ def test_ical_to_turnover_to_welcome(
         # tripping the ``forbid`` policy gate
         # (:func:`app.domain.tasks.evidence._default_policy`).
         owner_api.patch(
-            f"/w/{workspace_slug}/api/v1/tasks/tasks/{turnover_task_id}",
+            f"/w/{workspace_slug}/api/v1/tasks/{turnover_task_id}",
             {"photo_evidence": "optional"},
         )
 
@@ -291,7 +291,7 @@ def test_ical_to_turnover_to_welcome(
         # tasks they're assigned to — see
         # :func:`app.domain.tasks.completion._is_assignee`).
         assigned = owner_api.post(
-            f"/w/{workspace_slug}/api/v1/tasks/tasks/{turnover_task_id}/assign",
+            f"/w/{workspace_slug}/api/v1/tasks/{turnover_task_id}/assign",
             {"assignee_user_id": worker_user_id},
         )
         if assigned.get("assigned_user_id") != worker_user_id:
@@ -322,7 +322,7 @@ def test_ical_to_turnover_to_welcome(
         # the time the next request lines up.
         evidence_resp = worker_page.request.post(
             f"{base_url.rstrip('/')}/w/{workspace_slug}"
-            f"/api/v1/tasks/tasks/{turnover_task_id}/evidence",
+            f"/api/v1/tasks/{turnover_task_id}/evidence",
             multipart={
                 "kind": "photo",
                 "file": {
@@ -351,7 +351,7 @@ def test_ical_to_turnover_to_welcome(
         # an "optional" row accepts the photo and clears.
         complete_resp = worker_page.request.post(
             f"{base_url.rstrip('/')}/w/{workspace_slug}"
-            f"/api/v1/tasks/tasks/{turnover_task_id}/complete",
+            f"/api/v1/tasks/{turnover_task_id}/complete",
             data={
                 "note_md": "GA journey 3 turnover complete",
                 "photo_evidence_ids": [evidence_id],

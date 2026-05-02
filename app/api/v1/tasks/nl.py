@@ -31,7 +31,7 @@ router = APIRouter()
 
 
 @router.post(
-    "/tasks/from_nl",
+    "/from_nl",
     response_model=NlTaskPreviewPayload,
     operation_id="draft_task_from_nl",
     summary="Draft a task schedule from natural language",
@@ -62,7 +62,7 @@ def draft_task_from_nl_route(
 
 
 @router.post(
-    "/tasks/from_nl/commit",
+    "/from_nl/commit",
     status_code=status.HTTP_201_CREATED,
     response_model=NlTaskCommitPayload,
     operation_id="commit_task_from_nl",

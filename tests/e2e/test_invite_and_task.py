@@ -233,11 +233,11 @@ def test_owner_invites_worker_and_worker_completes_first_task(
         # test's surface narrow on the assignment-algorithm side.
         scheduled_for = _scheduled_iso_local()
         # The tasks router is mounted under the ``tasks`` context so
-        # the create endpoint sits at ``/w/<slug>/api/v1/tasks/tasks``
-        # (the inner ``/tasks`` is the route, the outer is the
-        # context-name prefix from CONTEXT_ROUTERS).
+        # the create endpoint sits at ``/w/<slug>/api/v1/tasks`` —
+        # inner routes use no extra ``/tasks`` prefix (the
+        # context-router segment supplies it once).
         task = owner_api.post(
-            f"/w/{workspace_slug}/api/v1/tasks/tasks",
+            f"/w/{workspace_slug}/api/v1/tasks",
             {
                 "title": f"GA journey 2 first task {run_id}",
                 "property_id": property_id,
@@ -251,7 +251,7 @@ def test_owner_invites_worker_and_worker_completes_first_task(
         )
         task_id = _expect_str(task, "id")
         assigned = owner_api.post(
-            f"/w/{workspace_slug}/api/v1/tasks/tasks/{task_id}/assign",
+            f"/w/{workspace_slug}/api/v1/tasks/{task_id}/assign",
             {"assignee_user_id": invitee_user_id},
         )
         assert assigned["assigned_user_id"] == invitee_user_id
@@ -262,14 +262,10 @@ def test_owner_invites_worker_and_worker_completes_first_task(
         # care about: passkey-issued cookie reaches FastAPI →
         # /auth/me probe succeeds → WorkspaceGate auto-adopts the
         # worker's only workspace → the protected tree mounts. The
-        # production TaskDetailPage at ``/task/:tid`` consumes a
-        # double-prefix path (``/api/v1/tasks/<id>/detail`` → SPA
-        # rewrites to ``/w/<slug>/api/v1/tasks/<id>/detail`` while
-        # the backend serves ``/w/<slug>/api/v1/tasks/tasks/<id>/detail``);
-        # tracking that frontend route gap is out of scope here — see
-        # follow-up Beads. We assert the worker's authenticated
-        # arrival and complete the task through the same JSON API
-        # the SPA's "Mark done" button targets.
+        # We assert the worker's authenticated arrival and complete
+        # the task through the same JSON API the SPA's "Mark done"
+        # button targets (cd-hnh9j removed the double-prefix
+        # workaround the earlier revision compensated for).
         invitee_page.goto(
             f"{base_url.rstrip('/')}/today",
             wait_until="domcontentloaded",
@@ -283,7 +279,7 @@ def test_owner_invites_worker_and_worker_completes_first_task(
         )
         # The SPA mounts after auth bootstraps; the "Today" heading
         # is the most stable readiness anchor that doesn't depend
-        # on task data (which is gated on the route-mismatch above).
+        # on task data.
         expect(invitee_page.get_by_role("heading", name="Today")).to_be_visible(
             timeout=15_000
         )
@@ -317,7 +313,7 @@ def test_owner_invites_worker_and_worker_completes_first_task(
         csrf_token = _read_csrf_cookie(invitee_page)
         complete_resp_obj = invitee_page.request.post(
             f"{base_url.rstrip('/')}/w/{workspace_slug}"
-            f"/api/v1/tasks/tasks/{task_id}/complete",
+            f"/api/v1/tasks/{task_id}/complete",
             data={"note_md": "Done via GA journey 2 e2e"},
             headers={CSRF_HEADER_NAME: csrf_token},
         )
@@ -560,7 +556,7 @@ def _poll_task_state_via_page(
     last: dict[str, Any] | None = None
     while time.monotonic() < deadline:
         resp = page.request.get(
-            f"{base_url.rstrip('/')}/w/{workspace_slug}/api/v1/tasks/tasks/{task_id}"
+            f"{base_url.rstrip('/')}/w/{workspace_slug}/api/v1/tasks/{task_id}"
         )
         if resp.status == 200:
             payload = resp.json()

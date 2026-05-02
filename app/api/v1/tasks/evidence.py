@@ -35,7 +35,7 @@ router = APIRouter()
 
 
 @router.get(
-    "/tasks/{task_id}/evidence",
+    "/{task_id}/evidence",
     response_model=EvidenceListResponse,
     operation_id="list_task_evidence",
     summary="List evidence rows on a task",
@@ -150,7 +150,7 @@ async def _read_file_capped(upload: UploadFile, *, kind: str) -> bytes:
 
 
 @router.post(
-    "/tasks/{task_id}/evidence",
+    "/{task_id}/evidence",
     status_code=status.HTTP_201_CREATED,
     response_model=EvidencePayload,
     operation_id="upload_task_evidence",

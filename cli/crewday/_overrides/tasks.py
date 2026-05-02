@@ -44,7 +44,6 @@ __all__ = ["register"]
 # coordinate doc) and live behind future override flags rather than
 # squatting on ``--evidence``.
 _DEFAULT_EVIDENCE_KIND: Final[str] = "photo"
-_OCCURRENCE_ROUTE_PREFIX: Final[str] = "tasks"
 
 
 def _guess_content_type(path: pathlib.Path) -> str:
@@ -168,9 +167,7 @@ def complete(
             "(pass --workspace or set CREWDAY_WORKSPACE)."
         )
 
-    task_route_root = (
-        f"/w/{resolved_ctx.workspace}/api/v1/tasks/{_OCCURRENCE_ROUTE_PREFIX}"
-    )
+    task_route_root = f"/w/{resolved_ctx.workspace}/api/v1/tasks"
     with _client_factory_for(resolved_ctx) as client:
         # Sanity-check the task exists + caller can see it. A 404 here
         # raises ApiError with exit code 1 (CLIENT_ERROR) so the

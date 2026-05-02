@@ -79,7 +79,7 @@ def test_locustfile_imports_without_running_load() -> None:
                 "assert module.CONFIG.time_prefix == "
                 "'/w/load/api/v1/time/shifts'; "
                 "assert module.CONFIG.tasks_prefix == "
-                "'/w/load/api/v1/tasks/tasks'; "
+                "'/w/load/api/v1/tasks'; "
                 "assert module.CrewdayLoadUser.abstract is True; "
                 "assert module.ClockingInUser is not None; "
                 "assert module.OccurrencesListUser is not None; "

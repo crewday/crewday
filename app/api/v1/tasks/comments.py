@@ -35,7 +35,7 @@ router = APIRouter()
 
 
 @router.post(
-    "/tasks/{task_id}/comments",
+    "/{task_id}/comments",
     status_code=status.HTTP_201_CREATED,
     response_model=CommentPayload,
     operation_id="post_task_comment",
@@ -77,7 +77,7 @@ def post_task_comment_route(
 
 
 @router.get(
-    "/tasks/{task_id}/comments",
+    "/{task_id}/comments",
     response_model=CommentListResponse,
     operation_id="list_task_comments",
     summary="List comments on a task (oldest-first, cursor-paginated)",
@@ -124,7 +124,7 @@ def list_task_comments_route(
 
 
 @router.patch(
-    "/tasks/{task_id}/comments/{comment_id}",
+    "/{task_id}/comments/{comment_id}",
     response_model=CommentPayload,
     operation_id="patch_task_comment",
     summary="Edit a comment within the author grace window",
@@ -165,7 +165,7 @@ def patch_task_comment_route(
 
 
 @router.delete(
-    "/tasks/{task_id}/comments/{comment_id}",
+    "/{task_id}/comments/{comment_id}",
     response_model=CommentPayload,
     operation_id="delete_task_comment",
     summary="Soft-delete a comment",

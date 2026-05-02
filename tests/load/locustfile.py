@@ -62,7 +62,7 @@ class LoadConfig:
 
     @property
     def tasks_prefix(self) -> str:
-        return f"{self.api_prefix}/tasks/tasks"
+        return f"{self.api_prefix}/tasks"
 
     @property
     def time_prefix(self) -> str:

@@ -59,7 +59,7 @@ export async function fetchPropertyDetail(
   const properties = await fetchJson<Property[]>("/api/v1/properties");
   const propertyRow = await fetchJson<PropertyDetailRow>("/api/v1/properties/" + pid);
   const tasks = await emptyListOnNotFound(
-    fetchJson<ListEnvelope<TaskRow>>("/api/v1/tasks/tasks?property_id=" + encodeURIComponent(pid) + "&limit=100"),
+    fetchJson<ListEnvelope<TaskRow>>("/api/v1/tasks?property_id=" + encodeURIComponent(pid) + "&limit=100"),
   );
   const reservations = await emptyListOnNotFound(
     fetchJson<ListEnvelope<ReservationRow>>(

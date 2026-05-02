@@ -230,9 +230,11 @@ def _client_for(
 ) -> TestClient:
     """Return a TestClient pinned to ``ctx`` (and optionally ``storage``).
 
-    Mounts the tasks router at ``/api/v1`` (sans the workspace-slug
-    prefix the factory adds in prod) and overrides the session + ctx
-    deps so the router reads the ambient seeded workspace.
+    Mounts the tasks router at ``/api/v1/tasks`` (sans the
+    workspace-slug prefix the factory adds in prod, otherwise the
+    same mount the production factory uses — see cd-hnh9j) and
+    overrides the session + ctx deps so the router reads the ambient
+    seeded workspace.
 
     ``storage`` is the :class:`InMemoryStorage` the file-evidence route
     writes blobs into. When ``None`` (the default), a throwaway
@@ -248,7 +250,7 @@ def _client_for(
     "undetectable bytes" branch) pass a stub.
     """
     app = FastAPI()
-    app.include_router(tasks_router, prefix="/api/v1")
+    app.include_router(tasks_router, prefix="/api/v1/tasks")
 
     def _session() -> Iterator[Session]:
         s = session_factory()
@@ -296,7 +298,7 @@ class TestTemplates:
     ) -> None:
         with _client_for(session_factory, seeded["owner_ctx"]) as client:
             r = client.post(
-                "/api/v1/task_templates",
+                "/api/v1/tasks/task_templates",
                 json={
                     "name": "Daily check",
                     "description_md": "",
@@ -308,13 +310,13 @@ class TestTemplates:
             assert created["name"] == "Daily check"
             tid = created["id"]
 
-            r = client.get("/api/v1/task_templates")
+            r = client.get("/api/v1/tasks/task_templates")
             assert r.status_code == 200, r.text
             body = r.json()
             assert set(body.keys()) == {"data", "next_cursor", "has_more"}
             assert any(row["id"] == tid for row in body["data"])
 
-            r = client.get(f"/api/v1/task_templates/{tid}")
+            r = client.get(f"/api/v1/tasks/task_templates/{tid}")
             assert r.status_code == 200, r.text
             assert r.json()["id"] == tid
 
@@ -325,11 +327,11 @@ class TestTemplates:
     ) -> None:
         with _client_for(session_factory, seeded["owner_ctx"]) as client:
             r = client.post(
-                "/api/v1/task_templates",
+                "/api/v1/tasks/task_templates",
                 json={"name": "Retirable", "description_md": ""},
             )
             tid = r.json()["id"]
-            r = client.delete(f"/api/v1/task_templates/{tid}")
+            r = client.delete(f"/api/v1/tasks/task_templates/{tid}")
             assert r.status_code == 200, r.text
             assert r.json()["deleted_at"] is not None
 
@@ -341,13 +343,13 @@ class TestTemplates:
         # Create a template in workspace A.
         with _client_for(session_factory, seeded["owner_ctx"]) as client:
             r = client.post(
-                "/api/v1/task_templates",
+                "/api/v1/tasks/task_templates",
                 json={"name": "A-only", "description_md": ""},
             )
             tid = r.json()["id"]
         # Try to read it as the owner of workspace B.
         with _client_for(session_factory, seeded["foreign_ctx"]) as client:
-            r = client.get(f"/api/v1/task_templates/{tid}")
+            r = client.get(f"/api/v1/tasks/task_templates/{tid}")
             assert r.status_code == 404, r.text
             assert r.json()["detail"]["error"] == "task_template_not_found"
 
@@ -360,19 +362,19 @@ class TestTemplates:
             ids: list[str] = []
             for i in range(2):
                 r = client.post(
-                    "/api/v1/task_templates",
+                    "/api/v1/tasks/task_templates",
                     json={"name": f"Tpl {i}", "description_md": ""},
                 )
                 ids.append(r.json()["id"])
 
-            r = client.get("/api/v1/task_templates", params={"limit": 1})
+            r = client.get("/api/v1/tasks/task_templates", params={"limit": 1})
             body = r.json()
             assert body["has_more"] is True
             assert body["next_cursor"] is not None
             assert len(body["data"]) == 1
 
             r = client.get(
-                "/api/v1/task_templates",
+                "/api/v1/tasks/task_templates",
                 params={"limit": 1, "cursor": body["next_cursor"]},
             )
             body = r.json()
@@ -390,7 +392,7 @@ class TestTemplates:
 class TestSchedules:
     def _create_template(self, client: TestClient, name: str = "Sched parent") -> str:
         r = client.post(
-            "/api/v1/task_templates",
+            "/api/v1/tasks/task_templates",
             json={"name": name, "description_md": "", "duration_minutes": 30},
         )
         tid = r.json()["id"]
@@ -405,7 +407,7 @@ class TestSchedules:
         with _client_for(session_factory, seeded["owner_ctx"]) as client:
             template_id = self._create_template(client)
             r = client.post(
-                "/api/v1/schedules",
+                "/api/v1/tasks/schedules",
                 json={
                     "name": "Bad",
                     "template_id": template_id,
@@ -425,7 +427,7 @@ class TestSchedules:
         with _client_for(session_factory, seeded["owner_ctx"]) as client:
             template_id = self._create_template(client, name="Weekly")
             r = client.post(
-                "/api/v1/schedules",
+                "/api/v1/tasks/schedules",
                 json={
                     "name": "Weekly clean",
                     "template_id": template_id,
@@ -437,15 +439,15 @@ class TestSchedules:
             assert r.status_code == 201, r.text
             sid = r.json()["id"]
 
-            r = client.get(f"/api/v1/schedules/{sid}/preview", params={"n": 3})
+            r = client.get(f"/api/v1/tasks/schedules/{sid}/preview", params={"n": 3})
             assert r.status_code == 200, r.text
             assert len(r.json()["occurrences"]) == 3
 
-            r = client.post(f"/api/v1/schedules/{sid}/pause")
+            r = client.post(f"/api/v1/tasks/schedules/{sid}/pause")
             assert r.status_code == 200, r.text
             assert r.json()["paused_at"] is not None
 
-            r = client.post(f"/api/v1/schedules/{sid}/resume")
+            r = client.post(f"/api/v1/tasks/schedules/{sid}/resume")
             assert r.status_code == 200, r.text
             assert r.json()["paused_at"] is None
 
@@ -457,7 +459,7 @@ class TestSchedules:
         with _client_for(session_factory, seeded["owner_ctx"]) as client:
             template_id = self._create_template(client)
             r = client.post(
-                "/api/v1/schedules",
+                "/api/v1/tasks/schedules",
                 json={
                     "name": "X",
                     "template_id": template_id,
@@ -468,7 +470,7 @@ class TestSchedules:
             )
             sid = r.json()["id"]
         with _client_for(session_factory, seeded["foreign_ctx"]) as client:
-            r = client.get(f"/api/v1/schedules/{sid}")
+            r = client.get(f"/api/v1/tasks/schedules/{sid}")
             assert r.status_code == 404, r.text
 
     def test_list_envelope_carries_templates_by_id(
@@ -481,7 +483,7 @@ class TestSchedules:
         with _client_for(session_factory, seeded["owner_ctx"]) as client:
             template_id = self._create_template(client, name="With sidecar")
             client.post(
-                "/api/v1/schedules",
+                "/api/v1/tasks/schedules",
                 json={
                     "name": "Daily",
                     "template_id": template_id,
@@ -491,7 +493,7 @@ class TestSchedules:
                 },
             )
 
-            r = client.get("/api/v1/schedules")
+            r = client.get("/api/v1/tasks/schedules")
             assert r.status_code == 200, r.text
             body = r.json()
             # The four-key envelope: cursor trio + sidecar.
@@ -528,7 +530,7 @@ class TestSchedules:
             template_id = self._create_template(client, name="Cadence parent")
             # Schedule with a default assignee.
             client.post(
-                "/api/v1/schedules",
+                "/api/v1/tasks/schedules",
                 json={
                     "name": "Weekly Mondays",
                     "template_id": template_id,
@@ -540,7 +542,7 @@ class TestSchedules:
             )
             # Schedule with no default assignee (None on the wire).
             client.post(
-                "/api/v1/schedules",
+                "/api/v1/tasks/schedules",
                 json={
                     "name": "Daily turnover",
                     "template_id": template_id,
@@ -550,7 +552,7 @@ class TestSchedules:
                 },
             )
 
-            r = client.get("/api/v1/schedules")
+            r = client.get("/api/v1/tasks/schedules")
             assert r.status_code == 200, r.text
             body = r.json()
 
@@ -589,7 +591,7 @@ class TestSchedules:
         with _client_for(session_factory, seeded["owner_ctx"]) as client:
             template_id = self._create_template(client, name="Single read")
             create = client.post(
-                "/api/v1/schedules",
+                "/api/v1/tasks/schedules",
                 json={
                     "name": "Saturdays",
                     "template_id": template_id,
@@ -605,7 +607,7 @@ class TestSchedules:
             assert created_body["rrule_human"] == "Every Saturday at 08:00"
             assert "default_assignee" not in created_body
 
-            r = client.get(f"/api/v1/schedules/{created_body['id']}")
+            r = client.get(f"/api/v1/tasks/schedules/{created_body['id']}")
             assert r.status_code == 200, r.text
             body = r.json()
             assert body["default_assignee_id"] == seeded["worker_id"]
@@ -622,7 +624,7 @@ class TestSchedules:
             referenced = self._create_template(client, name="Referenced")
             unreferenced = self._create_template(client, name="Lonely")
             client.post(
-                "/api/v1/schedules",
+                "/api/v1/tasks/schedules",
                 json={
                     "name": "Pull",
                     "template_id": referenced,
@@ -632,7 +634,7 @@ class TestSchedules:
                 },
             )
 
-            r = client.get("/api/v1/schedules")
+            r = client.get("/api/v1/tasks/schedules")
             body = r.json()
             assert referenced in body["templates_by_id"]
             assert unreferenced not in body["templates_by_id"]
@@ -653,7 +655,7 @@ class TestSchedules:
             tpl_a = self._create_template(client, name="Page A template")
             tpl_b = self._create_template(client, name="Page B template")
             client.post(
-                "/api/v1/schedules",
+                "/api/v1/tasks/schedules",
                 json={
                     "name": "Sched A",
                     "template_id": tpl_a,
@@ -663,7 +665,7 @@ class TestSchedules:
                 },
             )
             client.post(
-                "/api/v1/schedules",
+                "/api/v1/tasks/schedules",
                 json={
                     "name": "Sched B",
                     "template_id": tpl_b,
@@ -679,7 +681,7 @@ class TestSchedules:
                 params: dict[str, str] = {"limit": "1"}
                 if cursor is not None:
                     params["cursor"] = cursor
-                r = client.get("/api/v1/schedules", params=params)
+                r = client.get("/api/v1/tasks/schedules", params=params)
                 body = r.json()
                 assert len(body["data"]) == 1
                 seen_pairs.append(
@@ -704,7 +706,7 @@ class TestSchedules:
     ) -> None:
         """Empty result still serialises the envelope with an empty sidecar."""
         with _client_for(session_factory, seeded["foreign_ctx"]) as client:
-            r = client.get("/api/v1/schedules")
+            r = client.get("/api/v1/tasks/schedules")
             assert r.status_code == 200, r.text
             body = r.json()
             assert body["data"] == []
@@ -2042,12 +2044,12 @@ class TestCrossTenantMutations:
     ) -> None:
         with _client_for(session_factory, seeded["owner_ctx"]) as client:
             r = client.post(
-                "/api/v1/task_templates",
+                "/api/v1/tasks/task_templates",
                 json={"name": "Local-only", "description_md": ""},
             )
             tid = r.json()["id"]
         with _client_for(session_factory, seeded["foreign_ctx"]) as client:
-            r = client.delete(f"/api/v1/task_templates/{tid}")
+            r = client.delete(f"/api/v1/tasks/task_templates/{tid}")
             assert r.status_code == 404
             assert r.json()["detail"]["error"] == "task_template_not_found"
 
@@ -2058,12 +2060,12 @@ class TestCrossTenantMutations:
     ) -> None:
         with _client_for(session_factory, seeded["owner_ctx"]) as client:
             tr = client.post(
-                "/api/v1/task_templates",
+                "/api/v1/tasks/task_templates",
                 json={"name": "Parent", "description_md": ""},
             )
             template_id = tr.json()["id"]
             sr = client.post(
-                "/api/v1/schedules",
+                "/api/v1/tasks/schedules",
                 json={
                     "name": "X-tenant",
                     "template_id": template_id,
@@ -2074,7 +2076,7 @@ class TestCrossTenantMutations:
             )
             sid = sr.json()["id"]
         with _client_for(session_factory, seeded["foreign_ctx"]) as client:
-            r = client.post(f"/api/v1/schedules/{sid}/pause")
+            r = client.post(f"/api/v1/tasks/schedules/{sid}/pause")
             assert r.status_code == 404
             assert r.json()["detail"]["error"] == "schedule_not_found"
 

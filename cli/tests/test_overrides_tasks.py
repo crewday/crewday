@@ -95,9 +95,9 @@ def test_complete_no_evidence_calls_complete_immediately(
     # Two calls: GET sanity check + POST /complete.
     assert len(captured) == 2
     assert captured[0].method == "GET"
-    assert captured[0].url.path == "/w/smoke/api/v1/tasks/tasks/task-1"
+    assert captured[0].url.path == "/w/smoke/api/v1/tasks/task-1"
     assert captured[1].method == "POST"
-    assert captured[1].url.path == "/w/smoke/api/v1/tasks/tasks/task-1/complete"
+    assert captured[1].url.path == "/w/smoke/api/v1/tasks/task-1/complete"
 
     body = json.loads(captured[1].content)
     assert body == {"photo_evidence_ids": []}
@@ -327,8 +327,8 @@ def test_complete_uses_profile_default_workspace(
 
     assert result.exit_code == 0, result.output
     assert captured == [
-        ("GET", "/w/smoke/api/v1/tasks/tasks/task-1"),
-        ("POST", "/w/smoke/api/v1/tasks/tasks/task-1/complete"),
+        ("GET", "/w/smoke/api/v1/tasks/task-1"),
+        ("POST", "/w/smoke/api/v1/tasks/task-1/complete"),
     ]
 
 

@@ -1,4 +1,14 @@
-"""Occurrence routes exposed under the product label tasks."""
+"""Occurrence routes exposed under the product label tasks.
+
+The bare ``GET /`` (list) and ``POST /`` (create) operations live as
+plain handlers here and get their FastAPI decorators in :mod:`router`.
+This keeps them registered directly on the outer ``tasks_router`` with
+``path=""`` so they resolve at exactly ``/w/<slug>/api/v1/tasks`` (no
+trailing slash) — see the docstring in :mod:`router` for the FastAPI
+constraint that drives the split. Every other route stays decorated
+on the local ``router`` and is included via ``include_router`` from
+:mod:`router`.
+"""
 
 from __future__ import annotations
 
@@ -75,13 +85,6 @@ _OccurrenceState = Literal[
 ]
 
 
-@router.get(
-    "/tasks",
-    response_model=TaskListResponse,
-    operation_id="list_tasks",
-    summary="List occurrences (tasks) with filters",
-    openapi_extra={"x-cli": {"group": "tasks", "verb": "list"}},
-)
 def list_tasks_route(
     ctx: _Ctx,
     session: _Db,
@@ -164,13 +167,6 @@ def list_tasks_route(
     )
 
 
-@router.post(
-    "/tasks",
-    status_code=status.HTTP_201_CREATED,
-    response_model=TaskPayload,
-    operation_id="create_task",
-    summary="Create a one-off task",
-)
 def create_task_route(
     body: TaskCreate,
     ctx: _Ctx,
@@ -189,7 +185,7 @@ def create_task_route(
 
 
 @router.get(
-    "/tasks/{task_id}",
+    "/{task_id}",
     response_model=TaskPayload,
     operation_id="get_task",
     summary="Read a single task",
@@ -210,7 +206,7 @@ def get_task_route(
 
 
 @router.get(
-    "/tasks/{task_id}/detail",
+    "/{task_id}/detail",
     response_model=TaskDetailPayload,
     operation_id="get_task_detail",
     summary="Read worker task detail with property, instructions, and checklist",
@@ -230,7 +226,7 @@ def get_task_detail_route(
 
 
 @router.patch(
-    "/tasks/{task_id}",
+    "/{task_id}",
     response_model=TaskPayload,
     operation_id="patch_task",
     summary="Partial update of a task (full §06 mutable set)",
@@ -281,7 +277,7 @@ def patch_task_route(
 
 
 @router.patch(
-    "/tasks/{task_id}/checklist/{item_id}",
+    "/{task_id}/checklist/{item_id}",
     response_model=TaskChecklistItemPayload,
     operation_id="patch_task_checklist_item",
     summary="Idempotently tick or untick a task checklist item",
@@ -326,7 +322,7 @@ def patch_task_checklist_item_route(
 
 
 @router.post(
-    "/tasks/{task_id}/assign",
+    "/{task_id}/assign",
     response_model=AssignmentPayload,
     operation_id="assign_task",
     summary="Assign a task to a specific user",
@@ -369,7 +365,7 @@ def assign_task_route(
 
 
 @router.post(
-    "/tasks/{task_id}/start",
+    "/{task_id}/start",
     response_model=TaskStatePayload,
     operation_id="start_task",
     summary="Drive a task from pending to in_progress",
@@ -397,7 +393,7 @@ def start_task_route(
 
 
 @router.post(
-    "/tasks/{task_id}/complete",
+    "/{task_id}/complete",
     response_model=TaskStatePayload,
     operation_id="complete_task",
     summary="Mark a task completed — gated by evidence + checklist policy",
@@ -436,7 +432,7 @@ def complete_task_route(
 
 
 @router.post(
-    "/tasks/{task_id}/skip",
+    "/{task_id}/skip",
     response_model=TaskStatePayload,
     operation_id="skip_task",
     summary="Skip a task with a reason",
@@ -461,7 +457,7 @@ def skip_task_route(
 
 
 @router.post(
-    "/tasks/{task_id}/cancel",
+    "/{task_id}/cancel",
     response_model=TaskStatePayload,
     operation_id="cancel_task",
     summary="Cancel a task with a reason (manager / owner only)",
