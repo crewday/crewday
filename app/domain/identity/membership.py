@@ -78,11 +78,6 @@ models from :mod:`app.adapters.db.*`. The import-linter stopgap for
 :mod:`pyproject.toml` §"ignore_imports"). cd-duv6 tracks the proper
 Protocol-seam refactor for every identity service at once.
 
-Deferred to follow-ups (see report at handoff):
-
-* Nightly ``invite`` TTL sweeper ("expired" state flip) — runs
-  alongside the existing ``signup_gc`` worker.
-
 See ``docs/specs/03-auth-and-tokens.md`` §"Additional users
 (invite → click-to-accept)" and ``docs/specs/05-employees-and-roles.md``
 §"Role grants".
@@ -143,6 +138,13 @@ from app.domain.identity.permission_groups import (
     WouldOrphanOwnersGroup,
     write_member_remove_rejected_audit,
 )
+
+# Aliased to dodge the local ``InviteExpired`` exception class (a
+# 410 surface for the accept flow) — the event is the worker-side
+# SSE payload published when the TTL sweeper flips a row.
+from app.events.bus import EventBus
+from app.events.bus import bus as default_event_bus
+from app.events.types import InviteExpired as InviteExpiredEvent
 from app.mail.templates import invite_accept as invite_accept_template
 from app.mail.templates import render as render_template
 from app.tenancy import WorkspaceContext, tenant_agnostic
@@ -167,6 +169,7 @@ __all__ = [
     "NewUserAcceptance",
     "NotAMember",
     "PasskeySessionRequired",
+    "PruneStaleInvitesReport",
     "PurposeMismatch",
     "TokenExpired",
     "WorkspaceMembership",
@@ -177,6 +180,7 @@ __all__ = [
     "introspect_invite",
     "invite",
     "list_workspaces_for_user",
+    "prune_stale_invites",
     "register_invite_passkey_finish",
     "register_invite_passkey_start",
     "remove_member",
@@ -362,6 +366,21 @@ class WorkspaceMembership:
     workspace_id: str
     workspace_slug: str
     workspace_name: str
+
+
+@dataclass(frozen=True, slots=True)
+class PruneStaleInvitesReport:
+    """Return payload of :func:`prune_stale_invites` (cd-za45).
+
+    Mirrors :class:`app.domain.agent.approval.ExpireDueReport`: the
+    worker logs the count + ids at INFO so operators can correlate
+    SSE traffic with sweep ticks. The full row payload is not carried
+    — the SPA re-fetches the manager-members surface off the per-row
+    :class:`~app.events.types.InviteExpired` event.
+    """
+
+    expired_count: int
+    expired_ids: tuple[str, ...]
 
 
 # ---------------------------------------------------------------------------
@@ -882,6 +901,112 @@ def _invalidate_pending_invite_nonces(session: DbSession, *, invite_id: str) -> 
 def _hash_email(email_lower: str, *, settings: Settings | None) -> str:
     """Return the PII-safe audit hash for ``email_lower``."""
     return hash_with_pepper(email_lower, _email_pepper(settings))
+
+
+# ---------------------------------------------------------------------------
+# prune_stale_invites — TTL sweeper (cd-za45)
+# ---------------------------------------------------------------------------
+
+
+def prune_stale_invites(
+    *,
+    session: DbSession,
+    now: datetime,
+    clock: Clock | None = None,
+    event_bus: EventBus | None = None,
+) -> PruneStaleInvitesReport:
+    """Flip every ``pending`` :class:`Invite` past its ``expires_at`` to ``expired``.
+
+    Worker-driven sweep (cd-za45). Cross-tenant by design: the TTL
+    worker runs per-deployment, scans every workspace's pending invite
+    queue, and re-emits one
+    :class:`~app.events.types.InviteExpired` event per expired row
+    (the SSE transport's per-workspace + role filter routes it to the
+    right manager subscribers).
+
+    Mirrors :func:`app.domain.agent.approval.expire_due` exactly:
+
+    1. Selects every ``pending`` invite whose ``expires_at`` is not
+       greater than ``now``. The select runs under
+       :func:`tenant_agnostic` because the worker has no
+       :class:`WorkspaceContext`; the ORM tenant filter would drop
+       every row otherwise.
+    2. For each row: stamp ``state='expired'``. ``revoked_at`` /
+       ``accepted_at`` stay NULL — the lifecycle column for an
+       auto-expiry is ``expires_at`` itself (which already pins the
+       transition instant). A defensive guard skips rows whose state
+       changed between the SELECT and the UPDATE so a concurrent
+       accept never gets clobbered by the sweep.
+    3. Publishes one :class:`~app.events.types.InviteExpired` event
+       per row.
+
+    No audit row is written (deliberate, mirrors ``expire_due``). The
+    decision is automatic and attributable to the system actor — the
+    worker's structured log carries the per-tick summary
+    (``event=invite.ttl.sweep``) and the per-row state flip + event
+    payload carry the detail. Adding an audit row per expired invite
+    would dominate the audit table on a busy fleet for no reader gain.
+
+    Returns the count + the ids of expired rows so the worker can log
+    + emit metrics. An empty sweep is a no-op (no events). The event
+    side-effects share the caller's open transaction; the worker
+    commits once at the tick boundary.
+
+    The ``clock`` parameter is kept on the signature for forward
+    compatibility (a future extension that writes one summary audit
+    row per tick needs the clock for its ``created_at`` stamp) but is
+    unused on the v1 path because ``now`` is passed in by the worker
+    (which already derived it from its own clock).
+
+    See ``docs/specs/03-auth-and-tokens.md`` §"Additional users
+    (invite → click-to-accept)" §"TTL".
+    """
+    del clock  # forward-compat parameter, see docstring
+    bus = event_bus if event_bus is not None else default_event_bus
+    cutoff = _aware_utc(now)
+
+    with tenant_agnostic():
+        stmt = (
+            select(Invite)
+            .where(
+                Invite.state == "pending",
+                Invite.expires_at <= cutoff,
+            )
+            .order_by(Invite.created_at, Invite.id)
+        )
+        rows = list(session.scalars(stmt).all())
+
+    expired_ids: list[str] = []
+    for row in rows:
+        # Defensive guard: a concurrent accept / revoke may have
+        # flipped the row between the SELECT and the UPDATE. Skip
+        # rows whose state changed under us so the worker never
+        # overwrites a fresh decision. The next tick re-checks (the
+        # row is already terminal so it falls out of the predicate).
+        if row.state != "pending":
+            continue
+        row.state = "expired"
+        expired_ids.append(row.id)
+
+        bus.publish(
+            InviteExpiredEvent(
+                workspace_id=row.workspace_id,
+                # The expiry has no human actor — attribute to the
+                # inviter so the SSE filter routes the event to the
+                # manager surface that issued the invite. Falls back
+                # to ``"system"`` for the (rare) row whose inviter
+                # was hard-deleted between mint and expiry.
+                actor_id=row.invited_by_user_id or "system",
+                correlation_id=row.id,
+                occurred_at=cutoff,
+                invite_id=row.id,
+            )
+        )
+
+    return PruneStaleInvitesReport(
+        expired_count=len(expired_ids),
+        expired_ids=tuple(expired_ids),
+    )
 
 
 # ---------------------------------------------------------------------------

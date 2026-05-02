@@ -84,6 +84,7 @@ from app.worker.jobs.maintenance import (
     _make_chat_gateway_sweep_body,
     _make_idempotency_sweep_body,
     _make_inventory_reorder_body,
+    _make_invite_ttl_body,
     _make_retention_rotation_body,
     _make_webhook_dispatch_body,
 )
@@ -113,6 +114,8 @@ __all__ = [
     "HEARTBEAT_JOB_INTERVAL_SECONDS",
     "IDEMPOTENCY_SWEEP_JOB_ID",
     "INVENTORY_REORDER_JOB_ID",
+    "INVITE_TTL_INTERVAL_SECONDS",
+    "INVITE_TTL_JOB_ID",
     "LLM_BUDGET_REFRESH_INTERVAL_SECONDS",
     "LLM_BUDGET_REFRESH_JOB_ID",
     "OVERDUE_DETECT_INTERVAL_SECONDS",
@@ -268,6 +271,28 @@ APPROVAL_TTL_JOB_ID: str = "approval_ttl_sweep"
 # ``(status, expires_at)`` covering index is a Beads follow-up
 # (cd-approval-ttl-index) for fleets with sustained pending depth.
 APPROVAL_TTL_INTERVAL_SECONDS: int = 900
+
+
+# Stable job id for the invite TTL expiry sweep (cd-za45). The sweep
+# callable in :mod:`app.worker.tasks.invite_ttl.sweep_expired_invites`
+# flips every ``invite`` row past its ``expires_at`` from
+# ``state='pending'`` to ``state='expired'`` and re-emits one
+# :class:`~app.events.types.InviteExpired` per row. Cross-tenant by
+# design — like the sibling approval-TTL sweep, the body is
+# deployment-scope (NOT per-workspace) so the domain layer reads under
+# ``tenant_agnostic`` and the SSE transport routes the per-row event
+# to the right manager subscribers.
+INVITE_TTL_JOB_ID: str = "invite_ttl_sweep"
+
+# Interval for the invite TTL sweep. Spec §03 "Additional users
+# (invite → click-to-accept)" pins the magic-link TTL at 24 h; once a
+# row's ``expires_at`` lapses the manager workspace-members surface
+# should converge within one tick. 15 min matches the cadence pinned
+# for the sibling :data:`APPROVAL_TTL_INTERVAL_SECONDS` — the same
+# rationale applies (an idle fleet's pending depth is workspace-bounded
+# so a status-filtered scan rides the existing ``ix_invite_expires``
+# index without a covering one).
+INVITE_TTL_INTERVAL_SECONDS: int = 900
 
 
 # Stable job id for the outbound webhook dispatcher tick (cd-q885).
@@ -593,6 +618,7 @@ def register_jobs(
         POLL_ICAL_JOB_ID,
         USER_WORKSPACE_REFRESH_JOB_ID,
         APPROVAL_TTL_JOB_ID,
+        INVITE_TTL_JOB_ID,
         WEBHOOK_DISPATCH_JOB_ID,
         CHAT_GATEWAY_SWEEP_JOB_ID,
         INVENTORY_REORDER_JOB_ID,
@@ -864,6 +890,37 @@ def register_jobs(
         max_instances=1,
         coalesce=True,
         misfire_grace_time=APPROVAL_TTL_INTERVAL_SECONDS,
+    )
+
+    # --- 15 min invite TTL expiry sweep (cd-za45) ---
+    # The sweep callable in
+    # :mod:`app.worker.tasks.invite_ttl.sweep_expired_invites`
+    # flips every ``invite`` row past its ``expires_at`` from
+    # ``state='pending'`` to ``state='expired'`` and emits one
+    # :class:`~app.events.types.InviteExpired` per row. The sweep is
+    # deployment-scope (NOT per-workspace) — see the module docstring
+    # for the cross-tenant rationale. Mirrors the sibling
+    # :data:`APPROVAL_TTL_JOB_ID` registration shape.
+    #
+    # ``misfire_grace_time = INVITE_TTL_INTERVAL_SECONDS`` — one tick
+    # late is fine (the sweep is idempotent: rows in terminal state
+    # fall out of the predicate), two-ticks-late is a signal the
+    # scheduler is stuck and a skip is preferable to a stacked
+    # catch-up. ``coalesce=True`` + ``max_instances=1`` keep a slow
+    # sweep from stacking ticks on an overloaded DB.
+    scheduler.add_job(
+        wrap_job(
+            _make_invite_ttl_body(resolved_clock),
+            job_id=INVITE_TTL_JOB_ID,
+            clock=resolved_clock,
+        ),
+        trigger=IntervalTrigger(seconds=INVITE_TTL_INTERVAL_SECONDS),
+        id=INVITE_TTL_JOB_ID,
+        name=INVITE_TTL_JOB_ID,
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=INVITE_TTL_INTERVAL_SECONDS,
     )
 
     # --- 30 s outbound webhook dispatcher tick (cd-q885) ---

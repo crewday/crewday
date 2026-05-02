@@ -66,6 +66,7 @@ __all__ = [
     "InstructionUpdated",
     "InventoryItemChanged",
     "InventoryLowStock",
+    "InviteExpired",
     "IssueReported",
     "LeaveDecided",
     "LlmAssignmentChanged",
@@ -1681,3 +1682,31 @@ class LeaveDecided(Event):
     @classmethod
     def _decided_at_is_utc(cls, value: datetime) -> datetime:
         return _require_aware_utc(value)
+
+
+@register
+class InviteExpired(Event):
+    """A pending :class:`Invite` row was auto-expired by the TTL sweeper (cd-za45).
+
+    Published from :func:`app.domain.identity.membership.prune_stale_invites`
+    via the :func:`~app.worker.tasks.invite_ttl.sweep_expired_invites`
+    worker tick when an ``invite`` row's ``expires_at`` lapses and its
+    state flips ``pending → expired``. Subscribers refresh the manager
+    workspace-members surface so the row's "pending" badge clears
+    without a reload.
+
+    **Role scope.** Manager-only. Invites are a manager / owner concern
+    — workers, clients, and guests have no business in the invite
+    pipeline; narrowing here keeps the payload off their SSE streams
+    entirely.
+
+    **Payload posture.** Foreign-key identifier only. The pending email
+    plaintext + the inviter's display name live on the :class:`Invite`
+    row behind the per-row authz path; the SPA re-fetches via REST.
+    The invite id is enough for the manager surface to drop its row.
+    """
+
+    name: ClassVar[str] = "invite.expired"
+    allowed_roles: ClassVar[tuple[EventRole, ...]] = ("manager",)
+
+    invite_id: str

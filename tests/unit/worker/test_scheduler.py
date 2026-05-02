@@ -40,6 +40,8 @@ from app.worker.scheduler import (
     HEARTBEAT_JOB_ID,
     IDEMPOTENCY_SWEEP_JOB_ID,
     INVENTORY_REORDER_JOB_ID,
+    INVITE_TTL_INTERVAL_SECONDS,
+    INVITE_TTL_JOB_ID,
     LLM_BUDGET_REFRESH_INTERVAL_SECONDS,
     LLM_BUDGET_REFRESH_JOB_ID,
     OVERDUE_DETECT_INTERVAL_SECONDS,
@@ -101,6 +103,7 @@ class TestRegisterJobs:
             GENERATOR_JOB_ID,
             IDEMPOTENCY_SWEEP_JOB_ID,
             INVENTORY_REORDER_JOB_ID,
+            INVITE_TTL_JOB_ID,
             HEARTBEAT_JOB_ID,
             LLM_BUDGET_REFRESH_JOB_ID,
             OVERDUE_DETECT_JOB_ID,
@@ -144,6 +147,7 @@ class TestRegisterJobs:
             GENERATOR_JOB_ID,
             IDEMPOTENCY_SWEEP_JOB_ID,
             INVENTORY_REORDER_JOB_ID,
+            INVITE_TTL_JOB_ID,
             HEARTBEAT_JOB_ID,
             LLM_BUDGET_REFRESH_JOB_ID,
             OVERDUE_DETECT_JOB_ID,
@@ -673,6 +677,92 @@ class TestUserWorkspaceRefreshJob:
         # The body dispatched one ``reconcile_user_workspace`` call
         # and handed the patched clock's ``now()`` through.
         assert seen_now == [clock.now()]
+
+
+# ---------------------------------------------------------------------------
+# Invite TTL sweep (cd-za45)
+# ---------------------------------------------------------------------------
+
+
+class TestInviteTtlJob:
+    """Registration shape + clock propagation for the cd-za45 invite TTL sweep.
+
+    The body's per-row state flip + event publish behaviour is covered
+    against an in-memory engine in
+    ``tests/unit/identity/test_membership.py::TestPruneStaleInvites``;
+    the unit layer here pins the registration metadata + clock
+    propagation so a future refactor cannot silently change the
+    operator-visible cadence or break the FrozenClock-driven test seam.
+    Mirrors :class:`TestUserWorkspaceRefreshJob` exactly.
+    """
+
+    def test_adds_invite_ttl_job_at_15min_interval(self) -> None:
+        """Registered with the pinned interval + coalesce settings."""
+        from apscheduler.triggers.interval import IntervalTrigger
+
+        sched = create_scheduler()
+        register_jobs(sched)
+
+        job = sched.get_job(INVITE_TTL_JOB_ID)
+        assert job is not None, f"{INVITE_TTL_JOB_ID} not registered by register_jobs"
+
+        # IntervalTrigger at 900 s (15 min) — matches the sibling
+        # approval-TTL cadence.
+        assert isinstance(job.trigger, IntervalTrigger)
+        assert job.trigger.interval.total_seconds() == 900.0
+        assert INVITE_TTL_INTERVAL_SECONDS == 900
+
+        # Wrapper knobs: misfire grace == one full interval, coalesce
+        # on, single instance. One tick late is tolerated (idempotent
+        # sweep — rows in terminal state fall out of the predicate);
+        # two-ticks-late skip rather than stack.
+        assert job.misfire_grace_time == INVITE_TTL_INTERVAL_SECONDS
+        assert job.coalesce is True
+        assert job.max_instances == 1
+
+    def test_is_idempotent(self) -> None:
+        """Re-registering keeps exactly one invite_ttl_sweep job."""
+        sched = create_scheduler()
+        register_jobs(sched)
+        register_jobs(sched)
+
+        matching = [j for j in sched.get_jobs() if j.id == INVITE_TTL_JOB_ID]
+        assert len(matching) == 1
+
+    def test_uses_resolved_clock(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Injected :class:`FrozenClock` propagates into the sweep body.
+
+        The factory closes over the scheduler's clock at registration
+        time (matches the approval-TTL / LLM-budget-refresh pattern).
+        A regression that reached for :class:`SystemClock` inside the
+        body would silently trip every FrozenClock-driven test by
+        falling back to the OS clock; we prove propagation by patching
+        the deferred-import target and observing the ``clock`` arg.
+        """
+        from app.worker.jobs import maintenance as maintenance_jobs
+
+        clock = FrozenClock(datetime(2026, 4, 24, 12, 0, tzinfo=UTC))
+        seen_clocks: list[object] = []
+
+        class _FakeReport:
+            expired_count = 0
+            expired_ids: tuple[str, ...] = ()
+
+        def fake_sweep(*, clock: object) -> _FakeReport:  # type: ignore[no-untyped-def]
+            seen_clocks.append(clock)
+            return _FakeReport()
+
+        # Patch the deferred-import target — the body imports
+        # ``sweep_expired_invites`` from the task module, so we patch
+        # it there.
+        import app.worker.tasks.invite_ttl as _invite_ttl_mod
+
+        monkeypatch.setattr(_invite_ttl_mod, "sweep_expired_invites", fake_sweep)
+
+        body = maintenance_jobs._make_invite_ttl_body(clock)
+        body()
+
+        assert seen_clocks == [clock]
 
 
 # ---------------------------------------------------------------------------

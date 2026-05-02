@@ -59,6 +59,44 @@ def _make_approval_ttl_body(clock: Clock) -> Callable[[], None]:
     return _body
 
 
+def _make_invite_ttl_body(clock: Clock) -> Callable[[], None]:
+    """Build the 15-min invite TTL sweep body (cd-za45).
+
+    Factory rather than a bare module-level function so the body
+    closes over the scheduler's injected :class:`Clock` — the cutoff
+    (``expires_at <= clock.now()``) MUST be driven by the same clock
+    the heartbeat uses. A :class:`~app.util.clock.FrozenClock` under
+    test (or a future simulated-time deployment) would otherwise have
+    a deterministic heartbeat timestamp and a non-deterministic sweep
+    cutoff — easy to mis-diagnose, pointless to tolerate given how
+    cheap the closure is. Mirrors the sibling
+    :func:`_make_approval_ttl_body` exactly.
+
+    The returned body is a thin adapter around
+    :func:`app.worker.tasks.invite_ttl.sweep_expired_invites`,
+    which opens its own UoW (the worker has no ambient session) and
+    commits at the end.
+
+    The task import is deferred into the closure body so module
+    import order stays robust — the task module pulls in
+    :mod:`app.domain.identity.membership` (which itself drags in
+    permission groups + the event bus), none of which the standalone
+    ``python -m app.worker`` entrypoint otherwise needs at import
+    time.
+    """
+
+    def _body() -> None:
+        from app.worker.tasks.invite_ttl import sweep_expired_invites
+
+        # The task itself logs the per-tick summary at INFO with
+        # ``event=invite.ttl.sweep``; the wrapper does not need to
+        # re-emit. Discard the returned report — operators read it
+        # off the structured-log stream, not the wrapper's return.
+        sweep_expired_invites(clock=clock)
+
+    return _body
+
+
 def _make_webhook_dispatch_body(clock: Clock) -> Callable[[], None]:
     """Build the 30 s outbound webhook dispatcher body (cd-q885).
 

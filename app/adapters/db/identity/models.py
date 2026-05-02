@@ -642,8 +642,9 @@ class Invite(Base):
       transaction — for a new user that is the post-passkey
       ``complete_invite`` callback; for an existing user it is the
       second ``POST /invite/{id}/confirm`` press;
-    * pruned (``state = 'expired'``) by a future nightly
-      ``signup_gc`` worker once ``expires_at`` lapses.
+    * pruned (``state = 'expired'``) by the deployment-wide
+      :func:`~app.worker.tasks.invite_ttl.sweep_expired_invites`
+      worker tick once ``expires_at`` lapses (cd-za45).
 
     **PII minimisation (§15).** We store the invitee's email in the
     clear on this row (``pending_email``) because the accept flow

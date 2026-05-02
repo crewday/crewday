@@ -293,8 +293,9 @@ they take effect; grants never attach silently.
     work-role rows that will activate. On **Accept**, the pending
     rows activate in a single transaction; on **Dismiss**, they
     are left pending until the invite TTL lapses, at which point
-    the nightly `signup_gc` worker prunes them. No existing
-    passkey is re-registered; no break-glass regeneration.
+    the deployment-wide `invite_ttl_sweep` worker tick flips them
+    to `state='expired'`. No existing passkey is re-registered;
+    no break-glass regeneration.
 - Two audit events distinguish the two outcomes: `user.enrolled`
   on first-passkey completion, `user.grant_accepted` on the
   existing-user Accept. Both carry the `invite.id`, the list of
