@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { KeyRound, RotateCw, ScrollText, Trash2 } from "lucide-react";
 import { fetchJson } from "@/lib/api";
@@ -333,7 +334,7 @@ export default function ApiTokensPage() {
             </span>
             <span className="tokens-meta__divider" aria-hidden="true" />
             <span className="tokens-meta__hint">
-              personal tokens live on <a href="/me">/me</a>
+              personal tokens live on <Link to="/me">/me</Link>
             </span>
           </div>
         </header>

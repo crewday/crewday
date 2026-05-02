@@ -4,6 +4,7 @@
 // (§03 "Self-service lost-device recovery").
 
 import { KeyRound } from "lucide-react";
+import { Link } from "react-router-dom";
 
 export default function LoginPage() {
   return (
@@ -19,11 +20,11 @@ export default function LoginPage() {
           <button className="btn btn--moss btn--lg login__primary" type="button">
             <KeyRound size={18} strokeWidth={1.8} aria-hidden="true" /> Use passkey
           </button>
-          <a href="/recover" className="login__recover">Lost your device? Recover access →</a>
+          <Link to="/recover" className="login__recover">Lost your device? Recover access →</Link>
         </div>
         <p className="login__footnote">
           First time here? Open the invite link your manager sent.{" "}
-          <a href="/accept/demo-abc123" className="link">See what accepting an invite looks like →</a>
+          <Link to="/accept/demo-abc123" className="link">See what accepting an invite looks like →</Link>
         </p>
       </main>
     </div>

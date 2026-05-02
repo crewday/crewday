@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Link } from "react-router-dom";
 
 // Static (mock) self-service recovery surface (§03).
 // Workers, clients, and guests: enter email only.
@@ -61,7 +62,7 @@ export default function RecoverPage() {
             your workspace may have disabled self-service recovery — ask a manager to re-issue
             your link.
           </p>
-          <a href="/login" className="login__recover">← Back to sign in</a>
+          <Link to="/login" className="login__recover">← Back to sign in</Link>
         </div>
       </main>
     </div>
