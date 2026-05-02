@@ -765,6 +765,58 @@ rotate_session_secret = cli_override("admin", "rotate-session-secret", covers=[]
 )
 
 
+def _load_app_job_state() -> Any:
+    """Lazy import so non-host invocations don't pay the app-package cost."""
+    try:
+        from app.worker import job_state as job_state_mod
+    except Exception as exc:
+        raise ConfigError(
+            "admin worker commands must run on the server host with app "
+            "dependencies installed"
+        ) from exc
+    return job_state_mod
+
+
+def _system_clock() -> Any:
+    try:
+        from app.util.clock import SystemClock
+    except Exception as exc:
+        raise ConfigError(
+            "admin worker commands must run on the server host with app "
+            "dependencies installed"
+        ) from exc
+    return SystemClock()
+
+
+@click.command(name="reset-job")
+@click.argument("job_id")
+@click.pass_obj
+def worker_reset_job(_ctx: object, *, job_id: str) -> None:
+    """Clear the cd-8euz killswitch + failure counter for ``job_id``.
+
+    Driven by an operator after a ``worker.job.killed`` audit row
+    surfaces in the activity feed. Resets ``worker_heartbeat.dead_at``
+    and ``worker_heartbeat.consecutive_failures`` so the next tick
+    runs the body again. Writes a ``worker.job.reset`` deployment
+    audit row when a real reset happens.
+
+    Returns one JSON line so the verb composes cleanly with the
+    sibling ``crewday admin`` commands' shape (``{"job_id": ...,
+    "reset": true|false}``). ``"reset": false`` means the
+    ``worker_heartbeat`` row does not exist yet — a job that has
+    never run cannot be dead.
+    """
+    job_state_mod = _load_app_job_state()
+    clock = _system_clock()
+    reset = job_state_mod.reset_job(job_id=job_id, clock=clock)
+    click.echo(json.dumps({"job_id": job_id, "reset": reset}, sort_keys=True))
+
+
+worker_reset_job = cli_override("admin worker", "reset-job", covers=[])(
+    worker_reset_job
+)
+
+
 def _ensure_group(root: click.Group, name: str, *, help_text: str) -> click.Group:
     group = root.get_command(click.Context(root), name)
     if group is None:
@@ -796,3 +848,10 @@ def register(root: click.Group) -> None:
         help_text="host-only workspace admin commands",
     )
     workspace.add_command(workspace_bootstrap)
+
+    worker = _ensure_group(
+        group,
+        "worker",
+        help_text="host-only worker maintenance commands",
+    )
+    worker.add_command(worker_reset_job)

@@ -157,3 +157,61 @@ def test_secret_rotation_help_renders(command: object, expected: str) -> None:
 
     assert result.exit_code == 0
     assert expected in result.output
+
+
+def test_admin_worker_reset_job_clears_killswitch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``admin worker reset-job`` calls :func:`reset_job` and prints JSON.
+
+    The override is the operator-facing seam for the cd-8euz killswitch:
+    after a ``worker.job.killed`` audit row appears, the operator clears
+    ``worker_heartbeat.dead_at`` + ``consecutive_failures`` so the job
+    resumes ticking. The Click verb itself is glue — the durable work
+    happens inside :func:`app.worker.job_state.reset_job`. The test
+    confirms the verb threads the right ``job_id`` through and prints
+    a stable JSON payload.
+    """
+    seen_calls: list[str] = []
+
+    def fake_reset(*, job_id: str, clock: object) -> bool:
+        del clock
+        seen_calls.append(job_id)
+        return True
+
+    monkeypatch.setattr(
+        admin,
+        "_load_app_job_state",
+        lambda: SimpleNamespace(reset_job=fake_reset),
+    )
+    monkeypatch.setattr(admin, "_system_clock", lambda: SimpleNamespace())
+
+    result = CliRunner().invoke(admin.worker_reset_job, ["scheduler_heartbeat"])
+
+    assert result.exit_code == 0, result.output
+    assert seen_calls == ["scheduler_heartbeat"]
+    body = json.loads(result.output)
+    assert body == {"job_id": "scheduler_heartbeat", "reset": True}
+
+
+def test_admin_worker_reset_job_reports_no_row(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A reset on a never-run job returns ``"reset": false`` (and exit 0)."""
+
+    def fake_reset(*, job_id: str, clock: object) -> bool:
+        del job_id, clock
+        return False
+
+    monkeypatch.setattr(
+        admin,
+        "_load_app_job_state",
+        lambda: SimpleNamespace(reset_job=fake_reset),
+    )
+    monkeypatch.setattr(admin, "_system_clock", lambda: SimpleNamespace())
+
+    result = CliRunner().invoke(admin.worker_reset_job, ["never_ran"])
+
+    assert result.exit_code == 0, result.output
+    body = json.loads(result.output)
+    assert body == {"job_id": "never_ran", "reset": False}

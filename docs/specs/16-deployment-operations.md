@@ -759,7 +759,11 @@ A full env reference lives in `deploy/.env.example`.
   - `crewday_http_request_duration_seconds{route}`
   - `crewday_llm_calls_total{workspace_id, capability, status}`
   - `crewday_llm_cost_usd_total{workspace_id, model}`
-  - `crewday_worker_jobs_total{job, status}`
+  - `crewday_worker_jobs_total{job, status}` — `status` is one of
+    `ok` (clean tick), `error` (body raised), or `dead` (cd-8euz
+    killswitch short-circuit; tick skipped because a previous burst
+    of failures tipped the job into `worker_heartbeat.dead_at` and
+    no operator has cleared it yet).
   - `crewday_worker_job_duration_seconds{job}`
 - Future additions: DB pool gauges, email delivery counters,
   webhook delivery histogram. Each lands as a Beads task with

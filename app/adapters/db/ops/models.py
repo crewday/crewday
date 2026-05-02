@@ -56,6 +56,17 @@ class WorkerHeartbeat(Base):
     The row is upserted — one row per worker for the lifetime of the
     deployment, not one row per tick; the table stays constant-sized
     and cleanup is unnecessary.
+
+    ``consecutive_failures`` and ``dead_at`` (cd-8euz) carry per-job
+    failure state alongside the liveness signal: every failed tick
+    bumps the counter and the wrapper writes a deployment-scope
+    ``worker.job.repeated_failure`` audit row at the third consecutive
+    failure; the fifth tips ``dead_at`` non-NULL and the next tick
+    short-circuits until ``crewday admin worker reset-job`` clears
+    both columns. The ``MAX(heartbeat_at)`` readiness probe is
+    unaffected — a dead job stops bumping ``heartbeat_at`` so the
+    fleet's readiness escalates exactly the same way it would for a
+    silently stuck job.
     """
 
     __tablename__ = "worker_heartbeat"
@@ -63,6 +74,16 @@ class WorkerHeartbeat(Base):
     id: Mapped[str] = mapped_column(String, primary_key=True)
     worker_name: Mapped[str] = mapped_column(String, nullable=False)
     heartbeat_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
+    # Consecutive failed ticks since the last successful run. Reset to
+    # 0 on the next success. ``server_default='0'`` keeps existing
+    # rows (cd-7c0p era) consistent without a backfill.
+    consecutive_failures: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default="0", default=0
+    )
+    # Killswitch flag. NULL = live; non-NULL = the wrapper short-
+    # circuits subsequent ticks until an operator clears the flag via
+    # the host CLI ``crewday admin worker reset-job`` verb.
+    dead_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), nullable=True)
 
     __table_args__ = (
         UniqueConstraint("worker_name", name="uq_worker_heartbeat_worker_name"),

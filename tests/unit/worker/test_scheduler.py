@@ -820,6 +820,7 @@ class TestWrapJob:
             seen_calls.append((job_id, clock.now()))
 
         monkeypatch.setattr(scheduler_mod, "_write_heartbeat", fake_write)
+        monkeypatch.setattr(scheduler_mod, "_is_dead", lambda _job_id: False)
 
         body = MagicMock()
         wrapped = wrap_job(body, job_id="test_job", clock=clock)
@@ -852,6 +853,17 @@ class TestWrapJob:
             "_write_heartbeat",
             lambda job_id, _clock: write_calls.append(job_id),
         )
+        # cd-8euz: a failing body now invokes the failure-state writer
+        # too. Stub it so the unit test does not reach the DB; the
+        # call IS expected and is what carries the consecutive-failure
+        # bookkeeping in production.
+        failure_calls: list[str] = []
+        monkeypatch.setattr(
+            scheduler_mod,
+            "_record_failure",
+            lambda job_id, _clock: failure_calls.append(job_id),
+        )
+        monkeypatch.setattr(scheduler_mod, "_is_dead", lambda _job_id: False)
 
         def body() -> None:
             raise RuntimeError("boom")
@@ -861,6 +873,7 @@ class TestWrapJob:
             asyncio.run(wrapped())  # must not raise
 
         assert write_calls == []
+        assert failure_calls == ["flaky"]
         error_events = [
             rec
             for rec in caplog.records
@@ -881,6 +894,12 @@ class TestWrapJob:
             "_write_heartbeat",
             lambda job_id, _clock: None,
         )
+        monkeypatch.setattr(
+            scheduler_mod,
+            "_record_failure",
+            lambda job_id, _clock: None,
+        )
+        monkeypatch.setattr(scheduler_mod, "_is_dead", lambda _job_id: False)
 
         def body() -> None:
             raise KeyboardInterrupt()
@@ -926,6 +945,13 @@ class TestWrapJob:
             raise RuntimeError("db down")
 
         monkeypatch.setattr(scheduler_mod, "_write_heartbeat", failing_write)
+        # cd-8euz: a heartbeat write that raises flips the tick into
+        # the error branch; stub the failure-state writer so the test
+        # stays DB-free.
+        monkeypatch.setattr(
+            scheduler_mod, "_record_failure", lambda _job_id, _clock: None
+        )
+        monkeypatch.setattr(scheduler_mod, "_is_dead", lambda _job_id: False)
 
         body = MagicMock()
         wrapped = wrap_job(body, job_id="hb_flap", clock=clock)
@@ -958,6 +984,7 @@ class TestWrapJob:
             "_write_heartbeat",
             lambda job_id, _clock: None,
         )
+        monkeypatch.setattr(scheduler_mod, "_is_dead", lambda _job_id: False)
 
         run_count = 0
 
@@ -992,6 +1019,15 @@ class TestWrapJob:
             "_write_heartbeat",
             lambda job_id, _clock: write_calls.append(job_id),
         )
+        # cd-8euz: keep the async-failure test DB-free by stubbing the
+        # killswitch read + failure-state writer.
+        failure_calls: list[str] = []
+        monkeypatch.setattr(
+            scheduler_mod,
+            "_record_failure",
+            lambda job_id, _clock: failure_calls.append(job_id),
+        )
+        monkeypatch.setattr(scheduler_mod, "_is_dead", lambda _job_id: False)
 
         async def async_body() -> None:
             raise RuntimeError("async boom")
@@ -1001,6 +1037,7 @@ class TestWrapJob:
             asyncio.run(wrapped())  # must not raise
 
         assert write_calls == []
+        assert failure_calls == ["async_flaky"]
         error_events = [
             rec
             for rec in caplog.records
@@ -1008,3 +1045,195 @@ class TestWrapJob:
         ]
         assert len(error_events) == 1
         assert getattr(error_events[0], "job_id", None) == "async_flaky"
+
+
+# ---------------------------------------------------------------------------
+# Failure metrics + killswitch (cd-8euz)
+# ---------------------------------------------------------------------------
+
+
+class TestFailureMetricsAndKillswitch:
+    """cd-8euz: per-tick counter labels + killswitch short-circuit.
+
+    The Prometheus counter and the audit-write side effects are
+    durably tested in ``tests/unit/worker/test_job_state.py`` against a
+    real in-memory engine; this class pins the wrapper-level behaviour
+    that:
+
+    * a successful tick increments ``status="ok"`` and a failing tick
+      increments ``status="error"``,
+    * a job whose ``worker_heartbeat.dead_at`` is non-NULL skips the
+      body and increments ``status="dead"`` instead.
+
+    Both labels share the spec-pinned ``crewday_worker_jobs_total``
+    metric (§16 "Metrics") — the cd-8euz slice only adds the new
+    ``"dead"`` value to the existing label set.
+    """
+
+    @staticmethod
+    def _label_value(label_status: str) -> float:
+        from app.observability.metrics import WORKER_JOBS_TOTAL
+
+        # ``Counter._value`` is the documented private accessor used by
+        # the prometheus_client docs themselves; reaching for ``_value``
+        # avoids spinning up an HTTP exposition pipeline just to read
+        # one increment in a unit test.
+        return WORKER_JOBS_TOTAL.labels(  # type: ignore[no-any-return]
+            job="cd_8euz_test",
+            status=label_status,
+        )._value.get()
+
+    def test_success_increments_ok_counter(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A clean tick advances ``crewday_worker_jobs_total{status="ok"}``."""
+        clock = FrozenClock(datetime(2026, 5, 2, 12, 0, tzinfo=UTC))
+        monkeypatch.setattr(
+            scheduler_mod, "_write_heartbeat", lambda _job_id, _clock: None
+        )
+        monkeypatch.setattr(scheduler_mod, "_is_dead", lambda _job_id: False)
+
+        before_ok = self._label_value("ok")
+        before_error = self._label_value("error")
+        before_dead = self._label_value("dead")
+
+        wrapped = wrap_job(MagicMock(), job_id="cd_8euz_test", clock=clock)
+        asyncio.run(wrapped())
+
+        assert self._label_value("ok") == before_ok + 1
+        assert self._label_value("error") == before_error
+        assert self._label_value("dead") == before_dead
+
+    def test_failure_increments_error_counter(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        allow_propagated_log_capture: object,
+    ) -> None:
+        """A failing tick advances ``crewday_worker_jobs_total{status="error"}``."""
+        allow_propagated_log_capture("app.worker.scheduler")  # type: ignore[operator]
+
+        clock = FrozenClock(datetime(2026, 5, 2, 12, 0, tzinfo=UTC))
+        monkeypatch.setattr(
+            scheduler_mod, "_write_heartbeat", lambda _job_id, _clock: None
+        )
+        monkeypatch.setattr(
+            scheduler_mod, "_record_failure", lambda _job_id, _clock: None
+        )
+        monkeypatch.setattr(scheduler_mod, "_is_dead", lambda _job_id: False)
+
+        before_ok = self._label_value("ok")
+        before_error = self._label_value("error")
+        before_dead = self._label_value("dead")
+
+        def body() -> None:
+            raise RuntimeError("boom")
+
+        wrapped = wrap_job(body, job_id="cd_8euz_test", clock=clock)
+        asyncio.run(wrapped())
+
+        assert self._label_value("error") == before_error + 1
+        assert self._label_value("ok") == before_ok
+        assert self._label_value("dead") == before_dead
+
+    def test_killswitch_read_failure_fails_open_and_runs_body(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        allow_propagated_log_capture: object,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """A DB hiccup on the killswitch read must NOT escape the wrapper.
+
+        The cd-7c0p contract is "wrap_job swallows every ``Exception``
+        so the scheduler / broker stays alive". cd-8euz added an
+        ``is_dead`` read at the top of the wrapper that opens its own
+        UoW; without an explicit guard, a transient DB outage on that
+        read would propagate up into APScheduler. We fail-open
+        (run the body) on a read failure because fail-closed would
+        skip every tick on a momentary blip and the staleness window
+        already escalates a persistent outage via ``/readyz``.
+        """
+        allow_propagated_log_capture("app.worker.scheduler")  # type: ignore[operator]
+
+        clock = FrozenClock(datetime(2026, 5, 2, 12, 0, tzinfo=UTC))
+        write_calls: list[str] = []
+        monkeypatch.setattr(
+            scheduler_mod,
+            "_write_heartbeat",
+            lambda job_id, _clock: write_calls.append(job_id),
+        )
+
+        def boom(_job_id: str) -> bool:
+            raise RuntimeError("db down")
+
+        monkeypatch.setattr(scheduler_mod, "_is_dead", boom)
+
+        body = MagicMock()
+        wrapped = wrap_job(body, job_id="cd_8euz_test", clock=clock)
+        with caplog.at_level(logging.ERROR, logger="app.worker.scheduler"):
+            asyncio.run(wrapped())  # must not raise
+
+        body.assert_called_once_with()
+        assert write_calls == ["cd_8euz_test"]
+        read_errors = [
+            rec
+            for rec in caplog.records
+            if getattr(rec, "event", None) == "worker.job.killswitch_read_error"
+        ]
+        assert len(read_errors) == 1
+
+    def test_dead_job_skips_body_and_increments_dead_counter(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        allow_propagated_log_capture: object,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """A dead job skips the body, the heartbeat, and bumps ``status="dead"``.
+
+        The killswitch read fires before anything else in ``_runner``;
+        the body, the heartbeat upsert, and the ``ok``/``error``
+        counter are all bypassed. The skip is logged at WARNING with
+        ``event="worker.tick.dead_skip"`` so an operator scraping the
+        JSON log stream can isolate killswitch-skipped ticks from
+        legitimate runs.
+        """
+        allow_propagated_log_capture("app.worker.scheduler")  # type: ignore[operator]
+
+        clock = FrozenClock(datetime(2026, 5, 2, 12, 0, tzinfo=UTC))
+
+        write_calls: list[str] = []
+        failure_calls: list[str] = []
+        monkeypatch.setattr(
+            scheduler_mod,
+            "_write_heartbeat",
+            lambda job_id, _clock: write_calls.append(job_id),
+        )
+        monkeypatch.setattr(
+            scheduler_mod,
+            "_record_failure",
+            lambda job_id, _clock: failure_calls.append(job_id),
+        )
+        monkeypatch.setattr(scheduler_mod, "_is_dead", lambda _job_id: True)
+
+        before_ok = self._label_value("ok")
+        before_error = self._label_value("error")
+        before_dead = self._label_value("dead")
+
+        body = MagicMock()
+        wrapped = wrap_job(body, job_id="cd_8euz_test", clock=clock)
+        with caplog.at_level(logging.WARNING, logger="app.worker.scheduler"):
+            asyncio.run(wrapped())
+
+        body.assert_not_called()
+        assert write_calls == []
+        assert failure_calls == []
+        assert self._label_value("dead") == before_dead + 1
+        assert self._label_value("ok") == before_ok
+        assert self._label_value("error") == before_error
+
+        skip_events = [
+            rec
+            for rec in caplog.records
+            if getattr(rec, "event", None) == "worker.tick.dead_skip"
+        ]
+        assert len(skip_events) == 1
+        assert getattr(skip_events[0], "job_id", None) == "cd_8euz_test"

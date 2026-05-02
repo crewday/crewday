@@ -63,7 +63,6 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
-from app.adapters.db.session import make_uow
 from app.config import Settings
 from app.observability.metrics import (
     WORKER_JOB_DURATION_SECONDS,
@@ -72,7 +71,7 @@ from app.observability.metrics import (
 )
 from app.util.clock import Clock, SystemClock
 from app.util.logging import new_request_id, reset_request_id, set_request_id
-from app.worker.heartbeat import upsert_heartbeat
+from app.worker import job_state
 from app.worker.jobs import common as _common_jobs
 from app.worker.jobs.agent import _make_agent_compaction_body
 from app.worker.jobs.demo import _make_demo_gc_body, _make_demo_usage_rollup_body
@@ -522,8 +521,45 @@ def wrap_job(
             "worker tick starting",
             extra={"event": "worker.tick.start", "job_id": job_id},
         )
-        ok = False
         try:
+            # Killswitch (cd-8euz). A previous burst of failures has
+            # tipped this job's ``worker_heartbeat`` row into the
+            # ``dead`` state and an operator has not yet cleared it
+            # via ``crewday admin worker reset-job``. Skip the body,
+            # do not advance the heartbeat (so ``/readyz`` still
+            # surfaces the staleness), and bump the
+            # ``status="dead"`` counter so dashboards can distinguish
+            # the killswitch-skip from a legitimate ok / error tick.
+            #
+            # The killswitch read opens its own UoW; a transient DB
+            # outage here must NOT escape the wrapper (the original
+            # cd-7c0p contract was that ``wrap_job`` swallows every
+            # ``Exception`` so the broker stays alive). On a read
+            # failure we fail-open — log and run the body — because
+            # fail-closed would skip every tick on a momentary
+            # connectivity blip and the staleness window already
+            # escalates a persistent outage via ``/readyz``.
+            killswitch_dead = False
+            if heartbeat:
+                try:
+                    killswitch_dead = await asyncio.to_thread(_is_dead, job_id)
+                except Exception:
+                    _log.exception(
+                        "worker killswitch read failed; running body",
+                        extra={
+                            "event": "worker.job.killswitch_read_error",
+                            "job_id": job_id,
+                        },
+                    )
+            if killswitch_dead:
+                WORKER_JOBS_TOTAL.labels(job=job_label, status="dead").inc()
+                _log.warning(
+                    "worker tick skipped: job is dead",
+                    extra={"event": "worker.tick.dead_skip", "job_id": job_id},
+                )
+                return
+
+            ok = False
             try:
                 if is_coroutine:
                     # ``func`` is ``async def`` — invoke and await on
@@ -563,6 +599,22 @@ def wrap_job(
                         },
                     )
                     ok = False
+            elif not ok and heartbeat:
+                try:
+                    await asyncio.to_thread(_record_failure, job_id, clock)
+                except Exception:
+                    # The failure-state writer raising would mask the
+                    # original tick failure if we let it propagate.
+                    # Log and move on — the next failing tick retries
+                    # the increment, and a persistent DB outage
+                    # surfaces via ``/readyz`` going red anyway.
+                    _log.exception(
+                        "worker failure-state write failed",
+                        extra={
+                            "event": "worker.job.state_error",
+                            "job_id": job_id,
+                        },
+                    )
 
             duration = _time.perf_counter() - start
             WORKER_JOB_DURATION_SECONDS.labels(job=job_label).observe(duration)
@@ -589,16 +641,41 @@ def wrap_job(
 
 
 def _write_heartbeat(job_id: str, clock: Clock) -> None:
-    """Upsert a fresh ``worker_heartbeat`` row for ``job_id``.
+    """Advance the heartbeat + clear cd-8euz failure state for ``job_id``.
 
     Opens its own :class:`~app.adapters.db.session.UnitOfWorkImpl` so
     the heartbeat commit is independent of the job body's session —
     a job that failed halfway through its own transaction must not
     roll back the heartbeat row (and vice versa).
+
+    Delegates to :func:`app.worker.job_state.record_success` so a
+    successful tick also resets ``consecutive_failures`` and clears
+    ``dead_at``; a job that recovered without operator intervention
+    leaves the dead state automatically. The legacy
+    :func:`upsert_heartbeat` helper stays exported for the cd-7c0p
+    callers (tests + integration) that drive the row directly.
     """
-    now = clock.now()
-    with make_uow() as session:
-        upsert_heartbeat(session, worker_name=job_id, now=now)
+    job_state.record_success(job_id=job_id, clock=clock)
+
+
+def _is_dead(job_id: str) -> bool:
+    """Read the ``dead_at`` flag for ``job_id``.
+
+    Thin wrapper so unit tests can monkeypatch the seam without
+    importing :mod:`app.worker.job_state`. The wrapper opens its own
+    UoW under the covers — see :func:`app.worker.job_state.is_dead`.
+    """
+    return job_state.is_dead(job_id=job_id)
+
+
+def _record_failure(job_id: str, clock: Clock) -> job_state.FailureOutcome:
+    """Record a failed tick + emit threshold-crossing audits.
+
+    Thin wrapper so unit tests can monkeypatch the seam without
+    importing :mod:`app.worker.job_state`. Returns the outcome the
+    underlying writer hands back; the wrapper itself only logs.
+    """
+    return job_state.record_failure(job_id=job_id, clock=clock)
 
 
 def register_jobs(
