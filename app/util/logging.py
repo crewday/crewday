@@ -237,6 +237,16 @@ class RedactionFilter(logging.Filter):
         for attr in list(record.__dict__):
             if attr in _RESERVED_RECORD_ATTRS or attr.startswith("_"):
                 continue
+            # The ``event`` extra is reserved for the structured-log
+            # event marker (e.g. ``worker.scheduler.started``,
+            # ``ops.readyz.degraded``). It is always app-authored
+            # literal — never user input — and is the primary grep
+            # target for dashboards and alerting. Skip redaction
+            # entirely so a stray credential-shaped match never
+            # silently swaps the value for ``<redacted:credential>``.
+            # See ``cd-udts`` for the operational-impact analysis.
+            if attr == "event":
+                continue
             # Mimic the mapping-level sensitive-key rule on the flat
             # ``extra=`` namespace: ``{"token": ...}`` must redact
             # the value regardless of its shape.

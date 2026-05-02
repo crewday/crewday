@@ -231,11 +231,12 @@ class TestRedactionValues:
     def test_jwt_shape_in_message(
         self, configured_logger: logging.Logger, stream: io.StringIO
     ) -> None:
-        # Real-shape JWT: each segment is comfortably above the
-        # 16-char floor the redact regex now enforces. The previous
-        # ``eyJhbG.abc.def`` fixture is below that floor on purpose —
-        # the tightening exists so dotted event names like
-        # ``worker.tick.start`` survive (see ``cd-pzr1``).
+        # Real-shape JWT: at least one segment is well above the
+        # 10-char floor the redact regex enforces (header ~36,
+        # payload ~52, signature ~43). The regex uses an alternation
+        # form (≥10 on ANY segment) so dotted event-marker names like
+        # ``worker.scheduler.started`` still survive — see
+        # ``cd-pzr1`` and ``cd-udts``.
         jwt = (
             "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9"
             ".eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIn0"
@@ -245,6 +246,73 @@ class TestRedactionValues:
         msg = _as_str(_lines(stream)[0]["msg"])
         assert jwt not in msg
         assert "<redacted:credential>" in msg
+
+    def test_jwt_shape_in_extra_token_key(
+        self, configured_logger: logging.Logger, stream: io.StringIO
+    ) -> None:
+        # Belt-and-braces: a JWT under a sensitive key (``token``)
+        # must still be replaced by the sensitive-key rule even when
+        # the value-side regex would catch it. ``event=`` is exempt
+        # from redaction (per ``cd-udts``); other extra keys are not.
+        jwt = (
+            "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9"
+            ".eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIn0"
+            ".SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c"
+        )
+        configured_logger.info("auth", extra={"token": jwt})
+        line = _lines(stream)[0]
+        assert jwt not in stream.getvalue()
+        assert line["token"] == "<redacted:sensitive-key>"
+
+    @pytest.mark.parametrize(
+        "marker",
+        [
+            "worker.scheduler.started",
+            "worker.scheduler.stopped",
+            "worker.tick.start",
+            "worker.tick.error",
+            "ops.readyz.degraded",
+            "ops.readyz.db_error",
+            "a.b.c",
+        ],
+    )
+    def test_event_marker_in_message_survives(
+        self,
+        configured_logger: logging.Logger,
+        stream: io.StringIO,
+        marker: str,
+    ) -> None:
+        # Dotted event markers with all three segments under 10
+        # chars must NOT be mistaken for JWTs. Regression for
+        # ``cd-udts`` — every operator-facing ``event=`` literal is
+        # the primary grep target for dashboards and alerting.
+        configured_logger.info(f"emitted {marker} just now")
+        msg = _as_str(_lines(stream)[0]["msg"])
+        assert marker in msg
+        assert "<redacted:credential>" not in msg
+
+    @pytest.mark.parametrize(
+        "marker",
+        [
+            "worker.scheduler.started",
+            "ops.readyz.degraded",
+            "idempotency.sweep.tick",
+            "chat_gateway.sweep.tick",
+        ],
+    )
+    def test_event_marker_in_extra_event_key_survives(
+        self,
+        configured_logger: logging.Logger,
+        stream: io.StringIO,
+        marker: str,
+    ) -> None:
+        # The ``event`` extra is fully exempt from redaction — even
+        # markers with one segment ≥10 chars (which the JWT regex
+        # would otherwise catch) must round-trip unchanged. The
+        # field is always app-authored literal, never user input.
+        configured_logger.info("tick", extra={"event": marker})
+        line = _lines(stream)[0]
+        assert line["event"] == marker
 
     def test_64_char_hex_in_message(
         self, configured_logger: logging.Logger, stream: io.StringIO
