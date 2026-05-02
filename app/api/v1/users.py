@@ -68,7 +68,7 @@ from app.api.deps import current_workspace_context, db_session
 from app.api.v1._problem_json import IDENTITY_PROBLEM_RESPONSES
 from app.audit import write_audit
 from app.auth import magic_link as magic_link_module
-from app.auth._throttle import Throttle
+from app.auth._throttle import RateLimited, Throttle
 from app.auth.magic_link_port import MagicLinkAdapter
 from app.authz import PermissionDenied, require
 from app.authz.dep import Permission
@@ -380,8 +380,19 @@ def _http_for_invite(exc: Exception) -> HTTPException:
             status_code=422,
             detail={"error": "invalid_body", "message": str(exc)},
         )
-    # Rate-limited from the magic-link throttle is unlikely on this
-    # route (per-invite throttle is cheap) but we map it for safety.
+    # ``link_port.request_link`` runs the per-IP / per-email magic-link
+    # throttle (5/min, ``app/auth/_throttle.py``). A burst from the same
+    # source IP within the window — common in e2e flakes that hammer
+    # ``POST /users/invite`` — surfaces as :class:`RateLimited`. Map it
+    # to 429 ``rate_limited`` rather than letting it bubble as 500.
+    # ``RateLimited`` carries no retry-after hint today (the legacy
+    # bucket only tracks the window edge, not the remainder), so we
+    # omit ``Retry-After`` rather than fabricating a value.
+    if isinstance(exc, RateLimited):
+        return HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail={"error": "rate_limited"},
+        )
     return HTTPException(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         detail={"error": "internal"},
@@ -775,7 +786,7 @@ def build_users_router(
                     link_port=MagicLinkAdapter(session),
                     dispatch=dispatch,
                 )
-        except membership.InviteBodyInvalid as exc:
+        except (membership.InviteBodyInvalid, RateLimited) as exc:
             raise _http_for_invite(exc) from exc
 
         # ``with`` exited cleanly → UoW committed → invite + nonce +
