@@ -260,6 +260,21 @@ class Settings(BaseSettings):
     # sandbox where every caller is trusted.
     phase0_stub_enabled: bool = False
 
+    # --- Native push notifications (§02 "user_push_token"; cd-nq9s) ---
+    # Single boolean gate for the bare-host
+    # ``POST /api/v1/me/push-tokens`` registration surface. Default
+    # **off** because the v1 deployment has not yet provisioned FCM /
+    # APNS credentials — the router maps the gate to ``501
+    # push_unavailable`` so a native shell can probe capability without
+    # having to consult a second feature flag. ``GET`` and ``DELETE``
+    # are always live regardless of this flag so a sign-out can prune a
+    # stale row even on a deployment with native push delivery off
+    # (spec §02 "user_push_token" §"Surface" — sign-out cleanup must
+    # not depend on the registration gate). Provisioning the
+    # actual FCM / APNS credentials is tracked as a follow-up Beads
+    # task; this knob only governs the HTTP surface visibility.
+    native_push_enabled: bool = False
+
     # --- Observability (§16 "Observability / Metrics", cd-24tp) ---
     # Hard kill switch for the ``GET /metrics`` Prometheus endpoint.
     # Default **off** so a self-hosted box does not expose a metrics

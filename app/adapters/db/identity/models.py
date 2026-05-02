@@ -64,6 +64,7 @@ __all__ = [
     "Session",
     "SignupAttempt",
     "User",
+    "UserPushToken",
     "WebAuthnChallenge",
     "canonicalise_email",
 ]
@@ -999,6 +1000,112 @@ class BreakGlassCode(Base):
             sqlite_where=text("used_at IS NULL"),
             postgresql_where=text("used_at IS NULL"),
         ),
+    )
+
+
+class UserPushToken(Base):
+    """Native-app push-notification registration row (cd-nq9s).
+
+    One row per device the user has signed into from the future native
+    app (§14 "Native wrapper readiness"). Identity-scoped — a push
+    token is tied to a user and a device, not to a workspace, because
+    one app install delivers notifications for every workspace the user
+    belongs to (the push payload names the target workspace).
+
+    **Distinct from web-push** (:class:`app.adapters.db.messaging.models.PushToken`):
+    that surface stores a browser ``PushSubscription.endpoint`` URL +
+    encryption material, scoped to a workspace; this surface stores a
+    bare FCM/APNS token + platform discriminator, scoped to the user
+    only. Both feed the §10 "Agent-message delivery" worker but along
+    different fan-out branches (web-push vs native push).
+
+    **Visibility (§02 ``user_push_token``).** Reads and writes are
+    self-only. Owners, managers, and deployment admins do NOT see
+    another user's push tokens on any REST surface — the
+    :mod:`app.api.v1.auth.me_push_tokens` router enforces this and the
+    audit log records ``user_push_token.registered`` /
+    ``.disabled`` / ``.deleted`` with no token payload.
+
+    **Unique on ``(platform, token)``.** A token that surfaces on two
+    user accounts (device hand-off without sign-out) fails registration
+    with a deterministic ``409 token_claimed``. The native client is
+    expected to ``DELETE /me/push-tokens/{id}`` on sign-out so the next
+    sign-in can register cleanly.
+
+    **Lifecycle (§02 retention).** ``last_seen_at`` is bumped on every
+    PUT/refresh and on every successful push delivery (vendor-ack
+    integration is out of scope for cd-nq9s and tracked as a follow-up).
+    ``disabled_at`` is set when a vendor ack reports the token as
+    invalid/uninstalled — the row is RETAINED (never hard-deleted from
+    that path) so the delivery worker can report "app uninstalled"
+    without racing concurrent re-registrations. Disabled rows are
+    purged after 90 days by the same worker that rotates the audit
+    log; the freshness window (default 60 days of inactivity) is
+    treated as ``disabled`` by the delivery worker per §10.
+
+    **Cascade on user archive.** ``user_id`` carries
+    ``ON DELETE CASCADE`` so archiving a user disables every token
+    atomically per §02.
+
+    **Why not workspace-scoped.** This row has no ``workspace_id``
+    column — the native shell delivers notifications for every
+    workspace the user belongs to from one install. The table is NOT
+    registered in :mod:`app.tenancy.registry` (mirrors the precedent
+    set by :class:`ApiToken` and :class:`PasskeyCredential` — see
+    :mod:`app.adapters.db.identity` package docstring).
+
+    See ``docs/specs/02-domain-model.md`` §"user_push_token",
+    ``docs/specs/12-rest-api.md`` §"Device push tokens",
+    ``docs/specs/14-web-frontend.md`` §"Native wrapper readiness",
+    and ``docs/specs/10-messaging-notifications.md`` §"Agent-message
+    delivery".
+    """
+
+    __tablename__ = "user_push_token"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    user_id: Mapped[str] = mapped_column(
+        String,
+        ForeignKey("user.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    # ``android`` (FCM) or ``ios`` (APNS). The CHECK constraint pins
+    # the v1 enum; new platforms (e.g. ``huawei``, ``windows``) widen
+    # by reviewable code change.
+    platform: Mapped[str] = mapped_column(String, nullable=False)
+    # Raw FCM registration id or APNS device token. Stored as text —
+    # device-scoped public-ish identifiers, not credentials, but
+    # treated as PII and never logged. See §02 docstring.
+    token: Mapped[str] = mapped_column(String, nullable=False)
+    # User-friendly label for the /me push-tokens panel; client-supplied,
+    # client-trimmed to 64 chars (mirrored at the router DTO level).
+    device_label: Mapped[str | None] = mapped_column(String, nullable=True)
+    # Free-form app-version marker (``crewday-android/1.2.3``). Debug
+    # aid only — not surfaced in audit diffs.
+    app_version: Mapped[str | None] = mapped_column(String, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    last_seen_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    disabled_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "platform IN ('android', 'ios')",
+            name="ck_user_push_token_platform",
+        ),
+        # §02 "user_push_token" — uniqueness on the device-scoped token
+        # so a hand-off without sign-out fails 409 token_claimed.
+        UniqueConstraint(
+            "platform",
+            "token",
+            name="uq_user_push_token_platform_token",
+        ),
+        Index("ix_user_push_token_user", "user_id"),
     )
 
 

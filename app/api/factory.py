@@ -131,6 +131,7 @@ from app.api.v1.auth import magic as magic_module
 from app.api.v1.auth import me as me_module
 from app.api.v1.auth import me_avatar as me_avatar_module
 from app.api.v1.auth import me_export as me_export_module
+from app.api.v1.auth import me_push_tokens as me_push_tokens_module
 from app.api.v1.auth import me_tokens as me_tokens_module
 from app.api.v1.auth import passkey as passkey_module
 from app.api.v1.auth import recovery as recovery_module
@@ -639,6 +640,16 @@ def _mount_auth_routers(
     # reads the session cookie itself, matching ``/auth/me``.
     app.include_router(
         me_tokens_module.build_me_tokens_router(),
+        prefix=bare_prefix,
+    )
+    # /me/push-tokens — identity-scoped native-app push-token CRUD
+    # (§02 "user_push_token", cd-nq9s). Bare-host because native push
+    # tokens live outside any workspace (one app install delivers
+    # notifications for every workspace the user belongs to). Distinct
+    # from the workspace-scoped web-push surface mounted under
+    # ``/w/<slug>/api/v1/push-tokens``.
+    app.include_router(
+        me_push_tokens_module.build_me_push_tokens_router(),
         prefix=bare_prefix,
     )
     # /me/avatar — identity-scoped avatar upload / clear (§05 "Worker

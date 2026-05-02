@@ -71,6 +71,7 @@ from app.adapters.db.identity.models import (
     EmailChangePending,
     PasskeyCredential,
     User,
+    UserPushToken,
     canonicalise_email,
 )
 from app.adapters.db.tasks.models import Occurrence
@@ -89,11 +90,16 @@ from app.domain.identity.me_schedule_ports import (
     OccurrenceRefRow,
     PublicHolidayRow,
 )
+from app.domain.identity.push_tokens_ports import (
+    UserPushTokenRepository,
+    UserPushTokenRow,
+)
 from app.tenancy import tenant_agnostic
 
 __all__ = [
     "SqlAlchemyEmailChangeRepository",
     "SqlAlchemyMeScheduleQueryRepository",
+    "SqlAlchemyUserPushTokenRepository",
 ]
 
 
@@ -486,3 +492,190 @@ class SqlAlchemyEmailChangeRepository(EmailChangeRepository):
             row.reverted_at = reverted_at
             self._session.flush()
         return _to_email_change_pending_row(row)
+
+
+# ---------------------------------------------------------------------------
+# User push-token repository (cd-nq9s)
+# ---------------------------------------------------------------------------
+
+
+def _to_user_push_token_row(row: UserPushToken) -> UserPushTokenRow:
+    """Project an ORM :class:`UserPushToken` into the seam-level row."""
+    return UserPushTokenRow(
+        id=row.id,
+        user_id=row.user_id,
+        platform=row.platform,
+        token=row.token,
+        device_label=row.device_label,
+        app_version=row.app_version,
+        created_at=row.created_at,
+        last_seen_at=row.last_seen_at,
+        disabled_at=row.disabled_at,
+    )
+
+
+class SqlAlchemyUserPushTokenRepository(UserPushTokenRepository):
+    """SA-backed concretion of :class:`UserPushTokenRepository` (cd-nq9s).
+
+    Wraps an open :class:`~sqlalchemy.orm.Session` and never commits —
+    the caller's UoW owns the transaction boundary (§01 "Key runtime
+    invariants" #3). Mutating methods flush so the audit writer's FK
+    reference to ``entity_id`` (and any peer read in the same UoW)
+    sees the new row.
+
+    Native push tokens are identity-scoped — every read and write runs
+    under :func:`app.tenancy.tenant_agnostic` because the
+    :class:`~app.adapters.db.identity.models.UserPushToken` row has
+    no ``workspace_id`` column. The wrapping is centralised here so
+    the domain service does not have to litter its callsites with
+    the context manager.
+    """
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    @property
+    def session(self) -> Session:
+        return self._session
+
+    def list_for_user(self, *, user_id: str) -> Sequence[UserPushTokenRow]:
+        with tenant_agnostic():
+            rows = self._session.scalars(
+                select(UserPushToken)
+                .where(UserPushToken.user_id == user_id)
+                .order_by(
+                    UserPushToken.created_at.asc(),
+                    UserPushToken.id.asc(),
+                )
+            ).all()
+        return [_to_user_push_token_row(r) for r in rows]
+
+    def find_by_id(self, *, user_id: str, token_id: str) -> UserPushTokenRow | None:
+        with tenant_agnostic():
+            row = self._session.scalars(
+                select(UserPushToken).where(
+                    UserPushToken.id == token_id,
+                    UserPushToken.user_id == user_id,
+                )
+            ).first()
+        if row is None:
+            return None
+        return _to_user_push_token_row(row)
+
+    def find_by_user_platform_token(
+        self, *, user_id: str, platform: str, token: str
+    ) -> UserPushTokenRow | None:
+        with tenant_agnostic():
+            row = self._session.scalars(
+                select(UserPushToken).where(
+                    UserPushToken.user_id == user_id,
+                    UserPushToken.platform == platform,
+                    UserPushToken.token == token,
+                )
+            ).first()
+        if row is None:
+            return None
+        return _to_user_push_token_row(row)
+
+    def find_by_platform_token(
+        self, *, platform: str, token: str
+    ) -> UserPushTokenRow | None:
+        with tenant_agnostic():
+            row = self._session.scalars(
+                select(UserPushToken).where(
+                    UserPushToken.platform == platform,
+                    UserPushToken.token == token,
+                )
+            ).first()
+        if row is None:
+            return None
+        return _to_user_push_token_row(row)
+
+    def insert(
+        self,
+        *,
+        token_id: str,
+        user_id: str,
+        platform: str,
+        token: str,
+        device_label: str | None,
+        app_version: str | None,
+        created_at: datetime,
+    ) -> UserPushTokenRow:
+        row = UserPushToken(
+            id=token_id,
+            user_id=user_id,
+            platform=platform,
+            token=token,
+            device_label=device_label,
+            app_version=app_version,
+            created_at=created_at,
+            last_seen_at=created_at,
+            disabled_at=None,
+        )
+        with tenant_agnostic():
+            self._session.add(row)
+            self._session.flush()
+        return _to_user_push_token_row(row)
+
+    def update_last_seen(
+        self,
+        *,
+        user_id: str,
+        token_id: str,
+        last_seen_at: datetime,
+    ) -> UserPushTokenRow:
+        with tenant_agnostic():
+            row = self._session.scalars(
+                select(UserPushToken).where(
+                    UserPushToken.id == token_id,
+                    UserPushToken.user_id == user_id,
+                )
+            ).first()
+            if row is None:
+                raise RuntimeError(
+                    f"update_last_seen: push token {token_id!r} not found "
+                    f"for user {user_id!r}"
+                )
+            row.last_seen_at = last_seen_at
+            self._session.flush()
+        return _to_user_push_token_row(row)
+
+    def update_token(
+        self,
+        *,
+        user_id: str,
+        token_id: str,
+        token: str,
+        last_seen_at: datetime,
+    ) -> UserPushTokenRow:
+        with tenant_agnostic():
+            row = self._session.scalars(
+                select(UserPushToken).where(
+                    UserPushToken.id == token_id,
+                    UserPushToken.user_id == user_id,
+                )
+            ).first()
+            if row is None:
+                raise RuntimeError(
+                    f"update_token: push token {token_id!r} not found "
+                    f"for user {user_id!r}"
+                )
+            row.token = token
+            row.last_seen_at = last_seen_at
+            self._session.flush()
+        return _to_user_push_token_row(row)
+
+    def delete(self, *, user_id: str, token_id: str) -> bool:
+        with tenant_agnostic():
+            row = self._session.scalars(
+                select(UserPushToken).where(
+                    UserPushToken.id == token_id,
+                    UserPushToken.user_id == user_id,
+                )
+            ).first()
+            if row is None:
+                return False
+            self._session.delete(row)
+            self._session.flush()
+        return True
