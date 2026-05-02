@@ -12,13 +12,18 @@ import { __resetQueryKeyGetterForTests } from "@/lib/queryKeys";
 import * as preferences from "@/lib/preferences";
 import type { AuthMe } from "./types";
 
-function makeUser(workspaces: AuthMe["available_workspaces"], current: string | null = null): AuthMe {
+function makeUser(
+  workspaces: AuthMe["available_workspaces"],
+  current: string | null = null,
+  options: { isDeploymentAdmin?: boolean } = {},
+): AuthMe {
   return {
     user_id: "01HZ_USER",
     display_name: "Dee",
     email: "dee@example.com",
     available_workspaces: workspaces,
     current_workspace_id: current,
+    is_deployment_admin: options.isDeploymentAdmin ?? false,
   };
 }
 
@@ -149,6 +154,46 @@ describe("<WorkspaceGate>", () => {
     );
     expect(screen.getByText(/No workspaces yet/i)).toBeInTheDocument();
     expect(screen.queryByText("protected tree")).toBeNull();
+  });
+
+  it("does not surface the admin deep-link when the empty-state user is not a deployment admin", () => {
+    // cd-kiyd — non-admin branch. Only Sign Out should be reachable;
+    // the /admin/dashboard link is gated on `is_deployment_admin`.
+    setAuthenticated(makeUser([], null, { isDeploymentAdmin: false }));
+    render(
+      <App>
+        <WorkspaceGate>
+          <div>protected tree</div>
+        </WorkspaceGate>
+      </App>,
+    );
+    expect(screen.getByText(/No workspaces yet/i)).toBeInTheDocument();
+    expect(screen.getByText("Sign out")).toBeInTheDocument();
+    expect(screen.queryByText(/Open admin console/i)).toBeNull();
+  });
+
+  it("surfaces the admin deep-link in the empty state when the user is a deployment admin", () => {
+    // cd-kiyd — admin branch. A deployment admin with zero workspace
+    // grants should get a primary "Open admin console" link to
+    // /admin/dashboard alongside Sign Out, so the route is reachable
+    // without typing the URL by hand.
+    setAuthenticated(makeUser([], null, { isDeploymentAdmin: true }));
+    render(
+      <App>
+        <WorkspaceGate>
+          <div>protected tree</div>
+        </WorkspaceGate>
+      </App>,
+    );
+    expect(screen.getByText(/No workspaces yet/i)).toBeInTheDocument();
+    const adminLink = screen.getByRole("link", { name: /Open admin console/i });
+    expect(adminLink).toBeInTheDocument();
+    expect(adminLink.getAttribute("href")).toBe("/admin/dashboard");
+    // Sign Out is preserved as the secondary action.
+    expect(screen.getByText("Sign out")).toBeInTheDocument();
+    // The primary action takes initial focus so keyboard users land
+    // on the deep-link rather than Sign Out.
+    expect(document.activeElement).toBe(adminLink);
   });
 
   it("auto-focuses the first pickable button so keyboard users land inside the dialog", () => {

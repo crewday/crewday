@@ -16,6 +16,7 @@ const SAMPLE_USER: AuthMe = {
   email: "ada@example.com",
   available_workspaces: [],
   current_workspace_id: null,
+  is_deployment_admin: false,
 };
 
 const TOKEN_STORAGE_KEY = "crewday_auth_token";

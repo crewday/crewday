@@ -14,6 +14,7 @@ const SAMPLE_USER: AuthMe = {
   email: "bea@example.com",
   available_workspaces: [],
   current_workspace_id: null,
+  is_deployment_admin: false,
 };
 
 beforeEach(() => {

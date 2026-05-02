@@ -206,6 +206,7 @@ describe("<OrganizationsPage>", () => {
             source: "workspace_grant",
           },
         ],
+        is_deployment_admin: false,
       });
 
       const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });

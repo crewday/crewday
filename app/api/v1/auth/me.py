@@ -124,6 +124,14 @@ class AuthMeResponse(BaseModel):
     Matches :class:`AuthMe` in ``app/web/src/auth/types.ts``. The SPA
     expects a flat envelope — no nested ``user`` — because the field
     set is small enough to inline.
+
+    ``is_deployment_admin`` mirrors the same flag on
+    :class:`MeProfileResponse` (``GET /api/v1/me``) and is surfaced
+    here too so the bare-host SPA shell — which never reaches the
+    workspace-scoped ``/me`` when the caller has zero grants — can
+    still discover that the caller is a deployment admin and offer
+    a deep-link to ``/admin/dashboard`` from the
+    ``<WorkspaceGate>`` "no workspaces yet" empty state.
     """
 
     user_id: str
@@ -131,6 +139,7 @@ class AuthMeResponse(BaseModel):
     email: str
     available_workspaces: list[AvailableWorkspaceResponse]
     current_workspace_id: str | None
+    is_deployment_admin: bool
 
 
 class EmployeeProfileResponse(BaseModel):
@@ -755,6 +764,7 @@ def build_me_router() -> APIRouter:
             email=user.email,
             available_workspaces=_load_available_workspaces(session, user_id=user.id),
             current_workspace_id=None,
+            is_deployment_admin=is_deployment_admin(session, user_id=user.id),
         )
 
     return router

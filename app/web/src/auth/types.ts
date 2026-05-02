@@ -30,6 +30,13 @@ import type { AvailableWorkspace } from "@/types/auth";
  *   (read from the `crewday_workspace` cookie). When present and the
  *   client hasn't picked one yet, `<WorkspaceGate>` adopts it
  *   silently.
+ * - `is_deployment_admin`: mirrors the same flag on the
+ *   workspace-scoped `Me` envelope (§02, §05). Surfaced here so a
+ *   deployment admin who has zero workspace grants can still
+ *   discover the `/admin/dashboard` deep-link from the
+ *   `<WorkspaceGate>` "no workspaces yet" empty state — they would
+ *   otherwise never reach the workspace-scoped `/api/v1/me` that
+ *   carries the same flag.
  */
 export interface AuthMe {
   user_id: string;
@@ -37,6 +44,7 @@ export interface AuthMe {
   email: string;
   available_workspaces: AvailableWorkspace[];
   current_workspace_id: string | null;
+  is_deployment_admin: boolean;
 }
 
 /**

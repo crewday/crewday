@@ -14,6 +14,7 @@ const SAMPLE_USER: AuthMe = {
   email: "cara@example.com",
   available_workspaces: [],
   current_workspace_id: null,
+  is_deployment_admin: false,
 };
 
 function App({ initial = "/today", children }: { initial?: string; children?: ReactNode }) {

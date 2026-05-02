@@ -13,6 +13,7 @@ const TEST_USER: AuthMe = {
   email: "test@example.com",
   available_workspaces: [],
   current_workspace_id: null,
+  is_deployment_admin: false,
 };
 
 // Collect every EventSource constructed during a test so we can assert

@@ -33,6 +33,7 @@ const USER: AuthMe = {
     },
   ],
   current_workspace_id: "ws_1",
+  is_deployment_admin: false,
 };
 
 interface FakeResponse {

@@ -1,5 +1,5 @@
-import { Outlet } from "react-router-dom";
-import { useEffect, useMemo, useRef } from "react";
+import { Link, Outlet } from "react-router-dom";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import { Building2, ArrowRight } from "lucide-react";
 import { useAuth } from "./useAuth";
 import { useWorkspace } from "@/context/WorkspaceContext";
@@ -35,13 +35,20 @@ export function WorkspaceGate({ children }: { children?: React.ReactNode }) {
   // Focused on mount so keyboard users (and screen-reader users on a
   // JAWS / NVDA "forms mode" switch) land inside the dialog rather
   // than in the page chrome beneath. We target the first pickable
-  // button (or the sign-out in the empty state) — the dialog itself
-  // stays non-tabbable so Tab / Shift+Tab move through the picks.
-  const firstActionRef = useRef<HTMLButtonElement | null>(null);
+  // action (workspace pick, admin deep-link, or sign-out) — the
+  // dialog itself stays non-tabbable so Tab / Shift+Tab move through
+  // the picks. The ref is widened to `HTMLElement` so it can hold
+  // both the `<button>` picks and the `<a>` rendered by
+  // `<Link to="/admin/dashboard">` (the admin deep-link surfaced for
+  // deployment admins on the empty state).
+  const firstActionRef = useRef<HTMLElement | null>(null);
+  const setFirstAction = useCallback((node: HTMLElement | null): void => {
+    firstActionRef.current = node;
+  }, []);
   useEffect(() => {
     if (workspaceId !== null) return;
     firstActionRef.current?.focus({ preventScroll: true });
-  }, [workspaceId, user?.available_workspaces?.length]);
+  }, [workspaceId, user?.available_workspaces?.length, user?.is_deployment_admin]);
 
   const available = useMemo(
     () => user?.available_workspaces ?? [],
@@ -87,6 +94,16 @@ export function WorkspaceGate({ children }: { children?: React.ReactNode }) {
   // (or the empty state) instead of the protected tree.
 
   if (available.length === 0) {
+    // Deployment admins with zero workspace grants would otherwise
+    // dead-end on this empty state — they can't reach the workspace-
+    // scoped `/api/v1/me` that drives the manager-nav "Administration"
+    // link, so the only way to /admin/dashboard would be to type the
+    // URL by hand. Surface the deep-link as a primary action when the
+    // bare-host /auth/me carries `is_deployment_admin: true`. Sign-out
+    // stays available as the secondary action; the route is already
+    // gated by `<RequireAuth>` outside `<WorkspaceGate>` so this is
+    // pure UX polish, not a new permission edge.
+    const isAdmin = user?.is_deployment_admin === true;
     return (
       <div className="auth-gate" role="dialog" aria-modal="true" aria-labelledby="auth-gate-title">
         <div className="auth-gate__panel">
@@ -96,9 +113,18 @@ export function WorkspaceGate({ children }: { children?: React.ReactNode }) {
             but you don't have access to any workspaces. Ask your manager to send you an invite,
             or open the link they already sent.
           </p>
-          <div className="auth-gate__actions">
+          <div className="auth-gate__actions btn-group btn-group--stack">
+            {isAdmin && (
+              <Link
+                ref={setFirstAction}
+                to="/admin/dashboard"
+                className="btn btn--moss"
+              >
+                Open admin console
+              </Link>
+            )}
             <button
-              ref={firstActionRef}
+              ref={isAdmin ? undefined : setFirstAction}
               type="button"
               className="btn"
               onClick={() => { void logout(); }}
@@ -126,7 +152,7 @@ export function WorkspaceGate({ children }: { children?: React.ReactNode }) {
             return (
               <li key={w.workspace.id} className="auth-gate__item">
                 <button
-                  ref={idx === 0 ? firstActionRef : undefined}
+                  ref={idx === 0 ? setFirstAction : undefined}
                   type="button"
                   className="auth-gate__pick"
                   onClick={() => setWorkspaceId(slug)}
