@@ -115,8 +115,56 @@ crewday = "crewday._main:main"
 # ``sources`` remaps the on-disk path so ``cli/crewday/foo.py``
 # becomes ``crewday/foo.py`` in the built wheel — no symlinks, no
 # ``__init__.py`` redirects.
+#
+# ``exclude`` drops the frontend dev tree. ``app/web/`` is a Python
+# package (``__init__.py`` only) used by the import-linter contracts
+# below and by the FastAPI ``StaticFiles`` mount which resolves
+# ``app/web/dist/`` against the *repo root* at runtime — not as a
+# package resource. The dist bundle is built into the running source
+# checkout (dev container) or onto the deploy host separately; it
+# does not belong in the Python wheel. The pnpm tree
+# (``node_modules`` ~= 50k files, ~190 MB) and Vite scratch files
+# (``.vite``, ``coverage``, ``tsbuildinfo``, ``package*.json``,
+# ``vite*.config.ts``, etc.) are likewise dev-only. Without these
+# excludes Hatchling's package-data autodetect ships every byte
+# under ``app/web/``.
+#
+# ``artifacts`` force-includes ``app/abuse/data/*.txt`` (cd-5i2e):
+# the disposable-email blocklist is loaded at runtime via
+# :func:`importlib.resources.files`. Hatchling currently picks the
+# file up by package-data autodetect, but that contract is not stable
+# across releases — naming the file explicitly is defensive.
 [tool.hatch.build.targets.wheel]
 packages = ["app", "cli/crewday", "migrations"]
+artifacts = [
+    "app/abuse/data/*.txt",
+]
+exclude = [
+    "app/web/node_modules",
+    "app/web/node_modules/**",
+    "app/web/dist",
+    "app/web/dist/**",
+    "app/web/.vite",
+    "app/web/.vite/**",
+    "app/web/coverage",
+    "app/web/coverage/**",
+    "app/web/public",
+    "app/web/public/**",
+    "app/web/src",
+    "app/web/src/**",
+    "app/web/index.html",
+    "app/web/package.json",
+    "app/web/package-lock.json",
+    "app/web/.npmrc",
+    "app/web/.gitignore",
+    "app/web/tsconfig*.json",
+    "app/web/*.tsbuildinfo",
+    "app/web/vite.config.ts",
+    "app/web/vitest.config.ts",
+    "**/__pycache__",
+    "**/__pycache__/**",
+    "**/*.pyc",
+]
 
 [tool.hatch.build.targets.wheel.sources]
 "cli/crewday" = "crewday"
