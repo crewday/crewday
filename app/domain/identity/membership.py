@@ -80,8 +80,6 @@ Protocol-seam refactor for every identity service at once.
 
 Deferred to follow-ups (see report at handoff):
 
-* ``work_engagement`` + ``user_work_role`` sub-payloads on invite —
-  their backing tables do not exist yet.
 * ``binding_org_id`` scope_transfer on grants — the ``organization``
   table is not part of Phase 1.
 * Nightly ``invite`` TTL sweeper ("expired" state flip) — runs
@@ -118,7 +116,13 @@ from app.adapters.db.identity.models import (
 from app.adapters.db.identity.models import (
     Session as SessionRow,
 )
-from app.adapters.db.workspace.models import UserWorkspace, WorkEngagement, Workspace
+from app.adapters.db.workspace.models import (
+    UserWorkRole,
+    UserWorkspace,
+    WorkEngagement,
+    WorkRole,
+    Workspace,
+)
 from app.adapters.mail.ports import MailDeliveryError, Mailer
 from app.audit import write_audit
 from app.auth import passkey as passkey_service
@@ -221,6 +225,15 @@ _VALID_GRANT_ROLES: Final[frozenset[str]] = frozenset(
 # invite flow means cross-importing that guard. Tracked as
 # cd-dagg follow-ups; see module docstring.
 _VALID_SCOPE_KINDS: Final[frozenset[str]] = frozenset({"workspace"})
+
+# Engagement kinds the invite flow accepts (cd-4o61). Mirrors §22
+# "Engagement kinds" and the DB CHECK on ``work_engagement.engagement_kind``;
+# kept as a frozenset rather than re-importing
+# :data:`app.adapters.db.workspace.models._ENGAGEMENT_KIND_VALUES`
+# so the domain stays decoupled from the private ORM constant.
+_VALID_ENGAGEMENT_KINDS: Final[frozenset[str]] = frozenset(
+    {"payroll", "contractor", "agency_supplied"}
+)
 
 # HKDF purpose for the email-hash pepper carried in audit diffs.
 # Reuses the magic-link subkey so an invite's email_hash equals
@@ -536,6 +549,90 @@ def _validate_group_memberships(
         )
 
 
+def _validate_work_engagement(
+    work_engagement: dict[str, Any] | None,
+) -> None:
+    """Raise :class:`InviteBodyInvalid` unless the engagement payload is well-shaped.
+
+    cd-4o61. ``None`` is accepted (no override; falls back to the
+    default ``payroll`` seed). When present, ``engagement_kind`` must
+    sit in :data:`_VALID_ENGAGEMENT_KINDS` and the §02 supplier-pairing
+    biconditional is enforced — ``agency_supplied`` requires a
+    ``supplier_org_id``; every other kind forbids one. Mirrors the DB
+    CHECK on ``work_engagement`` so a bad pair fails at the domain
+    boundary (422) rather than at the DB.
+
+    The ``supplier_org_id`` value itself is not joined against the
+    ``organization`` table here — Phase 1 has no organization rows
+    landing in test fixtures, and the FK on
+    :class:`WorkEngagement.supplier_org_id` will raise an
+    :class:`IntegrityError` at accept-time flush if the id is bogus.
+    Once the organization surface lands a stricter cross-check can
+    move to invite time without breaking the wire shape.
+    """
+    if work_engagement is None:
+        return
+    kind = work_engagement.get("engagement_kind")
+    supplier_org_id = work_engagement.get("supplier_org_id")
+    if kind not in _VALID_ENGAGEMENT_KINDS:
+        raise InviteBodyInvalid(
+            f"work_engagement.engagement_kind {kind!r} is not in "
+            f"{sorted(_VALID_ENGAGEMENT_KINDS)}"
+        )
+    if kind == "agency_supplied" and not supplier_org_id:
+        raise InviteBodyInvalid(
+            "work_engagement.supplier_org_id is required when "
+            "engagement_kind == 'agency_supplied'"
+        )
+    if kind != "agency_supplied" and supplier_org_id is not None:
+        raise InviteBodyInvalid(
+            f"work_engagement.supplier_org_id must be NULL when "
+            f"engagement_kind == {kind!r}"
+        )
+
+
+def _validate_user_work_roles(
+    session: DbSession,
+    *,
+    user_work_roles: list[dict[str, Any]],
+    workspace_id: str,
+) -> None:
+    """Raise :class:`InviteBodyInvalid` unless every work-role id is local + live.
+
+    cd-4o61. Empty / missing list is a no-op. For each entry the
+    ``work_role_id`` must be a non-empty string, must resolve to a
+    :class:`WorkRole` in this workspace, and must not be soft-
+    deleted. One ``IN (...)`` lookup keeps the cost O(1) regardless
+    of the entry count; the ORM tenant filter auto-injects the
+    workspace predicate so a foreign-workspace id surfaces as
+    "missing".
+    """
+    if not user_work_roles:
+        return
+    ids: list[str] = []
+    for idx, uwr in enumerate(user_work_roles):
+        raw_id = uwr.get("work_role_id")
+        if not isinstance(raw_id, str) or not raw_id:
+            raise InviteBodyInvalid(
+                f"user_work_roles[{idx}].work_role_id must be a non-empty string"
+            )
+        ids.append(raw_id)
+    known = set(
+        session.scalars(
+            select(WorkRole.id).where(
+                WorkRole.workspace_id == workspace_id,
+                WorkRole.id.in_(ids),
+                WorkRole.deleted_at.is_(None),
+            )
+        ).all()
+    )
+    missing = sorted(set(ids) - known)
+    if missing:
+        raise InviteBodyInvalid(
+            f"user_work_roles carries unknown work_role_ids: {missing!r}"
+        )
+
+
 def _find_existing_invite(
     session: DbSession, *, workspace_id: str, email_lower: str
 ) -> Invite | None:
@@ -626,6 +723,8 @@ def invite(
     display_name: str,
     grants: list[dict[str, Any]],
     group_memberships: list[dict[str, Any]] | None = None,
+    work_engagement: dict[str, Any] | None = None,
+    user_work_roles: list[dict[str, Any]] | None = None,
     mailer: Mailer,
     throttle: Throttle,
     base_url: str,
@@ -647,6 +746,11 @@ def invite(
     1. Validate the payload — email present, grants non-empty, every
        grant's scope_kind + role + scope_id matches the workspace,
        every ``group_memberships[].group_id`` exists in the workspace.
+       cd-4o61: also validate the optional ``work_engagement`` and
+       ``user_work_roles`` sub-payloads. ``engagement_kind`` must be
+       a known value and ``supplier_org_id`` honours the §02
+       biconditional; every ``user_work_roles[].work_role_id`` must
+       resolve to a live :class:`WorkRole` in this workspace.
     2. Resolve or create the invitee's :class:`User` row. A fresh
        email spawns a new row at invite time so the later
        :func:`consume_invite_token` can bind a passkey to it; the
@@ -692,6 +796,17 @@ def invite(
         group_memberships=memberships,
         workspace_id=ctx.workspace_id,
     )
+    # cd-4o61: validate the optional work_engagement + user_work_roles
+    # sub-payloads. Both stay as JSON on the invite row until accept;
+    # validating here means a bad shape fails loud at invite time
+    # rather than corrupting the accept transaction later.
+    _validate_work_engagement(work_engagement)
+    user_work_roles_payload = user_work_roles or []
+    _validate_user_work_roles(
+        session,
+        user_work_roles=user_work_roles_payload,
+        workspace_id=ctx.workspace_id,
+    )
 
     email_hash = _hash_email(email_lower, settings=settings)
 
@@ -726,6 +841,14 @@ def invite(
         existing_invite.display_name = display_name
         existing_invite.grants_json = list(grants)
         existing_invite.group_memberships_json = list(memberships)
+        # cd-4o61: refresh path overwrites the pending sub-payloads
+        # so a re-invite with a different engagement shape wins; the
+        # caller's last write is authoritative until accept consumes
+        # the row.
+        existing_invite.work_engagement_json = (
+            dict(work_engagement) if work_engagement is not None else None
+        )
+        existing_invite.user_work_roles_json = list(user_work_roles_payload)
         existing_invite.invited_by_user_id = ctx.actor_id
         existing_invite.expires_at = resolved_now + _INVITE_TTL
         existing_invite.user_id = user_id
@@ -747,6 +870,10 @@ def invite(
             state="pending",
             grants_json=list(grants),
             group_memberships_json=list(memberships),
+            work_engagement_json=(
+                dict(work_engagement) if work_engagement is not None else None
+            ),
+            user_work_roles_json=list(user_work_roles_payload),
             invited_by_user_id=ctx.actor_id,
             created_at=resolved_now,
             expires_at=resolved_now + _INVITE_TTL,
@@ -853,6 +980,13 @@ def invite(
             "user_created": user_created,
             "grants": list(grants),
             "group_memberships": list(memberships),
+            # cd-4o61: forensic snapshot of the pending sub-payloads.
+            # No PII — engagement_kind / supplier_org_id / work_role_id
+            # are domain ids, not user content.
+            "work_engagement": (
+                dict(work_engagement) if work_engagement is not None else None
+            ),
+            "user_work_roles": list(user_work_roles_payload),
         },
         clock=clock,
     )
@@ -1311,10 +1445,12 @@ def _activate_invite(
     # id rather than a duplicate. Only run it for ``worker`` /
     # ``manager`` grants — ``client`` + ``guest`` grants do not carry
     # a pay pipeline, so a pending engagement for them would be
-    # misleading. The richer cd-1hd0 / cd-4o61 payload overrides
-    # ``engagement_kind`` + supplier fields once those sub-payloads
-    # ship; for now the default ``payroll`` row is a safe minimum.
-    needs_engagement_seed = any(
+    # misleading. cd-4o61: when the invite carried a
+    # ``work_engagement_json`` payload, that overrides the default
+    # ``payroll`` row for ``engagement_kind`` and ``supplier_org_id``;
+    # absent payload falls back to the legacy ``payroll`` default.
+    pending_engagement = invite_row.work_engagement_json
+    needs_engagement_seed = pending_engagement is not None or any(
         g.get("grant_role") in {"worker", "manager"} for g in invite_row.grants_json
     )
     if needs_engagement_seed:
@@ -1350,13 +1486,24 @@ def _activate_invite(
             )
         )
         if existing_active is None:
+            # cd-4o61: when the invite carried an explicit engagement
+            # payload, use it; otherwise fall back to the legacy
+            # ``payroll`` default. ``invite()`` already validated the
+            # supplier-pairing biconditional so the payload is safe to
+            # write directly.
+            if pending_engagement is not None:
+                engagement_kind = str(pending_engagement.get("engagement_kind"))
+                supplier_org_id = pending_engagement.get("supplier_org_id")
+            else:
+                engagement_kind = "payroll"
+                supplier_org_id = None
             engagement_id = new_ulid(clock=clock)
             engagement = WorkEngagement(
                 id=engagement_id,
                 user_id=user_id,
                 workspace_id=workspace_id,
-                engagement_kind="payroll",
-                supplier_org_id=None,
+                engagement_kind=engagement_kind,
+                supplier_org_id=supplier_org_id,
                 pay_destination_id=None,
                 reimbursement_destination_id=None,
                 started_on=now.date(),
@@ -1375,11 +1522,68 @@ def _activate_invite(
                 action="work_engagement.seeded_on_accept",
                 diff={
                     "user_id": user_id,
-                    "engagement_kind": "payroll",
+                    "engagement_kind": engagement_kind,
+                    "supplier_org_id": supplier_org_id,
                     "started_on": engagement.started_on.isoformat(),
                 },
                 clock=clock,
             )
+
+    # cd-4o61: insert the pending ``user_work_role`` rows captured at
+    # invite time. Idempotent on accept-replay — a row already
+    # present for the (user, workspace, role, started_on) tuple is
+    # skipped rather than colliding on the unique index. The
+    # workspace pinning was validated at invite time
+    # (:func:`_validate_user_work_roles`) so we only need a defensive
+    # re-check on the JSON shape here.
+    activated_user_work_roles: list[str] = []
+    pending_user_work_roles = invite_row.user_work_roles_json or []
+    for uwr in pending_user_work_roles:
+        if not isinstance(uwr, dict):
+            continue
+        work_role_id = uwr.get("work_role_id")
+        if not isinstance(work_role_id, str) or not work_role_id:
+            continue
+        existing_uwr = session.scalar(
+            select(UserWorkRole).where(
+                UserWorkRole.user_id == user_id,
+                UserWorkRole.workspace_id == workspace_id,
+                UserWorkRole.work_role_id == work_role_id,
+                UserWorkRole.started_on == now.date(),
+            )
+        )
+        if existing_uwr is not None:
+            continue
+        uwr_id = new_ulid(clock=clock)
+        row = UserWorkRole(
+            id=uwr_id,
+            user_id=user_id,
+            workspace_id=workspace_id,
+            work_role_id=work_role_id,
+            started_on=now.date(),
+            ended_on=None,
+            pay_rule_id=None,
+            created_at=now,
+            deleted_at=None,
+        )
+        session.add(row)
+        session.flush()
+        activated_user_work_roles.append(uwr_id)
+        write_audit(
+            session,
+            ctx,
+            entity_kind="user_work_role",
+            entity_id=uwr_id,
+            action="user_work_role.created",
+            diff={
+                "user_id": user_id,
+                "work_role_id": work_role_id,
+                "started_on": now.date().isoformat(),
+                "ended_on": None,
+                "source": "invite_accept",
+            },
+            clock=clock,
+        )
 
     invite_row.state = "accepted"
     invite_row.accepted_at = now
@@ -1415,6 +1619,11 @@ def _activate_invite(
             "user_id": user_id,
             "activated_grant_ids": activated_grants,
             "activated_group_memberships": activated_group_members,
+            # cd-4o61: surface the freshly-inserted user_work_role
+            # ids so a forensic join over the accept transaction is
+            # one query instead of N. Empty list when the invite did
+            # not carry a ``user_work_roles`` payload.
+            "activated_user_work_role_ids": activated_user_work_roles,
         },
         clock=clock,
     )

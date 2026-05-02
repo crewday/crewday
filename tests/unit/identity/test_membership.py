@@ -142,3 +142,109 @@ class TestTimezoneNormalisation:
 
         out = membership._aware_utc(_dt(2026, 1, 1, 12, 0, 0, tzinfo=UTC))
         assert out.tzinfo == UTC
+
+
+class TestWorkEngagementValidation:
+    """``_validate_work_engagement`` enforces the §02 supplier biconditional.
+
+    cd-4o61. ``None`` is the legacy "no override" path; every present
+    payload must have a known ``engagement_kind`` and the supplier
+    column must align with that kind. Pure unit coverage so the
+    domain integration test (which needs a live DB to land an invite)
+    only proves the wiring.
+    """
+
+    def test_none_payload_is_a_noop(self) -> None:
+        membership._validate_work_engagement(None)
+
+    def test_payroll_without_supplier_ok(self) -> None:
+        membership._validate_work_engagement({"engagement_kind": "payroll"})
+
+    def test_contractor_without_supplier_ok(self) -> None:
+        membership._validate_work_engagement(
+            {"engagement_kind": "contractor", "supplier_org_id": None}
+        )
+
+    def test_agency_supplied_with_supplier_ok(self) -> None:
+        membership._validate_work_engagement(
+            {
+                "engagement_kind": "agency_supplied",
+                "supplier_org_id": "org-123",
+            }
+        )
+
+    def test_unknown_kind_rejected(self) -> None:
+        with pytest.raises(membership.InviteBodyInvalid) as exc:
+            membership._validate_work_engagement({"engagement_kind": "freelance"})
+        assert "freelance" in str(exc.value)
+
+    def test_agency_supplied_without_supplier_rejected(self) -> None:
+        with pytest.raises(membership.InviteBodyInvalid) as exc:
+            membership._validate_work_engagement({"engagement_kind": "agency_supplied"})
+        assert "supplier_org_id" in str(exc.value)
+
+    def test_payroll_with_supplier_rejected(self) -> None:
+        with pytest.raises(membership.InviteBodyInvalid) as exc:
+            membership._validate_work_engagement(
+                {
+                    "engagement_kind": "payroll",
+                    "supplier_org_id": "org-leak",
+                }
+            )
+        assert "supplier_org_id" in str(exc.value)
+
+    def test_contractor_with_supplier_rejected(self) -> None:
+        with pytest.raises(membership.InviteBodyInvalid):
+            membership._validate_work_engagement(
+                {
+                    "engagement_kind": "contractor",
+                    "supplier_org_id": "org-leak",
+                }
+            )
+
+
+class TestUserWorkRolesShape:
+    """``_validate_user_work_roles`` early-returns on empty + shape errors.
+
+    cd-4o61. The DB-touching cases (workspace lookup, soft-delete
+    skip, foreign-workspace rejection) are exercised in
+    ``tests/integration/identity/test_membership.py``; this unit
+    suite covers the no-DB shape-check path so a typo in the
+    shape fails loud regardless of session state.
+    """
+
+    _WORKSPACE_ID = "01HWA000000000000000WS001"
+
+    def test_empty_list_is_a_noop(self) -> None:
+        # No session call happens — passing ``None`` would crash if
+        # the early return is missing.
+        membership._validate_user_work_roles(
+            None,  # type: ignore[arg-type]
+            user_work_roles=[],
+            workspace_id=self._WORKSPACE_ID,
+        )
+
+    def test_missing_work_role_id_rejected(self) -> None:
+        with pytest.raises(membership.InviteBodyInvalid) as exc:
+            membership._validate_user_work_roles(
+                None,  # type: ignore[arg-type]
+                user_work_roles=[{}],
+                workspace_id=self._WORKSPACE_ID,
+            )
+        assert "work_role_id" in str(exc.value)
+
+    def test_empty_work_role_id_rejected(self) -> None:
+        with pytest.raises(membership.InviteBodyInvalid):
+            membership._validate_user_work_roles(
+                None,  # type: ignore[arg-type]
+                user_work_roles=[{"work_role_id": ""}],
+                workspace_id=self._WORKSPACE_ID,
+            )
+
+    def test_non_string_work_role_id_rejected(self) -> None:
+        with pytest.raises(membership.InviteBodyInvalid):
+            membership._validate_user_work_roles(
+                None,  # type: ignore[arg-type]
+                user_work_roles=[{"work_role_id": 42}],
+                workspace_id=self._WORKSPACE_ID,
+            )

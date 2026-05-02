@@ -534,12 +534,14 @@ def seed_pending_work_engagement(
     engagement row lands alongside the ``role_grant`` +
     ``permission_group_member`` rows atomically.
 
-    The engagement is created with the Phase 1 defaults:
+    The engagement is created with the default-seed shape:
 
     * ``engagement_kind = 'payroll'`` — the majority case for
-      direct-employment workers (§22 "Engagement kinds"); the
-      richer invite sub-payload that can override this is the work
-      of cd-1hd0 / cd-4o61.
+      direct-employment workers (§22 "Engagement kinds"). The
+      richer ``work_engagement`` sub-payload that overrides this
+      lives inline in :func:`app.domain.identity.membership._activate_invite`
+      (cd-4o61); this helper covers the legacy default-only path
+      that the services-layer callers rely on.
     * ``started_on = now.date()`` — the accept instant.
     * ``archived_on = NULL`` — the engagement is active from the
       moment the passkey challenge completes.

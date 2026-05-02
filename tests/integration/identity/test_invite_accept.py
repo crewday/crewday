@@ -30,9 +30,14 @@ from sqlalchemy.orm import Session
 
 from app.adapters.db.audit.models import AuditLog
 from app.adapters.db.identity.models import (
+    Invite,
     PasskeyCredential,
 )
-from app.adapters.db.workspace.models import WorkEngagement
+from app.adapters.db.workspace.models import (
+    UserWorkRole,
+    WorkEngagement,
+    WorkRole,
+)
 from app.auth._throttle import Throttle
 from app.auth.magic_link_port import MagicLinkAdapter
 from app.config import Settings
@@ -203,6 +208,47 @@ def _engagements_for(
             )
         ).all()
     )
+
+
+def _user_work_roles_for(
+    session: Session, *, user_id: str, workspace_id: str
+) -> list[UserWorkRole]:
+    return list(
+        session.scalars(
+            select(UserWorkRole)
+            .where(
+                UserWorkRole.user_id == user_id,
+                UserWorkRole.workspace_id == workspace_id,
+            )
+            .order_by(UserWorkRole.work_role_id.asc())
+        ).all()
+    )
+
+
+def _seed_work_role(
+    session: Session,
+    *,
+    workspace_id: str,
+    key: str,
+    name: str,
+    clock: FrozenClock,
+) -> str:
+    """Insert a live :class:`WorkRole` and return its id."""
+    from app.util.ulid import new_ulid
+
+    role_id = new_ulid(clock=clock)
+    with tenant_agnostic():
+        session.add(
+            WorkRole(
+                id=role_id,
+                workspace_id=workspace_id,
+                key=key,
+                name=name,
+                created_at=clock.now(),
+            )
+        )
+        session.flush()
+    return role_id
 
 
 # ---------------------------------------------------------------------------
@@ -429,3 +475,447 @@ class TestAcceptSeedsEngagement:
         assert first is not None
         assert second is not None
         assert first.id == second.id
+
+
+# ---------------------------------------------------------------------------
+# cd-4o61 — invite carries pending ``work_engagement`` + ``user_work_roles``
+# ---------------------------------------------------------------------------
+
+
+def _invite_with_payload(
+    session: Session,
+    ctx: WorkspaceContext,
+    mailer: InMemoryMailer,
+    throttle: Throttle,
+    *,
+    email: str,
+    display_name: str,
+    role: str = "worker",
+    work_engagement: dict[str, object] | None = None,
+    user_work_roles: list[dict[str, object]] | None = None,
+) -> membership.InviteOutcome:
+    """Helper variant of :func:`_invite_worker` that wires the cd-4o61 payloads."""
+    return membership.invite(
+        session,
+        ctx,
+        email=email,
+        display_name=display_name,
+        grants=[
+            {
+                "scope_kind": "workspace",
+                "scope_id": ctx.workspace_id,
+                "grant_role": role,
+            }
+        ],
+        work_engagement=work_engagement,
+        user_work_roles=user_work_roles,
+        mailer=mailer,
+        throttle=throttle,
+        base_url=_BASE_URL,
+        settings=_TEST_SETTINGS,
+        inviter_display_name="Owner",
+        workspace_name=ctx.workspace_slug,
+        link_port=MagicLinkAdapter(session),
+    )
+
+
+class TestInvitePersistsPendingPayload:
+    """``invite()`` lands ``work_engagement`` + ``user_work_roles`` JSON.
+
+    cd-4o61. The accept path consumes these columns; if they don't
+    persist, the activation downstream would silently fall back to
+    legacy defaults.
+    """
+
+    def test_invite_persists_work_engagement_json(
+        self,
+        env: tuple[Session, WorkspaceContext, InMemoryMailer, Throttle],
+    ) -> None:
+        session, ctx, mailer, throttle = env
+        outcome = _invite_with_payload(
+            session,
+            ctx,
+            mailer,
+            throttle,
+            email="contractor@example.com",
+            display_name="Connie",
+            work_engagement={"engagement_kind": "contractor"},
+        )
+        invite_row = session.get(Invite, outcome.id)
+        assert invite_row is not None
+        assert invite_row.work_engagement_json == {"engagement_kind": "contractor"}
+        assert invite_row.user_work_roles_json == []
+
+    def test_invite_persists_user_work_roles_json(
+        self,
+        env: tuple[Session, WorkspaceContext, InMemoryMailer, Throttle],
+    ) -> None:
+        session, ctx, mailer, throttle = env
+        clock = FrozenClock(_PINNED)
+        wr_id = _seed_work_role(
+            session,
+            workspace_id=ctx.workspace_id,
+            key="maid",
+            name="Maid",
+            clock=clock,
+        )
+        outcome = _invite_with_payload(
+            session,
+            ctx,
+            mailer,
+            throttle,
+            email="role@example.com",
+            display_name="Roxie",
+            user_work_roles=[{"work_role_id": wr_id}],
+        )
+        invite_row = session.get(Invite, outcome.id)
+        assert invite_row is not None
+        assert invite_row.user_work_roles_json == [{"work_role_id": wr_id}]
+
+    def test_invite_rejects_unknown_work_role_id(
+        self,
+        env: tuple[Session, WorkspaceContext, InMemoryMailer, Throttle],
+    ) -> None:
+        session, ctx, mailer, throttle = env
+        with pytest.raises(membership.InviteBodyInvalid) as exc:
+            _invite_with_payload(
+                session,
+                ctx,
+                mailer,
+                throttle,
+                email="bad@example.com",
+                display_name="Bad",
+                user_work_roles=[{"work_role_id": "01HZZZZZZZZZZZZZZZZZZZZZ99"}],
+            )
+        assert "work_role_id" in str(exc.value)
+
+    def test_invite_rejects_cross_workspace_work_role(
+        self,
+        env: tuple[Session, WorkspaceContext, InMemoryMailer, Throttle],
+    ) -> None:
+        """A WorkRole from a different workspace must surface as missing."""
+        session, ctx, mailer, throttle = env
+        # Bootstrap a separate workspace so we have a real WorkRole
+        # row that the caller's workspace does not own.
+        clock = FrozenClock(_PINNED)
+        other_owner = bootstrap_user(
+            session,
+            email="other-owner@example.com",
+            display_name="Other Owner",
+            clock=clock,
+        )
+        other_ws = bootstrap_workspace(
+            session,
+            slug=f"other-{_next_slug()}",
+            name="Other WS",
+            owner_user_id=other_owner.id,
+            clock=clock,
+        )
+        foreign_id = _seed_work_role(
+            session,
+            workspace_id=other_ws.id,
+            key="cook",
+            name="Cook",
+            clock=clock,
+        )
+
+        with pytest.raises(membership.InviteBodyInvalid) as exc:
+            _invite_with_payload(
+                session,
+                ctx,
+                mailer,
+                throttle,
+                email="xws@example.com",
+                display_name="X-WS",
+                user_work_roles=[{"work_role_id": foreign_id}],
+            )
+        assert "work_role_id" in str(exc.value)
+
+    def test_invite_rejects_agency_supplied_without_supplier_org(
+        self,
+        env: tuple[Session, WorkspaceContext, InMemoryMailer, Throttle],
+    ) -> None:
+        session, ctx, mailer, throttle = env
+        with pytest.raises(membership.InviteBodyInvalid):
+            _invite_with_payload(
+                session,
+                ctx,
+                mailer,
+                throttle,
+                email="agency@example.com",
+                display_name="Agency",
+                work_engagement={"engagement_kind": "agency_supplied"},
+            )
+
+    def test_refresh_path_overwrites_pending_payload(
+        self,
+        env: tuple[Session, WorkspaceContext, InMemoryMailer, Throttle],
+    ) -> None:
+        """A re-invite replaces the pending sub-payload — last write wins."""
+        session, ctx, mailer, throttle = env
+        first = _invite_with_payload(
+            session,
+            ctx,
+            mailer,
+            throttle,
+            email="redo@example.com",
+            display_name="Redo",
+            work_engagement={"engagement_kind": "payroll"},
+        )
+        second = _invite_with_payload(
+            session,
+            ctx,
+            mailer,
+            throttle,
+            email="redo@example.com",
+            display_name="Redo",
+            work_engagement={"engagement_kind": "contractor"},
+        )
+        assert first.id == second.id
+        invite_row = session.get(Invite, second.id)
+        assert invite_row is not None
+        assert invite_row.work_engagement_json == {"engagement_kind": "contractor"}
+
+
+class TestAcceptConsumesPendingPayload:
+    """``_activate_invite`` consumes the JSON payload atomically."""
+
+    def test_accept_overrides_default_engagement_kind(
+        self,
+        env: tuple[Session, WorkspaceContext, InMemoryMailer, Throttle],
+    ) -> None:
+        session, ctx, mailer, throttle = env
+        outcome = _invite_with_payload(
+            session,
+            ctx,
+            mailer,
+            throttle,
+            email="cont@example.com",
+            display_name="Cont",
+            work_engagement={"engagement_kind": "contractor"},
+        )
+        token = _extract_token_from_body(mailer.sent[0].body_text)
+        acceptance = membership.consume_invite_token(
+            session,
+            token=token,
+            ip="127.0.0.1",
+            throttle=throttle,
+            settings=_TEST_SETTINGS,
+            link_port=MagicLinkAdapter(session),
+        )
+        assert isinstance(acceptance, membership.NewUserAcceptance)
+        _seed_passkey(
+            session,
+            user_id=acceptance.session.user_id,
+            clock=FrozenClock(_PINNED),
+        )
+        membership.complete_invite(
+            session,
+            invite_id=outcome.id,
+            settings=_TEST_SETTINGS,
+        )
+        assert outcome.user_id is not None
+        rows = _engagements_for(
+            session, user_id=outcome.user_id, workspace_id=ctx.workspace_id
+        )
+        assert len(rows) == 1
+        assert rows[0].engagement_kind == "contractor"
+        assert rows[0].supplier_org_id is None
+
+    def test_accept_inserts_user_work_role_rows(
+        self,
+        env: tuple[Session, WorkspaceContext, InMemoryMailer, Throttle],
+    ) -> None:
+        session, ctx, mailer, throttle = env
+        clock = FrozenClock(_PINNED)
+        wr_a = _seed_work_role(
+            session,
+            workspace_id=ctx.workspace_id,
+            key="maid",
+            name="Maid",
+            clock=clock,
+        )
+        wr_b = _seed_work_role(
+            session,
+            workspace_id=ctx.workspace_id,
+            key="cook",
+            name="Cook",
+            clock=clock,
+        )
+        outcome = _invite_with_payload(
+            session,
+            ctx,
+            mailer,
+            throttle,
+            email="multi@example.com",
+            display_name="Multi",
+            user_work_roles=[
+                {"work_role_id": wr_a},
+                {"work_role_id": wr_b},
+            ],
+        )
+        token = _extract_token_from_body(mailer.sent[0].body_text)
+        acceptance = membership.consume_invite_token(
+            session,
+            token=token,
+            ip="127.0.0.1",
+            throttle=throttle,
+            settings=_TEST_SETTINGS,
+            link_port=MagicLinkAdapter(session),
+        )
+        assert isinstance(acceptance, membership.NewUserAcceptance)
+        _seed_passkey(
+            session,
+            user_id=acceptance.session.user_id,
+            clock=FrozenClock(_PINNED),
+        )
+        membership.complete_invite(
+            session,
+            invite_id=outcome.id,
+            settings=_TEST_SETTINGS,
+        )
+        assert outcome.user_id is not None
+        uwr_rows = _user_work_roles_for(
+            session, user_id=outcome.user_id, workspace_id=ctx.workspace_id
+        )
+        assert sorted(r.work_role_id for r in uwr_rows) == sorted([wr_a, wr_b])
+        # Default engagement still seeded — payload omitted ``work_engagement``.
+        engagement_rows = _engagements_for(
+            session, user_id=outcome.user_id, workspace_id=ctx.workspace_id
+        )
+        assert len(engagement_rows) == 1
+        assert engagement_rows[0].engagement_kind == "payroll"
+
+    def test_accept_writes_user_work_role_audit_rows(
+        self,
+        env: tuple[Session, WorkspaceContext, InMemoryMailer, Throttle],
+    ) -> None:
+        session, ctx, mailer, throttle = env
+        clock = FrozenClock(_PINNED)
+        wr_id = _seed_work_role(
+            session,
+            workspace_id=ctx.workspace_id,
+            key="driver",
+            name="Driver",
+            clock=clock,
+        )
+        outcome = _invite_with_payload(
+            session,
+            ctx,
+            mailer,
+            throttle,
+            email="audit@example.com",
+            display_name="Auditee",
+            user_work_roles=[{"work_role_id": wr_id}],
+        )
+        token = _extract_token_from_body(mailer.sent[0].body_text)
+        acceptance = membership.consume_invite_token(
+            session,
+            token=token,
+            ip="127.0.0.1",
+            throttle=throttle,
+            settings=_TEST_SETTINGS,
+            link_port=MagicLinkAdapter(session),
+        )
+        assert isinstance(acceptance, membership.NewUserAcceptance)
+        _seed_passkey(
+            session,
+            user_id=acceptance.session.user_id,
+            clock=FrozenClock(_PINNED),
+        )
+        membership.complete_invite(
+            session,
+            invite_id=outcome.id,
+            settings=_TEST_SETTINGS,
+        )
+
+        # The user_work_role row's audit ride.
+        uwrs = _user_work_roles_for(
+            session,
+            user_id=outcome.user_id,  # type: ignore[arg-type]
+            workspace_id=ctx.workspace_id,
+        )
+        assert len(uwrs) == 1
+        audit_rows = list(
+            session.scalars(
+                select(AuditLog)
+                .where(AuditLog.entity_id == uwrs[0].id)
+                .order_by(AuditLog.created_at.asc())
+            ).all()
+        )
+        assert [r.action for r in audit_rows] == ["user_work_role.created"]
+        diff = audit_rows[0].diff
+        assert diff["work_role_id"] == wr_id
+        assert diff["source"] == "invite_accept"
+
+    def test_full_payload_lands_atomically(
+        self,
+        env: tuple[Session, WorkspaceContext, InMemoryMailer, Throttle],
+    ) -> None:
+        """End-to-end: invite carries both payloads; accept lands every row."""
+        session, ctx, mailer, throttle = env
+        clock = FrozenClock(_PINNED)
+        wr_id = _seed_work_role(
+            session,
+            workspace_id=ctx.workspace_id,
+            key="cleaner",
+            name="Cleaner",
+            clock=clock,
+        )
+        outcome = _invite_with_payload(
+            session,
+            ctx,
+            mailer,
+            throttle,
+            email="full@example.com",
+            display_name="Full",
+            work_engagement={"engagement_kind": "contractor"},
+            user_work_roles=[{"work_role_id": wr_id}],
+        )
+        token = _extract_token_from_body(mailer.sent[0].body_text)
+        acceptance = membership.consume_invite_token(
+            session,
+            token=token,
+            ip="127.0.0.1",
+            throttle=throttle,
+            settings=_TEST_SETTINGS,
+            link_port=MagicLinkAdapter(session),
+        )
+        assert isinstance(acceptance, membership.NewUserAcceptance)
+        _seed_passkey(
+            session,
+            user_id=acceptance.session.user_id,
+            clock=FrozenClock(_PINNED),
+        )
+        membership.complete_invite(
+            session,
+            invite_id=outcome.id,
+            settings=_TEST_SETTINGS,
+        )
+
+        assert outcome.user_id is not None
+        engagements = _engagements_for(
+            session, user_id=outcome.user_id, workspace_id=ctx.workspace_id
+        )
+        assert len(engagements) == 1
+        assert engagements[0].engagement_kind == "contractor"
+        uwrs = _user_work_roles_for(
+            session, user_id=outcome.user_id, workspace_id=ctx.workspace_id
+        )
+        assert len(uwrs) == 1
+        assert uwrs[0].work_role_id == wr_id
+
+        # Accept-side audit surfaces the activated user_work_role ids.
+        # New-user enrolment audits as ``user.enrolled``; the
+        # existing-user grant-accept path uses ``user.grant_accepted``
+        # — both share the diff shape we assert.
+        invite_audit = list(
+            session.scalars(
+                select(AuditLog)
+                .where(AuditLog.entity_id == outcome.id)
+                .where(AuditLog.action == "user.enrolled")
+            ).all()
+        )
+        assert len(invite_audit) == 1
+        diff = invite_audit[0].diff
+        assert diff["activated_user_work_role_ids"] == [uwrs[0].id]

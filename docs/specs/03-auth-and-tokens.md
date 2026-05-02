@@ -248,17 +248,20 @@ they take effect; grants never attach silently.
   `{ email, display_name,
      grants: [ {scope_kind, scope_id, grant_role, binding_org_id?}, ... ],
      permission_group_memberships?: [ {group_id}, ... ],
-     work_engagement?: {workspace_id, engagement_kind, ...},
-     user_work_roles?: [ {workspace_id, work_role_id}, ... ] }`.
-  One call creates (or re-uses, if `email` matches an existing
-  row) the `users` row and inserts a pending `invite` record
-  carrying the requested grants, permission-group memberships,
-  work engagement, and work-role mappings. Nothing on the invited
-  scope is active yet. The requested rows live alongside the
-  invite as `pending = true` and are activated atomically on
-  acceptance. Inviting someone directly into `owners@<scope>`
-  requires the inviter to pass the root-only
-  `groups.manage_owners_membership` action check for that scope.
+     work_engagement?: {engagement_kind, supplier_org_id?},
+     user_work_roles?: [ {work_role_id}, ... ] }`.
+  The `work_engagement` and `user_work_roles` sub-payloads are
+  optional and pinned to the caller's workspace (no `workspace_id`
+  on the wire — the invite already carries one). One call creates
+  (or re-uses, if `email` matches an existing row) the `users` row
+  and inserts a pending `invite` record carrying the requested
+  grants, permission-group memberships, work engagement, and
+  work-role mappings. Nothing on the invited scope is active yet.
+  The requested rows live alongside the invite as `pending = true`
+  and are activated atomically on acceptance. Inviting someone
+  directly into `owners@<scope>` requires the inviter to pass the
+  root-only `groups.manage_owners_membership` action check for that
+  scope.
 - System emails a magic link of purpose `accept` that lands on
   `/w/<slug>/accept/<token>` (24 h TTL across all surfaces;
   single-use; `jti` recorded). The same endpoint handles both

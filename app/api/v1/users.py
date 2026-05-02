@@ -9,7 +9,10 @@ Today's v1 surface:
   ``grant_invite`` magic link. A pending ``work_engagement`` row is
   NOT created at invite time — the accept-side path
   (:func:`app.domain.identity.membership._activate_invite`) seeds
-  it once the invitee completes their passkey challenge.
+  it once the invitee completes their passkey challenge. The body
+  carries optional ``work_engagement`` + ``user_work_roles``
+  sub-payloads (cd-4o61) which ride on the invite row as JSON until
+  accept, when they are consumed atomically inside the same UoW.
 * ``PATCH /users/{user_id}`` — partial profile update. Self-edits
   pass through without a capability check; edits targeting someone
   else require ``users.edit_profile_other`` (default
@@ -142,19 +145,73 @@ class GroupMembershipInput(BaseModel):
     group_id: str
 
 
+class WorkEngagementInput(BaseModel):
+    """Optional ``work_engagement`` sub-payload on ``POST /users/invite``.
+
+    cd-4o61 — captured at invite time as a pending row on the
+    :class:`~app.adapters.db.identity.models.Invite` and consumed
+    inside :func:`app.domain.identity.membership._activate_invite`
+    once the invitee completes their passkey challenge. ``None`` (the
+    field omitted) falls back to the default ``payroll`` engagement
+    seed; a present payload overrides ``engagement_kind`` and may
+    pin a ``supplier_org_id`` for ``agency_supplied`` engagements.
+
+    The domain service re-asserts the §02 supplier-pairing
+    biconditional at the invite boundary so a malformed pair fails
+    loud at 422 ``invalid_body`` rather than at the DB CHECK.
+    """
+
+    model_config = {"extra": "forbid"}
+
+    engagement_kind: str = Field(
+        ...,
+        description="One of 'payroll' | 'contractor' | 'agency_supplied'.",
+    )
+    supplier_org_id: str | None = Field(
+        default=None,
+        description=(
+            "Required iff engagement_kind == 'agency_supplied'; NULL "
+            "otherwise (§02 'work_engagement' supplier pairing)."
+        ),
+        max_length=64,
+    )
+
+
+class UserWorkRoleInput(BaseModel):
+    """One entry in the ``user_work_roles`` list on ``POST /users/invite``.
+
+    cd-4o61 — each entry inserts a fresh
+    :class:`~app.adapters.db.workspace.models.UserWorkRole` row
+    inside the same UoW that activates the membership. Validation
+    pins the ``work_role_id`` to the caller's workspace at invite
+    time so a typo or cross-workspace borrow fails loud on the
+    invite call rather than silently at accept.
+    """
+
+    model_config = {"extra": "forbid"}
+
+    work_role_id: str = Field(..., min_length=1, max_length=64)
+
+
 class InviteRequest(BaseModel):
     """Request body for ``POST /users/invite``.
 
-    ``work_engagement`` + ``user_work_roles`` are intentionally absent:
-    their backing tables don't exist in Phase 1. A future body-shape
-    bump will add them without breaking callers that send the current
-    payload. Tracked as cd-1hd0.
+    cd-4o61 expanded the wire shape so a manager can land the
+    accepting user's first ``work_engagement`` + ``user_work_role``
+    rows without a follow-up call. Both fields are optional — an
+    invite that omits them seeds the legacy default (``payroll``
+    engagement when the grant is ``worker``/``manager``; no extra
+    work-role rows). Each present payload is captured on the
+    :class:`Invite` row as JSON and applied atomically inside
+    :func:`app.domain.identity.membership._activate_invite`.
     """
 
     email: str = Field(..., min_length=3, max_length=320)
     display_name: str = Field(..., min_length=1, max_length=160)
     grants: list[GrantInput]
     permission_group_memberships: list[GroupMembershipInput] | None = None
+    work_engagement: WorkEngagementInput | None = None
+    user_work_roles: list[UserWorkRoleInput] | None = None
 
 
 class InviteResponse(BaseModel):
@@ -652,6 +709,18 @@ def build_users_router(
         memberships_payload: list[dict[str, Any]] = [
             gm.model_dump() for gm in (body.permission_group_memberships or [])
         ]
+        # cd-4o61: pending sub-payloads land on the invite row as
+        # JSON. ``None`` for ``work_engagement`` falls back to the
+        # legacy ``payroll`` default seed; an empty / absent
+        # ``user_work_roles`` skips the extra-roles activation.
+        work_engagement_payload: dict[str, Any] | None = (
+            body.work_engagement.model_dump()
+            if body.work_engagement is not None
+            else None
+        )
+        user_work_roles_payload: list[dict[str, Any]] = [
+            uwr.model_dump() for uwr in (body.user_work_roles or [])
+        ]
 
         dispatch = magic_link_module.PendingDispatch()
         try:
@@ -671,6 +740,8 @@ def build_users_router(
                     display_name=body.display_name,
                     grants=grants_payload,
                     group_memberships=memberships_payload,
+                    work_engagement=work_engagement_payload,
+                    user_work_roles=user_work_roles_payload,
                     mailer=mailer,
                     throttle=throttle,
                     base_url=resolved_base_url,

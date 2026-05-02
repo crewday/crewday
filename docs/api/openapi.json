@@ -11157,7 +11157,7 @@
         "type": "object"
       },
       "InviteRequest": {
-        "description": "Request body for ``POST /users/invite``.\n\n``work_engagement`` + ``user_work_roles`` are intentionally absent:\ntheir backing tables don't exist in Phase 1. A future body-shape\nbump will add them without breaking callers that send the current\npayload. Tracked as cd-1hd0.",
+        "description": "Request body for ``POST /users/invite``.\n\ncd-4o61 expanded the wire shape so a manager can land the\naccepting user's first ``work_engagement`` + ``user_work_role``\nrows without a follow-up call. Both fields are optional \u2014 an\ninvite that omits them seeds the legacy default (``payroll``\nengagement when the grant is ``worker``/``manager``; no extra\nwork-role rows). Each present payload is captured on the\n:class:`Invite` row as JSON and applied atomically inside\n:func:`app.domain.identity.membership._activate_invite`.",
         "properties": {
           "display_name": {
             "maxLength": 160,
@@ -11191,6 +11191,30 @@
               }
             ],
             "title": "Permission Group Memberships"
+          },
+          "user_work_roles": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/UserWorkRoleInput"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Work Roles"
+          },
+          "work_engagement": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/WorkEngagementInput"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -22786,6 +22810,23 @@
         "title": "UserWorkRoleCreateRequest",
         "type": "object"
       },
+      "UserWorkRoleInput": {
+        "additionalProperties": false,
+        "description": "One entry in the ``user_work_roles`` list on ``POST /users/invite``.\n\ncd-4o61 \u2014 each entry inserts a fresh\n:class:`~app.adapters.db.workspace.models.UserWorkRole` row\ninside the same UoW that activates the membership. Validation\npins the ``work_role_id`` to the caller's workspace at invite\ntime so a typo or cross-workspace borrow fails loud on the\ninvite call rather than silently at accept.",
+        "properties": {
+          "work_role_id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Work Role Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "work_role_id"
+        ],
+        "title": "UserWorkRoleInput",
+        "type": "object"
+      },
       "UserWorkRoleListResponse": {
         "description": "Collection envelope for ``GET /users/{id}/user_work_roles``.",
         "properties": {
@@ -23794,6 +23835,35 @@
           "welcome"
         ],
         "title": "WelcomeResponse",
+        "type": "object"
+      },
+      "WorkEngagementInput": {
+        "additionalProperties": false,
+        "description": "Optional ``work_engagement`` sub-payload on ``POST /users/invite``.\n\ncd-4o61 \u2014 captured at invite time as a pending row on the\n:class:`~app.adapters.db.identity.models.Invite` and consumed\ninside :func:`app.domain.identity.membership._activate_invite`\nonce the invitee completes their passkey challenge. ``None`` (the\nfield omitted) falls back to the default ``payroll`` engagement\nseed; a present payload overrides ``engagement_kind`` and may\npin a ``supplier_org_id`` for ``agency_supplied`` engagements.\n\nThe domain service re-asserts the \u00a702 supplier-pairing\nbiconditional at the invite boundary so a malformed pair fails\nloud at 422 ``invalid_body`` rather than at the DB CHECK.",
+        "properties": {
+          "engagement_kind": {
+            "description": "One of 'payroll' | 'contractor' | 'agency_supplied'.",
+            "title": "Engagement Kind",
+            "type": "string"
+          },
+          "supplier_org_id": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Required iff engagement_kind == 'agency_supplied'; NULL otherwise (\u00a702 'work_engagement' supplier pairing).",
+            "title": "Supplier Org Id"
+          }
+        },
+        "required": [
+          "engagement_kind"
+        ],
+        "title": "WorkEngagementInput",
         "type": "object"
       },
       "WorkEngagementListResponse": {

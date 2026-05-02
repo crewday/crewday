@@ -679,6 +679,18 @@ class Invite(Base):
     id against :class:`PermissionGroup` before activation — no
     cross-workspace membership is possible.
 
+    **``work_engagement_json``** (cd-4o61) is an optional
+    ``{engagement_kind, supplier_org_id?}`` dict captured at invite
+    time. ``None`` falls back to the default ``payroll`` seed in
+    :func:`app.domain.identity.membership._activate_invite`.
+
+    **``user_work_roles_json``** (cd-4o61) is a list of
+    ``{work_role_id}`` entries. Each entry inserts a fresh
+    ``user_work_role`` row inside the same UoW that activates the
+    membership. The domain service validates every ``work_role_id``
+    against :class:`WorkRole` at invite time so a typo fails loud
+    on the invite call rather than silently at accept.
+
     **Soft FK on ``user_id``.** Populated on accept by the domain
     service (tracks the :class:`User` row inserted at accept time
     for a brand-new invitee, or the pre-existing row for a known
@@ -712,6 +724,23 @@ class Invite(Base):
     # boundary.
     grants_json: Mapped[list[Any]] = mapped_column(JSON, nullable=False, default=list)
     group_memberships_json: Mapped[list[Any]] = mapped_column(
+        JSON, nullable=False, default=list
+    )
+    # cd-4o61: pending sub-payloads captured at invite time and
+    # consumed atomically inside ``_activate_invite`` (same UoW as the
+    # role_grant + permission_group_member writes). Both columns are
+    # JSON so the v2 wire shape can extend without another migration —
+    # the domain layer validates at the invite() boundary.
+    #
+    # ``work_engagement_json`` carries an optional dict
+    # ``{engagement_kind, supplier_org_id?}``; ``None`` means "fall
+    # back to the default ``payroll`` seed" (the legacy behaviour).
+    # ``user_work_roles_json`` is a list of ``{work_role_id}`` entries
+    # — empty list means "no extra roles assigned at accept time".
+    work_engagement_json: Mapped[dict[str, Any] | None] = mapped_column(
+        JSON, nullable=True, default=None
+    )
+    user_work_roles_json: Mapped[list[Any]] = mapped_column(
         JSON, nullable=False, default=list
     )
     invited_by_user_id: Mapped[str | None] = mapped_column(
