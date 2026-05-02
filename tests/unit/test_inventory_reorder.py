@@ -231,6 +231,7 @@ def test_default_restock_item_template_is_used(
         llm_hints_md=None,
         deleted_at=None,
         created_at=clock.now(),
+        updated_at=clock.now(),
     )
     session.add(template)
     _seed_item(

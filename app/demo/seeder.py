@@ -652,6 +652,7 @@ def _seed_templates(
                 priority=_str(raw, "priority", default="normal"),
                 inventory_effects_json=[],
                 created_at=now,
+                updated_at=now,
             )
         )
         session.flush()

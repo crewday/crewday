@@ -206,6 +206,7 @@ def _bootstrap_template(session: Session, *, workspace_id: str, name: str) -> st
             llm_hints_md=None,
             deleted_at=None,
             created_at=_PINNED,
+            updated_at=_PINNED,
         )
     )
     session.flush()

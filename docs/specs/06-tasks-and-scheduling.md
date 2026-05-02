@@ -49,7 +49,7 @@ their bundles.
 | priority                       | enum      | `low | normal | high | urgent`        |
 | inventory_effects_json         | jsonb     | list of `{item_ref, kind, qty}` declaring consume / produce effects; see §08 "Inventory effects on task completion". Replaces the pre-revision consume-only `inventory_consumption_json`. |
 | llm_hints_md                   | text      | free text to help agents understand intent |
-| created_at                     | tstz      | used for list ordering (ascending)    |
+| created_at / updated_at        | tstz      | used for list ordering (ascending) on `created_at` |
 | deleted_at                     | tstz?     |                                       |
 
 ### Checklist template shape

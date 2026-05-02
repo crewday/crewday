@@ -154,6 +154,7 @@ def _seed_template(
         default_assignee_role=default_assignee_role,
         checklist_template_json=[],
         created_at=_PINNED,
+        updated_at=_PINNED,
     )
     session.add(template)
     session.flush()
@@ -263,10 +264,13 @@ class TestMigrationShape:
             "auto_shift_from_occurrence",
             # cd-ro6v — per-template settings cascade override.
             "settings_override_json",
+            # cd-utr5 — §02 "created_at, updated_at on every row".
+            "updated_at",
         }
         assert set(cols) == expected
         assert cols["default_assignee_role"]["nullable"] is True
         assert cols["deleted_at"]["nullable"] is True
+        assert cols["updated_at"]["nullable"] is False
 
     def test_occurrence_per_acceptance_indexes(self, engine: Engine) -> None:
         indexes = {ix["name"]: ix for ix in inspect(engine).get_indexes("occurrence")}
@@ -623,6 +627,7 @@ class TestCheckConstraints:
                     default_assignee_role="overlord",
                     checklist_template_json=[],
                     created_at=_PINNED,
+                    updated_at=_PINNED,
                 )
             )
             with pytest.raises(IntegrityError):
@@ -659,6 +664,7 @@ class TestCheckConstraints:
                     photo_required=False,
                     checklist_template_json=[],
                     created_at=_PINNED,
+                    updated_at=_PINNED,
                 )
             )
             with pytest.raises(IntegrityError):

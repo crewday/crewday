@@ -334,6 +334,7 @@ def _bootstrap_template(
         inventory_consumption_json=inventory_consumption_json or {"sku-towel": 2},
         llm_hints_md=None,
         created_at=_PINNED,
+        updated_at=_PINNED,
     )
     session.add(tpl)
     session.flush()

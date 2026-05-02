@@ -413,6 +413,7 @@ def _bootstrap_template(
             llm_hints_md=None,
             deleted_at=None,
             created_at=_PINNED,
+            updated_at=_PINNED,
         )
     )
     session.flush()

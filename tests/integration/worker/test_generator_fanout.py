@@ -205,6 +205,7 @@ def _seed_schedule(engine: Engine, *, workspace_id: str) -> str:
                 inventory_consumption_json={},
                 llm_hints_md=None,
                 created_at=_PINNED,
+                updated_at=_PINNED,
             )
         )
         session.flush()

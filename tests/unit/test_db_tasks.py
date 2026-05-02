@@ -49,6 +49,7 @@ class TestTaskTemplateModel:
             photo_required=True,
             checklist_template_json=[],
             created_at=_PINNED,
+            updated_at=_PINNED,
         )
         assert template.id == "01HWA00000000000000000TPLA"
         assert template.workspace_id == "01HWA00000000000000000WSPA"
@@ -61,6 +62,7 @@ class TestTaskTemplateModel:
         assert template.default_assignee_role is None
         assert template.checklist_template_json == []
         assert template.created_at == _PINNED
+        assert template.updated_at == _PINNED
 
     def test_with_default_assignee_role(self) -> None:
         template = TaskTemplate(
@@ -74,6 +76,7 @@ class TestTaskTemplateModel:
             default_assignee_role="worker",
             checklist_template_json=[{"label": "Lobby"}],
             created_at=_PINNED,
+            updated_at=_PINNED,
         )
         assert template.default_assignee_role == "worker"
         assert template.checklist_template_json == [{"label": "Lobby"}]

@@ -1205,6 +1205,50 @@ class TestUpdate:
                 clock=FrozenClock(_PINNED),
             )
 
+    def test_updated_at_is_seeded_on_create_and_advances_on_update(
+        self, session: Session
+    ) -> None:
+        """cd-utr5: the §02 ``updated_at`` convention holds on every write.
+
+        Create stamps ``updated_at`` equal to ``created_at``. A
+        subsequent update bumps it to the new clock instant. The
+        column is not surfaced on :class:`TaskTemplateView`, so the
+        assertion reads the underlying row directly. SQLite strips
+        the tzinfo on round-trip so we compare naive instants here
+        (the integration shard on Postgres covers the full aware-
+        UTC contract).
+        """
+        later = datetime(2026, 4, 20, 12, 0, 0, tzinfo=UTC)
+        ws = _bootstrap_workspace(session, slug="upd-stamp")
+        ctx = _ctx(ws, slug="upd-stamp")
+        view = create(session, ctx, body=_minimal_body(), clock=FrozenClock(_PINNED))
+
+        row_after_create = session.scalars(
+            select(TaskTemplate).where(TaskTemplate.id == view.id)
+        ).one()
+        assert (
+            row_after_create.updated_at.replace(tzinfo=None)
+            == row_after_create.created_at.replace(tzinfo=None)
+            == _PINNED.replace(tzinfo=None)
+        )
+
+        update(
+            session,
+            ctx,
+            template_id=view.id,
+            body=_minimal_update(name="bumped"),
+            clock=FrozenClock(later),
+        )
+
+        row_after_update = session.scalars(
+            select(TaskTemplate).where(TaskTemplate.id == view.id)
+        ).one()
+        updated_naive = row_after_update.updated_at.replace(tzinfo=None)
+        created_naive = row_after_update.created_at.replace(tzinfo=None)
+        assert updated_naive == later.replace(tzinfo=None)
+        assert created_naive == _PINNED.replace(tzinfo=None)
+        assert updated_naive > created_naive
+
 
 class TestDelete:
     """:func:`delete` soft-deletes or refuses when live references exist."""
@@ -1228,6 +1272,33 @@ class TestDelete:
             select(TaskTemplate).where(TaskTemplate.id == view.id)
         ).one()
         assert row.deleted_at is not None
+
+    def test_delete_advances_updated_at(self, session: Session) -> None:
+        """cd-utr5: soft-deleting bumps ``updated_at`` to the delete instant.
+
+        ``delete`` records the soft-delete timestamp on both
+        ``deleted_at`` and ``updated_at`` so the §02 convention
+        "updated_at advances on every mutation" holds for the
+        delete path too. SQLite drops tzinfo on round-trip; compare
+        naive instants here (the integration shard covers the full
+        aware-UTC contract).
+        """
+        later = datetime(2026, 4, 20, 12, 0, 0, tzinfo=UTC)
+        ws = _bootstrap_workspace(session, slug="del-bump")
+        ctx = _ctx(ws, slug="del-bump")
+        view = create(session, ctx, body=_minimal_body(), clock=FrozenClock(_PINNED))
+
+        delete(session, ctx, template_id=view.id, clock=FrozenClock(later))
+
+        row = session.scalars(
+            select(TaskTemplate).where(TaskTemplate.id == view.id)
+        ).one()
+        assert row.deleted_at is not None
+        deleted_naive = row.deleted_at.replace(tzinfo=None)
+        updated_naive = row.updated_at.replace(tzinfo=None)
+        assert deleted_naive == later.replace(tzinfo=None)
+        assert updated_naive == later.replace(tzinfo=None)
+        assert updated_naive > _PINNED.replace(tzinfo=None)
 
     def test_delete_is_idempotent_at_soft_level(self, session: Session) -> None:
         """Soft-deleted rows look 404 to the service — another delete raises 404."""

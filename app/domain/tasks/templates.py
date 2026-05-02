@@ -720,8 +720,8 @@ def _load_row(
     return row
 
 
-def _apply_body(row: TaskTemplate, body: _TaskTemplateBody) -> None:
-    """Copy every mutable DTO field onto ``row``.
+def _apply_body(row: TaskTemplate, body: _TaskTemplateBody, *, now: datetime) -> None:
+    """Copy every mutable DTO field onto ``row`` and stamp ``updated_at``.
 
     Writes through to both the new (``name``, ``duration_minutes``)
     and legacy (``title``, ``default_duration_min``) columns so the
@@ -729,7 +729,9 @@ def _apply_body(row: TaskTemplate, body: _TaskTemplateBody) -> None:
     a follow-up migration drops the legacy pair. The CHECK-gated
     legacy columns (``required_evidence``, ``photo_required``) also
     mirror ``photo_evidence`` so their NOT NULL constraints hold
-    on INSERT.
+    on INSERT. ``updated_at`` is stamped from the caller's clock
+    instant — required by the §02 convention "created_at, updated_at
+    on every row" (cd-utr5).
     """
     row.name = body.name
     row.title = body.name
@@ -765,6 +767,7 @@ def _apply_body(row: TaskTemplate, body: _TaskTemplateBody) -> None:
     # — the column is nullable at the DB layer and cd-chd's
     # integration tests already cover the NULL path.
     row.default_assignee_role = None
+    row.updated_at = now
 
 
 def _effects_from_consumption(payload: dict[str, int]) -> list[dict[str, Any]]:
@@ -920,10 +923,10 @@ def create(
         id=new_ulid(),
         workspace_id=ctx.workspace_id,
         created_at=now,
-        # ``_apply_body`` fills the rest; we seed only the immutable
-        # per-row fields here.
+        # ``_apply_body`` fills the rest (including ``updated_at``);
+        # we seed only the immutable per-row fields here.
     )
-    _apply_body(row, body)
+    _apply_body(row, body, now=now)
     session.add(row)
     session.flush()
 
@@ -955,8 +958,9 @@ def update(
     before/after diff so operators can reconstruct the change.
     """
     row = _load_row(session, ctx, template_id=template_id)
+    now = (clock if clock is not None else SystemClock()).now()
     before = _row_to_view(row)
-    _apply_body(row, body)
+    _apply_body(row, body, now=now)
     session.flush()
     after = _row_to_view(row)
 
@@ -1009,6 +1013,7 @@ def delete(
     now = (clock if clock is not None else SystemClock()).now()
     before = _row_to_view(row)
     row.deleted_at = now
+    row.updated_at = now
     session.flush()
     after = _row_to_view(row)
 
