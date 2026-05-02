@@ -166,6 +166,13 @@ def attach_document(
             changed_fields=("asset_documents",),
         ),
     )
+    # Mint the paired ``file_extraction`` row in ``pending`` so the
+    # cd-mo9e worker tick picks it up. Local import — the extraction
+    # service imports from here for ``AssetDocumentNotFound``, so
+    # eager-importing it at module top would create a cycle.
+    from app.domain.assets.extraction import enqueue_extraction
+
+    enqueue_extraction(session, ctx, row.id, clock=resolved_clock)
     return _row_to_view(row)
 
 

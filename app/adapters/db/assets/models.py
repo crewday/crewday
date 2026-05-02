@@ -50,7 +50,13 @@ from app.adapters.db.places import models as _places_models  # noqa: F401
 from app.adapters.db.tasks import models as _tasks_models  # noqa: F401
 from app.adapters.db.workspace import models as _workspace_models  # noqa: F401
 
-__all__ = ["Asset", "AssetAction", "AssetDocument", "AssetType"]
+__all__ = [
+    "Asset",
+    "AssetAction",
+    "AssetDocument",
+    "AssetType",
+    "FileExtraction",
+]
 
 
 _ASSET_TYPE_CATEGORY_VALUES: tuple[str, ...] = (
@@ -97,6 +103,26 @@ _ASSET_DOCUMENT_KIND_VALUES: tuple[str, ...] = (
     "insurance",
     "other",
 )
+# §02 / §21 ``file_extraction`` enums. The state machine is
+# ``pending -> extracting -> {succeeded | failed | unsupported | empty}``;
+# ``failed`` rows can be re-armed back to ``pending`` via the
+# ``/extraction/retry`` route. ``extractor`` is nullable until a
+# rung claims the row (the v1 worker only ships ``passthrough`` for
+# ``text/plain``; PDF / DOCX rungs land in follow-up tasks).
+_FILE_EXTRACTION_STATUS_VALUES: tuple[str, ...] = (
+    "pending",
+    "extracting",
+    "succeeded",
+    "failed",
+    "unsupported",
+    "empty",
+)
+_FILE_EXTRACTION_EXTRACTOR_VALUES: tuple[str, ...] = (
+    "passthrough",
+    "pdf",
+    "docx",
+    "ocr",
+)
 
 _ASSET_TYPE_CATEGORY_ENUM = Enum(
     *_ASSET_TYPE_CATEGORY_VALUES,
@@ -125,6 +151,18 @@ _ASSET_ACTION_KIND_ENUM = Enum(
 _ASSET_DOCUMENT_KIND_ENUM = Enum(
     *_ASSET_DOCUMENT_KIND_VALUES,
     name="asset_document_kind",
+    native_enum=True,
+    create_constraint=False,
+)
+_FILE_EXTRACTION_STATUS_ENUM = Enum(
+    *_FILE_EXTRACTION_STATUS_VALUES,
+    name="file_extraction_status",
+    native_enum=True,
+    create_constraint=False,
+)
+_FILE_EXTRACTION_EXTRACTOR_ENUM = Enum(
+    *_FILE_EXTRACTION_EXTRACTOR_VALUES,
+    name="file_extraction_extractor",
     native_enum=True,
     create_constraint=False,
 )
@@ -451,4 +489,110 @@ class AssetDocument(Base):
         ),
         Index("ix_asset_document_workspace_asset", "workspace_id", "asset_id"),
         Index("ix_asset_document_workspace_property", "workspace_id", "property_id"),
+    )
+
+
+class FileExtraction(Base):
+    """Persisted text-extraction state for an :class:`AssetDocument`.
+
+    Spec shape lives in ``docs/specs/02-domain-model.md``
+    §"file_extraction" and ``docs/specs/21-assets.md``
+    §"Document text extraction". The §02 prose talks about a shared
+    ``file`` table; v1 has not landed it yet, so the PK / FK target is
+    :class:`AssetDocument` directly. The column name stays ``id`` for
+    Base-class consistency; a future ``file`` migration can rename
+    the FK target without rotating the column name. The synonym
+    ``asset_document_id`` keeps callers reading by intent.
+
+    State machine (§21 "Pipeline"):
+    ``pending`` (mint on upload)
+    -> ``extracting`` (worker picks the row up; ``attempts`` += 1)
+    -> ``succeeded`` (text recovered, ``body_text`` + ``pages_json`` filled)
+    -> ``failed`` (rung errored; retryable until ``attempts == 3``)
+    -> ``unsupported`` (MIME outside the rung table — terminal)
+    -> ``empty`` (rung returned no readable text — terminal)
+
+    A ``failed`` row whose ``attempts < 3`` may be re-armed to
+    ``pending`` by the manager via ``POST /documents/{id}/extraction/retry``.
+    Retry resets ``attempts`` to ``0`` per the §21 prose ("the manager
+    is asserting we should try again from scratch").
+    """
+
+    __tablename__ = "file_extraction"
+
+    # The PK is also the FK to ``asset_document.id``; one extraction row
+    # per document. ``synonym`` so callers can read either name without
+    # a column rename across the codebase.
+    id: Mapped[str] = mapped_column(
+        String,
+        ForeignKey("asset_document.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    asset_document_id = synonym("id")
+    workspace_id: Mapped[str] = mapped_column(
+        String,
+        ForeignKey("workspace.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    extraction_status: Mapped[str] = mapped_column(
+        _FILE_EXTRACTION_STATUS_ENUM,
+        nullable=False,
+        default="pending",
+        server_default="pending",
+    )
+    status = synonym("extraction_status")
+    extractor: Mapped[str | None] = mapped_column(
+        _FILE_EXTRACTION_EXTRACTOR_ENUM, nullable=True
+    )
+    body_text: Mapped[str | None] = mapped_column(String, nullable=True)
+    # ``[{"page": int, "char_start": int, "char_end": int}, ...]`` —
+    # one entry per logical page. ``passthrough`` for ``text/plain``
+    # collapses to a single entry covering the whole body.
+    pages_json: Mapped[list[dict[str, int]] | None] = mapped_column(JSON, nullable=True)
+    token_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    has_secret_marker: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="0"
+    )
+    attempts: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+    last_error: Mapped[str | None] = mapped_column(String, nullable=True)
+    extracted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            f"extraction_status IN ({_in_clause(_FILE_EXTRACTION_STATUS_VALUES)})",
+            name="file_extraction_status",
+        ),
+        CheckConstraint(
+            "extractor IS NULL OR extractor IN ("
+            f"{_in_clause(_FILE_EXTRACTION_EXTRACTOR_VALUES)})",
+            name="file_extraction_extractor",
+        ),
+        CheckConstraint(
+            "attempts >= 0",
+            name="file_extraction_attempts_nonneg",
+        ),
+        CheckConstraint(
+            "token_count IS NULL OR token_count >= 0",
+            name="file_extraction_token_count_nonneg",
+        ),
+        # Walk-the-pending-queue index for the deployment-scope worker
+        # tick: ``WHERE extraction_status = 'pending'`` ordered by
+        # workspace then id (no ``last_error`` LIKE filters, no
+        # token-range scans). Mirrors the
+        # ``ix_approval_request_workspace_status_created`` shape.
+        Index(
+            "ix_file_extraction_workspace_status",
+            "workspace_id",
+            "extraction_status",
+        ),
     )

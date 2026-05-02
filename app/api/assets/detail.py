@@ -27,7 +27,8 @@ from app.api.assets.schemas import (
 )
 from app.domain.assets.actions import list_actions
 from app.domain.assets.assets import AssetNotFound, AssetView, get_asset
-from app.domain.assets.documents import list_documents
+from app.domain.assets.documents import AssetDocumentNotFound, list_documents
+from app.domain.assets.extraction import DocumentExtractionView, get_extraction
 from app.domain.assets.types import AssetTypeNotFound, AssetTypeView, get_type
 from app.tenancy import WorkspaceContext, tenant_agnostic
 
@@ -60,6 +61,9 @@ def asset_detail(
     )
     asset_type = asset_type_for(session, ctx, asset)
     documents = list_documents(session, ctx, asset_id=asset.id)
+    extractions = _load_document_extractions(
+        session, ctx, [doc.id for doc in documents]
+    )
     action_views = list_actions(session, ctx, asset.id)
     return AssetDetailResponse(
         asset=AssetDetailAssetResponse.from_view(
@@ -77,11 +81,37 @@ def asset_detail(
             AssetDetailDocumentResponse.from_view(
                 document,
                 property_id=asset.property_id,
+                extraction=extractions.get(document.id),
             )
             for document in documents
         ],
         linked_tasks=[],
     )
+
+
+def _load_document_extractions(
+    session: Session,
+    ctx: WorkspaceContext,
+    document_ids: list[str],
+) -> dict[str, DocumentExtractionView]:
+    """Resolve extraction views keyed by document id.
+
+    Mirrors the helper in :mod:`app.api.assets.documents`. A per-row
+    SELECT is acceptable for an asset-detail payload (the document
+    fan-out per asset is bounded by the v1 attachment cap); the
+    workspace-wide list endpoints follow the same pattern. Swap to a
+    single-statement read if the per-asset count grows.
+    """
+    out: dict[str, DocumentExtractionView] = {}
+    for document_id in document_ids:
+        try:
+            out[document_id] = get_extraction(session, ctx, document_id)
+        except AssetDocumentNotFound:
+            # Race: the document was deleted between the document list
+            # read and the extraction read. Skip — the next response
+            # leaves it out and the SPA refreshes.
+            continue
+    return out
 
 
 def asset_type_for(

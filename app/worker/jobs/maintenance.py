@@ -131,6 +131,43 @@ def _make_webhook_dispatch_body(clock: Clock) -> Callable[[], None]:
     return _body
 
 
+def _make_extract_document_body(clock: Clock) -> Callable[[], None]:
+    """Build the 30 s document text-extraction worker body (cd-mo9e).
+
+    Factory rather than a bare module-level function so the body
+    closes over the scheduler's injected :class:`Clock` — every
+    extraction's ``extracted_at`` + audit ``created_at`` MUST be
+    driven by the same clock the heartbeat uses. A
+    :class:`~app.util.clock.FrozenClock` under test (or a future
+    simulated-time deployment) would otherwise have a deterministic
+    heartbeat timestamp and a non-deterministic extraction cutoff.
+
+    The returned body is a thin adapter around
+    :func:`app.worker.tasks.extract_document.extract_pending_documents`,
+    which opens its own UoW per row (the sweep is deployment-scope,
+    cross-tenant) and commits at each row's boundary. Mirrors the
+    sibling :func:`_make_webhook_dispatch_body` shape.
+
+    The task import is deferred into the closure body so module
+    import order stays robust — the task module pulls in the storage
+    factory + the domain extraction service (which itself drags in
+    the event types + audit writer), none of which the standalone
+    ``python -m app.worker`` entrypoint otherwise needs at import
+    time.
+    """
+
+    def _body() -> None:
+        from app.worker.tasks.extract_document import extract_pending_documents
+
+        # The task itself logs the per-tick summary at INFO with
+        # ``event=extract_document.tick``; the wrapper does not need
+        # to re-emit. Discard the returned report — operators read it
+        # off the structured-log stream, not the wrapper's return.
+        extract_pending_documents(clock=clock)
+
+    return _body
+
+
 def _make_inventory_reorder_body(clock: Clock) -> Callable[[], None]:
     """Build the hourly inventory reorder-point check body."""
 

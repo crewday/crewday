@@ -27,6 +27,7 @@ from pydantic_core import CoreSchema
 from app.domain.assets.actions import AssetActionView, AssetNextDueView
 from app.domain.assets.assets import AssetCreate, AssetUpdate, AssetView
 from app.domain.assets.documents import AssetDocumentView
+from app.domain.assets.extraction import DocumentExtractionView
 from app.domain.assets.types import AssetTypeView
 
 __all__ = [
@@ -749,6 +750,7 @@ class AssetDetailDocumentResponse(BaseModel):
         view: AssetDocumentView,
         *,
         property_id: str,
+        extraction: DocumentExtractionView | None,
     ) -> AssetDetailDocumentResponse:
         return cls(
             id=view.id,
@@ -762,8 +764,10 @@ class AssetDetailDocumentResponse(BaseModel):
             expires_on=view.expires_on,
             amount_cents=view.amount_cents,
             amount_currency=view.amount_currency,
-            extraction_status="pending",
-            extracted_at=None,
+            extraction_status=extraction.status
+            if extraction is not None
+            else "pending",
+            extracted_at=extraction.extracted_at if extraction is not None else None,
         )
 
 

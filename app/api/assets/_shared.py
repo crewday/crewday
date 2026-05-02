@@ -42,6 +42,7 @@ from app.domain.assets.documents import (
     AssetDocumentNotFound,
     AssetDocumentValidationError,
 )
+from app.domain.assets.extraction import ExtractionRetryNotAllowed
 from app.tenancy import WorkspaceContext
 
 __all__ = [
@@ -208,6 +209,20 @@ def http_for_document_error(exc: Exception) -> HTTPException:
         return HTTPException(
             status_code=422,
             detail={"error": exc.error, "field": exc.field},
+        )
+    if isinstance(exc, ExtractionRetryNotAllowed):
+        # Retry endpoint hit on a row that is not in ``failed`` (the
+        # only retry-eligible state). 409 matches the §21 contract
+        # ("Retrying a non-failed row returns 409 with
+        # ``error=asset_document_extraction_not_retryable``"). The
+        # ``message`` key flows into the envelope's ``detail``; the
+        # ``error`` key carries the structured symbol.
+        return HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "error": "asset_document_extraction_not_retryable",
+                "message": str(exc),
+            },
         )
     return HTTPException(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

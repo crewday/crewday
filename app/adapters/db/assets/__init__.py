@@ -13,10 +13,22 @@ See ``docs/specs/02-domain-model.md`` §"Assets" and
 
 from __future__ import annotations
 
-from app.adapters.db.assets.models import Asset, AssetAction, AssetDocument, AssetType
+from app.adapters.db.assets.models import (
+    Asset,
+    AssetAction,
+    AssetDocument,
+    AssetType,
+    FileExtraction,
+)
 from app.tenancy.registry import register
 
-for _table in ("asset_type", "asset", "asset_action", "asset_document"):
+for _table in (
+    "asset_type",
+    "asset",
+    "asset_action",
+    "asset_document",
+    "file_extraction",
+):
     register(_table)
 
 __all__ = [
@@ -25,6 +37,7 @@ __all__ = [
     "AssetAction",
     "AssetDocument",
     "AssetType",
+    "FileExtraction",
     "seed_asset_type_catalog",
 ]
 

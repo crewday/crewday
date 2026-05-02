@@ -3,10 +3,12 @@
 Two surfaces live here:
 
 - :func:`build_documents_router` — workspace-scoped ``/documents`` and
-  ``/documents/{document_id}/extraction`` routes, plus the placeholder
-  extraction endpoints. The extraction shapes return conservative
-  pending metadata until ``cd-mo9e`` lands real ``file_extraction``
-  rows; this module preserves the placeholder semantics.
+  ``/documents/{document_id}/extraction`` routes. The extraction
+  endpoints read the persisted ``file_extraction`` rows minted by
+  :func:`app.domain.assets.documents.attach_document` and walked by the
+  ``extract_document`` worker (cd-mo9e); the retry endpoint flips a
+  ``failed`` row back to ``pending`` and returns 409 on any other
+  state.
 - :func:`build_asset_documents_subrouter` — asset-scoped
   ``/{asset_id}/documents`` listing + upload and the workspace-level
   ``/documents/{document_id}`` DELETE. Mounted by the core asset
@@ -67,6 +69,13 @@ from app.domain.assets.documents import (
     list_documents,
     list_workspace_documents,
 )
+from app.domain.assets.extraction import (
+    DocumentExtractionView,
+    ExtractionRetryNotAllowed,
+    get_extraction,
+    get_extraction_page,
+    retry_extraction,
+)
 from app.tenancy import WorkspaceContext, tenant_agnostic
 
 __all__ = [
@@ -79,6 +88,7 @@ def _workspace_document_response(
     view: AssetDocumentView,
     *,
     asset_property_ids: dict[str, str],
+    extraction: DocumentExtractionView | None,
 ) -> WorkspaceDocumentResponse:
     property_id = view.property_id
     if property_id is None and view.asset_id is not None:
@@ -97,9 +107,33 @@ def _workspace_document_response(
         expires_on=view.expires_on,
         amount_cents=view.amount_cents,
         amount_currency=view.amount_currency,
-        extraction_status="pending",
-        extracted_at=None,
+        extraction_status=extraction.status if extraction is not None else "pending",
+        extracted_at=extraction.extracted_at if extraction is not None else None,
     )
+
+
+def _load_extractions(
+    session: Session,
+    ctx: WorkspaceContext,
+    document_ids: list[str],
+) -> dict[str, DocumentExtractionView]:
+    """Resolve the extraction view for a batch of document ids.
+
+    The list endpoints render an extraction status chip per document;
+    a per-row :func:`get_extraction` is acceptable for the v1 cap on
+    documents-per-workspace — once that surface scales we can swap in
+    a single SELECT keyed off the id list.
+    """
+    out: dict[str, DocumentExtractionView] = {}
+    for document_id in document_ids:
+        try:
+            out[document_id] = get_extraction(session, ctx, document_id)
+        except AssetDocumentNotFound:
+            # Race: the document was deleted between the document
+            # list read and the extraction read. Skip — the next
+            # response leaves it out and the SPA refreshes.
+            continue
+    return out
 
 
 def _asset_property_ids(
@@ -177,10 +211,12 @@ def build_documents_router() -> APIRouter:
                 expires_before=expires_before,
             )
             asset_property_ids = _asset_property_ids(session, ctx, views)
+            extractions = _load_extractions(session, ctx, [view.id for view in views])
             rows = [
                 _workspace_document_response(
                     view,
                     asset_property_ids=asset_property_ids,
+                    extraction=extractions.get(view.id),
                 )
                 for view in views
             ]
@@ -204,9 +240,11 @@ def build_documents_router() -> APIRouter:
     ) -> WorkspaceDocumentResponse:
         try:
             view = _load_workspace_document(session, ctx, document_id)
+            extractions = _load_extractions(session, ctx, [view.id])
             return _workspace_document_response(
                 view,
                 asset_property_ids=_asset_property_ids(session, ctx, [view]),
+                extraction=extractions.get(view.id),
             )
         except (AssetDocumentNotFound, AssetDocumentValidationError) as exc:
             raise http_for_document_error(exc) from exc
@@ -225,20 +263,23 @@ def build_documents_router() -> APIRouter:
     ) -> DocumentExtractionResponse:
         try:
             _load_workspace_document(session, ctx, document_id)
+            extraction_view = get_extraction(session, ctx, document_id)
         except AssetDocumentNotFound as exc:
             raise http_for_document_error(exc) from exc
-        # Temporary cd-mo9e boundary: the file_extraction table and worker do
-        # not exist yet, so expose conservative pending metadata only.
         return DocumentExtractionResponse(
-            document_id=document_id,
-            status="pending",
-            extractor=None,
-            body_preview="",
-            page_count=0,
-            token_count=0,
-            has_secret_marker=False,
-            last_error=None,
-            extracted_at=None,
+            document_id=extraction_view.document_id,
+            # The view's ``status`` is :class:`str`; pydantic's
+            # ``Literal`` enum on the response narrows it back to the
+            # closed set at validation time. Domain-side CHECK
+            # constraint already guarantees the value is in-range.
+            status=extraction_view.status,
+            extractor=extraction_view.extractor,
+            body_preview=extraction_view.body_preview,
+            page_count=extraction_view.page_count,
+            token_count=extraction_view.token_count,
+            has_secret_marker=extraction_view.has_secret_marker,
+            last_error=extraction_view.last_error,
+            extracted_at=extraction_view.extracted_at,
         )
 
     @api.get(
@@ -256,15 +297,15 @@ def build_documents_router() -> APIRouter:
     ) -> DocumentExtractionPageResponse:
         try:
             _load_workspace_document(session, ctx, document_id)
+            page_view = get_extraction_page(session, ctx, document_id, page)
         except AssetDocumentNotFound as exc:
             raise http_for_document_error(exc) from exc
-        # Temporary cd-mo9e boundary: no extracted page bodies are persisted yet.
         return DocumentExtractionPageResponse(
-            page=page,
-            char_start=0,
-            char_end=0,
-            body="",
-            more_pages=False,
+            page=page_view.page,
+            char_start=page_view.char_start,
+            char_end=page_view.char_end,
+            body=page_view.body,
+            more_pages=page_view.more_pages,
         )
 
     @api.post(
@@ -274,14 +315,15 @@ def build_documents_router() -> APIRouter:
         summary="Retry document extraction",
         dependencies=[manage_documents_gate],
     )
-    def retry_extraction(
+    def retry_extraction_endpoint(
         document_id: str,
         ctx: Ctx,
         session: Db,
     ) -> Response:
         try:
             _load_workspace_document(session, ctx, document_id)
-        except AssetDocumentNotFound as exc:
+            retry_extraction(session, ctx, document_id)
+        except (AssetDocumentNotFound, ExtractionRetryNotAllowed) as exc:
             raise http_for_document_error(exc) from exc
         return Response(status_code=status.HTTP_202_ACCEPTED)
 

@@ -82,6 +82,7 @@ from app.worker.jobs.maintenance import (
     _heartbeat_only_body,
     _make_approval_ttl_body,
     _make_chat_gateway_sweep_body,
+    _make_extract_document_body,
     _make_idempotency_sweep_body,
     _make_inventory_reorder_body,
     _make_invite_ttl_body,
@@ -109,6 +110,8 @@ __all__ = [
     "DEMO_GC_JOB_ID",
     "DEMO_USAGE_ROLLUP_INTERVAL_SECONDS",
     "DEMO_USAGE_ROLLUP_JOB_ID",
+    "EXTRACT_DOCUMENT_INTERVAL_SECONDS",
+    "EXTRACT_DOCUMENT_JOB_ID",
     "GENERATOR_JOB_ID",
     "HEARTBEAT_JOB_ID",
     "HEARTBEAT_JOB_INTERVAL_SECONDS",
@@ -382,6 +385,29 @@ DEMO_USAGE_ROLLUP_INTERVAL_SECONDS: int = 60
 # ``$DATA_DIR/archive/<table>.jsonl.gz`` and deletes the originals.
 RETENTION_ROTATION_JOB_ID: str = "rotate_operational_logs"
 
+# Stable job id for the document text-extraction worker tick (cd-mo9e).
+# The tick callable in
+# :mod:`app.worker.tasks.extract_document.extract_pending_documents`
+# walks every ``file_extraction`` row in ``status='pending'``, opens
+# a fresh UoW per row, and runs the v1 passthrough rung (text/* ->
+# extracted; everything else -> unsupported). Cross-tenant by design
+# — like the webhook dispatcher and TTL sweeps, the tick is
+# deployment-scope (NOT per-workspace) because the rung pipeline is a
+# global policy and per-row UoWs already carry the row's own
+# ``workspace_id`` for audit + SSE routing.
+EXTRACT_DOCUMENT_JOB_ID: str = "extract_document"
+
+# Interval for the document extraction sweep. 30 s matches the
+# sibling :data:`WEBHOOK_DISPATCH_INTERVAL_SECONDS` cadence — small
+# enough that an upload-then-tick round-trip lands inside one tick
+# for the manager who just dropped a file, large enough that an idle
+# fleet doesn't burn CPU on every wakeup. The body is itself
+# idempotent (rows in terminal state fall out of the predicate, and
+# the per-row ``start_extraction`` flips ``pending -> extracting``
+# atomically) so a misfire that runs late or a coalesced tick is
+# strictly safe.
+EXTRACT_DOCUMENT_INTERVAL_SECONDS: int = 30
+
 
 # Job-body type. Downstream tasks supply either a synchronous callable
 # (most of today's jobs — pure SQL + logging) or an ``async def``
@@ -621,6 +647,7 @@ def register_jobs(
         INVITE_TTL_JOB_ID,
         WEBHOOK_DISPATCH_JOB_ID,
         CHAT_GATEWAY_SWEEP_JOB_ID,
+        EXTRACT_DOCUMENT_JOB_ID,
         INVENTORY_REORDER_JOB_ID,
         DAILY_DIGEST_JOB_ID,
         RETENTION_ROTATION_JOB_ID,
@@ -988,6 +1015,38 @@ def register_jobs(
         max_instances=1,
         coalesce=True,
         misfire_grace_time=CHAT_GATEWAY_SWEEP_INTERVAL_SECONDS,
+    )
+
+    # --- 30 s document text-extraction worker (cd-mo9e) ---
+    # The tick callable in
+    # :mod:`app.worker.tasks.extract_document.extract_pending_documents`
+    # walks every ``file_extraction`` row in ``status='pending'``,
+    # opens a fresh UoW per row, and runs the v1 passthrough rung
+    # (text/* -> ``succeeded`` | ``empty``; everything else ->
+    # ``unsupported``). The PDF / DOCX / OCR rungs are §21 follow-ups.
+    #
+    # ``misfire_grace_time = EXTRACT_DOCUMENT_INTERVAL_SECONDS`` —
+    # one tick late is fine (the body is idempotent: rows in terminal
+    # state fall out of the predicate, and the per-row
+    # ``start_extraction`` flip handles concurrent ticks via the
+    # ``pending`` -> ``extracting`` transition); two-ticks-late is a
+    # signal the scheduler is stuck and a skip is preferable to a
+    # stacked catch-up. ``coalesce=True`` + ``max_instances=1`` keep
+    # a slow rung (a future PDF extractor) from stacking ticks on an
+    # overloaded host.
+    scheduler.add_job(
+        wrap_job(
+            _make_extract_document_body(resolved_clock),
+            job_id=EXTRACT_DOCUMENT_JOB_ID,
+            clock=resolved_clock,
+        ),
+        trigger=IntervalTrigger(seconds=EXTRACT_DOCUMENT_INTERVAL_SECONDS),
+        id=EXTRACT_DOCUMENT_JOB_ID,
+        name=EXTRACT_DOCUMENT_JOB_ID,
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=EXTRACT_DOCUMENT_INTERVAL_SECONDS,
     )
 
     # --- Hourly inventory reorder-point check (cd-kxr0) ---

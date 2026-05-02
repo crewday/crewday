@@ -51,6 +51,9 @@ __all__ = [
     "ApprovalDecision",
     "AssetActionPerformed",
     "AssetChanged",
+    "AssetDocumentExtracted",
+    "AssetDocumentExtractionFailed",
+    "AssetDocumentExtractionRetried",
     "ChatChannelBindingCreated",
     "ChatChannelBindingRevoked",
     "ChatChannelBindingVerified",
@@ -570,6 +573,74 @@ class AssetActionPerformed(Event):
     asset_id: str
     action_id: str
     kind: Literal["service", "repair", "replace", "inspect", "read"]
+
+
+@register
+class AssetDocumentExtracted(Event):
+    """A document's text-extraction row reached a non-failure terminal.
+
+    Fired by :mod:`app.domain.assets.extraction` once the worker tick
+    flips a ``file_extraction`` row to ``succeeded`` (text recovered)
+    or ``empty`` (rung returned no readable text). ``empty`` is a
+    valid terminal — clients can re-render the panel with the empty
+    indicator instead of waiting on a phantom retry.
+
+    Payload carries identifiers only; the SPA re-fetches
+    ``GET /documents/{document_id}/extraction`` under the usual
+    workspace authorisation. ``unsupported`` and runtime ``failed``
+    fan out as :class:`AssetDocumentExtractionFailed` instead.
+    """
+
+    name: ClassVar[str] = "asset_document.extracted"
+    allowed_roles: ClassVar[tuple[EventRole, ...]] = ("manager", "worker")
+
+    document_id: str
+    asset_id: str | None
+
+
+@register
+class AssetDocumentExtractionFailed(Event):
+    """A document's text-extraction tick errored or hit ``unsupported``.
+
+    Fired from :func:`app.domain.assets.extraction.record_extraction_failure`
+    (rung raised an error) and ``record_extraction_unsupported`` (MIME
+    outside the rung table). ``terminal`` separates the two SPA
+    behaviours: ``True`` means the row will not be retried by the
+    worker (``unsupported`` always; ``failed`` once
+    :data:`~app.domain.assets.extraction.MAX_EXTRACTION_ATTEMPTS` is
+    hit), so the panel can offer the manager retry button. ``False``
+    means another tick will pick the row back up; the panel just
+    surfaces the error chip.
+
+    ``attempts`` is the post-flip counter — ``1`` on the first failure,
+    ``MAX_EXTRACTION_ATTEMPTS`` on the terminal one.
+    """
+
+    name: ClassVar[str] = "asset_document.extraction_failed"
+    allowed_roles: ClassVar[tuple[EventRole, ...]] = ("manager", "worker")
+
+    document_id: str
+    asset_id: str | None
+    attempts: int
+    terminal: bool
+
+
+@register
+class AssetDocumentExtractionRetried(Event):
+    """A manager re-armed a ``failed`` extraction row to ``pending``.
+
+    Fired by :func:`app.domain.assets.extraction.retry_extraction` so
+    the SPA can flip the panel back to the "extracting" affordance
+    without polling. The next worker tick will pick the row up and
+    emit :class:`AssetDocumentExtracted` (or another
+    :class:`AssetDocumentExtractionFailed`) on its own.
+    """
+
+    name: ClassVar[str] = "asset_document.extraction_retried"
+    allowed_roles: ClassVar[tuple[EventRole, ...]] = ("manager", "worker")
+
+    document_id: str
+    asset_id: str | None
 
 
 @register

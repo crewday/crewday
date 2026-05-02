@@ -197,7 +197,10 @@ def test_workspace_documents_list_and_extraction_routes(
     filtered = client.get(f"/documents?property_id={property_id}&kind=manual")
     extraction = client.get(f"/documents/{document_id}/extraction")
     page = client.get(f"/documents/{document_id}/extraction/pages/1")
-    retry = client.post(f"/documents/{document_id}/extraction/retry")
+    # The freshly uploaded row sits in ``pending`` — the worker has not
+    # ticked yet — so a retry against it must surface the new 409:
+    # only ``failed`` rows can be retried (cd-mo9e §"Failure modes").
+    retry_pending = client.post(f"/documents/{document_id}/extraction/retry")
 
     assert listed.status_code == 200
     row = listed.json()["data"][0]
@@ -229,7 +232,11 @@ def test_workspace_documents_list_and_extraction_routes(
         "body": "",
         "more_pages": False,
     }
-    assert retry.status_code == 202
+    assert retry_pending.status_code == 409
+    assert (
+        retry_pending.json()["detail"]["error"]
+        == "asset_document_extraction_not_retryable"
+    )
 
 
 def test_document_upload_rejects_oversized_body(
@@ -355,3 +362,65 @@ def test_worker_cannot_delete_document(db_session: Session) -> None:
     assert page_denied.json()["detail"]["action_key"] == "assets.manage_documents"
     assert retry_denied.status_code == 403
     assert retry_denied.json()["detail"]["action_key"] == "assets.manage_documents"
+
+
+def test_extraction_retry_happy_path_resets_failed_row(
+    db_session: Session,
+) -> None:
+    """A row driven to ``failed`` round-trips through HTTP retry to ``pending``.
+
+    Walks the row through the state machine on the domain side (start
+    + record_failure x MAX_EXTRACTION_ATTEMPTS), then asserts the
+    HTTP retry endpoint flips it back, and ``GET /extraction``
+    reflects the new state.
+    """
+    from app.domain.assets.extraction import (
+        MAX_EXTRACTION_ATTEMPTS,
+        record_extraction_failure,
+        start_extraction,
+    )
+
+    ctx, property_id, _owner_id, _slug = _seed_workspace(db_session)
+    asset = create_asset(
+        db_session,
+        ctx,
+        property_id=property_id,
+        label="Retryable manual",
+        token_factory=lambda: "D0CMNT000007",
+        clock=FrozenClock(_NOW),
+    )
+    storage = InMemoryStorage()
+    client = _client(db_session, ctx, storage=storage, sniffed_type="application/pdf")
+    created = client.post(
+        f"/assets/{asset.id}/documents",
+        data={"category": "manual", "title": "Retry manual"},
+        files={"file": ("retry.pdf", b"%PDF retry", "application/pdf")},
+    )
+    assert created.status_code == 201
+    document_id = created.json()["id"]
+
+    # Drive the row to terminal ``failed``.
+    for _ in range(MAX_EXTRACTION_ATTEMPTS):
+        start_extraction(db_session, ctx, document_id, clock=FrozenClock(_NOW))
+        record_extraction_failure(
+            db_session,
+            ctx,
+            document_id,
+            error="boom",
+            asset_id=asset.id,
+            clock=FrozenClock(_NOW),
+        )
+    db_session.commit()
+
+    pre_retry = client.get(f"/documents/{document_id}/extraction")
+    assert pre_retry.status_code == 200
+    assert pre_retry.json()["status"] == "failed"
+
+    retry = client.post(f"/documents/{document_id}/extraction/retry")
+    assert retry.status_code == 202
+
+    post_retry = client.get(f"/documents/{document_id}/extraction")
+    assert post_retry.status_code == 200
+    body = post_retry.json()
+    assert body["status"] == "pending"
+    assert body["last_error"] is None

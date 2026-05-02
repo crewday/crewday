@@ -703,6 +703,13 @@ _INVALIDATIONS: Final[dict[str, tuple[tuple[str, ...], ...]]] = {
     "instruction.published": (("instructions",),),
     "asset.changed": (("assets",),),
     "asset_action.performed": (("assets",),),
+    # The document-library list and the asset-detail panel both render
+    # ``file_extraction`` state — invalidate ``documents`` for the manager
+    # library page and ``assets`` for the per-asset detail tab. Mirrors
+    # the dual-key pattern used by ``shift.ended``.
+    "asset_document.extracted": (("documents",), ("assets",)),
+    "asset_document.extraction_failed": (("documents",), ("assets",)),
+    "asset_document.extraction_retried": (("documents",), ("assets",)),
     "chat.message.sent": (("chat", "channels"),),
     "chat.message.received": (("chat", "channels"),),
     "chat_channel_binding.created": (("chat", "channels"),),
