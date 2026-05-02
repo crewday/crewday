@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # Print the next ready Beads task and its paired selfreview task in one
 # shot. With no args, picks the highest-ranked task that is NOT itself a
-# selfreview, preferring `bv --robot-triage` rankings (matches the
-# director skill's "pick from the top of the triage list" rule) and
-# falling back to `bd ready` when bv is unavailable. With an arg, looks
-# up that exact task id.
+# selfreview, preferring `bv --robot-next` (single top pick that bv has
+# already gated for claimability — unlike `bv --robot-triage` whose
+# `recommendations[0]` can surface high-impact tasks with open blockers)
+# and falling back to `bd ready` when bv is unavailable or its pick is
+# selfreview-labelled. With an arg, looks up that exact task id.
 #
 # Usage:
 #   ./scripts/agent-next-task.sh              # next ranked non-selfreview task
@@ -58,20 +59,21 @@ done
 # Resolve the main task id.
 source=""
 if [[ -z "$task_id" ]]; then
-  # Prefer bv --robot-triage rankings (the director skill's recommended
-  # source). `.triage.recommendations` carries `labels` inline, so we
-  # filter selfreview entries in one jq pass without extra `bd show`
-  # calls. Fall back to `bd ready` when bv is unavailable or returns
-  # nothing usable.
+  # Prefer `bv --robot-next` — bv's single top pick, already gated for
+  # claimability (unlike `--robot-triage`'s `recommendations[0]`, which
+  # can surface high-impact tasks with open blockers). If the pick
+  # happens to be a selfreview-labelled task, drop back to bd ready.
   if [[ "$no_bv" -eq 0 ]] && command -v bv >/dev/null 2>&1; then
-    if triage_json="$(bv --robot-triage 2>/dev/null)"; then
-      task_id="$(printf '%s\n' "$triage_json" \
-        | jq -r 'first(
-                   (.triage.recommendations // [])[]
-                   | select((.labels // []) | index("selfreview") | not)
-                   | .id
-                 ) // empty')"
-      [[ -n "$task_id" ]] && source="bv --robot-triage"
+    if next_json="$(bv --robot-next 2>/dev/null)"; then
+      candidate="$(printf '%s\n' "$next_json" | jq -r '.id // empty')"
+      if [[ -n "$candidate" ]]; then
+        candidate_labels="$(bd show "$candidate" --json 2>/dev/null \
+          | jq -r '.[0].labels // [] | join(",")')"
+        if [[ ",${candidate_labels}," != *",selfreview,"* ]]; then
+          task_id="$candidate"
+          source="bv --robot-next"
+        fi
+      fi
     fi
   fi
 

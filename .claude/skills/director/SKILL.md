@@ -37,7 +37,7 @@ breaks that coupling (reviews would batch, context bleeds across
 changes, and failures can't be attributed cleanly).
 
 Pick the next pair with **`./scripts/agent-next-task.sh`**. It
-prefers `bv --robot-triage` rankings (better than raw `bd ready`),
+prefers `bv --robot-next` rankings (better than raw `bd ready`),
 skips `selfreview`-labelled entries from the ranked queue, and
 prints the main task + its paired selfreview (the dependent with
 the `selfreview` label) in one shot:
@@ -86,7 +86,7 @@ commit. Closure and commit are atomic.
 
 ```
 DIRECTOR: pick the next pair via `./scripts/agent-next-task.sh`
-    │       (script prefers `bv --robot-triage` rankings, falls back
+    │       (script prefers `bv --robot-next` rankings, falls back
     │        to `bd ready`, skips `selfreview`-labelled entries, and
     │        prints the main task + its paired selfreview)
     ▼
@@ -343,7 +343,7 @@ Before delegating implementation:
 ```bash
 ./scripts/agent-next-task.sh          # next pair: ranked main task +
                                       # paired selfreview. Prefers
-                                      # `bv --robot-triage`, falls back to
+                                      # `bv --robot-next`, falls back to
                                       # `bd ready`, skips selfreview entries.
                                       # Rerun each loop — selfreview pair is
                                       # included so no separate lookup needed.

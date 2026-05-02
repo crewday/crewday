@@ -318,7 +318,7 @@ bd close <id>
 bd export -o .beads/issues.jsonl
 ```
 
-`agent-next-task.sh` prefers `bv --robot-triage` rankings (matching the
+`agent-next-task.sh` prefers `bv --robot-next` rankings (matching the
 director skill's "pick from the top of the triage list" rule), falls
 back to `bd ready` when `bv` is missing, skips entries labelled
 `selfreview`, and surfaces the paired selfreview task (dependent with
