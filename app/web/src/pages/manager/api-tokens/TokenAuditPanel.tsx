@@ -20,7 +20,7 @@ export default function TokenAuditPanel({ tokenId, onClose }: TokenAuditPanelPro
     <div className="tokens-audit">
       <header className="tokens-audit__head">
         <div>
-          <span className="tokens-audit__title">Request log</span>
+          <span className="tokens-audit__title">Audit timeline</span>
           <span className="tokens-audit__title-tag">{tokenId}</span>
         </div>
         <button
@@ -34,16 +34,17 @@ export default function TokenAuditPanel({ tokenId, onClose }: TokenAuditPanelPro
       {auditQ.isPending ? (
         <Loading />
       ) : (auditQ.data ?? []).length === 0 ? (
-        <p className="tokens-audit__empty">No requests recorded yet.</p>
+        <p className="tokens-audit__empty">No audit events recorded yet.</p>
       ) : (
         <table className="tokens-audit__table">
+          {/* §03 v1 surface: lifecycle events (mint / rotate / revoke /
+              revoked_noop) only. A sibling per-request log lands later
+              once the api_token_request_log table ships. */}
           <thead>
             <tr>
               <th>When</th>
-              <th>Method</th>
-              <th>Path</th>
-              <th>Status</th>
-              <th>IP</th>
+              <th>Action</th>
+              <th>Actor</th>
               <th>Correlation</th>
             </tr>
           </thead>
@@ -52,22 +53,9 @@ export default function TokenAuditPanel({ tokenId, onClose }: TokenAuditPanelPro
               <tr key={a.correlation_id + a.at}>
                 <td className="tokens-audit__when">{fmtDateTime(a.at)}</td>
                 <td>
-                  <span className="tokens-audit__method">{a.method}</span>
+                  <span className="tokens-audit__method">{a.action}</span>
                 </td>
-                <td className="tokens-audit__path">{a.path}</td>
-                <td>
-                  <span
-                    className={
-                      "tokens-audit__status " +
-                      (a.status < 400
-                        ? "tokens-audit__status--ok"
-                        : "tokens-audit__status--fail")
-                    }
-                  >
-                    {a.status}
-                  </span>
-                </td>
-                <td className="tokens-audit__ip">{a.ip}</td>
+                <td className="tokens-audit__path">{a.actor_id}</td>
                 <td className="tokens-audit__cid">{a.correlation_id}</td>
               </tr>
             ))}

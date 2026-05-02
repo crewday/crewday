@@ -153,9 +153,9 @@ export default function ApiTokensPage() {
             <tbody>
               {rows.map((t) => (
                 <TokenRow
-                  key={t.id}
+                  key={t.key_id}
                   token={t}
-                  auditOpen={openAudit === t.id}
+                  auditOpen={openAudit === t.key_id}
                   onToggleAudit={(id) =>
                     setOpenAudit((v) => (v === id ? null : id))
                   }

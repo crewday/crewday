@@ -103,6 +103,7 @@ from argon2.exceptions import Argon2Error, VerifyMismatchError
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.adapters.db.audit.models import AuditLog
 from app.adapters.db.identity.models import ApiToken, User
 from app.audit import write_audit
 from app.tenancy import WorkspaceContext, tenant_agnostic
@@ -118,6 +119,7 @@ __all__ = [
     "InvalidToken",
     "MintedToken",
     "SubjectUserArchived",
+    "TokenAuditEntry",
     "TokenExpired",
     "TokenKind",
     "TokenKindInvalid",
@@ -128,11 +130,13 @@ __all__ = [
     "TooManyPersonalTokens",
     "TooManyTokens",
     "VerifiedToken",
+    "list_audit",
     "list_personal_tokens",
     "list_tokens",
     "mint",
     "revoke",
     "revoke_personal",
+    "rotate",
     "verify",
 ]
 
@@ -292,6 +296,38 @@ class TokenSummary:
     kind: TokenKind
     delegate_for_user_id: str | None
     subject_user_id: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class TokenAuditEntry:
+    """One audit-log entry projected for the per-token UI.
+
+    §03 "Revocation and rotation" / "per-token audit log view": the
+    /tokens page shows a per-token history. v1 surfaces the
+    workspace-scoped ``audit_log`` rows whose
+    ``entity_kind == 'api_token'`` and ``entity_id == <key_id>`` — so
+    the trail covers ``api_token.minted`` / ``rotated`` / ``revoked``
+    / ``revoked_noop`` events.
+
+    The richer per-request shape the spec describes ("every request
+    with its method, path, response status, IP prefix, user_agent")
+    requires a sibling ``api_token_request_log`` table that does not
+    yet ship; the v1 projection carries the lifecycle events the
+    audit_log already records and leaves the per-request log as a
+    follow-up (cd-ocdg7) so the manager surface has *some* trail
+    today rather than none.
+
+    Columns mirror the wire shape the SPA reads: ``at`` is the
+    event timestamp, ``action`` is the audit symbol
+    (``api_token.minted`` etc.), ``actor_id`` is the workspace user
+    who performed the action, and ``correlation_id`` joins this
+    event to other rows in the same request.
+    """
+
+    at: datetime
+    action: str
+    actor_id: str
+    correlation_id: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -1075,6 +1111,61 @@ def list_personal_tokens(
 
 
 # ---------------------------------------------------------------------------
+# Public surface — audit log projection
+# ---------------------------------------------------------------------------
+
+
+def list_audit(
+    session: Session,
+    ctx: WorkspaceContext,
+    *,
+    token_id: str,
+    limit: int = 200,
+) -> list[TokenAuditEntry]:
+    """Return the per-token audit timeline (newest first).
+
+    §03 "Revocation and rotation": the /tokens page surfaces a
+    per-token audit log so a manager can see the lifecycle events
+    against a single key_id. Today this is the lifecycle trail —
+    mint / rotate / revoke / revoked_noop — projected from
+    ``audit_log``. The richer per-request log (method / path / IP
+    / user_agent) is reserved for a sibling table and is not yet
+    implemented (cd-ocdg7); this surface stays stable when that
+    follow-up lands by appending entries rather than reshaping
+    the row.
+
+    Refuses cross-workspace lookups by joining on
+    ``ctx.workspace_id`` — a manager on workspace A cannot read
+    audit rows for a token that lives on workspace B even if they
+    correctly guess its id. An unknown / cross-workspace token id
+    returns an empty list rather than raising; the router wraps a
+    PAT / unknown id check into a 404 separately so the empty
+    list here is unambiguously "no events yet".
+    """
+    with tenant_agnostic():
+        stmt = (
+            select(AuditLog)
+            .where(
+                AuditLog.entity_kind == "api_token",
+                AuditLog.entity_id == token_id,
+                AuditLog.workspace_id == ctx.workspace_id,
+            )
+            .order_by(AuditLog.created_at.desc())
+            .limit(limit)
+        )
+        rows = list(session.scalars(stmt).all())
+    return [
+        TokenAuditEntry(
+            at=row.created_at,
+            action=row.action,
+            actor_id=row.actor_id,
+            correlation_id=row.correlation_id,
+        )
+        for row in rows
+    ]
+
+
+# ---------------------------------------------------------------------------
 # Public surface — revoke
 # ---------------------------------------------------------------------------
 
@@ -1163,6 +1254,124 @@ def revoke(
             "kind": row.kind,
         },
         clock=clock,
+    )
+
+
+def rotate(
+    session: Session,
+    ctx: WorkspaceContext,
+    *,
+    token_id: str,
+    now: datetime | None = None,
+    clock: Clock | None = None,
+) -> MintedToken:
+    """Rotate a ``scoped`` / ``delegated`` token's secret in place.
+
+    Generates a fresh secret + argon2id hash and writes them onto the
+    existing row, leaving ``id`` (the public ``key_id``), ``label``,
+    ``scopes``, ``expires_at``, and the kind discriminators untouched.
+    The old secret stops working immediately — the spec's "1h overlap"
+    feature (§03 "Revocation and rotation": "the old secret hash is
+    kept alongside the new for a configurable overlap (default 1h)")
+    requires a sibling ``previous_hash`` column that v1 doesn't ship;
+    that follow-up is tracked under cd-oa8iz. Until that lands, rotate
+    is hard-cutover; agents must reload immediately.
+
+    **Personal access tokens are refused here.** §03 "Revocation":
+    PATs are revocable / rotatable only by their subject. A workspace
+    manager calling rotate on a PAT collapses to :class:`InvalidToken`
+    (404) at the router seam, same shape as "unknown token", so the
+    API doesn't leak whose tokens exist.
+
+    A revoked or expired token cannot be rotated — the agent should
+    mint a fresh one. Both collapse to :class:`InvalidToken` for the
+    same opacity reason. Pinning the rotation surface to live tokens
+    keeps the per-token audit log trivially partitioned: one
+    ``api_token.rotated`` event per token until revocation closes it.
+
+    Raises:
+
+    * :class:`InvalidToken` — unknown id, cross-workspace, PAT, or
+      already-revoked / expired row. All map to 404 at the router.
+    * :class:`TokenMintFailed` — argon2 hasher refused (rare).
+
+    Writes one ``api_token.rotated`` audit row carrying the old +
+    new prefix so a forensic walk can correlate before / after on a
+    single key_id.
+    """
+    resolved_now = now if now is not None else _now(clock)
+
+    # justification: api_token is identity-scoped; reuse of the
+    # tenant-agnostic gate mirrors the other accessors.
+    with tenant_agnostic():
+        row = session.get(ApiToken, token_id)
+
+    # Fail-closed: cross-workspace, unknown, PAT, revoked, or expired
+    # all collapse to the opaque "not found" shape. Expiry uses the
+    # same normalisation pattern as :func:`verify` so SQLite roundtrips
+    # don't drop tzinfo on the comparison.
+    if (
+        row is None
+        or row.kind == "personal"
+        or row.workspace_id != ctx.workspace_id
+        or row.revoked_at is not None
+    ):
+        raise InvalidToken(f"token {token_id!r} not found on this workspace")
+    if row.expires_at is not None:
+        expires_at = _normalise_expires_at(row.expires_at, resolved_now)
+        if expires_at <= resolved_now:
+            raise InvalidToken(f"token {token_id!r} not found on this workspace")
+
+    old_prefix = row.prefix
+    secret = _generate_secret()
+    new_prefix = secret[:_PREFIX_CHARS]
+
+    try:
+        new_hash = _HASHER.hash(secret)
+    except Argon2Error as exc:
+        raise TokenMintFailed(f"argon2id hash failed: {exc}") from exc
+
+    with tenant_agnostic():
+        row.hash = new_hash
+        row.prefix = new_prefix
+        # Reset ``last_used_at`` so the /tokens page's "stale token"
+        # heuristic doesn't mark the freshly-rotated row as
+        # immediately stale based on the previous secret's traffic.
+        row.last_used_at = None
+        session.flush()
+
+    write_audit(
+        session,
+        ctx,
+        entity_kind="api_token",
+        entity_id=token_id,
+        action="api_token.rotated",
+        diff={
+            "token_id": token_id,
+            "user_id": row.user_id,
+            "workspace_id": row.workspace_id,
+            "old_prefix": old_prefix,
+            "new_prefix": new_prefix,
+            "at": resolved_now.isoformat(),
+            "kind": row.kind,
+        },
+        clock=clock,
+    )
+
+    kind = _narrow_kind(row.kind)
+    # Normalise the post-flush ``expires_at`` so the wire shape stays
+    # tz-aware UTC. SQLite roundtrips drop tzinfo on the column read;
+    # _normalise_expires_at restamps UTC so the JSON serializer emits
+    # the trailing ``Z`` consistently with the mint response shape.
+    expires_at_out: datetime | None = None
+    if row.expires_at is not None:
+        expires_at_out = _normalise_expires_at(row.expires_at, resolved_now)
+    return MintedToken(
+        token=f"{_TOKEN_PREFIX}{row.id}_{secret}",
+        key_id=row.id,
+        prefix=new_prefix,
+        expires_at=expires_at_out,
+        kind=kind,
     )
 
 

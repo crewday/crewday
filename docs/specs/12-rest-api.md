@@ -809,9 +809,15 @@ POST   /api/v1/invite/passkey/finish             # body: {invite_id, challenge_i
 # the authenticated user. Not listed on the workspace admin page.
 GET    /api/v1/me/tokens                         # list PATs the caller owns
 POST   /api/v1/me/tokens                         # create a PAT (plaintext shown once)
-POST   /api/v1/me/tokens/{id}/revoke
-POST   /api/v1/me/tokens/{id}/rotate
-GET    /api/v1/me/tokens/{id}/audit              # per-token request history
+DELETE /api/v1/me/tokens/{id}                    # revoke — flips `revoked_at`. Idempotent.
+                                                 #   204 No Content on success.
+                                                 #   404 {"error": "token_not_found"} for unknown / cross-subject ids.
+# TBD — not yet implemented (v1 ships only mint / list / revoke above):
+#   POST   /api/v1/me/tokens/{id}/revoke   # POST alias of DELETE — tracked under cd-a23fn.
+#   POST   /api/v1/me/tokens/{id}/rotate   # rotate the secret in place — tracked under cd-a23fn
+#                                          # (depends on cd-oa8iz for the 1h overlap window).
+#   GET    /api/v1/me/tokens/{id}/audit    # per-token timeline — tracked under cd-a23fn
+#                                          # (lifecycle events; cd-ocdg7 adds per-request rows).
 
 # Device push tokens for the future native app (§02 `user_push_token`,
 # §10 "Agent-message delivery", §14 "Native wrapper readiness"). Identity-
@@ -890,11 +896,40 @@ DELETE /w/<slug>/api/v1/auth/tokens/{token_id}   # revoke — flips `revoked_at`
                                                  #     OR a token that belongs to another workspace
                                                  #     (collapsed to the same shape so the API does not leak
                                                  #     cross-workspace token existence).
-# TBD — not yet implemented (v1 covers mint / list / revoke above):
-#   POST   /w/<slug>/api/v1/auth/tokens/{id}/rotate  # §03 "Revocation and rotation"
-#   GET    /w/<slug>/api/v1/auth/tokens/{id}/audit   # per-token request history
-# The prose spec in §03 still stands; the routes are deferred to a
-# follow-up under the cd-rpxd identity-API parent.
+POST   /w/<slug>/api/v1/auth/tokens/{token_id}/revoke   # POST alias of the DELETE form above.
+                                                 # Same idempotent contract; same 404 on unknown / cross-workspace
+                                                 # / personal token ids. The /tokens SPA prefers POST verbs because
+                                                 # some browsers / proxies strip request bodies on DELETE; CLI
+                                                 # consumers should still prefer DELETE for consistency with REST.
+                                                 #   204 No Content on success.
+                                                 #   401 {"error": "not_authenticated"}.
+                                                 #   403 {"error": "permission_denied"}.
+                                                 #   404 {"error": "token_not_found"}.
+POST   /w/<slug>/api/v1/auth/tokens/{token_id}/rotate   # §03 "Revocation and rotation": rotate the secret in place,
+                                                 # leaving `key_id`, `label`, `scopes`, `expires_at` untouched.
+                                                 # Returns the new plaintext exactly once, same shape as POST /tokens
+                                                 # (`{token, key_id, prefix, expires_at, kind}`). Old secret stops
+                                                 # working immediately — the spec's 1h overlap requires a sibling
+                                                 # `previous_hash` column tracked under cd-oa8iz; v1 is hard-cutover.
+                                                 #   200 OK with the mint-shape response.
+                                                 #   401 {"error": "not_authenticated"}.
+                                                 #   403 {"error": "permission_denied"}.
+                                                 #   404 {"error": "token_not_found"} — unknown / cross-workspace
+                                                 #     / personal / revoked / expired token id (collapsed to one
+                                                 #     opaque shape so the API does not leak which mode fired).
+GET    /w/<slug>/api/v1/auth/tokens/{token_id}/audit    # per-token lifecycle timeline, newest first.
+                                                 # Surfaces `api_token.minted` / `rotated` / `revoked` /
+                                                 # `revoked_noop` events for one key_id on the caller's workspace.
+                                                 # The richer per-request log (method / path / IP / user_agent)
+                                                 # belongs to a sibling `api_token_request_log` table tracked under
+                                                 # cd-ocdg7; the v1 surface returns the lifecycle trail so the
+                                                 # /tokens SPA has *some* timeline today rather than none.
+                                                 #   200 OK with `[{at, action, actor_id, correlation_id}, ...]`.
+                                                 #   401 {"error": "not_authenticated"}.
+                                                 #   403 {"error": "permission_denied"}.
+                                                 #   200 [] for unknown / cross-workspace token ids — the seam
+                                                 #     stays "no events yet" so the SPA can pre-render the panel
+                                                 #     without branching on 404.
 
 # Additional passkeys (§03 "Additional passkeys"). Authenticated (any
 # principal that resolves a WorkspaceContext — session cookie or API

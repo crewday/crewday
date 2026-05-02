@@ -19,13 +19,16 @@ export default function TokenRow({
   onRevoke,
 }: TokenRowProps) {
   const st = statusOf(t);
+  // §03 scopes ride the wire as a flat `{action_key: true}` map; the
+  // row renders one pill per truthy entry. `Object.keys` is stable
+  // enough for this presentational use; no need to sort here.
+  const scopeKeys = Object.keys(t.scopes ?? {});
   return (
     <tr className={`tokens-row tokens-row--${st}`}>
       <td>
         <div className="tokens-name">
-          <span className="tokens-name__title">{t.name}</span>
+          <span className="tokens-name__title">{t.label}</span>
           <span className="tokens-name__id">{t.prefix}…</span>
-          {t.note ? <span className="tokens-name__note">{t.note}</span> : null}
         </div>
       </td>
       <td>
@@ -34,11 +37,11 @@ export default function TokenRow({
       <td>
         {t.kind === "delegated" ? (
           <span className="tokens-scopes__inherit">
-            Inherits {t.created_by_display}'s grants
+            Inherits the delegator's grants
           </span>
         ) : (
           <span className="tokens-scopes">
-            {t.scopes.map((s) => (
+            {scopeKeys.map((s) => (
               <span key={s} className="tokens-scopes__pill">{s}</span>
             ))}
           </span>
@@ -47,7 +50,6 @@ export default function TokenRow({
       <td>
         <div className="tokens-time">
           <span>{fmtDateTime(t.created_at)}</span>
-          <span className="tokens-time__sub">by {t.created_by_display}</span>
         </div>
       </td>
       <td>
@@ -63,7 +65,6 @@ export default function TokenRow({
         {t.last_used_at ? (
           <div className="tokens-time">
             <span>{fmtDateTime(t.last_used_at)}</span>
-            <span className="tokens-time__ip">{t.last_used_ip}</span>
           </div>
         ) : (
           <span className="tokens-time--absent">never</span>
@@ -80,17 +81,17 @@ export default function TokenRow({
             <button
               type="button"
               className="btn btn--sm btn--ghost"
-              onClick={() => onToggleAudit(t.id)}
-              title="Request log"
+              onClick={() => onToggleAudit(t.key_id)}
+              title="Audit timeline"
             >
               <ScrollText size={13} strokeWidth={2} />{" "}
-              {auditOpen ? "Hide" : "Log"}
+              {auditOpen ? "Hide" : "Audit"}
             </button>
             {!t.revoked_at && (
               <button
                 type="button"
                 className="btn btn--sm btn--ghost"
-                onClick={() => onRotate(t.id)}
+                onClick={() => onRotate(t.key_id)}
                 title="Rotate secret"
               >
                 <RotateCw size={13} strokeWidth={2} /> Rotate
@@ -100,7 +101,7 @@ export default function TokenRow({
               <button
                 type="button"
                 className="btn btn--sm btn--rust"
-                onClick={() => onRevoke(t.id)}
+                onClick={() => onRevoke(t.key_id)}
                 title="Revoke"
               >
                 <Trash2 size={13} strokeWidth={2} /> Revoke

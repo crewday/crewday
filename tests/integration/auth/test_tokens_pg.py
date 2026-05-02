@@ -779,3 +779,235 @@ class TestTokensCursorPagination:
         """``limit < 1`` is rejected at the FastAPI Query validator."""
         r = client.get("/api/v1/auth/tokens?limit=0")
         assert r.status_code == 422
+
+
+# ---------------------------------------------------------------------------
+# cd-8i9tr — POST revoke alias (the SPA's preferred verb)
+# ---------------------------------------------------------------------------
+
+
+class TestPostRevokeAlias:
+    """``POST /auth/tokens/{id}/revoke`` mirrors the DELETE behaviour."""
+
+    def test_post_revoke_returns_204(
+        self,
+        client: TestClient,
+        session_factory: sessionmaker[Session],
+        seeded_ctx: WorkspaceContext,
+    ) -> None:
+        mint_r = client.post(
+            "/api/v1/auth/tokens",
+            json={"label": "post-revoke", "scopes": {}, "expires_at_days": 7},
+        )
+        assert mint_r.status_code == 201
+        key_id = mint_r.json()["key_id"]
+
+        r = client.post(f"/api/v1/auth/tokens/{key_id}/revoke")
+        assert r.status_code == 204, r.text
+
+        with session_factory() as s:
+            row = s.get(ApiToken, key_id)
+            assert row is not None
+            assert row.revoked_at is not None
+
+    def test_post_revoke_unknown_is_404(self, client: TestClient) -> None:
+        r = client.post("/api/v1/auth/tokens/01HWA00000000000000000NOPE/revoke")
+        assert r.status_code == 404
+        assert r.json()["error"] == "token_not_found"
+
+    def test_post_revoke_is_idempotent(
+        self,
+        client: TestClient,
+        session_factory: sessionmaker[Session],
+        seeded_ctx: WorkspaceContext,
+    ) -> None:
+        mint_r = client.post(
+            "/api/v1/auth/tokens",
+            json={"label": "post-idem", "scopes": {}, "expires_at_days": 7},
+        )
+        assert mint_r.status_code == 201
+        key_id = mint_r.json()["key_id"]
+        # First and second call both return 204; the audit trail
+        # carries one ``revoked`` and one ``revoked_noop`` event.
+        assert client.post(f"/api/v1/auth/tokens/{key_id}/revoke").status_code == 204
+        assert client.post(f"/api/v1/auth/tokens/{key_id}/revoke").status_code == 204
+
+        with session_factory() as s:
+            actions = [
+                a.action
+                for a in s.scalars(
+                    select(AuditLog).where(
+                        AuditLog.workspace_id == seeded_ctx.workspace_id,
+                        AuditLog.entity_id == key_id,
+                    )
+                ).all()
+            ]
+        assert "api_token.revoked" in actions
+        assert "api_token.revoked_noop" in actions
+
+
+# ---------------------------------------------------------------------------
+# cd-8i9tr — secret rotation
+# ---------------------------------------------------------------------------
+
+
+class TestRotateHttp:
+    """``POST /auth/tokens/{id}/rotate`` swaps the secret in place."""
+
+    def test_rotate_returns_new_plaintext_same_key_id(
+        self,
+        client: TestClient,
+        session_factory: sessionmaker[Session],
+        seeded_ctx: WorkspaceContext,
+    ) -> None:
+        mint_r = client.post(
+            "/api/v1/auth/tokens",
+            json={
+                "label": "rotateme",
+                "scopes": {"tasks:read": True},
+                "expires_at_days": 30,
+            },
+        )
+        assert mint_r.status_code == 201
+        original = mint_r.json()
+        key_id = original["key_id"]
+
+        r = client.post(f"/api/v1/auth/tokens/{key_id}/rotate")
+        assert r.status_code == 200, r.text
+        rotated = r.json()
+        assert rotated["key_id"] == key_id
+        assert rotated["token"] != original["token"]
+        assert rotated["prefix"] != original["prefix"]
+        assert rotated["expires_at"] == original["expires_at"]
+
+        # The OLD plaintext stops working immediately; the NEW one
+        # verifies cleanly. cd-8i9tr explicitly chose hard-cutover
+        # semantics in v1 (the spec's 1h overlap requires a sibling
+        # ``previous_hash`` column tracked as a follow-up).
+        from app.auth.tokens import InvalidToken
+        from app.auth.tokens import verify as verify_token
+
+        with session_factory() as s:
+            verified = verify_token(s, token=rotated["token"])
+            assert verified.key_id == key_id
+        with session_factory() as s, pytest.raises(InvalidToken):
+            verify_token(s, token=original["token"])
+
+    def test_rotate_unknown_is_404(self, client: TestClient) -> None:
+        r = client.post("/api/v1/auth/tokens/01HWA00000000000000000NOPE/rotate")
+        assert r.status_code == 404
+        assert r.json()["error"] == "token_not_found"
+
+    def test_rotate_revoked_is_404(
+        self,
+        client: TestClient,
+        session_factory: sessionmaker[Session],
+        seeded_ctx: WorkspaceContext,
+    ) -> None:
+        mint_r = client.post(
+            "/api/v1/auth/tokens",
+            json={"label": "rev-then-rot", "scopes": {}, "expires_at_days": 7},
+        )
+        assert mint_r.status_code == 201
+        key_id = mint_r.json()["key_id"]
+        # Revoke first…
+        assert client.delete(f"/api/v1/auth/tokens/{key_id}").status_code == 204
+        # …then a rotate should collapse to 404 (not 409 / 422 — we
+        # don't leak which mode fired).
+        r = client.post(f"/api/v1/auth/tokens/{key_id}/rotate")
+        assert r.status_code == 404
+        assert r.json()["error"] == "token_not_found"
+
+    def test_rotate_writes_rotated_audit_with_prefix_change(
+        self,
+        client: TestClient,
+        session_factory: sessionmaker[Session],
+        seeded_ctx: WorkspaceContext,
+    ) -> None:
+        mint_r = client.post(
+            "/api/v1/auth/tokens",
+            json={"label": "auditable", "scopes": {}, "expires_at_days": 30},
+        )
+        assert mint_r.status_code == 201
+        original = mint_r.json()
+        key_id = original["key_id"]
+        rot_r = client.post(f"/api/v1/auth/tokens/{key_id}/rotate")
+        assert rot_r.status_code == 200
+        rotated = rot_r.json()
+
+        with session_factory() as s:
+            audits = s.scalars(
+                select(AuditLog).where(
+                    AuditLog.workspace_id == seeded_ctx.workspace_id,
+                    AuditLog.entity_id == key_id,
+                    AuditLog.action == "api_token.rotated",
+                )
+            ).all()
+        assert len(audits) == 1
+        diff = dict(audits[0].diff)
+        assert diff["old_prefix"] == original["prefix"]
+        assert diff["new_prefix"] == rotated["prefix"]
+
+
+# ---------------------------------------------------------------------------
+# cd-8i9tr — per-token audit timeline
+# ---------------------------------------------------------------------------
+
+
+class TestAuditTimelineHttp:
+    """``GET /auth/tokens/{id}/audit`` surfaces the lifecycle trail."""
+
+    def test_audit_returns_minted_event(
+        self,
+        client: TestClient,
+        seeded_ctx: WorkspaceContext,
+    ) -> None:
+        mint_r = client.post(
+            "/api/v1/auth/tokens",
+            json={"label": "audit-mint", "scopes": {}, "expires_at_days": 30},
+        )
+        assert mint_r.status_code == 201
+        key_id = mint_r.json()["key_id"]
+
+        r = client.get(f"/api/v1/auth/tokens/{key_id}/audit")
+        assert r.status_code == 200, r.text
+        entries = r.json()
+        assert isinstance(entries, list)
+        assert len(entries) >= 1
+        actions = [e["action"] for e in entries]
+        assert "api_token.minted" in actions
+        first = entries[0]
+        # The wire shape mirrors the SPA's `ApiTokenAuditEntry`.
+        assert set(first.keys()) == {"at", "action", "actor_id", "correlation_id"}
+        assert first["actor_id"] == seeded_ctx.actor_id
+
+    def test_audit_returns_full_lifecycle_newest_first(
+        self,
+        client: TestClient,
+        seeded_ctx: WorkspaceContext,
+    ) -> None:
+        mint_r = client.post(
+            "/api/v1/auth/tokens",
+            json={"label": "lifecycle", "scopes": {}, "expires_at_days": 30},
+        )
+        assert mint_r.status_code == 201
+        key_id = mint_r.json()["key_id"]
+        assert client.post(f"/api/v1/auth/tokens/{key_id}/rotate").status_code == 200
+        assert client.delete(f"/api/v1/auth/tokens/{key_id}").status_code == 204
+
+        r = client.get(f"/api/v1/auth/tokens/{key_id}/audit")
+        assert r.status_code == 200
+        actions = [e["action"] for e in r.json()]
+        # Newest first.
+        assert actions[0] == "api_token.revoked"
+        assert "api_token.rotated" in actions
+        assert actions[-1] == "api_token.minted"
+
+    def test_audit_unknown_token_returns_empty_list(self, client: TestClient) -> None:
+        # The seam is "no events yet, not a 404" so a follow-up ``mint``
+        # immediately starts a clean trail. cd-8i9tr chose this shape so
+        # the SPA can pre-render the panel header without branching on
+        # 404 vs. empty array.
+        r = client.get("/api/v1/auth/tokens/01HWA00000000000000000NOPE/audit")
+        assert r.status_code == 200
+        assert r.json() == []

@@ -5,8 +5,9 @@ import type { ApiTokenCreated } from "@/types/api";
 // §03 "Save this token now" ceremony. The only moment the plaintext
 // secret is visible — rendered as a sealed-envelope reveal, not as
 // an error panel. Copy-to-clipboard hints that the user should take
-// the plaintext *now*; the curl snippet below lets them paste it
-// into a script in the next breath.
+// the plaintext *now*; a curl example is built client-side from the
+// shared bearer pattern (the API doesn't ship one to keep the
+// response shape uniform across mint and rotate).
 export default function TokenRevealPanel({
   created,
   onDismiss,
@@ -27,6 +28,14 @@ export default function TokenRevealPanel({
       // Presentational-only fallback — the user can still select + copy.
     }
   }
+
+  // Built-in suggestion so the user can paste the secret into a
+  // working request in the next breath. Workspace tokens hit the
+  // workspace-scoped surface; personal tokens hit `/me/...`.
+  const curl =
+    kind === "personal"
+      ? `curl -H "Authorization: Bearer ${created.token}" https://app.crew.day/api/v1/me`
+      : `curl -H "Authorization: Bearer ${created.token}" https://app.crew.day/w/<slug>/api/v1/...`;
 
   return (
     <section className="tokens-reveal" role="status" aria-live="polite">
@@ -57,14 +66,14 @@ export default function TokenRevealPanel({
         </p>
         <div className="tokens-reveal__secret-row">
           <code className="tokens-reveal__secret" aria-label="Plaintext token">
-            {created.plaintext}
+            {created.token}
           </code>
           <button
             type="button"
             className={
               "tokens-reveal__copy" + (copied === "secret" ? " tokens-reveal__copy--done" : "")
             }
-            onClick={() => copy(created.plaintext, "secret")}
+            onClick={() => copy(created.token, "secret")}
           >
             {copied === "secret" ? (
               <>
@@ -80,7 +89,7 @@ export default function TokenRevealPanel({
 
         <div className="tokens-reveal__divider">Try it</div>
         <pre className="tokens-reveal__code">
-          <code>{created.curl_example}</code>
+          <code>{curl}</code>
         </pre>
       </div>
     </section>

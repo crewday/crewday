@@ -93,40 +93,42 @@ export interface ResolvedPermission {
 }
 
 // §03 API tokens — three kinds. The wire shape is a single type
-// because the list endpoint mixes them (for managers) and the /me
-// endpoint filters to `personal` only.
+// because the list endpoint mixes scoped/delegated rows (for
+// managers) and the /me endpoint filters to `personal` only. Field
+// names mirror the backend `TokenSummaryResponse` Pydantic shape so
+// there is one canonical wire vocabulary across the workspace
+// (`/auth/tokens`) and identity (`/me/tokens`) routers.
 export type ApiTokenKind = "scoped" | "delegated" | "personal";
 
 export interface ApiToken {
-  id: string;
-  name: string;
+  /** ULID — stable id used in every URL (`…/{key_id}/revoke` etc.). */
+  key_id: string;
+  /** Human-readable label set at mint time. */
+  label: string;
   kind: ApiTokenKind;
   /** `mip_<key_id>` — the public half of the token. Full secret
    *  only returned once at creation time via `ApiTokenCreated`. */
   prefix: string;
-  /** Scopes requested. Empty for delegated tokens. */
-  scopes: string[];
-  /** Creator for scoped; subject for personal; delegator for
-   *  delegated. Same column, populated from the session. */
-  created_by_user_id: string;
-  created_by_display: string;
+  /** §03 flat `{action_key: true}` mapping. Empty for delegated
+   *  tokens (authority resolves through the delegator's grants). */
+  scopes: Record<string, unknown>;
   created_at: string;
   expires_at: string | null;
   last_used_at: string | null;
-  /** Truncated to /24 (v4) or /64 (v6) per §15. */
-  last_used_ip: string | null;
-  last_used_path: string | null;
   revoked_at: string | null;
-  note: string | null;
-  ip_allowlist: string[];
+  /** Set on delegated rows only — the user whose grants the token
+   *  inherits at request time. `null` for scoped + personal. */
+  delegate_for_user_id?: string | null;
 }
 
 export interface ApiTokenCreated {
-  token: ApiToken;
-  /** The `mip_<key_id>_<secret>` plaintext. Shown once. */
-  plaintext: string;
-  /** Example curl for the first scope granted. */
-  curl_example: string;
+  /** The `mip_<key_id>_<secret>` plaintext. Shown once, then never
+   *  returned again — we store an argon2id hash, not the secret. */
+  token: string;
+  key_id: string;
+  prefix: string;
+  expires_at: string | null;
+  kind: ApiTokenKind;
 }
 
 // §12 cursor envelope for `GET /auth/tokens` (cd-msu2). Same shape
@@ -137,12 +139,14 @@ export interface ApiTokenListResponse {
   has_more: boolean;
 }
 
+// §03 per-token audit timeline — lifecycle events only on v1
+// (`api_token.minted` / `rotated` / `revoked` / `revoked_noop`).
+// A sibling per-request log lands later as a follow-up.
 export interface ApiTokenAuditEntry {
   at: string;
-  method: string;
-  path: string;
-  status: number;
-  ip: string;
-  user_agent: string;
+  /** Domain action key (e.g. `api_token.minted`). */
+  action: string;
+  /** ULID of the user / system actor who performed the action. */
+  actor_id: string;
   correlation_id: string;
 }

@@ -47,11 +47,13 @@ from app.auth.tokens import (
     TokenShapeError,
     TooManyPersonalTokens,
     TooManyTokens,
+    list_audit,
     list_personal_tokens,
     list_tokens,
     mint,
     revoke,
     revoke_personal,
+    rotate,
     verify,
 )
 from app.tenancy import WorkspaceContext, tenant_agnostic
@@ -622,6 +624,288 @@ class TestRevoke:
         )
         with pytest.raises(InvalidToken):
             revoke(db_session, other_ctx, token_id=result.key_id, now=_PINNED)
+
+
+# ---------------------------------------------------------------------------
+# ``rotate``
+# ---------------------------------------------------------------------------
+
+
+class TestRotate:
+    """``rotate`` swaps the secret in place and audits the lifecycle event."""
+
+    def test_swaps_secret_keeps_metadata(
+        self, db_session: Session, ctx: WorkspaceContext
+    ) -> None:
+        original = mint(
+            db_session,
+            ctx,
+            user_id=ctx.actor_id,
+            label="rotateable",
+            scopes={"tasks:read": True},
+            expires_at=_PINNED + timedelta(days=90),
+            now=_PINNED,
+        )
+        # Pretend the token has been seen; rotate must clear that
+        # signal so the SPA's "stale" heuristic doesn't keep the
+        # pre-rotation IP / timestamp.
+        with tenant_agnostic():
+            row = db_session.get(ApiToken, original.key_id)
+            assert row is not None
+            row.last_used_at = _PINNED + timedelta(hours=1)
+            db_session.flush()
+
+        rotate_time = _PINNED + timedelta(hours=2)
+        rotated = rotate(db_session, ctx, token_id=original.key_id, now=rotate_time)
+
+        assert rotated.key_id == original.key_id
+        assert rotated.token != original.token
+        assert rotated.prefix != original.prefix
+        # Same row, untouched fields.
+        with tenant_agnostic():
+            row = db_session.get(ApiToken, original.key_id)
+        assert row is not None
+        assert row.label == "rotateable"
+        assert row.scope_json == {"tasks:read": True}
+        assert row.expires_at is not None
+        assert row.last_used_at is None
+        assert row.prefix == rotated.prefix
+
+    def test_writes_rotated_audit_with_old_and_new_prefix(
+        self, db_session: Session, ctx: WorkspaceContext
+    ) -> None:
+        original = mint(
+            db_session,
+            ctx,
+            user_id=ctx.actor_id,
+            label="auditable",
+            scopes={},
+            expires_at=_PINNED + timedelta(days=90),
+            now=_PINNED,
+        )
+        rotated = rotate(
+            db_session,
+            ctx,
+            token_id=original.key_id,
+            now=_PINNED + timedelta(hours=1),
+        )
+        audits = db_session.scalars(
+            select(AuditLog).where(AuditLog.action == "api_token.rotated")
+        ).all()
+        assert len(audits) == 1
+        diff = dict(audits[0].diff)
+        assert diff["old_prefix"] == original.prefix
+        assert diff["new_prefix"] == rotated.prefix
+        assert diff["token_id"] == original.key_id
+
+    def test_personal_token_refused(
+        self,
+        db_session: Session,
+        ctx: WorkspaceContext,
+        user: object,
+    ) -> None:
+        pat = mint(
+            db_session,
+            None,
+            user_id=user.id,  # type: ignore[attr-defined]
+            label="my-pat",
+            scopes={"me.tasks:read": True},
+            expires_at=_PINNED + timedelta(days=90),
+            kind="personal",
+            subject_user_id=user.id,  # type: ignore[attr-defined]
+            now=_PINNED,
+        )
+        # The workspace-scoped rotate seam must not see PATs even when
+        # the manager guesses the id correctly.
+        with pytest.raises(InvalidToken):
+            rotate(db_session, ctx, token_id=pat.key_id, now=_PINNED)
+
+    def test_revoked_token_refused(
+        self, db_session: Session, ctx: WorkspaceContext
+    ) -> None:
+        original = mint(
+            db_session,
+            ctx,
+            user_id=ctx.actor_id,
+            label="revoked",
+            scopes={},
+            expires_at=_PINNED + timedelta(days=90),
+            now=_PINNED,
+        )
+        revoke(
+            db_session, ctx, token_id=original.key_id, now=_PINNED + timedelta(hours=1)
+        )
+        with pytest.raises(InvalidToken):
+            rotate(
+                db_session,
+                ctx,
+                token_id=original.key_id,
+                now=_PINNED + timedelta(hours=2),
+            )
+
+    def test_expired_token_refused(
+        self, db_session: Session, ctx: WorkspaceContext
+    ) -> None:
+        original = mint(
+            db_session,
+            ctx,
+            user_id=ctx.actor_id,
+            label="expired",
+            scopes={},
+            expires_at=_PINNED + timedelta(days=1),
+            now=_PINNED,
+        )
+        with pytest.raises(InvalidToken):
+            rotate(
+                db_session,
+                ctx,
+                token_id=original.key_id,
+                now=_PINNED + timedelta(days=2),
+            )
+
+    def test_unknown_id_refused(
+        self, db_session: Session, ctx: WorkspaceContext
+    ) -> None:
+        with pytest.raises(InvalidToken):
+            rotate(
+                db_session,
+                ctx,
+                token_id="01HWA00000000000000000NOPE",
+                now=_PINNED,
+            )
+
+    def test_cross_workspace_refused(
+        self,
+        db_session: Session,
+        ctx: WorkspaceContext,
+    ) -> None:
+        original = mint(
+            db_session,
+            ctx,
+            user_id=ctx.actor_id,
+            label="cross-ws",
+            scopes={},
+            expires_at=_PINNED + timedelta(days=90),
+            now=_PINNED,
+        )
+        other_id = new_ulid()
+        with tenant_agnostic():
+            db_session.add(
+                Workspace(
+                    id=other_id,
+                    slug="rotate-other",
+                    name="Other",
+                    plan="free",
+                    quota_json={},
+                    created_at=_PINNED,
+                )
+            )
+            db_session.flush()
+        other_ctx = WorkspaceContext(
+            workspace_id=other_id,
+            workspace_slug="rotate-other",
+            actor_id=ctx.actor_id,
+            actor_kind="user",
+            actor_grant_role="manager",
+            actor_was_owner_member=True,
+            audit_correlation_id=new_ulid(),
+        )
+        with pytest.raises(InvalidToken):
+            rotate(db_session, other_ctx, token_id=original.key_id, now=_PINNED)
+
+
+# ---------------------------------------------------------------------------
+# ``list_audit``
+# ---------------------------------------------------------------------------
+
+
+class TestListAudit:
+    """``list_audit`` projects audit_log rows for one workspace token."""
+
+    def test_returns_mint_event(
+        self, db_session: Session, ctx: WorkspaceContext
+    ) -> None:
+        original = mint(
+            db_session,
+            ctx,
+            user_id=ctx.actor_id,
+            label="audit-mint",
+            scopes={},
+            expires_at=_PINNED + timedelta(days=90),
+            now=_PINNED,
+        )
+        entries = list_audit(db_session, ctx, token_id=original.key_id)
+        actions = [e.action for e in entries]
+        assert "api_token.minted" in actions
+
+    def test_returns_lifecycle_in_reverse_chronological_order(
+        self, db_session: Session, ctx: WorkspaceContext
+    ) -> None:
+        original = mint(
+            db_session,
+            ctx,
+            user_id=ctx.actor_id,
+            label="audit-lifecycle",
+            scopes={},
+            expires_at=_PINNED + timedelta(days=90),
+            now=_PINNED,
+        )
+        rotate(
+            db_session, ctx, token_id=original.key_id, now=_PINNED + timedelta(hours=1)
+        )
+        revoke(
+            db_session, ctx, token_id=original.key_id, now=_PINNED + timedelta(hours=2)
+        )
+
+        entries = list_audit(db_session, ctx, token_id=original.key_id)
+        actions = [e.action for e in entries]
+        # Newest first per spec — revoked → rotated → minted.
+        assert actions[0] == "api_token.revoked"
+        assert "api_token.rotated" in actions
+        assert actions[-1] == "api_token.minted"
+
+    def test_cross_workspace_returns_empty(
+        self,
+        db_session: Session,
+        ctx: WorkspaceContext,
+    ) -> None:
+        original = mint(
+            db_session,
+            ctx,
+            user_id=ctx.actor_id,
+            label="audit-cross",
+            scopes={},
+            expires_at=_PINNED + timedelta(days=90),
+            now=_PINNED,
+        )
+        other_id = new_ulid()
+        with tenant_agnostic():
+            db_session.add(
+                Workspace(
+                    id=other_id,
+                    slug="audit-other",
+                    name="Other",
+                    plan="free",
+                    quota_json={},
+                    created_at=_PINNED,
+                )
+            )
+            db_session.flush()
+        other_ctx = WorkspaceContext(
+            workspace_id=other_id,
+            workspace_slug="audit-other",
+            actor_id=ctx.actor_id,
+            actor_kind="user",
+            actor_grant_role="manager",
+            actor_was_owner_member=True,
+            audit_correlation_id=new_ulid(),
+        )
+        assert list_audit(db_session, other_ctx, token_id=original.key_id) == []
+
+    def test_unknown_token_returns_empty(
+        self, db_session: Session, ctx: WorkspaceContext
+    ) -> None:
+        assert list_audit(db_session, ctx, token_id="01HWA00000000000000000NOPE") == []
 
 
 # ---------------------------------------------------------------------------

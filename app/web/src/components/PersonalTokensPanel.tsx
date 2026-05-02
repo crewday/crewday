@@ -45,8 +45,11 @@ export default function PersonalTokensPanel() {
   });
 
   const revokeM = useMutation({
+    // §03 ``/me/tokens`` ships only the canonical DELETE verb today;
+    // the POST /revoke alias + rotate + audit timeline that mirror the
+    // workspace surface are tracked under cd-a23fn.
     mutationFn: (id: string) =>
-      fetchJson<ApiToken>(`/api/v1/me/tokens/${id}/revoke`, { method: "POST" }),
+      fetchJson<void>(`/api/v1/me/tokens/${id}`, { method: "DELETE" }),
     onSuccess: () => qc.invalidateQueries({ queryKey: qk.meApiTokens() }),
   });
 
@@ -65,11 +68,17 @@ export default function PersonalTokensPanel() {
 
   function submitCreate(e: React.FormEvent) {
     e.preventDefault();
-    const expires = new Date(Date.now() + 90 * 864e5).toISOString();
+    // §03 wire shape: scopes is `{me.action: true}`. The server resolves
+    // the absolute `expires_at` from `expires_at_days`, defaulting to 90
+    // days when omitted; we pass it explicitly so the UI hint stays
+    // truthful even after the default changes server-side.
+    const scopes: Record<string, true> = Object.fromEntries(
+      Array.from(picked).map((k) => [k, true]),
+    );
     createM.mutate({
-      name,
-      scopes: Array.from(picked),
-      expires_at: expires,
+      label: name,
+      scopes,
+      expires_at_days: 90,
     });
   }
 
@@ -211,12 +220,12 @@ export default function PersonalTokensPanel() {
           <ul className="entry-cards">
             {rows.map((t) => (
               <li
-                key={t.id}
+                key={t.key_id}
                 className={"entry-card" + (t.revoked_at ? " entry-card--revoked" : "")}
               >
                 <div className="entry-card__head">
-                  <span className="entry-card__name">{t.name}</span>
-                  {t.scopes.map((s) => (
+                  <span className="entry-card__name">{t.label}</span>
+                  {Object.keys(t.scopes ?? {}).map((s) => (
                     <span key={s} className="tokens-scopes__pill tokens-scopes__pill--me">
                       {s}
                     </span>
@@ -228,7 +237,7 @@ export default function PersonalTokensPanel() {
                       <button
                         type="button"
                         className="btn btn--sm btn--rust"
-                        onClick={() => revokeM.mutate(t.id)}
+                        onClick={() => revokeM.mutate(t.key_id)}
                       >
                         <Trash2 size={13} strokeWidth={2} /> Revoke
                       </button>

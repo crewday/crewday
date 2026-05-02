@@ -39,6 +39,23 @@ Routes:
   idempotent for already-revoked rows. An unknown / foreign /
   personal ``token_id`` returns 404 (same shape — we don't leak
   whose tokens exist).
+* ``POST /auth/tokens/{token_id}/revoke`` → 204. Alias of the
+  ``DELETE`` shape above for clients (CSRF-tolerant fetchers, the
+  /tokens SPA, integration scripts that prefer POST verbs). Same
+  idempotency contract.
+* ``POST /auth/tokens/{token_id}/rotate`` → ``200 {token, key_id,
+  prefix, expires_at, kind}``. §03 "Revocation and rotation":
+  rotates the secret in place, leaving ``key_id`` / ``label`` /
+  ``scopes`` / ``expires_at`` untouched. Old secret stops working
+  immediately; the spec's "1h overlap" feature requires a sibling
+  ``previous_hash`` column tracked under cd-oa8iz. PAT / revoked /
+  expired / cross-workspace ids collapse to 404.
+* ``GET /auth/tokens/{token_id}/audit`` → list of
+  :class:`TokenAuditEntryResponse` — the per-token lifecycle trail
+  (mint / rotate / revoke / revoked_noop), newest first. The
+  per-request log surface (method / path / IP / user_agent)
+  belongs to a sibling ``api_token_request_log`` table tracked
+  under cd-ocdg7.
 
 Error shapes:
 
@@ -94,9 +111,11 @@ from app.auth.tokens import (
     TokenShapeError,
     TokenSummary,
     TooManyTokens,
+    list_audit,
     list_tokens,
     mint,
     revoke,
+    rotate,
 )
 from app.authz.dep import Permission
 from app.tenancy import WorkspaceContext
@@ -105,6 +124,7 @@ from app.util.clock import SystemClock
 __all__ = [
     "MintTokenBody",
     "MintTokenResponse",
+    "TokenAuditEntryResponse",
     "TokenListResponse",
     "TokenSummaryResponse",
     "build_tokens_router",
@@ -214,6 +234,22 @@ class TokenListResponse(BaseModel):
     data: list[TokenSummaryResponse]
     next_cursor: str | None = None
     has_more: bool = False
+
+
+class TokenAuditEntryResponse(BaseModel):
+    """Response element for ``GET /auth/tokens/{token_id}/audit``.
+
+    Mirrors :class:`app.auth.tokens.TokenAuditEntry`. The v1 surface
+    is the lifecycle trail (``api_token.minted`` /
+    ``api_token.rotated`` / ``api_token.revoked`` /
+    ``api_token.revoked_noop``); a future per-request log will
+    extend this shape rather than replace it.
+    """
+
+    at: datetime
+    action: str
+    actor_id: str
+    correlation_id: str
 
 
 # ---------------------------------------------------------------------------
@@ -491,6 +527,133 @@ def build_tokens_router() -> APIRouter:
                 detail={"error": "token_not_found"},
             ) from exc
         return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+    @api.post(
+        "/{token_id}/revoke",
+        status_code=status.HTTP_204_NO_CONTENT,
+        operation_id="auth.tokens.revoke_post",
+        summary="Revoke a token via POST — alias of DELETE",
+        dependencies=[permission_gate],
+        openapi_extra={
+            # Same x-cli verb as the DELETE form — the SPA prefers
+            # POST because some browsers / proxies strip request
+            # bodies on DELETE. Both paths share the same idempotency
+            # contract; CLI consumers should still prefer the DELETE
+            # form for consistency with REST conventions.
+            "x-cli": {
+                "group": "tokens",
+                "verb": "revoke",
+                "summary": "Revoke a workspace API token (POST alias)",
+                "mutates": True,
+            },
+        },
+    )
+    def post_revoke_token(
+        token_id: str,
+        ctx: _Ctx,
+        session: _Db,
+    ) -> Response:
+        """POST alias for :func:`delete_token`.
+
+        The /tokens SPA (cd-htab) and the mock router consume the
+        POST shape. Same idempotent contract, same 404 collapse on
+        unknown / cross-workspace / personal token ids.
+        """
+        try:
+            revoke(session, ctx, token_id=token_id)
+        except InvalidToken as exc:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={"error": "token_not_found"},
+            ) from exc
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+    @api.post(
+        "/{token_id}/rotate",
+        response_model=MintTokenResponse,
+        operation_id="auth.tokens.rotate",
+        summary="Rotate a token's secret in place — plaintext returned once",
+        dependencies=[permission_gate],
+        openapi_extra={
+            "x-cli": {
+                "group": "tokens",
+                "verb": "rotate",
+                "summary": "Rotate a workspace API token's secret",
+                "mutates": True,
+            },
+        },
+    )
+    def post_rotate_token(
+        token_id: str,
+        ctx: _Ctx,
+        session: _Db,
+    ) -> MintTokenResponse:
+        """Rotate ``token_id``'s secret in place.
+
+        Same row, same ``key_id`` / ``label`` / ``scopes`` /
+        ``expires_at`` — only the secret + prefix change. The new
+        plaintext is returned exactly once on this response, the
+        same one-shot contract as ``POST /auth/tokens``.
+
+        404 ``token_not_found`` collapses unknown / cross-workspace
+        / personal / revoked / expired ids — the API doesn't leak
+        which mode fired.
+        """
+        try:
+            result = rotate(session, ctx, token_id=token_id)
+        except InvalidToken as exc:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={"error": "token_not_found"},
+            ) from exc
+        return MintTokenResponse(
+            token=result.token,
+            key_id=result.key_id,
+            prefix=result.prefix,
+            expires_at=result.expires_at,
+            kind=result.kind,
+        )
+
+    @api.get(
+        "/{token_id}/audit",
+        response_model=list[TokenAuditEntryResponse],
+        operation_id="auth.tokens.audit",
+        summary="Per-token audit timeline — newest first",
+        dependencies=[permission_gate],
+        openapi_extra={
+            "x-cli": {
+                "group": "tokens",
+                "verb": "audit",
+                "summary": "Show a workspace API token's audit timeline",
+                "mutates": False,
+            },
+        },
+    )
+    def get_token_audit(
+        token_id: str,
+        ctx: _Ctx,
+        session: _Db,
+    ) -> list[TokenAuditEntryResponse]:
+        """Return the workspace audit_log rows tied to ``token_id``.
+
+        The list scope is the caller's workspace — a manager on
+        workspace A cannot read another workspace's token audit
+        rows. v1 surfaces the lifecycle events
+        (``api_token.minted`` / ``rotated`` / ``revoked`` /
+        ``revoked_noop``); a sibling per-request log lands as a
+        follow-up so the manager has *some* trail today rather
+        than none.
+        """
+        entries = list_audit(session, ctx, token_id=token_id)
+        return [
+            TokenAuditEntryResponse(
+                at=e.at,
+                action=e.action,
+                actor_id=e.actor_id,
+                correlation_id=e.correlation_id,
+            )
+            for e in entries
+        ]
 
     return api
 

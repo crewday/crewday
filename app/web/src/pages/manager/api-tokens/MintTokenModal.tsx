@@ -12,11 +12,10 @@ interface MintTokenModalProps {
 
 export default function MintTokenModal({ onCreated, onCancel }: MintTokenModalProps) {
   const qc = useQueryClient();
-  const [name, setName] = useState("my-script");
+  const [label, setLabel] = useState("my-script");
   const [kind, setKind] = useState<TokenKind>("scoped");
   const [picked, setPicked] = useState<Set<string>>(new Set(["tasks:read"]));
   const [expiryDays, setExpiryDays] = useState(90);
-  const [note, setNote] = useState("");
 
   const createM = useMutation({
     mutationFn: (body: Record<string, unknown>) =>
@@ -38,13 +37,20 @@ export default function MintTokenModal({ onCreated, onCancel }: MintTokenModalPr
 
   function submitCreate(e: React.FormEvent) {
     e.preventDefault();
-    const expires = new Date(Date.now() + expiryDays * 864e5).toISOString();
+    // §03 wire shape: scopes ride the wire as `{action_key: true}` and
+    // delegated mints REQUIRE an empty scope object — authority resolves
+    // through the session user's grants instead. TTL is sent as
+    // `expires_at_days`; the backend resolves the absolute timestamp
+    // server-side so the two surfaces (workspace + /me) agree.
+    const scopes: Record<string, true> =
+      kind === "delegated"
+        ? {}
+        : Object.fromEntries(Array.from(picked).map((k) => [k, true]));
     createM.mutate({
-      name,
+      label,
       delegate: kind === "delegated",
-      scopes: kind === "delegated" ? [] : Array.from(picked),
-      expires_at: expires,
-      note: note || null,
+      scopes,
+      expires_at_days: expiryDays,
     });
   }
 
@@ -56,20 +62,20 @@ export default function MintTokenModal({ onCreated, onCancel }: MintTokenModalPr
 
       <form className="tokens-form" onSubmit={submitCreate}>
         <div className="tokens-form__section">
-          <label className="tokens-form__legend" htmlFor="tok-name">
+          <label className="tokens-form__legend" htmlFor="tok-label">
             Name
             <span className="tokens-form__legend-hint">
               a human label that shows up in the audit log
             </span>
           </label>
           <input
-            id="tok-name"
+            id="tok-label"
             className="tokens-name-input"
             type="text"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
+            value={label}
+            onChange={(e) => setLabel(e.target.value)}
             placeholder="my-script"
-            maxLength={80}
+            maxLength={160}
             required
           />
         </div>
@@ -148,38 +154,22 @@ export default function MintTokenModal({ onCreated, onCancel }: MintTokenModalPr
           </div>
         )}
 
-        <div className="tokens-form__row">
-          <div className="tokens-form__section">
-            <div className="tokens-form__legend">Expires in</div>
-            <div className="tokens-expiry">
-              {[7, 30, 90, 365].map((d) => (
-                <button
-                  key={d}
-                  type="button"
-                  className={
-                    "tokens-expiry__preset" +
-                    (expiryDays === d ? " tokens-expiry__preset--on" : "")
-                  }
-                  onClick={() => setExpiryDays(d)}
-                >
-                  {d === 365 ? "1 year" : `${d} days`}
-                </button>
-              ))}
-            </div>
-          </div>
-          <div className="tokens-form__section">
-            <label className="tokens-form__legend" htmlFor="tok-note">
-              Note
-              <span className="tokens-form__legend-hint">optional · private to the workspace</span>
-            </label>
-            <input
-              id="tok-note"
-              type="text"
-              className="tokens-note-input"
-              value={note}
-              onChange={(e) => setNote(e.target.value)}
-              placeholder="e.g. Hermes scheduler on the dev box"
-            />
+        <div className="tokens-form__section">
+          <div className="tokens-form__legend">Expires in</div>
+          <div className="tokens-expiry">
+            {[7, 30, 90, 365].map((d) => (
+              <button
+                key={d}
+                type="button"
+                className={
+                  "tokens-expiry__preset" +
+                  (expiryDays === d ? " tokens-expiry__preset--on" : "")
+                }
+                onClick={() => setExpiryDays(d)}
+              >
+                {d === 365 ? "1 year" : `${d} days`}
+              </button>
+            ))}
           </div>
         </div>
 
