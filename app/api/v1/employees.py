@@ -79,13 +79,16 @@ from app.adapters.db.workspace.models import (
     UserWorkspace,
     WorkEngagement,
     WorkRole,
+    Workspace,
 )
 from app.api.deps import current_workspace_context, db_session
+from app.api.v1.settings import EntitySettingsPayload, build_entity_settings_payload
 from app.authz.dep import Permission
 from app.services.leave import LeavePermissionDenied, LeaveView, list_for_user
 from app.tenancy import WorkspaceContext, tenant_agnostic
 
 __all__ = [
+    "EmployeeDetailResponse",
     "EmployeeResponse",
     "build_employees_router",
 ]
@@ -171,6 +174,41 @@ class EmployeeLeavesResponse(BaseModel):
 
     subject: EmployeeResponse
     leaves: list[EmployeeLeaveResponse]
+
+
+class EmployeeDetailResponse(BaseModel):
+    """Payload for ``GET /employees/{employee_id}``.
+
+    Mirrors the SPA's ``EmployeeDetail`` interface in
+    ``app/web/src/pages/manager/EmployeeDetailPage.tsx``. ``subject``
+    is the same flat :class:`EmployeeResponse` the list endpoint emits
+    (built through :func:`_project_employee`); the four ``subject_*``
+    lists are placeholders pending dedicated per-employee composite
+    readers. The fields are emitted as empty arrays today so the SPA's
+    overview tab renders without "Failed to load.", and the contract
+    stays additive when the readers land.
+
+    The dedicated ``GET /employees/{id}/leaves`` composite continues to
+    be the canonical leaves source — it carries the
+    ``leaves.view_others`` gate this composite intentionally does not
+    require, so the page can still load when a manager lacks that
+    gate. The leaves tab in the SPA hits that endpoint directly.
+
+    The ``subject_*`` element types are kept as opaque JSON objects
+    (``list[dict[str, object]]``) rather than locking in
+    :class:`Task` / :class:`Expense` / :class:`PaySlip` payload models
+    here. Pulling the per-context payload classes (and their imports)
+    into this router for an empty-list contract would couple the
+    employees module to four downstream context payloads with no
+    callers reading the shape today; the next PR that wires a real
+    reader for each list owns the type tightening in the same turn.
+    """
+
+    subject: EmployeeResponse
+    subject_tasks: list[dict[str, object]]
+    subject_expenses: list[dict[str, object]]
+    subject_leaves: list[EmployeeLeaveResponse]
+    subject_payslips: list[dict[str, object]]
 
 
 # ---------------------------------------------------------------------------
@@ -521,6 +559,9 @@ def build_employees_router() -> APIRouter:
 
     read_gate = Depends(Permission("employees.read", scope_kind="workspace"))
     leave_view_gate = Depends(Permission("leaves.view_others", scope_kind="workspace"))
+    edit_settings_gate = Depends(
+        Permission("scope.edit_settings", scope_kind="workspace")
+    )
 
     @api.get(
         "",
@@ -579,6 +620,117 @@ def build_employees_router() -> APIRouter:
                 )
             )
         return out
+
+    @api.get(
+        "/{employee_id}",
+        response_model=EmployeeDetailResponse,
+        operation_id="employees.detail",
+        summary="Read one employee's manager-detail composite",
+        dependencies=[read_gate],
+        openapi_extra={
+            # Web-facing composite — same gate as the list endpoint, so
+            # the manager EmployeeDetailPage loads with one round-trip.
+            # CLI callers can compose `/employees` (roster) +
+            # `/employees/{id}/leaves` directly without this composite.
+            "x-cli": {
+                "group": "employees",
+                "verb": "detail",
+                "summary": "Read one employee's manager-detail composite",
+                "mutates": False,
+                "hidden": True,
+            },
+        },
+    )
+    def detail(
+        employee_id: str,
+        ctx: _Ctx,
+        session: _Db,
+    ) -> EmployeeDetailResponse:
+        """Return the manager EmployeeDetailPage composite payload.
+
+        Reuses :func:`_employee_or_404` to load + project the subject
+        through :func:`_project_employee`. The four ``subject_*``
+        lists are emitted as empty arrays today — see
+        :class:`EmployeeDetailResponse` for the rationale and the
+        per-list follow-up tasks. The dedicated
+        ``GET /employees/{id}/leaves`` composite remains the canonical
+        leaves source (it carries the ``leaves.view_others`` gate this
+        endpoint intentionally does not require).
+        """
+        subject = _employee_or_404(session, ctx, employee_id=employee_id)
+        return EmployeeDetailResponse(
+            subject=subject,
+            subject_tasks=[],
+            subject_expenses=[],
+            subject_leaves=[],
+            subject_payslips=[],
+        )
+
+    @api.get(
+        "/{employee_id}/settings",
+        response_model=EntitySettingsPayload,
+        operation_id="employees.settings.read",
+        summary="Read one employee's resolved settings cascade",
+        dependencies=[edit_settings_gate],
+        openapi_extra={
+            "x-cli": {
+                "group": "employees",
+                "verb": "settings-read",
+                "summary": "Read one employee's resolved settings cascade",
+                "mutates": False,
+                "hidden": True,
+            },
+        },
+    )
+    def read_settings(
+        employee_id: str,
+        ctx: _Ctx,
+        session: _Db,
+    ) -> EntitySettingsPayload:
+        """Return the per-employee settings payload.
+
+        ``overrides`` is the active engagement's
+        ``settings_override_json`` map (or ``{}`` when the user has no
+        active engagement in this workspace). ``resolved`` runs the
+        §02 cascade with engagement → workspace → catalog precedence
+        and tags each value with its ``source`` for the SPA's
+        per-row "overridden / inherited" badge.
+
+        Gate mirrors ``/settings/catalog`` (``scope.edit_settings``)
+        so reading the cascade follows the same permission as editing
+        a single layer of it.
+        """
+        # 404 first so a caller probing for ids does not learn whether
+        # the workspace has any engagement state until they cleared
+        # the membership check.
+        _employee_or_404(session, ctx, employee_id=employee_id)
+        engagements = _load_active_engagements(session, ctx, user_ids=[employee_id])
+        engagement = engagements.get(employee_id)
+        # Workspace row lookup is identity-scoped — the ORM tenant
+        # filter does not apply to :class:`Workspace`. Use
+        # ``tenant_agnostic`` to match the pattern in
+        # ``app.api.v1.settings._get_workspace``.
+        with tenant_agnostic():
+            workspace = session.get(Workspace, ctx.workspace_id)
+        if workspace is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={"error": "workspace_not_found"},
+            )
+        workspace_settings = (
+            workspace.settings_json if isinstance(workspace.settings_json, dict) else {}
+        )
+        entity_overrides: dict[str, object] = (
+            engagement.settings_override_json
+            if engagement is not None
+            and isinstance(engagement.settings_override_json, dict)
+            else {}
+        )
+        return build_entity_settings_payload(
+            workspace_settings_json=workspace_settings,
+            entity_overrides=entity_overrides,
+            entity_layer="employee",
+        )
 
     @api.get(
         "/{employee_id}/leaves",

@@ -54,10 +54,19 @@ from app.tenancy import WorkspaceContext, tenant_agnostic
 from app.util.clock import SystemClock
 
 __all__ = [
+    "EntitySettingsPayload",
+    "ResolvedSettingPayload",
     "SettingDefinitionResponse",
     "WorkspaceSettingsResponse",
+    "build_entity_settings_payload",
     "build_settings_router",
 ]
+
+# §02 cascade source enum exposed to the SPA. The cascade resolver
+# under :mod:`app.domain.settings.cascade` emits ``work_engagement`` for
+# the per-employee layer; the wire surface uses ``employee`` (mirrors
+# :class:`ResolvedSetting` in ``app/web/src/types/settings.ts``).
+EntitySettingsSource = Literal["workspace", "property", "employee", "task", "catalog"]
 
 router = APIRouter(tags=["settings"])
 
@@ -103,6 +112,37 @@ class WorkspaceSettingsResponse(BaseModel):
     meta: WorkspaceSettingsMeta
     defaults: dict[str, Any]
     policy: WorkspaceSettingsPolicy
+
+
+class ResolvedSettingPayload(BaseModel):
+    """One catalog key's effective value plus §02 provenance.
+
+    Mirrors :class:`ResolvedSetting` in
+    ``app/web/src/types/settings.ts`` exactly. ``source`` reports the
+    layer that supplied the value: ``employee`` for an active engagement
+    override, ``workspace`` for a workspace-level
+    ``settings_json`` value, ``catalog`` for the catalog default.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    value: Any
+    source: EntitySettingsSource
+
+
+class EntitySettingsPayload(BaseModel):
+    """Per-entity settings reader payload — see SPA ``EntitySettingsPayload``.
+
+    ``overrides`` holds the entity-level explicit map (the bare
+    ``settings_override_json`` column, no inheritance applied).
+    ``resolved`` carries the catalog-keyed map of effective values
+    after the §02 cascade ran.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    overrides: dict[str, Any]
+    resolved: dict[str, ResolvedSettingPayload]
 
 
 class VerifyOwnershipRequestResponse(BaseModel):
@@ -748,6 +788,69 @@ def _workspace_settings_response(ws: Workspace) -> WorkspaceSettingsResponse:
             danger_zone=list(_DANGER_ZONE),
         ),
     )
+
+
+def build_entity_settings_payload(
+    *,
+    workspace_settings_json: Mapping[str, Any],
+    entity_overrides: Mapping[str, Any],
+    entity_layer: EntitySettingsSource,
+) -> EntitySettingsPayload:
+    """Project the §02 cascade for one entity into the SPA wire shape.
+
+    Each catalog key resolves through three layers in priority order:
+    ``entity`` (e.g. employee, property, task) → ``workspace`` →
+    ``catalog`` default. Cross-layer inheritance markers (``None``,
+    ``"inherit"``) are treated as absent. The first concrete value
+    wins; ``source`` reports which layer supplied it.
+
+    Catalog keys whose ``override_scope`` does not include the entity
+    layer still appear in ``resolved`` — the SPA filters by
+    ``override_scope`` client-side, so trimming here would force the
+    SPA to special-case missing keys. The ``overrides`` map carries
+    only the entity-level explicit values (no scope filter applied),
+    matching the mock contract that the SPA already consumes.
+
+    Reuse target — call from any per-entity ``GET /<entity>/{id}/settings``
+    endpoint by passing the entity's ``settings_override_json`` column
+    and the workspace's ``settings_json`` column. The ``entity_layer``
+    argument tags ``ResolvedSetting.source`` so the SPA renders the
+    right "from <layer>" label.
+    """
+    overrides_concrete = _concrete_overrides(entity_overrides)
+    workspace_concrete = _concrete_overrides(workspace_settings_json)
+    resolved: dict[str, ResolvedSettingPayload] = {}
+    for definition in _CATALOG:
+        key = definition.key
+        if key in overrides_concrete:
+            resolved[key] = ResolvedSettingPayload(
+                value=overrides_concrete[key],
+                source=entity_layer,
+            )
+            continue
+        if key in workspace_concrete:
+            resolved[key] = ResolvedSettingPayload(
+                value=workspace_concrete[key],
+                source="workspace",
+            )
+            continue
+        resolved[key] = ResolvedSettingPayload(
+            value=definition.catalog_default,
+            source="catalog",
+        )
+    return EntitySettingsPayload(
+        overrides=dict(entity_overrides),
+        resolved=resolved,
+    )
+
+
+def _concrete_overrides(raw: Mapping[str, Any]) -> dict[str, Any]:
+    """Drop §02 inheritance markers (``None`` / ``"inherit"``) from a map."""
+    return {
+        key: value
+        for key, value in raw.items()
+        if value is not None and value != "inherit"
+    }
 
 
 def _merged_defaults(settings_json: Mapping[str, Any]) -> dict[str, Any]:

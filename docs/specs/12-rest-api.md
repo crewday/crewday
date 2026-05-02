@@ -1358,6 +1358,36 @@ GET    /employees                 # manager roster (cd-g6nf, cd-jtgo). Returns a
                                    # would have broken verbatim-port parity with
                                    # the mock layer for no observable benefit
                                    # while the SPA is still being built.
+GET    /employees/{id}            # manager EmployeeDetailPage composite
+                                   # (cd-5qqex). Returns
+                                   # `{subject, subject_tasks,
+                                   # subject_expenses, subject_leaves,
+                                   # subject_payslips}` — `subject` is
+                                   # the same `Employee` projection the
+                                   # list endpoint emits (built through
+                                   # `_project_employee`); the four
+                                   # `subject_*` lists are emitted as
+                                   # empty arrays today, the per-list
+                                   # readers land in their own
+                                   # follow-ups. Same gate as the list
+                                   # endpoint (`employees.read`); the
+                                   # dedicated `/employees/{id}/leaves`
+                                   # composite remains the canonical
+                                   # leaves source (it carries the
+                                   # `leaves.view_others` gate this
+                                   # composite intentionally does not
+                                   # require, so the page loads even
+                                   # when the manager lacks that gate).
+GET    /employees/{id}/settings   # per-employee resolved-settings
+                                   # cascade (cd-5qqex). Returns
+                                   # `{overrides, resolved}` — `overrides`
+                                   # is the active engagement's
+                                   # `settings_override_json`,
+                                   # `resolved` keys catalog → value +
+                                   # provenance (`employee` /
+                                   # `workspace` / `catalog`).
+                                   # Gate: `scope.edit_settings`,
+                                   # mirroring `/settings/catalog`.
 
 POST   /me/avatar                 # multipart; self-only; replaces users.avatar_file_id
 DELETE /me/avatar                 # self-only; clears avatar_file_id → initials fallback

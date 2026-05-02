@@ -7420,6 +7420,54 @@
         "title": "EmailVerifyResponse",
         "type": "object"
       },
+      "EmployeeDetailResponse": {
+        "description": "Payload for ``GET /employees/{employee_id}``.\n\nMirrors the SPA's ``EmployeeDetail`` interface in\n``app/web/src/pages/manager/EmployeeDetailPage.tsx``. ``subject``\nis the same flat :class:`EmployeeResponse` the list endpoint emits\n(built through :func:`_project_employee`); the four ``subject_*``\nlists are placeholders pending dedicated per-employee composite\nreaders. The fields are emitted as empty arrays today so the SPA's\noverview tab renders without \"Failed to load.\", and the contract\nstays additive when the readers land.\n\nThe dedicated ``GET /employees/{id}/leaves`` composite continues to\nbe the canonical leaves source \u2014 it carries the\n``leaves.view_others`` gate this composite intentionally does not\nrequire, so the page can still load when a manager lacks that\ngate. The leaves tab in the SPA hits that endpoint directly.\n\nThe ``subject_*`` element types are kept as opaque JSON objects\n(``list[dict[str, object]]``) rather than locking in\n:class:`Task` / :class:`Expense` / :class:`PaySlip` payload models\nhere. Pulling the per-context payload classes (and their imports)\ninto this router for an empty-list contract would couple the\nemployees module to four downstream context payloads with no\ncallers reading the shape today; the next PR that wires a real\nreader for each list owns the type tightening in the same turn.",
+        "properties": {
+          "subject": {
+            "$ref": "#/components/schemas/EmployeeResponse"
+          },
+          "subject_expenses": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Subject Expenses",
+            "type": "array"
+          },
+          "subject_leaves": {
+            "items": {
+              "$ref": "#/components/schemas/EmployeeLeaveResponse"
+            },
+            "title": "Subject Leaves",
+            "type": "array"
+          },
+          "subject_payslips": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Subject Payslips",
+            "type": "array"
+          },
+          "subject_tasks": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Subject Tasks",
+            "type": "array"
+          }
+        },
+        "required": [
+          "subject",
+          "subject_expenses",
+          "subject_leaves",
+          "subject_payslips",
+          "subject_tasks"
+        ],
+        "title": "EmployeeDetailResponse",
+        "type": "object"
+      },
       "EmployeeLeaveResponse": {
         "description": "Mock-compatible leave row for the manager employee ledger.",
         "properties": {
@@ -7715,6 +7763,30 @@
           }
         },
         "title": "EmployeeUpdateRequest",
+        "type": "object"
+      },
+      "EntitySettingsPayload": {
+        "additionalProperties": false,
+        "description": "Per-entity settings reader payload \u2014 see SPA ``EntitySettingsPayload``.\n\n``overrides`` holds the entity-level explicit map (the bare\n``settings_override_json`` column, no inheritance applied).\n``resolved`` carries the catalog-keyed map of effective values\nafter the \u00a702 cascade ran.",
+        "properties": {
+          "overrides": {
+            "additionalProperties": true,
+            "title": "Overrides",
+            "type": "object"
+          },
+          "resolved": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ResolvedSettingPayload"
+            },
+            "title": "Resolved",
+            "type": "object"
+          }
+        },
+        "required": [
+          "overrides",
+          "resolved"
+        ],
+        "title": "EntitySettingsPayload",
         "type": "object"
       },
       "EvidenceListResponse": {
@@ -18696,6 +18768,32 @@
           "rrule"
         ],
         "title": "ResolvedSchedule",
+        "type": "object"
+      },
+      "ResolvedSettingPayload": {
+        "additionalProperties": false,
+        "description": "One catalog key's effective value plus \u00a702 provenance.\n\nMirrors :class:`ResolvedSetting` in\n``app/web/src/types/settings.ts`` exactly. ``source`` reports the\nlayer that supplied the value: ``employee`` for an active engagement\noverride, ``workspace`` for a workspace-level\n``settings_json`` value, ``catalog`` for the catalog default.",
+        "properties": {
+          "source": {
+            "enum": [
+              "catalog",
+              "employee",
+              "property",
+              "task",
+              "workspace"
+            ],
+            "title": "Source",
+            "type": "string"
+          },
+          "value": {
+            "title": "Value"
+          }
+        },
+        "required": [
+          "source",
+          "value"
+        ],
+        "title": "ResolvedSettingPayload",
         "type": "object"
       },
       "ResolvedTask": {
@@ -55196,6 +55294,118 @@
         }
       ]
     },
+    "/w/{slug}/api/v1/employees/{employee_id}": {
+      "get": {
+        "description": "Return the manager EmployeeDetailPage composite payload.\n\nReuses :func:`_employee_or_404` to load + project the subject\nthrough :func:`_project_employee`. The four ``subject_*``\nlists are emitted as empty arrays today \u2014 see\n:class:`EmployeeDetailResponse` for the rationale and the\nper-list follow-up tasks. The dedicated\n``GET /employees/{id}/leaves`` composite remains the canonical\nleaves source (it carries the ``leaves.view_others`` gate this\nendpoint intentionally does not require).",
+        "operationId": "employees.detail",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "employee_id",
+            "required": true,
+            "schema": {
+              "title": "Employee Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EmployeeDetailResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "properties": {
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    },
+                    "retry_after_seconds": {
+                      "minimum": 1,
+                      "type": "integer"
+                    },
+                    "status": {
+                      "const": 429,
+                      "type": "integer"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "type": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "instance",
+                    "status",
+                    "title",
+                    "type"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Rate limited",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until the caller should retry.",
+                "schema": {
+                  "minimum": 1,
+                  "type": "integer"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Read one employee's manager-detail composite",
+        "tags": [
+          "identity",
+          "employees"
+        ],
+        "x-cli": {
+          "group": "employees",
+          "hidden": true,
+          "mutates": false,
+          "summary": "Read one employee's manager-detail composite",
+          "verb": "detail"
+        }
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "slug",
+          "required": true,
+          "schema": {
+            "maxLength": 40,
+            "minLength": 3,
+            "pattern": "^[a-z][a-z0-9-]{1,38}[a-z0-9]$",
+            "type": "string"
+          }
+        }
+      ]
+    },
     "/w/{slug}/api/v1/employees/{employee_id}/leaves": {
       "get": {
         "operationId": "employees.leaves.list",
@@ -55291,6 +55501,118 @@
           "mutates": false,
           "summary": "List one employee's leave ledger",
           "verb": "leaves-list"
+        }
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "slug",
+          "required": true,
+          "schema": {
+            "maxLength": 40,
+            "minLength": 3,
+            "pattern": "^[a-z][a-z0-9-]{1,38}[a-z0-9]$",
+            "type": "string"
+          }
+        }
+      ]
+    },
+    "/w/{slug}/api/v1/employees/{employee_id}/settings": {
+      "get": {
+        "description": "Return the per-employee settings payload.\n\n``overrides`` is the active engagement's\n``settings_override_json`` map (or ``{}`` when the user has no\nactive engagement in this workspace). ``resolved`` runs the\n\u00a702 cascade with engagement \u2192 workspace \u2192 catalog precedence\nand tags each value with its ``source`` for the SPA's\nper-row \"overridden / inherited\" badge.\n\nGate mirrors ``/settings/catalog`` (``scope.edit_settings``)\nso reading the cascade follows the same permission as editing\na single layer of it.",
+        "operationId": "employees.settings.read",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "employee_id",
+            "required": true,
+            "schema": {
+              "title": "Employee Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EntitySettingsPayload"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "properties": {
+                    "detail": {
+                      "type": "string"
+                    },
+                    "instance": {
+                      "type": "string"
+                    },
+                    "retry_after_seconds": {
+                      "minimum": 1,
+                      "type": "integer"
+                    },
+                    "status": {
+                      "const": 429,
+                      "type": "integer"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "type": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "instance",
+                    "status",
+                    "title",
+                    "type"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Rate limited",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until the caller should retry.",
+                "schema": {
+                  "minimum": 1,
+                  "type": "integer"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Read one employee's resolved settings cascade",
+        "tags": [
+          "identity",
+          "employees"
+        ],
+        "x-cli": {
+          "group": "employees",
+          "hidden": true,
+          "mutates": false,
+          "summary": "Read one employee's resolved settings cascade",
+          "verb": "settings-read"
         }
       },
       "parameters": [

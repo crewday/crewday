@@ -745,3 +745,345 @@ class TestSoftDelete:
         body = client.get("/employees").json()
         worker_row = next(r for r in body if r["id"] == worker_id)
         assert worker_row["properties"] == []
+
+
+# ---------------------------------------------------------------------------
+# GET /employees/{employee_id} — manager EmployeeDetailPage composite.
+# ---------------------------------------------------------------------------
+
+
+class TestDetail:
+    """Pin the ``EmployeeDetail`` shape consumed by the SPA.
+
+    The four ``subject_*`` lists are intentionally empty today — the
+    per-list composites land in their own follow-up tasks. The shape
+    contract still must hold so the SPA's overview tab renders
+    instead of falling through to "Failed to load.".
+    """
+
+    def test_owner_returns_subject_with_empty_lists(
+        self,
+        owner_ctx: tuple[WorkspaceContext, sessionmaker[Session], str],
+    ) -> None:
+        ctx, factory, _ = owner_ctx
+        client = _client(ctx, factory)
+        resp = client.get(f"/employees/{ctx.actor_id}")
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        # Every key in the SPA's ``EmployeeDetail`` interface — keep
+        # this in lockstep with
+        # ``app/web/src/pages/manager/EmployeeDetailPage.tsx``.
+        assert set(body.keys()) == {
+            "subject",
+            "subject_tasks",
+            "subject_expenses",
+            "subject_leaves",
+            "subject_payslips",
+        }
+        assert body["subject"]["id"] == ctx.actor_id
+        assert body["subject"]["email"] == "owner@example.com"
+        assert body["subject_tasks"] == []
+        assert body["subject_expenses"] == []
+        assert body["subject_leaves"] == []
+        assert body["subject_payslips"] == []
+
+    def test_subject_matches_list_projection(
+        self,
+        owner_ctx: tuple[WorkspaceContext, sessionmaker[Session], str],
+    ) -> None:
+        """``detail.subject`` is byte-identical to the list-endpoint row.
+
+        Both surfaces project through :func:`_project_employee`; if a
+        future refactor accidentally diverges the projections (a new
+        field on one but not the other), this test catches it.
+        """
+        ctx, factory, _ = owner_ctx
+        client = _client(ctx, factory)
+        list_body = client.get("/employees").json()
+        list_row = next(r for r in list_body if r["id"] == ctx.actor_id)
+        detail_body = client.get(f"/employees/{ctx.actor_id}").json()
+        assert detail_body["subject"] == list_row
+
+    def test_unknown_employee_returns_404(
+        self,
+        owner_ctx: tuple[WorkspaceContext, sessionmaker[Session], str],
+    ) -> None:
+        ctx, factory, _ = owner_ctx
+        client = _client(ctx, factory)
+        resp = client.get("/employees/01HWNOTAREALEMPLOYEEID00")
+        assert resp.status_code == 404, resp.text
+        assert resp.json()["detail"]["error"] == "not_found"
+
+    def test_cross_workspace_employee_returns_404(
+        self,
+        owner_ctx: tuple[WorkspaceContext, sessionmaker[Session], str],
+    ) -> None:
+        """An employee in a sibling workspace is invisible — 404, not 403.
+
+        Discriminating "not in workspace" from "doesn't exist" would
+        leak whether a given user id is a real account; the
+        membership-gated 404 keeps both paths indistinguishable.
+        """
+        ctx, factory, _ = owner_ctx
+        with factory() as s:
+            sibling_owner = bootstrap_user(
+                s, email="sibling@example.com", display_name="Sibling"
+            )
+            bootstrap_workspace(
+                s,
+                slug="ws-detail-sibling",
+                name="Sibling WS",
+                owner_user_id=sibling_owner.id,
+            )
+            s.commit()
+            sibling_id = sibling_owner.id
+        client = _client(ctx, factory)
+        resp = client.get(f"/employees/{sibling_id}")
+        assert resp.status_code == 404
+
+    def test_worker_returns_403(
+        self,
+        worker_ctx: tuple[WorkspaceContext, sessionmaker[Session], str, str],
+    ) -> None:
+        """Workers do not hold ``employees.read`` — must be 403.
+
+        The composite gate mirrors the list endpoint: a worker hitting
+        the manager profile page is a regression, not an accidental
+        privacy leak. Reject before any subject lookup so the 403
+        response carries no information about the target id.
+        """
+        ctx, factory, _, worker_id = worker_ctx
+        client = _client(ctx, factory)
+        resp = client.get(f"/employees/{worker_id}")
+        assert resp.status_code == 403, resp.text
+        assert resp.json()["detail"]["error"] == "permission_denied"
+
+
+# ---------------------------------------------------------------------------
+# GET /employees/{employee_id}/settings — manager settings tab payload.
+# ---------------------------------------------------------------------------
+
+
+def _set_workspace_settings(
+    factory: sessionmaker[Session],
+    *,
+    workspace_id: str,
+    settings_json: dict[str, object],
+) -> None:
+    """Patch :class:`Workspace.settings_json` for a seeded workspace."""
+    from app.adapters.db.workspace.models import Workspace
+
+    with factory() as s, tenant_agnostic():
+        ws = s.get(Workspace, workspace_id)
+        assert ws is not None
+        ws.settings_json = settings_json
+        s.commit()
+
+
+def _seed_engagement_with_overrides(
+    factory: sessionmaker[Session],
+    *,
+    user_id: str,
+    workspace_id: str,
+    settings_override_json: dict[str, object],
+) -> str:
+    """Seed an active engagement carrying ``settings_override_json``."""
+    eid = _seed_engagement(factory, user_id=user_id, workspace_id=workspace_id)
+    with factory() as s:
+        row = s.get(WorkEngagement, eid)
+        assert row is not None
+        row.settings_override_json = settings_override_json
+        s.commit()
+    return eid
+
+
+class TestSettings:
+    """Pin the ``EntitySettingsPayload`` cascade for the employee tab."""
+
+    def test_owner_returns_catalog_default_when_no_overrides(
+        self,
+        owner_ctx: tuple[WorkspaceContext, sessionmaker[Session], str],
+    ) -> None:
+        """Empty workspace + no engagement → every key resolves to catalog."""
+        ctx, factory, _ = owner_ctx
+        client = _client(ctx, factory)
+        resp = client.get(f"/employees/{ctx.actor_id}/settings")
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert set(body.keys()) == {"overrides", "resolved"}
+        assert body["overrides"] == {}
+        # Every catalog key resolves with ``source = "catalog"``.
+        assert body["resolved"]["evidence.policy"] == {
+            "value": "optional",
+            "source": "catalog",
+        }
+        assert body["resolved"]["tasks.checklist_required"] == {
+            "value": False,
+            "source": "catalog",
+        }
+        # Sanity — the catalog has many keys; sample-of-three is enough
+        # to pin the shape without binding to the full key list (which
+        # is tested directly under tests/unit/api/v1/test_settings_api).
+        assert all(
+            set(entry.keys()) == {"value", "source"}
+            for entry in body["resolved"].values()
+        )
+
+    def test_workspace_override_surfaces_with_workspace_source(
+        self,
+        owner_ctx: tuple[WorkspaceContext, sessionmaker[Session], str],
+    ) -> None:
+        """Workspace ``settings_json`` value beats catalog and tags ``workspace``."""
+        ctx, factory, ws_id = owner_ctx
+        _set_workspace_settings(
+            factory,
+            workspace_id=ws_id,
+            settings_json={"evidence.policy": "require"},
+        )
+        client = _client(ctx, factory)
+        body = client.get(f"/employees/{ctx.actor_id}/settings").json()
+        assert body["resolved"]["evidence.policy"] == {
+            "value": "require",
+            "source": "workspace",
+        }
+
+    def test_engagement_override_wins_and_tags_employee_source(
+        self,
+        owner_ctx: tuple[WorkspaceContext, sessionmaker[Session], str],
+    ) -> None:
+        """Active engagement override beats workspace + catalog.
+
+        ``overrides`` carries the engagement's bare override map (no
+        cascade applied); ``resolved`` runs the full cascade with
+        ``source = "employee"`` for keys that came from the engagement.
+        """
+        ctx, factory, ws_id = owner_ctx
+        _set_workspace_settings(
+            factory,
+            workspace_id=ws_id,
+            settings_json={"evidence.policy": "require"},
+        )
+        _seed_engagement_with_overrides(
+            factory,
+            user_id=ctx.actor_id,
+            workspace_id=ws_id,
+            settings_override_json={
+                "evidence.policy": "forbid",
+                "tasks.checklist_required": True,
+            },
+        )
+        client = _client(ctx, factory)
+        body = client.get(f"/employees/{ctx.actor_id}/settings").json()
+        assert body["overrides"] == {
+            "evidence.policy": "forbid",
+            "tasks.checklist_required": True,
+        }
+        assert body["resolved"]["evidence.policy"] == {
+            "value": "forbid",
+            "source": "employee",
+        }
+        assert body["resolved"]["tasks.checklist_required"] == {
+            "value": True,
+            "source": "employee",
+        }
+        # A key not overridden at the engagement falls back to its
+        # catalog default — provenance must reflect the actual layer.
+        assert body["resolved"]["pay.frequency"]["source"] == "catalog"
+
+    def test_inheritance_marker_falls_through(
+        self,
+        owner_ctx: tuple[WorkspaceContext, sessionmaker[Session], str],
+    ) -> None:
+        """``"inherit"`` and ``None`` at the entity layer fall through.
+
+        §02 cascade: the engagement carrying the literal string
+        ``"inherit"`` (or a JSON ``null``) for a key behaves as if the
+        key were absent. The next layer wins; provenance reports that
+        layer, not ``employee``.
+        """
+        ctx, factory, ws_id = owner_ctx
+        _set_workspace_settings(
+            factory,
+            workspace_id=ws_id,
+            settings_json={"evidence.policy": "require"},
+        )
+        _seed_engagement_with_overrides(
+            factory,
+            user_id=ctx.actor_id,
+            workspace_id=ws_id,
+            settings_override_json={
+                "evidence.policy": "inherit",
+                "tasks.checklist_required": None,
+            },
+        )
+        client = _client(ctx, factory)
+        body = client.get(f"/employees/{ctx.actor_id}/settings").json()
+        # Engagement-override map keeps the raw payload (inheritance
+        # markers and all) so a manager UI can show "explicitly cleared".
+        assert body["overrides"] == {
+            "evidence.policy": "inherit",
+            "tasks.checklist_required": None,
+        }
+        # Resolution skips the inheritance marker and falls through.
+        assert body["resolved"]["evidence.policy"] == {
+            "value": "require",
+            "source": "workspace",
+        }
+        assert body["resolved"]["tasks.checklist_required"] == {
+            "value": False,
+            "source": "catalog",
+        }
+
+    def test_archived_engagement_does_not_supply_overrides(
+        self,
+        owner_ctx: tuple[WorkspaceContext, sessionmaker[Session], str],
+    ) -> None:
+        """Only the active engagement contributes overrides.
+
+        An archived engagement (``archived_on IS NOT NULL``) carries
+        historical data that must not bleed back into the live
+        settings cascade.
+        """
+        ctx, factory, ws_id = owner_ctx
+        # Archived engagement carrying overrides — must NOT surface.
+        archived_id = _seed_engagement(
+            factory,
+            user_id=ctx.actor_id,
+            workspace_id=ws_id,
+            archived_on=date(2026, 1, 1),
+        )
+        with factory() as s:
+            row = s.get(WorkEngagement, archived_id)
+            assert row is not None
+            row.settings_override_json = {"evidence.policy": "forbid"}
+            s.commit()
+        client = _client(ctx, factory)
+        body = client.get(f"/employees/{ctx.actor_id}/settings").json()
+        assert body["overrides"] == {}
+        assert body["resolved"]["evidence.policy"]["source"] == "catalog"
+
+    def test_unknown_employee_returns_404(
+        self,
+        owner_ctx: tuple[WorkspaceContext, sessionmaker[Session], str],
+    ) -> None:
+        ctx, factory, _ = owner_ctx
+        client = _client(ctx, factory)
+        resp = client.get("/employees/01HWNOTAREALEMPLOYEEID00/settings")
+        assert resp.status_code == 404, resp.text
+        assert resp.json()["detail"]["error"] == "not_found"
+
+    def test_worker_returns_403(
+        self,
+        worker_ctx: tuple[WorkspaceContext, sessionmaker[Session], str, str],
+    ) -> None:
+        """Workers do not hold ``scope.edit_settings`` — must be 403.
+
+        The settings tab on the manager EmployeeDetailPage is by
+        definition manager-facing; a worker hitting the route is a
+        privacy regression. The gate matches ``/settings/catalog``.
+        """
+        ctx, factory, _, worker_id = worker_ctx
+        client = _client(ctx, factory)
+        resp = client.get(f"/employees/{worker_id}/settings")
+        assert resp.status_code == 403, resp.text
+        assert resp.json()["detail"]["error"] == "permission_denied"
