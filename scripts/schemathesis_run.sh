@@ -352,6 +352,37 @@ INCLUDE_ARGS=(
     # ``last_credential`` on the last-credential guard. All envelopes
     # documented as ``application/problem+json`` after cd-kcebs.
     --include-operation-id 'auth.passkey.revoke'
+    # ----------------------------------------------------------------
+    # Identity tag — ``auth.passkey`` router promotion under cd-0vw37.
+    # The 4xx codes each handler can emit are now declared per-op via
+    # the router-level ``responses=IDENTITY_PROBLEM_RESPONSES`` (cd-kcebs)
+    # inheritance, so schemathesis' "Undocumented HTTP status code"
+    # check accepts the runtime envelopes. Confirmed clean by isolating
+    # each op against the runner with ``--include-operation-id``
+    # (7 cases / op pass with zero failures across every check).
+    #
+    # Both ``*_finish`` ops will additionally surface schemathesis'
+    # "Missing authentication" *warning* under the full sweep — the
+    # WebAuthn ceremony can't be satisfied without a real authenticator,
+    # so every fuzzed payload lands at the 4xx envelope rather than 2xx.
+    # That's a warning (run still exits 0), not a failure; mirrors the
+    # already-included ``login_start`` / ``register_start`` posture.
+    # ----------------------------------------------------------------
+    # ``auth.passkey.login_finish`` — POST /auth/passkey/login/finish;
+    # finishes the WebAuthn assertion ceremony started by
+    # ``login_start``. Anonymous (no session cookie required — this
+    # *mints* the session). Emits 200 on success; 400 ``invalid_*`` /
+    # ``challenge_consumed_or_unknown`` / 404 ``passkey_not_found`` /
+    # 422 validation on the 4xx envelope.
+    --include-operation-id 'auth.passkey.login_finish'
+    # ``auth.passkey.register_finish`` — POST /auth/passkey/register/finish;
+    # finishes the WebAuthn registration ceremony started by
+    # ``register_start``. Session-cookie authed (the actor must already
+    # be logged in to attach a credential). Emits 200 on success; 400
+    # ``invalid_*`` / ``challenge_consumed_or_unknown`` / 401
+    # ``session_invalid`` / 409 ``passkey_already_registered`` / 422
+    # validation on the 4xx envelope.
+    --include-operation-id 'auth.passkey.register_finish'
 )
 
 # Checks excluded for the asset gate — kept here (rather than at

@@ -40,7 +40,7 @@ See ``docs/specs/02-domain-model.md`` §"permission_rule",
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Annotated, Literal
+from typing import Annotated, Any, Final, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from pydantic import BaseModel, ConfigDict, Field
@@ -53,7 +53,10 @@ from app.api.pagination import (
     PageCursorQuery,
     decode_cursor,
 )
-from app.api.v1._problem_json import IDENTITY_PROBLEM_RESPONSES
+from app.api.v1._problem_json import (
+    IDENTITY_PROBLEM_RESPONSES,
+    PROBLEM_JSON_CONTENT,
+)
 from app.authz.dep import Permission
 from app.tenancy import WorkspaceContext
 
@@ -172,6 +175,23 @@ def _http_for_table_unavailable() -> HTTPException:
     )
 
 
+# Per-route 503 declaration for the two write paths that emit
+# ``permission_rule_table_unavailable`` until the cd-dzp follow-up ships
+# the backing table. ``IDENTITY_PROBLEM_RESPONSES`` (router-level) only
+# documents the 4xx envelope every identity op shares; 503 is a
+# write-path-only quirk and stays scoped to the two routes that raise
+# it. Spec §12 "Errors" lists ``service_unavailable`` (503) as a
+# documented envelope, so the schemathesis "Undocumented HTTP status
+# code" check is satisfied without claiming 503 on read paths that
+# never emit it.
+_TABLE_UNAVAILABLE_RESPONSE: Final[dict[int | str, dict[str, Any]]] = {
+    503: {
+        "description": "permission_rule table not present in v1 schema",
+        "content": PROBLEM_JSON_CONTENT,
+    },
+}
+
+
 # ---------------------------------------------------------------------------
 # Router factory
 # ---------------------------------------------------------------------------
@@ -237,6 +257,7 @@ def build_permission_rules_router() -> APIRouter:
         operation_id="permission_rules.create",
         summary="Create a permission rule (root-only)",
         dependencies=[edit_gate],
+        responses=_TABLE_UNAVAILABLE_RESPONSE,
         openapi_extra={
             "x-cli": {
                 "group": "permission-rules",
@@ -266,6 +287,7 @@ def build_permission_rules_router() -> APIRouter:
         operation_id="permission_rules.revoke",
         summary="Revoke a permission rule (root-only)",
         dependencies=[edit_gate],
+        responses=_TABLE_UNAVAILABLE_RESPONSE,
         openapi_extra={
             "x-cli": {
                 "group": "permission-rules",
