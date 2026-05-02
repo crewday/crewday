@@ -170,6 +170,24 @@ comment).
 - Breaking-change detection: `openapi-diff` between the current branch
   and `main` runs in CI; a breaking diff fails unless PR body contains
   `ALLOW-BREAKING-API`.
+- **Curated allowlist, not full schema sweep.** The gate
+  (`scripts/schemathesis_run.sh`, wired into CI via `make
+  schemathesis`) lists each operation_id explicitly inside
+  `INCLUDE_ARGS` rather than running the entire schema. Reasons:
+  (a) several tags still have schema drift that schemathesis
+  legitimately catches but is tracked under per-tag follow-up
+  Beads tasks, and (b) including ops one-by-one keeps the gate
+  green and CI honest as each follow-up lands. Currently covered:
+  `auth.me.get`, `auth.passkey.login_start`, `auth.passkey.register_start`,
+  `employees.list`, `permissions.action_catalog`, plus the
+  asset-tag subset. The full identity surface is tracked under
+  the cd-1zw3x audit (problem+json content-type, 4xx envelope,
+  HTTPValidationError shape, undocumented status codes,
+  cross-field invariants, FK / unique-constraint 5xx); each
+  category has its own Beads task and re-enables a slice of the
+  allowlist when fixed. ``auth.logout`` is excluded for a
+  runner-architecture reason (single shared session seed) tracked
+  under cd-rfda7.
 
 ## End-to-end
 

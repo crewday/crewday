@@ -91,6 +91,14 @@ export CREWDAY_DEV_AUTH="1"
 export CREWDAY_ROOT_KEY="${CREWDAY_ROOT_KEY:-a086980eae3ed92658101eda4cab651ed4b8d4fafed4207f26446d9572b60eeb}"
 export CREWDAY_BIND_HOST="${HOST}"
 export CREWDAY_BIND_PORT="${PORT}"
+# Public URL — handlers that mint magic-link / email-change / recovery
+# / signup URLs raise ``RuntimeError`` when ``settings.public_url`` is
+# unset (see e.g. ``app/api/v1/auth/email_change.py::post_verify``),
+# which surfaces as a runner-side false-positive 5xx during the sweep.
+# Pinning to the loopback URI mirrors the compose stack's
+# ``CREWDAY_PUBLIC_URL`` so the URL builders stay happy without any
+# real outbound hostname dependency.
+export CREWDAY_PUBLIC_URL="${CREWDAY_PUBLIC_URL:-http://${HOST}:${PORT}}"
 # Cap LLM budget at zero so any handler reaching the LLM seam fails
 # fast instead of doing real network calls during the contract sweep.
 export CREWDAY_LLM_DEFAULT_BUDGET_CENTS_30D="0"
@@ -301,6 +309,35 @@ INCLUDE_ARGS=(
     # Re-enable once the seed clears the workspace between coverage
     # iterations (cd-pa9p follow-up).
     --exclude-operation-id 'asset_types.create'
+    # ----------------------------------------------------------------
+    # Identity tag (cd-1zw3x → cd-rpxd AC 7). The full ``--include-tag
+    # identity`` surface (108 ops) trips ~225 schema-conformance
+    # failures across five categories (problem+json content-type +
+    # 4xx envelope mismatches; FastAPI ``HTTPValidationError.detail``
+    # array-vs-string; undocumented 4xx codes for missing-resource
+    # lookups; cross-field invariants pydantic doesn't emit;
+    # genuine handler 5xx on FK / unique-constraint violations).
+    #
+    # Wire the gate via the same curated-allowlist pattern the asset
+    # tag uses: include exactly the identity operation_ids whose
+    # OpenAPI schemas already match runtime semantics, and add more
+    # only after each context's spec drift is fixed (per-op Beads
+    # follow-up). Each op below was confirmed clean by isolating it
+    # against the runner with ``--include-operation-id`` and
+    # ``--max-examples 20`` (165+ generated cases pass with zero
+    # failures across every check). See the `cd-1zw3x` audit notes
+    # for the full failure breakdown of the remaining 104 ops.
+    #
+    # ``auth.logout`` is intentionally NOT included — invoking it
+    # invalidates the seeded dev session, which then breaks every
+    # subsequent session-cookie-authed op in the same run (esp.
+    # ``auth.me.get``). Re-enable once the runner can re-mint the
+    # session between operations, or once the gate stops sharing one
+    # seed across the suite. Tracked under cd-rfda7.
+    --include-operation-id 'auth.passkey.login_start'
+    --include-operation-id 'auth.passkey.register_start'
+    --include-operation-id 'employees.list'
+    --include-operation-id 'permissions.action_catalog'
 )
 
 # Checks excluded for the asset gate — kept here (rather than at
