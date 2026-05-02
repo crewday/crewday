@@ -55,8 +55,6 @@ import re
 from collections.abc import AsyncIterator, Callable, Iterator
 from contextlib import AbstractAsyncContextManager, asynccontextmanager, contextmanager
 from datetime import timedelta
-from importlib.metadata import PackageNotFoundError
-from importlib.metadata import version as pkg_version
 from pathlib import Path
 from typing import Any, Final
 from urllib.parse import urlparse
@@ -191,21 +189,18 @@ from app.security.hmac_signer import HmacSigner
 from app.tenancy.middleware import WorkspaceContextMiddleware
 from app.util.clock import SystemClock
 from app.util.logging import setup_logging
+from app.util.version import resolve_package_version
 from app.worker.tasks.inventory_reorder import register_inventory_reorder_subscriber
 
 __all__ = ["DemoModeRefused", "PublicBindRefused", "create_app"]
 
 _log = logging.getLogger(__name__)
 
-# Package name we look up via :mod:`importlib.metadata`. Matches
-# ``pyproject.toml`` ``[project].name`` — kept as a module constant so a
-# rename lands in one place.
-_PACKAGE_NAME: Final[str] = "crewday"
-
-# Fallback emitted by ``/version`` when the package isn't installed (e.g.
-# running straight from a source checkout under pytest's default
-# rootdir, without ``pip install -e .``). We prefer a clear sentinel over
-# a crash because ``/version`` is probed in smoke tests.
+# Fallback stamped onto the OpenAPI ``info.version`` when the package
+# isn't installed (e.g. running straight from a source checkout under
+# pytest's default rootdir, without ``pip install -e .``). PEP-440
+# parseable so downstream tooling that reads the OpenAPI document
+# doesn't choke on the dev shape.
 _UNKNOWN_VERSION: Final[str] = "0.0.0+unknown"
 
 # Prod-profile SPA build directory. Resolved against the repo root
@@ -302,19 +297,6 @@ class PublicBindRefused(RuntimeError):
 
 class DemoModeRefused(RuntimeError):
     """Raised when ``CREWDAY_DEMO_MODE=1`` is paired with unsafe config."""
-
-
-def _resolve_version() -> str:
-    """Return the installed package version or a clear sentinel.
-
-    Wrapped so the ``/version`` handler stays trivial and we have a
-    single place to swap in a git-sha / OpenAPI-hash payload once
-    cd-leif lands the full build-metadata surface.
-    """
-    try:
-        return pkg_version(_PACKAGE_NAME)
-    except PackageNotFoundError:
-        return _UNKNOWN_VERSION
 
 
 def _enforce_bind_guard(settings: Settings) -> None:
@@ -1591,7 +1573,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app = FastAPI(
         title="crewday",
-        version=_resolve_version(),
+        version=resolve_package_version(_UNKNOWN_VERSION),
         # The OpenAPI surface lives at ``/api/openapi.json`` per §12
         # "Base URL"; the default ``/openapi.json`` would shadow an
         # SPA route and confuse CDN caching rules.

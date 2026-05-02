@@ -46,8 +46,6 @@ import logging
 import os
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from importlib.metadata import PackageNotFoundError
-from importlib.metadata import version as pkg_version
 from pathlib import Path
 from typing import Final
 
@@ -66,6 +64,7 @@ from app.adapters.db.session import make_uow
 from app.config import Settings
 from app.tenancy.current import tenant_agnostic
 from app.util.clock import Clock, SystemClock
+from app.util.version import resolve_package_version
 
 __all__ = ["router"]
 
@@ -73,15 +72,10 @@ _log = logging.getLogger(__name__)
 
 router = APIRouter(tags=["ops"])
 
-# Package name read by ``/version``. Matches ``pyproject.toml``
-# ``[project].name`` — kept local so a rename lands in one place here
-# without coupling to :mod:`app.main`'s copy (both resolve the same
-# string, that's fine).
-_PACKAGE_NAME: Final[str] = "crewday"
-
 # Sentinel for ``/version`` fields when the package/env var isn't
-# populated. Matches :mod:`app.main`'s fallback shape so dev shells
-# without a release pipeline still render a coherent payload.
+# populated. Human-readable token (not PEP-440) so the payload reads
+# coherently alongside ``git_sha`` / ``build_at`` / ``image_digest``
+# in dev shells without a release pipeline.
 _UNKNOWN: Final[str] = "unknown"
 
 # Env var names the release pipeline populates before baking the
@@ -213,7 +207,7 @@ def version() -> dict[str, str]:
     a release build returns a shape-complete payload.
     """
     return {
-        "version": _resolve_version(),
+        "version": resolve_package_version(_UNKNOWN),
         "git_sha": os.environ.get(_GIT_SHA_ENV, _UNKNOWN) or _UNKNOWN,
         "build_at": os.environ.get(_BUILD_AT_ENV, _UNKNOWN) or _UNKNOWN,
         "image_digest": os.environ.get(_IMAGE_DIGEST_ENV, _UNKNOWN) or _UNKNOWN,
@@ -223,20 +217,6 @@ def version() -> dict[str, str]:
 # ---------------------------------------------------------------------------
 # Internals
 # ---------------------------------------------------------------------------
-
-
-def _resolve_version() -> str:
-    """Return the installed package version or ``"unknown"``.
-
-    Falls back when running from a non-installed source checkout
-    (e.g. under pytest without ``pip install -e .``). We swallow the
-    specific :class:`PackageNotFoundError` narrowly — any other
-    :mod:`importlib.metadata` failure is a bug we want to see.
-    """
-    try:
-        return pkg_version(_PACKAGE_NAME)
-    except PackageNotFoundError:
-        return _UNKNOWN
 
 
 def _settings_from_request(request: Request) -> Settings:

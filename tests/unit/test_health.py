@@ -38,6 +38,7 @@ from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
 import app.api.health as health_module
+import app.util.version as version_module
 from app.api.health import router as health_router
 from app.config import Settings
 from app.util.clock import FrozenClock
@@ -538,7 +539,11 @@ class TestVersion:
         def _raise(_name: str) -> str:
             raise PackageNotFoundError("crewday")
 
-        monkeypatch.setattr(health_module, "pkg_version", _raise)
+        # ``resolve_package_version`` lives in ``app.util.version`` and
+        # both the factory and ``/version`` import it from there; patch
+        # the helper's underlying ``importlib.metadata`` lookup so both
+        # call sites observe the missing-package branch.
+        monkeypatch.setattr(version_module, "_pkg_version", _raise)
         body = _client(_bare_app(_settings())).get("/version").json()
         assert body["version"] == "unknown"
 

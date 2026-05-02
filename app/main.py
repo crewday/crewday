@@ -29,7 +29,6 @@ from app.api.factory import (
     PublicBindRefused,
     _is_api_path,
     _resolve_spa_dist,
-    _resolve_version,
     create_app,
 )
 
@@ -48,7 +47,6 @@ __all__ = [
     "PublicBindRefused",
     "_is_api_path",
     "_resolve_spa_dist",
-    "_resolve_version",
     "create_app",
     "get_settings",
     "setup_logging",
