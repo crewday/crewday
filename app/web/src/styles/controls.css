@@ -1,0 +1,276 @@
+/* §14 "Admin shell" — tokens are shared with the manager `.desk`;
+   these classes cover the bits ManagerLayout didn't already provide. */
+.desk--admin .desk__brand .desk__wordmark { color: var(--moss); }
+/* §14: no workspace switcher on /admin (deployment-wide surface). */
+.desk--admin .ws-switcher { display: none; }
+
+.admin-backlink { width: 100%; text-align: left; }
+
+.form-grid {
+  display: grid;
+  gap: 14px 24px;
+  padding: 16px;
+}
+.form-grid--two { grid-template-columns: 1fr 1fr; }
+@media (max-width: 720px) { .form-grid--two { grid-template-columns: 1fr; } }
+
+.form-row {
+  display: flex; flex-direction: column; gap: 6px;
+}
+.form-label {
+  font-size: 12px; font-weight: 600; text-transform: uppercase;
+  letter-spacing: 0.04em; color: var(--ink-3);
+}
+.toggle { display: flex; align-items: center; gap: 10px; }
+
+/* ══════════════════════════════════════════════════════════════
+   CHECKBOX — "field-guide tick".
+
+   A reusable, stylised checkbox that matches crewday's warm-paper
+   editorial tone. The box reads as a shallow depression pressed
+   into card stock; on check the moss fill washes in and the tick
+   draws with a hand-made micro-tilt and a spring settle.
+
+   Structure (BEM; use <Checkbox> from common.tsx for parity):
+
+     <label class="checkbox">
+       <input class="checkbox__input" type="checkbox" />
+       <span class="checkbox__box" aria-hidden="true">
+         <svg class="checkbox__tick" viewBox="0 0 18 18">
+           <path d="M3.8 9.6 L7.4 13 L14.2 5.4" />
+         </svg>
+         <span class="checkbox__dash" aria-hidden="true"></span>
+       </span>
+       <span class="checkbox__label">…</span>
+     </label>
+
+   Modifiers:
+     .checkbox--sm / --lg           size (14 / 18 / 22 px)
+     .checkbox--rust / --sky        alternate tones
+     .checkbox--block               wraps as a bordered card row
+     .checkbox--standalone          no label text (just the box)
+
+   The native input is visually hidden but remains keyboard / a11y
+   authoritative. `:has()` lets the sibling box react to state
+   without JS; we still ship `.is-*` fallback classes for safety
+   when the component needs explicit control (indeterminate).
+   ══════════════════════════════════════════════════════════════ */
+.checkbox {
+  display: inline-flex; align-items: flex-start; gap: 10px;
+  cursor: pointer; user-select: none;
+  font: inherit; color: var(--ink);
+  line-height: 1.4;
+  -webkit-tap-highlight-color: transparent;
+}
+.checkbox--block {
+  display: flex; width: 100%;
+  align-items: flex-start; gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--line); border-radius: 8px;
+  background: var(--card);
+  transition: background 140ms ease, border-color 140ms ease;
+}
+.checkbox--block:hover { border-color: var(--line-strong); }
+.checkbox--block:has(.checkbox__input:checked) {
+  background: var(--moss-softer);
+  border-color: var(--moss);
+}
+
+/* Visually hide the real input but keep it in the tab order +
+   accessible to screen readers. No `display:none` — that removes
+   it from the accessibility tree. */
+.checkbox__input {
+  position: absolute; width: 1px; height: 1px;
+  padding: 0; margin: -1px; overflow: hidden;
+  clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}
+
+.checkbox__box {
+  position: relative; flex-shrink: 0;
+  width: 18px; height: 18px;
+  border-radius: 5px;
+  border: 1.5px solid var(--line-strong);
+  background: var(--card);
+  display: inline-flex; align-items: center; justify-content: center;
+  /* Subtle inset: feels pressed into paper. */
+  box-shadow:
+    inset 0 1px 0 rgba(31, 26, 20, 0.04),
+    inset 0 -1px 0 rgba(255, 255, 255, 0.4);
+  transition:
+    background 160ms ease,
+    border-color 160ms ease,
+    transform 260ms cubic-bezier(0.34, 1.56, 0.64, 1),
+    box-shadow 160ms ease;
+  /* Alignment nudge so the box optically centres with the first
+     line of label text at 15px body size. */
+  margin-top: 1px;
+}
+[data-theme="dark"] .checkbox__box {
+  box-shadow:
+    inset 0 1px 0 rgba(0, 0, 0, 0.3),
+    inset 0 -1px 0 rgba(255, 255, 255, 0.04);
+}
+
+/* Hover: darken the border on the unchecked state to invite the click. */
+.checkbox:hover .checkbox__input:not(:checked):not(:disabled) ~ .checkbox__box {
+  border-color: var(--ink-3);
+}
+
+/* Focus ring. Matches the global :focus-visible moss outline but
+   offset on the box itself so the label text isn't ringed. */
+.checkbox__input:focus-visible ~ .checkbox__box {
+  outline: 2px solid var(--moss);
+  outline-offset: 3px;
+  border-radius: 5px;
+}
+
+/* ── Tick ───────────────────────────────────────────────────── */
+.checkbox__tick {
+  width: 100%; height: 100%;
+  stroke: var(--card);
+  stroke-width: 2.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  fill: none;
+  /* Draw-in: dasharray is longer than the path so the tick can
+     retract when unchecked. 24 > path length (~17). */
+  stroke-dasharray: 24;
+  stroke-dashoffset: 24;
+  /* Micro-tilt — the naturalist's jaunty pen. */
+  transform: rotate(-4deg);
+  transform-origin: 50% 50%;
+  transition: stroke-dashoffset 260ms cubic-bezier(0.65, 0, 0.35, 1);
+  opacity: 0;
+}
+.checkbox__dash {
+  position: absolute; inset: auto;
+  width: 9px; height: 2px;
+  background: var(--card); border-radius: 2px;
+  transform: scaleX(0);
+  transform-origin: 50% 50%;
+  transition: transform 200ms cubic-bezier(0.65, 0, 0.35, 1);
+}
+
+/* ── Checked state ──────────────────────────────────────────── */
+.checkbox__input:checked ~ .checkbox__box {
+  background: var(--moss);
+  border-color: var(--moss);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.12),
+    0 1px 0 rgba(31, 26, 20, 0.06);
+  animation: checkbox-pop 320ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.checkbox__input:checked ~ .checkbox__box .checkbox__tick {
+  stroke-dashoffset: 0;
+  opacity: 1;
+}
+
+@keyframes checkbox-pop {
+  0%   { transform: scale(1); }
+  55%  { transform: scale(1.08); }
+  100% { transform: scale(1); }
+}
+
+/* ── Indeterminate (explicit `.is-indeterminate` on the input) ── */
+.checkbox__input.is-indeterminate ~ .checkbox__box {
+  background: var(--moss);
+  border-color: var(--moss);
+}
+.checkbox__input.is-indeterminate ~ .checkbox__box .checkbox__tick {
+  opacity: 0;
+}
+.checkbox__input.is-indeterminate ~ .checkbox__box .checkbox__dash {
+  transform: scaleX(1);
+}
+
+/* ── Disabled ───────────────────────────────────────────────── */
+.checkbox:has(.checkbox__input:disabled) {
+  cursor: not-allowed;
+  color: var(--ink-3);
+}
+.checkbox__input:disabled ~ .checkbox__box {
+  opacity: 0.55;
+  background: var(--paper-2);
+  border-color: var(--line);
+  box-shadow: none;
+}
+.checkbox__input:disabled:checked ~ .checkbox__box {
+  background: var(--ink-4);
+  border-color: var(--ink-4);
+}
+
+/* ── Label ──────────────────────────────────────────────────── */
+.checkbox__label {
+  font-size: 14px; color: var(--ink);
+}
+.checkbox__label--hint {
+  display: block;
+  font-size: 12px; color: var(--ink-3);
+  margin-top: 2px;
+  font-weight: 400;
+}
+
+/* ── Size modifiers ─────────────────────────────────────────── */
+.checkbox--sm .checkbox__box { width: 14px; height: 14px; border-radius: 4px; }
+.checkbox--sm .checkbox__dash { width: 7px; }
+.checkbox--sm .checkbox__label { font-size: 13px; }
+
+.checkbox--lg .checkbox__box { width: 22px; height: 22px; border-radius: 6px; }
+.checkbox--lg .checkbox__dash { width: 11px; height: 2.5px; }
+.checkbox--lg .checkbox__label { font-size: 15px; }
+
+/* ── Tonal modifiers ────────────────────────────────────────── */
+.checkbox--rust .checkbox__input:checked ~ .checkbox__box,
+.checkbox--rust .checkbox__input.is-indeterminate ~ .checkbox__box {
+  background: var(--rust); border-color: var(--rust);
+}
+.checkbox--rust .checkbox__input:focus-visible ~ .checkbox__box {
+  outline-color: var(--rust);
+}
+.checkbox--rust.checkbox--block:has(.checkbox__input:checked) {
+  background: var(--rust-soft); border-color: var(--rust);
+}
+
+.checkbox--sky .checkbox__input:checked ~ .checkbox__box,
+.checkbox--sky .checkbox__input.is-indeterminate ~ .checkbox__box {
+  background: var(--sky); border-color: var(--sky);
+}
+.checkbox--sky .checkbox__input:focus-visible ~ .checkbox__box {
+  outline-color: var(--sky);
+}
+.checkbox--sky.checkbox--block:has(.checkbox__input:checked) {
+  background: var(--sky-soft); border-color: var(--sky);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .checkbox__input:checked ~ .checkbox__box { animation: none; }
+  .checkbox__tick { transform: none; }
+}
+
+.panel__foot {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 12px 16px; border-top: 1px solid var(--line);
+  gap: 12px; flex-wrap: wrap;
+}
+
+.inline-actions { display: inline-flex; gap: 6px; align-items: center; }
+
+.input--inline {
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--paper);
+  font: inherit;
+  min-width: 120px;
+}
+.input--inline:focus {
+  outline: 2px solid var(--moss);
+  outline-offset: 1px;
+}
+
+.table__link {
+  color: var(--ink);
+  text-decoration: none;
+  border-bottom: 1px dashed var(--line);
+}
+.table__link:hover { color: var(--moss); border-bottom-color: var(--moss); }

@@ -1,0 +1,770 @@
+/* ==========================================================
+   §03 API tokens — manager /tokens page + /me personal panel.
+
+   Design direction: "editorial field-guide". Each token is a
+   credential tile whose monospace prefix anchors the row; scopes
+   render as selectable pills (not checkboxes); the reveal-once
+   state feels like a safe-deposit ceremony, not an error banner.
+
+   Every non-panel surface here uses semantic names prefixed
+   `tokens-…` so future resource pages can fork the aesthetic
+   without colliding.
+   ========================================================== */
+
+/* Header meta strip — sits in .panel__head next to the title.
+   Replaces trailing .muted text with a structured rhythm of
+   counters + a quiet pointer to the /me surface. */
+.tokens-meta {
+  display: flex; align-items: center; gap: var(--space-7);
+  font-size: 12px; color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+}
+.tokens-meta__stat {
+  display: inline-flex; align-items: baseline; gap: var(--space-2);
+}
+.tokens-meta__stat-value {
+  font-family: "Fraunces", serif; font-weight: 600;
+  font-size: 15px; color: var(--ink);
+  font-variation-settings: "opsz" 16;
+}
+.tokens-meta__stat-label {
+  text-transform: uppercase; letter-spacing: 0.06em;
+  font-size: 10.5px;
+}
+.tokens-meta__divider {
+  width: 1px; height: 14px; background: var(--line-strong);
+}
+.tokens-meta__hint {
+  color: var(--ink-3);
+}
+.tokens-meta__hint a {
+  color: var(--moss); font-weight: 500; text-decoration: none;
+  border-bottom: 1px dashed var(--moss-soft);
+  padding-bottom: var(--space-1);
+}
+.tokens-meta__hint a:hover {
+  border-bottom-color: var(--moss);
+}
+
+/* Main list — a table with more typographic care than `.table`
+   provides. Name column is the "anchor"; prefix is pinned beneath
+   as the mono identifier. Rows show a left tick of colour that
+   encodes status (active/expiring/revoked) without needing a chip. */
+.tokens-table {
+  width: 100%; border-collapse: separate; border-spacing: 0;
+}
+.tokens-table thead th {
+  font-size: 10.5px; font-weight: 600; color: var(--ink-3);
+  text-transform: uppercase; letter-spacing: 0.1em;
+  padding: var(--space-6) var(--space-7) var(--space-5); text-align: left;
+  border-bottom: 1px solid var(--line);
+}
+.tokens-table tbody td {
+  padding: var(--space-9) var(--space-7);
+  border-bottom: 1px solid var(--line);
+  vertical-align: top;
+}
+.tokens-table tbody tr:last-child td { border-bottom: 0; }
+.tokens-table tbody tr {
+  position: relative;
+}
+.tokens-table tbody tr.tokens-row--active td:first-child   { box-shadow: inset 3px 0 0 var(--moss); }
+.tokens-table tbody tr.tokens-row--expiring td:first-child { box-shadow: inset 3px 0 0 var(--sand); }
+.tokens-table tbody tr.tokens-row--expired  td:first-child { box-shadow: inset 3px 0 0 var(--rust); }
+.tokens-table tbody tr.tokens-row--revoked  td:first-child { box-shadow: inset 3px 0 0 var(--ink-4); }
+.tokens-table tbody tr.tokens-row--revoked  td { opacity: 0.72; }
+
+.tokens-table td:first-child { padding-left: var(--space-9); }
+.tokens-table th:first-child { padding-left: var(--space-9); }
+
+/* Name cell — title + mono prefix + optional note. The prefix is
+   the visual identifier; monospace, faint, but with a preceding
+   bullet so it reads as one-glance metadata. */
+.tokens-name {
+  display: flex; flex-direction: column; gap: var(--space-2);
+}
+.tokens-name__title {
+  font-family: "Fraunces", serif; font-weight: 600;
+  font-size: 16px; color: var(--ink); line-height: 1.2;
+  font-variation-settings: "opsz" 24;
+}
+.tokens-name__id {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 11.5px; color: var(--ink-3);
+  letter-spacing: 0.01em;
+}
+.tokens-name__id::before {
+  content: "◆"; color: var(--moss-2); margin-right: var(--space-3);
+  font-size: 9px; vertical-align: 1.5px;
+}
+[data-theme="dark"] .tokens-name__id::before { color: var(--moss); }
+.tokens-name__note {
+  font-size: 12.5px; color: var(--ink-3); font-style: italic;
+  max-width: 28ch; line-height: 1.4;
+}
+
+/* Kind badge — slightly more presence than .chip (serif-matched,
+   outlined, per-kind tone). */
+.tokens-kind {
+  display: inline-flex; align-items: center; gap: var(--space-3);
+  padding: var(--space-2) var(--space-5) var(--space-2) var(--space-4); border-radius: 999px;
+  font-size: 11.5px; font-weight: 600; letter-spacing: 0.02em;
+  border: 1px solid transparent; white-space: nowrap;
+}
+.tokens-kind::before {
+  content: ""; width: 6px; height: 6px; border-radius: 50%;
+  display: inline-block;
+}
+.tokens-kind--scoped {
+  background: var(--moss-softer); color: var(--moss);
+  border-color: var(--moss-soft);
+}
+.tokens-kind--scoped::before   { background: var(--moss); }
+.tokens-kind--delegated {
+  background: var(--sky-soft); color: var(--sky);
+  border-color: var(--sky-soft);
+}
+.tokens-kind--delegated::before { background: var(--sky); }
+.tokens-kind--personal {
+  background: var(--sand-soft); color: #8A6A22;
+  border-color: var(--sand-soft);
+}
+[data-theme="dark"] .tokens-kind--personal { color: var(--sand); }
+.tokens-kind--personal::before { background: var(--sand); }
+
+/* Scope list in a table cell — pills aligned tightly, wrapping. */
+.tokens-scopes {
+  display: flex; flex-wrap: wrap; gap: var(--space-2); max-width: 22ch;
+}
+.tokens-scopes__pill {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 11px; padding: var(--space-1) var(--space-4); border-radius: 4px;
+  background: var(--paper-2); color: var(--ink-2);
+  border: 1px solid var(--line);
+  white-space: nowrap;
+}
+.tokens-scopes__pill--me {
+  background: var(--sand-soft); color: #8A6A22;
+  border-color: transparent;
+}
+[data-theme="dark"] .tokens-scopes__pill--me { color: var(--sand); }
+.tokens-scopes__inherit {
+  font-size: 12px; color: var(--ink-3); font-style: italic;
+  line-height: 1.35; max-width: 22ch;
+}
+
+/* Stacked time cell — primary timestamp + quieter secondary */
+.tokens-time {
+  display: flex; flex-direction: column; gap: var(--space-1);
+  font-size: 12.5px; color: var(--ink-2);
+  font-variant-numeric: tabular-nums;
+}
+.tokens-time__sub {
+  font-size: 11.5px; color: var(--ink-3);
+}
+.tokens-time__ip {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 10.5px; color: var(--ink-3);
+  letter-spacing: 0.01em; margin-top: var(--space-1);
+}
+.tokens-time--absent { color: var(--ink-4); font-style: italic; font-size: 12px; }
+
+/* Status dot — carries the same tone as the row tick, but as an
+   explicit pill so the column header has a target. */
+.tokens-status {
+  display: inline-flex; align-items: center; gap: var(--space-3);
+  font-size: 12px; font-weight: 500;
+}
+.tokens-status::before {
+  content: ""; width: 8px; height: 8px; border-radius: 50%;
+}
+.tokens-status--active   { color: var(--moss); }
+.tokens-status--active::before   { background: var(--moss); box-shadow: 0 0 0 3px var(--moss-softer); }
+.tokens-status--expiring { color: #8A6A22; }
+[data-theme="dark"] .tokens-status--expiring { color: var(--sand); }
+.tokens-status--expiring::before { background: var(--sand); box-shadow: 0 0 0 3px var(--sand-soft); }
+.tokens-status--expired  { color: var(--rust); }
+.tokens-status--expired::before  { background: var(--rust); box-shadow: 0 0 0 3px var(--rust-soft); }
+.tokens-status--revoked  { color: var(--ink-3); }
+.tokens-status--revoked::before  { background: var(--ink-4); }
+
+.tokens-row-actions {
+  display: flex; flex-direction: column; gap: var(--space-2);
+  align-items: flex-end; white-space: nowrap;
+}
+.tokens-row-actions__primary { display: flex; gap: var(--space-2); }
+
+/* Per-token audit log — distinctly quieter than the main list.
+   Inset on the warm paper-2, smaller type, left-gutter timestamp. */
+.tokens-audit {
+  margin-top: var(--space-7); padding: var(--space-8) var(--space-9);
+  background: var(--paper-2);
+  border: 1px dashed var(--line-strong);
+  border-radius: 10px;
+}
+.tokens-audit__head {
+  display: flex; align-items: baseline; justify-content: space-between;
+  margin-bottom: var(--space-5);
+}
+.tokens-audit__title {
+  font-family: "Fraunces", serif; font-weight: 600;
+  font-size: 14px; color: var(--ink);
+  font-variation-settings: "opsz" 14;
+}
+.tokens-audit__title-tag {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 11.5px; color: var(--ink-3); margin-left: var(--space-4);
+}
+.tokens-audit__empty {
+  color: var(--ink-3); font-size: 12.5px; font-style: italic;
+}
+.tokens-audit__table {
+  width: 100%; border-collapse: collapse; font-size: 12.5px;
+}
+.tokens-audit__table th {
+  text-align: left; padding: var(--space-3) var(--space-4);
+  font-size: 10px; font-weight: 600; color: var(--ink-3);
+  text-transform: uppercase; letter-spacing: 0.08em;
+  border-bottom: 1px solid var(--line);
+}
+.tokens-audit__table td {
+  padding: var(--space-4); border-bottom: 1px solid var(--line);
+  color: var(--ink-2); vertical-align: top;
+}
+.tokens-audit__table tr:last-child td { border-bottom: 0; }
+.tokens-audit__when {
+  font-variant-numeric: tabular-nums; color: var(--ink-3);
+  font-size: 11.5px; white-space: nowrap;
+}
+.tokens-audit__method {
+  display: inline-block; min-width: 44px; text-align: center;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 11px; font-weight: 700; letter-spacing: 0.03em;
+  padding: var(--space-1) var(--space-3); border-radius: 4px;
+  background: var(--paper-3); color: var(--ink-2);
+}
+.tokens-audit__path {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 11.5px;
+}
+.tokens-audit__status {
+  display: inline-block; font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 11.5px; font-weight: 600;
+  padding: var(--space-1) var(--space-4); border-radius: 4px;
+}
+.tokens-audit__status--ok {
+  background: var(--moss-soft); color: var(--moss);
+}
+.tokens-audit__status--fail {
+  background: var(--rust-soft); color: var(--rust);
+}
+.tokens-audit__ip,
+.tokens-audit__cid {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 11px; color: var(--ink-3);
+}
+
+/* ---- Create form: structured, pill scope picker ---- */
+.tokens-form {
+  display: flex; flex-direction: column; gap: var(--space-9);
+}
+.tokens-form__section {
+  display: flex; flex-direction: column; gap: var(--space-4);
+}
+.tokens-form__legend {
+  font-size: 11px; font-weight: 600; letter-spacing: 0.08em;
+  text-transform: uppercase; color: var(--ink-3);
+}
+.tokens-form__legend-hint {
+  font-size: 12px; color: var(--ink-3); font-weight: 400;
+  text-transform: none; letter-spacing: 0; margin-left: var(--space-4);
+}
+.tokens-form__row {
+  display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-7);
+}
+@media (max-width: 640px) { .tokens-form__row { grid-template-columns: 1fr; } }
+
+/* Kind selector — two cards, same idiom as /me Appearance. */
+.tokens-kind-picker {
+  display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-5);
+}
+@media (max-width: 640px) { .tokens-kind-picker { grid-template-columns: 1fr; } }
+.tokens-kind-picker__opt {
+  position: relative; cursor: pointer;
+  display: flex; flex-direction: column; gap: var(--space-2);
+  padding: var(--space-7) var(--space-8);
+  background: var(--card); border: 1px solid var(--line);
+  border-radius: 10px;
+  transition: border-color 140ms ease, background 140ms ease, box-shadow 140ms ease;
+}
+.tokens-kind-picker__opt:hover { border-color: var(--line-strong); }
+.tokens-kind-picker__opt input {
+  position: absolute; opacity: 0; pointer-events: none;
+}
+.tokens-kind-picker__opt--active {
+  border-color: var(--moss);
+  background: var(--moss-softer);
+  box-shadow: 0 0 0 1px var(--moss);
+}
+.tokens-kind-picker__title {
+  display: flex; align-items: center; gap: var(--space-4);
+  font-family: "Fraunces", serif; font-weight: 600;
+  font-size: 14.5px; color: var(--ink);
+}
+.tokens-kind-picker__title::before {
+  content: ""; width: 14px; height: 14px; border-radius: 50%;
+  border: 1.5px solid var(--line-strong); flex-shrink: 0;
+  background: var(--card);
+  transition: border-color 140ms ease, background 140ms ease;
+}
+.tokens-kind-picker__opt--active .tokens-kind-picker__title::before {
+  border-color: var(--moss); background: var(--moss);
+  box-shadow: inset 0 0 0 3px var(--card);
+}
+.tokens-kind-picker__sub {
+  font-size: 12.5px; color: var(--ink-3); line-height: 1.45;
+  padding-left: var(--space-10);
+}
+
+/* Scope picker — pill toggles. Monospace scope keys on a sand-
+   tinted background when selected; ghost-neutral when not. */
+.tokens-scope-picker {
+  display: flex; flex-wrap: wrap; gap: var(--space-3);
+}
+.tokens-scope-picker__pill {
+  cursor: pointer; user-select: none;
+  display: inline-flex; align-items: center; gap: var(--space-3);
+  padding: var(--space-3) var(--space-6); border-radius: 999px;
+  background: var(--card); border: 1px solid var(--line-strong);
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 12px; color: var(--ink-2);
+  transition: background 120ms ease, color 120ms ease,
+              border-color 120ms ease, transform 120ms ease;
+}
+.tokens-scope-picker__pill:hover {
+  border-color: var(--moss); color: var(--ink);
+}
+.tokens-scope-picker__pill input {
+  position: absolute; opacity: 0; width: 0; height: 0; pointer-events: none;
+}
+.tokens-scope-picker__pill--on {
+  background: var(--moss); color: var(--card);
+  border-color: var(--moss);
+}
+.tokens-scope-picker__pill--on:hover { color: var(--card); }
+.tokens-scope-picker__pill--on::before {
+  content: "✓"; font-size: 10px; font-weight: 700;
+}
+.tokens-scope-picker--personal .tokens-scope-picker__pill--on {
+  background: var(--sand); color: var(--ink); border-color: var(--sand);
+}
+[data-theme="dark"] .tokens-scope-picker--personal .tokens-scope-picker__pill--on {
+  color: var(--paper);
+}
+
+/* Hint list paired with scope picker on /me. Each scope key gets a
+   plain-language description; clicking anywhere on the row toggles. */
+.tokens-scope-list {
+  list-style: none; margin: var(--space-0); padding: var(--space-0);
+  display: flex; flex-direction: column; gap: var(--space-1);
+}
+.tokens-scope-list__item {
+  cursor: pointer; user-select: none;
+  display: grid; grid-template-columns: auto 1fr auto; gap: var(--space-6);
+  align-items: center; padding: var(--space-5) var(--space-6);
+  border: 1px solid var(--line); border-radius: 8px;
+  background: var(--card);
+  transition: background 120ms ease, border-color 120ms ease;
+}
+.tokens-scope-list__item:hover { border-color: var(--line-strong); }
+.tokens-scope-list__item input {
+  position: absolute; opacity: 0; width: 0; height: 0; pointer-events: none;
+}
+.tokens-scope-list__check {
+  width: 18px; height: 18px; border-radius: 5px;
+  border: 1.5px solid var(--line-strong); background: var(--card);
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 11px; color: transparent;
+  transition: background 120ms ease, border-color 120ms ease,
+              color 120ms ease, transform 220ms cubic-bezier(0.34, 1.56, 0.64, 1);
+  flex-shrink: 0;
+}
+.tokens-scope-list__item--on {
+  background: var(--moss-softer); border-color: var(--moss);
+}
+.tokens-scope-list__item--on .tokens-scope-list__check {
+  background: var(--moss); border-color: var(--moss); color: var(--card);
+  transform: scale(1.04);
+}
+.tokens-scope-list__key {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 12.5px; color: var(--ink);
+}
+.tokens-scope-list__hint {
+  font-size: 12px; color: var(--ink-3); line-height: 1.4;
+  grid-column: 2; padding-top: var(--space-1);
+}
+.tokens-scope-list__badge {
+  font-size: 10.5px; color: var(--ink-3);
+  text-transform: uppercase; letter-spacing: 0.08em;
+}
+.tokens-scope-list__item--on .tokens-scope-list__badge { color: var(--moss); }
+
+/* Submit bar — split pattern: hint on the left, actions on right */
+.tokens-form__actions {
+  display: flex; align-items: center; gap: var(--space-6);
+  justify-content: space-between;
+  padding-top: var(--space-6); margin-top: var(--space-2);
+  border-top: 1px solid var(--line);
+}
+.tokens-form__actions-hint {
+  font-size: 12px; color: var(--ink-3);
+  line-height: 1.45; max-width: 54ch;
+}
+.tokens-form__actions-buttons { display: flex; gap: var(--space-4); }
+
+.tokens-form__error {
+  margin: var(--space-0); padding: var(--space-5) var(--space-7);
+  background: var(--rust-soft); color: var(--rust);
+  border-left: 3px solid var(--rust); border-radius: 6px;
+  font-size: 13px;
+}
+
+/* ---- Reveal-once panel. The ceremony state.
+   Two-column stripe of type and a code deck; a locking-wax
+   callout bar ties it to the one-time warning. */
+.tokens-reveal {
+  position: relative;
+  padding: var(--space-0); overflow: hidden;
+  border: 1px solid var(--sand);
+  border-radius: 14px;
+  background: linear-gradient(180deg, var(--sand-soft) 0%, var(--card) 60%);
+  box-shadow: var(--shadow-raised);
+}
+.tokens-reveal__ribbon {
+  display: flex; align-items: center; gap: var(--space-6);
+  padding: var(--space-7) var(--space-10);
+  background: var(--card);
+  border-bottom: 1px dashed var(--sand);
+  font-size: 12px; color: var(--ink-2);
+}
+.tokens-reveal__ribbon-mark {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 28px; height: 28px; border-radius: 50%;
+  background: var(--sand-soft); color: #8A6A22;
+  flex-shrink: 0;
+}
+[data-theme="dark"] .tokens-reveal__ribbon-mark { color: var(--sand); }
+.tokens-reveal__ribbon-title {
+  font-family: "Fraunces", serif; font-weight: 600;
+  font-size: 15px; color: var(--ink);
+  font-variation-settings: "opsz" 18;
+  letter-spacing: -0.01em;
+}
+.tokens-reveal__ribbon-sub {
+  color: var(--ink-3); font-size: 12px; margin-top: var(--space-1);
+}
+.tokens-reveal__dismiss {
+  margin-left: auto;
+}
+.tokens-reveal__body { padding: var(--space-9) var(--space-10); }
+.tokens-reveal__label {
+  font-size: 10px; font-weight: 700; letter-spacing: 0.14em;
+  text-transform: uppercase; color: var(--ink-3);
+  margin: var(--space-0) var(--space-0) var(--space-4);
+}
+.tokens-reveal__secret-row {
+  display: flex; align-items: stretch; gap: var(--space-5);
+}
+.tokens-reveal__secret {
+  flex: 1; min-width: 0;
+  padding: var(--space-7) var(--space-8);
+  background: var(--paper);
+  border: 1px solid var(--line-strong);
+  border-radius: 10px;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 13px; line-height: 1.5; color: var(--ink);
+  letter-spacing: 0.02em;
+  word-break: break-all;
+  overflow-x: auto;
+}
+.tokens-reveal__copy {
+  flex-shrink: 0;
+  display: inline-flex; align-items: center; gap: var(--space-3);
+  padding: var(--space-5) var(--space-7);
+  background: var(--moss); color: var(--card);
+  border: 1px solid var(--moss); border-radius: 10px;
+  font-weight: 600; font-size: 13px; cursor: pointer;
+  font-family: inherit;
+  transition: background 120ms ease, transform 120ms ease;
+}
+.tokens-reveal__copy:hover { background: var(--moss-2); }
+.tokens-reveal__copy:active { transform: scale(0.97); }
+.tokens-reveal__copy--done { background: var(--moss-3); }
+
+.tokens-reveal__divider {
+  display: flex; align-items: center; gap: var(--space-5);
+  margin: var(--space-9) var(--space-0) var(--space-4);
+  font-size: 10.5px; font-weight: 700; letter-spacing: 0.14em;
+  text-transform: uppercase; color: var(--ink-3);
+}
+.tokens-reveal__divider::before,
+.tokens-reveal__divider::after {
+  content: ""; flex: 1; height: 1px; background: var(--line);
+}
+.tokens-reveal__code {
+  margin: var(--space-0); padding: var(--space-7) var(--space-8);
+  background: var(--ink); color: var(--paper);
+  border-radius: 10px;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 12.5px; line-height: 1.55; letter-spacing: 0.01em;
+  overflow-x: auto; white-space: pre;
+}
+[data-theme="dark"] .tokens-reveal__code {
+  background: var(--paper-3); color: var(--ink);
+}
+
+/* ---- Reusable callout. Generalised from the /me PAT intro.
+   Moss-tinted by default; --sand and --rust modifiers cover
+   informational and destructive variants for future use. Use as
+   an inline hint card (not a blocking dialog). ---- */
+.callout {
+  display: flex; align-items: flex-start; gap: var(--space-7);
+  padding: var(--space-7) var(--space-8);
+  border-radius: 12px;
+  background: var(--moss-softer);
+  border: 1px solid var(--moss-soft);
+}
+.callout--sand {
+  background: var(--sand-soft);
+  border-color: var(--sand-soft);
+}
+.callout--rust {
+  background: var(--rust-soft);
+  border-color: var(--rust-soft);
+}
+.callout__mark {
+  flex-shrink: 0; width: 32px; height: 32px;
+  border-radius: 50%; background: var(--card);
+  display: inline-flex; align-items: center; justify-content: center;
+  color: var(--moss); border: 1px solid var(--moss-soft);
+}
+.callout--sand .callout__mark { color: #8A6A22; border-color: var(--sand-soft); }
+[data-theme="dark"] .callout--sand .callout__mark { color: var(--sand); }
+.callout--rust .callout__mark { color: var(--rust); border-color: var(--rust-soft); }
+.callout__body { flex: 1; min-width: 0; }
+.callout__title {
+  font-family: "Fraunces", serif; font-weight: 600;
+  font-size: 14.5px; color: var(--ink); margin: var(--space-0) var(--space-0) var(--space-2);
+  font-variation-settings: "opsz" 16;
+}
+.callout__copy {
+  font-size: 12.5px; color: var(--ink-2); line-height: 1.5; margin: var(--space-0);
+}
+
+/* Inline counter (e.g. "2/5 active") pinned in .panel__head next
+   to a primary action button. Moss numeral reads as an attention-
+   light status indicator without needing a chip. */
+.tokens-meter {
+  display: inline-flex; align-items: baseline; gap: var(--space-3);
+  margin-right: var(--space-6);
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-3);
+}
+.tokens-meter__value {
+  font-family: "Fraunces", serif; font-weight: 600;
+  font-size: 15px; color: var(--moss);
+  font-variation-settings: "opsz" 16;
+}
+.tokens-meter__label {
+  font-size: 10.5px; font-weight: 600; letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.tokens-meter--warn .tokens-meter__value { color: var(--rust); }
+
+/* Vertical rhythm inside a single .panel (when multiple optional
+   blocks — intro, create form, reveal, list — share one panel).
+   On its own panel, siblings get their spacing from .desk__content. */
+.panel-stack {
+  display: flex; flex-direction: column;
+  gap: var(--space-7); margin-top: var(--space-7);
+}
+
+/* ---- Generalised "entry card": a tile-within-a-panel for any
+   record that has a name, an optional identifier, metadata, and a
+   primary action. Reused by personal access tokens, chat-channel
+   bindings, and passkeys. The action sits on the first line
+   (flex-right) so the card reads with one scan.
+   ---- */
+.entry-cards {
+  list-style: none; margin: var(--space-0); padding: var(--space-0);
+  display: grid; gap: var(--space-5);
+}
+.entry-card {
+  position: relative;
+  display: flex; flex-direction: column; gap: var(--space-3);
+  padding: var(--space-7) var(--space-9) var(--space-7) var(--space-10);
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  box-shadow: var(--shadow);
+  transition: border-color 140ms ease;
+}
+.entry-card:hover { border-color: var(--line-strong); }
+.entry-card::before {
+  content: "";
+  position: absolute; left: 0; top: 12px; bottom: 12px;
+  width: 3px; border-radius: 0 3px 3px 0;
+  background: var(--moss);
+}
+.entry-card--revoked,
+.entry-card--inactive { opacity: 0.7; }
+.entry-card--revoked::before,
+.entry-card--inactive::before { background: var(--ink-4); }
+.entry-card--sand::before { background: var(--sand); }
+.entry-card--sky::before { background: var(--sky); }
+
+.entry-card__head {
+  display: flex; align-items: center; gap: var(--space-5); flex-wrap: wrap;
+  row-gap: var(--space-3);
+}
+.entry-card__name {
+  font-family: "Fraunces", serif; font-weight: 600;
+  font-size: 17px; color: var(--ink); line-height: 1.1;
+  font-variation-settings: "opsz" 24;
+  letter-spacing: -0.01em;
+  flex-shrink: 0;
+}
+.entry-card__action {
+  margin-left: auto; flex-shrink: 0;
+  display: inline-flex; align-items: center; gap: var(--space-3);
+}
+
+.entry-card__prefix {
+  display: flex; align-items: baseline; gap: var(--space-4);
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 12.5px; color: var(--ink-3);
+  letter-spacing: 0.02em;
+}
+.entry-card__prefix-label {
+  font-family: "Inter Tight", sans-serif;
+  font-size: 10.5px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.1em;
+  color: var(--ink-4);
+}
+.entry-card__meta {
+  display: flex; flex-wrap: wrap; gap: var(--space-7);
+  font-size: 11.5px; color: var(--ink-3);
+  padding-top: var(--space-4); margin-top: var(--space-1);
+  border-top: 1px dashed var(--line);
+  font-variant-numeric: tabular-nums;
+}
+.entry-card__meta-label {
+  font-size: 10px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.08em;
+  color: var(--ink-4); margin-right: var(--space-2);
+}
+
+.tokens-empty {
+  padding: var(--space-11) var(--space-9); text-align: center;
+  border: 1px dashed var(--line-strong); border-radius: 12px;
+  background: var(--paper);
+}
+.tokens-empty__glyph {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 44px; height: 44px; border-radius: 50%;
+  background: var(--moss-softer); color: var(--moss);
+  margin-bottom: var(--space-5);
+}
+.tokens-empty__title {
+  font-family: "Fraunces", serif; font-weight: 600;
+  font-size: 15px; color: var(--ink);
+  font-variation-settings: "opsz" 18;
+  margin: var(--space-0) var(--space-0) var(--space-2);
+}
+.tokens-empty__sub {
+  font-size: 12.5px; color: var(--ink-3); margin: var(--space-0);
+}
+
+/* Inline name field — same breath as .field but typographically
+   louder so it feels like a headline rather than a form input. */
+.tokens-name-input {
+  font-family: "Fraunces", serif; font-weight: 600;
+  font-size: 22px; line-height: 1.1;
+  color: var(--ink);
+  background: transparent;
+  border: 0; border-bottom: 2px solid var(--line-strong);
+  padding: var(--space-2) var(--space-1);
+  transition: border-color 140ms ease;
+  font-variation-settings: "opsz" 36;
+}
+.tokens-name-input:focus {
+  outline: none; border-bottom-color: var(--moss);
+}
+.tokens-name-input::placeholder { color: var(--ink-4); font-style: italic; }
+
+.tokens-note-input {
+  padding: var(--space-5) var(--space-6);
+  background: var(--card);
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  font: inherit; font-size: 13px; color: var(--ink);
+  transition: border-color 140ms ease;
+  width: 100%;
+}
+.tokens-note-input:focus {
+  outline: none; border-color: var(--moss);
+}
+
+.tokens-select {
+  padding: var(--space-4) var(--space-6); padding-right: var(--space-11);
+  background: var(--card);
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  font: inherit; font-size: 13px; color: var(--ink);
+  appearance: none;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6' fill='none'><path d='M1 1l4 4 4-4' stroke='%238C8274' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  transition: border-color 140ms ease;
+}
+.tokens-select:focus { outline: none; border-color: var(--moss); }
+
+/* Expiry preset row — small chip buttons */
+.tokens-expiry {
+  display: flex; gap: var(--space-3); flex-wrap: wrap;
+}
+.tokens-expiry__preset {
+  cursor: pointer;
+  padding: var(--space-3) var(--space-6); border-radius: 999px;
+  background: var(--card); border: 1px solid var(--line-strong);
+  color: var(--ink-2); font-size: 12.5px;
+  font-family: inherit;
+  transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+.tokens-expiry__preset:hover { border-color: var(--moss); }
+.tokens-expiry__preset--on {
+  background: var(--moss); color: var(--card); border-color: var(--moss);
+}
+
+/* Motion rules — honour reduced-motion */
+@media (prefers-reduced-motion: reduce) {
+  .tokens-scope-picker__pill,
+  .tokens-scope-list__item,
+  .tokens-scope-list__check,
+  .tokens-kind-picker__opt,
+  .tokens-reveal__copy,
+  .tokens-expiry__preset,
+  .entry-card,
+  .tokens-name-input,
+  .tokens-note-input,
+  .tokens-select { transition: none; }
+}
+
+/* Retain legacy helpers used elsewhere on /me. */
+.inline-code {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.9em; padding: var(--space-1) var(--space-3); border-radius: 4px;
+  background: var(--paper-2); color: var(--ink);
+}
+

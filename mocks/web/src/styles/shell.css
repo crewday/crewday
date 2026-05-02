@@ -1,0 +1,324 @@
+/* Shell — grain overlay, preview banner, employee phone layout, and
+   the tablet/desktop responsive shell adjustments. Loaded first by
+   globals.css so every later layer can rely on `.phone`, `.phone__body`,
+   `.phone__section`, `.phone__tabs`, and `.phone__dock` already being
+   set up. */
+
+/* ── Grain overlay per §14 — SVG noise at 2–4% opacity on warm paper. */
+.grain {
+  position: fixed; inset: 0; width: 100%; height: 100%;
+  opacity: 0.035; pointer-events: none; z-index: 0; mix-blend-mode: multiply;
+}
+[data-theme="dark"] .grain { opacity: 0.06; mix-blend-mode: screen; }
+
+/* ── Preview banner ──────────────────────────────────────────── */
+.preview-banner {
+  position: sticky; top: 0; z-index: 50;
+  display: flex; align-items: center; gap: var(--space-7);
+  padding: var(--space-4) var(--space-8);
+  background: linear-gradient(90deg, var(--moss), var(--moss-2));
+  color: #fff; font-size: 13px;
+  min-height: 40px;
+}
+.preview-banner__badge {
+  background: rgba(255,255,255,0.18); padding: var(--space-1) var(--space-4);
+  border-radius: 4px; font-weight: 700; letter-spacing: 0.08em; font-size: 11px;
+  flex: 0 0 auto;
+}
+.preview-banner__note { opacity: 0.9; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.preview-banner__switch { margin-left: auto; display: flex; gap: var(--space-3); align-items: center; flex-shrink: 0; }
+
+@media (max-width: 640px) {
+  .preview-banner { gap: var(--space-4); padding: var(--space-3) var(--space-5); }
+  .preview-banner__note { display: none; }
+}
+@media (max-width: 420px) {
+  .preview-banner .pill { padding: var(--space-2) var(--space-5); font-size: 12px; }
+  .preview-banner .pill--ghost:last-of-type { display: none; }
+}
+/* §17 360 px walker — the preview banner is mocks-only chrome but it
+   ships to the e2e suite, so its tappables share the same 44×44 floor
+   as the rest of the SPA. At ≥720px the banner stays slim because
+   pointer users hit the small pills precisely; the floor only kicks
+   in below the breakpoint where a thumb is the input device. */
+@media (max-width: 720px) {
+  .preview-banner .pill,
+  .preview-banner__theme {
+    min-height: 44px; min-width: 44px;
+    display: inline-flex; align-items: center; justify-content: center;
+  }
+}
+.pill {
+  padding: var(--space-2) var(--space-6); border-radius: 999px;
+  font-size: 13px; color: rgba(255,255,255,0.85);
+  border: 1px solid rgba(255,255,255,0.35); line-height: 1.4;
+  cursor: pointer; background: transparent; font: inherit;
+}
+.pill--active { background: #fff; color: var(--moss); border-color: #fff; font-weight: 600; }
+.pill--ghost { border-color: rgba(255,255,255,0.22); padding: var(--space-2) var(--space-5); }
+.preview-banner__theme {
+  display: inline-flex; align-items: center; justify-content: center;
+  padding: var(--space-2) var(--space-4); min-width: 30px; line-height: 1;
+}
+
+/* ══════════════════════════════════════════════════════════════
+   EMPLOYEE (phone) layout.
+
+   Below 720px the container is edge-to-edge: the screen is already
+   small, so every horizontal pixel has to earn its keep. The old
+   480px "device frame" letterbox at tablet-ish widths wasted real
+   estate without adding clarity. At 720px+ the layout switches to
+   the three-column desktop grid (see below).
+   ══════════════════════════════════════════════════════════════ */
+.phone {
+  min-height: calc(100dvh - var(--banner-h, 40px));
+  padding-bottom: calc(var(--space-14) + var(--space-14) + var(--space-9)); position: relative; z-index: 1;
+}
+.phone__body { display: contents; }
+
+.phone__section { padding: var(--space-8) var(--space-9); }
+.phone__section--hero { padding-top: var(--space-9); }
+.phone__section--detail { padding-bottom: calc(var(--space-14) + var(--space-14) + var(--space-13)); }
+
+/* "Hi, <first name>" + date. Only rendered on the Me page; everything
+   else skips the greeting because it was noise on functional views. */
+.me-greet { display: flex; flex-direction: column; gap: var(--space-1); }
+.me-greet__hello {
+  font-family: "Fraunces", ui-serif, serif; font-weight: 600;
+  font-size: 1.55rem; line-height: 1.1; letter-spacing: -0.02em;
+}
+.me-greet__date { color: var(--ink-3); font-size: 13px; }
+
+/* Booking hint pill. Replaces the v0 clock-in toggle: under §09's
+   booking model the booking IS the time record (no clock-in / clock-out
+   tap). The hint shows the user's next scheduled booking and links to
+   `/schedule` (which folded in the retired `/bookings` page). Used
+   twice: sidebar action slot (desktop) and `.phone__dock` above the
+   tab bar (phone). */
+.booking-hint {
+  display: inline-flex; align-items: center; justify-content: center;
+  gap: var(--space-3); padding: var(--space-5) var(--space-8); border-radius: 999px;
+  border: 1px solid var(--moss-soft); background: var(--moss-soft);
+  font-family: inherit; font-size: 14px; font-weight: 600;
+  color: var(--moss); cursor: pointer; white-space: nowrap;
+  text-decoration: none;
+  transition: background 120ms ease, color 120ms ease,
+              border-color 120ms ease;
+}
+.booking-hint:hover { border-color: var(--moss); }
+
+/* Phone dock: a thin full-width bar that sits directly on top of the
+   fixed tab bar. On chat the composer takes this space, so the dock
+   is not rendered there. No gradient fade — the bar is solid so body
+   content does not bleed through beneath the icon row. */
+.phone__dock {
+  position: fixed; left: 0; right: 0; z-index: 19;
+  bottom: calc(60px + env(safe-area-inset-bottom, 0px));
+  display: flex;
+  background: var(--card);
+  border-top: 1px solid var(--line);
+}
+.phone__dock > .booking-hint {
+  width: 100%;
+  padding: var(--space-4) var(--space-8);
+  border-radius: 0;
+  border: none;
+  background: transparent;
+  font-size: 12px;
+  letter-spacing: 0.01em;
+}
+.phone__dock > .booking-hint:hover {
+  background: var(--moss-soft);
+  border-color: transparent;
+}
+
+.section-title {
+  font-family: "Fraunces", ui-serif, serif; font-size: 14px; font-weight: 600;
+  margin-bottom: var(--space-5); color: var(--ink-2);
+  text-transform: uppercase; letter-spacing: 0.09em;
+}
+.section-title--sm { font-size: 12px; margin-top: var(--space-10); margin-bottom: var(--space-4); }
+
+.section-title-row {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: var(--space-5); margin-bottom: var(--space-5);
+}
+.section-title-row .section-title { margin-bottom: var(--space-0); }
+
+.field--inline {
+  display: flex; flex-direction: row; align-items: center; gap: var(--space-4);
+}
+.field--inline > span { font-size: 13px; color: var(--ink-2); }
+
+.task-card--personal { border-left: 3px solid var(--sky, #9bb8d9); }
+
+/* Shared "Me" page container. Renders inside `.phone__body` (worker
+   PWA) and `.desk__main` (manager shell) with the same panel
+   aesthetic as `/settings`. */
+.me-page {
+  display: flex; flex-direction: column; gap: var(--space-10);
+  padding: var(--space-8) var(--space-9);
+}
+@media (min-width: 720px) {
+  .me-page { padding: var(--space-10) var(--space-0); }
+}
+
+/* Panels on /me wrap what used to be bespoke phone cards. Strip the
+   inner card chrome when these row/card components sit directly
+   inside a `.panel`, so the panel itself is the card — no double
+   framing. */
+.panel > .stack-row,
+.panel > a.stack-row,
+.panel > ul > li.stack-row {
+  background: transparent; border: 0; border-radius: 0;
+  padding: var(--space-0); margin-bottom: var(--space-0);
+}
+.panel > ul > li.stack-row + li.stack-row { margin-top: var(--space-5); }
+.panel > .profile-card {
+  background: transparent; border: 0; border-radius: 0;
+  padding: var(--space-0); box-shadow: none;
+}
+
+.phone__tabs {
+  position: fixed; bottom: 0; left: 0; right: 0; z-index: 20;
+  display: grid; grid-template-columns: repeat(5, 1fr);
+  background: var(--card); border-top: 1px solid var(--line);
+  padding: var(--space-3) var(--space-0) max(var(--space-3), env(safe-area-inset-bottom));
+  backdrop-filter: saturate(1.1);
+}
+.tab {
+  display: inline-flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: var(--space-2); padding: var(--space-3) var(--space-2); min-height: 48px; font-size: 11px; color: var(--ink-3);
+}
+.tab__glyph { font-size: 18px; line-height: 1; }
+.tab--active { color: var(--moss); font-weight: 600; }
+
+/* ══════════════════════════════════════════════════════════════
+   TABLET / DESKTOP EMPLOYEE LAYOUT
+
+   Below 720px the employee app is a phone — bottom tabs, edge-to-
+   edge, fixed-to-viewport composer and CTA. The shared <SideNav />
+   (same component, same CSS classes as the manager) is still in the
+   DOM but hidden by CSS at this width.
+
+   At 720px and above the bottom tab bar hides, the SideNav takes
+   over the left column, and the phone container becomes a two-column
+   grid that reuses the manager sidebar chrome 1:1.
+   ══════════════════════════════════════════════════════════════ */
+
+/* Shared sidebar is hidden on phone widths (the `.phone__tabs`
+   bottom bar owns navigation there). This selector is scoped to
+   `.phone` so the manager's `.desk > .desk__nav` is untouched. */
+.phone > .desk__nav { display: none; }
+
+@media (min-width: 720px) {
+  .surface[data-role="employee"] {
+    min-height: calc(100dvh - var(--banner-h, 40px));
+    display: flex;
+    flex-direction: column;
+  }
+  .phone {
+    max-width: none;
+    margin: var(--space-0);
+    padding: var(--space-0);
+    height: calc(100dvh - var(--banner-h, 40px));
+    min-height: 0;
+    display: grid;
+    grid-template-columns: 232px minmax(0, 1fr) 340px;
+    background: var(--paper);
+  }
+
+  .phone > .desk__nav {
+    display: flex;
+    grid-column: 1;
+    grid-row: 1 / -1;
+  }
+
+  /* Right rail: shared AgentSidebar mounts here on desktop for both
+     layouts. Mirrors the manager `.desk` grid (col 3 = agent). */
+  .phone > .desk__agent {
+    grid-column: 3;
+    grid-row: 1 / -1;
+  }
+  .phone:has(.desk__agent--collapsed),
+  .phone[data-agent-collapsed="true"] {
+    grid-template-columns: 232px minmax(0, 1fr) 52px;
+  }
+  .phone:has(.desk__nav--collapsed),
+  .phone[data-nav-collapsed="true"] {
+    grid-template-columns: auto minmax(0, 1fr) 340px;
+  }
+  .phone:has(.desk__nav--collapsed):has(.desk__agent--collapsed),
+  .phone[data-nav-collapsed="true"][data-agent-collapsed="true"] {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+  }
+
+  /* Hide the phone-mode bottom tab bar (shared between both shells)
+     and employee clock-in dock; the shared SideNav hosts navigation
+     and the clock-in at this width. */
+  .phone__tabs { display: none; }
+  .phone > .phone__dock { display: none; }
+
+  .phone__body {
+    grid-column: 2;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    overflow-y: auto;
+    /* Top padding is 0 on purpose: `.page-topbar` supplies its own
+       36px top breathing room, matching the ≥1080px rule below. */
+    padding: var(--space-0) var(--space-12) var(--space-12);
+    align-items: stretch;
+  }
+  .phone__section { padding: var(--space-8) var(--space-0); width: 100%; max-width: 880px; margin: var(--space-0) auto; }
+  .phone__section--detail { padding-bottom: var(--space-11); max-width: 880px; margin: var(--space-0) auto; }
+  /* Shared routes (/today, /week, /my/expenses, /schedule, /history,
+     /issues/new, /task/:tid) also mount inside .desk__main when a
+     manager views them. Drop the 880px cap there so they fill the
+     manager column like /me; the cap applies only to the .phone
+     (employee) shell. */
+  .desk__main .phone__section,
+  .desk__main .phone__section--detail,
+  .desk__main .phone__section--hero {
+    max-width: none;
+  }
+  .task-list { gap: var(--space-5); }
+  .task-card--now { padding: var(--space-9); }
+
+  /* Chat: the composer sticks to the bottom of the main column
+     instead of the viewport. */
+  .phone--chat {
+    height: calc(100dvh - var(--banner-h, 40px));
+  }
+  .phone--chat .chat-screen { margin-bottom: var(--space-0); }
+  .phone--chat .phone__body {
+    padding: var(--space-0);
+    overflow: hidden;
+  }
+  .phone--chat .chat-screen { padding: var(--space-0) var(--space-0) var(--space-0); }
+  .phone--chat .chat-log { padding: var(--space-9) var(--space-12); }
+  .phone--chat .chat-msg { max-width: min(560px, 70%); }
+  .chat-composer {
+    position: sticky;
+    bottom: 0;
+    left: auto;
+    right: auto;
+    max-width: none;
+    transform: none;
+    border-left: 0;
+    border-right: 0;
+    padding: var(--space-5) var(--space-12) calc(var(--space-5) + env(safe-area-inset-bottom, var(--space-0)));
+  }
+
+}
+
+@media (min-width: 1080px) {
+  .phone__body { padding: var(--space-0) var(--space-14) var(--space-13); }
+  .phone--chat .chat-log { padding: var(--space-10) var(--space-14); }
+  .chat-composer { padding: var(--space-6) var(--space-14) calc(var(--space-6) + env(safe-area-inset-bottom, var(--space-0))); }
+}
+
+@media (max-width: 360px) {
+  .phone__section { padding: var(--space-7); }
+}
+

@@ -1,0 +1,246 @@
+/* ══════════════════════════════════════════════════════════════
+   RESPONSIVE MANAGER — tablet down to phone
+   ══════════════════════════════════════════════════════════════ */
+
+/* Tablet & small desktop: nav tightens, main column trims its padding.
+   The agent rail stays present and user-toggleable — the sidebar
+   defaults collapsed below 1600px (`initialAgentCollapsed` in
+   preferences.ts), but the head remains clickable to expand inline. */
+@media (max-width: 1600px) {
+  .desk { grid-template-columns: 216px 1fr 340px; }
+  .desk:has(.desk__agent--collapsed),
+  .desk[data-agent-collapsed="true"] { grid-template-columns: 216px 1fr auto; }
+  .desk:has(.desk__nav--collapsed),
+  .desk[data-nav-collapsed="true"] { grid-template-columns: auto 1fr 340px; }
+  .desk:has(.desk__nav--collapsed):has(.desk__agent--collapsed),
+  .desk[data-nav-collapsed="true"][data-agent-collapsed="true"] {
+    grid-template-columns: auto 1fr auto;
+  }
+  .phone { grid-template-columns: 216px minmax(0, 1fr) 340px; }
+  .phone:has(.desk__agent--collapsed),
+  .phone[data-agent-collapsed="true"] { grid-template-columns: 216px minmax(0, 1fr) auto; }
+  .phone:has(.desk__nav--collapsed),
+  .phone[data-nav-collapsed="true"] { grid-template-columns: auto minmax(0, 1fr) 340px; }
+  .phone:has(.desk__nav--collapsed):has(.desk__agent--collapsed),
+  .phone[data-nav-collapsed="true"][data-agent-collapsed="true"] {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+  }
+  .desk__main { padding: var(--space-0) var(--space-11) calc(var(--space-14) + var(--space-10)); }
+}
+
+/* Small tablet (≤960): no extra padding budget. The rail is still
+   present and inline — user expands via the head if they want chat. */
+@media (max-width: 960px) {
+  .desk__main { padding: var(--space-0) var(--space-10) calc(var(--space-14) + var(--space-10)); }
+}
+
+/* Phone / narrow tablet: off-canvas drawer for the nav, mobile top
+   bar visible, main column full-width. */
+@media (max-width: 720px) {
+  .desk {
+    display: flex;
+    flex-direction: column;
+    height: calc(100dvh - var(--banner-h, 40px));
+    min-height: 0;
+  }
+  /* When the nav drawer is open, promote .desk's stacking context
+     above the preview banner (which also uses z-index: 50) so the
+     drawer overlays it end-to-end. */
+  .desk[data-nav-open="true"] {
+    z-index: 60;
+  }
+
+  .desk__nav {
+    position: fixed; top: 0; bottom: 0; left: 0;
+    width: min(280px, 82vw);
+    z-index: 60;
+    transform: translateX(-100%);
+    /* `visibility: hidden` (with a transition-delay equal to the slide
+       duration) takes the closed drawer off the focusable tree AND
+       removes its descendants from the visible-tappable surface so
+       the §17 360 px walker doesn't flag the (translated, off-screen,
+       un-tappable) nav rows. The slide-out animation still plays
+       because we delay the visibility flip until after the transform
+       transition completes. */
+    visibility: hidden;
+    transition:
+      transform 200ms cubic-bezier(0.22, 1, 0.36, 1),
+      visibility 0s linear 200ms;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.18);
+  }
+  .desk[data-nav-open="true"] .desk__nav {
+    transform: translateX(0);
+    visibility: visible;
+    transition:
+      transform 200ms cubic-bezier(0.22, 1, 0.36, 1),
+      visibility 0s linear 0s;
+  }
+
+  .desk__main {
+    flex: 1 1 auto;
+    padding: var(--space-0) var(--space-9) calc(var(--space-14) + var(--space-12));
+    min-height: 0;
+    width: 100%;
+  }
+
+  /* §14 "Page header" — sticky compact bar on phone. Padded for the
+     iOS notch via env(safe-area-inset-top) and rendered as a solid
+     paper-coloured strip so content scrolls under it without
+     bleed-through. The `top` value depends on which scroll container
+     owns the page: the worker shell scrolls the document (so we must
+     clear the sticky preview banner), while the manager/admin/client
+     shells scroll `.desk__main`, which already sits below the banner
+     — sticky there must be top: 0 or the header floats 42px down. */
+  .page-topbar {
+    position: sticky; top: 0; z-index: 35;
+    display: flex; align-items: center;
+    flex-wrap: nowrap; gap: var(--space-2);
+    padding: env(safe-area-inset-top, var(--space-0)) var(--space-5) var(--space-0);
+    min-height: calc(52px + env(safe-area-inset-top, 0px));
+    margin-bottom: var(--space-6);
+    background: var(--card);
+    border-bottom: 1px solid var(--line);
+  }
+  /* Inside the manager / admin / client shell the header lives one
+     level inside `.desk__main`, which has 18px horizontal padding
+     below 720px. Bleed the header out to the viewport edges with a
+     negative margin so the sticky strip looks anchored to the window,
+     matching the worker shell which sits directly under `.phone`. */
+  .desk__main > .page-topbar {
+    margin-inline: calc(-1 * var(--space-9));
+  }
+  /* Worker shell: the document is the scroll container, so the sticky
+     header must clear the sticky preview banner above it. */
+  .phone > .page-topbar,
+  .phone__body > .page-topbar {
+    margin-inline: var(--space-0);
+    top: var(--banner-h, 0px);
+  }
+  .page-topbar__leading,
+  .page-topbar__trailing {
+    min-height: 44px;
+  }
+  .page-topbar__heading {
+    padding: var(--space-3) var(--space-2);
+  }
+  .page-title {
+    font-family: "Inter Tight", ui-sans-serif, system-ui, sans-serif;
+    font-weight: 600;
+    font-size: 1.05rem;
+    line-height: 1.2;
+    letter-spacing: -0.01em;
+    margin: var(--space-0);
+    font-variation-settings: normal;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .page-sub {
+    font-size: 12px; line-height: 1.2;
+    margin: var(--space-0);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+
+  /* Phone mode: hide the inline rail entirely. Both shells route the
+     bottom Chat tab/dock to /chat (full-screen) instead. */
+  .desk__agent { display: none; }
+  .phone > .desk__agent { display: none; }
+
+  /* The desktop collapse hinge is a no-op inside the off-canvas
+     drawer — the drawer IS the "closed" state. Hide it there; it
+     returns at >=720px. */
+  .desk__nav-hinge { display: none; }
+
+  /* §17 360 px walker / WCAG 2.5.5 / iOS HIG — every tappable in the
+     off-canvas drawer must be ≥ 44×44. The desktop rail packs rows at
+     ~32 px because cursor users hit them precisely; thumbs do not.
+     Padding goes up to 11×14 so a 14px label + 18px icon clears 44 px
+     comfortably, and the row gap loosens by 2 px so the bigger rows
+     don't feel claustrophobic. */
+  .desk__nav .nav-link { min-height: 44px; padding: var(--space-6) var(--space-7); }
+  .desk__nav .desk__nav-group { gap: var(--space-2); }
+
+  /* The workspace switcher chip is part of the same drawer surface
+     and shares the floor — its trigger (and any open-menu options)
+     would otherwise render at ~34 px on phone. */
+  .desk__nav .ws-switcher__trigger,
+  .desk__nav .ws-switcher__opt { min-height: 44px; }
+
+  /* If the user collapsed on desktop then dropped into phone, the
+     drawer still needs full width/content. Force it open visually. */
+  .desk__nav--collapsed {
+    width: min(280px, 82vw);
+    padding: var(--space-9) var(--space-6);
+  }
+  .desk__nav--collapsed .desk__wordmark { display: block; }
+  .desk__nav--collapsed .desk__brand {
+    flex-direction: row; justify-content: flex-start;
+    align-items: center; gap: var(--space-4);
+    padding: var(--space-0) var(--space-4);
+  }
+  .desk__nav--collapsed .ws-switcher,
+  .desk__nav--collapsed .desk__nav-action { display: flex; }
+  .desk__nav--collapsed .ws-switcher { display: block; }
+  .desk__nav--collapsed .nav-link {
+    width: auto; height: auto;
+    grid-template-columns: 18px 1fr;
+    justify-items: start;
+    /* Match the un-collapsed drawer floor (≥ 44 px tap target). */
+    padding: var(--space-6) var(--space-7);
+    margin: var(--space-0);
+    gap: var(--space-5);
+  }
+  .desk__nav--collapsed .nav-link__label { display: block; }
+  .desk__nav--collapsed .nav-section__text {
+    position: static; width: auto; height: auto;
+    clip: auto; clip-path: none;
+  }
+  .desk__nav--collapsed .nav-section__rule { display: none; }
+  .desk__nav--collapsed .desk__me {
+    justify-content: flex-start; padding: var(--space-5); gap: var(--space-5);
+  }
+  .desk__nav--collapsed .desk__me-meta { display: block; }
+  .desk__nav--collapsed [data-tip]::after { display: none; }
+
+  /* Condense table rows. */
+  .task-row {
+    grid-template-columns: 1fr auto;
+    gap: var(--space-3) var(--space-5);
+  }
+  .task-row__time { grid-column: 1 / -1; font-size: 11px; }
+  .task-row__area { display: none; }
+  .page-topbar__trailing .btn {
+    padding-inline: var(--space-7);
+    min-height: 36px;
+  }
+
+  /* Let wide tables scroll horizontally inside panels instead of
+     forcing the whole page to scroll. */
+  .panel { padding: var(--space-8); overflow-x: auto; }
+  .panel--article { padding: var(--space-9); }
+  .table { min-width: 520px; }
+
+  /* Dashboard grids collapse to a single column. */
+  .grid--stats,
+  .grid--split,
+  .grid--cards { grid-template-columns: 1fr; gap: var(--space-7); }
+  .permissions__split { grid-template-columns: 1fr; }
+
+  /* Approvals / expense-approval cards stack. */
+  .expense-approval__grid { grid-template-columns: 1fr; gap: var(--space-5); }
+  .expense-approval__amount,
+  .expense-approval__receipt { border: 0; padding: var(--space-0); }
+  .issue-row { grid-template-columns: 1fr; gap: var(--space-2); }
+  .doc-row { grid-template-columns: auto 1fr; gap: var(--space-4); }
+  .doc-row > :nth-child(n+3) { grid-column: 2 / -1; }
+
+  /* Wide horizontal calendar defaults to horizontal scroll; make sure
+     the first column stays visible. */
+  .cal-wide { overflow-x: auto; }
+}
+
+/* Extra-small phones (≤400): tighter spacing. The header title is
+   already compact at the sticky breakpoint; no extra shrink needed. */
+@media (max-width: 400px) {
+  .desk__main { padding: var(--space-0) var(--space-7) calc(var(--space-14) + var(--space-12)); }
+  .desk__main > .page-topbar { margin-inline: calc(-1 * var(--space-7)); }
+}
+

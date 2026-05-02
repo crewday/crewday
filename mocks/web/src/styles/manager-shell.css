@@ -1,0 +1,413 @@
+/* ══════════════════════════════════════════════════════════════
+   MANAGER (desktop) layout
+   ══════════════════════════════════════════════════════════════ */
+.desk {
+  display: grid; grid-template-columns: 232px 1fr 340px;
+  height: calc(100dvh - var(--banner-h, 40px)); position: relative; z-index: 1;
+  overflow: hidden; min-height: 0;
+}
+.desk__nav {
+  background: var(--card); border-right: 1px solid var(--line);
+  padding: var(--space-9) var(--space-6); display: flex; flex-direction: column; gap: var(--space-8);
+  height: 100%; min-height: 0; overflow-y: auto;
+}
+.desk__brand { display: flex; align-items: center; gap: var(--space-4); padding: var(--space-0) var(--space-4); }
+.desk__logo { color: var(--moss); font-size: 22px; }
+.desk__wordmark {
+  font-family: "Fraunces", serif; font-weight: 700;
+  font-size: 1.25rem; letter-spacing: -0.03em;
+  font-variation-settings: "opsz" 72;
+}
+/* §02 — workspace switcher chip placed between the brand row and the
+   nav groups. Appears only when the user has more than one workspace
+   to switch into. */
+.ws-switcher { position: relative; padding: var(--space-0) var(--space-2); }
+.ws-switcher__trigger {
+  display: flex; align-items: center; gap: var(--space-4); width: 100%;
+  background: var(--paper-2); border: 1px solid var(--line);
+  border-radius: 8px; padding: var(--space-4) var(--space-5); cursor: pointer;
+  color: var(--ink-1); text-align: left;
+  font: inherit; font-size: 13px; font-weight: 600;
+}
+.ws-switcher__trigger:hover { background: var(--paper-3, var(--paper-2)); }
+.ws-switcher__trigger--inert { cursor: default; opacity: 0.85; }
+.ws-switcher__trigger--inert:hover { background: var(--paper-2); }
+.ws-switcher__name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ws-switcher__role {
+  font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em;
+  color: var(--ink-3); font-weight: 500;
+  border: 1px solid var(--line); border-radius: 4px; padding: var(--space-1) var(--space-3);
+}
+.ws-switcher__chev { color: var(--ink-3); flex-shrink: 0; }
+.ws-switcher__menu {
+  position: absolute; top: calc(100% + 4px); left: 4px; right: 4px;
+  list-style: none; margin: var(--space-0); padding: var(--space-2);
+  background: var(--card); border: 1px solid var(--line);
+  border-radius: 8px; box-shadow: var(--shadow);
+  z-index: 50; max-height: 60vh; overflow-y: auto;
+}
+.ws-switcher__opt {
+  display: flex; align-items: center; gap: var(--space-4); width: 100%;
+  background: transparent; border: 0; padding: var(--space-4) var(--space-5); cursor: pointer;
+  color: var(--ink-1); text-align: left; border-radius: 6px;
+  font: inherit; font-size: 13px;
+}
+.ws-switcher__opt:hover { background: var(--paper-2); }
+.ws-switcher__opt--active { background: var(--moss-soft); color: var(--moss); font-weight: 600; }
+.ws-switcher__opt-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ws-switcher__opt-role {
+  font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em;
+  color: var(--ink-3); font-weight: 500;
+}
+.ws-switcher__opt-check { flex-shrink: 0; }
+
+.desk__nav-group { display: flex; flex-direction: column; gap: var(--space-1); }
+.nav-section {
+  display: flex; align-items: center; gap: var(--space-4);
+  font-size: 10px; text-transform: uppercase; letter-spacing: 0.14em;
+  color: var(--ink-3); padding: var(--space-6) var(--space-6) var(--space-2) var(--space-6);
+}
+.nav-section__text { flex: 0 0 auto; }
+.nav-section__rule {
+  flex: 1 1 auto; height: 1px; background: var(--line);
+  align-self: center;
+}
+
+.nav-link {
+  position: relative;
+  display: grid; grid-template-columns: 18px 1fr;
+  align-items: center; gap: var(--space-5);
+  padding: var(--space-4) var(--space-6); border-radius: 8px; color: var(--ink-2);
+  font-weight: 500; font-size: 14px;
+  transition: background 140ms ease, color 140ms ease;
+}
+.nav-link__icon {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 18px; height: 18px; color: var(--ink-3);
+  transition: color 140ms ease;
+}
+.nav-link__icon svg { display: block; }
+.nav-link__label {
+  display: block; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.nav-link__marker {
+  position: absolute; left: 0; top: 50%;
+  width: 2px; height: 0; border-radius: 0 2px 2px 0;
+  background: var(--moss);
+  transform: translateY(-50%);
+  transition: height 160ms ease;
+}
+.nav-link__fallback-glyph {
+  font-family: "Fraunces", serif; font-weight: 600; font-size: 13px;
+  line-height: 1; color: var(--ink-3);
+}
+.nav-link:hover {
+  background: var(--paper-2); color: var(--ink);
+}
+.nav-link:hover .nav-link__icon { color: var(--ink-2); }
+.nav-link--active {
+  background: var(--moss-soft); color: var(--moss); font-weight: 600;
+}
+.nav-link--active .nav-link__icon { color: var(--moss); }
+.nav-link--active .nav-link__marker { height: 62%; }
+
+/* Hide items duplicated in the bottom tab bar from the off-canvas
+   hamburger drawer at phone widths. They still render in the desktop
+   side nav. Set per-item via SideNavItem.phoneHidden. */
+@media (max-width: 720px) {
+  .nav-link--phone-hidden,
+  .nav-section--phone-hidden { display: none; }
+}
+
+.desk__nav-action {
+  padding: var(--space-4) var(--space-2) var(--space-0);
+  display: flex; justify-content: stretch;
+}
+.desk__nav-action > .clock-toggle { width: 100%; }
+.desk__nav-action > .booking-hint { width: 100%; }
+
+.desk__me {
+  display: flex; align-items: center; gap: var(--space-5);
+  padding: var(--space-5); border-top: 1px solid var(--line);
+  position: relative;
+}
+.desk__me-meta { min-width: 0; flex: 1 1 auto; }
+.desk__me-name {
+  font-weight: 600; font-size: 13px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.desk__me-role {
+  color: var(--ink-3); font-size: 12px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+/* When present, the me footer is pinned to the bottom. The
+   nav-action slot (booking hint) sits just above it. */
+.desk__nav > .desk__nav-group ~ .desk__nav-action,
+.desk__nav > .desk__nav-group ~ .desk__me { margin-top: auto; }
+.desk__nav > .desk__nav-action ~ .desk__me { margin-top: var(--space-0); }
+
+/* Collapse-toggle hinge — a small icon button tucked into the brand
+   row, so it's always reachable even when the nav list is long and
+   scrolls. Acts as a "page pull" that folds the rail inward. */
+.desk__brand { position: relative; }
+.desk__nav-hinge {
+  margin-left: auto;
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 28px; height: 28px;
+  padding: var(--space-0);
+  background: transparent; border: 1px solid transparent;
+  border-radius: 7px; color: var(--ink-3);
+  cursor: pointer;
+  transition: background 140ms ease, color 140ms ease, border-color 140ms ease;
+}
+.desk__nav-hinge:hover {
+  background: var(--paper-2); color: var(--ink);
+  border-color: var(--line);
+}
+.desk__nav-hinge:focus-visible {
+  outline: 0;
+  background: var(--paper-2); border-color: var(--moss);
+  color: var(--moss);
+}
+.desk__nav-hinge__icon {
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.desk__nav-hinge__icon svg { display: block; }
+
+/* ── Tooltip (collapsed rail) ─────────────────────────────────
+   Semantic content lives in [data-tip]. The label slides out from
+   under the collapsed rail on hover/focus as a small cream tab with
+   a moss tick on its left edge — echoes the section rule. Only
+   activated inside a collapsed sidebar to avoid colliding with the
+   expanded label.                                               */
+.desk__nav--collapsed [data-tip] { position: relative; }
+.desk__nav--collapsed [data-tip]::after {
+  content: attr(data-tip);
+  position: absolute;
+  top: 50%; left: calc(100% + 8px);
+  transform: translate(-4px, -50%);
+  padding: var(--space-3) var(--space-6) var(--space-3) var(--space-5);
+  background: var(--card-raised);
+  color: var(--ink);
+  font-family: "Inter Tight", sans-serif; font-weight: 500;
+  font-size: 13px;
+  white-space: nowrap;
+  border-radius: 6px;
+  border-left: 2px solid var(--moss);
+  box-shadow: 0 6px 20px rgba(31, 26, 20, 0.12), 0 1px 2px rgba(31, 26, 20, 0.06);
+  opacity: 0; pointer-events: none;
+  transition: opacity 140ms ease, transform 180ms cubic-bezier(0.22, 1, 0.36, 1);
+  z-index: 40;
+}
+.desk__nav--collapsed [data-tip]:hover::after,
+.desk__nav--collapsed [data-tip]:focus-visible::after {
+  opacity: 1; transform: translate(0, -50%);
+}
+[data-theme="dark"] .desk__nav--collapsed [data-tip]::after {
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.55), 0 1px 2px rgba(0, 0, 0, 0.35);
+}
+
+/* ── Collapsed side nav layout ───────────────────────────────── */
+/* Tooltips need to escape the rail rightward into `.desk__main` —
+   but we also need the rail to scroll internally for tall nav
+   lists. Split responsibilities: the rail itself stays
+   overflow-visible (so the ::after bubble can paint past the right
+   edge), and we give the nav-group a scrollable body via a hybrid
+   approach — a wide "hit-box" that extends past the rail so
+   tooltips have somewhere to render. The extra width is
+   `pointer-events: none` except on the actual link, so main-column
+   interactions are never blocked. */
+.desk__nav--collapsed {
+  padding: var(--space-9) var(--space-3);
+  gap: var(--space-5);
+  align-items: stretch;
+  overflow: visible;
+}
+.desk__nav--collapsed .desk__nav-group {
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow-y: auto;
+  overflow-x: visible;
+  /* Extend the scroll container rightward so the tooltip `::after`
+     bubble (absolutely-positioned inside each nav-link) has room to
+     render without being clipped by this overflow container. The
+     negative margin + positive padding keeps the visible hit-target
+     at the rail's 64px, while the box itself is wide enough for
+     tooltips. */
+  margin-right: -220px; /* measured tooltip gutter for collapsed nav labels */
+  padding-right: 220px; /* measured tooltip gutter for collapsed nav labels */
+  pointer-events: none;
+  scrollbar-width: none;
+}
+.desk__nav--collapsed .desk__nav-group::-webkit-scrollbar { width: 0; }
+.desk__nav--collapsed .desk__nav-group > * {
+  pointer-events: auto;
+}
+.desk__nav--collapsed .desk__brand {
+  flex-direction: column;
+  justify-content: center; align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-0);
+}
+.desk__nav--collapsed .desk__logo {
+  font-size: 26px; line-height: 1;
+}
+.desk__nav--collapsed .desk__wordmark { display: none; }
+.desk__nav--collapsed .desk__nav-hinge {
+  margin-left: var(--space-0);
+  width: 36px; height: 32px;
+  border-radius: 8px;
+  color: var(--ink-2);
+}
+.desk__nav--collapsed .desk__nav-hinge:hover {
+  background: var(--paper-2); color: var(--moss);
+  border-color: var(--line);
+}
+
+/* Workspace switcher and free-form action slot (e.g. booking hint)
+   don't collapse gracefully — hide them in the narrow rail. The user
+   re-opens the sidebar to switch workspace or tap the booking chip. */
+.desk__nav--collapsed .ws-switcher,
+.desk__nav--collapsed .desk__nav-action { display: none; }
+
+/* Section headers become a thin rule — the text is still in the DOM
+   for screen readers but hidden visually so the rail stays calm. */
+.desk__nav--collapsed .nav-section {
+  padding: var(--space-4) var(--space-5) var(--space-1);
+  gap: var(--space-0);
+}
+.desk__nav--collapsed .nav-section__text {
+  position: absolute; width: 1px; height: 1px; overflow: hidden;
+  clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap;
+}
+.desk__nav--collapsed .nav-section__rule {
+  width: 100%; background: var(--line-strong); opacity: 0.6;
+}
+
+/* Nav links: icon centered in a square tap target, label hidden. */
+.desk__nav--collapsed .nav-link {
+  grid-template-columns: 1fr;
+  justify-items: center;
+  padding: var(--space-5) var(--space-0);
+  width: 44px; height: 40px;
+  margin: var(--space-0) auto;
+  border-radius: 10px;
+  gap: var(--space-0);
+}
+.desk__nav--collapsed .nav-link__label { display: none; }
+.desk__nav--collapsed .nav-link__icon {
+  width: 20px; height: 20px; color: var(--ink-2);
+}
+.desk__nav--collapsed .nav-link:hover .nav-link__icon { color: var(--ink); }
+.desk__nav--collapsed .nav-link--active {
+  background: var(--moss-soft);
+}
+.desk__nav--collapsed .nav-link--active .nav-link__icon { color: var(--moss); }
+.desk__nav--collapsed .nav-link__marker {
+  left: -6px; width: 3px; border-radius: 0 3px 3px 0;
+}
+.desk__nav--collapsed .nav-link--active .nav-link__marker { height: 56%; }
+
+/* Me footer: avatar only, centered. Hover shows the tooltip stash. */
+.desk__nav--collapsed .desk__me {
+  justify-content: center;
+  padding: var(--space-5) var(--space-2);
+  gap: var(--space-0);
+}
+.desk__nav--collapsed .desk__me-meta { display: none; }
+
+
+.desk__main {
+  padding: var(--space-0) var(--space-13) calc(var(--space-14) + var(--space-10));
+  height: 100%; min-height: 0; overflow-y: auto;
+}
+/* §14 "Page header" — three slots: leading (back or hamburger), heading
+   (title + optional sub), trailing (one primary action + overflow).
+   On desktop the large Fraunces title sits flush left; the slots are
+   present in the DOM but `:empty { display: none }` so the heading
+   pins to the left edge when no back button or action exists. Phone
+   overrides below turn this into a sticky, compact, safe-area bar. */
+.page-topbar {
+  display: flex; align-items: flex-start; gap: var(--space-8);
+  margin-bottom: var(--space-10);
+  padding-top: var(--space-12); padding-bottom: var(--space-5);
+}
+.page-topbar__leading {
+  flex: 0 0 auto;
+  display: flex; align-items: center; gap: var(--space-2);
+  min-height: 44px;
+}
+.page-topbar__leading:empty { display: none; }
+.page-topbar__heading {
+  flex: 1 1 auto; min-width: 0;
+}
+.page-topbar__trailing {
+  flex: 0 0 auto;
+  display: flex; align-items: center; gap: var(--space-4);
+  min-height: 44px;
+  margin-left: auto;
+}
+.page-topbar__trailing:empty { display: none; }
+.page-topbar__icon-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 44px; height: 44px;
+  padding: var(--space-0); border: 0;
+  background: transparent; color: var(--ink-2);
+  border-radius: 10px; cursor: pointer; text-decoration: none;
+  transition: background 120ms ease, color 120ms ease;
+}
+.page-topbar__icon-btn:hover { background: var(--moss-soft); color: var(--ink); }
+.page-topbar__icon-btn:focus-visible {
+  outline: 2px solid var(--moss); outline-offset: 2px;
+  background: var(--moss-soft); color: var(--ink);
+}
+/* The hamburger is only useful on phone — the left-nav / drawer lives
+   inline at desktop widths. Keep the DOM node (accessibility tree
+   stays consistent across breakpoints) but hide it visually. */
+@media (min-width: 720px) {
+  .page-topbar__menu-btn { display: none; }
+}
+.desk__content { display: flex; flex-direction: column; gap: var(--space-10); }
+.page-title {
+  font-size: 2.05rem; margin-bottom: var(--space-2); line-height: 1.1;
+  font-variation-settings: "opsz" 96;
+}
+.page-sub { color: var(--ink-3); font-size: 14px; }
+
+/* Overflow menu used by the header trailing slot. Rendered as a native
+   <dialog> so Escape + backdrop click + focus trap come for free. */
+.overflow-menu[open] {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: var(--space-3);
+  background: var(--card); color: var(--ink);
+  box-shadow: 0 20px 60px rgba(0,0,0,0.25);
+  min-width: min(260px, 86vw);
+}
+.overflow-menu::backdrop { background: rgba(31, 26, 20, 0.35); }
+.overflow-menu__list {
+  list-style: none; padding: var(--space-0); margin: var(--space-0);
+  display: flex; flex-direction: column; gap: var(--space-1);
+}
+.overflow-menu__item {
+  display: flex; align-items: center; gap: var(--space-5);
+  width: 100%; padding: var(--space-5) var(--space-6);
+  min-height: 44px;
+  background: transparent; border: 0; border-radius: 8px;
+  font: inherit; color: var(--ink);
+  text-align: left; cursor: pointer;
+}
+.overflow-menu__item:hover,
+.overflow-menu__item:focus-visible {
+  background: var(--paper-2);
+  outline: none;
+}
+.overflow-menu__item--destructive { color: var(--rust); }
+.overflow-menu__icon {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 20px; height: 20px; color: currentColor;
+}
+.overflow-menu__label { flex: 1; }
+

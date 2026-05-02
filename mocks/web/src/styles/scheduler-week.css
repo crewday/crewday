@@ -1,0 +1,439 @@
+
+/* ── Scheduler (§14 "Scheduler", §06 "Schedule ruleset") ──────────── */
+
+/* Pending-attention banner above the weeknav on /schedule. Appears
+   only when the window holds any pending_approval or pending-amend
+   bookings — so it is never ambient noise, only a one-line "you have
+   something open" flag. */
+.schedule-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-6);
+  padding: var(--space-5) var(--space-7);
+  margin-bottom: var(--space-4);
+  border: 1px solid var(--sand);
+  border-left-width: 4px;
+  border-radius: 8px;
+  background: var(--sand-soft);
+  color: var(--ink);
+  font-size: 14px;
+}
+.schedule-banner__text { flex: 1; min-width: 0; }
+.schedule-banner__detail { color: var(--ink-2); }
+.schedule-banner--pending strong { color: #8A6A22; }
+[data-theme="dark"] .schedule-banner--pending strong { color: var(--sand); }
+
+.scheduler-weeknav {
+  display: flex;
+  align-items: center;
+  gap: var(--space-6);
+  margin-bottom: var(--space-8);
+}
+.scheduler-weeknav__label {
+  font-weight: 600;
+  color: var(--ink);
+  min-width: 160px;
+}
+.scheduler-grid-panel {
+  padding: var(--space-9);
+}
+.scheduler-grid {
+  display: grid;
+  grid-template-columns: minmax(140px, 1fr) repeat(7, minmax(110px, 1.2fr));
+  border: 1px solid var(--paper-3);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--paper);
+}
+.scheduler-grid__header {
+  padding: var(--space-5) var(--space-6);
+  background: var(--paper-2);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--ink-2);
+  border-bottom: 1px solid var(--paper-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+.scheduler-grid__header--user {
+  text-align: left;
+}
+.scheduler-grid__date {
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--ink-3);
+  text-transform: none;
+  letter-spacing: 0;
+}
+.scheduler-row {
+  display: contents;
+}
+.scheduler-row__user {
+  padding: var(--space-5) var(--space-6);
+  border-top: 1px solid var(--paper-3);
+  background: var(--paper-2);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+.scheduler-row__sub {
+  font-size: 11px;
+  color: var(--ink-3);
+}
+.scheduler-cell {
+  padding: var(--space-3);
+  border-top: 1px solid var(--paper-3);
+  border-left: 1px solid var(--paper-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-height: 56px;
+}
+.scheduler-cell--empty {
+  color: var(--ink-4);
+  font-size: 12px;
+  text-align: center;
+  justify-content: center;
+}
+.rota-slot {
+  background: var(--rota-tint, var(--moss-soft));
+  border-left: 3px solid var(--moss);
+  padding: var(--space-2) var(--space-3);
+  border-radius: 4px;
+  font-size: 11px;
+  color: var(--ink);
+}
+.rota-slot__time {
+  font-weight: 600;
+}
+.rota-slot__warning {
+  font-size: 10px;
+  color: var(--rust);
+  padding: var(--space-1) var(--space-3);
+  border: 1px dashed var(--rust);
+  border-radius: 3px;
+  align-self: flex-start;
+}
+.rota-task {
+  background: var(--paper);
+  border-left: 3px solid var(--sand);
+  padding: var(--space-2) var(--space-3);
+  border-radius: 4px;
+  font-size: 11px;
+  color: var(--ink);
+  display: flex;
+  gap: var(--space-3);
+  box-shadow: inset 0 0 0 1px var(--paper-3);
+}
+.rota-task__time {
+  font-weight: 600;
+  color: var(--ink-2);
+}
+.rota-task--completed {
+  opacity: 0.55;
+  text-decoration: line-through;
+}
+.rota-task--cancelled,
+.rota-task--skipped {
+  opacity: 0.4;
+}
+.rota-task--overdue {
+  border-left-color: var(--rust);
+}
+.scheduler-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-5);
+  margin-top: var(--space-7);
+}
+.scheduler-legend__item {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3);
+  font-size: 12px;
+  color: var(--ink-2);
+  padding: var(--space-2) var(--space-4);
+  border: 1px solid var(--paper-3);
+  border-radius: 999px;
+}
+.scheduler-legend__swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--rota-tint, var(--moss-soft));
+  border: 1px solid var(--paper-3);
+}
+
+/* ── /schedule — self-only schedule view (§14 "Schedule view") ─────── */
+
+.schedule {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-9);
+}
+
+
+/* Phone-only: gutter the whole agenda column so cells, monthbar, and
+   sentinels all share a consistent inset against the viewport edge.
+   `.page-stack` and `.phone__body { display: contents }` give us no
+   horizontal padding by default, so without this rule every row sits
+   flush at x=0. 12px (half of `.phone__section`'s 20px) because
+   `.schedule-day` already pads its content 12px internally — stacking
+   a 20px outer with a 12px inner would waste thumb real-estate on a
+   dense calendar surface. */
+.schedule.schedule--phone {
+  padding: var(--space-0) var(--space-6);
+}
+
+/* Agenda column: vertical stack shared by both variants. Phone lays
+   out one day card per row; desktop lays out one 7-column week grid
+   per row. Gap differs: phone's 10px matches card spacing, desktop's
+   18px leaves air between week blocks. */
+.schedule__agenda {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+.schedule--desktop .schedule__agenda {
+  gap: var(--space-9);
+}
+
+/* Desktop intro: legend + help line rendered once above the agenda,
+   below the sticky monthbar. Scrolls away as the worker thumbs
+   deeper into weeks — the monthbar still pins orientation. */
+.schedule__intro {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  padding-bottom: var(--space-6);
+  border-bottom: 1px solid var(--line);
+  margin-bottom: var(--space-2);
+}
+.schedule__intro-help { margin: var(--space-0); font-size: 12px; }
+.schedule__intro .schedule__legend { border-top: none; padding-top: var(--space-0); }
+
+/* Sticky header stack: pending-booking banner (when present) sits on
+   top of the month/year ribbon. Both pin together as the worker
+   thumbs through weeks, so the actionable alert stays reachable even
+   after the infinite agenda auto-scrolls to today.
+   Sticky offset depends on the scroll container rather than the
+   breakpoint. Phone's shell is document-scrolled so the preview banner
+   consumes 40px of viewport and sticky must clear it; desktop variants
+   both scroll inside an own-overflow pane (`.phone__body` for worker,
+   `.desk__main` for manager) that already sits below the banner, so
+   sticky pins flush at top:0. */
+.schedule__sticky-top {
+  position: sticky;
+  top: 0;
+  z-index: 4;
+  background: color-mix(in oklab, var(--paper) 88%, transparent);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+}
+/* Desktop variants get an intrinsic top inset so the banner has
+   breathing room above it — both on first paint and after the
+   sticky pins to the scroll root. The inset lives inside the
+   sticky wrapper, so its frosted backdrop masks content scrolling
+   behind, no bare gap. Phone already uses page chrome as the
+   sticky reference and doesn't need this. */
+.schedule--desktop .schedule__sticky-top {
+  padding-top: var(--space-6);
+}
+/* Phone worker: the document is the scroll container and the page
+   topbar is itself sticky at `var(--banner-h, 0px)` with a 52px
+   min-height and a 12px bottom margin (see `.page-topbar` in the
+   <720px block). Park our header just past its bottom margin so the
+   sticky offset matches its natural layout position — no 12px jump
+   when the user begins to scroll. */
+.schedule--phone .schedule__sticky-top {
+  top: calc(var(--banner-h, 40px) + 52px + 12px);
+}
+
+/* The month/year ribbon drives orientation: the topmost-visible day's
+   month is mirrored here, plus an inline "Today" jump when today has
+   scrolled out of view. Not independently sticky and has no own
+   background — the wrapper above carries the frosted backdrop so the
+   banner + monthbar pin together as one opaque strip. */
+.schedule__monthbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-5);
+  padding: var(--space-4) var(--space-5);
+  border-bottom: 1px solid var(--line);
+  font-family: "Fraunces", ui-serif, serif;
+  font-size: 1.05rem;
+  letter-spacing: 0.005em;
+  color: var(--ink);
+}
+.schedule__monthbar-label { font-weight: 600; }
+.schedule__monthbar-jump {
+  font: inherit;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  padding: var(--space-2) var(--space-5);
+  border-radius: 999px;
+  background: var(--moss-soft);
+  color: var(--moss);
+  border: 1px solid transparent;
+  cursor: pointer;
+}
+.schedule__monthbar-jump:hover { border-color: var(--moss); }
+
+/* Each day cell needs to clear the sticky monthbar when scrolled
+   into view by the JS scroll-to-today pass. `data-schedule-iso`
+   lives on the `.schedule-day` element itself — scroll-margin only
+   applies to the element actually being scrolled into view, so we
+   set it there. Desktop scrolls inside a pane that already sits
+   below the banner (88px = monthbar + intro border); phone scrolls
+   the document and needs an extra banner-h to clear the preview
+   strip above the monthbar. The pending-banner above the monthbar
+   adds ~48px when present, so bump the offset with :has(). */
+.schedule [data-schedule-iso] { scroll-margin-top: calc(var(--space-14) + var(--space-11)); }
+.schedule:has(.schedule-banner) [data-schedule-iso] { scroll-margin-top: calc(var(--space-14) + var(--space-14) + var(--space-10)); }
+.schedule--phone [data-schedule-iso] {
+  scroll-margin-top: calc(var(--banner-h, var(--space-12)) + var(--space-14) + var(--space-8));
+}
+.schedule--phone:has(.schedule-banner) [data-schedule-iso] {
+  scroll-margin-top: calc(var(--banner-h, var(--space-12)) + var(--space-14) + var(--space-8) + var(--space-6) + var(--space-14));
+}
+
+/* Top/bottom sentinels watched by IntersectionObserver. The hint text
+   doubles as scaffolding so the row has enough height to be reliably
+   intersected (a 0px node can be skipped on Safari). The spinner copy
+   appears while the matching `fetchPreviousPage` / `fetchNextPage` is
+   in flight. */
+.schedule__sentinel {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 48px;
+  padding: var(--space-6) var(--space-0);
+  color: var(--ink-3);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.schedule__sentinel--top { padding-top: var(--space-2); }
+.schedule__sentinel--bot { padding-bottom: calc(var(--space-14) + var(--space-10)); }
+.schedule__sentinel-spinner {
+  position: relative;
+  padding-left: var(--space-10);
+}
+.schedule__sentinel-spinner::before {
+  content: "";
+  position: absolute;
+  left: 0; top: 50%;
+  width: 14px; height: 14px;
+  margin-top: calc(-1 * var(--space-4));
+  border-radius: 50%;
+  border: 2px solid var(--paper-3);
+  border-top-color: var(--moss);
+  animation: schedule-spin 0.8s linear infinite;
+}
+@keyframes schedule-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Quiet separator between consecutive ISO weeks. Anchors the reader
+   when the agenda spans 3+ weeks; without it the week boundary blurs
+   into "another Monday somewhere". */
+.schedule__weekgap {
+  display: flex;
+  align-items: center;
+  gap: var(--space-5);
+  padding: var(--space-3) var(--space-2) var(--space-1);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.schedule__weekgap::before,
+.schedule__weekgap::after {
+  content: "";
+  flex: 1 1 auto;
+  height: 1px;
+  background: var(--line);
+}
+
+/* Floating "Today" pill. Only mounted while today is off-screen
+   (workers spend most of their schedule glances on today; if they
+   scroll away by accident, this brings them back in one tap).
+   Phone: sits above `.phone__dock` and `BottomTabs`. Desktop: sits
+   above the document edge (no dock on desktop). */
+.schedule__today-fab {
+  position: fixed;
+  right: 16px;
+  bottom: calc(108px + env(safe-area-inset-bottom, 0px));
+  z-index: 18;
+  padding: var(--space-5) var(--space-8);
+  border-radius: 999px;
+  font: inherit;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--paper);
+  background: var(--moss);
+  border: 1px solid var(--moss);
+  box-shadow: 0 8px 22px rgba(22, 34, 22, 0.22);
+  cursor: pointer;
+  animation: schedule-fab-in 220ms ease-out;
+}
+/* Desktop has no bottom dock, but the right column is the agent rail
+   (`.desk__agent`, 340px wide on worker + manager shells). Pinning
+   the FAB at `right: 28px` would float it over the chat composer.
+   Offset past the rail's max width so the FAB stays inside the
+   schedule column. When the rail is collapsed (52px) the extra gap
+   is harmless; overlapping chat is not. */
+.schedule--desktop .schedule__today-fab {
+  right: calc(340px + 28px);
+  bottom: 28px;
+}
+.schedule__today-fab:hover { filter: brightness(1.05); }
+@keyframes schedule-fab-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.schedule-week {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+.schedule-week__label {
+  font-family: "Fraunces", ui-serif, serif;
+  font-size: 1.05rem;
+  color: var(--ink);
+  letter-spacing: 0.01em;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: var(--space-3);
+}
+.schedule-week__header-row {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: var(--space-3);
+}
+.schedule-week__header {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--ink-3);
+}
+.schedule-week__header strong {
+  color: var(--ink-2);
+  font-weight: 700;
+}
+.schedule-week__row {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: var(--space-3);
+}
