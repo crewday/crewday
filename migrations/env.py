@@ -37,7 +37,14 @@ _log = logging.getLogger("alembic.env")
 config = context.config
 
 if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+    # ``disable_existing_loggers=False`` keeps alembic's handler/level
+    # wiring while leaving every application logger
+    # (``app.auth.session_cookie``, ``app.api.factory``, ...) untouched.
+    # The stdlib default flips ``disabled=True`` on every logger not
+    # listed under ``[loggers]`` in ``alembic.ini``, which silently
+    # drops downstream ``caplog`` records in tests that run after
+    # ``alembic upgrade head`` (see cd-ydhf, cd-0dyv).
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 # Pull the URL from settings and normalise async driver prefixes. We set
 # the value on the Alembic config so the standard
