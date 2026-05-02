@@ -63,6 +63,7 @@ from app.api.pagination import (
     decode_cursor,
     paginate,
 )
+from app.api.v1._problem_json import IDENTITY_PROBLEM_RESPONSES
 from app.domain.identity.user_availability_overrides import (
     UserAvailabilityOverrideAlreadyExists,
     UserAvailabilityOverrideCreate,
@@ -402,6 +403,7 @@ def build_user_availability_overrides_router() -> APIRouter:
     api = APIRouter(
         prefix="/user_availability_overrides",
         tags=["identity", "user_availability_overrides"],
+        responses=IDENTITY_PROBLEM_RESPONSES,
     )
 
     @api.get(

@@ -55,6 +55,7 @@ from app.api.pagination import (
     decode_cursor,
     paginate,
 )
+from app.api.v1._problem_json import IDENTITY_PROBLEM_RESPONSES
 from app.authz.dep import Permission
 from app.domain.places.property_work_role_assignments import (
     PropertyWorkRoleAssignmentCreate,
@@ -246,6 +247,7 @@ def build_property_work_role_assignments_router() -> APIRouter:
     api = APIRouter(
         prefix="/property_work_role_assignments",
         tags=["identity", "property_work_role_assignments"],
+        responses=IDENTITY_PROBLEM_RESPONSES,
     )
 
     manage_gate = Depends(Permission("work_roles.manage", scope_kind="workspace"))

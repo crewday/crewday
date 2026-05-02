@@ -65,6 +65,7 @@ from app.adapters.db.workspace.models import UserWorkspace, Workspace
 from app.adapters.db.workspace.repositories import SqlAlchemyMembershipRepository
 from app.adapters.mail.ports import Mailer
 from app.api.deps import current_workspace_context, db_session
+from app.api.v1._problem_json import IDENTITY_PROBLEM_RESPONSES
 from app.audit import write_audit
 from app.auth import magic_link as magic_link_module
 from app.auth._throttle import Throttle
@@ -692,7 +693,11 @@ def build_users_router(
     # identity-adjacent operation under one OpenAPI section;
     # ``users`` is kept for back-compat with existing clients that
     # filter on the finer-grained tag.
-    router = APIRouter(prefix="/users", tags=["identity", "users"])
+    router = APIRouter(
+        prefix="/users",
+        tags=["identity", "users"],
+        responses=IDENTITY_PROBLEM_RESPONSES,
+    )
     cfg = settings if settings is not None else get_settings()
     resolved_base_url = base_url if base_url is not None else cfg.public_url
 

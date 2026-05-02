@@ -49,7 +49,7 @@ See ``docs/specs/03-auth-and-tokens.md`` §"WebAuthn specifics",
 from __future__ import annotations
 
 import logging
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel, Field
@@ -60,6 +60,7 @@ from app.abuse.throttle import throttle as throttle_decorator
 from app.adapters.db.identity.models import PasskeyCredential
 from app.adapters.db.session import make_uow
 from app.api.deps import current_workspace_context, db_session
+from app.api.v1._problem_json import IDENTITY_PROBLEM_RESPONSES
 from app.audit import write_audit
 from app.auth._hashing import hash_with_pepper
 from app.auth._throttle import PasskeyLoginLockout, Throttle
@@ -144,28 +145,6 @@ class RegisterFinishResponse(BaseModel):
     aaguid: str
 
 
-class PasskeyNotFoundResponse(BaseModel):
-    """404 envelope returned by ``DELETE /auth/passkey/{credential_id}``.
-
-    Unknown ids, ids owned by a different user, and malformed
-    base64url all collapse into the same shape so the credential-id
-    space is not an enumeration oracle (§03 "Additional passkeys").
-    """
-
-    error: Literal["passkey_not_found"]
-
-
-class LastCredentialResponse(BaseModel):
-    """422 envelope when the caller tries to revoke their last passkey.
-
-    Leaving the user credential-less would force them through the
-    recovery flow; the SPA must guide them to enrol another passkey
-    first or call ``/recover`` intentionally.
-    """
-
-    error: Literal["last_credential"]
-
-
 # ---------------------------------------------------------------------------
 # Error mapping
 # ---------------------------------------------------------------------------
@@ -241,7 +220,11 @@ def _http_for(exc: Exception) -> HTTPException:
 # Tags: ``identity`` surfaces every identity-adjacent operation
 # under one OpenAPI section (spec §01 context map + §12 Auth);
 # ``auth`` stays for fine-grained client filtering.
-router = APIRouter(prefix="/auth/passkey", tags=["identity", "auth"])
+router = APIRouter(
+    prefix="/auth/passkey",
+    tags=["identity", "auth"],
+    responses=IDENTITY_PROBLEM_RESPONSES,
+)
 
 
 @router.post(
@@ -339,22 +322,15 @@ def post_register_finish(
     status_code=status.HTTP_204_NO_CONTENT,
     operation_id="auth.passkey.revoke",
     summary="Revoke one of the authenticated user's passkeys",
-    responses={
-        # The router emits ``HTTPException(detail={"error": <symbol>})``
-        # directly — the production problem+json transformer wraps that
-        # at the boundary, but the OpenAPI shape we publish here is the
-        # raw FastAPI envelope clients see in unit harnesses and via
-        # the test client. Both errors collapse on a single key so
-        # the credential-id space stays opaque.
-        status.HTTP_404_NOT_FOUND: {
-            "model": PasskeyNotFoundResponse,
-            "description": "Unknown / not-owned / malformed credential id",
-        },
-        422: {
-            "model": LastCredentialResponse,
-            "description": "Refused: would leave the user credential-less",
-        },
-    },
+    # 404 ``passkey_not_found`` and 422 ``last_credential`` are emitted
+    # via ``HTTPException(detail={"error": <symbol>})`` and rewritten
+    # by :mod:`app.api.errors` into the RFC 7807 ``application/problem
+    # +json`` envelope (spec §12 "Errors"). The ``error`` key flows
+    # through as a top-level extension. Both branches collapse on a
+    # single key so the credential-id space stays opaque to enumeration
+    # (§03 "Additional passkeys"). The router-level
+    # :data:`IDENTITY_PROBLEM_RESPONSES` already documents the envelope
+    # shape for both status codes; no per-route override needed.
     openapi_extra={
         # Unlike the register ceremonies, the CLI surface for
         # ``passkey-revoke`` is meaningful — an operator listing
@@ -778,6 +754,7 @@ def build_login_router(
     router = APIRouter(
         prefix="/auth/passkey/login",
         tags=["identity", "auth", "login"],
+        responses=IDENTITY_PROBLEM_RESPONSES,
     )
 
     # §15 "Rate limiting and abuse controls": 10/min per IP for login

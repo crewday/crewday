@@ -102,6 +102,7 @@ from app.api.pagination import (
     decode_cursor,
     paginate,
 )
+from app.api.v1._problem_json import IDENTITY_PROBLEM_RESPONSES
 from app.auth.tokens import (
     DELEGATED_DEFAULT_TTL_DAYS,
     SCOPED_DEFAULT_TTL_DAYS,
@@ -318,6 +319,7 @@ def build_tokens_router() -> APIRouter:
     api = APIRouter(
         prefix="/auth/tokens",
         tags=["identity", "auth", "tokens"],
+        responses=IDENTITY_PROBLEM_RESPONSES,
     )
 
     permission_gate = Depends(Permission("api_tokens.manage", scope_kind="workspace"))

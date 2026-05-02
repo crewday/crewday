@@ -43,6 +43,7 @@ from fastapi import APIRouter, Cookie, Depends, Response, status
 from sqlalchemy.orm import Session
 
 from app.api.deps import db_session
+from app.api.v1._problem_json import IDENTITY_PROBLEM_RESPONSES
 from app.auth import session as auth_session
 from app.auth.session_cookie import (
     DEV_SESSION_COOKIE_NAME,
@@ -77,7 +78,11 @@ def build_logout_router() -> APIRouter:
     # Tags: ``identity`` surfaces every identity-adjacent operation
     # under one OpenAPI section (spec §01 context map + §12 Auth);
     # ``auth`` stays for fine-grained client filtering.
-    router = APIRouter(prefix="/auth", tags=["identity", "auth"])
+    router = APIRouter(
+        prefix="/auth",
+        tags=["identity", "auth"],
+        responses=IDENTITY_PROBLEM_RESPONSES,
+    )
 
     @router.post(
         "/logout",

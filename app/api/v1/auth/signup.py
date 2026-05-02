@@ -48,6 +48,7 @@ from app.adapters.db.identity.models import SignupAttempt, canonicalise_email
 from app.adapters.db.session import make_uow
 from app.adapters.mail.ports import Mailer
 from app.api.deps import db_session
+from app.api.v1._problem_json import IDENTITY_PROBLEM_RESPONSES
 from app.audit import write_audit, write_deployment_audit
 from app.auth import passkey, signup, signup_abuse
 from app.auth._hashing import hash_with_pepper
@@ -643,6 +644,7 @@ def build_signup_router(
     router = APIRouter(
         prefix="/signup",
         tags=["identity", "auth", "signup"],
+        responses=IDENTITY_PROBLEM_RESPONSES,
     )
     cfg = settings if settings is not None else get_settings()
     resolved_base_url = base_url if base_url is not None else cfg.public_url

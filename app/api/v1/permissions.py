@@ -40,6 +40,7 @@ from pydantic import BaseModel, ConfigDict
 from sqlalchemy.orm import Session
 
 from app.api.deps import current_workspace_context, db_session
+from app.api.v1._problem_json import IDENTITY_PROBLEM_RESPONSES
 from app.authz import (
     EmptyPermissionRuleRepository,
     InvalidScope,
@@ -326,7 +327,11 @@ _ScopeIdQuery = Annotated[
 
 def build_permissions_router() -> APIRouter:
     """Return a fresh :class:`APIRouter` wired for permission introspection."""
-    api = APIRouter(prefix="/permissions", tags=["identity", "permissions"])
+    api = APIRouter(
+        prefix="/permissions",
+        tags=["identity", "permissions"],
+        responses=IDENTITY_PROBLEM_RESPONSES,
+    )
 
     catalog_gate = Depends(Permission("scope.view", scope_kind="workspace"))
     resolve_gate = Depends(Permission("audit_log.view", scope_kind="workspace"))

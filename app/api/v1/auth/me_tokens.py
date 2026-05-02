@@ -52,6 +52,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.api.deps import db_session
+from app.api.v1._problem_json import IDENTITY_PROBLEM_RESPONSES
 from app.auth import session as auth_session
 from app.auth.session_cookie import DEV_SESSION_COOKIE_NAME
 from app.auth.tokens import (
@@ -218,6 +219,7 @@ def build_me_tokens_router() -> APIRouter:
     router = APIRouter(
         prefix="/me/tokens",
         tags=["identity", "auth", "tokens"],
+        responses=IDENTITY_PROBLEM_RESPONSES,
     )
 
     @router.post(

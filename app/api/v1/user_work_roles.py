@@ -37,6 +37,7 @@ from app.api.pagination import (
     decode_cursor,
     paginate,
 )
+from app.api.v1._problem_json import IDENTITY_PROBLEM_RESPONSES
 from app.authz.dep import Permission
 from app.domain.identity.user_work_roles import (
     UserWorkRoleCreate,
@@ -162,7 +163,11 @@ def _http_for_not_found() -> HTTPException:
 
 def build_user_work_roles_router() -> APIRouter:
     """Return the top-level ``/user_work_roles`` router (POST + PATCH + DELETE)."""
-    api = APIRouter(prefix="/user_work_roles", tags=["identity", "user_work_roles"])
+    api = APIRouter(
+        prefix="/user_work_roles",
+        tags=["identity", "user_work_roles"],
+        responses=IDENTITY_PROBLEM_RESPONSES,
+    )
 
     manage_gate = Depends(Permission("work_roles.manage", scope_kind="workspace"))
 
@@ -246,7 +251,11 @@ def build_users_user_work_roles_router() -> APIRouter:
     factory mounts this alongside the users router, see
     :mod:`app.api.factory`.
     """
-    api = APIRouter(prefix="/users", tags=["identity", "user_work_roles"])
+    api = APIRouter(
+        prefix="/users",
+        tags=["identity", "user_work_roles"],
+        responses=IDENTITY_PROBLEM_RESPONSES,
+    )
 
     # Listing is user-scoped. A worker fetching their own record is a
     # common read-path hit, so ``scope.view`` is the right default-

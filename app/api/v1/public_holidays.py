@@ -20,6 +20,7 @@ from app.api.pagination import (
     encode_page_cursor,
     validate_limit,
 )
+from app.api.v1._problem_json import IDENTITY_PROBLEM_RESPONSES
 from app.authz.dep import Permission
 from app.domain.identity.public_holidays import (
     PublicHolidayConflict,
@@ -196,7 +197,11 @@ def _filter(
 
 
 def build_public_holidays_router() -> APIRouter:
-    api = APIRouter(prefix="/public_holidays", tags=["identity", "public_holidays"])
+    api = APIRouter(
+        prefix="/public_holidays",
+        tags=["identity", "public_holidays"],
+        responses=IDENTITY_PROBLEM_RESPONSES,
+    )
 
     manage_gate = Depends(Permission("work_roles.manage", scope_kind="workspace"))
 

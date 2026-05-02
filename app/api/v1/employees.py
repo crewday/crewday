@@ -82,6 +82,7 @@ from app.adapters.db.workspace.models import (
     Workspace,
 )
 from app.api.deps import current_workspace_context, db_session
+from app.api.v1._problem_json import IDENTITY_PROBLEM_RESPONSES
 from app.api.v1.settings import EntitySettingsPayload, build_entity_settings_payload
 from app.authz.dep import Permission
 from app.services.leave import LeavePermissionDenied, LeaveView, list_for_user
@@ -555,7 +556,11 @@ def build_employees_router() -> APIRouter:
     :func:`tests.unit.api.v1.identity.conftest.build_client` to keep
     the dependency-override cache per-case.
     """
-    api = APIRouter(prefix="/employees", tags=["identity", "employees"])
+    api = APIRouter(
+        prefix="/employees",
+        tags=["identity", "employees"],
+        responses=IDENTITY_PROBLEM_RESPONSES,
+    )
 
     read_gate = Depends(Permission("employees.read", scope_kind="workspace"))
     leave_view_gate = Depends(Permission("leaves.view_others", scope_kind="workspace"))

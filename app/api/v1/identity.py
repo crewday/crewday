@@ -17,6 +17,8 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
-router = APIRouter(tags=["identity"])
+from app.api.v1._problem_json import IDENTITY_PROBLEM_RESPONSES
+
+router = APIRouter(tags=["identity"], responses=IDENTITY_PROBLEM_RESPONSES)
 
 __all__ = ["router"]

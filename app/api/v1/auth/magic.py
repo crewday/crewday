@@ -44,6 +44,7 @@ from sqlalchemy.orm import Session
 from app.adapters.db.session import make_uow
 from app.adapters.mail.ports import Mailer
 from app.api.deps import db_session
+from app.api.v1._problem_json import IDENTITY_PROBLEM_RESPONSES
 from app.auth.magic_link import (
     AlreadyConsumed,
     ConsumeLockout,
@@ -242,7 +243,11 @@ def build_magic_router(
     # Tags: ``identity`` surfaces every identity-adjacent operation
     # under one OpenAPI section (spec §01 context map + §12 Auth);
     # ``auth`` stays for fine-grained client filtering.
-    router = APIRouter(prefix="/auth/magic", tags=["identity", "auth"])
+    router = APIRouter(
+        prefix="/auth/magic",
+        tags=["identity", "auth"],
+        responses=IDENTITY_PROBLEM_RESPONSES,
+    )
     cfg = settings if settings is not None else get_settings()
     resolved_base_url = base_url if base_url is not None else cfg.public_url
 

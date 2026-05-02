@@ -64,6 +64,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.api.deps import db_session
+from app.api.v1._problem_json import IDENTITY_PROBLEM_RESPONSES
 from app.auth import passkey as passkey_service
 from app.auth import session as auth_session
 from app.auth._throttle import ConsumeLockout, RateLimited, Throttle
@@ -428,6 +429,7 @@ def build_invite_router(
     router = APIRouter(
         prefix="/invite",
         tags=["identity", "auth", "invite"],
+        responses=IDENTITY_PROBLEM_RESPONSES,
     )
     cfg = settings if settings is not None else get_settings()
 
@@ -760,6 +762,7 @@ def build_invites_router(
     router = APIRouter(
         prefix="/invites",
         tags=["identity", "auth", "invite"],
+        responses=IDENTITY_PROBLEM_RESPONSES,
     )
     cfg = settings if settings is not None else get_settings()
 

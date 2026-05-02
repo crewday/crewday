@@ -66,6 +66,7 @@ from app.adapters.db.identity.repositories import (
     SqlAlchemyUserPushTokenRepository,
 )
 from app.api.deps import db_session
+from app.api.v1._problem_json import IDENTITY_PROBLEM_RESPONSES
 from app.auth import session as auth_session
 from app.auth.session_cookie import DEV_SESSION_COOKIE_NAME
 from app.config import get_settings
@@ -223,6 +224,7 @@ def build_me_push_tokens_router() -> APIRouter:
     router = APIRouter(
         prefix="/me/push-tokens",
         tags=["identity", "push-tokens"],
+        responses=IDENTITY_PROBLEM_RESPONSES,
     )
 
     @router.post(

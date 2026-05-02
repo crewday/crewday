@@ -53,6 +53,7 @@ from app.api.pagination import (
     PageCursorQuery,
     decode_cursor,
 )
+from app.api.v1._problem_json import IDENTITY_PROBLEM_RESPONSES
 from app.authz.dep import Permission
 from app.tenancy import WorkspaceContext
 
@@ -178,7 +179,11 @@ def _http_for_table_unavailable() -> HTTPException:
 
 def build_permission_rules_router() -> APIRouter:
     """Return a fresh :class:`APIRouter` wired for permission-rule ops."""
-    api = APIRouter(prefix="/permission_rules", tags=["identity", "permission_rules"])
+    api = APIRouter(
+        prefix="/permission_rules",
+        tags=["identity", "permission_rules"],
+        responses=IDENTITY_PROBLEM_RESPONSES,
+    )
 
     # ``permissions.edit_rules`` is root-only — the action gate keeps
     # rule reads + writes governance-sensitive (the resolver's

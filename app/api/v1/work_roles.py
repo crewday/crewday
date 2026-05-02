@@ -41,6 +41,7 @@ from app.api.pagination import (
     decode_cursor,
     paginate,
 )
+from app.api.v1._problem_json import IDENTITY_PROBLEM_RESPONSES
 from app.authz.dep import Permission
 from app.domain.identity.work_roles import (
     WorkRoleCreate,
@@ -164,7 +165,11 @@ def _view_to_response(view: WorkRoleView) -> WorkRoleResponse:
 
 def build_work_roles_router() -> APIRouter:
     """Return a fresh :class:`APIRouter` wired to the work-roles surface."""
-    api = APIRouter(prefix="/work_roles", tags=["identity", "work_roles"])
+    api = APIRouter(
+        prefix="/work_roles",
+        tags=["identity", "work_roles"],
+        responses=IDENTITY_PROBLEM_RESPONSES,
+    )
 
     manage_gate = Depends(Permission("work_roles.manage", scope_kind="workspace"))
     view_gate = Depends(Permission("scope.view", scope_kind="workspace"))

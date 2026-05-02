@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.adapters.storage.ports import Storage
 from app.api.deps import db_session, get_storage
+from app.api.v1._problem_json import IDENTITY_PROBLEM_RESPONSES
 from app.api.v1.auth.me_tokens import _resolve_session_user
 from app.domain.privacy import get_user_export, request_user_export
 
@@ -30,7 +31,11 @@ class PrivacyExportResponse(BaseModel):
 
 
 def build_me_export_router() -> APIRouter:
-    router = APIRouter(prefix="/me", tags=["identity", "me", "privacy"])
+    router = APIRouter(
+        prefix="/me",
+        tags=["identity", "me", "privacy"],
+        responses=IDENTITY_PROBLEM_RESPONSES,
+    )
 
     @router.post(
         "/export",

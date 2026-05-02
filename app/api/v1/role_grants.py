@@ -61,6 +61,7 @@ from app.api.pagination import (
     decode_cursor,
     paginate,
 )
+from app.api.v1._problem_json import IDENTITY_PROBLEM_RESPONSES
 from app.audit import write_audit
 from app.authz import is_owner_member
 from app.authz.dep import Permission
@@ -288,7 +289,11 @@ def build_role_grants_router() -> APIRouter:
     The list endpoint lives on :func:`build_users_role_grants_router`
     since it is user-keyed (``/users/{id}/role_grants``).
     """
-    api = APIRouter(prefix="/role_grants", tags=["identity", "role_grants"])
+    api = APIRouter(
+        prefix="/role_grants",
+        tags=["identity", "role_grants"],
+        responses=IDENTITY_PROBLEM_RESPONSES,
+    )
 
     create_gate = Depends(Permission("role_grants.create", scope_kind="workspace"))
     revoke_gate = Depends(Permission("role_grants.revoke", scope_kind="workspace"))
@@ -512,7 +517,11 @@ def build_users_role_grants_router() -> APIRouter:
     gate on ``scope.view`` so any grant role can read their own
     grants — managers + owners can read anyone's.
     """
-    api = APIRouter(prefix="/users", tags=["identity", "role_grants"])
+    api = APIRouter(
+        prefix="/users",
+        tags=["identity", "role_grants"],
+        responses=IDENTITY_PROBLEM_RESPONSES,
+    )
 
     view_gate = Depends(Permission("scope.view", scope_kind="workspace"))
 

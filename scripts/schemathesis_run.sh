@@ -338,6 +338,20 @@ INCLUDE_ARGS=(
     --include-operation-id 'auth.passkey.register_start'
     --include-operation-id 'employees.list'
     --include-operation-id 'permissions.action_catalog'
+    # ----------------------------------------------------------------
+    # Identity tag — additional clean ops promoted under cd-kcebs after
+    # the ``application/problem+json`` 4xx envelope landed on every
+    # identity-tagged router (router-level ``responses=`` kwarg, mirroring
+    # the asset cd-pa9p pattern). Confirmed clean by isolating each op
+    # against the runner with ``--include-operation-id`` (199+ generated
+    # cases pass with zero failures across every check).
+    # ----------------------------------------------------------------
+    # ``auth.passkey.revoke`` — DELETE /auth/passkey/{credential_id};
+    # session-cookie authed; emits 204 on success, 404
+    # ``passkey_not_found`` on unknown / not-owned ids, 422
+    # ``last_credential`` on the last-credential guard. All envelopes
+    # documented as ``application/problem+json`` after cd-kcebs.
+    --include-operation-id 'auth.passkey.revoke'
 )
 
 # Checks excluded for the asset gate — kept here (rather than at

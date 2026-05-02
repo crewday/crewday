@@ -62,6 +62,7 @@ from app.api.pagination import (
     decode_cursor,
     paginate,
 )
+from app.api.v1._problem_json import IDENTITY_PROBLEM_RESPONSES
 from app.domain.identity.user_leaves import (
     UserLeaveCategory,
     UserLeaveCreate,
@@ -351,7 +352,11 @@ def make_seam_pair(
 
 def build_user_leaves_router() -> APIRouter:
     """Return a fresh :class:`APIRouter` wired for the CRUD + state surface."""
-    api = APIRouter(prefix="/user_leaves", tags=["identity", "user_leaves"])
+    api = APIRouter(
+        prefix="/user_leaves",
+        tags=["identity", "user_leaves"],
+        responses=IDENTITY_PROBLEM_RESPONSES,
+    )
 
     @api.get(
         "",

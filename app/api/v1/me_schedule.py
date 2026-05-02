@@ -54,6 +54,7 @@ from app.api.pagination import (
     decode_cursor,
     paginate,
 )
+from app.api.v1._problem_json import IDENTITY_PROBLEM_RESPONSES
 from app.api.v1.user_availability_overrides import (
     UserAvailabilityOverrideListResponse,
     UserAvailabilityOverrideResponse,
@@ -354,7 +355,11 @@ def _http_for_window() -> HTTPException:
 
 def build_me_schedule_router() -> APIRouter:
     """Return a fresh :class:`APIRouter` wired for the self-service surface."""
-    api = APIRouter(prefix="/me", tags=["identity", "me"])
+    api = APIRouter(
+        prefix="/me",
+        tags=["identity", "me"],
+        responses=IDENTITY_PROBLEM_RESPONSES,
+    )
 
     @api.get(
         "/schedule",

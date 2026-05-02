@@ -48,6 +48,7 @@ from app.api.pagination import (
     decode_cursor,
     paginate,
 )
+from app.api.v1._problem_json import IDENTITY_PROBLEM_RESPONSES
 from app.authz.dep import Permission
 from app.domain.identity.work_engagements import (
     EngagementKind,
@@ -197,7 +198,11 @@ def _http_for_invariant(exc: WorkEngagementInvariantViolated) -> HTTPException:
 
 def build_work_engagements_router() -> APIRouter:
     """Return a fresh :class:`APIRouter` wired for engagement CRUD."""
-    api = APIRouter(prefix="/work_engagements", tags=["identity", "work_engagements"])
+    api = APIRouter(
+        prefix="/work_engagements",
+        tags=["identity", "work_engagements"],
+        responses=IDENTITY_PROBLEM_RESPONSES,
+    )
 
     manage_gate = Depends(Permission("work_roles.manage", scope_kind="workspace"))
     view_gate = Depends(Permission("scope.view", scope_kind="workspace"))

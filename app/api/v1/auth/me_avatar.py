@@ -88,6 +88,7 @@ from app.api.uploads import (
     read_upload_file_capped,
     require_allowed_upload_content_type,
 )
+from app.api.v1._problem_json import IDENTITY_PROBLEM_RESPONSES
 from app.audit import write_audit
 from app.auth import session as auth_session
 from app.auth.session_cookie import DEV_SESSION_COOKIE_NAME
@@ -335,7 +336,11 @@ def build_me_avatar_router() -> APIRouter:
     # Tags: ``identity`` surfaces every identity-adjacent operation
     # under one OpenAPI section (spec §01 context map + §12 Auth);
     # ``me`` stays for fine-grained client filtering.
-    router = APIRouter(prefix="/me", tags=["identity", "me"])
+    router = APIRouter(
+        prefix="/me",
+        tags=["identity", "me"],
+        responses=IDENTITY_PROBLEM_RESPONSES,
+    )
 
     @router.post(
         "/avatar",

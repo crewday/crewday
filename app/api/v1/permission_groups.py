@@ -70,6 +70,7 @@ from app.api.pagination import (
     decode_cursor,
     paginate,
 )
+from app.api.v1._problem_json import IDENTITY_PROBLEM_RESPONSES
 from app.authz import require
 from app.authz.dep import Permission
 from app.authz.enforce import PermissionDenied
@@ -355,7 +356,11 @@ _ScopeIdFilter = Annotated[
 
 def build_permission_groups_router() -> APIRouter:
     """Return a fresh :class:`APIRouter` wired for permission-group ops."""
-    api = APIRouter(prefix="/permission_groups", tags=["identity", "permission_groups"])
+    api = APIRouter(
+        prefix="/permission_groups",
+        tags=["identity", "permission_groups"],
+        responses=IDENTITY_PROBLEM_RESPONSES,
+    )
 
     view_gate = Depends(Permission("scope.view", scope_kind="workspace"))
     create_gate = Depends(Permission("groups.create", scope_kind="workspace"))

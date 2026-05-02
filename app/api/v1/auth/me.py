@@ -52,6 +52,7 @@ from app.adapters.db.identity.models import User
 from app.adapters.db.workspace.models import UserWorkspace, Workspace
 from app.api.admin._owners import is_deployment_owner
 from app.api.deps import db_session
+from app.api.v1._problem_json import IDENTITY_PROBLEM_RESPONSES
 from app.auth import session as auth_session
 from app.authz.deployment_admin import is_deployment_admin
 from app.tenancy import tenant_agnostic
@@ -627,7 +628,11 @@ def build_me_profile_router(*, operation_id: str = "me.profile.get") -> APIRoute
     flag). Keep it as a thin authenticated identity/profile view while
     ``/auth/me`` remains the tenant-agnostic bootstrap surface.
     """
-    router = APIRouter(prefix="/me", tags=["identity", "me"])
+    router = APIRouter(
+        prefix="/me",
+        tags=["identity", "me"],
+        responses=IDENTITY_PROBLEM_RESPONSES,
+    )
 
     @router.get(
         "",
@@ -708,7 +713,11 @@ def build_me_router() -> APIRouter:
     # Tags: ``identity`` surfaces every identity-adjacent operation
     # under one OpenAPI section (spec §01 context map + §12 Auth);
     # ``auth`` stays for fine-grained client filtering.
-    router = APIRouter(prefix="/auth", tags=["identity", "auth"])
+    router = APIRouter(
+        prefix="/auth",
+        tags=["identity", "auth"],
+        responses=IDENTITY_PROBLEM_RESPONSES,
+    )
 
     @router.get(
         "/me",
@@ -790,7 +799,11 @@ def build_me_workspaces_router() -> APIRouter:
     # fine-grained client filtering symmetrical with the sibling
     # ``/auth/me`` route. ``workspaces`` is added so SPA-side filters
     # ("which endpoints power the switcher?") have a stable handle.
-    router = APIRouter(prefix="/me", tags=["identity", "auth", "workspaces"])
+    router = APIRouter(
+        prefix="/me",
+        tags=["identity", "auth", "workspaces"],
+        responses=IDENTITY_PROBLEM_RESPONSES,
+    )
 
     @router.get(
         "/workspaces",

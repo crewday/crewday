@@ -52,6 +52,7 @@ from app.adapters.db.identity.repositories import SqlAlchemyEmailChangeRepositor
 from app.adapters.db.session import make_uow
 from app.adapters.mail.ports import Mailer
 from app.api.deps import db_session
+from app.api.v1._problem_json import IDENTITY_PROBLEM_RESPONSES
 from app.auth import session as auth_session
 from app.auth._throttle import ConsumeLockout, RateLimited, Throttle
 from app.auth.magic_link import PendingDispatch
@@ -302,7 +303,7 @@ def build_email_change_router(
     # The router carries no shared prefix because the three routes
     # live on two different prefixes (``/me`` and ``/auth``) per
     # §12. We mount them individually below.
-    router = APIRouter(tags=["identity", "auth"])
+    router = APIRouter(tags=["identity", "auth"], responses=IDENTITY_PROBLEM_RESPONSES)
 
     # -----------------------------------------------------------------
     # POST /me/email/change_request
