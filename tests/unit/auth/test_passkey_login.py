@@ -1499,10 +1499,32 @@ class TestAutoRevokeCredentialFreshUow:
                 reason="clone_detected",
             )
 
-        # The failure was logged with the credential id so an operator
-        # investigating a missing ``passkey.auto_revoked`` audit row
-        # can correlate back to the source event.
-        assert any(cred_b64 in rec.getMessage() for rec in caplog.records)
+        # The failure was logged at ERROR with the simulated exception
+        # attached. We deliberately do NOT assert on the raw credential
+        # id appearing in the message: the credential id is PII-adjacent
+        # and :class:`app.util.logging.RedactionFilter` correctly scrubs
+        # base64url credential blobs to ``<redacted:credential>`` when
+        # it is attached to the root logger (which earlier tests in the
+        # full unit suite leave in place for the duration of their own
+        # ``setup_logging`` call). The redaction-stable invariant is the
+        # static message prefix plus the captured ``exc_info`` — both
+        # prove "auto-revoke failure was logged and swallowed" without
+        # depending on raw PII surviving scrubbing.
+        matching = [
+            rec
+            for rec in caplog.records
+            if rec.name == passkey_api_module.__name__
+            and rec.levelno == logging.ERROR
+            and rec.getMessage().startswith(
+                "clone-detected auto-revoke failed on fresh UoW"
+            )
+        ]
+        assert matching, "expected ERROR record from auto-revoke helper"
+        rec = matching[0]
+        assert rec.exc_info is not None
+        exc = rec.exc_info[1]
+        assert isinstance(exc, RuntimeError)
+        assert str(exc) == "simulated DB failure"
 
         with factory() as s:
             # No audit row was written (the fresh UoW never opened),
