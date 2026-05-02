@@ -309,7 +309,12 @@ export default function App() {
               <Route path="/templates" element={<TemplatesPage />} />
               <Route path="/schedules" element={<SchedulesPage />} />
               <Route path="/permissions" element={<PermissionsPage />} />
-              <Route path="/tokens" element={<ApiTokensPage />} />
+            </Route>
+
+            <Route element={<RequirePermission actionKey="api_tokens.manage" />}>
+              <Route element={<ManagerLayout />}>
+                <Route path="/tokens" element={<ApiTokensPage />} />
+              </Route>
             </Route>
 
             <Route element={<RequirePermission actionKey="audit_log.view" />}>

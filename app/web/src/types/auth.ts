@@ -129,6 +129,14 @@ export interface ApiTokenCreated {
   curl_example: string;
 }
 
+// §12 cursor envelope for `GET /auth/tokens` (cd-msu2). Same shape
+// as `SignupsListResponse` and every other paginated listing.
+export interface ApiTokenListResponse {
+  data: ApiToken[];
+  next_cursor: string | null;
+  has_more: boolean;
+}
+
 export interface ApiTokenAuditEntry {
   at: string;
   method: string;
