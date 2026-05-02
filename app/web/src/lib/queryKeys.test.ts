@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { QueryClient } from "@tanstack/react-query";
 import {
   __resetQueryKeyGetterForTests,
   qk,
@@ -36,12 +37,18 @@ describe("qk — workspace prefix", () => {
     expect(qk.propertyClosures("p1")).toEqual(["w", "acme", "property", "p1", "closures"]);
     expect(qk.clientPortfolio()).toEqual(["w", "acme", "client", "portfolio"]);
     expect(qk.clientQuotes()).toEqual(["w", "acme", "client", "quotes"]);
-    expect(qk.mySchedule("2026-04-20", "2026-04-27")).toEqual([
+    expect(qk.mySchedulePages("2026-04-20")).toEqual([
       "w",
       "acme",
       "my-schedule",
+      "infinite",
       "2026-04-20",
-      "2026-04-27",
+    ]);
+    expect(qk.mySchedulePrefix()).toEqual(["w", "acme", "my-schedule"]);
+    expect(qk.schedulerCalendarPrefix()).toEqual([
+      "w",
+      "acme",
+      "scheduler-calendar",
     ]);
   });
 
@@ -140,5 +147,59 @@ describe("qk — every key is a first-class readonly tuple", () => {
     // narrow query.
     expect(qk.users()).toEqual(["w", "acme", "users", "all"]);
     expect(qk.users("ws-1")).toEqual(["w", "acme", "users", "ws-1"]);
+  });
+});
+
+// cd-z1vj regression guard. The whole point of `mySchedulePrefix()` /
+// `schedulerCalendarPrefix()` is that "the call happened" is not the
+// same as "the cache was invalidated" — TanStack v5's prefix match
+// starts at index 0 of the cached key, so a bare `["my-schedule"]`
+// shortcut would silently miss the workspace-scoped cache. The
+// existing sse.test.ts assertions only check call shape; they would
+// not catch a future revert to bare keys. These tests use a real
+// `QueryClient` so a regression flips them red.
+describe("qk — workspace-prefix invalidation actually matches the cache", () => {
+  beforeEach(() => {
+    __resetQueryKeyGetterForTests();
+    registerQueryKeyWorkspaceGetter(() => "acme");
+  });
+
+  it("mySchedulePrefix() invalidates this tenant's pages and not another tenant's", async () => {
+    const qc = new QueryClient();
+    const acmeKey = qk.mySchedulePages("2026-04-20");
+    const otherKey = ["w", "other", "my-schedule", "infinite", "2026-04-20"] as const;
+    qc.setQueryData(acmeKey, { marker: "acme" });
+    qc.setQueryData(otherKey, { marker: "other" });
+
+    await qc.invalidateQueries({ queryKey: qk.mySchedulePrefix() });
+
+    expect(qc.getQueryState(acmeKey)?.isInvalidated).toBe(true);
+    expect(qc.getQueryState(otherKey)?.isInvalidated).toBe(false);
+  });
+
+  it("schedulerCalendarPrefix() invalidates this tenant's calendar and not another tenant's", async () => {
+    const qc = new QueryClient();
+    const acmeKey = qk.schedulerCalendar("2026-04-20", "2026-04-26");
+    const otherKey = ["w", "other", "scheduler-calendar", "2026-04-20", "2026-04-26"] as const;
+    qc.setQueryData(acmeKey, { marker: "acme" });
+    qc.setQueryData(otherKey, { marker: "other" });
+
+    await qc.invalidateQueries({ queryKey: qk.schedulerCalendarPrefix() });
+
+    expect(qc.getQueryState(acmeKey)?.isInvalidated).toBe(true);
+    expect(qc.getQueryState(otherKey)?.isInvalidated).toBe(false);
+  });
+
+  it("a bare bare-key shortcut would NOT match the workspace-scoped cache (negative control)", async () => {
+    // The exact failure mode cd-z1vj fixed. Pinned here so a future
+    // contributor who shortens the helper to `["my-schedule"]` sees
+    // it fail loudly rather than silently regress.
+    const qc = new QueryClient();
+    const acmeKey = qk.mySchedulePages("2026-04-20");
+    qc.setQueryData(acmeKey, { marker: "acme" });
+
+    await qc.invalidateQueries({ queryKey: ["my-schedule"] });
+
+    expect(qc.getQueryState(acmeKey)?.isInvalidated).toBe(false);
   });
 });

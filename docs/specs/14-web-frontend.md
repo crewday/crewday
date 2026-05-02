@@ -673,7 +673,15 @@ the platform must guarantee*.
   does not clear the cache — the old keys stay resident — but no
   query from one slug can ever be served to a page rendering
   another slug. This is the client-side counterpart to the §01
-  tenant-isolation invariant.
+  tenant-isolation invariant. Schedule keys (`my-schedule`,
+  `scheduler-calendar`) follow the same rule — they include
+  pagination/window suffixes but stay under `['w', slug, ...]`. SSE
+  handlers and dialog mutations invalidate via the workspace-scoped
+  prefix helpers (`qk.mySchedulePrefix()`,
+  `qk.schedulerCalendarPrefix()`); a bare `['my-schedule']` /
+  `['scheduler-calendar']` shortcut would silently miss the
+  workspace-scoped cache, since TanStack v5 prefix-matching starts
+  at index 0 (cd-z1vj).
 - **Optimistic mutations.** `onMutate` snapshots cache; `onError`
   rolls back; `onSettled` invalidates. On concurrent writes (§06
   last-write-wins) the UI surfaces a "Completed by <name>" toast —

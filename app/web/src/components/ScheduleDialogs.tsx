@@ -30,7 +30,7 @@ function invalidateScheduleQueries(
   qc: ReturnType<typeof useQueryClient>,
   empId: string | null,
 ): void {
-  qc.invalidateQueries({ queryKey: ["my-schedule"] });
+  qc.invalidateQueries({ queryKey: qk.mySchedulePrefix() });
   qc.invalidateQueries({ queryKey: qk.meOverrides() });
   qc.invalidateQueries({ queryKey: qk.me() });
   if (empId) qc.invalidateQueries({ queryKey: qk.employeeLeaves(empId) });
@@ -57,12 +57,13 @@ export function OverrideDialog({
 
   // Re-init only when the dialog OPENS (iso flips from null to a date).
   // We deliberately don't depend on `pattern`: once the dialog is open,
-  // an SSE-driven `["my-schedule"]` invalidation regenerates the merged
-  // weekly_availability payload (and hence the `pattern` reference) on
-  // every event — depending on it would clobber the worker's half-typed
-  // hours mid-edit. The pattern is read via a ref so the seed values
-  // come from whatever was current when the dialog opened, and the
-  // live `pattern` prop is still used at render time for `wouldNarrow`.
+  // an SSE-driven `qk.mySchedulePrefix()` invalidation regenerates the
+  // merged weekly_availability payload (and hence the `pattern`
+  // reference) on every event — depending on it would clobber the
+  // worker's half-typed hours mid-edit. The pattern is read via a ref
+  // so the seed values come from whatever was current when the dialog
+  // opened, and the live `pattern` prop is still used at render time
+  // for `wouldNarrow`.
   const patternRef = useRef(pattern);
   patternRef.current = pattern;
   useEffect(() => {
@@ -203,7 +204,7 @@ export function LeaveDialog({
 
   // Re-init only when the dialog OPENS (iso flips). The seed values are
   // derived from `iso` itself plus static defaults; no data-derived
-  // prop drives this effect, so an SSE-driven `["my-schedule"]`
+  // prop drives this effect, so an SSE-driven `qk.mySchedulePrefix()`
   // invalidation can't clobber a half-typed leave request.
   useEffect(() => {
     if (iso === null) return;

@@ -18,6 +18,7 @@ import {
 import { useInfiniteQuery } from "@tanstack/react-query";
 import type { UseInfiniteQueryResult, InfiniteData } from "@tanstack/react-query";
 import { fetchJson } from "@/lib/api";
+import { qk } from "@/lib/queryKeys";
 import type { MySchedulePayload } from "@/types/api";
 import type { DayCell } from "./buildCells";
 import { buildCells, mergeSchedulePages } from "./buildCells";
@@ -66,9 +67,9 @@ export function useInfiniteAgenda(
   const q = useInfiniteQuery({
     // Single key for the whole infinite stream so React Query keeps
     // accumulated pages across re-renders. Mutations elsewhere
-    // invalidate `["my-schedule", ...]` by prefix and pick this one
-    // up too.
-    queryKey: ["my-schedule", "infinite", initialMondayIso] as const,
+    // invalidate the workspace-scoped `[..., "my-schedule", ...]`
+    // prefix via `qk.mySchedulePrefix()` and pick this one up too.
+    queryKey: qk.mySchedulePages(initialMondayIso),
     initialPageParam: initialMondayIso,
     queryFn: ({ pageParam }) => {
       const fromIso = pageParam;

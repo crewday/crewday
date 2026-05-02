@@ -459,11 +459,11 @@ export const INVALIDATIONS: Record<EventKind, InvalidationHandler> = {
     invalidate(qc, qk.today());
     invalidate(qc, qk.dashboard());
     // §14 worker schedule — the bidirectional infinite agenda keys
-    // every loaded page under `["my-schedule", ...]`. A new task
-    // landing in the worker's window has to surface as a chip without
-    // a manual refresh, so we invalidate the prefix and let the
-    // visible window refetch.
-    invalidate(qc, ["my-schedule"]);
+    // every loaded page under the workspace-scoped `[..., "my-schedule",
+    // ...]` prefix. A new task landing in the worker's window has to
+    // surface as a chip without a manual refresh, so we invalidate the
+    // prefix and let the visible window refetch.
+    invalidate(qc, qk.mySchedulePrefix());
   },
 
   "task.assigned": (_event, qc) => {
@@ -472,7 +472,7 @@ export const INVALIDATIONS: Record<EventKind, InvalidationHandler> = {
     invalidate(qc, qk.dashboard());
     // §14 worker schedule — assignment can move a task into or out of
     // the worker's calendar; refresh the loaded window.
-    invalidate(qc, ["my-schedule"]);
+    invalidate(qc, qk.mySchedulePrefix());
   },
 
   "task.updated": (event, qc) => {
@@ -491,7 +491,7 @@ export const INVALIDATIONS: Record<EventKind, InvalidationHandler> = {
     // `property_id`, and `scheduled_start` from the schedule payload,
     // so a rename or re-property doesn't surface without invalidating
     // the loaded windows.
-    invalidate(qc, ["my-schedule"]);
+    invalidate(qc, qk.mySchedulePrefix());
   },
 
   "task.completed": (event, qc) => {
@@ -508,9 +508,10 @@ export const INVALIDATIONS: Record<EventKind, InvalidationHandler> = {
     // Tasks tab of the `/history` feed.
     invalidate(qc, qk.history("tasks"));
     // §14 worker schedule — drop the task chip from the day cell when
-    // the worker checks it off. Keys are `["my-schedule", ...]` so
-    // invalidate the prefix for every loaded window.
-    invalidate(qc, ["my-schedule"]);
+    // the worker checks it off. Every loaded window is keyed under the
+    // workspace-scoped `qk.mySchedulePrefix()`, so a single prefix
+    // invalidate fans out to all of them.
+    invalidate(qc, qk.mySchedulePrefix());
   },
 
   "task.skipped": (event, qc) => {
@@ -525,7 +526,7 @@ export const INVALIDATIONS: Record<EventKind, InvalidationHandler> = {
     invalidate(qc, qk.history("tasks"));
     // §14 worker schedule — skipping flips the chip status; the cell
     // needs a refresh to recolor it.
-    invalidate(qc, ["my-schedule"]);
+    invalidate(qc, qk.mySchedulePrefix());
   },
 
   "task.comment_added": (event, qc) => {
@@ -544,7 +545,7 @@ export const INVALIDATIONS: Record<EventKind, InvalidationHandler> = {
     invalidate(qc, qk.dashboard());
     // §14 worker schedule — overdue chips read with a rust accent in
     // the cell; refresh so the colour matches the new status.
-    invalidate(qc, ["my-schedule"]);
+    invalidate(qc, qk.mySchedulePrefix());
   },
 
   "stay.upcoming": (_event, qc) => {
@@ -553,7 +554,7 @@ export const INVALIDATIONS: Record<EventKind, InvalidationHandler> = {
     // §14 worker schedule — upcoming stays cut bookings via the
     // nightly materialiser (§09). The bookings/tasks then surface as
     // cells, so the worker's schedule has to refresh too.
-    invalidate(qc, ["my-schedule"]);
+    invalidate(qc, qk.mySchedulePrefix());
   },
 
   "reservation.upserted": (_event, qc) => {
@@ -561,7 +562,7 @@ export const INVALIDATIONS: Record<EventKind, InvalidationHandler> = {
     invalidate(qc, qk.properties());
     invalidate(qc, qk.stays());
     invalidate(qc, qk.dashboard());
-    invalidate(qc, ["my-schedule"]);
+    invalidate(qc, qk.mySchedulePrefix());
   },
 
   "property.closure.created": (event, qc) => {
@@ -570,8 +571,8 @@ export const INVALIDATIONS: Record<EventKind, InvalidationHandler> = {
     invalidate(qc, qk.properties());
     invalidate(qc, qk.stays());
     invalidate(qc, qk.propertyClosures(payload.property_id));
-    invalidate(qc, ["scheduler-calendar"]);
-    invalidate(qc, ["my-schedule"]);
+    invalidate(qc, qk.schedulerCalendarPrefix());
+    invalidate(qc, qk.mySchedulePrefix());
   },
 
   "property.closure.updated": (event, qc) => {
@@ -580,8 +581,8 @@ export const INVALIDATIONS: Record<EventKind, InvalidationHandler> = {
     invalidate(qc, qk.properties());
     invalidate(qc, qk.stays());
     invalidate(qc, qk.propertyClosures(payload.property_id));
-    invalidate(qc, ["scheduler-calendar"]);
-    invalidate(qc, ["my-schedule"]);
+    invalidate(qc, qk.schedulerCalendarPrefix());
+    invalidate(qc, qk.mySchedulePrefix());
   },
 
   "property.workspace.changed": (event, qc) => {
@@ -595,25 +596,25 @@ export const INVALIDATIONS: Record<EventKind, InvalidationHandler> = {
 
   "ical.poll.completed": (_event, qc) => {
     invalidate(qc, qk.stays());
-    invalidate(qc, ["scheduler-calendar"]);
-    invalidate(qc, ["my-schedule"]);
+    invalidate(qc, qk.schedulerCalendarPrefix());
+    invalidate(qc, qk.mySchedulePrefix());
   },
 
   "stay_task_bundle.upserted": (_event, qc) => {
     // §14 scheduler: `stay_task_bundle.*` invalidates the scheduler
     // calendar feed. The calendar key includes a window, so match by
     // root prefix to hit every mounted window.
-    invalidate(qc, ["scheduler-calendar"]);
+    invalidate(qc, qk.schedulerCalendarPrefix());
     invalidate(qc, qk.stays());
     // §14 worker schedule — bundle changes ripple into the worker's
     // tasks for the affected stay; refresh the loaded windows.
-    invalidate(qc, ["my-schedule"]);
+    invalidate(qc, qk.mySchedulePrefix());
   },
 
   "stay_task_bundle.deleted": (_event, qc) => {
-    invalidate(qc, ["scheduler-calendar"]);
+    invalidate(qc, qk.schedulerCalendarPrefix());
     invalidate(qc, qk.stays());
-    invalidate(qc, ["my-schedule"]);
+    invalidate(qc, qk.mySchedulePrefix());
   },
 
   "approval.decided": (_event, qc) => {
@@ -633,7 +634,7 @@ export const INVALIDATIONS: Record<EventKind, InvalidationHandler> = {
     // dedicated `user_leave.*` / `user_availability_override.*`
     // kinds; until it does, `approval.decided` is the umbrella that
     // also covers the leave + override approval flow.
-    invalidate(qc, ["my-schedule"]);
+    invalidate(qc, qk.mySchedulePrefix());
     invalidate(qc, qk.leaves());
     invalidate(qc, qk.meOverrides());
   },
@@ -650,7 +651,7 @@ export const INVALIDATIONS: Record<EventKind, InvalidationHandler> = {
     invalidate(qc, qk.history("expenses"));
     // Same schedule + leave + override invalidations as
     // `approval.decided` above.
-    invalidate(qc, ["my-schedule"]);
+    invalidate(qc, qk.mySchedulePrefix());
     invalidate(qc, qk.leaves());
     invalidate(qc, qk.meOverrides());
   },
@@ -667,7 +668,7 @@ export const INVALIDATIONS: Record<EventKind, InvalidationHandler> = {
     }
     invalidate(qc, qk.dashboard());
     invalidate(qc, qk.history("leaves"));
-    invalidate(qc, ["my-schedule"]);
+    invalidate(qc, qk.mySchedulePrefix());
   },
 
   "expense.created": (_event, qc) => {
@@ -804,12 +805,12 @@ export const INVALIDATIONS: Record<EventKind, InvalidationHandler> = {
 
   "schedule_ruleset.upserted": (_event, qc) => {
     invalidate(qc, qk.scheduleRulesets());
-    invalidate(qc, ["scheduler-calendar"]);
+    invalidate(qc, qk.schedulerCalendarPrefix());
   },
 
   "schedule_ruleset.deleted": (_event, qc) => {
     invalidate(qc, qk.scheduleRulesets());
-    invalidate(qc, ["scheduler-calendar"]);
+    invalidate(qc, qk.schedulerCalendarPrefix());
   },
 
   "booking.created": (_event, qc) => bookingInvalidations(qc),
@@ -847,12 +848,12 @@ export const INVALIDATIONS: Record<EventKind, InvalidationHandler> = {
   "instruction.published": invalidateInstruction,
 
   "shift.ended": (_event, qc) => {
-    invalidate(qc, ["my-schedule"]);
+    invalidate(qc, qk.mySchedulePrefix());
     invalidate(qc, qk.dashboard());
   },
 
   "time.shift.changed": (_event, qc) => {
-    invalidate(qc, ["my-schedule"]);
+    invalidate(qc, qk.mySchedulePrefix());
     invalidate(qc, qk.dashboard());
   },
 
@@ -925,9 +926,10 @@ export const INVALIDATIONS: Record<EventKind, InvalidationHandler> = {
 
 function bookingInvalidations(qc: QueryClient): void {
   // §09 booking lifecycle. `/schedule` keys include a window
-  // (`["my-schedule", from, to]`), so invalidate by the root prefix
-  // to catch every currently-mounted window.
-  invalidate(qc, ["my-schedule"]);
+  // (`[..., "my-schedule", from, to]`), so invalidate by the
+  // workspace-scoped root prefix to catch every currently-mounted
+  // window without leaking across tenants.
+  invalidate(qc, qk.mySchedulePrefix());
   invalidate(qc, qk.bookings());
   invalidate(qc, qk.dashboard());
 }

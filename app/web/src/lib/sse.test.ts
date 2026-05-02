@@ -187,7 +187,7 @@ describe("INVALIDATIONS — per-kind behaviour", () => {
         qk.tasks(),
         qk.today(),
         qk.dashboard(),
-        ["my-schedule"],
+        qk.mySchedulePrefix(),
       ]),
     );
     // `refetchType: "active"` keeps idle queries cheap.
@@ -210,7 +210,7 @@ describe("INVALIDATIONS — per-kind behaviour", () => {
         qk.tasks(),
         qk.today(),
         qk.dashboard(),
-        ["my-schedule"],
+        qk.mySchedulePrefix(),
       ]),
     );
   });
@@ -228,7 +228,7 @@ describe("INVALIDATIONS — per-kind behaviour", () => {
         qk.tasks(),
         qk.today(),
         qk.dashboard(),
-        ["my-schedule"],
+        qk.mySchedulePrefix(),
       ]),
     );
   });
@@ -255,7 +255,7 @@ describe("INVALIDATIONS — per-kind behaviour", () => {
     INVALIDATIONS["stay.upcoming"](makeEvent("stay.upcoming"), qc);
     const called = spy.mock.calls.map((c) => c[0]?.queryKey);
     expect(called).toEqual(
-      expect.arrayContaining([qk.stays(), qk.dashboard(), ["my-schedule"]]),
+      expect.arrayContaining([qk.stays(), qk.dashboard(), qk.mySchedulePrefix()]),
     );
   });
 
@@ -272,7 +272,7 @@ describe("INVALIDATIONS — per-kind behaviour", () => {
     );
     const called = spy.mock.calls.map((c) => c[0]?.queryKey);
     expect(called).toEqual(
-      expect.arrayContaining([qk.clientPortfolio(), qk.properties(), qk.stays(), qk.dashboard(), ["my-schedule"]]),
+      expect.arrayContaining([qk.clientPortfolio(), qk.properties(), qk.stays(), qk.dashboard(), qk.mySchedulePrefix()]),
     );
   });
 
@@ -294,8 +294,8 @@ describe("INVALIDATIONS — per-kind behaviour", () => {
         qk.properties(),
         qk.stays(),
         qk.propertyClosures("prop_1"),
-        ["scheduler-calendar"],
-        ["my-schedule"],
+        qk.schedulerCalendarPrefix(),
+        qk.mySchedulePrefix(),
       ]),
     );
   });
@@ -318,8 +318,8 @@ describe("INVALIDATIONS — per-kind behaviour", () => {
         qk.properties(),
         qk.stays(),
         qk.propertyClosures("prop_1"),
-        ["scheduler-calendar"],
-        ["my-schedule"],
+        qk.schedulerCalendarPrefix(),
+        qk.mySchedulePrefix(),
       ]),
     );
   });
@@ -356,7 +356,7 @@ describe("INVALIDATIONS — per-kind behaviour", () => {
     );
     const called = spy.mock.calls.map((c) => c[0]?.queryKey);
     expect(called).toEqual(
-      expect.arrayContaining([qk.stays(), ["scheduler-calendar"], ["my-schedule"]]),
+      expect.arrayContaining([qk.stays(), qk.schedulerCalendarPrefix(), qk.mySchedulePrefix()]),
     );
   });
 
@@ -374,9 +374,9 @@ describe("INVALIDATIONS — per-kind behaviour", () => {
       const called = spy.mock.calls.map((c) => c[0]?.queryKey);
       expect(called).toEqual(
         expect.arrayContaining([
-          ["scheduler-calendar"],
+          qk.schedulerCalendarPrefix(),
           qk.stays(),
-          ["my-schedule"],
+          qk.mySchedulePrefix(),
         ]),
       );
     }
@@ -390,7 +390,7 @@ describe("INVALIDATIONS — per-kind behaviour", () => {
       const spy = vi.spyOn(qc, "invalidateQueries");
       INVALIDATIONS[kind](makeEvent(kind, { task_id: "t1" }), qc);
       const called = spy.mock.calls.map((c) => c[0]?.queryKey);
-      expect(called).toEqual(expect.arrayContaining([["my-schedule"]]));
+      expect(called).toEqual(expect.arrayContaining([qk.mySchedulePrefix()]));
     }
   });
 
@@ -410,7 +410,7 @@ describe("INVALIDATIONS — per-kind behaviour", () => {
       const called = spy.mock.calls.map((c) => c[0]?.queryKey);
       expect(called).toEqual(
         expect.arrayContaining([
-          ["my-schedule"],
+          qk.mySchedulePrefix(),
           qk.clientQuotes(),
           qk.workOrders(),
           qk.leaves(),
@@ -438,7 +438,7 @@ describe("INVALIDATIONS — per-kind behaviour", () => {
         qk.employeeLeaves("emp_1"),
         qk.dashboard(),
         qk.history("leaves"),
-        ["my-schedule"],
+        qk.mySchedulePrefix(),
       ]),
     );
   });
@@ -510,7 +510,7 @@ describe("INVALIDATIONS — per-kind behaviour", () => {
         qk.tasks(),
         qk.today(),
         qk.dashboard(),
-        ["my-schedule"],
+        qk.mySchedulePrefix(),
       ]),
     );
   });
@@ -908,7 +908,7 @@ describe("INVALIDATIONS — per-kind behaviour", () => {
       INVALIDATIONS[kind](makeEvent(kind, { ruleset: { id: "r1" } }), qc);
       const called = spy.mock.calls.map((c) => c[0]?.queryKey);
       expect(called).toEqual(
-        expect.arrayContaining([qk.scheduleRulesets(), ["scheduler-calendar"]]),
+        expect.arrayContaining([qk.scheduleRulesets(), qk.schedulerCalendarPrefix()]),
       );
     }
   });
@@ -929,7 +929,7 @@ describe("INVALIDATIONS — per-kind behaviour", () => {
       const called = spy.mock.calls.map((c) => c[0]?.queryKey);
       expect(called).toEqual(
         expect.arrayContaining([
-          ["my-schedule"],
+          qk.mySchedulePrefix(),
           qk.bookings(),
           qk.dashboard(),
         ]),
@@ -944,7 +944,7 @@ describe("INVALIDATIONS — per-kind behaviour", () => {
       INVALIDATIONS[kind](makeEvent(kind), qc);
       const called = spy.mock.calls.map((c) => c[0]?.queryKey);
       expect(called).toEqual(
-        expect.arrayContaining([["my-schedule"], qk.dashboard()]),
+        expect.arrayContaining([qk.mySchedulePrefix(), qk.dashboard()]),
       );
     }
   });

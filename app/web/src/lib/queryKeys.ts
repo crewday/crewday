@@ -60,8 +60,16 @@ export const qk = {
   taskInstructions: (tid: string) => [...ws(), "task", tid, "instructions"] as const,
   today: () => [...ws(), "today"] as const,
   week: () => [...ws(), "week"] as const,
-  mySchedule: (fromIso: string, toIso: string) =>
-    [...ws(), "my-schedule", fromIso, toIso] as const,
+  // §14 worker schedule — bidirectional infinite-agenda pages keyed
+  // under the workspace-scoped `[..., "my-schedule", ...]` prefix so
+  // SSE invalidations via `mySchedulePrefix()` match every loaded
+  // page without leaking across tenants.
+  mySchedulePages: (mondayIso: string) =>
+    [...ws(), "my-schedule", "infinite", mondayIso] as const,
+  // §14 invalidation prefix — every cached `my-schedule` entry starts
+  // with `[..., "my-schedule"]`, so SSE handlers and dialog mutations
+  // can call `invalidateQueries` against this prefix and hit them all.
+  mySchedulePrefix: () => [...ws(), "my-schedule"] as const,
   meOverrides: () => [...ws(), "me", "availability_overrides"] as const,
   dashboard: () => [...ws(), "dashboard"] as const,
   expenses: (scope: "all" | "mine") => [...ws(), "expenses", scope] as const,
@@ -78,6 +86,10 @@ export const qk = {
   scheduleRulesets: () => [...ws(), "schedule_rulesets"] as const,
   schedulerCalendar: (fromIso: string, toIso: string) =>
     [...ws(), "scheduler-calendar", fromIso, toIso] as const,
+  // §14 invalidation prefix — same shape as `mySchedulePrefix()`. The
+  // bare `["scheduler-calendar"]` shortcut would silently miss the
+  // workspace-scoped cache (TanStack v5 prefix-match starts at index 0).
+  schedulerCalendarPrefix: () => [...ws(), "scheduler-calendar"] as const,
   instructions: () => [...ws(), "instructions"] as const,
   instruction: (iid: string) => [...ws(), "instruction", iid] as const,
   instructionVersions: (iid: string) => [...ws(), "instruction", iid, "versions"] as const,

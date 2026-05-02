@@ -55,7 +55,7 @@ export function DayDrawer({
         body,
       }),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["my-schedule"] });
+      qc.invalidateQueries({ queryKey: qk.mySchedulePrefix() });
       qc.invalidateQueries({ queryKey: qk.bookings() });
     },
   });
@@ -67,7 +67,7 @@ export function DayDrawer({
         body: { reason },
       }),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["my-schedule"] });
+      qc.invalidateQueries({ queryKey: qk.mySchedulePrefix() });
       qc.invalidateQueries({ queryKey: qk.bookings() });
     },
   });

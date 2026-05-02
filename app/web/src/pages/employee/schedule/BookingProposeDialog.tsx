@@ -28,9 +28,9 @@ export function BookingProposeDialog({
 
   // Re-init only when the dialog OPENS (iso flips from null to a date).
   // We deliberately don't depend on `properties`: once the dialog is
-  // open, an SSE-driven `["my-schedule"]` invalidation regenerates the
-  // merged payload (and hence `properties` array reference) on every
-  // event — depending on it would clobber the worker's half-typed
+  // open, an SSE-driven `qk.mySchedulePrefix()` invalidation regenerates
+  // the merged payload (and hence `properties` array reference) on
+  // every event — depending on it would clobber the worker's half-typed
   // form mid-edit. Properties are reachable on first paint (the dialog
   // only opens from a loaded day cell), so the empty fallback below
   // never triggers in practice.
@@ -56,7 +56,7 @@ export function BookingProposeDialog({
         body,
       }),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["my-schedule"] });
+      qc.invalidateQueries({ queryKey: qk.mySchedulePrefix() });
       qc.invalidateQueries({ queryKey: qk.bookings() });
       onClose();
     },
