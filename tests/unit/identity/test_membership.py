@@ -23,7 +23,7 @@ class TestPublicSurface:
         assert membership.InviteAlreadyAccepted is not None
         assert membership.PasskeySessionRequired is not None
         assert membership.NotAMember is not None
-        assert membership.LastOwnerMember is not None
+        assert membership.WouldOrphanOwnersGroup is not None
 
     def test_exports_write_member_remove_rejected_audit(self) -> None:
         # Reused from permission_groups — the membership module

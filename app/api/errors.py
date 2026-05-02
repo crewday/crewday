@@ -62,7 +62,7 @@ from app.domain.errors import (
     UpstreamUnavailable,
     Validation,
 )
-from app.domain.identity.permission_groups import LastOwnerMember
+from app.domain.identity.permission_groups import WouldOrphanOwnersGroup
 
 __all__ = [
     "CONTENT_TYPE_PROBLEM_JSON",
@@ -94,7 +94,7 @@ CORRELATION_HEADERS: Final[tuple[str, ...]] = ("X-Correlation-Id", "X-Request-Id
 # at import time rather than at first 500.
 _DOMAIN_STATUS_MAP: Final[dict[type[DomainError], int]] = {
     Validation: 422,
-    LastOwnerMember: 422,
+    WouldOrphanOwnersGroup: 422,
     NotFound: 404,
     Conflict: 409,
     IdempotencyConflict: 409,
@@ -295,7 +295,7 @@ def _resolve_domain_status(exc: DomainError) -> int | None:
     ``Forbidden``) rendered as 403 without forcing every new subclass
     to add its own map entry. Stops at the first hit so a subclass
     can still **override** an ancestor's status by registering its
-    own row (e.g. :class:`LastOwnerMember` overrides ``Validation``'s
+    own row (e.g. :class:`WouldOrphanOwnersGroup` overrides ``Validation``'s
     422 only because it's listed explicitly — the order is
     "registered class wins, otherwise nearest ancestor").
 

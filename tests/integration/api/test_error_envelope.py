@@ -49,7 +49,7 @@ from app.domain.errors import (
     UpstreamUnavailable,
     Validation,
 )
-from app.domain.identity.permission_groups import LastOwnerMember
+from app.domain.identity.permission_groups import WouldOrphanOwnersGroup
 
 pytestmark = pytest.mark.integration
 
@@ -157,7 +157,7 @@ def _build_probe_router() -> APIRouter:
 
     @r.get("/api/_probe/would_orphan_owners_group", include_in_schema=False)
     def probe_would_orphan_owners_group() -> None:
-        raise LastOwnerMember(
+        raise WouldOrphanOwnersGroup(
             "cannot remove the last member of the 'owners' group",
         )
 

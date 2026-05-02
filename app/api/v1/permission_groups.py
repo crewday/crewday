@@ -70,13 +70,13 @@ from app.authz import require
 from app.authz.dep import Permission
 from app.authz.enforce import PermissionDenied
 from app.domain.identity.permission_groups import (
-    LastOwnerMember,
     PermissionGroupMemberRef,
     PermissionGroupNotFound,
     PermissionGroupRef,
     PermissionGroupSlugTaken,
     SystemGroupProtected,
     UnknownCapability,
+    WouldOrphanOwnersGroup,
     add_member,
     create_group,
     delete_group,
@@ -246,7 +246,7 @@ def _http_for_unknown_capability(exc: UnknownCapability) -> HTTPException:
     )
 
 
-def _http_for_last_owner(exc: LastOwnerMember) -> HTTPException:
+def _http_for_would_orphan_owners_group(exc: WouldOrphanOwnersGroup) -> HTTPException:
     return HTTPException(
         status_code=422,
         detail={"error": "would_orphan_owners_group", "message": str(exc)},
@@ -666,7 +666,7 @@ def build_permission_groups_router() -> APIRouter:
             )
         except PermissionGroupNotFound as exc:
             raise _http_for_not_found() from exc
-        except LastOwnerMember as exc:
+        except WouldOrphanOwnersGroup as exc:
             # Open a fresh UoW so the forensic ``member_remove_rejected``
             # row survives the primary UoW's rollback.
             try:
@@ -689,7 +689,7 @@ def build_permission_groups_router() -> APIRouter:
                     "primary 422 still surfaced",
                     exc_info=True,
                 )
-            raise _http_for_last_owner(exc) from exc
+            raise _http_for_would_orphan_owners_group(exc) from exc
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 
     return api

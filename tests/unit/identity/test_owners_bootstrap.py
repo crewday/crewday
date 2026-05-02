@@ -1,7 +1,7 @@
 """Unit tests for owners-group bootstrap + governance surface.
 
-Pure-Python surface: error-class hierarchy for the new
-:class:`LastOwnerMember` exception, the frozen-dataclass invariants
+Pure-Python surface: error-class hierarchy for the
+:class:`WouldOrphanOwnersGroup` exception, the frozen-dataclass invariants
 around ``resolve_is_owner`` / ``is_owner_member`` identity, and the
 audit shape emitted by :func:`write_member_remove_rejected_audit`.
 
@@ -18,26 +18,26 @@ from __future__ import annotations
 from app.authz import is_owner_member, resolve_is_owner
 from app.domain.errors import DomainError, Validation
 from app.domain.identity.permission_groups import (
-    LastOwnerMember,
+    WouldOrphanOwnersGroup,
     write_member_remove_rejected_audit,
 )
 
 
-class TestLastOwnerMemberType:
-    """The new guard exception has the spec-expected hierarchy."""
+class TestWouldOrphanOwnersGroupType:
+    """The guard exception has the spec-expected hierarchy."""
 
-    def test_last_owner_member_is_validation(self) -> None:
+    def test_would_orphan_owners_group_is_validation(self) -> None:
         """422-style domain errors subclass :class:`Validation`."""
-        assert issubclass(LastOwnerMember, Validation)
-        assert issubclass(LastOwnerMember, DomainError)
+        assert issubclass(WouldOrphanOwnersGroup, Validation)
+        assert issubclass(WouldOrphanOwnersGroup, DomainError)
 
-    def test_last_owner_member_type_name(self) -> None:
+    def test_would_orphan_owners_group_type_name(self) -> None:
         """The canonical ``type`` URI short-name matches §02."""
-        assert LastOwnerMember.type_name == "would_orphan_owners_group"
+        assert WouldOrphanOwnersGroup.type_name == "would_orphan_owners_group"
 
-    def test_last_owner_member_carries_message(self) -> None:
+    def test_would_orphan_owners_group_carries_message(self) -> None:
         """The message mentions the ``owners`` group so logs are legible."""
-        err = LastOwnerMember("cannot remove the last member of 'owners'")
+        err = WouldOrphanOwnersGroup("cannot remove the last member of 'owners'")
         assert "owners" in str(err)
 
 

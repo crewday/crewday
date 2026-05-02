@@ -12,7 +12,7 @@ installed:
   "permission_group" §"System groups".
 * :func:`app.domain.identity.permission_groups.remove_member`
   refuses to drop the last member of the ``owners`` group and
-  raises :class:`LastOwnerMember`; a non-last owner removal
+  raises :class:`WouldOrphanOwnersGroup`; a non-last owner removal
   succeeds.
 * :func:`app.authz.owners.resolve_is_owner` returns ``True`` for
   ``owners@<ws>`` members, ``False`` for managers-only members,
@@ -44,7 +44,7 @@ from app.adapters.db.authz.repositories import SqlAlchemyPermissionGroupReposito
 from app.adapters.db.workspace.models import UserWorkspace, Workspace
 from app.authz import resolve_is_owner
 from app.domain.identity.permission_groups import (
-    LastOwnerMember,
+    WouldOrphanOwnersGroup,
     add_member,
     list_groups,
     list_members,
@@ -451,7 +451,7 @@ class TestResolveIsOwner:
 # ---------------------------------------------------------------------------
 
 
-class TestLastOwnerMemberGuard:
+class TestWouldOrphanOwnersGroupGuard:
     """``remove_member`` refuses to empty the ``owners`` group."""
 
     def test_remove_last_owner_raises(
@@ -460,7 +460,7 @@ class TestLastOwnerMemberGuard:
         """The sole owner cannot be removed from ``owners@<ws>``."""
         session, ctx, user_id = env
         owners_id = _owners_group_id(session, ctx)
-        with pytest.raises(LastOwnerMember) as exc:
+        with pytest.raises(WouldOrphanOwnersGroup) as exc:
             remove_member(
                 _repo(session),
                 ctx,
@@ -477,7 +477,7 @@ class TestLastOwnerMemberGuard:
         """After the refusal the row still exists — no partial DELETE."""
         session, ctx, user_id = env
         owners_id = _owners_group_id(session, ctx)
-        with pytest.raises(LastOwnerMember):
+        with pytest.raises(WouldOrphanOwnersGroup):
             remove_member(
                 _repo(session),
                 ctx,
@@ -562,7 +562,7 @@ class TestLastOwnerMemberGuard:
             clock=clock,
         )
         # Now try to remove the original user → refused.
-        with pytest.raises(LastOwnerMember):
+        with pytest.raises(WouldOrphanOwnersGroup):
             remove_member(
                 _repo(session), ctx, group_id=owners_id, user_id=user_id, clock=clock
             )
@@ -664,7 +664,7 @@ class TestRejectedAuditHelper:
         owners_id = _owners_group_id(session, ctx)
 
         # Attempt removal, expect refusal.
-        with pytest.raises(LastOwnerMember):
+        with pytest.raises(WouldOrphanOwnersGroup):
             remove_member(
                 _repo(session),
                 ctx,

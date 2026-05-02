@@ -876,7 +876,7 @@ class TestRemoveMember:
         env: tuple[Session, WorkspaceContext, InMemoryMailer, Throttle],
     ) -> None:
         session, ctx, _, _ = env
-        with pytest.raises(membership.LastOwnerMember):
+        with pytest.raises(membership.WouldOrphanOwnersGroup):
             membership.remove_member(session, ctx, user_id=ctx.actor_id)
 
     def test_remove_non_member_raises(

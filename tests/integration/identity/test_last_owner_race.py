@@ -55,7 +55,7 @@ from app.adapters.db.authz.repositories import (
 from app.adapters.db.identity.models import User
 from app.adapters.db.workspace.models import UserWorkspace, Workspace
 from app.domain.identity.permission_groups import (
-    LastOwnerMember,
+    WouldOrphanOwnersGroup,
     add_member,
     list_groups,
     remove_member,
@@ -367,7 +367,7 @@ def _remove_member_worker(
     Opens its own :class:`Session`, sets a :class:`WorkspaceContext`
     tied to ``actor_id``, waits on ``start`` so both workers execute
     the service call as close to simultaneously as :mod:`threading`
-    allows, commits on success, rolls back on :class:`LastOwnerMember`.
+    allows, commits on success, rolls back on :class:`WouldOrphanOwnersGroup`.
     Outcomes land on ``result``'s shared lists under its mutex.
     """
     try:
@@ -387,7 +387,7 @@ def _remove_member_worker(
                     session.commit()
                     with result.lock:
                         result.successes.append(f"remove:{target_user_id}")
-                except LastOwnerMember as exc:
+                except WouldOrphanOwnersGroup as exc:
                     session.rollback()
                     with result.lock:
                         result.errors.append(exc)
@@ -449,7 +449,7 @@ class TestRemoveMemberRace:
     ``owner_count == 2`` and both DELETE, leaving the group empty
     (§02 invariant broken). With the lock, one serialises before the
     other; the second re-reads ``owner_count == 1`` and raises
-    :class:`LastOwnerMember`.
+    :class:`WouldOrphanOwnersGroup`.
 
     This is the primary scenario cd-mb5n exists to fix — two
     concurrent admins hitting "remove from owners" on different
@@ -511,8 +511,10 @@ class TestRemoveMemberRace:
                     f"{len(result.successes)} (successes={result.successes}, "
                     f"errors={result.errors})"
                 )
-                assert any(isinstance(e, LastOwnerMember) for e in result.errors), (
-                    f"iteration {i}: expected a LastOwnerMember refusal, "
+                assert any(
+                    isinstance(e, WouldOrphanOwnersGroup) for e in result.errors
+                ), (
+                    f"iteration {i}: expected a WouldOrphanOwnersGroup refusal, "
                     f"got errors={result.errors}"
                 )
             finally:

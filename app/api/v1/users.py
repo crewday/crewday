@@ -71,7 +71,7 @@ from app.authz.dep import Permission
 from app.config import Settings, get_settings
 from app.domain.identity import membership
 from app.domain.identity.permission_groups import (
-    LastOwnerMember,
+    WouldOrphanOwnersGroup,
     write_member_remove_rejected_audit,
 )
 from app.mail.templates import passkey_reset_notice as passkey_reset_notice_template
@@ -314,7 +314,7 @@ def _http_for_invite(exc: Exception) -> HTTPException:
 def _http_for_remove(exc: Exception) -> HTTPException:
     """Map a :func:`membership.remove_member` error to an HTTP response.
 
-    :class:`LastOwnerMember` is **not** handled here: it is a
+    :class:`WouldOrphanOwnersGroup` is **not** handled here: it is a
     :class:`~app.domain.errors.Validation` subclass, so the RFC 7807
     exception handler in :mod:`app.api.errors` translates it directly
     into a 422 ``would_orphan_owners_group`` problem+json envelope.
@@ -835,7 +835,7 @@ def build_users_router(
         """Strip every grant + group-member + session tied to ``user_id``."""
         try:
             membership.remove_member(session, ctx, user_id=user_id)
-        except LastOwnerMember:
+        except WouldOrphanOwnersGroup:
             # Typed refusal — forensic row lands on a fresh UoW so
             # the primary UoW's rollback does not sweep it. Re-raise
             # the typed exception so the RFC 7807 seam translates it

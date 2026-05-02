@@ -35,7 +35,7 @@ High-level surface:
   workspace, plus every live :class:`Session` scoped to that
   workspace. Refuses the operation if it would empty the ``owners``
   group (reuses
-  :class:`app.domain.identity.permission_groups.LastOwnerMember`).
+  :class:`app.domain.identity.permission_groups.WouldOrphanOwnersGroup`).
   The derived :class:`UserWorkspace` row drops on the next worker
   tick (see "derived junction" below).
 * :func:`list_workspaces_for_user` — what the workspace switcher
@@ -136,7 +136,7 @@ from app.domain.identity.email_change_ports import (
     MagicLinkTokenExpired,
 )
 from app.domain.identity.permission_groups import (
-    LastOwnerMember,
+    WouldOrphanOwnersGroup,
     write_member_remove_rejected_audit,
 )
 from app.mail.templates import invite_accept as invite_accept_template
@@ -160,13 +160,13 @@ __all__ = [
     "InvitePasskeyAlreadyRegistered",
     "InviteSession",
     "InviteStateInvalid",
-    "LastOwnerMember",
     "NewUserAcceptance",
     "NotAMember",
     "PasskeySessionRequired",
     "PurposeMismatch",
     "TokenExpired",
     "WorkspaceMembership",
+    "WouldOrphanOwnersGroup",
     "complete_invite",
     "confirm_invite",
     "consume_invite_token",
@@ -1862,7 +1862,7 @@ def remove_member(
     Spec §03 / §05: the workspace admin clicks "remove from workspace"
     on a user's profile. Owners can remove anyone except the last
     owner; the last-owner guard reuses
-    :class:`app.domain.identity.permission_groups.LastOwnerMember`
+    :class:`app.domain.identity.permission_groups.WouldOrphanOwnersGroup`
     so the invariant definition lives in one place (§02
     "permission_group" §"Invariants").
 
@@ -1929,7 +1929,7 @@ def remove_member(
             or 0
         )
         if total_owner_members <= 1:
-            raise LastOwnerMember(
+            raise WouldOrphanOwnersGroup(
                 f"cannot remove the last member of the 'owners' group; "
                 f"workspace_id={ctx.workspace_id!r} user_id={user_id!r}"
             )

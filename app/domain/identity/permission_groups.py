@@ -16,7 +16,7 @@ groups (``owners``, ``managers``, ``all_workers``, ``all_clients``):
   allowed on every group including system ones, and both are
   idempotent: a duplicate add or a missing remove is a no-op that
   still emits an audit row (§02 "Audit"). Removing the last member
-  of the system ``owners`` group raises :class:`LastOwnerMember`
+  of the system ``owners`` group raises :class:`WouldOrphanOwnersGroup`
   (cd-ckr): §02's "owners has ≥ 1 active member at all times"
   invariant would otherwise break. The caller-visible forensic row
   for the refusal lands on a **fresh** UoW via
@@ -77,13 +77,13 @@ from app.util.clock import Clock, SystemClock
 from app.util.ulid import new_ulid
 
 __all__ = [
-    "LastOwnerMember",
     "PermissionGroupMemberRef",
     "PermissionGroupNotFound",
     "PermissionGroupRef",
     "PermissionGroupSlugTaken",
     "SystemGroupProtected",
     "UnknownCapability",
+    "WouldOrphanOwnersGroup",
     "add_member",
     "create_group",
     "delete_group",
@@ -159,16 +159,18 @@ class UnknownCapability(ValueError):
     """
 
 
-class LastOwnerMember(Validation):
+class WouldOrphanOwnersGroup(Validation):
     """Refuse to remove the sole member of the system ``owners`` group.
 
     HTTP 422 with ``type = would_orphan_owners_group`` per §02
-    "permission_group" §"Invariants". The service rejects the remove
-    **before** the DELETE lands, so the caller's UoW rolls back and
-    the ``owners`` group keeps its member. The router is expected to
-    write the forensic rejection audit row on a fresh UoW (see
-    :func:`write_member_remove_rejected_audit`) so the refusal trail
-    survives the rollback.
+    "permission_group" §"Invariants" (and the matching
+    ``users.archived_at`` clause that uses the same code for the
+    deployment-wide sole-owner-archival case). The service rejects
+    the remove **before** the DELETE lands, so the caller's UoW
+    rolls back and the ``owners`` group keeps its member. The router
+    is expected to write the forensic rejection audit row on a fresh
+    UoW (see :func:`write_member_remove_rejected_audit`) so the
+    refusal trail survives the rollback.
 
     The guard is scoped to the **system** ``owners`` group only
     (``slug == 'owners'`` AND ``system is True``). A user-defined
@@ -540,7 +542,7 @@ def remove_member(
 
     * :class:`PermissionGroupNotFound` — the group is missing from
       the caller's workspace.
-    * :class:`LastOwnerMember` — the target group is the system
+    * :class:`WouldOrphanOwnersGroup` — the target group is the system
       ``owners`` group and removing ``user_id`` would leave it with
       zero members. §02 "permission_group" §"Invariants" forbids an
       empty ``owners`` group; the guard fires BEFORE the DELETE so
@@ -580,7 +582,7 @@ def remove_member(
             # would discard the row with it. The router writes a
             # ``member_remove_rejected`` forensic row on a fresh
             # UoW via :func:`write_member_remove_rejected_audit`.
-            raise LastOwnerMember(
+            raise WouldOrphanOwnersGroup(
                 f"cannot remove the last member of the 'owners' group "
                 f"({group.id!r}); transfer owners membership first"
             )
@@ -611,7 +613,7 @@ def write_member_remove_rejected_audit(
     """Append the forensic rejection row for a refused ``remove_member`` call.
 
     Mirrors :func:`app.auth.magic_link.write_rejected_audit`: the
-    typed :class:`LastOwnerMember` exception bubbles through the
+    typed :class:`WouldOrphanOwnersGroup` exception bubbles through the
     caller's UoW, which rolls back and discards every row the
     service queued on the same session (including any audit row).
     The HTTP router catches the exception, opens a fresh UoW via
