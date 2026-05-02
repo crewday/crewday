@@ -292,9 +292,14 @@ export default function App() {
               </Route>
             </Route>
 
+            <Route element={<RequirePermission actionKey="employees.read" />}>
+              <Route element={<ManagerLayout />}>
+                <Route path="/employees" element={<EmployeesPage />} />
+                <Route path="/employee/:eid" element={<EmployeeDetailPage />} />
+              </Route>
+            </Route>
+
             <Route element={<ManagerLayout />}>
-              <Route path="/employees" element={<EmployeesPage />} />
-              <Route path="/employee/:eid" element={<EmployeeDetailPage />} />
               <Route
                 path="/expenses"
                 element={

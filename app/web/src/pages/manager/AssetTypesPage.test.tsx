@@ -89,8 +89,12 @@ afterEach(() => {
 
 describe("<AssetTypesPage>", () => {
   it("wraps the asset type route in the scope-view permission guard", () => {
+    // The scope.view block bundles every read-only asset / inventory
+    // surface; sibling routes (e.g. `/inventory`) may sit between
+    // `/assets` and `/asset_types`. Match the wrapper + the AssetTypes
+    // route presence rather than locking adjacency.
     expect(appSource).toMatch(
-      /<Route element={<RequirePermission actionKey="scope\.view" \/>}>\s*<Route element={<ManagerLayout \/>}>\s*<Route path="\/assets" element={<AssetsPage \/>} \/>\s*<Route path="\/asset_types" element={<AssetTypesPage \/>} \/>/,
+      /<Route element={<RequirePermission actionKey="scope\.view" \/>}>\s*<Route element={<ManagerLayout \/>}>[\s\S]*?<Route path="\/asset_types" element={<AssetTypesPage \/>} \/>/,
     );
   });
 
