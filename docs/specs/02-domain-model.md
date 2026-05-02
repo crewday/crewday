@@ -205,6 +205,11 @@ erDiagram
     WORK_ENGAGEMENT ||--o{ BOOKING : commits
     BOOKING ||--o{ TASK_COMPLETION : groups
 
+    WORKSPACE ||--o{ SHIFT : tracks
+    USER ||--o{ SHIFT : clocks
+    OCCURRENCE |o--o| SHIFT : auto_opens
+    PROPERTY |o--o{ SHIFT : at
+
     WORK_ENGAGEMENT ||--o{ PAY_RULE : paid_under
     PAY_RULE ||--o{ PAY_PERIOD_ENTRY : accrues
     PAY_PERIOD ||--o{ PAY_PERIOD_ENTRY : contains
@@ -294,7 +299,10 @@ catalog pair (see `permission_rule` below and the catalog in
   one open shift (``ends_at IS NULL``) is permitted per (user,
   workspace) at any time — the service rejects a second
   `open_shift` call with `ShiftAlreadyOpen` until the existing
-  shift is closed.
+  shift is closed. Shifts are forensic / compliance records — they
+  are **not** part of the pay pipeline. `pay_period_entry` and
+  `payslip` rows are derived from `booking` rows, never from
+  `shift` rows (see §09 §"Bookings").
 - **Clients, vendors, work orders** (§22): `organization`,
   `client_rate`, `client_user_rate`, `booking_billing`,
   `work_order`, `quote`, `vendor_invoice`,

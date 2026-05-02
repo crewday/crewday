@@ -51,13 +51,13 @@ only when the contract is questioned.
 > amended) `actual_minutes` record — no minute-by-minute
 > self-reporting needed.
 
-Note: a lightweight `shift` entity does exist for workspaces that
-want explicit clock-in / clock-out records alongside (not instead
-of) bookings — see `app/domain/time/shifts.py` and §12 "Time,
-payroll, expenses". Shifts are not pay-bearing in the current
-pipeline; their relationship to `booking_billing` is deferred to a
-future spec update (see `docs/specs/02-domain-model.md`
-§"Time / pay / expenses").
+A complementary `shift` entity records explicit clock-in /
+clock-out events alongside (not instead of) bookings — see
+`app/domain/time/shifts.py` and §12 "Time, payroll, expenses".
+**Shifts are not pay-bearing.** Pay-period entries, payslips, and
+`booking_billing` are populated exclusively from `booking` rows;
+the `shift` table is forensic / compliance-facing, used by the
+manager rota view and the labour-law audit trail.
 
 When `task_template.auto_shift_from_occurrence` or the workspace's
 `property_workspace.auto_shift_from_occurrence` flag is enabled, the

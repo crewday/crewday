@@ -1731,6 +1731,10 @@ quantities as JSON numbers (fractional — e.g. `"qty": 0.3`).
 
 ### Time, payroll, expenses
 
+Note: the `/time/shifts*` endpoints write `shift` rows (clock-in /
+clock-out for compliance and the manager rota view). Shifts are not
+pay-bearing — see §09 §"Bookings".
+
 ```
 GET    /time/shifts                # list shifts; ?user_id=…&starts_from=…&starts_until=…&open_only=true|false
                                    # shifts ordered (starts_at ASC, id ASC).
