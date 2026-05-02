@@ -397,26 +397,28 @@ ignore_imports = [
     # ``app.domain.identity`` exceptions.
     "app.domain.identity._owner_guard -> app.adapters.db.authz.models",
     # v1 stopgap (cd-jpa): ``app.domain.identity.membership`` reads
-    # identity + authz + workspace ORM models directly. Same
+    # identity + authz + workspace ORM models directly for the
+    # post-acceptance operations (remove_member,
+    # list_workspaces_for_user, switch_session_workspace). Same
     # Protocol-seam refactor as the siblings above; tracked by
     # cd-duv6 (extended scope). Drops once the repositories land.
     "app.domain.identity.membership -> app.adapters.db.authz.models",
     "app.domain.identity.membership -> app.adapters.db.identity.models",
     "app.domain.identity.membership -> app.adapters.db.workspace.models",
-    # cd-dagg follow-up: property- + organization-scope invite grants
-    # cross-check against ``property_workspace`` and ``organization``
-    # at invite() time. Same Protocol-seam stopgap as the siblings
-    # above; drops with cd-duv6.
-    "app.domain.identity.membership -> app.adapters.db.billing.models",
-    "app.domain.identity.membership -> app.adapters.db.places.models",
-    # v1 stopgap (cd-9q6bb): the bare-host invitee passkey enrolment
-    # seam (``register_invite_passkey_{start,finish}``) delegates
-    # verification + persistence to :mod:`app.auth.passkey` so the
-    # WebAuthn envelope stays in one place. The auth layer itself
-    # reads identity ORM models directly (cd-4zz). Drops with
-    # cd-duv6 / cd-kd26 when the passkey-finish callback folds
-    # completion in and the auth layer routes through a port.
-    "app.domain.identity.membership -> app.auth.passkey",
+    # cd-vc3r: invite lifecycle (create / introspect / consume /
+    # complete / confirm + new-user passkey enrolment) split out of
+    # ``app.domain.identity.membership`` into its own focused module.
+    # Inherits the parent module's full ignore set — invite() reads
+    # billing + places models for property/organization-scope
+    # cross-checks (cd-dagg), and the bare-host passkey enrolment
+    # seam (cd-9q6bb) delegates to ``app.auth.passkey``. Drops with
+    # cd-duv6 / cd-kd26 when the Protocol seams land.
+    "app.domain.identity.invite -> app.adapters.db.authz.models",
+    "app.domain.identity.invite -> app.adapters.db.identity.models",
+    "app.domain.identity.invite -> app.adapters.db.workspace.models",
+    "app.domain.identity.invite -> app.adapters.db.billing.models",
+    "app.domain.identity.invite -> app.adapters.db.places.models",
+    "app.domain.identity.invite -> app.auth.passkey",
     # v1 stopgap (cd-ckr): the owners-membership check lives under
     # ``app.authz.owners`` so the tenancy middleware (cd-7y4) and
     # the identity domain share one SELECT shape. ``app.authz``

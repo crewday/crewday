@@ -334,8 +334,12 @@ class TestScopedRowIsolation:
 COVERED_METHODS: frozenset[str] = frozenset(
     {
         # identity context
-        "app.domain.identity.membership.invite",
-        "app.domain.identity.membership.confirm_invite",
+        # cd-vc3r: invite lifecycle moved out of ``membership`` into the
+        # focused ``app.domain.identity.invite`` module; ``remove_member``
+        # is the only write that stayed in ``membership`` (post-acceptance
+        # operation, not part of the invite create/accept flow).
+        "app.domain.identity.invite.invite",
+        "app.domain.identity.invite.confirm_invite",
         "app.domain.identity.membership.remove_member",
         "app.domain.identity.permission_groups.list_groups",
         "app.domain.identity.permission_groups.get_group",
