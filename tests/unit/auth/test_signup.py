@@ -47,7 +47,7 @@ from app.adapters.db.identity.models import (
     WebAuthnChallenge,
 )
 from app.adapters.db.llm.models import BudgetLedger
-from app.adapters.db.session import make_engine
+from app.adapters.db.session import UnitOfWorkImpl, make_engine
 from app.adapters.db.workspace.models import UserWorkspace, Workspace
 from app.api.deps import db_session
 from app.api.v1.auth.signup import build_signup_router
@@ -2090,3 +2090,248 @@ class TestEmailHashParity:
         expected.update(b"parity@example.com")
         expected.update(pepper)
         assert attempt.email_hash == expected.hexdigest()
+
+
+# ---------------------------------------------------------------------------
+# Router-level coverage — challenge row burn on /signup/passkey/finish
+# ---------------------------------------------------------------------------
+
+
+class TestRouterPasskeyFinishChallengeSingleUse:
+    """cd-4mhy / cd-qx1f / §03 "WebAuthn specifics": a verified-and-failed
+    ``/signup/passkey/finish`` burns the challenge row on a fresh UoW
+    so a leaked id is single-use even on failure.
+
+    The burn lands via the ``after_rollback`` listener that
+    :func:`signup.complete_signup` registers when its inner
+    ``register_finish_signup`` raises one of
+    :class:`~app.auth.passkey.InvalidRegistration`,
+    :class:`~app.auth.passkey.ChallengeSubjectMismatch`, or
+    :class:`~app.auth.passkey.ChallengeExpired`. The router doesn't
+    need its own burn — the listener fires when the FastAPI ``db_session``
+    UoW rolls back as the typed error propagates through. These tests
+    pin the invariant at the HTTP boundary; the deleted
+    ``TestSignupFinishChallengeSingleUse`` (9ec56a8) covered the
+    retired parallel router and didn't survive its retirement.
+    """
+
+    @pytest.fixture
+    def client(
+        self,
+        capabilities_enabled: Capabilities,
+        mailer: _RecordingMailer,
+        throttle: Throttle,
+        settings: Settings,
+        engine: Engine,
+    ) -> Iterator[TestClient]:
+        """Real-UoW DB override — rollback fires the burn listener.
+
+        A plain ``factory()`` yield would commit on context exit and
+        never trigger the :meth:`Session.rollback` that
+        :func:`passkey.burn_challenge_on_failure` listens for.
+        """
+        app = FastAPI()
+        router = build_signup_router(
+            mailer=mailer,
+            throttle=throttle,
+            capabilities=capabilities_enabled,
+            base_url="https://crew.day",
+            settings=settings,
+        )
+        app.include_router(router, prefix="/api/v1")
+
+        factory = sessionmaker(bind=engine, expire_on_commit=False, class_=Session)
+
+        def _db() -> Iterator[Session]:
+            uow = UnitOfWorkImpl(session_factory=factory)
+            with uow as s:
+                assert isinstance(s, Session)
+                yield s
+
+        app.dependency_overrides[db_session] = _db
+        with _redirect_default_engine_to(engine), TestClient(app) as c:
+            yield c
+
+    def _seed_verified_attempt_and_challenge(
+        self,
+        engine: Engine,
+        *,
+        mailer: _RecordingMailer,
+        throttle: Throttle,
+        settings: Settings,
+        capabilities: Capabilities,
+        now: datetime,
+    ) -> tuple[str, str]:
+        """Run start + verify and seed the challenge row.
+
+        ``now`` is wall-clock here (not ``_PINNED``): the canonical
+        handler runs against the real clock, and a pinned ``now`` would
+        trip the 15-min signup-attempt TTL the moment the handler
+        advanced past it.
+        """
+        factory = sessionmaker(bind=engine, expire_on_commit=False, class_=Session)
+        with factory() as s:
+            signup.start_signup(
+                s,
+                email="burn@example.com",
+                desired_slug="burn-villa",
+                ip="127.0.0.1",
+                mailer=mailer,
+                base_url="https://crew.day",
+                throttle=throttle,
+                capabilities=capabilities,
+                now=now,
+                settings=settings,
+            )
+            token = _extract_token(mailer.sent[-1])
+            ssn = signup.consume_verify(
+                s,
+                token=token,
+                ip="127.0.0.1",
+                throttle=throttle,
+                capabilities=capabilities,
+                now=now + timedelta(seconds=1),
+                settings=settings,
+            )
+            challenge_id = _make_signup_challenge(
+                s,
+                signup_attempt_id=ssn.signup_attempt_id,
+                now=now + timedelta(seconds=2),
+            )
+            s.commit()
+        return ssn.signup_attempt_id, challenge_id
+
+    def test_invalid_registration_burns_challenge(
+        self,
+        client: TestClient,
+        engine: Engine,
+        mailer: _RecordingMailer,
+        throttle: Throttle,
+        settings: Settings,
+        capabilities_enabled: Capabilities,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A verifier rejection still removes the challenge row."""
+        now = datetime.now(tz=UTC)
+        signup_session_id, challenge_id = self._seed_verified_attempt_and_challenge(
+            engine,
+            mailer=mailer,
+            throttle=throttle,
+            settings=settings,
+            capabilities=capabilities_enabled,
+            now=now,
+        )
+        factory = sessionmaker(bind=engine, expire_on_commit=False, class_=Session)
+        with factory() as s:
+            assert s.get(WebAuthnChallenge, challenge_id) is not None
+
+        _stub_verify_registration(monkeypatch, fail=True)
+
+        resp = client.post(
+            "/api/v1/signup/passkey/finish",
+            json={
+                "signup_session_id": signup_session_id,
+                "challenge_id": challenge_id,
+                "display_name": "Burn Owner",
+                "timezone": "Pacific/Auckland",
+                "credential": _dummy_credential(),
+            },
+        )
+        assert resp.status_code == 400, resp.text
+        assert resp.json()["detail"]["error"] == "invalid_registration"
+
+        with factory() as s:
+            assert s.get(WebAuthnChallenge, challenge_id) is None
+
+    def test_challenge_expired_burns_challenge(
+        self,
+        client: TestClient,
+        engine: Engine,
+        mailer: _RecordingMailer,
+        throttle: Throttle,
+        settings: Settings,
+        capabilities_enabled: Capabilities,
+    ) -> None:
+        """Even a stale (TTL-elapsed) challenge is burned on finish so a
+        replay with the same id collapses to the privacy-preserving
+        ``challenge_consumed_or_unknown`` 409 instead of leaving a
+        ``challenge_expired`` 400 reachable until the 10-min TTL.
+        """
+        now = datetime.now(tz=UTC)
+        signup_session_id, challenge_id = self._seed_verified_attempt_and_challenge(
+            engine,
+            mailer=mailer,
+            throttle=throttle,
+            settings=settings,
+            capabilities=capabilities_enabled,
+            now=now,
+        )
+        factory = sessionmaker(bind=engine, expire_on_commit=False, class_=Session)
+        with factory() as s:
+            row = s.get(WebAuthnChallenge, challenge_id)
+            assert row is not None
+            row.expires_at = now - timedelta(minutes=20)
+            s.commit()
+
+        resp = client.post(
+            "/api/v1/signup/passkey/finish",
+            json={
+                "signup_session_id": signup_session_id,
+                "challenge_id": challenge_id,
+                "display_name": "Burn Owner",
+                "timezone": "Pacific/Auckland",
+                "credential": _dummy_credential(),
+            },
+        )
+        assert resp.status_code == 400, resp.text
+        assert resp.json()["detail"]["error"] == "challenge_expired"
+
+        with factory() as s:
+            assert s.get(WebAuthnChallenge, challenge_id) is None
+
+    def test_subject_mismatch_burns_challenge(
+        self,
+        client: TestClient,
+        engine: Engine,
+        mailer: _RecordingMailer,
+        throttle: Throttle,
+        settings: Settings,
+        capabilities_enabled: Capabilities,
+    ) -> None:
+        """A challenge minted for a different signup_session is burned
+        even though the verify pipeline rejects before the attestation
+        check. Exercises the
+        ``except passkey.ChallengeSubjectMismatch`` arm in
+        :func:`signup.complete_signup`.
+        """
+        now = datetime.now(tz=UTC)
+        signup_session_id, challenge_id = self._seed_verified_attempt_and_challenge(
+            engine,
+            mailer=mailer,
+            throttle=throttle,
+            settings=settings,
+            capabilities=capabilities_enabled,
+            now=now,
+        )
+        factory = sessionmaker(bind=engine, expire_on_commit=False, class_=Session)
+        with factory() as s:
+            row = s.get(WebAuthnChallenge, challenge_id)
+            assert row is not None
+            row.signup_session_id = "01HWA00000000000000000DIFF"
+            s.commit()
+
+        resp = client.post(
+            "/api/v1/signup/passkey/finish",
+            json={
+                "signup_session_id": signup_session_id,
+                "challenge_id": challenge_id,
+                "display_name": "Burn Owner",
+                "timezone": "Pacific/Auckland",
+                "credential": _dummy_credential(),
+            },
+        )
+        assert resp.status_code == 400, resp.text
+        assert resp.json()["detail"]["error"] == "invalid_registration"
+
+        with factory() as s:
+            assert s.get(WebAuthnChallenge, challenge_id) is None
