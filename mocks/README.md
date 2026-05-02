@@ -20,6 +20,87 @@ docker compose -f mocks/docker-compose.yml up -d --build
 - Public: https://dev.crew.day (via Pangolin / Traefik with
   badger auth; same wiring as `../fj2`)
 
+## Topology (cd-g1cy)
+
+The dev stack runs four containers (plus Mailpit) that together
+serve the same single-origin shape we will ship in production:
+
+```
+browser ──▶ FastAPI (app-api :8000)  ── /api, /events, /healthz, …
+   ▲                  │                  ───▶ real routers
+   │                  └─ everything else
+   │                     (HTTP fetch + ``vite-hmr`` WebSocket on /)
+   │                                     ───▶ web-dev (Vite :5173)
+   │                                                    │
+   │                                                    └ ``/mocks/*`` ──▶
+   │                                                      mocks-web-dev
+   │                                                      (Vite :5173, --base /mocks/)
+   │                                                                    │
+   │                                                                    └ ``/mocks/api`` ──▶
+   │                                                                      mocks-api (FastAPI)
+   │
+   └── 127.0.0.1:8100 (loopback) or dev.crew.day (Traefik)
+```
+
+Key points:
+
+- The browser never talks to Vite directly. FastAPI is the only
+  thing bound to host port 8100, and the only thing Traefik routes
+  for un-prefixed `dev.crew.day` requests.
+- The dev profile (`CREWDAY_PROFILE=dev`) turns on the Vite reverse
+  proxy in `app/api/proxy.py` — HTTP for module loads, WebSocket
+  upgrade for Vite's `vite-hmr` HMR socket.
+- `web-dev` and `mocks-web-dev` Vite containers are joined to the
+  compose network only; they have no host port and (for `web-dev`)
+  no Traefik labels. `mocks-web-dev` keeps a higher-priority
+  (`priority=100`) `Host(dev.crew.day) && PathPrefix(/mocks)`
+  Traefik router so requests via the **public host**
+  (`dev.crew.day/mocks/*`) go straight to it — they do **not** flow
+  through FastAPI. On the **loopback front door**
+  (`127.0.0.1:8100/mocks/*`) the request does take the longer path
+  drawn above (FastAPI → web-dev → mocks-web-dev) because Traefik is
+  not in the picture there. Both shapes preserve the single-origin
+  invariant; the public-host shortcut keeps the public route from
+  paying for two extra HTTP hops.
+
+### Why this topology
+
+Two reasons:
+
+1. **Production parity** — prod will serve the compiled SPA and the
+   JSON API from a single FastAPI process. Putting the dev stack
+   behind the same single origin shakes out cookie / CSP / origin
+   bugs before they hide in a shipped bundle.
+2. **Live exercise of the WS HMR proxy** — the proxy code in
+   `app/api/proxy.py` (cd-q1be HTTP + cd-354g WebSocket) used to be
+   unit-tested only. With this topology, every save under
+   `app/web/src/**/*.tsx` flows browser → FastAPI WS → Vite, so a
+   regression on either side surfaces immediately as `[vite] server
+   connection lost` in the browser console.
+
+### Debugging HMR
+
+If editing a `.tsx` no longer triggers `[vite] hot updated`:
+
+1. Confirm the FastAPI front door is up: `curl -I http://127.0.0.1:8100/healthz` returns `200`.
+2. Confirm the WebSocket leg works:
+   ```bash
+   curl -i -N -H "Connection: Upgrade" -H "Upgrade: websocket" \
+     -H "Sec-WebSocket-Version: 13" \
+     -H "Sec-WebSocket-Key: $(openssl rand -base64 16)" \
+     -H "Sec-WebSocket-Protocol: vite-hmr" \
+     http://127.0.0.1:8100/
+   ```
+   Expect `HTTP/1.1 101 Switching Protocols`.
+3. Open `http://127.0.0.1:8100/` in a browser and look for
+   `[vite] connected.` in the console — `[vite] server connection
+   lost.` means the WS upgrade didn't reach Vite. Check
+   `docker compose -f mocks/docker-compose.yml logs app-api` for
+   `spa_vite_ws_proxy_failed` events.
+4. Confirm `CREWDAY_VITE_DEV_URL` in the `app-api` environment
+   matches the running `web-dev` service hostname (compose service
+   name is the DNS name on the default network).
+
 ## Audience toggle
 
 Top banner has **Employee · Manager** pills (sets a cookie and
@@ -82,8 +163,10 @@ no utility frameworks). Tokens follow §14:
 The container joins the existing `traefik-proxy` network and
 registers Traefik labels — same pattern as `../fj2`. For badger to
 gate the domain, `dev.crew.day` needs to exist as a **resource**
-in the Pangolin dashboard (target `crewday-mocks:8000`). DNS is
-already CNAMEd to this host.
+in the Pangolin dashboard (target `crewday-app-api:8000` under the
+flipped topology — cd-g1cy renamed the front-door container from
+`crewday-mocks` to `crewday-app-api`). DNS is already CNAMEd to this
+host.
 
 ## Files
 

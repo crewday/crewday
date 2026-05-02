@@ -45,6 +45,7 @@ def _settings(
     demo_mode: bool = False,
     demo_frame_ancestors: str | None = None,
     hsts_enabled: bool = False,
+    profile: str = "prod",
 ) -> Settings:
     """Minimal :class:`Settings` — every field not listed here is
     irrelevant to the security-header middleware.
@@ -63,7 +64,7 @@ def _settings(
         demo_frame_ancestors=demo_frame_ancestors,
         hsts_enabled=hsts_enabled,
         worker="internal",
-        profile="prod",
+        profile=profile,
     )
 
 
@@ -179,6 +180,38 @@ class TestBuildCspHeader:
         )
         assert "frame-ancestors 'none'" in csp
         assert "https://evil.example" not in csp
+
+    def test_dev_profile_relaxes_inline_and_eval(self) -> None:
+        """Dev profile drops the nonce and allows inline + eval (cd-g1cy).
+
+        Vite's HMR client and React preamble emit nonce-less inline
+        ``<script>`` tags and rely on ``eval`` for source maps; under
+        the prod nonce-only directive the page never renders. The
+        relaxation is dev-only — every other knob (``frame-ancestors``,
+        ``object-src``, …) keeps its strict value so an accidentally
+        flipped flag still leaves the framing / object surface tight.
+        """
+        csp = build_csp_header(
+            "NONCE123",
+            demo_mode=False,
+            demo_frame_ancestors=None,
+            dev_profile=True,
+        )
+        assert "script-src 'self' 'unsafe-inline' 'unsafe-eval'" in csp
+        assert "style-src 'self' 'unsafe-inline'" in csp
+        # Nonce intentionally absent so the browser doesn't override
+        # ``'unsafe-inline'`` per CSP3 §6.6.2.4.
+        assert "nonce-NONCE123" not in csp
+        # The non-script knobs stay locked down.
+        assert "frame-ancestors 'none'" in csp
+        assert "object-src 'none'" in csp
+
+    def test_dev_profile_default_off(self) -> None:
+        """``dev_profile`` defaults to ``False`` so prod callers stay strict."""
+        csp = build_csp_header("NONCE123", demo_mode=False, demo_frame_ancestors=None)
+        assert "'unsafe-inline'" not in csp
+        assert "'unsafe-eval'" not in csp
+        assert "nonce-NONCE123" in csp
 
 
 # ---------------------------------------------------------------------------
@@ -440,6 +473,42 @@ class TestDemoFrameAncestors:
         client = TestClient(app)
         resp = client.get("/probe")
         assert resp.headers["x-frame-options"] == "DENY"
+
+
+class TestDevProfileMiddleware:
+    """``SecurityHeadersMiddleware.dispatch`` reads ``settings.profile``
+    and forwards it to :func:`build_csp_header` (cd-g1cy).
+
+    The pure-function tests above pin the directive shape; these tests
+    pin the wiring — a future regression that drops the
+    ``dev_profile=...`` argument from ``dispatch()`` would silently
+    leave the unit-level coverage green, but the live response CSP
+    would revert to the strict nonce-only directive and Vite's HMR
+    client would refuse to execute.
+    """
+
+    def test_dev_profile_response_csp_relaxes_inline_and_eval(self) -> None:
+        app = _build_app(_settings(profile="dev"))
+        client = TestClient(app)
+        resp = client.get("/probe")
+        csp = resp.headers["content-security-policy"]
+        assert "script-src 'self' 'unsafe-inline' 'unsafe-eval'" in csp
+        assert "style-src 'self' 'unsafe-inline'" in csp
+        # Nonce intentionally absent — see CSP3 §6.6.2.4.
+        assert "'nonce-" not in csp
+        # Strict knobs unchanged under dev profile.
+        assert "frame-ancestors 'none'" in csp
+        assert "object-src 'none'" in csp
+
+    def test_prod_profile_response_csp_keeps_nonce(self) -> None:
+        app = _build_app(_settings(profile="prod"))
+        client = TestClient(app)
+        resp = client.get("/probe")
+        csp = resp.headers["content-security-policy"]
+        assert "script-src 'self' 'nonce-" in csp
+        assert "style-src 'self' 'nonce-" in csp
+        assert "'unsafe-inline'" not in csp
+        assert "'unsafe-eval'" not in csp
 
 
 class TestNonceNotLogged:

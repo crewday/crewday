@@ -111,6 +111,7 @@ def build_csp_header(
     *,
     demo_mode: bool,
     demo_frame_ancestors: str | None,
+    dev_profile: bool = False,
 ) -> str:
     """Compose the ``Content-Security-Policy`` directive string.
 
@@ -125,15 +126,42 @@ def build_csp_header(
     iframe can be embedded on the marketing site. Everywhere else,
     ``frame-ancestors 'none'`` stays hard — any same-origin framing
     attempt is refused at the browser layer.
+
+    Dev-profile carve-out (cd-g1cy): when ``dev_profile`` is on, the
+    ``script-src`` and ``style-src`` directives also accept
+    ``'unsafe-inline'`` and ``'unsafe-eval'``. Vite's HMR client and
+    its ``@vitejs/plugin-react`` preamble emit nonce-less inline
+    ``<script type="module">`` tags and rely on ``eval`` for source
+    maps; rewriting them to carry the FastAPI-issued nonce would
+    require parsing every upstream HTML / JS chunk and is out of scope
+    for the dev seam (cd-q1be / cd-354g pinned the proxy as
+    framing-preserving). The relaxation is dev-only — production
+    builds emit content-hashed external scripts that the strict
+    nonce-only policy already accepts.
     """
     frame_ancestors = "'none'"
     if demo_mode and demo_frame_ancestors:
         frame_ancestors = demo_frame_ancestors
 
+    if dev_profile:
+        # CSP3 §6.6.2.4 says ``'unsafe-inline'`` is **ignored** whenever
+        # the same directive carries a nonce or hash — so we drop the
+        # nonce in dev and lean on ``'unsafe-inline'`` + ``'unsafe-eval'``
+        # alone. That lets Vite's HMR client, its
+        # ``@vitejs/plugin-react`` preamble, and its source-map decoder
+        # all execute without per-script rewriting. The Beads-tracked
+        # SPA bootstrap script in dev still emits the nonce attribute,
+        # which the browser simply ignores under this directive.
+        script_src = "script-src 'self' 'unsafe-inline' 'unsafe-eval'"
+        style_src = "style-src 'self' 'unsafe-inline'"
+    else:
+        script_src = f"script-src 'self' 'nonce-{nonce}'"
+        style_src = f"style-src 'self' 'nonce-{nonce}'"
+
     directives = [
         "default-src 'self'",
-        f"script-src 'self' 'nonce-{nonce}'",
-        f"style-src 'self' 'nonce-{nonce}'",
+        script_src,
+        style_src,
         "img-src 'self' data:",
         "font-src 'self'",
         "connect-src 'self'",
@@ -205,6 +233,7 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
             nonce,
             demo_mode=self._settings.demo_mode,
             demo_frame_ancestors=self._settings.demo_frame_ancestors,
+            dev_profile=self._settings.profile == "dev",
         )
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
         response.headers["Permissions-Policy"] = build_permissions_policy(

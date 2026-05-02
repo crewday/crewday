@@ -128,14 +128,24 @@ export default defineConfig({
     alias: { "@": path.resolve(__dirname, "src") },
   },
   // The dev server binds inside the Docker `web-dev` container on
-  // 0.0.0.0 and is reached two ways:
-  //   - locally: 127.0.0.1:8100 → container :5173 (port forward)
-  //   - publicly: https://dev.crew.day → Traefik → web-dev:5173
-  // Letting Vite pick HMR host/port from the page origin makes both
-  // work without per-URL config: ws:// for 127.0.0.1:8100, wss://
-  // for the public host (Traefik upgrades the websocket).
+  // 0.0.0.0 and is reached one way in compose: the sibling
+  // `app-api` container proxies to `http://web-dev:5173` for SPA
+  // routes and `ws://web-dev:5173/` for HMR upgrades (cd-g1cy).
+  // The browser never talks to Vite directly — it talks to FastAPI
+  // on `127.0.0.1:8100` (loopback) or `dev.crew.day` (Traefik), and
+  // FastAPI's dev-profile reverse proxy (`app/api/proxy.py`) does
+  // the rest.
+  //
+  // We deliberately leave `server.hmr` unset: Vite then bakes
+  // `hmrPort = null` into `/@vite/client`, which makes the browser
+  // HMR client fall back to `importMetaUrl.port` — i.e. the page's
+  // own origin port. Loopback (8100) and HTTPS via Traefik (443)
+  // both pick up automatically without any per-environment config.
+  //
   // `allowedHosts` lets the public hostname and the API container's
-  // proxy host through Vite's host-check.
+  // proxy host through Vite's host-check (FastAPI's HTTP proxy
+  // strips the inbound `Host`, but `httpx` re-synthesises one based
+  // on the upstream URL = `web-dev:5173`).
   server: {
     host: "0.0.0.0",
     port: 5173,
