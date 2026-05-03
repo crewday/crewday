@@ -14,30 +14,17 @@ Two gates per the task / spec contract:
    running Prometheus inside the same VPC populate this with the
    scraper's CIDR.
 
-**Reverse-proxy caveat (cd-24tp self-review):** The CIDR check
-runs against ``request.client.host`` — the TCP peer. In any
-deployment that fronts the app with a reverse proxy
-(Caddy / nginx / Traefik / Pangolin) the peer is the proxy, not
-the original client. Recipe A (Caddy on host →
-``reverse_proxy 127.0.0.1:8000``) makes EVERY request appear to
-come from loopback, so the default ``127.0.0.0/8`` allowlist
-would let an external scraper hitting the proxy reach
-``/metrics``. Operators behind a reverse proxy MUST either:
-
-* Keep ``CREWDAY_METRICS_ENABLED=false`` (the default) and scrape
-  Prometheus from a sidecar that talks to the app directly
-  (bypassing the proxy), or
-* Configure the reverse proxy to refuse external traffic to
-  ``/metrics`` (nginx ``location = /metrics { allow ...; deny all; }``,
-  Caddy ``@metrics path /metrics`` with an IP matcher), or
-* Set ``CREWDAY_METRICS_ALLOW_CIDR`` to a tight, proxy-aware
-  range that excludes loopback (e.g. just the scraper's
-  internal Docker bridge CIDR).
-
-We deliberately do NOT trust ``X-Forwarded-For`` here — without
-a trusted-proxy registry an attacker can spoof the header. The
-crewday spec carries no trusted-proxy seam today; adding one is
-tracked as a Beads follow-up.
+**Source-IP resolution (cd-ca0u):** the gate matches against the
+output of :func:`app.util.forwarded.resolve_source_ip`. When the TCP
+peer falls inside :attr:`Settings.trusted_proxies` we honour the
+rightmost ``X-Forwarded-For`` entry; otherwise we fall back to
+``request.client.host`` and ignore the header entirely. Operators
+behind a reverse proxy (Caddy / nginx / Traefik / Pangolin) set
+``CREWDAY_TRUSTED_PROXIES`` to the proxy's CIDR (Recipe A:
+``127.0.0.1/32``); deployments with no proxy leave it empty and keep
+the historical "TCP peer is source" behaviour. See
+``docs/specs/16-deployment-operations.md`` §"Reverse-proxy caveat"
+for the operator-side mitigations that compose with this seam.
 
 The endpoint is unversioned — bare ``/metrics`` — because it is an
 ops surface, not part of the §12 REST API. Prometheus's default
@@ -61,10 +48,13 @@ from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 
 from app.config import Settings
 from app.observability.metrics import METRICS_REGISTRY
+from app.util.forwarded import parse_trusted_proxies, resolve_source_ip
 
 __all__ = ["build_metrics_router"]
 
 _log = logging.getLogger(__name__)
+
+type _IPNetwork = ipaddress.IPv4Network | ipaddress.IPv6Network
 
 
 # Default allow-list when the operator hasn't set one explicitly.
@@ -78,21 +68,23 @@ _DEFAULT_ALLOW_CIDRS: Final[tuple[str, ...]] = (
 )
 
 
-def _resolve_allow_cidrs(settings: Settings) -> tuple[ipaddress.IPv4Network, ...]:
-    """Return the parsed CIDR allow-list as :class:`IPv4Network` tuples.
+def _resolve_allow_cidrs(settings: Settings) -> tuple[_IPNetwork, ...]:
+    """Return the parsed CIDR allow-list as v4/v6 network tuples.
 
     The settings value is a list of strings (parsed from the
     comma-separated ``CREWDAY_METRICS_ALLOW_CIDR`` env var); empty
     falls back to :data:`_DEFAULT_ALLOW_CIDRS`. Invalid entries log
     at WARNING and are dropped — a typo in the env var should not
     crash the boot, but operators need a clear signal in the JSON
-    log stream.
+    log stream. v4 + v6 entries mix freely; the default stays v4-only
+    because the documented mesh ranges (loopback + Tailscale CGNAT)
+    are both v4.
     """
     raw = list(settings.metrics_allow_cidr) or list(_DEFAULT_ALLOW_CIDRS)
-    parsed: list[ipaddress.IPv4Network] = []
+    parsed: list[_IPNetwork] = []
     for entry in raw:
         try:
-            parsed.append(ipaddress.IPv4Network(entry, strict=False))
+            parsed.append(ipaddress.ip_network(entry, strict=False))
         except ValueError:
             _log.warning(
                 "metrics allow-cidr entry rejected; ignoring",
@@ -101,25 +93,9 @@ def _resolve_allow_cidrs(settings: Settings) -> tuple[ipaddress.IPv4Network, ...
     return tuple(parsed)
 
 
-def _client_ip(request: Request) -> str | None:
-    """Return the request's source IP (no proxy header trust).
-
-    The §15 spec deliberately does NOT trust ``X-Forwarded-For`` —
-    a client behind no proxy can spoof it freely. The metrics CIDR
-    gate runs against the actual TCP peer
-    (``request.client.host``). Operators fronting the app with a
-    reverse proxy MUST scrape from the proxy's network and add
-    that CIDR to the allowlist; the alternative is letting any
-    public client claim a private source.
-    """
-    if request.client is None:
-        return None
-    return request.client.host
-
-
 def _is_allowed(
     client_ip: str | None,
-    cidrs: tuple[ipaddress.IPv4Network, ...],
+    cidrs: tuple[_IPNetwork, ...],
 ) -> bool:
     """Return True if ``client_ip`` falls inside any allowed CIDR.
 
@@ -132,12 +108,8 @@ def _is_allowed(
     if client_ip is None:
         return False
     try:
-        addr = ipaddress.IPv4Address(client_ip)
+        addr = ipaddress.ip_address(client_ip)
     except ValueError:
-        # IPv6 callers fall through this branch — for v1 the spec
-        # ships an IPv4-only allowlist (loopback + Tailscale CGNAT
-        # are both v4). A future IPv6 deployment widens both the
-        # default and this branch in lockstep.
         return False
     return any(addr in cidr for cidr in cidrs)
 
@@ -148,10 +120,27 @@ def build_metrics_router(*, settings: Settings) -> APIRouter:
     Built per-app so :class:`Settings` is captured by closure rather
     than read from a global on every request — matches the rest of
     the factory's settings-injection pattern (every router that
-    needs settings takes them at construction time).
+    needs settings takes them at construction time). Both the CIDR
+    allowlist and the trusted-proxy registry are parsed once here
+    and reused per request.
     """
     router = APIRouter()
     allow_cidrs = _resolve_allow_cidrs(settings)
+    trusted_proxies = parse_trusted_proxies(list(settings.trusted_proxies))
+
+    def _client_ip(request: Request) -> str | None:
+        peer = request.client.host if request.client is not None else None
+        # Multi-value handling: HTTP allows the same header to appear
+        # more than once (some proxies append a fresh ``X-Forwarded-For``
+        # rather than extending the upstream one). ``Headers.get`` only
+        # returns the first; ``getlist`` returns all. Comma-join so the
+        # rightmost-pick in :func:`resolve_source_ip` sees the full
+        # chain — for the /metrics gate this is mostly belt-and-braces,
+        # but it's the correct shape for any future audit / rate-limit
+        # consumer.
+        forwarded_values = request.headers.getlist("X-Forwarded-For")
+        forwarded_for = ", ".join(forwarded_values) if forwarded_values else None
+        return resolve_source_ip(peer, forwarded_for, trusted_proxies)
 
     @router.get(
         "/metrics",

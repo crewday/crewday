@@ -693,6 +693,7 @@ provisioned per visitor, not per operator.
 | `CREWDAY_SESSION_USER_TTL_DAYS` | 30                        | session lifetime (days) for everyone else; see §03 |
 | `CREWDAY_ALLOW_PUBLIC_BIND`| 0                              | required for any bind that isn't loopback or on a trusted interface; compose recipes set it explicitly |
 | `CREWDAY_TRUSTED_INTERFACES`| `tailscale*`                  | comma-separated fnmatch globs of interface names whose addresses pass without the opt-in; set value **replaces** the default (no implicit baseline) |
+| `CREWDAY_TRUSTED_PROXIES`   | -                              | comma-separated v4/v6 CIDRs of reverse proxies whose `X-Forwarded-For` we honour when resolving a request's source IP. Empty (default) means no proxies are trusted: the TCP peer is the source IP and `X-Forwarded-For` is ignored. Operators behind a reverse proxy set this to the proxy's CIDR (Recipe A: `127.0.0.1/32`; compose: the Docker bridge). Wired through `app.util.forwarded` into the `/metrics` CIDR check today and any future audit / rate-limit seam. cd-ca0u. |
 | `CREWDAY_SMTP_*`            | -                              | see §10                  |
 | `CREWDAY_OPENROUTER_API_KEY`| -                              | see §11                  |
 | `CREWDAY_LLM_PROVIDER`      | -                              | Runtime `LLMClient` selector. Unset / `openrouter` keeps the production wiring (`OpenRouterClient` when an API key is reachable, `None` otherwise). `fake` swaps in the in-process `app.adapters.llm.fake.FakeLLMClient` so the e2e / Playwright stack exercises LLM autofill without an upstream key — gated to `mocks/docker-compose.e2e.yml`. Never enable in production. Pair with `CREWDAY_LLM_OCR_MODEL` for the receipt-autofill capability gate. cd-tblly. |
@@ -764,8 +765,10 @@ A full env reference lives in `deploy/.env.example`.
      403) so a scanner cannot distinguish "metrics off" from "no
      such endpoint".
   2. `CREWDAY_METRICS_ALLOW_CIDR` — comma-separated CIDR
-     allowlist matched against the request's TCP source IP (NOT
-     `X-Forwarded-For`, which is spoofable). Empty falls back to
+     allowlist matched against the request's source IP (resolved
+     via `app.util.forwarded`: the TCP peer by default, or the
+     rightmost `X-Forwarded-For` entry when the peer is in
+     `CREWDAY_TRUSTED_PROXIES`). Empty falls back to
      `127.0.0.0/8,100.64.0.0/10` (loopback + Tailscale CGNAT). A
      non-allowed source returns 403.
 - The §15 "Logging and redaction" no-PII contract extends to
@@ -792,15 +795,32 @@ A full env reference lives in `deploy/.env.example`.
 
 #### Reverse-proxy caveat
 
-`CREWDAY_METRICS_ALLOW_CIDR` matches the **TCP peer**, not the
-original client. In any deployment that fronts the app with a
-reverse proxy (Caddy / nginx / Traefik / Pangolin), `request.client.host`
-is the proxy's IP. Recipe A puts Caddy on the host and proxies
-to `127.0.0.1:8000`, so EVERY inbound request appears to come
-from loopback once it reaches the app — the default
-`127.0.0.0/8` allowlist is wide open through the proxy.
+`CREWDAY_METRICS_ALLOW_CIDR` matches the request's resolved source
+IP, which by default is the **TCP peer**. In any deployment that
+fronts the app with a reverse proxy (Caddy / nginx / Traefik /
+Pangolin), `request.client.host` is the proxy's IP. Recipe A puts
+Caddy on the host and proxies to `127.0.0.1:8000`, so EVERY inbound
+request appears to come from loopback once it reaches the app — the
+default `127.0.0.0/8` allowlist is wide open through the proxy
+unless the operator either populates the trusted-proxy registry or
+applies a belt-and-braces proxy-side rule.
 
-Operators behind a reverse proxy MUST do **one** of:
+The first-class fix is **`CREWDAY_TRUSTED_PROXIES`** (cd-ca0u): a
+comma-separated CIDR list of reverse proxies whose `X-Forwarded-For`
+we are willing to honour. When the TCP peer falls inside the
+registry, the source IP becomes the rightmost `X-Forwarded-For`
+entry (the IP the trusted proxy itself observed); otherwise the
+peer wins and `X-Forwarded-For` is ignored entirely (spoof-safe).
+Recipe A wires this with `CREWDAY_TRUSTED_PROXIES=127.0.0.1/32`;
+compose stacks set the Docker bridge CIDR. The empty default
+preserves the historical "TCP peer is source" behaviour for
+deployments with no reverse proxy.
+
+Operators should still combine the registry with at least one
+operator-side mitigation — both because defence-in-depth is cheap
+and because some proxies (Docker compose default networking, in
+particular) rewrite the peer IP without forwarding the original
+header at all. Pick **one or more** of:
 
 1. Keep `CREWDAY_METRICS_ENABLED=false` (the default) and run
    the Prometheus scraper as a sidecar that talks to the app
@@ -838,12 +858,6 @@ Operators behind a reverse proxy MUST do **one** of:
    forwards the unmodified peer IP, which Docker compose
    networking does **not** do without
    `network_mode: host`.
-
-We deliberately do not honour `X-Forwarded-For` here — without
-a trusted-proxy registry an attacker can spoof the header. A
-trusted-proxy seam can land later if a real deployment needs
-it; until then the safe posture is "metrics off behind a
-proxy, scrape direct".
 
 #### Cardinality budget
 

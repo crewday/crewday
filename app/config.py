@@ -309,6 +309,21 @@ class Settings(BaseSettings):
         default_factory=list,
     )
 
+    # --- Trusted reverse proxies (§16 "Reverse-proxy caveat", cd-ca0u) ---
+    # CIDR list of reverse proxies whose ``X-Forwarded-For`` we are
+    # willing to honour when resolving a request's source IP — wired
+    # through :mod:`app.util.forwarded`. Empty (default) means no
+    # proxies are trusted: every consumer (today: the ``/metrics``
+    # CIDR gate) treats the TCP peer as the source IP and ignores XFF
+    # entirely. Operators behind a reverse proxy populate this with
+    # the proxy's CIDR — Recipe A (Caddy on host) sets
+    # ``CREWDAY_TRUSTED_PROXIES=127.0.0.1/32``; compose stacks set the
+    # Docker bridge CIDR. v4 and v6 entries mix freely. Comma-separated
+    # at the env layer (see :meth:`_split_trusted_proxies`).
+    trusted_proxies: Annotated[list[str], NoDecode] = Field(
+        default_factory=list,
+    )
+
     @field_validator("trusted_interfaces", mode="before")
     @classmethod
     def _split_trusted_interfaces(cls, value: object) -> object:
@@ -335,6 +350,14 @@ class Settings(BaseSettings):
     @field_validator("metrics_allow_cidr", mode="before")
     @classmethod
     def _split_metrics_allow_cidr(cls, value: object) -> object:
+        """Parse comma-separated env input into a list (see above)."""
+        if isinstance(value, str):
+            return [item.strip() for item in value.split(",") if item.strip()]
+        return value
+
+    @field_validator("trusted_proxies", mode="before")
+    @classmethod
+    def _split_trusted_proxies(cls, value: object) -> object:
         """Parse comma-separated env input into a list (see above)."""
         if isinstance(value, str):
             return [item.strip() for item in value.split(",") if item.strip()]

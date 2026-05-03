@@ -193,6 +193,29 @@ class TestTrustedInterfacesParsing:
         assert s.trusted_interfaces == ["tailscale*"]
 
 
+class TestTrustedProxiesParsing:
+    """``CREWDAY_TRUSTED_PROXIES`` env knob (cd-ca0u)."""
+
+    def test_trusted_proxies_default_empty(self, monkeypatch: MonkeyPatch) -> None:
+        monkeypatch.setenv("CREWDAY_DATABASE_URL", "sqlite:///:memory:")
+        s = Settings()
+        assert s.trusted_proxies == []
+
+    def test_trusted_proxies_comma_split(self, monkeypatch: MonkeyPatch) -> None:
+        monkeypatch.setenv("CREWDAY_DATABASE_URL", "sqlite:///:memory:")
+        monkeypatch.setenv("CREWDAY_TRUSTED_PROXIES", "127.0.0.1/32, ::1/128")
+        s = Settings()
+        assert s.trusted_proxies == ["127.0.0.1/32", "::1/128"]
+
+    def test_trusted_proxies_trailing_comma_drops_empty(
+        self, monkeypatch: MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("CREWDAY_DATABASE_URL", "sqlite:///:memory:")
+        monkeypatch.setenv("CREWDAY_TRUSTED_PROXIES", "127.0.0.1/32,")
+        s = Settings()
+        assert s.trusted_proxies == ["127.0.0.1/32"]
+
+
 class TestSecretRedaction:
     def test_safe_dump_masks_populated_secrets(self, monkeypatch: MonkeyPatch) -> None:
         monkeypatch.setenv("CREWDAY_DATABASE_URL", "sqlite:///:memory:")

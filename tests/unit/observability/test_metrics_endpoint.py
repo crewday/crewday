@@ -35,12 +35,14 @@ def _settings(
     *,
     metrics_enabled: bool = True,
     metrics_allow_cidr: list[str] | None = None,
+    trusted_proxies: list[str] | None = None,
 ) -> Settings:
     """Build a minimal :class:`Settings` for the gating tests."""
     return Settings.model_construct(
         database_url="sqlite:///:memory:",
         metrics_enabled=metrics_enabled,
         metrics_allow_cidr=metrics_allow_cidr or [],
+        trusted_proxies=trusted_proxies or [],
     )
 
 
@@ -174,6 +176,85 @@ class TestCidrAllowlistGate:
             "metrics allow-cidr entry rejected" in record.message
             for record in caplog.records
         )
+
+
+# ---------------------------------------------------------------------------
+# Trusted-proxy seam (cd-ca0u): X-Forwarded-For honoured ONLY when peer
+# falls inside ``CREWDAY_TRUSTED_PROXIES``; otherwise ignored.
+# ---------------------------------------------------------------------------
+
+
+class TestTrustedProxySeam:
+    """``CREWDAY_TRUSTED_PROXIES`` gates ``X-Forwarded-For`` trust."""
+
+    def test_metrics_xff_rejected_when_peer_not_trusted(self) -> None:
+        """A spoofed ``X-Forwarded-For`` from an untrusted peer is ignored.
+
+        Untrusted peer outside the allowlist + XFF claiming loopback
+        (which IS in the allowlist) → 403, because the gate uses the
+        peer when no proxy is trusted. This is the spoof-safe path.
+        """
+        app = _build_app(_settings(trusted_proxies=[]))
+        resp = _external_client(app, ip="203.0.113.42").get(
+            "/metrics", headers={"X-Forwarded-For": "127.0.0.1"}
+        )
+        assert resp.status_code == 403
+
+    def test_metrics_xff_honoured_when_peer_trusted(self) -> None:
+        """Trusted-peer XFF resolves to the rightmost entry → allowlist match."""
+        app = _build_app(
+            _settings(
+                metrics_allow_cidr=["127.0.0.0/8"],
+                trusted_proxies=["10.0.0.0/8"],
+            )
+        )
+        resp = _external_client(app, ip="10.0.0.5").get(
+            "/metrics", headers={"X-Forwarded-For": "127.0.0.1"}
+        )
+        assert resp.status_code == 200
+
+    def test_metrics_xff_honoured_but_xff_ip_not_in_allow_cidrs(self) -> None:
+        """Both gates compose: XFF honoured for source, allowlist still gates."""
+        app = _build_app(
+            _settings(
+                metrics_allow_cidr=["127.0.0.0/8"],
+                trusted_proxies=["10.0.0.0/8"],
+            )
+        )
+        resp = _external_client(app, ip="10.0.0.5").get(
+            "/metrics", headers={"X-Forwarded-For": "203.0.113.42"}
+        )
+        assert resp.status_code == 403
+
+    def test_metrics_xff_multi_header_takes_rightmost_across_headers(self) -> None:
+        """Multiple ``X-Forwarded-For`` headers are joined before rightmost-pick.
+
+        HTTP allows the same header to appear more than once; some
+        proxies append a fresh ``X-Forwarded-For`` rather than
+        extending the upstream value. The endpoint must consider every
+        header value, not just the first — otherwise a later hop
+        would not be considered.
+        """
+        app = _build_app(
+            _settings(
+                metrics_allow_cidr=["127.0.0.0/8"],
+                trusted_proxies=["10.0.0.0/8"],
+            )
+        )
+        # ``httpx`` (and the underlying ``TestClient``) flattens a list
+        # value into a multi-header send. ``203.0.113.42`` (TEST-NET-3)
+        # is OUTSIDE ``metrics_allow_cidr``; ``127.0.0.1`` (the second
+        # header — i.e. the rightmost across headers) is INSIDE. If
+        # the endpoint only looked at the first header, the gate would
+        # reject; with the multi-header join in place, it allows.
+        resp = _external_client(app, ip="10.0.0.5").get(
+            "/metrics",
+            headers=[
+                ("X-Forwarded-For", "203.0.113.42"),
+                ("X-Forwarded-For", "127.0.0.1"),
+            ],
+        )
+        assert resp.status_code == 200
 
 
 # ---------------------------------------------------------------------------
