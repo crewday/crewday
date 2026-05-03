@@ -19,7 +19,13 @@ Specifically pins:
   every repo method — defence-in-depth that the seam never broadens
   to another user / workspace.
 * ``window_start_utc`` / ``window_end_utc`` for the booking read
-  resolve to the full-day UTC bounds of the resolved window.
+  over-fetch by one UTC day each side (so the property-local
+  post-filter has every row that could possibly land inside the
+  caller's ``[from, to]`` window — IANA offsets reach ±14 h).
+* Bookings are bucketed by **property-local** date: a booking at
+  local 00:30 in ``Pacific/Auckland`` (UTC+13) on the first window
+  day is included even though its ``scheduled_start`` lands on the
+  previous UTC day.
 """
 
 from __future__ import annotations
@@ -226,13 +232,18 @@ def _leave(*, starts_on: date, ends_on: date, approved: bool = True) -> UserLeav
     )
 
 
-def _booking(*, scheduled_start: datetime, status: str = "scheduled") -> BookingRefRow:
+def _booking(
+    *,
+    scheduled_start: datetime,
+    status: str = "scheduled",
+    property_id: str | None = None,
+) -> BookingRefRow:
     return BookingRefRow(
         id=new_ulid(),
         workspace_id=_WS_ID,
         user_id=_USER_ID,
         work_engagement_id="01HWENG0000000000000000",
-        property_id=None,
+        property_id=property_id,
         client_org_id=None,
         status=status,
         kind="work",
@@ -282,8 +293,14 @@ class TestAggregatorPredicateForwarding:
         assert repo.leave_call.from_date == from_d
         assert repo.leave_call.to_date == to_d
 
-    def test_booking_window_resolves_to_full_day_utc_bounds(self) -> None:
-        """``window_start_utc`` = 00:00, ``window_end_utc`` = 23:59:59.999999."""
+    def test_booking_window_overfetches_one_utc_day_each_side(self) -> None:
+        """The booking fetch widens by ±1 UTC day so any IANA offset is covered.
+
+        The aggregator post-filters the rows by property-local date,
+        so the SELECT bound has to be safe for both extreme corners
+        of the IANA range (UTC-12 through UTC+14). One day each side
+        is enough — the largest absolute offset is ~14 hours.
+        """
         repo = _FakeRepo()
         ctx = _ctx()
         from_d = date(2026, 5, 1)
@@ -292,11 +309,11 @@ class TestAggregatorPredicateForwarding:
         aggregate_schedule(repo, ctx, from_date=from_d, to_date=to_d)
 
         assert repo.booking_call.window_start_utc == datetime(
-            2026, 5, 1, 0, 0, 0, tzinfo=UTC
+            2026, 4, 30, 0, 0, 0, tzinfo=UTC
         )
         # ``time.max`` is 23:59:59.999999.
         assert repo.booking_call.window_end_utc == datetime(
-            2026, 5, 15, 23, 59, 59, 999999, tzinfo=UTC
+            2026, 5, 16, 23, 59, 59, 999999, tzinfo=UTC
         )
 
 
@@ -429,3 +446,149 @@ class TestProjections:
         )
 
         assert payload.user_id == _USER_ID
+
+
+class TestBookingsPropertyLocalWindow:
+    """Bookings are bucketed by **property-local** date.
+
+    A worker's calendar window is "today through to" in the property's
+    timezone — a booking at local 00:30 in ``Pacific/Auckland`` (UTC+13)
+    on the first window day stores ``scheduled_start`` 11:30 the
+    previous UTC day, so a naïve UTC bound would silently drop the row.
+    The aggregator over-fetches by one UTC day each side and post-filters
+    on the property-local date.
+    """
+
+    _AUCKLAND_PROP = "01HWPROP_AUCKLAND00000000"
+    _LA_PROP = "01HWPROP_LOSANGELES000000"
+
+    def test_booking_at_local_midnight_in_auckland_is_included(self) -> None:
+        """Local 00:30 NZST on ``from_date`` lands 12:30 UTC the prior day — keep it."""
+        # 2026-05-01 00:30 in Pacific/Auckland (UTC+12 in NZST, May
+        # is past the April DST flip) = 2026-04-30 12:30 UTC. Without
+        # the property-local fix this row would fall outside the
+        # naïve UTC ``[2026-05-01, 2026-05-15]`` bound and silently
+        # vanish from the worker calendar.
+        booking = _booking(
+            scheduled_start=datetime(2026, 4, 30, 12, 30, tzinfo=UTC),
+            property_id=self._AUCKLAND_PROP,
+        )
+        repo = _FakeRepo(booking_rows=[booking])
+        ctx = _ctx()
+
+        payload = aggregate_schedule(
+            repo,
+            ctx,
+            from_date=date(2026, 5, 1),
+            to_date=date(2026, 5, 15),
+            property_timezones={self._AUCKLAND_PROP: "Pacific/Auckland"},
+        )
+
+        assert [b.id for b in payload.bookings] == [booking.id]
+
+    def test_booking_at_local_late_evening_in_la_on_to_date_is_included(self) -> None:
+        """Local 23:30 PDT on ``to_date`` lands 06:30 UTC the next day — keep it."""
+        # 2026-05-15 23:30 in America/Los_Angeles (UTC-7 in PDT) =
+        # 2026-05-16 06:30 UTC.
+        booking = _booking(
+            scheduled_start=datetime(2026, 5, 16, 6, 30, tzinfo=UTC),
+            property_id=self._LA_PROP,
+        )
+        repo = _FakeRepo(booking_rows=[booking])
+        ctx = _ctx()
+
+        payload = aggregate_schedule(
+            repo,
+            ctx,
+            from_date=date(2026, 5, 1),
+            to_date=date(2026, 5, 15),
+            property_timezones={self._LA_PROP: "America/Los_Angeles"},
+        )
+
+        assert [b.id for b in payload.bookings] == [booking.id]
+
+    def test_booking_clearly_outside_window_in_all_timezones_is_dropped(self) -> None:
+        """A booking 5 days past ``to_date`` is dropped under any IANA offset."""
+        out_of_window = _booking(
+            scheduled_start=datetime(2026, 5, 20, 12, 0, tzinfo=UTC),
+            property_id=self._LA_PROP,
+        )
+        repo = _FakeRepo(booking_rows=[out_of_window])
+        ctx = _ctx()
+
+        payload = aggregate_schedule(
+            repo,
+            ctx,
+            from_date=date(2026, 5, 1),
+            to_date=date(2026, 5, 15),
+            property_timezones={self._LA_PROP: "America/Los_Angeles"},
+        )
+
+        assert payload.bookings == []
+
+    def test_booking_outside_window_in_la_local_but_inside_utc_is_dropped(
+        self,
+    ) -> None:
+        """Local 2026-04-30 23:30 PDT lands 2026-05-01 06:30 UTC — keep "out"."""
+        # The naïve UTC filter would have kept this row because
+        # ``scheduled_start`` falls inside ``[2026-05-01 00:00 UTC,
+        # 2026-05-15 23:59:59 UTC]``. The property-local filter
+        # correctly drops it: 2026-04-30 in Los Angeles is one day
+        # before the from-date.
+        booking = _booking(
+            scheduled_start=datetime(2026, 5, 1, 6, 30, tzinfo=UTC),
+            property_id=self._LA_PROP,
+        )
+        repo = _FakeRepo(booking_rows=[booking])
+        ctx = _ctx()
+
+        payload = aggregate_schedule(
+            repo,
+            ctx,
+            from_date=date(2026, 5, 1),
+            to_date=date(2026, 5, 15),
+            property_timezones={self._LA_PROP: "America/Los_Angeles"},
+        )
+
+        assert payload.bookings == []
+
+    def test_booking_without_property_id_falls_back_to_utc(self) -> None:
+        """A booking with no ``property_id`` is bucketed by its UTC date."""
+        # Without a property the timezone map can't tell us where to
+        # project — UTC is the spec'd fallback (mirrors
+        # :func:`_scheduler_resolver.local_date_for_task`).
+        booking = _booking(
+            scheduled_start=datetime(2026, 5, 5, 9, 0, tzinfo=UTC),
+            property_id=None,
+        )
+        repo = _FakeRepo(booking_rows=[booking])
+        ctx = _ctx()
+
+        payload = aggregate_schedule(
+            repo,
+            ctx,
+            from_date=date(2026, 5, 1),
+            to_date=date(2026, 5, 15),
+            property_timezones={},
+        )
+
+        assert [b.id for b in payload.bookings] == [booking.id]
+
+    def test_unknown_iana_string_falls_back_to_utc(self) -> None:
+        """A garbled timezone string falls back to UTC instead of raising."""
+        booking = _booking(
+            scheduled_start=datetime(2026, 5, 5, 12, 0, tzinfo=UTC),
+            property_id="01HWPROP_BOGUS0000000000",
+        )
+        repo = _FakeRepo(booking_rows=[booking])
+        ctx = _ctx()
+
+        payload = aggregate_schedule(
+            repo,
+            ctx,
+            from_date=date(2026, 5, 1),
+            to_date=date(2026, 5, 15),
+            property_timezones={"01HWPROP_BOGUS0000000000": "Mars/Olympus_Mons"},
+        )
+
+        assert [b.id for b in payload.bookings] == [booking.id]

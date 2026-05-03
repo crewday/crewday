@@ -52,6 +52,7 @@ from sqlalchemy.orm import Session
 from app.adapters.db.identity.repositories import (
     SqlAlchemyMeScheduleQueryRepository,
 )
+from app.adapters.db.places.models import Property
 from app.api.deps import current_workspace_context, db_session
 from app.api.pagination import (
     DEFAULT_LIMIT,
@@ -361,6 +362,8 @@ def _resolve_self_calendar(
     ctx: WorkspaceContext,
     *,
     payload: SchedulePayload,
+    property_timezones: dict[str, str],
+    workspace_properties: list[Property],
 ) -> tuple[
     list[ScheduleRulesetResponse],
     list[ScheduleRulesetSlotResponse],
@@ -380,10 +383,14 @@ def _resolve_self_calendar(
     properties with the union of the user's assignment + task +
     booking footprint — the worker only sees the properties they
     actually touch in this window.
+
+    ``workspace_properties`` and ``property_timezones`` are passed in
+    by the route so the booking aggregator (which needs the same map
+    to project ``scheduled_start`` into property-local time) and the
+    rota synthesiser share a single load — the property table is read
+    once per request.
     """
-    workspace_properties = list_workspace_properties(session, ctx)
     properties_by_id = {prop.id: prop for prop in workspace_properties}
-    property_timezones = {prop.id: prop.timezone for prop in workspace_properties}
     workspace_property_ids = {prop.id for prop in workspace_properties}
 
     assignment_rows = assignment_rows_for_window(
@@ -505,14 +512,25 @@ def build_me_schedule_router() -> APIRouter:
         if from_ is not None and to is not None and to < from_:
             raise _http_for_window()
         repo = SqlAlchemyMeScheduleQueryRepository(session)
+        # Read the property bag once per request: the aggregator
+        # needs the timezone map to bucket bookings into the
+        # property-local window, and the rota synthesiser needs the
+        # full row for the per-property names + visible footprint.
+        workspace_properties = list_workspace_properties(session, ctx)
+        property_timezones = {p.id: p.timezone for p in workspace_properties}
         payload = aggregate_schedule(
             repo,
             ctx,
             from_date=from_,
             to_date=to,
+            property_timezones=property_timezones,
         )
         rulesets, slots, assignments, tasks, properties = _resolve_self_calendar(
-            session, ctx, payload=payload
+            session,
+            ctx,
+            payload=payload,
+            property_timezones=property_timezones,
+            workspace_properties=workspace_properties,
         )
         return MeScheduleResponse(
             window=SchedulerWindowResponse(

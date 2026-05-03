@@ -1650,6 +1650,18 @@ GET    /me/schedule                       # self-only calendar feed for /schedul
                                           #     flagged separately so the UI can
                                           #     render "pending approval" state
                                           #     without treating them as live.
+                                          #   window is **property-local** for tasks
+                                          #     and bookings: a booking at local
+                                          #     00:30 in Pacific/Auckland on `from=`
+                                          #     belongs to the window even though
+                                          #     its UTC `scheduled_start` lands the
+                                          #     prior day. A booking with no
+                                          #     `property_id`, with a `property_id`
+                                          #     the workspace can't see (archived
+                                          #     or unlinked), or whose property
+                                          #     carries an unrecognised IANA
+                                          #     timezone string falls back to UTC
+                                          #     bucketing.
 POST   /me/leaves                         # body: {category, starts_on, ends_on, note_md?}
                                           #   creates user_leave with approval_required
                                           #   always true; returns 201 with pending row.

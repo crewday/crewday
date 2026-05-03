@@ -33,7 +33,10 @@ from app.adapters.db.availability.models import (
     UserWeeklyAvailability,
 )
 from app.adapters.db.base import Base
+from app.adapters.db.payroll.models import Booking
+from app.adapters.db.places.models import Property, PropertyWorkspace
 from app.adapters.db.session import UnitOfWorkImpl, make_engine
+from app.adapters.db.workspace.models import WorkEngagement
 from app.api.deps import current_workspace_context, db_session
 from app.api.v1.me_schedule import build_me_schedule_router
 from app.tenancy import WorkspaceContext, registry
@@ -465,3 +468,280 @@ class TestEndToEnd:
             finally:
                 reset_current(t)
         assert rows == []
+
+
+class TestBookingsPropertyLocalWindow:
+    """End-to-end pin: bookings are bucketed by property-local date.
+
+    The aggregator (cd-ijte) projects each booking's
+    ``scheduled_start`` into the property's IANA timezone before
+    bucketing it into the worker's ``[from, to]`` window. This pins
+    that two bookings the naïve UTC bound would mis-classify (one
+    east of UTC, one west) round-trip correctly through the SA
+    repository — i.e. the over-fetched UTC SELECT plus the
+    aggregator post-filter agree with the §14 worker calendar's
+    "today through to in property time" intent.
+    """
+
+    def _seed_property_and_engagement(
+        self,
+        factory: sessionmaker[Session],
+        *,
+        ws_id: str,
+        user_id: str,
+        prop_id: str,
+        timezone: str,
+    ) -> str:
+        """Seed one property with the requested timezone + a worker engagement.
+
+        Returns the ``work_engagement_id`` so the caller can attach
+        bookings. The property is wired to the workspace via
+        ``PropertyWorkspace`` so ``list_workspace_properties`` (the
+        route's source of the timezone bag) sees it.
+        """
+        engagement_id = new_ulid()
+        with factory() as s:
+            s.add(
+                Property(
+                    id=prop_id,
+                    name=f"{timezone} villa",
+                    kind="str",
+                    address="1 Calendar Lane",
+                    address_json={"line1": "1 Calendar Lane"},
+                    country="NZ",
+                    timezone=timezone,
+                    tags_json=[],
+                    welcome_defaults_json={},
+                    property_notes_md="",
+                    created_at=_PINNED,
+                    updated_at=_PINNED,
+                    deleted_at=None,
+                )
+            )
+            s.add(
+                PropertyWorkspace(
+                    property_id=prop_id,
+                    workspace_id=ws_id,
+                    label=f"{timezone} villa",
+                    membership_role="owner_workspace",
+                    share_guest_identity=True,
+                    status="active",
+                    created_at=_PINNED,
+                )
+            )
+            s.add(
+                WorkEngagement(
+                    id=engagement_id,
+                    user_id=user_id,
+                    workspace_id=ws_id,
+                    engagement_kind="payroll",
+                    supplier_org_id=None,
+                    pay_destination_id=None,
+                    reimbursement_destination_id=None,
+                    started_on=_PINNED.date(),
+                    archived_on=None,
+                    notes_md="",
+                    created_at=_PINNED,
+                    updated_at=_PINNED,
+                )
+            )
+            s.commit()
+        return engagement_id
+
+    def _seed_booking(
+        self,
+        factory: sessionmaker[Session],
+        *,
+        ws_id: str,
+        user_id: str,
+        engagement_id: str,
+        prop_id: str,
+        scheduled_start: datetime,
+    ) -> str:
+        booking_id = new_ulid()
+        with factory() as s:
+            s.add(
+                Booking(
+                    id=booking_id,
+                    workspace_id=ws_id,
+                    work_engagement_id=engagement_id,
+                    user_id=user_id,
+                    property_id=prop_id,
+                    client_org_id=None,
+                    status="scheduled",
+                    kind="work",
+                    pay_basis="scheduled",
+                    scheduled_start=scheduled_start,
+                    scheduled_end=scheduled_start + timedelta(hours=2),
+                    actual_minutes=None,
+                    actual_minutes_paid=0,
+                    break_seconds=0,
+                    notes_md=None,
+                    adjusted=False,
+                    adjustment_reason=None,
+                    pending_amend_minutes=None,
+                    pending_amend_reason=None,
+                    declined_at=None,
+                    declined_reason=None,
+                    cancelled_at=None,
+                    cancellation_window_hours=24,
+                    cancellation_pay_to_worker=True,
+                    created_by_actor_kind=None,
+                    created_by_actor_id=None,
+                    created_at=_PINNED,
+                    updated_at=_PINNED,
+                    deleted_at=None,
+                )
+            )
+            s.commit()
+        return booking_id
+
+    def test_auckland_local_midnight_booking_lands_in_window(
+        self, api_factory: sessionmaker[Session]
+    ) -> None:
+        """Local 2026-05-01 00:30 NZST → 2026-04-30 12:30 UTC is included.
+
+        Without the property-local fix the booking falls outside the
+        UTC bound ``[2026-05-01 00:00 UTC, 2026-05-15 23:59:59 UTC]``
+        and silently vanishes from the worker calendar.
+        """
+        ws_id, ws_slug, _owner_id = _seed_workspace_with_owner(
+            api_factory, slug="me-int-tzakl"
+        )
+        worker_id = _seed_worker(
+            api_factory, ws_id=ws_id, email="me-int-tzakl-w@example.com"
+        )
+        prop_id = "01HWPROP_AUCKLAND00000000"
+        engagement_id = self._seed_property_and_engagement(
+            api_factory,
+            ws_id=ws_id,
+            user_id=worker_id,
+            prop_id=prop_id,
+            timezone="Pacific/Auckland",
+        )
+        booking_id = self._seed_booking(
+            api_factory,
+            ws_id=ws_id,
+            user_id=worker_id,
+            engagement_id=engagement_id,
+            prop_id=prop_id,
+            scheduled_start=datetime(2026, 4, 30, 12, 30, tzinfo=UTC),
+        )
+
+        worker_ctx = _ctx(
+            workspace_id=ws_id,
+            workspace_slug=ws_slug,
+            actor_id=worker_id,
+            grant_role="worker",
+            actor_was_owner_member=False,
+        )
+        client = TestClient(
+            _build_app(api_factory, worker_ctx),
+            raise_server_exceptions=False,
+        )
+        resp = client.get(
+            "/me/schedule",
+            params={"from": "2026-05-01", "to": "2026-05-15"},
+        )
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert [b["id"] for b in body["bookings"]] == [booking_id]
+
+    def test_la_late_evening_booking_on_to_date_lands_in_window(
+        self, api_factory: sessionmaker[Session]
+    ) -> None:
+        """Local 2026-05-15 23:30 PDT → 2026-05-16 06:30 UTC is included."""
+        ws_id, ws_slug, _owner_id = _seed_workspace_with_owner(
+            api_factory, slug="me-int-tzla"
+        )
+        worker_id = _seed_worker(
+            api_factory, ws_id=ws_id, email="me-int-tzla-w@example.com"
+        )
+        prop_id = "01HWPROP_LOSANGELES000000"
+        engagement_id = self._seed_property_and_engagement(
+            api_factory,
+            ws_id=ws_id,
+            user_id=worker_id,
+            prop_id=prop_id,
+            timezone="America/Los_Angeles",
+        )
+        booking_id = self._seed_booking(
+            api_factory,
+            ws_id=ws_id,
+            user_id=worker_id,
+            engagement_id=engagement_id,
+            prop_id=prop_id,
+            scheduled_start=datetime(2026, 5, 16, 6, 30, tzinfo=UTC),
+        )
+
+        worker_ctx = _ctx(
+            workspace_id=ws_id,
+            workspace_slug=ws_slug,
+            actor_id=worker_id,
+            grant_role="worker",
+            actor_was_owner_member=False,
+        )
+        client = TestClient(
+            _build_app(api_factory, worker_ctx),
+            raise_server_exceptions=False,
+        )
+        resp = client.get(
+            "/me/schedule",
+            params={"from": "2026-05-01", "to": "2026-05-15"},
+        )
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert [b["id"] for b in body["bookings"]] == [booking_id]
+
+    def test_la_evening_booking_one_day_before_window_is_excluded(
+        self, api_factory: sessionmaker[Session]
+    ) -> None:
+        """Local 2026-04-30 23:30 PDT → 2026-05-01 06:30 UTC is excluded.
+
+        The naïve UTC bound would have **kept** this row (it falls
+        inside ``[2026-05-01 00:00 UTC, 2026-05-15 23:59:59 UTC]``);
+        the property-local filter correctly drops it because in the
+        property's timezone the booking is on the day **before** the
+        window.
+        """
+        ws_id, ws_slug, _owner_id = _seed_workspace_with_owner(
+            api_factory, slug="me-int-tzla-out"
+        )
+        worker_id = _seed_worker(
+            api_factory, ws_id=ws_id, email="me-int-tzla-out-w@example.com"
+        )
+        prop_id = "01HWPROP_LAOUT0000000000"
+        engagement_id = self._seed_property_and_engagement(
+            api_factory,
+            ws_id=ws_id,
+            user_id=worker_id,
+            prop_id=prop_id,
+            timezone="America/Los_Angeles",
+        )
+        self._seed_booking(
+            api_factory,
+            ws_id=ws_id,
+            user_id=worker_id,
+            engagement_id=engagement_id,
+            prop_id=prop_id,
+            scheduled_start=datetime(2026, 5, 1, 6, 30, tzinfo=UTC),
+        )
+
+        worker_ctx = _ctx(
+            workspace_id=ws_id,
+            workspace_slug=ws_slug,
+            actor_id=worker_id,
+            grant_role="worker",
+            actor_was_owner_member=False,
+        )
+        client = TestClient(
+            _build_app(api_factory, worker_ctx),
+            raise_server_exceptions=False,
+        )
+        resp = client.get(
+            "/me/schedule",
+            params={"from": "2026-05-01", "to": "2026-05-15"},
+        )
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["bookings"] == []

@@ -68,8 +68,10 @@ See ``docs/specs/12-rest-api.md`` §"Self-service shortcuts";
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
-from datetime import UTC, date, datetime, time, timedelta
+from datetime import UTC, date, datetime, time, timedelta, tzinfo
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from app.domain.identity.me_schedule_ports import (
     BookingRefRow,
@@ -186,6 +188,46 @@ def _resolve_window(
 # ---------------------------------------------------------------------------
 
 
+def _resolve_zone(tz_name: str | None) -> tzinfo:
+    """Resolve an IANA timezone name, falling back to UTC.
+
+    A booking with no ``property_id`` (and hence no entry in
+    ``property_timezones``) or an unrecognised IANA string falls
+    back to UTC — the same fallback :func:`local_date_for_task`
+    in :mod:`app.api.v1._scheduler_resolver` uses, so the worker
+    calendar's task and booking branches stay symmetric.
+    """
+    if not tz_name:
+        return UTC
+    try:
+        return ZoneInfo(tz_name)
+    except ZoneInfoNotFoundError:
+        return UTC
+
+
+def _booking_local_date(
+    row: BookingRefRow,
+    *,
+    property_timezones: Mapping[str, str],
+) -> date:
+    """Return the booking's ``scheduled_start`` projected into property-local date.
+
+    A booking with no ``property_id``, with a ``property_id`` missing
+    from ``property_timezones`` (archived or cross-workspace property),
+    or whose property carries an unrecognised IANA string falls back
+    to UTC. Tombstoned bookings (``deleted_at IS NOT NULL``) never
+    reach this helper — the repo filters them at SELECT time.
+    Mirrors :func:`app.api.v1._scheduler_resolver.local_date_for_task`
+    so the §14 worker calendar lines up tasks and bookings against
+    the same property-local grid.
+    """
+    starts_at = row.scheduled_start
+    if starts_at.tzinfo is None:
+        starts_at = starts_at.replace(tzinfo=UTC)
+    tz_name = property_timezones.get(row.property_id) if row.property_id else None
+    return starts_at.astimezone(_resolve_zone(tz_name)).date()
+
+
 def aggregate_schedule(
     repo: MeScheduleQueryRepository,
     ctx: WorkspaceContext,
@@ -193,6 +235,7 @@ def aggregate_schedule(
     from_date: date | None = None,
     to_date: date | None = None,
     clock: Clock | None = None,
+    property_timezones: Mapping[str, str] | None = None,
 ) -> SchedulePayload:
     """Return the caller's :class:`SchedulePayload` for the requested window.
 
@@ -200,12 +243,27 @@ def aggregate_schedule(
     window (``to_date < from_date``) returns an empty feed — the
     router validates the window at the wire layer; the aggregator
     stays permissive so a malformed request collapses cleanly.
+
+    ``property_timezones`` maps each visible ``property_id`` to its
+    IANA timezone string. Used to decide which bookings fall inside
+    ``[from_date, to_date]`` **in property-local time** — a booking at
+    local 00:30 on the first window day in ``Pacific/Auckland``
+    (UTC+13) lands 11:30 the previous UTC day; without this map the
+    naïve UTC bound would silently drop the row. Bookings without a
+    ``property_id`` (or with an unresolvable timezone) fall back to
+    UTC, matching :func:`app.api.v1._scheduler_resolver.local_date_for_task`.
+    Defaults to an empty mapping so direct domain-level callers (the
+    unit suite, future scriptable consumers) still get the
+    UTC-only behaviour.
     """
     resolved_clock = clock if clock is not None else SystemClock()
     resolved_from, resolved_to = _resolve_window(
         from_date=from_date,
         to_date=to_date,
         clock=resolved_clock,
+    )
+    tz_map: Mapping[str, str] = (
+        property_timezones if property_timezones is not None else {}
     )
 
     user_id = ctx.actor_id
@@ -244,18 +302,35 @@ def aggregate_schedule(
     overrides = [_override_row_to_view(row) for row in override_rows]
 
     # --- Bookings --------------------------------------------------------
-    # Bound the booking window in UTC the same way the assigned-task
-    # window resolves: start of ``from_date`` UTC to end of
-    # ``to_date`` UTC, so a booking starting at 23:30 on the last
-    # window day still matches.
-    window_start_utc = datetime.combine(resolved_from, time.min, tzinfo=UTC)
-    window_end_utc = datetime.combine(resolved_to, time.max, tzinfo=UTC)
+    # The §14 worker calendar treats the ``[from, to]`` window as
+    # **property-local** — a booking belongs to the window iff its
+    # ``scheduled_start`` projected into the property's IANA timezone
+    # falls within ``[from, to]``. We over-fetch by one UTC day on
+    # each side (covers any IANA offset, including the ±14h corners)
+    # then post-filter the rows whose property-local date falls
+    # inside the requested window. This mirrors the task path in
+    # :func:`app.api.v1._scheduler_resolver.task_rows_for_window`,
+    # so the worker calendar's task and booking branches use the same
+    # property-local grid.
+    window_start_utc = datetime.combine(
+        resolved_from - timedelta(days=1), time.min, tzinfo=UTC
+    )
+    window_end_utc = datetime.combine(
+        resolved_to + timedelta(days=1), time.max, tzinfo=UTC
+    )
     booking_rows = repo.list_bookings_in_window(
         workspace_id=workspace_id,
         user_id=user_id,
         window_start_utc=window_start_utc,
         window_end_utc=window_end_utc,
     )
+    bookings_in_window = [
+        row
+        for row in booking_rows
+        if resolved_from
+        <= _booking_local_date(row, property_timezones=tz_map)
+        <= resolved_to
+    ]
 
     return SchedulePayload(
         from_date=resolved_from,
@@ -264,5 +339,5 @@ def aggregate_schedule(
         weekly_availability=weekly_availability,
         leaves=leaves,
         overrides=overrides,
-        bookings=list(booking_rows),
+        bookings=bookings_in_window,
     )
