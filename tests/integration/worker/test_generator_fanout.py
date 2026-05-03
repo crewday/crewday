@@ -34,13 +34,14 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable, Iterator
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from sqlalchemy import Engine, delete, select
 from sqlalchemy.orm import Session, sessionmaker
 
 import app.adapters.db.session as _session_mod
+from app.adapters.db.demo.models import DemoWorkspace
 from app.adapters.db.places.models import Property
 from app.adapters.db.tasks.models import Occurrence, Schedule, TaskTemplate
 from app.adapters.db.workspace.models import Workspace
@@ -49,7 +50,6 @@ from app.tenancy.current import reset_current, set_current
 from app.tenancy.orm_filter import install_tenant_filter
 from app.util.clock import Clock, FrozenClock
 from app.util.ulid import new_ulid
-from app.worker import scheduler as scheduler_mod
 from app.worker.scheduler import _make_generator_fanout_body
 from app.worker.tasks.generator import GenerationReport
 
@@ -123,6 +123,7 @@ def clean_generator_tables(engine: Engine) -> Iterator[None]:
         conn.execute(delete(Schedule))
         conn.execute(delete(TaskTemplate))
         conn.execute(delete(Property))
+        conn.execute(delete(DemoWorkspace))
         conn.execute(delete(Workspace))
     yield
     with engine.begin() as conn:
@@ -130,6 +131,7 @@ def clean_generator_tables(engine: Engine) -> Iterator[None]:
         conn.execute(delete(Schedule))
         conn.execute(delete(TaskTemplate))
         conn.execute(delete(Property))
+        conn.execute(delete(DemoWorkspace))
         conn.execute(delete(Workspace))
 
 
@@ -155,6 +157,35 @@ def _seed_workspace(engine: Engine, *, slug: str) -> str:
         )
         session.commit()
     return workspace_id
+
+
+def _seed_demo_workspace(
+    engine: Engine,
+    *,
+    workspace_id: str,
+    expires_at: datetime,
+) -> None:
+    """Mark ``workspace_id`` as a demo workspace expiring at ``expires_at``.
+
+    Filling the §24 ``demo_workspace`` columns with plausible literals
+    (the GC + skip helpers only read ``id`` and ``expires_at``; the
+    digests just need to satisfy NOT NULL).
+    """
+    factory = sessionmaker(bind=engine, expire_on_commit=False, class_=Session)
+    seeded_at = _PINNED - timedelta(days=1)
+    with factory() as session, tenant_agnostic():
+        session.add(
+            DemoWorkspace(
+                id=workspace_id,
+                scenario_key="probe",
+                seed_digest="x" * 64,
+                created_at=seeded_at,
+                last_activity_at=seeded_at,
+                expires_at=expires_at,
+                cookie_binding_digest="x" * 64,
+            )
+        )
+        session.commit()
 
 
 def _seed_schedule(engine: Engine, *, workspace_id: str) -> str:
@@ -533,41 +564,126 @@ class TestGeneratorFanOut:
 
 
 # ---------------------------------------------------------------------------
-# Demo-expired filter — forward-compatible no-op until cd-otv3 lands
+# Demo-expired filter — §24 garbage-collection skip
 # ---------------------------------------------------------------------------
 
 
 class TestDemoExpiredFilter:
-    """The demo-expired skip is a forward-compat seam.
+    """The fan-out body skips demo workspaces past their TTL (§24).
 
-    :func:`~app.worker.scheduler._demo_expired_workspace_ids` returns
-    an empty set today (the ``demo_workspace`` model does not exist
-    yet — cd-otv3 + cd-h0ja are the open tasks that land it). Once
-    the model is in place this suite gets a "seed expired
-    demo_workspace, assert skip" companion. For now we pin the
-    no-op so a regression that started raising ``ImportError`` would
-    surface immediately.
+    Expired demo workspaces are awaiting the ``demo_gc`` sweep;
+    materialising occurrences on them is wasted work and would race
+    the GC. The fan-out:
+
+    * counts the expired workspace toward
+      ``total_workspaces_skipped`` and emits no
+      ``worker.generator.workspace.tick`` payload for it;
+    * leaves unexpired demo workspaces on the golden path — they tick
+      normally and contribute to the aggregate counters.
     """
 
-    def test_no_demo_workspace_table_returns_empty_set(
+    def test_expired_demo_workspace_is_skipped(
         self,
         engine: Engine,
         real_make_uow: None,
         clean_generator_tables: None,
+        caplog: pytest.LogCaptureFixture,
+        allow_propagated_log_capture: Callable[..., None],
     ) -> None:
-        """The helper short-circuits to an empty set when the model is absent.
+        """Demo workspace whose ``expires_at`` is in the past is skipped.
 
-        Direct call rather than going through the full body — the
-        body's behaviour around the empty result is covered by
-        :class:`TestGeneratorFanOut` (no skip event, no inflated
-        ``total_workspaces_skipped`` count).
+        Two workspaces seeded; one is marked as a demo workspace with
+        ``expires_at < now``. The fan-out summary counts one skip and
+        emits no per-workspace tick payload for the expired tenant;
+        the live tenant still ticks.
         """
-        ws_a = _seed_workspace(engine, slug="demo-filter-probe")
-        factory = sessionmaker(bind=engine, expire_on_commit=False, class_=Session)
-        with factory() as session, tenant_agnostic():
-            result = scheduler_mod._demo_expired_workspace_ids(
-                session,
-                [ws_a],
-                now=_PINNED,
-            )
-        assert result == set()
+        allow_propagated_log_capture("app.worker.scheduler")
+
+        frozen = FrozenClock(_PINNED)
+
+        ws_live = _seed_workspace(engine, slug="ws-live")
+        ws_expired = _seed_workspace(engine, slug="ws-expired-demo")
+        _seed_demo_workspace(
+            engine,
+            workspace_id=ws_expired,
+            expires_at=_PINNED - timedelta(hours=1),
+        )
+
+        body = _make_generator_fanout_body(frozen)
+        with caplog.at_level(logging.INFO, logger="app.worker.scheduler"):
+            body()
+
+        tick_workspace_ids = {
+            getattr(rec, "workspace_id", None)
+            for rec in caplog.records
+            if getattr(rec, "event", None) == "worker.generator.workspace.tick"
+        }
+        assert ws_expired not in tick_workspace_ids, (
+            "expired demo workspace must not emit a per-workspace tick payload"
+        )
+        assert ws_live in tick_workspace_ids, (
+            "live workspace must still tick when a sibling is skipped"
+        )
+
+        summary_events = [
+            rec
+            for rec in caplog.records
+            if getattr(rec, "event", None) == "worker.generator.tick.summary"
+        ]
+        assert len(summary_events) == 1
+        summary = summary_events[0]
+        assert getattr(summary, "total_workspaces", None) == 2
+        assert getattr(summary, "total_workspaces_skipped", None) == 1
+        assert getattr(summary, "total_workspaces_failed", None) == 0
+
+    def test_unexpired_demo_workspace_is_not_skipped(
+        self,
+        engine: Engine,
+        real_make_uow: None,
+        clean_generator_tables: None,
+        caplog: pytest.LogCaptureFixture,
+        allow_propagated_log_capture: Callable[..., None],
+    ) -> None:
+        """Demo workspace whose ``expires_at`` equals ``now`` ticks normally.
+
+        A demo workspace within its TTL window must NOT be filtered —
+        the §24 skip is keyed strictly on ``expires_at < now``. Seeding
+        ``expires_at == _PINNED`` exactly pins the boundary: under
+        the spec's strict ``<`` the row is NOT expired (this test
+        passes); a regression that flipped the predicate to ``<=``
+        would classify it as expired and surface here.
+        """
+        allow_propagated_log_capture("app.worker.scheduler")
+
+        frozen = FrozenClock(_PINNED)
+
+        ws_demo = _seed_workspace(engine, slug="ws-active-demo")
+        _seed_demo_workspace(
+            engine,
+            workspace_id=ws_demo,
+            expires_at=_PINNED,
+        )
+
+        body = _make_generator_fanout_body(frozen)
+        with caplog.at_level(logging.INFO, logger="app.worker.scheduler"):
+            body()
+
+        tick_workspace_ids = {
+            getattr(rec, "workspace_id", None)
+            for rec in caplog.records
+            if getattr(rec, "event", None) == "worker.generator.workspace.tick"
+        }
+        assert ws_demo in tick_workspace_ids, (
+            "unexpired demo workspace must tick like any live workspace"
+        )
+
+        summary_events = [
+            rec
+            for rec in caplog.records
+            if getattr(rec, "event", None) == "worker.generator.tick.summary"
+        ]
+        assert len(summary_events) == 1
+        summary = summary_events[0]
+        assert getattr(summary, "total_workspaces", None) == 1
+        assert getattr(summary, "total_workspaces_skipped", None) == 0
+        assert getattr(summary, "total_workspaces_failed", None) == 0

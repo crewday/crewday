@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Final
 
 from sqlalchemy import select
 
+from app.adapters.db.demo.models import DemoWorkspace
 from app.tenancy import WorkspaceContext
 
 if TYPE_CHECKING:
@@ -77,65 +78,28 @@ def _demo_expired_workspace_ids(
     §24 "Demo mode" / "Garbage collection" is the spec of record:
     every ``demo_workspace`` row carries an ``expires_at``; once it
     is in the past the workspace is awaiting GC and the generator
-    must skip it (running materialisation on a soon-to-be-purged
-    tenant is wasted work and would race with the ``demo_gc`` sweep).
+    fan-outs must skip it (running materialisation on a soon-to-be-
+    purged tenant is wasted work and would race the ``demo_gc``
+    sweep). The result is the set of workspace ids the caller should
+    drop from its per-workspace loop and roll into
+    ``total_workspaces_skipped``.
 
-    The :class:`DemoWorkspace` table does not exist yet — cd-otv3 +
-    cd-h0ja are the open follow-ups that land it. Until then this
-    helper returns an empty set, the fan-out treats every workspace
-    as live, and the count surfaced in the tick summary stays at
-    zero. Once the model is in place the missing-module branch falls
-    away and the SELECT below picks up the filter without further
-    work in the fan-out.
-
-    Resolved via :mod:`importlib` rather than a static ``from ...
-    import ...`` because the demo package does not exist on disk
-    today — a static import would either hard-fail at module load
-    time or force ``# type: ignore`` to placate ``mypy --strict``.
-    Both are worse than this seam: ``importlib.import_module`` raises
-    :class:`ModuleNotFoundError` at call time (a subclass of
-    :class:`ImportError`, narrowed below), no other exception class
-    is swallowed, and the helper stays type-safe.
+    ``demo_workspace`` is the demo tenancy anchor — it carries no
+    ``workspace_id`` of its own — so the SELECT runs inside
+    ``tenant_agnostic`` (the caller already holds that bracket via
+    the surrounding workspace enumeration).
     """
     if not workspace_ids:
         return set()
 
-    import importlib
-
-    try:
-        demo_module = importlib.import_module("app.adapters.db.demo.models")
-    except ModuleNotFoundError:
-        return set()
-
-    # The model class itself stays attribute-resolved — ``getattr``
-    # is the only safe form for a runtime-only import. The
-    # ``DemoWorkspace`` mapper is mandatory once the package
-    # exists; an :class:`AttributeError` here would be a packaging
-    # bug we want to surface, not swallow.
-    demo_workspace = demo_module.DemoWorkspace
-
-    # ``demo_workspace.id`` is a 1:1 FK to ``workspace.id`` (§24
-    # "Entity"), so the predicate is a simple ``id IN ...`` plus the
-    # ``expires_at`` cutoff. ``demo_workspace`` is the demo tenancy
-    # anchor — it carries no ``workspace_id`` of its own — so the
-    # SELECT runs inside ``tenant_agnostic`` (the caller already
-    # holds that bracket via the Workspace enumeration).
     stmt = (
-        select(demo_workspace.id)
-        .where(demo_workspace.id.in_(workspace_ids))
-        .where(demo_workspace.expires_at < now)
+        select(DemoWorkspace.id)
+        .where(DemoWorkspace.id.in_(workspace_ids))
+        .where(DemoWorkspace.expires_at < now)
     )
-    # ``demo_workspace`` came in via :mod:`importlib`, so the column
-    # type stays ``Any`` from mypy's view. Belt-and-braces filter the
-    # scalars to the input set: we promise a ``set[str]`` whose every
-    # element appears in ``workspace_ids``, so a future schema change
-    # that returned a wrapped type (e.g. a ULID dataclass) cannot
-    # silently flag a live workspace as expired through equality
-    # surprise. A string that fails the membership check is dropped
-    # — fail-open is the right default for a sweep skip filter.
-    candidate_set = set(workspace_ids)
-    return {
-        candidate_id
-        for candidate_id in session.scalars(stmt).all()
-        if isinstance(candidate_id, str) and candidate_id in candidate_set
-    }
+    # ``DemoWorkspace.id`` is a ``Mapped[str]`` (SQLAlchemy 2.x typed
+    # column), so ``session.scalars(stmt).all()`` is exactly
+    # ``Sequence[str]`` — no membership re-filter needed; the IN-list
+    # in the WHERE clause already constrains the result to a subset
+    # of the input.
+    return set(session.scalars(stmt).all())
