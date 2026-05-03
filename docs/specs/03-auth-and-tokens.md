@@ -640,6 +640,16 @@ auth dep edge alongside the change_request / verify routes.
 - CSRF: Authenticated SPA requests carry a double-submit token
   (`crewday_csrf` cookie + `X-CSRF` header) for every non-GET. Same
   origin is enforced by `SameSite=Lax` for initial navigation.
+- **Archive gate.** If the session-owning user has
+  `users.archived_at IS NOT NULL`, every subsequent request returns
+  `401` with `error = "subject_user_archived"` — the same wire code
+  the PAT-side gate emits, because both gates carry the same operator
+  remediation (reinstate the user). Reinstating
+  (`archived_at` → NULL) clears the gate on the next request without
+  re-issuing the cookie. Mirrors the `subject_user_archived` /
+  `delegating_user_archived` checks in "Personal access tokens" /
+  "Delegated tokens" — the cookie-session path was the matching
+  gap before this rule landed.
 
 ## API tokens
 

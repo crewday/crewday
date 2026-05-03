@@ -263,6 +263,15 @@ def _validated_session_user(
             accept_language=accept_language,
             touch=touch_session,
         )
+    except auth_session.UserArchived as exc:
+        # Archive gate (cd-uceg, §03 "Sessions" / "Personal access
+        # tokens"). Match the bearer-token side: typed wire code so
+        # the SPA can route the operator to "have a deployment owner
+        # reinstate this user", not the opaque ``session_invalid``.
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail={"error": auth_session.USER_ARCHIVED_WIRE_CODE},
+        ) from exc
     except (auth_session.SessionInvalid, auth_session.SessionExpired) as exc:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -869,6 +878,14 @@ def build_me_workspaces_router() -> APIRouter:
                 ua=ua,
                 accept_language=accept_language,
             )
+        except auth_session.UserArchived as exc:
+            # Archive gate (cd-uceg) — see :func:`_validated_session_user`
+            # for the rationale; same wire shape on the switcher route
+            # so the SPA branches uniformly.
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail={"error": auth_session.USER_ARCHIVED_WIRE_CODE},
+            ) from exc
         except (auth_session.SessionInvalid, auth_session.SessionExpired) as exc:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,

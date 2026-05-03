@@ -134,7 +134,7 @@ from typing import Final
 from sqlalchemy import delete, select, update
 from sqlalchemy.orm import Session as DbSession
 
-from app.adapters.db.identity.models import PasskeyCredential
+from app.adapters.db.identity.models import PasskeyCredential, User
 from app.adapters.db.identity.models import Session as SessionRow
 from app.audit import write_audit
 from app.auth._hashing import hash_with_pepper
@@ -152,9 +152,11 @@ from app.util.clock import Clock, SystemClock
 
 __all__ = [
     "SESSION_COOKIE_NAME",
+    "USER_ARCHIVED_WIRE_CODE",
     "SessionExpired",
     "SessionInvalid",
     "SessionIssue",
+    "UserArchived",
     "build_session_cookie",
     "hash_cookie_value",
     "invalidate_for_credential",
@@ -164,6 +166,16 @@ __all__ = [
     "revoke_all_for_user",
     "validate",
 ]
+
+
+# Wire-error code surfaced to callers when ``validate`` raises
+# :class:`UserArchived`. Shared with the PAT-side
+# ``subject_user_archived`` discriminator (cd-et6y, §03 "Personal
+# access tokens") because both gates carry the same operator
+# remediation: the user must be reinstated. A single literal keeps
+# the SPA / dashboards routing one error code instead of branching
+# session vs PAT.
+USER_ARCHIVED_WIRE_CODE: Final[str] = "subject_user_archived"
 
 
 # ---------------------------------------------------------------------------
@@ -241,6 +253,32 @@ class SessionExpired(ValueError):
     """
 
 
+class UserArchived(SessionInvalid):
+    """Session row is live but the owning user has ``archived_at`` set.
+
+    401-equivalent. Subclass of :class:`SessionInvalid` so existing
+    callers that catch the parent (router error mappers, the tenancy
+    middleware's broad ``except SessionInvalid`` arm) continue to
+    treat it as a generic 401; consumers that want the typed wire
+    code (HTTP layer) catch :class:`UserArchived` first and emit
+    :data:`USER_ARCHIVED_WIRE_CODE` (``subject_user_archived``) on
+    the response envelope.
+
+    Sibling of :class:`app.auth.tokens.SubjectUserArchived` /
+    :class:`app.auth.tokens.DelegatingUserArchived` — same gate
+    (``users.archived_at IS NOT NULL``), different credential surface
+    (browser cookie vs bearer token). The PAT-side wire code is
+    reused on purpose: both gates share the operator remediation
+    ("reinstate the user"), and a single discriminator keeps the SPA
+    / dashboards routing one error code regardless of the credential.
+
+    Spec §03 "Sessions" mirrors §03 "Personal access tokens" /
+    "Delegated tokens": an archived user's credentials must not
+    authenticate further requests, even when the credential itself
+    (cookie / token) is still within its lifetime.
+    """
+
+
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
@@ -286,6 +324,37 @@ def hash_cookie_value(cookie_value: str) -> str:
     cookie is the actual credential.
     """
     return hashlib.sha256(cookie_value.encode("utf-8")).hexdigest()
+
+
+def _user_is_archived(session: DbSession, *, user_id: str) -> bool:
+    """Return ``True`` iff ``user.archived_at`` is set for ``user_id``.
+
+    Single-column probe — the validate path is on the per-request hot
+    path and the only field it needs is ``archived_at``; an explicit
+    ``SELECT archived_at`` keeps the read O(1) on the PK index without
+    hydrating display name / email / locale into the ORM cache.
+
+    Mirrors :func:`app.auth.tokens._user_is_archived` (cd-et6y) — the
+    bearer-token verifier asks the same question via the same shape;
+    keeping a near-identical helper here avoids a cross-module
+    dependency between the cookie-session validator and the bearer-
+    token verifier (their lifecycles are independent and a future
+    split must not couple them).
+
+    A missing :class:`User` row collapses to ``False`` — the row's
+    FK on ``session.user_id`` is ``ON DELETE CASCADE`` so a vanished
+    user already invalidates the session via row deletion; this
+    defensive branch only fires if the cascade failed or the row
+    was hard-deleted out from under the cookie-session FK in some
+    future schema change. Returning ``False`` keeps validate aligned
+    with "no archive flag found" rather than synthesising an archive
+    state that would gate every browser request on a phantom row.
+    """
+    # justification: ``user`` is identity-scoped (no workspace_id
+    # column); the ORM tenant filter has nothing to apply.
+    with tenant_agnostic():
+        archived_at = session.scalar(select(User.archived_at).where(User.id == user_id))
+    return archived_at is not None
 
 
 def _compute_fingerprint(ua: str, accept_language: str, pepper: bytes) -> str:
@@ -443,6 +512,13 @@ def validate(
     5. Fingerprint matches the caller's ``ua + accept_language`` when
        the row carries one and the caller supplied one (else
        :class:`SessionInvalid` + ``audit.session.fingerprint_mismatch``).
+    6. The session's user is **not archived** — ``users.archived_at``
+       must be NULL (else :class:`UserArchived`, cd-uceg, mirroring
+       the §03 PAT / delegated archive gate). Subclass of
+       :class:`SessionInvalid` so router-tier error mappers that
+       catch the parent keep working; the HTTP layer catches
+       :class:`UserArchived` first to emit the typed
+       :data:`USER_ARCHIVED_WIRE_CODE` wire code.
 
     Side effects on success when ``touch`` is true:
 
@@ -469,6 +545,12 @@ def validate(
       so the caller cannot distinguish them — leaking that bit would
       give an attacker an enumeration / replay oracle.
     * :class:`SessionExpired` — row exists but an expiry gate fired.
+    * :class:`UserArchived` — every other gate passed but the row's
+      :attr:`~app.adapters.db.identity.models.Session.user_id` points
+      at a :class:`User` with ``archived_at IS NOT NULL``. Subclass
+      of :class:`SessionInvalid` so a generic ``except SessionInvalid``
+      still catches it; the HTTP layer narrows on :class:`UserArchived`
+      first to emit the typed wire code.
 
     The caller's UoW owns transaction boundaries; nothing here
     commits.
@@ -540,6 +622,20 @@ def validate(
                 clock=clock,
             )
             raise SessionInvalid(f"session id {session_id!r} fingerprint mismatch")
+
+    # Archive gate (cd-uceg, §03 "Sessions"). Mirrors the cd-et6y
+    # bearer-token gate: an archived user's credentials must not
+    # authenticate further requests, even when the credential row is
+    # otherwise live. Run AFTER the cheap structural gates (row,
+    # invalidation, expiry, fingerprint) so the per-request hot path
+    # only pays the extra ``users`` SELECT when the session is
+    # otherwise admissible. Run BEFORE sliding refresh so an archived
+    # user's expiry never extends — the row is on its way to being
+    # rejected and we don't move the wall forward in the meantime.
+    if _user_is_archived(session, user_id=row.user_id):
+        raise UserArchived(
+            f"session id {session_id!r} owning user {row.user_id!r} is archived"
+        )
 
     if not touch:
         return row.user_id

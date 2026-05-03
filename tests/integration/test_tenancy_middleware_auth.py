@@ -544,6 +544,124 @@ class TestArchivedDelegatingSubjectUser:
         assert body["workspace_id"] == ws_id
 
 
+class TestArchivedSessionUser:
+    """cd-uceg — middleware emits 401 with ``subject_user_archived``.
+
+    §03 "Sessions" mirrors the bearer-token archive gates above for
+    cookie-session traffic: a still-live session whose owning user
+    has ``archived_at IS NOT NULL`` returns ``401`` with the typed
+    wire code rather than the constant-time 404 the unknown-cookie
+    path collapses into.
+    """
+
+    def test_session_archived_user_returns_401(
+        self,
+        session_factory: sessionmaker[Session],
+        settings: Settings,
+        wire_default_uow: None,
+    ) -> None:
+        """Archive flips a live session's validate to 401 ``subject_user_archived``."""
+        _ws_id, user_id = _seed(
+            session_factory,
+            slug="int-sess-arch",
+            email="sess-archived@example.com",
+        )
+        with session_factory() as s:
+            issued = issue_session(
+                s,
+                user_id=user_id,
+                has_owner_grant=True,
+                ua="testclient",
+                ip="127.0.0.1",
+                accept_language="",
+                now=datetime.now(UTC),
+                settings=settings,
+            )
+            s.commit()
+
+        # Archive the session-owning user out-of-band — mirrors the
+        # privacy-purge / future deployment-archive flow.
+        with session_factory() as s:
+            from app.adapters.db.identity.models import User
+            from app.tenancy import tenant_agnostic
+
+            with tenant_agnostic():
+                row = s.get(User, user_id)
+                assert row is not None
+                row.archived_at = _PINNED
+                s.commit()
+
+        app = _build_app()
+        with TestClient(app, raise_server_exceptions=False) as client:
+            client.cookies.set(SESSION_COOKIE_NAME, issued.cookie_value)
+            response = client.get("/w/int-sess-arch/api/v1/ping")
+
+        assert response.status_code == 401
+        assert response.json() == {
+            "error": "subject_user_archived",
+            "detail": None,
+        }
+        assert CORRELATION_ID_HEADER in response.headers
+
+    def test_session_clearing_archive_re_admits_request(
+        self,
+        session_factory: sessionmaker[Session],
+        settings: Settings,
+        wire_default_uow: None,
+    ) -> None:
+        """Reinstate (``archived_at`` → NULL) re-admits the same cookie.
+
+        §03 "Personal access tokens" rule mirrored to the cookie
+        side: the archive flag is reversible; sessions resume on the
+        next request without re-issuing.
+        """
+        ws_id, user_id = _seed(
+            session_factory,
+            slug="int-sess-rs",
+            email="sess-reinstated@example.com",
+        )
+        with session_factory() as s:
+            issued = issue_session(
+                s,
+                user_id=user_id,
+                has_owner_grant=True,
+                ua="testclient",
+                ip="127.0.0.1",
+                accept_language="",
+                now=datetime.now(UTC),
+                settings=settings,
+            )
+            s.commit()
+
+        with session_factory() as s:
+            from app.adapters.db.identity.models import User
+            from app.tenancy import tenant_agnostic
+
+            with tenant_agnostic():
+                row = s.get(User, user_id)
+                assert row is not None
+                row.archived_at = _PINNED
+                s.commit()
+
+        app = _build_app()
+        with TestClient(app, raise_server_exceptions=False) as client:
+            client.cookies.set(SESSION_COOKIE_NAME, issued.cookie_value)
+            blocked = client.get("/w/int-sess-rs/api/v1/ping")
+            assert blocked.status_code == 401
+
+            with session_factory() as s, tenant_agnostic():
+                row = s.get(User, user_id)
+                assert row is not None
+                row.archived_at = None
+                s.commit()
+
+            response = client.get("/w/int-sess-rs/api/v1/ping")
+            assert response.status_code == 200, response.text
+            body = response.json()
+            assert body["bound"] is True
+            assert body["workspace_id"] == ws_id
+
+
 def _soft_revoke_all_grants(
     session_factory: sessionmaker[Session], *, user_id: str, workspace_id: str | None
 ) -> None:

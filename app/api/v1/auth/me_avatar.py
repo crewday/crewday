@@ -188,6 +188,17 @@ def _resolve_session_user(
             ua=ua,
             accept_language=accept_language,
         )
+    except auth_session.UserArchived as exc:
+        # Archive gate (cd-uceg, §03 "Sessions"). Bare-host avatar
+        # routes don't go through the tenancy middleware archive 401
+        # branch — surface the typed wire code locally so the SPA
+        # can route the operator to "have a deployment owner
+        # reinstate this user" instead of the generic
+        # ``session_invalid``.
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail={"error": auth_session.USER_ARCHIVED_WIRE_CODE},
+        ) from exc
     except (auth_session.SessionInvalid, auth_session.SessionExpired) as exc:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

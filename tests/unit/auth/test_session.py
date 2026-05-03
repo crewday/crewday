@@ -49,8 +49,10 @@ from app.auth.csrf import (
 from app.auth.keys import derive_subkey
 from app.auth.session import (
     SESSION_COOKIE_NAME,
+    USER_ARCHIVED_WIRE_CODE,
     SessionExpired,
     SessionInvalid,
+    UserArchived,
     build_session_cookie,
     hash_cookie_value,
     issue,
@@ -752,6 +754,238 @@ class TestFingerprint:
             settings=settings,
         )
         assert resolved == user.id
+
+
+# ---------------------------------------------------------------------------
+# Archived-user gate (cd-uceg, §03 "Sessions")
+# ---------------------------------------------------------------------------
+
+
+class TestArchivedUser:
+    """``validate`` rejects sessions whose owning user is archived.
+
+    Mirrors the cd-et6y bearer-token archive gate
+    (:class:`app.auth.tokens.SubjectUserArchived` /
+    :class:`app.auth.tokens.DelegatingUserArchived`). Subclass shape
+    is asserted so existing ``except SessionInvalid`` arms keep
+    working; the typed wire code is asserted so the HTTP layer emits
+    the same ``subject_user_archived`` discriminator the PAT side
+    surfaces.
+    """
+
+    def test_user_archived_is_subclass_of_session_invalid(self) -> None:
+        """Existing ``except SessionInvalid`` arms must still catch the new type."""
+        assert issubclass(UserArchived, SessionInvalid)
+
+    def test_wire_code_matches_subject_user_archived(self) -> None:
+        """Single discriminator shared with the PAT side (cd-et6y)."""
+        assert USER_ARCHIVED_WIRE_CODE == "subject_user_archived"
+
+    def test_validate_succeeds_when_archived_at_is_null(
+        self, db_session: Session, settings: Settings
+    ) -> None:
+        """Sanity floor: a live (non-archived) user round-trips cleanly."""
+        user = bootstrap_user(db_session, email="ok@example.com", display_name="OK")
+        result = issue(
+            db_session,
+            user_id=user.id,
+            has_owner_grant=False,
+            ua="ua",
+            ip="ip",
+            now=_PINNED,
+            settings=settings,
+        )
+        # ``users.archived_at`` is NULL by default — explicit assertion
+        # so the test fails loudly if the schema default ever changes.
+        assert user.archived_at is None
+        resolved = validate(
+            db_session,
+            cookie_value=result.cookie_value,
+            now=_PINNED + timedelta(hours=1),
+            settings=settings,
+        )
+        assert resolved == user.id
+
+    def test_validate_raises_user_archived_when_archived_at_set(
+        self, db_session: Session, settings: Settings
+    ) -> None:
+        """Setting ``users.archived_at`` flips the gate even on a live row."""
+        user = bootstrap_user(db_session, email="arc@example.com", display_name="Arc")
+        result = issue(
+            db_session,
+            user_id=user.id,
+            has_owner_grant=False,
+            ua="ua",
+            ip="ip",
+            now=_PINNED,
+            settings=settings,
+        )
+        # Archive the user out-of-band — mirrors the production path
+        # where the privacy purge or a future deployment-archive flow
+        # stamps ``archived_at`` directly.
+        user.archived_at = _PINNED + timedelta(minutes=5)
+        db_session.flush()
+
+        with pytest.raises(UserArchived):
+            validate(
+                db_session,
+                cookie_value=result.cookie_value,
+                now=_PINNED + timedelta(hours=1),
+                settings=settings,
+            )
+
+    def test_validate_user_archived_caught_by_session_invalid(
+        self, db_session: Session, settings: Settings
+    ) -> None:
+        """Existing routers that catch ``SessionInvalid`` keep working.
+
+        Defence against the regression where an HTTP layer migrating
+        to a typed envelope accidentally narrows its catch and stops
+        rejecting archived-user sessions altogether.
+        """
+        user = bootstrap_user(db_session, email="bc@example.com", display_name="BC")
+        result = issue(
+            db_session,
+            user_id=user.id,
+            has_owner_grant=False,
+            ua="ua",
+            ip="ip",
+            now=_PINNED,
+            settings=settings,
+        )
+        user.archived_at = _PINNED + timedelta(minutes=5)
+        db_session.flush()
+
+        with pytest.raises(SessionInvalid):
+            validate(
+                db_session,
+                cookie_value=result.cookie_value,
+                now=_PINNED + timedelta(hours=1),
+                settings=settings,
+            )
+
+    def test_clearing_archived_at_re_enables_session(
+        self, db_session: Session, settings: Settings
+    ) -> None:
+        """Spec §03 reinstate clears the gate on the next request.
+
+        Mirrors :class:`app.auth.tokens` archive-then-reinstate
+        round-trip — once ``archived_at`` clears, the session validates
+        again without re-issuing.
+        """
+        user = bootstrap_user(db_session, email="rs@example.com", display_name="RS")
+        result = issue(
+            db_session,
+            user_id=user.id,
+            has_owner_grant=False,
+            ua="ua",
+            ip="ip",
+            now=_PINNED,
+            settings=settings,
+        )
+        user.archived_at = _PINNED + timedelta(minutes=5)
+        db_session.flush()
+        with pytest.raises(UserArchived):
+            validate(
+                db_session,
+                cookie_value=result.cookie_value,
+                now=_PINNED + timedelta(hours=1),
+                settings=settings,
+            )
+
+        user.archived_at = None
+        db_session.flush()
+        resolved = validate(
+            db_session,
+            cookie_value=result.cookie_value,
+            now=_PINNED + timedelta(hours=2),
+            settings=settings,
+        )
+        assert resolved == user.id
+
+    def test_archived_check_runs_after_invalidation(
+        self, db_session: Session, settings: Settings
+    ) -> None:
+        """An invalidated session collapses to the older error type.
+
+        Order matters: the row's own state (invalidated_at,
+        expiry, fingerprint) is checked before the archive probe,
+        so an attacker cannot use the typed ``UserArchived`` shape
+        to enumerate which sessions are revoked.
+        """
+        user = bootstrap_user(db_session, email="inv@example.com", display_name="Inv")
+        result = issue(
+            db_session,
+            user_id=user.id,
+            has_owner_grant=False,
+            ua="ua",
+            ip="ip",
+            now=_PINNED,
+            settings=settings,
+        )
+        # Stamp invalidated_at AND archive the user. validate must
+        # surface ``SessionInvalid`` from the invalidation path, NOT
+        # ``UserArchived`` — the typed shape would leak which user
+        # owned the session to a probing attacker.
+        row = db_session.scalars(select(SessionRow)).one()
+        row.invalidated_at = _PINNED + timedelta(minutes=1)
+        row.invalidation_cause = "test"
+        user.archived_at = _PINNED + timedelta(minutes=5)
+        db_session.flush()
+
+        with pytest.raises(SessionInvalid) as exc_info:
+            validate(
+                db_session,
+                cookie_value=result.cookie_value,
+                now=_PINNED + timedelta(hours=1),
+                settings=settings,
+            )
+        assert not isinstance(exc_info.value, UserArchived)
+
+    def test_archived_check_runs_after_fingerprint_mismatch(
+        self, db_session: Session, settings: Settings
+    ) -> None:
+        """A fingerprint mismatch on an archived user surfaces the generic shape.
+
+        Same enumeration concern as the invalidation ordering test:
+        if the archive probe ran *before* the fingerprint gate, an
+        attacker who guessed at session ids could distinguish
+        "fingerprint wrong" from "user archived" by branching on
+        :class:`UserArchived` vs :class:`SessionInvalid`. The gate
+        order (row → invalidation → expiry → fingerprint → archive)
+        keeps every pre-archive failure in the generic shape.
+        """
+        user = bootstrap_user(
+            db_session, email="fa-arc@example.com", display_name="FA-Arc"
+        )
+        result = issue(
+            db_session,
+            user_id=user.id,
+            has_owner_grant=False,
+            ua="Mozilla/5.0",
+            ip="1.2.3.4",
+            accept_language="en-US",
+            now=_PINNED,
+            settings=settings,
+        )
+        # Archive the user AND present a mismatching fingerprint.
+        # validate must raise the generic ``SessionInvalid`` from the
+        # fingerprint gate, NOT ``UserArchived`` — leaking the typed
+        # shape on a fingerprint-mismatched probe would tell an
+        # attacker which guessed session ids belong to archived users.
+        user.archived_at = _PINNED + timedelta(minutes=5)
+        db_session.flush()
+
+        with pytest.raises(SessionInvalid, match="fingerprint") as exc_info:
+            validate(
+                db_session,
+                cookie_value=result.cookie_value,
+                ua="Chrome/100",  # different UA — fingerprint mismatch
+                accept_language="en-US",
+                now=_PINNED + timedelta(hours=1),
+                settings=settings,
+            )
+        assert not isinstance(exc_info.value, UserArchived)
 
 
 # ---------------------------------------------------------------------------

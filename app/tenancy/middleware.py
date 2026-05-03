@@ -68,8 +68,10 @@ from app.api.errors import problem_response
 from app.api.transport.correlation_id import CORRELATION_ID_STATE_ATTR
 from app.auth.session import (
     SESSION_COOKIE_NAME,
+    USER_ARCHIVED_WIRE_CODE,
     SessionExpired,
     SessionInvalid,
+    UserArchived,
     hash_cookie_value,
 )
 from app.auth.session import (
@@ -353,18 +355,23 @@ def _not_found(request: Request) -> JSONResponse:
 def _archived_user_401(error_code: str) -> JSONResponse:
     """Return the canonical 401 shape for a deactivated delegating / subject user.
 
-    §03 "Delegated tokens" / "Personal access tokens" both pin a
-    ``401`` with a clear message when the delegating / subject user
-    has been deactivated — distinct from the constant-time 404 the
-    middleware emits for "unknown slug / not a member" so a token
-    holder sees "you ARE authenticated but the human you act for is
-    gone" rather than the opaque enumeration shield. Four typed
-    discriminators ride this envelope:
+    §03 "Delegated tokens" / "Personal access tokens" / "Sessions"
+    all pin a ``401`` with a clear message when the delegating /
+    subject / session-owning user has been deactivated — distinct
+    from the constant-time 404 the middleware emits for "unknown
+    slug / not a member" so the caller sees "you ARE authenticated
+    but the human you act for is gone" rather than the opaque
+    enumeration shield. Four typed discriminators ride this
+    envelope:
 
     * ``delegating_user_archived`` (cd-et6y) — delegated token's
       delegating user has ``archived_at IS NOT NULL``.
-    * ``subject_user_archived`` (cd-et6y) — PAT's subject user has
-      ``archived_at IS NOT NULL``.
+    * ``subject_user_archived`` (cd-et6y / cd-uceg) — PAT's subject
+      user OR cookie-session's owning user has ``archived_at IS NOT
+      NULL``. The wire code is shared on purpose: both gates carry
+      the same operator remediation (reinstate the user), and the
+      SPA / agents route on one discriminator regardless of the
+      credential surface.
     * ``delegating_user_inactive`` (cd-ljvs) — delegated token's
       delegating user holds zero live ``role_grant`` rows in the
       token's workspace.
@@ -439,6 +446,14 @@ def resolve_actor(
     the token works again" signal. The middleware catches all four
     at :meth:`dispatch` and emits the matching 401 envelope.
 
+    Also **raises** :class:`UserArchived` (cd-uceg, §03 "Sessions")
+    when a cookie session validates cleanly at the row level but
+    its owning user has ``archived_at IS NOT NULL``. Same 401
+    envelope as the bearer-token archive arms — wire code
+    ``subject_user_archived`` shared with the PAT side because
+    both gates carry the same operator remediation (reinstate the
+    user).
+
     Other exceptions bubble; the :class:`InvalidToken` /
     :class:`SessionInvalid` / ... tree is caught narrowly.
     """
@@ -490,6 +505,16 @@ def resolve_actor(
                 accept_language=accept_language,
                 settings=settings,
             )
+        except UserArchived:
+            # cd-uceg / §03 "Sessions": session is otherwise live but
+            # the owning user has ``archived_at IS NOT NULL``. Mirrors
+            # the bearer-token archive gate (cd-et6y) — propagate so
+            # :meth:`dispatch` can emit the typed 401 envelope with
+            # ``subject_user_archived`` instead of the constant-time
+            # 404 the other session failures collapse into. The agent
+            # / SPA gets a clear "the user is gone; reinstate them"
+            # signal rather than the opaque enumeration shield.
+            raise
         except SessionInvalid, SessionExpired:
             return None
         # The session row's PK is the sha256 of the cookie value; we
@@ -922,6 +947,33 @@ class WorkspaceContextMiddleware(BaseHTTPMiddleware):
                 outcome="subject_user_archived",
             )
             response = _archived_user_401("subject_user_archived")
+            response.headers[CORRELATION_ID_HEADER] = correlation_id
+            return response
+        except UserArchived:
+            # cd-uceg / §03 "Sessions": cookie-session sibling of the
+            # PAT / delegated archive gates above. The browser request
+            # carries a still-live session cookie for a user whose
+            # ``users.archived_at`` is set. Same envelope + wire code
+            # as the PAT branch (``subject_user_archived``) because
+            # both gates share the operator remediation: the user
+            # must be reinstated. MUST be caught BEFORE the broader
+            # ``SessionInvalid`` catches in :func:`resolve_actor`
+            # would collapse the failure to ``None`` (the typed
+            # exception is re-raised on purpose; see the
+            # ``except UserArchived: raise`` block in
+            # :func:`resolve_actor`).
+            _log_tenancy_event(
+                slug=_parse_scoped_path(path),
+                workspace_id=None,
+                actor_id=None,
+                actor_kind=None,
+                token_id=None,
+                session_id=None,
+                correlation_id=correlation_id,
+                skip_path=False,
+                outcome=USER_ARCHIVED_WIRE_CODE,
+            )
+            response = _archived_user_401(USER_ARCHIVED_WIRE_CODE)
             response.headers[CORRELATION_ID_HEADER] = correlation_id
             return response
         except DelegatingUserInactive:
