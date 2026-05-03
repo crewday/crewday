@@ -121,9 +121,7 @@ from app.domain.identity.email_change_ports import (
     MagicLinkTokenExpired,
     UserIdentityRow,
 )
-from app.mail.templates import email_change_confirmed, email_change_notice
-from app.mail.templates import email_change_revert as revert_template
-from app.mail.templates import render as render_template
+from app.mail.auth_templates import render_auth_email
 from app.tenancy import WorkspaceContext
 from app.util.clock import Clock, SystemClock
 from app.util.ulid import new_ulid
@@ -426,9 +424,8 @@ def _send_notice_to_old(
     recovers. A 5xx surfacing here would shadow the typed domain
     error vocabulary the router relies on.
     """
-    subject = render_template(email_change_notice.SUBJECT)
-    body = render_template(
-        email_change_notice.BODY_TEXT,
+    subject, body = render_auth_email(
+        "email_change_notice",
         display_name=display_name,
         masked_new_email=masked_new_email,
         ip_prefix=ip_prefix,
@@ -454,9 +451,8 @@ def _send_confirmation_to_new(
 
     Same swallow-and-log policy as the notice send.
     """
-    subject = render_template(email_change_confirmed.SUBJECT)
-    body = render_template(
-        email_change_confirmed.BODY_TEXT,
+    subject, body = render_auth_email(
+        "email_change_confirmed",
         display_name=display_name,
         masked_old_email=masked_old_email,
     )
@@ -487,9 +483,8 @@ def _send_revert_link_to_old(
     """
     url = f"{base_url.rstrip('/')}/auth/email/revert?token={token}"
     ttl_hours = max(1, int(ttl.total_seconds() // 3600))
-    subject = render_template(revert_template.SUBJECT)
-    body = render_template(
-        revert_template.BODY_TEXT,
+    subject, body = render_auth_email(
+        "email_change_revert",
         display_name=display_name,
         masked_new_email=masked_new_email,
         url=url,

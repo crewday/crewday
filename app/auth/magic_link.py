@@ -156,8 +156,8 @@ from app.auth._throttle import ConsumeLockout, RateLimited, Throttle
 from app.auth.keys import derive_subkey
 from app.config import Settings, get_settings
 from app.domain.identity.email_change_ports import MagicLinkHandle
-from app.mail.templates import magic_link as magic_link_template
-from app.mail.templates import render as render_template
+from app.mail.auth_templates import purpose_label as magic_link_purpose_label
+from app.mail.auth_templates import render_auth_email
 from app.tenancy import WorkspaceContext, tenant_agnostic
 from app.util.clock import Clock, SystemClock
 from app.util.ulid import new_ulid
@@ -970,10 +970,9 @@ def _send_link_email(
     """
     url = f"{base_url.rstrip('/')}/auth/magic/{token}"
     ttl_minutes = max(1, int(ttl.total_seconds() // 60))
-    label = magic_link_template.purpose_label(purpose)
-    subject = render_template(magic_link_template.SUBJECT, purpose_label=label)
-    body_text = render_template(
-        magic_link_template.BODY_TEXT,
+    label = magic_link_purpose_label(purpose)
+    subject, body_text = render_auth_email(
+        "magic_link",
         purpose_label=label,
         url=url,
         ttl_minutes=str(ttl_minutes),

@@ -1,12 +1,16 @@
-"""mail — outbound email templates and rendering.
+"""mail — outbound email rendering for auth and identity flows.
 
-Concrete transport lives under :mod:`app.adapters.mail`; this package
-holds the per-purpose templates and rendering helpers. v1 ships a
-minimal ``str.format_map`` wrapper rather than a full templating
-engine — a template is a ``.py`` module that exposes ``subject``,
-``body_text``, and an optional ``body_html`` as string constants with
-``{placeholder}`` slots. A future task will swap in Jinja2 once the
-template surface justifies the dependency.
+Concrete transport lives under :mod:`app.adapters.mail`. Notification
+templates (task-assigned, daily digest, agent message, ...) live with
+the notification service under :mod:`app.domain.messaging.templates`
+and are rendered by
+:class:`app.domain.messaging.notifications.NotificationService`.
 
-See ``docs/specs/10-messaging-notifications.md`` §"Email".
+Auth-flow templates (magic link, invite, recovery, passkey reset,
+email change) live under
+:mod:`app.domain.messaging.templates` ``auth/`` subdirectory and are
+rendered by :func:`app.mail.auth_templates.render_auth_email`.
+
+See ``docs/specs/10-messaging-notifications.md`` §"Email template
+system" and ``docs/specs/03-auth-and-tokens.md``.
 """

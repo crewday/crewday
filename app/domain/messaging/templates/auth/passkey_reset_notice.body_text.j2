@@ -1,0 +1,18 @@
+Hi {{ owner_display_name }},
+
+You reset the passkey for {{ worker_display_name }} ({{ worker_email_masked }})
+on the {{ workspace_name }} workspace at {{ timestamp }}. A magic link has
+been mailed to them; clicking the link in their inbox enrols a fresh
+passkey under their account and revokes every existing one.
+
+This message is a confirmation copy. The link below is NOT a
+claimable enrolment URL — it lands on a notice page so you can
+review the action:
+
+{{ notice_url }}
+
+Not you? If you did not trigger this reset, follow the link above
+and report the action immediately. The worker has not yet completed
+the enrolment, so the account is still recoverable.
+
+— crew.day

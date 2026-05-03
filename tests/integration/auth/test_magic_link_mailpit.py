@@ -270,7 +270,8 @@ def _post_json(
 def _extract_magic_url(body_text: str) -> str:
     """Return the first ``…/auth/magic/<token>`` URL in a plain-text body.
 
-    The magic-link template (``app/mail/templates/magic_link.py``)
+    The magic-link template
+    (``app/domain/messaging/templates/auth/magic_link.body_text.j2``)
     drops the URL on its own line; we walk the body, strip whitespace,
     and pick the first line that *both* starts with ``http`` and
     contains ``/auth/magic/``. Belt-and-braces against a future
@@ -456,7 +457,7 @@ def test_subject_matches_template(clean_inbox: tuple[str, str]) -> None:
     * An SMTP-side header rewrite mangling the em-dash on the wire.
 
     The test deliberately re-asserts the literal rather than re-rendering
-    the template via :mod:`app.mail.templates.magic_link` — the goal is
+    the template via :mod:`app.mail.auth_templates` — the goal is
     to catch a divergence between *what the template renders* and
     *what arrives in the inbox*, not to tautologically compare the
     template to itself.

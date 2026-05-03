@@ -132,8 +132,7 @@ from app.auth._throttle import RecoveryRateLimited, Throttle
 from app.auth.keys import derive_subkey
 from app.auth.magic_link import PendingDispatch
 from app.config import Settings, get_settings
-from app.mail.templates import recovery_new_link as recovery_new_link_template
-from app.mail.templates import render as render_template
+from app.mail.auth_templates import render_auth_email
 from app.tenancy import WorkspaceContext, tenant_agnostic
 from app.util.clock import Clock, SystemClock
 from app.util.ulid import new_ulid
@@ -671,9 +670,8 @@ def _send_recovery_link(
     """
     url = f"{base_url.rstrip('/')}/recover/enroll?token={token}"
     ttl_minutes = max(1, int(ttl.total_seconds() // 60))
-    subject = render_template(recovery_new_link_template.SUBJECT)
-    body_text = render_template(
-        recovery_new_link_template.BODY_TEXT,
+    subject, body_text = render_auth_email(
+        "recovery_new_link",
         display_name=display_name,
         url=url,
         ttl_minutes=str(ttl_minutes),
@@ -804,7 +802,8 @@ def request_recovery(
        gate cleared): hand off to :func:`magic_link.request_link`
        with purpose ``recover_passkey``. The magic-link service
        mints the token, inserts the nonce row, and sends the mail
-       via the :data:`recovery_new_link_template` template — which
+       via the ``recovery_new_link`` auth template (rendered through
+       :func:`app.mail.auth_templates.render_auth_email`) — which
        we pass as the caller-owned ``mailer_template`` parameter.
        ``subject_id`` is pinned to the user's id so the verify
        step binds directly to the row without trusting the

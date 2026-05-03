@@ -1215,10 +1215,11 @@ The contract below is the *shared shape*, not a shared schema.
 deliberately do **not** hash-self-seed:
 
 - **Email templates** (§10 "Template system") — filesystem-resident
-  Jinja2/MJML under `app/templates/email/`, compiled at build time.
-  Operators change email copy by editing the template file, not
-  through an admin UI. The locale-fallback resolver in §10 is
-  filesystem-based.
+  Jinja2 under `app/domain/messaging/templates/` (notifications) and
+  `app/domain/messaging/templates/auth/` (auth flows), compiled at
+  build time. Operators change email copy by editing the template
+  file, not through an admin UI. The locale-fallback resolver in §10
+  is filesystem-based.
 - **WhatsApp templates** (§23 "Session window") — Meta-approved
   content registered at the provider. The source of truth lives at
   Meta; the gateway tracks sync state and offers a resubmit endpoint

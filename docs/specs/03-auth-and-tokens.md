@@ -121,7 +121,7 @@ because no workspace exists yet:
    suggested alternative. The server stores a `signup_attempt`
    row keyed by `(email, desired_slug)` with a 15-minute TTL and
    emails a magic link. The mailer's shared template emits the
-   generic `/auth/magic/<token>` URL (`app/mail/templates/magic_link.py`),
+   generic `/auth/magic/<token>` URL (`app/domain/messaging/templates/auth/magic_link.*.j2`),
    which the SPA routes to its `SignupVerifyPage`; the page also
    accepts the equivalent `/signup/verify?token=...` shape so
    deployments that template the SPA-native URL directly continue

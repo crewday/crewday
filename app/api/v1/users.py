@@ -78,10 +78,7 @@ from app.domain.identity.permission_groups import (
     WouldOrphanOwnersGroup,
     write_member_remove_rejected_audit,
 )
-from app.mail.templates import passkey_reset_notice as passkey_reset_notice_template
-from app.mail.templates import passkey_reset_worker as passkey_reset_worker_template
-from app.mail.templates import recovery_new_link as recovery_new_link_template
-from app.mail.templates import render as render_template
+from app.mail.auth_templates import render_auth_email
 from app.services.employees import (
     EmployeeNotFound,
     EmployeeProfileUpdate,
@@ -619,9 +616,8 @@ def _send_recovery_link_email(
     TTL string matches the magic-link service's per-purpose ceiling
     for ``recover_passkey``.
     """
-    subject = render_template(recovery_new_link_template.SUBJECT)
-    body_text = render_template(
-        recovery_new_link_template.BODY_TEXT,
+    subject, body_text = render_auth_email(
+        "recovery_new_link",
         display_name=display_name,
         url=url,
         ttl_minutes="10",
@@ -639,9 +635,8 @@ def _send_passkey_reset_worker_email(
     url: str,
 ) -> None:
     """Render + send the worker-side passkey-reset email."""
-    subject = render_template(passkey_reset_worker_template.SUBJECT)
-    body_text = render_template(
-        passkey_reset_worker_template.BODY_TEXT,
+    subject, body_text = render_auth_email(
+        "passkey_reset_worker",
         display_name=worker_display_name,
         owner_display_name=owner_display_name,
         workspace_name=workspace_name,
@@ -669,9 +664,8 @@ def _send_passkey_reset_notice_email(
     reset". The body explicitly tells the owner clicking the URL is
     NOT an enrolment action.
     """
-    subject = render_template(passkey_reset_notice_template.SUBJECT)
-    body_text = render_template(
-        passkey_reset_notice_template.BODY_TEXT,
+    subject, body_text = render_auth_email(
+        "passkey_reset_notice",
         owner_display_name=owner_display_name,
         worker_display_name=worker_display_name,
         worker_email_masked=worker_email_masked,

@@ -7,9 +7,10 @@
 //      template can emit this directly when the deployment knows
 //      the SPA owns the verify step.
 //   2. `/auth/magic/:token` — generic magic-link URL the mailer
-//      defaults to. The signup mailer (`app/mail/templates/magic_link`)
-//      uses this shape today, so we accept it here and treat the
-//      path param as the token.
+//      defaults to. The signup mailer
+//      (`app/domain/messaging/templates/auth/magic_link.*.j2`) uses
+//      this shape today, so we accept it here and treat the path
+//      param as the token.
 //
 // On mount we POST `/api/v1/signup/verify` with `{token}` (a POST,
 // not a GET — the spec mandates a SPA-first JSON shape; §03 step 2).

@@ -602,8 +602,9 @@ fix the offender.
     §11 "Agent knowledge tools"). See "Hash-self-seeded table"
     above.
   - **Email template** (§10 "Template system"). Filesystem-resident
-    Jinja2 / MJML under `app/templates/email/`. Edited in code, not
-    hash-self-seeded.
+    Jinja2 under `app/domain/messaging/templates/` (notifications) and
+    `app/domain/messaging/templates/auth/` (auth flows). Edited in
+    code, not hash-self-seeded.
   - **WhatsApp template** (§23 "Session window"). Meta-approved
     content registered at the provider. Source of truth lives at
     Meta; changes require resubmission via `/admin/chat-gateway`.

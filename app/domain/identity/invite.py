@@ -122,8 +122,7 @@ from app.domain.identity.email_change_ports import (
 from app.events.bus import EventBus
 from app.events.bus import bus as default_event_bus
 from app.events.types import InviteExpired as InviteExpiredEvent
-from app.mail.templates import invite_accept as invite_accept_template
-from app.mail.templates import render as render_template
+from app.mail.auth_templates import render_auth_email
 from app.tenancy import WorkspaceContext, tenant_agnostic
 from app.tenancy.current import reset_current, set_current
 from app.util.clock import Clock, SystemClock
@@ -1287,13 +1286,8 @@ def _send_invite_email(
     re-frame the body copy with workspace / inviter context without
     a round-trip through a recording mailer.
     """
-    subject = render_template(
-        invite_accept_template.SUBJECT,
-        inviter_display_name=inviter_display_name,
-        workspace_name=workspace_name,
-    )
-    body_text = render_template(
-        invite_accept_template.BODY_TEXT,
+    subject, body_text = render_auth_email(
+        "invite_accept",
         invitee_display_name=invitee_display_name,
         inviter_display_name=inviter_display_name,
         workspace_name=workspace_name,

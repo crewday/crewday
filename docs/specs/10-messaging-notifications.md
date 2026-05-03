@@ -38,9 +38,22 @@ Postfix, or Resend via SMTP bridge.
 
 ### Template system
 
-Jinja2 templates under `app/templates/email/`. MJML compiled at build
-time into plain HTML. Every email is **both** HTML and plaintext. No
-external CSS. Preheader text as a hidden first div.
+Jinja2 templates under `app/domain/messaging/templates/`. Notification
+kinds (task assigned, daily digest, agent message, ...) live at the
+top level as `<kind>.<channel>.j2` files (channels: `subject`,
+`body_md`, `push`). Auth-flow templates (magic link, invite, recovery,
+passkey reset, email change) live under the `auth/` subdirectory as
+`auth/<name>.<channel>.j2` (channels: `subject`, `body_text` — auth
+emails are plain-text only in v1). MJML for HTML notification bodies
+is a future addition; v1 ships subject + Markdown body for
+notifications and subject + plain text for auth flows.
+
+The notification rendering helper is
+`app.domain.messaging.notifications.Jinja2TemplateLoader` (autoescape
+on, `StrictUndefined`); auth flows render through
+`app.mail.auth_templates.render_auth_email` which uses a sibling
+`jinja2.Environment` with autoescape off (auth bodies are plain-text
+and HTML escaping would mangle URLs and mask copy in the inbox).
 
 Email templates are **filesystem-resident** and authored in code;
 they deliberately do **not** use the hash-self-seeded primitive
@@ -53,11 +66,13 @@ paragraph) exposed *on top of* the filesystem template, not a
 wholesale move to DB bodies.
 
 **Locale-aware template resolution.** The system resolves templates
-with locale fallback: it looks for `{key}_{locale}.html`, then
-`{key}_{language}.html`, then `{key}.html`. v1 ships only English
-defaults; the resolution logic is in place from day one. All templates
-receive `locale` in their Jinja context. Formatting helpers
-(`fmt_date`, `fmt_money`, `fmt_number`) respect this parameter.
+with locale fallback: it looks for `<kind>.<locale>.<channel>.j2`,
+then strips a region tag (`fr-CA` → `fr`) and tries
+`<kind>.<language>.<channel>.j2`, then falls back to the locale-free
+`<kind>.<channel>.j2`. v1 ships only English defaults; the resolution
+logic is in place from day one. All notification templates receive
+`locale` in their Jinja context. Formatting helpers (`fmt_date`,
+`fmt_money`, `fmt_number`) respect this parameter.
 
 ### Emails the system sends
 
