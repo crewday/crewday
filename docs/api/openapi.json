@@ -13412,6 +13412,181 @@
         "title": "MeAvailabilityOverrideCreateRequest",
         "type": "object"
       },
+      "MeBookingResponse": {
+        "description": "Wire shape for a worker booking on the \u00a714 calendar.\n\nMirrors the \u00a709 frontend ``Booking`` type. ``employee_id`` is\npopulated from the booking's ``work_engagement_id`` until a\ndedicated :class:`Employee` table lands; for the v1 partial\nUNIQUE on ``(user_id, workspace_id) WHERE archived_on IS NULL``\nevery active worker booking has exactly one engagement, so the\nfrontend can treat the two ids as interchangeable for the purpose\nof grouping bookings by worker.",
+        "properties": {
+          "actual_minutes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Actual Minutes"
+          },
+          "actual_minutes_paid": {
+            "title": "Actual Minutes Paid",
+            "type": "integer"
+          },
+          "adjusted": {
+            "title": "Adjusted",
+            "type": "boolean"
+          },
+          "adjustment_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Adjustment Reason"
+          },
+          "break_seconds": {
+            "title": "Break Seconds",
+            "type": "integer"
+          },
+          "client_org_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Client Org Id"
+          },
+          "declined_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Declined At"
+          },
+          "declined_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Declined Reason"
+          },
+          "employee_id": {
+            "title": "Employee Id",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "notes_md": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notes Md"
+          },
+          "pending_amend_minutes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pending Amend Minutes"
+          },
+          "pending_amend_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pending Amend Reason"
+          },
+          "property_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Property Id"
+          },
+          "scheduled_end": {
+            "format": "date-time",
+            "title": "Scheduled End",
+            "type": "string"
+          },
+          "scheduled_start": {
+            "format": "date-time",
+            "title": "Scheduled Start",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "user_id": {
+            "title": "User Id",
+            "type": "string"
+          },
+          "work_engagement_id": {
+            "title": "Work Engagement Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "actual_minutes",
+          "actual_minutes_paid",
+          "adjusted",
+          "adjustment_reason",
+          "break_seconds",
+          "client_org_id",
+          "declined_at",
+          "declined_reason",
+          "employee_id",
+          "id",
+          "kind",
+          "notes_md",
+          "pending_amend_minutes",
+          "pending_amend_reason",
+          "property_id",
+          "scheduled_end",
+          "scheduled_start",
+          "status",
+          "user_id",
+          "work_engagement_id"
+        ],
+        "title": "MeBookingResponse",
+        "type": "object"
+      },
       "MeLeaveCreate": {
         "additionalProperties": false,
         "description": "Request body for ``POST /me/leaves``.\n\nA narrower shape than :class:`~app.services.leave.LeaveCreate`\n(no ``user_id`` \u2014 the caller is always the target) so the SPA\ncan't accidentally author a leave for someone else through the\nself-service surface. Managers use ``POST /leaves`` (not shipped\nin this slice \u2014 cd-8pi) or go through the domain service for\ncross-user creation today.\n\n``kind`` narrows to the :data:`LeaveKind` literal so the HTTP\nboundary rejects out-of-set values with FastAPI's standard\n``detail[].loc/msg`` 422 envelope. The service-layer DTO\nreasserts the same check via :class:`LeaveKindInvalid` for\nPython callers that bypass this model.",
@@ -13500,31 +13675,6 @@
           "starts_on"
         ],
         "title": "MeLeaveCreateRequest",
-        "type": "object"
-      },
-      "MePendingItemsResponse": {
-        "description": "Pending leaves + overrides bucketed away from the live precedence stack.",
-        "properties": {
-          "leaves": {
-            "items": {
-              "$ref": "#/components/schemas/UserLeaveResponse"
-            },
-            "title": "Leaves",
-            "type": "array"
-          },
-          "overrides": {
-            "items": {
-              "$ref": "#/components/schemas/UserAvailabilityOverrideResponse"
-            },
-            "title": "Overrides",
-            "type": "array"
-          }
-        },
-        "required": [
-          "leaves",
-          "overrides"
-        ],
-        "title": "MePendingItemsResponse",
         "type": "object"
       },
       "MeProfileResponse": {
@@ -13618,100 +13768,21 @@
         "title": "MeProfileResponse",
         "type": "object"
       },
-      "MePublicHolidayResponse": {
-        "description": "Read projection of a :class:`PublicHoliday` row covering the window.",
-        "properties": {
-          "country": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Country"
-          },
-          "date": {
-            "format": "date",
-            "title": "Date",
-            "type": "string"
-          },
-          "id": {
-            "title": "Id",
-            "type": "string"
-          },
-          "name": {
-            "title": "Name",
-            "type": "string"
-          },
-          "payroll_multiplier": {
-            "anyOf": [
-              {
-                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Payroll Multiplier"
-          },
-          "reduced_ends_local": {
-            "anyOf": [
-              {
-                "format": "time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Reduced Ends Local"
-          },
-          "reduced_starts_local": {
-            "anyOf": [
-              {
-                "format": "time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Reduced Starts Local"
-          },
-          "scheduling_effect": {
-            "title": "Scheduling Effect",
-            "type": "string"
-          }
-        },
-        "required": [
-          "country",
-          "date",
-          "id",
-          "name",
-          "payroll_multiplier",
-          "reduced_ends_local",
-          "reduced_starts_local",
-          "scheduling_effect"
-        ],
-        "title": "MePublicHolidayResponse",
-        "type": "object"
-      },
       "MeScheduleResponse": {
-        "description": "Aggregated calendar feed for the caller across ``[from, to]``.\n\nThe ``from`` / ``to`` fields use Pydantic aliases so the wire\npayload reads naturally (``from`` is a Python keyword on the\nresponse side too, even though the wire shape is stable).",
+        "description": "Aggregated calendar feed for the caller across ``[from, to]``.\n\nWire shape per \u00a714 \"Schedule view\" \u2014 what the SPA's ``/schedule``\npage consumes. Composed by stitching two sources at the router\nlayer (see module docstring): the identity-side aggregator owns\nleaves / overrides / bookings / weekly_availability / user_id /\nwindow; the shared scheduler resolver owns rulesets / slots /\nassignments / tasks / properties.",
         "properties": {
-          "from": {
-            "format": "date",
-            "title": "From",
-            "type": "string"
-          },
-          "holidays": {
+          "assignments": {
             "items": {
-              "$ref": "#/components/schemas/MePublicHolidayResponse"
+              "$ref": "#/components/schemas/ScheduleAssignmentResponse"
             },
-            "title": "Holidays",
+            "title": "Assignments",
+            "type": "array"
+          },
+          "bookings": {
+            "items": {
+              "$ref": "#/components/schemas/MeBookingResponse"
+            },
+            "title": "Bookings",
             "type": "array"
           },
           "leaves": {
@@ -13728,59 +13799,63 @@
             "title": "Overrides",
             "type": "array"
           },
-          "pending": {
-            "$ref": "#/components/schemas/MePendingItemsResponse"
-          },
-          "rota": {
+          "properties": {
             "items": {
-              "$ref": "#/components/schemas/MeWeeklySlotResponse"
+              "$ref": "#/components/schemas/SchedulerPropertyResponse"
             },
-            "title": "Rota",
+            "title": "Properties",
+            "type": "array"
+          },
+          "rulesets": {
+            "items": {
+              "$ref": "#/components/schemas/ScheduleRulesetResponse"
+            },
+            "title": "Rulesets",
+            "type": "array"
+          },
+          "slots": {
+            "items": {
+              "$ref": "#/components/schemas/ScheduleRulesetSlotResponse"
+            },
+            "title": "Slots",
             "type": "array"
           },
           "tasks": {
             "items": {
-              "$ref": "#/components/schemas/MeTaskRefResponse"
+              "$ref": "#/components/schemas/SchedulerTaskResponse"
             },
             "title": "Tasks",
             "type": "array"
           },
-          "to": {
-            "format": "date",
-            "title": "To",
-            "type": "string"
-          }
-        },
-        "required": [
-          "from",
-          "holidays",
-          "leaves",
-          "overrides",
-          "pending",
-          "rota",
-          "tasks",
-          "to"
-        ],
-        "title": "MeScheduleResponse",
-        "type": "object"
-      },
-      "MeTaskRefResponse": {
-        "description": "Lightweight reference to an :class:`Occurrence` assigned to the caller.",
-        "properties": {
-          "id": {
-            "title": "Id",
+          "user_id": {
+            "title": "User Id",
             "type": "string"
           },
-          "scheduled_for_local": {
-            "title": "Scheduled For Local",
-            "type": "string"
+          "weekly_availability": {
+            "items": {
+              "$ref": "#/components/schemas/MeWeeklySlotResponse"
+            },
+            "title": "Weekly Availability",
+            "type": "array"
+          },
+          "window": {
+            "$ref": "#/components/schemas/SchedulerWindowResponse"
           }
         },
         "required": [
-          "id",
-          "scheduled_for_local"
+          "assignments",
+          "bookings",
+          "leaves",
+          "overrides",
+          "properties",
+          "rulesets",
+          "slots",
+          "tasks",
+          "user_id",
+          "weekly_availability",
+          "window"
         ],
-        "title": "MeTaskRefResponse",
+        "title": "MeScheduleResponse",
         "type": "object"
       },
       "MeWeeklySlotResponse": {
@@ -74838,7 +74913,7 @@
         }
       ],
       "post": {
-        "description": "Attach a blob to a draft claim.\n\nThe bytes flow through ``POST /uploads`` first; this endpoint\nonly registers the metadata row. The service revalidates the\nasserted mime / size against the receipt allow-list + 10 MB cap\nand confirms ``storage.exists(blob_hash)``.\n\ncd-95zb: when ``settings.llm_ocr_model`` is set AND an LLM client\nis wired, the attach pipeline injects the synchronous OCR /\nautofill runner so the first-attachment flow auto-populates the\nclaim's worker-typed fields. The runner is gated on both knobs\nso a deployment can disable autofill by clearing either side\nwithout booting a half-wired state machine. ``llm`` is an\noptional dep so the route still works when no LLM client is\nwired (the runner is just ``None``).",
+        "description": "Attach a blob to a draft claim.\n\nThe bytes flow through ``POST /uploads`` first; this endpoint\nonly registers the metadata row. The service revalidates the\nasserted mime / size against the receipt allow-list + 10 MB cap\nand confirms ``storage.exists(blob_hash)``.\n\ncd-95zb: when ``settings.llm_ocr_model`` is set AND an LLM client\nis wired, the attach pipeline injects the synchronous OCR /\nautofill runner so the first-attachment flow auto-populates the\nclaim's worker-typed fields. The runner is gated on both knobs\nso a deployment can disable autofill by clearing either side\nwithout booting a half-wired state machine. ``llm`` is an\noptional dep so the route still works when no LLM client is\nwired (the runner is just ``None``).\n\ncd-l690: re-attaching the same ``(blob_hash, kind)`` triplet to a\nsingle claim returns 409 ``attachment_already_exists`` \u2014 storage\nis content-addressed so the bytes are shared, but a duplicate row\nclutters the manager approval UI. Same blob with a different\n``kind`` (receipt vs invoice) stays legal.",
         "operationId": "attach_expense_receipt",
         "parameters": [
           {
@@ -80755,7 +80830,7 @@
     },
     "/w/{slug}/api/v1/me/availability_overrides": {
       "get": {
-        "description": "Cursor-paginated listing keyed to ``ctx.actor_id``.\n\nPer spec \u00a712 \"Self-service shortcuts\": ``self-only list of\nevery user_availability_override (any approval state)``. The\ndomain helper :func:`list_overrides` is invoked with\n``user_id = ctx.actor_id`` so a worker cannot widen the\nlisting to cross-user; the underlying capability check\n``availability_overrides.create_self`` is permissive for\nself-target reads (a self-keyed listing is always allowed\nby ``_gate_or_self``).",
+        "description": "Cursor-paginated listing keyed to ``ctx.actor_id``.\n\nPer spec \u00a712 \"Self-service shortcuts\": ``self-only list of\nevery user_availability_override (any approval state)``. The\ndomain helper :func:`list_overrides` is invoked with\n``user_id = ctx.actor_id`` so a worker cannot widen the\nlisting to cross-user; the underlying capability check\n``availability_overrides.create_self`` is permissive for\nself-target reads (a self-keyed listing is always allowed\nby ``_gate_or_self``).\n\nReuses the parent ``/user_availability_overrides`` filters\nthat make sense for a self-view: ``?from=`` / ``?to=`` to\nslice a date window and ``?approved=`` to narrow by approval\nstate. The ``?user_id=`` filter is **deliberately absent** \u2014\nthe caller is always ``ctx.actor_id``.",
         "operationId": "me.availability_overrides.list",
         "parameters": [
           {
@@ -80789,6 +80864,62 @@
               "minimum": 1,
               "title": "Limit",
               "type": "integer"
+            }
+          },
+          {
+            "description": "Inclusive lower bound on ``date`` (ISO date). Combine with ``to`` to slice a date window.",
+            "in": "query",
+            "name": "from",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Inclusive lower bound on ``date`` (ISO date). Combine with ``to`` to slice a date window.",
+              "title": "From"
+            }
+          },
+          {
+            "description": "Inclusive upper bound on ``date`` (ISO date). Combine with ``from`` to slice a date window.",
+            "in": "query",
+            "name": "to",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Inclusive upper bound on ``date`` (ISO date). Combine with ``from`` to slice a date window.",
+              "title": "To"
+            }
+          },
+          {
+            "description": "``true`` returns only approved overrides; ``false`` returns only pending overrides. Omit for both states.",
+            "in": "query",
+            "name": "approved",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "``true`` returns only approved overrides; ``false`` returns only pending overrides. Omit for both states.",
+              "title": "Approved"
             }
           }
         ],
@@ -82102,7 +82233,7 @@
     },
     "/w/{slug}/api/v1/me/schedule": {
       "get": {
-        "description": "Return rota / tasks / approved leaves / overrides / holidays / pending.\n\n``from_`` is the ``?from=`` query alias (Python keyword\nclash). The wire param stays ``from`` \u2014 see the\n:data:`_FromQuery` dependency annotation. Defaults are\n``[today, today+14d]`` per \u00a712 \"Self-service shortcuts\".",
+        "description": "Return the full \u00a714 calendar payload for the caller.\n\n``from_`` is the ``?from=`` query alias (Python keyword\nclash). The wire param stays ``from`` \u2014 see the\n:data:`_FromQuery` dependency annotation. Defaults are\n``[today, today+14d]`` per \u00a712 \"Self-service shortcuts\".",
         "operationId": "me.schedule.get",
         "parameters": [
           {

@@ -1672,6 +1672,13 @@ GET    /me/availability_overrides         # self-only list of every
                                           #   caller; managers use the generic
                                           #   `/user_availability_overrides?user_id=`
                                           #   form for other users.
+                                          #   params: cursor, limit (cursor envelope
+                                          #     per "Pagination"), plus optional
+                                          #     from, to (ISO dates, inclusive),
+                                          #     approved (true|false). The
+                                          #     `user_id` query is deliberately
+                                          #     absent — the listing is always
+                                          #     keyed to ctx.actor_id.
 POST   /me/availability_overrides         # body: {date, available, starts_local?, ends_local?, reason?}
                                           #   server computes `approval_required` per
                                           #   §06 "Approval logic (hybrid model)":

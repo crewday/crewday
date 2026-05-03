@@ -81,6 +81,12 @@ from app.api.v1._scheduler_resolver import (
 from app.api.v1.user_availability_overrides import (
     UserAvailabilityOverrideListResponse,
     UserAvailabilityOverrideResponse,
+    _ApprovedFilter,
+    _FromFilter,
+    _ToFilter,
+)
+from app.api.v1.user_availability_overrides import (
+    _approved_to_status as _override_approved_to_status,
 )
 from app.api.v1.user_availability_overrides import (
     _http_for_invariant as _http_for_override_invariant,
@@ -609,6 +615,9 @@ def build_me_schedule_router() -> APIRouter:
         session: _Db,
         cursor: PageCursorQuery = None,
         limit: LimitQuery = DEFAULT_LIMIT,
+        from_: _FromFilter = None,
+        to: _ToFilter = None,
+        approved: _ApprovedFilter = None,
     ) -> UserAvailabilityOverrideListResponse:
         """Cursor-paginated listing keyed to ``ctx.actor_id``.
 
@@ -620,9 +629,20 @@ def build_me_schedule_router() -> APIRouter:
         ``availability_overrides.create_self`` is permissive for
         self-target reads (a self-keyed listing is always allowed
         by ``_gate_or_self``).
+
+        Reuses the parent ``/user_availability_overrides`` filters
+        that make sense for a self-view: ``?from=`` / ``?to=`` to
+        slice a date window and ``?approved=`` to narrow by approval
+        state. The ``?user_id=`` filter is **deliberately absent** —
+        the caller is always ``ctx.actor_id``.
         """
         after_id = decode_cursor(cursor)
-        filters = UserAvailabilityOverrideListFilter(user_id=ctx.actor_id)
+        filters = UserAvailabilityOverrideListFilter(
+            user_id=ctx.actor_id,
+            status=_override_approved_to_status(approved),
+            from_date=from_,
+            to_date=to,
+        )
         repo, checker = make_override_seam_pair(session, ctx)
         views = list_overrides(
             repo,

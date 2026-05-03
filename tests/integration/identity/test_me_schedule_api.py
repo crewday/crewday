@@ -333,6 +333,99 @@ class TestEndToEnd:
         assert [ov["id"] for ov in body["overrides"]] == [override_id]
         assert body["overrides"][0]["approved_at"] is not None
 
+    def test_worker_lists_self_overrides_through_listing_endpoint(
+        self, api_factory: sessionmaker[Session]
+    ) -> None:
+        """``GET /me/availability_overrides`` returns rows the worker just POSTed.
+
+        End-to-end pin on the §12 "Self-service shortcuts" listing
+        contract: persist via ``POST``, list via ``GET``, confirm
+        the ``user_id`` is forced to ``ctx.actor_id`` and the
+        cursor envelope (``data``/``next_cursor``/``has_more``) is
+        populated. A sibling worker's row in the same workspace is
+        seeded to confirm the listing does not widen.
+        """
+        ws_id, ws_slug, _owner_id = _seed_workspace_with_owner(
+            api_factory, slug="me-int-list-1"
+        )
+        worker_id = _seed_worker(
+            api_factory, ws_id=ws_id, email="me-int-list-1-w@example.com"
+        )
+        sibling_id = _seed_worker(
+            api_factory, ws_id=ws_id, email="me-int-list-1-other@example.com"
+        )
+        # Seed an off-pattern Monday so the worker's POST auto-approves
+        # (same shape as the existing override-create test).
+        with api_factory() as s:
+            s.add(
+                UserWeeklyAvailability(
+                    id=new_ulid(),
+                    workspace_id=ws_id,
+                    user_id=worker_id,
+                    weekday=0,
+                    starts_local=None,
+                    ends_local=None,
+                    updated_at=_PINNED,
+                )
+            )
+            s.commit()
+        worker_ctx = _ctx(
+            workspace_id=ws_id,
+            workspace_slug=ws_slug,
+            actor_id=worker_id,
+            grant_role="worker",
+            actor_was_owner_member=False,
+        )
+        client = TestClient(
+            _build_app(api_factory, worker_ctx),
+            raise_server_exceptions=False,
+        )
+
+        post = client.post(
+            "/me/availability_overrides",
+            json={
+                "date": "2026-05-04",
+                "available": True,
+                "starts_local": "09:00:00",
+                "ends_local": "13:00:00",
+            },
+        )
+        assert post.status_code == 201, post.text
+        own_override_id = post.json()["id"]
+
+        # Seed a sibling override directly through the ORM — it must
+        # not surface in the worker's self-listing.
+        from app.adapters.db.availability.models import UserAvailabilityOverride
+
+        with api_factory() as s:
+            s.add(
+                UserAvailabilityOverride(
+                    id=new_ulid(),
+                    workspace_id=ws_id,
+                    user_id=sibling_id,
+                    date=date(2026, 5, 4),
+                    available=True,
+                    starts_local=None,
+                    ends_local=None,
+                    reason=None,
+                    approval_required=False,
+                    approved_at=_PINNED,
+                    approved_by=sibling_id,
+                    created_at=_PINNED,
+                    updated_at=_PINNED,
+                    deleted_at=None,
+                )
+            )
+            s.commit()
+
+        resp = client.get("/me/availability_overrides")
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert [ov["id"] for ov in body["data"]] == [own_override_id]
+        assert all(ov["user_id"] == worker_id for ov in body["data"])
+        assert body["next_cursor"] is None
+        assert body["has_more"] is False
+
     def test_default_window_omitted_params(
         self, api_factory: sessionmaker[Session]
     ) -> None:

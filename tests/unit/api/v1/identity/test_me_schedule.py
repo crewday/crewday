@@ -1047,6 +1047,182 @@ class TestMeAvailabilityOverridesList:
         body = resp.json()
         assert body == {"data": [], "next_cursor": None, "has_more": False}
 
+    def test_me_availability_overrides_filters_by_date_window(
+        self,
+        worker_ctx: tuple[WorkspaceContext, sessionmaker[Session], str, str],
+    ) -> None:
+        """``?from=`` / ``?to=`` slice the listing to the requested window."""
+        ctx, factory, ws_id, worker_id = worker_ctx
+        # Two out-of-window rows + one in-window row; only the
+        # in-window id should round-trip through ``?from=`` / ``?to=``.
+        _seed_override(
+            factory,
+            workspace_id=ws_id,
+            user_id=worker_id,
+            on_date=date(2026, 5, 1),
+            available=True,
+            approved=True,
+            starts_local=time(8, 0),
+            ends_local=time(18, 0),
+        )
+        inside = _seed_override(
+            factory,
+            workspace_id=ws_id,
+            user_id=worker_id,
+            on_date=date(2026, 5, 5),
+            available=True,
+            approved=True,
+            starts_local=time(8, 0),
+            ends_local=time(18, 0),
+        )
+        _seed_override(
+            factory,
+            workspace_id=ws_id,
+            user_id=worker_id,
+            on_date=date(2026, 5, 20),
+            available=True,
+            approved=True,
+            starts_local=time(8, 0),
+            ends_local=time(18, 0),
+        )
+
+        client = _client(ctx, factory)
+        resp = client.get(
+            "/me/availability_overrides",
+            params={"from": "2026-05-04", "to": "2026-05-10"},
+        )
+        assert resp.status_code == 200, resp.text
+        ids = [ov["id"] for ov in resp.json()["data"]]
+        assert ids == [inside]
+
+    def test_me_availability_overrides_filters_by_approved(
+        self,
+        worker_ctx: tuple[WorkspaceContext, sessionmaker[Session], str, str],
+    ) -> None:
+        """``?approved=true|false`` narrows by approval state."""
+        ctx, factory, ws_id, worker_id = worker_ctx
+        approved_id = _seed_override(
+            factory,
+            workspace_id=ws_id,
+            user_id=worker_id,
+            on_date=date(2026, 5, 4),
+            available=True,
+            approved=True,
+            starts_local=time(8, 0),
+            ends_local=time(18, 0),
+        )
+        pending_id = _seed_override(
+            factory,
+            workspace_id=ws_id,
+            user_id=worker_id,
+            on_date=date(2026, 5, 5),
+            available=False,
+            approved=False,
+            approval_required=True,
+        )
+
+        client = _client(ctx, factory)
+        resp_true = client.get(
+            "/me/availability_overrides", params={"approved": "true"}
+        )
+        assert resp_true.status_code == 200, resp_true.text
+        assert [ov["id"] for ov in resp_true.json()["data"]] == [approved_id]
+
+        resp_false = client.get(
+            "/me/availability_overrides", params={"approved": "false"}
+        )
+        assert resp_false.status_code == 200, resp_false.text
+        assert [ov["id"] for ov in resp_false.json()["data"]] == [pending_id]
+
+    def test_me_availability_overrides_cursor_round_trip(
+        self,
+        worker_ctx: tuple[WorkspaceContext, sessionmaker[Session], str, str],
+    ) -> None:
+        """``next_cursor`` round-trips: page 2 picks up where page 1 stopped."""
+        ctx, factory, ws_id, worker_id = worker_ctx
+        ids = [
+            _seed_override(
+                factory,
+                workspace_id=ws_id,
+                user_id=worker_id,
+                on_date=date(2026, 5, day),
+                available=True,
+                approved=True,
+                starts_local=time(8, 0),
+                ends_local=time(18, 0),
+            )
+            for day in range(1, 6)
+        ]
+
+        client = _client(ctx, factory)
+        first = client.get("/me/availability_overrides", params={"limit": 2})
+        assert first.status_code == 200, first.text
+        first_body = first.json()
+        assert len(first_body["data"]) == 2
+        assert first_body["has_more"] is True
+        assert first_body["next_cursor"] is not None
+
+        second = client.get(
+            "/me/availability_overrides",
+            params={"limit": 2, "cursor": first_body["next_cursor"]},
+        )
+        assert second.status_code == 200, second.text
+        second_body = second.json()
+        # No overlap between page 1 and page 2.
+        page_one_ids = {ov["id"] for ov in first_body["data"]}
+        page_two_ids = {ov["id"] for ov in second_body["data"]}
+        assert page_one_ids.isdisjoint(page_two_ids)
+        # Together with subsequent pages, the entire seeded set is reachable.
+        assert page_one_ids.issubset(set(ids))
+        assert page_two_ids.issubset(set(ids))
+
+    def test_me_availability_overrides_user_id_query_is_ignored(
+        self,
+        worker_ctx: tuple[WorkspaceContext, sessionmaker[Session], str, str],
+    ) -> None:
+        """A bogus ``?user_id=`` query never widens the listing past ``ctx.actor_id``.
+
+        FastAPI silently drops query params that are not declared on
+        the handler, so a worker passing ``?user_id=<other>`` still
+        only sees their own rows. The router does **not** treat this
+        as a 422 — we deliberately mirror the parent listing's
+        permissive query handling and rely on the forced
+        ``user_id = ctx.actor_id`` to keep the contract honest.
+        """
+        ctx, factory, ws_id, worker_id = worker_ctx
+        own_id = _seed_override(
+            factory,
+            workspace_id=ws_id,
+            user_id=worker_id,
+            on_date=date(2026, 5, 4),
+            available=True,
+            approved=True,
+            starts_local=time(8, 0),
+            ends_local=time(18, 0),
+        )
+        with factory() as s:
+            other = bootstrap_user(
+                s, email="other-user-id-query@example.com", display_name="Other"
+            )
+            s.commit()
+            other_id = other.id
+        _seed_override(
+            factory,
+            workspace_id=ws_id,
+            user_id=other_id,
+            on_date=date(2026, 5, 4),
+            available=True,
+            approved=True,
+            starts_local=time(8, 0),
+            ends_local=time(18, 0),
+        )
+
+        client = _client(ctx, factory)
+        resp = client.get("/me/availability_overrides", params={"user_id": other_id})
+        assert resp.status_code == 200, resp.text
+        ids = [ov["id"] for ov in resp.json()["data"]]
+        assert ids == [own_id]
+
 
 # ---------------------------------------------------------------------------
 # Cross-workspace isolation
