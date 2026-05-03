@@ -160,7 +160,7 @@ export type EventKind =
   | "chat_channel_binding.verified"
   | "chat_channel_binding.revoked"
   // §11 LLM router cache invalidation — workspace-scoped, manager-only.
-  // Fires on any mutation to `model_assignment` /
+  // Fires on any mutation to `llm_assignment` /
   // `llm_capability_inheritance`; the SPA drops the admin LLM graph
   // cache so a second tab sees the chain update without a reload.
   | "llm.assignment.changed"

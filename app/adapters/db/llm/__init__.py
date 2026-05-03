@@ -3,7 +3,7 @@
 This package ships two tiers of tables:
 
 **Workspace-scoped** (``workspace_id`` column, registered in
-:mod:`app.tenancy.registry`): :class:`ModelAssignment`,
+:mod:`app.tenancy.registry`): :class:`LlmAssignment`,
 :class:`AgentToken`, :class:`ApprovalRequest`, :class:`LlmUsage`,
 :class:`BudgetLedger`, :class:`LlmCapabilityInheritance`,
 :class:`AgentPreference`, :class:`AgentPreferenceRevision`. The ORM
@@ -41,7 +41,7 @@ FK hygiene mirrors the rest of the app:
   ``ondelete='SET NULL'`` — a user hard-delete must not nuke the
   audit trail; rows survive with a NULL identity pointer and the
   domain layer reads the denormalised label fields downstream.
-* :attr:`ModelAssignment.model_id` → :attr:`LlmProviderModel.id`
+* :attr:`LlmAssignment.model_id` → :attr:`LlmProviderModel.id`
   ``ondelete='RESTRICT'`` (cd-4btd). Deleting a registry row that
   an active assignment still points at would silently strand the
   workspace without a chain — operators migrate the assignment
@@ -82,6 +82,7 @@ from app.adapters.db.llm.models import (
     AgentToken,
     ApprovalRequest,
     BudgetLedger,
+    LlmAssignment,
     LlmCapabilityInheritance,
     LlmModel,
     LlmPromptTemplate,
@@ -89,7 +90,6 @@ from app.adapters.db.llm.models import (
     LlmProvider,
     LlmProviderModel,
     LlmUsage,
-    ModelAssignment,
 )
 from app.tenancy.registry import register
 
@@ -99,7 +99,7 @@ from app.tenancy.registry import register
 # filter would inject a ``workspace_id =`` predicate against a column
 # that does not exist and break every read.
 for _table in (
-    "model_assignment",
+    "llm_assignment",
     "agent_token",
     "approval_request",
     "llm_usage",
@@ -118,6 +118,7 @@ __all__ = [
     "AgentToken",
     "ApprovalRequest",
     "BudgetLedger",
+    "LlmAssignment",
     "LlmCapabilityInheritance",
     "LlmModel",
     "LlmPromptTemplate",
@@ -125,5 +126,4 @@ __all__ = [
     "LlmProvider",
     "LlmProviderModel",
     "LlmUsage",
-    "ModelAssignment",
 ]

@@ -8,7 +8,7 @@ here (same pattern as ``tests/tenant/conftest.py``).
 
 The router tests need:
 
-* the real migrated schema (so ``model_assignment`` has its
+* the real migrated schema (so ``llm_assignment`` has its
   cd-u84y columns and ``llm_capability_inheritance`` exists);
 * the ORM tenant filter installed on the sessionmaker (so the
   resolver's SELECTs are scoped to the active
@@ -31,11 +31,11 @@ from sqlalchemy import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.adapters.db.llm.models import (
+    LlmAssignment,
     LlmCapabilityInheritance,
     LlmModel,
     LlmProvider,
     LlmProviderModel,
-    ModelAssignment,
 )
 from app.adapters.db.workspace.models import Workspace
 from app.domain.llm import router as router_module
@@ -83,7 +83,7 @@ _PINNED = datetime(2026, 4, 19, 12, 0, 0, tzinfo=UTC)
 # full suite runs. Same pattern as
 # ``tests/integration/test_db_llm.py::_ensure_llm_registered``.
 _LLM_TABLES: tuple[str, ...] = (
-    "model_assignment",
+    "llm_assignment",
     "llm_capability_inheritance",
     # cd-irng adds ``llm_usage`` + ``budget_ledger`` reads / writes
     # to the budget module's surface; both must stay in the
@@ -272,7 +272,7 @@ def seed_provider_model(
     """Insert a :class:`LlmProviderModel` plus its :class:`LlmProvider` /
     :class:`LlmModel` ancestors.
 
-    The cd-4btd FK on :attr:`ModelAssignment.model_id` requires every
+    The cd-4btd FK on :attr:`LlmAssignment.model_id` requires every
     seeded assignment to point at a real ``llm_provider_model`` row.
     Tests that don't care about the wire form let the helper mint the
     ancestor trio with auto-generated identifiers; tests that care
@@ -347,8 +347,8 @@ def seed_assignment(
     temperature: float | None = None,
     extra_api_params: dict[str, object] | None = None,
     required_capabilities: list[str] | None = None,
-) -> ModelAssignment:
-    """Insert a :class:`ModelAssignment` with sensible defaults.
+) -> LlmAssignment:
+    """Insert a :class:`LlmAssignment` with sensible defaults.
 
     cd-4btd: ``model_id`` must reference a real ``llm_provider_
     model`` row. To keep call sites concise the helper auto-creates
@@ -380,7 +380,7 @@ def seed_assignment(
         existing.api_model_id = api_model_id
         session.flush()
 
-    row = ModelAssignment(
+    row = LlmAssignment(
         id=new_ulid(),
         workspace_id=workspace_id,
         capability=capability,

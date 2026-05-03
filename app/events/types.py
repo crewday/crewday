@@ -1358,7 +1358,7 @@ class QuoteDecided(Event):
 class LlmAssignmentChanged(Event):
     """A workspace's LLM model assignments or capability inheritance changed.
 
-    Fired whenever an admin mutates the ``model_assignment`` or
+    Fired whenever an admin mutates the ``llm_assignment`` or
     ``llm_capability_inheritance`` table for a workspace (create,
     update, delete, reorder, enable/disable). The §11 router
     (:mod:`app.domain.llm.router`) listens on this event to drop its

@@ -297,7 +297,7 @@ class LlmUsage:
       :class:`~app.domain.llm.router.ModelPick` (the registry
       follow-up will split them).
     * ``assignment_id`` — the :class:`~app.adapters.db.llm.models.
-      ModelAssignment` row this rung was resolved from. Empty string
+      LlmAssignment` row this rung was resolved from. Empty string
       means "resolver bypassed" (e.g. admin smoke test) — the adapter
       writes it as ``NULL`` so the DB column contract (NULL = bypass)
       lines up with the spec; the ledger update still fires so the

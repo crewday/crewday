@@ -8,7 +8,7 @@ CASCADE sweeps every row; user SET NULL on
 no user FK on ``llm_usage``; no FK on ``model_id`` — soft reference),
 happy-path CRUD round-trip of every model, the pending-queue hot-path
 query, the per-capability usage breakdown query, the unique-index
-(model_assignment, budget_ledger), CHECK violations, cross-workspace
+(llm_assignment, budget_ledger), CHECK violations, cross-workspace
 isolation, and tenant-filter behaviour (all five tables scoped; SELECT
 without a :class:`WorkspaceContext` raises :class:`TenantFilterMissing`).
 
@@ -37,12 +37,12 @@ from app.adapters.db.llm.models import (
     AgentToken,
     ApprovalRequest,
     BudgetLedger,
+    LlmAssignment,
     LlmCapabilityInheritance,
     LlmModel,
     LlmProvider,
     LlmProviderModel,
     LlmUsage,
-    ModelAssignment,
 )
 from app.adapters.db.workspace.models import Workspace
 from app.tenancy import registry
@@ -61,7 +61,7 @@ _PERIOD_END = _PINNED + timedelta(days=30)
 
 
 _LLM_TABLES: tuple[str, ...] = (
-    "model_assignment",
+    "llm_assignment",
     "agent_token",
     "approval_request",
     "llm_usage",
@@ -167,11 +167,11 @@ def _seed_registry_trio(
 @pytest.fixture(autouse=True)
 def _seed_default_provider_models(db_session: Session) -> None:
     """Pre-seed :class:`LlmProviderModel` rows for the synthetic ULIDs
-    the integration tests embed in ``ModelAssignment.model_id``.
+    the integration tests embed in ``LlmAssignment.model_id``.
 
-    cd-4btd promoted ``ModelAssignment.model_id`` from a soft string
+    cd-4btd promoted ``LlmAssignment.model_id`` from a soft string
     reference into a real FK on ``llm_provider_model.id``. Tests that
-    construct a :class:`ModelAssignment` with a hand-rolled ULID
+    construct a :class:`LlmAssignment` with a hand-rolled ULID
     (``01HWA00000000000000000MDLA`` / ``MDLB``) need that registry row
     to exist before the ``flush()`` lands. Pre-seeding the two ULIDs
     in an autouse fixture keeps the per-test setup terse and matches
@@ -230,14 +230,14 @@ class TestMigrationShape:
         for table in _LLM_TABLES:
             assert table in tables, f"{table} missing from schema"
 
-    def test_model_assignment_columns(self, engine: Engine) -> None:
-        """cd-u84y: ``model_assignment`` carries the full v1 tuning shape.
+    def test_llm_assignment_columns(self, engine: Engine) -> None:
+        """cd-u84y: ``llm_assignment`` carries the full v1 tuning shape.
 
         Includes the priority / enabled / tuning columns the §11
         resolver depends on; ``max_tokens`` and ``temperature`` are
         nullable (NULL = inherit the provider-model default).
         """
-        cols = {c["name"]: c for c in inspect(engine).get_columns("model_assignment")}
+        cols = {c["name"]: c for c in inspect(engine).get_columns("llm_assignment")}
         expected = {
             "id",
             "workspace_id",
@@ -259,7 +259,7 @@ class TestMigrationShape:
         for notnull in expected - nullable:
             assert cols[notnull]["nullable"] is False, f"{notnull} must be NOT NULL"
 
-    def test_model_assignment_fks(self, engine: Engine) -> None:
+    def test_llm_assignment_fks(self, engine: Engine) -> None:
         """cd-4btd: ``workspace_id`` CASCADE; ``model_id`` is now a real
         FK to ``llm_provider_model.id`` ON DELETE RESTRICT.
 
@@ -272,7 +272,7 @@ class TestMigrationShape:
         """
         fks = {
             tuple(fk["constrained_columns"]): fk
-            for fk in inspect(engine).get_foreign_keys("model_assignment")
+            for fk in inspect(engine).get_foreign_keys("llm_assignment")
         }
         assert fks[("workspace_id",)]["referred_table"] == "workspace"
         assert fks[("workspace_id",)]["options"].get("ondelete") == "CASCADE"
@@ -280,7 +280,7 @@ class TestMigrationShape:
         assert fks[("model_id",)]["referred_table"] == "llm_provider_model"
         assert fks[("model_id",)]["options"].get("ondelete") == "RESTRICT"
 
-    def test_model_assignment_priority_index(self, engine: Engine) -> None:
+    def test_llm_assignment_priority_index(self, engine: Engine) -> None:
         """cd-u84y: non-unique ``(workspace_id, capability, priority)`` index.
 
         Replaces the cd-cm5 unique ``(workspace_id, capability)`` index.
@@ -291,17 +291,17 @@ class TestMigrationShape:
         prefix of the same index.
         """
         indexes = {
-            ix["name"]: ix for ix in inspect(engine).get_indexes("model_assignment")
+            ix["name"]: ix for ix in inspect(engine).get_indexes("llm_assignment")
         }
-        assert "ix_model_assignment_workspace_capability_priority" in indexes
-        ix = indexes["ix_model_assignment_workspace_capability_priority"]
+        assert "ix_llm_assignment_workspace_capability_priority" in indexes
+        ix = indexes["ix_llm_assignment_workspace_capability_priority"]
         assert ix["column_names"] == ["workspace_id", "capability", "priority"]
         # SQLite's inspector returns 1/0, PG returns True/False — coerce.
         assert bool(ix["unique"]) is False
         # The cd-cm5 unique index is gone — guard against re-introducing
         # the "one row per capability" rule the resolver relies on being
         # absent.
-        assert "uq_model_assignment_workspace_capability" not in indexes
+        assert "uq_llm_assignment_workspace_capability" not in indexes
 
     def test_agent_token_columns(self, engine: Engine) -> None:
         cols = {c["name"]: c for c in inspect(engine).get_columns("agent_token")}
@@ -599,8 +599,8 @@ class TestMigrationShape:
         assert bool(uq["unique"]) is True
 
 
-class TestModelAssignmentCrud:
-    """Insert + select + update round-trip on :class:`ModelAssignment`."""
+class TestLlmAssignmentCrud:
+    """Insert + select + update round-trip on :class:`LlmAssignment`."""
 
     def test_round_trip(self, db_session: Session) -> None:
         workspace, user = _bootstrap(
@@ -612,7 +612,7 @@ class TestModelAssignmentCrud:
         )
         ctx_token = set_current(_ctx_for(workspace, user.id))
         try:
-            row = ModelAssignment(
+            row = LlmAssignment(
                 id="01HWA00000000000000000MAAA",
                 workspace_id=workspace.id,
                 capability="staff_chat",
@@ -623,7 +623,7 @@ class TestModelAssignmentCrud:
             db_session.add(row)
             db_session.flush()
 
-            loaded = db_session.get(ModelAssignment, row.id)
+            loaded = db_session.get(LlmAssignment, row.id)
             assert loaded is not None
             assert loaded.capability == "staff_chat"
             assert loaded.model_id == "01HWA00000000000000000MDLA"
@@ -655,7 +655,7 @@ class TestModelAssignmentCrud:
         try:
             db_session.add_all(
                 [
-                    ModelAssignment(
+                    LlmAssignment(
                         id="01HWA00000000000000000MAPA",
                         workspace_id=workspace.id,
                         capability="staff_chat",
@@ -664,7 +664,7 @@ class TestModelAssignmentCrud:
                         priority=0,
                         created_at=_PINNED,
                     ),
-                    ModelAssignment(
+                    LlmAssignment(
                         id="01HWA00000000000000000MAPB",
                         workspace_id=workspace.id,
                         capability="staff_chat",  # same (workspace, capability)
@@ -679,10 +679,10 @@ class TestModelAssignmentCrud:
             db_session.flush()
 
             chain = db_session.scalars(
-                select(ModelAssignment)
-                .where(ModelAssignment.workspace_id == workspace.id)
-                .where(ModelAssignment.capability == "staff_chat")
-                .order_by(ModelAssignment.priority.asc())
+                select(LlmAssignment)
+                .where(LlmAssignment.workspace_id == workspace.id)
+                .where(LlmAssignment.capability == "staff_chat")
+                .order_by(LlmAssignment.priority.asc())
             ).all()
             assert [r.priority for r in chain] == [0, 1]
             assert [r.model_id for r in chain] == [
@@ -709,7 +709,7 @@ class TestModelAssignmentCrud:
             # Construct without the cd-u84y tuning fields — the Python-
             # side ORM defaults kick on insert; the migration's
             # ``server_default`` backstops raw SQL.
-            row = ModelAssignment(
+            row = LlmAssignment(
                 id="01HWA00000000000000000MADF",
                 workspace_id=workspace.id,
                 capability="staff_chat",
@@ -721,7 +721,7 @@ class TestModelAssignmentCrud:
             db_session.flush()
             db_session.expire_all()
 
-            reloaded = db_session.get(ModelAssignment, row.id)
+            reloaded = db_session.get(LlmAssignment, row.id)
             assert reloaded is not None
             assert reloaded.priority == 0
             assert reloaded.enabled is True
@@ -750,7 +750,7 @@ class TestModelAssignmentCrud:
         ctx_token = set_current(_ctx_for(workspace, user.id))
         try:
             db_session.add(
-                ModelAssignment(
+                LlmAssignment(
                     id="01HWA00000000000000000MANG",
                     workspace_id=workspace.id,
                     capability="staff_chat",
@@ -779,7 +779,7 @@ class TestModelAssignmentCrud:
         try:
             extra = {"top_p": 0.95, "tool_choice": "auto"}
             req_caps = ["vision", "json_mode"]
-            row = ModelAssignment(
+            row = LlmAssignment(
                 id="01HWA00000000000000000MATU",
                 workspace_id=workspace.id,
                 capability="documents.ocr",
@@ -797,7 +797,7 @@ class TestModelAssignmentCrud:
             db_session.flush()
             db_session.expire_all()
 
-            reloaded = db_session.get(ModelAssignment, row.id)
+            reloaded = db_session.get(LlmAssignment, row.id)
             assert reloaded is not None
             assert reloaded.priority == 3
             assert reloaded.enabled is False
@@ -821,7 +821,7 @@ class TestModelAssignmentCrud:
         try:
             db_session.add_all(
                 [
-                    ModelAssignment(
+                    LlmAssignment(
                         id="01HWA00000000000000000MADA",
                         workspace_id=workspace.id,
                         capability="staff_chat",
@@ -829,7 +829,7 @@ class TestModelAssignmentCrud:
                         provider="openrouter",
                         created_at=_PINNED,
                     ),
-                    ModelAssignment(
+                    LlmAssignment(
                         id="01HWA00000000000000000MADB",
                         workspace_id=workspace.id,
                         capability="daily_digest",
@@ -842,9 +842,9 @@ class TestModelAssignmentCrud:
             db_session.flush()
 
             rows = db_session.scalars(
-                select(ModelAssignment)
-                .where(ModelAssignment.workspace_id == workspace.id)
-                .order_by(ModelAssignment.capability)
+                select(LlmAssignment)
+                .where(LlmAssignment.workspace_id == workspace.id)
+                .order_by(LlmAssignment.capability)
             ).all()
             assert [r.capability for r in rows] == ["daily_digest", "staff_chat"]
         finally:
@@ -2093,7 +2093,7 @@ class TestCascadeOnWorkspaceDelete:
         try:
             db_session.add_all(
                 [
-                    ModelAssignment(
+                    LlmAssignment(
                         id="01HWA00000000000000000MACW",
                         workspace_id=workspace.id,
                         capability="staff_chat",
@@ -2158,7 +2158,7 @@ class TestCascadeOnWorkspaceDelete:
         ctx_token = set_current(_ctx_for(workspace, user.id))
         try:
             for model in (
-                ModelAssignment,
+                LlmAssignment,
                 AgentToken,
                 ApprovalRequest,
                 LlmUsage,
@@ -2176,7 +2176,7 @@ class TestCascadeOnWorkspaceDelete:
 class TestCrossWorkspaceIsolation:
     """LLM-layer rows do not leak across workspaces."""
 
-    def test_model_assignment_same_capability_different_workspace(
+    def test_llm_assignment_same_capability_different_workspace(
         self, db_session: Session
     ) -> None:
         """Two workspaces can each bind the same capability."""
@@ -2199,7 +2199,7 @@ class TestCrossWorkspaceIsolation:
         token_a = set_current(_ctx_for(ws_a, user.id))
         try:
             db_session.add(
-                ModelAssignment(
+                LlmAssignment(
                     id="01HWA00000000000000000MXA1",
                     workspace_id=ws_a.id,
                     capability="staff_chat",
@@ -2215,7 +2215,7 @@ class TestCrossWorkspaceIsolation:
         token_b = set_current(_ctx_for(ws_b, user.id))
         try:
             db_session.add(
-                ModelAssignment(
+                LlmAssignment(
                     id="01HWA00000000000000000MXB1",
                     workspace_id=ws_b.id,
                     capability="staff_chat",  # same capability, different ws
@@ -2228,7 +2228,7 @@ class TestCrossWorkspaceIsolation:
             db_session.flush()
 
             b_rows = db_session.scalars(
-                select(ModelAssignment).where(ModelAssignment.workspace_id == ws_b.id)
+                select(LlmAssignment).where(LlmAssignment.workspace_id == ws_b.id)
             ).all()
             assert [r.model_id for r in b_rows] == ["01HWA00000000000000000MDLB"]
         finally:
@@ -2309,7 +2309,7 @@ class TestTenantFilter:
     @pytest.mark.parametrize(
         "model",
         [
-            ModelAssignment,
+            LlmAssignment,
             AgentToken,
             ApprovalRequest,
             LlmUsage,
@@ -2320,7 +2320,7 @@ class TestTenantFilter:
     def test_read_without_ctx_raises(
         self,
         filtered_factory: sessionmaker[Session],
-        model: type[ModelAssignment]
+        model: type[LlmAssignment]
         | type[AgentToken]
         | type[ApprovalRequest]
         | type[LlmUsage]
@@ -2395,7 +2395,10 @@ class TestCdU84yMigrationRoundTrip:
                 command.upgrade(cfg, "head")
 
             insp = inspect(engine)
-            cols = {c["name"]: c for c in insp.get_columns("model_assignment")}
+            # cd-z7wm renames the table to ``llm_assignment`` at head;
+            # the cd-u84y shape (columns + composite index) lives on the
+            # renamed table.
+            cols = {c["name"]: c for c in insp.get_columns("llm_assignment")}
             for added in (
                 "priority",
                 "enabled",
@@ -2412,10 +2415,11 @@ class TestCdU84yMigrationRoundTrip:
             assert cols["max_tokens"]["nullable"] is True
             assert cols["temperature"]["nullable"] is True
 
-            indexes = {ix["name"]: ix for ix in insp.get_indexes("model_assignment")}
-            # Old unique gone, new composite non-unique in.
-            assert "uq_model_assignment_workspace_capability" not in indexes
-            assert "ix_model_assignment_workspace_capability_priority" in indexes
+            indexes = {ix["name"]: ix for ix in insp.get_indexes("llm_assignment")}
+            # Old unique gone, new composite non-unique in (under the
+            # cd-z7wm-renamed name).
+            assert "uq_llm_assignment_workspace_capability" not in indexes
+            assert "ix_llm_assignment_workspace_capability_priority" in indexes
 
             # New table landed with its shape.
             assert "llm_capability_inheritance" in insp.get_table_names()
@@ -2528,8 +2532,8 @@ class TestCdU84yMigrationRoundTrip:
             # primary assignment per capability. Raw SQL (no ORM
             # factories) so the test owns the row shape at this exact
             # revision; the registry rows are needed to satisfy the
-            # FK ``model_assignment.model_id → llm_provider_model.id``
-            # that cd-4btd lands at head.
+            # FK ``llm_assignment.model_id → llm_provider_model.id``
+            # that cd-4btd lands and cd-z7wm renames at head.
             with engine.begin() as conn:
                 conn.execute(
                     text(
@@ -2579,9 +2583,10 @@ class TestCdU84yMigrationRoundTrip:
                         "'2026-04-24T12:00:00+00:00')"
                     )
                 )
+                # Insert under the cd-z7wm-renamed table at head.
                 conn.execute(
                     text(
-                        "INSERT INTO model_assignment "
+                        "INSERT INTO llm_assignment "
                         "(id, workspace_id, capability, model_id, provider, "
                         "priority, enabled, extra_api_params, "
                         "required_capabilities, created_at) VALUES "
@@ -2639,8 +2644,8 @@ class TestCdU84yMigrationRoundTrip:
             # primary + two fallback rungs on the same
             # (workspace, capability). Raw SQL keeps the test
             # revision-agnostic; the registry rows satisfy the FK
-            # ``model_assignment.model_id → llm_provider_model.id``
-            # that cd-4btd lands at head.
+            # ``llm_assignment.model_id → llm_provider_model.id``
+            # that cd-4btd lands and cd-z7wm renames at head.
             with engine.begin() as conn:
                 conn.execute(
                     text(
@@ -2698,9 +2703,10 @@ class TestCdU84yMigrationRoundTrip:
                             "'2026-04-24T12:00:00+00:00')"
                         )
                     )
+                    # Insert under the cd-z7wm-renamed table at head.
                     conn.execute(
                         text(
-                            "INSERT INTO model_assignment "
+                            "INSERT INTO llm_assignment "
                             "(id, workspace_id, capability, model_id, provider, "
                             "priority, enabled, extra_api_params, "
                             "required_capabilities, created_at) VALUES "
@@ -2999,7 +3005,8 @@ class TestCd4btdMigrationRoundTrip:
 
     Mirrors the cd-u84y / cd-wjpl round-trip smoke: scratch SQLite
     file, ``alembic upgrade head``, introspect the new tables + the
-    promoted FK on ``model_assignment.model_id``, ``downgrade -1``
+    promoted FK on ``llm_assignment.model_id`` (the cd-z7wm-renamed
+    table at head), ``downgrade -1``
     to restore the cd-kgcc shape (no registry trio, soft-reference
     ``model_id``), then re-upgrade to prove reversibility +
     idempotence.
@@ -3056,10 +3063,13 @@ class TestCd4btdMigrationRoundTrip:
             for added in ("llm_provider", "llm_model", "llm_provider_model"):
                 assert added in tables, f"{added} missing after upgrade"
 
-            # FK promoted from soft reference to a real edge.
+            # FK promoted from soft reference to a real edge. cd-z7wm
+            # renames the table to ``llm_assignment`` further down the
+            # chain — the FK survives the rename under the new table
+            # name.
             fks = {
                 tuple(fk["constrained_columns"]): fk
-                for fk in insp.get_foreign_keys("model_assignment")
+                for fk in insp.get_foreign_keys("llm_assignment")
             }
             assert fks[("model_id",)]["referred_table"] == "llm_provider_model"
             assert fks[("model_id",)]["options"].get("ondelete") == "RESTRICT"
@@ -3261,10 +3271,10 @@ class TestRegistryShape:
 
 
 class TestRegistryFkProtect:
-    """The cd-4btd FK on ``model_assignment.model_id`` enforces
+    """The cd-4btd FK on ``llm_assignment.model_id`` enforces
     RESTRICT semantics."""
 
-    def test_model_assignment_requires_existing_provider_model(
+    def test_llm_assignment_requires_existing_provider_model(
         self, db_session: Session
     ) -> None:
         """Inserting an assignment with an unknown ``model_id`` fails
@@ -3279,7 +3289,7 @@ class TestRegistryFkProtect:
         )
         ctx_token = set_current(_ctx_for(workspace, user.id))
         try:
-            row = ModelAssignment(
+            row = LlmAssignment(
                 id="01HWA00000000000000000MAFK",
                 workspace_id=workspace.id,
                 capability="staff_chat",
@@ -3309,7 +3319,7 @@ class TestRegistryFkProtect:
         )
         ctx_token = set_current(_ctx_for(workspace, user.id))
         try:
-            row = ModelAssignment(
+            row = LlmAssignment(
                 id="01HWA00000000000000000MARS",
                 workspace_id=workspace.id,
                 capability="staff_chat",

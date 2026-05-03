@@ -62,7 +62,7 @@ def seed_default_registry(
 
     The default trio satisfies the §11 ``chat.manager`` capability —
     callers who need a workspace assignment thread the returned
-    row's ``id`` into :attr:`ModelAssignment.model_id` (the cd-4btd
+    row's ``id`` into :attr:`LlmAssignment.model_id` (the cd-4btd
     FK target). Per-call tuning (``temperature``, ``max_tokens``,
     …) lives on the assignment, not the provider_model — the
     deployment seed is intentionally minimal.

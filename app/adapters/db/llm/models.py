@@ -3,7 +3,7 @@
 Defines the five workspace-scoped tables that back §11's agent and
 LLM plumbing from the DB side:
 
-* :class:`ModelAssignment` — capability → model map, one row per
+* :class:`LlmAssignment` — capability → model map, one row per
   ``(workspace_id, capability)`` pair.
 * :class:`AgentToken` — delegated agent tokens (one row per minted
   token). ``hash`` stores the **sha256** digest of the plaintext
@@ -31,7 +31,7 @@ contract.
 
 As of cd-4btd this module also ships the deployment-scope
 :class:`LlmProvider` / :class:`LlmModel` / :class:`LlmProviderModel`
-registry. :attr:`ModelAssignment.model_id` is now a real FK to
+registry. :attr:`LlmAssignment.model_id` is now a real FK to
 :attr:`LlmProviderModel.id` (``ondelete="RESTRICT"``) so the §11
 resolver can surface the provider's wire name
 (:attr:`LlmProviderModel.api_model_id`) on
@@ -96,6 +96,7 @@ __all__ = [
     "AgentToken",
     "ApprovalRequest",
     "BudgetLedger",
+    "LlmAssignment",
     "LlmCapabilityInheritance",
     "LlmModel",
     "LlmPromptTemplate",
@@ -103,7 +104,6 @@ __all__ = [
     "LlmProvider",
     "LlmProviderModel",
     "LlmUsage",
-    "ModelAssignment",
 ]
 
 
@@ -171,7 +171,7 @@ def _in_clause(values: tuple[str, ...]) -> str:
     return "'" + "', '".join(values) + "'"
 
 
-class ModelAssignment(Base):
+class LlmAssignment(Base):
     """Capability → model binding for a workspace.
 
     A capability may carry **many** assignments, forming a priority-
@@ -236,7 +236,7 @@ class ModelAssignment(Base):
     sweeps its assignments.
     """
 
-    __tablename__ = "model_assignment"
+    __tablename__ = "llm_assignment"
 
     id: Mapped[str] = mapped_column(String, primary_key=True)
     workspace_id: Mapped[str] = mapped_column(
@@ -326,7 +326,7 @@ class ModelAssignment(Base):
         # tenant filter; per-capability lookup still rides the same
         # index's ``(workspace_id, capability)`` prefix.
         Index(
-            "ix_model_assignment_workspace_capability_priority",
+            "ix_llm_assignment_workspace_capability_priority",
             "workspace_id",
             "capability",
             "priority",
@@ -593,7 +593,7 @@ class LlmUsage(Base):
     **Spec-drift note on ``model_id``.** The column is named
     ``model_id`` here but the §02 ``llm_call`` spec names the
     equivalent column ``provider_model_id`` — and unlike
-    :attr:`ModelAssignment.model_id` (a real FK as of cd-4btd) it
+    :attr:`LlmAssignment.model_id` (a real FK as of cd-4btd) it
     still holds the provider's free-form **wire name string**, not
     the ``llm_provider_model.id``. The cd-wjpl / cd-irng post-flight
     writers populate it with
@@ -608,7 +608,7 @@ class LlmUsage(Base):
     cd-wjpl telemetry columns (all nullable — §11 "Agent audit
     trail"):
 
-    * ``assignment_id`` — the :class:`ModelAssignment.id` rung the
+    * ``assignment_id`` — the :class:`LlmAssignment.id` rung the
       §11 resolver picked for this call. NULL means the resolver
       was bypassed (admin smoke path, deployment-scope callers).
       Soft reference — no FK so deleting an assignment doesn't
@@ -647,7 +647,7 @@ class LlmUsage(Base):
         nullable=False,
     )
     # Capability key from the §11 catalogue. Plain string — see
-    # :class:`ModelAssignment.capability` for the rationale.
+    # :class:`LlmAssignment.capability` for the rationale.
     capability: Mapped[str] = mapped_column(String, nullable=False)
     # Resolved provider-model reference. Column name is ``model_id``
     # for cd-cm5-era compatibility; the §02 spec names the equivalent
@@ -678,7 +678,7 @@ class LlmUsage(Base):
     attempt: Mapped[int] = mapped_column(
         Integer, nullable=False, default=0, server_default="0"
     )
-    # cd-wjpl telemetry: the ``ModelAssignment.id`` rung the §11
+    # cd-wjpl telemetry: the ``LlmAssignment.id`` rung the §11
     # resolver picked. NULL when the resolver was bypassed (admin
     # smoke path, deployment-scope callers). Soft reference.
     assignment_id: Mapped[str | None] = mapped_column(String(26), nullable=True)
@@ -816,7 +816,7 @@ class BudgetLedger(Base):
 class LlmCapabilityInheritance(Base):
     """Parent-child fallback edge between two capabilities.
 
-    When the §11 resolver finds no enabled :class:`ModelAssignment`
+    When the §11 resolver finds no enabled :class:`LlmAssignment`
     for a child capability in the active workspace, it walks one hop
     up this edge to the parent and replays the resolver against the
     parent's chain. v1 seeds one edge per deployment
@@ -852,7 +852,7 @@ class LlmCapabilityInheritance(Base):
     )
     # Child capability — the one that falls through when its own
     # chain is exhausted. Same open-enum rationale as
-    # :attr:`ModelAssignment.capability`.
+    # :attr:`LlmAssignment.capability`.
     capability: Mapped[str] = mapped_column(String, nullable=False)
     # Parent capability — replayed against this row's chain. Must also
     # be a key in the §11 capability catalogue; enforcement lives at

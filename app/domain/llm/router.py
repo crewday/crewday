@@ -4,7 +4,7 @@ Every LLM caller asks for a **capability** (``chat.manager``,
 ``expenses.autofill``, ``tasks.nl_intake``, …), never for a specific
 model id. This module answers the question "which models should I
 try, in what order, for this capability in this workspace?" by
-walking the workspace's :class:`~app.adapters.db.llm.models.ModelAssignment`
+walking the workspace's :class:`~app.adapters.db.llm.models.LlmAssignment`
 rows (priority-ascending, enabled-only) and falling through
 :class:`~app.adapters.db.llm.models.LlmCapabilityInheritance` edges
 when the capability itself has no enabled assignments.
@@ -105,9 +105,9 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.adapters.db.llm.models import (
+    LlmAssignment,
     LlmCapabilityInheritance,
     LlmProviderModel,
-    ModelAssignment,
 )
 from app.config import get_settings
 from app.demo.guardrails import demo_free_model_pick, llm_capability_allowed_in_demo
@@ -197,7 +197,7 @@ class CapabilityUnassignedError(Exception):
     Raised when:
 
     * the capability has no enabled
-      :class:`~app.adapters.db.llm.models.ModelAssignment` rows in
+      :class:`~app.adapters.db.llm.models.LlmAssignment` rows in
       the workspace, and
     * no :class:`~app.adapters.db.llm.models.LlmCapabilityInheritance`
       edge leads to a capability that does, and
@@ -327,7 +327,7 @@ def _load_enabled_chain(
     the caller decides whether to walk inheritance from there.
     Relies on the ORM tenant filter (see
     :mod:`app.tenancy.orm_filter`) to pin ``workspace_id`` on the
-    workspace-scoped ``model_assignment`` table; the deployment-
+    workspace-scoped ``llm_assignment`` table; the deployment-
     scope ``llm_provider_model`` join target is intentionally NOT
     in the registry, so the filter leaves it alone — exactly what
     we want for a deployment-shared row. We still pass
@@ -340,28 +340,28 @@ def _load_enabled_chain(
     provider's wire form) on
     :class:`ModelPick.api_model_id` while keeping the registry id
     on :class:`ModelPick.provider_model_id`. We use a plain INNER
-    join because :attr:`ModelAssignment.model_id` is now a NOT NULL
+    join because :attr:`LlmAssignment.model_id` is now a NOT NULL
     FK — every assignment must point at a registry row, so a LEFT
     join would only mask a data integrity bug rather than recover
     from one.
     """
     stmt = (
-        select(ModelAssignment, LlmProviderModel)
+        select(LlmAssignment, LlmProviderModel)
         .join(
             LlmProviderModel,
-            ModelAssignment.model_id == LlmProviderModel.id,
+            LlmAssignment.model_id == LlmProviderModel.id,
         )
         .where(
-            ModelAssignment.capability == capability,
-            ModelAssignment.enabled.is_(True),
+            LlmAssignment.capability == capability,
+            LlmAssignment.enabled.is_(True),
         )
-        .order_by(ModelAssignment.priority.asc(), ModelAssignment.id.asc())
+        .order_by(LlmAssignment.priority.asc(), LlmAssignment.id.asc())
     )
     rows = session.execute(stmt).all()
     return [_to_pick(assignment, provider_model) for assignment, provider_model in rows]
 
 
-def _to_pick(row: ModelAssignment, provider_model: LlmProviderModel) -> ModelPick:
+def _to_pick(row: LlmAssignment, provider_model: LlmProviderModel) -> ModelPick:
     """Map an (assignment, provider_model) pair to a frozen :class:`ModelPick`.
 
     JSON columns round-trip as mutable ``dict`` / ``list`` — wrap

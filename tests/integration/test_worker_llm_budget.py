@@ -69,7 +69,7 @@ _PINNED = datetime(2026, 4, 24, 12, 0, 0, tzinfo=UTC)
 # suite runs. Same pattern as
 # ``tests/domain/llm/conftest.py::_ensure_llm_registered``.
 _LLM_TABLES: tuple[str, ...] = (
-    "model_assignment",
+    "llm_assignment",
     "llm_capability_inheritance",
     "llm_usage",
     "budget_ledger",

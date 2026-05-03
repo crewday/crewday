@@ -15,6 +15,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.adapters.db.llm.models import (
+    LlmAssignment,
     LlmCapabilityInheritance,
     LlmModel,
     LlmPromptTemplate,
@@ -22,7 +23,6 @@ from app.adapters.db.llm.models import (
     LlmProvider,
     LlmProviderModel,
     LlmUsage,
-    ModelAssignment,
 )
 from app.adapters.db.workspace.models import Workspace
 from app.api.admin.deps import require_deployment_scope
@@ -515,7 +515,7 @@ def _capabilities() -> list[LlmCapabilityEntry]:
 
 
 def _assignment_response(
-    row: ModelAssignment,
+    row: LlmAssignment,
     *,
     usage: dict[str, tuple[int, int]],
 ) -> LlmAssignmentResponse:
@@ -616,10 +616,10 @@ def _load_graph(session: Session) -> LlmGraphPayload:
         )
         assignments = list(
             session.scalars(
-                select(ModelAssignment).order_by(
-                    ModelAssignment.capability,
-                    ModelAssignment.priority,
-                    ModelAssignment.id,
+                select(LlmAssignment).order_by(
+                    LlmAssignment.capability,
+                    LlmAssignment.priority,
+                    LlmAssignment.id,
                 )
             ).all()
         )
@@ -870,11 +870,11 @@ def _validate_assignment_priority(
     assignment_id: str | None = None,
 ) -> None:
     duplicate = session.scalar(
-        select(ModelAssignment.id)
+        select(LlmAssignment.id)
         .where(
-            ModelAssignment.workspace_id == workspace_id,
-            ModelAssignment.capability == capability,
-            ModelAssignment.priority == priority,
+            LlmAssignment.workspace_id == workspace_id,
+            LlmAssignment.capability == capability,
+            LlmAssignment.priority == priority,
         )
         .limit(1)
     )
@@ -882,8 +882,8 @@ def _validate_assignment_priority(
         raise _conflict("assignment_priority_exists")
 
 
-def _assignment(session: Session, assignment_id: str) -> ModelAssignment:
-    row = session.get(ModelAssignment, assignment_id)
+def _assignment(session: Session, assignment_id: str) -> LlmAssignment:
+    row = session.get(LlmAssignment, assignment_id)
     if row is None:
         raise _not_found()
     return row
@@ -1268,8 +1268,8 @@ def build_admin_llm_router() -> APIRouter:
         with tenant_agnostic():
             row = _provider_model(session, provider_model_id)
             references = session.scalar(
-                select(func.count(ModelAssignment.id)).where(
-                    ModelAssignment.model_id == provider_model_id
+                select(func.count(LlmAssignment.id)).where(
+                    LlmAssignment.model_id == provider_model_id
                 )
             )
             if references:
@@ -1287,10 +1287,10 @@ def build_admin_llm_router() -> APIRouter:
         with tenant_agnostic():
             rows = list(
                 session.scalars(
-                    select(ModelAssignment).order_by(
-                        ModelAssignment.capability,
-                        ModelAssignment.priority,
-                        ModelAssignment.id,
+                    select(LlmAssignment).order_by(
+                        LlmAssignment.capability,
+                        LlmAssignment.priority,
+                        LlmAssignment.id,
                     )
                 ).all()
             )
@@ -1327,7 +1327,7 @@ def build_admin_llm_router() -> APIRouter:
                     required_capabilities=required_capabilities,
                 )
             )
-            row = ModelAssignment(
+            row = LlmAssignment(
                 id=new_ulid(),
                 workspace_id=payload.workspace_id,
                 capability=payload.capability,
@@ -1363,9 +1363,9 @@ def build_admin_llm_router() -> APIRouter:
             for group in payload:
                 rows = list(
                     session.scalars(
-                        select(ModelAssignment).where(
-                            ModelAssignment.id.in_(group.ids_in_priority_order),
-                            ModelAssignment.capability == group.capability,
+                        select(LlmAssignment).where(
+                            LlmAssignment.id.in_(group.ids_in_priority_order),
+                            LlmAssignment.capability == group.capability,
                         )
                     ).all()
                 )
@@ -1382,9 +1382,9 @@ def build_admin_llm_router() -> APIRouter:
                 workspace_id = next(iter(workspace_ids))
                 all_group_ids = set(
                     session.scalars(
-                        select(ModelAssignment.id).where(
-                            ModelAssignment.workspace_id == workspace_id,
-                            ModelAssignment.capability == group.capability,
+                        select(LlmAssignment.id).where(
+                            LlmAssignment.workspace_id == workspace_id,
+                            LlmAssignment.capability == group.capability,
                         )
                     ).all()
                 )
@@ -1402,10 +1402,10 @@ def build_admin_llm_router() -> APIRouter:
             _commit_or_conflict(session, "assignment_constraint_violation")
             all_rows = list(
                 session.scalars(
-                    select(ModelAssignment).order_by(
-                        ModelAssignment.capability,
-                        ModelAssignment.priority,
-                        ModelAssignment.id,
+                    select(LlmAssignment).order_by(
+                        LlmAssignment.capability,
+                        LlmAssignment.priority,
+                        LlmAssignment.id,
                     )
                 ).all()
             )

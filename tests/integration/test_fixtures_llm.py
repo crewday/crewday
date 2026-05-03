@@ -8,7 +8,7 @@ The default-registry seed must:
   duplicating the trio.
 * Produce a row a workspace can assign ``chat.manager`` to (i.e. an
   ``LlmProviderModel.id`` the cd-4btd FK on
-  ``model_assignment.model_id`` accepts).
+  ``llm_assignment.model_id`` accepts).
 
 See ``docs/specs/11-llm-and-agents.md`` §"Provider / model /
 provider-model registry".
@@ -23,10 +23,10 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.adapters.db.llm.models import (
+    LlmAssignment,
     LlmModel,
     LlmProvider,
     LlmProviderModel,
-    ModelAssignment,
 )
 from app.fixtures.llm import (
     DEFAULT_MODEL_CANONICAL_NAME,
@@ -89,7 +89,7 @@ class TestSeedDefaultRegistry:
     def test_seed_satisfies_chat_manager_assignment(self, db_session: Session) -> None:
         """A workspace assignment can FK at the seeded provider_model.
 
-        Proves the cd-4btd FK on ``model_assignment.model_id`` accepts
+        Proves the cd-4btd FK on ``llm_assignment.model_id`` accepts
         the seed's ULID — i.e. the seed is the smallest unit that
         unblocks a fresh deployment from creating a working
         ``chat.manager`` chain.
@@ -121,7 +121,7 @@ class TestSeedDefaultRegistry:
         )
         token = set_current(ctx)
         try:
-            row = ModelAssignment(
+            row = LlmAssignment(
                 id="01HWA00000000000000000SEDA",
                 workspace_id=workspace.id,
                 capability="chat.manager",
@@ -133,7 +133,7 @@ class TestSeedDefaultRegistry:
             # No FK violation — the seed's id is a real registry row.
             db_session.flush()
 
-            loaded = db_session.get(ModelAssignment, row.id)
+            loaded = db_session.get(LlmAssignment, row.id)
             assert loaded is not None
             assert loaded.model_id == pm.id
         finally:

@@ -34,10 +34,10 @@ from app.adapters.db.audit.models import AuditLog
 from app.adapters.db.identity.models import User
 from app.adapters.db.llm.models import (
     BudgetLedger,
+    LlmAssignment,
     LlmModel,
     LlmProvider,
     LlmProviderModel,
-    ModelAssignment,
 )
 from app.adapters.db.messaging.models import ChatChannel
 from app.adapters.db.workspace.models import Workspace
@@ -67,7 +67,7 @@ _PINNED = datetime(2026, 4, 26, 12, 0, 0, tzinfo=UTC)
 def _ensure_registered() -> None:
     """Belt-and-braces — same pattern as the LLM integration tests."""
     for table in (
-        "model_assignment",
+        "llm_assignment",
         "llm_capability_inheritance",
         "llm_usage",
         "budget_ledger",
@@ -272,7 +272,7 @@ def _seed_llm_assignment(session: Session, *, workspace_id: str) -> None:
     )
     session.add(provider_model)
     session.flush()
-    assignment = ModelAssignment(
+    assignment = LlmAssignment(
         id=new_ulid(),
         workspace_id=workspace_id,
         capability="chat.manager",

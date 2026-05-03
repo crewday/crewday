@@ -20,6 +20,7 @@ from app.adapters.db.authz.models import RoleGrant
 from app.adapters.db.identity.models import ApiToken, User
 from app.adapters.db.identity.models import Session as SessionRow
 from app.adapters.db.llm.models import (
+    LlmAssignment,
     LlmCapabilityInheritance,
     LlmModel,
     LlmPromptTemplate,
@@ -27,7 +28,6 @@ from app.adapters.db.llm.models import (
     LlmProvider,
     LlmProviderModel,
     LlmUsage,
-    ModelAssignment,
 )
 from app.adapters.db.workspace.models import UserWorkspace, Workspace
 from app.auth.session import SESSION_COOKIE_NAME, issue
@@ -233,7 +233,7 @@ def _seed_llm_graph(session_factory: sessionmaker[Session]) -> SeededLlm:
         )
         s.flush()
         s.add(
-            ModelAssignment(
+            LlmAssignment(
                 id=assignment_id,
                 workspace_id=workspace_id,
                 capability="chat.manager",
@@ -308,7 +308,7 @@ def _wipe(session_factory: sessionmaker[Session]) -> None:
     with session_factory() as s, tenant_agnostic():
         for model in (
             LlmUsage,
-            ModelAssignment,
+            LlmAssignment,
             LlmCapabilityInheritance,
             LlmPromptTemplateRevision,
             LlmPromptTemplate,

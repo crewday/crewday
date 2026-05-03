@@ -2,17 +2,6 @@
 // graph, capabilities, assignments, prompt templates, per-workspace
 // usage envelope, and agent preferences / agent docs metadata.
 
-export interface ModelAssignment {
-  capability: string;
-  description: string;
-  provider: string;
-  model_id: string;
-  enabled: boolean;
-  daily_budget_usd: number;
-  spent_24h_usd: number;
-  calls_24h: number;
-}
-
 export interface LLMCall {
   at: string;
   capability: string;

@@ -21,9 +21,9 @@ from app.adapters.db.llm import (
     AgentToken,
     ApprovalRequest,
     BudgetLedger,
+    LlmAssignment,
     LlmCapabilityInheritance,
     LlmUsage,
-    ModelAssignment,
 )
 from app.adapters.db.llm import models as llm_models
 
@@ -31,11 +31,11 @@ _PINNED = datetime(2026, 4, 19, 12, 0, 0, tzinfo=UTC)
 _LATER = datetime(2026, 4, 20, 12, 0, 0, tzinfo=UTC)
 
 
-class TestModelAssignmentModel:
-    """The ``ModelAssignment`` mapped class carries the cd-u84y slice."""
+class TestLlmAssignmentModel:
+    """The :class:`LlmAssignment` mapped class carries the cd-u84y slice."""
 
     def test_minimal_construction(self) -> None:
-        row = ModelAssignment(
+        row = LlmAssignment(
             id="01HWA00000000000000000MAAA",
             workspace_id="01HWA00000000000000000WSPA",
             capability="staff_chat",
@@ -54,7 +54,7 @@ class TestModelAssignmentModel:
         """cd-u84y columns carry through a full construction."""
         extra = {"top_p": 0.9, "frequency_penalty": 0.0}
         req_caps = ["vision", "json_mode"]
-        row = ModelAssignment(
+        row = LlmAssignment(
             id="01HWA00000000000000000MAFA",
             workspace_id="01HWA00000000000000000WSPA",
             capability="staff_chat",
@@ -76,7 +76,7 @@ class TestModelAssignmentModel:
         assert row.required_capabilities == req_caps
 
     def test_tablename(self) -> None:
-        assert ModelAssignment.__tablename__ == "model_assignment"
+        assert LlmAssignment.__tablename__ == "llm_assignment"
 
     def test_priority_index_present(self) -> None:
         """cd-u84y: composite ``(workspace_id, capability, priority)`` index.
@@ -88,13 +88,13 @@ class TestModelAssignmentModel:
         the tenant filter and the ``(workspace_id, capability)`` prefix
         still serves per-capability lookup.
         """
-        indexes = [i for i in ModelAssignment.__table_args__ if isinstance(i, Index)]
+        indexes = [i for i in LlmAssignment.__table_args__ if isinstance(i, Index)]
         names = [i.name for i in indexes]
-        assert "ix_model_assignment_workspace_capability_priority" in names
+        assert "ix_llm_assignment_workspace_capability_priority" in names
         target = next(
             i
             for i in indexes
-            if i.name == "ix_model_assignment_workspace_capability_priority"
+            if i.name == "ix_llm_assignment_workspace_capability_priority"
         )
         assert target.unique is False
         assert [c.name for c in target.columns] == [
@@ -110,14 +110,14 @@ class TestModelAssignmentModel:
         one-row-per-capability rule the §11 resolver's fallback chain
         depends on being absent.
         """
-        names = [i.name for i in ModelAssignment.__table_args__ if isinstance(i, Index)]
-        assert "uq_model_assignment_workspace_capability" not in names
+        names = [i.name for i in LlmAssignment.__table_args__ if isinstance(i, Index)]
+        assert "uq_llm_assignment_workspace_capability" not in names
 
     def test_priority_check_present(self) -> None:
         """CHECK ``priority >= 0`` clamps the sort key to non-negative."""
         checks = [
             c
-            for c in ModelAssignment.__table_args__
+            for c in LlmAssignment.__table_args__
             if isinstance(c, CheckConstraint)
             and c.name is not None
             and str(c.name).endswith("priority_non_negative")
@@ -537,7 +537,7 @@ class TestPackageReExports:
     """``app.adapters.db.llm`` re-exports every model."""
 
     def test_models_re_exported(self) -> None:
-        assert ModelAssignment is llm_models.ModelAssignment
+        assert LlmAssignment is llm_models.LlmAssignment
         assert AgentToken is llm_models.AgentToken
         assert ApprovalRequest is llm_models.ApprovalRequest
         assert LlmUsage is llm_models.LlmUsage
@@ -559,7 +559,7 @@ class TestRegistryIntent:
     """
 
     _TABLES: tuple[str, ...] = (
-        "model_assignment",
+        "llm_assignment",
         "agent_token",
         "approval_request",
         "llm_usage",

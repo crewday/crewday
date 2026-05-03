@@ -75,7 +75,7 @@ _PINNED = datetime(2026, 4, 26, 12, 0, 0, tzinfo=UTC)
 # registry between modules, which silently drops the tenant filter
 # off LLM / messaging queries when the full suite runs.
 _REGISTERED_TABLES: tuple[str, ...] = (
-    "model_assignment",
+    "llm_assignment",
     "llm_capability_inheritance",
     "llm_usage",
     "budget_ledger",
@@ -524,12 +524,12 @@ def seed_assignment(
     capability: str,
     api_model_id: str = "fake/chat-model",
 ) -> None:
-    """Seed a :class:`ModelAssignment` + the registry trio it needs."""
+    """Seed an :class:`LlmAssignment` + the registry trio it needs."""
     from app.adapters.db.llm.models import (
+        LlmAssignment,
         LlmModel,
         LlmProvider,
         LlmProviderModel,
-        ModelAssignment,
     )
 
     pm_id = new_ulid()
@@ -570,7 +570,7 @@ def seed_assignment(
     )
     session.add(provider_model)
     session.flush()
-    row = ModelAssignment(
+    row = LlmAssignment(
         id=new_ulid(),
         workspace_id=workspace_id,
         capability=capability,

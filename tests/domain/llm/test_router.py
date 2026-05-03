@@ -197,9 +197,9 @@ class TestRegistryWireName:
     """``ModelPick.api_model_id`` carries the provider's wire form.
 
     Pre-cd-4btd the resolver populated ``provider_model_id`` and
-    ``api_model_id`` from the same ``ModelAssignment.model_id`` ULID
+    ``api_model_id`` from the same ``LlmAssignment.model_id`` ULID
     because the deployment-scope ``llm_provider_model`` registry had
-    not landed. cd-4btd JOINs ``model_assignment → llm_provider_model``
+    not landed. cd-4btd JOINs ``llm_assignment → llm_provider_model``
     so the two strings can diverge: ``provider_model_id`` is the
     ``llm_provider_model.id`` ULID, and ``api_model_id`` is whatever
     the provider expects on the wire (e.g. ``anthropic/

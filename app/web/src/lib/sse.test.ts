@@ -1071,7 +1071,7 @@ describe("INVALIDATIONS — per-kind behaviour", () => {
 
   it("llm.assignment.changed invalidates the admin LLM graph", () => {
     // §11 LLM router cache invalidation — when an admin mutates
-    // `model_assignment` or `llm_capability_inheritance`, the SPA
+    // `llm_assignment` or `llm_capability_inheritance`, the SPA
     // drops `qk.adminLlmGraph()` so a second admin tab observes
     // the new chain without a reload (cd-cui2).
     const qc = makeClient();
