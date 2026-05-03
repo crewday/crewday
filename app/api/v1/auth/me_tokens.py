@@ -37,9 +37,25 @@ Error shapes:
 * 422 ``scopes_required`` — body carried no scopes.
 * 422 ``me_scope_conflict`` — body carried a scope outside ``me:*``.
 
+**Audit rows**: every state-changing call writes an
+``identity.token.minted`` / ``identity.token.revoked`` row through the
+shared :func:`app.auth.audit.agnostic_audit_ctx` sentinel — same
+zero-ULID workspace + ``actor_kind="system"`` shape every other
+bare-host identity surface uses. The acting user's id rides in the
+``diff`` payload alongside the cd-6vq5 ``before_hash`` /
+``after_hash`` slots (token's ``key_id`` carried in whichever slot
+represents the live state). This row coexists with the
+``api_token.minted`` / ``api_token.revoked`` row that
+:mod:`app.auth.tokens` writes on the workspace-side audit seam: the
+``api_token.*`` action tracks the token entity's lifecycle, the
+``identity.token.*`` action tracks the bare-host identity event.
+Revoke is state-gated — an already-revoked / unknown / foreign /
+wrong-kind id collapses to 404 *and* skips the identity row, matching
+the avatar router's "no audit on no-op" convention.
+
 See ``docs/specs/03-auth-and-tokens.md`` §"Personal access tokens"
-and ``docs/specs/14-web-frontend.md`` §"Personal access tokens"
-(``/me`` panel).
++ §"Audit" and ``docs/specs/14-web-frontend.md`` §"Personal access
+tokens" (``/me`` panel).
 """
 
 from __future__ import annotations
@@ -51,9 +67,12 @@ from fastapi import APIRouter, Cookie, Depends, HTTPException, Response, status
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
+from app.adapters.db.identity.models import ApiToken
 from app.api.deps import db_session
 from app.api.v1._problem_json import IDENTITY_PROBLEM_RESPONSES
+from app.audit import write_audit
 from app.auth import session as auth_session
+from app.auth.audit import agnostic_audit_ctx
 from app.auth.session_cookie import DEV_SESSION_COOKIE_NAME
 from app.auth.tokens import (
     PERSONAL_DEFAULT_TTL_DAYS,
@@ -68,6 +87,7 @@ from app.auth.tokens import (
     mint,
     revoke_personal,
 )
+from app.tenancy import tenant_agnostic
 from app.util.clock import SystemClock
 
 __all__ = [
@@ -326,6 +346,42 @@ def build_me_tokens_router() -> APIRouter:
                 },
             ) from exc
 
+        # Identity-surface audit row for the bare-host
+        # ``/me/tokens`` mint event. ``app.auth.tokens.mint`` already
+        # writes an ``api_token.minted`` row on the identity-scope
+        # seam (real subject user as the actor); this row uses the
+        # shared zero-ULID :func:`agnostic_audit_ctx` sentinel and
+        # carries the acting user's id in ``diff`` — same shape every
+        # other bare-host identity write uses (avatar, signup,
+        # recovery, magic-link). The two rows coexist: the
+        # ``api_token.*`` action tracks the token entity's lifecycle;
+        # the ``identity.token.*`` action tracks the identity-surface
+        # event. ``before_hash``/``after_hash`` carry the token's
+        # ``key_id`` to mirror the cd-6vq5 avatar idiom — the active
+        # slot transitions from ``None`` (mint) or to ``None``
+        # (revoke).
+        write_audit(
+            session,
+            agnostic_audit_ctx(),
+            entity_kind="api_token",
+            entity_id=result.key_id,
+            action="identity.token.minted",
+            diff={
+                "user_id": user_id,
+                "before_hash": None,
+                "after_hash": result.key_id,
+                "label": body.label,
+                "prefix": result.prefix,
+                "scopes": sorted(body.scopes.keys()),
+                "expires_at": (
+                    result.expires_at.isoformat()
+                    if result.expires_at is not None
+                    else None
+                ),
+                "kind": result.kind,
+            },
+        )
+
         return MintPersonalTokenResponse(
             token=result.token,
             key_id=result.key_id,
@@ -400,6 +456,22 @@ def build_me_tokens_router() -> APIRouter:
             cookie_primary=session_cookie_primary,
             cookie_dev=session_cookie_dev,
         )
+
+        # Probe for the row's prior revoked_at so the identity-surface
+        # audit row is state-gated — an already-revoked PAT carries no
+        # information ("a buggy client clicked twice"), and the avatar
+        # router uses the same gate for ``identity.avatar.cleared``.
+        # ``api_token`` is identity-scoped; the ORM tenant filter has
+        # nothing to apply.
+        with tenant_agnostic():
+            prior_row = session.get(ApiToken, token_id)
+        already_revoked = (
+            prior_row is None
+            or prior_row.kind != "personal"
+            or prior_row.subject_user_id != user_id
+            or prior_row.revoked_at is not None
+        )
+
         try:
             revoke_personal(session, token_id=token_id, subject_user_id=user_id)
         except InvalidToken as exc:
@@ -407,6 +479,29 @@ def build_me_tokens_router() -> APIRouter:
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail={"error": "token_not_found"},
             ) from exc
+
+        # Identity-surface audit row. Mirrors the mint side: the
+        # ``api_token.revoked`` row written by ``revoke_personal``
+        # tracks the entity lifecycle; this row tracks the
+        # bare-host identity event with the acting user in the
+        # diff. Skipped when the revoke was an idempotent no-op
+        # (already-revoked / unknown / foreign / wrong-kind), per
+        # the avatar router's state-gate convention.
+        if not already_revoked:
+            write_audit(
+                session,
+                agnostic_audit_ctx(),
+                entity_kind="api_token",
+                entity_id=token_id,
+                action="identity.token.revoked",
+                diff={
+                    "user_id": user_id,
+                    "before_hash": token_id,
+                    "after_hash": None,
+                    "kind": "personal",
+                },
+            )
+
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 
     return router

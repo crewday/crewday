@@ -26,14 +26,11 @@ already resolved the old signed URL; the GC sweep is safer.
 only when the prior hash was set (an already-null clear is a no-op
 from an audit standpoint — we don't want to spam the log with
 idempotent retries that carry no information). The context passed to
-:func:`write_audit` is a synthetic :class:`WorkspaceContext` minted
-by :func:`_identity_audit_ctx` — same zero-ULID workspace / ``system``
-actor-kind shape every other bare-host identity surface uses
-(:func:`app.auth.session._agnostic_audit_ctx`,
-:func:`app.auth.magic_link._agnostic_audit_ctx`, …); the acting
-user's id rides in the diff because the synthetic actor-id slot is
-reserved for the ``0``-ULID sentinel. cd-rqhy tracks the follow-up
-that will extract the synthetic-ctx factory to a shared helper.
+:func:`write_audit` is the shared
+:func:`app.auth.audit.agnostic_audit_ctx` sentinel (zero-ULID
+workspace + actor, ``actor_kind="system"``, ``principal_kind="system"``);
+the acting user's id rides in the diff because the synthetic actor-id
+slot is reserved for the ``0``-ULID sentinel.
 
 **Content-type allowlist** (§12 "Avatar upload"):
 
@@ -91,9 +88,9 @@ from app.api.uploads import (
 from app.api.v1._problem_json import IDENTITY_PROBLEM_RESPONSES
 from app.audit import write_audit
 from app.auth import session as auth_session
+from app.auth.audit import agnostic_audit_ctx as _identity_audit_ctx
 from app.auth.session_cookie import DEV_SESSION_COOKIE_NAME
-from app.tenancy import WorkspaceContext, tenant_agnostic
-from app.util.ulid import new_ulid
+from app.tenancy import tenant_agnostic
 
 __all__ = [
     "AvatarResponse",
@@ -102,19 +99,6 @@ __all__ = [
 
 
 _log = logging.getLogger(__name__)
-
-# Synthetic tenant-agnostic actor + workspace sentinels for audit
-# rows emitted from this bare-host router. Same zero-ULID shape as
-# :func:`app.auth.session._agnostic_audit_ctx` + the three other
-# ``_agnostic_audit_ctx`` helpers in :mod:`app.auth` — identity
-# mutations are not workspace-scoped, so the writer gets a synthetic
-# ctx that keeps its NOT-NULL contract without pretending the row
-# belongs to a specific tenant. ``_AGNOSTIC_ACTOR_ID`` keeps the
-# actor-identity slot readable at a glance in the audit log; the
-# acting user's real id rides in the diff payload instead. Tracked
-# as cd-rqhy to extract the shared helper.
-_AGNOSTIC_WORKSPACE_ID: Final[str] = "0" * 26
-_AGNOSTIC_ACTOR_ID: Final[str] = "0" * 26
 
 # 2 MiB upload cap. The stored blob is a client-side-cropped 512x512
 # WebP; 2 MiB leaves ample headroom for lossless + high-quality output
@@ -296,33 +280,6 @@ def _check_content_length(request: Request) -> None:
 
 
 _ContentLengthGuard = Annotated[None, Depends(_check_content_length)]
-
-
-def _identity_audit_ctx() -> WorkspaceContext:
-    """Return a sentinel :class:`WorkspaceContext` for avatar audit rows.
-
-    Mirrors :func:`app.auth.session._agnostic_audit_ctx` and the
-    other four bare-host identity surfaces that mint their own copy:
-    zero-ULID workspace + actor, ``actor_kind="system"``, fresh
-    correlation id per request. The caller's real user id is carried
-    in the ``diff`` payload (not in ``actor_id``) because the
-    synthetic actor-id slot is reserved for the zero-ULID sentinel —
-    every bare-host identity writer uses the same shape so dashboards
-    filtering on ``actor_kind='system'`` aggregate them uniformly.
-    cd-rqhy tracks the follow-up that will extract this factory to a
-    shared helper and surface the acting user's id in a first-class
-    column rather than a diff field.
-    """
-    return WorkspaceContext(
-        workspace_id=_AGNOSTIC_WORKSPACE_ID,
-        workspace_slug="",
-        actor_id=_AGNOSTIC_ACTOR_ID,
-        actor_kind="system",
-        actor_grant_role="manager",  # unused for system actors
-        actor_was_owner_member=False,
-        audit_correlation_id=new_ulid(),
-        principal_kind="system",
-    )
 
 
 def build_me_avatar_router() -> APIRouter:

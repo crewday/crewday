@@ -53,6 +53,7 @@ from app.audit import write_audit, write_deployment_audit
 from app.auth import passkey, signup, signup_abuse
 from app.auth._hashing import hash_with_pepper
 from app.auth._throttle import SignupRateLimited, Throttle
+from app.auth.audit import agnostic_audit_ctx as _agnostic_audit_ctx
 from app.auth.keys import derive_subkey
 from app.auth.magic_link import (
     AlreadyConsumed,
@@ -62,7 +63,6 @@ from app.auth.magic_link import (
     PurposeMismatch,
     RateLimited,
     TokenExpired,
-    _agnostic_audit_ctx,
 )
 from app.auth.signup_abuse import CaptchaFailed, DisposableEmail
 from app.capabilities import Capabilities

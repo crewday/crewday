@@ -51,6 +51,7 @@ from app.audit import write_audit
 from app.auth import passkey, recovery
 from app.auth._hashing import hash_with_pepper
 from app.auth._throttle import RecoveryRateLimited, Throttle
+from app.auth.audit import agnostic_audit_ctx as _agnostic_audit_ctx
 from app.auth.keys import derive_subkey
 from app.auth.magic_link import (
     AlreadyConsumed,
@@ -60,7 +61,6 @@ from app.auth.magic_link import (
     PurposeMismatch,
     RateLimited,
     TokenExpired,
-    _agnostic_audit_ctx,
 )
 from app.config import Settings, get_settings
 from app.util.clock import SystemClock

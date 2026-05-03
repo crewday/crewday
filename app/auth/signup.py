@@ -73,6 +73,7 @@ from app.audit import write_audit
 from app.auth import magic_link, passkey
 from app.auth._hashing import hash_with_pepper
 from app.auth._throttle import Throttle
+from app.auth.audit import agnostic_audit_ctx as _agnostic_audit_ctx
 from app.auth.keys import derive_subkey
 from app.auth.magic_link import PendingDispatch
 from app.capabilities import Capabilities
@@ -314,27 +315,6 @@ def _pepper(settings: Settings | None) -> bytes:
 # (``email_hash = _hash_with_pepper(email_lower, pepper)`` etc.) stay
 # a one-word swap without reshuffling the entire file.
 _hash_with_pepper = hash_with_pepper
-
-
-def _agnostic_audit_ctx() -> WorkspaceContext:
-    """Sentinel ``WorkspaceContext`` for pre-workspace audit rows.
-
-    Mirrors :func:`app.auth.magic_link._agnostic_audit_ctx`: the start
-    and verify steps have no real workspace to borrow, so we synthesise
-    a zero-ULID context with ``actor_kind='system'``. Once
-    :func:`complete_signup` has the freshly-minted workspace, audit
-    emissions switch to a real ctx.
-    """
-    return WorkspaceContext(
-        workspace_id="00000000000000000000000000",
-        workspace_slug="",
-        actor_id="00000000000000000000000000",
-        actor_kind="system",
-        actor_grant_role="manager",
-        actor_was_owner_member=False,
-        audit_correlation_id=new_ulid(),
-        principal_kind="system",
-    )
 
 
 def _existing_active_slugs(session: Session) -> list[str]:

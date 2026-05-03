@@ -106,6 +106,7 @@ from sqlalchemy.orm import Session
 from app.adapters.db.audit.models import AuditLog
 from app.adapters.db.identity.models import ApiToken, User
 from app.audit import write_audit
+from app.auth.audit import AGNOSTIC_WORKSPACE_ID as _AGNOSTIC_WORKSPACE_ID
 from app.tenancy import WorkspaceContext, tenant_agnostic
 from app.util.clock import Clock, SystemClock
 from app.util.ulid import new_ulid
@@ -215,13 +216,14 @@ _LAST_USED_DEBOUNCE: Final[timedelta] = timedelta(minutes=1)
 
 
 # Sentinel workspace id for tenant-agnostic (identity-scope) audit
-# rows — PAT mint / revoke have no workspace to borrow. Mirrors the
-# private constants in :mod:`app.auth.session`, :mod:`app.auth.magic_link`,
-# and :mod:`app.api.v1.auth.me_avatar`. cd-rqhy promotes all four
-# copies to a shared helper; until then each module redefines locally
-# rather than reaching across module boundaries for a private symbol.
-_AGNOSTIC_WORKSPACE_ID: Final[str] = "00000000000000000000000000"
-
+# rows — PAT mint / revoke have no workspace to borrow. Re-exported
+# from :mod:`app.auth.audit` (cd-rqhy consolidated the six byte-
+# identical bare-host copies there) under the module-private name
+# (see the import block above) so nothing else in this module reaches
+# across the boundary for a private symbol. ``_pat_audit_ctx`` itself
+# stays here because its actor is the **real** subject user, not the
+# zero-ULID — the only audit-ctx in the auth tree that intentionally
+# diverges from the canonical shape.
 
 # argon2-cffi's ``PasswordHasher`` is thread-safe and stateless once
 # constructed, so sharing a single instance across the process is

@@ -106,8 +106,8 @@ without turning the table into a PII sink.
 **Audit.** Every mutation writes to ``audit_log`` via
 :func:`app.audit.write_audit`. Sessions are tenant-agnostic at issue
 time (``workspace_id`` may be NULL — users pick a workspace after
-login), so the audit context is the shared ``_agnostic_audit_ctx``
-shape used by :mod:`app.auth.magic_link`. Actions emitted:
+login), so the audit context is the shared
+:func:`app.auth.audit.agnostic_audit_ctx` sentinel. Actions emitted:
 
 * ``session.created`` — on :func:`issue`.
 * ``session.refreshed`` — on :func:`validate` when sliding refresh
@@ -138,6 +138,7 @@ from app.adapters.db.identity.models import PasskeyCredential
 from app.adapters.db.identity.models import Session as SessionRow
 from app.audit import write_audit
 from app.auth._hashing import hash_with_pepper
+from app.auth.audit import agnostic_audit_ctx as _agnostic_audit_ctx
 from app.auth.keys import derive_subkey
 
 # Cookie builder + canonical cookie names live in :mod:`session_cookie`
@@ -146,9 +147,8 @@ from app.auth.keys import derive_subkey
 # ``app.auth.session`` don't have to change.
 from app.auth.session_cookie import SESSION_COOKIE_NAME, build_session_cookie
 from app.config import Settings, get_settings
-from app.tenancy import WorkspaceContext, tenant_agnostic
+from app.tenancy import tenant_agnostic
 from app.util.clock import Clock, SystemClock
-from app.util.ulid import new_ulid
 
 __all__ = [
     "SESSION_COOKIE_NAME",
@@ -192,15 +192,6 @@ _HKDF_PURPOSE: Final[str] = "session-hash"
 # operator who needs a shorter cap stacks a §11 authorisation rule on
 # top; raising it is a spec change and an ADR.
 _ABSOLUTE_SESSION_TTL: Final[timedelta] = timedelta(days=90)
-
-# Shared tenant-agnostic audit sentinel — mirrors
-# :mod:`app.auth.magic_link`. A real workspace is resolved only after
-# the user picks one post-login, and most session events (issue,
-# revoke, refresh, invalidate) happen before that pick or on explicit
-# sign-out / auto-invalidation, where no single workspace is in scope.
-_AGNOSTIC_WORKSPACE_ID: Final[str] = "00000000000000000000000000"
-_AGNOSTIC_ACTOR_ID: Final[str] = "00000000000000000000000000"
-
 
 # ---------------------------------------------------------------------------
 # Value objects
@@ -283,27 +274,6 @@ def _ttl_for(settings: Settings | None, *, has_owner_grant: bool) -> timedelta:
     s = settings if settings is not None else get_settings()
     days = s.session_owner_ttl_days if has_owner_grant else s.session_user_ttl_days
     return timedelta(days=days)
-
-
-def _agnostic_audit_ctx() -> WorkspaceContext:
-    """Return a sentinel :class:`WorkspaceContext` for tenant-agnostic events.
-
-    Sessions are issued before any workspace is picked, and revoked
-    either globally (logout everywhere) or during re-enrolment where
-    multiple workspaces may be in scope. A synthetic context with
-    zero-ULID workspace + actor ids keeps the audit writer happy
-    without pretending the event belongs to one specific tenant.
-    """
-    return WorkspaceContext(
-        workspace_id=_AGNOSTIC_WORKSPACE_ID,
-        workspace_slug="",
-        actor_id=_AGNOSTIC_ACTOR_ID,
-        actor_kind="system",
-        actor_grant_role="manager",  # unused for system actors
-        actor_was_owner_member=False,
-        audit_correlation_id=new_ulid(),
-        principal_kind="system",
-    )
 
 
 def hash_cookie_value(cookie_value: str) -> str:

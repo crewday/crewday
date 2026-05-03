@@ -1079,6 +1079,105 @@ and never creates a session.
   commonly unchanged when a passkey is lost. Revoking a binding on
   a stolen phone is an explicit action (§23 "Security").
 
+## Audit
+
+Every state-changing auth surface writes one `audit_log` row through
+`app.audit.write_audit`. Bare-host events (signup, recovery,
+magic-link, session, `/me/*`) carry a tenant-agnostic
+`WorkspaceContext` minted by `app.auth.audit.agnostic_audit_ctx` —
+zero-ULID workspace + zero-ULID actor + `actor_kind = "system"` +
+`principal_kind = "system"`. The audit reader recognises the
+zero-ULID workspace as "pre-tenant identity event" and workspace-
+scoped views naturally filter it out. The acting user's id rides in
+the `diff` payload (not in `actor_id`), so `/me` audit views filter
+on `entity_id` or `diff.user_id` rather than `actor_id`. Personal-
+access-token mint / revoke is the one exception: it uses the real
+subject user as the actor (`app.auth.tokens._pat_audit_ctx`) so the
+`/me` token-history view can filter on `actor_id` without a JSON
+scan.
+
+Action-name shape:
+
+- New identity surfaces follow `identity.<thing>.<verb>` so dashboards
+  can group every bare-host identity mutation under one prefix.
+- Pre-existing bare-name actions (`session.*`, `magic_link.*`,
+  `signup.*`, `recovery.*`, `passkey.*`, `api_token.*`) are kept as
+  written — renaming them would invalidate every committed audit row
+  and every downstream filter without changing the semantics. Treat
+  the bare names as the legacy shape and `identity.<thing>.<verb>` as
+  the form for new surfaces.
+
+Canonical action catalogue:
+
+| Action                              | Source                           | When                                      |
+| ----------------------------------- | -------------------------------- | ----------------------------------------- |
+| `signup.requested`                  | `app.auth.signup`                | `/auth/signup/start` accepted             |
+| `signup.verified`                   | `app.auth.signup`                | Signup magic-link consumed                |
+| `signup.completed`                  | `app.auth.signup`                | Workspace + first owner minted            |
+| `magic_link.sent`                   | `app.auth.magic_link`            | Token issued                              |
+| `magic_link.consumed`               | `app.auth.magic_link`            | Token consumed (single-use flip)          |
+| `magic_link.rejected`               | `app.auth.magic_link`            | Token rejected (out-of-band UoW)          |
+| `recovery.requested`                | `app.auth.recovery`              | `/auth/recover/passkey/request` accepted  |
+| `recovery.verified`                 | `app.auth.recovery`              | Recovery magic-link consumed              |
+| `recovery.completed`                | `app.auth.recovery`              | Replacement passkey minted                |
+| `recovery.disabled_by_workspace`    | `app.auth.recovery`              | Workspace kill-switch refused recovery    |
+| `recovery.rejected`                 | `app.api.v1.auth.recovery`       | Recovery token rejected (router-level)    |
+| `recovery.stepup_missing`           | `app.auth.recovery`              | Step-up user submitted no break-glass code|
+| `recovery.stepup_invalid`           | `app.auth.recovery`              | Step-up user submitted unknown / wrong code|
+| `recovery.stepup_locked_out`        | `app.auth.recovery`              | Step-up user past 24h redemption lockout  |
+| `session.created`                   | `app.auth.session.issue`         | Session row inserted                      |
+| `session.refreshed`                 | `app.auth.session.validate`      | Sliding refresh fired                     |
+| `session.revoked`                   | `app.auth.session.revoke`        | Single session deleted                    |
+| `session.revoked_all`               | `app.auth.session`               | Bulk delete (sign out everywhere)         |
+| `session.invalidated`               | `app.auth.session`               | Non-destructive cut (logout / re-enrol)   |
+| `session.fingerprint_mismatch`      | `app.auth.session.validate`      | UA / Accept-Language fingerprint trip     |
+| `passkey.registered`                | `app.auth.passkey`               | Passkey credential added                  |
+| `passkey.revoked`                   | `app.auth.passkey`               | Passkey credential removed                |
+| `passkey.assertion_ok`              | `app.auth.passkey`               | WebAuthn assertion verified               |
+| `passkey.auto_revoked`              | `app.api.v1.auth.passkey`        | Cloned-detected auto-revoke               |
+| `passkey.cloned_detected`           | `app.api.v1.auth.passkey`        | Sign-count rollback observed              |
+| `passkey.login_rejected`            | `app.api.v1.auth.passkey`        | WebAuthn assertion rejected               |
+| `api_token.minted`                  | `app.auth.tokens.mint`           | Token row inserted (workspace + PAT)      |
+| `api_token.revoked`                 | `app.auth.tokens`                | Token row revoked (workspace + PAT)       |
+| `api_token.revoked_noop`            | `app.auth.tokens`                | Workspace token already revoked           |
+| `api_token.rotated`                 | `app.auth.tokens`                | Workspace token rotated                   |
+| `identity.token.minted`             | `app.api.v1.auth.me_tokens`      | PAT minted via `/me/tokens`               |
+| `identity.token.revoked`            | `app.api.v1.auth.me_tokens`      | PAT revoked via `/me/tokens`              |
+| `identity.avatar.updated`           | `app.api.v1.auth.me_avatar`      | Avatar uploaded / replaced                |
+| `identity.avatar.cleared`           | `app.api.v1.auth.me_avatar`      | Avatar cleared (state-gated)              |
+| `email.change_requested`            | `app.domain.identity.email_change`| `/me/email/change_request` accepted      |
+| `email.change_verified`             | `app.domain.identity.email_change`| Email-change magic-link consumed         |
+| `email.change_reverted`             | `app.domain.identity.email_change`| Revert magic-link consumed (72h window)  |
+
+`/auth/logout` is covered by `session.invalidated` — the router calls
+`session.invalidate_for_user(cause="logout")`, which already writes
+the row with the count, cause, and acting user in the diff. No
+separate `identity.session.cleared` action is needed; one row per
+logout call carries the N invalidated sessions in the diff.
+
+`/me/tokens` mint and revoke each write **two** audit rows: the
+existing `api_token.*` row from `app.auth.tokens` (entity-lifecycle
+view, real subject user as the actor) and the new `identity.token.*`
+row from this router (identity-surface view, system actor with the
+acting user in the diff). Both share the token's `key_id` as
+`entity_id` so investigators can join the two views without a JSON
+scan.
+
+`identity.avatar.cleared`, `identity.token.revoked`, and
+`identity.session.cleared` (if a future surface adds one) are
+**state-gated**: an idempotent retry that didn't actually change
+state writes no row. The `*.updated` / `*.minted` siblings always
+write — replaying the endpoint *is* a fresh operator intent and the
+row doubles as a per-call access-log entry.
+
+`before_hash` / `after_hash` is the v1 idiom for identity-surface
+diffs (cd-6vq5): the slot represents the live state, with `None` on
+the missing side. For tokens, the slot carries the token's `key_id`
+(transition `None → key_id` on mint, `key_id → None` on revoke); for
+avatars, it carries the storage digest. Field names end in `_hash`
+so the log redactor (`app.util.redact`) treats them as already-
+minimised digests.
+
 ## Privacy
 
 - We store only: credential ID, public key, sign count, AAGUID,

@@ -40,6 +40,7 @@ from app.adapters.db.base import Base
 from app.adapters.db.identity.models import MagicLinkNonce
 from app.adapters.db.session import make_engine
 from app.audit import write_audit
+from app.auth.audit import agnostic_audit_ctx as _agnostic_audit_ctx
 from app.auth.magic_link import (
     _SERIALIZER_SALT,
     AlreadyConsumed,
@@ -50,7 +51,6 @@ from app.auth.magic_link import (
     RateLimited,
     Throttle,
     TokenExpired,
-    _agnostic_audit_ctx,
     _subkey,
     consume_link,
     reason_for_exception,

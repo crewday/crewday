@@ -153,12 +153,13 @@ from app.adapters.mail.ports import MailDeliveryError, Mailer
 from app.audit import AuditVia, write_audit
 from app.auth._hashing import hash_with_pepper
 from app.auth._throttle import ConsumeLockout, RateLimited, Throttle
+from app.auth.audit import agnostic_audit_ctx as _agnostic_audit_ctx
 from app.auth.keys import derive_subkey
 from app.config import Settings, get_settings
 from app.domain.identity.email_change_ports import MagicLinkHandle
 from app.mail.auth_templates import purpose_label as magic_link_purpose_label
 from app.mail.auth_templates import render_auth_email
-from app.tenancy import WorkspaceContext, tenant_agnostic
+from app.tenancy import tenant_agnostic
 from app.util.clock import Clock, SystemClock
 from app.util.ulid import new_ulid
 
@@ -241,18 +242,6 @@ _SERIALIZER_SALT: Final[str] = "magic-link-v1"
 # bumps this to ``"magic-link-v2"`` and keeps the v1 signer around
 # during the grace window so in-flight tokens keep verifying.
 _HKDF_PURPOSE: Final[str] = "magic-link"
-
-# Synthetic tenant for audit emission. The tenant-agnostic flows
-# (signup, recovery) have no :class:`WorkspaceContext` to borrow, but
-# :func:`app.audit.write_audit` requires one. We build a sentinel
-# value matching the actor-free system voice — the audit reader
-# recognises the zero-ULID workspace as "pre-tenant identity event"
-# and displays it accordingly (cd-dir, future). Until that reader
-# lands, the audit row still pins actor / ip-hash / email-hash
-# through ``diff``, which is the forensic data operators need.
-_AGNOSTIC_WORKSPACE_ID: Final[str] = "00000000000000000000000000"
-_AGNOSTIC_ACTOR_ID: Final[str] = "00000000000000000000000000"
-
 
 # ---------------------------------------------------------------------------
 # Value objects
@@ -602,32 +591,6 @@ def _ip_hash(ip: str, pepper: bytes) -> str:
 
 def _email_hash(email: str, pepper: bytes) -> str:
     return _hash_with_pepper(canonicalise_email(email), pepper)
-
-
-def _agnostic_audit_ctx() -> WorkspaceContext:
-    """Return a sentinel :class:`WorkspaceContext` for bare-host events.
-
-    Mirrors the pattern used by :func:`app.auth.passkey.register_finish_signup`'s
-    deferred audit emission: the signup flow emits its own audit
-    rows with a :class:`WorkspaceContext` borrowed from the freshly-
-    minted workspace. Magic-link *request* and *consume* both run
-    strictly before a workspace exists (or outside the workspace
-    scope for recovery), so no real ctx is available — we synthesise
-    one whose workspace_id / actor_id are the zero-ULID (26 zeros)
-    and whose ``actor_kind`` is ``"system"``. The audit reader
-    recognises this sentinel and renders the row as a pre-tenant
-    identity event.
-    """
-    return WorkspaceContext(
-        workspace_id=_AGNOSTIC_WORKSPACE_ID,
-        workspace_slug="",  # no slug exists at this layer
-        actor_id=_AGNOSTIC_ACTOR_ID,
-        actor_kind="system",
-        actor_grant_role="manager",  # unused for system actors
-        actor_was_owner_member=False,
-        audit_correlation_id=new_ulid(),
-        principal_kind="system",
-    )
 
 
 def _lookup_user_by_email(session: Session, *, email: str) -> User | None:

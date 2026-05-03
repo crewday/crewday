@@ -129,11 +129,12 @@ from app.auth import break_glass, magic_link, passkey
 from app.auth import session as session_module
 from app.auth._hashing import hash_with_pepper
 from app.auth._throttle import RecoveryRateLimited, Throttle
+from app.auth.audit import agnostic_audit_ctx as _agnostic_audit_ctx
 from app.auth.keys import derive_subkey
 from app.auth.magic_link import PendingDispatch
 from app.config import Settings, get_settings
 from app.mail.auth_templates import render_auth_email
-from app.tenancy import WorkspaceContext, tenant_agnostic
+from app.tenancy import tenant_agnostic
 from app.util.clock import Clock, SystemClock
 from app.util.ulid import new_ulid
 
@@ -365,28 +366,6 @@ def _aware_utc(value: datetime) -> datetime:
     if value.tzinfo is None:
         return value.replace(tzinfo=UTC)
     return value
-
-
-def _agnostic_audit_ctx() -> WorkspaceContext:
-    """Sentinel :class:`WorkspaceContext` for pre-tenant audit rows.
-
-    Mirrors :func:`app.auth.magic_link._agnostic_audit_ctx` and
-    :func:`app.auth.signup._agnostic_audit_ctx`: recovery runs
-    outside every workspace (the user may hold grants in any number
-    of workspaces and we don't pick one for them at recovery time).
-    The audit reader recognises the zero-ULID workspace as a pre-
-    tenant identity event.
-    """
-    return WorkspaceContext(
-        workspace_id="00000000000000000000000000",
-        workspace_slug="",
-        actor_id="00000000000000000000000000",
-        actor_kind="system",
-        actor_grant_role="manager",
-        actor_was_owner_member=False,
-        audit_correlation_id=new_ulid(),
-        principal_kind="system",
-    )
 
 
 def _lookup_user_by_email(session: SqlaSession, *, email_lower: str) -> User | None:

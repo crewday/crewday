@@ -35,10 +35,12 @@ from pydantic import SecretStr
 from sqlalchemy import Engine, select
 from sqlalchemy.orm import Session, sessionmaker
 
+from app.adapters.db.audit.models import AuditLog
 from app.adapters.db.identity.models import ApiToken, User
 from app.adapters.db.identity.models import Session as SessionRow
 from app.api.deps import db_session as db_session_dep
 from app.api.v1.auth import me_tokens as me_tokens_module
+from app.auth.audit import AGNOSTIC_ACTOR_ID, AGNOSTIC_WORKSPACE_ID
 from app.auth.session import SESSION_COOKIE_NAME, issue
 from app.config import Settings
 from app.tenancy import tenant_agnostic
@@ -86,8 +88,18 @@ def seed_user(session_factory: sessionmaker[Session]) -> Iterator[str]:
         user_id = user.id
         s.commit()
     yield user_id
-    # Cascade wipe: ApiToken, Session, User. No workspace to clean.
+    # Cascade wipe: AuditLog (identity-scope rows we wrote), ApiToken,
+    # Session, User. No workspace to clean.
     with session_factory() as s, tenant_agnostic():
+        # Identity-scope audit rows pin ``actor_id`` to the zero-ULID
+        # sentinel and carry the user id only in ``diff``; filter by
+        # ``entity_id`` (the ``api_token`` row's ``key_id``) instead.
+        for audit_row in s.scalars(
+            select(AuditLog).where(AuditLog.workspace_id == AGNOSTIC_WORKSPACE_ID)
+        ).all():
+            diff = audit_row.diff
+            if isinstance(diff, dict) and diff.get("user_id") == user_id:
+                s.delete(audit_row)
         for tok in s.scalars(select(ApiToken).where(ApiToken.user_id == user_id)).all():
             s.delete(tok)
         for sess in s.scalars(
@@ -341,3 +353,291 @@ class TestMeTokensHttpFlow:
         r = client.delete("/api/v1/me/tokens/01HWA00000000000000000NOPE")
         assert r.status_code == 404
         assert r.json()["detail"]["error"] == "token_not_found"
+
+
+# ---------------------------------------------------------------------------
+# cd-rqhy: identity-surface audit rows + shared helper
+# ---------------------------------------------------------------------------
+
+
+class TestMeTokensIdentityAudit:
+    """``identity.token.minted`` / ``identity.token.revoked`` rows land.
+
+    The router writes through :func:`app.audit.write_audit` with the
+    shared :func:`app.auth.audit.agnostic_audit_ctx` sentinel — never
+    a re-derived copy. Both audit rows pin the zero-ULID workspace +
+    actor and carry the acting user's id in the ``diff`` payload, so
+    the row shape is portable across every bare-host identity surface
+    (avatar, signup, recovery, magic-link, session).
+    """
+
+    def test_mint_writes_identity_token_minted(
+        self,
+        client: TestClient,
+        session_factory: sessionmaker[Session],
+        settings: Settings,
+        seed_user: str,
+    ) -> None:
+        """``POST /me/tokens`` writes one ``identity.token.minted`` row."""
+        cookie_value = _issue_session(
+            session_factory, user_id=seed_user, settings=settings
+        )
+        client.cookies.set(SESSION_COOKIE_NAME, cookie_value)
+        r = client.post(
+            "/api/v1/me/tokens",
+            json={
+                "label": "audit-mint",
+                "scopes": {"me.tasks:read": True},
+                "expires_at_days": 30,
+            },
+        )
+        assert r.status_code == 201, r.text
+        body = r.json()
+        key_id = body["key_id"]
+        prefix = body["prefix"]
+
+        with session_factory() as s, tenant_agnostic():
+            rows = (
+                s.query(AuditLog)
+                .filter(AuditLog.entity_id == key_id)
+                .filter(AuditLog.action == "identity.token.minted")
+                .all()
+            )
+            assert len(rows) == 1, "exactly one identity.token.minted row"
+            row = rows[0]
+            # Shared zero-ULID seam — same shape every other bare-host
+            # identity surface uses.
+            assert row.workspace_id == AGNOSTIC_WORKSPACE_ID
+            assert row.actor_id == AGNOSTIC_ACTOR_ID
+            assert row.actor_kind == "system"
+            assert row.entity_kind == "api_token"
+            diff = row.diff
+            assert isinstance(diff, dict)
+            assert diff["user_id"] == seed_user
+            # cd-6vq5 idiom: before_hash transitions None -> key_id
+            # on mint; after_hash carries the new live state.
+            assert diff["before_hash"] is None
+            assert diff["after_hash"] == key_id
+            assert diff["prefix"] == prefix
+            assert diff["kind"] == "personal"
+            assert diff["scopes"] == ["me.tasks:read"]
+
+    def test_mint_writes_both_api_token_and_identity_rows(
+        self,
+        client: TestClient,
+        session_factory: sessionmaker[Session],
+        settings: Settings,
+        seed_user: str,
+    ) -> None:
+        """The two audit rows coexist: entity-lifecycle + identity-surface.
+
+        ``app.auth.tokens.mint`` writes ``api_token.minted``;
+        ``/me/tokens`` writes ``identity.token.minted``. Both share
+        ``entity_id`` so an investigator can join the views.
+        """
+        cookie_value = _issue_session(
+            session_factory, user_id=seed_user, settings=settings
+        )
+        client.cookies.set(SESSION_COOKIE_NAME, cookie_value)
+        r = client.post(
+            "/api/v1/me/tokens",
+            json={"label": "two-rows", "scopes": {"me.tasks:read": True}},
+        )
+        assert r.status_code == 201
+        key_id = r.json()["key_id"]
+
+        with session_factory() as s, tenant_agnostic():
+            actions = sorted(
+                row.action
+                for row in s.query(AuditLog).filter(AuditLog.entity_id == key_id).all()
+            )
+            assert actions == ["api_token.minted", "identity.token.minted"]
+
+    def test_revoke_writes_identity_token_revoked(
+        self,
+        client: TestClient,
+        session_factory: sessionmaker[Session],
+        settings: Settings,
+        seed_user: str,
+    ) -> None:
+        """``DELETE /me/tokens/{id}`` writes one ``identity.token.revoked``."""
+        cookie_value = _issue_session(
+            session_factory, user_id=seed_user, settings=settings
+        )
+        client.cookies.set(SESSION_COOKIE_NAME, cookie_value)
+        r_mint = client.post(
+            "/api/v1/me/tokens",
+            json={"label": "audit-revoke", "scopes": {"me.tasks:read": True}},
+        )
+        assert r_mint.status_code == 201
+        key_id = r_mint.json()["key_id"]
+
+        r_del = client.delete(f"/api/v1/me/tokens/{key_id}")
+        assert r_del.status_code == 204
+
+        with session_factory() as s, tenant_agnostic():
+            rows = (
+                s.query(AuditLog)
+                .filter(AuditLog.entity_id == key_id)
+                .filter(AuditLog.action == "identity.token.revoked")
+                .all()
+            )
+            assert len(rows) == 1
+            row = rows[0]
+            assert row.workspace_id == AGNOSTIC_WORKSPACE_ID
+            assert row.actor_id == AGNOSTIC_ACTOR_ID
+            assert row.actor_kind == "system"
+            diff = row.diff
+            assert isinstance(diff, dict)
+            assert diff["user_id"] == seed_user
+            # cd-6vq5 idiom inverted: before_hash carries the old live
+            # state (key_id), after_hash transitions to None.
+            assert diff["before_hash"] == key_id
+            assert diff["after_hash"] is None
+            assert diff["kind"] == "personal"
+
+    def test_revoke_idempotent_does_not_duplicate_audit(
+        self,
+        client: TestClient,
+        session_factory: sessionmaker[Session],
+        settings: Settings,
+        seed_user: str,
+    ) -> None:
+        """A second DELETE on an already-revoked PAT writes no second row.
+
+        Mirrors ``identity.avatar.cleared`` state-gating: an idempotent
+        retry that didn't actually change state writes no row, so the
+        log doesn't accumulate noise on buggy-client retries.
+        """
+        cookie_value = _issue_session(
+            session_factory, user_id=seed_user, settings=settings
+        )
+        client.cookies.set(SESSION_COOKIE_NAME, cookie_value)
+        r_mint = client.post(
+            "/api/v1/me/tokens",
+            json={"label": "idempotent", "scopes": {"me.tasks:read": True}},
+        )
+        key_id = r_mint.json()["key_id"]
+
+        r1 = client.delete(f"/api/v1/me/tokens/{key_id}")
+        # Second DELETE on the same id is an idempotent 204 — the
+        # caller still owns the row and ``revoke_personal`` returns
+        # silently when ``revoked_at`` is already set (no second
+        # ``api_token.revoked`` row, matching the workspace-side
+        # "one revoke event per token lifetime" invariant). The state
+        # gate in the router suppresses the identity row the same way.
+        r2 = client.delete(f"/api/v1/me/tokens/{key_id}")
+        assert r1.status_code == 204
+        assert r2.status_code == 204
+
+        with session_factory() as s, tenant_agnostic():
+            rows = (
+                s.query(AuditLog)
+                .filter(AuditLog.entity_id == key_id)
+                .filter(AuditLog.action == "identity.token.revoked")
+                .all()
+            )
+            assert len(rows) == 1, "exactly one revoke row across both DELETEs"
+
+    def test_revoke_unknown_token_writes_no_identity_audit(
+        self,
+        client: TestClient,
+        session_factory: sessionmaker[Session],
+        settings: Settings,
+        seed_user: str,
+    ) -> None:
+        """Revoking a non-existent PAT id is a 404 with no audit row.
+
+        State-gated: there's no live row to revoke, so no identity
+        event happened.
+        """
+        cookie_value = _issue_session(
+            session_factory, user_id=seed_user, settings=settings
+        )
+        client.cookies.set(SESSION_COOKIE_NAME, cookie_value)
+        nonce_id = "01HWA00000000000000000FAKE"
+        r = client.delete(f"/api/v1/me/tokens/{nonce_id}")
+        assert r.status_code == 404
+
+        with session_factory() as s, tenant_agnostic():
+            rows = (
+                s.query(AuditLog)
+                .filter(AuditLog.entity_id == nonce_id)
+                .filter(AuditLog.action == "identity.token.revoked")
+                .all()
+            )
+            assert rows == []
+
+
+class TestSharedAgnosticAuditCtx:
+    """The six bare-host identity surfaces share one helper.
+
+    cd-rqhy consolidated six byte-identical ``_agnostic_audit_ctx``
+    copies into :func:`app.auth.audit.agnostic_audit_ctx`. This test
+    pins the consolidation: the canonical helper exists, every former
+    callsite imports it (rather than re-deriving the zero-ULID shape),
+    and the shape itself stays the spec-pinned sentinel.
+    """
+
+    def test_canonical_helper_returns_zero_ulid_system_actor(self) -> None:
+        """The canonical factory pins the zero-ULID system-actor shape."""
+        from app.auth.audit import agnostic_audit_ctx
+
+        ctx = agnostic_audit_ctx()
+        assert ctx.workspace_id == "0" * 26
+        assert ctx.actor_id == "0" * 26
+        assert ctx.actor_kind == "system"
+        assert ctx.principal_kind == "system"
+        assert ctx.workspace_slug == ""
+        # Correlation id is fresh per call so sibling writes get their
+        # own trace cursor.
+        ctx2 = agnostic_audit_ctx()
+        assert ctx.audit_correlation_id != ctx2.audit_correlation_id
+
+    def test_callers_import_canonical_helper(self) -> None:
+        """Every former ``_agnostic_audit_ctx`` is now the shared one.
+
+        Pin that the six bare-host identity modules all resolve their
+        helper to the same function object — guards against a future
+        edit that re-introduces a local copy and silently drifts.
+        """
+        from app.api.v1.auth import (
+            me_avatar as me_avatar_module,
+        )
+        from app.api.v1.auth import (
+            recovery as recovery_router,
+        )
+        from app.api.v1.auth import (
+            signup as signup_router,
+        )
+        from app.auth import (
+            audit as canonical,
+        )
+        from app.auth import (
+            magic_link as magic_link_module,
+        )
+        from app.auth import (
+            recovery as recovery_module,
+        )
+        from app.auth import (
+            session as session_module,
+        )
+        from app.auth import (
+            signup as signup_module,
+        )
+        from app.domain.identity import (
+            email_change as email_change_module,
+        )
+
+        target = canonical.agnostic_audit_ctx
+        # Every bare-host identity module either re-exports the
+        # canonical helper under its legacy name (``_agnostic_audit_ctx``
+        # / ``_identity_audit_ctx``) or imports it directly.
+        assert magic_link_module._agnostic_audit_ctx is target
+        assert recovery_module._agnostic_audit_ctx is target
+        assert signup_module._agnostic_audit_ctx is target
+        assert session_module._agnostic_audit_ctx is target
+        assert email_change_module._agnostic_audit_ctx is target
+        assert me_avatar_module._identity_audit_ctx is target
+        assert signup_router._agnostic_audit_ctx is target
+        assert recovery_router._agnostic_audit_ctx is target

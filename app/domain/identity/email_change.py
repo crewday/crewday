@@ -109,6 +109,7 @@ from app.adapters.mail.ports import MailDeliveryError, Mailer
 from app.audit import write_audit
 from app.auth._hashing import hash_with_pepper
 from app.auth._throttle import Throttle
+from app.auth.audit import agnostic_audit_ctx as _agnostic_audit_ctx
 from app.auth.keys import derive_subkey
 from app.config import Settings, get_settings
 from app.domain.identity.email_change_ports import (
@@ -122,7 +123,6 @@ from app.domain.identity.email_change_ports import (
     UserIdentityRow,
 )
 from app.mail.auth_templates import render_auth_email
-from app.tenancy import WorkspaceContext
 from app.util.clock import Clock, SystemClock
 from app.util.ulid import new_ulid
 
@@ -181,14 +181,6 @@ _REENROLLMENT_COOLOFF: Final[timedelta] = timedelta(minutes=15)
 # as the sibling magic-link rows. A separate label would make abuse
 # correlation joins double-hash without payoff.
 _HKDF_PURPOSE: Final[str] = "magic-link"
-
-
-# Synthetic tenant for audit emission — the email-change flow is
-# bare-host (identity-scoped) and runs without any workspace context.
-# Mirrors the sentinel used by :mod:`app.auth.magic_link`,
-# :mod:`app.auth.recovery`, and :mod:`app.auth.session`.
-_AGNOSTIC_WORKSPACE_ID: Final[str] = "00000000000000000000000000"
-_AGNOSTIC_ACTOR_ID: Final[str] = "00000000000000000000000000"
 
 
 # ---------------------------------------------------------------------------
@@ -302,20 +294,6 @@ def _email_hash(email: str, *, pepper: bytes, repo: EmailChangeRepository) -> st
 
 def _ip_hash(ip: str, pepper: bytes) -> str:
     return hash_with_pepper(ip, pepper)
-
-
-def _agnostic_audit_ctx() -> WorkspaceContext:
-    """Return the bare-host :class:`WorkspaceContext` used for audit emission."""
-    return WorkspaceContext(
-        workspace_id=_AGNOSTIC_WORKSPACE_ID,
-        workspace_slug="",
-        actor_id=_AGNOSTIC_ACTOR_ID,
-        actor_kind="system",
-        actor_grant_role="manager",  # unused for system actors
-        actor_was_owner_member=False,
-        audit_correlation_id=new_ulid(),
-        principal_kind="system",
-    )
 
 
 def _validate_email_syntax(raw: str) -> str:
