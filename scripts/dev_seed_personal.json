@@ -1,0 +1,24 @@
+{
+  "owner": {
+    "deployment_admin": true,
+    "display_name": "Vincent",
+    "email": "servers@courcelle.com",
+    "passkeys": [
+      {
+        "aaguid": "bada5566-a7aa-401f-bd96-45619a55120d",
+        "backup_eligible": true,
+        "credential_id_b64": "Q00roAr8qyAXmaprKrGWG2M84Qekx1tC-ol8bxjjIUfk5aiIfYAolYnttT3-2NcEZTa_y60SC0-HWQ",
+        "label": null,
+        "public_key_b64": "pQECAyYgASFYIFtj_oH3lIChmf40NKUmHtFKM8JUSWjYlqld1EbRZkENIlggnfsg7i72odaDsDTSX70WHqTEfKUdECxC_89ocCwnBv8",
+        "sign_count": 0,
+        "transports": "internal,hybrid"
+      }
+    ],
+    "timezone": "Asia/Dubai"
+  },
+  "workspace": {
+    "name": "crewday",
+    "role": "manager",
+    "slug": "crewday"
+  }
+}
