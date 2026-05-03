@@ -267,6 +267,17 @@ def _build_app_with_rejection_consumer() -> FastAPI:
     return app
 
 
+def _build_app_with_w_catch_all() -> FastAPI:
+    app = FastAPI()
+    app.add_middleware(WorkspaceContextMiddleware)
+
+    @app.get("/w/{rest:path}")
+    def w_catch_all(rest: str) -> dict[str, object]:
+        return {"bound": get_current() is not None, "rest": rest}
+
+    return app
+
+
 def _client(app: FastAPI | None = None) -> TestClient:
     return TestClient(app or _build_app(), raise_server_exceptions=False)
 
@@ -414,12 +425,28 @@ class TestSlugRejection:
         assert response.status_code == 404
 
     def test_empty_slug_returns_404(self, stub_settings: Settings) -> None:
+        """Default router 404s after middleware passes the unscoped path through."""
         with _client() as client:
             response = client.get(
                 "/w//api/v1/ping",
                 headers={TEST_WORKSPACE_ID_HEADER: "01WS000000000000000000000A"},
             )
         assert response.status_code == 404
+
+    def test_empty_slug_catch_all_passes_through_unbound(
+        self, stub_settings: Settings
+    ) -> None:
+        """Empty-slug pass-through is allowed, but must not bind a context."""
+        app = _build_app_with_w_catch_all()
+
+        with _client(app) as client:
+            response = client.get(
+                "/w//api/v1/ping",
+                headers={TEST_WORKSPACE_ID_HEADER: "01WS000000000000000000000A"},
+            )
+
+        assert response.status_code == 200
+        assert response.json() == {"bound": False, "rest": "/api/v1/ping"}
 
 
 # ---------------------------------------------------------------------------
