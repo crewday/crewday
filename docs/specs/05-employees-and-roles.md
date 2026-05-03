@@ -750,6 +750,9 @@ Covered in §03. Three token kinds:
   else: the subject narrowing is anchored on the session, not
   a body field.
 
+Chat-gateway tokens are scoped or delegated API tokens; they do
+not receive a seeded system permission group.
+
 ## Example (real world)
 
 > Maria is a maid at Villa Sud (twice a week) and a nanny at the

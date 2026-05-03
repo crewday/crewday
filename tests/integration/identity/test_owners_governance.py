@@ -293,9 +293,8 @@ class TestOwnersBootstrapAudit:
 class TestFourSystemGroups:
     """§02 "permission_group": exactly four system groups on every workspace.
 
-    The cd-ckr task description mentions a fifth "chat-gateway-agents"
-    group — it is NOT in the spec and NOT seeded. Any drift would
-    show up here as a failing ``== {four slugs}`` assertion.
+    The four-slug assertion pins the spec and bootstrap code together
+    so any future drift shows up loudly.
     """
 
     _EXPECTED_SYSTEM_SLUGS = frozenset(
