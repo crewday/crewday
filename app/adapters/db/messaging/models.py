@@ -94,6 +94,7 @@ _NOTIFICATION_KIND_VALUES: tuple[str, ...] = (
     "anomaly_detected",
     "agent_message",
     "daily_digest",
+    "privacy_export_ready",
 )
 
 # Allowed ``digest_record.kind`` values. Matches the §10 "Daily digests"

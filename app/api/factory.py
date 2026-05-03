@@ -663,9 +663,12 @@ def _mount_auth_routers(
     )
     # /me/export — identity-scoped privacy access export (§15). Bare
     # host because the subject is the authenticated human across every
-    # workspace they belong to.
+    # workspace they belong to. ``mailer`` is threaded through so the
+    # ``privacy_export_ready`` email lands via the standard §10.1
+    # NotificationService path; SMTP-less deployments mount the router
+    # without a mailer (the bundle still queues, no email is sent).
     app.include_router(
-        me_export_module.build_me_export_router(),
+        me_export_module.build_me_export_router(mailer=mailer),
         prefix=bare_prefix,
     )
     # /auth/logout — session-teardown ceremony invoked by the SPA's

@@ -1,0 +1,15 @@
+Hi {{ recipient_display_name | default("there") }},
+
+The data export you requested from crew.day is ready. The bundle
+contains your profile, assigned tasks, comments you authored,
+bookings, and expenses, packaged as a single ZIP.
+
+{% if download_url -%}
+Download it here: {{ download_url }}
+{% endif %}
+{% if expires_at -%}
+The link expires on {{ expires_at }}.
+{% endif %}
+
+If you did not request this export, please contact your workspace
+owner — the request was made by a session signed in as you.

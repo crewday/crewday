@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Protocol, cast
 
 from sqlalchemy import (
     ColumnElement,
@@ -41,6 +41,7 @@ from app.adapters.storage.ports import BlobNotFound, Storage
 from app.audit import write_audit
 from app.tenancy import WorkspaceContext, tenant_agnostic
 from app.util.clock import Clock, SystemClock
+from app.util.redact import redact
 from app.util.ulid import new_ulid
 
 EXPORT_TTL = timedelta(days=7)
@@ -61,6 +62,35 @@ class ExportResult:
     poll_url: str
     download_url: str | None
     expires_at: datetime | None
+
+
+class ExportReadyNotifier(Protocol):
+    """Callable seam that delivers the "export ready" email.
+
+    The privacy service stays free of a hard dependency on
+    :class:`~app.domain.messaging.notifications.NotificationService`
+    so the bundle build path can be exercised in unit tests without
+    pulling in the messaging stack. The route layer wires a closure
+    that constructs ``NotificationService`` (with the per-workspace
+    ``WorkspaceContext`` and the SMTP mailer) and forwards the
+    rendered context — the closure picks the requesting user's
+    primary workspace per :func:`_audit_export_requested`.
+
+    A ``None`` notifier is allowed: tests that exercise only the
+    bundle / storage / audit contract pass ``None``; production
+    routes always wire a concrete instance.
+    """
+
+    def __call__(
+        self,
+        *,
+        user_id: str,
+        export_id: str,
+        download_url: str | None,
+        expires_at: datetime | None,
+    ) -> None:
+        """Deliver the privacy-export-ready notification."""
+        ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -90,6 +120,7 @@ def request_user_export(
     user_id: str,
     poll_base_path: str = "/api/v1/me/export",
     clock: Clock | None = None,
+    notifier: ExportReadyNotifier | None = None,
 ) -> ExportResult:
     """Create and complete an access-export job for ``user_id``.
 
@@ -98,6 +129,14 @@ def request_user_export(
     trail are the contract. A later external worker can move
     ``_build_export_bundle`` behind an async dispatcher without changing
     the API surface.
+
+    When ``notifier`` is wired (production route layer) the function
+    fans out the §15 ``privacy_export_ready`` email through
+    :class:`~app.domain.messaging.notifications.NotificationService`
+    once the bundle has been written to storage. The email path
+    persists an ``email_delivery`` row (queued → sent / failed) per
+    §10 "Delivery tracking". Bundle content is redacted under
+    ``scope="export"`` regardless of whether a notifier is wired.
     """
     now = _now(clock)
     job = PrivacyExport(
@@ -120,14 +159,22 @@ def request_user_export(
         job.completed_at = now
         job.expires_at = now + EXPORT_TTL
         _audit_export_requested(session, user_id=user_id, job_id=job.id, now=now)
+    download_url = storage.sign_url(
+        content_hash,
+        ttl_seconds=int(EXPORT_TTL.total_seconds()),
+    )
+    if notifier is not None:
+        notifier(
+            user_id=user_id,
+            export_id=job.id,
+            download_url=download_url,
+            expires_at=job.expires_at,
+        )
     return ExportResult(
         id=job.id,
         status=job.status,
         poll_url=f"{poll_base_path}/{job.id}",
-        download_url=storage.sign_url(
-            content_hash,
-            ttl_seconds=int(EXPORT_TTL.total_seconds()),
-        ),
+        download_url=download_url,
         expires_at=job.expires_at,
     )
 
@@ -138,6 +185,7 @@ def get_user_export(
     *,
     user_id: str,
     export_id: str,
+    clock: Clock | None = None,
 ) -> ExportResult | None:
     with tenant_agnostic():
         job = session.get(PrivacyExport, export_id)
@@ -145,9 +193,23 @@ def get_user_export(
         return None
     download_url = None
     if job.status == "completed" and job.blob_hash is not None:
+        # Sign with the REMAINING lifetime, not a fresh ``EXPORT_TTL``
+        # window. Without the cap, polling a 6-day-old export would
+        # mint a URL valid for another 7 days — extending the export's
+        # accessible lifetime past the job's own ``expires_at`` and
+        # past whatever the retention sweep keeps the blob around for.
+        # ``max(0, ...)`` ensures we never sign a negative TTL: an
+        # already-expired job hands back a zero-second URL instead of
+        # the 7-day default, which is the correct "you cannot read
+        # this anymore" signal.
+        ttl_seconds = int(EXPORT_TTL.total_seconds())
+        if job.expires_at is not None:
+            now = _now(clock)
+            remaining = int((job.expires_at - now).total_seconds())
+            ttl_seconds = max(0, min(ttl_seconds, remaining))
         download_url = storage.sign_url(
             job.blob_hash,
-            ttl_seconds=int(EXPORT_TTL.total_seconds()),
+            ttl_seconds=ttl_seconds,
         )
     return ExportResult(
         id=job.id,
@@ -378,10 +440,29 @@ def _build_export_bundle(
         for row in rows:
             blob_hashes.update(_blob_hashes(row))
 
+    # §15 "Privacy and data rights": every free-text column in the
+    # bundle passes through the canonical redactor under
+    # ``scope="export"`` before it lands in the ZIP. The redactor's
+    # sensitive-key pass scrubs anything keyed like a credential
+    # (``password``, ``secret``, ``token``, …); the regex pass scrubs
+    # emails, phone numbers, IBANs, PANs, JWTs, and credential blobs
+    # found in body text. The subject user's own rows might still
+    # contain their own email under the ``user`` table's email column —
+    # that key matches the sensitive-key rule too, so the export is
+    # safe by construction even when the row belongs to the requester.
+    # The caller is responsible for filtering rows to ``user_id`` (see
+    # :func:`_subject_filters`); this layer is the regex safety net for
+    # PII that leaked into a free-text column belonging to someone
+    # else.
+    redacted_records = cast(
+        "dict[str, list[dict[str, object]]]",
+        redact(records, scope="export"),
+    )
+
     manifest = {
         "generated_at": now.isoformat(),
         "subject_user_id": user_id,
-        "tables": records,
+        "tables": redacted_records,
         "attachments": sorted(blob_hashes),
     }
     output = io.BytesIO()
