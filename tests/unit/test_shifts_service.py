@@ -832,6 +832,135 @@ class TestListShifts:
 
 
 # ---------------------------------------------------------------------------
+# Pagination — limit + after_id (§12 cursor-isolation contract)
+# ---------------------------------------------------------------------------
+
+
+class TestListShiftsPagination:
+    """Domain-layer coverage for the ``limit`` / ``after_id`` arguments.
+
+    The HTTP layer in :mod:`app.api.v1.time` translates an opaque cursor
+    to a raw ``after_id`` and asks the domain for ``limit + 1`` rows.
+    These tests pin the contract that cd-kwxw introduced — overshoot
+    sizing, deterministic ``(starts_at, id)`` ordering, and the §12
+    cursor-isolation guarantee that an out-of-scope cursor returns the
+    empty list rather than leaking rows from another workspace / user
+    or the wrong open/closed bucket.
+    """
+
+    def _three_closed(
+        self,
+        session: Session,
+        ctx: WorkspaceContext,
+        clock: FrozenClock,
+    ) -> list[ShiftView]:
+        """Create three chronologically distinct closed shifts."""
+        opened: list[ShiftView] = []
+        for _ in range(3):
+            view = open_shift(session, ctx, clock=clock)
+            clock.advance(timedelta(hours=1))
+            close_shift(session, ctx, shift_id=view.id, clock=clock)
+            clock.advance(timedelta(hours=1))
+            opened.append(view)
+        return opened
+
+    def test_list_shifts_limit_returns_overshoot(
+        self,
+        session: Session,
+        worker_env: tuple[WorkspaceContext, str, FrozenClock],
+    ) -> None:
+        """``limit=N`` returns up to ``N + 1`` rows so the HTTP layer can
+        detect ``has_more`` without a second query."""
+        ctx, _uid, clock = worker_env
+        self._three_closed(session, ctx, clock)
+        views = list_shifts(session, ctx, limit=2)
+        assert len(views) == 3  # limit + 1
+
+    def test_list_shifts_after_id_walks_forward(
+        self,
+        session: Session,
+        worker_env: tuple[WorkspaceContext, str, FrozenClock],
+    ) -> None:
+        """``after_id`` returns rows strictly after the cursor row in
+        ``(starts_at ASC, id ASC)`` order."""
+        ctx, _uid, clock = worker_env
+        opened = self._three_closed(session, ctx, clock)
+        page = list_shifts(session, ctx, after_id=opened[0].id, limit=10)
+        assert [v.id for v in page] == [opened[1].id, opened[2].id]
+
+    def test_list_shifts_cursor_unknown_id_returns_empty(
+        self,
+        session: Session,
+        worker_env: tuple[WorkspaceContext, str, FrozenClock],
+    ) -> None:
+        ctx, _uid, _clock = worker_env
+        assert list_shifts(session, ctx, after_id="01ZZZZNOSHIFT") == []
+
+    def test_list_shifts_cursor_from_other_workspace_returns_empty(
+        self,
+        session: Session,
+    ) -> None:
+        """A cursor row in workspace B is invisible to workspace A."""
+        ws_a = _bootstrap_workspace(session, slug="page-a")
+        ws_b = _bootstrap_workspace(session, slug="page-b")
+        user_a = _bootstrap_user(session, email="pa@x.com", display_name="A")
+        user_b = _bootstrap_user(session, email="pb@x.com", display_name="B")
+        _grant(session, workspace_id=ws_a, user_id=user_a, grant_role="worker")
+        _grant(session, workspace_id=ws_b, user_id=user_b, grant_role="worker")
+        session.commit()
+
+        ctx_a = _ctx(workspace_id=ws_a, actor_id=user_a, grant_role="worker")
+        ctx_b = _ctx(workspace_id=ws_b, actor_id=user_b, grant_role="worker")
+        clock = FrozenClock(_PINNED)
+        open_shift(session, ctx_a, clock=clock)
+        b_view = open_shift(session, ctx_b, clock=clock)
+        # Asking ctx_a to page after ctx_b's row leaks nothing.
+        assert list_shifts(session, ctx_a, after_id=b_view.id) == []
+
+    def test_list_open_shifts_limit_returns_overshoot(
+        self,
+        session: Session,
+    ) -> None:
+        ws_id = _bootstrap_workspace(session, slug="open-page")
+        user_a = _bootstrap_user(session, email="oa@x.com", display_name="A")
+        user_b = _bootstrap_user(session, email="ob@x.com", display_name="B")
+        user_c = _bootstrap_user(session, email="oc@x.com", display_name="C")
+        for uid in (user_a, user_b, user_c):
+            _grant(session, workspace_id=ws_id, user_id=uid, grant_role="worker")
+        session.commit()
+
+        ctx_a = _ctx(workspace_id=ws_id, actor_id=user_a, grant_role="worker")
+        clock = FrozenClock(_PINNED)
+        for uid in (user_a, user_b, user_c):
+            ctx = _ctx(workspace_id=ws_id, actor_id=uid, grant_role="worker")
+            open_shift(session, ctx, clock=clock)
+            clock.advance(timedelta(minutes=1))
+
+        page = list_open_shifts(session, ctx_a, limit=2)
+        assert len(page) == 3  # limit + 1
+
+    def test_list_open_shifts_cursor_to_closed_row_returns_empty(
+        self,
+        session: Session,
+        worker_env: tuple[WorkspaceContext, str, FrozenClock],
+    ) -> None:
+        """When the cursor row was closed in the meantime (or someone
+        passes a closed shift's id as a cursor against the open-only
+        path), the §12 cursor-isolation contract returns the empty
+        list rather than walking the keyset onto another row."""
+        ctx, _uid, clock = worker_env
+        opened = open_shift(session, ctx, clock=clock)
+        clock.advance(timedelta(hours=1))
+        close_shift(session, ctx, shift_id=opened.id, clock=clock)
+        clock.advance(timedelta(hours=1))
+        # A still-open shift after the closed one — proves the empty
+        # list isn't because there's nothing left to return.
+        open_shift(session, ctx, clock=clock)
+
+        assert list_open_shifts(session, ctx, after_id=opened.id) == []
+
+
+# ---------------------------------------------------------------------------
 # Audit rows
 # ---------------------------------------------------------------------------
 

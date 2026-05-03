@@ -423,6 +423,8 @@ def list_open_shifts(
     ctx: WorkspaceContext,
     *,
     user_id: str | None = None,
+    limit: int | None = None,
+    after_id: str | None = None,
 ) -> Sequence[ShiftView]:
     """Return every open shift (``ends_at IS NULL``) in the workspace.
 
@@ -431,6 +433,14 @@ def list_open_shifts(
     same millisecond. The ``(user_id, ends_at)`` index answers the
     filtered query in one B-tree scan; the unfiltered query uses the
     workspace index.
+
+    Pagination: when ``limit`` is set, returns up to ``limit + 1`` rows
+    so the HTTP layer can compute ``has_more`` without a second query.
+    ``after_id`` is the id of the last row from the previous page —
+    rows are taken strictly after it in the ``(starts_at, id)`` order.
+    An ``after_id`` that is not in scope (unknown / wrong workspace /
+    closed) yields the empty list, matching the §12 contract that a
+    stale cursor cannot cross-leak rows.
     """
     stmt = select(Shift).where(
         Shift.workspace_id == ctx.workspace_id,
@@ -438,7 +448,21 @@ def list_open_shifts(
     )
     if user_id is not None:
         stmt = stmt.where(Shift.user_id == user_id)
+    if after_id is not None:
+        cursor_row = session.get(Shift, after_id)
+        if (
+            cursor_row is None
+            or cursor_row.workspace_id != ctx.workspace_id
+            or cursor_row.ends_at is not None
+        ):
+            return []
+        stmt = stmt.where(
+            (Shift.starts_at > cursor_row.starts_at)
+            | ((Shift.starts_at == cursor_row.starts_at) & (Shift.id > cursor_row.id))
+        )
     stmt = stmt.order_by(Shift.starts_at.asc(), Shift.id.asc())
+    if limit is not None:
+        stmt = stmt.limit(limit + 1)
     rows = session.scalars(stmt).all()
     return [_row_to_view(row) for row in rows]
 
@@ -450,6 +474,8 @@ def list_shifts(
     user_id: str | None = None,
     starts_from: datetime | None = None,
     starts_until: datetime | None = None,
+    limit: int | None = None,
+    after_id: str | None = None,
 ) -> Sequence[ShiftView]:
     """Return every shift in the workspace, optionally filtered by range.
 
@@ -458,6 +484,13 @@ def list_shifts(
     starts_until``. Returning rows in (``starts_at ASC``, ``id
     ASC``) order so the manager timesheet can paginate
     deterministically.
+
+    Pagination: when ``limit`` is set, returns up to ``limit + 1`` rows
+    so the HTTP layer can compute ``has_more`` without a second query.
+    ``after_id`` is the id of the last row from the previous page —
+    rows are taken strictly after it in the ``(starts_at, id)`` order.
+    An ``after_id`` that is not in scope (unknown / wrong workspace)
+    yields the empty list per the §12 cursor-isolation contract.
     """
     stmt = select(Shift).where(Shift.workspace_id == ctx.workspace_id)
     if user_id is not None:
@@ -466,7 +499,17 @@ def list_shifts(
         stmt = stmt.where(Shift.starts_at >= starts_from)
     if starts_until is not None:
         stmt = stmt.where(Shift.starts_at < starts_until)
+    if after_id is not None:
+        cursor_row = session.get(Shift, after_id)
+        if cursor_row is None or cursor_row.workspace_id != ctx.workspace_id:
+            return []
+        stmt = stmt.where(
+            (Shift.starts_at > cursor_row.starts_at)
+            | ((Shift.starts_at == cursor_row.starts_at) & (Shift.id > cursor_row.id))
+        )
     stmt = stmt.order_by(Shift.starts_at.asc(), Shift.id.asc())
+    if limit is not None:
+        stmt = stmt.limit(limit + 1)
     rows = session.scalars(stmt).all()
     return [_row_to_view(row) for row in rows]
 

@@ -49,6 +49,13 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.api.deps import current_workspace_context, db_session
+from app.api.pagination import (
+    DEFAULT_LIMIT,
+    LimitQuery,
+    PageCursorQuery,
+    decode_cursor,
+    paginate,
+)
 from app.domain.time.geofence_settings import (
     GeofenceMode,
     GeofenceSettingNotFound,
@@ -157,12 +164,15 @@ class ShiftPayload(BaseModel):
 class ShiftListResponse(BaseModel):
     """Response body for ``GET /shifts``.
 
-    Always-present ``items`` key so the SPA can treat the response
-    as paginated-able from day one — adding a ``next_cursor`` field
-    later is non-breaking.
+    Collection envelope per ``docs/specs/12-rest-api.md`` §"Pagination" —
+    ``{"data": [...], "next_cursor": "...", "has_more": ...}``. Mirrors
+    the work_engagements / work_roles list shape so SPA clients can
+    pattern-match identically across the v1 surface.
     """
 
-    items: list[ShiftPayload]
+    data: list[ShiftPayload]
+    next_cursor: str | None = None
+    has_more: bool = False
 
 
 class LeavePayload(BaseModel):
@@ -207,12 +217,15 @@ class LeavePayload(BaseModel):
 class LeaveListResponse(BaseModel):
     """Response body for ``GET /me/leaves`` and ``GET /leaves``.
 
-    Always-present ``items`` key so the SPA can treat the response
-    as paginated-able from day one — adding a ``next_cursor`` field
-    later is non-breaking.
+    Collection envelope per ``docs/specs/12-rest-api.md`` §"Pagination" —
+    ``{"data": [...], "next_cursor": "...", "has_more": ...}``. Mirrors
+    the work_engagements / work_roles list shape so SPA clients can
+    pattern-match identically across the v1 surface.
     """
 
-    items: list[LeavePayload]
+    data: list[LeavePayload]
+    next_cursor: str | None = None
+    has_more: bool = False
 
 
 class LeaveConflictsPayload(BaseModel):
@@ -497,10 +510,21 @@ def get_list_shifts(
     starts_from: Annotated[datetime | None, Query()] = None,
     starts_until: Annotated[datetime | None, Query()] = None,
     open_only: Annotated[bool, Query()] = False,
+    cursor: PageCursorQuery = None,
+    limit: LimitQuery = DEFAULT_LIMIT,
 ) -> ShiftListResponse:
-    """Return every shift matching the optional filters."""
+    """Return every shift matching the optional filters.
+
+    Cursor-paginated per spec §"Pagination" — the response envelope
+    is ``{data, next_cursor, has_more}``. The service returns up to
+    ``limit + 1`` rows so :func:`paginate` can compute ``has_more``
+    without a second query.
+    """
+    after_id = decode_cursor(cursor)
     if open_only:
-        views = list_open_shifts(session, ctx, user_id=user_id)
+        views = list_open_shifts(
+            session, ctx, user_id=user_id, limit=limit, after_id=after_id
+        )
     else:
         views = list_shifts(
             session,
@@ -508,8 +532,15 @@ def get_list_shifts(
             user_id=user_id,
             starts_from=starts_from,
             starts_until=starts_until,
+            limit=limit,
+            after_id=after_id,
         )
-    return ShiftListResponse(items=[ShiftPayload.from_view(v) for v in views])
+    page = paginate(views, limit=limit, key_getter=lambda v: v.id)
+    return ShiftListResponse(
+        data=[ShiftPayload.from_view(v) for v in page.items],
+        next_cursor=page.next_cursor,
+        has_more=page.has_more,
+    )
 
 
 @router.get(
@@ -690,12 +721,33 @@ def get_list_my_leaves(
         LeaveStatus | None,
         Query(alias="status"),
     ] = None,
+    cursor: PageCursorQuery = None,
+    limit: LimitQuery = DEFAULT_LIMIT,
 ) -> LeaveListResponse:
-    """Return every leave owned by the caller, optionally filtered."""
+    """Return every leave owned by the caller, optionally filtered.
+
+    Cursor-paginated per spec §"Pagination" — the response envelope
+    is ``{data, next_cursor, has_more}``. The service returns up to
+    ``limit + 1`` rows so :func:`paginate` can compute ``has_more``
+    without a second query.
+    """
+    after_id = decode_cursor(cursor)
     # ``list_for_user`` defaults ``user_id`` to ``ctx.actor_id`` when
     # ``None`` — the self-service path is always self.
-    views = list_for_user(session, ctx, user_id=None, status=status_)
-    return LeaveListResponse(items=[LeavePayload.from_view(v) for v in views])
+    views = list_for_user(
+        session,
+        ctx,
+        user_id=None,
+        status=status_,
+        limit=limit,
+        after_id=after_id,
+    )
+    page = paginate(views, limit=limit, key_getter=lambda v: v.id)
+    return LeaveListResponse(
+        data=[LeavePayload.from_view(v) for v in page.items],
+        next_cursor=page.next_cursor,
+        has_more=page.has_more,
+    )
 
 
 def _load_owned_leave_or_404(
@@ -818,6 +870,8 @@ def get_list_leaves(
         LeaveStatus | None,
         Query(alias="status"),
     ] = None,
+    cursor: PageCursorQuery = None,
+    limit: LimitQuery = DEFAULT_LIMIT,
 ) -> LeaveListResponse:
     """Return leaves matching the optional filters.
 
@@ -831,15 +885,35 @@ def get_list_leaves(
     * ``user_id`` omitted -> workspace-wide queue via
       :func:`list_for_workspace`; always requires
       ``leaves.view_others``.
+
+    Cursor-paginated per spec §"Pagination" — the response envelope
+    is ``{data, next_cursor, has_more}``. The service returns up to
+    ``limit + 1`` rows so :func:`paginate` can compute ``has_more``
+    without a second query.
     """
+    after_id = decode_cursor(cursor)
     try:
         if user_id is None:
-            views = list_for_workspace(session, ctx, status=status_)
+            views = list_for_workspace(
+                session, ctx, status=status_, limit=limit, after_id=after_id
+            )
         else:
-            views = list_for_user(session, ctx, user_id=user_id, status=status_)
+            views = list_for_user(
+                session,
+                ctx,
+                user_id=user_id,
+                status=status_,
+                limit=limit,
+                after_id=after_id,
+            )
     except LeavePermissionDenied as exc:
         raise _http_for_leave_error(exc) from exc
-    return LeaveListResponse(items=[LeavePayload.from_view(v) for v in views])
+    page = paginate(views, limit=limit, key_getter=lambda v: v.id)
+    return LeaveListResponse(
+        data=[LeavePayload.from_view(v) for v in page.items],
+        next_cursor=page.next_cursor,
+        has_more=page.has_more,
+    )
 
 
 @router.get(

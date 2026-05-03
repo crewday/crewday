@@ -1888,8 +1888,9 @@ pay-bearing — see §09 §"Bookings".
 
 ```
 GET    /time/shifts                # list shifts; ?user_id=…&starts_from=…&starts_until=…&open_only=true|false
-                                   # shifts ordered (starts_at ASC, id ASC).
-                                   # response: {"items": [ShiftPayload, ...]}
+                                   # cursor-paginated per §"Pagination" — accepts ?cursor=&limit=
+                                   # (default 50, max 500). shifts ordered (starts_at ASC, id ASC).
+                                   # response: {"data": [ShiftPayload, ...], "next_cursor": "…", "has_more": …}
 POST   /time/shifts/open           # clock-in: body ShiftOpen {user_id?, property_id?, source?, notes_md?}
                                    # omit user_id to clock in the caller (time.clock_self).
                                    # supply user_id to open for someone else (time.edit_others).
@@ -1943,7 +1944,9 @@ POST   /time/me/leaves             # worker self-create: body {kind, starts_at, 
                                    #   (service-layer defence; HTTP layer rejects first via Literal).
 GET    /time/me/leaves             # ?status=pending|approved|rejected|cancelled
                                    # self-only list, ordered (starts_at ASC, id ASC).
-                                   # 200 {"items": [LeavePayload, ...]}.
+                                   # cursor-paginated per §"Pagination" — accepts ?cursor=&limit=
+                                   # (default 50, max 500).
+                                   # 200 {"data": [LeavePayload, ...], "next_cursor": "…", "has_more": …}.
 PATCH  /time/me/leaves/{leave_id}  # rewrite window: body {starts_at, ends_at}. pending-only,
                                    # caller-owned-only. 200 LeavePayload; 404 not_found (incl.
                                    # leaves owned by someone else); 422 invalid_window;
@@ -1954,7 +1957,9 @@ DELETE /time/me/leaves/{leave_id}  # cancel; valid from pending or approved-with
 GET    /time/leaves                # ?user_id=…&status=…
                                    # manager inbox when user_id omitted -> leaves.view_others.
                                    # when user_id is caller: self-service (no cap); otherwise -> leaves.view_others.
-                                   # 200 {"items": [LeavePayload, ...]}; 403 forbidden.
+                                   # cursor-paginated per §"Pagination" — accepts ?cursor=&limit=
+                                   # (default 50, max 500).
+                                   # 200 {"data": [LeavePayload, ...], "next_cursor": "…", "has_more": …}; 403 forbidden.
 GET    /time/leaves/{leave_id}     # read single; requester or leaves.view_others.
                                    # 200 LeavePayload; 404 not_found; 403 forbidden.
 GET    /time/leaves/{leave_id}/conflicts

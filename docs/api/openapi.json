@@ -11843,18 +11843,34 @@
         "type": "object"
       },
       "LeaveListResponse": {
-        "description": "Response body for ``GET /me/leaves`` and ``GET /leaves``.\n\nAlways-present ``items`` key so the SPA can treat the response\nas paginated-able from day one \u2014 adding a ``next_cursor`` field\nlater is non-breaking.",
+        "description": "Response body for ``GET /me/leaves`` and ``GET /leaves``.\n\nCollection envelope per ``docs/specs/12-rest-api.md`` \u00a7\"Pagination\" \u2014\n``{\"data\": [...], \"next_cursor\": \"...\", \"has_more\": ...}``. Mirrors\nthe work_engagements / work_roles list shape so SPA clients can\npattern-match identically across the v1 surface.",
         "properties": {
-          "items": {
+          "data": {
             "items": {
               "$ref": "#/components/schemas/LeavePayload"
             },
-            "title": "Items",
+            "title": "Data",
             "type": "array"
+          },
+          "has_more": {
+            "default": false,
+            "title": "Has More",
+            "type": "boolean"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
           }
         },
         "required": [
-          "items"
+          "data"
         ],
         "title": "LeaveListResponse",
         "type": "object"
@@ -20061,18 +20077,34 @@
         "type": "object"
       },
       "ShiftListResponse": {
-        "description": "Response body for ``GET /shifts``.\n\nAlways-present ``items`` key so the SPA can treat the response\nas paginated-able from day one \u2014 adding a ``next_cursor`` field\nlater is non-breaking.",
+        "description": "Response body for ``GET /shifts``.\n\nCollection envelope per ``docs/specs/12-rest-api.md`` \u00a7\"Pagination\" \u2014\n``{\"data\": [...], \"next_cursor\": \"...\", \"has_more\": ...}``. Mirrors\nthe work_engagements / work_roles list shape so SPA clients can\npattern-match identically across the v1 surface.",
         "properties": {
-          "items": {
+          "data": {
             "items": {
               "$ref": "#/components/schemas/ShiftPayload"
             },
-            "title": "Items",
+            "title": "Data",
             "type": "array"
+          },
+          "has_more": {
+            "default": false,
+            "title": "Has More",
+            "type": "boolean"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
           }
         },
         "required": [
-          "items"
+          "data"
         ],
         "title": "ShiftListResponse",
         "type": "object"
@@ -106537,7 +106569,7 @@
     },
     "/w/{slug}/api/v1/time/leaves": {
       "get": {
-        "description": "Return leaves matching the optional filters.\n\nGating follows the service's authority model:\n\n* ``user_id`` == caller -> self-service path, no capability\n  check (same as ``GET /me/leaves``).\n* ``user_id`` set to someone else -> cross-user lookup via\n  :func:`list_for_user`; service raises 403 unless the caller\n  holds ``leaves.view_others``.\n* ``user_id`` omitted -> workspace-wide queue via\n  :func:`list_for_workspace`; always requires\n  ``leaves.view_others``.",
+        "description": "Return leaves matching the optional filters.\n\nGating follows the service's authority model:\n\n* ``user_id`` == caller -> self-service path, no capability\n  check (same as ``GET /me/leaves``).\n* ``user_id`` set to someone else -> cross-user lookup via\n  :func:`list_for_user`; service raises 403 unless the caller\n  holds ``leaves.view_others``.\n* ``user_id`` omitted -> workspace-wide queue via\n  :func:`list_for_workspace`; always requires\n  ``leaves.view_others``.\n\nCursor-paginated per spec \u00a7\"Pagination\" \u2014 the response envelope\nis ``{data, next_cursor, has_more}``. The service returns up to\n``limit + 1`` rows so :func:`paginate` can compute ``has_more``\nwithout a second query.",
         "operationId": "time.list_leaves",
         "parameters": [
           {
@@ -106577,6 +106609,39 @@
                 }
               ],
               "title": "Status"
+            }
+          },
+          {
+            "description": "Opaque forward cursor from the previous page's ``next_cursor``. Omitted on the first call. Bounded to 256 chars to keep the URL below reverse-proxy header limits.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 256,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Opaque forward cursor from the previous page's ``next_cursor``. Omitted on the first call. Bounded to 256 chars to keep the URL below reverse-proxy header limits.",
+              "title": "Cursor"
+            }
+          },
+          {
+            "description": "Maximum rows to return. Default 50, cap 500 per spec \u00a712 'Pagination'. Rejected with 422 outside ``[1, 500]``.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "description": "Maximum rows to return. Default 50, cap 500 per spec \u00a712 'Pagination'. Rejected with 422 outside ``[1, 500]``.",
+              "maximum": 500,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
             }
           }
         ],
@@ -107102,7 +107167,7 @@
     },
     "/w/{slug}/api/v1/time/me/leaves": {
       "get": {
-        "description": "Return every leave owned by the caller, optionally filtered.",
+        "description": "Return every leave owned by the caller, optionally filtered.\n\nCursor-paginated per spec \u00a7\"Pagination\" \u2014 the response envelope\nis ``{data, next_cursor, has_more}``. The service returns up to\n``limit + 1`` rows so :func:`paginate` can compute ``has_more``\nwithout a second query.",
         "operationId": "time.list_my_leaves",
         "parameters": [
           {
@@ -107125,6 +107190,39 @@
                 }
               ],
               "title": "Status"
+            }
+          },
+          {
+            "description": "Opaque forward cursor from the previous page's ``next_cursor``. Omitted on the first call. Bounded to 256 chars to keep the URL below reverse-proxy header limits.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 256,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Opaque forward cursor from the previous page's ``next_cursor``. Omitted on the first call. Bounded to 256 chars to keep the URL below reverse-proxy header limits.",
+              "title": "Cursor"
+            }
+          },
+          {
+            "description": "Maximum rows to return. Default 50, cap 500 per spec \u00a712 'Pagination'. Rejected with 422 outside ``[1, 500]``.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "description": "Maximum rows to return. Default 50, cap 500 per spec \u00a712 'Pagination'. Rejected with 422 outside ``[1, 500]``.",
+              "maximum": 500,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
             }
           }
         ],
@@ -107829,7 +107927,7 @@
     },
     "/w/{slug}/api/v1/time/shifts": {
       "get": {
-        "description": "Return every shift matching the optional filters.",
+        "description": "Return every shift matching the optional filters.\n\nCursor-paginated per spec \u00a7\"Pagination\" \u2014 the response envelope\nis ``{data, next_cursor, has_more}``. The service returns up to\n``limit + 1`` rows so :func:`paginate` can compute ``has_more``\nwithout a second query.",
         "operationId": "time.list_shifts",
         "parameters": [
           {
@@ -107891,6 +107989,39 @@
               "default": false,
               "title": "Open Only",
               "type": "boolean"
+            }
+          },
+          {
+            "description": "Opaque forward cursor from the previous page's ``next_cursor``. Omitted on the first call. Bounded to 256 chars to keep the URL below reverse-proxy header limits.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 256,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Opaque forward cursor from the previous page's ``next_cursor``. Omitted on the first call. Bounded to 256 chars to keep the URL below reverse-proxy header limits.",
+              "title": "Cursor"
+            }
+          },
+          {
+            "description": "Maximum rows to return. Default 50, cap 500 per spec \u00a712 'Pagination'. Rejected with 422 outside ``[1, 500]``.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "description": "Maximum rows to return. Default 50, cap 500 per spec \u00a712 'Pagination'. Rejected with 422 outside ``[1, 500]``.",
+              "maximum": 500,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
             }
           }
         ],

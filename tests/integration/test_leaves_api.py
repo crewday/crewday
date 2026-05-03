@@ -10,8 +10,11 @@ Covers:
 
 * ``POST /me/leaves`` — 201 + :class:`LeavePayload`; 422 on a bad
   window; 422 on a bad ``kind``.
-* ``GET /me/leaves`` — returns ``{"items": [...]}``; filters by
-  ``status``; a worker only sees their own leaves.
+* ``GET /me/leaves`` — returns the §12 cursor envelope
+  ``{"data": [...], "next_cursor": "…", "has_more": …}``; filters by
+  ``status``; a worker only sees their own leaves. Cursor pagination
+  walks pages of size ``limit`` and the ``has_more`` flag flips
+  correctly across page boundaries.
 * ``PATCH /me/leaves/{id}`` — 200 while pending; 409 on non-pending.
 * ``DELETE /me/leaves/{id}`` — 200 on pending cancel; 409 on
   already-cancelled.
@@ -341,7 +344,7 @@ class TestCreateMyLeave:
 
 
 class TestListMyLeaves:
-    def test_returns_items_envelope(
+    def test_returns_data_envelope(
         self,
         worker_client: tuple[TestClient, WorkspaceContext, str],
     ) -> None:
@@ -350,8 +353,13 @@ class TestListMyLeaves:
         resp = client.get("/me/leaves")
         assert resp.status_code == 200, resp.text
         body = resp.json()
-        assert "items" in body
-        assert len(body["items"]) == 1
+        # §12 "Pagination": every collection response carries the
+        # ``data / next_cursor / has_more`` envelope, never ``items``.
+        assert "data" in body
+        assert "items" not in body
+        assert body["next_cursor"] is None
+        assert body["has_more"] is False
+        assert len(body["data"]) == 1
 
     def test_filter_by_status(
         self,
@@ -371,10 +379,10 @@ class TestListMyLeaves:
 
         pending = client.get("/me/leaves", params={"status": "pending"}).json()
         cancelled = client.get("/me/leaves", params={"status": "cancelled"}).json()
-        assert len(pending["items"]) == 1
-        assert pending["items"][0]["status"] == "pending"
-        assert len(cancelled["items"]) == 1
-        assert cancelled["items"][0]["id"] == a["id"]
+        assert len(pending["data"]) == 1
+        assert pending["data"][0]["status"] == "pending"
+        assert len(cancelled["data"]) == 1
+        assert cancelled["data"][0]["id"] == a["id"]
 
     def test_worker_only_sees_own(
         self,
@@ -394,10 +402,45 @@ class TestListMyLeaves:
 
         client_a.post("/me/leaves", json=_leave_body())
 
-        a_list = client_a.get("/me/leaves").json()["items"]
-        b_list = client_b.get("/me/leaves").json()["items"]
+        a_list = client_a.get("/me/leaves").json()["data"]
+        b_list = client_b.get("/me/leaves").json()["data"]
         assert len(a_list) == 1 and a_list[0]["user_id"] == a_id
         assert b_list == []
+
+    def test_cursor_pagination(
+        self,
+        worker_client: tuple[TestClient, WorkspaceContext, str],
+    ) -> None:
+        """Cursor walks every leave once; ``has_more`` flips on the last page."""
+        client, *_ = worker_client
+        ids: list[str] = []
+        # Three leaves with strictly distinct ``starts_at`` so the
+        # ordering is unambiguous and the cursor seek is exercised.
+        for offset_days in (0, 14, 28):
+            body = _leave_body(
+                starts_at=_FUTURE + timedelta(days=offset_days),
+                ends_at=_FUTURE_END + timedelta(days=offset_days),
+            )
+            ids.append(client.post("/me/leaves", json=body).json()["id"])
+
+        page1 = client.get("/me/leaves", params={"limit": 2}).json()
+        assert len(page1["data"]) == 2
+        assert page1["has_more"] is True
+        assert page1["next_cursor"] is not None
+
+        page2 = client.get(
+            "/me/leaves", params={"limit": 2, "cursor": page1["next_cursor"]}
+        ).json()
+        assert len(page2["data"]) == 1
+        assert page2["has_more"] is False
+        assert page2["next_cursor"] is None
+
+        # Walked rows are chronological (starts_at ASC) — and together
+        # the two pages cover every id with no overlap.
+        seen = [row["id"] for row in page1["data"]] + [
+            row["id"] for row in page2["data"]
+        ]
+        assert seen == ids
 
 
 # ---------------------------------------------------------------------------
@@ -540,9 +583,9 @@ class TestListWorkspaceLeaves:
 
         resp = client_mgr.get("/leaves", params={"status": "pending"})
         assert resp.status_code == 200, resp.text
-        items = resp.json()["items"]
-        assert len(items) == 1
-        assert items[0]["user_id"] == worker_id
+        rows = resp.json()["data"]
+        assert len(rows) == 1
+        assert rows[0]["user_id"] == worker_id
 
     def test_worker_gets_403_on_workspace_queue(
         self,
@@ -583,7 +626,7 @@ class TestListWorkspaceLeaves:
         client.post("/me/leaves", json=_leave_body())
         resp = client.get("/leaves", params={"user_id": user_id})
         assert resp.status_code == 200, resp.text
-        assert len(resp.json()["items"]) == 1
+        assert len(resp.json()["data"]) == 1
 
 
 # ---------------------------------------------------------------------------
@@ -885,7 +928,7 @@ class TestTenantIsolation:
 
         resp = client_b.get(f"/leaves/{created['id']}")
         assert resp.status_code == 404, resp.text
-        assert client_b.get("/me/leaves").json()["items"] == []
+        assert client_b.get("/me/leaves").json()["data"] == []
 
 
 # ---------------------------------------------------------------------------

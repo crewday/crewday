@@ -535,6 +535,8 @@ def list_for_user(
     *,
     user_id: str | None = None,
     status: LeaveStatus | None = None,
+    limit: int | None = None,
+    after_id: str | None = None,
 ) -> Sequence[LeaveView]:
     """Return every leave for ``user_id`` (default: the caller).
 
@@ -544,6 +546,14 @@ def list_for_user(
     Results are ordered by ``starts_at`` ascending with ``id`` as a
     tiebreaker inside the same millisecond so the manager timeline
     + self-service "My leaves" page render deterministically.
+
+    Pagination: when ``limit`` is set, returns up to ``limit + 1`` rows
+    so the HTTP layer can compute ``has_more`` without a second query.
+    ``after_id`` is the id of the last row from the previous page —
+    rows are taken strictly after it in the ``(starts_at, id)`` order.
+    An ``after_id`` that is not in scope (unknown / wrong workspace /
+    different user) yields the empty list per the §12 cursor-isolation
+    contract.
     """
     target_user_id = user_id if user_id is not None else ctx.actor_id
     _gate_or_self(
@@ -559,7 +569,21 @@ def list_for_user(
     )
     if status is not None:
         stmt = stmt.where(Leave.status == status)
+    if after_id is not None:
+        cursor_row = session.get(Leave, after_id)
+        if (
+            cursor_row is None
+            or cursor_row.workspace_id != ctx.workspace_id
+            or cursor_row.user_id != target_user_id
+        ):
+            return []
+        stmt = stmt.where(
+            (Leave.starts_at > cursor_row.starts_at)
+            | ((Leave.starts_at == cursor_row.starts_at) & (Leave.id > cursor_row.id))
+        )
     stmt = stmt.order_by(Leave.starts_at.asc(), Leave.id.asc())
+    if limit is not None:
+        stmt = stmt.limit(limit + 1)
     return [_row_to_view(row) for row in session.scalars(stmt).all()]
 
 
@@ -568,6 +592,8 @@ def list_for_workspace(
     ctx: WorkspaceContext,
     *,
     status: LeaveStatus | None = None,
+    limit: int | None = None,
+    after_id: str | None = None,
 ) -> Sequence[LeaveView]:
     """Return every leave in the workspace (manager inbox view).
 
@@ -575,6 +601,13 @@ def list_for_workspace(
     queue by design. A worker that calls this for their own leaves
     should use :func:`list_for_user` instead (no capability check
     for the self-case).
+
+    Pagination: when ``limit`` is set, returns up to ``limit + 1`` rows
+    so the HTTP layer can compute ``has_more`` without a second query.
+    ``after_id`` is the id of the last row from the previous page —
+    rows are taken strictly after it in the ``(starts_at, id)`` order.
+    An ``after_id`` that is not in scope (unknown / wrong workspace)
+    yields the empty list per the §12 cursor-isolation contract.
     """
     try:
         _require_capability(session, ctx, action_key="leaves.view_others")
@@ -584,7 +617,17 @@ def list_for_workspace(
     stmt = select(Leave).where(Leave.workspace_id == ctx.workspace_id)
     if status is not None:
         stmt = stmt.where(Leave.status == status)
+    if after_id is not None:
+        cursor_row = session.get(Leave, after_id)
+        if cursor_row is None or cursor_row.workspace_id != ctx.workspace_id:
+            return []
+        stmt = stmt.where(
+            (Leave.starts_at > cursor_row.starts_at)
+            | ((Leave.starts_at == cursor_row.starts_at) & (Leave.id > cursor_row.id))
+        )
     stmt = stmt.order_by(Leave.starts_at.asc(), Leave.id.asc())
+    if limit is not None:
+        stmt = stmt.limit(limit + 1)
     return [_row_to_view(row) for row in session.scalars(stmt).all()]
 
 

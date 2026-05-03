@@ -18,9 +18,11 @@ Covers:
   ``invalid_window`` on ``ends_at < starts_at``.
 * ``PATCH /shifts/{id}`` — manager-only; worker gets 403;
   ``invalid_window`` fires on zero-length; unknown id → 404.
-* ``GET /shifts`` — returns ``{"items": [...]}``; filters by
+* ``GET /shifts`` — returns the §12 cursor envelope
+  ``{"data": [...], "next_cursor": "…", "has_more": …}``; filters by
   ``user_id`` + ``open_only``; tenant filter keeps a peer workspace
-  invisible.
+  invisible. Cursor pagination walks pages of size ``limit`` and the
+  ``has_more`` flag flips correctly across page boundaries.
 * ``GET /shifts/{id}`` — returns the view; 404 on unknown id.
 * SSE: every mutation emits a :class:`ShiftChanged` event whose
   handler receives the right action + shift id.
@@ -531,7 +533,7 @@ class TestEditShift:
 
 
 class TestListShifts:
-    def test_list_returns_items_envelope(
+    def test_list_returns_data_envelope(
         self,
         worker_client: tuple[TestClient, WorkspaceContext, str],
     ) -> None:
@@ -540,8 +542,13 @@ class TestListShifts:
         resp = client.get("/shifts")
         assert resp.status_code == 200, resp.text
         body = resp.json()
-        assert "items" in body
-        assert len(body["items"]) == 1
+        # §12 "Pagination": every collection response carries the
+        # ``data / next_cursor / has_more`` envelope, never ``items``.
+        assert "data" in body
+        assert "items" not in body
+        assert body["next_cursor"] is None
+        assert body["has_more"] is False
+        assert len(body["data"]) == 1
 
     def test_list_open_only(
         self,
@@ -555,9 +562,9 @@ class TestListShifts:
 
         all_resp = client.get("/shifts").json()
         open_resp = client.get("/shifts", params={"open_only": "true"}).json()
-        assert len(all_resp["items"]) == 2
-        assert len(open_resp["items"]) == 1
-        assert open_resp["items"][0]["ends_at"] is None
+        assert len(all_resp["data"]) == 2
+        assert len(open_resp["data"]) == 1
+        assert open_resp["data"][0]["ends_at"] is None
 
     def test_list_filter_by_user_id(
         self,
@@ -579,7 +586,39 @@ class TestListShifts:
         client_b.post("/shifts/open", json={})
 
         resp = client_a.get("/shifts", params={"user_id": a_id}).json()
-        assert all(item["user_id"] == a_id for item in resp["items"])
+        assert all(item["user_id"] == a_id for item in resp["data"])
+
+    def test_list_cursor_pagination(
+        self,
+        worker_client: tuple[TestClient, WorkspaceContext, str],
+    ) -> None:
+        """Cursor walks every shift once; ``has_more`` flips on the last page."""
+        client, *_ = worker_client
+        # Open + close three shifts (chronologically distinct via the
+        # service-side wall clock — each open advances starts_at).
+        ids: list[str] = []
+        for _ in range(3):
+            opened = client.post("/shifts/open", json={}).json()
+            client.post(f"/shifts/{opened['id']}/close", json={})
+            ids.append(opened["id"])
+
+        page1 = client.get("/shifts", params={"limit": 2}).json()
+        assert len(page1["data"]) == 2
+        assert page1["has_more"] is True
+        assert page1["next_cursor"] is not None
+
+        page2 = client.get(
+            "/shifts", params={"limit": 2, "cursor": page1["next_cursor"]}
+        ).json()
+        assert len(page2["data"]) == 1
+        assert page2["has_more"] is False
+        assert page2["next_cursor"] is None
+
+        # The two pages together cover every id with no overlap.
+        seen = [row["id"] for row in page1["data"]] + [
+            row["id"] for row in page2["data"]
+        ]
+        assert sorted(seen) == sorted(ids)
 
     def test_get_one_returns_view(
         self,
@@ -705,7 +744,7 @@ class TestTenantIsolation:
 
         # GET /shifts from workspace B → empty list.
         resp = client_b.get("/shifts").json()
-        assert resp["items"] == []
+        assert resp["data"] == []
 
 
 # ---------------------------------------------------------------------------

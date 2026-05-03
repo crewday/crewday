@@ -891,6 +891,149 @@ class TestListForWorkspace:
 
 
 # ---------------------------------------------------------------------------
+# Pagination — limit + after_id (§12 cursor-isolation contract)
+# ---------------------------------------------------------------------------
+
+
+class TestLeaveListPagination:
+    """Domain-layer coverage for the ``limit`` / ``after_id`` arguments
+    on :func:`list_for_user` and :func:`list_for_workspace`.
+
+    Mirrors the shifts pagination shard: overshoot sizing, deterministic
+    keyset walk, and the §12 cursor-isolation guarantee that an
+    out-of-scope cursor returns the empty list rather than walking
+    onto another user's or another workspace's rows.
+    """
+
+    def _three_leaves(
+        self,
+        session: Session,
+        ctx: WorkspaceContext,
+        clock: FrozenClock,
+    ) -> list[str]:
+        """Three pending leaves with strictly distinct ``starts_at``."""
+        ids: list[str] = []
+        for offset_days in (0, 14, 28):
+            view = create_leave(
+                session,
+                ctx,
+                body=_create_body(
+                    starts_at=_FUTURE + timedelta(days=offset_days),
+                    ends_at=_FUTURE_END + timedelta(days=offset_days),
+                ),
+                clock=clock,
+            )
+            ids.append(view.id)
+        return ids
+
+    def test_list_for_user_limit_returns_overshoot(
+        self,
+        session: Session,
+        worker_env: tuple[WorkspaceContext, str, FrozenClock],
+    ) -> None:
+        ctx, _uid, clock = worker_env
+        self._three_leaves(session, ctx, clock)
+        views = list_for_user(session, ctx, limit=2)
+        assert len(views) == 3  # limit + 1
+
+    def test_list_for_user_after_id_walks_forward(
+        self,
+        session: Session,
+        worker_env: tuple[WorkspaceContext, str, FrozenClock],
+    ) -> None:
+        ctx, _uid, clock = worker_env
+        ids = self._three_leaves(session, ctx, clock)
+        page = list_for_user(session, ctx, after_id=ids[0], limit=10)
+        assert [v.id for v in page] == [ids[1], ids[2]]
+
+    def test_list_for_user_cursor_unknown_id_returns_empty(
+        self,
+        session: Session,
+        worker_env: tuple[WorkspaceContext, str, FrozenClock],
+    ) -> None:
+        ctx, _uid, _clock = worker_env
+        assert list_for_user(session, ctx, after_id="01ZZZZNOLEAVE") == []
+
+    def test_list_for_user_cursor_for_other_user_returns_empty(
+        self,
+        session: Session,
+    ) -> None:
+        """A worker paging their own leaves cannot use a manager's
+        cursor row from a different user as the seek key — the §12
+        cursor-isolation rule kicks in via the ``user_id`` mismatch."""
+        ws_id = _bootstrap_workspace(session, slug="leave-page-x")
+        a_id = _bootstrap_user(session, email="lpa@x.com", display_name="A")
+        b_id = _bootstrap_user(session, email="lpb@x.com", display_name="B")
+        _grant(session, workspace_id=ws_id, user_id=a_id, grant_role="worker")
+        _grant(session, workspace_id=ws_id, user_id=b_id, grant_role="worker")
+        session.commit()
+        ctx_a = _ctx(workspace_id=ws_id, actor_id=a_id, grant_role="worker")
+        ctx_b = _ctx(workspace_id=ws_id, actor_id=b_id, grant_role="worker")
+        clock = FrozenClock(_PINNED)
+        b_view = create_leave(session, ctx_b, body=_create_body(), clock=clock)
+        # A pages own leaves but supplies B's leave id as the cursor.
+        assert list_for_user(session, ctx_a, after_id=b_view.id) == []
+
+    def test_list_for_workspace_limit_returns_overshoot(
+        self,
+        session: Session,
+    ) -> None:
+        ws_id = _bootstrap_workspace(session, slug="ws-page")
+        worker_id = _bootstrap_user(session, email="wp@x.com", display_name="W")
+        mgr_id = _bootstrap_user(session, email="mp@x.com", display_name="M")
+        _grant(session, workspace_id=ws_id, user_id=worker_id, grant_role="worker")
+        _grant(session, workspace_id=ws_id, user_id=mgr_id, grant_role="manager")
+        session.commit()
+        ctx_worker = _ctx(workspace_id=ws_id, actor_id=worker_id, grant_role="worker")
+        ctx_mgr = _ctx(workspace_id=ws_id, actor_id=mgr_id, grant_role="manager")
+        clock = FrozenClock(_PINNED)
+        for offset_days in (0, 14, 28):
+            create_leave(
+                session,
+                ctx_worker,
+                body=_create_body(
+                    starts_at=_FUTURE + timedelta(days=offset_days),
+                    ends_at=_FUTURE_END + timedelta(days=offset_days),
+                ),
+                clock=clock,
+            )
+        views = list_for_workspace(session, ctx_mgr, limit=2)
+        assert len(views) == 3  # limit + 1
+
+    def test_list_for_workspace_cursor_from_other_workspace_returns_empty(
+        self,
+        session: Session,
+    ) -> None:
+        """A cursor row belonging to another workspace yields the empty
+        list rather than leaking the receiving workspace's rows."""
+        # Workspace A — manager + worker with one leave.
+        ws_a = _bootstrap_workspace(session, slug="leak-a")
+        wa_id = _bootstrap_user(session, email="la@x.com", display_name="A")
+        ma_id = _bootstrap_user(session, email="lma@x.com", display_name="MA")
+        _grant(session, workspace_id=ws_a, user_id=wa_id, grant_role="worker")
+        _grant(session, workspace_id=ws_a, user_id=ma_id, grant_role="manager")
+        # Workspace B — manager + worker with one leave we'll use as the
+        # foreign cursor.
+        ws_b = _bootstrap_workspace(session, slug="leak-b")
+        wb_id = _bootstrap_user(session, email="lb@x.com", display_name="B")
+        mb_id = _bootstrap_user(session, email="lmb@x.com", display_name="MB")
+        _grant(session, workspace_id=ws_b, user_id=wb_id, grant_role="worker")
+        _grant(session, workspace_id=ws_b, user_id=mb_id, grant_role="manager")
+        session.commit()
+
+        clock = FrozenClock(_PINNED)
+        ctx_wa = _ctx(workspace_id=ws_a, actor_id=wa_id, grant_role="worker")
+        ctx_ma = _ctx(workspace_id=ws_a, actor_id=ma_id, grant_role="manager")
+        ctx_wb = _ctx(workspace_id=ws_b, actor_id=wb_id, grant_role="worker")
+        create_leave(session, ctx_wa, body=_create_body(), clock=clock)
+        b_view = create_leave(session, ctx_wb, body=_create_body(), clock=clock)
+
+        # Manager of A scans the workspace queue with B's cursor →
+        # empty list; never leaks A's leave.
+        assert list_for_workspace(session, ctx_ma, after_id=b_view.id) == []
+
+
+# ---------------------------------------------------------------------------
 # get_leave
 # ---------------------------------------------------------------------------
 
