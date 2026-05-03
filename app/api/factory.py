@@ -107,6 +107,7 @@ from app.api.middleware import (
     RequestIdMiddleware,
     SecurityHeadersMiddleware,
 )
+from app.api.transport.correlation_id import CorrelationIdMiddleware
 from app.api.transport.sse import router as sse_router
 from app.api.v1 import (
     APPROVALS_ROUTER,
@@ -1656,11 +1657,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     #    every downstream log line (including the tenancy middleware's
     #    own) stamps ``request_id`` (§16 "Observability / Logs").
     # 3. SecurityHeaders — stamp every response, even middleware rejects.
-    # 4. WorkspaceContextMiddleware — bind the tenancy ctx + stash the
+    # 4. CorrelationIdMiddleware — read ``X-Correlation-Id`` (or mint
+    #    a ULID), stash on ``request.state.correlation_id``, and write
+    #    ``X-Correlation-Id-Echo`` on the response (§11 "Client
+    #    abstraction"). Mounted outer of WorkspaceContext so the
+    #    tenancy resolver picks the value off ``request.state`` and
+    #    threads it through to ``audit_log.correlation_id`` /
+    #    ``llm_usage.correlation_id`` via ``audit_correlation_id``.
+    # 5. WorkspaceContextMiddleware — bind the tenancy ctx + stash the
     #    resolved :class:`~app.tenancy.middleware.ActorIdentity` on
     #    ``request.state`` (so the idempotency middleware can read
     #    ``token_id`` without re-verifying the bearer token).
-    # 5. HttpMetricsMiddleware — bump the §16 HTTP counter / histogram.
+    # 6. HttpMetricsMiddleware — bump the §16 HTTP counter / histogram.
     #    Mounted **inside** WorkspaceContext so it can read the
     #    workspace_id from the active :class:`WorkspaceContext` after
     #    ``call_next`` returns. ``BaseHTTPMiddleware`` resets the
@@ -1671,16 +1679,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     #    bug fix). The histogram now excludes the brief
     #    auth/tenancy resolution time, which is fine — operators
     #    care about handler latency, not tenancy lookup overhead.
-    # 6. RateLimitMiddleware — per-token / per-IP API buckets. Runs
+    # 7. RateLimitMiddleware — per-token / per-IP API buckets. Runs
     #    inside HTTP metrics so 429s are counted, and after workspace
     #    resolution so bearer-token metadata is already on
     #    ``request.state``.
-    # 7. AgentApprovalMiddleware — delegated-token approval gate.
-    # 8. IdempotencyMiddleware — replay cache for ``POST`` retries
+    # 8. AgentApprovalMiddleware — delegated-token approval gate.
+    # 9. IdempotencyMiddleware — replay cache for ``POST`` retries
     #    carrying ``Idempotency-Key``. Runs AFTER auth (so
     #    ``token_id`` is known) and BEFORE the handler. Spec §12
     #    "Idempotency".
-    # 9. CSRFMiddleware — double-submit check on mutation verbs.
+    # 10. CSRFMiddleware — double-submit check on mutation verbs.
     #
     # To get that layout we register INNER → OUTER: CSRF first (ends up
     # innermost), CORS last (ends up outermost). CORS defaults to
@@ -1695,6 +1703,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.add_middleware(RateLimitMiddleware, settings=cfg)
     app.add_middleware(HttpMetricsMiddleware)
     app.add_middleware(WorkspaceContextMiddleware)
+    # Outer of WorkspaceContext so the resolver picks up the id off
+    # ``request.state.correlation_id`` rather than re-parsing the
+    # header itself; inner of SecurityHeaders + RequestId so the
+    # ``X-Correlation-Id-Echo`` we write here lands before those
+    # touch the response (cd-iws5 / spec §11 "Client abstraction").
+    app.add_middleware(CorrelationIdMiddleware)
     app.add_middleware(
         DemoGuardrailMiddleware,
         settings=cfg,
@@ -1708,7 +1722,22 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         allow_origin_regex=None,
         allow_credentials=False,
         allow_methods=["GET", "HEAD", "OPTIONS", "POST", "PUT", "PATCH", "DELETE"],
-        allow_headers=["Authorization", "Content-Type", "X-CSRF", "X-Request-Id"],
+        # ``X-Correlation-Id`` is the spec §11 inbound a browser-origin
+        # SPA may stamp; without it the CORS preflight rejects the
+        # header before our middleware ever sees it.
+        allow_headers=[
+            "Authorization",
+            "Content-Type",
+            "X-CSRF",
+            "X-Correlation-Id",
+            "X-Request-Id",
+        ],
+        # Make the per-hop log-correlation handle and the spec-named
+        # echo readable to a same-document fetch caller. Without
+        # ``expose_headers`` only the CORS-safelisted response headers
+        # surface to JS — and our two correlation handles aren't on
+        # that list.
+        expose_headers=["X-Correlation-Id-Echo", "X-Request-Id"],
     )
 
     mailer, throttle, capabilities = _wire_services(app, cfg)

@@ -626,6 +626,14 @@ class TestMiddlewareWiring:
         assert names.index("SecurityHeadersMiddleware") < names.index(
             "WorkspaceContextMiddleware"
         )
+        # CorrelationIdMiddleware must run BEFORE WorkspaceContextMiddleware
+        # on the inbound path so ``request.state.correlation_id`` is
+        # populated when the tenancy resolver reads it (cd-iws5 / spec
+        # §11 "Client abstraction"). With ``user_middleware`` indexed
+        # outer→inner, the outer middleware comes earlier in the list.
+        assert names.index("CorrelationIdMiddleware") < names.index(
+            "WorkspaceContextMiddleware"
+        )
 
 
 # ---------------------------------------------------------------------------

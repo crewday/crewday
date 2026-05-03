@@ -65,6 +65,7 @@ from app.adapters.db.authz.models import RoleGrant
 from app.adapters.db.session import make_uow
 from app.adapters.db.workspace.models import UserWorkspace, Workspace
 from app.api.errors import problem_response
+from app.api.transport.correlation_id import CORRELATION_ID_STATE_ATTR
 from app.auth.session import (
     SESSION_COOKIE_NAME,
     SessionExpired,
@@ -805,7 +806,18 @@ class WorkspaceContextMiddleware(BaseHTTPMiddleware):
         call_next: Callable[[Request], Awaitable[Response]],
     ) -> Response:
         path = request.url.path
-        correlation_id = request.headers.get(CORRELATION_ID_HEADER) or new_ulid()
+        # Prefer the value the outer
+        # :class:`~app.api.transport.correlation_id.CorrelationIdMiddleware`
+        # already resolved from ``X-Correlation-Id`` and stashed on
+        # ``request.state`` (cd-iws5 / spec §11 "Client abstraction").
+        # Falling back to the legacy ``X-Request-Id`` inbound keeps
+        # this middleware self-contained for unit tests and for any
+        # composition that omits the outer middleware — e.g. tests in
+        # ``tests/unit/test_tenancy_middleware.py`` that mount only
+        # WCM. The outer middleware is the production source of truth.
+        correlation_id = getattr(request.state, CORRELATION_ID_STATE_ATTR, None)
+        if correlation_id is None:
+            correlation_id = request.headers.get(CORRELATION_ID_HEADER) or new_ulid()
 
         # 1) Bare-host skip paths (health, signup, static, docs, ...)
         #    and requests that aren't scoped ``/w/<slug>/...`` at all.
