@@ -251,6 +251,13 @@ class SqlAlchemyMeScheduleQueryRepository(MeScheduleQueryRepository):
         # Walks the ``ix_occurrence_workspace_assignee_starts``
         # composite index — leading ``workspace_id`` carries the tenant
         # filter, and ``starts_at`` ranges inside the index.
+        #
+        # Excludes ``state='cancelled'`` rows: the ``/me/schedule``
+        # surface drives the worker's live calendar, and a cancelled
+        # occurrence (e.g. swept by a schedule-delete cascade per §06)
+        # is no longer actionable. ``completed`` / ``skipped`` rows
+        # stay so the worker can still see "what I did this week" in
+        # the same window.
         rows = self._session.scalars(
             select(Occurrence)
             .where(
@@ -258,6 +265,7 @@ class SqlAlchemyMeScheduleQueryRepository(MeScheduleQueryRepository):
                 Occurrence.assignee_user_id == user_id,
                 Occurrence.starts_at >= window_start_utc,
                 Occurrence.starts_at <= window_end_utc,
+                Occurrence.state != "cancelled",
             )
             .order_by(Occurrence.starts_at.asc())
         ).all()

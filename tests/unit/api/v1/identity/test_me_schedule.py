@@ -181,6 +181,8 @@ def _seed_occurrence(
     assignee_user_id: str | None,
     starts_at: datetime,
     scheduled_for_local: str | None,
+    state: str = "pending",
+    cancellation_reason: str | None = None,
 ) -> str:
     with factory() as s:
         occurrence_id = new_ulid()
@@ -196,12 +198,12 @@ def _seed_occurrence(
                 ends_at=starts_at + timedelta(hours=1),
                 scheduled_for_local=scheduled_for_local,
                 originally_scheduled_for=scheduled_for_local,
-                state="pending",
+                state=state,
                 completed_at=None,
                 completed_by_user_id=None,
                 reviewer_user_id=None,
                 reviewed_at=None,
-                cancellation_reason=None,
+                cancellation_reason=cancellation_reason,
                 title="Clean room 12",
                 description_md=None,
                 priority="normal",
@@ -510,6 +512,56 @@ class TestMeSchedule:
         body = resp.json()
         assert body["leaves"] == []
         assert body["pending"]["leaves"] == []
+
+    def test_me_schedule_excludes_cancelled_tasks(
+        self,
+        worker_ctx: tuple[WorkspaceContext, sessionmaker[Session], str, str],
+    ) -> None:
+        """Cancelled occurrences never surface in the worker's calendar feed.
+
+        A schedule-delete cascade flips affected occurrences to
+        ``state='cancelled'`` (§06 "Schedules" — schedule deletion
+        sweeps its history). The aggregator must filter these out so
+        the live calendar UI doesn't render stale, no-longer-actionable
+        rows. ``completed`` / ``skipped`` rows still surface so the
+        worker can see "what I did this week".
+        """
+        ctx, factory, ws_id, worker_id = worker_ctx
+        live_id = _seed_occurrence(
+            factory,
+            workspace_id=ws_id,
+            assignee_user_id=worker_id,
+            starts_at=datetime(2026, 5, 4, 10, 0, tzinfo=UTC),
+            scheduled_for_local="2026-05-04T10:00:00",
+            state="pending",
+        )
+        completed_id = _seed_occurrence(
+            factory,
+            workspace_id=ws_id,
+            assignee_user_id=worker_id,
+            starts_at=datetime(2026, 5, 5, 10, 0, tzinfo=UTC),
+            scheduled_for_local="2026-05-05T10:00:00",
+            state="completed",
+        )
+        _seed_occurrence(
+            factory,
+            workspace_id=ws_id,
+            assignee_user_id=worker_id,
+            starts_at=datetime(2026, 5, 6, 10, 0, tzinfo=UTC),
+            scheduled_for_local="2026-05-06T10:00:00",
+            state="cancelled",
+            cancellation_reason="schedule deleted",
+        )
+
+        client = _client(ctx, factory)
+        resp = client.get(
+            "/me/schedule",
+            params={"from": "2026-05-01", "to": "2026-05-15"},
+        )
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        task_ids = [t["id"] for t in body["tasks"]]
+        assert task_ids == [live_id, completed_id]
 
     def test_me_schedule_window_validation(
         self,
