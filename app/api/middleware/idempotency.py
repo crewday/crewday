@@ -85,6 +85,7 @@ from starlette.types import ASGIApp
 from app.adapters.db.ops.models import IdempotencyKey
 from app.adapters.db.session import make_uow
 from app.api.errors import problem_response
+from app.config import Settings, get_settings
 from app.domain.errors import IdempotencyConflict
 from app.tenancy.current import tenant_agnostic
 from app.tenancy.middleware import ACTOR_STATE_ATTR, ActorIdentity
@@ -121,6 +122,8 @@ IDEMPOTENCY_REPLAY_HEADER: Final[str] = "Idempotency-Replay"
 
 # TTL for persisted cache rows. Spec §12 pins 24 h.
 IDEMPOTENCY_TTL_HOURS: Final[int] = 24
+
+DEFAULT_MAX_BODY_BYTES: Final[int] = 10 * 1024 * 1024
 
 # Subset of response headers the middleware replays on a cache hit.
 # Most headers (``Set-Cookie``, ``Content-Security-Policy``,
@@ -175,6 +178,10 @@ class _CachedResponse:
     status: int
     body: bytes
     headers: dict[str, str]
+
+
+class _RequestBodyTooLarge(Exception):
+    """Inbound body crossed the idempotency hashing buffer cap."""
 
 
 def is_exempt_path(path: str) -> bool:
@@ -238,17 +245,31 @@ def _collect_replayable_headers(headers: Iterable[tuple[str, str]]) -> dict[str,
     return out
 
 
-async def _read_request_body(request: Request) -> bytes:
+async def _read_request_body(request: Request, *, max_body_bytes: int) -> bytes:
     """Return the inbound body bytes.
 
     Starlette's :class:`BaseHTTPMiddleware` wraps the request in a
     :class:`starlette.middleware.base._CachedRequest` which caches
-    the body on ``_body`` the first time ``await request.body()``
-    is called, then replays it verbatim to the downstream handler
-    via ``wrapped_receive``. We simply read once and rely on that
-    cache — no manual ``_receive`` surgery required.
+    the body on ``_body`` the first time the middleware reads it,
+    then replays it verbatim to the downstream handler via
+    ``wrapped_receive``.
+
+    ``Request.body()`` has no size guard, so we stream into a bounded
+    buffer ourselves and stop as soon as the running total crosses
+    ``max_body_bytes``. Accepted bodies still land on ``_body`` so the
+    downstream handler sees the same bytes it would have seen before
+    this cap existed.
     """
-    return await request.body()
+    chunks: list[bytes] = []
+    total = 0
+    async for chunk in request.stream():
+        total += len(chunk)
+        if total > max_body_bytes:
+            raise _RequestBodyTooLarge()
+        chunks.append(chunk)
+    body = b"".join(chunks)
+    request._body = body
+    return body
 
 
 def _extract_token_id(request: Request) -> str | None:
@@ -371,6 +392,18 @@ def _conflict_response(
     )
 
 
+def _payload_too_large_response(request: Request, *, max_body_bytes: int) -> Response:
+    """Build the RFC 7807 ``payload_too_large`` 413 response."""
+    return problem_response(
+        request,
+        status=413,
+        type_name="payload_too_large",
+        title="Payload too large",
+        detail="Request body exceeds the idempotency cache size cap.",
+        extra={"max_body_bytes": max_body_bytes},
+    )
+
+
 @runtime_checkable
 class _Streamable(Protocol):
     """Duck-typed shape of Starlette's streaming-body responses.
@@ -452,19 +485,28 @@ class IdempotencyMiddleware(BaseHTTPMiddleware):
     isn't a ``POST`` carrying an ``Idempotency-Key`` header on a
     non-exempt path — those fall straight through to ``call_next``.
 
-    The constructor accepts an optional :class:`~app.util.clock.Clock`
-    so tests can pin ``created_at`` without monkeypatching
-    ``datetime.now``.
+    The constructor accepts optional settings, body-cap, and clock
+    overrides so tests can pin behaviour without monkeypatching
+    process globals.
     """
 
     def __init__(
         self,
         app: ASGIApp,
         *,
+        settings: Settings | None = None,
         clock: Clock | None = None,
+        max_body_bytes: int | None = None,
     ) -> None:
         super().__init__(app)
         self._clock = clock if clock is not None else SystemClock()
+        if max_body_bytes is not None:
+            if max_body_bytes < 1:
+                raise ValueError("max_body_bytes must be greater than 0")
+            self._max_body_bytes = max_body_bytes
+            return
+        settings_obj = settings if settings is not None else get_settings()
+        self._max_body_bytes = settings_obj.idempotency_max_body_bytes
 
     async def dispatch(
         self,
@@ -493,7 +535,16 @@ class IdempotencyMiddleware(BaseHTTPMiddleware):
             # cannot use the replay cache.
             return await call_next(request)
 
-        body = await _read_request_body(request)
+        try:
+            body = await _read_request_body(
+                request,
+                max_body_bytes=self._max_body_bytes,
+            )
+        except _RequestBodyTooLarge:
+            return _payload_too_large_response(
+                request,
+                max_body_bytes=self._max_body_bytes,
+            )
         body_hash = canonical_body_hash(body)
 
         # --- Cache lookup ---

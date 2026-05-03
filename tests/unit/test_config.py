@@ -64,6 +64,7 @@ class TestDefaults:
         assert s.root_key is None
         assert s.demo_mode is False
         assert s.demo_db_denylist == []
+        assert s.idempotency_max_body_bytes == 10 * 1024 * 1024
         assert s.worker == "internal"
         assert s.storage_backend == "localfs"
         assert s.ical_allow_private_addresses is False

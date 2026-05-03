@@ -266,8 +266,8 @@ Canonical error `type` URIs — full URI is
 - `validation` (422), `invalid_cursor` (422), `not_found` (404),
   `conflict` (409), `unauthorized` (401), `forbidden` (403),
   `rate_limited` (429), `service_unavailable` (503),
-  `upstream_unavailable` (502), `idempotency_conflict` (409),
-  `would_orphan_owners_group` (422),
+  `upstream_unavailable` (502), `payload_too_large` (413),
+  `idempotency_conflict` (409), `would_orphan_owners_group` (422),
   `last_owner_grant_protected` (409), `approval_required` (409).
 - `internal` (500) — fallback when an unregistered `DomainError`
   subclass reaches the handler. Unknown `HTTPException` statuses fall
@@ -289,6 +289,12 @@ Canonical error `type` URIs — full URI is
   visible API contract — clients never see it. See §02
   §"`idempotency_key`" for the full row shape and
   `app/api/middleware/idempotency.py` for the writer.
+- The idempotency middleware streams request bodies into a bounded
+  hash buffer before handler execution. The default cap is 10 MiB
+  (`CREWDAY_IDEMPOTENCY_MAX_BODY_BYTES`, minimum 1 byte). Crossing the
+  cap stops the read early and returns 413 `payload_too_large`
+  problem+json; the handler is not invoked and no idempotency cache
+  row is written.
 - Replays return the stored response with the
   `Idempotency-Replay: true` response header attached. A fresh
   request omits the header; a replay (server-cache hit) carries it.

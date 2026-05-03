@@ -150,6 +150,7 @@ class Settings(BaseSettings):
     rate_limit_token_per_minute: int = Field(default=60, ge=1)
     rate_limit_personal_me_per_minute: int = Field(default=600, ge=1)
     rate_limit_anonymous_per_minute: int = Field(default=30, ge=1)
+    idempotency_max_body_bytes: int = Field(default=10 * 1024 * 1024, ge=1)
 
     # --- Signup abuse mitigations (§15 "Self-serve abuse mitigations"; cd-055) ---
     # Cloudflare Turnstile server-side secret. ``None`` means "test /

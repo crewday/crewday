@@ -14,6 +14,7 @@ See ``docs/specs/12-rest-api.md`` §"Idempotency" and
 
 from __future__ import annotations
 
+import asyncio
 import json
 from collections.abc import Awaitable, Callable, Iterator
 from datetime import UTC, datetime, timedelta
@@ -42,6 +43,7 @@ from app.api.middleware.idempotency import (
     is_exempt_path,
     prune_expired_idempotency_keys,
 )
+from app.config import Settings
 from app.tenancy.middleware import ACTOR_STATE_ATTR, ActorIdentity
 from app.tenancy.orm_filter import install_tenant_filter
 from app.util.clock import FrozenClock
@@ -150,6 +152,7 @@ class TestIsExemptPath:
 def _build_stub_app(
     *,
     actor: ActorIdentity | None,
+    max_body_bytes: int = idempotency_mod.DEFAULT_MAX_BODY_BYTES,
 ) -> Starlette:
     """Return a :class:`Starlette` app with a single POST route and the middleware.
 
@@ -183,7 +186,10 @@ def _build_stub_app(
             ),
         ]
     )
-    app.add_middleware(IdempotencyMiddleware)
+    app.add_middleware(
+        IdempotencyMiddleware,
+        max_body_bytes=max_body_bytes,
+    )
     # Stamp actor INSIDE the idempotency middleware's view.
     # ``add_middleware`` prepends, so the last add is outermost —
     # our stamp-middleware must be registered AFTER the idempotency
@@ -308,6 +314,194 @@ class TestShortCircuitPaths:
         assert resp.status_code == 200
         with memory_factory() as session:
             assert session.query(IdempotencyKey).count() == 0
+
+    @pytest.mark.parametrize(
+        ("method", "path", "actor", "headers"),
+        [
+            (
+                "GET",
+                "/echo",
+                _actor("01HXTOK00000000000000TOK00"),
+                {IDEMPOTENCY_HEADER: "k"},
+            ),
+            ("POST", "/echo", _actor("01HXTOK00000000000000TOK00"), {}),
+            ("POST", "/echo", _actor(None), {IDEMPOTENCY_HEADER: "k"}),
+            ("POST", "/echo", None, {IDEMPOTENCY_HEADER: "k"}),
+            (
+                "POST",
+                "/payslips/01HXPAY00000000000000PAY00/payout_manifest",
+                _actor("01HXTOK00000000000000TOK00"),
+                {IDEMPOTENCY_HEADER: "k"},
+            ),
+        ],
+    )
+    def test_body_cap_does_not_apply_to_short_circuited_paths(
+        self,
+        method: str,
+        path: str,
+        actor: ActorIdentity | None,
+        headers: dict[str, str],
+        redirect_default_engine: None,
+        memory_factory: sessionmaker[Session],
+    ) -> None:
+        app = _build_stub_app(actor=actor, max_body_bytes=5)
+        with TestClient(app) as client:
+            resp = client.request(
+                method,
+                path,
+                content=b'{"abcdef":true}',
+                headers={"content-type": "application/json", **headers},
+            )
+
+        assert resp.status_code == 200
+        assert resp.json()["at"] == "handler"
+        with memory_factory() as session:
+            assert session.query(IdempotencyKey).count() == 0
+
+
+# ---------------------------------------------------------------------------
+# Request body cap
+# ---------------------------------------------------------------------------
+
+
+class TestRequestBodyCap:
+    """The idempotency body hash path rejects oversized payloads early."""
+
+    def test_constructor_max_body_bytes_overrides_settings(
+        self,
+        redirect_default_engine: None,
+    ) -> None:
+        handler_calls = 0
+
+        async def capped_handler(request: Request) -> Response:
+            nonlocal handler_calls
+            handler_calls += 1
+            raw = await request.body()
+            return JSONResponse({"size": len(raw)})
+
+        async def stamp_actor(
+            request: Request,
+            call_next: Callable[[Request], Awaitable[Response]],
+        ) -> Response:
+            setattr(
+                request.state,
+                ACTOR_STATE_ATTR,
+                _actor("01HXTOK00000000000000TOK00"),
+            )
+            return await call_next(request)
+
+        app = Starlette(routes=[Route("/capped", capped_handler, methods=["POST"])])
+        app.add_middleware(
+            IdempotencyMiddleware,
+            settings=Settings(
+                database_url="sqlite:///:memory:",
+                idempotency_max_body_bytes=5,
+            ),
+            max_body_bytes=20,
+        )
+        from starlette.middleware.base import BaseHTTPMiddleware
+
+        app.add_middleware(BaseHTTPMiddleware, dispatch=stamp_actor)
+
+        with TestClient(app) as client:
+            resp = client.post(
+                "/capped",
+                content=b'{"abcdef":true}',
+                headers={
+                    IDEMPOTENCY_HEADER: "override",
+                    "content-type": "application/json",
+                },
+            )
+
+        assert resp.status_code == 200
+        assert resp.json() == {"size": 15}
+        assert handler_calls == 1
+
+    def test_over_cap_post_returns_413_without_handler_or_cache(
+        self,
+        redirect_default_engine: None,
+        memory_factory: sessionmaker[Session],
+    ) -> None:
+        handler_calls = 0
+
+        async def capped_handler(request: Request) -> Response:
+            nonlocal handler_calls
+            handler_calls += 1
+            return JSONResponse({"ok": True})
+
+        async def stamp_actor(
+            request: Request,
+            call_next: Callable[[Request], Awaitable[Response]],
+        ) -> Response:
+            setattr(
+                request.state,
+                ACTOR_STATE_ATTR,
+                _actor("01HXTOK00000000000000TOK00"),
+            )
+            return await call_next(request)
+
+        app = Starlette(routes=[Route("/capped", capped_handler, methods=["POST"])])
+        app.add_middleware(
+            IdempotencyMiddleware,
+            settings=Settings(
+                database_url="sqlite:///:memory:",
+                idempotency_max_body_bytes=5,
+            ),
+        )
+        from starlette.middleware.base import BaseHTTPMiddleware
+
+        app.add_middleware(BaseHTTPMiddleware, dispatch=stamp_actor)
+
+        with TestClient(app) as client:
+            resp = client.post(
+                "/capped",
+                content=b"abcdef",
+                headers={
+                    IDEMPOTENCY_HEADER: "too-large",
+                    "content-type": "application/octet-stream",
+                },
+            )
+
+        assert resp.status_code == 413
+        assert resp.headers["content-type"].startswith("application/problem+json")
+        body = resp.json()
+        assert body["type"].endswith("/payload_too_large")
+        assert body["status"] == 413
+        assert body["max_body_bytes"] == 5
+        assert handler_calls == 0
+        with memory_factory() as session:
+            assert session.query(IdempotencyKey).count() == 0
+
+    def test_streaming_reader_stops_after_threshold_crosses(self) -> None:
+        async def run() -> None:
+            messages = [
+                {"type": "http.request", "body": b"abc", "more_body": True},
+                {"type": "http.request", "body": b"def", "more_body": True},
+                {"type": "http.request", "body": b"ghi", "more_body": False},
+            ]
+            read_count = 0
+
+            async def receive() -> dict[str, object]:
+                nonlocal read_count
+                read_count += 1
+                return messages.pop(0)
+
+            request = Request(
+                {
+                    "type": "http",
+                    "method": "POST",
+                    "path": "/capped",
+                    "headers": [],
+                },
+                receive,
+            )
+
+            with pytest.raises(idempotency_mod._RequestBodyTooLarge):
+                await idempotency_mod._read_request_body(request, max_body_bytes=5)
+            assert read_count == 2
+            assert len(messages) == 1
+
+        asyncio.run(run())
 
 
 # ---------------------------------------------------------------------------
@@ -461,7 +655,10 @@ class TestStatusClassAndHeaderPolicy:
             return await call_next(request)
 
         app = Starlette(routes=[Route("/boom", flaky_handler, methods=["POST"])])
-        app.add_middleware(IdempotencyMiddleware)
+        app.add_middleware(
+            IdempotencyMiddleware,
+            max_body_bytes=idempotency_mod.DEFAULT_MAX_BODY_BYTES,
+        )
         from starlette.middleware.base import BaseHTTPMiddleware
 
         app.add_middleware(BaseHTTPMiddleware, dispatch=stamp_actor)
@@ -496,7 +693,10 @@ class TestStatusClassAndHeaderPolicy:
             return await call_next(request)
 
         app = Starlette(routes=[Route("/bad", reject_handler, methods=["POST"])])
-        app.add_middleware(IdempotencyMiddleware)
+        app.add_middleware(
+            IdempotencyMiddleware,
+            max_body_bytes=idempotency_mod.DEFAULT_MAX_BODY_BYTES,
+        )
         from starlette.middleware.base import BaseHTTPMiddleware
 
         app.add_middleware(BaseHTTPMiddleware, dispatch=stamp_actor)
@@ -542,7 +742,10 @@ class TestStatusClassAndHeaderPolicy:
             return await call_next(request)
 
         app = Starlette(routes=[Route("/ck", cookie_handler, methods=["POST"])])
-        app.add_middleware(IdempotencyMiddleware)
+        app.add_middleware(
+            IdempotencyMiddleware,
+            max_body_bytes=idempotency_mod.DEFAULT_MAX_BODY_BYTES,
+        )
         from starlette.middleware.base import BaseHTTPMiddleware
 
         app.add_middleware(BaseHTTPMiddleware, dispatch=stamp_actor)
@@ -643,7 +846,10 @@ class TestIntegrityErrorRace:
             return await call_next(request)
 
         app = Starlette(routes=[Route("/r", echo_handler, methods=["POST"])])
-        app.add_middleware(IdempotencyMiddleware)
+        app.add_middleware(
+            IdempotencyMiddleware,
+            max_body_bytes=idempotency_mod.DEFAULT_MAX_BODY_BYTES,
+        )
         from starlette.middleware.base import BaseHTTPMiddleware
 
         app.add_middleware(BaseHTTPMiddleware, dispatch=stamp_actor)
@@ -716,7 +922,10 @@ class TestIntegrityErrorRace:
             return await call_next(request)
 
         app = Starlette(routes=[Route("/rc", echo_handler, methods=["POST"])])
-        app.add_middleware(IdempotencyMiddleware)
+        app.add_middleware(
+            IdempotencyMiddleware,
+            max_body_bytes=idempotency_mod.DEFAULT_MAX_BODY_BYTES,
+        )
         from starlette.middleware.base import BaseHTTPMiddleware
 
         app.add_middleware(BaseHTTPMiddleware, dispatch=stamp_actor)
@@ -1032,7 +1241,11 @@ class TestClockInjection:
 
         app = Starlette(routes=[Route("/echo", echo_handler, methods=["POST"])])
         # Inject the frozen clock directly via the constructor.
-        app.add_middleware(IdempotencyMiddleware, clock=FrozenClock(frozen))
+        app.add_middleware(
+            IdempotencyMiddleware,
+            clock=FrozenClock(frozen),
+            max_body_bytes=idempotency_mod.DEFAULT_MAX_BODY_BYTES,
+        )
         from starlette.middleware.base import BaseHTTPMiddleware
 
         app.add_middleware(BaseHTTPMiddleware, dispatch=stamp_actor)
