@@ -420,6 +420,15 @@ def _live_unit_count(session: Session, *, property_id: str) -> int:
     return int(result)
 
 
+def _lock_property_for_unit_delete(
+    session: Session, *, property_id: str, unit_id: str
+) -> None:
+    """Serialise the last-unit gate for sibling deletes on one property."""
+    stmt = select(Property.id).where(Property.id == property_id).with_for_update()
+    if session.scalars(stmt).one_or_none() is None:
+        raise UnitNotFound(unit_id)
+
+
 # ---------------------------------------------------------------------------
 # Reads
 # ---------------------------------------------------------------------------
@@ -723,18 +732,15 @@ def soft_delete_unit(
     now = resolved_clock.now()
     row = _load_unit_row(session, ctx, unit_id=unit_id)
 
-    # Concurrency note: the "is last unit" check + the tombstone
-    # write are two statements; a Postgres deployment running two
-    # concurrent ``soft_delete_unit`` calls against the last two
-    # remaining live units could race past the gate and end with
-    # zero live units. We accept the race on SQLite (single-writer)
-    # and rely on the "every property has >= 1 unit" invariant
-    # being soft (no DB-level CHECK enforces it; §04 "Invariants"
-    # says "enforced by application"). When the production target
-    # is firmly Postgres (cd-75wp REST API + production deploy) we
-    # tighten this to ``SELECT ... FOR UPDATE`` on the parent
-    # property row before the count, which serialises the gate
-    # under read-committed. Tracked in cd-zfcj.
+    # ``SELECT ... FOR UPDATE`` on the parent property serialises
+    # sibling deletes before the count under Postgres READ COMMITTED.
+    # SQLite compiles the lock away and keeps its single-writer
+    # behaviour.
+    _lock_property_for_unit_delete(
+        session,
+        property_id=row.property_id,
+        unit_id=row.id,
+    )
     if _live_unit_count(session, property_id=row.property_id) <= 1:
         raise LastUnitProtected(
             f"cannot soft-delete the last remaining unit on property "
