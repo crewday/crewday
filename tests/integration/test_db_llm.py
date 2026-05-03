@@ -429,6 +429,10 @@ class TestMigrationShape:
         assert indexes["ix_approval_request_workspace_status_created"][
             "column_names"
         ] == ["workspace_id", "status", "created_at"]
+        assert "ix_approval_request_pending_expires" in indexes
+        assert indexes["ix_approval_request_pending_expires"]["column_names"] == [
+            "expires_at"
+        ]
 
     def test_llm_usage_columns(self, engine: Engine) -> None:
         cols = {c["name"]: c for c in inspect(engine).get_columns("llm_usage")}

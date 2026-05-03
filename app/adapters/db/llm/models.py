@@ -564,6 +564,12 @@ class ApprovalRequest(Base):
             "status",
             "created_at",
         ),
+        Index(
+            "ix_approval_request_pending_expires",
+            "expires_at",
+            sqlite_where=text("status = 'pending'"),
+            postgresql_where=text("status = 'pending'"),
+        ),
     )
 
 

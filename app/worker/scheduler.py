@@ -265,13 +265,9 @@ APPROVAL_TTL_JOB_ID: str = "approval_ttl_sweep"
 # the row's ``expires_at`` to ``created_at + 7 days``; once a row has
 # slipped past that boundary the queue depth on the desk surface
 # should converge within one tick. 15 min matches the cron cadence
-# pinned in the §11 prose (``*/15 * * * *``). The current cd-9ghv
-# slice rides the existing ``ix_approval_request_workspace_status_
-# created`` index for the per-tenant queue path; the cross-tenant
-# TTL sweep falls back to a status-filtered scan (acceptable for
-# v1 — pending counts are workspace-bounded). A future
-# ``(status, expires_at)`` covering index is a Beads follow-up
-# (cd-approval-ttl-index) for fleets with sustained pending depth.
+# pinned in the §11 prose (``*/15 * * * *``). The cross-tenant sweep
+# rides ``ix_approval_request_pending_expires`` so due pending rows
+# are found by ``expires_at`` without scanning terminal history.
 APPROVAL_TTL_INTERVAL_SECONDS: int = 900
 
 
