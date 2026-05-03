@@ -895,10 +895,15 @@ class TestRecoveryKillSwitch:
         factory = sessionmaker(bind=engine, expire_on_commit=False, class_=Session)
         with factory() as s:
             assert s.scalars(select(MagicLinkNonce)).all() == []
-            # The disabled-by-workspace audit row landed.
+            # The disabled-by-workspace audit row landed. Scope by
+            # ``entity_id == user_id`` so a sibling test on the same
+            # xdist worker that wrote a ``recovery.disabled_by_workspace``
+            # row (cd-m6p5) cannot pollute the count even when the
+            # broad pre-sweep is bypassed by an FK collision on PG.
             disabled = s.scalars(
                 select(AuditLog).where(
-                    AuditLog.action == "recovery.disabled_by_workspace"
+                    AuditLog.action == "recovery.disabled_by_workspace",
+                    AuditLog.entity_id == user_id,
                 )
             ).all()
             assert len(disabled) == 1
@@ -906,11 +911,14 @@ class TestRecoveryKillSwitch:
             assert row.entity_id == user_id
             assert isinstance(row.diff, dict)
             assert row.diff["reason"] == "workspace_kill_switch"
-            # No ``recovery.requested`` row — the domain branch
-            # short-circuits before the primary UoW audit.
+            # No ``recovery.requested`` row for THIS user — the domain
+            # branch short-circuits before the primary UoW audit.
             assert (
                 s.scalars(
-                    select(AuditLog).where(AuditLog.action == "recovery.requested")
+                    select(AuditLog).where(
+                        AuditLog.action == "recovery.requested",
+                        AuditLog.entity_id == user_id,
+                    )
                 ).all()
                 == []
             )
