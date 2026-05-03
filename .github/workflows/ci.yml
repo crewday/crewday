@@ -358,6 +358,32 @@ jobs:
             sleep 2
           done
           echo "dev stack healthy after ${SECONDS}s"
+      - name: Emit SPA surface manifest (cd-qv2l)
+        # The §17 360 px sitemap walker reads the authenticated route
+        # list from ``app/web/dist/_surface.json`` (emitted by the
+        # ``crewday:emit-surface-manifest`` Vite plugin at build time).
+        # The dev compose stack only runs ``vite dev`` — no production
+        # build, no manifest — so without this step the helper falls
+        # back to the 5-route :data:`PILOT_AUTHENTICATED_ROUTES` smoke
+        # subset and regressions on stays / scheduler / templates / etc.
+        # slip through CI.
+        #
+        # We piggyback on the ``web-dev`` container which already
+        # finished ``npm install`` during stack bring-up (waited on by
+        # the healthz gate above). ``vite build`` skips the SPA's
+        # ``tsc -b`` prelude — type-check is owned by the standalone
+        # ``type`` job; running it here would double-charge CI for the
+        # same gate and red-fail the e2e job on unrelated TS noise.
+        # The bind-mount (``../app/web:/web``) means the emitted
+        # ``/web/dist/_surface.json`` lands on the host filesystem at
+        # ``app/web/dist/_surface.json`` — exactly where the helper
+        # reads it.
+        run: |
+          set -euo pipefail
+          docker compose -f mocks/docker-compose.yml -f mocks/docker-compose.e2e.yml \
+              exec -T web-dev npx vite build
+          test -s app/web/dist/_surface.json
+          echo "surface manifest emitted ($(wc -c <app/web/dist/_surface.json) bytes)"
       - name: pytest (e2e)
         # ``-v`` because failures here drive a slower triage loop than
         # unit/integration; per-test names in the log are worth the
@@ -371,6 +397,12 @@ jobs:
         # ``127.0.0.1:8100`` dev stack and the shared
         # ``tests/e2e/_artifacts/`` output dir. The conftest already
         # routes artefacts under that dir via ``--output``.
+        # ``CREWDAY_REQUIRE_SURFACE_MANIFEST`` makes the sitemap
+        # helper fail if the build step above did not leave a usable
+        # ``app/web/dist/_surface.json``; CI must never drop back to
+        # the 5-route smoke subset.
+        env:
+          CREWDAY_REQUIRE_SURFACE_MANIFEST: "1"
         run: uv run pytest tests/e2e -v -n0 --tracing=retain-on-failure --video=retain-on-failure --screenshot=only-on-failure
       - name: Upload e2e artefacts
         # Failure-only — green runs would otherwise upload empty

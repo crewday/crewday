@@ -89,7 +89,7 @@ export default function IssueNewPage() {
       {header}
       <section className="phone__section">
         <p className="muted">
-          You can also report this in <Link to="/chat">Chat</Link> — it's usually faster.
+          You can also report this in <Link to="/chat" className="issue-new__chat-link">Chat</Link> — it's usually faster.
         </p>
         {submitError && <p className="muted" role="alert">{submitError}</p>}
 

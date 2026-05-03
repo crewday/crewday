@@ -1,6 +1,7 @@
 /* ── Buttons & forms ────────────────────────────────────────── */
 .btn {
   display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  min-height: 44px;
   padding: 8px 14px; border-radius: 999px;
   border: 1px solid transparent; cursor: pointer;
   font-family: "Inter Tight", sans-serif; font-size: 14px; font-weight: 500;
@@ -20,12 +21,10 @@
   opacity: 0.55; cursor: not-allowed; transform: none;
 }
 
-/* Full-width button. Pairs with any color + size modifier; guarantees
-   a 44px minimum tap target (iOS HIG / Material) so even a .btn--sm
-   promoted to block is still thumb-safe on phones. Use standalone
-   for a single card CTA, or inside .btn-group--stack/--split for a
-   row/column of equally-sized actions. */
-.btn--block { width: 100%; min-height: 44px; }
+/* Full-width button. Pairs with any color + size modifier. Use
+   standalone for a single card CTA, or inside .btn-group--stack/--split
+   for a row/column of equally-sized actions. */
+.btn--block { width: 100%; }
 .btn--block.btn--sm { padding-block: 10px; }
 .btn--block.btn--lg { min-height: 52px; }
 
@@ -333,4 +332,3 @@
     margin-top: auto; flex-wrap: wrap; justify-content: space-between;
   }
 }
-

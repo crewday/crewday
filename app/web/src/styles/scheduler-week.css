@@ -271,11 +271,16 @@
 }
 .schedule__monthbar-label { font-weight: 600; }
 .schedule__monthbar-jump {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 44px;
+  min-height: 44px;
   font: inherit;
   font-family: inherit;
   font-size: 12px;
   font-weight: 600;
-  padding: 4px 10px;
+  padding: 4px 12px;
   border-radius: 999px;
   background: var(--moss-soft);
   color: var(--moss);
@@ -366,10 +371,15 @@
    Phone: sits above `.phone__dock` and `BottomTabs`. Desktop: sits
    above the document edge (no dock on desktop). */
 .schedule__today-fab {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   position: fixed;
   right: 16px;
   bottom: calc(108px + env(safe-area-inset-bottom, 0px));
   z-index: 18;
+  min-width: 44px;
+  min-height: 44px;
   padding: 10px 16px;
   border-radius: 999px;
   font: inherit;
@@ -436,4 +446,26 @@
   display: grid;
   grid-template-columns: repeat(7, minmax(0, 1fr));
   gap: 6px;
+}
+
+@media (max-width: 520px) {
+  .schedule-week__header-row {
+    display: none;
+  }
+  .schedule-week__row {
+    grid-template-columns: 1fr;
+  }
+  .schedule-week__row .schedule-day {
+    padding: 12px;
+  }
+  .schedule-week__row .schedule-day__timeline {
+    grid-template-columns: 28px 18px 1fr;
+  }
+  .schedule-week__row .schedule-day__header {
+    padding-bottom: 8px;
+  }
+  .schedule-week__row .schedule-day__wd,
+  .schedule-week__row .schedule-day__mo {
+    display: inline;
+  }
 }

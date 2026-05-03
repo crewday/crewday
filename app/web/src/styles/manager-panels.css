@@ -7,7 +7,10 @@
   gap: 16px;
   margin-bottom: 14px;
 }
-.panel__head > .btn { flex-shrink: 0; }
+.panel__head > .btn,
+.panel__head > .link {
+  flex-shrink: 0;
+}
 .panel__head-stack {
   display: flex; flex-direction: column; gap: 4px;
   min-width: 0;
@@ -51,9 +54,24 @@
 
 .link { color: var(--moss); font-weight: 500; font-size: 13px; }
 .link--muted { color: var(--ink-3); }
+.table .link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 44px;
+  min-height: 44px;
+}
 
 .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); margin-bottom: 16px; overflow-x: auto; }
-.tab-link { padding: 10px 14px; color: var(--ink-3); font-weight: 500; font-size: 14px; border-bottom: 2px solid transparent; cursor: pointer; white-space: nowrap; background: transparent; border-left: 0; border-right: 0; border-top: 0; font-family: inherit; }
+.panel__head > .link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  min-width: 44px;
+}
+
+.tab-link { display: inline-flex; align-items: center; min-height: 44px; padding: 10px 14px; color: var(--ink-3); font-weight: 500; font-size: 14px; border-bottom: 2px solid transparent; cursor: pointer; white-space: nowrap; background: transparent; border-left: 0; border-right: 0; border-top: 0; font-family: inherit; }
 .tab-link--active { color: var(--ink); border-bottom-color: var(--moss); }
 
 /* ── Approvals / issues ───────────────────────────────────── */
@@ -534,4 +552,3 @@
   background: var(--card); color: var(--ink-1); padding: 10px 12px;
   font: inherit; text-transform: uppercase;
 }
-

@@ -94,6 +94,14 @@
 .phone__section { padding: 16px 20px; }
 .phone__section--hero { padding-top: 18px; }
 .phone__section--detail { padding-bottom: 160px; }
+.issue-new__chat-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 44px;
+  min-height: 44px;
+  vertical-align: middle;
+}
 
 /* "Hi, <first name>" + date. Only rendered on the Me page; everything
    else skips the greeting because it was noise on functional views. */
@@ -135,6 +143,7 @@
 }
 .phone__dock > .booking-hint {
   width: 100%;
+  min-height: 44px;
   padding: 7px 16px;
   border-radius: 0;
   border: none;
@@ -360,4 +369,3 @@
 @media (max-width: 360px) {
   .phone__section { padding: 14px; }
 }
-

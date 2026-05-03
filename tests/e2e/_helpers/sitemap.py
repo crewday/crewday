@@ -17,17 +17,31 @@ falls back to :data:`PILOT_AUTHENTICATED_ROUTES`, the original cd-ndmv
 smoke list, so the e2e suite still has *some* coverage even with a
 stale ``dist/``.
 
-**CI gap (cd-7zfr follow-up).** ``mocks/docker-compose.yml`` runs the
-SPA via ``vite dev`` (``web-dev`` container, ``npm run dev``); no
-production build runs in CI, so ``dist/_surface.json`` is absent and
-:func:`load_authenticated_routes` falls back to
-:data:`PILOT_AUTHENTICATED_ROUTES` on every CI run. Locally, run
-``pnpm -C app/web build`` once before invoking ``pytest tests/e2e``
-to exercise the full 45-route manifest. The fallback emits a WARNING
-so the gap is visible in pytest's ``-v`` log; wiring the build into
-CI (e2e job adds a pnpm install + build step before
-``docker compose up``) is the canonical fix and is left as a
-follow-up Beads task.
+**CI** runs ``npx vite build`` inside the ``web-dev`` container after
+the dev stack is healthy (``.github/workflows/ci.yml`` ▸ the e2e job
+▸ "Emit SPA surface manifest" step, cd-qv2l). The web-dev bind-mount
+(``../app/web:/web``) projects ``/web/dist/_surface.json`` onto the
+host's ``app/web/dist/_surface.json``, which is exactly where this
+helper reads it. The e2e job also sets
+``CREWDAY_REQUIRE_SURFACE_MANIFEST=1`` so a missing or malformed
+manifest fails instead of falling back to the 5-route smoke subset.
+
+**Locally**, run ``npm run build`` (or ``npx vite build``) inside
+``app/web/`` once before invoking ``pytest tests/e2e`` to exercise
+the full 45-route manifest. The fallback to
+:data:`PILOT_AUTHENTICATED_ROUTES` emits a WARNING so the gap is
+visible in pytest's ``-v`` log when the SPA hasn't been built locally.
+
+**``/admin/*`` filter (cd-qv2l).** The walker test
+:func:`tests.e2e.test_sitemap_mobile_walk
+.test_authenticated_sitemap_at_360_walks_runtime_routes` filters out
+``/admin/...`` routes because ``login_with_dev_session(role="owner")``
+mints a workspace-scoped grant only — the admin shell gates on
+``is_deployment_admin`` (a separate deployment-scope grant that
+``scripts/dev_login.py`` does not currently expose). The 10 admin
+routes still ship in the manifest for native shells and a future
+admin-walk test; they just aren't reachable from the current
+dev-login fast path.
 
 Each route's check is **route-scoped** — a failure on one route
 collects, but the walker keeps going so the test sees the full
@@ -39,16 +53,19 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Final
+from urllib.parse import urlparse
 
 from playwright.sync_api import Locator, Page
 
 __all__ = [
     "PILOT_AUTHENTICATED_ROUTES",
+    "REQUIRE_SURFACE_MANIFEST_ENV",
     "SURFACE_MANIFEST_PATH",
     "TAP_TARGET_MIN_PX",
     "RouteFinding",
@@ -83,6 +100,8 @@ PILOT_AUTHENTICATED_ROUTES: Final[tuple[str, ...]] = (
     "/employees",
 )
 
+REQUIRE_SURFACE_MANIFEST_ENV: Final[str] = "CREWDAY_REQUIRE_SURFACE_MANIFEST"
+
 
 # Default location of the SPA build manifest. Computed by walking up
 # from this file (``tests/e2e/_helpers/sitemap.py``) to the repo root
@@ -96,6 +115,8 @@ SURFACE_MANIFEST_PATH: Final[Path] = (
 
 def load_authenticated_routes(
     manifest_path: Path | None = None,
+    *,
+    require_manifest: bool | None = None,
 ) -> tuple[str, ...]:
     """Return the authenticated SPA routes from the build manifest.
 
@@ -112,61 +133,65 @@ def load_authenticated_routes(
     * the JSON is valid but missing the ``authenticated`` key, or that
       key is not a list of strings.
 
-    Never raises — the e2e suite must still be able to run with the
-    smaller pilot list when the SPA isn't built. Pass ``manifest_path``
-    to override the default location (used by the helper unit tests).
+    Set ``CREWDAY_REQUIRE_SURFACE_MANIFEST=1`` (or pass
+    ``require_manifest=True``) to turn those fallback cases into
+    :class:`RuntimeError`. CI uses that strict mode after emitting the
+    manifest so it cannot silently fall back to the 5-route smoke
+    subset.
     """
     path = manifest_path if manifest_path is not None else SURFACE_MANIFEST_PATH
+    strict = (
+        os.environ.get(REQUIRE_SURFACE_MANIFEST_ENV) == "1"
+        if require_manifest is None
+        else require_manifest
+    )
+
+    def fallback(reason: str) -> tuple[str, ...]:
+        message = f"surface manifest {path} {reason}"
+        if strict:
+            raise RuntimeError(f"{message}; fallback disabled by strict mode")
+        _log.warning("%s; falling back to pilot routes", message)
+        return PILOT_AUTHENTICATED_ROUTES
+
     try:
         raw = path.read_text(encoding="utf-8")
     except FileNotFoundError:
-        _log.warning(
-            "surface manifest %s not found; falling back to pilot routes", path
-        )
-        return PILOT_AUTHENTICATED_ROUTES
+        return fallback("not found")
     except OSError as exc:
-        _log.warning(
-            "surface manifest %s unreadable (%s); falling back to pilot routes",
-            path,
-            exc,
-        )
-        return PILOT_AUTHENTICATED_ROUTES
+        return fallback(f"unreadable ({exc})")
 
     try:
         data: object = json.loads(raw)
     except json.JSONDecodeError as exc:
-        _log.warning(
-            "surface manifest %s is not valid JSON (%s); falling back to pilot routes",
-            path,
-            exc,
-        )
-        return PILOT_AUTHENTICATED_ROUTES
+        return fallback(f"is not valid JSON ({exc})")
 
     if not isinstance(data, dict):
-        _log.warning(
-            "surface manifest %s is not a JSON object; falling back to pilot routes",
-            path,
-        )
-        return PILOT_AUTHENTICATED_ROUTES
+        return fallback("is not a JSON object")
 
     routes = data.get("authenticated")
     if not isinstance(routes, list):
-        _log.warning(
-            "surface manifest %s missing/invalid 'authenticated' list; "
-            "falling back to pilot routes",
-            path,
-        )
-        return PILOT_AUTHENTICATED_ROUTES
+        return fallback("missing/invalid 'authenticated' list")
 
     if not all(isinstance(entry, str) for entry in routes):
-        _log.warning(
-            "surface manifest %s 'authenticated' contains non-string entries; "
-            "falling back to pilot routes",
-            path,
-        )
-        return PILOT_AUTHENTICATED_ROUTES
+        return fallback("'authenticated' contains non-string entries")
 
-    return tuple(routes)
+    if not routes:
+        return fallback("has no authenticated routes")
+
+    if any(not entry.startswith("/") for entry in routes):
+        return fallback("'authenticated' contains non-path entries")
+
+    unique_routes = tuple(dict.fromkeys(routes))
+    if len(unique_routes) != len(routes):
+        return fallback("'authenticated' contains duplicate routes")
+
+    if strict and len(unique_routes) <= len(PILOT_AUTHENTICATED_ROUTES):
+        raise RuntimeError(
+            f"surface manifest {path} lists only {len(unique_routes)} authenticated "
+            "route(s); expected the full SPA surface, not the pilot smoke subset"
+        )
+
+    return unique_routes
 
 
 @dataclass(frozen=True)
@@ -238,7 +263,7 @@ def walk_authenticated_sitemap(
     for route in routes:
         result.visited.append(route)
         try:
-            page.goto(f"{base_url.rstrip('/')}{route}", wait_until="domcontentloaded")
+            _navigate_to_route(page, base_url=base_url, route=route)
         except Exception as exc:
             result.findings.append(
                 RouteFinding(route=route, kind="navigation_error", detail=repr(exc))
@@ -304,6 +329,54 @@ _TAPPABLE_SELECTOR: Final[str] = (
 )
 
 
+def _navigate_to_route(page: Page, *, base_url: str, route: str) -> None:
+    """Render one route without reloading the SPA for every same-origin path."""
+    target = f"{base_url.rstrip('/')}{route}"
+    base = urlparse(base_url)
+    current = urlparse(page.url)
+    if base.scheme not in {"http", "https"} or (
+        current.scheme,
+        current.netloc,
+    ) != (base.scheme, base.netloc):
+        page.goto(target, wait_until="domcontentloaded", timeout=45_000)
+        _wait_for_route_to_settle(page, route=route, base_scheme=base.scheme)
+        return
+
+    page.evaluate(
+        """
+        (path) => {
+          window.history.pushState({}, "", path);
+          window.dispatchEvent(new PopStateEvent("popstate", {
+            state: window.history.state,
+          }));
+        }
+        """,
+        route,
+    )
+    _wait_for_route_to_settle(page, route=route, base_scheme=base.scheme)
+
+
+def _wait_for_route_to_settle(page: Page, *, route: str, base_scheme: str) -> None:
+    if base_scheme not in {"http", "https"} or not route.startswith("/"):
+        return
+
+    page.wait_for_function(
+        "(path) => window.location.pathname === path",
+        arg=route,
+        timeout=5_000,
+    )
+    page.evaluate(
+        """
+        () => new Promise((resolve) => {
+          requestAnimationFrame(() => requestAnimationFrame(resolve));
+        })
+        """
+    )
+    final_path = urlparse(page.url).path
+    if final_path != route:
+        raise RuntimeError(f"route {route!r} redirected to {final_path!r}")
+
+
 def _check_tap_targets(page: Page, *, route: str) -> Iterator[RouteFinding]:
     """Yield tap-target findings for visible tappables on the current page.
 
@@ -312,30 +385,47 @@ def _check_tap_targets(page: Page, *, route: str) -> Iterator[RouteFinding]:
     visible-and-tappable elements; an off-screen ``display:none``
     button has no human-facing tap surface.
     """
-    locators = page.locator(_TAPPABLE_SELECTOR)
-    count = locators.count()
-    for index in range(count):
-        node = locators.nth(index)
-        if not node.is_visible():
+    raw_findings = page.evaluate(
+        """
+        ([selector, minPx]) => {
+          const findings = [];
+          for (const el of document.querySelectorAll(selector)) {
+            const cs = getComputedStyle(el);
+            if (cs.display === 'none' || cs.visibility === 'hidden') continue;
+
+            const rect = el.getBoundingClientRect();
+            if (rect.width === 0 || rect.height === 0) continue;
+            if (rect.width >= minPx && rect.height >= minPx) continue;
+
+            findings.push({
+              tag: el.tagName.toLowerCase(),
+              width: Math.trunc(rect.width),
+              height: Math.trunc(rect.height),
+              text: (el.textContent || '').trim().slice(0, 41),
+            });
+          }
+          return findings;
+        }
+        """,
+        [_TAPPABLE_SELECTOR, TAP_TARGET_MIN_PX],
+    )
+    if not isinstance(raw_findings, list):
+        return
+
+    for item in raw_findings:
+        if not isinstance(item, dict):
             continue
-        box = node.bounding_box()
-        if box is None or box["width"] == 0 or box["height"] == 0:
+        tag = item.get("tag")
+        width = item.get("width")
+        height = item.get("height")
+        text = item.get("text")
+        if (
+            not isinstance(tag, str)
+            or not isinstance(width, int)
+            or not isinstance(height, int)
+            or not isinstance(text, str)
+        ):
             continue
-        width = int(box["width"])
-        height = int(box["height"])
-        if width >= TAP_TARGET_MIN_PX and height >= TAP_TARGET_MIN_PX:
-            continue
-        # Best-effort label — a CSS selector path would be ideal but
-        # Playwright doesn't expose it for arbitrary nodes. The
-        # element's text + tag is enough to grep audit on a regression.
-        try:
-            text = (node.inner_text(timeout=500) or "").strip()
-        except Exception:
-            text = ""
-        try:
-            tag = node.evaluate("el => el.tagName.toLowerCase()")
-        except Exception:
-            tag = "?"
         label = (text[:40] + "…") if len(text) > 40 else text
         yield RouteFinding(
             route=route,

@@ -43,6 +43,7 @@ from tests.e2e._helpers.auth import (
 )
 from tests.e2e._helpers.sitemap import (
     PILOT_AUTHENTICATED_ROUTES,
+    REQUIRE_SURFACE_MANIFEST_ENV,
     load_authenticated_routes,
 )
 
@@ -292,6 +293,24 @@ class TestLoadAuthenticatedRoutes:
         assert routes == PILOT_AUTHENTICATED_ROUTES
         assert any("not found" in rec.message for rec in caplog.records)
 
+    def test_strict_mode_raises_when_manifest_missing(self, tmp_path: Path) -> None:
+        """Strict mode is CI's guard against silently using the smoke subset."""
+        missing = tmp_path / "does-not-exist.json"
+        with pytest.raises(RuntimeError, match="fallback disabled"):
+            load_authenticated_routes(
+                manifest_path=missing,
+                require_manifest=True,
+            )
+
+    def test_env_strict_mode_raises_when_manifest_missing(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """CI enables strict mode through an env var, not a test-code branch."""
+        monkeypatch.setenv(REQUIRE_SURFACE_MANIFEST_ENV, "1")
+        missing = tmp_path / "does-not-exist.json"
+        with pytest.raises(RuntimeError, match="fallback disabled"):
+            load_authenticated_routes(manifest_path=missing)
+
     def test_falls_back_on_malformed_json(
         self, tmp_path: Path, caplog: pytest.LogCaptureFixture
     ) -> None:
@@ -316,6 +335,62 @@ class TestLoadAuthenticatedRoutes:
             "missing/invalid 'authenticated' list" in rec.message
             for rec in caplog.records
         )
+
+    def test_falls_back_when_authenticated_list_is_empty(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """An empty manifest would make the walker visit zero routes."""
+        manifest = tmp_path / "_surface.json"
+        manifest.write_text('{"version": 1, "authenticated": []}', encoding="utf-8")
+        with caplog.at_level(logging.WARNING, logger="tests.e2e._helpers.sitemap"):
+            routes = load_authenticated_routes(manifest_path=manifest)
+        assert routes == PILOT_AUTHENTICATED_ROUTES
+        assert any(
+            "has no authenticated routes" in rec.message for rec in caplog.records
+        )
+
+    def test_strict_mode_rejects_pilot_sized_manifest(self, tmp_path: Path) -> None:
+        """CI should read the full SPA surface, not a generated 5-route subset."""
+        manifest = tmp_path / "_surface.json"
+        manifest.write_text(
+            '{"version": 1, "authenticated": ['
+            '"/today", "/schedule", "/dashboard", "/properties", "/employees"'
+            "]}",
+            encoding="utf-8",
+        )
+        with pytest.raises(RuntimeError, match="pilot smoke subset"):
+            load_authenticated_routes(
+                manifest_path=manifest,
+                require_manifest=True,
+            )
+
+    def test_falls_back_when_authenticated_routes_are_not_paths(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Manifest route entries must be SPA paths, not relative or absolute URLs."""
+        manifest = tmp_path / "_surface.json"
+        manifest.write_text(
+            '{"version": 1, "authenticated": ["/today", "dashboard"]}',
+            encoding="utf-8",
+        )
+        with caplog.at_level(logging.WARNING, logger="tests.e2e._helpers.sitemap"):
+            routes = load_authenticated_routes(manifest_path=manifest)
+        assert routes == PILOT_AUTHENTICATED_ROUTES
+        assert any("non-path entries" in rec.message for rec in caplog.records)
+
+    def test_falls_back_when_authenticated_routes_have_duplicates(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Duplicate routes can make a truncated manifest look large enough."""
+        manifest = tmp_path / "_surface.json"
+        manifest.write_text(
+            '{"version": 1, "authenticated": ["/today", "/today"]}',
+            encoding="utf-8",
+        )
+        with caplog.at_level(logging.WARNING, logger="tests.e2e._helpers.sitemap"):
+            routes = load_authenticated_routes(manifest_path=manifest)
+        assert routes == PILOT_AUTHENTICATED_ROUTES
+        assert any("duplicate routes" in rec.message for rec in caplog.records)
 
     def test_falls_back_when_top_level_is_not_object(
         self, tmp_path: Path, caplog: pytest.LogCaptureFixture

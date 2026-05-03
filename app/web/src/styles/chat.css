@@ -117,7 +117,7 @@
 }
 .chat-composer__icon {
   flex: 0 0 auto;
-  width: 40px; height: 40px;
+  width: 44px; height: 44px;
   border-radius: 50%;
   border: 0;
   background: transparent;
@@ -131,7 +131,7 @@
   color: var(--ink-2);
 }
 .chat-composer__icon--inline {
-  width: 32px; height: 32px;
+  width: 44px; height: 44px;
   margin-right: -4px;
 }
 .chat-composer__field {
@@ -159,7 +159,7 @@
 .chat-composer textarea::placeholder { color: var(--ink-3); }
 .chat-composer__send {
   flex: 0 0 auto;
-  width: 42px; height: 42px;
+  width: 44px; height: 44px;
   border-radius: 50%;
   background: var(--moss); color: #fff;
   border: 0; cursor: pointer;
@@ -222,4 +222,3 @@
     padding: 12px 56px calc(12px + env(safe-area-inset-bottom, 0px));
   }
 }
-

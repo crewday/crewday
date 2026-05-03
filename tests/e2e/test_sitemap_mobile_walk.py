@@ -37,12 +37,15 @@ cookie, not the full passkey ceremony.
 
 from __future__ import annotations
 
+import os
 from typing import Final
 
 from playwright.sync_api import BrowserContext
 
 from tests.e2e._helpers.auth import login_with_dev_session
 from tests.e2e._helpers.sitemap import (
+    PILOT_AUTHENTICATED_ROUTES,
+    REQUIRE_SURFACE_MANIFEST_ENV,
     assert_no_findings,
     load_authenticated_routes,
     walk_authenticated_sitemap,
@@ -50,6 +53,9 @@ from tests.e2e._helpers.sitemap import (
 
 WALK_EMAIL: Final[str] = "e2e-pilot-mobile-walk@dev.local"
 WALK_SLUG: Final[str] = "e2e-pilot-mobile-walk"
+DRAWER_EMAIL: Final[str] = "e2e-closed-drawer@dev.local"
+DRAWER_SLUG: Final[str] = "e2e-closed-drawer"
+ROLE_COOKIE_NAME: Final[str] = "crewday_role"
 
 # A 600 px-wide replaced element (SVG) forces horizontal scroll
 # inside a 360 px viewport. Replaced elements (SVG, IMG, IFRAME)
@@ -66,6 +72,21 @@ _OVERFLOW_PAGE: Final[str] = (
     "<button style='width:48px;height:48px'>tap</button>"
     "</body></html>"
 )
+
+
+def _set_manager_role_preference(context: BrowserContext, *, base_url: str) -> None:
+    context.add_cookies(
+        [
+            {
+                "name": ROLE_COOKIE_NAME,
+                "value": "manager",
+                "url": base_url.rstrip("/") or base_url,
+                "secure": False,
+                "httpOnly": False,
+                "sameSite": "Lax",
+            }
+        ]
+    )
 
 
 def test_walker_detects_known_horizontal_scroll_regression(
@@ -133,12 +154,18 @@ def test_authenticated_sitemap_at_360_walks_runtime_routes(
         workspace_slug=WALK_SLUG,
         role="owner",
     )
+    _set_manager_role_preference(context, base_url=base_url)
     page = context.new_page()
-    page.goto(f"{base_url.rstrip('/')}/dashboard", wait_until="domcontentloaded")
-    page.locator(".desk").wait_for(state="attached")
+    page.goto(f"{base_url.rstrip('/')}/dashboard", wait_until="commit", timeout=45_000)
+    page.locator(".desk").wait_for(state="attached", timeout=45_000)
     walk_routes = tuple(
         route for route in load_authenticated_routes() if not route.startswith("/admin")
     )
+    if os.environ.get(REQUIRE_SURFACE_MANIFEST_ENV) == "1":
+        assert len(walk_routes) > len(PILOT_AUTHENTICATED_ROUTES), (
+            "strict sitemap mode requires the full reachable workspace surface; "
+            f"got {len(walk_routes)} non-admin route(s): {walk_routes!r}"
+        )
     result = walk_authenticated_sitemap(
         page,
         base_url=base_url,
@@ -175,14 +202,15 @@ def test_closed_drawer_removes_nav_from_focus_order(
     login_with_dev_session(
         context,
         base_url=base_url,
-        email=WALK_EMAIL,
-        workspace_slug=WALK_SLUG,
+        email=DRAWER_EMAIL,
+        workspace_slug=DRAWER_SLUG,
         role="owner",
     )
+    _set_manager_role_preference(context, base_url=base_url)
     page = context.new_page()
     page.set_viewport_size({"width": 360, "height": 780})
-    page.goto(f"{base_url.rstrip('/')}/dashboard", wait_until="domcontentloaded")
-    page.locator(".desk__nav").wait_for(state="attached")
+    page.goto(f"{base_url.rstrip('/')}/dashboard", wait_until="commit", timeout=45_000)
+    page.locator(".desk__nav").wait_for(state="attached", timeout=45_000)
 
     # Confirm the drawer is in its closed state — a stray
     # data-nav-open="true" elsewhere would invalidate the test.
