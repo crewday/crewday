@@ -283,11 +283,12 @@ class UserLeaveView:
 
     Returned by every service read + write. ``approved_at`` is the
     only state column the caller needs to reason about — when set,
-    the leave blocks assignment; when null, it's pending. The view
-    deliberately omits ``deleted_at`` from the wire shape because
-    the router's read paths skip tombstones by default; an admin
-    surface that needs the column would extend this view, not graft
-    it onto every caller.
+    the leave blocks assignment; when null, it's pending.
+    ``deleted_at`` is included so the wire response from
+    :func:`reject_leave` and :func:`delete_leave` carries the
+    tombstone timestamp the UI needs to render the post-action
+    state; the live-list path filters tombstones at the repo layer
+    so they never leak into a default ``GET /user_leaves`` page.
     """
 
     id: str
