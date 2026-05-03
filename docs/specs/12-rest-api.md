@@ -1223,7 +1223,11 @@ deployment-scoped events (`admin.usage.updated`,
 `admin.audit.appended`, `agent.message.appended` scoped to
 `for_user_id`, `agent.action.pending`, and the
 `agent.turn.{started,finished}` pair from §11 "Agent turn
-lifecycle").
+lifecycle"). The deployment-scope `admin.llm.assignment_updated`
+has a workspace-scope sibling `llm.assignment.changed` on the
+per-workspace `/w/<slug>/events` stream — see §11 "Model
+assignment" subsection "SSE: `llm.assignment.changed`" for its
+`allowed_roles`, payload, and the router-cache + LlmPage consumers.
 
 **Demo mode.** Every admin route 404s under
 `CREWDAY_DEMO_MODE=1` (§24). The demo has no operator seat and no

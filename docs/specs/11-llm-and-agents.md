@@ -944,6 +944,39 @@ override the chain from `/admin/llm` without a redeploy by writing
 rows over the deployment seeds at read time. A workspace with no
 overrides sees the deployment defaults verbatim.
 
+### SSE: `llm.assignment.changed`
+
+A workspace-scoped SSE event published whenever the `/admin/llm`
+surface mutates an `llm_assignment` or `llm_capability_inheritance`
+row for a given workspace (create, update, delete, reorder,
+enable/disable). Routes the workspace `/w/<slug>/events` stream;
+the deployment-scope sibling on `/admin/events` is named
+`admin.llm.assignment_updated` (§12 "SSE") — they are separate
+signals with different scopes and different subscribers.
+
+- **Scope:** workspace (`/w/<slug>/events`).
+- **`allowed_roles`:** `("manager",)`. LLM configuration is the
+  admin/manager surface; workers, clients, and guests neither see
+  nor care about the `/admin/llm` graph, and narrowing the role
+  tuple keeps the event off client-bound SSE streams where its
+  arrival would leak which providers / models are wired up and how
+  often they change.
+- **Payload:** the base `Event` envelope only —
+  `{workspace_id, actor_id, correlation_id, occurred_at}`. No
+  capability / assignment id is named: a single edit to a
+  `llm_capability_inheritance` edge can silently change the chain
+  of a capability two hops downstream, so the event is deliberately
+  whole-workspace and subscribers fan out from there.
+- **Consumer (router cache):** the §11 router
+  (`app/domain/llm/router.py`) drops its 30 s in-process resolver
+  cache for the affected workspace so the next `resolve_model` call
+  observes the new chain without waiting for the TTL to expire.
+  Whole-workspace invalidation (not per-capability) for the reason
+  above.
+- **Consumer (admin SPA):** the `/admin/llm` LlmPage invalidates
+  its admin LLM-graph queries so providers, models, assignments,
+  and capability inheritance refetch in every connected admin tab.
+
 ## Prompt library
 
 `llm_prompt_template` is one of the **hash-self-seeded tables**
