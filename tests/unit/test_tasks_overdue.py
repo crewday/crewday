@@ -41,7 +41,7 @@ See ``docs/specs/06-tasks-and-scheduling.md`` §"State machine"
 from __future__ import annotations
 
 from collections.abc import Iterator
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
 import pytest
@@ -53,7 +53,7 @@ from app.adapters.db.base import Base
 from app.adapters.db.places.models import Property
 from app.adapters.db.session import make_engine
 from app.adapters.db.tasks.models import Occurrence
-from app.adapters.db.workspace.models import Workspace
+from app.adapters.db.workspace.models import WorkEngagement, Workspace
 from app.api.v1.tasks import TaskPayload, _compute_overdue
 from app.domain.tasks.completion import (
     cancel,
@@ -218,6 +218,37 @@ def _bootstrap_user(session: Session) -> str:
     )
     session.flush()
     return uid
+
+
+def _bootstrap_work_engagement(
+    session: Session,
+    *,
+    workspace_id: str,
+    user_id: str,
+    settings_override_json: dict[str, Any] | None = None,
+) -> str:
+    eid = new_ulid()
+    session.add(
+        WorkEngagement(
+            id=eid,
+            user_id=user_id,
+            workspace_id=workspace_id,
+            engagement_kind="payroll",
+            supplier_org_id=None,
+            pay_destination_id=None,
+            reimbursement_destination_id=None,
+            started_on=date(2026, 1, 1),
+            archived_on=None,
+            notes_md="",
+            settings_override_json=(
+                settings_override_json if settings_override_json is not None else {}
+            ),
+            created_at=_PINNED,
+            updated_at=_PINNED,
+        )
+    )
+    session.flush()
+    return eid
 
 
 def _bootstrap_occurrence(
@@ -892,6 +923,185 @@ class TestSettingsResolvers:
         assert resolve_overdue_tick_seconds(session, workspace_id=ws) == (
             DEFAULT_OVERDUE_TICK_SECONDS
         )
+
+
+# ---------------------------------------------------------------------------
+# Settings cascade for default overdue sweeps
+# ---------------------------------------------------------------------------
+
+
+class TestOverdueGraceCascade:
+    """Default sweeps resolve grace through workspace/property/engagement/task."""
+
+    def test_workspace_only_setting_is_used(
+        self, session: Session, bus: EventBus, clock: FrozenClock
+    ) -> None:
+        ws = _bootstrap_workspace(
+            session, settings_json={SETTINGS_KEY_OVERDUE_GRACE_MINUTES: 20}
+        )
+        prop = _bootstrap_property(session)
+        oid = _bootstrap_occurrence(
+            session,
+            workspace_id=ws,
+            property_id=prop,
+            ends_at=_PINNED - timedelta(minutes=30),
+        )
+
+        report = detect_overdue(_ctx(ws), session=session, clock=clock, event_bus=bus)
+
+        assert report.flipped_task_ids == (oid,)
+
+    def test_property_override_beats_workspace(
+        self, session: Session, bus: EventBus, clock: FrozenClock
+    ) -> None:
+        ws = _bootstrap_workspace(
+            session, settings_json={SETTINGS_KEY_OVERDUE_GRACE_MINUTES: 60}
+        )
+        inherited_prop = _bootstrap_property(session)
+        override_prop = _bootstrap_property(session)
+        prop_row = session.get(Property, override_prop)
+        assert prop_row is not None
+        prop_row.settings_override_json = {SETTINGS_KEY_OVERDUE_GRACE_MINUTES: 10}
+        inherited = _bootstrap_occurrence(
+            session,
+            workspace_id=ws,
+            property_id=inherited_prop,
+            ends_at=_PINNED - timedelta(minutes=30),
+        )
+        overridden = _bootstrap_occurrence(
+            session,
+            workspace_id=ws,
+            property_id=override_prop,
+            ends_at=_PINNED - timedelta(minutes=30),
+        )
+
+        report = detect_overdue(_ctx(ws), session=session, clock=clock, event_bus=bus)
+
+        assert report.flipped_task_ids == (overridden,)
+        inherited_row = session.get(Occurrence, inherited)
+        assert inherited_row is not None and inherited_row.state == "pending"
+
+    def test_engagement_override_uses_assigned_worker(
+        self, session: Session, bus: EventBus, clock: FrozenClock
+    ) -> None:
+        ws = _bootstrap_workspace(
+            session, settings_json={SETTINGS_KEY_OVERDUE_GRACE_MINUTES: 60}
+        )
+        prop = _bootstrap_property(session)
+        worker = _bootstrap_user(session)
+        other_worker = _bootstrap_user(session)
+        _bootstrap_work_engagement(
+            session,
+            workspace_id=ws,
+            user_id=worker,
+            settings_override_json={SETTINGS_KEY_OVERDUE_GRACE_MINUTES: 10},
+        )
+        overridden = _bootstrap_occurrence(
+            session,
+            workspace_id=ws,
+            property_id=prop,
+            ends_at=_PINNED - timedelta(minutes=30),
+            assignee_user_id=worker,
+        )
+        inherited = _bootstrap_occurrence(
+            session,
+            workspace_id=ws,
+            property_id=prop,
+            ends_at=_PINNED - timedelta(minutes=30),
+            assignee_user_id=other_worker,
+        )
+
+        report = detect_overdue(_ctx(ws), session=session, clock=clock, event_bus=bus)
+
+        assert report.flipped_task_ids == (overridden,)
+        inherited_row = session.get(Occurrence, inherited)
+        assert inherited_row is not None and inherited_row.state == "pending"
+
+    def test_task_override_beats_engagement(
+        self, session: Session, bus: EventBus, clock: FrozenClock
+    ) -> None:
+        ws = _bootstrap_workspace(
+            session, settings_json={SETTINGS_KEY_OVERDUE_GRACE_MINUTES: 60}
+        )
+        prop = _bootstrap_property(session)
+        worker = _bootstrap_user(session)
+        _bootstrap_work_engagement(
+            session,
+            workspace_id=ws,
+            user_id=worker,
+            settings_override_json={SETTINGS_KEY_OVERDUE_GRACE_MINUTES: 50},
+        )
+        oid = _bootstrap_occurrence(
+            session,
+            workspace_id=ws,
+            property_id=prop,
+            ends_at=_PINNED - timedelta(minutes=30),
+            assignee_user_id=worker,
+        )
+        task = session.get(Occurrence, oid)
+        assert task is not None
+        task.settings_override_json = {SETTINGS_KEY_OVERDUE_GRACE_MINUTES: 10}
+
+        report = detect_overdue(_ctx(ws), session=session, clock=clock, event_bus=bus)
+
+        assert report.flipped_task_ids == (oid,)
+
+    def test_mixed_cascade_filters_each_candidate(
+        self, session: Session, bus: EventBus, clock: FrozenClock
+    ) -> None:
+        ws = _bootstrap_workspace(
+            session, settings_json={SETTINGS_KEY_OVERDUE_GRACE_MINUTES: 20}
+        )
+        default_prop = _bootstrap_property(session)
+        strict_prop = _bootstrap_property(session)
+        relaxed_prop = _bootstrap_property(session)
+        relaxed_row = session.get(Property, relaxed_prop)
+        assert relaxed_row is not None
+        relaxed_row.settings_override_json = {SETTINGS_KEY_OVERDUE_GRACE_MINUTES: 60}
+        worker = _bootstrap_user(session)
+        _bootstrap_work_engagement(
+            session,
+            workspace_id=ws,
+            user_id=worker,
+            settings_override_json={SETTINGS_KEY_OVERDUE_GRACE_MINUTES: 10},
+        )
+        workspace_task = _bootstrap_occurrence(
+            session,
+            workspace_id=ws,
+            property_id=default_prop,
+            ends_at=_PINNED - timedelta(minutes=30),
+        )
+        property_task = _bootstrap_occurrence(
+            session,
+            workspace_id=ws,
+            property_id=relaxed_prop,
+            ends_at=_PINNED - timedelta(minutes=30),
+        )
+        engagement_task = _bootstrap_occurrence(
+            session,
+            workspace_id=ws,
+            property_id=relaxed_prop,
+            ends_at=_PINNED - timedelta(minutes=30),
+            assignee_user_id=worker,
+        )
+        task_override = _bootstrap_occurrence(
+            session,
+            workspace_id=ws,
+            property_id=strict_prop,
+            ends_at=_PINNED - timedelta(minutes=30),
+            assignee_user_id=worker,
+        )
+        task_row = session.get(Occurrence, task_override)
+        assert task_row is not None
+        task_row.settings_override_json = {SETTINGS_KEY_OVERDUE_GRACE_MINUTES: 90}
+
+        report = detect_overdue(_ctx(ws), session=session, clock=clock, event_bus=bus)
+
+        assert report.flipped_task_ids == (workspace_task, engagement_task)
+        property_row = session.get(Occurrence, property_task)
+        task_override_row = session.get(Occurrence, task_override)
+        assert property_row is not None and property_row.state == "pending"
+        assert task_override_row is not None and task_override_row.state == "pending"
 
 
 # ---------------------------------------------------------------------------

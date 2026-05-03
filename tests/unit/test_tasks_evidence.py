@@ -268,6 +268,33 @@ def test_forbid_policy_rejects_photo_before_storage(
     assert storage._blobs == {}
 
 
+def test_property_forbid_policy_rejects_photo_before_storage(
+    session: Session, clock: FrozenClock
+) -> None:
+    ws = _workspace(session)
+    prop = _property(session)
+    prop_row = session.get(Property, prop)
+    assert prop_row is not None
+    prop_row.settings_override_json = {"evidence.policy": "forbid"}
+    task_id = _task(
+        session, workspace_id=ws, property_id=prop, photo_evidence="optional"
+    )
+    storage = InMemoryStorage()
+
+    with pytest.raises(EvidencePolicyError):
+        upload_evidence(
+            session,
+            _ctx(ws),
+            task_id,
+            EvidenceUpload(kind="photo", bytes=b"jpeg", mime="image/jpeg"),
+            storage=storage,
+            mime_sniffer=_PinnedSniffer("image/jpeg"),
+            clock=clock,
+        )
+
+    assert storage._blobs == {}
+
+
 def test_required_policy_allows_partial_non_photo_save(
     session: Session, clock: FrozenClock
 ) -> None:

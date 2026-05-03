@@ -17,6 +17,12 @@ from app.adapters.db.tasks.models import ChecklistItem, Evidence, Occurrence
 from app.adapters.storage.mime import FiletypeMimeSniffer
 from app.adapters.storage.ports import MimeSniffer, Storage
 from app.audit import write_audit
+from app.domain.settings.cascade import (
+    EvidencePolicy,
+    EvidencePolicyResolver,
+    resolve_evidence_policy,
+    task_scope_chain,
+)
 from app.events.bus import EventBus
 from app.events.bus import bus as default_event_bus
 from app.events.types import TaskEvidenceAdded
@@ -26,10 +32,6 @@ from app.util.ulid import new_ulid
 
 EvidenceKind = Literal["photo", "voice", "note", "checklist_snapshot", "gps"]
 FileEvidenceKind = Literal["photo", "voice", "gps"]
-EvidencePolicy = Literal["forbid", "require", "optional"]
-EvidencePolicyResolver = Callable[
-    [Session, WorkspaceContext, Occurrence], EvidencePolicy
-]
 PhotoNormalizer = Callable[[bytes, str], bytes]
 
 _PHOTO_ALLOWED_MIME: frozenset[str] = frozenset(
@@ -349,12 +351,13 @@ def _load_task(session: Session, ctx: WorkspaceContext, task_id: str) -> Occurre
 def _default_policy(
     session: Session, ctx: WorkspaceContext, task: Occurrence
 ) -> EvidencePolicy:
-    _ = session, ctx
-    if task.photo_evidence == "disabled":
-        return "forbid"
-    if task.photo_evidence == "required":
-        return "require"
-    return "optional"
+    actor_user_id = ctx.actor_id if ctx.actor_kind == "user" else None
+    return resolve_evidence_policy(
+        session,
+        task_scope_chain(
+            task, workspace_id=ctx.workspace_id, actor_user_id=actor_user_id
+        ),
+    )
 
 
 def _is_manager_or_owner(ctx: WorkspaceContext) -> bool:

@@ -34,16 +34,12 @@ The skip is silent (no event, no audit beyond the per-tick summary),
 matching the spec's "soft state never overwrites a manual transition
 that happened between ticks" invariant.
 
-**Workspace settings (cd-hurw temporary stub).** The grace window
-and tick cadence are spec'd as workspace-resolved settings
-(``tasks.overdue_grace_minutes`` and ``tasks.overdue_tick_seconds``).
-The settings cascade reads from ``workspace.settings_json`` already;
-this slice exposes a thin :func:`resolve_overdue_grace_minutes`
-helper that reads the key with a sensible default. The richer
-cascade (workspace → property → unit → engagement → task) is the
-job of cd-settings-cascade — same pattern the completion module's
-:data:`~app.domain.tasks.completion.EvidencePolicyResolver` uses
-today.
+**Settings.** The grace window and tick cadence are spec'd as
+settings (``tasks.overdue_grace_minutes`` and
+``tasks.overdue_tick_seconds``). Tick cadence is workspace-scoped;
+the grace window resolves through the shared §02 cascade for each
+candidate task when the caller does not pass an explicit
+``grace_minutes`` override.
 
 **WorkspaceContext** is threaded through every DB read and event
 publish. The worker never reads tenancy from the environment; the
@@ -68,12 +64,16 @@ from sqlalchemy import CursorResult, select, update
 from sqlalchemy.orm import Session
 
 from app.adapters.db.tasks.models import Occurrence
-from app.adapters.db.workspace.models import Workspace
 from app.audit import write_audit
+from app.domain.settings.cascade import (
+    SettingScopeChain,
+    resolve_most_specific,
+    task_scope_chain,
+)
 from app.events.bus import EventBus
 from app.events.bus import bus as default_event_bus
 from app.events.types import TaskOverdue
-from app.tenancy import WorkspaceContext, tenant_agnostic
+from app.tenancy import WorkspaceContext
 from app.util.clock import Clock, SystemClock
 
 __all__ = [
@@ -131,17 +131,14 @@ _FLIPPABLE_STATES: Final[tuple[str, ...]] = ("scheduled", "pending", "in_progres
 def _resolve_int_setting(
     session: Session,
     *,
-    workspace_id: str,
+    chain: SettingScopeChain,
     key: str,
     default: int,
 ) -> int:
-    """Read an integer-valued setting from ``workspace.settings_json``.
+    """Resolve a positive integer setting through the shared cascade.
 
     Returns ``default`` for any of:
 
-    * the workspace row is missing (defensive — the tenancy middleware
-      should have resolved it);
-    * the ``settings_json`` payload is not a dict (corruption);
     * the key is absent;
     * the value is not coercible to a positive integer.
 
@@ -152,18 +149,7 @@ def _resolve_int_setting(
     The conservative posture matches the rest of the worker's
     "missing setting → fall back to spec default" stance.
     """
-    # Belt-and-braces: ``workspace`` is the tenancy anchor and not
-    # registered with the ORM tenant filter, but a future migration
-    # could change that. Wrap in ``tenant_agnostic`` so the SELECT
-    # never trips ``TenantFilterMissing`` if a caller forgot to bind
-    # a context before calling in.
-    with tenant_agnostic():
-        settings_json = session.scalar(
-            select(Workspace.settings_json).where(Workspace.id == workspace_id)
-        )
-    if not isinstance(settings_json, dict):
-        return default
-    raw = settings_json.get(key)
+    raw = resolve_most_specific(session, key, chain, default=default)
     if isinstance(raw, bool):
         # ``isinstance(True, int)`` is ``True`` in Python; explicitly
         # reject bool so a stray ``"key": true`` in the settings JSON
@@ -177,18 +163,14 @@ def _resolve_int_setting(
 def resolve_overdue_grace_minutes(session: Session, *, workspace_id: str) -> int:
     """Resolve ``tasks.overdue_grace_minutes`` for a workspace.
 
-    Reads :attr:`Workspace.settings_json`; falls back to
-    :data:`DEFAULT_OVERDUE_GRACE_MINUTES` when the key is unset
-    (or the value is not a positive integer). The richer §02
-    settings cascade (workspace → property → unit → engagement →
-    task) is the job of cd-settings-cascade; this slice surfaces
-    the workspace layer because that is the only one the v1
-    sweeper needs (the grace is a per-tenant policy, not a
-    per-task one).
+    This public helper intentionally answers the workspace root value
+    used by scheduler/audit callers. The sweeper resolves the full
+    task-scoped cascade internally when ``detect_overdue`` receives no
+    explicit ``grace_minutes`` override.
     """
     return _resolve_int_setting(
         session,
-        workspace_id=workspace_id,
+        chain=SettingScopeChain(workspace_id=workspace_id),
         key=SETTINGS_KEY_OVERDUE_GRACE_MINUTES,
         default=DEFAULT_OVERDUE_GRACE_MINUTES,
     )
@@ -206,9 +188,27 @@ def resolve_overdue_tick_seconds(session: Session, *, workspace_id: str) -> int:
     """
     return _resolve_int_setting(
         session,
-        workspace_id=workspace_id,
+        chain=SettingScopeChain(workspace_id=workspace_id),
         key=SETTINGS_KEY_OVERDUE_TICK_SECONDS,
         default=DEFAULT_OVERDUE_TICK_SECONDS,
+    )
+
+
+def _resolve_task_overdue_grace_minutes(
+    session: Session,
+    *,
+    workspace_id: str,
+    task: Occurrence,
+) -> int:
+    """Resolve overdue grace for the task's normal performer cascade."""
+
+    return _resolve_int_setting(
+        session,
+        chain=task_scope_chain(
+            task, workspace_id=workspace_id, actor_user_id=task.assignee_user_id
+        ),
+        key=SETTINGS_KEY_OVERDUE_GRACE_MINUTES,
+        default=DEFAULT_OVERDUE_GRACE_MINUTES,
     )
 
 
@@ -280,10 +280,9 @@ def detect_overdue(
     also omitted). Both are exposed so tests can drive the worker
     deterministically.
 
-    ``grace_minutes`` overrides the per-workspace setting; if
-    ``None`` the worker resolves
-    :func:`resolve_overdue_grace_minutes`. Tests pin a deterministic
-    grace by passing the kwarg.
+    ``grace_minutes`` overrides the settings cascade; if ``None`` the
+    worker resolves ``tasks.overdue_grace_minutes`` per candidate task.
+    Tests that need a deterministic global grace pass the kwarg.
 
     Returns an :class:`OverdueReport`. Writes one
     ``tasks.overdue_tick`` audit row at the end of the run with the
@@ -307,18 +306,25 @@ def detect_overdue(
     if resolved_now.tzinfo is None:
         raise ValueError("now must be a timezone-aware datetime in UTC")
     resolved_bus = event_bus if event_bus is not None else default_event_bus
-    resolved_grace = (
+    audit_grace = (
         grace_minutes
         if grace_minutes is not None
         else resolve_overdue_grace_minutes(session, workspace_id=ctx.workspace_id)
     )
 
     tick_started_at = resolved_now
-    cutoff = resolved_now - timedelta(minutes=resolved_grace)
+    candidate_cutoff = (
+        resolved_now - timedelta(minutes=grace_minutes)
+        if grace_minutes is not None
+        else resolved_now
+    )
 
     # 1. Load eligible candidates. Predicate matches §06: rows in a
     #    flippable state whose ``ends_at`` is on the wrong side of the
-    #    cutoff. The ``state IN (...)`` leg is the selective one and
+    #    cutoff. With an explicit grace override, keep the old
+    #    workspace-wide cutoff. Otherwise load every past-ended task
+    #    and apply the effective per-task grace before updating. The
+    #    ``state IN (...)`` leg is the selective one and
     #    rides the cd-hurw composite index
     #    ``ix_occurrence_workspace_state_overdue_since`` for the
     #    per-tenant scan.
@@ -327,7 +333,7 @@ def detect_overdue(
             select(Occurrence)
             .where(Occurrence.workspace_id == ctx.workspace_id)
             .where(Occurrence.state.in_(_FLIPPABLE_STATES))
-            .where(Occurrence.ends_at < cutoff)
+            .where(Occurrence.ends_at < candidate_cutoff)
             .order_by(Occurrence.id.asc())
         ).all()
     )
@@ -341,6 +347,17 @@ def detect_overdue(
     skipped_already_overdue = 0
 
     for task in candidates:
+        ends_at_aware = _ensure_utc(task.ends_at)
+        task_grace = (
+            grace_minutes
+            if grace_minutes is not None
+            else _resolve_task_overdue_grace_minutes(
+                session, workspace_id=ctx.workspace_id, task=task
+            )
+        )
+        if ends_at_aware >= resolved_now - timedelta(minutes=task_grace):
+            continue
+
         # 2. Re-assert the state predicate in the WHERE clause of the
         #    UPDATE. A manual transition landing between SELECT and
         #    UPDATE makes the row's state no longer match — the
@@ -384,7 +401,6 @@ def detect_overdue(
         #    which the resolver rejects). ``ends_at`` may come back
         #    naive on SQLite — coerce to UTC before subtracting so
         #    the arithmetic is portable.
-        ends_at_aware = _ensure_utc(task.ends_at)
         slipped_seconds = (resolved_now - ends_at_aware).total_seconds()
         slipped_minutes = max(0, math.floor(slipped_seconds / 60))
         resolved_bus.publish(
@@ -409,7 +425,7 @@ def detect_overdue(
         skipped_already_overdue=skipped_already_overdue,
         skipped_manual_transition=skipped_manual_transition,
         per_property_breakdown=per_property_breakdown,
-        grace_minutes=resolved_grace,
+        grace_minutes=audit_grace,
         tick_started_at=tick_started_at,
         tick_ended_at=tick_ended_at,
         clock=resolved_clock,

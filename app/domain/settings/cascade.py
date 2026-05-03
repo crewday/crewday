@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Literal
+from typing import Literal, Protocol, TypeVar
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -12,9 +12,22 @@ from sqlalchemy.orm import Session
 from app.adapters.db.places.models import Property, Unit
 from app.adapters.db.tasks.models import Occurrence, TaskTemplate
 from app.adapters.db.workspace.models import WorkEngagement, Workspace
-from app.tenancy import tenant_agnostic
+from app.tenancy import WorkspaceContext, tenant_agnostic
 
 SettingLayer = Literal["workspace", "property", "unit", "work_engagement", "task"]
+EvidencePolicy = Literal["forbid", "require", "optional"]
+_T_co = TypeVar("_T_co", covariant=True)
+
+
+class SettingsCascadeResolver(Protocol[_T_co]):
+    """Port for task-scoped domain services backed by the §02 cascade."""
+
+    def __call__(
+        self, session: Session, ctx: WorkspaceContext, task: Occurrence
+    ) -> _T_co: ...
+
+
+EvidencePolicyResolver = SettingsCascadeResolver[EvidencePolicy]
 
 
 @dataclass(frozen=True, slots=True)
@@ -55,6 +68,8 @@ class _LayerSettings:
 
 CATALOG_DEFAULTS: Mapping[str, object] = {
     "evidence.policy": "optional",
+    "tasks.overdue_grace_minutes": 15,
+    "tasks.overdue_tick_seconds": 300,
     "tasks.checklist_required": False,
     "tasks.allow_skip_with_reason": True,
     "inventory.apply_on_task": True,
@@ -157,7 +172,7 @@ def resolve_most_specific(
 
 def resolve_evidence_policy(
     session: Session, chain: SettingScopeChain
-) -> Literal["forbid", "require", "optional"]:
+) -> EvidencePolicy:
     """Resolve ``evidence.policy`` with the domain-specific forbid rule."""
 
     values = concrete_values(session, "evidence.policy", chain, default="optional")

@@ -124,6 +124,8 @@ from app.adapters.storage.ports import (
 )
 from app.audit import write_audit
 from app.domain.settings.cascade import (
+    EvidencePolicy,
+    EvidencePolicyResolver,
     resolve_evidence_policy,
     resolve_most_specific,
     task_scope_chain,
@@ -212,12 +214,6 @@ TaskStateName = Literal[
 ]
 
 
-# Shape of the photo-policy resolver. Returns one of three concrete
-# values; ``inherit`` never reaches the service — the resolver
-# collapses the cascade before answering.
-EvidencePolicy = Literal["forbid", "require", "optional"]
-
-
 @dataclass(frozen=True, slots=True)
 class _FixedClock:
     instant: datetime
@@ -226,15 +222,10 @@ class _FixedClock:
         return self.instant
 
 
-EvidencePolicyResolver = Callable[
-    [Session, WorkspaceContext, Occurrence], EvidencePolicy
-]
-"""Port: resolve the effective photo-evidence policy for a task.
-
-Default :func:`_default_evidence_policy` reads
-the §02 cascade. Legacy ``photo_evidence`` columns are treated as a
-task-layer compatibility source while task settings overrides roll out.
-"""
+# EvidencePolicyResolver is the shared settings-cascade port from
+# app.domain.settings.cascade. The default below keeps legacy
+# photo_evidence columns as a task-layer compatibility source while
+# task settings overrides roll out.
 
 ChecklistRequiredResolver = Callable[[Session, WorkspaceContext, Occurrence], bool]
 """Port: resolve ``tasks.checklist_required`` for a task.

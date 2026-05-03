@@ -1644,6 +1644,8 @@ scope, and the spec that defines the feature:
 | `tasks.required_approval` | bool | `false` | W/P/U/WE/T | §06 |
 | `tasks.allow_complete_backdated` | bool | `false` | W/P/U/WE | §05 |
 | `tasks.allow_skip_with_reason` | bool | `true` | W/P/U/WE | §05 |
+| `tasks.overdue_grace_minutes` | int | `15` | W/P/U/WE/T | §06 |
+| `tasks.overdue_tick_seconds` | int | `300` | W | §06 |
 | `inventory.apply_on_task` | bool | `true` | W/P/U/WE/T | §08 — gates both consume and produce effects declared on task templates / asset actions. |
 | `inventory.shrinkage_alert_pct` | int | `10` | W/P | §08 — digest highlights any item whose `theft + loss` over 30 days exceeds this percentage of rolling consumption. |
 | `expenses.autofill_receipts` | bool | `true` | W/WE | §09 |
