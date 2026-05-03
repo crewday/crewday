@@ -1,7 +1,7 @@
 """Hand-written ``crewday expenses submit`` override.
 
 Spec ``docs/specs/13-cli.md`` §"crewday expenses": ``submit`` is one
-user-facing verb wrapping three HTTP calls — scan the receipt for an
+user-facing verb wrapping three HTTP calls: scan the receipt for an
 LLM-suggested fill, ask the operator to confirm, then create + submit
 the claim. The intermediate state lives only in the user's terminal,
 which is exactly the gap the SPA's review screen plugs and which the
@@ -10,16 +10,13 @@ call).
 
 Two notes on shape:
 
-* The ``POST /expenses`` API today consumes JSON
-  (:class:`app.domain.expenses.claims.ExpenseClaimCreate`); the spec
-  table at ``docs/specs/12-rest-api.md`` line 1519 says "multipart
-  for receipts" but that wording predates the split into the
-  separate ``POST /uploads`` (TBD) and ``POST /expenses/{id}/
-  attachments`` flow. We follow the live contract here so the
-  override actually works against the running server; the
-  ``attachments`` step is an out-of-scope follow-up tracked under
-  the wider expenses CLI work (cd-fzyg). A spec-drift Beads task is
-  filed if one does not already exist.
+* The ``POST /expenses`` API consumes JSON
+  (:class:`app.domain.expenses.claims.ExpenseClaimCreate`). This
+  override sends the receipt only to ``POST /expenses/scan`` for
+  preview/autofill suggestions, then creates and submits the claim
+  without attaching the image. The attachment step requires a
+  separate stored-blob flow and remains out of scope for this command
+  until the CLI has a concrete upload route to call.
 * The scan endpoint returns ``{value, confidence}`` cells; we project
   each to its plain value for the create payload but surface the
   confidence in the user-visible review table so the operator can
@@ -246,6 +243,10 @@ def submit(
     skip_confirm: bool,
 ) -> None:
     """Scan a receipt and submit the resulting expense claim.
+
+    The receipt upload is preview-only: it is sent to
+    ``POST /expenses/scan`` for autofill suggestions, but the image is
+    not attached to the submitted claim.
 
     Composite flow:
 

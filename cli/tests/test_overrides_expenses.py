@@ -127,14 +127,15 @@ def test_submit_happy_path_with_yes(
         obj=_ctx(),
     )
     assert result.exit_code == 0, result.output
-    # 3 calls: scan, create, submit.
+    # 3 calls: scan preview, JSON create, submit. No attachment route is
+    # called because the receipt image is preview/autofill-only here.
     assert len(captured) == 3
     assert captured[0].url.path.endswith("/expenses/scan")
     assert captured[1].url.path.endswith("/expenses")
     assert captured[2].url.path.endswith("/expenses/claim-1/submit")
+    assert all("/attachments" not in request.url.path for request in captured)
 
-    # Scan and submit are multipart / no-body respectively; the create
-    # call carries the JSON-projected scan fields.
+    # The create call carries the JSON-projected scan fields.
     create_body = json.loads(captured[1].content)
     assert create_body["work_engagement_id"] == "we-1"
     assert create_body["vendor"] == "Best Coffee"
@@ -351,6 +352,7 @@ def test_submit_help_renders(runner: CliRunner) -> None:
     assert "RECEIPT_PATH" in result.output
     assert "--work-engagement" in result.output
     assert "--yes" in result.output
+    assert "preview-only" in result.output
 
 
 def test_register_attaches_under_existing_expenses_group() -> None:

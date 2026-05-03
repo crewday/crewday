@@ -2123,11 +2123,14 @@ GET    /expenses/pending_reimbursement   # ?user_id=me|<id>|<omit>; approved-but
                                          #   user_id=me  -> caller's own pool (no cap).
                                          #   user_id=<id> or omitted -> workspace-wide; requires expenses.approve.
                                          #   When user_id is omitted the response carries a per-user `by_user` breakdown.
-POST   /expenses                   # multipart for receipts
+POST   /expenses                   # JSON ExpenseClaimCreate; no receipt bytes
 POST   /expenses/{id}/submit
 POST   /expenses/{id}/approve      # snaps owed_* fields; see §09 "Amount owed to the employee"
 POST   /expenses/{id}/reject
 POST   /expenses/scan              # multipart/form-data; receipt image in → ExpenseScanResult out (cd-65ib)
+POST   /expenses/{id}/attachments  # JSON; register a previously uploaded receipt blob
+GET    /expenses/{id}/attachments
+DELETE /expenses/{id}/attachments/{attachment_id}
 
 GET    /exchange_rates                              # ?as_of=…&quote=…&source=…
 GET    /exchange_rates/{base}/{quote}?as_of=YYYY-MM-DD   # single row; as_of defaults to today
@@ -2152,6 +2155,16 @@ upload, and 504 `extraction_timeout` / 503
 `extraction_rate_limited` / 503 `extraction_provider_error` for the
 LLM-side failure modes (the rate-limit response carries a
 `Retry-After: 60` header).
+
+`POST /expenses` creates the claim from a JSON `ExpenseClaimCreate`
+body. Receipt image bytes are not accepted on that route. `POST
+/expenses/scan` is preview/autofill-only: it does not create a claim,
+attachment, or reusable blob. Persisting a receipt image requires a
+separate blob upload route that stores the bytes, followed by `POST
+/expenses/{id}/attachments` with the stored blob hash, content type, and
+size metadata. Until a generic receipt blob upload route is exposed,
+clients that only call `/expenses/scan` and `/expenses` create a claim
+without an attached receipt image.
 
 `GET /expenses/pending_reimbursement` returns the approved-but-not-yet-
 reimbursed pool that drives the worker "Owed to you" panel (§09 §"Amount

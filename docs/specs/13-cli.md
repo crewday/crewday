@@ -112,8 +112,9 @@ Hand-written click commands for cases the generic path cannot handle:
 - `admin.py` — host-CLI-only commands (no HTTP surface): `init`,
   `recover`, `rotate-root-key`, `backup`, `restore`, `purge`,
   `version`.
-- `expenses.py` — `expenses submit` composite (autofill + create +
-  submit in one flow).
+- `expenses.py` — `expenses submit` composite (receipt scan/autofill
+  preview + JSON create + submit in one flow; the scanned image is not
+  attached to the claim).
 - `tasks.py` — `tasks complete` with multipart photo upload.
 - `auth.py` — `auth login` interactive flow.
 
@@ -331,8 +332,8 @@ crewday pay
   payslips mark-paid <id>
 
 crewday expenses
-  submit --user <id?> --photo <path> [--vendor "..."] [--amount 1234 --currency EUR]
-                                      # autofill from receipt if photo only
+  submit <receipt_path> --work-engagement <id> [--category "..."] [--task <id>] [--yes]
+                                      # receipt image is scan/autofill preview only; no attachment is created
   list [--user] [--state]
   approve <id>                        # snaps claim.currency → workspace default + → destination currency (§09)
   reject <id> --reason "..."
