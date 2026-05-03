@@ -327,6 +327,14 @@ ranking source it used. `--id-only` prints just the main id (handy to
 pipe into `bd update <id> --claim`); `--no-bv` forces the `bd ready`
 path.
 
+**Pair a selfreview with every code-work Beads task you create.** Even
+when not using `/beads` or `/director`. The selfreview is a separate
+`chore` task with the `selfreview` label and a `blocks` edge from the
+selfreview to the parent (`bd dep add <selfreview-id> <parent-id>`).
+`agent-next-task.sh` relies on this pairing to surface the review step;
+parents created without it will be picked up bare. Skip pairing only
+for non-code tasks (docs-only, ops, tracking issues).
+
 After any Beads change, export `.beads/issues.jsonl` and include it in
 the same commit. Link dependencies only when one task literally cannot
 start before another.
