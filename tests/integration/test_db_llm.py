@@ -5,7 +5,7 @@ constraints, indexes), the referential-integrity contract (workspace
 CASCADE sweeps every row; user SET NULL on
 ``agent_token.delegating_user_id`` /
 ``approval_request.requester_actor_id`` / ``approval_request.decided_by``;
-no user FK on ``llm_usage``; no FK on ``model_id`` — soft reference),
+no user FK on ``llm_usage``; no FK on ``provider_model_id`` — soft reference),
 happy-path CRUD round-trip of every model, the pending-queue hot-path
 query, the per-capability usage breakdown query, the unique-index
 (llm_assignment, budget_ledger), CHECK violations, cross-workspace
@@ -436,7 +436,7 @@ class TestMigrationShape:
             "id",
             "workspace_id",
             "capability",
-            "model_id",
+            "provider_model_id",
             "tokens_in",
             "tokens_out",
             "cost_cents",
@@ -476,15 +476,17 @@ class TestMigrationShape:
             assert cols[notnull]["nullable"] is False, f"{notnull} must be NOT NULL"
 
     def test_llm_usage_fks(self, engine: Engine) -> None:
-        """Only the workspace FK exists — ``model_id`` is a soft ref."""
+        """Only the workspace FK exists — ``provider_model_id`` is a
+        soft ref."""
         fks = {
             tuple(fk["constrained_columns"]): fk
             for fk in inspect(engine).get_foreign_keys("llm_usage")
         }
         assert fks[("workspace_id",)]["referred_table"] == "workspace"
         assert fks[("workspace_id",)]["options"].get("ondelete") == "CASCADE"
-        # No FK on ``model_id`` — soft reference, see model docstring.
-        assert ("model_id",) not in fks
+        # No FK on ``provider_model_id`` — soft reference, see model
+        # docstring.
+        assert ("provider_model_id",) not in fks
 
     def test_llm_usage_indexes(self, engine: Engine) -> None:
         indexes = {ix["name"]: ix for ix in inspect(engine).get_indexes("llm_usage")}
@@ -1232,7 +1234,7 @@ class TestLlmUsageCrud:
                 id="01HWA00000000000000000LUSA",
                 workspace_id=workspace.id,
                 capability="staff_chat",
-                model_id="01HWA00000000000000000MDLA",
+                provider_model_id="01HWA00000000000000000MDLA",
                 tokens_in=1200,
                 tokens_out=340,
                 cost_cents=18,
@@ -1272,7 +1274,7 @@ class TestLlmUsageCrud:
                     id="01HWA00000000000000000LUPA",
                     workspace_id=workspace.id,
                     capability="staff_chat",
-                    model_id="01HWA00000000000000000MDLA",
+                    provider_model_id="01HWA00000000000000000MDLA",
                     cost_cents=10,
                     status="ok",
                     correlation_id="01HWA00000000000000000CR01",
@@ -1282,7 +1284,7 @@ class TestLlmUsageCrud:
                     id="01HWA00000000000000000LUPB",
                     workspace_id=workspace.id,
                     capability="staff_chat",
-                    model_id="01HWA00000000000000000MDLA",
+                    provider_model_id="01HWA00000000000000000MDLA",
                     cost_cents=20,
                     status="ok",
                     correlation_id="01HWA00000000000000000CR02",
@@ -1292,7 +1294,7 @@ class TestLlmUsageCrud:
                     id="01HWA00000000000000000LUPC",
                     workspace_id=workspace.id,
                     capability="daily_digest",
-                    model_id="01HWA00000000000000000MDLA",
+                    provider_model_id="01HWA00000000000000000MDLA",
                     cost_cents=5,
                     status="ok",
                     correlation_id="01HWA00000000000000000CR03",
@@ -1345,7 +1347,7 @@ class TestLlmUsageCrud:
                 id="01HWA00000000000000000LURA",
                 workspace_id=workspace.id,
                 capability="staff_chat",
-                model_id="01HWA00000000000000000MDLA",
+                provider_model_id="01HWA00000000000000000MDLA",
                 # Pre-flight refusal: no tokens, no latency — the call
                 # never left the client.
                 tokens_in=0,
@@ -1365,8 +1367,10 @@ class TestLlmUsageCrud:
         finally:
             reset_current(ctx_token)
 
-    def test_soft_ref_model_id_accepts_any_ulid(self, db_session: Session) -> None:
-        """``model_id`` has no FK — any ULID lands without lookup."""
+    def test_soft_ref_provider_model_id_accepts_any_ulid(
+        self, db_session: Session
+    ) -> None:
+        """``provider_model_id`` has no FK — any ULID lands without lookup."""
         workspace, user = _bootstrap(
             db_session,
             email="lu-soft@example.com",
@@ -1382,7 +1386,7 @@ class TestLlmUsageCrud:
                 capability="staff_chat",
                 # A ULID for an ``llm_model`` row that doesn't exist
                 # yet — the registry table lands in a later slice.
-                model_id="01HWA0000000000000000GHOST",
+                provider_model_id="01HWA0000000000000000GHOST",
                 status="ok",
                 correlation_id="01HWA00000000000000000CRSF",
                 created_at=_PINNED,
@@ -1392,7 +1396,7 @@ class TestLlmUsageCrud:
 
             loaded = db_session.get(LlmUsage, row.id)
             assert loaded is not None
-            assert loaded.model_id == "01HWA0000000000000000GHOST"
+            assert loaded.provider_model_id == "01HWA0000000000000000GHOST"
         finally:
             reset_current(ctx_token)
 
@@ -1726,7 +1730,7 @@ class TestCheckConstraints:
                     id="01HWA00000000000000000BLUS",
                     workspace_id=workspace.id,
                     capability="staff_chat",
-                    model_id="01HWA00000000000000000MDLA",
+                    provider_model_id="01HWA00000000000000000MDLA",
                     status="paused",  # not in the enum
                     correlation_id="01HWA00000000000000000CRLB",
                     created_at=_PINNED,
@@ -2122,7 +2126,7 @@ class TestCascadeOnWorkspaceDelete:
                         id="01HWA00000000000000000LUCW",
                         workspace_id=workspace.id,
                         capability="staff_chat",
-                        model_id="01HWA00000000000000000MDLA",
+                        provider_model_id="01HWA00000000000000000MDLA",
                         status="ok",
                         correlation_id="01HWA00000000000000000CRLC",
                         created_at=_PINNED,
@@ -2258,7 +2262,7 @@ class TestCrossWorkspaceIsolation:
                     id="01HWA00000000000000000LXA1",
                     workspace_id=ws_a.id,
                     capability="staff_chat",
-                    model_id="01HWA00000000000000000MDLA",
+                    provider_model_id="01HWA00000000000000000MDLA",
                     status="ok",
                     correlation_id="01HWA00000000000000000CRXA",
                     created_at=_PINNED,
@@ -2275,7 +2279,7 @@ class TestCrossWorkspaceIsolation:
                     id="01HWA00000000000000000LXB1",
                     workspace_id=ws_b.id,
                     capability="staff_chat",
-                    model_id="01HWA00000000000000000MDLA",
+                    provider_model_id="01HWA00000000000000000MDLA",
                     status="ok",
                     correlation_id="01HWA00000000000000000CRXB",
                     created_at=_PINNED,
@@ -2964,7 +2968,7 @@ class TestCdWjplMigrationRoundTrip:
                 conn.execute(
                     text(
                         "INSERT INTO llm_usage "
-                        "(id, workspace_id, capability, model_id, "
+                        "(id, workspace_id, capability, provider_model_id, "
                         "tokens_in, tokens_out, cost_cents, latency_ms, "
                         "status, correlation_id, attempt, created_at) "
                         "VALUES ('01HWA00000000000000000UJPL', "

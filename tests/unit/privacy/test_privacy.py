@@ -243,7 +243,7 @@ def test_retention_archives_jsonl_gz_and_deletes_rows(tmp_path: Path) -> None:
                     id="llm1",
                     workspace_id="w1",
                     capability="receipt_ocr",
-                    model_id="fake",
+                    provider_model_id="fake",
                     tokens_in=1,
                     tokens_out=1,
                     cost_cents=1,

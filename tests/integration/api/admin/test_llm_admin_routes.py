@@ -276,7 +276,7 @@ def _seed_llm_graph(session_factory: sessionmaker[Session]) -> SeededLlm:
                 id=new_ulid(),
                 workspace_id=workspace_id,
                 capability="chat.manager",
-                model_id=provider_model_id,
+                provider_model_id=provider_model_id,
                 tokens_in=100,
                 tokens_out=40,
                 cost_cents=17,

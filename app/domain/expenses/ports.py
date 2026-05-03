@@ -563,7 +563,7 @@ class ExpensesRepository(Protocol):
         usage_id: str,
         workspace_id: str,
         capability: str,
-        model_id: str,
+        provider_model_id: str,
         tokens_in: int,
         tokens_out: int,
         cost_cents: int,
@@ -574,6 +574,12 @@ class ExpensesRepository(Protocol):
         created_at: datetime,
     ) -> None:
         """Insert one ``llm_usage`` row in the same UoW.
+
+        ``provider_model_id`` carries the resolved provider-model wire
+        name (the string that flowed on the network) — matches the
+        ``llm_usage.provider_model_id`` column. See
+        :class:`~app.adapters.db.llm.models.LlmUsage` for the soft-ref
+        rationale.
 
         Does NOT flush — the row is never referenced by an audit-writer
         FK lookup, and the caller's outer UoW commit covers it. (The

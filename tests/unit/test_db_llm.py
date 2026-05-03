@@ -381,14 +381,14 @@ class TestLlmUsageModel:
             id="01HWA00000000000000000LUSA",
             workspace_id="01HWA00000000000000000WSPA",
             capability="staff_chat",
-            model_id="01HWA00000000000000000MDLA",
+            provider_model_id="01HWA00000000000000000MDLA",
             status="ok",
             correlation_id="01HWA00000000000000000CRLA",
             created_at=_PINNED,
         )
         assert row.workspace_id == "01HWA00000000000000000WSPA"
         assert row.capability == "staff_chat"
-        assert row.model_id == "01HWA00000000000000000MDLA"
+        assert row.provider_model_id == "01HWA00000000000000000MDLA"
         assert row.status == "ok"
         assert row.correlation_id == "01HWA00000000000000000CRLA"
 
@@ -397,7 +397,7 @@ class TestLlmUsageModel:
             id="01HWA00000000000000000LUSB",
             workspace_id="01HWA00000000000000000WSPA",
             capability="daily_digest",
-            model_id="01HWA00000000000000000MDLA",
+            provider_model_id="01HWA00000000000000000MDLA",
             tokens_in=1200,
             tokens_out=340,
             cost_cents=18,
@@ -418,7 +418,7 @@ class TestLlmUsageModel:
                 id=f"01HWA0000000000000000LUS{index}",
                 workspace_id="01HWA00000000000000000WSPA",
                 capability="staff_chat",
-                model_id="01HWA00000000000000000MDLA",
+                provider_model_id="01HWA00000000000000000MDLA",
                 status=status,
                 correlation_id=f"01HWA000000000000000CRL{index}",
                 created_at=_PINNED,

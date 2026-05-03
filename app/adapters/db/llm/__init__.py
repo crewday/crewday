@@ -46,12 +46,11 @@ FK hygiene mirrors the rest of the app:
   an active assignment still points at would silently strand the
   workspace without a chain — operators migrate the assignment
   first.
-* :attr:`LlmUsage.model_id` stays a free-form **string** carrying
-  the wire name that flowed across the network — historical rows
-  must survive a registry row's retirement, so promoting it to an
-  FK would break the /admin/usage feed. The §02 spec column
-  ``llm_call.provider_model_id`` is the future shape; the rename is
-  tracked as a follow-up.
+* :attr:`LlmUsage.provider_model_id` stays a free-form **string**
+  carrying the wire name that flowed across the network — historical
+  rows must survive a registry row's retirement, so promoting it to
+  an FK would break the /admin/usage feed. Matches the §02 spec
+  column ``llm_call.provider_model_id``.
 * :class:`LlmProviderModel.provider_id` /
   :class:`LlmProviderModel.model_id` →
   :class:`LlmProvider.id` / :class:`LlmModel.id`

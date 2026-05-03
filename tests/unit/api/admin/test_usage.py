@@ -84,7 +84,7 @@ def _add_llm_usage(
                 id=new_ulid(),
                 workspace_id=workspace_id,
                 capability=capability,
-                model_id="01HW00000000000000000MD01",
+                provider_model_id="01HW00000000000000000MD01",
                 tokens_in=1000,
                 tokens_out=500,
                 cost_cents=cost_cents,

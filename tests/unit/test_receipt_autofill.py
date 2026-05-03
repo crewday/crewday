@@ -1169,7 +1169,7 @@ class TestLlmUsagePersisted:
         assert row.id == result.llm_usage_id
         assert row.workspace_id == ctx.workspace_id
         assert row.capability == AUTOFILL_CAPABILITY
-        assert row.model_id == _OCR_MODEL
+        assert row.provider_model_id == _OCR_MODEL
         assert row.tokens_in == 42
         assert row.tokens_out == 17
         assert row.status == "ok"
@@ -1218,7 +1218,7 @@ class TestLlmUsagePersisted:
         # surface even though the parse failed.
         assert row.tokens_in == 42
         assert row.tokens_out == 17
-        assert row.model_id == _OCR_MODEL
+        assert row.provider_model_id == _OCR_MODEL
 
 
 # ---------------------------------------------------------------------------

@@ -808,7 +808,7 @@ def _record_llm_usage(
         usage_id=usage_id,
         workspace_id=ctx.workspace_id,
         capability=AUTOFILL_CAPABILITY,
-        model_id=model_id,
+        provider_model_id=model_id,
         tokens_in=prompt_tokens,
         tokens_out=completion_tokens,
         cost_cents=0,

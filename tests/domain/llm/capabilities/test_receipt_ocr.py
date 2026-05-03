@@ -204,7 +204,7 @@ def test_canonical_receipt_parses_and_records_usage(
     rows = _usage_rows(db_session, ctx=workspace_ctx)
     assert len(rows) == 1
     assert rows[0].capability == AUTOFILL_CAPABILITY
-    assert rows[0].model_id == "fake/receipt-model"
+    assert rows[0].provider_model_id == "fake/receipt-model"
     assert rows[0].tokens_in == 80
     assert rows[0].tokens_out == 30
     assert rows[0].status == "ok"
@@ -355,10 +355,10 @@ def test_parse_failure_falls_through_assignment_chain(
     ]
     rows = _usage_rows(db_session, ctx=workspace_ctx)
     assert len(rows) == 2
-    assert rows[0].model_id == "fake/bad-receipt-model"
+    assert rows[0].provider_model_id == "fake/bad-receipt-model"
     assert rows[0].attempt == 0
     assert rows[0].fallback_attempts == 0
-    assert rows[1].model_id == "fake/good-receipt-model"
+    assert rows[1].provider_model_id == "fake/good-receipt-model"
     assert rows[1].attempt == 1
     assert rows[1].fallback_attempts == 1
 
@@ -425,7 +425,7 @@ def test_non_receipt_classification_does_not_fall_through(
     ]
     rows = _usage_rows(db_session, ctx=workspace_ctx)
     assert len(rows) == 1
-    assert rows[0].model_id == "fake/bad-receipt-model"
+    assert rows[0].provider_model_id == "fake/bad-receipt-model"
 
 
 @pytest.mark.parametrize(

@@ -36,9 +36,9 @@ registry. :attr:`LlmAssignment.model_id` is now a real FK to
 resolver can surface the provider's wire name
 (:attr:`LlmProviderModel.api_model_id`) on
 :class:`~app.domain.llm.router.ModelPick` without a second lookup.
-:attr:`LlmUsage.model_id`, by contrast, stays a free-form wire-name
-string so historical rows survive a registry row's retirement —
-see the class docstring's spec-drift note.
+:attr:`LlmUsage.provider_model_id`, by contrast, stays a free-form
+wire-name string so historical rows survive a registry row's
+retirement — see the class docstring for the rationale.
 
 FK hygiene (see the package ``__init__`` docstring for the full
 rationale):
@@ -590,18 +590,16 @@ class LlmUsage(Base):
     rounding hazards across SQLite + PG). ``latency_ms`` is the
     adapter-measured wall time between request-out and body-in.
 
-    **Spec-drift note on ``model_id``.** The column is named
-    ``model_id`` here but the §02 ``llm_call`` spec names the
-    equivalent column ``provider_model_id`` — and unlike
-    :attr:`LlmAssignment.model_id` (a real FK as of cd-4btd) it
-    still holds the provider's free-form **wire name string**, not
-    the ``llm_provider_model.id``. The cd-wjpl / cd-irng post-flight
+    ``provider_model_id`` carries the resolved provider-model wire
+    name — the string the adapter actually sent on the network — and
+    matches the §02 ``llm_call.provider_model_id`` column. Unlike
+    :attr:`LlmAssignment.model_id` (a real FK as of cd-4btd), this
+    column is a free-form **wire name string**, not the
+    ``llm_provider_model.id``: the cd-wjpl / cd-irng post-flight
     writers populate it with
-    :attr:`~app.domain.llm.budget.LlmUsage.api_model_id` — the
-    string that flowed across the network — so historical rows
-    survive a registry row's deletion. Promoting this column to an
-    FK + rename is tracked as a follow-up Beads task; the surface is
-    intentionally append-only because the /admin/usage feed must
+    :attr:`~app.domain.llm.budget.LlmUsage.api_model_id` so
+    historical rows survive a registry row's deletion. The surface
+    is intentionally append-only because the /admin/usage feed must
     still render past calls even after their provider_model row has
     been retired.
 
@@ -649,11 +647,12 @@ class LlmUsage(Base):
     # Capability key from the §11 catalogue. Plain string — see
     # :class:`LlmAssignment.capability` for the rationale.
     capability: Mapped[str] = mapped_column(String, nullable=False)
-    # Resolved provider-model reference. Column name is ``model_id``
-    # for cd-cm5-era compatibility; the §02 spec names the equivalent
-    # ``llm_call`` column ``provider_model_id`` — see the class
-    # docstring's "Spec-drift note" for why the rename is deferred.
-    model_id: Mapped[str] = mapped_column(String(26), nullable=False)
+    # Resolved provider-model wire name (matches §02 ``llm_call.
+    # provider_model_id``). Free-form string — historical rows
+    # survive a registry row's retirement. Distinct from
+    # :attr:`LlmAssignment.model_id`, which is a real FK to
+    # :class:`LlmProviderModel.id` (cd-4btd).
+    provider_model_id: Mapped[str] = mapped_column(String(26), nullable=False)
     tokens_in: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     tokens_out: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     cost_cents: Mapped[int] = mapped_column(Integer, nullable=False, default=0)

@@ -12220,6 +12220,7 @@
         "type": "object"
       },
       "LlmCallResponse": {
+        "description": "One row of the /admin/usage call feed.\n\n``model_id`` and ``provider_model_id`` are intentionally distinct\nfields and **not** redundant \u2014 do not collapse them:\n\n* ``model_id`` is the **wire-name string** that flowed across the\n  network on this call (sourced from ``llm_usage.provider_model_id``,\n  which stores the free-form provider wire name \u2014 see\n  :class:`~app.adapters.db.llm.models.LlmUsage`). Always present;\n  survives a registry row's retirement so historical calls still\n  render.\n* ``provider_model_id`` is the **resolved registry id** (a\n  ``LlmProviderModel.id``), looked up at read time from the wire\n  string via :func:`_llm_usage_provider_model_id`. ``None`` when\n  the registry row has been retired since the call was made.\n\nThe DB column was renamed in cd-v6dj from ``model_id`` to\n``provider_model_id`` to match the \u00a702 spec, but the JSON wire\ncontract here keeps both fields under their pre-existing names \u2014\na frontend (``mocks/web/src/types/api.ts::LLMCall``) and OpenAPI\nconsumers depend on the shape.",
         "properties": {
           "assignment_id": {
             "anyOf": [

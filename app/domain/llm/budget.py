@@ -998,7 +998,7 @@ def record_usage(
         id=new_ulid(clock=c),
         workspace_id=ctx.workspace_id,
         capability=usage.capability,
-        model_id=usage.api_model_id,
+        provider_model_id=usage.api_model_id,
         tokens_in=usage.prompt_tokens,
         tokens_out=usage.completion_tokens,
         cost_cents=usage.cost_cents,

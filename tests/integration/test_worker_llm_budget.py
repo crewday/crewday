@@ -179,7 +179,7 @@ def _seed_usage(
                 id=new_ulid(),
                 workspace_id=workspace_id,
                 capability="chat.manager",
-                model_id="01HWA00000000000000000MDL0",
+                provider_model_id="01HWA00000000000000000MDL0",
                 tokens_in=100,
                 tokens_out=50,
                 cost_cents=cost_cents,

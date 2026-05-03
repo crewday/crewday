@@ -238,6 +238,29 @@ class LlmPromptRevisionResponse(BaseModel):
 
 
 class LlmCallResponse(BaseModel):
+    """One row of the /admin/usage call feed.
+
+    ``model_id`` and ``provider_model_id`` are intentionally distinct
+    fields and **not** redundant — do not collapse them:
+
+    * ``model_id`` is the **wire-name string** that flowed across the
+      network on this call (sourced from ``llm_usage.provider_model_id``,
+      which stores the free-form provider wire name — see
+      :class:`~app.adapters.db.llm.models.LlmUsage`). Always present;
+      survives a registry row's retirement so historical calls still
+      render.
+    * ``provider_model_id`` is the **resolved registry id** (a
+      ``LlmProviderModel.id``), looked up at read time from the wire
+      string via :func:`_llm_usage_provider_model_id`. ``None`` when
+      the registry row has been retired since the call was made.
+
+    The DB column was renamed in cd-v6dj from ``model_id`` to
+    ``provider_model_id`` to match the §02 spec, but the JSON wire
+    contract here keeps both fields under their pre-existing names —
+    a frontend (``mocks/web/src/types/api.ts::LLMCall``) and OpenAPI
+    consumers depend on the shape.
+    """
+
     at: str
     capability: str
     model_id: str
@@ -903,9 +926,9 @@ def _llm_usage_provider_model_id(
     provider_model_ids: set[str],
     provider_model_ids_by_api_model_id: dict[str, str],
 ) -> str | None:
-    if row.model_id in provider_model_ids:
-        return row.model_id
-    return provider_model_ids_by_api_model_id.get(row.model_id)
+    if row.provider_model_id in provider_model_ids:
+        return row.provider_model_id
+    return provider_model_ids_by_api_model_id.get(row.provider_model_id)
 
 
 def build_admin_llm_router() -> APIRouter:
@@ -1705,7 +1728,7 @@ def build_admin_llm_router() -> APIRouter:
             stmt = stmt.where(
                 or_(
                     *(
-                        LlmUsage.model_id == value
+                        LlmUsage.provider_model_id == value
                         for value in provider_model_filter_values
                     )
                 )
@@ -1725,7 +1748,7 @@ def build_admin_llm_router() -> APIRouter:
             LlmCallResponse(
                 at=_iso(row.created_at) or "",
                 capability=row.capability,
-                model_id=row.model_id,
+                model_id=row.provider_model_id,
                 input_tokens=row.tokens_in,
                 output_tokens=row.tokens_out,
                 cost_cents=row.cost_cents,

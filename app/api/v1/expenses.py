@@ -1532,7 +1532,7 @@ def _record_preview_usage(
         usage_id=new_ulid(),
         workspace_id=ctx.workspace_id,
         capability=AUTOFILL_CAPABILITY,
-        model_id=burnt.model_id if burnt is not None else fallback_model_id,
+        provider_model_id=(burnt.model_id if burnt is not None else fallback_model_id),
         tokens_in=burnt.prompt_tokens if burnt is not None else 0,
         tokens_out=burnt.completion_tokens if burnt is not None else 0,
         cost_cents=0,

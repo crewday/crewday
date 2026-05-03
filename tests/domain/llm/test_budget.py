@@ -170,7 +170,7 @@ def _seed_usage_row(
         id=new_ulid(),
         workspace_id=workspace_id,
         capability=capability,
-        model_id="01HWA00000000000000000MDL0",
+        provider_model_id="01HWA00000000000000000MDL0",
         tokens_in=0,
         tokens_out=0,
         cost_cents=cost_cents,
