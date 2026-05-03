@@ -46,6 +46,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 import urllib.error
 import urllib.request
 import uuid
@@ -63,7 +64,21 @@ from tests.integration.mail import (
     wait_for_message,
 )
 
-pytestmark = pytest.mark.integration
+# ``xdist_group`` keeps every test in this file on the same xdist worker
+# whenever the suite runs under a group-aware scheduler (e.g.
+# ``--dist loadgroup``). Combined with :func:`mailpit_test_lock` — the
+# cross-worker file lock the ``clean_inbox`` fixture wraps the whole
+# test in — this means the three tests below execute strictly
+# sequentially against the dev stack, never racing each other into the
+# per-IP throttle bucket. The default ``--dist worksteal`` scheduler
+# (configured in ``pyproject.toml``) doesn't honour the marker today,
+# but the file lock alone already serializes execution; the
+# ``xdist_group`` hint is here so the constraint stays explicit if the
+# repo ever switches schedulers.
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.xdist_group("magic_link_mailpit"),
+]
 
 
 # ---------------------------------------------------------------------------
@@ -320,12 +335,12 @@ def _unique_email() -> str:
     a second-pass run lands within the 60s window. A per-test UUIDv4
     sidesteps the per-email bucket entirely without disabling the
     rate-limit code path under test — the *per-IP* bucket still
-    fires (all three tests share one source IP) but a 429 there is
-    environmental and we skip cleanly via :func:`_request_or_skip`
-    rather than fail. Rate-limit regressions have their own coverage
-    in ``tests/integration/auth/test_abuse_guards.py`` —
-    re-asserting them here would just turn a back-to-back rerun of
-    the suite into a flake.
+    fires (all three tests share one source IP), and
+    :func:`_request_or_drain` waits for it to drain on a back-to-back
+    rerun rather than skipping. Rate-limit regressions have their own
+    coverage in ``tests/integration/auth/test_abuse_guards.py`` —
+    re-asserting them here would just turn a useful round-trip test
+    into a flake.
     """
     return f"magic-link-mailpit-{uuid.uuid4()}@dev.local"
 
@@ -343,28 +358,55 @@ _MAGIC_REQUEST_PATH = "/api/v1/auth/magic/request"
 _MAGIC_CONSUME_PATH = "/api/v1/auth/magic/consume"
 
 
-def _request_or_skip(app_url: str, email: str) -> None:
-    """POST a magic-link request; ``pytest.skip`` if the per-IP bucket trips.
+# Magic-link request budget per :mod:`app.auth._throttle` —
+# ``_REQUEST_LIMIT = 5`` over a ``_REQUEST_WINDOW = 60s`` fixed window
+# per source IP. The dev stack publishes a single source IP for every
+# host-loopback caller (the docker bridge gateway), so every test in
+# this file shares the same bucket. Three tests = three hits per run,
+# well under budget for one fresh run; the flake bites on a back-to-back
+# rerun within 60s, when leftover hits push the bucket over. The
+# ``_REQUEST_DRAIN_DEADLINE_S`` ceiling is the worst-case wait for the
+# oldest hit to age out (the window length plus a small buffer for the
+# eviction tick).
+_REQUEST_DRAIN_DEADLINE_S = 75.0
+_REQUEST_DRAIN_INTERVAL_S = 5.0
+
+
+def _request_or_drain(app_url: str, email: str) -> None:
+    """POST a magic-link request; wait for the per-IP bucket to drain on 429.
 
     The dev-stack throttle is shared across the whole compose process,
-    so a back-to-back rerun of this module within the 60-s window can
-    legitimately hit 429 on the per-IP bucket (5 hits/min) even with
-    fresh per-test emails. That's environmental — not a regression in
-    the magic-link flow this module is designed to catch — so we skip
-    cleanly with a clear "rerun in 60s" reason rather than fail. The
-    per-IP rate-limit code path has its own dedicated coverage in
-    ``test_abuse_guards.py``; re-asserting it from here would only
-    turn a useful round-trip test into a flake.
+    so a back-to-back rerun of this module within the per-IP fixed
+    window can legitimately hit 429 even with fresh per-test emails.
+    Rather than skip — which forfeits the round-trip the module exists
+    to verify — we poll the request endpoint at
+    :data:`_REQUEST_DRAIN_INTERVAL_S` intervals until the bucket drains,
+    capped at :data:`_REQUEST_DRAIN_DEADLINE_S` (one window + buffer).
+
+    A still-429 response after that ceiling is environmental
+    (something else on the dev box hammered the same endpoint) and we
+    skip with a precise diagnostic instead of failing. The per-IP
+    rate-limit semantics have their own coverage in
+    ``test_abuse_guards.py``; re-asserting them here would just turn a
+    useful round-trip test into a flake.
     """
-    status, body = _post_json(
-        f"{app_url}{_MAGIC_REQUEST_PATH}",
-        {"email": email, "purpose": _PURPOSE},
-    )
-    if status == 429:
-        pytest.skip(
-            "magic-link per-IP rate limit tripped on the dev stack "
-            f"(body={body!r}); rerun in ~60s once the bucket drains"
+    body_payload = {"email": email, "purpose": _PURPOSE}
+    deadline = time.monotonic() + _REQUEST_DRAIN_DEADLINE_S
+    while True:
+        status, body = _post_json(
+            f"{app_url}{_MAGIC_REQUEST_PATH}",
+            body_payload,
         )
+        if status != 429:
+            break
+        if time.monotonic() >= deadline:
+            pytest.skip(
+                "magic-link per-IP rate limit still tripped after waiting "
+                f"~{_REQUEST_DRAIN_DEADLINE_S:.0f}s for the bucket to drain "
+                f"(body={body!r}); something else on the dev stack is "
+                "hammering /api/v1/auth/magic/request"
+            )
+        time.sleep(_REQUEST_DRAIN_INTERVAL_S)
     assert status == 202, f"unexpected bootstrap status; body={body!r}"
     assert body == {"status": "accepted"}
 
@@ -390,7 +432,7 @@ def test_magic_link_round_trip(clean_inbox: tuple[str, str]) -> None:
     email = _unique_email()
 
     # --- bootstrap ----------------------------------------------------------
-    _request_or_skip(app_url, email)
+    _request_or_drain(app_url, email)
 
     # --- poll Mailpit -------------------------------------------------------
     envelope = wait_for_message(mailpit_url, to=email)
@@ -465,7 +507,7 @@ def test_subject_matches_template(clean_inbox: tuple[str, str]) -> None:
     app_url, mailpit_url = clean_inbox
     email = _unique_email()
 
-    _request_or_skip(app_url, email)
+    _request_or_drain(app_url, email)
 
     envelope = wait_for_message(mailpit_url, to=email)
     assert envelope["Subject"] == ("crew.day — verify your email and finish signing up")
@@ -493,7 +535,7 @@ def test_text_body_contains_link(clean_inbox: tuple[str, str]) -> None:
     app_url, mailpit_url = clean_inbox
     email = _unique_email()
 
-    _request_or_skip(app_url, email)
+    _request_or_drain(app_url, email)
 
     envelope = wait_for_message(mailpit_url, to=email)
     detail = fetch_message_detail(mailpit_url, envelope["ID"])
