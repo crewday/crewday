@@ -235,7 +235,11 @@ budget cap is **10% of the free-tier cap** and the upload quota is
 **25 MB**. Both lift automatically once the manager completes the
 human-verification trigger (one property created + one user
 invited + one task created). See §15 for the full cap table and
-abuse-response playbook.
+abuse-response playbook. The same 10% fraction is applied to the
+ledger row's `cap_cents` (§11 "Cap") via
+`app.domain.plans.tight_cap_cents`, so the ledger and
+`workspace.quota_json['llm_budget_cents_30d']` always agree on the
+number a freshly-signed-up workspace runs at.
 
 **Throttle on repeat provisioning.** The same email may provision
 at most **3 workspaces** lifetime on the SaaS deployment

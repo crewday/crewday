@@ -2095,6 +2095,13 @@ Defaults:
 
 - **Prod:** `cap_usd_30d = 5.0000` seeded at workspace creation. This
   row is inserted in the same transaction as the workspace row.
+  During the §03 "Tight initial caps" phase (until the workspace
+  reaches `verification_state='human_verified'`) the seeded
+  `cap_cents` is scaled by the 10 % `_TIGHT_CAP_FRACTION` via
+  `app.domain.plans.tight_cap_cents`, so the ledger row and
+  `workspace.quota_json['llm_budget_cents_30d']` agree on the same
+  reduced number — a freshly-signed-up prod workspace runs at
+  `cap_usd_30d = 0.5000` until the lift, not the full $5.
 - **Demo:** `cap_usd_30d = 0.1000` seeded per scenario (§24); see
   "Demo mode overrides" below.
 
