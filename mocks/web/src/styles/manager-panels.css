@@ -288,6 +288,31 @@
 .tpl-card__checklist { list-style: none; padding: var(--space-0); margin: var(--space-0); border-top: 1px solid var(--line); }
 .tpl-card__checklist li { display: flex; align-items: center; gap: var(--space-4); padding: var(--space-4) var(--space-0); font-size: 13px; border-bottom: 1px dashed var(--line); }
 .tpl-card__checklist li:last-child { border-bottom: 0; }
+.tpl-card__checklist--editable .tpl-card__step { padding-left: var(--space-2); padding-right: var(--space-2); cursor: grab; transition: background 120ms ease, transform 120ms ease; }
+.tpl-card__checklist--editable .tpl-card__step:active { cursor: grabbing; }
+.tpl-card__checklist--editable .tpl-card__step--dragging { opacity: 0.5; background: var(--paper-2); }
+.tpl-card__checklist--editable .tpl-card__step--drop-target { background: var(--moss-soft); box-shadow: inset 0 2px 0 var(--moss); }
+.tpl-card__step-handle {
+  display: inline-flex; align-items: center; justify-content: center;
+  color: var(--ink-4); flex-shrink: 0;
+  width: 16px; height: 16px;
+}
+.tpl-card__checklist--editable .tpl-card__step:hover .tpl-card__step-handle { color: var(--ink-3); }
+.tpl-card__step-body { flex: 1 1 auto; min-width: 0; }
+.tpl-card__step-actions { display: inline-flex; gap: var(--space-1); flex-shrink: 0; margin-left: auto; }
+.tpl-card__step-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  /* WCAG 2.2 SC 2.5.8 minimum target size is 24×24 CSS px; we go to
+   * 28 so thumb taps don't fight the neighbour. Touch is the primary
+   * fallback when HTML5 DnD doesn't fire (iOS Safari). */
+  width: 28px; height: 28px; padding: var(--space-0);
+  border: 1px solid var(--line); border-radius: 6px;
+  background: var(--card); color: var(--ink-3); cursor: pointer;
+  transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+.tpl-card__step-btn:hover:not(:disabled) { background: var(--paper-2); color: var(--ink); border-color: var(--line-strong); }
+.tpl-card__step-btn:focus-visible { outline: 2px solid var(--moss); outline-offset: 2px; }
+.tpl-card__step-btn:disabled { opacity: 0.35; cursor: not-allowed; }
 .tpl-card__effects {
   display: flex; flex-direction: column; gap: var(--space-2);
   margin-top: var(--space-5); padding-top: var(--space-5);
