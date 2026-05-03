@@ -561,3 +561,48 @@ class TestEndToEnd:
         # request rolls back.
         listing = client.get("/user_availability_overrides").json()
         assert len(listing["data"]) == 1
+
+    def test_resubmit_after_withdraw_returns_409_override_exists(
+        self, api_factory: sessionmaker[Session]
+    ) -> None:
+        """A re-submit on the same date after a withdraw still 409s.
+
+        The ``UNIQUE(workspace_id, user_id, date)`` constraint is
+        unconditional — tombstoned rows still occupy the slot. The
+        v1 cd-uqw1 surface deliberately rejects with ``override_exists``
+        rather than flipping ``deleted_at`` back, so the original
+        withdrawal's audit chain stays intact. Pinning this behavior
+        keeps a future implementer from silently swapping the policy
+        and breaking callers that rely on the typed 409 envelope.
+        """
+        ws_id, ws_slug, owner_id = _seed_workspace_with_owner(
+            api_factory, slug="uao-int-redup"
+        )
+        ctx = _ctx(
+            workspace_id=ws_id,
+            workspace_slug=ws_slug,
+            actor_id=owner_id,
+            grant_role="manager",
+            actor_was_owner_member=True,
+        )
+        client = TestClient(_build_app(api_factory, ctx), raise_server_exceptions=False)
+        first = client.post(
+            "/user_availability_overrides",
+            json={"date": "2026-05-04", "available": False, "user_id": owner_id},
+        )
+        assert first.status_code == 201, first.text
+        override_id = first.json()["id"]
+
+        # Withdraw the row — soft-delete leaves the (user, date) slot
+        # occupied by the tombstoned row.
+        deleted = client.delete(f"/user_availability_overrides/{override_id}")
+        assert deleted.status_code == 204, deleted.text
+
+        # Resubmit on the same date — the unconditional UNIQUE still
+        # fires; pre-flight probe maps it to a typed 409.
+        resubmit = client.post(
+            "/user_availability_overrides",
+            json={"date": "2026-05-04", "available": False, "user_id": owner_id},
+        )
+        assert resubmit.status_code == 409, resubmit.text
+        assert resubmit.json()["detail"]["error"] == "override_exists"

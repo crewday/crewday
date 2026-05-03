@@ -300,9 +300,17 @@ class UserAvailabilityOverride(Base):
     falls back to the weekly pattern's hours (§06).
 
     **UNIQUE.** ``(workspace_id, user_id, date)`` — one override per
-    user per date. Withdrawing an override and re-submitting on the
-    same date overwrites the same row (the service layer flips
-    ``deleted_at`` back to ``NULL`` rather than minting a new row).
+    user per date. The constraint is unconditional: tombstoned rows
+    still occupy the slot. The cd-uqw1 service therefore rejects a
+    re-submit on the same ``(user_id, date)`` with a 409
+    ``override_exists`` envelope (see
+    :func:`app.domain.identity.user_availability_overrides.create_override`'s
+    pre-flight existence probe + the SAVEPOINT-wrapped insert race
+    fallback). A worker withdrawing then re-submitting on the same
+    date must wait for the tombstoned row to be hard-purged, or use a
+    new date — the v1 surface deliberately does not "flip
+    ``deleted_at`` back" because that would erase the audit chain of
+    the original withdrawal.
 
     **Soft references.** ``user_id`` and ``approved_by`` are plain
     :class:`str`; see :class:`UserLeave` for the rationale.
