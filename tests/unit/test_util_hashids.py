@@ -47,6 +47,24 @@ class TestTampering:
         with pytest.raises(TokenInvalid):
             decode_token(tampered, _SECRET, _SALT, max_age_seconds=60)
 
+    # itsdangerous signs with HMAC-SHA1 -> 20 bytes (160 bits), urlsafe-b64-
+    # encoded without padding to 27 chars. 27 * 6 = 162 bits, so positions
+    # 0..25 each fully encode HMAC bits (any substitution changes the
+    # decoded HMAC bytes) while position 26 carries 2 real bits + 4 padding
+    # bits — substitutions there can land on a char with the same top-2
+    # bits and silently verify. Sweeping 0..25 covers every guaranteed-
+    # interior position.
+    @pytest.mark.parametrize("position", range(26))
+    def test_signature_byte_mutation_raises_token_invalid(self, position: int) -> None:
+        token = encode_token({"k": "v"}, _SECRET, _SALT)
+        payload, ts, sig = token.rsplit(".", 2)
+        original = sig[position]
+        replacement = "Z" if original != "Z" else "A"
+        new_sig = sig[:position] + replacement + sig[position + 1 :]
+        tampered = f"{payload}.{ts}.{new_sig}"
+        with pytest.raises(TokenInvalid):
+            decode_token(tampered, _SECRET, _SALT, max_age_seconds=60)
+
     def test_wrong_secret_raises_token_invalid(self) -> None:
         token = encode_token({"k": "v"}, _SECRET, _SALT)
         with pytest.raises(TokenInvalid):
