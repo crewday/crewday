@@ -125,6 +125,7 @@ from sqlalchemy import (
     Integer,
     Numeric,
     String,
+    UniqueConstraint,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -610,6 +611,26 @@ class ExpenseAttachment(Base):
         CheckConstraint(
             "pages IS NULL OR pages >= 1",
             name="pages_positive",
+        ),
+        # cd-l690: a single claim may not carry the same blob twice
+        # under the same ``kind``. Storage is content-addressed so the
+        # bytes are shared, but a duplicate row clutters the manager
+        # approval UI and would force the cd-95zb OCR worker to re-run
+        # over the same hash. Same blob with a different ``kind``
+        # (receipt vs invoice) stays legal — the worker may be
+        # re-classifying — so the unique key is the triplet, not the
+        # pair. ``pages`` is intentionally NOT in the key: a duplicate
+        # under the same ``kind`` with a different page count is still
+        # a duplicate (pages is derived from the blob, not asserted
+        # twice). The domain layer pre-flight (see
+        # :func:`app.domain.expenses.claims.attach_receipt`) raises
+        # :class:`AttachmentAlreadyExists` before this constraint ever
+        # fires; the unique key is the DB-level backstop.
+        UniqueConstraint(
+            "claim_id",
+            "blob_hash",
+            "kind",
+            name="uq_expense_attachment_claim_blob_kind",
         ),
         # "All attachments for this claim" read path.
         Index(

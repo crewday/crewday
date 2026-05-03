@@ -119,6 +119,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from app.adapters.storage.ports import Storage
 from app.audit import write_audit
 from app.domain.expenses.ports import (
+    AttachmentAlreadyExistsConflict,
     CapabilityChecker,
     ExpenseAttachmentRow,
     ExpenseClaimRow,
@@ -132,6 +133,7 @@ from app.util.currency import ISO_4217_ALLOWLIST
 from app.util.ulid import new_ulid
 
 __all__ = [
+    "AttachmentAlreadyExists",
     "BlobMimeNotAllowed",
     "BlobMissing",
     "BlobTooLarge",
@@ -326,6 +328,23 @@ class TooManyAttachments(ValueError):
     invoices. The 11th attempt raises here so the UI can show a
     helpful "you've reached the limit" message instead of letting
     the row land and rejecting later at approval.
+    """
+
+
+class AttachmentAlreadyExists(ValueError):
+    """The same ``(blob_hash, kind)`` triplet is already attached to the claim.
+
+    409-equivalent (cd-l690). The DB-level
+    ``uq_expense_attachment_claim_blob_kind`` constraint enforces the
+    same rule as a backstop, but the service runs a pre-flight SELECT
+    so the typical path raises this domain exception cleanly without
+    waiting for an ``IntegrityError`` round-trip.
+
+    Same blob with a different ``kind`` (receipt vs invoice) stays
+    legal — the worker may be re-classifying. Same blob with the
+    same ``kind`` but a different ``pages`` count is rejected here
+    too: the unique key intentionally omits ``pages`` (the page count
+    is derived from the blob, not asserted independently).
     """
 
 
@@ -1458,16 +1477,50 @@ def attach_receipt(
             f"kind {kind!r} is not one of {sorted(_ATTACHMENT_KIND_VALUES_LOCAL)!r}"
         )
 
-    now = resolved_clock.now()
-    attachment_row = repo.insert_attachment(
-        attachment_id=new_ulid(),
+    # cd-l690 dedupe pre-flight. Storage is content-addressed so the
+    # bytes are shared, but a duplicate ``(claim_id, blob_hash, kind)``
+    # row clutters the manager approval UI and would force the cd-95zb
+    # OCR worker to re-run on the same hash. Same blob with a
+    # different ``kind`` (receipt vs invoice) stays legal — the worker
+    # may be re-classifying. The DB-level
+    # ``uq_expense_attachment_claim_blob_kind`` constraint is the
+    # ultimate backstop; this SELECT keeps the typical path off the
+    # ``IntegrityError`` round-trip.
+    duplicate = repo.find_attachment_by_blob_kind(
         workspace_id=ctx.workspace_id,
         claim_id=claim_id,
         blob_hash=blob_hash,
         kind=kind,
-        pages=pages,
-        created_at=now,
     )
+    if duplicate is not None:
+        raise AttachmentAlreadyExists(
+            f"claim {claim_id!r} already has a {kind!r} attachment for "
+            f"blob {blob_hash!r}"
+        )
+
+    now = resolved_clock.now()
+    # The pre-flight above is the typical path; the
+    # ``AttachmentAlreadyExistsConflict`` catch is the race backstop —
+    # if a concurrent request inserted the same triplet between our
+    # SELECT and our INSERT, the unique constraint
+    # ``uq_expense_attachment_claim_blob_kind`` fires at flush time,
+    # the SA repo translates the ``IntegrityError`` into the seam
+    # exception, and we re-raise it as the same domain
+    # :class:`AttachmentAlreadyExists` shape so the router's 409
+    # envelope path is identical regardless of which side caught the
+    # duplicate.
+    try:
+        attachment_row = repo.insert_attachment(
+            attachment_id=new_ulid(),
+            workspace_id=ctx.workspace_id,
+            claim_id=claim_id,
+            blob_hash=blob_hash,
+            kind=kind,
+            pages=pages,
+            created_at=now,
+        )
+    except AttachmentAlreadyExistsConflict as exc:
+        raise AttachmentAlreadyExists(str(exc)) from exc
     view = _attachment_row_to_view(attachment_row)
 
     write_audit(

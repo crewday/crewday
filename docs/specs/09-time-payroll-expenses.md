@@ -1019,6 +1019,16 @@ expense_attachment
 ├── pages                      # int (for multi-page PDFs)
 ```
 
+A claim may not carry the same blob twice under the same `kind`:
+`(claim_id, blob_hash, kind)` is unique. Storage is content-addressed,
+so the bytes are shared, but a duplicate row clutters the manager
+approval UI and would force the OCR worker to re-run on the same
+hash. Same blob with a different `kind` (receipt vs invoice) stays
+legal — a worker may be re-classifying. `pages` is intentionally not
+part of the key: page count is derived from the blob, not asserted
+independently. The duplicate-attach attempt surfaces 409
+`attachment_already_exists` (§12 Errors).
+
 **Cross-table delete behaviour.** `owed_destination_id` and
 `reimbursement_destination_id` use `ON DELETE RESTRICT`: both are
 payroll-law evidence — `owed_destination_id` snapshots the

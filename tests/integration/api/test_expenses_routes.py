@@ -548,6 +548,90 @@ class TestAttachments:
             r = client.get(f"/api/v1/expenses/{cid}/attachments")
             assert r.json()["data"] == []
 
+    def test_dedupe_same_blob_same_kind_returns_409(
+        self,
+        session_factory: sessionmaker[Session],
+        storage: InMemoryStorage,
+        seeded: dict[str, Any],
+    ) -> None:
+        """cd-l690: re-attaching the same (blob_hash, kind) returns 409.
+
+        The first POST lands the row; the second surfaces the
+        ``attachment_already_exists`` envelope so the SPA can render
+        a "this receipt is already attached" hint.
+        """
+        with _client_for(session_factory, seeded["worker_ctx"], storage) as client:
+            cid = self._seed_draft(client, seeded)
+            blob = _push_blob(storage)
+            r = client.post(
+                f"/api/v1/expenses/{cid}/attachments",
+                json={
+                    "blob_hash": blob,
+                    "content_type": "image/jpeg",
+                    "size_bytes": 64,
+                },
+            )
+            assert r.status_code == 201, r.text
+
+            r = client.post(
+                f"/api/v1/expenses/{cid}/attachments",
+                json={
+                    "blob_hash": blob,
+                    "content_type": "image/jpeg",
+                    "size_bytes": 64,
+                },
+            )
+            assert r.status_code == 409, r.text
+            assert r.json()["detail"]["error"] == "attachment_already_exists"
+
+            # The duplicate didn't land — the claim still has exactly
+            # one attachment.
+            r = client.get(f"/api/v1/expenses/{cid}/attachments")
+            assert r.status_code == 200, r.text
+            assert len(r.json()["data"]) == 1
+
+    def test_dedupe_same_blob_different_kind_succeeds(
+        self,
+        session_factory: sessionmaker[Session],
+        storage: InMemoryStorage,
+        seeded: dict[str, Any],
+    ) -> None:
+        """cd-l690: same blob with a different ``kind`` is still legal.
+
+        A worker re-classifying a receipt as an invoice (or attaching
+        an invoice copy alongside a receipt) is allowed because the
+        unique key is ``(claim_id, blob_hash, kind)``.
+        """
+        with _client_for(session_factory, seeded["worker_ctx"], storage) as client:
+            cid = self._seed_draft(client, seeded)
+            blob = _push_blob(storage)
+            r = client.post(
+                f"/api/v1/expenses/{cid}/attachments",
+                json={
+                    "blob_hash": blob,
+                    "content_type": "image/jpeg",
+                    "size_bytes": 64,
+                    "kind": "receipt",
+                },
+            )
+            assert r.status_code == 201, r.text
+
+            r = client.post(
+                f"/api/v1/expenses/{cid}/attachments",
+                json={
+                    "blob_hash": blob,
+                    "content_type": "image/jpeg",
+                    "size_bytes": 64,
+                    "kind": "invoice",
+                },
+            )
+            assert r.status_code == 201, r.text
+
+            r = client.get(f"/api/v1/expenses/{cid}/attachments")
+            assert r.status_code == 200, r.text
+            kinds = sorted(row["kind"] for row in r.json()["data"])
+            assert kinds == ["invoice", "receipt"]
+
 
 # ---------------------------------------------------------------------------
 # Listing + pagination

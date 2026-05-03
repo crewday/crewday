@@ -36,6 +36,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.adapters.db.expenses.models import ExpenseAttachment, ExpenseClaim
@@ -49,6 +50,7 @@ from app.authz import (
     require,
 )
 from app.domain.expenses.ports import (
+    AttachmentAlreadyExistsConflict,
     CapabilityChecker,
     ExpenseAttachmentRow,
     ExpenseClaimRow,
@@ -88,6 +90,33 @@ def _ensure_utc_optional(value: datetime | None) -> datetime | None:
     if value is None:
         return None
     return _ensure_utc(value)
+
+
+# cd-l690: signatures for the
+# ``uq_expense_attachment_claim_blob_kind`` constraint as it appears in
+# each backend's IntegrityError message. PG reports the constraint
+# name verbatim; SQLite reports the column tuple ("UNIQUE constraint
+# failed: expense_attachment.claim_id, ..."). Matching both flavours
+# keeps the seam translation backend-agnostic without leaking
+# dialect details to the caller.
+_ATTACHMENT_UNIQUE_HINTS: tuple[str, ...] = (
+    "uq_expense_attachment_claim_blob_kind",
+    # SQLite shape — the column triplet appears in this order in the
+    # error string.
+    "expense_attachment.claim_id, expense_attachment.blob_hash, "
+    "expense_attachment.kind",
+)
+
+
+def _is_attachment_unique_violation(exc: IntegrityError) -> bool:
+    """Return True when ``exc`` is the ``(claim_id, blob_hash, kind)`` collision.
+
+    Other IntegrityError shapes (FK violation on ``claim_id``, CHECK on
+    ``kind`` / ``pages``, etc.) must not be silently translated into a
+    409 — the caller relies on a 500 surface for those.
+    """
+    message = str(exc.orig)
+    return any(hint in message for hint in _ATTACHMENT_UNIQUE_HINTS)
 
 
 def _to_engagement_row(row: WorkEngagement) -> WorkEngagementRow:
@@ -403,6 +432,25 @@ class SqlAlchemyExpensesRepository(ExpensesRepository):
             return None
         return _to_attachment_row(row)
 
+    def find_attachment_by_blob_kind(
+        self,
+        *,
+        workspace_id: str,
+        claim_id: str,
+        blob_hash: str,
+        kind: str,
+    ) -> ExpenseAttachmentRow | None:
+        stmt = select(ExpenseAttachment).where(
+            ExpenseAttachment.workspace_id == workspace_id,
+            ExpenseAttachment.claim_id == claim_id,
+            ExpenseAttachment.blob_hash == blob_hash,
+            ExpenseAttachment.kind == kind,
+        )
+        row = self._session.scalars(stmt).one_or_none()
+        if row is None:
+            return None
+        return _to_attachment_row(row)
+
     def insert_attachment(
         self,
         *,
@@ -424,7 +472,30 @@ class SqlAlchemyExpensesRepository(ExpensesRepository):
             created_at=created_at,
         )
         self._session.add(attachment)
-        self._session.flush()
+        # cd-l690: translate the unique-by-``(claim_id, blob_hash, kind)``
+        # constraint into a typed seam exception. The domain pre-flight
+        # in :func:`app.domain.expenses.claims.attach_receipt` makes this
+        # the rare path — only a concurrent attach that raced past the
+        # SELECT can land here — but without the catch the racing request
+        # would surface as a 500 instead of the same 409 envelope the
+        # pre-flight produces. Mirrors the inventory / places / identity
+        # repos' IntegrityError translation pattern. Rolls the session
+        # back so the caller's UoW can abort cleanly (an
+        # ``IntegrityError`` puts the session into ``in failed
+        # transaction`` state for any subsequent SQL on PG).
+        try:
+            self._session.flush()
+        except IntegrityError as exc:
+            self._session.rollback()
+            if _is_attachment_unique_violation(exc):
+                raise AttachmentAlreadyExistsConflict(
+                    f"claim {claim_id!r} already has a {kind!r} attachment for "
+                    f"blob {blob_hash!r}"
+                ) from exc
+            # Some other constraint fired (FK, CHECK, etc.) — re-raise so
+            # the surrounding UoW surfaces a 500, matching the existing
+            # "unexpected DB error" path.
+            raise
         return _to_attachment_row(attachment)
 
     def delete_attachment(

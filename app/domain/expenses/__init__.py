@@ -25,6 +25,7 @@ from app.domain.expenses.approval import (
     reject_claim,
 )
 from app.domain.expenses.claims import (
+    AttachmentAlreadyExists,
     BlobMimeNotAllowed,
     BlobMissing,
     BlobTooLarge,
@@ -61,6 +62,7 @@ from app.domain.expenses.claims import (
 __all__ = [
     "ApprovalEdits",
     "ApprovalPermissionDenied",
+    "AttachmentAlreadyExists",
     "BlobMimeNotAllowed",
     "BlobMissing",
     "BlobTooLarge",

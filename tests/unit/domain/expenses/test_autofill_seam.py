@@ -186,6 +186,18 @@ class _FakeRepo:
             return None
         return self.attachment
 
+    def find_attachment_by_blob_kind(
+        self,
+        *,
+        workspace_id: str,
+        claim_id: str,
+        blob_hash: str,
+        kind: str,
+    ) -> ExpenseAttachmentRow | None:
+        raise NotImplementedError(
+            "autofill should not look up attachments by (blob_hash, kind)"
+        )
+
     def insert_attachment(
         self,
         *,

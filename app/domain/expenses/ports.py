@@ -69,6 +69,7 @@ from typing import Any, Literal, Protocol
 from sqlalchemy.orm import Session
 
 __all__ = [
+    "AttachmentAlreadyExistsConflict",
     "CapabilityChecker",
     "ExpenseAttachmentRow",
     "ExpenseClaimRow",
@@ -83,6 +84,23 @@ __all__ = [
 # ---------------------------------------------------------------------------
 # Seam exceptions
 # ---------------------------------------------------------------------------
+
+
+class AttachmentAlreadyExistsConflict(Exception):
+    """Seam-level signal: ``(claim_id, blob_hash, kind)`` unique constraint fired.
+
+    Raised by :meth:`ExpensesRepository.insert_attachment` when its
+    ``flush()`` trips ``uq_expense_attachment_claim_blob_kind`` —
+    typically because a concurrent request raced past the
+    :meth:`find_attachment_by_blob_kind` pre-flight and won the insert
+    first. The SA-backed concretion catches the underlying
+    :class:`sqlalchemy.exc.IntegrityError`, rolls the session back so
+    the caller can react, and raises this seam-level exception. The
+    domain layer (:func:`app.domain.expenses.claims.attach_receipt`)
+    re-raises it as :class:`~app.domain.expenses.AttachmentAlreadyExists`
+    so the router's 409 envelope path is the same whether the
+    pre-flight or the constraint backstop fires.
+    """
 
 
 class SeamPermissionDenied(Exception):
@@ -420,6 +438,27 @@ class ExpensesRepository(Protocol):
         attachment_id: str,
     ) -> ExpenseAttachmentRow | None:
         """Return the attachment scoped to ``workspace_id`` + ``claim_id``."""
+        ...
+
+    def find_attachment_by_blob_kind(
+        self,
+        *,
+        workspace_id: str,
+        claim_id: str,
+        blob_hash: str,
+        kind: str,
+    ) -> ExpenseAttachmentRow | None:
+        """Return the attachment with the given ``(blob_hash, kind)`` triplet.
+
+        Powers the cd-l690 dedupe pre-flight in
+        :func:`app.domain.expenses.claims.attach_receipt`. Returns
+        ``None`` when no row matches; the caller proceeds with the
+        insert. The DB-level
+        ``uq_expense_attachment_claim_blob_kind`` constraint is the
+        ultimate backstop — a concurrent attach that races past the
+        pre-flight still surfaces an ``IntegrityError`` the caller
+        translates into the same domain exception.
+        """
         ...
 
     def insert_attachment(

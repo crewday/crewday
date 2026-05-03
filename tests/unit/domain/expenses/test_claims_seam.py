@@ -259,6 +259,24 @@ class _FakeRepo:
             return None
         return row
 
+    def find_attachment_by_blob_kind(
+        self,
+        *,
+        workspace_id: str,
+        claim_id: str,
+        blob_hash: str,
+        kind: str,
+    ) -> ExpenseAttachmentRow | None:
+        for a in self.attachments.values():
+            if (
+                a.workspace_id == workspace_id
+                and a.claim_id == claim_id
+                and a.blob_hash == blob_hash
+                and a.kind == kind
+            ):
+                return a
+        return None
+
     def insert_attachment(
         self,
         *,

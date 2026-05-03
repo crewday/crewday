@@ -43,6 +43,7 @@ from app.adapters.db.identity.models import User, canonicalise_email
 from app.adapters.db.session import make_engine
 from app.adapters.db.workspace.models import WorkEngagement, Workspace
 from app.domain.expenses import (
+    AttachmentAlreadyExists,
     BlobMimeNotAllowed,
     BlobMissing,
     BlobTooLarge,
@@ -1189,6 +1190,186 @@ class TestAttachReceipt:
             "expense.claim.created",
             "expense.claim.receipt_attached",
         ]
+
+    def test_dedupe_same_blob_same_kind_rejected(
+        self,
+        session: Session,
+        worker_env: tuple[WorkspaceContext, str, str, FrozenClock],
+        storage: InMemoryStorage,
+    ) -> None:
+        """cd-l690: re-attaching the same (blob_hash, kind) on the same claim 409s.
+
+        The first attach lands a row; the second raises
+        :class:`AttachmentAlreadyExists` so the SPA can show a "this
+        receipt is already attached" message instead of producing a
+        duplicate row that would clutter the manager approval UI.
+        """
+        ctx, _user_id, eng_id, clock = worker_env
+        created = create_claim(
+            session, ctx, body=_create_body(work_engagement_id=eng_id), clock=clock
+        )
+        h = _put_blob(storage)
+        attach_receipt(
+            session,
+            ctx,
+            claim_id=created.id,
+            blob_hash=h,
+            content_type="image/jpeg",
+            size_bytes=1024,
+            storage=storage,
+            clock=clock,
+        )
+        with pytest.raises(AttachmentAlreadyExists):
+            attach_receipt(
+                session,
+                ctx,
+                claim_id=created.id,
+                blob_hash=h,
+                content_type="image/jpeg",
+                size_bytes=1024,
+                storage=storage,
+                clock=clock,
+            )
+        # The duplicate didn't land — the claim still has exactly one
+        # attachment.
+        reloaded = get_claim(session, ctx, claim_id=created.id)
+        assert len(reloaded.attachments) == 1
+
+    def test_dedupe_same_blob_different_kind_allowed(
+        self,
+        session: Session,
+        worker_env: tuple[WorkspaceContext, str, str, FrozenClock],
+        storage: InMemoryStorage,
+    ) -> None:
+        """cd-l690: same blob with a different ``kind`` is still legal.
+
+        The unique key is the triplet ``(claim_id, blob_hash, kind)``;
+        a worker re-classifying a receipt as an invoice (or vice versa)
+        is intentionally allowed.
+        """
+        ctx, _user_id, eng_id, clock = worker_env
+        created = create_claim(
+            session, ctx, body=_create_body(work_engagement_id=eng_id), clock=clock
+        )
+        h = _put_blob(storage)
+        attach_receipt(
+            session,
+            ctx,
+            claim_id=created.id,
+            blob_hash=h,
+            content_type="image/jpeg",
+            size_bytes=1024,
+            storage=storage,
+            kind="receipt",
+            clock=clock,
+        )
+        # Same blob, different kind — landed cleanly.
+        attach_receipt(
+            session,
+            ctx,
+            claim_id=created.id,
+            blob_hash=h,
+            content_type="image/jpeg",
+            size_bytes=1024,
+            storage=storage,
+            kind="invoice",
+            clock=clock,
+        )
+        reloaded = get_claim(session, ctx, claim_id=created.id)
+        assert len(reloaded.attachments) == 2
+        kinds = sorted(a.kind for a in reloaded.attachments)
+        assert kinds == ["invoice", "receipt"]
+
+    def test_dedupe_same_blob_same_kind_different_pages_rejected(
+        self,
+        session: Session,
+        worker_env: tuple[WorkspaceContext, str, str, FrozenClock],
+        storage: InMemoryStorage,
+    ) -> None:
+        """cd-l690: ``pages`` is intentionally NOT in the unique key.
+
+        A duplicate ``(blob_hash, kind)`` with a different page count
+        is still a duplicate — page count is derived from the blob,
+        not asserted independently.
+        """
+        ctx, _user_id, eng_id, clock = worker_env
+        created = create_claim(
+            session, ctx, body=_create_body(work_engagement_id=eng_id), clock=clock
+        )
+        h = _put_blob(storage)
+        attach_receipt(
+            session,
+            ctx,
+            claim_id=created.id,
+            blob_hash=h,
+            content_type="image/jpeg",
+            size_bytes=1024,
+            storage=storage,
+            kind="receipt",
+            pages=1,
+            clock=clock,
+        )
+        with pytest.raises(AttachmentAlreadyExists):
+            attach_receipt(
+                session,
+                ctx,
+                claim_id=created.id,
+                blob_hash=h,
+                content_type="image/jpeg",
+                size_bytes=1024,
+                storage=storage,
+                kind="receipt",
+                pages=3,
+                clock=clock,
+            )
+
+    def test_dedupe_constraint_backstop_translates_integrity_error(
+        self,
+        session: Session,
+        worker_env: tuple[WorkspaceContext, str, str, FrozenClock],
+        storage: InMemoryStorage,
+    ) -> None:
+        """cd-l690: a race past the SELECT pre-flight surfaces the same 409.
+
+        Drives the SA repo's ``insert_attachment`` directly, bypassing
+        the domain pre-flight, and inserts the same
+        ``(claim_id, blob_hash, kind)`` triplet twice. The second call
+        must surface a typed
+        :class:`AttachmentAlreadyExistsConflict` (not a raw
+        ``IntegrityError``) so the domain layer can translate it into
+        the same :class:`AttachmentAlreadyExists` 409 envelope the
+        pre-flight produces.
+        """
+        from app.domain.expenses.ports import AttachmentAlreadyExistsConflict
+
+        ctx, _user_id, eng_id, clock = worker_env
+        created = create_claim(
+            session, ctx, body=_create_body(work_engagement_id=eng_id), clock=clock
+        )
+        h = _put_blob(storage)
+        repo = SqlAlchemyExpensesRepository(session)
+        repo.insert_attachment(
+            attachment_id=new_ulid(),
+            workspace_id=ctx.workspace_id,
+            claim_id=created.id,
+            blob_hash=h,
+            kind="receipt",
+            pages=None,
+            created_at=clock.now(),
+        )
+        # The session is rolled back by the repo on the integrity-error
+        # path, so re-build the repo after the assertion to avoid
+        # leaning on a session in an indeterminate state.
+        with pytest.raises(AttachmentAlreadyExistsConflict):
+            repo.insert_attachment(
+                attachment_id=new_ulid(),
+                workspace_id=ctx.workspace_id,
+                claim_id=created.id,
+                blob_hash=h,
+                kind="receipt",
+                pages=None,
+                created_at=clock.now(),
+            )
 
 
 class TestDetachReceipt:

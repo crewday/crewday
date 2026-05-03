@@ -125,6 +125,7 @@ from app.config import Settings, get_settings
 from app.domain.expenses import (
     ApprovalEdits,
     ApprovalPermissionDenied,
+    AttachmentAlreadyExists,
     BlobMimeNotAllowed,
     BlobMissing,
     BlobTooLarge,
@@ -492,8 +493,10 @@ def _http_for_claim_error(exc: Exception) -> HTTPException:
     * 404 ``claim_not_found`` — :class:`ClaimNotFound` (cross-tenant
       probes already collapse to this in the service via ``_load_row``).
     * 409 ``claim_not_editable`` / ``claim_not_approvable`` /
-      ``claim_not_reimbursable`` / ``claim_state_transition_invalid``
-      — wrong state for the requested verb.
+      ``claim_not_reimbursable`` / ``claim_state_transition_invalid`` /
+      ``attachment_already_exists`` — wrong state for the requested
+      verb (or, for the cd-l690 dedupe, the same blob is already on
+      the claim under the same kind).
     * 403 ``claim_permission_denied`` / ``approval_permission_denied``
       / ``reimburse_permission_denied`` — distinct codes so the SPA
       can surface the right "you can't do this" message without
@@ -508,6 +511,10 @@ def _http_for_claim_error(exc: Exception) -> HTTPException:
         return _http(status.HTTP_404_NOT_FOUND, "claim_not_found")
     if isinstance(exc, ClaimNotEditable):
         return _http(status.HTTP_409_CONFLICT, "claim_not_editable", message=str(exc))
+    if isinstance(exc, AttachmentAlreadyExists):
+        return _http(
+            status.HTTP_409_CONFLICT, "attachment_already_exists", message=str(exc)
+        )
     if isinstance(exc, ClaimNotApprovable):
         return _http(status.HTTP_409_CONFLICT, "claim_not_approvable", message=str(exc))
     if isinstance(exc, ClaimNotReimbursable):
@@ -942,6 +949,12 @@ def attach_expense_receipt_route(
     without booting a half-wired state machine. ``llm`` is an
     optional dep so the route still works when no LLM client is
     wired (the runner is just ``None``).
+
+    cd-l690: re-attaching the same ``(blob_hash, kind)`` triplet to a
+    single claim returns 409 ``attachment_already_exists`` — storage
+    is content-addressed so the bytes are shared, but a duplicate row
+    clutters the manager approval UI. Same blob with a different
+    ``kind`` (receipt vs invoice) stays legal.
     """
     runner = _build_attach_runner(llm=llm, settings=settings, storage=storage)
     repo, checker = make_seam_pair(session, ctx)
@@ -967,6 +980,7 @@ def attach_expense_receipt_route(
         BlobMimeNotAllowed,
         BlobTooLarge,
         TooManyAttachments,
+        AttachmentAlreadyExists,
     ) as exc:
         raise _http_for_claim_error(exc) from exc
     return ExpenseAttachmentPayload.from_view(view)
