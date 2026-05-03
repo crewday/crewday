@@ -136,11 +136,17 @@ class SqlAlchemyPropertyWorkRoleAssignmentRepository(
         # ``property_workspace`` is the workspace-tenancy junction for
         # ``property`` (which is itself shared across workspaces). A
         # live junction row is the only signal "this workspace
-        # operates this property" (§02 "property_workspace").
+        # operates this property" (§02 "property_workspace"). "Live"
+        # here means ``status = 'active'`` — ``invited`` rows are
+        # pre-acceptance (§02 "property_workspace.status") and the
+        # workspace has not yet taken operational control of the
+        # property, so pinning a role to it would violate §02
+        # "property_work_role_assignment" invariant 2.
         row = self._session.scalar(
             select(PropertyWorkspace).where(
                 PropertyWorkspace.property_id == property_id,
                 PropertyWorkspace.workspace_id == workspace_id,
+                PropertyWorkspace.status == "active",
             )
         )
         return row is not None

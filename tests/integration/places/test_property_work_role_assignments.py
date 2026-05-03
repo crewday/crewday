@@ -365,6 +365,68 @@ class TestCreate:
             )
         assert "user_work_role" in str(exc_info.value)
 
+    def test_invited_property_workspace_blocks_create(
+        self, env: tuple[Session, WorkspaceContext, str, str]
+    ) -> None:
+        """A property linked through an ``invited`` junction is not yet operated.
+
+        The §02 ``property_workspace.status`` enum ships ``invited`` for
+        rows minted by the §22 invite/accept flow that the recipient
+        workspace has not yet accepted. Spec §02
+        ``property_work_role_assignment`` invariant 2 says the property
+        must be linked through a *live* row — pinning a role to an
+        unaccepted property would leak operational decisions before the
+        workspace took control.
+        """
+        session, ctx, _prop_id, uwr_id = env
+        # Seed a fresh property + an ``invited``-status junction. The
+        # row is bound to ``ctx.workspace_id`` but not yet accepted.
+        invited_prop = Property(
+            id=new_ulid(),
+            name="Invited Villa",
+            kind="vacation",
+            address="—",
+            address_json={"country": "FR"},
+            country="FR",
+            locale=None,
+            default_currency=None,
+            timezone="Europe/Paris",
+            lat=None,
+            lon=None,
+            client_org_id=None,
+            owner_user_id=None,
+            tags_json=[],
+            welcome_defaults_json={},
+            property_notes_md="",
+            created_at=_PINNED,
+            updated_at=_PINNED,
+            deleted_at=None,
+        )
+        session.add(invited_prop)
+        session.add(
+            PropertyWorkspace(
+                property_id=invited_prop.id,
+                workspace_id=ctx.workspace_id,
+                label="Invited Villa",
+                membership_role="managed_workspace",
+                status="invited",
+                created_at=_PINNED,
+            )
+        )
+        session.flush()
+
+        with pytest.raises(PropertyWorkRoleAssignmentInvariantViolated) as exc_info:
+            create_property_work_role_assignment(
+                _repo(session),
+                ctx,
+                body=PropertyWorkRoleAssignmentCreate(
+                    user_work_role_id=uwr_id,
+                    property_id=invited_prop.id,
+                ),
+                clock=FrozenClock(_PINNED),
+            )
+        assert "not linked" in str(exc_info.value)
+
     def test_create_with_unknown_pay_rule_raises_invariant(
         self, env: tuple[Session, WorkspaceContext, str, str]
     ) -> None:

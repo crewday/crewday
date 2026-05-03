@@ -283,8 +283,11 @@ def _assert_property_in_workspace(
     """Raise if ``property_id`` is not linked to the caller's workspace.
 
     Reachability is "live ``property_workspace`` row joining the
-    property to ``ctx.workspace_id``". A workspace cannot pin a role
-    to a property it does not operate (§02
+    property to ``ctx.workspace_id``" — where "live" means
+    ``status = 'active'`` (§02 "property_workspace.status"); rows
+    still in the ``invited`` pre-acceptance state do not count, as
+    the workspace has not yet taken operational control. A workspace
+    cannot pin a role to a property it does not operate (§02
     "property_work_role_assignment" invariant 2).
     """
     if not repo.property_in_workspace(
