@@ -1,13 +1,15 @@
-"""Pilot 360x780 mobile-walk over the authenticated SPA (cd-ndmv).
+"""360x780 mobile-walk over the authenticated SPA (cd-ndmv, cd-7zfr).
 
 Spec: ``docs/specs/17-testing-quality.md`` §"360 px viewport sitemap"
 — full authenticated sitemap walked at 360x780; fails on horizontal
 scroll, sub-44x44 tap targets, or unreachable nav.
 
-Pilot scope: hard-coded route list
-(:data:`tests.e2e._helpers.sitemap.PILOT_AUTHENTICATED_ROUTES`)
-because the SPA does not yet emit a runtime sitemap; the follow-up
-Beads task wires the walker to a generated ``_surface.json``.
+The route list is read at test time from the SPA build manifest
+(``app/web/dist/_surface.json``) via
+:func:`tests.e2e._helpers.sitemap.load_authenticated_routes`, which
+falls back to the original cd-ndmv pilot list
+(:data:`tests.e2e._helpers.sitemap.PILOT_AUTHENTICATED_ROUTES`) when
+the SPA hasn't been built.
 
 **Three tests in this file**, each pinning a different invariant:
 
@@ -16,7 +18,7 @@ Beads task wires the walker to a generated ``_surface.json``.
   viewport, asserts the walker reports a ``horizontal_scroll`` finding.
   Pins the cd-ndmv acceptance criterion "fails on a deliberately
   introduced horizontal scroll".
-* :func:`test_authenticated_sitemap_at_360_walks_pilot_routes` —
+* :func:`test_authenticated_sitemap_at_360_walks_runtime_routes` —
   smoke-runs the walker against the live SPA. The manager-shell
   off-canvas drawer, side-nav rows, and PreviewShell pills all hold
   the 44x44 floor at 360 px (cd-jptt). Any regression here re-surfaces
@@ -41,8 +43,8 @@ from playwright.sync_api import BrowserContext
 
 from tests.e2e._helpers.auth import login_with_dev_session
 from tests.e2e._helpers.sitemap import (
-    PILOT_AUTHENTICATED_ROUTES,
     assert_no_findings,
+    load_authenticated_routes,
     walk_authenticated_sitemap,
 )
 
@@ -95,17 +97,34 @@ def test_walker_detects_known_horizontal_scroll_regression(
     )
 
 
-def test_authenticated_sitemap_at_360_walks_pilot_routes(
+def test_authenticated_sitemap_at_360_walks_runtime_routes(
     context: BrowserContext, base_url: str
 ) -> None:
-    """Walk the pilot routes at 360x780 and assert the full check passes.
+    """Walk the runtime route manifest at 360x780 and assert the check passes.
 
     Findings (horizontal scroll, sub-floor tap targets, missing nav)
     surface as a single aggregate :class:`AssertionError` with one
     line per regression.
 
-    Routes come from the pilot constant; the follow-up Beads task
-    swaps in a runtime ``_surface.json`` walker.
+    Routes come from ``app/web/dist/_surface.json`` via
+    :func:`load_authenticated_routes`, which falls back to the
+    original cd-ndmv pilot list when the SPA isn't built (so this
+    test still has coverage in a stale-``dist/`` worktree).
+
+    Slowest test in the suite — 45 routes x tap-target sweep is
+    roughly 10-30s per browser. Don't speed it up by trimming the
+    manifest; if the budget bites, parallelise per route at the
+    Playwright layer instead.
+
+    **``/admin/*`` filter.** The dev-login fast path (`role="owner"`)
+    mints a *workspace-scoped* role grant only; the admin shell gates
+    on ``is_deployment_admin`` (a separate deployment-scope grant).
+    Without that grant ``<AdminLayout>`` redirects every
+    ``/admin/...`` URL back to ``/`` (RoleHome) and the walker would
+    silently re-check the redirect target, not the admin page. We
+    drop those routes here until the suite gains a deployment-admin
+    login path. The manifest itself still lists them — other
+    consumers (native shell, future admin-walk test) need them.
     """
     login_with_dev_session(
         context,
@@ -117,10 +136,13 @@ def test_authenticated_sitemap_at_360_walks_pilot_routes(
     page = context.new_page()
     page.goto(f"{base_url.rstrip('/')}/dashboard", wait_until="domcontentloaded")
     page.locator(".desk").wait_for(state="attached")
+    walk_routes = tuple(
+        route for route in load_authenticated_routes() if not route.startswith("/admin")
+    )
     result = walk_authenticated_sitemap(
         page,
         base_url=base_url,
-        routes=PILOT_AUTHENTICATED_ROUTES,
+        routes=walk_routes,
     )
     assert_no_findings(result)
 

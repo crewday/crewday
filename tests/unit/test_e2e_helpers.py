@@ -1,6 +1,6 @@
 """Unit tests for ``tests/e2e/_helpers`` pure-Python pieces.
 
-The e2e suite's helpers ship two pieces of logic that are pure-Python
+The e2e suite's helpers ship a few pieces of logic that are pure-Python
 and unit-testable without Playwright or the dev stack:
 
 * :func:`tests.e2e._helpers.auth.extract_magic_link_token` — regex
@@ -13,6 +13,11 @@ and unit-testable without Playwright or the dev stack:
   :func:`tests.e2e._helpers.auth._extract_to_addresses` — type-narrowing
   helpers over Mailpit's ``dict[str, Any]`` listing payloads. Pinned
   here so a Mailpit API drift fails the unit suite first.
+* :func:`tests.e2e._helpers.sitemap.load_authenticated_routes` —
+  reads the SPA build manifest (``app/web/dist/_surface.json``) and
+  falls back to :data:`PILOT_AUTHENTICATED_ROUTES` when the file is
+  missing or malformed. The fallback is the safety net that keeps
+  the §17 360 px walker running when the SPA hasn't been built.
 
 Spec: ``docs/specs/17-testing-quality.md`` §"End-to-end" (the e2e
 helpers themselves are infrastructure for §17's GA journey suite).
@@ -20,6 +25,7 @@ helpers themselves are infrastructure for §17's GA journey suite).
 
 from __future__ import annotations
 
+import logging
 import subprocess
 from pathlib import Path
 from types import SimpleNamespace
@@ -34,6 +40,10 @@ from tests.e2e._helpers.auth import (
     _extract_to_addresses,
     extract_magic_link_token,
     login_with_dev_session,
+)
+from tests.e2e._helpers.sitemap import (
+    PILOT_AUTHENTICATED_ROUTES,
+    load_authenticated_routes,
 )
 
 
@@ -246,3 +256,99 @@ class TestLoginWithDevSession:
         assert len(calls) == 2
         assert first.cookies[0]["value"] == "value-1"
         assert second.cookies[0]["value"] == "value-2"
+
+
+class TestLoadAuthenticatedRoutes:
+    """:func:`load_authenticated_routes` build-manifest reader.
+
+    The helper underpins the §17 360 px sitemap walker: the production
+    Vite plugin emits ``app/web/dist/_surface.json``, the helper reads
+    it at test time, and the test consumes the route list. The
+    fallback to :data:`PILOT_AUTHENTICATED_ROUTES` keeps the e2e suite
+    runnable when the SPA hasn't been built — pinning the four
+    failure modes here means a regression in that fallback surfaces
+    in the unit suite, not the slow Playwright run.
+    """
+
+    def test_returns_routes_from_valid_manifest(self, tmp_path: Path) -> None:
+        """A well-formed manifest's ``authenticated`` list comes back as a tuple."""
+        manifest = tmp_path / "_surface.json"
+        manifest.write_text(
+            '{"version": 1, "authenticated": ["/today", "/dashboard"]}',
+            encoding="utf-8",
+        )
+        assert load_authenticated_routes(manifest_path=manifest) == (
+            "/today",
+            "/dashboard",
+        )
+
+    def test_falls_back_when_manifest_missing(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Missing file → fallback to pilot list, with a WARNING log line."""
+        missing = tmp_path / "does-not-exist.json"
+        with caplog.at_level(logging.WARNING, logger="tests.e2e._helpers.sitemap"):
+            routes = load_authenticated_routes(manifest_path=missing)
+        assert routes == PILOT_AUTHENTICATED_ROUTES
+        assert any("not found" in rec.message for rec in caplog.records)
+
+    def test_falls_back_on_malformed_json(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Invalid JSON → fallback (don't raise)."""
+        manifest = tmp_path / "_surface.json"
+        manifest.write_text("{not valid json", encoding="utf-8")
+        with caplog.at_level(logging.WARNING, logger="tests.e2e._helpers.sitemap"):
+            routes = load_authenticated_routes(manifest_path=manifest)
+        assert routes == PILOT_AUTHENTICATED_ROUTES
+        assert any("not valid JSON" in rec.message for rec in caplog.records)
+
+    def test_falls_back_when_authenticated_key_missing(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Valid JSON without ``authenticated`` → fallback."""
+        manifest = tmp_path / "_surface.json"
+        manifest.write_text('{"version": 1, "public": ["/login"]}', encoding="utf-8")
+        with caplog.at_level(logging.WARNING, logger="tests.e2e._helpers.sitemap"):
+            routes = load_authenticated_routes(manifest_path=manifest)
+        assert routes == PILOT_AUTHENTICATED_ROUTES
+        assert any(
+            "missing/invalid 'authenticated' list" in rec.message
+            for rec in caplog.records
+        )
+
+    def test_falls_back_when_top_level_is_not_object(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """A JSON list at the top level → fallback (defensive narrowing)."""
+        manifest = tmp_path / "_surface.json"
+        manifest.write_text('["/today"]', encoding="utf-8")
+        with caplog.at_level(logging.WARNING, logger="tests.e2e._helpers.sitemap"):
+            routes = load_authenticated_routes(manifest_path=manifest)
+        assert routes == PILOT_AUTHENTICATED_ROUTES
+        assert any("not a JSON object" in rec.message for rec in caplog.records)
+
+    def test_falls_back_on_non_string_route_entries(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Manifest with a non-string entry → fallback (caught by isinstance check)."""
+        manifest = tmp_path / "_surface.json"
+        manifest.write_text(
+            '{"version": 1, "authenticated": ["/today", 42]}',
+            encoding="utf-8",
+        )
+        with caplog.at_level(logging.WARNING, logger="tests.e2e._helpers.sitemap"):
+            routes = load_authenticated_routes(manifest_path=manifest)
+        assert routes == PILOT_AUTHENTICATED_ROUTES
+        assert any("non-string entries" in rec.message for rec in caplog.records)
+
+    def test_default_path_resolves_under_app_web_dist(self) -> None:
+        """The module-level default path points at ``app/web/dist/_surface.json``."""
+        from tests.e2e._helpers.sitemap import SURFACE_MANIFEST_PATH
+
+        # Don't assert the file exists (CI may run before the SPA is
+        # built); just pin the resolved location relative to the repo
+        # root so a directory-restructure surfaces here rather than
+        # silently breaking the live walker.
+        parts = SURFACE_MANIFEST_PATH.parts
+        assert parts[-4:] == ("app", "web", "dist", "_surface.json")

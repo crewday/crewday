@@ -1,4 +1,4 @@
-"""360 px viewport sitemap walk for the e2e suite (cd-ndmv).
+"""360 px viewport sitemap walk for the e2e suite (cd-ndmv, cd-7zfr).
 
 Spec: ``docs/specs/17-testing-quality.md`` §"360 px viewport sitemap"
 — the full authenticated sitemap is walked at 360x780 and fails on
@@ -9,12 +9,25 @@ This is the **web-platform side** of §14's native-wrapper readiness
 contract: the native shell later consumes the same routes as a black
 box, so any regression at the loopback breaks both surfaces.
 
-The pilot (cd-ndmv) hard-codes a small list of authenticated routes
-because the SPA does not yet emit a runtime ``_surface.json`` for
-its pages (the existing ``cli/crewday/_surface.json`` describes the
-HTTP surface, not the UI sitemap). A follow-up Beads task wires the
-walker to a generated ``app/web/dist/_surface.json`` once the SPA
-build emits one.
+The route list is read at test time from ``app/web/dist/_surface.json``
+(emitted by the ``crewday:emit-surface-manifest`` Vite plugin from
+``app/web/src/routes/_surface.ts``). When the SPA hasn't been built —
+or the manifest is malformed — :func:`load_authenticated_routes`
+falls back to :data:`PILOT_AUTHENTICATED_ROUTES`, the original cd-ndmv
+smoke list, so the e2e suite still has *some* coverage even with a
+stale ``dist/``.
+
+**CI gap (cd-7zfr follow-up).** ``mocks/docker-compose.yml`` runs the
+SPA via ``vite dev`` (``web-dev`` container, ``npm run dev``); no
+production build runs in CI, so ``dist/_surface.json`` is absent and
+:func:`load_authenticated_routes` falls back to
+:data:`PILOT_AUTHENTICATED_ROUTES` on every CI run. Locally, run
+``pnpm -C app/web build`` once before invoking ``pytest tests/e2e``
+to exercise the full 45-route manifest. The fallback emits a WARNING
+so the gap is visible in pytest's ``-v`` log; wiring the build into
+CI (e2e job adds a pnpm install + build step before
+``docker compose up``) is the canonical fix and is left as a
+follow-up Beads task.
 
 Each route's check is **route-scoped** — a failure on one route
 collects, but the walker keeps going so the test sees the full
@@ -24,21 +37,29 @@ the per-route findings.
 
 from __future__ import annotations
 
+import json
+import logging
 from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Final
 
 from playwright.sync_api import Locator, Page
 
 __all__ = [
     "PILOT_AUTHENTICATED_ROUTES",
+    "SURFACE_MANIFEST_PATH",
     "TAP_TARGET_MIN_PX",
     "RouteFinding",
     "WalkResult",
     "assert_no_findings",
+    "load_authenticated_routes",
     "walk_authenticated_sitemap",
 ]
+
+
+_log = logging.getLogger(__name__)
 
 
 # WCAG / Apple HIG / Material — 44x44 dp is the floor for tappable
@@ -48,11 +69,12 @@ __all__ = [
 # ``data-tappable`` opt-in attribute.
 TAP_TARGET_MIN_PX: Final[int] = 44
 
-# Hard-coded pilot route list. Each entry is the SPA path; the walker
-# prepends the test's base URL. The follow-up that wires
-# ``_surface.json`` will retire this constant — keeping it visible
-# (instead of inlining at the call site) means a future grep finds
-# the pilot anchor.
+# Smoke fallback for :func:`load_authenticated_routes`. Used when
+# ``app/web/dist/_surface.json`` is missing (e.g. the SPA hasn't been
+# built) or unreadable. The live walker reads the manifest at runtime
+# via :func:`load_authenticated_routes`; this constant is intentionally
+# tiny (5 routes) so a stale ``dist/`` still gets some coverage instead
+# of silently falling through to zero.
 PILOT_AUTHENTICATED_ROUTES: Final[tuple[str, ...]] = (
     "/today",
     "/schedule",
@@ -60,6 +82,91 @@ PILOT_AUTHENTICATED_ROUTES: Final[tuple[str, ...]] = (
     "/properties",
     "/employees",
 )
+
+
+# Default location of the SPA build manifest. Computed by walking up
+# from this file (``tests/e2e/_helpers/sitemap.py``) to the repo root
+# and joining ``app/web/dist/_surface.json``. Exposed as a module
+# attribute so the helper unit tests can monkeypatch it without
+# reaching into private state.
+SURFACE_MANIFEST_PATH: Final[Path] = (
+    Path(__file__).resolve().parents[3] / "app" / "web" / "dist" / "_surface.json"
+)
+
+
+def load_authenticated_routes(
+    manifest_path: Path | None = None,
+) -> tuple[str, ...]:
+    """Return the authenticated SPA routes from the build manifest.
+
+    The manifest is emitted by the ``crewday:emit-surface-manifest``
+    Vite plugin (see ``app/web/vite.config.ts``) and lives at
+    ``app/web/dist/_surface.json`` after a production build. Schema:
+    ``{"version": 1, "authenticated": ["/today", ...]}``.
+
+    Falls back to :data:`PILOT_AUTHENTICATED_ROUTES` (logging a
+    WARNING) when:
+
+    * the manifest file does not exist (SPA not built);
+    * the file is unreadable or malformed JSON;
+    * the JSON is valid but missing the ``authenticated`` key, or that
+      key is not a list of strings.
+
+    Never raises — the e2e suite must still be able to run with the
+    smaller pilot list when the SPA isn't built. Pass ``manifest_path``
+    to override the default location (used by the helper unit tests).
+    """
+    path = manifest_path if manifest_path is not None else SURFACE_MANIFEST_PATH
+    try:
+        raw = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        _log.warning(
+            "surface manifest %s not found; falling back to pilot routes", path
+        )
+        return PILOT_AUTHENTICATED_ROUTES
+    except OSError as exc:
+        _log.warning(
+            "surface manifest %s unreadable (%s); falling back to pilot routes",
+            path,
+            exc,
+        )
+        return PILOT_AUTHENTICATED_ROUTES
+
+    try:
+        data: object = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        _log.warning(
+            "surface manifest %s is not valid JSON (%s); falling back to pilot routes",
+            path,
+            exc,
+        )
+        return PILOT_AUTHENTICATED_ROUTES
+
+    if not isinstance(data, dict):
+        _log.warning(
+            "surface manifest %s is not a JSON object; falling back to pilot routes",
+            path,
+        )
+        return PILOT_AUTHENTICATED_ROUTES
+
+    routes = data.get("authenticated")
+    if not isinstance(routes, list):
+        _log.warning(
+            "surface manifest %s missing/invalid 'authenticated' list; "
+            "falling back to pilot routes",
+            path,
+        )
+        return PILOT_AUTHENTICATED_ROUTES
+
+    if not all(isinstance(entry, str) for entry in routes):
+        _log.warning(
+            "surface manifest %s 'authenticated' contains non-string entries; "
+            "falling back to pilot routes",
+            path,
+        )
+        return PILOT_AUTHENTICATED_ROUTES
+
+    return tuple(routes)
 
 
 @dataclass(frozen=True)

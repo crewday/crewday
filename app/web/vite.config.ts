@@ -2,6 +2,7 @@ import { defineConfig, type PluginOption } from "vite";
 import react from "@vitejs/plugin-react";
 import { VitePWA } from "vite-plugin-pwa";
 import path from "node:path";
+import { AUTHENTICATED_ROUTES } from "./src/routes/_surface";
 
 // URL-based cache busting in dev: Vite adds ?t=<timestamp> to HMR
 // updates, but the initial request for index.html references raw
@@ -31,6 +32,31 @@ function cacheBustHtml(): PluginOption {
           /(<link\b[^>]*\shref=")(\/[^"?#]+)(")/g,
           (_m, pre, path, post) => `${pre}${stamp(path)}${post}`,
         );
+    },
+  };
+}
+
+// Emit `dist/_surface.json` at build time so downstream tooling
+// (the §17 360 px sitemap walker, future native shells) can read the
+// authenticated route list without parsing the SPA JSX. The plugin
+// only runs at build time — `apply: 'build'` keeps it a no-op in
+// `vite dev`. Schema is intentionally thin and versioned so we can
+// extend it later (e.g. add a `public` route list or per-route
+// metadata) without breaking existing consumers.
+function emitSurfaceManifest(): PluginOption {
+  return {
+    name: "crewday:emit-surface-manifest",
+    apply: "build",
+    generateBundle() {
+      const manifest = {
+        version: 1,
+        authenticated: [...AUTHENTICATED_ROUTES],
+      };
+      this.emitFile({
+        type: "asset",
+        fileName: "_surface.json",
+        source: `${JSON.stringify(manifest, null, 2)}\n`,
+      });
     },
   };
 }
@@ -83,6 +109,7 @@ const API_PATHS = [
 export default defineConfig({
   plugins: [
     cacheBustHtml(),
+    emitSurfaceManifest(),
     react(),
     // The PWA plugin only emits a service worker for the production
     // build. Keeping `devOptions.enabled` off (the default) ensures
