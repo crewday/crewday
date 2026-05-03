@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime, timedelta
 
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.adapters.db.audit.models import AuditLog
-from app.api.v1.audit import build_workspace_audit_router
+from app.api.v1.audit import NDJSON_MEDIA_TYPE, build_workspace_audit_router
 from app.tenancy import WorkspaceContext, tenant_agnostic
 from app.util.ulid import new_ulid
 from tests.factories.identity import bootstrap_user, bootstrap_workspace
@@ -231,6 +232,63 @@ def test_blank_filters_are_ignored(
 
     assert response.status_code == 200, response.text
     assert "visible" in {row["action"] for row in response.json()["data"]}
+
+
+def test_tail_emits_ndjson_from_workspace_feed(
+    owner_ctx: tuple[WorkspaceContext, sessionmaker[Session], str],
+) -> None:
+    ctx, factory, workspace_id = owner_ctx
+    older_entity = new_ulid()
+    newer_entity = new_ulid()
+    _seed_audit(
+        factory,
+        workspace_id=workspace_id,
+        action="task.created",
+        entity_id=older_entity,
+        created_at=AFTER_BOOTSTRAP,
+    )
+    _seed_audit(
+        factory,
+        workspace_id=workspace_id,
+        action="task.completed",
+        entity_id=newer_entity,
+        created_at=AFTER_BOOTSTRAP + timedelta(minutes=1),
+    )
+
+    with _client(ctx, factory).stream(
+        "GET",
+        "/audit/tail",
+        params={"entity_kind": "task"},
+    ) as response:
+        assert response.status_code == 200
+        assert response.headers["content-type"].startswith(NDJSON_MEDIA_TYPE)
+        body = b"".join(response.iter_bytes()).decode("utf-8")
+
+    lines = [line for line in body.split("\n") if line]
+    assert [json.loads(line)["action"] for line in lines] == [
+        "task.completed",
+        "task.created",
+    ]
+    assert [json.loads(line)["entity_id"] for line in lines] == [
+        newer_entity,
+        older_entity,
+    ]
+
+
+def test_tail_empty_feed_emits_keepalive_newline(
+    owner_ctx: tuple[WorkspaceContext, sessionmaker[Session], str],
+) -> None:
+    ctx, factory, _workspace_id = owner_ctx
+
+    with _client(ctx, factory).stream(
+        "GET",
+        "/audit/tail",
+        params={"entity_kind": "task", "since": AFTER_BOOTSTRAP.isoformat()},
+    ) as response:
+        assert response.status_code == 200
+        body = b"".join(response.iter_bytes())
+
+    assert body == b"\n"
 
 
 def test_workspace_rows_do_not_cross_tenant(

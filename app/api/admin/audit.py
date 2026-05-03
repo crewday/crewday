@@ -7,10 +7,9 @@ Mounts under ``/admin/api/v1`` (§12 "Admin surface"):
   audit-feed contract (cd-b0au): ``actor`` / ``action`` /
   ``entity_kind`` / ``entity_id`` / ``since`` / ``until``.
 * ``GET /audit/tail?follow=0|1`` — NDJSON projection of the
-  same query. ``follow=1`` is reserved for the streaming
-  long-poll path (cd-7xth tracks the carve-out); the cd-jlms
-  slice ships the bounded one-shot dump under the same URL so
-  the SPA's audit page can wire against the live URL today.
+  same query. ``follow=0`` is a bounded one-shot dump;
+  ``follow=1`` keeps polling for rows newer than the emitted
+  high-water cursor until the client disconnects.
 
 Reads run under :func:`tenant_agnostic` because the deployment
 partition (``workspace_id IS NULL``) is invisible to the ORM
@@ -22,7 +21,6 @@ audit", ``docs/specs/02-domain-model.md`` §"audit_log".
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Iterator
 from datetime import UTC, datetime
 from typing import Annotated, Any, Final
 
@@ -35,6 +33,11 @@ from sqlalchemy.orm import Session
 from app.adapters.db.audit.models import AuditLog
 from app.api.admin.deps import current_deployment_admin_principal
 from app.api.deps import db_session
+from app.audit.tail import (
+    NDJSON_MEDIA_TYPE,
+    AuditTailCursor,
+    audit_tail_chunks,
+)
 from app.tenancy import DeploymentContext, tenant_agnostic
 
 __all__ = [
@@ -53,10 +56,8 @@ _DEFAULT_LIMIT: Final[int] = 50
 _MAX_LIMIT: Final[int] = 500
 
 
-# Media type for ``GET /audit/tail``. RFC 8259 NDJSON — one JSON
-# object per line, no outer envelope. Pinned to a constant so the
-# route + test assertions agree on the exact spelling.
-NDJSON_MEDIA_TYPE: Final[str] = "application/x-ndjson"
+_TAIL_POLL_INTERVAL_SECONDS: Final[float] = 1.0
+_TAIL_MAX_EMPTY_POLLS: Final[int | None] = None
 
 
 class AuditEntryResponse(BaseModel):
@@ -214,37 +215,51 @@ def _query_rows(
         return list(session.scalars(stmt).all())
 
 
-def _ndjson_lines(rows: Iterable[AuditEntryResponse]) -> Iterator[bytes]:
-    """Encode each response row as one NDJSON line."""
-    for row in rows:
-        # ``model_dump_json`` honours pydantic's serialisation rules
-        # (e.g. dict ordering); appending ``\n`` keeps each line
-        # independently parseable per RFC 8259 NDJSON.
-        yield row.model_dump_json().encode("utf-8") + b"\n"
+def _query_newer_rows(
+    session: Session,
+    *,
+    actor_id: str | None,
+    action: str | None,
+    entity_kind: str | None,
+    entity_id: str | None,
+    since: datetime | None,
+    until: datetime | None,
+    cursor: AuditTailCursor | None,
+    limit: int,
+) -> list[AuditLog]:
+    """Return deployment-audit rows newer than the follow cursor."""
+    stmt = (
+        select(AuditLog)
+        .where(AuditLog.scope_kind == "deployment")
+        .order_by(AuditLog.created_at.asc(), AuditLog.id.asc())
+        .limit(limit)
+    )
+    if actor_id is not None:
+        stmt = stmt.where(AuditLog.actor_id == actor_id)
+    if action is not None:
+        stmt = stmt.where(AuditLog.action == action)
+    if entity_kind is not None:
+        stmt = stmt.where(AuditLog.entity_kind == entity_kind)
+    if entity_id is not None:
+        stmt = stmt.where(AuditLog.entity_id == entity_id)
+    if since is not None:
+        stmt = stmt.where(AuditLog.created_at >= since)
+    if until is not None:
+        stmt = stmt.where(AuditLog.created_at <= until)
+    if cursor is not None:
+        stmt = stmt.where(
+            (AuditLog.created_at > cursor.created_at)
+            | (
+                (AuditLog.created_at == cursor.created_at)
+                & (AuditLog.id > cursor.row_id)
+            )
+        )
+    with tenant_agnostic():
+        return list(session.scalars(stmt).all())
 
 
-def _ndjson_lines_or_keepalive(rows: list[AuditEntryResponse]) -> Iterator[bytes]:
-    """Generator for the NDJSON streaming response.
-
-    Wraps :func:`_ndjson_lines` and emits a single newline when
-    the result-set is empty so curl + most NDJSON readers
-    observe a clean end-of-stream rather than a zero-length body
-    that intermediaries (Pangolin, nginx, dev proxies) can
-    mis-buffer or coalesce away. The ``follow=1`` long-poll path
-    will replace this generator with a polling loop in cd-7xth;
-    the helper signature is pinned now so the swap is
-    internal-only.
-    """
-    yielded = False
-    for chunk in _ndjson_lines(rows):
-        yielded = True
-        yield chunk
-    if not yielded:
-        # Single bare newline — RFC 8259 NDJSON treats blank
-        # lines as no-ops, so the output stays parseable and
-        # the response body has at least one byte for the
-        # proxy layer to flush through.
-        yield b"\n"
+def _tail_cursor(row: AuditLog) -> AuditTailCursor:
+    return AuditTailCursor(created_at=row.created_at, row_id=row.id)
 
 
 def _parse_iso(value: str | None, *, label: str) -> datetime | None:
@@ -359,11 +374,9 @@ def build_admin_audit_router() -> APIRouter:
     def tail_audit(
         _ctx: Annotated[DeploymentContext, Depends(current_deployment_admin_principal)],
         session: _Db,
-        # ``follow=1`` is the spec's "stream forever" knob; the
-        # cd-jlms slice accepts it but emits the same bounded
-        # one-shot dump as ``follow=0`` until cd-7xth wires the
-        # polling loop. Surface as ``int`` so the SPA can pass
-        # ``?follow=1`` literally per the spec example.
+        # ``follow=1`` is the spec's "stream forever" knob. Surface
+        # as ``int`` so the SPA can pass ``?follow=1`` literally per
+        # the spec example.
         follow: Annotated[int, Query(ge=0, le=1)] = 0,
         actor_id: Annotated[str | None, Query(max_length=64)] = None,
         action: Annotated[str | None, Query(max_length=128)] = None,
@@ -375,33 +388,57 @@ def build_admin_audit_router() -> APIRouter:
     ) -> StreamingResponse:
         """Stream the deployment audit feed as NDJSON.
 
-        Today's body returns one chunk per matching row in
+        The initial body returns one chunk per matching row in
         newest-first order — exactly the same projection as
         ``GET /audit`` but in NDJSON shape so a CLI ``--follow``
         consumer can ``jq -c .`` into structured data without
-        peeling a JSON array. ``follow=1`` is reserved for the
-        cd-7xth long-poll path.
+        peeling a JSON array. When ``follow=1``, the response then
+        keeps polling and emits newer rows until disconnect.
 
         The handler is sync because the underlying SELECT runs
         against the synchronous SQLAlchemy session; FastAPI
         wraps the generator in a thread-pool when needed.
         """
-        _ = follow  # cd-7xth wires the long-poll path against this knob.
-        rows = _query_rows(
-            session,
-            actor_id=actor_id,
-            action=action,
-            entity_kind=entity_kind,
-            entity_id=entity_id,
-            since=_parse_iso(since, label="since"),
-            until=_parse_iso(until, label="until"),
-            cursor=None,
-            limit=limit,
-        )
-        page = rows[:limit]
-        projected = [_project_row(row) for row in page]
+        parsed_since = _parse_iso(since, label="since")
+        parsed_until = _parse_iso(until, label="until")
+
+        def _initial() -> list[AuditLog]:
+            rows = _query_rows(
+                session,
+                actor_id=actor_id,
+                action=action,
+                entity_kind=entity_kind,
+                entity_id=entity_id,
+                since=parsed_since,
+                until=parsed_until,
+                cursor=None,
+                limit=limit,
+            )
+            return rows[:limit]
+
+        def _next(cursor: AuditTailCursor | None) -> list[AuditLog]:
+            return _query_newer_rows(
+                session,
+                actor_id=actor_id,
+                action=action,
+                entity_kind=entity_kind,
+                entity_id=entity_id,
+                since=parsed_since,
+                until=parsed_until,
+                cursor=cursor,
+                limit=limit,
+            )
+
         return StreamingResponse(
-            _ndjson_lines_or_keepalive(projected),
+            audit_tail_chunks(
+                fetch_initial=_initial,
+                fetch_next=_next,
+                project_row=_project_row,
+                cursor_for=_tail_cursor,
+                follow=follow == 1,
+                poll_interval_seconds=_TAIL_POLL_INTERVAL_SECONDS,
+                max_empty_polls=_TAIL_MAX_EMPTY_POLLS,
+            ),
             media_type=NDJSON_MEDIA_TYPE,
         )
 
@@ -413,4 +450,3 @@ def build_admin_audit_router() -> APIRouter:
 # has a stable import. Marking it ``__all__``-public means the
 # eventual cd-7xth promotion stays a single-file diff.
 project_audit_row = _project_row
-ndjson_lines = _ndjson_lines

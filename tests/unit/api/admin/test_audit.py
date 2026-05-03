@@ -8,19 +8,22 @@ surface" §"Deployment audit":
 * Newest-first ordering with cursor walk.
 * Filters: ``actor_id`` / ``action`` / ``entity_kind`` /
   ``entity_id`` / ``since`` / ``until``.
-* Tail emits NDJSON; ``follow=1`` is accepted (cd-7xth wires
-  the streaming path later).
+* Tail emits NDJSON; ``follow=1`` keeps the stream open until
+  client disconnect.
 """
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+import json
+from collections.abc import Callable, Iterator
 from datetime import datetime, timedelta
 
+import anyio
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import Engine
 from sqlalchemy.orm import Session, sessionmaker
+from starlette.types import ASGIApp, Message, Scope
 
 from app.adapters.db.audit.models import AuditLog
 from app.api.admin.audit import NDJSON_MEDIA_TYPE
@@ -30,6 +33,8 @@ from app.tenancy import tenant_agnostic
 from app.util.ulid import new_ulid
 from tests.unit.api.admin._helpers import (
     PINNED,
+    TEST_ACCEPT_LANGUAGE,
+    TEST_UA,
     build_client,
     engine_fixture,
     grant_deployment_admin,
@@ -69,6 +74,67 @@ def _admin_cookie(session_factory: sessionmaker[Session], settings: Settings) ->
         grant_deployment_admin(s, user_id=user_id)
         s.commit()
     return issue_session(session_factory, user_id=user_id, settings=settings)
+
+
+async def _collect_stream_bodies(
+    app: ASGIApp,
+    path: str,
+    query_string: bytes,
+    cookie: str,
+    body_count: int,
+    after_first_body: Callable[[], None] | None = None,
+) -> tuple[int, list[bytes]]:
+    enough_bodies = anyio.Event()
+    request_sent = False
+    status_code = 0
+    bodies: list[bytes] = []
+
+    async def receive() -> Message:
+        nonlocal request_sent
+        if not request_sent:
+            request_sent = True
+            return {"type": "http.request", "body": b"", "more_body": False}
+        await enough_bodies.wait()
+        return {"type": "http.disconnect"}
+
+    async def send(message: Message) -> None:
+        nonlocal status_code
+        if message["type"] == "http.response.start":
+            status_code = int(message["status"])
+            return
+        if message["type"] != "http.response.body":
+            return
+        chunk = message.get("body", b"")
+        if not isinstance(chunk, bytes) or chunk == b"":
+            return
+        bodies.append(chunk)
+        if len(bodies) == 1 and after_first_body is not None:
+            after_first_body()
+        if len(bodies) >= body_count:
+            enough_bodies.set()
+
+    scope: Scope = {
+        "type": "http",
+        "asgi": {"version": "3.0"},
+        "http_version": "1.1",
+        "method": "GET",
+        "scheme": "https",
+        "path": path,
+        "raw_path": path.encode("ascii"),
+        "query_string": query_string,
+        "root_path": "",
+        "headers": [
+            (b"host", b"testserver"),
+            (b"user-agent", TEST_UA.encode("ascii")),
+            (b"accept-language", TEST_ACCEPT_LANGUAGE.encode("ascii")),
+            (b"cookie", f"{SESSION_COOKIE_NAME}={cookie}".encode("ascii")),
+        ],
+        "client": ("127.0.0.1", 123),
+        "server": ("testserver", 443),
+    }
+    with anyio.fail_after(1):
+        await app(scope, receive, send)
+    return status_code, bodies
 
 
 def _seed_audit(
@@ -297,9 +363,7 @@ class TestTailAudit:
             body = b"".join(resp.iter_bytes()).decode("utf-8")
         # Newest-first.
         lines = [line for line in body.split("\n") if line]
-        import json as _json
-
-        ids = [_json.loads(line)["id"] for line in lines]
+        ids = [json.loads(line)["id"] for line in lines]
         assert ids == [b, a]
 
     def test_empty_feed_emits_keepalive_newline(
@@ -320,22 +384,63 @@ class TestTailAudit:
             body = b"".join(resp.iter_bytes())
         assert body == b"\n"
 
-    def test_follow_param_accepted(
+    def test_follow_streams_until_client_disconnect(
         self,
         client: TestClient,
         session_factory: sessionmaker[Session],
         settings: Settings,
     ) -> None:
-        client.cookies.set(
-            SESSION_COOKIE_NAME, _admin_cookie(session_factory, settings)
+        row_id = _seed_audit(
+            session_factory,
+            scope_kind="deployment",
+            action="signup_settings.updated",
         )
-        with client.stream(
-            "GET", "/admin/api/v1/audit/tail", params={"follow": 1}
-        ) as resp:
-            assert resp.status_code == 200
-            # Empty result returns a single empty chunk; the route
-            # accepts ``follow=1`` today (cd-7xth wires the
-            # long-poll path later).
+        cookie = _admin_cookie(session_factory, settings)
+
+        status_code, bodies = anyio.run(
+            _collect_stream_bodies,
+            client.app,
+            "/admin/api/v1/audit/tail",
+            b"follow=1",
+            cookie,
+            1,
+        )
+
+        assert status_code == 200
+        body = b"".join(bodies)
+        assert json.loads(body.decode("utf-8"))["id"] == row_id
+
+    def test_follow_polls_rows_created_after_empty_initial_feed(
+        self,
+        client: TestClient,
+        session_factory: sessionmaker[Session],
+        settings: Settings,
+    ) -> None:
+        cookie = _admin_cookie(session_factory, settings)
+        inserted_row: list[str] = []
+
+        def _insert_after_keepalive() -> None:
+            inserted_row.append(
+                _seed_audit(
+                    session_factory,
+                    scope_kind="deployment",
+                    action="signup_settings.updated",
+                )
+            )
+
+        status_code, bodies = anyio.run(
+            _collect_stream_bodies,
+            client.app,
+            "/admin/api/v1/audit/tail",
+            b"follow=1",
+            cookie,
+            2,
+            _insert_after_keepalive,
+        )
+
+        assert status_code == 200
+        assert bodies[0] == b"\n"
+        assert json.loads(bodies[1].decode("utf-8"))["id"] == inserted_row[0]
 
     def test_404_for_non_admin(
         self,
