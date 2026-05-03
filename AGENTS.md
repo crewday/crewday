@@ -105,6 +105,12 @@ replace several tool calls per check:
 - `./scripts/agent-status.sh` — compose health, `/readyz`, `/healthz`,
   alembic current vs head, git branch + dirty count. Exit 0 when the
   stack is ready. Run first when a smoke fails.
+  - Trust the `endpoints:` line over the compose `stack:` line. The
+    `app-api` container's Docker healthcheck flips to `unhealthy`
+    when the LLM budget refresh tick logs `OperationalError` per
+    workspace (dev DB has stale workspace rows that the refresh
+    can't read), but `/readyz` + `/healthz` keep returning 200 and
+    every API path keeps serving — don't chase a fake outage.
 - `./scripts/agent-curl.sh <ws> <METHOD> <path> [body]` — authenticated
   curl against `http://127.0.0.1:8100`. Caches the cookie per
   workspace+email, auto-refreshes on stale sessions, pretty-prints JSON,

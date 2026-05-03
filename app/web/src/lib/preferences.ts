@@ -1,10 +1,24 @@
-// PLACEHOLDER — real impl lands in cd-knp1 (cookie readers/writers ride
-// with ThemeContext + RoleContext + WorkspaceContext wiring). DO NOT USE
-// FOR PRODUCTION DECISIONS.
+// Cookie-backed preferences shim — INCOMPLETE.
 //
-// Cookie-backed preferences shim. Every reader returns a sane default
-// and every writer is a no-op; the production impl mirrors
-// `mocks/web/src/lib/preferences.ts` (cookie reads, sendBeacon writes).
+// Reads return sane defaults and writers are no-ops. cd-knp1 was the
+// task that *should* have delivered the live impl alongside the
+// context wiring; it closed without porting this file (acceptance
+// criterion "WorkspaceContext persists + restores the active slug"
+// missed). No follow-up Beads task exists yet — see TODO below.
+//
+// Symptom for the next agent: any code path that depends on a cookie
+// preference (active workspace slug for `fetchJson` rewrites, theme,
+// nav/agent-rail collapse) silently degrades. `WorkspaceProvider`
+// boots with `workspaceId = null` until `WorkspaceGate` adopts a slug
+// from `/api/v1/auth/me`; if that adoption fails (e.g. the
+// id-vs-slug mismatch in `WorkspaceGate.currentSlug`), every API
+// call goes to bare `/api/v1/...` and 404s.
+//
+// Reference impl: `mocks/web/src/lib/preferences.ts` (cookie reads,
+// sendBeacon writes) — port that file plus the matching server
+// endpoints (`/switch/<role>`, `/theme/set/<theme>`,
+// `/workspaces/switch/<id>`, `/agent/sidebar/<state>`,
+// `/nav/sidebar/<state>` — none currently mounted in `app/api`).
 import type { Role, Theme } from "@/types/api";
 
 export function readRoleCookie(): Role {

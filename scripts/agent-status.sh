@@ -33,8 +33,21 @@ else
   problems=$((problems + 1))
 fi
 
-readyz="$(curl -sS -o /dev/null -m 3 -w '%{http_code}' "$base_url/readyz" 2>/dev/null || echo 000)"
-healthz="$(curl -sS -o /dev/null -m 3 -w '%{http_code}' "$base_url/healthz" 2>/dev/null || echo 000)"
+# curl writes `%{http_code}` to stdout *before* exiting non-zero on
+# transport errors, so a `|| echo 000` fallback ends up appended to
+# whatever curl printed (e.g. timeout → `000` then ` 000` → `000000`).
+# Capture into an intermediate variable and overwrite on failure
+# instead of piping the fallback through command substitution.
+probe() {
+  local out
+  if out="$(curl -sS -o /dev/null -m 3 -w '%{http_code}' "$1" 2>/dev/null)"; then
+    printf '%s' "$out"
+  else
+    printf '000'
+  fi
+}
+readyz="$(probe "$base_url/readyz")"
+healthz="$(probe "$base_url/healthz")"
 echo "endpoints: /readyz=${readyz} /healthz=${healthz}"
 [[ "$readyz" == "200" ]] || problems=$((problems + 1))
 
