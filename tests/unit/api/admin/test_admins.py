@@ -6,8 +6,9 @@ surface" §"Admin team":
 * ``GET /admins`` — listing oldest-first.
 * ``POST /admins`` — grant by user_id / email; idempotent re-grant;
   validation 422s on missing / ambiguous / unknown target.
-* ``POST /admins/{id}/revoke`` — hard-delete; 404 on missing;
-  audit row emits.
+* ``POST /admins/{id}/revoke`` — soft-retire (cd-x1xh); 404 on
+  missing; audit row emits and the row's ``revoked_at`` /
+  ``revoked_by_user_id`` / ``ended_on`` are stamped.
 * ``GET /admins/groups`` — owners from ``deployment_owner`` and
   managers from deployment ``role_grant`` rows.
 * Owners-group add / revoke require a deployment owner.
@@ -247,12 +248,21 @@ class TestGrantAdmin:
 
 
 class TestRevokeAdmin:
-    def test_revoke_deletes_row_and_audits(
+    def test_revoke_soft_retires_row_and_audits(
         self,
         client: TestClient,
         session_factory: sessionmaker[Session],
         settings: Settings,
     ) -> None:
+        """cd-x1xh: ``POST /admins/{id}/revoke`` is soft-retire, not hard-delete.
+
+        The row stays in ``role_grant`` with ``revoked_at`` /
+        ``revoked_by_user_id`` / ``ended_on`` stamped. Live-grant read
+        paths (``list_admins`` etc.) filter on ``revoked_at IS NULL``
+        so the row disappears from the admin surface; the audit trail
+        survives via the preserved row plus the ``admin.revoked``
+        audit_log entry.
+        """
         with session_factory() as s:
             ada = seed_user(s, email="ada@example.com", display_name="Ada")
             grace = seed_user(s, email="grace@example.com", display_name="Grace")
@@ -266,7 +276,11 @@ class TestRevokeAdmin:
         assert resp.status_code == 200, resp.text
         assert resp.json() == {"revoked_id": grace_grant}
         with session_factory() as s, tenant_agnostic():
-            assert s.get(RoleGrant, grace_grant) is None
+            row = s.get(RoleGrant, grace_grant)
+            assert row is not None
+            assert row.revoked_at is not None
+            assert row.revoked_by_user_id == ada
+            assert row.ended_on is not None
             audits = s.scalars(
                 select(AuditLog).where(AuditLog.action == "admin.revoked")
             ).all()

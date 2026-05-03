@@ -22,10 +22,10 @@ owns the transaction boundary (§01 "Key runtime invariants" #3).
 from __future__ import annotations
 
 from collections.abc import Sequence
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any
 
-from sqlalchemy import exists, select
+from sqlalchemy import exists, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -301,7 +301,13 @@ class SqlAlchemyRoleGrantRepository(RoleGrantRepository):
         user_id: str | None = None,
         scope_property_id: str | None = None,
     ) -> Sequence[RoleGrantRow]:
-        stmt = select(RoleGrant).where(RoleGrant.workspace_id == workspace_id)
+        # Live grants only — soft-retired rows (``revoked_at IS NOT
+        # NULL``) stay in the table for audit but never feed the
+        # surface read paths (cd-x1xh).
+        stmt = select(RoleGrant).where(
+            RoleGrant.workspace_id == workspace_id,
+            RoleGrant.revoked_at.is_(None),
+        )
         if user_id is not None:
             stmt = stmt.where(RoleGrant.user_id == user_id)
         if scope_property_id is not None:
@@ -311,21 +317,29 @@ class SqlAlchemyRoleGrantRepository(RoleGrantRepository):
         return [_to_grant_row(row) for row in rows]
 
     def get_grant(self, *, workspace_id: str, grant_id: str) -> RoleGrantRow | None:
+        # Live-only read: a soft-retired grant collapses to "not
+        # found" for the domain service. The audit trail still
+        # survives in the table; revoking an already-revoked grant
+        # surfaces as :class:`RoleGrantNotFound` (cd-x1xh).
         row = self._session.scalars(
             select(RoleGrant).where(
                 RoleGrant.id == grant_id,
                 RoleGrant.workspace_id == workspace_id,
+                RoleGrant.revoked_at.is_(None),
             )
         ).one_or_none()
         return _to_grant_row(row) if row is not None else None
 
     def has_active_manager_grant(self, *, workspace_id: str, user_id: str) -> bool:
+        # Live manager grants only — a soft-retired manager grant
+        # cannot feed the §05 owner-authority policy (cd-x1xh).
         stmt = (
             select(RoleGrant)
             .where(
                 RoleGrant.workspace_id == workspace_id,
                 RoleGrant.user_id == user_id,
                 RoleGrant.grant_role == "manager",
+                RoleGrant.revoked_at.is_(None),
             )
             .limit(1)
         )
@@ -394,12 +408,37 @@ class SqlAlchemyRoleGrantRepository(RoleGrantRepository):
         nested.commit()
         return _to_grant_row(row)
 
-    def delete_grant(self, *, workspace_id: str, grant_id: str) -> None:
-        row = self._session.scalars(
-            select(RoleGrant).where(
+    def soft_revoke_grant(
+        self,
+        *,
+        workspace_id: str,
+        grant_id: str,
+        revoked_at: datetime,
+        revoked_by_user_id: str | None,
+        ended_on: date,
+    ) -> None:
+        # Stamp ``revoked_at`` + ``revoked_by_user_id`` + ``ended_on``
+        # via a single UPDATE; the row is preserved for audit
+        # (cd-x1xh). The WHERE pins on ``revoked_at IS NULL`` so a
+        # double-revoke is a no-op rather than overwriting an earlier
+        # revoker / timestamp — the domain caller already gates
+        # double-revoke through :func:`_load_grant`'s
+        # :class:`RoleGrantNotFound` (the live-only read filters out
+        # already-revoked rows), so reaching this UPDATE on a
+        # soft-retired row would be a programming error worth
+        # surfacing as a silent no-op rather than corrupting the
+        # audit trail.
+        self._session.execute(
+            update(RoleGrant)
+            .where(
                 RoleGrant.id == grant_id,
                 RoleGrant.workspace_id == workspace_id,
+                RoleGrant.revoked_at.is_(None),
             )
-        ).one()
-        self._session.delete(row)
+            .values(
+                revoked_at=revoked_at,
+                revoked_by_user_id=revoked_by_user_id,
+                ended_on=ended_on,
+            )
+        )
         self._session.flush()

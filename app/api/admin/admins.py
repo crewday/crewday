@@ -305,12 +305,16 @@ def _owner_members(session: Session) -> list[GroupMemberInfo]:
 
 
 def _manager_members(session: Session) -> list[GroupMemberInfo]:
-    """Return deployment managers derived from deployment admin grants."""
+    """Return deployment managers derived from live deployment admin grants."""
     with tenant_agnostic():
         rows = session.execute(
             select(RoleGrant, User)
             .join(User, User.id == RoleGrant.user_id)
             .where(RoleGrant.scope_kind == "deployment")
+            # cd-x1xh: live grants only — soft-retired admin grants
+            # stay in the table for audit but no longer surface in
+            # the manager-members roster.
+            .where(RoleGrant.revoked_at.is_(None))
             .order_by(RoleGrant.created_at.asc(), RoleGrant.id.asc())
         ).all()
     return [
@@ -329,14 +333,17 @@ def _existing_grant(session: Session, *, user_id: str) -> RoleGrant | None:
     """Return the user's active deployment grant, if any.
 
     The ``role_grant`` table carries a partial UNIQUE on
-    ``(user_id, grant_role) WHERE scope_kind='deployment'`` so
-    at most one row matches — the lookup uses ``.first()``.
+    ``(user_id, grant_role) WHERE scope_kind='deployment' AND
+    revoked_at IS NULL`` (cd-x1xh) so at most one **live** row
+    matches — the lookup pins on ``revoked_at IS NULL`` and uses
+    ``.first()``.
     """
     with tenant_agnostic():
         return session.scalars(
             select(RoleGrant)
             .where(RoleGrant.scope_kind == "deployment")
             .where(RoleGrant.user_id == user_id)
+            .where(RoleGrant.revoked_at.is_(None))
             .limit(1)
         ).first()
 
@@ -383,6 +390,10 @@ def build_admin_admins_router() -> APIRouter:
                 select(RoleGrant, User)
                 .join(User, User.id == RoleGrant.user_id)
                 .where(RoleGrant.scope_kind == "deployment")
+                # cd-x1xh: live grants only — soft-retired admin
+                # grants stay in the table for audit but no longer
+                # surface on the admin list.
+                .where(RoleGrant.revoked_at.is_(None))
                 .order_by(RoleGrant.created_at.asc(), RoleGrant.id.asc())
             ).all()
         owner_user_ids = deployment_owner_user_ids(session)
@@ -490,28 +501,36 @@ def build_admin_admins_router() -> APIRouter:
         session: _Db,
         request: Request,
     ) -> AdminRevokeResponse:
-        """Hard-delete a deployment admin grant; audit the action.
+        """Soft-retire a deployment admin grant; audit the action.
 
-        Today's :class:`RoleGrant` carries no ``revoked_at``
-        column (cd-79r tracks that addition); revocation is a
-        hard delete per :func:`app.authz.deployment_admin.is_deployment_admin`'s
-        contract ("Active in v1 means exists"). Once cd-79r
-        lands, this handler flips to a column update without
-        breaking the wire shape.
+        cd-x1xh moved deployment-admin revocation to the §02
+        soft-retire shape: the row is preserved with ``revoked_at``
+        + ``revoked_by_user_id`` + ``ended_on`` stamped, and live
+        deployment-admin reads filter on ``revoked_at IS NULL``.
+        The partial UNIQUE on ``(user_id, grant_role) WHERE
+        scope_kind='deployment' AND revoked_at IS NULL`` carries
+        the same predicate so a re-grant after revoke lands a
+        fresh row alongside.
 
-        Idempotent: revoking an already-deleted grant returns
-        the same envelope (the route 404s on the first miss
-        path; a re-revoke after a successful delete also 404s
-        because the row is gone). Self-revoke is allowed — the
+        Idempotent: revoking an already-revoked grant 404s (the
+        live-only ``where`` filters it out); the first revoke is
+        a 200 with the new state. Self-revoke is allowed — the
         last-deployment-admin guard lives separately (cd-79r
         will host it).
         """
         ensure_deployment_owner(session, ctx=ctx)
+        now = datetime.now(UTC)
         with tenant_agnostic():
             grant = session.get(RoleGrant, id)
-            if grant is None or grant.scope_kind != "deployment":
+            if (
+                grant is None
+                or grant.scope_kind != "deployment"
+                or grant.revoked_at is not None
+            ):
                 raise _not_found()
-            session.delete(grant)
+            grant.revoked_at = now
+            grant.revoked_by_user_id = ctx.user_id
+            grant.ended_on = now.date()
             audit_admin(
                 session,
                 ctx=ctx,

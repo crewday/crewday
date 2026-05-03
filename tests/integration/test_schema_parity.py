@@ -133,18 +133,42 @@ def _fingerprint(engine: Engine) -> dict[str, Any]:
 
         # Union uniques coming from either surface. Tuple-of-columns
         # is the primitive both inspectors agree on.
-        uniques_from_constraints: set[tuple[str, ...]] = {
-            tuple(uc.get("column_names", []) or [])
-            for uc in insp.get_unique_constraints(name)
-        }
-        uniques_from_indexes: set[tuple[str, ...]] = set()
-        non_unique_indexes: set[tuple[str, ...]] = set()
-        for ix in insp.get_indexes(name):
-            cols = tuple(ix.get("column_names", []) or [])
-            if ix.get("unique"):
-                uniques_from_indexes.add(cols)
-            else:
-                non_unique_indexes.add(cols)
+        #
+        # Expression-based indexes (e.g. cd-x1xh's
+        # ``COALESCE(scope_property_id, '')``) are reflected
+        # asymmetrically — SQLite's reflector skips them entirely
+        # (emits ``SAWarning``) while PG returns the rendered
+        # expression text, with ``None`` placeholders for the
+        # expression slots in older SQLAlchemy versions. Comparing
+        # them here would always diverge. We exclude any index where
+        # ``column_names`` contains ``None`` — the structural shape
+        # is dialect-symmetric (both backends honour the partial
+        # UNIQUE behaviourally), and the cd-x1xh index has its own
+        # focused parity coverage in
+        # :mod:`tests.integration.test_db_authz`.
+        import warnings
+
+        with warnings.catch_warnings():
+            warnings.filterwarnings(
+                "ignore",
+                message=".*Skipped unsupported reflection of expression-based index.*",
+            )
+            uniques_from_constraints: set[tuple[str, ...]] = {
+                tuple(uc.get("column_names", []) or [])
+                for uc in insp.get_unique_constraints(name)
+            }
+            uniques_from_indexes: set[tuple[str, ...]] = set()
+            non_unique_indexes: set[tuple[str, ...]] = set()
+            for ix in insp.get_indexes(name):
+                cols_raw = ix.get("column_names", []) or []
+                # Drop expression-slot ``None`` entries — see docstring above.
+                if any(c is None for c in cols_raw):
+                    continue
+                cols = tuple(cols_raw)
+                if ix.get("unique"):
+                    uniques_from_indexes.add(cols)
+                else:
+                    non_unique_indexes.add(cols)
         uniques = sorted(uniques_from_constraints | uniques_from_indexes)
         indexes = sorted(non_unique_indexes)
 

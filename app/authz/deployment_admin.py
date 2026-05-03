@@ -57,8 +57,9 @@ def is_deployment_admin(session: Session, *, user_id: str) -> bool:
     carry a ``revoked_at`` column (the v1 slice docstring spells this
     out; cd-79r adds it). Revocation today is a hard delete, so the
     existence check is exactly the right shape; once ``revoked_at``
-    lands the predicate extends to ``revoked_at IS NULL`` without
-    changing the caller contract.
+    Filters to ``revoked_at IS NULL`` so a soft-retired deployment
+    admin grant no longer authorises the bare-host admin surface
+    (cd-x1xh).
 
     **Tenant-agnostic.** ``role_grant`` is a workspace-scoped table;
     the deployment partition (``workspace_id IS NULL``) is invisible
@@ -76,6 +77,7 @@ def is_deployment_admin(session: Session, *, user_id: str) -> bool:
         .where(
             RoleGrant.scope_kind == "deployment",
             RoleGrant.user_id == user_id,
+            RoleGrant.revoked_at.is_(None),
         )
         .limit(1)
     )

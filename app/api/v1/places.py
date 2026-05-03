@@ -862,6 +862,9 @@ def _visible_property_ids_for_worker(
     grants_stmt = select(RoleGrant.scope_property_id).where(
         RoleGrant.workspace_id == ctx.workspace_id,
         RoleGrant.user_id == ctx.actor_id,
+        # cd-x1xh: live grants only — soft-retired grants must not
+        # widen the caller's visible-property fan-out.
+        RoleGrant.revoked_at.is_(None),
     )
     visible: set[str] = set()
     for (scope_property_id,) in session.execute(grants_stmt).all():

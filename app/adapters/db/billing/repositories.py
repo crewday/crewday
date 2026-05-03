@@ -336,6 +336,9 @@ class SqlAlchemyClientPortalRepository(ClientPortalRepository):
                     RoleGrant.grant_role == "client",
                     RoleGrant.scope_property_id.is_(None),
                     RoleGrant.binding_org_id.is_not(None),
+                    # cd-x1xh: live grants only — soft-retired client
+                    # grants must not widen the portal scope.
+                    RoleGrant.revoked_at.is_(None),
                 )
             ).all()
             if org_id is not None
@@ -351,6 +354,9 @@ class SqlAlchemyClientPortalRepository(ClientPortalRepository):
                 RoleGrant.scope_kind == "workspace",
                 RoleGrant.grant_role == "client",
                 RoleGrant.scope_property_id.is_not(None),
+                # cd-x1xh: live grants only — soft-retired client
+                # grants must not widen the portal scope.
+                RoleGrant.revoked_at.is_(None),
                 PropertyWorkspace.workspace_id == workspace_id,
                 PropertyWorkspace.status == "active",
                 Property.deleted_at.is_(None),

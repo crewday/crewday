@@ -410,16 +410,11 @@ def is_self_service_recovery_disabled(session: SqlaSession, *, user_id: str) -> 
     mails nothing and audits
     ``audit.recovery.disabled_by_workspace``.
 
-    **Non-archived grants in v1.** The v1 ``role_grant`` schema has no
-    ``revoked_at`` column — revocation is a hard DELETE today (see
-    :mod:`app.domain.identity.role_grants` module docstring), so every
-    extant row is an active grant by construction. ``users.archived_at``
-    likewise hasn't landed. When those columns arrive (cd-x1xh lands
-    the role_grant soft-retire shape) the WHERE-clause below extends
-    with ``RoleGrant.revoked_at IS NULL`` / a ``users.archived_at IS
-    NULL`` pre-gate; until then "non-archived" == "row exists". The
-    helper's public contract ("return True iff **any** workspace
-    disables self-service recovery for the user") stays unchanged.
+    **Non-archived grants.** cd-x1xh moved ``role_grant`` revocation
+    to the §02 soft-retire shape; the WHERE clause filters
+    ``RoleGrant.revoked_at IS NULL`` so a soft-retired grant no
+    longer feeds the kill-switch decision. ``users.archived_at`` is
+    still pending; when it lands the WHERE adds the matching pre-gate.
 
     **Default semantics.** Absence of the key — a workspace that
     never wrote a value for the flag — is treated as ``True`` (the
@@ -452,6 +447,7 @@ def is_self_service_recovery_disabled(session: SqlaSession, *, user_id: str) -> 
         select(Workspace.settings_json)
         .join(RoleGrant, RoleGrant.workspace_id == Workspace.id)
         .where(RoleGrant.user_id == user_id)
+        .where(RoleGrant.revoked_at.is_(None))
     )
     with tenant_agnostic():
         payloads = session.scalars(stmt).all()

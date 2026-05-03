@@ -31,14 +31,14 @@ from __future__ import annotations
 
 from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from pydantic import SecretStr
-from sqlalchemy import Engine, delete, select
+from sqlalchemy import Engine, delete, select, update
 from sqlalchemy.orm import Session, sessionmaker
 from webauthn.helpers.structs import (
     AttestationFormat,
@@ -958,13 +958,14 @@ class TestRecoveryKillSwitch:
         engine: Engine,
         mailer: _RecordingMailer,
     ) -> None:
-        """§03 "Workspace kill-switch": only non-archived grants feed
-        the decision. v1's archival == hard-delete, so we seed the
-        kill-switched grant and then delete it — the user must still
-        reach the happy path via their surviving non-kill-switched
-        grant. When cd-x1xh lands ``role_grant.revoked_at``, this
-        test extends to soft-revoke semantics without changing the
-        behavioural assertion.
+        """§03 "Workspace kill-switch": only live (non-revoked) grants feed
+        the decision. cd-x1xh moved revocation to a soft-retire shape;
+        we seed the kill-switched grant, soft-revoke it, and confirm
+        the user still reaches the happy path via their surviving
+        non-kill-switched grant. The behavioural assertion is the same
+        as the prior hard-delete shape; what changed is that the
+        soft-revoked row stays in the table (with ``revoked_at``
+        stamped) and the recovery probe filters it out.
         """
         factory = sessionmaker(bind=engine, expire_on_commit=False, class_=Session)
         with factory() as s:
@@ -1018,8 +1019,21 @@ class TestRecoveryKillSwitch:
                 )
             )
             s.flush()
-            # Archive == delete in v1.
-            s.execute(delete(RoleGrant).where(RoleGrant.id == killed_grant_id))
+            # Soft-retire (cd-x1xh): archival now stamps ``revoked_at``
+            # on the row; live-grant read paths filter on
+            # ``revoked_at IS NULL``. The recovery probe walks the
+            # same filter, so the kill-switched workspace stops
+            # contributing to the decision.
+            now = datetime.now(UTC)
+            s.execute(
+                update(RoleGrant)
+                .where(RoleGrant.id == killed_grant_id)
+                .values(
+                    revoked_at=now,
+                    revoked_by_user_id=user.id,
+                    ended_on=now.date(),
+                )
+            )
             s.commit()
 
         r = client.post(

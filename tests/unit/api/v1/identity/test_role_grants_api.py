@@ -648,7 +648,12 @@ class TestList:
         ctx, factory, ws_id = owner_ctx
         # Owner already has the bootstrap manager grant. Add 3 more
         # worker grants pinned to fresh ULIDs so the listing has 4 rows.
+        # cd-x1xh's partial UNIQUE forbids two live grants with the
+        # same ``(workspace, user, role, scope_property_id)`` tuple
+        # (NULL collapsed to '' inside the index), so each extra grant
+        # rides a distinct ``scope_property_id``.
         for _ in range(3):
+            prop_id = _seed_property_in_workspace(factory, workspace_id=ws_id)
             with factory() as s:
                 s.add(
                     RoleGrant(
@@ -656,7 +661,7 @@ class TestList:
                         workspace_id=ws_id,
                         user_id=ctx.actor_id,
                         grant_role="worker",
-                        scope_property_id=None,
+                        scope_property_id=prop_id,
                         created_at=datetime.now(tz=UTC),
                         created_by_user_id=None,
                     )

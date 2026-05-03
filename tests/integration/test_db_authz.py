@@ -222,18 +222,32 @@ class TestMigrationShape:
             "binding_org_id",
             "created_at",
             "created_by_user_id",
+            # cd-x1xh: §02 soft-retire shape. ``revoked_at`` flips
+            # the row out of the live partition; ``started_on`` /
+            # ``ended_on`` carry future date-bound grants;
+            # ``revoked_by_user_id`` mirrors ``created_by_user_id``
+            # for audit symmetry.
+            "revoked_at",
+            "started_on",
+            "ended_on",
+            "revoked_by_user_id",
         }
         assert set(cols) == expected
         # ``scope_property_id`` (property-scope narrowing),
         # ``binding_org_id`` (client-org narrowing),
-        # ``created_by_user_id`` (self-bootstrap rows), and
+        # ``created_by_user_id`` (self-bootstrap rows),
         # ``workspace_id`` (NULL on deployment-scope grants per
-        # cd-wchi) are nullable.
+        # cd-wchi), and the four cd-x1xh soft-retire columns are
+        # nullable.
         nullable = {
             "scope_property_id",
             "binding_org_id",
             "created_by_user_id",
             "workspace_id",
+            "revoked_at",
+            "started_on",
+            "ended_on",
+            "revoked_by_user_id",
         }
         for name in nullable:
             assert cols[name]["nullable"] is True, f"{name} must be nullable"
@@ -251,6 +265,11 @@ class TestMigrationShape:
         # ``created_by_user_id`` sets NULL so history survives the actor.
         assert by_col[("created_by_user_id",)]["referred_table"] == "user"
         assert by_col[("created_by_user_id",)]["options"].get("ondelete") == "SET NULL"
+        # cd-x1xh: ``revoked_by_user_id`` mirrors ``created_by_user_id``
+        # (audit-shape symmetry); SET NULL on user delete keeps the
+        # revoked row's other audit fields intact.
+        assert by_col[("revoked_by_user_id",)]["referred_table"] == "user"
+        assert by_col[("revoked_by_user_id",)]["options"].get("ondelete") == "SET NULL"
         binding_fk = by_col[("binding_org_id", "workspace_id")]
         assert binding_fk["referred_table"] == "organization"
         assert binding_fk["referred_columns"] == ["id", "workspace_id"]
@@ -259,7 +278,21 @@ class TestMigrationShape:
         assert ("scope_property_id",) not in by_col
 
     def test_role_grant_indexes(self, engine: Engine) -> None:
-        indexes = {ix["name"]: ix for ix in inspect(engine).get_indexes("role_grant")}
+        # SQLite's reflector emits ``SAWarning`` when it skips the
+        # cd-x1xh expression-based index. The behavioural invariant
+        # is asserted in :meth:`test_role_grant_workspace_partial_unique_index`
+        # via raw catalogue probes; this test only cares about the
+        # plain b-tree indexes, so suppress the noise.
+        import warnings
+
+        with warnings.catch_warnings():
+            warnings.filterwarnings(
+                "ignore",
+                message=".*Skipped unsupported reflection of expression-based index.*",
+            )
+            indexes = {
+                ix["name"]: ix for ix in inspect(engine).get_indexes("role_grant")
+            }
         assert "ix_role_grant_workspace_user" in indexes
         assert indexes["ix_role_grant_workspace_user"]["column_names"] == [
             "workspace_id",
@@ -283,7 +316,19 @@ class TestMigrationShape:
         bodies in :class:`Inspector` are not always normalised) so we
         compare on the structural shape that round-trips cleanly.
         """
-        indexes = {ix["name"]: ix for ix in inspect(engine).get_indexes("role_grant")}
+        # SQLite emits ``SAWarning`` skipping the cd-x1xh expression
+        # index alongside the deployment one we actually inspect here;
+        # filter it so the test stays quiet on both dialects.
+        import warnings
+
+        with warnings.catch_warnings():
+            warnings.filterwarnings(
+                "ignore",
+                message=".*Skipped unsupported reflection of expression-based index.*",
+            )
+            indexes = {
+                ix["name"]: ix for ix in inspect(engine).get_indexes("role_grant")
+            }
         assert "uq_role_grant_deployment_user_role" in indexes
         ix = indexes["uq_role_grant_deployment_user_role"]
         assert ix["column_names"] == ["user_id", "grant_role"]
@@ -291,6 +336,68 @@ class TestMigrationShape:
         # ``True``. Normalise via ``bool`` so the assertion works on
         # both backends.
         assert bool(ix.get("unique")) is True
+
+    def test_role_grant_workspace_partial_unique_index(self, engine: Engine) -> None:
+        """cd-x1xh lands a partial UNIQUE on workspace-scope ``role_grant``.
+
+        At most one **live** ``(workspace_id, user_id, grant_role,
+        scope_property_id)`` row at a time; the index's WHERE
+        narrows to ``scope_kind='workspace' AND revoked_at IS NULL``
+        so re-grants after a soft-revoke land a fresh row instead of
+        409-ing against the prior revoked one.
+
+        The fourth indexed slot is ``COALESCE(scope_property_id, '')``
+        rather than the plain column — SQL's NULL-distinct UNIQUE
+        semantics would otherwise let two live workspace-wide grants
+        ``(ws, u, role, NULL)`` slip through. The COALESCE collapses
+        NULL to a sentinel inside the index so uniqueness binds
+        across both NULL and non-NULL property scopes.
+
+        SQLAlchemy's :class:`Inspector` cannot reflect expression
+        indexes uniformly across dialects: SQLite's reflector skips
+        expression indexes entirely (emits SAWarning), and Postgres
+        returns the rendered expression text in ``column_names``.
+        We therefore probe the underlying catalogue directly — both
+        SQLite (``sqlite_master.sql``) and Postgres (``pg_indexes.
+        indexdef``) expose the index DDL and let us assert on the
+        ``COALESCE`` token + the leading column list. The behavioural
+        invariant (duplicate live rows rejected) lives on the
+        ``test_duplicate_live_workspace_wide_grant_rejected_*`` seam
+        in :mod:`tests.integration.identity.test_role_grants`.
+        """
+        from sqlalchemy import text
+
+        with engine.connect() as conn:
+            dialect = engine.dialect.name
+            if dialect == "sqlite":
+                ddl = conn.execute(
+                    text(
+                        "SELECT sql FROM sqlite_master WHERE type='index' "
+                        "AND name='uq_role_grant_workspace_user_role_scope_active'"
+                    )
+                ).scalar_one_or_none()
+            else:  # postgresql
+                ddl = conn.execute(
+                    text(
+                        "SELECT indexdef FROM pg_indexes WHERE "
+                        "indexname='uq_role_grant_workspace_user_role_scope_active'"
+                    )
+                ).scalar_one_or_none()
+        assert ddl is not None, "expected partial UNIQUE index to be present"
+        # Order matters in a UNIQUE: the leading three columns plus
+        # the COALESCE expression must appear as the index key.
+        normalised = ddl.lower()
+        assert "unique" in normalised
+        assert "coalesce" in normalised
+        assert "scope_property_id" in normalised
+        # The leading column list — pinning order, since the partial
+        # UNIQUE relies on it for B-tree lookup shape.
+        for col in ("workspace_id", "user_id", "grant_role"):
+            assert col in normalised
+        # The partial WHERE clause — the soft-retire filter is the
+        # whole point of the cd-x1xh shape.
+        assert "revoked_at is null" in normalised
+        assert "scope_kind" in normalised
 
     def test_deployment_owner_columns(self, engine: Engine) -> None:
         cols = {c["name"]: c for c in inspect(engine).get_columns("deployment_owner")}
@@ -512,9 +619,16 @@ class TestRoleGrantCheckConstraint:
             reset_current(token)
 
     def test_every_allowed_role_roundtrips(self, db_session: Session) -> None:
-        """Each allowed ``grant_role`` persists."""
+        """Each allowed ``grant_role`` persists.
+
+        :func:`bootstrap_workspace` pre-seeds the owner's ``manager``
+        grant, so we insert each role for a freshly-minted user (one
+        per role) — otherwise the cd-x1xh partial UNIQUE on
+        ``(workspace_id, user_id, grant_role, COALESCE(scope_property_id,''))``
+        would 409 on the second ``manager`` for the same user.
+        """
         clock = FrozenClock(_PINNED)
-        user = bootstrap_user(
+        owner = bootstrap_user(
             db_session,
             email="every-role@example.com",
             display_name="EveryRole",
@@ -524,17 +638,23 @@ class TestRoleGrantCheckConstraint:
             db_session,
             slug="every-role-ws",
             name="EveryRoleWS",
-            owner_user_id=user.id,
+            owner_user_id=owner.id,
             clock=clock,
         )
-        token = set_current(_ctx_for(ws, user.id))
+        token = set_current(_ctx_for(ws, owner.id))
         try:
             for idx, role in enumerate(("manager", "worker", "client", "guest")):
+                grantee = bootstrap_user(
+                    db_session,
+                    email=f"every-role-{role}@example.com",
+                    display_name=f"EveryRole-{role}",
+                    clock=clock,
+                )
                 db_session.add(
                     RoleGrant(
                         id=f"01HWA00000000000000000RE{idx:02d}",
                         workspace_id=ws.id,
-                        user_id=user.id,
+                        user_id=grantee.id,
                         grant_role=role,
                         created_at=_PINNED,
                     )

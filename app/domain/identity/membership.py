@@ -64,7 +64,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, update
 from sqlalchemy.orm import Session as DbSession
 
 from app.adapters.db.authz.models import (
@@ -218,11 +218,18 @@ def remove_member(
 
     Writes (in one transaction):
 
-    1. Delete every :class:`RoleGrant` for ``(workspace, user)``.
+    1. Soft-retire every live :class:`RoleGrant` for
+       ``(workspace, user)`` — bulk UPDATE stamping ``revoked_at`` +
+       ``revoked_by_user_id`` + ``ended_on``. cd-x1xh moved
+       revocation to the §02 soft-retire shape; the rows survive for
+       audit and live-grant read paths filter on
+       ``revoked_at IS NULL``. Already-revoked rows are skipped by
+       the WHERE.
     2. Delete every :class:`PermissionGroupMember` for
        ``(workspace, user)``. If the user is the sole owner, the
-       guard refuses BEFORE the DELETE; the caller's UoW keeps the
-       rows intact.
+       guard refuses BEFORE this step; the caller's UoW keeps the
+       rows intact. (``permission_group_member`` does not yet carry
+       a soft-retire column in v1 — that lands on its own task.)
     3. Delete every :class:`Session` row whose ``workspace_id``
        matches the caller's workspace.
 
@@ -284,13 +291,17 @@ def remove_member(
                 f"workspace_id={ctx.workspace_id!r} user_id={user_id!r}"
             )
 
-    # Gather forensic fields before the DELETE — the rows disappear
-    # in the next statement and the audit row needs their ids.
+    # Gather forensic fields before the soft-retire UPDATE — the audit
+    # row needs the affected grant ids. Filter on
+    # ``revoked_at IS NULL`` so already-soft-retired rows don't count
+    # toward "live membership" (matches every other read path post
+    # cd-x1xh) and don't get re-stamped by the UPDATE.
     grant_rows = list(
         session.scalars(
             select(RoleGrant).where(
                 RoleGrant.workspace_id == ctx.workspace_id,
                 RoleGrant.user_id == user_id,
+                RoleGrant.revoked_at.is_(None),
             )
         ).all()
     )
@@ -317,10 +328,16 @@ def remove_member(
     deleted_group_ids = [row.group_id for row in group_member_rows]
 
     session.execute(
-        delete(RoleGrant)
+        update(RoleGrant)
         .where(
             RoleGrant.workspace_id == ctx.workspace_id,
             RoleGrant.user_id == user_id,
+            RoleGrant.revoked_at.is_(None),
+        )
+        .values(
+            revoked_at=resolved_now,
+            revoked_by_user_id=ctx.actor_id,
+            ended_on=resolved_now.date(),
         )
         .execution_options(synchronize_session="fetch")
     )

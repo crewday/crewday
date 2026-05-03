@@ -30,7 +30,7 @@ Summary of the rules enforced in this module:
   soft reference to ``property.id`` today — the promoted FK lands
   with cd-8u5; until then the junction join is the authoritative
   scoping gate.)
-* **Last-owner protection.** ``revoke`` refuses to remove a
+* **Last-owner protection.** ``revoke`` refuses to retire a
   ``manager`` grant when doing so would leave ``owners@<workspace>``
   with **zero** members who still hold a live ``manager`` grant on
   the workspace (§02 "permission_group" §"Invariants" —
@@ -42,6 +42,16 @@ Summary of the rules enforced in this module:
   whose holder is not in ``owners`` — are unconstrained. The test
   matrix in ``tests/integration/identity/test_role_grants.py``
   documents the full V1 boundary.
+
+* **Soft-retire on revoke (cd-x1xh).** ``revoke`` writes
+  ``revoked_at`` + ``revoked_by_user_id`` + ``ended_on`` on the row
+  instead of deleting it; the partial UNIQUE indexes
+  (``uq_role_grant_*``) all carry a ``revoked_at IS NULL`` filter so
+  the live partition still has at most one grant per
+  ``(user, role, scope)``, and re-granting after revoke lands a
+  fresh row beside the soft-retired prior. Read paths consult
+  ``revoked_at IS NULL`` to surface only live grants — the audit
+  trail survives in the table.
 
 **Capability gates are NOT enforced here.** ``users.grant_role`` /
 ``users.revoke_grant`` (the §05 action-catalog entries) are the
@@ -432,24 +442,31 @@ def revoke(
     grant_id: str,
     clock: Clock | None = None,
 ) -> None:
-    """Delete the role grant identified by ``grant_id``.
+    """Soft-retire the role grant identified by ``grant_id``.
 
-    The v1 schema has no ``revoked_at`` column (§02's soft-retire
-    pattern lands with a follow-up migration), so revocation is a
-    hard DELETE today. Audit still records the mutation.
+    cd-x1xh moved revocation to the §02 soft-retire shape: the row
+    is **preserved** with ``revoked_at`` + ``revoked_by_user_id`` +
+    ``ended_on`` stamped instead of being hard-deleted. Live-grant
+    read paths filter on ``revoked_at IS NULL`` so the user no
+    longer sees the surface; the row remains for audit and a
+    re-grant on the same ``(user, role, scope)`` triple lands a
+    fresh row alongside (the partial UNIQUE indexes carry the
+    same ``revoked_at IS NULL`` filter).
 
     Raises:
 
-    * :class:`RoleGrantNotFound` — no row in the caller's workspace
-      with that id.
+    * :class:`RoleGrantNotFound` — no live row in the caller's
+      workspace with that id (the repo's live-only read collapses
+      already-revoked rows to ``None`` so a double-revoke is the
+      same 404 as an unknown id).
     * :class:`LastOwnerGrantProtected` — the grant is a ``manager``
       grant whose removal would leave ``owners@<workspace>`` with
       zero members holding a live ``manager`` grant (§02 admin-reach
       invariant, cd-nj8m). Mint a replacement ``manager`` grant on
       another owners-group member before revoking this seat.
 
-    ``clock`` is optional; tests pin the audit row's ``created_at``
-    via a :class:`~app.util.clock.FrozenClock`.
+    ``clock`` is optional; tests pin the revoke timestamp + the audit
+    row's ``created_at`` via a :class:`~app.util.clock.FrozenClock`.
     """
     row = _load_grant(repo, ctx, grant_id=grant_id)
 
@@ -462,7 +479,7 @@ def revoke(
         # the same lock on the owners-group row as
         # :func:`count_owner_members_locked` does, then counts the
         # users who are BOTH in ``owners@<ws>`` AND hold at least one
-        # ``manager`` grant — excluding the row we're about to delete.
+        # ``manager`` grant — excluding the row we're about to revoke.
         # The shared lock serialises the membership-removal and
         # grant-revoke guards so a concurrent ``remove_member`` /
         # ``revoke`` on the same workspace cannot race us to a state
@@ -479,16 +496,27 @@ def revoke(
                 "member first"
             )
 
-    # Snapshot the fields the audit row needs before the DELETE; once
-    # the row is gone we cannot read it again. We also carry
+    # Snapshot the fields the audit row needs; we also carry
     # ``scope_property_id`` into the audit payload so operational
-    # forensics ("which property grant was removed?") can reconstruct
-    # the deleted row without walking back to the earlier ``granted``
-    # entry.
+    # forensics ("which property grant was retired?") can reconstruct
+    # the soft-retired row at a glance without joining back to the
+    # earlier ``granted`` entry.
     user_id = row.user_id
     grant_role = row.grant_role
     scope_property_id = row.scope_property_id
-    repo.delete_grant(workspace_id=ctx.workspace_id, grant_id=grant_id)
+
+    now = (clock if clock is not None else SystemClock()).now()
+    repo.soft_revoke_grant(
+        workspace_id=ctx.workspace_id,
+        grant_id=grant_id,
+        revoked_at=now,
+        revoked_by_user_id=ctx.actor_id,
+        # ``ended_on`` is the spec-mandated effective-period close
+        # (§02 "role_grants" §"ended_on"). UTC date matches the rest
+        # of the v1 storage convention; "today_local_or_utc" is
+        # workspace-tz-driven on the rendering side, not here.
+        ended_on=now.date(),
+    )
 
     write_audit(
         repo.session,

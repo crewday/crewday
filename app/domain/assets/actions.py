@@ -459,6 +459,9 @@ def _assert_record_access(
                 RoleGrant.user_id == ctx.actor_id,
                 RoleGrant.grant_role == "worker",
                 RoleGrant.scope_kind == "workspace",
+                # cd-x1xh: live grants only — a soft-retired worker
+                # grant must not authorise asset actions.
+                RoleGrant.revoked_at.is_(None),
                 or_(
                     RoleGrant.scope_property_id == property_id,
                     RoleGrant.scope_property_id.is_(None),

@@ -264,6 +264,10 @@ def count_owner_members_with_manager_grant_locked(
         RoleGrant.workspace_id == workspace_id,
         RoleGrant.user_id == PermissionGroupMember.user_id,
         RoleGrant.grant_role == "manager",
+        # cd-x1xh: only **live** grants count toward the
+        # manager-holding-owner anchor; a soft-retired manager grant
+        # cannot keep the workspace governance reachable.
+        RoleGrant.revoked_at.is_(None),
     ]
     if exclude_grant_id is not None:
         grant_predicates.append(RoleGrant.id != exclude_grant_id)

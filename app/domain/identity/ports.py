@@ -369,11 +369,10 @@ class RoleGrantRepository(Protocol):
         ...
 
     def has_active_manager_grant(self, *, workspace_id: str, user_id: str) -> bool:
-        """Return ``True`` iff ``user_id`` holds a ``manager`` grant here.
+        """Return ``True`` iff ``user_id`` holds a live ``manager`` grant here.
 
-        v1 has no ``revoked_at`` column on ``role_grant``; any row
-        with ``grant_role='manager'`` in the workspace counts as an
-        active manager grant for the §05 owner-authority policy.
+        Filters to rows with ``revoked_at IS NULL`` so a soft-retired
+        manager grant no longer feeds the §05 owner-authority policy.
         """
         ...
 
@@ -421,12 +420,27 @@ class RoleGrantRepository(Protocol):
         """Insert a fresh workspace-scoped ``role_grant`` row."""
         ...
 
-    def delete_grant(self, *, workspace_id: str, grant_id: str) -> None:
-        """Hard-delete the named grant.
+    def soft_revoke_grant(
+        self,
+        *,
+        workspace_id: str,
+        grant_id: str,
+        revoked_at: datetime,
+        revoked_by_user_id: str | None,
+        ended_on: date,
+    ) -> None:
+        """Soft-retire the named grant: stamp ``revoked_at`` + audit fields.
+
+        Replaces the hard-DELETE that v1 used (cd-x1xh). The row is
+        preserved for audit; live-grant read paths filter it out via
+        ``revoked_at IS NULL``. The partial UNIQUE indexes use the
+        same predicate so a re-grant after revoke lands a fresh row.
 
         Caller is responsible for the last-owner protection (§05
-        "Surface grants at a glance"); v1 has no ``revoked_at``
-        column so the row is removed outright.
+        "Surface grants at a glance"); the SAVEPOINT inside this
+        method is unnecessary because the UPDATE either succeeds or
+        no rows are touched (no UNIQUE collision is possible — we are
+        leaving the live partition).
         """
         ...
 

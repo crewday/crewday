@@ -161,6 +161,10 @@ def _seed_first_deployment_owner(
             select(RoleGrant.id)
             .where(RoleGrant.scope_kind == "deployment")
             .where(RoleGrant.user_id == user_id)
+            # cd-x1xh: only treat **live** grants as "already
+            # exists"; a soft-retired bootstrap grant should not
+            # block re-seeding the deployment owner.
+            .where(RoleGrant.revoked_at.is_(None))
             .limit(1)
         )
         if existing_grant is None:

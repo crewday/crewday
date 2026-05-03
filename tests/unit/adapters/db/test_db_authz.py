@@ -295,18 +295,24 @@ class TestPartialUniqueDeploymentUserRole:
         assert {r.grant_role for r in rows} == {"manager", "worker"}
 
 
-class TestWorkspacePartialUniqueUnaffected:
-    """The deployment partial UNIQUE does not constrain workspace rows."""
+class TestWorkspacePartialUnique:
+    """cd-x1xh: workspace-side partial UNIQUE on the live partition.
 
-    def test_two_workspace_grants_same_user_role_allowed(
+    Before cd-x1xh the workspace surface had no app-level uniqueness
+    on ``(workspace_id, user_id, grant_role)`` — re-grants relied on
+    a hard DELETE of the prior row. Per §02 (soft-retire) the
+    canonical model now keeps revoked rows for audit and the partial
+    UNIQUE bounds the **live** rows: at most one
+    ``(workspace_id, user_id, grant_role, COALESCE(scope_property_id,
+    ''))`` row with ``revoked_at IS NULL``. ``COALESCE`` is needed to
+    defeat SQL NULL-distinct semantics so two workspace-wide grants
+    ``(ws, u, role, NULL)`` don't both slip through.
+    """
+
+    def test_two_live_workspace_grants_same_triple_rejected(
         self, session: Session
     ) -> None:
-        """Workspace re-grants are history-preserving (§02 "Revocation").
-
-        The partial UNIQUE applies only ``WHERE scope_kind='deployment'``;
-        re-granting the same ``(user, role)`` workspace-side inserts a
-        new row without conflicting. Pins the WHERE-predicate scoping.
-        """
+        """Two live grants on the same triple violate the partial UNIQUE."""
         _seed_workspace(session, workspace_id="01HWA000000000000000000WSU", slug="ws-u")
         _seed_user(session, user_id="01HWA000000000000000000USU", tag="ws-uniq")
         session.add(
@@ -327,15 +333,46 @@ class TestWorkspacePartialUniqueUnaffected:
                 created_at=_PINNED,
             )
         )
-        # Both rows must coexist — workspace-side has no app-level
-        # uniqueness on ``(workspace_id, user_id, grant_role)``.
+        with pytest.raises(IntegrityError):
+            session.flush()
+        session.rollback()
+
+    def test_revoked_row_does_not_block_regrant(self, session: Session) -> None:
+        """A soft-revoked row sits outside the partial UNIQUE's WHERE.
+
+        The first row carries ``revoked_at`` set; the second row
+        (live, same triple) lands without conflict — proving the
+        ``revoked_at IS NULL`` filter is active in the index.
+        """
+        _seed_workspace(session, workspace_id="01HWA000000000000000000WSV", slug="ws-v")
+        _seed_user(session, user_id="01HWA000000000000000000USV", tag="ws-regrant")
+        session.add(
+            RoleGrant(
+                id="01HWA000000000000000000RV1",
+                workspace_id="01HWA000000000000000000WSV",
+                user_id="01HWA000000000000000000USV",
+                grant_role="manager",
+                created_at=_PINNED,
+                revoked_at=_PINNED,
+                ended_on=_PINNED.date(),
+            )
+        )
+        session.add(
+            RoleGrant(
+                id="01HWA000000000000000000RV2",
+                workspace_id="01HWA000000000000000000WSV",
+                user_id="01HWA000000000000000000USV",
+                grant_role="manager",
+                created_at=_PINNED,
+            )
+        )
         session.commit()
         rows = session.scalars(
-            select(RoleGrant).where(RoleGrant.user_id == "01HWA000000000000000000USU")
+            select(RoleGrant).where(RoleGrant.user_id == "01HWA000000000000000000USV")
         ).all()
         assert {r.id for r in rows} == {
-            "01HWA000000000000000000RW1",
-            "01HWA000000000000000000RW2",
+            "01HWA000000000000000000RV1",
+            "01HWA000000000000000000RV2",
         }
 
 

@@ -286,6 +286,10 @@ def build_admin_me_router() -> APIRouter:
                 select(RoleGrant, User)
                 .join(User, User.id == RoleGrant.user_id)
                 .where(RoleGrant.scope_kind == "deployment")
+                # cd-x1xh: live grants only — soft-retired admins
+                # stay in the table for audit but no longer surface
+                # on /me's admin team list.
+                .where(RoleGrant.revoked_at.is_(None))
                 .order_by(RoleGrant.created_at.asc(), RoleGrant.id.asc())
             ).all()
 

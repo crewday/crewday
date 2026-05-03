@@ -657,11 +657,18 @@ class TestListGrants:
 
 
 class TestRevoke:
-    """``revoke`` deletes the row, protects the last owner, and audits."""
+    """``revoke`` soft-retires the row, protects the last owner, and audits."""
 
-    def test_revoke_worker_succeeds(
+    def test_revoke_worker_soft_retires_row(
         self, env: tuple[Session, WorkspaceContext]
     ) -> None:
+        """cd-x1xh: revoke is a soft-retire, not a hard-delete.
+
+        The row stays in the table with ``revoked_at`` /
+        ``revoked_by_user_id`` / ``ended_on`` stamped; live-grant read
+        paths filter on ``revoked_at IS NULL`` so the grant is gone
+        from the application's perspective without losing audit trail.
+        """
         session, ctx = env
         clock = FrozenClock(_PINNED)
         target = _add_second_user(session, suffix="rvk-w", clock=clock)
@@ -674,10 +681,16 @@ class TestRevoke:
         )
         revoke(_rg_repo(session), ctx, grant_id=ref.id, clock=clock)
 
-        remaining = session.scalars(
-            select(RoleGrant).where(RoleGrant.id == ref.id)
-        ).all()
-        assert remaining == []
+        # Live-grant view: the row is gone.
+        live = list_grants(_rg_repo(session), ctx, user_id=target)
+        assert [g.id for g in live] == []
+
+        # Physical row: still present with the soft-retire stamps.
+        row = session.scalar(select(RoleGrant).where(RoleGrant.id == ref.id))
+        assert row is not None
+        assert row.revoked_at is not None
+        assert row.revoked_by_user_id == ctx.actor_id
+        assert row.ended_on == _PINNED.date()
 
     def test_revoke_emits_audit(self, env: tuple[Session, WorkspaceContext]) -> None:
         session, ctx = env
@@ -818,10 +831,14 @@ class TestRevoke:
         # With two owners, we may safely revoke the second's manager
         # grant — the workspace still has an owner with a manager grant.
         revoke(_rg_repo(session), ctx, grant_id=second_grant.id, clock=clock)
-        remaining = session.scalars(
-            select(RoleGrant).where(RoleGrant.id == second_grant.id)
-        ).all()
-        assert remaining == []
+        # Soft-retire (cd-x1xh): row stays, but is gone from live-grant
+        # reads. Confirm both halves so a regression of either side
+        # surfaces.
+        live = list_grants(_rg_repo(session), ctx, user_id=second_owner)
+        assert all(g.id != second_grant.id for g in live)
+        row = session.scalar(select(RoleGrant).where(RoleGrant.id == second_grant.id))
+        assert row is not None
+        assert row.revoked_at is not None
 
     def test_revoke_worker_of_only_owner_succeeds(
         self, env: tuple[Session, WorkspaceContext]
@@ -844,10 +861,113 @@ class TestRevoke:
         )
         revoke(_rg_repo(session), ctx, grant_id=extra.id, clock=clock)
 
-        remaining = session.scalars(
-            select(RoleGrant).where(RoleGrant.id == extra.id)
+        # Soft-retire (cd-x1xh): the row is preserved but absent from
+        # live-grant reads.
+        live_extra = [
+            g
+            for g in list_grants(_rg_repo(session), ctx, user_id=ctx.actor_id)
+            if g.id == extra.id
+        ]
+        assert live_extra == []
+        row = session.scalar(select(RoleGrant).where(RoleGrant.id == extra.id))
+        assert row is not None
+        assert row.revoked_at is not None
+
+    def test_regrant_after_revoke_lands_fresh_row(
+        self, env: tuple[Session, WorkspaceContext]
+    ) -> None:
+        """cd-x1xh: the partial UNIQUE filters out soft-revoked rows.
+
+        After a soft-revoke, granting the same ``(user, role,
+        scope?)`` triple again must land a brand-new row — the partial
+        UNIQUE's WHERE clause excludes the revoked one. This proves
+        re-grant doesn't 409 against the dead row, and that the
+        revoked row stays put alongside the fresh live one (history
+        preservation).
+        """
+        session, ctx = env
+        clock = FrozenClock(_PINNED)
+        target = _add_second_user(session, suffix="regrant", clock=clock)
+        first = grant(
+            _rg_repo(session),
+            ctx,
+            user_id=target,
+            grant_role="worker",
+            clock=clock,
+        )
+        revoke(_rg_repo(session), ctx, grant_id=first.id, clock=clock)
+        # Same triple as before — the partial UNIQUE permits it
+        # because the prior row is now soft-revoked.
+        second = grant(
+            _rg_repo(session),
+            ctx,
+            user_id=target,
+            grant_role="worker",
+            clock=clock,
+        )
+        assert second.id != first.id
+
+        live = list_grants(_rg_repo(session), ctx, user_id=target)
+        assert [g.id for g in live] == [second.id]
+
+        # Both rows survive in the table; the revoked one carries the
+        # soft-retire stamps.
+        all_rows = session.scalars(
+            select(RoleGrant)
+            .where(RoleGrant.user_id == target)
+            .order_by(RoleGrant.created_at.asc(), RoleGrant.id.asc())
         ).all()
-        assert remaining == []
+        assert {row.id for row in all_rows} == {first.id, second.id}
+        first_row = next(r for r in all_rows if r.id == first.id)
+        second_row = next(r for r in all_rows if r.id == second.id)
+        assert first_row.revoked_at is not None
+        assert second_row.revoked_at is None
+
+    def test_duplicate_live_workspace_wide_grant_rejected_by_partial_unique(
+        self, env: tuple[Session, WorkspaceContext]
+    ) -> None:
+        """cd-x1xh: two live workspace-wide grants on the same triple are rejected.
+
+        Standard SQL NULL-distinct UNIQUE semantics would let two
+        ``(workspace, user, role, NULL)`` rows slip through —
+        ``COALESCE(scope_property_id, '')`` inside the index collapses
+        the NULL to a sentinel so the UNIQUE binds across NULL and
+        non-NULL property scopes alike. We assert at the DB level (raw
+        INSERT bypassing the domain service) so the test fails on a
+        regression even if the domain layer adds its own pre-flight.
+        """
+        from sqlalchemy.exc import IntegrityError
+
+        session, ctx = env
+        clock = FrozenClock(_PINNED)
+        target = _add_second_user(session, suffix="dup", clock=clock)
+        # First insert via the domain service, so the grant lands with
+        # the right shape and the audit/owner-authority paths run.
+        grant(
+            _rg_repo(session),
+            ctx,
+            user_id=target,
+            grant_role="worker",
+            clock=clock,
+        )
+        session.flush()
+        # Sibling row with the same ``(workspace, user, role)`` triple
+        # and ``scope_property_id IS NULL`` — would silently land
+        # without the COALESCE-based partial UNIQUE.
+        session.add(
+            RoleGrant(
+                id=new_ulid(),
+                workspace_id=ctx.workspace_id,
+                user_id=target,
+                grant_role="worker",
+                scope_kind="workspace",
+                scope_property_id=None,
+                created_at=_PINNED,
+                created_by_user_id=ctx.actor_id,
+            )
+        )
+        with pytest.raises(IntegrityError):
+            session.flush()
 
 
 # ---------------------------------------------------------------------------

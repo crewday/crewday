@@ -1329,10 +1329,26 @@ class TestRemoveMember:
 
         membership.remove_member(session, ctx, user_id=worker.id)
 
-        remaining_grants = session.scalars(
-            select(RoleGrant).where(RoleGrant.user_id == worker.id)
+        # cd-x1xh: remove_member soft-retires grants instead of
+        # hard-deleting. The row is preserved for audit but
+        # filtered from live-grant reads via ``revoked_at IS NULL``.
+        live_grants = session.scalars(
+            select(RoleGrant).where(
+                RoleGrant.user_id == worker.id,
+                RoleGrant.revoked_at.is_(None),
+            )
         ).all()
-        assert remaining_grants == []
+        assert live_grants == []
+        revoked_grants = session.scalars(
+            select(RoleGrant).where(
+                RoleGrant.user_id == worker.id,
+                RoleGrant.revoked_at.is_not(None),
+            )
+        ).all()
+        assert len(revoked_grants) == 1
+        revoked = revoked_grants[0]
+        assert revoked.revoked_by_user_id == ctx.actor_id
+        assert revoked.ended_on is not None
         # ``remove_member`` calls the scoped reconciler inline (see
         # ``user_workspace_refresh.reconcile_user_workspace_for``) so
         # the removed user does not keep a stale guest-fallback ctx

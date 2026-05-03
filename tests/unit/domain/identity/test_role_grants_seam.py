@@ -21,7 +21,7 @@ We cover:
 from __future__ import annotations
 
 from collections.abc import Sequence
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from typing import Any
 
 import pytest
@@ -100,6 +100,11 @@ class _FakeRepo(RoleGrantRepository):
             known_user_ids if known_user_ids is not None else frozenset()
         )
         self._session = _FakeSession()
+        # cd-x1xh: the soft-retire seam stamps three audit fields. The
+        # test asserts on this tuple so a regression in the domain
+        # layer (e.g. forgetting to forward ``revoked_by_user_id``)
+        # surfaces here rather than in the integration suite.
+        self._last_revoked: tuple[str, datetime, str | None, date] | None = None
 
     @property
     def session(self) -> Any:
@@ -162,8 +167,23 @@ class _FakeRepo(RoleGrantRepository):
         self._grants[grant_id] = row
         return row
 
-    def delete_grant(self, *, workspace_id: str, grant_id: str) -> None:
+    def soft_revoke_grant(
+        self,
+        *,
+        workspace_id: str,
+        grant_id: str,
+        revoked_at: datetime,
+        revoked_by_user_id: str | None,
+        ended_on: date,
+    ) -> None:
+        # The fake mirrors the SA repo's "soft-retire" shape (cd-x1xh):
+        # the row stays in the store but disappears from the live-grant
+        # views (``list_grants`` / ``get_grant``). The simplest fake
+        # that preserves that contract is to drop the row from the
+        # in-memory map — the validation paths under test never read
+        # the audit fields, so the missing-row aspect is what matters.
         self._grants.pop(grant_id, None)
+        self._last_revoked = (grant_id, revoked_at, revoked_by_user_id, ended_on)
 
 
 class TestRevoke:
@@ -181,8 +201,9 @@ class TestRevoke:
 
         :func:`revoke` short-circuits the ``is_owner_member`` lookup
         when ``grant_role != 'manager'``, so this path runs entirely
-        against the fake repo. Confirms the DELETE lands and an audit
-        row queues through ``repo.session``.
+        against the fake repo. Confirms the soft-retire seam call
+        (cd-x1xh) lands with the right stamps and an audit row queues
+        through ``repo.session``.
         """
         worker_grant = RoleGrantRow(
             id="01HWA00000000000000000RG02",
@@ -198,6 +219,15 @@ class TestRevoke:
         revoke(repo, _ctx(), grant_id=worker_grant.id, clock=FrozenClock(_PINNED))
         assert worker_grant.id not in repo._grants
         assert len(repo._session.added) == 1
+        # The soft-retire seam carries the actor + clock; assert on
+        # the stamped tuple so a forgotten kwarg (e.g.
+        # ``revoked_by_user_id``) surfaces as a unit failure.
+        assert repo._last_revoked == (
+            worker_grant.id,
+            _PINNED,
+            _ACTOR_ID,
+            _PINNED.date(),
+        )
 
 
 class TestListGrants:

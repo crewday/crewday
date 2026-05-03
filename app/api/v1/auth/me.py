@@ -302,6 +302,9 @@ def _load_available_workspaces(
             select(RoleGrant, Workspace)
             .join(Workspace, Workspace.id == RoleGrant.workspace_id)
             .where(RoleGrant.user_id == user_id)
+            # cd-x1xh: live grants only — a soft-retired grant must
+            # not surface a workspace in the user's switcher.
+            .where(RoleGrant.revoked_at.is_(None))
         ).all()
 
         owners_workspace_ids = set(
@@ -372,6 +375,9 @@ def _client_binding_org_ids(
                 RoleGrant.grant_role == "client",
                 RoleGrant.scope_property_id.is_(None),
                 RoleGrant.binding_org_id.is_not(None),
+                # cd-x1xh: a soft-retired client grant must not
+                # widen the portal's binding-org list.
+                RoleGrant.revoked_at.is_(None),
             )
             .order_by(RoleGrant.binding_org_id.asc())
         ).all()
@@ -418,6 +424,8 @@ def _workspace_role(session: Session, *, user_id: str, workspace_id: str) -> str
                 .where(RoleGrant.workspace_id == workspace_id)
                 .where(RoleGrant.scope_kind == "workspace")
                 .where(RoleGrant.scope_property_id.is_(None))
+                # cd-x1xh: live grants only.
+                .where(RoleGrant.revoked_at.is_(None))
             ).all()
         )
         owner_member = (
@@ -527,6 +535,9 @@ def _load_switcher_entries(
             .where(RoleGrant.user_id == user_id)
             .where(RoleGrant.workspace_id.in_(workspace_ids))
             .where(RoleGrant.scope_property_id.is_(None))
+            # cd-x1xh: live grants only — soft-retired grants must
+            # not contribute to the workspace switcher's role pick.
+            .where(RoleGrant.revoked_at.is_(None))
         ).all()
 
         owners_workspace_ids = set(

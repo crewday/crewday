@@ -253,16 +253,12 @@ def is_step_up_user(session: SqlaSession, *, user_id: str) -> bool:
     registration. We open a :func:`tenant_agnostic` block so the
     ORM tenant filter doesn't refuse the read.
 
-    **Forward-compat — non-archived grants.** v1's ``role_grant``
-    schema has no ``revoked_at`` column (revocation is a hard DELETE
-    today, see :mod:`app.domain.identity.role_grants` module
-    docstring), so every extant row is an active grant by
-    construction. ``users.archived_at`` likewise hasn't landed on
-    the read path here. When those columns arrive (cd-x1xh)
-    the WHERE clause extends with ``RoleGrant.revoked_at IS NULL`` /
-    a ``users.archived_at IS NULL`` pre-gate. The helper's public
-    contract (return ``True`` iff the user holds a step-up role
-    *somewhere*) stays unchanged.
+    **Non-archived grants.** cd-x1xh moved ``role_grant`` revocation
+    to the §02 soft-retire shape; the manager-grant probe filters
+    ``RoleGrant.revoked_at IS NULL`` so a soft-retired manager grant
+    no longer lands the user in the step-up population.
+    ``users.archived_at`` is still pending; when it lands the WHERE
+    adds the matching pre-gate.
     """
     with tenant_agnostic():
         # Manager-grant check — one row anywhere is enough.
@@ -270,6 +266,7 @@ def is_step_up_user(session: SqlaSession, *, user_id: str) -> bool:
             select(RoleGrant.id)
             .where(RoleGrant.user_id == user_id)
             .where(RoleGrant.grant_role == "manager")
+            .where(RoleGrant.revoked_at.is_(None))
             .limit(1)
         )
         if manager_grant is not None:

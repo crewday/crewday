@@ -383,6 +383,9 @@ def _load_property_ids_by_user(
     grants_stmt = select(RoleGrant.user_id, RoleGrant.scope_property_id).where(
         RoleGrant.workspace_id == ctx.workspace_id,
         RoleGrant.user_id.in_(user_ids),
+        # cd-x1xh: live grants only — a soft-retired grant must
+        # not widen a user's property visibility on the roster.
+        RoleGrant.revoked_at.is_(None),
     )
     grants_by_user: dict[str, list[str | None]] = defaultdict(list)
     for user_id, scope_property_id in session.execute(grants_stmt).all():

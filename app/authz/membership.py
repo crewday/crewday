@@ -85,11 +85,10 @@ def is_member_of(
       explicit that these groups never carry ``permission_group_member``
       rows, so consulting that table would be misleading.
 
-    A membership row is "active" if it exists — v1 has no
-    ``revoked_at`` column on ``role_grant`` (see
-    :mod:`app.adapters.db.authz.models` docstring); the future column
-    will extend this query with an ``IS NULL`` predicate without
-    changing the caller contract.
+    A membership row is "active" iff its ``revoked_at`` is NULL
+    (cd-x1xh moved revocation to soft-retire). Soft-retired rows
+    stay in the table for audit but no longer feed derived-group
+    membership.
 
     **Workspace-scope means workspace-scope.** §02's "Derived group
     membership" says that a property-level manager grant contributes
@@ -121,6 +120,7 @@ def is_member_of(
             RoleGrant.user_id == user_id,
             RoleGrant.grant_role == mapped_role,
             RoleGrant.scope_property_id.is_(None),
+            RoleGrant.revoked_at.is_(None),
         )
         .limit(1)
     )

@@ -215,6 +215,9 @@ def _client_visible_property_ids(
             RoleGrant.user_id == ctx.actor_id,
             RoleGrant.scope_kind == "workspace",
             RoleGrant.grant_role == "client",
+            # cd-x1xh: live grants only — a soft-retired client
+            # grant must not widen the portal's property visibility.
+            RoleGrant.revoked_at.is_(None),
         )
     ).all()
     property_ids = {pid for pid, _org_id in grants if pid is not None}

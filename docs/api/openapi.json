@@ -26899,7 +26899,7 @@
     },
     "/admin/api/v1/admins/{id}/revoke": {
       "post": {
-        "description": "Hard-delete a deployment admin grant; audit the action.\n\nToday's :class:`RoleGrant` carries no ``revoked_at``\ncolumn (cd-79r tracks that addition); revocation is a\nhard delete per :func:`app.authz.deployment_admin.is_deployment_admin`'s\ncontract (\"Active in v1 means exists\"). Once cd-79r\nlands, this handler flips to a column update without\nbreaking the wire shape.\n\nIdempotent: revoking an already-deleted grant returns\nthe same envelope (the route 404s on the first miss\npath; a re-revoke after a successful delete also 404s\nbecause the row is gone). Self-revoke is allowed \u2014 the\nlast-deployment-admin guard lives separately (cd-79r\nwill host it).",
+        "description": "Soft-retire a deployment admin grant; audit the action.\n\ncd-x1xh moved deployment-admin revocation to the \u00a702\nsoft-retire shape: the row is preserved with ``revoked_at``\n+ ``revoked_by_user_id`` + ``ended_on`` stamped, and live\ndeployment-admin reads filter on ``revoked_at IS NULL``.\nThe partial UNIQUE on ``(user_id, grant_role) WHERE\nscope_kind='deployment' AND revoked_at IS NULL`` carries\nthe same predicate so a re-grant after revoke lands a\nfresh row alongside.\n\nIdempotent: revoking an already-revoked grant 404s (the\nlive-only ``where`` filters it out); the first revoke is\na 200 with the new state. Self-revoke is allowed \u2014 the\nlast-deployment-admin guard lives separately (cd-79r\nwill host it).",
         "operationId": "admin.admins.revoke",
         "parameters": [
           {
@@ -98995,7 +98995,7 @@
     },
     "/w/{slug}/api/v1/role_grants/{grant_id}": {
       "delete": {
-        "description": "Hard-delete the row (v1 has no ``revoked_at`` column yet).\n\nThe last-owner guard fires at the domain layer for any\n``manager`` revoke whose removal would leave\n``owners@<workspace>`` with **zero** members holding a live\n``manager`` grant on the workspace (\u00a702 admin-reach\ninvariant, cd-nj8m); the router maps it to 409\n``last_owner_grant_protected`` so the SPA can prompt the\noperator to mint a replacement ``manager`` grant on another\nowners-group member first.",
+        "description": "Soft-retire the row (cd-x1xh).\n\nThe domain ``revoke`` writes ``revoked_at`` +\n``revoked_by_user_id`` + ``ended_on`` instead of deleting the\nrow; live-grant read paths filter on ``revoked_at IS NULL``\nso the user no longer sees the surface. The audit trail\nsurvives in the table and a re-grant on the same\n``(user, role, scope)`` triple lands a fresh row beside.\n\nThe last-owner guard still fires at the domain layer for any\n``manager`` revoke whose retirement would leave\n``owners@<workspace>`` with **zero** members holding a live\n``manager`` grant on the workspace (\u00a702 admin-reach\ninvariant, cd-nj8m); the router maps it to 409\n``last_owner_grant_protected`` so the SPA can prompt the\noperator to mint a replacement ``manager`` grant on another\nowners-group member first.",
         "operationId": "role_grants.revoke",
         "parameters": [
           {

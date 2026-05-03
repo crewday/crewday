@@ -522,6 +522,9 @@ def _derive_actor_grant_role(
     stmt = select(RoleGrant.grant_role).where(
         RoleGrant.workspace_id == workspace_id,
         RoleGrant.user_id == user_id,
+        # cd-x1xh: live grants only — a soft-retired grant must not
+        # promote the actor's grant-role pick on the request ctx.
+        RoleGrant.revoked_at.is_(None),
     )
     roles = set(db_session.scalars(stmt).all())
     if roles:

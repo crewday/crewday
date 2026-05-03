@@ -179,17 +179,25 @@ def _seed_workspace(
         name=f"{slug} workspace",
         owner_user_id=user.id,
     )
-    session.add(
-        RoleGrant(
-            id=new_ulid(),
-            workspace_id=workspace.id,
-            user_id=user.id,
-            grant_role=role,
-            scope_property_id=None,
-            created_at=_PINNED,
-            created_by_user_id=None,
+    # ``bootstrap_workspace`` already seeds a workspace-wide
+    # ``manager`` grant for ``user``. cd-x1xh's partial UNIQUE on
+    # ``(workspace, user, role, COALESCE(scope_property_id, ''))``
+    # (live rows only) rejects a second ``manager`` row, so we only
+    # add a grant here when ``role`` is something other than
+    # ``manager`` — which lets these tests still bootstrap a worker /
+    # client / guest actor without colliding.
+    if role != "manager":
+        session.add(
+            RoleGrant(
+                id=new_ulid(),
+                workspace_id=workspace.id,
+                user_id=user.id,
+                grant_role=role,
+                scope_property_id=None,
+                created_at=_PINNED,
+                created_by_user_id=None,
+            )
         )
-    )
     session.flush()
     return (
         _ctx(

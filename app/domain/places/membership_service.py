@@ -415,6 +415,9 @@ def _user_can_reach_workspace(
                 RoleGrant.user_id == user_id,
                 RoleGrant.grant_role.in_(_AUTHORISED_GRANT_ROLES),
                 RoleGrant.scope_kind == "workspace",
+                # cd-x1xh: live grants only — a soft-retired
+                # workspace grant must not authorise places sharing.
+                RoleGrant.revoked_at.is_(None),
             )
             .limit(1)
         )

@@ -23,18 +23,20 @@ See ``docs/specs/02-domain-model.md`` §"permission_group",
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any
 
 from sqlalchemy import (
     JSON,
     Boolean,
     CheckConstraint,
+    Date,
     ForeignKey,
     ForeignKeyConstraint,
     Index,
     String,
     UniqueConstraint,
+    func,
     text,
 )
 from sqlalchemy.orm import Mapped, mapped_column
@@ -212,10 +214,24 @@ class RoleGrant(Base):
     from membership in the deployment ``owners`` permission group.
 
     The partial UNIQUE ``uq_role_grant_deployment_user_role`` on
-    ``(user_id, grant_role) WHERE scope_kind='deployment'`` enforces
-    "at most one active deployment grant per ``(user, role)``" —
-    workspace-scope re-grants stay history-preserving (a new row per
-    re-grant) per §02 "Revocation".
+    ``(user_id, grant_role) WHERE scope_kind='deployment' AND
+    revoked_at IS NULL`` enforces "at most one **live** deployment
+    grant per ``(user, role)``" — re-grants after revoke land a
+    fresh row, the soft-retired prior row stays for audit (§02
+    "Revocation"). The workspace partition gets the same shape via
+    ``uq_role_grant_workspace_user_role_scope_active`` on
+    ``(workspace_id, user_id, grant_role, scope_property_id) WHERE
+    scope_kind='workspace' AND revoked_at IS NULL`` (cd-x1xh).
+
+    **Soft-retire columns (cd-x1xh).** Revoking a grant writes
+    ``revoked_at`` (UTC timestamp) and ``revoked_by_user_id`` (audit
+    actor) and stamps ``ended_on`` to today; the row is preserved.
+    Every read path that walks live grants filters on
+    ``revoked_at IS NULL``. ``started_on`` is paired forward-looking:
+    a future scheduling surface may mint a grant that takes effect
+    later than ``created_at`` (§02 "role_grants" §"started_on");
+    until then mints leave it NULL and the read paths treat NULL as
+    "active since ``created_at``".
     """
 
     __tablename__ = "role_grant"
@@ -255,6 +271,23 @@ class RoleGrant(Base):
         ForeignKey("user.id", ondelete="SET NULL"),
         nullable=True,
     )
+    # Soft-retire columns (cd-x1xh). Every legacy row holds
+    # ``revoked_at IS NULL``; the column is populated by the domain
+    # ``revoke()`` path which now writes UPDATEs instead of DELETEs.
+    # ``started_on`` / ``ended_on`` carry the §02 effective-period
+    # shape — both stamp the revoke path; ``started_on`` is also
+    # available to future mints that schedule a grant for a later
+    # take-effect date (NULL == active from ``created_at``).
+    # ``revoked_by_user_id`` is the audit-shape mirror of
+    # ``created_by_user_id``.
+    revoked_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), nullable=True)
+    started_on: Mapped[date | None] = mapped_column(Date(), nullable=True)
+    ended_on: Mapped[date | None] = mapped_column(Date(), nullable=True)
+    revoked_by_user_id: Mapped[str | None] = mapped_column(
+        String,
+        ForeignKey("user.id", ondelete="SET NULL"),
+        nullable=True,
+    )
 
     __table_args__ = (
         CheckConstraint(
@@ -288,17 +321,42 @@ class RoleGrant(Base):
         Index("ix_role_grant_workspace_user", "workspace_id", "user_id"),
         Index("ix_role_grant_scope_property", "scope_property_id"),
         Index("ix_role_grant_binding_org", "workspace_id", "binding_org_id"),
-        # Partial UNIQUE — at most one active deployment grant per
-        # ``(user, role)``. Workspace-scope re-grants stay
-        # history-preserving (no app-level uniqueness on the
-        # workspace partition; §02 "Revocation"). Dialect kwargs
-        # match the migration's ``sqlite_where`` / ``postgresql_where``.
+        # Partial UNIQUE — at most one **live** deployment grant per
+        # ``(user, role)``. cd-x1xh extended the WHERE with
+        # ``revoked_at IS NULL`` so a re-grant after revoke lands a
+        # fresh row instead of 409-ing against the soft-retired one.
+        # Dialect kwargs match the migration's ``sqlite_where`` /
+        # ``postgresql_where``.
         Index(
             "uq_role_grant_deployment_user_role",
             "user_id",
             "grant_role",
             unique=True,
-            sqlite_where=text("scope_kind = 'deployment'"),
-            postgresql_where=text("scope_kind = 'deployment'"),
+            sqlite_where=text("scope_kind = 'deployment' AND revoked_at IS NULL"),
+            postgresql_where=text("scope_kind = 'deployment' AND revoked_at IS NULL"),
+        ),
+        # Partial UNIQUE — at most one **live** workspace-scoped grant
+        # per ``(user, role, property?)`` tuple (cd-x1xh). The §02
+        # primary-key shape applies the soft-retire filter; re-grants
+        # after revoke land a fresh row, the soft-retired prior row
+        # stays for audit. Dialect kwargs match the migration.
+        #
+        # ``scope_property_id`` is nullable, and standard SQL
+        # NULL-distinct semantics would let two live workspace-wide
+        # grants ``(ws, u, role, NULL)`` slip through this index. The
+        # ``COALESCE(scope_property_id, '')`` expression collapses the
+        # NULL case to a sentinel so uniqueness binds across both the
+        # NULL (workspace-wide) and non-NULL (property-scoped) shapes.
+        # SQLite + Postgres both support indexed expressions; the
+        # migration emits the same expression in raw SQL.
+        Index(
+            "uq_role_grant_workspace_user_role_scope_active",
+            "workspace_id",
+            "user_id",
+            "grant_role",
+            func.coalesce(text("scope_property_id"), ""),
+            unique=True,
+            sqlite_where=text("scope_kind = 'workspace' AND revoked_at IS NULL"),
+            postgresql_where=text("scope_kind = 'workspace' AND revoked_at IS NULL"),
         ),
     )

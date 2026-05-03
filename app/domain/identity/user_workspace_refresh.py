@@ -306,7 +306,9 @@ def _collect_desired_source_for(
     the workspace.
     """
     # workspace_grant — workspace-scoped role_grant, no property
-    # sub-scope, matching workspace.
+    # sub-scope, matching workspace. cd-x1xh: live grants only — a
+    # soft-retired grant must not keep the user_workspace junction
+    # row alive past revoke.
     if (
         session.scalar(
             select(RoleGrant.id)
@@ -314,6 +316,7 @@ def _collect_desired_source_for(
             .where(RoleGrant.scope_property_id.is_(None))
             .where(RoleGrant.user_id == user_id)
             .where(RoleGrant.workspace_id == workspace_id)
+            .where(RoleGrant.revoked_at.is_(None))
             .limit(1)
         )
         is not None
@@ -322,7 +325,8 @@ def _collect_desired_source_for(
 
     # property_grant — property-scoped role_grant resolved through
     # property_workspace to the target workspace. The user may hold a
-    # grant on any property mapped into ``workspace_id``.
+    # grant on any property mapped into ``workspace_id``. cd-x1xh:
+    # live grants only.
     if (
         session.scalar(
             select(RoleGrant.id)
@@ -334,6 +338,7 @@ def _collect_desired_source_for(
             .where(RoleGrant.scope_property_id.is_not(None))
             .where(RoleGrant.user_id == user_id)
             .where(PropertyWorkspace.workspace_id == workspace_id)
+            .where(RoleGrant.revoked_at.is_(None))
             .limit(1)
         )
         is not None
@@ -395,6 +400,9 @@ def _workspace_grant_pairs(session: Session) -> list[tuple[str, str]]:
         .where(RoleGrant.scope_kind == "workspace")
         .where(RoleGrant.scope_property_id.is_(None))
         .where(RoleGrant.workspace_id.is_not(None))
+        # cd-x1xh: live grants only — soft-retired grants must not
+        # keep the user_workspace junction row alive past revoke.
+        .where(RoleGrant.revoked_at.is_(None))
     )
     return [(user_id, workspace_id) for user_id, workspace_id in session.execute(stmt)]
 
@@ -415,6 +423,8 @@ def _property_grant_pairs(session: Session) -> list[tuple[str, str]]:
         )
         .where(RoleGrant.scope_kind == "workspace")
         .where(RoleGrant.scope_property_id.is_not(None))
+        # cd-x1xh: live grants only.
+        .where(RoleGrant.revoked_at.is_(None))
     )
     return [(user_id, workspace_id) for user_id, workspace_id in session.execute(stmt)]
 

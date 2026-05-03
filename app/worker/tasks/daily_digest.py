@@ -284,6 +284,8 @@ def _eligible_recipients(
         .where(RoleGrant.workspace_id == ctx.workspace_id)
         .where(RoleGrant.scope_kind == "workspace")
         .where(RoleGrant.grant_role.in_(("manager", "worker")))
+        # cd-x1xh: do not mail a soft-retired user their daily digest.
+        .where(RoleGrant.revoked_at.is_(None))
     ).all()
     for row in role_rows:
         role = str(row.grant_role)

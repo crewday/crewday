@@ -402,6 +402,11 @@ def build_role_grants_router() -> APIRouter:
                 select(RoleGrant).where(
                     RoleGrant.id == grant_id,
                     RoleGrant.workspace_id == ctx.workspace_id,
+                    # cd-x1xh: a soft-retired grant collapses to 404
+                    # — re-scoping a revoked row would be a no-op the
+                    # SPA never asks for and an audit trail the
+                    # forensics never wants.
+                    RoleGrant.revoked_at.is_(None),
                 )
             ).one_or_none()
             if row is None:
@@ -412,6 +417,7 @@ def build_role_grants_router() -> APIRouter:
             select(RoleGrant).where(
                 RoleGrant.id == grant_id,
                 RoleGrant.workspace_id == ctx.workspace_id,
+                RoleGrant.revoked_at.is_(None),
             )
         ).one_or_none()
         if row is None:
@@ -486,10 +492,17 @@ def build_role_grants_router() -> APIRouter:
         ctx: _Ctx,
         session: _Db,
     ) -> Response:
-        """Hard-delete the row (v1 has no ``revoked_at`` column yet).
+        """Soft-retire the row (cd-x1xh).
 
-        The last-owner guard fires at the domain layer for any
-        ``manager`` revoke whose removal would leave
+        The domain ``revoke`` writes ``revoked_at`` +
+        ``revoked_by_user_id`` + ``ended_on`` instead of deleting the
+        row; live-grant read paths filter on ``revoked_at IS NULL``
+        so the user no longer sees the surface. The audit trail
+        survives in the table and a re-grant on the same
+        ``(user, role, scope)`` triple lands a fresh row beside.
+
+        The last-owner guard still fires at the domain layer for any
+        ``manager`` revoke whose retirement would leave
         ``owners@<workspace>`` with **zero** members holding a live
         ``manager`` grant on the workspace (§02 admin-reach
         invariant, cd-nj8m); the router maps it to 409
