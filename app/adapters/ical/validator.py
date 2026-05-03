@@ -48,15 +48,23 @@ See ``docs/specs/04-properties-and-stays.md`` §"SSRF guard",
 from __future__ import annotations
 
 import http.client
-import ipaddress
 import socket
 import ssl
 import time
-from collections.abc import Callable, Iterable
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from urllib.parse import SplitResult, urlsplit, urlunsplit
 
 from app.adapters.ical.ports import IcalValidation, IcalValidationError, IcalValidator
+from app.net.fetch_guard import (
+    FetchGuardBlocked,
+    Resolver,
+    assert_allowed_scheme,
+)
+from app.net.fetch_guard import is_public_ip as _is_public_ip_shared
+from app.net.fetch_guard import (
+    system_resolver as _shared_system_resolver,
+)
 
 __all__ = [
     "DEFAULT_ALLOWED_CONTENT_TYPES",
@@ -111,74 +119,44 @@ _CODE_MALFORMED = "ical_url_malformed"
 
 
 # -----------------------------------------------------------------------------
-# Resolver
+# Resolver + public-IP gate (delegated to :mod:`app.net.fetch_guard`)
 # -----------------------------------------------------------------------------
-
-
-Resolver = Callable[[str, int], Iterable[str]]
+#
+# The §04 / §15 "SSRF guard" host-validation rules live in
+# :mod:`app.net.fetch_guard` so every server-side fetcher (iCal,
+# webhooks, Turnstile, future LLM tools) inherits the same blocklist.
+# The validator keeps these names as public re-exports so legacy
+# callers (and tests) that import ``is_public_ip`` /
+# ``resolve_public_address`` from this module keep working — the
+# implementations are now thin wrappers that translate
+# :class:`FetchGuardBlocked` into the iCal-specific
+# :class:`IcalValidationError` vocabulary.
 
 
 def _system_resolver(host: str, port: int) -> Iterable[str]:
-    """Default resolver — :func:`socket.getaddrinfo`.
+    """Default resolver — delegates to :func:`app.net.fetch_guard.system_resolver`.
 
-    Returns every unique address string ``getaddrinfo`` emits,
-    preserving order so a split-horizon DNS can't mask a private
-    address by ordering it second.
+    Translates :class:`FetchGuardBlocked` (raised when
+    :func:`socket.getaddrinfo` fails) into
+    :class:`IcalValidationError` so the validator's error vocabulary
+    stays unchanged for existing callers.
     """
     try:
-        infos = socket.getaddrinfo(
-            host,
-            port,
-            type=socket.SOCK_STREAM,
-        )
-    except socket.gaierror as exc:
-        raise IcalValidationError(
-            _CODE_UNREACHABLE, f"DNS resolution failed for {host!r}: {exc}"
-        ) from exc
-    seen: list[str] = []
-    for info in infos:
-        sockaddr = info[4]
-        if not isinstance(sockaddr, tuple) or len(sockaddr) < 2:
-            continue
-        ip = sockaddr[0]
-        if isinstance(ip, str) and ip not in seen:
-            seen.append(ip)
-    return seen
-
-
-# -----------------------------------------------------------------------------
-# Public IP check
-# -----------------------------------------------------------------------------
-
-
-# CGNAT (RFC 6598) — not caught by ``ipaddress.IPv4Address.is_private``;
-# we add an explicit CIDR check.
-_CGNAT_V4 = ipaddress.ip_network("100.64.0.0/10")
+        return _shared_system_resolver(host, port)
+    except FetchGuardBlocked as exc:
+        raise IcalValidationError(_CODE_UNREACHABLE, str(exc)) from exc
 
 
 def is_public_ip(ip_str: str) -> bool:
     """Return ``True`` iff ``ip_str`` is a routable public unicast address.
 
-    Rejects loopback, link-local, RFC 1918, multicast, reserved,
-    unspecified, and CGNAT. Uses :mod:`ipaddress` where possible
-    and augments with an explicit CGNAT CIDR.
+    Thin re-export of :func:`app.net.fetch_guard.is_public_ip` — the
+    SSRF blocklist (loopback, RFC 1918, RFC 4193, link-local,
+    multicast, reserved, unspecified, CGNAT, IPv4-mapped IPv6) is
+    owned by the shared guard module so a future addition (e.g. a new
+    reserved range) lands once and propagates here automatically.
     """
-    try:
-        addr = ipaddress.ip_address(ip_str)
-    except ValueError:
-        return False
-    if (
-        addr.is_loopback
-        or addr.is_link_local
-        or addr.is_multicast
-        or addr.is_reserved
-        or addr.is_unspecified
-        or addr.is_private
-    ):
-        return False
-    # CGNAT (RFC 6598) is classified by the stdlib as "not private"
-    # but also "not global" — we treat it as non-public per §04.
-    return not (isinstance(addr, ipaddress.IPv4Address) and addr in _CGNAT_V4)
+    return _is_public_ip_shared(ip_str)
 
 
 def resolve_public_address(
@@ -190,9 +168,13 @@ def resolve_public_address(
 ) -> str:
     """Resolve ``host`` and return the first public IP, or raise.
 
-    Rejects the whole lookup if ANY returned address is non-public —
-    a mixed result set is the classic DNS-rebinding signal (a later
-    re-resolve could easily flip to the private leg).
+    Wraps :func:`app.net.fetch_guard.resolve_public_address` and
+    translates :class:`FetchGuardBlocked` into the iCal validator's
+    :class:`IcalValidationError` vocabulary:
+
+    * ``reason="empty_dns"`` → ``ical_url_unreachable``.
+    * ``reason="dns_error"`` → ``ical_url_unreachable``.
+    * ``reason="private_address"`` → ``ical_url_private_address``.
 
     The ``allow_private_addresses`` carve-out (cd-xr652) is the §04
     "SSRF guard" dev / e2e escape hatch wired to
@@ -205,6 +187,17 @@ def resolve_public_address(
     network. The validator's :meth:`HttpxIcalValidator._resolve` and
     the worker's :func:`app.worker.tasks.poll_ical.fetch_ical_body`
     both delegate here so the gate has a single source of truth.
+
+    Note: the iCal validator has historically allowed the kwarg flip
+    *without* the env-var second factor that the shared guard's
+    :func:`safe_fetch` requires. The escape hatch's two-factor design
+    is for new callers; the iCal validator keeps single-factor
+    semantics so the existing e2e compose override (which sets only
+    :class:`app.config.Settings.ical_allow_private_addresses`)
+    keeps working. We forward the kwarg directly to a thin
+    re-implementation rather than going through
+    :func:`app.net.fetch_guard.resolve_public_address` whose env-var
+    gate would block the e2e path.
     """
     addresses = list(resolver(host, port))
     if not addresses:
@@ -479,12 +472,21 @@ def _read_body_capped(
 
 
 def _require_https(parsed: SplitResult) -> None:
-    """Reject any scheme other than ``https``."""
-    if parsed.scheme.lower() != "https":
+    """Reject any scheme other than ``https``.
+
+    Delegates to :func:`app.net.fetch_guard.assert_allowed_scheme`
+    with the iCal-specific allow-list ``("https",)`` and translates
+    the resulting :class:`FetchGuardBlocked` into the validator's
+    :class:`IcalValidationError` vocabulary
+    (``ical_url_insecure_scheme``).
+    """
+    try:
+        assert_allowed_scheme(parsed.scheme, allowed=("https",))
+    except FetchGuardBlocked as exc:
         raise IcalValidationError(
             _CODE_INSECURE_SCHEME,
             f"only https:// URLs are accepted; got {parsed.scheme!r}",
-        )
+        ) from exc
 
 
 def _origin_of(parsed: SplitResult) -> tuple[str, str, int]:

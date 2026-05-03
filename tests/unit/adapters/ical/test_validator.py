@@ -932,3 +932,74 @@ class TestHostProviderDetector:
         det = HostProviderDetector()
         assert det.detect("https://www.airbnb.com/ical/123.ics") == "airbnb"
         assert det.detect("https://example.test/feed.ics") == "generic"
+
+
+# ---------------------------------------------------------------------------
+# Shared SSRF-guard migration (cd-kqkwp)
+# ---------------------------------------------------------------------------
+
+
+class TestSharedSsrfGuardMigration:
+    """The validator's SSRF primitives delegate to :mod:`app.net.fetch_guard`.
+
+    Earlier the validator owned its own ``is_public_ip`` /
+    ``resolve_public_address`` / ``_system_resolver`` implementations
+    (duplicated logic with the future fetch-guard module). The
+    cd-kqkwp migration extracted those into :mod:`app.net.fetch_guard`
+    so every server-side fetcher inherits the same blocklist. These
+    tests pin the migration: the validator's public surface still
+    raises ``IcalValidationError`` with the historical codes (so
+    callers don't need to change), but the underlying classifier is
+    the shared one.
+    """
+
+    def test_is_public_ip_matches_shared(self) -> None:
+        """Validator re-export agrees with the shared classifier on a sample."""
+        from app.adapters.ical.validator import is_public_ip as ical_is_public
+        from app.net.fetch_guard import is_public_ip as shared_is_public
+
+        for ip in [
+            "127.0.0.1",
+            "10.0.0.1",
+            "169.254.169.254",
+            "fc00::1",
+            "1.1.1.1",
+            "8.8.8.8",
+        ]:
+            assert ical_is_public(ip) == shared_is_public(ip), (
+                f"{ip}: validator and shared classifier disagree"
+            )
+
+    def test_resolve_public_address_translates_blocked(self) -> None:
+        """Shared ``FetchGuardBlocked`` becomes ``IcalValidationError``.
+
+        The exception subclass change is invisible to callers — the
+        validator's public ``resolve_public_address`` keeps raising
+        the iCal-flavoured ``IcalValidationError`` with the same
+        codes the validator has historically promised.
+        """
+        # private_address translation
+        with pytest.raises(IcalValidationError) as exc_info:
+            resolve_public_address(
+                "evil.test",
+                443,
+                resolver=_fixed_resolver(["10.0.0.1"]),
+            )
+        assert exc_info.value.code == "ical_url_private_address"
+
+        # empty_dns translation
+        with pytest.raises(IcalValidationError) as exc_info:
+            resolve_public_address("evil.test", 443, resolver=_fixed_resolver([]))
+        assert exc_info.value.code == "ical_url_unreachable"
+
+    def test_scheme_gate_translates_bad_scheme(self) -> None:
+        """``FetchGuardBlocked(reason='bad_scheme')`` → ``ical_url_insecure_scheme``."""
+        validator = HttpxIcalValidator(
+            IcalValidatorConfig(
+                resolver=_fixed_resolver(["1.1.1.1"]),
+                fetcher=StubFetcher(responses=[]),
+            )
+        )
+        with pytest.raises(IcalValidationError) as exc_info:
+            validator.validate("ftp://example.com/feed.ics")
+        assert exc_info.value.code == "ical_url_insecure_scheme"
