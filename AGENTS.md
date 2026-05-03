@@ -19,7 +19,11 @@ OpenClaw, etc.) operating on this repository.
 - **Production**: not yet deployed. The production app code lives
   under `app/`; high-fidelity mocks remain under `mocks/`. See
   `docs/specs/19-roadmap.md`.
-- **Bring the dev stack up**: `docker compose -f mocks/docker-compose.yml up -d --build`.
+- **Bring the dev stack up**: `./scripts/dev-stack-up.sh` (wraps
+  `docker compose -f mocks/docker-compose.yml up -d --build`, waits
+  for `/readyz`, and surfaces migration / heartbeat / root-key drift
+  loudly with a one-line remediation hint). The raw compose command
+  still works if you want to skip the drift gate.
 - **Never bind to the public interface.** Use `127.0.0.1` or the
   `tailscale0` interface only — a misbound port is a blocker bug.
   See `docs/specs/16`.
@@ -138,8 +142,12 @@ multi-step scripts) or the wrappers misbehave.
 
 - Bring the stack up with:
   ```bash
-  docker compose -f mocks/docker-compose.yml up -d --build
+  ./scripts/dev-stack-up.sh
   ```
+  (`docker compose -f mocks/docker-compose.yml up -d --build` is the
+  raw equivalent; the wrapper adds a `/readyz` drift gate that names
+  the failing check and prints a remediation hint instead of letting
+  the next test session inherit a stale alembic head.)
 - Use the loopback app, not `dev.crew.day`: `http://127.0.0.1:8100`.
 - Create a dev session inside the compose stack:
   ```bash

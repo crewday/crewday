@@ -61,6 +61,21 @@ if [[ $# -lt 2 ]]; then
   exit 2
 fi
 
+# Surface dev-stack drift before issuing a session — a stale alembic
+# head turns subsequent test runs into confusing 4xx mysteries far
+# from the real cause (cd-t2jz). Skip with CREWDAY_SKIP_READYZ_CHECK=1
+# when the operator already knows the stack is mid-migration.
+if [[ "${CREWDAY_SKIP_READYZ_CHECK:-0}" != "1" ]]; then
+  # Resolve next to this script so callers can invoke from any cwd.
+  _here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  # shellcheck source=scripts/_lib/check_readyz.sh
+  . "$_here/_lib/check_readyz.sh"
+  if ! _check_readyz; then
+    echo "error: dev-login aborting — fix the drift above or rerun with CREWDAY_SKIP_READYZ_CHECK=1" >&2
+    exit 3
+  fi
+fi
+
 # Pick the first Python on PATH. Prefer the caller-supplied $PYTHON,
 # then ``python3`` (the canonical name on every modern distro), then
 # the legacy ``python`` symlink as a last resort. To run under uv,
