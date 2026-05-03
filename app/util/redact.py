@@ -358,11 +358,65 @@ _BEARER_RE: Final[re.Pattern[str]] = re.compile(r"Bearer\s+[A-Za-z0-9._\-]+")
 #   real token.
 # * Signature — HS256 yields 256 bits = 43 base64url chars; RS256 /
 #   ES256 are longer.
+#
+# Match candidates pass through :func:`_looks_like_hostname` before
+# being scrubbed: the alternation alone fires on dotted DNS hostnames
+# whose middle label happens to be ≥10 chars (``fcm.googleapis.com``,
+# ``whatever.googleusercontent.com``), which over-redacts vendor
+# hostnames in audit diffs. The post-match carve-out rejects strings
+# whose every dot-separated segment is a valid RFC 1035 LDH label
+# AND whose final segment looks like a TLD (2-8 lowercase letters).
+# Real JWT segments use base64url and almost always contain
+# uppercase letters, digits, or ``_`` — none of which appear in DNS
+# labels — so the carve-out leaves real tokens untouched. See
+# ``cd-g9ce0`` for the messaging-audit regression.
 _JWT_RE: Final[re.Pattern[str]] = re.compile(
     r"\b[\w-]{10,}\.[\w-]+\.[\w-]+\b"
     r"|\b[\w-]+\.[\w-]{10,}\.[\w-]+\b"
     r"|\b[\w-]+\.[\w-]+\.[\w-]{10,}\b"
 )
+# RFC 1035 LDH label: lowercase letter or digit, optionally followed
+# by letters / digits / hyphens, never starting or ending with a
+# hyphen. JWT segments routinely contain uppercase letters (base64url
+# alphabet) so the lowercase-only constraint discriminates host
+# labels from credential blobs.
+_DNS_LABEL_RE: Final[re.Pattern[str]] = re.compile(r"^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$")
+# TLD-like trailing label: 2-8 lowercase letters. Covers every
+# in-use gTLD / ccTLD we care about (``com``, ``org``, ``io``,
+# ``day``, ``travel``, ``business``) without lifting the cap so high
+# that long alpha JWT tail segments (the ``a.b.cdefghijkl`` shape
+# pinned in :mod:`tests.unit.test_redact_jwt_boundary`) start
+# qualifying as hostnames. Names like ``.amsterdam`` / ``.barcelona``
+# (9+ chars) are intentionally excluded — false-positive risk
+# on a real JWT tail outweighs the cost of redacting a hostname
+# under such a TLD in a log line.
+_HOSTNAME_TLD_RE: Final[re.Pattern[str]] = re.compile(r"^[a-z]{2,8}$")
+
+
+def _looks_like_hostname(candidate: str) -> bool:
+    """Return ``True`` if ``candidate`` is a dotted DNS hostname.
+
+    A hostname is two-or-more dot-separated RFC 1035 LDH labels
+    whose final segment looks like a TLD. The check is conservative
+    (lowercase only) so the JWT regex can run loosely and the
+    carve-out drops only the real-world false-positive class —
+    vendor hostnames like ``fcm.googleapis.com`` /
+    ``whatever.googleusercontent.com`` whose middle label happens
+    to clear the 10-char floor.
+    """
+    parts = candidate.split(".")
+    if len(parts) < 2:
+        return False
+    if _HOSTNAME_TLD_RE.match(parts[-1]) is None:
+        return False
+    return all(_DNS_LABEL_RE.match(p) is not None for p in parts)
+
+
+def _jwt_replace(match: re.Match[str]) -> str:
+    candidate = match.group(0)
+    return candidate if _looks_like_hostname(candidate) else _TAG_CREDENTIAL
+
+
 # Hex threshold: 32+ chars. The SHA-256 convention is 64, but MD5 +
 # SHA-1 + op-specific 32-char fingerprints all cluster at 32. Hashes
 # stored under ``*_hash`` keys get the :func:`_key_is_hash`
@@ -485,7 +539,7 @@ def scrub_string(value: str) -> str:
     """
     out = _EMAIL_RE.sub(_TAG_EMAIL, value)
     out = _BEARER_RE.sub(_TAG_CREDENTIAL, out)
-    out = _JWT_RE.sub(_TAG_CREDENTIAL, out)
+    out = _JWT_RE.sub(_jwt_replace, out)
     out = _HEX_RE.sub(_TAG_CREDENTIAL, out)
     out = _BASE64URL_RE.sub(_TAG_CREDENTIAL, out)
     # IBAN and PAN run BEFORE phone so the digit tail of an IBAN /

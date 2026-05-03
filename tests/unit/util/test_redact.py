@@ -205,6 +205,161 @@ class TestCredentialRedaction:
         assert "deadbeefcafebabe" in out
 
 
+class TestHostnameNotRedactedAsJwt:
+    """Vendor hostnames (audit ``endpoint_host`` values) survive the JWT regex.
+
+    The push-token audit diff stores the URL host of the user's
+    subscription endpoint (``fcm.googleapis.com``,
+    ``updates.push.services.mozilla.com``, …) so operators can see
+    which provider rejected a token without having the full
+    endpoint URL. The loosened JWT alternation form would otherwise
+    swallow any host whose middle label clears the 10-char floor
+    (``googleapis``, ``googleusercontent``) — the carve-out in
+    :func:`app.util.redact._looks_like_hostname` keeps these intact.
+    See ``cd-g9ce0``.
+    """
+
+    @pytest.mark.parametrize(
+        "host",
+        [
+            "fcm.googleapis.com",
+            "apns.example.com",
+            "push.crew.day",
+            "dev.crew.day",
+            "updates.push.services.mozilla.com",
+            "web.push.apple.com",
+            "whatever.googleusercontent.com",
+            "s3.amazonaws.com",
+        ],
+    )
+    def test_hostname_value_survives(self, host: str) -> None:
+        out = redact({"endpoint_host": host}, scope="log")
+        assert isinstance(out, dict)
+        assert out["endpoint_host"] == host
+
+    @pytest.mark.parametrize(
+        "host",
+        [
+            "fcm.googleapis.com",
+            "updates.push.services.mozilla.com",
+            "web.push.apple.com",
+        ],
+    )
+    def test_hostname_inside_message_survives(self, host: str) -> None:
+        out = redact(f"endpoint={host} status=410", scope="log")
+        assert isinstance(out, str)
+        assert host in out
+        assert "<redacted:credential>" not in out
+
+    def test_loopback_and_iface_not_redacted(self) -> None:
+        # Loopback host:port and iface label are not dotted three-segment
+        # JWT shapes and must survive intact.
+        out = redact("bound to 127.0.0.1:8100 via tailscale0", scope="log")
+        assert "127.0.0.1:8100" in out
+        assert "tailscale0" in out
+        assert "<redacted:credential>" not in out
+
+    def test_real_jwt_still_redacted(self) -> None:
+        # Positive control: the carve-out must NOT shield real tokens.
+        jwt = (
+            "eyJhbGciOiJIUzI1NiJ9"
+            ".eyJzdWIiOiJ0ZXN0In0"
+            ".SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c"
+        )
+        out = redact(f"auth {jwt} end", scope="log")
+        assert isinstance(out, str)
+        assert jwt not in out
+        assert "<redacted:credential>" in out
+
+    @pytest.mark.parametrize(
+        "host",
+        [
+            # IDN punycode hostname — survives because xn-- labels are
+            # all-lowercase LDH and the TLD is a normal 2-8 char word.
+            "xn--bcher-kva.example.com",
+            # AWS region hostname with hyphenated middle labels.
+            "s3.us-west-2.amazonaws.com",
+            # 5-segment hostname: every label must clear the LDH check.
+            "updates.push.services.mozilla.com",
+        ],
+    )
+    def test_idn_and_multi_segment_hostnames_survive(self, host: str) -> None:
+        # IDN / hyphenated / 5-segment hosts must keep working: the
+        # production audit path passes them as-is (`urlparse().hostname`
+        # already lowercased the value), so the carve-out has to accept
+        # the whole RFC 1035 LDH grammar, not just the simple
+        # ``label.label.tld`` shape.
+        out = redact({"endpoint_host": host}, scope="log")
+        assert isinstance(out, dict)
+        assert out["endpoint_host"] == host
+
+    @pytest.mark.parametrize(
+        "candidate",
+        [
+            # Trailing dot: empty final label fails the TLD check.
+            "fcm.googleapis.com.",
+            # Leading dot: empty leading label fails LDH.
+            ".fcm.googleapis.com",
+            # Single-label "hostname": below the 2-segment minimum.
+            "localhost",
+            # Mixed-case: carve-out is lowercase-only by design so
+            # base64url-ish JWT tails can't masquerade as hosts.
+            "Foo.GoogleAPIs.Com",
+        ],
+    )
+    def test_carve_out_negatives_are_not_hostnames(self, candidate: str) -> None:
+        # The carve-out is deliberately conservative. These shapes do
+        # NOT qualify as hostnames; any JWT-regex match must therefore
+        # still scrub. ``localhost`` and trailing/leading-dot candidates
+        # do not even hit the JWT regex (only one or zero dots, or an
+        # empty segment), so they survive unscrubbed for that reason —
+        # but the ``Foo.GoogleAPIs.Com`` case is a real positive match
+        # for the JWT regex (one segment ≥ 10 chars on the middle
+        # label) and must be redacted.
+        from app.util.redact import _looks_like_hostname
+
+        assert _looks_like_hostname(candidate) is False
+
+    def test_mixed_case_hostname_shaped_string_still_redacted(self) -> None:
+        # Production audit values come from ``urlparse(...).hostname``
+        # which always lowercases. Anything operator-supplied with
+        # uppercase letters in a JWT-regex-eligible position is treated
+        # as a credential — pin that behaviour so a future "be lenient
+        # on case" change can't silently shrink the JWT detector.
+        out = redact("got Foo.GoogleAPIs.Com here", scope="log")
+        assert "Foo.GoogleAPIs.Com" not in out
+        assert "<redacted:credential>" in out
+
+    def test_long_tld_is_not_a_hostname(self) -> None:
+        # The carve-out caps TLDs at 8 lowercase letters: longer
+        # all-alpha tails (``.amsterdam``, ``.barcelona``) are
+        # intentionally NOT classified as hostnames so a JWT whose
+        # signature segment is long alpha (the ``a.b.cdefghijkl`` shape
+        # in tests/unit/test_redact_jwt_boundary.py) keeps redacting.
+        # Trade-off: a vendor host under ``.amsterdam`` would also be
+        # redacted in a log line — judged acceptable vs. the
+        # under-redaction risk on real JWT tails.
+        from app.util.redact import _looks_like_hostname
+
+        assert _looks_like_hostname("foo.amsterdam") is False
+        assert _looks_like_hostname("foo.barcelona") is False
+        # Pin the boundary: the regex still fires on ``a.b.<long>``
+        # so the carve-out must not lift it.
+        out = scrub_string("a.b.cdefghijkl")
+        assert "<redacted:credential>" in out
+
+    def test_ip_literal_is_not_a_hostname(self) -> None:
+        # Raw IPv4 literals never reach this code path through the
+        # audit ``endpoint_host`` writer (we always extract a
+        # ``hostname``), but pin the helper anyway: an all-digit
+        # dotted run must not pass the LDH check that would let a
+        # future caller treat it as a host.
+        from app.util.redact import _looks_like_hostname
+
+        assert _looks_like_hostname("127.0.0.1") is False
+        assert _looks_like_hostname("192.168.1.1") is False
+
+
 # ---------------------------------------------------------------------------
 # Key-name rules
 # ---------------------------------------------------------------------------
