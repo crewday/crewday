@@ -33,7 +33,6 @@ from app.adapters.db.availability.models import (
     UserWeeklyAvailability,
 )
 from app.adapters.db.base import Base
-from app.adapters.db.holidays.models import PublicHoliday
 from app.adapters.db.session import UnitOfWorkImpl, make_engine
 from app.api.deps import current_workspace_context, db_session
 from app.api.v1.me_schedule import build_me_schedule_router
@@ -88,7 +87,14 @@ def api_factory(api_engine: Engine) -> sessionmaker[Session]:
 
 @pytest.fixture(autouse=True)
 def _ensure_tables_registered() -> None:
-    """Register the workspace-scoped tables this module touches."""
+    """Register the workspace-scoped tables this module touches.
+
+    Most scoped tables auto-register on package import (workspace +
+    places + payroll). The list below is the residual set used by
+    the schedule aggregator that is **not** auto-registered (the
+    historical tests pinned them defensively in case sibling tests
+    in the same xdist worker had cleared the registry).
+    """
     registry.register("user_leave")
     registry.register("user_availability_override")
     registry.register("user_weekly_availability")
@@ -98,6 +104,7 @@ def _ensure_tables_registered() -> None:
     registry.register("role_grant")
     registry.register("permission_group")
     registry.register("permission_group_member")
+    registry.register("booking")
 
 
 def _ctx(
@@ -205,12 +212,14 @@ class TestEndToEnd:
     def test_worker_creates_leave_and_sees_it_in_schedule(
         self, api_factory: sessionmaker[Session]
     ) -> None:
-        """Worker POSTs ``/me/leaves`` and the row lands in ``/me/schedule.pending``.
+        """Worker POSTs ``/me/leaves`` and the row lands in ``/me/schedule.leaves``.
 
         End-to-end through the production tenant filter: persist the
         row via the POST, then read it back via the schedule
         aggregator to confirm both writes and reads honour the
-        ``ctx.actor_id`` predicate.
+        ``ctx.actor_id`` predicate. Approved + pending leaves now
+        live in a single ``leaves`` list — the SPA branches on
+        ``approved_at``.
         """
         ws_id, ws_slug, _owner_id = _seed_workspace_with_owner(
             api_factory, slug="me-int-1"
@@ -250,10 +259,11 @@ class TestEndToEnd:
         )
         assert resp.status_code == 200, resp.text
         body = resp.json()
-        # Worker self-submits land pending → they belong in
-        # ``pending.leaves``, never in the top-level ``leaves`` list.
-        assert body["leaves"] == []
-        assert [lv["id"] for lv in body["pending"]["leaves"]] == [leave_id]
+        # Approved + pending merged — pending self-submit lives in the
+        # main ``leaves`` list and the SPA reads ``approved_at`` to
+        # decide pending state.
+        assert [lv["id"] for lv in body["leaves"]] == [leave_id]
+        assert body["leaves"][0]["approved_at"] is None
 
     def test_worker_creates_override_and_sees_it_in_schedule(
         self, api_factory: sessionmaker[Session]
@@ -261,8 +271,8 @@ class TestEndToEnd:
         """Worker POSTs ``/me/availability_overrides`` and the resolved state lands.
 
         Adding hours on an off pattern auto-approves per §06's hybrid
-        approval matrix; the aggregator returns the row in the live
-        ``overrides`` bucket.
+        approval matrix; the aggregator returns the row in the
+        ``overrides`` list with ``approved_at`` set.
         """
         ws_id, ws_slug, _owner_id = _seed_workspace_with_owner(
             api_factory, slug="me-int-2"
@@ -318,36 +328,15 @@ class TestEndToEnd:
         )
         body = resp.json()
         assert [ov["id"] for ov in body["overrides"]] == [override_id]
-        assert body["pending"]["overrides"] == []
+        assert body["overrides"][0]["approved_at"] is not None
 
-    def test_holiday_in_window_surfaces_in_schedule(
+    def test_default_window_omitted_params(
         self, api_factory: sessionmaker[Session]
     ) -> None:
-        """A workspace holiday on a covered date appears under ``holidays``."""
+        """Calling ``/me/schedule`` with no params returns the 14-day default window."""
         ws_id, ws_slug, owner_id = _seed_workspace_with_owner(
-            api_factory, slug="me-int-3"
+            api_factory, slug="me-int-5"
         )
-        with api_factory() as s:
-            s.add(
-                PublicHoliday(
-                    id=new_ulid(),
-                    workspace_id=ws_id,
-                    name="May Day",
-                    date=date(2026, 5, 1),
-                    country=None,
-                    scheduling_effect="block",
-                    reduced_starts_local=None,
-                    reduced_ends_local=None,
-                    payroll_multiplier=None,
-                    recurrence=None,
-                    notes_md=None,
-                    created_at=_PINNED,
-                    updated_at=_PINNED,
-                    deleted_at=None,
-                )
-            )
-            s.commit()
-
         owner_ctx = _ctx(
             workspace_id=ws_id,
             workspace_slug=ws_slug,
@@ -359,26 +348,26 @@ class TestEndToEnd:
             _build_app(api_factory, owner_ctx),
             raise_server_exceptions=False,
         )
-        resp = client.get(
-            "/me/schedule",
-            params={"from": "2026-05-01", "to": "2026-05-15"},
-        )
+        resp = client.get("/me/schedule")
         assert resp.status_code == 200, resp.text
         body = resp.json()
-        assert len(body["holidays"]) == 1
-        assert body["holidays"][0]["name"] == "May Day"
+        from_d = date.fromisoformat(body["window"]["from"])
+        to_d = date.fromisoformat(body["window"]["to"])
+        # 14-day window per §12.
+        assert (to_d - from_d) == timedelta(days=14)
+        # Empty payload — no rows seeded.
+        assert body["weekly_availability"] == []
+        assert body["tasks"] == []
+        assert body["leaves"] == []
+        assert body["overrides"] == []
+        assert body["bookings"] == []
+        assert body["assignments"] == []
+        assert body["properties"] == []
 
     def test_cross_workspace_isolation_through_tenant_filter(
         self, api_factory: sessionmaker[Session]
     ) -> None:
-        """The production tenant filter blocks cross-workspace leaks.
-
-        Seeds a leave in workspace B and queries from workspace A —
-        the row must be invisible. This is the integration-tier
-        guarantee that both the explicit ``workspace_id`` predicate
-        in the aggregator AND the tenant filter installed on the
-        ``sessionmaker`` work together to keep the surface tight.
-        """
+        """The production tenant filter blocks cross-workspace leaks."""
         ws_a_id, ws_a_slug, owner_a_id = _seed_workspace_with_owner(
             api_factory, slug="me-int-a"
         )
@@ -424,17 +413,11 @@ class TestEndToEnd:
         )
         body = resp.json()
         assert body["leaves"] == []
-        assert body["pending"]["leaves"] == []
 
     def test_explicit_user_id_in_body_rejected(
         self, api_factory: sessionmaker[Session]
     ) -> None:
-        """A worker passing ``user_id`` in the body collapses to 422.
-
-        End-to-end check that the schema-layer ``extra="forbid"``
-        guard fires through the real router (not just the unit-test
-        seam).
-        """
+        """A worker passing ``user_id`` in the body collapses to 422."""
         ws_id, ws_slug, _owner_id = _seed_workspace_with_owner(
             api_factory, slug="me-int-4"
         )
@@ -482,37 +465,3 @@ class TestEndToEnd:
             finally:
                 reset_current(t)
         assert rows == []
-
-    def test_default_window_omitted_params(
-        self, api_factory: sessionmaker[Session]
-    ) -> None:
-        """Calling ``/me/schedule`` with no params returns the 14-day default window."""
-        ws_id, ws_slug, owner_id = _seed_workspace_with_owner(
-            api_factory, slug="me-int-5"
-        )
-        owner_ctx = _ctx(
-            workspace_id=ws_id,
-            workspace_slug=ws_slug,
-            actor_id=owner_id,
-            grant_role="manager",
-            actor_was_owner_member=True,
-        )
-        client = TestClient(
-            _build_app(api_factory, owner_ctx),
-            raise_server_exceptions=False,
-        )
-        resp = client.get("/me/schedule")
-        assert resp.status_code == 200, resp.text
-        body = resp.json()
-        from_d = date.fromisoformat(body["from"])
-        to_d = date.fromisoformat(body["to"])
-        # 14-day window per §12.
-        assert (to_d - from_d) == timedelta(days=14)
-        # Empty payload — no rows seeded.
-        assert body["rota"] == []
-        assert body["tasks"] == []
-        assert body["leaves"] == []
-        assert body["overrides"] == []
-        assert body["holidays"] == []
-        assert body["pending"]["leaves"] == []
-        assert body["pending"]["overrides"] == []

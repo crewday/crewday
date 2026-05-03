@@ -33,32 +33,43 @@ export function buildCells(
   data: MySchedulePayload,
 ): DayCell[] {
   const cells: DayCell[] = [];
+  // Defensive defaults — even with the API contract pinned, a future
+  // regression on /me/schedule that drops a key shouldn't crash the
+  // page. Each `?? []` collapses an undefined source into an empty
+  // bag so the day-cell still renders (degraded > broken).
+  const assignments = data.assignments ?? [];
+  const slotsAll = data.slots ?? [];
+  const weeklyAvailability = data.weekly_availability ?? [];
+  const tasksAll = data.tasks ?? [];
+  const leavesAll = data.leaves ?? [];
+  const overridesAll = data.overrides ?? [];
+  const bookingsAll = data.bookings ?? [];
   const assignmentProperty = new Map<string, string>();
-  data.assignments.forEach((a) => {
+  assignments.forEach((a) => {
     if (a.schedule_ruleset_id) assignmentProperty.set(a.schedule_ruleset_id, a.property_id);
   });
   const weeklyByDay = new Map<number, SelfWeeklyAvailabilitySlot>(
-    data.weekly_availability.map((w) => [w.weekday, w]),
+    weeklyAvailability.map((w) => [w.weekday, w]),
   );
   for (let i = 0; i < days; i++) {
     const d = addDays(from, i);
     const iso = isoDate(d);
     const wd = isoWeekday(d);
-    const rota = data.slots
+    const rota = slotsAll
       .filter((s) => s.weekday === wd)
       .map((s) => ({
         slot: s,
         property_id: assignmentProperty.get(s.schedule_ruleset_id) ?? "",
       }))
       .filter((r) => r.property_id);
-    const tasks = data.tasks
+    const tasks = tasksAll
       .filter((t) => t.scheduled_start.slice(0, 10) === iso)
       .sort((a, b) => a.scheduled_start.localeCompare(b.scheduled_start));
-    const leaves = data.leaves.filter(
+    const leaves = leavesAll.filter(
       (lv) => lv.starts_on <= iso && lv.ends_on >= iso,
     );
-    const overrides = data.overrides.filter((ao) => ao.date === iso);
-    const bookings = data.bookings
+    const overrides = overridesAll.filter((ao) => ao.date === iso);
+    const bookings = bookingsAll
       .filter((b) => b.scheduled_start.slice(0, 10) === iso)
       .sort((a, b) => a.scheduled_start.localeCompare(b.scheduled_start));
     cells.push({
@@ -100,14 +111,14 @@ export function mergeSchedulePages(pages: MySchedulePayload[]): MySchedulePayloa
   return {
     window: { from: first.window.from, to: last.window.to },
     user_id: first.user_id,
-    weekly_availability: first.weekly_availability,
-    rulesets: dedup(pages.flatMap((p) => p.rulesets), (r) => r.id),
-    slots: dedup(pages.flatMap((p) => p.slots), (s) => s.id),
-    assignments: dedup(pages.flatMap((p) => p.assignments), (a) => a.id),
-    tasks: dedup(pages.flatMap((p) => p.tasks), (t) => t.id),
-    properties: dedup(pages.flatMap((p) => p.properties), (p) => p.id),
-    leaves: dedup(pages.flatMap((p) => p.leaves), (lv) => lv.id),
-    overrides: dedup(pages.flatMap((p) => p.overrides), (o) => o.id),
-    bookings: dedup(pages.flatMap((p) => p.bookings), (b) => b.id),
+    weekly_availability: first.weekly_availability ?? [],
+    rulesets: dedup(pages.flatMap((p) => p.rulesets ?? []), (r) => r.id),
+    slots: dedup(pages.flatMap((p) => p.slots ?? []), (s) => s.id),
+    assignments: dedup(pages.flatMap((p) => p.assignments ?? []), (a) => a.id),
+    tasks: dedup(pages.flatMap((p) => p.tasks ?? []), (t) => t.id),
+    properties: dedup(pages.flatMap((p) => p.properties ?? []), (p) => p.id),
+    leaves: dedup(pages.flatMap((p) => p.leaves ?? []), (lv) => lv.id),
+    overrides: dedup(pages.flatMap((p) => p.overrides ?? []), (o) => o.id),
+    bookings: dedup(pages.flatMap((p) => p.bookings ?? []), (b) => b.id),
   };
 }

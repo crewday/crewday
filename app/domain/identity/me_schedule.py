@@ -2,20 +2,20 @@
 
 Read-only helper that powers ``GET /me/schedule`` (§12 "Self-service
 shortcuts" / §14 "Schedule view"). Walks the §06 availability stack +
-the assigned-task table for the caller and projects every row covering
+the §09 booking ledger for the caller and projects every row covering
 a date window into the wire shape consumed by the worker
 ``/schedule`` page.
 
-This module is the **single read seam** for the schedule feed. The
-HTTP router in :mod:`app.api.v1.me_schedule` is a thin DTO passthrough
-that forwards to :func:`aggregate_schedule` and serialises the
-:class:`SchedulePayload`.
+This module owns the **identity-side seam reads** (weekly pattern,
+leaves, overrides, bookings); the rota / assignment / property / task
+synthesis lives in :mod:`app.api.v1._scheduler_resolver` because both
+``/me/schedule`` (worker self-view) and ``/scheduler/calendar``
+(manager view) project from the same backing rows. The router
+composes the two sources into a single wire payload.
 
 Public surface:
 
-* **DTOs** — :class:`WeeklySlotView`, :class:`TaskRefView`,
-  :class:`PublicHolidayView`, :class:`PendingItems`,
-  :class:`SchedulePayload`.
+* **DTOs** — :class:`WeeklySlotView`, :class:`SchedulePayload`.
 * **Aggregator** — :func:`aggregate_schedule`. Takes a
   :class:`MeScheduleQueryRepository` plus a :class:`WorkspaceContext`
   plus optional ``from_date`` / ``to_date`` (defaults to the §12
@@ -24,16 +24,17 @@ Public surface:
 
 **Self-only by construction.** Every read predicate is keyed on
 ``ctx.actor_id`` — a worker cannot use this surface to leak another
-user's leaves, overrides, or assigned tasks. The router does **not**
-expose a ``user_id`` query param: managers wanting cross-user
-visibility use the per-resource generic endpoints (`/user_leaves`,
+user's data through the feed. The router does **not** expose a
+``user_id`` query param: managers wanting cross-user visibility use
+the per-resource generic endpoints (`/user_leaves`,
 `/user_availability_overrides`, `/tasks?assignee_user_id=…`).
 
-**Approved vs pending.** Per §12 "Self-service shortcuts" the
-aggregator returns approved leaves + overrides + holidays inline, and
-pending leaves + overrides under :attr:`SchedulePayload.pending` so
-the UI can render "pending approval" state without treating a
-not-yet-approved row as live in the precedence stack.
+**Approved + pending merged.** The §14 worker calendar surfaces both
+states inline — each row carries its own ``approved_at`` /
+``approval_required`` so the SPA renders the pending banner without
+needing a parallel bucket. The earlier ``pending`` envelope from the
+cd-6uij wire shape was dropped when the frontend port (§14 "Schedule
+view") and the API converged on the rich §12 calendar wire.
 
 **No audit.** Read-only — the aggregator never writes a row. The
 :class:`WorkspaceContext` carries the actor id we filter on; no
@@ -43,58 +44,43 @@ not-yet-approved row as live in the precedence stack.
 by the SA-backed
 :class:`~app.adapters.db.identity.repositories.SqlAlchemyMeScheduleQueryRepository`;
 the repo also re-asserts the ``workspace_id = ctx.workspace_id``
-predicate explicitly as defence-in-depth (matches the sibling
-:mod:`app.domain.identity.user_leaves` /
-:mod:`app.domain.identity.user_availability_overrides` shape).
+predicate explicitly as defence-in-depth.
 
-**Holiday country matching is intentionally simple in v1.** The
-aggregator returns every :class:`PublicHolidayRow` whose calendar
-date falls in the window, regardless of ``country``. Country
-narrowing per the user's primary property requires the
-Stay/Property join the ``/me/schedule`` page does not yet drive — a
-follow-up Beads task lands the country-aware filter once the
-property timezone surface catches up. Annual recurrence is also
-deferred: v1 surfaces the literal calendar date the row carries,
-not the recurring anchor.
+**Holidays.** v1 does not surface holidays through the worker
+calendar — the §14 UI has no public-holiday markers yet. The
+``public_holiday`` table still exists and is queryable through the
+manager-side ``/public_holidays`` surface; a follow-up adds a
+``holidays[]`` field once the SPA grows the §14 "Public holidays
+and property closures" markers.
 
 **Architecture (cd-lot5).** The module talks to a
 :class:`~app.domain.identity.me_schedule_ports.MeScheduleQueryRepository`
 Protocol — never to the SQLAlchemy model classes. The SA-backed
 concretion lives in
 :mod:`app.adapters.db.identity.repositories`; unit tests inject
-fakes or wire the SA repo over an in-memory SQLite session. Mirrors
-the cd-r5j2 / cd-2upg pattern shipped for the sibling
-:mod:`app.domain.identity.user_availability_overrides` /
-:mod:`app.domain.identity.user_leaves` services.
+fakes or wire the SA repo over an in-memory SQLite session.
 
 See ``docs/specs/12-rest-api.md`` §"Self-service shortcuts";
 ``docs/specs/06-tasks-and-scheduling.md`` §"user_leave",
-§"user_availability_overrides", §"Weekly availability",
-§"public_holidays".
+§"user_availability_overrides", §"Weekly availability";
+``docs/specs/14-web-frontend.md`` §"Schedule view".
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, timedelta
-from decimal import Decimal
 
 from app.domain.identity.me_schedule_ports import (
+    BookingRefRow,
     MeScheduleQueryRepository,
-    OccurrenceRefRow,
-    PublicHolidayRow,
 )
 from app.domain.identity.user_availability_overrides import (
     UserAvailabilityOverrideView,
 )
 
 # Reuse the sibling services' seam-Row → View projections rather than
-# duplicating them here (cd-lot5 dropped the inlined ``_override_row_to_view``
-# / ``_leave_row_to_view`` shipped by cd-r5j2 / cd-2upg). The underscore
-# crossing is intentional: both helpers are stable per-row projections of
-# the same seam Row shape this module already imports, and inlining a third
-# copy would invite drift between the three sites the moment a column
-# lands.
+# duplicating them here.
 from app.domain.identity.user_availability_overrides import (
     _row_to_view as _override_row_to_view,
 )
@@ -109,10 +95,7 @@ from app.util.clock import Clock, SystemClock
 
 __all__ = [
     "DEFAULT_WINDOW_DAYS",
-    "PendingItems",
-    "PublicHolidayView",
     "SchedulePayload",
-    "TaskRefView",
     "WeeklySlotView",
     "aggregate_schedule",
 ]
@@ -146,126 +129,33 @@ class WeeklySlotView:
 
 
 @dataclass(frozen=True, slots=True)
-class TaskRefView:
-    """Lightweight reference to a task assigned to the caller in the window.
-
-    Per the cd-6uij task description: "task ids + scheduled_for_local".
-    The full :class:`~app.adapters.db.tasks.models.Occurrence` shape
-    lives at ``/tasks/{id}``; the schedule feed only needs enough to
-    drop a marker on the calendar.
-
-    ``scheduled_for_local`` is the property-local ISO-8601 string the
-    scheduler worker stamped at generation time; the SA adapter falls
-    back to the UTC ``starts_at`` ISO when the column is null (legacy
-    rows pre-cd-22e).
-    """
-
-    id: str
-    scheduled_for_local: str
-
-
-@dataclass(frozen=True, slots=True)
-class PublicHolidayView:
-    """Read projection of a :class:`PublicHolidayRow` covering the window.
-
-    Pared down to the columns the worker calendar needs — the manager
-    configuration screen at ``/public_holidays`` carries the full
-    edit shape. ``payroll_multiplier`` is a :class:`~decimal.Decimal`
-    on the row; the wire JSON serialises it as a string to preserve
-    Decimal semantics across SQLite (TEXT) and Postgres (numeric).
-    """
-
-    id: str
-    name: str
-    date: date
-    country: str | None
-    scheduling_effect: str
-    reduced_starts_local: time | None
-    reduced_ends_local: time | None
-    payroll_multiplier: Decimal | None
-
-
-@dataclass(frozen=True, slots=True)
-class PendingItems:
-    """Pending leaves + overrides bucketed away from the live precedence stack.
-
-    The §06 invariant is that **only approved** leaves / overrides
-    affect candidate-pool selection. Surfacing them inline alongside
-    approved rows would invite the UI to render them as live; surfacing
-    them under a dedicated bucket lets the worker see "I asked for X,
-    awaiting approval" without confusing the assignment authority.
-    """
-
-    leaves: list[UserLeaveView]
-    overrides: list[UserAvailabilityOverrideView]
-
-
-@dataclass(frozen=True, slots=True)
 class SchedulePayload:
-    """Aggregated calendar feed for the caller across ``[from_date, to_date]``.
+    """Identity-side slice of the ``/me/schedule`` wire payload.
 
-    The wire envelope mirrors the §12 "Self-service shortcuts"
-    description verbatim:
+    Covers everything the :mod:`app.domain.identity` seam owns —
+    weekly pattern, leaves, overrides, bookings — plus the resolved
+    window + caller id. The rota / slot / assignment / task /
+    property bag is stitched on top by the router using
+    :mod:`app.api.v1._scheduler_resolver`.
 
-    * ``rota`` — the caller's seven-row weekly pattern (Mon..Sun).
-    * ``tasks`` — :class:`~app.adapters.db.tasks.models.Occurrence`
-      rows assigned to the caller whose ``starts_at`` falls inside
-      the window.
-    * ``leaves`` — approved :class:`~app.adapters.db.availability.models.UserLeave`
-      rows overlapping the window.
-    * ``overrides`` — approved
-      :class:`~app.adapters.db.availability.models.UserAvailabilityOverride`
-      rows inside the window.
-    * ``holidays`` — :class:`~app.adapters.db.holidays.models.PublicHoliday`
-      rows whose calendar date falls in the window.
-    * ``pending`` — pending :class:`~app.adapters.db.availability.models.UserLeave`
-      + :class:`~app.adapters.db.availability.models.UserAvailabilityOverride`
-      rows; explicitly bucketed so the UI does not promote them into
-      the live precedence stack.
-
-    ``from_date`` / ``to_date`` are echoed back so a caller that fell
-    through to the default window sees the resolved bounds without a
-    second round trip.
+    ``leaves`` / ``overrides`` are the **merged** approved + pending
+    lists per §14 "Schedule view": each row carries its own
+    ``approved_at`` / ``approval_required`` so the SPA can render
+    the pending banner without a parallel bucket.
     """
 
     from_date: date
     to_date: date
-    rota: list[WeeklySlotView]
-    tasks: list[TaskRefView]
+    user_id: str
+    weekly_availability: list[WeeklySlotView]
     leaves: list[UserLeaveView]
     overrides: list[UserAvailabilityOverrideView]
-    holidays: list[PublicHolidayView]
-    pending: PendingItems
+    bookings: list[BookingRefRow]
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-
-def _holiday_row_to_view(row: PublicHolidayRow) -> PublicHolidayView:
-    """Project a seam-level :class:`PublicHolidayRow` into the public view."""
-    return PublicHolidayView(
-        id=row.id,
-        name=row.name,
-        date=row.date,
-        country=row.country,
-        scheduling_effect=row.scheduling_effect,
-        reduced_starts_local=row.reduced_starts_local,
-        reduced_ends_local=row.reduced_ends_local,
-        payroll_multiplier=row.payroll_multiplier,
-    )
-
-
-def _occurrence_ref_to_view(row: OccurrenceRefRow) -> TaskRefView:
-    """Project a seam-level :class:`OccurrenceRefRow` into :class:`TaskRefView`.
-
-    The seam already resolved the
-    :attr:`OccurrenceRefRow.scheduled_for_local` fallback (UTC
-    ``starts_at`` when the property-local column is null), so this
-    re-pack is field-for-field.
-    """
-    return TaskRefView(id=row.id, scheduled_for_local=row.scheduled_for_local)
 
 
 def _resolve_window(
@@ -306,18 +196,10 @@ def aggregate_schedule(
 ) -> SchedulePayload:
     """Return the caller's :class:`SchedulePayload` for the requested window.
 
-    See the module docstring for the full contract. The aggregator is
-    deliberately small: each repo call runs a single table scan keyed
-    on ``(workspace_id, user_id)`` (the indexes the cd-l2r9 migration
-    installed) so the whole feed lands in one transaction without
-    N+1 surprises.
-
-    A backwards window (``to_date < from_date``) returns an empty
-    feed in every list except ``rota`` (the weekly pattern is always
-    seven rows max, independent of the calendar window). The caller
-    is expected to validate the window at the wire layer; the
-    aggregator stays permissive so a malformed request collapses
-    cleanly rather than raising mid-aggregate.
+    See the module docstring for the full contract. A backwards
+    window (``to_date < from_date``) returns an empty feed — the
+    router validates the window at the wire layer; the aggregator
+    stays permissive so a malformed request collapses cleanly.
     """
     resolved_clock = clock if clock is not None else SystemClock()
     resolved_from, resolved_to = _resolve_window(
@@ -329,12 +211,12 @@ def aggregate_schedule(
     user_id = ctx.actor_id
     workspace_id = ctx.workspace_id
 
-    # --- Rota (weekly pattern) ------------------------------------------
+    # --- Weekly pattern --------------------------------------------------
     weekly_rows = repo.list_weekly_pattern(
         workspace_id=workspace_id,
         user_id=user_id,
     )
-    rota = [
+    weekly_availability = [
         WeeklySlotView(
             weekday=row.weekday,
             starts_local=row.starts_local,
@@ -343,80 +225,44 @@ def aggregate_schedule(
         for row in weekly_rows
     ]
 
-    # --- Assigned tasks --------------------------------------------------
-    # Bound the window in UTC using the start of ``from_date`` and the
-    # end of ``to_date`` so a task scheduled at 23:30 on the last day of
-    # the window still matches.
-    window_start_utc = datetime.combine(resolved_from, time.min, tzinfo=UTC)
-    window_end_utc = datetime.combine(resolved_to, time.max, tzinfo=UTC)
-    occurrence_rows = repo.list_assigned_occurrences_in_window(
-        workspace_id=workspace_id,
-        user_id=user_id,
-        window_start_utc=window_start_utc,
-        window_end_utc=window_end_utc,
-    )
-    tasks = [_occurrence_ref_to_view(row) for row in occurrence_rows]
-
-    # --- Leaves (approved + pending) ------------------------------------
+    # --- Leaves (approved + pending merged) -----------------------------
     leave_rows = repo.list_leaves_in_window(
         workspace_id=workspace_id,
         user_id=user_id,
         from_date=resolved_from,
         to_date=resolved_to,
     )
-    approved_leaves: list[UserLeaveView] = []
-    pending_leaves: list[UserLeaveView] = []
-    for leave_row in leave_rows:
-        leave_view = _leave_row_to_view(leave_row)
-        if leave_view.approved_at is not None:
-            approved_leaves.append(leave_view)
-        else:
-            pending_leaves.append(leave_view)
+    leaves = [_leave_row_to_view(row) for row in leave_rows]
 
-    # --- Overrides (approved + pending) ---------------------------------
+    # --- Overrides (approved + pending merged) --------------------------
     override_rows = repo.list_overrides_in_window(
         workspace_id=workspace_id,
         user_id=user_id,
         from_date=resolved_from,
         to_date=resolved_to,
     )
-    approved_overrides: list[UserAvailabilityOverrideView] = []
-    pending_overrides: list[UserAvailabilityOverrideView] = []
-    for override_row in override_rows:
-        override_view = _override_row_to_view(override_row)
-        # Approved iff ``approved_at IS NOT NULL`` — covers both
-        # auto-approved (``approval_required=False``) and
-        # manager-approved (``approval_required=True``,
-        # ``approved_at=now`` after an approve transition).
-        # Pending requires both ``approval_required=True`` AND
-        # ``approved_at IS NULL`` per spec §12 wording: making the
-        # ``approval_required`` half explicit guards against an
-        # unreachable-but-defensive state (``approval_required=False``
-        # without ``approved_at``) leaking into either bucket.
-        if override_view.approved_at is not None:
-            approved_overrides.append(override_view)
-        elif override_view.approval_required:
-            pending_overrides.append(override_view)
+    overrides = [_override_row_to_view(row) for row in override_rows]
 
-    # --- Holidays --------------------------------------------------------
-    # No country narrowing in v1 — see module docstring.
-    holiday_rows = repo.list_holidays_in_window(
+    # --- Bookings --------------------------------------------------------
+    # Bound the booking window in UTC the same way the assigned-task
+    # window resolves: start of ``from_date`` UTC to end of
+    # ``to_date`` UTC, so a booking starting at 23:30 on the last
+    # window day still matches.
+    window_start_utc = datetime.combine(resolved_from, time.min, tzinfo=UTC)
+    window_end_utc = datetime.combine(resolved_to, time.max, tzinfo=UTC)
+    booking_rows = repo.list_bookings_in_window(
         workspace_id=workspace_id,
-        from_date=resolved_from,
-        to_date=resolved_to,
+        user_id=user_id,
+        window_start_utc=window_start_utc,
+        window_end_utc=window_end_utc,
     )
-    holidays = [_holiday_row_to_view(row) for row in holiday_rows]
 
     return SchedulePayload(
         from_date=resolved_from,
         to_date=resolved_to,
-        rota=rota,
-        tasks=tasks,
-        leaves=approved_leaves,
-        overrides=approved_overrides,
-        holidays=holidays,
-        pending=PendingItems(
-            leaves=pending_leaves,
-            overrides=pending_overrides,
-        ),
+        user_id=user_id,
+        weekly_availability=weekly_availability,
+        leaves=leaves,
+        overrides=overrides,
+        bookings=list(booking_rows),
     )

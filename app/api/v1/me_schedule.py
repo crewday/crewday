@@ -24,19 +24,25 @@ field at the schema layer — is preferable to a route-level 403 check
 because it keeps the semantic clear: this surface only ever speaks
 for the caller.
 
-The :func:`get_self_schedule` aggregator is workspace-scoped: every
-SELECT keys on ``ctx.actor_id`` + ``ctx.workspace_id`` so a worker
-cannot leak another user's data through the feed.
+The ``GET /me/schedule`` aggregator stitches two sources:
+
+* :func:`app.domain.identity.me_schedule.aggregate_schedule` — the
+  identity-side seam: weekly pattern, leaves, overrides, bookings,
+  resolved window, caller id.
+* :mod:`app.api.v1._scheduler_resolver` — shared rota / slot /
+  assignment / property / task synthesiser used by both this route
+  and ``/scheduler/calendar`` so the two views stay in lockstep
+  until the §06 ``schedule_ruleset`` table lands.
 
 See ``docs/specs/12-rest-api.md`` §"Self-service shortcuts",
+``docs/specs/14-web-frontend.md`` §"Schedule view",
 ``docs/specs/06-tasks-and-scheduling.md`` §"user_leave",
 §"user_availability_overrides", §"Weekly availability".
 """
 
 from __future__ import annotations
 
-from datetime import date, time
-from decimal import Decimal
+from datetime import date, datetime, time
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -55,6 +61,22 @@ from app.api.pagination import (
     paginate,
 )
 from app.api.v1._problem_json import IDENTITY_PROBLEM_RESPONSES
+from app.api.v1._scheduler_resolver import (
+    ScheduleAssignmentResponse,
+    SchedulerPropertyResponse,
+    SchedulerTaskResponse,
+    ScheduleRulesetResponse,
+    ScheduleRulesetSlotResponse,
+    SchedulerWindowResponse,
+    assignment_rows_for_window,
+    build_rota_blocks,
+    estimated_minutes,
+    list_workspace_properties,
+    property_name,
+    scheduled_start_text,
+    task_rows_for_window,
+    weekly_rows_for_users,
+)
 from app.api.v1.user_availability_overrides import (
     UserAvailabilityOverrideListResponse,
     UserAvailabilityOverrideResponse,
@@ -79,13 +101,11 @@ from app.api.v1.user_leaves import (
     make_seam_pair as make_leave_seam_pair,
 )
 from app.domain.identity.me_schedule import (
-    PendingItems,
-    PublicHolidayView,
     SchedulePayload,
-    TaskRefView,
     WeeklySlotView,
     aggregate_schedule,
 )
+from app.domain.identity.me_schedule_ports import BookingRefRow
 from app.domain.identity.user_availability_overrides import (
     UserAvailabilityOverrideAlreadyExists,
     UserAvailabilityOverrideCreate,
@@ -106,11 +126,9 @@ from app.tenancy import WorkspaceContext
 
 __all__ = [
     "MeAvailabilityOverrideCreateRequest",
+    "MeBookingResponse",
     "MeLeaveCreateRequest",
-    "MePendingItemsResponse",
-    "MePublicHolidayResponse",
     "MeScheduleResponse",
-    "MeTaskRefResponse",
     "MeWeeklySlotResponse",
     "build_me_schedule_router",
     "router",
@@ -210,51 +228,62 @@ class MeWeeklySlotResponse(BaseModel):
     ends_local: time | None
 
 
-class MeTaskRefResponse(BaseModel):
-    """Lightweight reference to an :class:`Occurrence` assigned to the caller."""
+class MeBookingResponse(BaseModel):
+    """Wire shape for a worker booking on the §14 calendar.
+
+    Mirrors the §09 frontend ``Booking`` type. ``employee_id`` is
+    populated from the booking's ``work_engagement_id`` until a
+    dedicated :class:`Employee` table lands; for the v1 partial
+    UNIQUE on ``(user_id, workspace_id) WHERE archived_on IS NULL``
+    every active worker booking has exactly one engagement, so the
+    frontend can treat the two ids as interchangeable for the purpose
+    of grouping bookings by worker.
+    """
 
     id: str
-    scheduled_for_local: str
-
-
-class MePublicHolidayResponse(BaseModel):
-    """Read projection of a :class:`PublicHoliday` row covering the window."""
-
-    id: str
-    name: str
-    date: date
-    country: str | None
-    scheduling_effect: str
-    reduced_starts_local: time | None
-    reduced_ends_local: time | None
-    payroll_multiplier: Decimal | None
-
-
-class MePendingItemsResponse(BaseModel):
-    """Pending leaves + overrides bucketed away from the live precedence stack."""
-
-    leaves: list[UserLeaveResponse]
-    overrides: list[UserAvailabilityOverrideResponse]
+    employee_id: str
+    user_id: str
+    work_engagement_id: str
+    property_id: str | None
+    client_org_id: str | None
+    status: str
+    kind: str
+    scheduled_start: datetime
+    scheduled_end: datetime
+    actual_minutes: int | None
+    actual_minutes_paid: int
+    break_seconds: int
+    pending_amend_minutes: int | None
+    pending_amend_reason: str | None
+    declined_at: datetime | None
+    declined_reason: str | None
+    notes_md: str | None
+    adjusted: bool
+    adjustment_reason: str | None
 
 
 class MeScheduleResponse(BaseModel):
     """Aggregated calendar feed for the caller across ``[from, to]``.
 
-    The ``from`` / ``to`` fields use Pydantic aliases so the wire
-    payload reads naturally (``from`` is a Python keyword on the
-    response side too, even though the wire shape is stable).
+    Wire shape per §14 "Schedule view" — what the SPA's ``/schedule``
+    page consumes. Composed by stitching two sources at the router
+    layer (see module docstring): the identity-side aggregator owns
+    leaves / overrides / bookings / weekly_availability / user_id /
+    window; the shared scheduler resolver owns rulesets / slots /
+    assignments / tasks / properties.
     """
 
-    model_config = ConfigDict(populate_by_name=True)
-
-    from_date: date = Field(serialization_alias="from", validation_alias="from")
-    to_date: date = Field(serialization_alias="to", validation_alias="to")
-    rota: list[MeWeeklySlotResponse]
-    tasks: list[MeTaskRefResponse]
+    window: SchedulerWindowResponse
+    user_id: str
+    weekly_availability: list[MeWeeklySlotResponse]
+    rulesets: list[ScheduleRulesetResponse]
+    slots: list[ScheduleRulesetSlotResponse]
+    assignments: list[ScheduleAssignmentResponse]
+    tasks: list[SchedulerTaskResponse]
+    properties: list[SchedulerPropertyResponse]
     leaves: list[UserLeaveResponse]
     overrides: list[UserAvailabilityOverrideResponse]
-    holidays: list[MePublicHolidayResponse]
-    pending: MePendingItemsResponse
+    bookings: list[MeBookingResponse]
 
 
 # ---------------------------------------------------------------------------
@@ -299,41 +328,133 @@ def _weekly_slot_to_response(slot: WeeklySlotView) -> MeWeeklySlotResponse:
     )
 
 
-def _task_ref_to_response(ref: TaskRefView) -> MeTaskRefResponse:
-    return MeTaskRefResponse(id=ref.id, scheduled_for_local=ref.scheduled_for_local)
-
-
-def _holiday_to_response(view: PublicHolidayView) -> MePublicHolidayResponse:
-    return MePublicHolidayResponse(
-        id=view.id,
-        name=view.name,
-        date=view.date,
-        country=view.country,
-        scheduling_effect=view.scheduling_effect,
-        reduced_starts_local=view.reduced_starts_local,
-        reduced_ends_local=view.reduced_ends_local,
-        payroll_multiplier=view.payroll_multiplier,
+def _booking_to_response(row: BookingRefRow) -> MeBookingResponse:
+    return MeBookingResponse(
+        id=row.id,
+        # Until a dedicated ``employee`` table exists, frontend
+        # ``Booking.employee_id`` is satisfied by the work_engagement
+        # id (one active engagement per (user, workspace)).
+        employee_id=row.work_engagement_id,
+        user_id=row.user_id,
+        work_engagement_id=row.work_engagement_id,
+        property_id=row.property_id,
+        client_org_id=row.client_org_id,
+        status=row.status,
+        kind=row.kind,
+        scheduled_start=row.scheduled_start,
+        scheduled_end=row.scheduled_end,
+        actual_minutes=row.actual_minutes,
+        actual_minutes_paid=row.actual_minutes_paid,
+        break_seconds=row.break_seconds,
+        pending_amend_minutes=row.pending_amend_minutes,
+        pending_amend_reason=row.pending_amend_reason,
+        declined_at=row.declined_at,
+        declined_reason=row.declined_reason,
+        notes_md=row.notes_md,
+        adjusted=row.adjusted,
+        adjustment_reason=row.adjustment_reason,
     )
 
 
-def _pending_to_response(pending: PendingItems) -> MePendingItemsResponse:
-    return MePendingItemsResponse(
-        leaves=[_leave_view_to_response(v) for v in pending.leaves],
-        overrides=[_override_view_to_response(v) for v in pending.overrides],
+def _resolve_self_calendar(
+    session: Session,
+    ctx: WorkspaceContext,
+    *,
+    payload: SchedulePayload,
+) -> tuple[
+    list[ScheduleRulesetResponse],
+    list[ScheduleRulesetSlotResponse],
+    list[ScheduleAssignmentResponse],
+    list[SchedulerTaskResponse],
+    list[SchedulerPropertyResponse],
+]:
+    """Synthesise the rota / slot / assignment / task / property bag.
+
+    Both the manager ``/scheduler/calendar`` route and this self-view
+    use the same synthesiser to project ``PropertyWorkRoleAssignment``
+    + ``UserWeeklyAvailability`` rows into the §14 wire shape. Until
+    the §06 ``schedule_ruleset`` table ships, this is the single
+    source of truth.
+
+    The properties list is the intersection of workspace-visible
+    properties with the union of the user's assignment + task +
+    booking footprint — the worker only sees the properties they
+    actually touch in this window.
+    """
+    workspace_properties = list_workspace_properties(session, ctx)
+    properties_by_id = {prop.id: prop for prop in workspace_properties}
+    property_timezones = {prop.id: prop.timezone for prop in workspace_properties}
+    workspace_property_ids = {prop.id for prop in workspace_properties}
+
+    assignment_rows = assignment_rows_for_window(
+        session,
+        ctx,
+        visible_property_ids=workspace_property_ids,
+        narrow_to_user_id=ctx.actor_id,
     )
-
-
-def _payload_to_response(payload: SchedulePayload) -> MeScheduleResponse:
-    return MeScheduleResponse(
+    task_rows = task_rows_for_window(
+        session,
+        ctx,
         from_date=payload.from_date,
         to_date=payload.to_date,
-        rota=[_weekly_slot_to_response(s) for s in payload.rota],
-        tasks=[_task_ref_to_response(t) for t in payload.tasks],
-        leaves=[_leave_view_to_response(v) for v in payload.leaves],
-        overrides=[_override_view_to_response(v) for v in payload.overrides],
-        holidays=[_holiday_to_response(h) for h in payload.holidays],
-        pending=_pending_to_response(payload.pending),
+        visible_property_ids=workspace_property_ids,
+        property_timezones=property_timezones,
+        narrow_to_user_id=ctx.actor_id,
+        # /me/schedule is the worker self-view: cancelled tasks are
+        # no longer actionable, so they don't surface here. The
+        # manager /scheduler/calendar leaves them visible.
+        exclude_cancelled=True,
     )
+
+    weekly_by_user = weekly_rows_for_users(session, ctx, user_ids={ctx.actor_id})
+
+    rulesets, slots, assignments = build_rota_blocks(
+        workspace_id=ctx.workspace_id,
+        assignment_rows=assignment_rows,
+        weekly_by_user=weekly_by_user,
+    )
+
+    tasks = [
+        SchedulerTaskResponse(
+            id=task.id,
+            title=task.title or "Task",
+            property_id=task.property_id,
+            user_id=task.assignee_user_id,
+            scheduled_start=scheduled_start_text(task),
+            estimated_minutes=estimated_minutes(task),
+            priority=task.priority,
+            status=task.state,
+        )
+        for task in task_rows
+        if task.property_id is not None and task.assignee_user_id is not None
+    ]
+
+    # Property footprint for the calendar legend: only the ones the
+    # worker actually touches in this window.
+    touched_property_ids: set[str] = set()
+    for assignment, _uwr, _role, _user in assignment_rows:
+        touched_property_ids.add(assignment.property_id)
+    for task in task_rows:
+        if task.property_id is not None:
+            touched_property_ids.add(task.property_id)
+    for booking in payload.bookings:
+        if booking.property_id is not None:
+            touched_property_ids.add(booking.property_id)
+
+    visible_properties = sorted(
+        (
+            SchedulerPropertyResponse(
+                id=prop.id,
+                name=property_name(prop),
+                timezone=prop.timezone,
+            )
+            for prop in workspace_properties
+            if prop.id in touched_property_ids
+        ),
+        key=lambda row: (property_name(properties_by_id[row.id]), row.id),
+    )
+
+    return rulesets, slots, assignments, tasks, visible_properties
 
 
 def _http_for_window() -> HTTPException:
@@ -374,7 +495,7 @@ def build_me_schedule_router() -> APIRouter:
         from_: _FromQuery = None,
         to: _ToQuery = None,
     ) -> MeScheduleResponse:
-        """Return rota / tasks / approved leaves / overrides / holidays / pending.
+        """Return the full §14 calendar payload for the caller.
 
         ``from_`` is the ``?from=`` query alias (Python keyword
         clash). The wire param stays ``from`` — see the
@@ -390,7 +511,27 @@ def build_me_schedule_router() -> APIRouter:
             from_date=from_,
             to_date=to,
         )
-        return _payload_to_response(payload)
+        rulesets, slots, assignments, tasks, properties = _resolve_self_calendar(
+            session, ctx, payload=payload
+        )
+        return MeScheduleResponse(
+            window=SchedulerWindowResponse(
+                from_date=payload.from_date,
+                to_date=payload.to_date,
+            ),
+            user_id=payload.user_id,
+            weekly_availability=[
+                _weekly_slot_to_response(s) for s in payload.weekly_availability
+            ],
+            rulesets=rulesets,
+            slots=slots,
+            assignments=assignments,
+            tasks=tasks,
+            properties=properties,
+            leaves=[_leave_view_to_response(v) for v in payload.leaves],
+            overrides=[_override_view_to_response(v) for v in payload.overrides],
+            bookings=[_booking_to_response(b) for b in payload.bookings],
+        )
 
     @api.post(
         "/leaves",

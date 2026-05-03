@@ -43,9 +43,8 @@ from app.domain.identity.email_change_ports import (
     UserIdentityRow,
 )
 from app.domain.identity.me_schedule_ports import (
+    BookingRefRow,
     MeScheduleQueryRepository,
-    OccurrenceRefRow,
-    PublicHolidayRow,
 )
 from app.domain.identity.ports import (
     MembershipRepository,
@@ -61,6 +60,7 @@ from app.domain.identity.ports import (
 )
 
 __all__ = [
+    "BookingRefRow",
     "CapabilityChecker",
     "EmailChangePendingRow",
     "EmailChangeRepository",
@@ -75,12 +75,10 @@ __all__ = [
     "MagicLinkTokenExpired",
     "MeScheduleQueryRepository",
     "MembershipRepository",
-    "OccurrenceRefRow",
     "PermissionGroupMemberRow",
     "PermissionGroupRepository",
     "PermissionGroupRow",
     "PermissionGroupSlugTakenError",
-    "PublicHolidayRow",
     "RoleGrantRepository",
     "RoleGrantRow",
     "SeamPermissionDenied",

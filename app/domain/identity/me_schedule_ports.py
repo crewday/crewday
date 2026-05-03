@@ -1,11 +1,11 @@
 """Identity context — read-only repository seam for the schedule aggregator (cd-lot5).
 
 Defines the seam :mod:`app.domain.identity.me_schedule` uses to pull
-the five row shapes the worker calendar feed needs (rota, holidays,
-assigned occurrences, plus the existing override / leave projections
+the four row shapes the worker calendar feed needs (rota, leaves,
+overrides, bookings, plus the existing override / leave projections
 from :mod:`app.domain.identity.availability_ports`) — without
-importing SQLAlchemy model classes from ``app.adapters.db.{availability,
-holidays,tasks}.models``.
+importing SQLAlchemy model classes from
+``app.adapters.db.{availability,payroll}.models``.
 
 Spec: ``docs/specs/01-architecture.md`` §"Boundary rules" rule 4 —
 each context defines its own repository port in its public surface
@@ -19,34 +19,43 @@ state machines).
 One seam lives here:
 
 * :class:`MeScheduleQueryRepository` — read-only aggregator that walks
-  the §06 weekly-pattern + leave + override + holiday + assigned-
-  occurrence stack for a single ``(workspace_id, user_id)`` pair.
-  Returns immutable row projections so the domain never sees an ORM
-  row.
+  the §06 weekly-pattern + leave + override + §09 booking stack for a
+  single ``(workspace_id, user_id)`` pair. Returns immutable row
+  projections so the domain never sees an ORM row.
 
 **Why one aggregated repo (not four).** The me_schedule service runs
-exactly one aggregation per request and reads from three different
-adapter packages. Carving four separate Protocols would either:
-duplicate the existing :class:`UserAvailabilityOverrideRepository` /
+exactly one aggregation per request and reads from two adapter
+packages. Carving separate Protocols would either duplicate the
+existing :class:`UserAvailabilityOverrideRepository` /
 :class:`UserLeaveRepository` ``list()`` shapes (which expose
 date-bound and status filters those services need but the schedule
-aggregator does not), or force the router to compose four DI args
+aggregator does not), or force the router to compose multiple DI args
 into a single call site. One narrow aggregator keeps the §12 "Self-
 service shortcuts" feed's wiring to a single repo argument and pins
 the read shape — the leave overlap predicate (``starts_on <= window_end
 AND ends_on >= window_start``) does not match
 :meth:`UserLeaveRepository.list`'s ``starts_after`` / ``ends_before``
-inclusion filter, so reusing it would force-fit semantics. The five
-methods here mirror the five SELECTs the aggregator runs verbatim.
+inclusion filter, so reusing it would force-fit semantics. The four
+methods here mirror the four SELECTs the aggregator runs verbatim.
 
 The row projections reuse three existing seam shapes from
 :mod:`app.domain.identity.availability_ports`:
 :class:`UserAvailabilityOverrideRow`, :class:`UserLeaveRow`,
-:class:`UserWeeklyAvailabilityRow`. Two new shapes
-(:class:`PublicHolidayRow`, :class:`OccurrenceRefRow`) cover the
-holidays / occurrences read; both stay narrow (only the columns the
-calendar feed renders) so the seam can grow new readers without
-re-shaping the value objects.
+:class:`UserWeeklyAvailabilityRow`. One new shape
+(:class:`BookingRefRow`) covers the booking read; it stays narrow
+(only the columns the calendar feed renders) so the seam can grow
+new readers without re-shaping the value object.
+
+The §14 worker calendar's rota / slot / assignment / property / task
+synthesis is **not** reads through this seam — both
+``/me/schedule`` and ``/scheduler/calendar`` share the synthesiser
+in :mod:`app.api.v1._scheduler_resolver` until the
+``schedule_ruleset`` table lands (§06 "Schedule ruleset"). Holidays
+are tracked separately in
+:mod:`app.adapters.db.holidays.models` and surface through the
+manager-side ``/public_holidays`` API; a follow-up reads them
+through this seam once the worker calendar grows §14 "Public
+holidays and property closures" markers.
 
 Protocols are deliberately **not** ``runtime_checkable``: structural
 compatibility is checked statically by mypy. Runtime ``isinstance``
@@ -59,8 +68,6 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import date, datetime
-from datetime import time as time_cls
-from decimal import Decimal
 from typing import Protocol
 
 from app.domain.identity.availability_ports import (
@@ -70,9 +77,8 @@ from app.domain.identity.availability_ports import (
 )
 
 __all__ = [
+    "BookingRefRow",
     "MeScheduleQueryRepository",
-    "OccurrenceRefRow",
-    "PublicHolidayRow",
 ]
 
 
@@ -82,45 +88,41 @@ __all__ = [
 
 
 @dataclass(frozen=True, slots=True)
-class PublicHolidayRow:
-    """Immutable projection of a ``public_holiday`` row covering the window.
+class BookingRefRow:
+    """Immutable projection of a ``booking`` row covering the worker's window.
 
-    Mirrors :class:`~app.domain.identity.me_schedule.PublicHolidayView`
-    minus the ORM-managed columns the calendar feed never renders
-    (``recurrence``, ``notes_md``, audit timestamps). Declared on the
-    seam so the SA adapter can project ORM rows into a domain-owned
-    shape without importing the service module that consumes it.
+    Mirrors the public §09 booking shape the
+    ``/me/schedule`` page renders inline. ``user_id`` is the resolved
+    booking ``user_id`` (the worker the booking pays); the seam keeps
+    ``work_engagement_id`` so the wire layer can populate the
+    frontend ``Booking.employee_id`` slot consistently for now (one
+    user = one engagement per workspace, per the §02 partial UNIQUE).
 
-    ``payroll_multiplier`` carries :class:`~decimal.Decimal` semantics
-    cleanly across SQLite (TEXT) and Postgres (numeric); the wire
-    layer above serialises it as a string at response time.
+    Tombstoned rows (``deleted_at IS NOT NULL``) are filtered at the
+    repo layer so the worker calendar never renders a withdrawn
+    booking.
     """
 
     id: str
-    name: str
-    date: date
-    country: str | None
-    scheduling_effect: str
-    reduced_starts_local: time_cls | None
-    reduced_ends_local: time_cls | None
-    payroll_multiplier: Decimal | None
-
-
-@dataclass(frozen=True, slots=True)
-class OccurrenceRefRow:
-    """Immutable lightweight projection of an :class:`Occurrence` row.
-
-    Carries only what the §12 "Self-service shortcuts" feed renders
-    on the calendar — the full :class:`Occurrence` shape lives at
-    ``/tasks/{id}``. ``scheduled_for_local`` is the property-local
-    ISO-8601 string the scheduler worker stamped at generation time;
-    the SA adapter falls back to ``starts_at.isoformat()`` when the
-    column is null (legacy rows pre-cd-22e), so the domain never sees
-    a missing local timestamp.
-    """
-
-    id: str
-    scheduled_for_local: str
+    workspace_id: str
+    user_id: str
+    work_engagement_id: str
+    property_id: str | None
+    client_org_id: str | None
+    status: str
+    kind: str
+    scheduled_start: datetime
+    scheduled_end: datetime
+    actual_minutes: int | None
+    actual_minutes_paid: int
+    break_seconds: int
+    pending_amend_minutes: int | None
+    pending_amend_reason: str | None
+    declined_at: datetime | None
+    declined_reason: str | None
+    notes_md: str | None
+    adjusted: bool
+    adjustment_reason: str | None
 
 
 # ---------------------------------------------------------------------------
@@ -131,13 +133,12 @@ class OccurrenceRefRow:
 class MeScheduleQueryRepository(Protocol):
     """Read-only seam for the §12 worker calendar aggregator.
 
-    Five narrow SELECTs keyed on ``(workspace_id, user_id)`` (the
-    weekly pattern + per-user leaves / overrides / occurrences) plus
-    one workspace-scoped SELECT for holidays. Every read honours the
-    workspace-scoping invariant: the SA concretion always pins reads
-    to the ``workspace_id`` passed by the caller, mirroring the ORM
-    tenant filter as defence-in-depth (a misconfigured filter must
-    fail loud).
+    Four narrow SELECTs keyed on ``(workspace_id, user_id)`` (the
+    weekly pattern + per-user leaves / overrides / bookings). Every
+    read honours the workspace-scoping invariant: the SA concretion
+    always pins reads to the ``workspace_id`` passed by the caller,
+    mirroring the ORM tenant filter as defence-in-depth (a
+    misconfigured filter must fail loud).
 
     The repo never writes — the schedule feed is pure aggregation —
     so there is no ``session`` accessor and no ``flush`` contract. The
@@ -146,12 +147,7 @@ class MeScheduleQueryRepository(Protocol):
 
     Tombstone filtering: every read that targets a soft-delete-aware
     table (``user_leave``, ``user_availability_override``,
-    ``public_holiday``) excludes rows with ``deleted_at IS NOT NULL``.
-    Occurrences do not carry a tombstone column — the §06 lifecycle
-    cancels via ``state='cancelled'`` instead — so the occurrence
-    read returns every assignee row in the window regardless of
-    state. The router's renderer is responsible for any state-based
-    filtering.
+    ``booking``) excludes rows with ``deleted_at IS NOT NULL``.
     """
 
     def list_weekly_pattern(
@@ -181,9 +177,9 @@ class MeScheduleQueryRepository(Protocol):
 
         Inclusive bounds on both edges, matching the §12 window
         semantics. Ordered by ``date ASC``. Tombstoned rows
-        (``deleted_at IS NOT NULL``) are excluded. The caller
-        partitions the returned rows into approved / pending buckets
-        per the §06 "Approved vs pending" rule.
+        (``deleted_at IS NOT NULL``) are excluded. The caller carries
+        approved + pending rows merged; each row exposes its own
+        ``approval_required`` / ``approved_at`` so the SPA can branch.
         """
         ...
 
@@ -201,52 +197,26 @@ class MeScheduleQueryRepository(Protocol):
         ``starts_on <= to_date AND ends_on >= from_date`` — standard
         interval overlap, matches §06 "user_leave" semantics. Ordered
         by ``starts_on ASC``. Tombstoned rows (``deleted_at IS NOT
-        NULL``) are excluded. The caller partitions the returned rows
-        into approved / pending buckets.
+        NULL``) are excluded. Approved + pending rows are returned
+        together; each row exposes its own ``approved_at``.
         """
         ...
 
-    def list_holidays_in_window(
-        self,
-        *,
-        workspace_id: str,
-        from_date: date,
-        to_date: date,
-    ) -> Sequence[PublicHolidayRow]:
-        """Return live holiday rows whose ``date`` falls in the window.
-
-        Inclusive bounds on both edges. Ordered by ``date ASC``.
-        Tombstoned rows (``deleted_at IS NOT NULL``) are excluded.
-
-        v1 returns every holiday in the workspace regardless of
-        ``country`` — country narrowing per the user's primary
-        property is deferred until the property-timezone surface
-        catches up (see :mod:`app.domain.identity.me_schedule` module
-        docstring).
-        """
-        ...
-
-    def list_assigned_occurrences_in_window(
+    def list_bookings_in_window(
         self,
         *,
         workspace_id: str,
         user_id: str,
         window_start_utc: datetime,
         window_end_utc: datetime,
-    ) -> Sequence[OccurrenceRefRow]:
-        """Return occurrence refs assigned to ``user_id`` inside the UTC window.
+    ) -> Sequence[BookingRefRow]:
+        """Return live bookings whose ``scheduled_start`` falls in the UTC window.
 
-        The caller resolves the property-local window dates into UTC
-        bounds (``window_start_utc`` = ``from_date`` 00:00 UTC,
-        ``window_end_utc`` = ``to_date`` 23:59:59.999999 UTC) so the
-        SA concretion can walk the
-        ``ix_occurrence_workspace_assignee_starts`` composite index
-        without re-doing the timezone math. Inclusive on both edges.
-        Ordered by ``starts_at ASC``.
-
-        The SA concretion fills :attr:`OccurrenceRefRow.scheduled_for_local`
-        from ``starts_at.isoformat()`` when the column is null
-        (legacy rows pre-cd-22e), so the returned shape always carries
-        a renderable timestamp.
+        Inclusive on both edges. Ordered by ``scheduled_start ASC``,
+        then ``id ASC`` so the wire payload is deterministic.
+        Tombstoned rows (``deleted_at IS NOT NULL``) are excluded.
+        Every status is returned — the worker calendar surfaces
+        ``pending_approval`` + ``cancelled_*`` rows alongside the
+        live ``scheduled`` ones (§14 "Schedule view").
         """
         ...

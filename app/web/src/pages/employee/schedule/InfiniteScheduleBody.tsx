@@ -103,7 +103,7 @@ export function InfiniteScheduleBody({
   const data = merged;
 
   const { allPending, firstPendingIso, bannerParts } = computePendingState(
-    data.bookings,
+    data.bookings ?? [],
   );
 
   // Group cells by ISO week so we can drop a small separator between
@@ -165,7 +165,7 @@ export function InfiniteScheduleBody({
           // stays pinned. Phone drops it — cards are labelled in-line.
           <div className="schedule__intro">
             <div className="schedule__legend">
-              {data.properties.map((p) => (
+              {(data.properties ?? []).map((p) => (
                 <span
                   key={p.id}
                   className="schedule__legend-item"

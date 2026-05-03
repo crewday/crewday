@@ -4,24 +4,22 @@ The HTTP-tier suite at :mod:`tests.unit.api.v1.identity.test_me_schedule`
 exercises the full feed end-to-end through the router + service + DB.
 This module pins the aggregator's pure logic against a fake
 :class:`~app.domain.identity.me_schedule_ports.MeScheduleQueryRepository`
-so a future regression in the aggregator (a swapped predicate, a
-miscategorised pending row, a window default drift) fires here in
-milliseconds without spinning up a TestClient or a SQLite engine.
+so a future regression in the aggregator (a swapped predicate, a window
+default drift, a missing seam call) fires here in milliseconds without
+spinning up a TestClient or a SQLite engine.
 
 Specifically pins:
 
 * The window default fires when both ``from_date`` and ``to_date`` are
-  ``None`` (clock-driven; injected ``Clock`` keeps the test
-  deterministic).
-* Approved overrides + leaves land in the top-level buckets; pending
-  rows land under :attr:`SchedulePayload.pending`.
-* The defensive "approval_required=False without approved_at" branch
-  is dropped from both buckets (neither approved nor pending).
-* A backwards window (``to_date < from_date``) returns empty calendar
-  buckets but keeps the rota (the rota is window-independent).
+  ``None`` (clock-driven; injected ``Clock`` keeps the test deterministic).
+* Approved + pending rows are merged into single ``leaves`` /
+  ``overrides`` lists — each carries its own ``approved_at`` /
+  ``approval_required`` so the SPA branches per row.
 * The aggregator passes ``ctx.actor_id`` + ``ctx.workspace_id`` to
   every repo method — defence-in-depth that the seam never broadens
   to another user / workspace.
+* ``window_start_utc`` / ``window_end_utc`` for the booking read
+  resolve to the full-day UTC bounds of the resolved window.
 """
 
 from __future__ import annotations
@@ -29,7 +27,6 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, time, timedelta
-from decimal import Decimal
 
 from app.domain.identity.availability_ports import (
     UserAvailabilityOverrideRow,
@@ -40,10 +37,7 @@ from app.domain.identity.me_schedule import (
     DEFAULT_WINDOW_DAYS,
     aggregate_schedule,
 )
-from app.domain.identity.me_schedule_ports import (
-    OccurrenceRefRow,
-    PublicHolidayRow,
-)
+from app.domain.identity.me_schedule_ports import BookingRefRow
 from app.tenancy import WorkspaceContext
 from app.tenancy.context import ActorGrantRole
 from app.util.clock import Clock
@@ -61,12 +55,7 @@ _USER_ID = "01HWUSER0000000000000000"
 
 @dataclass
 class _CallRecord:
-    """Records the kwargs each repo method received.
-
-    The aggregator must hand every read the caller's
-    ``workspace_id`` + ``user_id``; this struct lets the tests assert
-    the predicate flowed through verbatim.
-    """
+    """Records the kwargs each repo method received."""
 
     workspace_id: str | None = None
     user_id: str | None = None
@@ -78,23 +67,16 @@ class _CallRecord:
 
 @dataclass
 class _FakeRepo:
-    """Hand-rolled fake of :class:`MeScheduleQueryRepository`.
-
-    Returns exactly the rows the test seeds; every call records its
-    kwargs so the aggregator's defence-in-depth predicates can be
-    asserted on directly.
-    """
+    """Hand-rolled fake of :class:`MeScheduleQueryRepository`."""
 
     weekly_rows: Sequence[UserWeeklyAvailabilityRow] = field(default_factory=list)
     override_rows: Sequence[UserAvailabilityOverrideRow] = field(default_factory=list)
     leave_rows: Sequence[UserLeaveRow] = field(default_factory=list)
-    holiday_rows: Sequence[PublicHolidayRow] = field(default_factory=list)
-    occurrence_rows: Sequence[OccurrenceRefRow] = field(default_factory=list)
+    booking_rows: Sequence[BookingRefRow] = field(default_factory=list)
     weekly_call: _CallRecord = field(default_factory=_CallRecord)
     override_call: _CallRecord = field(default_factory=_CallRecord)
     leave_call: _CallRecord = field(default_factory=_CallRecord)
-    holiday_call: _CallRecord = field(default_factory=_CallRecord)
-    occurrence_call: _CallRecord = field(default_factory=_CallRecord)
+    booking_call: _CallRecord = field(default_factory=_CallRecord)
 
     def list_weekly_pattern(
         self,
@@ -137,35 +119,21 @@ class _FakeRepo:
         )
         return self.leave_rows
 
-    def list_holidays_in_window(
-        self,
-        *,
-        workspace_id: str,
-        from_date: date,
-        to_date: date,
-    ) -> Sequence[PublicHolidayRow]:
-        self.holiday_call = _CallRecord(
-            workspace_id=workspace_id,
-            from_date=from_date,
-            to_date=to_date,
-        )
-        return self.holiday_rows
-
-    def list_assigned_occurrences_in_window(
+    def list_bookings_in_window(
         self,
         *,
         workspace_id: str,
         user_id: str,
         window_start_utc: datetime,
         window_end_utc: datetime,
-    ) -> Sequence[OccurrenceRefRow]:
-        self.occurrence_call = _CallRecord(
+    ) -> Sequence[BookingRefRow]:
+        self.booking_call = _CallRecord(
             workspace_id=workspace_id,
             user_id=user_id,
             window_start_utc=window_start_utc,
             window_end_utc=window_end_utc,
         )
-        return self.occurrence_rows
+        return self.booking_rows
 
 
 @dataclass
@@ -258,23 +226,28 @@ def _leave(*, starts_on: date, ends_on: date, approved: bool = True) -> UserLeav
     )
 
 
-def _holiday(*, on_date: date, name: str = "Bank Holiday") -> PublicHolidayRow:
-    return PublicHolidayRow(
+def _booking(*, scheduled_start: datetime, status: str = "scheduled") -> BookingRefRow:
+    return BookingRefRow(
         id=new_ulid(),
-        name=name,
-        date=on_date,
-        country=None,
-        scheduling_effect="block",
-        reduced_starts_local=None,
-        reduced_ends_local=None,
-        payroll_multiplier=Decimal("1.50"),
-    )
-
-
-def _occurrence_ref(*, scheduled_for_local: str) -> OccurrenceRefRow:
-    return OccurrenceRefRow(
-        id=new_ulid(),
-        scheduled_for_local=scheduled_for_local,
+        workspace_id=_WS_ID,
+        user_id=_USER_ID,
+        work_engagement_id="01HWENG0000000000000000",
+        property_id=None,
+        client_org_id=None,
+        status=status,
+        kind="work",
+        scheduled_start=scheduled_start,
+        scheduled_end=scheduled_start + timedelta(hours=2),
+        actual_minutes=None,
+        actual_minutes_paid=0,
+        break_seconds=0,
+        pending_amend_minutes=None,
+        pending_amend_reason=None,
+        declined_at=None,
+        declined_reason=None,
+        notes_md=None,
+        adjusted=False,
+        adjustment_reason=None,
     )
 
 
@@ -294,29 +267,22 @@ class TestAggregatorPredicateForwarding:
 
         aggregate_schedule(repo, ctx, from_date=from_d, to_date=to_d)
 
-        # Workspace + user pinned on every call that takes a user.
         for call in (
             repo.weekly_call,
             repo.override_call,
             repo.leave_call,
-            repo.occurrence_call,
+            repo.booking_call,
         ):
             assert call.workspace_id == _WS_ID
             assert call.user_id == _USER_ID
-        # Holiday is workspace-scoped only (no per-user filter — see
-        # the seam docstring on country-narrowing being v1-deferred).
-        assert repo.holiday_call.workspace_id == _WS_ID
-        assert repo.holiday_call.user_id is None
 
         # Window edges flow through verbatim to the date-keyed reads.
         assert repo.override_call.from_date == from_d
         assert repo.override_call.to_date == to_d
         assert repo.leave_call.from_date == from_d
         assert repo.leave_call.to_date == to_d
-        assert repo.holiday_call.from_date == from_d
-        assert repo.holiday_call.to_date == to_d
 
-    def test_occurrence_window_resolves_to_full_day_utc_bounds(self) -> None:
+    def test_booking_window_resolves_to_full_day_utc_bounds(self) -> None:
         """``window_start_utc`` = 00:00, ``window_end_utc`` = 23:59:59.999999."""
         repo = _FakeRepo()
         ctx = _ctx()
@@ -325,11 +291,11 @@ class TestAggregatorPredicateForwarding:
 
         aggregate_schedule(repo, ctx, from_date=from_d, to_date=to_d)
 
-        assert repo.occurrence_call.window_start_utc == datetime(
+        assert repo.booking_call.window_start_utc == datetime(
             2026, 5, 1, 0, 0, 0, tzinfo=UTC
         )
         # ``time.max`` is 23:59:59.999999.
-        assert repo.occurrence_call.window_end_utc == datetime(
+        assert repo.booking_call.window_end_utc == datetime(
             2026, 5, 15, 23, 59, 59, 999999, tzinfo=UTC
         )
 
@@ -377,10 +343,10 @@ class TestWindowResolution:
         assert payload.to_date == explicit_to
 
 
-class TestApprovedVsPending:
-    """Approved rows top-level; pending rows under :attr:`SchedulePayload.pending`."""
+class TestApprovedPendingMerged:
+    """Approved + pending rows now share one list each — SPA branches per row."""
 
-    def test_partitioning_is_disjoint_for_overrides(self) -> None:
+    def test_overrides_merged_into_single_list_with_state_per_row(self) -> None:
         approved = _override(on_date=date(2026, 5, 4), available=True, approved=True)
         pending = _override(
             on_date=date(2026, 5, 5),
@@ -395,10 +361,15 @@ class TestApprovedVsPending:
             repo, ctx, from_date=date(2026, 5, 1), to_date=date(2026, 5, 15)
         )
 
-        assert [v.id for v in payload.overrides] == [approved.id]
-        assert [v.id for v in payload.pending.overrides] == [pending.id]
+        ids = {v.id for v in payload.overrides}
+        assert ids == {approved.id, pending.id}
+        approved_view = next(v for v in payload.overrides if v.id == approved.id)
+        pending_view = next(v for v in payload.overrides if v.id == pending.id)
+        assert approved_view.approved_at is not None
+        assert pending_view.approved_at is None
+        assert pending_view.approval_required is True
 
-    def test_partitioning_is_disjoint_for_leaves(self) -> None:
+    def test_leaves_merged_into_single_list_with_state_per_row(self) -> None:
         approved = _leave(
             starts_on=date(2026, 5, 4), ends_on=date(2026, 5, 5), approved=True
         )
@@ -412,95 +383,49 @@ class TestApprovedVsPending:
             repo, ctx, from_date=date(2026, 5, 1), to_date=date(2026, 5, 15)
         )
 
-        assert [v.id for v in payload.leaves] == [approved.id]
-        assert [v.id for v in payload.pending.leaves] == [pending.id]
-
-    def test_override_without_approval_required_and_unapproved_drops(self) -> None:
-        """Defensive branch: ``approval_required=False`` + ``approved_at=None`` drops.
-
-        Per the §06 hybrid-approval matrix this state is unreachable
-        in production (an auto-approved row stamps ``approved_at`` at
-        insert time). The aggregator drops the row from **both**
-        buckets so a future bug in the approval calculator surfaces
-        as a missing row in the worker feed (the bug becomes visible)
-        rather than as an "approved" misclassification (silently
-        allowing assignment).
-        """
-        rogue = _override(
-            on_date=date(2026, 5, 4),
-            available=True,
-            approval_required=False,
-            approved=False,
-        )
-        repo = _FakeRepo(override_rows=[rogue])
-        ctx = _ctx()
-
-        payload = aggregate_schedule(
-            repo, ctx, from_date=date(2026, 5, 1), to_date=date(2026, 5, 15)
-        )
-
-        assert payload.overrides == []
-        assert payload.pending.overrides == []
-
-
-class TestRotaIsWindowIndependent:
-    def test_backwards_window_keeps_rota_drops_calendar(self) -> None:
-        """``to_date < from_date`` returns empty calendar buckets, but rota survives.
-
-        The rota is the standing weekly pattern — it has no calendar
-        edges to respect, so a malformed window must not erase it.
-        """
-        repo = _FakeRepo(
-            weekly_rows=[_weekly(0, time(9, 0), time(17, 0))],
-            # The seams may still return matching rows even on a
-            # backwards window; the aggregator is permissive (see the
-            # docstring on :func:`aggregate_schedule`). We pin empty
-            # collections to keep the test focused.
-        )
-        ctx = _ctx()
-
-        payload = aggregate_schedule(
-            repo, ctx, from_date=date(2026, 5, 15), to_date=date(2026, 5, 1)
-        )
-
-        assert payload.from_date == date(2026, 5, 15)
-        assert payload.to_date == date(2026, 5, 1)
-        assert len(payload.rota) == 1
-        assert payload.rota[0].weekday == 0
-        assert payload.tasks == []
-        assert payload.leaves == []
-        assert payload.overrides == []
-        assert payload.holidays == []
-        assert payload.pending.leaves == []
-        assert payload.pending.overrides == []
+        ids = {v.id for v in payload.leaves}
+        assert ids == {approved.id, pending.id}
 
 
 class TestProjections:
-    def test_holiday_projection_carries_payroll_decimal(self) -> None:
-        row = _holiday(on_date=date(2026, 5, 1))
-        repo = _FakeRepo(holiday_rows=[row])
+    def test_weekly_projection_carries_off_pattern(self) -> None:
+        repo = _FakeRepo(
+            weekly_rows=[
+                _weekly(0, time(9, 0), time(17, 0)),
+                _weekly(1, None, None),
+            ]
+        )
         ctx = _ctx()
 
         payload = aggregate_schedule(
             repo, ctx, from_date=date(2026, 5, 1), to_date=date(2026, 5, 15)
         )
 
-        assert len(payload.holidays) == 1
-        view = payload.holidays[0]
-        assert view.id == row.id
-        assert view.name == row.name
-        assert view.payroll_multiplier == Decimal("1.50")
-        assert view.scheduling_effect == "block"
+        assert [s.weekday for s in payload.weekly_availability] == [0, 1]
+        assert payload.weekly_availability[1].starts_local is None
+        assert payload.weekly_availability[1].ends_local is None
 
-    def test_occurrence_ref_projection_passes_local_through(self) -> None:
-        row = _occurrence_ref(scheduled_for_local="2026-05-05T10:00:00")
-        repo = _FakeRepo(occurrence_rows=[row])
+    def test_bookings_pass_through(self) -> None:
+        booking = _booking(
+            scheduled_start=datetime(2026, 5, 5, 9, 0, tzinfo=UTC),
+            status="pending_approval",
+        )
+        repo = _FakeRepo(booking_rows=[booking])
         ctx = _ctx()
 
         payload = aggregate_schedule(
             repo, ctx, from_date=date(2026, 5, 1), to_date=date(2026, 5, 15)
         )
 
-        assert len(payload.tasks) == 1
-        assert payload.tasks[0].id == row.id
-        assert payload.tasks[0].scheduled_for_local == "2026-05-05T10:00:00"
+        assert [b.id for b in payload.bookings] == [booking.id]
+        assert payload.bookings[0].status == "pending_approval"
+
+    def test_payload_echoes_caller_id(self) -> None:
+        repo = _FakeRepo()
+        ctx = _ctx()
+
+        payload = aggregate_schedule(
+            repo, ctx, from_date=date(2026, 5, 1), to_date=date(2026, 5, 15)
+        )
+
+        assert payload.user_id == _USER_ID

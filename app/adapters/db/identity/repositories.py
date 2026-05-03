@@ -3,13 +3,11 @@
 The concrete classes here adapt SQLAlchemy ``Session`` work to the
 Protocol surfaces declared on the identity context's port files:
 
-* :class:`SqlAlchemyMeScheduleQueryRepository` — wraps the five
+* :class:`SqlAlchemyMeScheduleQueryRepository` — wraps the four
   SELECTs the schedule aggregator runs (cd-lot5). Reads from
   :mod:`app.adapters.db.availability.models` (rota / overrides /
-  leaves), :mod:`app.adapters.db.holidays.models` (workspace
-  holidays), and :mod:`app.adapters.db.tasks.models` (assigned
-  occurrence refs). Consumed by
-  :mod:`app.domain.identity.me_schedule`.
+  leaves) and :mod:`app.adapters.db.payroll.models` (worker
+  bookings). Consumed by :mod:`app.domain.identity.me_schedule`.
 
 * :class:`SqlAlchemyEmailChangeRepository` — wraps the four ORM
   classes the self-service email-change flow touches (cd-24im):
@@ -66,7 +64,6 @@ from app.adapters.db.availability.repositories import (
     _to_override_row,
     _to_weekly_row,
 )
-from app.adapters.db.holidays.models import PublicHoliday
 from app.adapters.db.identity.models import (
     EmailChangePending,
     PasskeyCredential,
@@ -74,7 +71,7 @@ from app.adapters.db.identity.models import (
     UserPushToken,
     canonicalise_email,
 )
-from app.adapters.db.tasks.models import Occurrence
+from app.adapters.db.payroll.models import Booking
 from app.domain.identity.availability_ports import (
     UserAvailabilityOverrideRow,
     UserLeaveRow,
@@ -86,9 +83,8 @@ from app.domain.identity.email_change_ports import (
     UserIdentityRow,
 )
 from app.domain.identity.me_schedule_ports import (
+    BookingRefRow,
     MeScheduleQueryRepository,
-    OccurrenceRefRow,
-    PublicHolidayRow,
 )
 from app.domain.identity.push_tokens_ports import (
     UserPushTokenRepository,
@@ -108,35 +104,30 @@ __all__ = [
 # ---------------------------------------------------------------------------
 
 
-def _to_holiday_row(row: PublicHoliday) -> PublicHolidayRow:
-    """Project an ORM ``PublicHoliday`` into the seam-level row."""
-    return PublicHolidayRow(
+def _to_booking_ref_row(row: Booking) -> BookingRefRow:
+    """Project an ORM ``Booking`` into the seam-level booking ref."""
+    return BookingRefRow(
         id=row.id,
-        name=row.name,
-        date=row.date,
-        country=row.country,
-        scheduling_effect=row.scheduling_effect,
-        reduced_starts_local=row.reduced_starts_local,
-        reduced_ends_local=row.reduced_ends_local,
-        payroll_multiplier=row.payroll_multiplier,
+        workspace_id=row.workspace_id,
+        user_id=row.user_id,
+        work_engagement_id=row.work_engagement_id,
+        property_id=row.property_id,
+        client_org_id=row.client_org_id,
+        status=row.status,
+        kind=row.kind,
+        scheduled_start=row.scheduled_start,
+        scheduled_end=row.scheduled_end,
+        actual_minutes=row.actual_minutes,
+        actual_minutes_paid=row.actual_minutes_paid,
+        break_seconds=row.break_seconds,
+        pending_amend_minutes=row.pending_amend_minutes,
+        pending_amend_reason=row.pending_amend_reason,
+        declined_at=row.declined_at,
+        declined_reason=row.declined_reason,
+        notes_md=row.notes_md,
+        adjusted=row.adjusted,
+        adjustment_reason=row.adjustment_reason,
     )
-
-
-def _to_occurrence_ref_row(row: Occurrence) -> OccurrenceRefRow:
-    """Project an ORM ``Occurrence`` into the lightweight calendar ref.
-
-    Falls back to ``starts_at.isoformat()`` when ``scheduled_for_local``
-    is null. The cd-22e generator always populates the local column,
-    so this fallback only fires for legacy rows (or hand-seeded test
-    fixtures that skip the column); keeping it deterministic in the
-    adapter avoids a JSON ``null`` leaking into a UI that expects a
-    renderable timestamp.
-    """
-    if row.scheduled_for_local is not None:
-        local = row.scheduled_for_local
-    else:
-        local = row.starts_at.isoformat()
-    return OccurrenceRefRow(id=row.id, scheduled_for_local=local)
 
 
 # ---------------------------------------------------------------------------
@@ -221,55 +212,26 @@ class SqlAlchemyMeScheduleQueryRepository(MeScheduleQueryRepository):
         ).all()
         return [_to_leave_row(r) for r in rows]
 
-    def list_holidays_in_window(
-        self,
-        *,
-        workspace_id: str,
-        from_date: _date_cls,
-        to_date: _date_cls,
-    ) -> Sequence[PublicHolidayRow]:
-        rows = self._session.scalars(
-            select(PublicHoliday)
-            .where(
-                PublicHoliday.workspace_id == workspace_id,
-                PublicHoliday.deleted_at.is_(None),
-                PublicHoliday.date >= from_date,
-                PublicHoliday.date <= to_date,
-            )
-            .order_by(PublicHoliday.date.asc())
-        ).all()
-        return [_to_holiday_row(r) for r in rows]
-
-    def list_assigned_occurrences_in_window(
+    def list_bookings_in_window(
         self,
         *,
         workspace_id: str,
         user_id: str,
         window_start_utc: datetime,
         window_end_utc: datetime,
-    ) -> Sequence[OccurrenceRefRow]:
-        # Walks the ``ix_occurrence_workspace_assignee_starts``
-        # composite index — leading ``workspace_id`` carries the tenant
-        # filter, and ``starts_at`` ranges inside the index.
-        #
-        # Excludes ``state='cancelled'`` rows: the ``/me/schedule``
-        # surface drives the worker's live calendar, and a cancelled
-        # occurrence (e.g. swept by a schedule-delete cascade per §06)
-        # is no longer actionable. ``completed`` / ``skipped`` rows
-        # stay so the worker can still see "what I did this week" in
-        # the same window.
+    ) -> Sequence[BookingRefRow]:
         rows = self._session.scalars(
-            select(Occurrence)
+            select(Booking)
             .where(
-                Occurrence.workspace_id == workspace_id,
-                Occurrence.assignee_user_id == user_id,
-                Occurrence.starts_at >= window_start_utc,
-                Occurrence.starts_at <= window_end_utc,
-                Occurrence.state != "cancelled",
+                Booking.workspace_id == workspace_id,
+                Booking.user_id == user_id,
+                Booking.deleted_at.is_(None),
+                Booking.scheduled_start >= window_start_utc,
+                Booking.scheduled_start <= window_end_utc,
             )
-            .order_by(Occurrence.starts_at.asc())
+            .order_by(Booking.scheduled_start.asc(), Booking.id.asc())
         ).all()
-        return [_to_occurrence_ref_row(r) for r in rows]
+        return [_to_booking_ref_row(r) for r in rows]
 
 
 # ---------------------------------------------------------------------------
