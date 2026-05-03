@@ -108,6 +108,26 @@ export interface SignupFinishResponse {
   redirect: string;
 }
 
+// Invite-acceptance passkey wire shapes — mirrors
+// `app/api/v1/auth/invite.py::Invite{PasskeyStart,PasskeyFinish}{Request,Response}`.
+// New invitees (no passkey on file) run this ceremony after the
+// `/invites/{token}/accept` returns `kind == "new_user"`. The finish
+// callback also activates pending grants and emits the
+// `user.enrolled` audit in the same UoW (cd-kd26), so its response
+// carries the redirect target — same shape as the signup-finish body.
+// Backend stamps the session cookie via `Set-Cookie`; the SPA must
+// not touch the cookie value (HttpOnly).
+export interface InvitePasskeyStartResponse {
+  challenge_id: string;
+  options: PublicKeyCredentialCreationOptionsJSON;
+}
+
+export interface InvitePasskeyFinishResponse {
+  user_id: string;
+  workspace_id: string;
+  redirect: string;
+}
+
 /**
  * Consume the recovery magic link. Returns the transient
  * `recovery_session_id` the SPA threads into the two subsequent
@@ -400,6 +420,66 @@ export async function runSignupEnrollCeremony(
         timezone,
         credential,
       ),
+    options.signal,
+  );
+}
+
+/**
+ * Mint the `PublicKeyCredentialCreationOptions` for a new invitee's
+ * first passkey. Bare-host endpoint — the `invite_id` is the
+ * bearer-of-capability and the server enforces the
+ * pending+passkey-absent gate before minting the challenge.
+ */
+export async function beginInvitePasskey(
+  inviteId: string,
+): Promise<InvitePasskeyStartResponse> {
+  return fetchJson<InvitePasskeyStartResponse>("/api/v1/invite/passkey/start", {
+    method: "POST",
+    body: { invite_id: inviteId },
+  });
+}
+
+/**
+ * Submit the browser's attestation for an invite passkey ceremony.
+ * The server activates the pending grants, emits `user.enrolled`,
+ * and stamps the session cookie via `Set-Cookie` in the same UoW
+ * (cd-kd26). Response carries the redirect target so the SPA can
+ * land the user on `/w/<slug>/today` without a second round trip.
+ */
+export async function finishInvitePasskey(
+  inviteId: string,
+  challengeId: string,
+  credential: PasskeyRegisterCredential,
+): Promise<InvitePasskeyFinishResponse> {
+  return fetchJson<InvitePasskeyFinishResponse>("/api/v1/invite/passkey/finish", {
+    method: "POST",
+    body: {
+      invite_id: inviteId,
+      challenge_id: challengeId,
+      credential,
+    },
+  });
+}
+
+/**
+ * Drive the full invite-passkey ceremony: start → create() → finish.
+ * Caller supplies the `invite_id` returned by the preceding
+ * `POST /invites/{token}/accept` (which left the invite in
+ * ``pending`` with the user_id known but no passkey on file).
+ *
+ * Translates platform errors into the module's typed errors
+ * (`PasskeyCancelledError`, `PasskeyTimeoutError`,
+ * `PasskeyTransientError`, `PasskeyUnsupportedError`); anything else
+ * propagates (usually `ApiError`). On success the server-set session
+ * cookie authenticates the user — no follow-up login required.
+ */
+export async function runInvitePasskeyCeremony(
+  inviteId: string,
+  options: { signal?: AbortSignal } = {},
+): Promise<InvitePasskeyFinishResponse> {
+  return runRegisterCeremony(
+    () => beginInvitePasskey(inviteId),
+    (challengeId, credential) => finishInvitePasskey(inviteId, challengeId, credential),
     options.signal,
   );
 }

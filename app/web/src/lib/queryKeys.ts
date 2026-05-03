@@ -47,6 +47,10 @@ function ws(): WorkspacePrefix {
 // which preserves tuple literal types all the way down.
 export const qk = {
   authMe: () => ["auth", "me"] as const,
+  // §03 invite click-to-accept preview. Bare-host (no workspace
+  // slug — the token carries the target workspace via its
+  // `subject_id`) and per-token, so the key sits outside `ws()`.
+  invite: (token: string) => ["invite", token] as const,
   me: () => [...ws(), "me"] as const,
   properties: () => [...ws(), "properties"] as const,
   property: (pid: string) => [...ws(), "property", pid] as const,

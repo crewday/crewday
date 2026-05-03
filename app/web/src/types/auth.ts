@@ -148,3 +148,62 @@ export interface ApiTokenAuditEntry {
   actor_id: string;
   correlation_id: string;
 }
+
+// ── Invites (§03 "Additional users") ──────────────────────────────
+//
+// Mirrors `app.api.v1.auth.invite.InviteIntrospectionResponse` /
+// `AcceptResponse`. The grants + group_memberships dicts are
+// validated server-side via `_validate_grants(...)` and round-tripped
+// through `invite_row.grants_json` — keys are stable but the dict
+// stays open-ended to keep the wire forward-compatible.
+export type InviteKind = "new_user" | "existing_user" | "needs_sign_in";
+
+export interface InviteGrantPreview {
+  scope_kind: ScopeKind;
+  scope_id: string;
+  grant_role: GrantRole;
+  scope_property_id?: string | null;
+  binding_org_id?: string | null;
+  [extension: string]: unknown;
+}
+
+export interface InvitePermissionGroupMembershipPreview {
+  group_id: string;
+  group_slug?: string;
+  group_name?: string;
+  [extension: string]: unknown;
+}
+
+// `GET /api/v1/invites/{token}` — read-only preview, does not burn
+// the magic-link nonce. The page renders this before the user clicks
+// Accept.
+export interface InviteIntrospection {
+  kind: Exclude<InviteKind, "needs_sign_in">;
+  invite_id: string;
+  workspace_id: string;
+  workspace_slug: string;
+  workspace_name: string;
+  inviter_display_name: string;
+  email_lower: string;
+  expires_at: string;
+  grants: InviteGrantPreview[];
+  permission_group_memberships: InvitePermissionGroupMembershipPreview[];
+}
+
+// `POST /api/v1/invites/{token}/accept` — the union response. The
+// server fills different field subsets per `kind`; we keep them all
+// nullable so a single shape covers both branches.
+export interface InviteAcceptResponse {
+  kind: InviteKind;
+  invite_id: string;
+  // Populated on the `new_user` branch.
+  user_id?: string | null;
+  email_lower?: string | null;
+  display_name?: string | null;
+  // Populated on the `existing_user` branch.
+  workspace_id?: string | null;
+  workspace_slug?: string | null;
+  workspace_name?: string | null;
+  grants?: InviteGrantPreview[] | null;
+  permission_group_memberships?: InvitePermissionGroupMembershipPreview[] | null;
+}

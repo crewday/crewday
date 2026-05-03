@@ -153,6 +153,14 @@ describe("INVALIDATIONS — coverage", () => {
     "chat_channel_binding.verified",
     "chat_channel_binding.revoked",
     "llm.assignment.changed",
+    "permission_group.upserted",
+    "permission_group.deleted",
+    "permission_group_member.added",
+    "permission_group_member.removed",
+    "permission_rule.upserted",
+    "permission_rule.deleted",
+    "role_grant.created",
+    "role_grant.revoked",
     "workspace.changed",
   ];
 
