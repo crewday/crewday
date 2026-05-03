@@ -17,9 +17,15 @@
 #   /data               (named volume — SQLite DB, chown'd at boot)
 #
 # Ships WeasyPrint + the Pango/fontconfig pieces needed for payslip
-# PDF rendering. The other prod deps mirror ``pyproject.toml``
-# ``[project].dependencies`` plus ``aiosqlite`` (for completeness —
-# the sync engine's URL normaliser would work without it).
+# PDF rendering. Prod deps are extracted from ``pyproject.toml`` at
+# build time so the dev image cannot drift from the canonical
+# ``[project].dependencies`` list. ``aiosqlite`` is layered on as a
+# defensive extra (cd-sgpl): the compose env sets
+# ``CREWDAY_DATABASE_URL=sqlite+aiosqlite://...`` and the sync engine's
+# URL normaliser strips the ``+aiosqlite`` suffix before
+# ``create_engine``, so the runtime never actually imports the driver
+# — but carrying it means a stray async-engine call or an out-of-band
+# ``create_engine("sqlite+aiosqlite://...")`` still works.
 
 FROM python:3.14-slim
 
@@ -46,40 +52,20 @@ RUN groupadd --system --gid 10001 crewday \
 
 WORKDIR /app
 
-# Prod deps (mirrors ``pyproject.toml`` ``[project].dependencies``;
-# adds ``aiosqlite`` per cd-sgpl).
-RUN pip install --no-cache-dir \
-    "fastapi>=0.115" \
-    "uvicorn[standard]>=0.30" \
-    "sqlalchemy>=2.0" \
-    "alembic" \
-    "pydantic>=2.6" \
-    "pydantic-settings" \
-    "python-multipart" \
-    "webauthn" \
-    "python-ulid" \
-    "apscheduler" \
-    "httpx" \
-    "icalendar" \
-    "python-dateutil" \
-    "itsdangerous" \
-    "weasyprint" \
-    "click" \
-    "argon2-cffi>=23" \
-    "aiosqlite" \
-    "jinja2" \
-    "babel>=2.18.0" \
-    "cryptography>=42" \
-    "pyyaml>=6.0" \
-    "filetype>=1.2" \
-    "segno>=1.6.6" \
-    "prometheus-client>=0.25.0" \
-    "opentelemetry-api>=1.41.1" \
-    "opentelemetry-sdk>=1.41.1" \
-    "opentelemetry-instrumentation-fastapi>=0.62b1" \
-    "opentelemetry-instrumentation-sqlalchemy>=0.62b1" \
-    "opentelemetry-instrumentation-httpx>=0.62b1" \
-    "opentelemetry-exporter-otlp>=1.41.1"
+# Single-source the prod deps from ``pyproject.toml`` (cd-m11h). The
+# repo-root file is in the build context (compose's ``context: ..``);
+# copying just the file (not the whole project) keeps the layer cheap
+# and keeps the project source out of site-packages so the runtime
+# bind-mount of ``/app/app`` is the only import path Python sees.
+# ``aiosqlite`` is layered on as a defensive extra (cd-sgpl) — see the
+# header comment for why the runtime does not actually import it.
+# ``rm -f /app/pyproject.toml`` at the end clears the build artefact
+# so the runtime sees only the bind-mounted file at the same path.
+COPY pyproject.toml ./pyproject.toml
+RUN python -c "import tomllib; data = tomllib.load(open('pyproject.toml', 'rb')); print('\n'.join(data['project']['dependencies']))" > /tmp/runtime-deps.txt \
+ && pip install --no-cache-dir -r /tmp/runtime-deps.txt \
+ && pip install --no-cache-dir aiosqlite \
+ && rm -f /tmp/runtime-deps.txt /app/pyproject.toml
 
 # The data dir is a named compose volume by default, so the mount
 # point itself needs to exist (Docker creates it) but the volume's
