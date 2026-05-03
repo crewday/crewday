@@ -213,6 +213,27 @@ class TestBuildCspHeader:
         assert "'unsafe-eval'" not in csp
         assert "nonce-NONCE123" in csp
 
+    def test_worker_src_allows_self_and_blob_in_both_profiles(self) -> None:
+        """``worker-src 'self' blob:`` is emitted in dev and prod alike.
+
+        The PWA service worker (``vite-plugin-pwa`` + Workbox)
+        registers ``/sw.js`` (covered by ``'self'``) and spawns
+        helper workers from ``URL.createObjectURL(...)`` blob URLs at
+        runtime (covered by ``blob:``). Without the explicit
+        directive the browser falls back to ``script-src``, which
+        never lists ``blob:`` in either profile and so blocks the
+        worker — see the dashboard CSP report that prompted this
+        fix.
+        """
+        for dev_profile in (False, True):
+            csp = build_csp_header(
+                "NONCE123",
+                demo_mode=False,
+                demo_frame_ancestors=None,
+                dev_profile=dev_profile,
+            )
+            assert "worker-src 'self' blob:" in csp
+
 
 # ---------------------------------------------------------------------------
 # build_permissions_policy

@@ -140,6 +140,9 @@ See §16 for deployment details.
   `frame-ancestors 'none'`, `form-action 'self'`, `base-uri 'self'`,
   `img-src 'self' data:` (for small icons); uploaded images served
   from the same origin under `/files/*/blob`.
+  `worker-src 'self' blob:` so the PWA service worker (registered
+  from `/sw.js`, see §14) can spawn its Workbox helper workers from
+  same-origin blob URLs without falling back to `script-src`.
 - `Strict-Transport-Security` (once HSTS opted in).
 - `Referrer-Policy: strict-origin-when-cross-origin`.
 - `Permissions-Policy`: allow `camera=(self)` only on worker pages

@@ -117,8 +117,10 @@ def build_csp_header(
 
     Kept as a pure function so tests can pin the exact serialisation
     without a live middleware. The directive ordering matches the spec
-    prose: ``default-src`` first, then resource-specific sources, then
-    the framing / navigation / base-URI set, then ``object-src``.
+    prose: ``default-src`` first, then resource-specific sources
+    (``script-src``, ``style-src``, ``worker-src``, ``img-src``,
+    ``font-src``, ``connect-src``), then the framing / navigation /
+    base-URI set, then ``object-src``.
 
     Demo carve-out (§24 "CSP on demo"): when ``demo_mode`` is on and
     ``demo_frame_ancestors`` is set, the ``frame-ancestors 'none'``
@@ -162,6 +164,16 @@ def build_csp_header(
         "default-src 'self'",
         script_src,
         style_src,
+        # ``worker-src`` exists so the PWA service worker
+        # (``vite-plugin-pwa`` + Workbox at ``app/web/vite.config.ts``)
+        # can spawn its runtime helper workers from
+        # ``URL.createObjectURL(...)`` blob URLs. With the directive
+        # absent the browser falls back to ``script-src``, which does
+        # not list ``blob:`` in either profile and so blocks the
+        # worker. ``'self'`` covers the registered ``/sw.js`` script
+        # itself; ``blob:`` covers the same-origin helper workers
+        # Workbox builds at runtime.
+        "worker-src 'self' blob:",
         "img-src 'self' data:",
         "font-src 'self'",
         "connect-src 'self'",
