@@ -40,8 +40,8 @@ The test logic itself is browser-agnostic — no passkey ceremony is
 involved, so the WebKit virtual-authenticator carve-out (§17
 "End-to-end") doesn't apply. Whether the WebKit leg actually runs
 depends on the host: pytest-playwright's ``browser`` fixture errors
-at launch time on hosts missing libicu74 (AGENTS.md §"End-to-end
-Playwright suite"), independent of this test.
+at launch time on hosts missing libicu74 (see
+``tests/e2e/README.md``), independent of this test.
 """
 
 from __future__ import annotations
@@ -106,9 +106,9 @@ def test_ical_to_turnover_to_welcome(
     passkey ceremony is exercised — the dev_login fast path mints
     both manager and worker sessions.
     """
-    # AGENTS.md §"End-to-end Playwright suite" notes that the WebKit
-    # driver requires libicu74 — pytest-playwright's ``browser``
-    # fixture errors at launch time on hosts that only ship libicu70,
+    # tests/e2e/README.md notes that the WebKit driver requires
+    # libicu74 — pytest-playwright's ``browser`` fixture errors at
+    # launch time on hosts that only ship libicu70,
     # before this body runs. There is no in-test mitigation; CI and
     # local invocations targeting WebKit must install the dep first.
     # The Chromium leg always runs the full journey.

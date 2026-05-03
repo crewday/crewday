@@ -21,15 +21,15 @@ cutting concerns the spec calls out:
   artefact emission per §17 ("first failure → trace.zip artefact").
   The plugin defaults each to ``off`` / ``retain-on-failure`` /
   ``only-on-failure`` respectively, so the operator opts in via the
-  CLI; AGENTS.md §"End-to-end Playwright suite" pins the
-  recommended invocation that turns all three on.
+  CLI; ``tests/e2e/README.md`` pins the recommended invocation that
+  turns all three on.
 * **WebKit auto-skip.** Hosts missing libicu74 cannot launch the
   WebKit driver. We wrap pytest-playwright's ``launch_browser``
   fixture so the "Host system is missing dependencies" error
   surfaces as a focused ``pytest.skip`` (whole-suite when the user
   ran ``--browser webkit`` only, per-test parametrisation otherwise).
-  AGENTS.md §"End-to-end Playwright suite" documents the install
-  hint; we surface the same hint at skip time.
+  ``tests/e2e/README.md`` documents the install hint; we surface
+  the same hint at skip time.
 
 The pytest-playwright defaults already cover screenshot + video on
 failure; we extend the storage location so artefacts land beside the
@@ -197,11 +197,11 @@ def launch_browser(
 ) -> Callable[..., Browser]:
     """Wrap pytest-playwright's launcher to convert missing-deps to ``skip``.
 
-    AGENTS.md §"End-to-end Playwright suite" documents that WebKit
-    needs ``libicu74`` (and friends) installed before the driver can
-    launch. Without this wrapper the missing-deps error becomes a
-    pytest fixture ERROR, not a SKIP — turning a documented dev-host
-    limitation into a noisy red bar that can mask real regressions.
+    ``tests/e2e/README.md`` documents that WebKit needs ``libicu74``
+    (and friends) installed before the driver can launch. Without
+    this wrapper the missing-deps error becomes a pytest fixture
+    ERROR, not a SKIP — turning a documented dev-host limitation
+    into a noisy red bar that can mask real regressions.
 
     We mirror :func:`pytest_playwright.pytest_playwright.launch_browser`
     1:1 (including the ``connect_options`` branch that supports the
@@ -232,7 +232,7 @@ def launch_browser(
                     f"{browser_type.name} driver missing host dependencies "
                     "(install with `sudo playwright install-deps` or "
                     "`apt-get install libicu74 libxml2`); skipping per "
-                    "AGENTS.md §End-to-end Playwright suite."
+                    "tests/e2e/README.md."
                 )
             raise
 

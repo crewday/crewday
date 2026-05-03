@@ -142,39 +142,20 @@ multi-step scripts) or the wrappers misbehave.
   ```
   Stdout is `__Host-crewday_session=<value>`. Feed it to
   `curl -b "$cookie" http://127.0.0.1:8100/w/smoke/api/v1/...`.
-  For Playwright, do **not** add the `__Host-crewday_session` cookie
-  directly on loopback: the prefix requires `Secure`, and browser
-  cookie APIs will either reject it or keep it from plain-HTTP
-  requests. Ask `dev_login` for the Playwright shape and add that
-  dev-only alias cookie instead:
-  ```bash
-  docker compose -f mocks/docker-compose.yml exec app-api \
-    python -m scripts.dev_login --email me@dev.local \
-      --workspace smoke --output playwright
-  ```
-  ```js
-  const cookie = /* paste the JSON object from --output playwright */;
-  await page.context().addCookies([cookie]);
-  await page.goto("http://127.0.0.1:8100/w/smoke/...");
-  ```
-  The object has this shape:
-  ```js
-  await page.context().addCookies([{
-    name: "crewday_session",
-    value: "<same opaque session value>",
-    url: "http://127.0.0.1:8100",
-    httpOnly: true,
-    secure: false,
-    sameSite: "Lax",
-  }]);
-  ```
-  The pytest e2e helper `tests/e2e/_helpers/auth.py::login_with_dev_session`
-  performs this exact alias injection for full Playwright tests.
+- **Playwright on loopback needs an alias cookie**, not the curl one
+  (`__Host-` prefix requires `Secure`, which browsers refuse on
+  plain-HTTP). See [`docs/dev/playwright-auth.md`](docs/dev/playwright-auth.md)
+  for the `--output playwright` recipe and the e2e helper that wraps it.
 - Host-side login variant:
   ```bash
   CREWDAY_DEV_AUTH=1 ./scripts/dev-login.sh <email> <slug>
   ```
   Requires `uv sync` or `pip install -e .`.
+- **Personal passkey re-seed.** After a DB reset, run
+  `./scripts/dev-seed-personal.sh apply` to rehydrate your user +
+  workspace + passkey rows from `scripts/dev_seed_personal.json` so
+  your physical authenticator still works at `https://dev.crew.day`.
+  See the script docstrings for `capture` and other flags.
 - If `dev_login`, `/readyz`, or a smoke request fails with a missing
   column/table, run:
   ```bash
@@ -267,12 +248,9 @@ update in your wrap-up.
 - **JSON with `jq`**, not Python. Use `gh`'s `--jq` for GitHub
   payloads.
 - **Regenerate OpenAPI with `make openapi`.** Wraps
-  `python -m scripts.regen_openapi`; sets a dummy `CREWDAY_ROOT_KEY`
-  if unset, silences app-boot logs, and writes
-  `docs/api/openapi.json` with stable formatting (`sort_keys=True`,
-  `required` / `enum` / operation-level `tags` arrays sorted in
-  the factory). Use `make openapi-check` to fail when the committed
-  file has drifted from the live schema.
+  `python -m scripts.regen_openapi` (see its docstring for the
+  stable-formatting choices). Use `make openapi-check` in CI / before
+  pushing to fail when `docs/api/openapi.json` has drifted.
 - **Modern CLI tools**: `rg` over `grep`, `fd` over `find`, `sd` over
   `sed`.
 - **Quality gate wrapper.** Run `./scripts/agent-quality.sh` to apply
@@ -387,12 +365,8 @@ Plain text to the user; CLI handles styling.
   the other exists (e.g. the app's env-var table mentioning the
   feedback bridge), but actual content lives where it's owned.
   Site is optional for self-hosters and has its own build +
-  deploy under `site/`.
-- **Site stack.** `site/web/` is **Astro 4+ with React islands**
-  (not Vite-SPA — different SEO and first-paint needs on a
-  brochure site), built to static HTML. `site/api/` is FastAPI
-  + SQLite, matching the app's Python toolchain. Design tokens
-  and icons flow one-way app → site. See `docs/specs-site/00-overview.md`.
+  deploy under `site/` — see [`docs/specs-site/00-overview.md`](docs/specs-site/00-overview.md)
+  for the stack (Astro + React islands, FastAPI + SQLite).
 - **Semantic CSS classes only.** Name after the thing
   (`task-card`, `shift-timeline`, `payroll-summary`), not the look.
   No utility/atomic classes (Tailwind-style), no inline `style=""`,
@@ -422,31 +396,11 @@ Plain text to the user; CLI handles styling.
   `.playwright-mcp/README.md`). Close the browser
   (`mcp__playwright__browser_close`) when done.
 - **End-to-end Playwright suite (`tests/e2e/`)** runs against the
-  dev compose stack plus the e2e override, which aligns WebAuthn
-  `rp_id` / `public_url` with the loopback origin for Chromium's
-  virtual authenticator. Bring it up first; the suite skips with a
-  focused message if `/healthz` is unreachable. Default origin is
-  `http://localhost:8100` because Chromium rejects IP literals as
-  WebAuthn RP IDs; this still reaches the same 127.0.0.1-bound Vite
-  port. Override via `CREWDAY_E2E_BASE_URL`.
-  Browsers must be installed once (`uv run playwright install
-  chromium webkit`); WebKit auto-skips on hosts missing libicu74.
-  ```
-  docker compose -f mocks/docker-compose.yml \
-      -f mocks/docker-compose.e2e.yml up -d --build
-  uv run playwright install chromium webkit
-  uv run pytest tests/e2e -v -n0 \
-      --tracing=retain-on-failure \
-      --video=retain-on-failure \
-      --screenshot=only-on-failure
-  ```
-  The full pilot suite is fast (~10 s on Chromium); the
-  `pytest-playwright` flags above are what gate the artefact drops
-  — without them no trace.zip / video / screenshot is captured (the
-  CLI defaults are `off`). Artefacts land in `tests/e2e/_artifacts/`,
-  visual-regression diffs in `tests/e2e/_diff/`. Both directories are
-  gitignored. The visual baseline at `tests/e2e/_baselines/` is
-  committed and reviewed manually.
+  dev compose stack plus an e2e override that aligns WebAuthn with
+  the loopback origin. Fast (~10 s on Chromium). For the full
+  invocation (compose override, `playwright install`, pytest flags
+  that actually emit traces/videos), see
+  [`tests/e2e/README.md`](tests/e2e/README.md).
 
 ## Session wrap-up
 
