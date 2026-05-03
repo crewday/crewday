@@ -11,11 +11,14 @@ Scoping is unambiguous: every expense row belongs to exactly one
 workspace's expense ledger — the claim is filed against a workspace-
 owned engagement, the lines and attachments live inside the claim.
 
-``decided_by`` / ``owed_destination_id`` / ``reimbursement_destination_id``
-are persisted as soft-ref :class:`str` columns (no SQL foreign key)
-— see :mod:`app.adapters.db.expenses.models` for the rationale. The
-``file`` table referenced by :class:`ExpenseAttachment`'s
-``blob_hash`` has not landed yet; the soft-ref preserves the
+``decided_by`` is persisted as a soft-ref :class:`str` column (no
+SQL foreign key) — see :mod:`app.adapters.db.expenses.models` for
+the rationale. ``owed_destination_id`` / ``reimbursement_destination_id``
+/ ``property_id`` / ``expense_line.asset_id`` were promoted to real
+FKs by cd-48c1 once their parent tables landed. The ``file`` table
+referenced by :class:`ExpenseAttachment`'s ``blob_hash`` has not
+landed yet — cd-48c1 explicitly defers that promotion until §02
+§"Shared tables" §"file" lands; the soft-ref preserves the
 content-addressed storage layer's dedup until that migration.
 
 See ``docs/specs/02-domain-model.md`` §"Core entities (by

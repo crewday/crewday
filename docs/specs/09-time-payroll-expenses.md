@@ -976,13 +976,13 @@ expense_claim
 ├── currency                   # ISO-4217; any code, per-claim (see §02 "Multi-currency expenses")
 ├── exchange_rate_to_default   # snap at approval against workspace.default_currency; immutable
 ├── total_amount_cents         # in claim currency
-├── owed_destination_id        # FK snapshot of payout_destination at approval; immutable
+├── owed_destination_id        # FK → payout_destination.id (ON DELETE RESTRICT); snapshot at approval, immutable
 ├── owed_currency              # ISO-4217; copy of owed destination's currency
 ├── owed_amount_cents          # claim total converted into owed_currency via snapped rate; authoritative "owed"
 ├── owed_exchange_rate         # claim.currency → owed_currency rate (may be cross via EUR)
 ├── owed_rate_source           # ecb | manual | stale_carryover — copied from exchange_rate.source
 ├── category                   # supplies|fuel|food|transport|maintenance|other
-├── property_id                # optional
+├── property_id                # FK → property.id (ON DELETE SET NULL); optional
 ├── note_md
 ├── llm_autofill_json          # full JSON returned by autofill (shape below)
 ├── autofill_confidence_overall # 0..1, derived min() of per-field scores
@@ -990,7 +990,7 @@ expense_claim
 ├── decided_by_user_id
 ├── decided_at
 ├── decision_note_md
-├── reimbursement_destination_id # ULID FK? override; null → use work_engagement default
+├── reimbursement_destination_id # FK → payout_destination.id (ON DELETE RESTRICT); override, null → use work_engagement default
 ├── reimbursed_at                # tstz; wall-clock the manager / operator marked the claim settled. Null until state → reimbursed.
 ├── reimbursed_via               # cash|bank|card|other — channel actually used. CHECK-clamped + nullable until state → reimbursed.
 ├── reimbursed_by                # ULID FK? user who actioned the settlement. May differ from decided_by_user_id (the approver).
@@ -1005,7 +1005,7 @@ expense_line
 ├── quantity
 ├── unit_price_cents
 ├── line_total_cents           # derived
-├── asset_id                   # ULID FK?; links to asset for TCO tracking (§21)
+├── asset_id                   # FK → asset.id (ON DELETE SET NULL); links to asset for TCO tracking (§21)
 ├── source                     # ocr | manual (§02)
 └── edited_by_user             # bool; set when a user mutates an ocr row
 ```
@@ -1018,6 +1018,22 @@ expense_attachment
 ├── kind                       # receipt | invoice | other
 ├── pages                      # int (for multi-page PDFs)
 ```
+
+**Cross-table delete behaviour.** `owed_destination_id` and
+`reimbursement_destination_id` use `ON DELETE RESTRICT`: both are
+payroll-law evidence — `owed_destination_id` snapshots the
+destination at approval (see § "Amount owed to the employee"), and
+`reimbursement_destination_id` is the override the approver picked.
+A raw `DELETE FROM payout_destination` would silently strip the
+audit trail, so the FK rejects it; the normal lifecycle is
+`payout_destination.archived_at` (§ "Payout destinations" §
+"Owner"), which leaves the FK valid. `property_id` and
+`expense_line.asset_id` are not audit-bearing in the same way — the
+purchase data lives on independently in `llm_autofill_json` and the
+pay-period rollup — so they use `ON DELETE SET NULL` to keep the
+claim / line alive while detaching the FK. The `expense_attachment.file_id`
+column is still a soft-ref pending the §02 §"Shared tables" §"file"
+table landing; FK promotion is deferred until that migration.
 
 ### Approval (owner or manager)
 

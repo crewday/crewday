@@ -49,6 +49,7 @@ from app.adapters.db.expenses.repositories import (
 )
 from app.adapters.db.identity.models import User
 from app.adapters.db.llm.models import LlmUsage
+from app.adapters.db.places.models import Property
 from app.adapters.db.workspace.models import WorkEngagement, Workspace
 from app.domain.expenses.ports import PendingClaimsCursor
 
@@ -233,6 +234,32 @@ def _seed_claim(
         )
     )
     repo.session.flush()
+
+
+def _seed_property(session: Session, *, property_id: str) -> str:
+    """Insert a workspace-agnostic :class:`Property` so claim FKs resolve.
+
+    cd-48c1 promoted ``expense_claim.property_id`` to a real FK; tests
+    that pin a claim to a property must seed the parent row first.
+    """
+    session.add(
+        Property(
+            id=property_id,
+            name="Villa Sud",
+            kind="residence",
+            address="1 Pool Way",
+            address_json={"line1": "1 Pool Way", "country": "FR"},
+            country="FR",
+            timezone="Europe/Paris",
+            tags_json=[],
+            welcome_defaults_json={},
+            property_notes_md="",
+            created_at=_PINNED,
+            updated_at=_PINNED,
+        )
+    )
+    session.flush()
+    return property_id
 
 
 def _bootstrap(session: Session) -> None:
@@ -764,6 +791,7 @@ class TestListings:
         self, session: Session, repo: SqlAlchemyExpensesRepository
     ) -> None:
         _bootstrap(session)
+        prop_id = _seed_property(session, property_id="01HWA00000000000000000PRP1")
         _seed_claim(
             repo,
             claim_id="C1",
@@ -776,12 +804,12 @@ class TestListings:
             claim_id="C2",
             state="submitted",
             submitted_at=_PINNED,
-            property_id="01HWA00000000000000000PRP1",
+            property_id=prop_id,
         )
         rows = repo.list_pending_claims(
             workspace_id=_WORKSPACE_ID,
             claimant_user_id=None,
-            property_id="01HWA00000000000000000PRP1",
+            property_id=prop_id,
             category=None,
             limit=10,
             cursor=None,

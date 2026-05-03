@@ -31,34 +31,37 @@ the rest of the app:
   ``submitted``-or-later rows should never be hard-deleted (the
   audit trail in :mod:`app.adapters.db.audit` carries the write
   history).
-* ``property_id`` stays a plain :class:`str` (soft-ref) — matches
-  the sibling ``shift.property_id`` / ``movement.occurrence_id``
-  rationale in :mod:`app.adapters.db.time` and
-  :mod:`app.adapters.db.inventory`. The §05 /
-  ``property_workspace`` intersection owns when that becomes a
-  hard FK.
+* ``property_id`` is a real FK with ``ON DELETE SET NULL`` — cd-48c1
+  promoted the soft-ref now that ``property`` (§04) has landed. Per
+  the §02 §"Money" / §09 §"Currency alignment rule" rationale, a
+  deleted property must not sweep the expense; the claim still has a
+  copy of the purchase data in ``llm_autofill_json`` and the
+  pay-period rollup.
 * ``decided_by`` is a plain :class:`str` soft-ref — matches the
   sibling ``leave.decided_by`` / ``shift.approved_by`` pattern. The
   approver may be a system process (an agent capability) rather
   than a user; audit linkage lives in :mod:`app.adapters.db.audit`.
 * ``owed_destination_id`` / ``reimbursement_destination_id`` are
-  plain :class:`str` soft-refs — the ``payout_destination`` table
-  does not exist yet (see §09 §"Payout destinations"). Follow-up
-  will promote to FKs once the parent table lands, matching the
-  ``work_engagement.pay_destination_id`` / ``reimbursement_destination_id``
-  convention.
-* ``blob_hash`` on :class:`ExpenseAttachment` is a plain
+  real FKs with ``ON DELETE RESTRICT`` — cd-48c1 promoted the
+  soft-refs now that ``payout_destination`` (§09 §"Payout
+  destinations") has landed. RESTRICT, not SET NULL: the snapshot
+  on an approved claim is audit-bearing (§09 §"Currency alignment
+  rule") and a raw destination DELETE must not silently drop the
+  payout history. The normal archive path is
+  ``payout_destination.archived_at``, which leaves the FK valid.
+* ``blob_hash`` on :class:`ExpenseAttachment` stays a plain
   :class:`str` soft-ref into blob storage (content-addressed hash).
   §09 §"Model" calls this column ``file_id`` — a hard FK to the
   shared ``file`` table — but that table in §02 §"Shared tables"
   has not landed yet, so the v1 slice lands the same
   ``blob_hash`` convention as the sibling
   :class:`app.adapters.db.tasks.models.Evidence` and
-  ``payslip.pdf_blob_hash`` columns (column rename + FK promotion
-  land together in cd-48c1). The same hash can be referenced by
+  ``payslip.pdf_blob_hash`` columns. cd-48c1 explicitly defers the
+  ``blob_hash`` → ``file.id`` FK promotion until §02 §"Shared
+  tables" §"file" lands. The same hash can be referenced by
   multiple rows (same receipt re-used across claims), so keeping
-  it blob-ref only preserves the content-addressed storage layer's
-  dedup.
+  it blob-ref only also preserves the content-addressed storage
+  layer's dedup until that migration.
 
 Allowed enum values — the v1 slice matches the §02 §"Enums" and §09
 §"Model" taxonomy:
@@ -126,13 +129,17 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.adapters.db._columns import UtcDateTime
-from app.adapters.db.base import Base
 
 # Cross-package FK targets — see :mod:`app.adapters.db` package
 # docstring for the load-order contract. ``workspace.id`` /
-# ``work_engagement.id`` FKs below resolve against ``Base.metadata``
-# only if ``workspace.models`` has been imported, so we register it
-# here as a side effect.
+# ``work_engagement.id`` / ``payout_destination.id`` /
+# ``property.id`` / ``asset.id`` FKs below resolve against
+# ``Base.metadata`` only if the target packages have been imported,
+# so we register them here as a side effect.
+from app.adapters.db.assets import models as _asset_models  # noqa: F401
+from app.adapters.db.base import Base
+from app.adapters.db.payroll import models as _payroll_models  # noqa: F401
+from app.adapters.db.places import models as _places_models  # noqa: F401
 from app.adapters.db.workspace import models as _workspace_models  # noqa: F401
 
 __all__ = ["ExpenseAttachment", "ExpenseClaim", "ExpenseLine"]
@@ -268,9 +275,15 @@ class ExpenseClaim(Base):
         Numeric(18, 8), nullable=True
     )
     # Snapshot of the ``payout_destination`` id active at the
-    # approval moment — soft-ref to the future ``payout_destination``
-    # table. Immutable once set (§09 §"Currency alignment rule").
-    owed_destination_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    # approval moment. Immutable once set (§09 §"Currency alignment
+    # rule"). RESTRICT — see the module docstring; a destination
+    # DELETE must not silently strip an approved claim's payout
+    # snapshot.
+    owed_destination_id: Mapped[str | None] = mapped_column(
+        String,
+        ForeignKey("payout_destination.id", ondelete="RESTRICT"),
+        nullable=True,
+    )
     # Copy of ``payout_destination.currency`` at the approval moment
     # — the authoritative *payment* currency the employee will
     # actually see land in their account.
@@ -290,8 +303,15 @@ class ExpenseClaim(Base):
     # landing in a later migration); no CHECK here yet.
     owed_rate_source: Mapped[str | None] = mapped_column(String, nullable=True)
     category: Mapped[str] = mapped_column(String, nullable=False)
-    # Soft-ref :class:`str` — see the module docstring.
-    property_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    # Real FK with ``ON DELETE SET NULL`` — see the module docstring.
+    # A deleted property must not sweep the expense; the claim's
+    # purchase data lives on independently in ``llm_autofill_json``
+    # and the pay-period rollup.
+    property_id: Mapped[str | None] = mapped_column(
+        String,
+        ForeignKey("property.id", ondelete="SET NULL"),
+        nullable=True,
+    )
     # Empty-string default keeps the column NOT NULL without forcing
     # every seeder / API caller to thread ``note_md=""`` through —
     # mirrors ``work_engagement.notes_md`` (cd-4saj).
@@ -322,12 +342,15 @@ class ExpenseClaim(Base):
     # is recorded; empty-string default would hide the "decided but
     # reason omitted" case.
     decision_note_md: Mapped[str | None] = mapped_column(String, nullable=True)
-    # Soft-ref :class:`str` — per-claim reimbursement destination
-    # override. NULL falls back to the engagement's
-    # ``reimbursement_destination_id`` at payout time (§09 §"Per-claim
-    # override").
+    # Per-claim reimbursement destination override. NULL falls back
+    # to the engagement's ``reimbursement_destination_id`` at payout
+    # time (§09 §"Per-claim override"). RESTRICT — see the module
+    # docstring; once the override is set on an approved claim the
+    # destination row is audit-bearing.
     reimbursement_destination_id: Mapped[str | None] = mapped_column(
-        String, nullable=True
+        String,
+        ForeignKey("payout_destination.id", ondelete="RESTRICT"),
+        nullable=True,
     )
     # cd-9guk reimbursement snapshot — populated when the manager
     # marks the claim ``reimbursed``. NULL while the claim is still
@@ -474,11 +497,17 @@ class ExpenseLine(Base):
     # line write so the "sum of lines" invariant can ride an index.
     # See the class docstring for the invariant rule.
     line_total_cents: Mapped[int] = mapped_column(BigInteger, nullable=False)
-    # Soft-ref :class:`str` — links to an ``asset`` row for §21 TCO
-    # tracking. NULL when the line is not a capital-equipment
-    # purchase. FK promotion lands with cd-7rfu's service layer once
-    # the asset table is in place.
-    asset_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    # Real FK with ``ON DELETE SET NULL`` — cd-48c1 promoted the
+    # soft-ref now that ``asset`` (§21) has landed. NULL when the
+    # line is not a capital-equipment purchase. SET NULL because a
+    # deleted asset row must not sweep the expense ledger; the
+    # description + amount on this row are still meaningful for
+    # audit / reimbursement purposes.
+    asset_id: Mapped[str | None] = mapped_column(
+        String,
+        ForeignKey("asset.id", ondelete="SET NULL"),
+        nullable=True,
+    )
     source: Mapped[str] = mapped_column(String, nullable=False, default="manual")
     # Provenance bit — set ``true`` when a user mutates a row that
     # was originally ``source = 'ocr'``. The ``source`` column
@@ -557,10 +586,12 @@ class ExpenseAttachment(Base):
         nullable=False,
     )
     # Content-addressed blob reference (SHA-256 hash). Soft-ref —
-    # see the module docstring. The same hash may be referenced by
-    # multiple rows (same receipt re-used across claims), so keeping
-    # it blob-ref only preserves the content-addressed storage
-    # layer's dedup.
+    # see the module docstring. cd-48c1 explicitly defers the
+    # ``blob_hash`` → ``file.id`` FK promotion until the §02
+    # §"Shared tables" §"file" table lands. The same hash may be
+    # referenced by multiple rows (same receipt re-used across
+    # claims), so keeping it blob-ref only also preserves the
+    # content-addressed storage layer's dedup until that migration.
     blob_hash: Mapped[str] = mapped_column(String, nullable=False)
     kind: Mapped[str] = mapped_column(String, nullable=False, default="receipt")
     # ``pages`` is populated for multi-page PDFs (§09 §"Model").

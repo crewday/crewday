@@ -46,6 +46,7 @@ from app.adapters.db.expenses.repositories import (
     SqlAlchemyExpensesRepository,
 )
 from app.adapters.db.identity.models import User, canonicalise_email
+from app.adapters.db.places.models import Property
 from app.adapters.db.session import make_engine
 from app.adapters.db.workspace.models import WorkEngagement, Workspace
 from app.domain.expenses import (
@@ -306,6 +307,32 @@ def _grant(s: Session, *, workspace_id: str, user_id: str, grant_role: str) -> N
         )
     )
     s.flush()
+
+
+def _bootstrap_property(s: Session, *, property_id: str) -> str:
+    """Insert a workspace-agnostic :class:`Property` so claim FKs resolve.
+
+    cd-48c1 promoted ``expense_claim.property_id`` to a real FK; tests
+    that pin a claim to a property must seed the parent row first.
+    """
+    s.add(
+        Property(
+            id=property_id,
+            name="Villa Sud",
+            kind="residence",
+            address="1 Pool Way",
+            address_json={"line1": "1 Pool Way", "country": "FR"},
+            country="FR",
+            timezone="Europe/Paris",
+            tags_json=[],
+            welcome_defaults_json={},
+            property_notes_md="",
+            created_at=_PINNED,
+            updated_at=_PINNED,
+        )
+    )
+    s.flush()
+    return property_id
 
 
 def _bootstrap_engagement(
@@ -1401,7 +1428,7 @@ class TestListPending:
         ],
     ) -> None:
         worker_ctx, manager_ctx, _wid, _mid, eng_id, clock = manager_and_worker
-        prop_id = "01PROPABCDEFGHIJKLMNOPQRST"
+        prop_id = _bootstrap_property(session, property_id="01PROPABCDEFGHIJKLMNOPQRST")
         pinned = _create_and_submit(
             session, worker_ctx, eng_id, clock, property_id=prop_id
         )
