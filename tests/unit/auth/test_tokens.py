@@ -31,6 +31,7 @@ from sqlalchemy import Engine, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.adapters.db.audit.models import AuditLog
+from app.adapters.db.authz.models import RoleGrant
 from app.adapters.db.base import Base
 from app.adapters.db.identity.models import ApiToken
 from app.adapters.db.session import make_engine
@@ -38,9 +39,11 @@ from app.adapters.db.workspace.models import Workspace
 from app.auth.tokens import (
     _AGNOSTIC_WORKSPACE_ID,
     DelegatingUserArchived,
+    DelegatingUserInactive,
     InvalidToken,
     MintedToken,
     SubjectUserArchived,
+    SubjectUserInactive,
     TokenExpired,
     TokenKindInvalid,
     TokenRevoked,
@@ -126,6 +129,60 @@ def ctx(workspace: Workspace, user: object) -> WorkspaceContext:
         actor_grant_role="manager",
         actor_was_owner_member=True,
         audit_correlation_id=new_ulid(),
+    )
+
+
+def _seed_role_grant(
+    session: Session,
+    *,
+    workspace_id: str,
+    user_id: str,
+    grant_role: str = "worker",
+    revoked_at: datetime | None = None,
+) -> str:
+    """Seed one :class:`RoleGrant` row; return its id.
+
+    cd-ljvs makes the verifier consult ``role_grant.revoked_at IS
+    NULL`` for delegated / personal tokens — every verify-time test
+    on those kinds needs at least one live grant for the principal.
+    The helper takes ``revoked_at`` as a keyword so soft-retired
+    grants are also expressible (the inactive-gate tests below
+    seed both shapes to assert the predicate honours the filter).
+    """
+    grant_id = new_ulid()
+    with tenant_agnostic():
+        session.add(
+            RoleGrant(
+                id=grant_id,
+                workspace_id=workspace_id,
+                user_id=user_id,
+                grant_role=grant_role,
+                scope_property_id=None,
+                created_at=_PINNED,
+                created_by_user_id=None,
+                revoked_at=revoked_at,
+            )
+        )
+        session.flush()
+    return grant_id
+
+
+@pytest.fixture
+def live_grant(workspace: Workspace, user: object, db_session: Session) -> str:
+    """Seed one live ``role_grant`` for ``user`` in ``workspace``.
+
+    cd-ljvs: every test that exercises :func:`verify` against a
+    delegated or personal token needs at least one live grant for
+    the principal — without it the new liveness gate raises
+    :class:`DelegatingUserInactive` / :class:`SubjectUserInactive`
+    before returning. Returning the grant id keeps test bodies
+    free to revoke / mutate the row inline (the inactive-gate
+    tests below).
+    """
+    return _seed_role_grant(
+        db_session,
+        workspace_id=workspace.id,
+        user_id=user.id,  # type: ignore[attr-defined]
     )
 
 
@@ -1007,7 +1064,7 @@ class TestMintDelegated:
         assert row.scope_json == {}
 
     def test_delegated_token_verifies_with_delegate_fk(
-        self, db_session: Session, ctx: WorkspaceContext
+        self, db_session: Session, ctx: WorkspaceContext, live_grant: str
     ) -> None:
         """``verify`` returns kind + delegate_for_user_id on the happy path."""
         result = mint(
@@ -1160,7 +1217,7 @@ class TestMintPersonal:
         assert row.delegate_for_user_id is None
 
     def test_personal_token_verifies_with_null_workspace(
-        self, db_session: Session, user: object
+        self, db_session: Session, user: object, live_grant: str
     ) -> None:
         user_id = user.id  # type: ignore[attr-defined]
         result = mint(
@@ -1785,7 +1842,11 @@ class TestVerifyArchivedUser:
     """
 
     def test_delegated_verify_succeeds_for_live_user(
-        self, db_session: Session, ctx: WorkspaceContext, user: object
+        self,
+        db_session: Session,
+        ctx: WorkspaceContext,
+        user: object,
+        live_grant: str,
     ) -> None:
         """Sanity floor: a live (non-archived) delegating user verifies cleanly."""
         result = mint(
@@ -1807,7 +1868,7 @@ class TestVerifyArchivedUser:
         assert verified.delegate_for_user_id == ctx.actor_id
 
     def test_pat_verify_succeeds_for_live_user(
-        self, db_session: Session, user: object
+        self, db_session: Session, user: object, live_grant: str
     ) -> None:
         """Sanity floor: a live (non-archived) subject user verifies cleanly."""
         user_id = user.id  # type: ignore[attr-defined]
@@ -2007,7 +2068,11 @@ class TestVerifyArchivedUser:
             )
 
     def test_reinstating_user_clears_archive_gate(
-        self, db_session: Session, ctx: WorkspaceContext, user: object
+        self,
+        db_session: Session,
+        ctx: WorkspaceContext,
+        user: object,
+        live_grant: str,
     ) -> None:
         """Setting ``archived_at`` back to NULL re-enables the token (§03 reinstate).
 
@@ -2044,3 +2109,342 @@ class TestVerifyArchivedUser:
             now=_PINNED + timedelta(hours=3),
         )
         assert verified.kind == "delegated"
+
+
+class TestVerifyInactiveUser:
+    """``verify`` returns 401-equivalents when the principal has no live grants.
+
+    cd-ljvs / §03 "Delegated tokens" / "Personal access tokens": a
+    delegated token whose delegating user holds zero live
+    ``role_grant`` rows in the token's workspace returns 401
+    ``delegating_user_inactive``; same shape for a PAT whose subject
+    user holds zero live grants in any workspace —
+    ``subject_user_inactive``. The check sits AFTER the archive
+    gate so an archived user with no grants surfaces the
+    archive-shape error (the lower-level fact). cd-x1xh's
+    soft-retire columns are what made this enforceable: before
+    ``role_grant.revoked_at`` existed, "no live grants" looked
+    identical to "never granted" at the SQL level.
+    """
+
+    def test_delegated_verify_succeeds_with_live_grant_in_workspace(
+        self,
+        db_session: Session,
+        ctx: WorkspaceContext,
+        user: object,
+        live_grant: str,
+    ) -> None:
+        """Sanity floor: a live grant in the token's workspace verifies."""
+        result = mint(
+            db_session,
+            ctx,
+            user_id=ctx.actor_id,
+            label="del-live",
+            scopes={},
+            expires_at=_PINNED + timedelta(days=30),
+            kind="delegated",
+            delegate_for_user_id=ctx.actor_id,
+            now=_PINNED,
+        )
+        verified = verify(db_session, token=result.token, now=_PINNED)
+        assert verified.kind == "delegated"
+        assert verified.delegate_for_user_id == ctx.actor_id
+
+    def test_delegated_verify_rejects_user_with_only_revoked_grants(
+        self,
+        db_session: Session,
+        ctx: WorkspaceContext,
+        user: object,
+    ) -> None:
+        """Every grant in the workspace soft-retired ⇒ ``DelegatingUserInactive``."""
+        # Seed one grant and immediately mark it revoked — represents
+        # the soft-retire shape cd-x1xh writes on the revoke path.
+        _seed_role_grant(
+            db_session,
+            workspace_id=ctx.workspace_id,
+            user_id=ctx.actor_id,
+            revoked_at=_PINNED + timedelta(minutes=5),
+        )
+        result = mint(
+            db_session,
+            ctx,
+            user_id=ctx.actor_id,
+            label="del-inactive",
+            scopes={},
+            expires_at=_PINNED + timedelta(days=30),
+            kind="delegated",
+            delegate_for_user_id=ctx.actor_id,
+            now=_PINNED,
+        )
+        with pytest.raises(DelegatingUserInactive):
+            verify(
+                db_session,
+                token=result.token,
+                now=_PINNED + timedelta(hours=1),
+            )
+        # Token row stays untouched — only the principal's grants
+        # gate the verifier; revocation is the only path that flips
+        # the row itself.
+        row = db_session.get(ApiToken, result.key_id)
+        assert row is not None
+        assert row.revoked_at is None
+
+    def test_delegated_verify_rejects_when_live_grant_is_in_other_workspace(
+        self,
+        db_session: Session,
+        ctx: WorkspaceContext,
+        user: object,
+    ) -> None:
+        """Delegated check is per-workspace — a grant elsewhere doesn't unblock."""
+        # Live grant in a *sibling* workspace; revoked grant in the
+        # token's workspace. The delegated token's authority is
+        # anchored on its issuing workspace, so the sibling grant
+        # must NOT count.
+        sibling_ws_id = new_ulid()
+        sibling = Workspace(
+            id=sibling_ws_id,
+            slug="ws-sibling",
+            name="Sibling WS",
+            plan="free",
+            quota_json={},
+            created_at=_PINNED,
+        )
+        with tenant_agnostic():
+            db_session.add(sibling)
+            db_session.flush()
+        _seed_role_grant(
+            db_session,
+            workspace_id=sibling_ws_id,
+            user_id=ctx.actor_id,
+        )
+        _seed_role_grant(
+            db_session,
+            workspace_id=ctx.workspace_id,
+            user_id=ctx.actor_id,
+            revoked_at=_PINNED + timedelta(minutes=5),
+        )
+        result = mint(
+            db_session,
+            ctx,
+            user_id=ctx.actor_id,
+            label="del-sibling",
+            scopes={},
+            expires_at=_PINNED + timedelta(days=30),
+            kind="delegated",
+            delegate_for_user_id=ctx.actor_id,
+            now=_PINNED,
+        )
+        with pytest.raises(DelegatingUserInactive):
+            verify(
+                db_session,
+                token=result.token,
+                now=_PINNED + timedelta(hours=1),
+            )
+
+    def test_archived_user_with_no_grants_surfaces_archived(
+        self,
+        db_session: Session,
+        ctx: WorkspaceContext,
+        user: object,
+    ) -> None:
+        """Archive precedes inactive — both gates would fire, archive wins.
+
+        Spec orders the four error codes archive-first (the
+        lower-level fact). Reinstating clears the archive flag and
+        the verifier then re-evaluates liveness; if grants are
+        also missing, the agent gets ``delegating_user_inactive``
+        on the next call.
+        """
+        result = mint(
+            db_session,
+            ctx,
+            user_id=ctx.actor_id,
+            label="del-arch-no-grants",
+            scopes={},
+            expires_at=_PINNED + timedelta(days=30),
+            kind="delegated",
+            delegate_for_user_id=ctx.actor_id,
+            now=_PINNED,
+        )
+        # Archive AND seed only a revoked grant — both gates would
+        # fire, but archive runs first.
+        user.archived_at = _PINNED + timedelta(minutes=5)  # type: ignore[attr-defined]
+        _seed_role_grant(
+            db_session,
+            workspace_id=ctx.workspace_id,
+            user_id=ctx.actor_id,
+            revoked_at=_PINNED + timedelta(minutes=5),
+        )
+        with pytest.raises(DelegatingUserArchived):
+            verify(
+                db_session,
+                token=result.token,
+                now=_PINNED + timedelta(hours=1),
+            )
+
+    def test_pat_verify_succeeds_with_live_grant_anywhere(
+        self,
+        db_session: Session,
+        user: object,
+        live_grant: str,
+    ) -> None:
+        """Sanity floor: a live grant in any workspace lets the PAT verify."""
+        user_id = user.id  # type: ignore[attr-defined]
+        result = mint(
+            db_session,
+            None,
+            user_id=user_id,
+            label="pat-live",
+            scopes={"me.tasks:read": True},
+            expires_at=_PINNED + timedelta(days=90),
+            kind="personal",
+            subject_user_id=user_id,
+            now=_PINNED,
+        )
+        verified = verify(db_session, token=result.token, now=_PINNED)
+        assert verified.kind == "personal"
+        assert verified.subject_user_id == user_id
+
+    def test_pat_verify_rejects_user_with_only_revoked_grants_everywhere(
+        self,
+        db_session: Session,
+        workspace: Workspace,
+        user: object,
+    ) -> None:
+        """Every grant soft-retired across every workspace ⇒ ``SubjectUserInactive``."""
+        user_id = user.id  # type: ignore[attr-defined]
+        # Two workspaces, both with only revoked grants — the PAT
+        # check is workspace-agnostic, so both must be soft-retired
+        # for the gate to fire.
+        sibling_ws_id = new_ulid()
+        sibling = Workspace(
+            id=sibling_ws_id,
+            slug="ws-pat-sib",
+            name="Sib",
+            plan="free",
+            quota_json={},
+            created_at=_PINNED,
+        )
+        with tenant_agnostic():
+            db_session.add(sibling)
+            db_session.flush()
+        _seed_role_grant(
+            db_session,
+            workspace_id=workspace.id,
+            user_id=user_id,
+            revoked_at=_PINNED + timedelta(minutes=5),
+        )
+        _seed_role_grant(
+            db_session,
+            workspace_id=sibling_ws_id,
+            user_id=user_id,
+            revoked_at=_PINNED + timedelta(minutes=5),
+        )
+        result = mint(
+            db_session,
+            None,
+            user_id=user_id,
+            label="pat-inactive",
+            scopes={"me.tasks:read": True},
+            expires_at=_PINNED + timedelta(days=90),
+            kind="personal",
+            subject_user_id=user_id,
+            now=_PINNED,
+        )
+        with pytest.raises(SubjectUserInactive):
+            verify(
+                db_session,
+                token=result.token,
+                now=_PINNED + timedelta(hours=1),
+            )
+
+    def test_pat_verify_succeeds_when_grant_is_live_in_any_workspace(
+        self,
+        db_session: Session,
+        workspace: Workspace,
+        user: object,
+    ) -> None:
+        """PAT check is workspace-agnostic — a live grant anywhere unblocks.
+
+        Seed a *revoked* grant in the home workspace and a *live*
+        grant in a sibling workspace. The PAT does not pin a
+        workspace at issue time, so the sibling grant suffices
+        even though the home workspace's grants are all
+        soft-retired.
+        """
+        user_id = user.id  # type: ignore[attr-defined]
+        sibling_ws_id = new_ulid()
+        sibling = Workspace(
+            id=sibling_ws_id,
+            slug="ws-pat-live-sib",
+            name="LiveSib",
+            plan="free",
+            quota_json={},
+            created_at=_PINNED,
+        )
+        with tenant_agnostic():
+            db_session.add(sibling)
+            db_session.flush()
+        _seed_role_grant(
+            db_session,
+            workspace_id=workspace.id,
+            user_id=user_id,
+            revoked_at=_PINNED + timedelta(minutes=5),
+        )
+        _seed_role_grant(
+            db_session,
+            workspace_id=sibling_ws_id,
+            user_id=user_id,
+        )
+        result = mint(
+            db_session,
+            None,
+            user_id=user_id,
+            label="pat-cross-ws",
+            scopes={"me.tasks:read": True},
+            expires_at=_PINNED + timedelta(days=90),
+            kind="personal",
+            subject_user_id=user_id,
+            now=_PINNED,
+        )
+        verified = verify(db_session, token=result.token, now=_PINNED)
+        assert verified.kind == "personal"
+        assert verified.subject_user_id == user_id
+
+    def test_scoped_token_unaffected_by_grant_inactivity(
+        self,
+        db_session: Session,
+        ctx: WorkspaceContext,
+        user: object,
+    ) -> None:
+        """Scoped tokens carry their own authority — grant liveness doesn't gate them.
+
+        The §03 inactive gate is delegated / PAT specific. A scoped
+        token's authority is the explicit ``scope_json`` set, not a
+        delegating user's grants. Soft-retiring every grant on the
+        minting user must NOT retroactively disable a scoped token —
+        revocation is the only valid kill path (matches the existing
+        ``test_scoped_token_unaffected_by_user_archive`` precedent).
+        """
+        _seed_role_grant(
+            db_session,
+            workspace_id=ctx.workspace_id,
+            user_id=ctx.actor_id,
+            revoked_at=_PINNED + timedelta(minutes=5),
+        )
+        result = mint(
+            db_session,
+            ctx,
+            user_id=ctx.actor_id,
+            label="scoped-inactive",
+            scopes={"tasks:read": True},
+            expires_at=_PINNED + timedelta(days=90),
+            now=_PINNED,
+        )
+        verified = verify(
+            db_session,
+            token=result.token,
+            now=_PINNED + timedelta(hours=1),
+        )
+        assert verified.kind == "scoped"
+        assert verified.scopes == {"tasks:read": True}

@@ -78,8 +78,10 @@ from app.auth.session import (
 from app.auth.session_cookie import DEV_SESSION_COOKIE_NAME
 from app.auth.tokens import (
     DelegatingUserArchived,
+    DelegatingUserInactive,
     InvalidToken,
     SubjectUserArchived,
+    SubjectUserInactive,
     TokenExpired,
     TokenRevoked,
 )
@@ -349,21 +351,32 @@ def _not_found(request: Request) -> JSONResponse:
 
 
 def _archived_user_401(error_code: str) -> JSONResponse:
-    """Return the canonical 401 shape for an archived delegating / subject user.
+    """Return the canonical 401 shape for a deactivated delegating / subject user.
 
     §03 "Delegated tokens" / "Personal access tokens" both pin a
     ``401`` with a clear message when the delegating / subject user
-    is archived — distinct from the constant-time 404 the middleware
-    emits for "unknown slug / not a member" so a token holder sees
-    "you ARE authenticated but the human you act for is gone" rather
-    than the opaque enumeration shield. The error code is the typed
-    discriminator (``delegating_user_archived`` /
-    ``subject_user_archived``) the agent / SDK surfaces in its own UI.
+    has been deactivated — distinct from the constant-time 404 the
+    middleware emits for "unknown slug / not a member" so a token
+    holder sees "you ARE authenticated but the human you act for is
+    gone" rather than the opaque enumeration shield. Four typed
+    discriminators ride this envelope:
+
+    * ``delegating_user_archived`` (cd-et6y) — delegated token's
+      delegating user has ``archived_at IS NOT NULL``.
+    * ``subject_user_archived`` (cd-et6y) — PAT's subject user has
+      ``archived_at IS NOT NULL``.
+    * ``delegating_user_inactive`` (cd-ljvs) — delegated token's
+      delegating user holds zero live ``role_grant`` rows in the
+      token's workspace.
+    * ``subject_user_inactive`` (cd-ljvs) — PAT's subject user holds
+      zero live ``role_grant`` rows in any workspace.
+
+    The agent / SDK surfaces ``error_code`` in its own UI so the
+    operator can route the recovery (reinstate vs re-grant).
 
     The envelope is the legacy ``{"error": <code>, "detail": null}``
-    shape spec §03 names by field (``error = "delegating_user_archived"``
-    / ``error = "subject_user_archived"``). It deliberately diverges
-    from :func:`_not_found`'s RFC 7807 ``problem+json`` envelope —
+    shape spec §03 names by field. It deliberately diverges from
+    :func:`_not_found`'s RFC 7807 ``problem+json`` envelope —
     migrating this 401 to ``problem+json`` is its own follow-up
     because §03 contracts the ``error`` field name, not the §12
     ``type`` URI. We do not carry the user_id in ``detail`` — even
@@ -410,17 +423,21 @@ def resolve_actor(
     resolver plumb-testable (``session.validate`` uses it for the
     pepper subkey).
 
-    **Raises** :class:`DelegatingUserArchived` or
-    :class:`SubjectUserArchived` (cd-et6y) when a delegated /
-    personal-access token verifies cleanly but its delegating /
-    subject :class:`User` row carries a non-NULL ``archived_at``.
-    Spec §03 "Delegated tokens" / "Personal access tokens" pin a
-    ``401`` with a typed error code for that case — distinct from
-    the constant-time 404 the other failure paths collapse into,
-    because the agent has proven knowledge of the secret and needs
-    a clear "the human you act for is archived; reinstate them"
-    signal. The middleware catches both at :meth:`dispatch` and
-    emits the matching 401 envelope.
+    **Raises** :class:`DelegatingUserArchived`,
+    :class:`SubjectUserArchived` (cd-et6y),
+    :class:`DelegatingUserInactive`, or :class:`SubjectUserInactive`
+    (cd-ljvs) when a delegated / personal-access token verifies
+    cleanly but its delegating / subject :class:`User` row carries
+    a non-NULL ``archived_at`` (archived) or holds no live
+    ``role_grant`` rows (inactive — every grant has been
+    soft-retired with ``revoked_at``). Spec §03 "Delegated tokens"
+    / "Personal access tokens" pins a ``401`` with a typed error
+    code for both cases — distinct from the constant-time 404 the
+    other failure paths collapse into, because the agent has
+    proven knowledge of the secret and needs a clear "the human
+    you act for is archived / has lost every grant; fix that and
+    the token works again" signal. The middleware catches all four
+    at :meth:`dispatch` and emits the matching 401 envelope.
 
     Other exceptions bubble; the :class:`InvalidToken` /
     :class:`SessionInvalid` / ... tree is caught narrowly.
@@ -435,10 +452,11 @@ def resolve_actor(
                 # Every "is this a real token?" failure collapses to
                 # "no actor" — the middleware cannot distinguish them
                 # at the wire without leaking. Liveness errors
-                # (DelegatingUserArchived / SubjectUserArchived) are
+                # (DelegatingUserArchived / SubjectUserArchived /
+                # DelegatingUserInactive / SubjectUserInactive) are
                 # NOT caught here on purpose: they propagate so the
                 # middleware can emit the spec-mandated 401 with a
-                # typed error code (cd-et6y, §03).
+                # typed error code (cd-et6y + cd-ljvs, §03).
                 return None
             return ActorIdentity(
                 user_id=verified.user_id,
@@ -904,6 +922,45 @@ class WorkspaceContextMiddleware(BaseHTTPMiddleware):
                 outcome="subject_user_archived",
             )
             response = _archived_user_401("subject_user_archived")
+            response.headers[CORRELATION_ID_HEADER] = correlation_id
+            return response
+        except DelegatingUserInactive:
+            # cd-ljvs / §03 "Delegated tokens": secret verified, user
+            # not archived, but the human has no live ``role_grant``
+            # row in the token's workspace — every grant has been
+            # soft-retired. 401 with the typed code so the agent
+            # surfaces "you need a fresh grant", not the opaque 404.
+            _log_tenancy_event(
+                slug=_parse_scoped_path(path),
+                workspace_id=None,
+                actor_id=None,
+                actor_kind=None,
+                token_id=None,
+                session_id=None,
+                correlation_id=correlation_id,
+                skip_path=False,
+                outcome="delegating_user_inactive",
+            )
+            response = _archived_user_401("delegating_user_inactive")
+            response.headers[CORRELATION_ID_HEADER] = correlation_id
+            return response
+        except SubjectUserInactive:
+            # cd-ljvs / §03 "Personal access tokens": same shape as
+            # the delegated-inactive branch but PAT-side (workspace-
+            # agnostic — every workspace has zero live grants for
+            # this subject).
+            _log_tenancy_event(
+                slug=_parse_scoped_path(path),
+                workspace_id=None,
+                actor_id=None,
+                actor_kind=None,
+                token_id=None,
+                session_id=None,
+                correlation_id=correlation_id,
+                skip_path=False,
+                outcome="subject_user_inactive",
+            )
+            response = _archived_user_401("subject_user_inactive")
             response.headers[CORRELATION_ID_HEADER] = correlation_id
             return response
 

@@ -482,6 +482,26 @@ class TestTokenPrincipal:
             admin_id = _seed_user(s, tag="depl-admin-deleg")
             _grant_deployment_admin(s, user_id=admin_id)
             workspace_id = _seed_workspace(s, slug="deleg-ws")
+            # cd-ljvs: ``verify()`` refuses a delegated token whose
+            # delegating user has zero live ``role_grant`` rows in the
+            # token's workspace. The deployment-scope grant above sits
+            # at ``workspace_id IS NULL`` (deployment partition) so
+            # plant a workspace-scoped grant too — this mirrors the
+            # realistic shape of a deployment admin who also holds a
+            # workspace seat (so the workspace surface admits them on
+            # ordinary endpoints, not just the /admin tree).
+            with tenant_agnostic():
+                s.add(
+                    RoleGrant(
+                        id=new_ulid(),
+                        workspace_id=workspace_id,
+                        user_id=admin_id,
+                        grant_role="manager",
+                        scope_kind="workspace",
+                        created_at=_PINNED,
+                    )
+                )
+                s.flush()
             s.commit()
 
         token = _mint_delegated_token(

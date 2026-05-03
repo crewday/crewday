@@ -371,10 +371,20 @@ class TestAuthorityFollowsUser:
         with TestClient(app, raise_server_exceptions=False) as client:
             headers = {"Authorization": f"Bearer {minted.token}"}
 
-            # 1) No grant — 403.
+            # 1) No grant — 401 ``delegating_user_inactive``.
+            #    cd-ljvs: the verifier refuses the token before the
+            #    action catalog ever runs because the delegating user
+            #    holds zero live grants in the workspace. Pre-cd-ljvs
+            #    this returned 403 ``permission_denied`` from the
+            #    action-catalog seam; spec §03 "Delegated tokens"
+            #    pins the 401 verify-time gate, which is what the
+            #    agent now sees.
             r = client.get("/w/del-auth/api/v1/protected", headers=headers)
-            assert r.status_code == 403, r.text
-            assert r.json()["detail"]["error"] == "permission_denied"
+            assert r.status_code == 401, r.text
+            assert r.json() == {
+                "error": "delegating_user_inactive",
+                "detail": None,
+            }
 
             # 2) Grant the outsider 'manager' — same token, same call,
             #    now passes. No re-mint, no token round-trip.
@@ -388,7 +398,11 @@ class TestAuthorityFollowsUser:
             assert r.status_code == 200, r.text
             assert r.json() == {"status": "allowed"}
 
-            # 3) Revoke the grant — same token denies again.
+            # 3) Revoke the grant — same token denies again with the
+            #    cd-ljvs verify-time gate (``_revoke_role`` here hard-
+            #    deletes; in production cd-x1xh's soft-revoke shape
+            #    sets ``revoked_at`` instead. Both shapes collapse
+            #    "no live grants" to the same 401).
             _revoke_role(
                 session_factory,
                 workspace_id=ws_id,
@@ -408,8 +422,11 @@ class TestAuthorityFollowsUser:
                 assert s.get(RoleGrant, grant_id) is None
 
             r = client.get("/w/del-auth/api/v1/protected", headers=headers)
-            assert r.status_code == 403, r.text
-            assert r.json()["detail"]["error"] == "permission_denied"
+            assert r.status_code == 401, r.text
+            assert r.json() == {
+                "error": "delegating_user_inactive",
+                "detail": None,
+            }
 
     def test_scoped_token_authority_unaffected_by_user_grants(
         self,

@@ -45,6 +45,7 @@ from app.domain.identity.ports import (
     RoleGrantRow,
     RoleGrantUserNotFoundError,
 )
+from app.tenancy import tenant_agnostic
 
 __all__ = [
     "SqlAlchemyPermissionGroupRepository",
@@ -344,6 +345,59 @@ class SqlAlchemyRoleGrantRepository(RoleGrantRepository):
             .limit(1)
         )
         return self._session.scalars(stmt).first() is not None
+
+    def has_live_grants_in_workspace(self, *, workspace_id: str, user_id: str) -> bool:
+        # cd-ljvs: token verifier asks "does this user still hold
+        # *any* live grant in this workspace?" before admitting a
+        # delegated token (§03 "Delegated tokens"). ``revoked_at IS
+        # NULL`` is the soft-retire predicate set by cd-x1xh; we
+        # don't filter on ``grant_role`` because the spec rule is
+        # "loses every non-revoked grant", not "every manager grant".
+        # ``role_grant`` is registered as workspace-scoped, but the
+        # token verifier (the primary caller of this method) runs
+        # before any :class:`WorkspaceContext` exists — without
+        # ``tenant_agnostic`` the ORM filter would raise
+        # :class:`TenantFilterMissing` (it fails closed on missing
+        # ctx, see :mod:`app.tenancy.orm_filter`). The explicit
+        # ``workspace_id`` predicate in the WHERE clause is the
+        # actual tenant gate; the gate-disable here is just removing
+        # the now-redundant filter that would otherwise misfire.
+        stmt = select(
+            exists().where(
+                RoleGrant.workspace_id == workspace_id,
+                RoleGrant.user_id == user_id,
+                RoleGrant.revoked_at.is_(None),
+            )
+        )
+        # justification: pre-context verifier probe — the explicit
+        # ``workspace_id`` predicate above is the actual tenant gate.
+        with tenant_agnostic():
+            return bool(self._session.scalar(stmt))
+
+    def has_live_grants_anywhere(self, *, user_id: str) -> bool:
+        # cd-ljvs: PAT verifier asks "does this subject still hold
+        # *any* live grant in *any* workspace?" before admitting a
+        # personal access token (§03 "Personal access tokens"). PATs
+        # are workspace-agnostic at issue time so the probe is too.
+        # ``role_grant`` is registered as workspace-scoped, so we
+        # disable the ORM tenant filter for this read — the verifier
+        # runs before any :class:`WorkspaceContext` exists, and a
+        # filter against ``current_workspace_id()`` would silently
+        # narrow the predicate to the deployment partition (where
+        # ``workspace_id IS NULL``) and miss every live workspace
+        # grant. ``tenant_agnostic`` here mirrors the same gate the
+        # token verifier wraps its own ``ApiToken`` / ``User`` reads
+        # in.
+        stmt = select(
+            exists().where(
+                RoleGrant.user_id == user_id,
+                RoleGrant.revoked_at.is_(None),
+            )
+        )
+        # justification: pre-context PAT verifier probe — the check
+        # is workspace-agnostic by design (PATs carry no workspace).
+        with tenant_agnostic():
+            return bool(self._session.scalar(stmt))
 
     def is_property_in_workspace(self, *, workspace_id: str, property_id: str) -> bool:
         stmt = select(

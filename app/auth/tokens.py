@@ -104,6 +104,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.adapters.db.audit.models import AuditLog
+from app.adapters.db.authz.repositories import SqlAlchemyRoleGrantRepository
 from app.adapters.db.identity.models import ApiToken, User
 from app.audit import write_audit
 from app.auth.audit import AGNOSTIC_WORKSPACE_ID as _AGNOSTIC_WORKSPACE_ID
@@ -117,9 +118,11 @@ __all__ = [
     "PERSONAL_SCOPE_PREFIX",
     "SCOPED_DEFAULT_TTL_DAYS",
     "DelegatingUserArchived",
+    "DelegatingUserInactive",
     "InvalidToken",
     "MintedToken",
     "SubjectUserArchived",
+    "SubjectUserInactive",
     "TokenAuditEntry",
     "TokenExpired",
     "TokenKind",
@@ -489,6 +492,56 @@ class SubjectUserArchived(ValueError):
     ``error = "subject_user_archived"`` instead of the opaque "not a
     real token" 404 — the user needs to be reinstated, not re-mint
     a fresh token.
+    """
+
+
+class DelegatingUserInactive(ValueError):
+    """Delegated token's delegating user has no live ``role_grant`` here.
+
+    401-equivalent. Raised by :func:`verify` when the row's
+    ``kind == 'delegated'`` and the delegating user holds **zero**
+    role grants with ``revoked_at IS NULL`` in the token's workspace
+    (§03 "Delegated tokens": "If the delegating user is archived,
+    globally deactivated, or loses every non-revoked grant, requests
+    with the token return 401 with a clear message"). cd-x1xh's
+    soft-retire columns make this observable: a user whose every
+    grant in the workspace has been revoked is materially distinct
+    from one who never held one. The verifier checks
+    workspace-scoped liveness — a live grant in a *sibling*
+    workspace does not unblock this token because the delegated
+    token's authority is anchored on the workspace it was minted in.
+
+    Distinct from :class:`InvalidToken` / :class:`TokenRevoked` /
+    :class:`TokenExpired` / :class:`DelegatingUserArchived` so the
+    HTTP layer can return ``error = "delegating_user_inactive"``
+    instead of the opaque "not a real token" 404 — the agent gets a
+    clear signal that re-minting won't help; granting the human a
+    fresh role grant in the workspace will. Ordered AFTER the
+    archive check so an archived user with no grants surfaces as
+    ``delegating_user_archived`` (the older / lower-level fact).
+    """
+
+
+class SubjectUserInactive(ValueError):
+    """PAT subject user holds no live ``role_grant`` in any workspace.
+
+    401-equivalent. Raised by :func:`verify` when the row's
+    ``kind == 'personal'`` and the subject user holds **zero**
+    role grants with ``revoked_at IS NULL`` across every workspace
+    (§03 "Personal access tokens": "If the subject user is archived,
+    globally deactivated, or loses every non-revoked grant in every
+    workspace, PAT requests return 401 with a clear message"). PATs
+    are workspace-agnostic at issue time (``workspace_id IS NULL``)
+    so the liveness check is too — a live grant in *any* workspace
+    keeps the token usable; only "no live grants anywhere" gates it.
+
+    Distinct from :class:`InvalidToken` / :class:`TokenRevoked` /
+    :class:`TokenExpired` / :class:`SubjectUserArchived` so the HTTP
+    layer can return ``error = "subject_user_inactive"`` instead of
+    the opaque "not a real token" 404 — granting the user a fresh
+    role grant in any workspace reinstates the PAT. Ordered AFTER
+    the archive check so an archived subject with no grants
+    surfaces as ``subject_user_archived``.
     """
 
 
@@ -1487,8 +1540,8 @@ def verify(
        :class:`InvalidToken` — wrapping argon2's
        :class:`VerifyMismatchError` so the caller sees the domain
        vocabulary only.
-    6. **Delegating / subject liveness** (cd-et6y, §03 "Delegated
-       tokens" / "Personal access tokens"):
+    6. **Delegating / subject liveness** (cd-et6y + cd-ljvs, §03
+       "Delegated tokens" / "Personal access tokens"):
 
        * ``kind == 'delegated'`` and
          :attr:`User.archived_at` is set on the row's
@@ -1496,22 +1549,31 @@ def verify(
        * ``kind == 'personal'`` and
          :attr:`User.archived_at` is set on the row's
          ``subject_user_id`` → :class:`SubjectUserArchived`.
+       * ``kind == 'delegated'`` and the delegating user holds zero
+         live ``role_grant`` rows (``revoked_at IS NULL``) in the
+         token's workspace → :class:`DelegatingUserInactive`
+         (cd-ljvs).
+       * ``kind == 'personal'`` and the subject user holds zero
+         live ``role_grant`` rows across **every** workspace →
+         :class:`SubjectUserInactive` (cd-ljvs).
 
-       The HTTP layer maps both to 401 with a typed error code
-       (``delegating_user_archived`` / ``subject_user_archived``) so
+       The HTTP layer maps all four to 401 with a typed error code
+       (``delegating_user_archived`` / ``subject_user_archived`` /
+       ``delegating_user_inactive`` / ``subject_user_inactive``) so
        the agent gets a clear signal that re-minting won't help —
-       the human owner / subject has to be reinstated. Run AFTER
-       the secret verification so a probe with a random secret
-       still collapses to :class:`InvalidToken` (we don't leak
-       "this user is archived" to a caller who never proved
-       knowledge of the secret).
-
-       The "loses every non-revoked grant" half of the §03 rule
-       lands in a follow-up — the v1 ``role_grant`` schema has no
-       ``revoked_at`` column (revocation is a hard DELETE today,
-       see :mod:`app.adapters.db.authz.models`), so "no live
-       grants" today is "no rows" and is materially different from
-       the soft-retire shape the spec eventually wants.
+       the human owner / subject needs to be reinstated or
+       re-granted. Run AFTER the secret verification so a probe
+       with a random secret still collapses to :class:`InvalidToken`
+       (we don't leak "this user is archived / inactive" to a
+       caller who never proved knowledge of the secret). Archive
+       checks run BEFORE the inactivity checks so an archived user
+       with no live grants surfaces as ``…_archived`` (the
+       lower-level fact); reinstating clears the archive gate, and
+       the verifier then re-evaluates liveness on the next request.
+       The cd-ljvs half became enforceable once cd-x1xh added the
+       ``role_grant.revoked_at`` soft-retire columns — before that,
+       "no live grants" was indistinguishable from "never granted"
+       at the SQL level.
     7. Debounced ``last_used_at`` bump — see module docstring.
 
     Caller's UoW owns the transaction; this function never commits.
@@ -1556,11 +1618,12 @@ def verify(
         # an unknown ``key_id`` at the wire.
         raise InvalidToken(f"token {key_id!r} secret did not verify") from exc
 
-    # Liveness gate (cd-et6y). Run AFTER the secret check so a probe
-    # with a random secret still collapses to :class:`InvalidToken`
-    # rather than leaking that "this token's user is archived".
-    # ``scoped`` tokens do not consult either FK — their authority is
-    # the explicit scope set on the row, not a delegating user.
+    # Liveness gate (cd-et6y + cd-ljvs). Run AFTER the secret check
+    # so a probe with a random secret still collapses to
+    # :class:`InvalidToken` rather than leaking that "this token's
+    # user is archived / inactive". ``scoped`` tokens do not consult
+    # either FK — their authority is the explicit scope set on the
+    # row, not a delegating user.
     kind = _narrow_kind(row.kind)
     if (
         kind == "delegated"
@@ -1578,6 +1641,38 @@ def verify(
         raise SubjectUserArchived(
             f"token {key_id!r} subject user {row.subject_user_id!r} is archived"
         )
+
+    # cd-ljvs: live-grant gate. Order is archive-first then
+    # inactive-second so an archived user with no grants always
+    # reports the archive-shape error (the lower-level fact);
+    # reinstating clears the archive flag and the verifier then
+    # re-evaluates liveness on the next request. The role-grant repo
+    # is constructed inline because :func:`verify` takes a session,
+    # not a repo seam — it is on the per-request hot path so the
+    # cheapest probe (``EXISTS`` on the partial-unique index) is
+    # what we want here.
+    if (
+        kind == "delegated"
+        and row.delegate_for_user_id is not None
+        and row.workspace_id is not None
+    ):
+        repo = SqlAlchemyRoleGrantRepository(session)
+        if not repo.has_live_grants_in_workspace(
+            workspace_id=row.workspace_id,
+            user_id=row.delegate_for_user_id,
+        ):
+            raise DelegatingUserInactive(
+                f"token {key_id!r} delegates for user "
+                f"{row.delegate_for_user_id!r} who holds no live "
+                f"grants in workspace {row.workspace_id!r}"
+            )
+    if kind == "personal" and row.subject_user_id is not None:
+        repo = SqlAlchemyRoleGrantRepository(session)
+        if not repo.has_live_grants_anywhere(user_id=row.subject_user_id):
+            raise SubjectUserInactive(
+                f"token {key_id!r} subject user "
+                f"{row.subject_user_id!r} holds no live grants in any workspace"
+            )
 
     # Debounced best-effort update. We don't write to audit for this
     # — the /tokens UI reads ``last_used_at`` directly from the row

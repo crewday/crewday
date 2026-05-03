@@ -254,6 +254,8 @@ def _resolve_token_principal(
         auth_tokens.TokenRevoked,
         auth_tokens.DelegatingUserArchived,
         auth_tokens.SubjectUserArchived,
+        auth_tokens.DelegatingUserInactive,
+        auth_tokens.SubjectUserInactive,
     ):
         return None
 

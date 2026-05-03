@@ -705,16 +705,26 @@ Key properties:
   reassignment), the delegated token's effective permissions change
   immediately.
 - If the delegating user is archived, globally deactivated, or loses
-  every non-revoked grant, requests with the token return `401`
-  with `error = "delegating_user_archived"`. The verifier
-  (`app.auth.tokens.verify`) reads `users.archived_at` on every
-  request and raises a typed `DelegatingUserArchived` error which
-  the tenancy middleware maps to the 401 envelope; reinstating the
-  user (clearing `archived_at` back to NULL) restores the token.
-  The "loses every non-revoked grant" half lands when the
-  `role_grant` table grows a `revoked_at` column (see §02
-  follow-ups); until then "non-archived grant" == "row exists" and
-  the verifier only enforces the archive half.
+  every non-revoked grant in the token's workspace, requests with
+  the token return `401` with one of two typed error codes:
+  - `error = "delegating_user_archived"` when
+    `users.archived_at IS NOT NULL` for the delegating user.
+    Reinstating the user (clearing `archived_at` back to NULL)
+    restores the token.
+  - `error = "delegating_user_inactive"` when the delegating user
+    holds zero `role_grant` rows with `revoked_at IS NULL` in the
+    token's workspace (every grant has been soft-retired by
+    `cd-x1xh`'s soft-revoke flow). Granting the user a fresh role
+    in the workspace restores the token. The check is workspace-
+    scoped: a live grant in a *sibling* workspace does not unblock
+    this token because the delegated token's authority is anchored
+    on its issuing workspace.
+
+  The archive check runs first so an archived user with no live
+  grants surfaces as `delegating_user_archived` (the lower-level
+  fact). Both raise typed errors out of the verifier
+  (`app.auth.tokens.verify`) which the tenancy middleware maps to
+  the 401 envelope.
 - A delegated token can only be created by a **passkey session** — it
   cannot be created by another token (no transitive delegation). The
   mint route refuses every non-session caller (token-presented or
@@ -794,17 +804,24 @@ Key properties:
   actions"), not an action-catalog entry.
 - If the subject user is archived, globally deactivated, or loses
   every non-revoked grant in every workspace, PAT requests return
-  `401` with `error = "subject_user_archived"`. The verifier
-  (`app.auth.tokens.verify`) reads `users.archived_at` on every
-  request and raises a typed `SubjectUserArchived` error which the
-  tenancy middleware maps to the 401 envelope. Reinstating the
-  user reinstates their PATs only if they survived archive (spec
-  is archive-preserves-rows; `users.archived_at` is set, the
-  token stays but returns 401 until the archive flag clears). The
-  "loses every non-revoked grant" half lands when `role_grant`
-  grows a `revoked_at` column (same follow-up as the delegated
-  case above); until then the verifier enforces only the archive
-  half.
+  `401` with one of two typed error codes:
+  - `error = "subject_user_archived"` when
+    `users.archived_at IS NOT NULL` for the subject user.
+    Reinstating the user reinstates their PATs only if they
+    survived archive (spec is archive-preserves-rows;
+    `users.archived_at` is set, the token stays but returns 401
+    until the archive flag clears).
+  - `error = "subject_user_inactive"` when the subject user holds
+    zero `role_grant` rows with `revoked_at IS NULL` across every
+    workspace. Granting the user a fresh role in any workspace
+    reinstates the PAT — PATs are workspace-agnostic at issue time
+    (`workspace_id IS NULL`) so the liveness check is too.
+
+  The archive check runs first so an archived subject with no
+  live grants surfaces as `subject_user_archived` (the lower-level
+  fact). Both raise typed errors out of the verifier
+  (`app.auth.tokens.verify`) which the tenancy middleware maps to
+  the 401 envelope.
 - A PAT scoped to a workspace the user is no longer a member of
   returns `404 workspace_out_of_scope` — matching the behaviour
   of a scoped standalone token used against the wrong workspace.

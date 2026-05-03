@@ -542,3 +542,143 @@ class TestArchivedDelegatingSubjectUser:
         body = response.json()
         assert body["bound"] is True
         assert body["workspace_id"] == ws_id
+
+
+def _soft_revoke_all_grants(
+    session_factory: sessionmaker[Session], *, user_id: str, workspace_id: str | None
+) -> None:
+    """Soft-retire every live ``role_grant`` for ``user_id``.
+
+    cd-ljvs integration helper. Mirrors what ``cd-x1xh``'s
+    domain-side ``revoke()`` writes (``revoked_at`` + ``ended_on``)
+    without going through the owner-authority gate — the integration
+    test only cares about the resulting "no live grants" state.
+    Pass ``workspace_id=None`` to retire across every workspace
+    (PAT-shape) or a specific id to retire only one workspace's
+    grants (delegated-shape).
+    """
+    from app.adapters.db.authz.models import RoleGrant
+    from app.tenancy import tenant_agnostic
+
+    with session_factory() as s, tenant_agnostic():
+        stmt = s.query(RoleGrant).filter(
+            RoleGrant.user_id == user_id,
+            RoleGrant.revoked_at.is_(None),
+        )
+        if workspace_id is not None:
+            stmt = stmt.filter(RoleGrant.workspace_id == workspace_id)
+        now = datetime.now(UTC)
+        for row in stmt.all():
+            row.revoked_at = now
+            row.ended_on = now.date()
+        s.commit()
+
+
+class TestInactiveDelegatingSubjectUser:
+    """cd-ljvs — middleware emits 401 with the inactive-shape error code.
+
+    §03 "Delegated tokens" / "Personal access tokens": when the
+    delegating / subject user has lost every non-revoked grant
+    (cd-x1xh soft-retired every row), the bearer-token request
+    returns ``401`` with ``delegating_user_inactive`` /
+    ``subject_user_inactive`` — the agent gets a clear "grant a
+    fresh role" signal, distinct from the archived-user gate
+    above. Order: archive-first, then inactive — both gates would
+    fire when archived AND no grants, archive wins.
+    """
+
+    def test_delegated_token_inactive_user_returns_401(
+        self,
+        session_factory: sessionmaker[Session],
+        settings: Settings,
+        wire_default_uow: None,
+    ) -> None:
+        """Soft-retiring every grant in the workspace gates the token at 401."""
+        ws_id, user_id = _seed(
+            session_factory,
+            slug="int-del-inactive",
+            email="del-inactive@example.com",
+        )
+        with session_factory() as s:
+            ctx = WorkspaceContext(
+                workspace_id=ws_id,
+                workspace_slug="int-del-inactive",
+                actor_id=user_id,
+                actor_kind="user",
+                actor_grant_role="manager",
+                actor_was_owner_member=True,
+                audit_correlation_id=new_ulid(),
+            )
+            minted = mint_token(
+                s,
+                ctx,
+                user_id=user_id,
+                label="del-int-inactive",
+                scopes={},
+                expires_at=None,
+                kind="delegated",
+                delegate_for_user_id=user_id,
+                now=datetime.now(UTC),
+            )
+            s.commit()
+
+        # Soft-retire every live grant for the delegating user in
+        # the token's workspace. Mirrors cd-x1xh's domain revoke
+        # without going through the owner-authority gate.
+        _soft_revoke_all_grants(session_factory, user_id=user_id, workspace_id=ws_id)
+
+        app = _build_app()
+        with TestClient(app, raise_server_exceptions=False) as client:
+            response = client.get(
+                "/w/int-del-inactive/api/v1/ping",
+                headers={"Authorization": f"Bearer {minted.token}"},
+            )
+        assert response.status_code == 401
+        assert response.json() == {
+            "error": "delegating_user_inactive",
+            "detail": None,
+        }
+        assert CORRELATION_ID_HEADER in response.headers
+
+    def test_personal_token_inactive_user_returns_401(
+        self,
+        session_factory: sessionmaker[Session],
+        settings: Settings,
+        wire_default_uow: None,
+    ) -> None:
+        """Soft-retiring every grant across every workspace gates the PAT at 401."""
+        _ws_id, user_id = _seed(
+            session_factory,
+            slug="int-pat-inactive",
+            email="pat-inactive@example.com",
+        )
+        with session_factory() as s:
+            minted = mint_token(
+                s,
+                None,
+                user_id=user_id,
+                label="pat-int-inactive",
+                scopes={"me.tasks:read": True},
+                expires_at=None,
+                kind="personal",
+                subject_user_id=user_id,
+                now=datetime.now(UTC),
+            )
+            s.commit()
+
+        # PAT check is workspace-agnostic — retire across every
+        # workspace.
+        _soft_revoke_all_grants(session_factory, user_id=user_id, workspace_id=None)
+
+        app = _build_app()
+        with TestClient(app, raise_server_exceptions=False) as client:
+            response = client.get(
+                "/w/int-pat-inactive/api/v1/ping",
+                headers={"Authorization": f"Bearer {minted.token}"},
+            )
+        assert response.status_code == 401
+        assert response.json() == {
+            "error": "subject_user_inactive",
+            "detail": None,
+        }
+        assert CORRELATION_ID_HEADER in response.headers
