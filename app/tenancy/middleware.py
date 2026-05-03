@@ -171,6 +171,26 @@ SKIP_PATHS: frozenset[str] = frozenset(
         "/assets",
         "/styleguide",
         "/unsupported",
+        # Bare-host UI-preference cookie setters (see
+        # :mod:`app.api.preferences`). Public, unauthenticated — the
+        # cookies carry no authority (the SPA can spoof its own
+        # ``document.cookie`` regardless), and the sidebar writers use
+        # ``navigator.sendBeacon`` which cannot attach the ``X-CSRF``
+        # header the CSRF middleware would otherwise require. Skipping
+        # CSRF here too matches the mock implementation in
+        # ``mocks/app/main.py`` and keeps the writer surface honest.
+        #
+        # The ``/workspaces``, ``/agent``, and ``/nav`` namespaces
+        # could plausibly host future bare-host routes that DO carry
+        # authority (a workspace search, an agent capability probe, a
+        # nav config endpoint). Pin the skip prefixes to the exact
+        # cookie-setter sub-paths so a future sibling route doesn't
+        # silently inherit the CSRF bypass.
+        "/switch",
+        "/theme/set",
+        "/workspaces/switch",
+        "/agent/sidebar",
+        "/nav/sidebar",
     }
 )
 

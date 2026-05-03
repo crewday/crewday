@@ -107,6 +107,7 @@ from app.api.middleware import (
     RequestIdMiddleware,
     SecurityHeadersMiddleware,
 )
+from app.api.preferences import build_preferences_router
 from app.api.transport.correlation_id import CorrelationIdMiddleware
 from app.api.transport.sse import router as sse_router
 from app.api.v1 import (
@@ -954,6 +955,19 @@ def _mount_context_routers(app: FastAPI, *, settings: Settings) -> None:
     # AgentSidebar, not ``/api/v1/llm/agent``.
     app.include_router(build_agent_router(), prefix=scoped_prefix)
     app.include_router(build_chat_channel_bindings_router(), prefix=scoped_prefix)
+
+    # Bare-host UI-preference cookie setters (``/switch/{role}``,
+    # ``/theme/set/{value}``, ``/workspaces/switch/{wsid}``,
+    # ``/agent/sidebar/{state}``, ``/nav/sidebar/{state}``). Public,
+    # unauthenticated, no workspace context — these cookies are pure
+    # UI hints the SPA reads back from ``document.cookie`` to hydrate
+    # initial state. The matching path prefixes are listed in
+    # :data:`app.tenancy.middleware.SKIP_PATHS` so the tenancy
+    # middleware passes them through without slug resolution and the
+    # CSRF middleware skips the double-submit gate (the writers use
+    # ``navigator.sendBeacon`` which cannot send a custom header, and
+    # the cookies confer no authority — see the module docstring).
+    app.include_router(build_preferences_router())
 
     # Workspace-scoped SSE transport (``/w/<slug>/events``, cd-clz9).
     # Mounted outside the ``/api/v1`` tree because the SPA talks to

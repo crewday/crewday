@@ -521,6 +521,79 @@ class TestSkipPaths:
             response = client.get("/w/villa-sud/", follow_redirects=True)
         assert response.status_code == 200
 
+    def test_preference_cookie_setters_are_skip_paths(self) -> None:
+        """Bare-host UI-preference cookie setters bypass tenancy resolution.
+
+        Mirrors :mod:`app.api.preferences`: the five fire-and-forget
+        endpoints (`/switch/{role}`, `/theme/set/{value}`,
+        `/workspaces/switch/{wsid}`, `/agent/sidebar/{state}`,
+        `/nav/sidebar/{state}`) are public, unauthenticated, and must
+        not require a workspace context. The skip-prefix entries are
+        deliberately narrow (``/theme/set``, not ``/theme``) so a
+        future sibling route under the same namespace doesn't silently
+        inherit the bypass.
+        """
+        for entry in (
+            "/switch",
+            "/theme/set",
+            "/workspaces/switch",
+            "/agent/sidebar",
+            "/nav/sidebar",
+        ):
+            assert entry in SKIP_PATHS, (
+                f"preference cookie-setter prefix {entry} missing from SKIP_PATHS"
+            )
+
+        app = _build_app()
+
+        @app.post("/switch/{role}")
+        def switch_role(role: str) -> dict[str, object]:
+            return {"ok": True, "role": role, "bound": get_current() is not None}
+
+        @app.post("/theme/set/{value}")
+        def theme_set(value: str) -> dict[str, object]:
+            return {"ok": True, "value": value, "bound": get_current() is not None}
+
+        @app.post("/workspaces/switch/{wsid}")
+        def workspace_switch(wsid: str) -> dict[str, object]:
+            return {"ok": True, "wsid": wsid, "bound": get_current() is not None}
+
+        @app.post("/agent/sidebar/{state}")
+        def agent_sidebar(state: str) -> dict[str, object]:
+            return {"ok": True, "state": state, "bound": get_current() is not None}
+
+        @app.post("/nav/sidebar/{state}")
+        def nav_sidebar(state: str) -> dict[str, object]:
+            return {"ok": True, "state": state, "bound": get_current() is not None}
+
+        with _client(app) as client:
+            for path in (
+                "/switch/manager",
+                "/theme/set/dark",
+                "/workspaces/switch/01HW7XYZ",
+                "/agent/sidebar/collapsed",
+                "/nav/sidebar/open",
+            ):
+                response = client.post(path)
+                assert response.status_code == 200, path
+                assert response.json()["bound"] is False, path
+
+    def test_preference_skip_prefixes_are_narrow(self) -> None:
+        """Sibling routes under the same namespace stay tenancy-scoped.
+
+        Guards against a regression where someone widens the skip
+        prefix back to ``/theme``, ``/workspaces``, ``/agent``, or
+        ``/nav`` — those wider prefixes would silently bypass tenancy
+        + CSRF for any future bare-host route mounted under the same
+        namespace. The skip surface stays pinned to the cookie-setter
+        sub-paths that mirror :mod:`app.api.preferences`.
+        """
+        for wider in ("/theme", "/workspaces", "/agent", "/nav"):
+            assert wider not in SKIP_PATHS, (
+                f"{wider} must not be a top-level SKIP_PATHS entry — "
+                f"narrow it to the cookie-setter sub-path."
+            )
+
 
 # ---------------------------------------------------------------------------
 # Correlation id propagation

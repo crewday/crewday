@@ -71,6 +71,7 @@ const API_PATHS = [
   "/events",
   "/switch",
   "/theme",
+  "/workspaces/switch",
   "/agent",
   "/nav/sidebar",
   "/healthz",
