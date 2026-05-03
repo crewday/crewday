@@ -152,6 +152,8 @@ from app.util.ulid import new_ulid
 
 __all__ = [
     "AssetActionHook",
+    "ChecklistItemEvidenceView",
+    "ChecklistItemNotFound",
     "ChecklistRequiredResolver",
     "EvidenceContentTypeNotAllowed",
     "EvidenceGpsPayloadInvalid",
@@ -172,9 +174,11 @@ __all__ = [
     "SkipNotPermitted",
     "TaskNotFound",
     "TaskState",
+    "TaskTerminal",
     "TombstoneHook",
     "add_file_evidence",
     "add_note_evidence",
+    "attach_checklist_evidence",
     "cancel",
     "complete",
     "delete_evidence",
@@ -300,6 +304,26 @@ class TaskState:
     completed_at: datetime | None = None
     completed_by_user_id: str | None = None
     reason: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ChecklistItemEvidenceView:
+    """Snapshot of a :class:`ChecklistItem` row after evidence attachment.
+
+    Frozen + slotted so the API layer can reflect it into the
+    :class:`TaskChecklistItemPayload` wire shape without the risk of a
+    service caller mutating the payload post hoc. The fields mirror
+    the columns ``TaskChecklistItemPayload.from_row`` reads — keeping
+    the seam decoupled from the SQLAlchemy row.
+    """
+
+    id: str
+    task_id: str
+    label: str
+    requires_photo: bool
+    checked: bool
+    checked_at: datetime | None
+    evidence_blob_hash: str
 
 
 # ---------------------------------------------------------------------------
@@ -434,6 +458,32 @@ class EvidenceGpsPayloadInvalid(ValueError):
     contract keeps the stored bytes auditable and prevents abuse of
     the gps kind as a generic JSON drop box.
     """
+
+
+class ChecklistItemNotFound(LookupError):
+    """The checklist item id is not visible in the caller's workspace + task.
+
+    404-equivalent. Mirrors :class:`TaskNotFound`'s "collapse cross-tenant
+    reads to 404" rule (§14): an item belonging to a different task or
+    a different workspace is indistinguishable from a missing id.
+    """
+
+
+class TaskTerminal(ValueError):
+    """The parent task is in a terminal state — checklist evidence is locked.
+
+    409-equivalent. Mirrors the behaviour of the tick / untick route
+    (:func:`app.api.v1.tasks.occurrences.patch_task_checklist_item_route`)
+    so workers can't retroactively staple evidence onto a completed,
+    skipped, or cancelled task. Owners / managers hit the same gate —
+    a terminal task is immutable for everyone.
+    """
+
+    def __init__(self, state: str) -> None:
+        super().__init__(
+            f"checklist evidence cannot be attached while task state is {state!r}"
+        )
+        self.state = state
 
 
 # ---------------------------------------------------------------------------
@@ -1722,6 +1772,97 @@ def _validate_gps_payload(payload: bytes) -> dict[str, Any]:
     return document
 
 
+@dataclass(frozen=True, slots=True)
+class _StoredBlob:
+    """Outcome of the shared photo / file evidence storage helper.
+
+    Returned by :func:`_validate_and_store_file_payload` so callers can
+    audit both the **sniffed** verdict (what bytes actually landed) and
+    the post-normalize size (which differs from the request size on
+    photo EXIF-strip — see :func:`normalize_photo_bytes`).
+    """
+
+    blob_hash: str
+    sniffed_type: str
+    size_bytes: int
+    stored_size_bytes: int
+
+
+def _check_payload_cap_and_sniff(
+    payload: bytes,
+    *,
+    kind: FileEvidenceKind,
+    content_type: str,
+    mime_sniffer: MimeSniffer,
+) -> str:
+    """Run the §15 cap + sniff guards; return the sniffed MIME type.
+
+    Split out from the storage step so callers can interleave a
+    kind-specific structural check (e.g. :func:`_validate_gps_payload`)
+    between the sniff and the blob write — without duplicating the
+    cap / sniff logic.
+
+    Raises:
+        :class:`EvidenceTooLarge` past the per-kind cap.
+        :class:`EvidenceContentTypeNotAllowed` when the sniff is
+        ``None`` (unclassifiable) or outside the per-kind allow-list.
+        :class:`ValueError` when ``payload`` is empty.
+    """
+    cap = _MAX_BYTES_BY_KIND[kind]
+    size_bytes = len(payload)
+    if size_bytes == 0:
+        # Empty file is always a client bug — a zero-byte photo / voice
+        # memo / GPS payload carries no information.
+        raise ValueError(f"kind={kind!r} evidence payload must not be empty")
+    if size_bytes > cap:
+        raise EvidenceTooLarge(kind=kind, size_bytes=size_bytes, cap_bytes=cap)
+
+    # Spec §15: sniff the bytes, validate the sniff (not the header)
+    # against the per-kind allow-list. The declared ``content_type``
+    # is passed as a hint only so the JSON structural-check fallback
+    # is gated on a JSON-shaped declaration — it is **never** the
+    # decision-maker.
+    sniffed_type = mime_sniffer.sniff(payload, hint=content_type)
+    allowed = _MIME_ALLOWLIST_BY_KIND[kind]
+    if sniffed_type is None or sniffed_type not in allowed:
+        # Either the sniffer could not classify the bytes (None) or
+        # the sniff disagrees with the allow-list. Either way the
+        # upload never lands in storage.
+        raise EvidenceContentTypeNotAllowed(kind=kind, content_type=sniffed_type)
+    return sniffed_type
+
+
+def _normalize_hash_and_store(
+    payload: bytes,
+    *,
+    kind: FileEvidenceKind,
+    sniffed_type: str,
+    storage: Storage,
+) -> _StoredBlob:
+    """Normalize (photo only), SHA-256, and ``Storage.put`` a vetted payload.
+
+    Companion to :func:`_check_payload_cap_and_sniff` — splitting the
+    pipeline at the sniff lets the gps branch interleave its
+    structural validator without duplicating the storage write.
+
+    The Storage port is idempotent: the same hash on a repeat upload
+    returns the existing blob's metadata without re-writing. The
+    persisted ``content_type`` is the sniffed verdict, not the
+    declared header — what the bytes are, not what the client claimed.
+    """
+    stored_payload = (
+        normalize_photo_bytes(payload, sniffed_type) if kind == "photo" else payload
+    )
+    blob_hash = hashlib.sha256(stored_payload).hexdigest()
+    storage.put(blob_hash, io.BytesIO(stored_payload), content_type=sniffed_type)
+    return _StoredBlob(
+        blob_hash=blob_hash,
+        sniffed_type=sniffed_type,
+        size_bytes=len(payload),
+        stored_size_bytes=len(stored_payload),
+    )
+
+
 def add_file_evidence(
     session: Session,
     ctx: WorkspaceContext,
@@ -1785,60 +1926,41 @@ def add_file_evidence(
 
     task = _load_task(session, ctx, task_id)
 
-    cap = _MAX_BYTES_BY_KIND[kind]
-    size_bytes = len(payload)
-    if size_bytes == 0:
-        # Empty file is always a client bug — a zero-byte photo / voice
-        # memo / GPS payload carries no information. Same envelope as
-        # :func:`add_note_evidence`'s empty-note rejection.
-        raise ValueError(f"kind={kind!r} evidence payload must not be empty")
-    if size_bytes > cap:
-        raise EvidenceTooLarge(kind=kind, size_bytes=size_bytes, cap_bytes=cap)
-
-    # Spec §15: sniff the bytes, validate the sniff (not the header)
-    # against the per-kind allow-list. The declared ``content_type``
-    # is passed as a hint only so the JSON structural-check fallback
-    # is gated on a JSON-shaped declaration — it is **never** the
-    # decision-maker.
-    sniffed_type = resolved_sniffer.sniff(payload, hint=content_type)
-    allowed = _MIME_ALLOWLIST_BY_KIND[kind]
-    if sniffed_type is None or sniffed_type not in allowed:
-        # Either the sniffer could not classify the bytes (None) or
-        # the sniff disagrees with the allow-list. Either way the
-        # upload never lands in storage. The exception carries the
-        # sniffed type so the operator inspecting the audit envelope
-        # sees the actual shape, not the multipart-form lie.
-        raise EvidenceContentTypeNotAllowed(kind=kind, content_type=sniffed_type)
+    sniffed_type = _check_payload_cap_and_sniff(
+        payload,
+        kind=kind,
+        content_type=content_type,
+        mime_sniffer=resolved_sniffer,
+    )
 
     gps_lat: float | None = None
     gps_lon: float | None = None
-    stored_payload = payload
     if kind == "gps":
-        # Parse + validate BEFORE storage so a malformed payload never
-        # lands in the blob store (and the audit row carries the
-        # rejection reason instead of an opaque blob hash).
+        # Parse + validate AFTER the sniff (which gated the JSON
+        # allow-list) but BEFORE the blob write so a malformed payload
+        # never lands in storage. The cap + sniff above keep the order
+        # the pre-cd-u6vr seam shipped: oversize → 413, mis-typed →
+        # 415, malformed JSON → 422.
         gps_payload = _validate_gps_payload(payload)
         gps_lat = float(gps_payload["lat"])
         gps_lon = float(gps_payload["lon"])
-    elif kind == "photo":
-        stored_payload = normalize_photo_bytes(payload, sniffed_type)
 
-    # Hash + store. The Storage port is idempotent: the same hash on a
-    # repeat upload returns the existing blob's metadata without
-    # re-writing. We do NOT short-circuit the audit row on a dedupe —
-    # the Evidence row is a per-task pointer, not a per-blob one, so
-    # a worker who attaches the same photo to two tasks gets two rows.
-    # The persisted ``content_type`` is the sniffed verdict, not the
-    # declared header — what the bytes are, not what the client claimed.
-    blob_hash = hashlib.sha256(stored_payload).hexdigest()
-    storage.put(blob_hash, io.BytesIO(stored_payload), content_type=sniffed_type)
+    stored = _normalize_hash_and_store(
+        payload,
+        kind=kind,
+        sniffed_type=sniffed_type,
+        storage=storage,
+    )
 
+    # The Evidence row is a per-task pointer, not a per-blob one, so
+    # a worker who attaches the same photo to two tasks gets two rows
+    # even when the underlying blob deduplicates inside Storage.
     row = Evidence(
         id=new_ulid(),
         workspace_id=ctx.workspace_id,
         occurrence_id=task.id,
         kind=kind,
-        blob_hash=blob_hash,
+        blob_hash=stored.blob_hash,
         note_md=None,
         gps_lat=gps_lat,
         gps_lon=gps_lon,
@@ -1858,19 +1980,152 @@ def add_file_evidence(
         diff={
             "after": {
                 "evidence_id": row.id,
-                "blob_hash": blob_hash,
+                "blob_hash": stored.blob_hash,
                 # Persist the sniffed verdict on the audit row so a
                 # later forensic walk knows what bytes actually landed.
-                "content_type": sniffed_type,
+                "content_type": stored.sniffed_type,
                 # Declared header preserved alongside for the
                 # "client claimed X, sniff said Y" forensic case —
                 # useful when the two disagree on a non-rejected
                 # upload (e.g. ``audio/wav`` declared, ``audio/x-wav``
                 # sniffed; both in the allow-list).
                 "declared_content_type": content_type,
-                "size_bytes": size_bytes,
-                "stored_size_bytes": len(stored_payload),
+                "size_bytes": stored.size_bytes,
+                "stored_size_bytes": stored.stored_size_bytes,
             }
         },
     )
     return _evidence_row_to_view(row)
+
+
+# ---------------------------------------------------------------------------
+# Checklist-item evidence (cd-u6vr)
+# ---------------------------------------------------------------------------
+
+
+def attach_checklist_evidence(
+    session: Session,
+    ctx: WorkspaceContext,
+    *,
+    task_id: str,
+    item_id: str,
+    payload: bytes,
+    content_type: str,
+    storage: Storage,
+    mime_sniffer: MimeSniffer | None = None,
+    clock: Clock | None = None,
+) -> ChecklistItemEvidenceView:
+    """Attach a content-addressed photo blob to a :class:`ChecklistItem`.
+
+    Drives the same §15 asset pipeline as
+    :func:`add_file_evidence` for ``kind='photo'``:
+
+    1. Loads the task through the workspace-scoped seam (404 on miss).
+    2. Loads the checklist item filtered by ``workspace_id`` +
+       ``occurrence_id`` so a cross-tenant or cross-task ``item_id``
+       collapses to :class:`ChecklistItemNotFound` (also 404).
+    3. Refuses when the parent task is in a terminal state — mirrors
+       the tick / untick guard in
+       :func:`app.api.v1.tasks.occurrences.patch_task_checklist_item_route`
+       so completed / skipped / cancelled tasks stay immutable.
+    4. Reuses :func:`_validate_and_store_file_payload` with
+       ``kind='photo'`` so the per-kind cap, the §15 MIME sniff
+       allow-list, the EXIF-strip, the SHA-256 hash and the
+       :meth:`Storage.put` write are exercised through the same code
+       path as ad-hoc evidence.
+    5. Sets :attr:`ChecklistItem.evidence_blob_hash` to the resulting
+       hash. The :class:`ChecklistItem` row carries no sibling MIME /
+       size columns (see ``app/adapters/db/tasks/models.py``); the
+       sniffed type and forensic trail land on the audit row instead.
+    6. Audits ``task.checklist.evidence.add`` with the item id, the
+       blob hash, the sniffed type, the declared header, and both
+       sizes — same shape as ``task.evidence.<kind>.add`` so a single
+       walker can fold both surfaces into one timeline.
+
+    The kind is pinned to ``photo`` because checklist items only carry
+    ``requires_photo`` evidence (see ``ChecklistItem.requires_photo``
+    in ``app/adapters/db/tasks/models.py`` — the canonical worker
+    contract is "tick the item and stamp it with a photo"); voice /
+    gps belong on the ad-hoc evidence trail, not the per-item slot.
+
+    No separate :class:`Evidence` row is written — the checklist
+    column is the per-item pointer, the :class:`Evidence` table is
+    the ad-hoc evidence list, and §02 / §06 keep the two cleanly
+    separated. A worker who also wants the photo to appear in the
+    task evidence list calls :func:`add_file_evidence` instead.
+    """
+    resolved_clock = clock if clock is not None else SystemClock()
+    resolved_sniffer = (
+        mime_sniffer if mime_sniffer is not None else FiletypeMimeSniffer()
+    )
+
+    task = _load_task(session, ctx, task_id)
+
+    if task.state in _TERMINAL:
+        # Mirror the tick / untick route — a terminal task is locked.
+        # Owners + managers hit the same gate; this is about the row
+        # being closed for business, not about role permission.
+        raise TaskTerminal(state=task.state)
+
+    item = session.scalar(
+        select(ChecklistItem).where(
+            ChecklistItem.id == item_id,
+            ChecklistItem.workspace_id == ctx.workspace_id,
+            ChecklistItem.occurrence_id == task.id,
+        )
+    )
+    if item is None:
+        raise ChecklistItemNotFound(
+            f"checklist item {item_id!r} not visible on task {task_id!r}"
+        )
+
+    sniffed_type = _check_payload_cap_and_sniff(
+        payload,
+        kind="photo",
+        content_type=content_type,
+        mime_sniffer=resolved_sniffer,
+    )
+    stored = _normalize_hash_and_store(
+        payload,
+        kind="photo",
+        sniffed_type=sniffed_type,
+        storage=storage,
+    )
+
+    previous_hash = item.evidence_blob_hash
+    item.evidence_blob_hash = stored.blob_hash
+    session.flush()
+
+    _audit(
+        session,
+        ctx,
+        resolved_clock,
+        task=task,
+        action="task.checklist.evidence.add",
+        diff={
+            "before": {"evidence_blob_hash": previous_hash},
+            "after": {
+                "checklist_item_id": item.id,
+                "evidence_blob_hash": stored.blob_hash,
+                # Persist the sniffed verdict so a later forensic walk
+                # knows what bytes actually landed without re-reading
+                # the blob.
+                "content_type": stored.sniffed_type,
+                # Declared header preserved alongside for the
+                # "client claimed X, sniff said Y" forensic case.
+                "declared_content_type": content_type,
+                "size_bytes": stored.size_bytes,
+                "stored_size_bytes": stored.stored_size_bytes,
+            },
+        },
+    )
+
+    return ChecklistItemEvidenceView(
+        id=item.id,
+        task_id=task.id,
+        label=item.label,
+        requires_photo=item.requires_photo,
+        checked=item.checked,
+        checked_at=item.checked_at,
+        evidence_blob_hash=stored.blob_hash,
+    )

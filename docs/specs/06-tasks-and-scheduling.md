@@ -748,6 +748,17 @@ parent task is not yet terminal. An item row is also created when an
 agent uses the NL-intake flow and the resolved template has checklist
 entries.
 
+When `requires_photo = true`, the worker attaches the per-item photo
+through
+`PATCH /tasks/{task_id}/checklist/{item_id}/evidence` (multipart/form-data,
+photo only). The hash is written to
+`checklist_item.evidence_blob_hash`; no separate `evidence` row is
+created (the column is the per-item pointer, the `evidence` table is
+the ad-hoc trail). The endpoint reuses the same §15 cap / MIME sniff /
+content-addressed Storage pipeline as `POST /tasks/{id}/evidence` and
+audits `task.checklist.evidence.add`. Like the tick / untick PATCH, it
+is rejected once the parent task is terminal.
+
 **Seeding is RRULE-filtered.** At task generation, the bundle/schedule
 worker expands `task_template.checklist_template_json` into
 `checklist_item` rows by evaluating each item's optional

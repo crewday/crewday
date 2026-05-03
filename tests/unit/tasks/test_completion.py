@@ -66,6 +66,7 @@ from app.adapters.db.tasks.models import (
 from app.adapters.db.workspace.models import WorkEngagement, Workspace
 from app.domain.settings.cascade import resolve_setting, task_scope_chain
 from app.domain.tasks.completion import (
+    ChecklistItemNotFound,
     EvidenceContentTypeNotAllowed,
     EvidenceGpsPayloadInvalid,
     EvidenceRequired,
@@ -76,9 +77,11 @@ from app.domain.tasks.completion import (
     RequiredChecklistIncomplete,
     SkipNotPermitted,
     TaskNotFound,
+    TaskTerminal,
     _assert_transition,
     add_file_evidence,
     add_note_evidence,
+    attach_checklist_evidence,
     cancel,
     complete,
     list_evidence,
@@ -3059,3 +3062,325 @@ class TestAddFileEvidenceMimeSniff:
         assert isinstance(diff, dict)
         assert diff["after"]["content_type"] == "video/mp4"
         assert diff["after"]["declared_content_type"] == "audio/mp4"
+
+
+# ---------------------------------------------------------------------------
+# attach_checklist_evidence — checklist-item evidence_blob_hash (cd-u6vr)
+# ---------------------------------------------------------------------------
+
+
+class TestAttachChecklistEvidence:
+    """``attach_checklist_evidence`` stamps the per-item blob + audits."""
+
+    def test_happy_path_sets_blob_hash_and_audits(
+        self, session: Session, clock: FrozenClock
+    ) -> None:
+        from tests._fakes.storage import InMemoryStorage
+
+        ws = _bootstrap_workspace(session)
+        prop = _bootstrap_property(session)
+        occ = _bootstrap_occurrence(session, workspace_id=ws, property_id=prop)
+        item = _bootstrap_required_checklist(
+            session, workspace_id=ws, occurrence_id=occ
+        )
+        author = _bootstrap_user(session)
+        storage = InMemoryStorage()
+
+        view = attach_checklist_evidence(
+            session,
+            _ctx(ws, actor_id=author),
+            task_id=occ,
+            item_id=item,
+            payload=_TINY_PNG,
+            content_type="image/png",
+            storage=storage,
+            clock=clock,
+        )
+
+        assert view.id == item
+        assert view.task_id == occ
+        assert view.evidence_blob_hash is not None
+        assert len(view.evidence_blob_hash) == 64  # SHA-256 hex.
+        assert storage.exists(view.evidence_blob_hash)
+
+        row = session.scalars(
+            select(ChecklistItem).where(ChecklistItem.id == item)
+        ).one()
+        assert row.evidence_blob_hash == view.evidence_blob_hash
+
+        audit = session.scalars(
+            select(AuditLog).where(
+                AuditLog.entity_id == occ,
+                AuditLog.action == "task.checklist.evidence.add",
+            )
+        ).one()
+        diff = audit.diff
+        assert isinstance(diff, dict)
+        assert diff["before"] == {"evidence_blob_hash": None}
+        after = diff["after"]
+        assert after["checklist_item_id"] == item
+        assert after["evidence_blob_hash"] == view.evidence_blob_hash
+        assert after["content_type"] == "image/png"
+        assert after["declared_content_type"] == "image/png"
+        assert after["size_bytes"] == len(_TINY_PNG)
+
+    def test_missing_task_raises_task_not_found(
+        self, session: Session, clock: FrozenClock
+    ) -> None:
+        from tests._fakes.storage import InMemoryStorage
+
+        ws = _bootstrap_workspace(session)
+        author = _bootstrap_user(session)
+
+        with pytest.raises(TaskNotFound):
+            attach_checklist_evidence(
+                session,
+                _ctx(ws, actor_id=author),
+                task_id=new_ulid(),
+                item_id=new_ulid(),
+                payload=_TINY_PNG,
+                content_type="image/png",
+                storage=InMemoryStorage(),
+                clock=clock,
+            )
+
+    def test_missing_item_raises_checklist_item_not_found(
+        self, session: Session, clock: FrozenClock
+    ) -> None:
+        from tests._fakes.storage import InMemoryStorage
+
+        ws = _bootstrap_workspace(session)
+        prop = _bootstrap_property(session)
+        occ = _bootstrap_occurrence(session, workspace_id=ws, property_id=prop)
+        author = _bootstrap_user(session)
+
+        with pytest.raises(ChecklistItemNotFound):
+            attach_checklist_evidence(
+                session,
+                _ctx(ws, actor_id=author),
+                task_id=occ,
+                item_id=new_ulid(),  # never created
+                payload=_TINY_PNG,
+                content_type="image/png",
+                storage=InMemoryStorage(),
+                clock=clock,
+            )
+
+    def test_cross_task_item_raises_checklist_item_not_found(
+        self, session: Session, clock: FrozenClock
+    ) -> None:
+        """An item belonging to a sibling task collapses to 404 (§14)."""
+        from tests._fakes.storage import InMemoryStorage
+
+        ws = _bootstrap_workspace(session)
+        prop = _bootstrap_property(session)
+        occ_a = _bootstrap_occurrence(session, workspace_id=ws, property_id=prop)
+        occ_b = _bootstrap_occurrence(session, workspace_id=ws, property_id=prop)
+        item_b = _bootstrap_required_checklist(
+            session, workspace_id=ws, occurrence_id=occ_b
+        )
+        author = _bootstrap_user(session)
+
+        with pytest.raises(ChecklistItemNotFound):
+            attach_checklist_evidence(
+                session,
+                _ctx(ws, actor_id=author),
+                task_id=occ_a,  # the wrong parent
+                item_id=item_b,
+                payload=_TINY_PNG,
+                content_type="image/png",
+                storage=InMemoryStorage(),
+                clock=clock,
+            )
+
+    def test_terminal_task_rejects_with_task_terminal(
+        self, session: Session, clock: FrozenClock
+    ) -> None:
+        from tests._fakes.storage import InMemoryStorage
+
+        ws = _bootstrap_workspace(session)
+        prop = _bootstrap_property(session)
+        occ = _bootstrap_occurrence(
+            session, workspace_id=ws, property_id=prop, state="completed"
+        )
+        item = _bootstrap_required_checklist(
+            session, workspace_id=ws, occurrence_id=occ
+        )
+        author = _bootstrap_user(session)
+
+        with pytest.raises(TaskTerminal) as excinfo:
+            attach_checklist_evidence(
+                session,
+                _ctx(ws, actor_id=author),
+                task_id=occ,
+                item_id=item,
+                payload=_TINY_PNG,
+                content_type="image/png",
+                storage=InMemoryStorage(),
+                clock=clock,
+            )
+        assert excinfo.value.state == "completed"
+
+    def test_oversize_payload_raises_evidence_too_large(
+        self, session: Session, clock: FrozenClock
+    ) -> None:
+        from tests._fakes.storage import InMemoryStorage
+
+        ws = _bootstrap_workspace(session)
+        prop = _bootstrap_property(session)
+        occ = _bootstrap_occurrence(session, workspace_id=ws, property_id=prop)
+        item = _bootstrap_required_checklist(
+            session, workspace_id=ws, occurrence_id=occ
+        )
+        author = _bootstrap_user(session)
+        # The photo cap is 10 MiB. Pin a sniffer that vouches for the
+        # bytes so the cap fires before the sniff allow-list could.
+        # We don't actually need 10 MiB — :func:`_check_payload_cap_and_sniff`
+        # short-circuits past 10 * 1024 * 1024 bytes.
+        oversize = b"\xff\xd8" + b"\x00" * (10 * 1024 * 1024)
+        storage = InMemoryStorage()
+
+        with pytest.raises(EvidenceTooLarge) as excinfo:
+            attach_checklist_evidence(
+                session,
+                _ctx(ws, actor_id=author),
+                task_id=occ,
+                item_id=item,
+                payload=oversize,
+                content_type="image/jpeg",
+                storage=storage,
+                mime_sniffer=_PinnedSniffer("image/jpeg"),
+                clock=clock,
+            )
+        assert excinfo.value.kind == "photo"
+        # The oversized payload never landed in storage.
+        assert not storage._blobs
+
+    def test_bad_mime_raises_content_type_not_allowed(
+        self, session: Session, clock: FrozenClock
+    ) -> None:
+        from tests._fakes.storage import InMemoryStorage
+
+        ws = _bootstrap_workspace(session)
+        prop = _bootstrap_property(session)
+        occ = _bootstrap_occurrence(session, workspace_id=ws, property_id=prop)
+        item = _bootstrap_required_checklist(
+            session, workspace_id=ws, occurrence_id=occ
+        )
+        author = _bootstrap_user(session)
+        storage = InMemoryStorage()
+
+        with pytest.raises(EvidenceContentTypeNotAllowed) as excinfo:
+            attach_checklist_evidence(
+                session,
+                _ctx(ws, actor_id=author),
+                task_id=occ,
+                item_id=item,
+                payload=b"<svg/>",
+                content_type="image/svg+xml",
+                storage=storage,
+                clock=clock,
+            )
+        assert excinfo.value.kind == "photo"
+        assert not storage._blobs  # rejection prevented the write.
+
+    def test_undetectable_bytes_rejected_via_sniff(
+        self, session: Session, clock: FrozenClock
+    ) -> None:
+        """Spec §15: a ``None`` sniff verdict closes the gate (cd-ba5c)."""
+        from tests._fakes.storage import InMemoryStorage
+
+        ws = _bootstrap_workspace(session)
+        prop = _bootstrap_property(session)
+        occ = _bootstrap_occurrence(session, workspace_id=ws, property_id=prop)
+        item = _bootstrap_required_checklist(
+            session, workspace_id=ws, occurrence_id=occ
+        )
+        author = _bootstrap_user(session)
+        storage = InMemoryStorage()
+
+        with pytest.raises(EvidenceContentTypeNotAllowed) as excinfo:
+            attach_checklist_evidence(
+                session,
+                _ctx(ws, actor_id=author),
+                task_id=occ,
+                item_id=item,
+                payload=_TINY_PNG,
+                content_type="image/png",
+                storage=storage,
+                mime_sniffer=_PinnedSniffer(None),
+                clock=clock,
+            )
+        assert excinfo.value.content_type is None
+        assert not storage._blobs
+
+    def test_empty_payload_raises_value_error(
+        self, session: Session, clock: FrozenClock
+    ) -> None:
+        from tests._fakes.storage import InMemoryStorage
+
+        ws = _bootstrap_workspace(session)
+        prop = _bootstrap_property(session)
+        occ = _bootstrap_occurrence(session, workspace_id=ws, property_id=prop)
+        item = _bootstrap_required_checklist(
+            session, workspace_id=ws, occurrence_id=occ
+        )
+        author = _bootstrap_user(session)
+
+        with pytest.raises(ValueError, match="must not be empty"):
+            attach_checklist_evidence(
+                session,
+                _ctx(ws, actor_id=author),
+                task_id=occ,
+                item_id=item,
+                payload=b"",
+                content_type="image/png",
+                storage=InMemoryStorage(),
+                clock=clock,
+            )
+
+    def test_replaces_existing_blob_hash_and_audits_before(
+        self, session: Session, clock: FrozenClock
+    ) -> None:
+        """Re-attaching surfaces the previous hash on the audit ``before``."""
+        from tests._fakes.storage import InMemoryStorage
+
+        ws = _bootstrap_workspace(session)
+        prop = _bootstrap_property(session)
+        occ = _bootstrap_occurrence(session, workspace_id=ws, property_id=prop)
+        item = _bootstrap_required_checklist(
+            session, workspace_id=ws, occurrence_id=occ
+        )
+        # Seed an initial blob hash so we can assert the audit ``before``
+        # carries the stale value (rather than the post-update one).
+        existing = session.scalars(
+            select(ChecklistItem).where(ChecklistItem.id == item)
+        ).one()
+        existing.evidence_blob_hash = "deadbeef" * 8
+        session.flush()
+
+        author = _bootstrap_user(session)
+        storage = InMemoryStorage()
+
+        view = attach_checklist_evidence(
+            session,
+            _ctx(ws, actor_id=author),
+            task_id=occ,
+            item_id=item,
+            payload=_TINY_PNG,
+            content_type="image/png",
+            storage=storage,
+            clock=clock,
+        )
+        assert view.evidence_blob_hash != "deadbeef" * 8
+
+        audit = session.scalars(
+            select(AuditLog).where(
+                AuditLog.entity_id == occ,
+                AuditLog.action == "task.checklist.evidence.add",
+            )
+        ).one()
+        diff = audit.diff
+        assert isinstance(diff, dict)
+        assert diff["before"] == {"evidence_blob_hash": "deadbeef" * 8}
+        assert diff["after"]["evidence_blob_hash"] == view.evidence_blob_hash

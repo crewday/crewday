@@ -16,7 +16,11 @@ from app.domain.llm.capabilities.tasks_intake import (
     ScheduledTask,
 )
 from app.domain.tasks.comments import CommentView
-from app.domain.tasks.completion import EvidenceView, TaskState
+from app.domain.tasks.completion import (
+    ChecklistItemEvidenceView,
+    EvidenceView,
+    TaskState,
+)
 from app.domain.tasks.oneoff import TaskView
 from app.domain.tasks.schedules import ScheduleView
 from app.domain.tasks.templates import TaskTemplateView
@@ -394,18 +398,60 @@ class TaskChecklistItemPayload(BaseModel):
     @classmethod
     def from_row(cls, row: ChecklistItem) -> TaskChecklistItemPayload:
         """Copy a :class:`ChecklistItem` row into the worker wire shape."""
-        return cls(
+        return cls._build(
             id=row.id,
-            text=row.label,
             label=row.label,
-            required=row.requires_photo,
-            guest_visible=False,
+            requires_photo=row.requires_photo,
             checked=row.checked,
-            done=row.checked,
-            completed_at=_aware_utc(row.checked_at),
-            checked_at=_aware_utc(row.checked_at),
-            completed_by_user_id=None,
+            checked_at=row.checked_at,
             evidence_blob_hash=row.evidence_blob_hash,
+        )
+
+    @classmethod
+    def from_evidence_view(
+        cls, view: ChecklistItemEvidenceView
+    ) -> TaskChecklistItemPayload:
+        """Copy a :class:`ChecklistItemEvidenceView` into the worker wire shape.
+
+        Shares :meth:`_build` with :meth:`from_row` so a future field
+        addition lands in one place. The view's columns are 1:1 with
+        the row's, so the seam is purely about decoupling the API
+        layer from the SQLAlchemy row.
+        """
+        return cls._build(
+            id=view.id,
+            label=view.label,
+            requires_photo=view.requires_photo,
+            checked=view.checked,
+            checked_at=view.checked_at,
+            evidence_blob_hash=view.evidence_blob_hash,
+        )
+
+    @classmethod
+    def _build(
+        cls,
+        *,
+        id: str,
+        label: str,
+        requires_photo: bool,
+        checked: bool,
+        checked_at: datetime | None,
+        evidence_blob_hash: str | None,
+    ) -> TaskChecklistItemPayload:
+        """Single Pydantic-construction site for the two ``from_*`` paths."""
+        completed_at = _aware_utc(checked_at)
+        return cls(
+            id=id,
+            text=label,
+            label=label,
+            required=requires_photo,
+            guest_visible=False,
+            checked=checked,
+            done=checked,
+            completed_at=completed_at,
+            checked_at=completed_at,
+            completed_by_user_id=None,
+            evidence_blob_hash=evidence_blob_hash,
         )
 
 

@@ -17,19 +17,22 @@ from fastapi import (
 
 from app.api.uploads import read_upload_capped, require_upload_content_type
 from app.domain.tasks.completion import (
+    ChecklistItemNotFound,
     EvidenceContentTypeNotAllowed,
     EvidenceGpsPayloadInvalid,
     EvidenceTooLarge,
     FileEvidenceKind,
+    TaskTerminal,
     add_file_evidence,
     add_note_evidence,
+    attach_checklist_evidence,
     list_evidence,
 )
 from app.domain.tasks.completion import TaskNotFound as CompletionTaskNotFound
 
 from .deps import _Ctx, _Db, _MimeSniffer, _Storage
 from .errors import _http, _task_not_found
-from .payloads import EvidenceListResponse, EvidencePayload
+from .payloads import EvidenceListResponse, EvidencePayload, TaskChecklistItemPayload
 
 router = APIRouter()
 
@@ -337,3 +340,111 @@ async def upload_task_evidence_route(
         # generic envelope so the client still learns the rejection.
         raise _http(422, "evidence_invalid", message=str(exc)) from exc
     return EvidencePayload.from_view(view)
+
+
+@router.patch(
+    "/{task_id}/checklist/{item_id}/evidence",
+    response_model=TaskChecklistItemPayload,
+    operation_id="attach_task_checklist_evidence",
+    summary="Attach a photo blob to a checklist item",
+    openapi_extra={"x-cli": {"group": "tasks", "verb": "checklist-evidence"}},
+)
+async def attach_task_checklist_evidence_route(
+    task_id: str,
+    item_id: str,
+    ctx: _Ctx,
+    session: _Db,
+    storage: _Storage,
+    mime_sniffer: _MimeSniffer,
+    _: _EvidenceContentLengthGuard,
+    file: Annotated[UploadFile, File()],
+) -> TaskChecklistItemPayload:
+    """Stamp a checklist item's :attr:`evidence_blob_hash` from a multipart upload.
+
+    Mirrors :func:`upload_task_evidence_route`'s photo branch
+    end-to-end: the same router-level content-length dep, the same
+    streaming-cap reader, the same per-kind MIME allow-list / size
+    cap / sniff inside the domain seam, and the same Storage port.
+    The kind is pinned to ``photo`` because checklist items only
+    carry photographic evidence (see ``ChecklistItem.requires_photo``)
+    — voice / gps belong on the ad-hoc ``POST /tasks/{id}/evidence``
+    surface.
+
+    The endpoint sets :attr:`ChecklistItem.evidence_blob_hash` and
+    audits ``task.checklist.evidence.add``; it does NOT write a
+    sibling :class:`Evidence` row because the checklist column is the
+    per-item pointer and the evidence list is the ad-hoc trail (§02 /
+    §06 keep them cleanly separated).
+    """
+    try:
+        declared_type = require_upload_content_type(
+            file,
+            missing=lambda: _http(
+                status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+                "evidence_content_type_missing",
+                kind="photo",
+                message=(
+                    "checklist evidence requires a 'Content-Type' header on the "
+                    "uploaded file part"
+                ),
+            ),
+        )
+    except HTTPException:
+        await file.close()
+        raise
+
+    payload = await _read_file_capped(file, kind="photo")
+
+    try:
+        view = attach_checklist_evidence(
+            session,
+            ctx,
+            task_id=task_id,
+            item_id=item_id,
+            payload=payload,
+            content_type=declared_type,
+            storage=storage,
+            mime_sniffer=mime_sniffer,
+        )
+    except (CompletionTaskNotFound, ChecklistItemNotFound) as exc:
+        # Cross-tenant + cross-task item ids collapse to 404 (§14).
+        raise _task_not_found() from exc
+    except TaskTerminal as exc:
+        raise _http(
+            status.HTTP_409_CONFLICT,
+            "task_terminal",
+            state=exc.state,
+            message=str(exc),
+        ) from exc
+    except EvidenceContentTypeNotAllowed as exc:
+        # ``exc.content_type`` carries the **sniffed** type per spec
+        # §15. Surface both ``content_type`` (the sniff) and
+        # ``sniffed_type`` (an explicit alias) so the operator
+        # inspecting the audit envelope sees the actual shape rather
+        # than the multipart-form lie. ``declared_type`` is preserved
+        # alongside for the forensic "client claimed X, sniff said Y"
+        # trail — same envelope as the ad-hoc evidence route.
+        raise _http(
+            status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            "evidence_content_type_rejected",
+            kind=exc.kind,
+            content_type=exc.content_type,
+            sniffed_type=exc.content_type,
+            declared_type=declared_type,
+            message=str(exc),
+        ) from exc
+    except EvidenceTooLarge as exc:
+        raise _http(
+            status.HTTP_413_CONTENT_TOO_LARGE,
+            "evidence_too_large",
+            kind=exc.kind,
+            size_bytes=exc.size_bytes,
+            cap_bytes=exc.cap_bytes,
+            message=str(exc),
+        ) from exc
+    except ValueError as exc:
+        # Empty payload + any other domain-side rejection collapse to
+        # 422 with a generic envelope so the client still learns the
+        # rejection. Mirrors :func:`upload_task_evidence_route`'s tail.
+        raise _http(422, "evidence_invalid", message=str(exc)) from exc
+    return TaskChecklistItemPayload.from_evidence_view(view)

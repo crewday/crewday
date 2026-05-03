@@ -1806,6 +1806,211 @@ class TestEvidence:
 
 
 # ---------------------------------------------------------------------------
+# Tests — checklist-item evidence (cd-u6vr)
+# ---------------------------------------------------------------------------
+
+
+class TestChecklistItemEvidence:
+    """``PATCH /tasks/{id}/checklist/{item}/evidence`` — photo blob attach."""
+
+    # Same pre-rendered 1x1 PNG fixture as :class:`TestEvidence` so the
+    # test stays deterministic and avoids a runtime PNG encoder.
+    _TINY_PNG: bytes = bytes.fromhex(
+        "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4"
+        "8900000010494441541857636060f80f0000010101003e6b40fb000000004949"
+        "454e44ae426082"
+    )
+
+    @staticmethod
+    def _seed_checklist_item(
+        session_factory: sessionmaker[Session],
+        seeded: dict[str, Any],
+        *,
+        position: int = 0,
+        label: str = "Wipe counters",
+    ) -> str:
+        """Insert a runtime checklist row attached to ``seeded['task_id']``.
+
+        Returns the new item id. Uses ``tenant_agnostic`` because the
+        seeded ``Occurrence`` was inserted under that scope.
+        """
+        item_id = new_ulid()
+        with session_factory() as s, tenant_agnostic():
+            s.add(
+                ChecklistItem(
+                    id=item_id,
+                    workspace_id=seeded["workspace_id"],
+                    occurrence_id=seeded["task_id"],
+                    label=label,
+                    position=position,
+                    requires_photo=True,
+                    checked=False,
+                    checked_at=None,
+                    evidence_blob_hash=None,
+                )
+            )
+            s.commit()
+        return item_id
+
+    def test_attach_photo_round_trips(
+        self,
+        session_factory: sessionmaker[Session],
+        seeded: dict[str, Any],
+    ) -> None:
+        item_id = self._seed_checklist_item(session_factory, seeded)
+        storage = InMemoryStorage()
+
+        with _client_for(session_factory, seeded["owner_ctx"], storage=storage) as c:
+            r = c.patch(
+                f"/api/v1/tasks/{seeded['task_id']}/checklist/{item_id}/evidence",
+                files={"file": ("evidence.png", self._TINY_PNG, "image/png")},
+            )
+            assert r.status_code == 200, r.text
+            body = r.json()
+            assert body["id"] == item_id
+            assert body["evidence_blob_hash"] is not None
+            assert len(body["evidence_blob_hash"]) == 64  # SHA-256 hex.
+            assert storage.exists(body["evidence_blob_hash"])
+
+        # Persisted on the row.
+        with session_factory() as s:
+            row = s.scalar(select(ChecklistItem).where(ChecklistItem.id == item_id))
+            assert row is not None
+            assert row.evidence_blob_hash == body["evidence_blob_hash"]
+
+    def test_unknown_item_returns_404(
+        self,
+        session_factory: sessionmaker[Session],
+        seeded: dict[str, Any],
+    ) -> None:
+        with _client_for(session_factory, seeded["owner_ctx"]) as c:
+            r = c.patch(
+                f"/api/v1/tasks/{seeded['task_id']}/checklist/{new_ulid()}/evidence",
+                files={"file": ("evidence.png", self._TINY_PNG, "image/png")},
+            )
+            assert r.status_code == 404, r.text
+            assert r.json()["detail"]["error"] == "task_not_found"
+
+    def test_unknown_task_returns_404(
+        self,
+        session_factory: sessionmaker[Session],
+        seeded: dict[str, Any],
+    ) -> None:
+        item_id = self._seed_checklist_item(session_factory, seeded)
+        with _client_for(session_factory, seeded["owner_ctx"]) as c:
+            r = c.patch(
+                f"/api/v1/tasks/{new_ulid()}/checklist/{item_id}/evidence",
+                files={"file": ("evidence.png", self._TINY_PNG, "image/png")},
+            )
+            assert r.status_code == 404, r.text
+            assert r.json()["detail"]["error"] == "task_not_found"
+
+    def test_terminal_task_returns_409(
+        self,
+        session_factory: sessionmaker[Session],
+        seeded: dict[str, Any],
+    ) -> None:
+        item_id = self._seed_checklist_item(session_factory, seeded)
+        # Flip the seeded task into a terminal state.
+        with session_factory() as s, tenant_agnostic():
+            occ = s.scalar(select(Occurrence).where(Occurrence.id == seeded["task_id"]))
+            assert occ is not None
+            occ.state = "completed"
+            s.commit()
+
+        with _client_for(session_factory, seeded["owner_ctx"]) as c:
+            r = c.patch(
+                f"/api/v1/tasks/{seeded['task_id']}/checklist/{item_id}/evidence",
+                files={"file": ("evidence.png", self._TINY_PNG, "image/png")},
+            )
+            assert r.status_code == 409, r.text
+            body = r.json()["detail"]
+            assert body["error"] == "task_terminal"
+            assert body["state"] == "completed"
+
+    def test_oversize_returns_413(
+        self,
+        session_factory: sessionmaker[Session],
+        seeded: dict[str, Any],
+    ) -> None:
+        """26 MiB advertised body > the 25 MiB + 1 router cap → 413."""
+        item_id = self._seed_checklist_item(session_factory, seeded)
+        with _client_for(session_factory, seeded["owner_ctx"]) as c:
+            r = c.patch(
+                f"/api/v1/tasks/{seeded['task_id']}/checklist/{item_id}/evidence",
+                headers={"Content-Length": str(26 * 1024 * 1024)},
+                files={"file": ("p.png", b"\x00" * 8, "image/png")},
+            )
+            assert r.status_code == 413, r.text
+            assert r.json()["detail"]["error"] == "evidence_too_large"
+
+    def test_bad_mime_returns_415(
+        self,
+        session_factory: sessionmaker[Session],
+        seeded: dict[str, Any],
+    ) -> None:
+        item_id = self._seed_checklist_item(session_factory, seeded)
+        storage = InMemoryStorage()
+        with _client_for(session_factory, seeded["owner_ctx"], storage=storage) as c:
+            r = c.patch(
+                f"/api/v1/tasks/{seeded['task_id']}/checklist/{item_id}/evidence",
+                files={"file": ("evidence.svg", b"<svg/>", "image/svg+xml")},
+            )
+            assert r.status_code == 415, r.text
+            body = r.json()["detail"]
+            assert body["error"] == "evidence_content_type_rejected"
+            assert body["kind"] == "photo"
+            # The malicious payload never landed.
+            assert not storage._blobs
+
+    def test_audit_row_landed(
+        self,
+        session_factory: sessionmaker[Session],
+        seeded: dict[str, Any],
+    ) -> None:
+        from app.adapters.db.audit.models import AuditLog
+
+        item_id = self._seed_checklist_item(session_factory, seeded)
+        with _client_for(session_factory, seeded["owner_ctx"]) as c:
+            r = c.patch(
+                f"/api/v1/tasks/{seeded['task_id']}/checklist/{item_id}/evidence",
+                files={"file": ("evidence.png", self._TINY_PNG, "image/png")},
+            )
+            assert r.status_code == 200, r.text
+
+        with session_factory() as s, tenant_agnostic():
+            audit = s.scalar(
+                select(AuditLog).where(
+                    AuditLog.entity_id == seeded["task_id"],
+                    AuditLog.action == "task.checklist.evidence.add",
+                )
+            )
+            assert audit is not None
+            diff = audit.diff
+            assert isinstance(diff, dict)
+            assert diff["after"]["checklist_item_id"] == item_id
+            assert diff["after"]["content_type"] == "image/png"
+
+    def test_foreign_tenant_returns_404(
+        self,
+        session_factory: sessionmaker[Session],
+        seeded: dict[str, Any],
+    ) -> None:
+        """A caller bound to a sibling workspace cannot see the item (§14)."""
+        item_id = self._seed_checklist_item(session_factory, seeded)
+        storage = InMemoryStorage()
+        with _client_for(session_factory, seeded["foreign_ctx"], storage=storage) as c:
+            r = c.patch(
+                f"/api/v1/tasks/{seeded['task_id']}/checklist/{item_id}/evidence",
+                files={"file": ("evidence.png", self._TINY_PNG, "image/png")},
+            )
+            assert r.status_code == 404, r.text
+            assert r.json()["detail"]["error"] == "task_not_found"
+        # The foreign-tenant probe never landed bytes.
+        assert not storage._blobs
+
+
+# ---------------------------------------------------------------------------
 # Tests — PATCH /tasks/{id} (narrow partial update)
 # ---------------------------------------------------------------------------
 
