@@ -30,7 +30,9 @@ from fastapi import Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
 from app.api.deps import current_workspace_context, db_session
+from app.authz.approval_mint import mint_and_envelope_for_http
 from app.authz.enforce import (
+    ApprovalRequired,
     InvalidScope,
     PermissionDenied,
     PermissionRuleRepository,
@@ -97,6 +99,8 @@ def Permission(
     * :class:`UnknownActionKey` → 422 ``unknown_action_key``.
     * :class:`InvalidScope` → 422 ``invalid_scope_kind``.
     * :class:`PermissionDenied` → 403 ``permission_denied``.
+    * :class:`ApprovalRequired` → 409 ``approval_required`` (mints
+      one ``approval_request`` row and commits before returning).
     * Missing path param → 500 ``scope_id_unresolved`` (caller wired
       the dep incorrectly).
 
@@ -170,5 +174,12 @@ def Permission(
             raise _misuse_to_http("invalid_scope_kind", action_key, str(exc)) from exc
         except PermissionDenied as exc:
             raise _deny_to_http(action_key) from exc
+        except ApprovalRequired as exc:
+            # The action was allowed but the catalog flags it
+            # ``requires_approval=True`` — mint the HITL row and
+            # surface the §12 409 envelope. ``PermissionDenied`` is
+            # mutually exclusive with this branch (the resolver
+            # raises one or the other, never both).
+            raise mint_and_envelope_for_http(request, session, ctx, exc) from exc
 
     return _dep

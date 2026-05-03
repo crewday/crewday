@@ -43,6 +43,7 @@ from app.adapters.db.identity.models import User, canonicalise_email
 from app.adapters.db.session import make_engine
 from app.adapters.db.workspace.models import Workspace
 from app.authz.enforce import (
+    ApprovalRequired,
     EmptyPermissionRuleRepository,
     InvalidScope,
     PermissionCheck,
@@ -51,6 +52,7 @@ from app.authz.enforce import (
     UnknownActionKey,
     require,
 )
+from app.domain.identity._action_catalog import ACTION_CATALOG, ActionSpec
 from app.tenancy.context import ActorGrantRole, WorkspaceContext
 from app.util.ulid import new_ulid
 
@@ -928,3 +930,192 @@ class TestPermissionCheckValue:
         assert check.action_key == "tasks.create"
         assert check.scope_kind == "property"
         assert check.scope_id == "01HWA00000000000000000PR01"
+
+
+# -----------------------------------------------------------------------
+# ApprovalRequired post-allow check (cd-qo3g)
+# -----------------------------------------------------------------------
+
+
+def _patch_requires_approval(
+    monkeypatch: pytest.MonkeyPatch, action_key: str
+) -> ActionSpec:
+    """Swap a single :data:`ACTION_CATALOG` entry to ``requires_approval=True``.
+
+    The catalog is a frozen :class:`MappingProxyType` view over the
+    underlying dict, so we mutate the backing dict via
+    ``ACTION_CATALOG.copy()`` semantics: build a new dict, monkeypatch
+    the public binding to point at it for the test's lifetime.
+    """
+    original = ACTION_CATALOG[action_key]
+    flagged = ActionSpec(
+        key=original.key,
+        valid_scope_kinds=original.valid_scope_kinds,
+        default_allow=original.default_allow,
+        root_only=original.root_only,
+        root_protected_deny=original.root_protected_deny,
+        requires_approval=True,
+    )
+    new_catalog = dict(ACTION_CATALOG)
+    new_catalog[action_key] = flagged
+    monkeypatch.setattr("app.authz.enforce.ACTION_CATALOG", new_catalog)
+    return flagged
+
+
+class TestApprovalRequired:
+    """Resolver raises :class:`ApprovalRequired` instead of returning on allow.
+
+    Mutually exclusive with :class:`PermissionDenied` — every allow path
+    funnels through the post-allow check, but a denied caller still gets
+    the deny exception (the gate only fires after the resolver decided
+    "yes").
+    """
+
+    def test_carries_structured_fields(self) -> None:
+        """The exception carries the four context fields the seam needs."""
+        exc = ApprovalRequired(
+            action_key="tasks.create",
+            scope_kind="property",
+            scope_id="01HWA00000000000000000PR01",
+            actor_id="01HWA00000000000000000US01",
+        )
+        assert exc.action_key == "tasks.create"
+        assert exc.scope_kind == "property"
+        assert exc.scope_id == "01HWA00000000000000000PR01"
+        assert exc.actor_id == "01HWA00000000000000000US01"
+
+    def test_default_allow_path_raises(
+        self,
+        factory: sessionmaker[Session],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Manager hits ``tasks.create`` via ``managers`` default_allow.
+
+        With ``requires_approval=True`` flipped on, the resolver
+        raises :class:`ApprovalRequired` instead of returning.
+        """
+        _patch_requires_approval(monkeypatch, "tasks.create")
+        with factory() as s:
+            seeded = _seed(s)
+            s.commit()
+            ctx = _ctx(
+                workspace_id=seeded.workspace_id, actor_id=seeded.manager_user_id
+            )
+            with pytest.raises(ApprovalRequired) as exc_info:
+                require(
+                    s,
+                    ctx,
+                    action_key="tasks.create",
+                    scope_kind="workspace",
+                    scope_id=seeded.workspace_id,
+                )
+            exc = exc_info.value
+            assert exc.action_key == "tasks.create"
+            assert exc.scope_kind == "workspace"
+            assert exc.scope_id == seeded.workspace_id
+            assert exc.actor_id == seeded.manager_user_id
+
+    def test_owner_root_only_path_raises(
+        self,
+        factory: sessionmaker[Session],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Owner clears the root-only gate on ``workspace.archive``.
+
+        With ``requires_approval=True`` flipped on, the gate fires
+        even though the owner is allowed.
+        """
+        _patch_requires_approval(monkeypatch, "workspace.archive")
+        with factory() as s:
+            seeded = _seed(s)
+            s.commit()
+            ctx = _ctx(
+                workspace_id=seeded.workspace_id,
+                actor_id=seeded.owner_user_id,
+                was_owner=True,
+            )
+            with pytest.raises(ApprovalRequired) as exc_info:
+                require(
+                    s,
+                    ctx,
+                    action_key="workspace.archive",
+                    scope_kind="workspace",
+                    scope_id=seeded.workspace_id,
+                )
+            assert exc_info.value.action_key == "workspace.archive"
+
+    def test_explicit_allow_rule_path_raises(
+        self,
+        factory: sessionmaker[Session],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Allow rule wins → post-allow gate still fires.
+
+        Uses a stranger (no role grants, no group memberships) so the
+        rule-walk allow is the **only** path that could allow — proving
+        the gate fires on the rule branch specifically rather than on
+        the default_allow fallback. We pick ``users.edit_profile_other``
+        because its ``default_allow`` is ``("owners","managers")``: a
+        stranger never matches, leaving the explicit allow rule as the
+        sole allow path.
+        """
+        _patch_requires_approval(monkeypatch, "users.edit_profile_other")
+        with factory() as s:
+            seeded = _seed(s)
+            s.commit()
+            ctx = _ctx(
+                workspace_id=seeded.workspace_id,
+                actor_id=seeded.stranger_user_id,
+                grant_role=None,
+            )
+            stub = _StubRuleRepo(
+                rules_by_scope={
+                    ("workspace", seeded.workspace_id): [
+                        RuleRow(
+                            rule_id=new_ulid(),
+                            scope_kind="workspace",
+                            scope_id=seeded.workspace_id,
+                            effect="allow",
+                        ),
+                    ],
+                }
+            )
+            with pytest.raises(ApprovalRequired) as exc_info:
+                require(
+                    s,
+                    ctx,
+                    action_key="users.edit_profile_other",
+                    scope_kind="workspace",
+                    scope_id=seeded.workspace_id,
+                    rule_repo=stub,
+                )
+            assert exc_info.value.action_key == "users.edit_profile_other"
+            assert exc_info.value.actor_id == seeded.stranger_user_id
+
+    def test_denied_caller_gets_permission_denied_not_approval(
+        self,
+        factory: sessionmaker[Session],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Stranger has no allow path → :class:`PermissionDenied` wins.
+
+        The post-allow gate is only consulted on the allow side; a
+        denied caller never sees :class:`ApprovalRequired`.
+        """
+        _patch_requires_approval(monkeypatch, "tasks.create")
+        with factory() as s:
+            seeded = _seed(s)
+            s.commit()
+            ctx = _ctx(
+                workspace_id=seeded.workspace_id,
+                actor_id=seeded.stranger_user_id,
+                grant_role=None,
+            )
+            with pytest.raises(PermissionDenied):
+                require(
+                    s,
+                    ctx,
+                    action_key="tasks.create",
+                    scope_kind="workspace",
+                    scope_id=seeded.workspace_id,
+                )

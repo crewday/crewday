@@ -236,3 +236,40 @@ class TestIntegrityFunction:
 
     def test_catalog_drift_is_runtime_error(self) -> None:
         assert issubclass(CatalogDrift, RuntimeError)
+
+
+class TestRequiresApproval:
+    """The new ``requires_approval`` field on :class:`ActionSpec` (cd-qo3g).
+
+    The v1 catalog ships **no** entries with ``requires_approval=True``
+    — flipping any row to True is a behavior change and must not happen
+    accidentally. The field exists so a future spec edit can opt one in
+    deliberately; the resolver branch is covered separately by
+    ``tests/unit/authz/test_enforce.py``.
+    """
+
+    def test_default_is_false(self) -> None:
+        """An ``ActionSpec`` constructed without the kwarg defaults to False."""
+        spec = ActionSpec(
+            key="x.y",
+            valid_scope_kinds=("workspace",),
+            default_allow=("owners",),
+            root_only=False,
+            root_protected_deny=False,
+        )
+        assert spec.requires_approval is False
+
+    def test_no_catalog_entry_flags_requires_approval(self) -> None:
+        """No live catalog row is HITL-gated in v1.
+
+        Flipping any row to True is a deliberate, spec-coupled change
+        — this test fails loudly to prompt the conversation rather
+        than letting a silent flip ship.
+        """
+        flagged = sorted(
+            key for key, spec in ACTION_CATALOG.items() if spec.requires_approval
+        )
+        assert flagged == [], (
+            f"unexpected requires_approval=True entries: {flagged!r}; "
+            "flipping a catalog row is a spec-coupled behavior change."
+        )

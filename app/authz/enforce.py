@@ -37,6 +37,17 @@ Resolution order — implements §02 "Permission resolution" verbatim:
    ``ActionSpec.default_allow``.
 6. Otherwise: :class:`PermissionDenied`.
 
+After the resolver decides ``allow`` (steps 2/3/4/5 — owner-on-
+root-only, allow rule, default_allow fallback), one extra check
+fires: if the action's :class:`~app.domain.identity._action_catalog.ActionSpec`
+carries ``requires_approval=True``, the resolver raises
+:class:`ApprovalRequired` instead of returning. This is the §12
+``409 approval_required`` envelope's enforcer-side trigger; the
+seam catches it, mints an ``approval_request`` row, and surfaces
+the envelope. Denied actions never raise :class:`ApprovalRequired`
+— they raise :class:`PermissionDenied` and become 403
+``permission_denied``.
+
 Each deny emits one structured log line for the "who can do this?"
 debug surface. The message is pure English; the decision data rides
 the ``extra`` dict so log aggregators can filter without parsing.
@@ -76,6 +87,7 @@ from app.domain.identity._action_catalog import (
 from app.tenancy import WorkspaceContext
 
 __all__ = [
+    "ApprovalRequired",
     "CatalogDrift",
     "EmptyPermissionRuleRepository",
     "InvalidScope",
@@ -110,6 +122,43 @@ class PermissionDenied(RuntimeError):
     fields (``action_key``, ``scope_kind``, ``scope_id``, ``actor_id``)
     ride on the log ``extra`` dict emitted by :func:`require`.
     """
+
+
+class ApprovalRequired(RuntimeError):
+    """The caller was allowed, but the action is HITL-gated.
+
+    Raised by :func:`require` *after* the resolver decides ``allow``
+    when the action's :class:`~app.domain.identity._action_catalog.ActionSpec`
+    carries ``requires_approval=True``. Mutually exclusive with
+    :class:`PermissionDenied`: a denied action becomes 403
+    ``permission_denied``; an allowed-but-gated action becomes 409
+    ``approval_required`` (§12).
+
+    Contract: :func:`require` raises this **bare**, carrying only the
+    structured fields needed to mint the ``approval_request`` row
+    (``action_key`` / ``scope_kind`` / ``scope_id`` / ``actor_id``).
+    The enforcer never writes to the DB — keeping it side-effect-free
+    is what lets every caller (HTTP, CLI, worker) pick its own
+    persistence flavour. The outer seam (the FastAPI
+    :func:`app.authz.dep.Permission` dep, or any service caller) is
+    responsible for materialising the row via
+    :func:`app.authz.approval_mint.mint_approval_request` and
+    surfacing the §12 envelope.
+    """
+
+    def __init__(
+        self,
+        *,
+        action_key: str,
+        scope_kind: str,
+        scope_id: str,
+        actor_id: str,
+    ) -> None:
+        super().__init__(action_key)
+        self.action_key = action_key
+        self.scope_kind = scope_kind
+        self.scope_id = scope_id
+        self.actor_id = actor_id
 
 
 class UnknownActionKey(RuntimeError):
@@ -381,6 +430,32 @@ def _log_denied(
     )
 
 
+def _allow(
+    spec: ActionSpec,
+    *,
+    ctx: WorkspaceContext,
+    scope_kind: str,
+    scope_id: str,
+) -> None:
+    """Centralised allow-side return.
+
+    Threads the ``requires_approval`` post-allow check so every
+    success branch in :func:`require` flows through one place. If
+    the catalog flags the action HITL-gated, raise
+    :class:`ApprovalRequired` carrying the structured fields the
+    seam needs to mint the ``approval_request`` row; otherwise
+    return ``None`` (the canonical allow).
+    """
+    if spec.requires_approval:
+        raise ApprovalRequired(
+            action_key=spec.key,
+            scope_kind=scope_kind,
+            scope_id=scope_id,
+            actor_id=ctx.actor_id,
+        )
+    return None
+
+
 def require(
     session: Session,
     ctx: WorkspaceContext,
@@ -401,7 +476,13 @@ def require(
     * :class:`UnknownActionKey` when ``action_key`` is not catalogued.
     * :class:`InvalidScope` when ``scope_kind`` is not in the
       action's ``valid_scope_kinds``.
-    * :class:`PermissionDenied` otherwise on deny.
+    * :class:`PermissionDenied` on deny.
+    * :class:`ApprovalRequired` when the resolver decided ``allow``
+      but the action's :class:`~app.domain.identity._action_catalog.ActionSpec`
+      carries ``requires_approval=True``. The seam catches this,
+      mints an ``approval_request`` row, and surfaces the §12
+      ``409 approval_required`` envelope. Mutually exclusive with
+      :class:`PermissionDenied`.
 
     ``rule_repo`` defaults to :class:`EmptyPermissionRuleRepository`
     (v1 has no ``permission_rule`` table yet). Tests and future
@@ -432,7 +513,7 @@ def require(
     # Step 2 — root-only gate.
     if spec.root_only:
         if is_owner:
-            return
+            return _allow(spec, ctx=ctx, scope_kind=scope_kind, scope_id=scope_id)
         _log_denied(
             action_key=action_key,
             scope_kind=scope_kind,
@@ -485,7 +566,7 @@ def require(
             )
             raise PermissionDenied(action_key)
         if has_allow:
-            return
+            return _allow(spec, ctx=ctx, scope_kind=scope_kind, scope_id=scope_id)
         # No effective row on this scope — fall through to the next
         # scope group.
 
@@ -498,7 +579,7 @@ def require(
                 user_id=ctx.actor_id,
                 group_slug=group_slug,
             ):
-                return
+                return _allow(spec, ctx=ctx, scope_kind=scope_kind, scope_id=scope_id)
         except UnknownSystemGroup:
             # A catalog entry referencing an unknown group slug is a
             # spec / code drift — surface it loudly, not as a deny.

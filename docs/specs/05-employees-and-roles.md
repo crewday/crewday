@@ -490,6 +490,17 @@ Each entry declares:
   Non-owners may still be allowed via rules. Used for
   administrative actions that must never be accidentally
   locked out.
+- `requires_approval` — `true` means a caller who would otherwise
+  be allowed must still pause for human-in-the-loop approval
+  (§02 "Permission resolution" step 6). The resolver raises
+  `ApprovalRequired` after deciding `allow`; the HTTP seam mints
+  one `approval_request` row marked as direct-human (the §11
+  agent-runtime fields `inline_channel`, `for_user_id`,
+  `resolved_user_mode` are left NULL) and surfaces the §12
+  `409 approval_required` envelope. Mutually exclusive with
+  `deny`. Defaults to `false`. The v1 catalog ships with this
+  flag off on every row; flipping a row is a deliberate,
+  spec-coupled change.
 
 The catalog below is the v1 canonical set. New actions require a
 spec edit here before the backend can accept them.

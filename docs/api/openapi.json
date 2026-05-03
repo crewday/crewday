@@ -103121,7 +103121,7 @@
         }
       ],
       "post": {
-        "description": "Ad-hoc create \u2014 see :func:`app.domain.tasks.oneoff.create_oneoff`.",
+        "description": "Ad-hoc create \u2014 see :func:`app.domain.tasks.oneoff.create_oneoff`.\n\nThe route catches :class:`ApprovalRequired` raised by\n:func:`app.authz.require` from inside the domain service: when the\ncatalog flags ``tasks.create`` (or any ``create_oneoff`` call's\naction) ``requires_approval=True``, the seam mints an\n``approval_request`` row and surfaces the \u00a712 ``409 approval_required``\nenvelope instead of letting the exception bubble as a 500.",
         "operationId": "create_task",
         "requestBody": {
           "content": {

@@ -25,6 +25,12 @@ Each :class:`ActionSpec` records the metadata the resolver needs:
   (§05 "Root-only actions").
 * ``root_protected_deny`` — ``True`` means owners cannot be denied by
   a deny rule (§05 "root_protected_deny" column, shown as ✅).
+* ``requires_approval`` — ``True`` means an allowed call still pauses
+  for a HITL decision (the enforcer raises
+  :class:`app.authz.ApprovalRequired` after the resolver decides
+  allow; the seam mints an ``approval_request`` row and returns the
+  §12 ``409 approval_required`` envelope). Defaults to ``False``;
+  no v1 row is flagged.
 
 ``ACTION_CATALOG`` is a ``Mapping[str, ActionSpec]`` — the primary
 surface for the resolver. ``ACTION_KEYS`` is a ``frozenset[str]`` view
@@ -63,6 +69,18 @@ class ActionSpec:
     ``default_allow`` is a tuple (not a set) so the ordered,
     human-readable section of §05 round-trips verbatim and diffs stay
     readable.
+
+    ``requires_approval`` flags an action that, **once allowed by the
+    resolver**, must still pause for a human-in-the-loop decision
+    before the side effect lands. The enforcer (§02 "Permission
+    resolution") raises :class:`app.authz.ApprovalRequired` post-allow
+    when this is ``True``; the seam catches that, mints an
+    ``approval_request`` row, and returns the §12 ``409
+    approval_required`` envelope. Default ``False`` — the v1 catalog
+    does not flag any action; the field exists so future spec edits
+    can opt a row in without adding new plumbing. Mutually exclusive
+    with the deny path: a denied action is 403
+    ``permission_denied``, never 409 ``approval_required``.
     """
 
     key: str
@@ -70,6 +88,7 @@ class ActionSpec:
     default_allow: tuple[str, ...]
     root_only: bool
     root_protected_deny: bool
+    requires_approval: bool = False
 
 
 # ---------------------------------------------------------------------------

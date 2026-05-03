@@ -2128,3 +2128,96 @@ class TestCrossTenantMutations:
             )
             assert r.status_code == 404
             assert r.json()["detail"]["error"] == "task_not_found"
+
+
+# ---------------------------------------------------------------------------
+# HITL approval gate (cd-qo3g) — direct-human ``requires_approval=True``.
+# ---------------------------------------------------------------------------
+
+
+class TestApprovalRequired:
+    """``POST /tasks`` against a HITL-flagged ``tasks.create`` returns 409.
+
+    Patches the action catalog at module import sites so the resolver
+    inside :func:`app.domain.tasks.oneoff.create_oneoff` sees
+    ``requires_approval=True``. The route's seam catches
+    :class:`~app.authz.ApprovalRequired`, mints an
+    :class:`~app.adapters.db.llm.models.ApprovalRequest`, and surfaces
+    the §12 ``409 approval_required`` envelope.
+    """
+
+    @pytest.fixture
+    def approval_gated_tasks_create(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Flip ``tasks.create`` to ``requires_approval=True`` for one test."""
+        from app.domain.identity._action_catalog import (
+            ACTION_CATALOG as _CATALOG,
+        )
+        from app.domain.identity._action_catalog import (
+            ActionSpec,
+        )
+
+        original = _CATALOG["tasks.create"]
+        flagged = ActionSpec(
+            key=original.key,
+            valid_scope_kinds=original.valid_scope_kinds,
+            default_allow=original.default_allow,
+            root_only=original.root_only,
+            root_protected_deny=original.root_protected_deny,
+            requires_approval=True,
+        )
+        new_catalog = dict(_CATALOG)
+        new_catalog[original.key] = flagged
+        monkeypatch.setattr("app.authz.enforce.ACTION_CATALOG", new_catalog)
+
+    def test_post_tasks_returns_409_with_envelope_and_persists_row(
+        self,
+        session_factory: sessionmaker[Session],
+        seeded: dict[str, Any],
+        approval_gated_tasks_create: None,
+    ) -> None:
+        from app.adapters.db.llm.models import ApprovalRequest
+
+        ctx: WorkspaceContext = seeded["owner_ctx"]
+        with _client_for(session_factory, ctx) as client:
+            r = client.post(
+                "/api/v1/tasks",
+                json={
+                    "title": "Smoke task",
+                    "scheduled_for_local": "2026-04-20T09:00",
+                    "property_id": seeded["property_id"],
+                },
+            )
+        assert r.status_code == 409, r.text
+        body = r.json()["detail"]
+        assert body["error"] == "approval_required"
+        approval_id = body["approval_request_id"]
+        assert approval_id
+        assert body["expires_at"] is None
+
+        # The route's UoW commits the mint — assert visible in a fresh
+        # session and that no Occurrence was written.
+        with session_factory() as s, tenant_agnostic():
+            row = s.get(ApprovalRequest, approval_id)
+            assert row is not None
+            assert row.status == "pending"
+            assert row.workspace_id == seeded["workspace_id"]
+            assert row.requester_actor_id == seeded["owner_id"]
+            assert row.action_json["action_key"] == "tasks.create"
+            assert row.action_json["scope_kind"] == "property"
+            assert row.action_json["scope_id"] == seeded["property_id"]
+            assert row.action_json["actor_id"] == seeded["owner_id"]
+            # Direct-human marker fields.
+            assert row.inline_channel is None
+            assert row.for_user_id is None
+            assert row.resolved_user_mode is None
+            assert row.expires_at is None
+            # No new Occurrence created — the gate fires before the
+            # service inserts the task row.
+            titles = list(
+                s.execute(
+                    select(Occurrence.title).where(
+                        Occurrence.workspace_id == seeded["workspace_id"]
+                    )
+                ).scalars()
+            )
+            assert "Smoke task" not in titles

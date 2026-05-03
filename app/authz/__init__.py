@@ -53,6 +53,7 @@ from __future__ import annotations
 from app.authz.deployment_admin import is_deployment_admin
 from app.authz.deployment_owners import is_deployment_owner
 from app.authz.enforce import (
+    ApprovalRequired,
     CatalogDrift,
     EmptyPermissionRuleRepository,
     InvalidScope,
@@ -69,6 +70,7 @@ from app.authz.membership import UnknownSystemGroup, is_member_of
 from app.authz.owners import is_owner_member, resolve_is_owner
 
 __all__ = [
+    "ApprovalRequired",
     "CatalogDrift",
     "EmptyPermissionRuleRepository",
     "InvalidScope",

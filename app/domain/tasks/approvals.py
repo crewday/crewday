@@ -19,6 +19,7 @@ from app.adapters.db.tasks.models import (
 )
 from app.audit import write_audit
 from app.authz import (
+    ApprovalRequired,
     EmptyPermissionRuleRepository,
     InvalidScope,
     PermissionRuleRepository,
@@ -359,6 +360,15 @@ def _assert_can_decide(
     except (UnknownActionKey, InvalidScope) as exc:
         raise RuntimeError(
             f"authz catalog misconfigured for 'tasks.review.decide': {exc!s}"
+        ) from exc
+    except ApprovalRequired as exc:
+        # The decide verb is itself the HITL surface — flagging it
+        # ``requires_approval=True`` would create a recursive gate. Fail
+        # loudly so the catalog mistake is visible during boot or tests
+        # rather than silently 500-ing the operator's decision.
+        raise RuntimeError(
+            "authz catalog misconfigured: 'tasks.review.decide' must not be "
+            f"requires_approval=True (would loop the HITL gate): {exc!s}"
         ) from exc
     except AuthzPermissionDenied as exc:
         raise ApprovalPermissionDenied(str(exc)) from exc

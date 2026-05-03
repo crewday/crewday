@@ -858,7 +858,10 @@ scope (or any containing scope) may edit rules on that scope.
 ### Permission resolution
 
 Given a triple `(user U, action_key A, target_scope S)`, the
-permission resolver returns `allow | deny` using this order.
+permission resolver returns `allow | deny | approval_required`
+using this order. `approval_required` is a post-allow outcome —
+the resolver decided `allow` but the action's catalog entry
+flags it for human-in-the-loop review (see step 6).
 
 1. **Action existence.** If `A` is not registered in the
    action catalog (§05), the resolver returns `deny` and logs
@@ -897,6 +900,17 @@ permission resolver returns `allow | deny` using this order.
    back to the action's `default_allow` list of system group
    keys. If any of `U`'s active memberships on the scope chain
    intersects `default_allow` → `allow`. Otherwise → `deny`.
+6. **Post-allow approval gate.** Once steps 2–5 decide `allow`,
+   if the action's `requires_approval` flag is set the resolver
+   raises `ApprovalRequired` carrying `(action_key, scope_kind,
+   scope_id, actor_id)` instead of returning. The HTTP seam
+   catches it, mints one `approval_request` row marked as
+   direct-human (`inline_channel`, `for_user_id`,
+   `resolved_user_mode` left NULL), and returns the §12
+   `409 approval_required` envelope. Mutually exclusive with
+   `deny`: a denied caller never sees this branch. The v1
+   action catalog ships with `requires_approval=False` on every
+   row; flipping a row is a deliberate, spec-coupled change.
 
 **Deny within a scope beats allow within the same scope.** A
 more-specific scope overrides a broader one — so a property

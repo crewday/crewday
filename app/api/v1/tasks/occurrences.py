@@ -16,7 +16,7 @@ from datetime import UTC, datetime
 from typing import Annotated, Literal
 from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, Query, status
+from fastapi import APIRouter, Query, Request, status
 from sqlalchemy import or_, select
 
 from app.adapters.db.tasks.models import ChecklistItem, Occurrence
@@ -27,6 +27,8 @@ from app.api.pagination import (
     decode_cursor,
     paginate,
 )
+from app.authz import ApprovalRequired
+from app.authz.approval_mint import mint_and_envelope_for_http
 from app.domain.tasks.assignment import TaskNotFound as AssignTaskNotFound
 from app.domain.tasks.assignment import assign_task
 from app.domain.tasks.completion import (
@@ -58,7 +60,11 @@ from app.domain.tasks.templates import TaskTemplateNotFound
 from .deps import _Ctx, _Db, _task_lifecycle_bus
 from .derived import _TERMINAL_STATES
 from .detail import _property_timezone, _resolve_zones_for_views, _task_detail_payload
-from .errors import _http, _http_for_task_mutation, _task_not_found
+from .errors import (
+    _http,
+    _http_for_task_mutation,
+    _task_not_found,
+)
 from .payloads import (
     AssignmentPayload,
     AssignRequest,
@@ -171,10 +177,21 @@ def create_task_route(
     body: TaskCreate,
     ctx: _Ctx,
     session: _Db,
+    request: Request,
 ) -> TaskPayload:
-    """Ad-hoc create — see :func:`app.domain.tasks.oneoff.create_oneoff`."""
+    """Ad-hoc create — see :func:`app.domain.tasks.oneoff.create_oneoff`.
+
+    The route catches :class:`ApprovalRequired` raised by
+    :func:`app.authz.require` from inside the domain service: when the
+    catalog flags ``tasks.create`` (or any ``create_oneoff`` call's
+    action) ``requires_approval=True``, the seam mints an
+    ``approval_request`` row and surfaces the §12 ``409 approval_required``
+    envelope instead of letting the exception bubble as a 500.
+    """
     try:
         view = create_oneoff(session, ctx, payload=body)
+    except ApprovalRequired as exc:
+        raise mint_and_envelope_for_http(request, session, ctx, exc) from exc
     except (
         TaskTemplateNotFound,
         PersonalAssignmentError,
