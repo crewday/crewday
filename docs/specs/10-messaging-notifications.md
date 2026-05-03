@@ -76,31 +76,108 @@ logic is in place from day one. All notification templates receive
 
 ### Emails the system sends
 
-| event                          | to                                   | required?     |
-|--------------------------------|--------------------------------------|---------------|
-| magic link (enrollment / recovery) | recipient                        | yes           |
-| daily owner/manager digest     | each user with owner or manager grant | opt-out      |
-| daily worker digest            | each user with worker grant          | opt-out       |
-| task overdue alert             | assigned user + owner/manager        | opt-out       |
-| task comment mention           | mentioned user                       | opt-out       |
-| issue reported                 | owners and managers                  | yes           |
-| expense submitted              | owners and managers                  | yes           |
-| expense decision               | submitting user                      | yes           |
-| payslip issued                 | work-engagement user                 | yes           |
-| iCal feed error                | owners and managers                  | yes           |
-| anomaly detected (§11)         | owners and managers                  | opt-out       |
-| availability override pending  | owners and managers                  | yes           |
-| pre-arrival task unassigned    | owners and managers                  | yes           |
-| task primary unavailable       | owners and managers                  | yes           |
-| holiday schedule impact        | affected users                       | opt-out       |
-| agent approval pending         | owners and managers                  | yes           |
-| invoice reminder               | client user (biller's client grant) or billing workspace's owners/managers | opt-out (per `invoice_reminders.enabled` cascade setting, §22) |
-| invoice reminder exhausted     | owners and managers of the billing workspace | yes    |
-| property_workspace invite      | owners of the recipient workspace (if addressed) or the invite link's opener | yes |
+The system sends three families of email. The taxonomy below is the
+**code-aligned** view: each row names the canonical kind value as it
+appears in code (snake_case, the on-disk template segment, and the
+`email_opt_out.category` value the pre-send probe consults), with the
+human-readable label in the description column.
+
+#### §10.1 Routed via NotificationService
+
+These flow through `NotificationService.notify()`
+(`app/domain/messaging/notifications.py`), persist a `notification`
+inbox row, fire the `notification.created` SSE event, and only emit
+email when no matching `email_opt_out` row exists. The kind values
+below ARE the `NotificationKind` enum — the enum and §10.1 are kept
+in lockstep by a coherence test
+(`tests/unit/messaging/test_notification_kind_spec_alignment.py`).
+
+| kind value (`NotificationKind`) | description                                          | recipient                              | required? |
+|---------------------------------|------------------------------------------------------|----------------------------------------|-----------|
+| `task_assigned`                 | a task has been assigned to a user                    | assignee                               | opt-out   |
+| `task_overdue`                  | task overdue alert                                    | assigned user + owners/managers        | opt-out   |
+| `comment_mention`               | task comment `@mention`                               | mentioned user                         | opt-out   |
+| `issue_reported`                | a user reported an issue                              | owners and managers                    | yes       |
+| `issue_resolved`                | issue marked resolved (or `wont_fix`)                 | reporter                               | opt-out   |
+| `expense_submitted`             | expense awaiting decision                             | owners and managers                    | yes       |
+| `expense_approved`              | expense decision: approved (the submitter's branch of "expense decision") | submitting user            | yes       |
+| `expense_rejected`              | expense decision: rejected (the submitter's other branch of "expense decision") | submitting user      | yes       |
+| `approval_needed`               | a workflow needs an owner/manager decision (incl. agent approvals, availability overrides) | owners and managers | yes |
+| `approval_decided`              | the matching `approval_needed` was decided            | requester                              | opt-out   |
+| `payslip_issued`                | a payslip is ready                                    | work-engagement user                   | yes       |
+| `stay_upcoming`                 | a stay is starting soon                               | owners + assigned workers              | opt-out   |
+| `anomaly_detected`              | §11 anomaly heuristic fired                           | owners and managers                    | opt-out   |
+| `agent_message`                 | agent reaching a human out-of-band (per "Agent-message delivery" fallback chain) | the targeted user | yes (fallback chain bottoms out here) |
+| `daily_digest`                  | the per-recipient daily digest (covers both the owner/manager digest and the worker digest; the worker decides which body to render based on the recipient's grants) | each user with a grant in the workspace | opt-out |
 
 Opt-outs are per-person, per-category, via a signed unsubscribe link
-in the footer of each email. Required emails (security-relevant, or
+in the footer of each email. Required kinds (security-relevant or
 legally equivalent) cannot be unsubscribed but throttle by priority.
+
+#### §10.2 Direct-mail (auth path)
+
+Authentication and identity-lifecycle emails do **not** go through
+`NotificationService`. They render via
+`app.mail.auth_templates.render_auth_email` (subject + plain-text
+body, autoescape off) and dispatch directly through the configured
+`Mailer`. They never write a `notification` inbox row, never fire
+the SSE event, and are never opt-outable — losing one of these would
+lock the user out.
+
+Templates live under `app/domain/messaging/templates/auth/` as
+`auth/<name>.<channel>.j2` files (channels: `subject`, `body_text`).
+The set today:
+
+| template name           | description                                                | recipient                       |
+|-------------------------|------------------------------------------------------------|---------------------------------|
+| `magic_link`            | passwordless sign-in / enrolment link                      | recipient                       |
+| `recovery_new_link`     | new recovery link after the previous one expired           | recipient                       |
+| `invite_accept`         | workspace invite acceptance link                           | invitee                         |
+| `passkey_reset_notice`  | a manager / owner reset their passkey (notify the user)    | the user whose passkey reset    |
+| `passkey_reset_worker`  | a worker passkey reset, sent to the worker                 | worker                          |
+| `email_change_notice`   | confirmation request for an email change                   | new address                     |
+| `email_change_confirmed`| email change applied                                       | new address                     |
+| `email_change_revert`   | undo-window link sent to the previous address              | previous address                |
+
+#### §10.3 Digest emails (idempotency: `digest_record`)
+
+The daily digest worker is bookkept by the `digest_record` table
+(one row per `(workspace_id, recipient_user_id, period_start, kind)`
+tuple, see `_DIGEST_KIND_VALUES` in
+`app/adapters/db/messaging/models.py`). The `digest_record` row is
+the **idempotency / replay ledger**, not a separate delivery path:
+the actual fan-out still goes through `NotificationService` under
+the `daily_digest` kind documented in §10.1 above. A duplicate
+worker tick reads the existing `digest_record` for the same
+`period_start` and skips re-sending.
+
+`_DIGEST_KIND_VALUES` (`daily`, `weekly`) names the cadence; weekly
+rollups are reserved (column accepts the value, no worker emits it
+in v1).
+
+#### §10.4 Future kinds (spec-only, not yet emitted)
+
+The §10 prose has carried these labels since early drafts; none are
+emitted in code today and the `NotificationKind` enum deliberately
+does not list them. They land via additive enum-widening migrations
+when each feature ships, with a §10.1 row added in the same change.
+Umbrella tracking: **cd-vtm12**.
+
+| label (spec)                    | proposed kind value             | recipient                                                                  | required? | tracking |
+|---------------------------------|---------------------------------|----------------------------------------------------------------------------|-----------|----------|
+| iCal feed error                 | `ical_feed_error`               | owners and managers                                                        | yes       | cd-vtm12 |
+| availability override pending   | (use existing `approval_needed`)| owners and managers                                                        | yes       | rolled into `approval_needed` (cd-0loc5) |
+| pre-arrival task unassigned     | `pre_arrival_task_unassigned`   | owners and managers                                                        | yes       | cd-vtm12 |
+| task primary unavailable        | `task_primary_unavailable`      | owners and managers                                                        | yes       | cd-vtm12 |
+| holiday schedule impact         | `holiday_schedule_impact`       | affected users                                                             | opt-out   | cd-vtm12 |
+| invoice reminder                | `invoice_reminder`              | client user (biller's client grant) or billing workspace's owners/managers | opt-out (per `invoice_reminders.enabled` cascade setting, §22) | cd-vtm12 |
+| invoice reminder exhausted      | `invoice_reminder_exhausted`    | owners and managers of the billing workspace                               | yes       | cd-vtm12 |
+| property_workspace invite       | `property_workspace_invite`     | owners of the recipient workspace (if addressed) or the invite link's opener | yes     | cd-vtm12 |
+
+The "agent approval pending" / "agent approval decided" labels from
+earlier drafts are subsumed by `approval_needed` / `approval_decided`
+in §10.1 — the approvals subsystem (§11) is the one source of truth
+for both the agent-driven and human-driven branches.
 
 ### `email_opt_out`
 
@@ -114,10 +191,16 @@ legally equivalent) cannot be unsubscribed but throttle by priority.
 | source        | enum    | `unsubscribe_link | profile | admin`           |
 
 Before sending, the worker checks for an `email_opt_out` row matching
-`(workspace_id, user_id, category)`. Required categories (magic link,
-payslip issued, expense decision, issue reported, agent approval
-pending) are never suppressed even if a row exists — the row is kept
-for audit but ignored for those templates.
+`(workspace_id, user_id, category)` where `category` is the kind's
+snake_case value (e.g. `task_assigned`, `comment_mention`). Required
+categories — those marked "yes" in §10.1 (`payslip_issued`,
+`expense_approved`, `expense_rejected`, `expense_submitted`,
+`issue_reported`, `approval_needed`, `agent_message`) and the entire
+auth path (§10.2: `magic_link`, recovery, invite, passkey reset,
+email change) — are never suppressed even if a row exists; the row
+is kept for audit but ignored for those kinds. A wildcard category
+(`'*'`) suppresses every opt-outable kind for that user without
+listing each one.
 
 ### Delivery tracking
 
