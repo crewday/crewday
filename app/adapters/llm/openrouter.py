@@ -81,6 +81,7 @@ __all__ = [
     "OPENROUTER_API_KEY_PURPOSE",
     "OPENROUTER_API_KEY_SETTING",
     "DeploymentOpenRouterConfigSource",
+    "LlmContentRefused",
     "LlmProviderError",
     "LlmRateLimited",
     "LlmTransportError",
@@ -209,6 +210,44 @@ class LlmTransportError(RuntimeError):
 
 class LlmProviderError(RuntimeError):
     """Raised when the provider rejects the request with a non-retryable ``4xx``."""
+
+
+class LlmContentRefused(RuntimeError):
+    """Raised when every rung in the chain refused on content grounds.
+
+    Distinct from :class:`LlmTransportError` so callers that want to
+    react to "model refused this request" (surface a friendlier
+    message, fall back to a non-LLM path, …) can discriminate on type
+    rather than parsing the message. Inside a single rung a
+    ``finish_reason`` of ``safety`` / ``content_filter`` is treated as
+    retryable per §11 "Retryable errors" and advances the chain; this
+    exception only surfaces once the whole chain has been exhausted on
+    refusals.
+
+    The chain-exhausted-refusal surface (raised by
+    :class:`app.domain.llm.client.LLMClient`) carries the same
+    ``fallback_attempts`` / ``correlation_id`` attributes that
+    :class:`app.domain.llm.client.LLMChainExhausted` exposes so the
+    API layer can fill the ``X-LLM-Fallback-Attempts`` /
+    ``X-Correlation-Id-Echo`` response headers on the failure path
+    regardless of which subtype it caught (§11 "Failure modes" — same
+    echo contract as the success path). Both attributes default to
+    safe sentinels (``0`` / ``""``) so the bare exception remains
+    backwards-compatible with adapter-layer raisers that don't have a
+    chain context.
+    """
+
+    __slots__ = ("correlation_id", "fallback_attempts")
+
+    def __init__(
+        self,
+        *args: object,
+        fallback_attempts: int = 0,
+        correlation_id: str = "",
+    ) -> None:
+        super().__init__(*args)
+        self.fallback_attempts = fallback_attempts
+        self.correlation_id = correlation_id
 
 
 class StaticOpenRouterConfigSource:
