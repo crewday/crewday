@@ -816,7 +816,9 @@ def deliver(
     # the worker tick does not need a WorkspaceContext for this call.
     secret_blob = subscription.secret_blob.encode("latin-1")
     plaintext_secret = envelope.decrypt(
-        secret_blob, purpose=SUBSCRIPTION_SECRET_PURPOSE
+        secret_blob,
+        purpose=SUBSCRIPTION_SECRET_PURPOSE,
+        expected_owner=EnvelopeOwner(kind="webhook_subscription", id=subscription.id),
     )
 
     # Build the signed POST body.

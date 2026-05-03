@@ -39,7 +39,14 @@ class FakeEnvelope:
         del owner
         return _PREFIX + purpose.encode("utf-8") + b"::" + plaintext
 
-    def decrypt(self, ciphertext: bytes, *, purpose: str) -> bytes:
+    def decrypt(
+        self,
+        ciphertext: bytes,
+        *,
+        purpose: str,
+        expected_owner: object | None = None,
+    ) -> bytes:
+        del expected_owner
         if not ciphertext.startswith(_PREFIX):
             raise EnvelopeDecryptError("FakeEnvelope ciphertext missing magic prefix")
         rest = ciphertext[len(_PREFIX) :]

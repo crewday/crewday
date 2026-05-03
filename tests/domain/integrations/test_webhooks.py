@@ -18,6 +18,7 @@ from typing import Any
 import httpx
 import pytest
 
+from app.adapters.storage.ports import EnvelopeOwner
 from app.domain.integrations.ports import (
     WebhookDeliveryRow,
     WebhookSubscriptionRow,
@@ -258,6 +259,25 @@ class _SessionStub:
 
     def add(self, row: object) -> None:
         self.added.append(row)
+
+
+class _RecordingEnvelope(FakeEnvelope):
+    def __init__(self) -> None:
+        self.expected_owners: list[object | None] = []
+
+    def decrypt(
+        self,
+        ciphertext: bytes,
+        *,
+        purpose: str,
+        expected_owner: object | None = None,
+    ) -> bytes:
+        self.expected_owners.append(expected_owner)
+        return super().decrypt(
+            ciphertext,
+            purpose=purpose,
+            expected_owner=expected_owner,
+        )
 
 
 def _ctx() -> WorkspaceContext:
@@ -528,6 +548,7 @@ class TestSubscriptionCrud:
             envelope.decrypt(
                 repo.subscriptions[view.id].secret_blob.encode("latin-1"),
                 purpose=SUBSCRIPTION_SECRET_PURPOSE,
+                expected_owner=EnvelopeOwner(kind="webhook_subscription", id=view.id),
             )
             == b"fedcba9876543210"
         )
@@ -587,7 +608,7 @@ def _seed_subscription(
     blob = envelope.encrypt(
         secret_plaintext.encode("utf-8"),
         purpose=SUBSCRIPTION_SECRET_PURPOSE,
-        owner=None,
+        owner=EnvelopeOwner(kind="webhook_subscription", id=sub_id),
     )
     return repo.insert_subscription(
         sub_id=sub_id,
@@ -670,11 +691,12 @@ class TestEnqueueAndDeliver:
         client = httpx.Client(transport=httpx.MockTransport(handler))
         try:
             session = _SessionStub()
+            envelope = _RecordingEnvelope()
             report = deliver(
                 session,  # type: ignore[arg-type]
                 delivery_id=delivery_id,
                 repo=repo,
-                envelope=FakeEnvelope(),
+                envelope=envelope,
                 http=client,
                 clock=FrozenClock(_PINNED),
             )
@@ -690,6 +712,9 @@ class TestEnqueueAndDeliver:
         assert row.succeeded_at is not None
         # Successful deliveries do NOT audit.
         assert session.added == []
+        assert envelope.expected_owners == [
+            EnvelopeOwner(kind="webhook_subscription", id=sub.id)
+        ]
         # The signed header rode the wire.
         assert SIGNATURE_HEADER in captured[0].headers
         assert captured[0].headers["X-Crewday-Event"] == "task.completed"

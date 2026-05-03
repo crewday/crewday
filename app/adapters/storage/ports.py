@@ -22,6 +22,7 @@ __all__ = [
     "EnvelopeDecryptError",
     "EnvelopeEncryptor",
     "EnvelopeOwner",
+    "EnvelopeOwnerMismatch",
     "KeyFingerprintMismatch",
     "MimeSniffer",
     "Storage",
@@ -71,14 +72,14 @@ class EnvelopeDecryptError(Exception):
 
     Ciphertext shape mismatch, wrong version byte, wrong purpose,
     AEAD tag mismatch, or a row-backed pointer that no longer
-    resolves — every failure mode that is *not* a key-fingerprint
-    issue collapses to this single error. Callers treat it as "the
-    bytes on disk are not decipherable under the current key for
-    this purpose": fail loudly rather than silently return garbage.
+    resolves — every failure mode subclasses this base error. Callers
+    treat it as "the bytes on disk are not decipherable under the
+    current key for this purpose": fail loudly rather than silently
+    return garbage.
 
-    Key-fingerprint mismatches surface separately as
-    :class:`KeyFingerprintMismatch` so the operator-facing message
-    can name both fingerprints explicitly (the §15 actionable shape).
+    Key-fingerprint and owner mismatches surface as narrower
+    subclasses so operator-facing or security-sensitive callsites can
+    distinguish them when needed.
 
     See ``docs/specs/15-security-privacy.md`` §"Secret envelope".
     """
@@ -154,6 +155,29 @@ class EnvelopeOwner:
             raise ValueError("envelope owner id must be a non-blank value")
 
 
+class EnvelopeOwnerMismatch(EnvelopeDecryptError):
+    """Raised when a row-backed envelope belongs to a different owner."""
+
+    __slots__ = ("actual_id", "actual_kind", "envelope_id", "expected")
+
+    def __init__(
+        self,
+        *,
+        envelope_id: str,
+        expected: EnvelopeOwner,
+        actual_kind: str,
+        actual_id: str,
+    ) -> None:
+        self.envelope_id = envelope_id
+        self.expected = expected
+        self.actual_kind = actual_kind
+        self.actual_id = actual_id
+        super().__init__(
+            "row-backed envelope owner mismatch; ciphertext is not valid "
+            "for the requested owner"
+        )
+
+
 class EnvelopeEncryptor(Protocol):
     """Port: encrypt / decrypt small secrets at rest.
 
@@ -175,6 +199,10 @@ class EnvelopeEncryptor(Protocol):
     columns are NOT NULL. Callers in row-backed mode (e.g. iCal
     feed registration after cd-znv4) always pass an owner; legacy
     callers that still target inline mode pass ``None``.
+
+    ``expected_owner`` on decrypt lets owner-aware callsites bind a
+    row-backed pointer back to the entity column that carried it.
+    Inline legacy blobs ignore it because they have no row owner.
 
     Concrete implementation: :class:`app.adapters.storage.envelope.
     Aes256GcmEnvelope` (AES-256-GCM, HKDF-derived subkey). Tests
@@ -201,7 +229,13 @@ class EnvelopeEncryptor(Protocol):
         """
         ...
 
-    def decrypt(self, ciphertext: bytes, *, purpose: str) -> bytes:
+    def decrypt(
+        self,
+        ciphertext: bytes,
+        *,
+        purpose: str,
+        expected_owner: EnvelopeOwner | None = ...,
+    ) -> bytes:
         """Inverse of :meth:`encrypt`; raises :class:`EnvelopeDecryptError`."""
         ...
 

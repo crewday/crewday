@@ -35,6 +35,7 @@ from app.adapters.storage.envelope import (
 from app.adapters.storage.ports import (
     EnvelopeDecryptError,
     EnvelopeOwner,
+    EnvelopeOwnerMismatch,
     KeyFingerprintMismatch,
 )
 from app.auth.keys import KeyDerivationError
@@ -175,6 +176,19 @@ class TestInlineMode:
         ct_b = env.encrypt(b"same", purpose="b")
         assert ct_a != ct_b
 
+    def test_expected_owner_ignored_for_legacy_inline_blob(self) -> None:
+        env = Aes256GcmEnvelope(_KEY)
+        ciphertext = env.encrypt(b"legacy", purpose="p")
+
+        assert (
+            env.decrypt(
+                ciphertext,
+                purpose="p",
+                expected_owner=EnvelopeOwner(kind="ical_feed", id="feed-1"),
+            )
+            == b"legacy"
+        )
+
 
 # ---------------------------------------------------------------------------
 # Row-backed mode (cd-znv4, version byte 0x02)
@@ -220,7 +234,34 @@ class TestRowBackedMode:
         assert row.rotated_at is None
 
         # Decrypt recovers the original.
-        assert env.decrypt(ciphertext, purpose="ical-feed-url") == plaintext
+        assert (
+            env.decrypt(
+                ciphertext,
+                purpose="ical-feed-url",
+                expected_owner=owner,
+            )
+            == plaintext
+        )
+
+    def test_expected_owner_mismatch_rejected(self) -> None:
+        repo = _InMemoryEnvelopeRepository()
+        env = Aes256GcmEnvelope(_KEY, repository=repo, clock=_FrozenClock(_PINNED))
+        owner = EnvelopeOwner(kind="ical_feed", id="feed-a")
+        ciphertext = env.encrypt(b"secret", purpose="p", owner=owner)
+
+        with pytest.raises(EnvelopeOwnerMismatch) as exc_info:
+            env.decrypt(
+                ciphertext,
+                purpose="p",
+                expected_owner=EnvelopeOwner(kind="ical_feed", id="feed-b"),
+            )
+
+        assert exc_info.value.expected == EnvelopeOwner(kind="ical_feed", id="feed-b")
+        assert exc_info.value.actual_kind == "ical_feed"
+        assert exc_info.value.actual_id == "feed-a"
+        assert isinstance(exc_info.value, EnvelopeDecryptError)
+        assert "feed-a" not in str(exc_info.value)
+        assert "feed-b" not in str(exc_info.value)
 
     def test_fresh_nonce_per_call(self) -> None:
         """Two row-backed encrypts of the same plaintext land different rows."""

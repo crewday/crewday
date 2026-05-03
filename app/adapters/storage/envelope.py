@@ -57,6 +57,7 @@ from app.adapters.storage.ports import (
     EnvelopeDecryptError,
     EnvelopeEncryptor,
     EnvelopeOwner,
+    EnvelopeOwnerMismatch,
     KeyFingerprintMismatch,
 )
 from app.auth.keys import derive_subkey
@@ -72,6 +73,7 @@ __all__ = [
     "EnvelopeDecryptError",
     "EnvelopeEncryptor",
     "EnvelopeOwner",
+    "EnvelopeOwnerMismatch",
     "KeyFingerprintMismatch",
     "compute_key_fingerprint",
 ]
@@ -265,7 +267,13 @@ class Aes256GcmEnvelope:
         )
         return bytes((_VERSION_ROW,)) + envelope_id.encode("utf-8")
 
-    def decrypt(self, ciphertext: bytes, *, purpose: str) -> bytes:
+    def decrypt(
+        self,
+        ciphertext: bytes,
+        *,
+        purpose: str,
+        expected_owner: EnvelopeOwner | None = None,
+    ) -> bytes:
         """Inverse of :meth:`encrypt`.
 
         Branches on the leading version byte:
@@ -275,12 +283,14 @@ class Aes256GcmEnvelope:
           :class:`KeyFingerprintMismatch` because inline blobs do
           not carry a fingerprint.
         * ``0x02`` — read the trailing ULID, fetch the row through
-          the repository, check the row's ``key_fp`` against the
+          the repository, optionally check the row's owner against
+          ``expected_owner``, check the row's ``key_fp`` against the
           active key's fingerprint, and open the AES-GCM body.
 
-        Fails with :class:`EnvelopeDecryptError` (or its narrower
-        :class:`KeyFingerprintMismatch` subclass) on shape /
-        version / tag / fingerprint / pointer-resolution failure.
+        Fails with :class:`EnvelopeDecryptError` (or narrower
+        subclasses such as :class:`KeyFingerprintMismatch`) on shape /
+        version / tag / fingerprint / owner / pointer-resolution
+        failure.
         The authentication tag is part of the ciphertext body — GCM
         binds plaintext to ciphertext, so a flipped bit anywhere in
         the body surfaces as a tag-mismatch rather than silent
@@ -292,7 +302,11 @@ class Aes256GcmEnvelope:
         if version == _VERSION_INLINE:
             return self._decrypt_inline(ciphertext, purpose=purpose)
         if version == _VERSION_ROW:
-            return self._decrypt_row_backed(ciphertext, purpose=purpose)
+            return self._decrypt_row_backed(
+                ciphertext,
+                purpose=purpose,
+                expected_owner=expected_owner,
+            )
         raise EnvelopeDecryptError(
             f"unknown envelope version {version!r}; "
             f"expected {_VERSION_INLINE!r} (inline) or {_VERSION_ROW!r} (row-backed)"
@@ -321,7 +335,13 @@ class Aes256GcmEnvelope:
                 "under the current root key for the given purpose"
             ) from exc
 
-    def _decrypt_row_backed(self, ciphertext: bytes, *, purpose: str) -> bytes:
+    def _decrypt_row_backed(
+        self,
+        ciphertext: bytes,
+        *,
+        purpose: str,
+        expected_owner: EnvelopeOwner | None,
+    ) -> bytes:
         """Open a ``0x02`` pointer-tagged row-backed ciphertext."""
         if self._repository is None:
             # The caller asked us to open a row-backed blob but never
@@ -361,6 +381,16 @@ class Aes256GcmEnvelope:
         if row is None:
             raise EnvelopeDecryptError(
                 f"row-backed envelope {envelope_id!r} not found in repository"
+            )
+        if expected_owner is not None and (
+            row.owner_entity_kind != expected_owner.kind
+            or row.owner_entity_id != expected_owner.id
+        ):
+            raise EnvelopeOwnerMismatch(
+                envelope_id=envelope_id,
+                expected=expected_owner,
+                actual_kind=row.owner_entity_kind,
+                actual_id=row.owner_entity_id,
             )
 
         # §15 "Key fingerprint": open rows under the active key when the

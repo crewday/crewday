@@ -44,6 +44,7 @@ from app.adapters.ical.ports import (
     IcalValidation,
     IcalValidationError,
 )
+from app.adapters.storage.ports import EnvelopeOwner
 from app.domain.stays.ical_service import (
     IcalFeedCreate,
     IcalFeedNotFound,
@@ -580,7 +581,11 @@ class TestUpdate:
         # Row's ciphertext now decrypts to the new URL.
         row = session_stays.get(IcalFeed, feed_id)
         assert row is not None
-        plain = envelope.decrypt(row.url.encode("latin-1"), purpose="ical-feed-url")
+        plain = envelope.decrypt(
+            row.url.encode("latin-1"),
+            purpose="ical-feed-url",
+            expected_owner=EnvelopeOwner(kind="ical_feed", id=feed_id),
+        )
         assert plain == new_url.encode("utf-8")
 
     def test_update_override_only_skips_probe(
@@ -716,7 +721,9 @@ class TestUpdate:
         assert row_after is not None
         assert row_after.url == ciphertext_before
         decrypted = envelope.decrypt(
-            row_after.url.encode("latin-1"), purpose="ical-feed-url"
+            row_after.url.encode("latin-1"),
+            purpose="ical-feed-url",
+            expected_owner=EnvelopeOwner(kind="ical_feed", id=feed_id),
         )
         assert decrypted == original_url.encode("utf-8")
 

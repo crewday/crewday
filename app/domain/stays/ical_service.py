@@ -611,7 +611,11 @@ def get_plaintext_url(
     :class:`app.adapters.storage.envelope.EnvelopeDecryptError`.
     """
     row = _load_row(session, ctx, feed_id=feed_id)
-    plaintext = envelope.decrypt(_str_to_ciphertext(row.url), purpose=_URL_PURPOSE)
+    plaintext = envelope.decrypt(
+        _str_to_ciphertext(row.url),
+        purpose=_URL_PURPOSE,
+        expected_owner=_owner_for_feed(row.id),
+    )
     return plaintext.decode("utf-8")
 
 

@@ -48,6 +48,7 @@ from app.adapters.db.secrets.repositories import (
 )
 from app.adapters.db.workspace.models import Workspace
 from app.adapters.storage.envelope import Aes256GcmEnvelope
+from app.adapters.storage.ports import EnvelopeOwnerMismatch
 from app.domain.integrations.webhooks import (
     DELIVERY_DEAD_LETTERED,
     DELIVERY_SUCCEEDED,
@@ -288,6 +289,51 @@ class TestEndToEndDelivery:
             now_unix=int(clock.now().timestamp()),
             tolerance_s=24 * 3600,
         )
+
+    def test_copied_subscription_secret_pointer_fails_owner_check(
+        self, db_session: Session, receiver: ThreadingHTTPServer
+    ) -> None:
+        ws_id, source_sub_id, _source_secret = self._seed(db_session, receiver)
+        envelope = _build_envelope(db_session)
+        repo = SqlAlchemyWebhookRepository(db_session)
+        target = create_subscription(
+            db_session,
+            _ctx(ws_id),
+            repo=repo,
+            envelope=envelope,
+            name="target",
+            url=_receiver_url(receiver),
+            events=["task.completed"],
+            clock=FrozenClock(_PINNED + timedelta(seconds=1)),
+        )
+
+        source_row = db_session.get(WebhookSubscription, source_sub_id)
+        target_row = db_session.get(WebhookSubscription, target.id)
+        assert source_row is not None
+        assert target_row is not None
+        target_row.secret_blob = source_row.secret_blob
+        db_session.flush()
+
+        ids = enqueue(
+            repo=repo,
+            workspace_id=ws_id,
+            event="task.completed",
+            data={"task_id": "T1"},
+            subscription_id=target.id,
+            clock=FrozenClock(_PINNED + timedelta(seconds=2)),
+        )
+        assert len(ids) == 1
+        _ScriptedHandler.captured_requests = []
+
+        with pytest.raises(EnvelopeOwnerMismatch):
+            deliver(
+                db_session,
+                delivery_id=ids[0],
+                repo=repo,
+                envelope=envelope,
+                clock=FrozenClock(_PINNED + timedelta(seconds=3)),
+            )
+        assert _ScriptedHandler.captured_requests == []
 
     def test_six_failures_dead_letter_with_audit(
         self, db_session: Session, receiver: ThreadingHTTPServer

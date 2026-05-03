@@ -186,6 +186,11 @@ deliberately narrow:
   `openrouter.api_key`, and admin reads expose only `display_stub`.
   Operator rotation commands, validation probes, and recommended
   cadences are listed in §16 "Secret lifecycle".
+- Owner-scoped columns that store row-backed envelope pointers pass
+  the expected `(owner_entity_kind, owner_entity_id)` into decrypt;
+  a row whose owner does not match is rejected before AES-GCM opens
+  the body. Legacy inline `0x01` blobs ignore this parameter because
+  they do not carry a row owner.
 
 1. **Payout manifest** (HTTP, §09) — owner/manager passkey session
    only; on §11's interactive-session-only list; not stored; not
