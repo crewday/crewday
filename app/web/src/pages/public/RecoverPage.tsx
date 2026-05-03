@@ -36,13 +36,16 @@
 import {
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type FormEvent,
   type ReactElement,
   type RefObject,
 } from "react";
+import { useLocation } from "react-router-dom";
 import { useMutation } from "@tanstack/react-query";
+import { sanitizeNext } from "@/auth";
 import { ApiError, fetchJson } from "@/lib/api";
 
 interface RecoverRequestBody {
@@ -64,6 +67,7 @@ type FormState =
   | { kind: "error"; message: string };
 
 export default function RecoverPage() {
+  const location = useLocation();
   const [stepUp, setStepUp] = useState(false);
   const [email, setEmail] = useState("");
   const [code, setCode] = useState("");
@@ -130,6 +134,11 @@ export default function RecoverPage() {
   );
 
   const pending = form.kind === "pending";
+  const safeNext = useMemo(() => {
+    const params = new URLSearchParams(location.search);
+    return sanitizeNext(params.get("next"));
+  }, [location.search]);
+  const loginHref = safeNext ? `/login?next=${encodeURIComponent(safeNext)}` : "/login";
 
   // Move focus to the confirmation heading once the form is replaced
   // by the success view. Keyboard focus would otherwise be stranded
@@ -223,7 +232,7 @@ export default function RecoverPage() {
               </p>
             </>
           )}
-          <a href="/login" className="login__recover">← Back to sign in</a>
+          <a href={loginHref} className="login__recover">← Back to sign in</a>
         </div>
       </main>
     </div>

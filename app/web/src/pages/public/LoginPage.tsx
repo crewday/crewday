@@ -153,6 +153,7 @@ export default function LoginPage() {
   }
 
   const pending = form.kind === "pending";
+  const recoverHref = safeNext ? `/recover?next=${encodeURIComponent(safeNext)}` : "/recover";
 
   return (
     <div className="surface surface--login">
@@ -187,7 +188,7 @@ export default function LoginPage() {
             <KeyRound size={18} strokeWidth={1.8} aria-hidden="true" />
             {pending ? "Contacting your authenticator…" : "Use passkey"}
           </button>
-          <a href="/recover" className="login__recover">Lost your device? Recover access →</a>
+          <a href={recoverHref} className="login__recover">Lost your device? Recover access →</a>
         </div>
         <p className="login__footnote">
           First time here? Open the invite link your manager sent.{" "}

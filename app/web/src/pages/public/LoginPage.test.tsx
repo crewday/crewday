@@ -519,6 +519,42 @@ describe("<LoginPage> — error branches", () => {
 });
 
 describe("<LoginPage> — sanitizeNext wiring (closes cd-g5c2)", () => {
+  it("carries a sanitised ?next into the recover link", async () => {
+    const { restore } = installFetch({
+      "/api/v1/auth/me": [
+        { status: 401, body: { detail: "no session" } },
+      ],
+    });
+
+    try {
+      render(<Harness initial="/login?next=/property/abc" />);
+      await flush();
+
+      expect(screen.getByRole("link", { name: /lost your device/i }).getAttribute("href"))
+        .toBe("/recover?next=%2Fproperty%2Fabc");
+    } finally {
+      restore();
+    }
+  });
+
+  it("drops an off-origin ?next from the recover link", async () => {
+    const { restore } = installFetch({
+      "/api/v1/auth/me": [
+        { status: 401, body: { detail: "no session" } },
+      ],
+    });
+
+    try {
+      render(<Harness initial="/login?next=https%3A%2F%2Fevil.example%2F" />);
+      await flush();
+
+      expect(screen.getByRole("link", { name: /lost your device/i }).getAttribute("href"))
+        .toBe("/recover");
+    } finally {
+      restore();
+    }
+  });
+
   it("drops an off-origin ?next=https://evil.example/ and lands on the role home instead", async () => {
     const { restore } = installFetch({
       "/api/v1/auth/me": [

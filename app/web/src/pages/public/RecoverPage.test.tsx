@@ -38,6 +38,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { MemoryRouter } from "react-router-dom";
 import { type ReactElement } from "react";
 import RecoverPage from "./RecoverPage";
 import { __resetApiProvidersForTests } from "@/lib/api";
@@ -52,7 +53,7 @@ function installFetch(scripted: Record<string, FakeResponse[]>) {
   return installFetchRoutes(scripted, { match: "endsWith" });
 }
 
-function Harness(): ReactElement {
+function Harness({ initial = "/recover" }: { initial?: string } = {}): ReactElement {
   // Fresh QueryClient per render so one test's retry state doesn't
   // leak into the next. `retry: false` keeps 429 from climbing the
   // exponential-backoff ladder while we're asserting.
@@ -61,7 +62,9 @@ function Harness(): ReactElement {
   });
   return (
     <QueryClientProvider client={qc}>
-      <RecoverPage />
+      <MemoryRouter initialEntries={[initial]}>
+        <RecoverPage />
+      </MemoryRouter>
     </QueryClientProvider>
   );
 }
@@ -133,6 +136,22 @@ describe("<RecoverPage> — happy path", () => {
     } finally {
       restore();
     }
+  });
+});
+
+describe("<RecoverPage> — sign-in link next propagation", () => {
+  it("carries a sanitised ?next back to the login link", () => {
+    render(<Harness initial="/recover?next=/property/abc" />);
+
+    expect(screen.getByRole("link", { name: /back to sign in/i }).getAttribute("href"))
+      .toBe("/login?next=%2Fproperty%2Fabc");
+  });
+
+  it("drops an off-origin ?next from the login link", () => {
+    render(<Harness initial="/recover?next=https%3A%2F%2Fevil.example%2F" />);
+
+    expect(screen.getByRole("link", { name: /back to sign in/i }).getAttribute("href"))
+      .toBe("/login");
   });
 });
 
