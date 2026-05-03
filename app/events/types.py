@@ -60,6 +60,8 @@ __all__ = [
     "ChatMessageReceived",
     "ChatMessageSent",
     "ExpenseApproved",
+    "ExpenseCancelled",
+    "ExpenseCreated",
     "ExpenseReimbursed",
     "ExpenseRejected",
     "ExpenseSubmitted",
@@ -1374,6 +1376,109 @@ class ExpenseSubmitted(Event):
     submitter_user_id: str
     currency: str
     total_amount_cents: int
+
+
+@register
+class ExpenseCreated(Event):
+    """A worker has drafted a new expense claim (cd-iibg).
+
+    Fired by :func:`app.domain.expenses.claims.create_claim` after the
+    audit row lands and the new ``draft`` row is persisted. The author's
+    own "My expenses" view listens so a draft started in one tab
+    surfaces in their other open tabs without polling — the manager
+    surface stays quiet until the worker submits.
+
+    **Role scope.** Narrowed to ``("manager", "worker")`` *and*
+    user-scoped: the SSE transport additionally filters delivery to the
+    addressee's own tabs. A draft is private to its author until
+    submission, and a sibling worker has no business seeing another
+    user's draft on the bus. Managers are listed in the role allowlist
+    so a manager filing their own claim still receives the personal
+    refresh — the user-scope filter pins delivery to the actor either
+    way. Clients / guests stay out of the expense pipeline.
+
+    **Payload posture.** Foreign-key identifiers and the resulting row
+    state only — no ``vendor`` / ``note_md`` / amount on the wire. A
+    draft's free-text fields can carry highly personal narrative
+    (vendor identifiers, vacation receipts, medical co-pays) that has
+    no place on an SSE payload; subscribers needing the rendered view
+    pull ``GET /expense_claims/{id}`` under the per-row authz path.
+    ``submitter_user_id`` carries the actor (always equal to the
+    engagement's ``user_id`` in v1, since manager-on-behalf-of creation
+    is not in scope).
+    """
+
+    name: ClassVar[str] = "expense.created"
+    # Drafts are private to their author until submission; user-scoped
+    # delivery keeps the personal-refresh signal off other workers'
+    # tabs even though they share the same role allowlist.
+    allowed_roles: ClassVar[tuple[EventRole, ...]] = ("manager", "worker")
+    user_scoped: ClassVar[bool] = True
+
+    actor_user_id: str
+    claim_id: str
+    work_engagement_id: str
+    submitter_user_id: str
+    state: Literal["draft"]
+
+
+@register
+class ExpenseCancelled(Event):
+    """A worker has cancelled a previously-submitted claim (cd-iibg).
+
+    Fired by :func:`app.domain.expenses.claims.cancel_claim` AFTER the
+    audit row lands, and ONLY on the ``submitted`` -> ``rejected``
+    branch. Worker-cancelling a submitted claim flips the row to
+    ``rejected`` with ``decision_note_md = "cancelled by requester"``
+    (see the :func:`~app.domain.expenses.claims.cancel_claim` docstring
+    for the schema-deviation rationale).
+
+    Draft soft-deletes do NOT emit this event. A draft is private to
+    its author until submission (spec §09); broadcasting a draft
+    cancellation workspace-wide would leak ``submitter_user_id`` and
+    ``claim_id`` for a row no other user has any business knowing
+    existed. The author's REST ``DELETE`` response refreshes their
+    own local cache directly — cross-tab on draft-cancel is the cost
+    of keeping drafts genuinely private. Submit-cancel only is the
+    same audience pattern as :class:`ExpenseApproved` /
+    :class:`ExpenseRejected` / :class:`ExpenseReimbursed`, all of
+    which only fire on already-submitted rows.
+
+    The author's "My expenses" view listens so the cancelled
+    submission's chip flips without polling; managers listen too, so
+    the row disappears from their pending queue the moment the worker
+    withdraws.
+
+    **Role scope.** Narrowed to ``("manager", "worker")`` workspace-wide
+    — the manager queue must invalidate when a submitted claim is
+    withdrawn, and the submitter's own tabs must refresh. Clients /
+    guests stay out of the expense pipeline. Unlike
+    :class:`ExpenseCreated`, this event is NOT user-scoped: the manager
+    queue invalidation needs every manager's tabs to see the
+    withdrawal, not only the submitter's.
+
+    **Payload posture.** Foreign-key identifiers and the resulting row
+    state only — no ``reason_md`` (which can carry free-text narrative).
+    ``state`` is pinned to ``"rejected"`` (the only emitting branch);
+    subscribers that need the rendered cancel note read it via
+    ``GET /expense_claims/{id}`` under the per-row authz path.
+    """
+
+    name: ClassVar[str] = "expense.cancelled"
+    # Workspace-wide narrowing matches ``ExpenseApproved``: the manager
+    # queue and the submitting worker both refresh; clients / guests
+    # stay out.
+    allowed_roles: ClassVar[tuple[EventRole, ...]] = ("manager", "worker")
+
+    claim_id: str
+    work_engagement_id: str
+    submitter_user_id: str
+    # Pinned to ``rejected`` because draft soft-deletes do not emit.
+    # If a future change wants to surface draft-cancel cross-tab, the
+    # right shape is a separate user-scoped event (mirroring
+    # ``ExpenseCreated``) so non-author subscribers never see the
+    # draft on the wire.
+    state: Literal["rejected"]
 
 
 @register

@@ -63,7 +63,7 @@ from app.domain.expenses import (
     TooManyAttachments,
 )
 from app.domain.expenses import claims as _claims_module
-from app.events import ExpenseSubmitted, bus
+from app.events import ExpenseCancelled, ExpenseCreated, ExpenseSubmitted, bus
 from app.tenancy.context import ActorGrantRole, WorkspaceContext
 from app.util.clock import FrozenClock
 from app.util.ulid import new_ulid
@@ -842,6 +842,38 @@ class TestCreateClaim:
             clock=clock,
         )
         assert view.currency == "KWD"
+
+    def test_create_publishes_event(
+        self,
+        session: Session,
+        worker_env: tuple[WorkspaceContext, str, str, FrozenClock],
+    ) -> None:
+        """``create_claim`` publishes :class:`ExpenseCreated` (cd-iibg).
+
+        The event rides AFTER the audit row lands (see the audit-then-
+        publish ordering on the matching ``submit_claim`` test) and
+        carries the canonical FK identifiers + the resulting
+        ``state='draft'``. ``actor_user_id`` is the user-scope filter
+        target — the SSE transport uses it to narrow delivery to the
+        author's tabs, since drafts are private until submission.
+        """
+        ctx, _user_id, eng_id, clock = worker_env
+        captured: list[ExpenseCreated] = []
+
+        @bus.subscribe(ExpenseCreated)
+        def _on_create(event: ExpenseCreated) -> None:
+            captured.append(event)
+
+        view = create_claim(
+            session, ctx, body=_create_body(work_engagement_id=eng_id), clock=clock
+        )
+        assert len(captured) == 1
+        evt = captured[0]
+        assert evt.claim_id == view.id
+        assert evt.work_engagement_id == eng_id
+        assert evt.submitter_user_id == ctx.actor_id
+        assert evt.actor_user_id == ctx.actor_id
+        assert evt.state == "draft"
 
 
 # ---------------------------------------------------------------------------
@@ -1654,6 +1686,68 @@ class TestCancelClaim:
         rows = _audit_rows(session, workspace_id=ctx.workspace_id)
         actions = [r.action for r in rows if r.entity_kind == "expense_claim"]
         assert actions == ["expense.claim.created", "expense.claim.cancelled"]
+
+    def test_cancel_draft_does_not_publish_event(
+        self,
+        session: Session,
+        worker_env: tuple[WorkspaceContext, str, str, FrozenClock],
+    ) -> None:
+        """Cancelling a draft soft-deletes the row and does NOT publish
+        :class:`ExpenseCancelled`.
+
+        Drafts are private to their author until submission (spec §09);
+        broadcasting a draft cancellation workspace-wide would leak
+        ``submitter_user_id`` and ``claim_id`` to other workers /
+        managers who never saw the draft. The author's REST DELETE
+        response refreshes their own local cache, and that's the
+        boundary we hold to.
+        """
+        ctx, _user_id, eng_id, clock = worker_env
+        created = create_claim(
+            session, ctx, body=_create_body(work_engagement_id=eng_id), clock=clock
+        )
+        captured: list[ExpenseCancelled] = []
+
+        @bus.subscribe(ExpenseCancelled)
+        def _on_cancel(event: ExpenseCancelled) -> None:
+            captured.append(event)
+
+        cancel_claim(session, ctx, claim_id=created.id, clock=clock)
+        assert captured == []
+
+    def test_cancel_submitted_publishes_event(
+        self,
+        session: Session,
+        worker_env: tuple[WorkspaceContext, str, str, FrozenClock],
+    ) -> None:
+        """Cancelling a submitted claim flips it to ``rejected`` and
+        publishes :class:`ExpenseCancelled` with ``state='rejected'``.
+
+        Submit-cancel is the only emitting branch — the manager queue
+        needs the workspace-wide signal to drop the row from the
+        approval list and the submitting worker's tabs need the same
+        edge to flip the chip. The event payload reflects the
+        post-cancel row state so the manager-queue invalidator does
+        not have to refetch to know which surface to drop.
+        """
+        ctx, _user_id, eng_id, clock = worker_env
+        created = create_claim(
+            session, ctx, body=_create_body(work_engagement_id=eng_id), clock=clock
+        )
+        submit_claim(session, ctx, claim_id=created.id, clock=clock)
+        captured: list[ExpenseCancelled] = []
+
+        @bus.subscribe(ExpenseCancelled)
+        def _on_cancel(event: ExpenseCancelled) -> None:
+            captured.append(event)
+
+        cancel_claim(session, ctx, claim_id=created.id, clock=clock)
+        assert len(captured) == 1
+        evt = captured[0]
+        assert evt.claim_id == created.id
+        assert evt.work_engagement_id == eng_id
+        assert evt.submitter_user_id == ctx.actor_id
+        assert evt.state == "rejected"
 
 
 # ---------------------------------------------------------------------------

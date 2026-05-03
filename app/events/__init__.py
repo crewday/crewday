@@ -12,6 +12,8 @@ from app.events.registry import (
 from app.events.types import (
     ChatMessageSent,
     ExpenseApproved,
+    ExpenseCancelled,
+    ExpenseCreated,
     ExpenseReimbursed,
     ExpenseRejected,
     ExpenseSubmitted,
@@ -65,6 +67,8 @@ __all__ = [
     "EventBus",
     "EventNotFound",
     "ExpenseApproved",
+    "ExpenseCancelled",
+    "ExpenseCreated",
     "ExpenseReimbursed",
     "ExpenseRejected",
     "ExpenseSubmitted",

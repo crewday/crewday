@@ -37,6 +37,7 @@ from app.adapters.db.authz.models import RoleGrant
 from app.adapters.db.workspace.models import WorkEngagement
 from app.api.deps import current_workspace_context, db_session, get_storage
 from app.api.v1.expenses import router as expenses_router
+from app.events import ExpenseCancelled, ExpenseCreated, ExpenseSubmitted, bus
 from app.tenancy import WorkspaceContext, tenant_agnostic
 from app.util.ulid import new_ulid
 from tests._fakes.storage import InMemoryStorage
@@ -421,6 +422,156 @@ class TestWorkerSelfService:
             assert body["state"] == "rejected"
             assert body["decision_note_md"]
             assert "cancelled by requester" in body["decision_note_md"]
+
+    def test_create_emits_expense_created_event(
+        self,
+        session_factory: sessionmaker[Session],
+        storage: InMemoryStorage,
+        seeded: dict[str, Any],
+    ) -> None:
+        """``POST /expenses`` publishes :class:`ExpenseCreated` (cd-iibg).
+
+        The event drives the SPA's ``['expenses']`` cache invalidation
+        so a draft started in one tab surfaces in the author's other
+        tabs without polling. ``actor_user_id`` is the user-scope
+        filter target — only the author's tabs receive the signal.
+        """
+        bus._reset_for_tests()
+        captured: list[ExpenseCreated] = []
+
+        @bus.subscribe(ExpenseCreated)
+        def _on_create(event: ExpenseCreated) -> None:
+            captured.append(event)
+
+        try:
+            with _client_for(session_factory, seeded["worker_ctx"], storage) as client:
+                r = client.post(
+                    "/api/v1/expenses",
+                    json=_create_body(work_engagement_id=seeded["worker_eng_id"]),
+                )
+                assert r.status_code == 201, r.text
+                cid = r.json()["id"]
+        finally:
+            bus._reset_for_tests()
+
+        assert len(captured) == 1
+        evt = captured[0]
+        assert evt.claim_id == cid
+        assert evt.work_engagement_id == seeded["worker_eng_id"]
+        assert evt.submitter_user_id == seeded["worker_ctx"].actor_id
+        assert evt.actor_user_id == seeded["worker_ctx"].actor_id
+        assert evt.state == "draft"
+
+    def test_submit_emits_expense_submitted_event(
+        self,
+        session_factory: sessionmaker[Session],
+        storage: InMemoryStorage,
+        seeded: dict[str, Any],
+    ) -> None:
+        """``POST /expenses/{id}/submit`` publishes
+        :class:`ExpenseSubmitted` so the manager-side approval inbox
+        surfaces the new submission without polling."""
+        bus._reset_for_tests()
+        captured: list[ExpenseSubmitted] = []
+
+        @bus.subscribe(ExpenseSubmitted)
+        def _on_submit(event: ExpenseSubmitted) -> None:
+            captured.append(event)
+
+        try:
+            with _client_for(session_factory, seeded["worker_ctx"], storage) as client:
+                r = client.post(
+                    "/api/v1/expenses",
+                    json=_create_body(work_engagement_id=seeded["worker_eng_id"]),
+                )
+                cid = r.json()["id"]
+                r = client.post(f"/api/v1/expenses/{cid}/submit")
+                assert r.status_code == 200, r.text
+        finally:
+            bus._reset_for_tests()
+
+        assert len(captured) == 1
+        evt = captured[0]
+        assert evt.claim_id == cid
+        assert evt.work_engagement_id == seeded["worker_eng_id"]
+        assert evt.submitter_user_id == seeded["worker_ctx"].actor_id
+
+    def test_cancel_draft_does_not_emit_expense_cancelled_event(
+        self,
+        session_factory: sessionmaker[Session],
+        storage: InMemoryStorage,
+        seeded: dict[str, Any],
+    ) -> None:
+        """``DELETE /expenses/{id}`` on a draft soft-deletes the row but
+        does NOT publish :class:`ExpenseCancelled`.
+
+        Drafts are private to their author until submission (spec §09);
+        broadcasting a draft cancellation workspace-wide would leak
+        ``submitter_user_id`` and ``claim_id`` to other workers /
+        managers who never saw the draft. The author's REST DELETE
+        response refreshes their own local cache, and that's the
+        boundary we hold to.
+        """
+        bus._reset_for_tests()
+        captured: list[ExpenseCancelled] = []
+
+        @bus.subscribe(ExpenseCancelled)
+        def _on_cancel(event: ExpenseCancelled) -> None:
+            captured.append(event)
+
+        try:
+            with _client_for(session_factory, seeded["worker_ctx"], storage) as client:
+                r = client.post(
+                    "/api/v1/expenses",
+                    json=_create_body(work_engagement_id=seeded["worker_eng_id"]),
+                )
+                cid = r.json()["id"]
+                r = client.delete(f"/api/v1/expenses/{cid}")
+                assert r.status_code == 204, r.text
+        finally:
+            bus._reset_for_tests()
+
+        assert captured == []
+        # ``cid`` is unused after the no-emit assertion, but the local
+        # binding documents the lifecycle the test is exercising.
+        assert cid
+
+    def test_cancel_submitted_emits_expense_cancelled_event(
+        self,
+        session_factory: sessionmaker[Session],
+        storage: InMemoryStorage,
+        seeded: dict[str, Any],
+    ) -> None:
+        """``DELETE /expenses/{id}`` on a submitted claim publishes
+        :class:`ExpenseCancelled` with ``state='rejected'`` so the
+        manager queue invalidates and the author's tabs refresh on the
+        same edge."""
+        bus._reset_for_tests()
+        captured: list[ExpenseCancelled] = []
+
+        @bus.subscribe(ExpenseCancelled)
+        def _on_cancel(event: ExpenseCancelled) -> None:
+            captured.append(event)
+
+        try:
+            with _client_for(session_factory, seeded["worker_ctx"], storage) as client:
+                r = client.post(
+                    "/api/v1/expenses",
+                    json=_create_body(work_engagement_id=seeded["worker_eng_id"]),
+                )
+                cid = r.json()["id"]
+                client.post(f"/api/v1/expenses/{cid}/submit")
+                r = client.delete(f"/api/v1/expenses/{cid}")
+                assert r.status_code == 204, r.text
+        finally:
+            bus._reset_for_tests()
+
+        assert len(captured) == 1
+        evt = captured[0]
+        assert evt.claim_id == cid
+        assert evt.work_engagement_id == seeded["worker_eng_id"]
+        assert evt.submitter_user_id == seeded["worker_ctx"].actor_id
+        assert evt.state == "rejected"
 
 
 # ---------------------------------------------------------------------------

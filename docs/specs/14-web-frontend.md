@@ -699,12 +699,29 @@ the platform must guarantee*.
   never silently drop local state.
 - **SSE-driven invalidation.** One `EventSource('/w/${slug}/events')`
   per active workspace, re-established on workspace switch. Events
-  `task.updated`, `approval.resolved`, `expense.decided`,
+  `task.updated`, `approval.resolved`, the expense lifecycle quartet
+  `expense.created` / `expense.submitted` / `expense.cancelled` /
+  `expense.approved` (the worker-side draft / submit / cancel
+  signals join the existing `expense.approved` decision so the SPA
+  invalidates `['expenses']` for every visible state edge — see §09
+  "Expense claims" lifecycle for the state machine),
   `agent.message.appended`, `agent.action.pending`, and the
   `agent.turn.{started,finished}` pair (§11) drive
   `queryClient.invalidateQueries(...)` or direct
   `setQueryData(...)` scoped to the matching `['w', slug, ...]`
-  prefix. No polling.
+  prefix. `expense.created` is user-scoped (only the author's tabs
+  receive it — drafts are private until submission).
+  `expense.submitted` is manager-only (`allowed_roles=("manager",)`)
+  — the submitting worker's local cache is refreshed by the REST
+  `POST /submit` response, not via SSE. `expense.cancelled` fires
+  ONLY on the submitted → rejected branch and is workspace-narrowed
+  to `(manager, worker)` so the manager queue drops the row and the
+  submitting worker's tabs flip the chip; draft soft-deletes do not
+  emit (drafts are private; the author's REST `DELETE` response
+  handles their own cache). The remaining `expense.*` decisions
+  (`approved` / `rejected` / `reimbursed`) are workspace-narrowed to
+  `(manager, worker)` so both the worker and the manager queue
+  refresh on the same edge. No polling.
 - **Route-split bundles.** Worker and owner/manager entry points are
   separate. Shared routes (see route contract above) land in both
   bundles. Only manager-only operational surfaces (`/dashboard`,

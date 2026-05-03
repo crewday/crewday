@@ -126,7 +126,7 @@ from app.domain.expenses.ports import (
     ExpensesRepository,
     SeamPermissionDenied,
 )
-from app.events import ExpenseSubmitted, bus
+from app.events import ExpenseCancelled, ExpenseCreated, ExpenseSubmitted, bus
 from app.tenancy import WorkspaceContext
 from app.util.clock import Clock, SystemClock
 from app.util.currency import ISO_4217_ALLOWLIST
@@ -1262,6 +1262,21 @@ def create_claim(
         diff={"after": _view_to_diff_dict(view)},
         clock=resolved_clock,
     )
+    # Audit-then-publish: a failed publish must not lose the audit row.
+    # Mirrors the ordering in ``submit_claim`` / ``cancel_claim``.
+    bus.publish(
+        ExpenseCreated(
+            workspace_id=ctx.workspace_id,
+            actor_id=ctx.actor_id,
+            correlation_id=ctx.audit_correlation_id,
+            occurred_at=now,
+            actor_user_id=ctx.actor_id,
+            claim_id=claim_row.id,
+            work_engagement_id=claim_row.work_engagement_id,
+            submitter_user_id=ctx.actor_id,
+            state="draft",
+        )
+    )
     return view
 
 
@@ -1847,6 +1862,28 @@ def cancel_claim(
         },
         clock=resolved_clock,
     )
+    # Audit-then-publish: a failed publish must not lose the audit row.
+    # Only emit on the submitted-cancel branch — draft soft-deletes are
+    # private to the author per spec §09, so broadcasting a draft
+    # cancellation workspace-wide would leak ``submitter_user_id`` and
+    # ``claim_id`` to other workers / managers who never saw the draft.
+    # The author's REST DELETE response refreshes their own local cache
+    # directly; cross-tab on draft-cancel is the cost of keeping drafts
+    # genuinely private. See :class:`ExpenseCancelled` for the
+    # audience-design rationale.
+    if current_state == "submitted":
+        bus.publish(
+            ExpenseCancelled(
+                workspace_id=ctx.workspace_id,
+                actor_id=ctx.actor_id,
+                correlation_id=ctx.audit_correlation_id,
+                occurred_at=now,
+                claim_id=cancelled_row.id,
+                work_engagement_id=cancelled_row.work_engagement_id,
+                submitter_user_id=ctx.actor_id,
+                state="rejected",
+            )
+        )
     return after
 
 

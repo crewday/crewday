@@ -960,7 +960,20 @@ the LLM auto-populating from a receipt photo.*
    - a `confidence` per field
 5. Worker reviews; fields with low confidence are highlighted.
 6. Submit. State becomes `submitted`, an owner or manager gets a
-   notification (email + webhook).
+   notification (email + webhook). The SPA emits SSE events on the
+   non-private lifecycle edges — `expense.created` (user-scoped to
+   the author's own tabs so a draft started in one tab surfaces in
+   their other tabs without polling, and never leaves that user's
+   stream), `expense.submitted` (manager-only — the approval queue
+   surfaces the new row without polling), `expense.cancelled` (only
+   on the submitted → rejected branch, workspace-narrowed to
+   managers + workers so the manager queue drops the row and the
+   submitter's tabs flip the chip), and `expense.approved` /
+   `expense.rejected` / `expense.reimbursed` for the manager-driven
+   transitions. Draft soft-deletes do NOT emit `expense.cancelled` —
+   drafts are private to their author until submission, and the
+   author's REST `DELETE` response refreshes their own local cache
+   directly. See §14 "SSE-driven invalidation" for the wire shape.
 
 Offline capture: the photo is queued locally; OCR runs on reconnect.
 
