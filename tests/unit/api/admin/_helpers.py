@@ -40,6 +40,7 @@ from app.adapters.db.workspace.models import Workspace
 from app.api.admin import admin_router
 from app.api.deps import db_session as db_session_dep
 from app.api.errors import add_exception_handlers
+from app.api.transport.admin_sse import router as admin_sse_router
 from app.auth.session import issue
 from app.config import Settings
 from app.tenancy import tenant_agnostic
@@ -111,6 +112,7 @@ def build_client(
 
     app = FastAPI()
     app.state.settings = settings
+    app.include_router(admin_sse_router, prefix="/admin")
     app.include_router(admin_router, prefix="/admin/api/v1")
     add_exception_handlers(app)
 

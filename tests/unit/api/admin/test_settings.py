@@ -30,6 +30,7 @@ from app.api.admin.settings import (
     ERROR_UNKNOWN_KEY,
     ERROR_VALUE_TYPE,
 )
+from app.api.transport import admin_sse
 from app.auth.session import SESSION_COOKIE_NAME
 from app.config import Settings
 from app.tenancy import tenant_agnostic
@@ -208,7 +209,14 @@ class TestUpdateSetting:
         client: TestClient,
         session_factory: sessionmaker[Session],
         settings: Settings,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
+        published: list[dict[str, object]] = []
+        monkeypatch.setattr(
+            admin_sse.default_admin_fanout,
+            "publish",
+            lambda **kwargs: published.append(kwargs),
+        )
         client.cookies.set(
             SESSION_COOKIE_NAME, _admin_cookie(session_factory, settings, owner=True)
         )
@@ -228,6 +236,11 @@ class TestUpdateSetting:
         assert row.value is False
         assert len(audits) == 1
         assert audits[0].actor_was_owner_member is True
+        assert [event["kind"] for event in published] == [
+            "admin.audit.appended",
+            "admin.settings.updated",
+        ]
+        assert published[1]["payload"]["key"] == "signup_enabled"
 
     def test_invalid_type_for_bool_setting(
         self,

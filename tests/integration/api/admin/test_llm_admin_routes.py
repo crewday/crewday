@@ -30,8 +30,10 @@ from app.adapters.db.llm.models import (
     LlmUsage,
 )
 from app.adapters.db.workspace.models import UserWorkspace, Workspace
+from app.api.transport import admin_sse
 from app.auth.session import SESSION_COOKIE_NAME, issue
 from app.config import Settings
+from app.events.bus import EventBus
 from app.events.types import LlmAssignmentChanged
 from app.main import create_app
 from app.tenancy import tenant_agnostic
@@ -437,8 +439,14 @@ class TestAdminLlmRoutes:
             )
             seeded = _seed_llm_graph(session_factory)
             published: list[LlmAssignmentChanged] = []
+            event_bus = EventBus()
+            event_bus.subscribe(LlmAssignmentChanged)(published.append)
+            admin_events: list[dict[str, object]] = []
+            monkeypatch.setattr("app.api.admin.llm.default_event_bus", event_bus)
             monkeypatch.setattr(
-                "app.api.admin.llm.default_event_bus.publish", published.append
+                admin_sse.default_admin_fanout,
+                "publish",
+                lambda **kwargs: admin_events.append(kwargs),
             )
 
             resp = client.post(
@@ -456,6 +464,10 @@ class TestAdminLlmRoutes:
             assert body["capability"] == "tasks.assist"
             assert body["required_capabilities"] == ["chat"]
             assert [event.workspace_id for event in published] == [seeded.workspace_id]
+            assert [event["kind"] for event in admin_events] == [
+                "admin.llm.assignment_updated"
+            ]
+            assert admin_events[0]["payload"]["workspace_id"] == seeded.workspace_id
         finally:
             _wipe(session_factory)
 

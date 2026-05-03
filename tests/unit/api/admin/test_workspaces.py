@@ -30,6 +30,7 @@ from app.adapters.db.audit.models import AuditLog
 from app.adapters.db.llm.models import LlmUsage
 from app.adapters.db.places.models import Property, PropertyWorkspace
 from app.adapters.db.workspace.models import Workspace
+from app.api.transport import admin_sse
 from app.auth.session import SESSION_COOKIE_NAME
 from app.config import Settings
 from app.tenancy import tenant_agnostic
@@ -281,7 +282,14 @@ class TestTrustWorkspace:
         client: TestClient,
         session_factory: sessionmaker[Session],
         settings: Settings,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
+        published: list[dict[str, object]] = []
+        monkeypatch.setattr(
+            admin_sse.default_admin_fanout,
+            "publish",
+            lambda **kwargs: published.append(kwargs),
+        )
         with session_factory() as s:
             ws = seed_workspace(s, slug="trusted-ws")
             s.commit()
@@ -307,6 +315,11 @@ class TestTrustWorkspace:
             assert audit_rows[0].diff == {
                 "verification_state": {"before": "unverified", "after": "trusted"}
             }
+        assert [event["kind"] for event in published] == [
+            "admin.audit.appended",
+            "admin.workspace.trusted",
+        ]
+        assert published[1]["payload"]["workspace_id"] == ws
 
     def test_idempotent_re_trust_no_extra_audit(
         self,
@@ -377,7 +390,14 @@ class TestArchiveWorkspace:
         client: TestClient,
         session_factory: sessionmaker[Session],
         settings: Settings,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
+        published: list[dict[str, object]] = []
+        monkeypatch.setattr(
+            admin_sse.default_admin_fanout,
+            "publish",
+            lambda **kwargs: published.append(kwargs),
+        )
         with session_factory() as s:
             ws = seed_workspace(s, slug="ws-owner-archive")
             s.commit()
@@ -398,6 +418,11 @@ class TestArchiveWorkspace:
         assert row.archived_at is not None
         assert len(audits) == 1
         assert audits[0].actor_was_owner_member is True
+        assert [event["kind"] for event in published] == [
+            "admin.audit.appended",
+            "admin.workspace.archived",
+        ]
+        assert published[1]["payload"]["workspace_id"] == ws
 
     def test_404_for_non_admin_without_workspace_id_leak(
         self,

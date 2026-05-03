@@ -40,6 +40,7 @@ from app.api.admin._owners import ensure_deployment_owner
 from app.api.admin.deps import current_deployment_admin_principal
 from app.api.admin.me import AdminTeamMemberResponse
 from app.api.deps import db_session
+from app.api.transport import admin_sse
 from app.authz.deployment_owners import (
     add_deployment_owner,
     deployment_owner_count,
@@ -475,6 +476,16 @@ def build_admin_admins_router() -> APIRouter:
                 },
             )
             session.flush()
+        admin_sse.publish_admin_event(
+            kind="admin.admins.updated",
+            ctx=ctx,
+            request=request,
+            payload={
+                "action": "grant",
+                "grant_id": grant.id,
+                "user_id": target_user.id,
+            },
+        )
         owner_user_ids = deployment_owner_user_ids(session)
         return AdminGrantResponse(
             admin=_project_member(grant, target_user, owner_user_ids=owner_user_ids)
@@ -541,6 +552,16 @@ def build_admin_admins_router() -> APIRouter:
                 diff={"user_id": grant.user_id},
             )
             session.flush()
+        admin_sse.publish_admin_event(
+            kind="admin.admins.updated",
+            ctx=ctx,
+            request=request,
+            payload={
+                "action": "revoke",
+                "grant_id": id,
+                "user_id": grant.user_id,
+            },
+        )
         return AdminRevokeResponse(revoked_id=id)
 
     @router.get(
@@ -619,6 +640,12 @@ def build_admin_admins_router() -> APIRouter:
                 diff={"user_id": target.id},
             )
             session.flush()
+            admin_sse.publish_admin_event(
+                kind="admin.admins.updated",
+                ctx=ctx,
+                request=request,
+                payload={"action": "owner_add", "user_id": target.id},
+            )
         return OwnersGroupResponse(members=_owner_members(session))
 
     @router.post(
@@ -661,6 +688,12 @@ def build_admin_admins_router() -> APIRouter:
                 diff={"user_id": user_id},
             )
             session.flush()
+            admin_sse.publish_admin_event(
+                kind="admin.admins.updated",
+                ctx=ctx,
+                request=request,
+                payload={"action": "owner_revoke", "user_id": user_id},
+            )
         return OwnersGroupResponse(members=_owner_members(session))
 
     return router

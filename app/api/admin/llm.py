@@ -8,7 +8,7 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Annotated, Any, Literal, Self
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
@@ -27,6 +27,7 @@ from app.adapters.db.llm.models import (
 from app.adapters.db.workspace.models import Workspace
 from app.api.admin.deps import require_deployment_scope
 from app.api.deps import db_session
+from app.api.transport import admin_sse
 from app.domain.agent.compaction import (
     COMPACT_CAPABILITY as _COMPACT_CAPABILITY,
 )
@@ -754,7 +755,11 @@ def _flush_or_conflict(session: Session, error: str) -> None:
         raise _conflict(error) from exc
 
 
-def _publish_assignment_changed(ctx: DeploymentContext, workspace_id: str) -> None:
+def _publish_assignment_changed(
+    ctx: DeploymentContext,
+    request: Request,
+    workspace_id: str,
+) -> None:
     default_event_bus.publish(
         LlmAssignmentChanged(
             workspace_id=workspace_id,
@@ -762,6 +767,12 @@ def _publish_assignment_changed(ctx: DeploymentContext, workspace_id: str) -> No
             correlation_id=new_ulid(),
             occurred_at=_now(),
         )
+    )
+    admin_sse.publish_admin_event(
+        kind="admin.llm.assignment_updated",
+        ctx=ctx,
+        request=request,
+        payload={"workspace_id": workspace_id},
     )
 
 
@@ -1326,7 +1337,7 @@ def build_admin_llm_router() -> APIRouter:
         operation_id="admin.llm.assignments.create",
     )
     def create_assignment(
-        ctx: _WriteCtx, session: _Db, payload: AssignmentPayload
+        ctx: _WriteCtx, session: _Db, request: Request, payload: AssignmentPayload
     ) -> LlmAssignmentResponse:
         now = _now()
         with tenant_agnostic():
@@ -1368,7 +1379,7 @@ def build_admin_llm_router() -> APIRouter:
             )
             session.add(row)
             _flush_or_conflict(session, "assignment_constraint_violation")
-            _publish_assignment_changed(ctx, row.workspace_id)
+            _publish_assignment_changed(ctx, request, row.workspace_id)
             _commit_or_conflict(session, "assignment_constraint_violation")
             session.refresh(row)
         return _assignment_response(row, usage={})
@@ -1379,7 +1390,10 @@ def build_admin_llm_router() -> APIRouter:
         operation_id="admin.llm.assignments.reorder",
     )
     def reorder_assignments(
-        ctx: _WriteCtx, session: _Db, payload: list[AssignmentReorderItem]
+        ctx: _WriteCtx,
+        session: _Db,
+        request: Request,
+        payload: list[AssignmentReorderItem],
     ) -> list[LlmAssignmentResponse]:
         changed_workspaces: set[str] = set()
         with tenant_agnostic():
@@ -1421,7 +1435,7 @@ def build_admin_llm_router() -> APIRouter:
                     changed_workspaces.add(row.workspace_id)
             _flush_or_conflict(session, "assignment_constraint_violation")
             for workspace_id in changed_workspaces:
-                _publish_assignment_changed(ctx, workspace_id)
+                _publish_assignment_changed(ctx, request, workspace_id)
             _commit_or_conflict(session, "assignment_constraint_violation")
             all_rows = list(
                 session.scalars(
@@ -1456,6 +1470,7 @@ def build_admin_llm_router() -> APIRouter:
     def update_assignment(
         ctx: _WriteCtx,
         session: _Db,
+        request: Request,
         assignment_id: str,
         payload: AssignmentUpdatePayload,
     ) -> LlmAssignmentResponse:
@@ -1516,7 +1531,7 @@ def build_admin_llm_router() -> APIRouter:
                 row.enabled = payload.is_enabled
             _flush_or_conflict(session, "assignment_constraint_violation")
             workspace_id = row.workspace_id
-            _publish_assignment_changed(ctx, workspace_id)
+            _publish_assignment_changed(ctx, request, workspace_id)
             _commit_or_conflict(session, "assignment_constraint_violation")
             session.refresh(row)
         return _assignment_response(row, usage={})
@@ -1526,13 +1541,18 @@ def build_admin_llm_router() -> APIRouter:
         status_code=204,
         operation_id="admin.llm.assignments.delete",
     )
-    def delete_assignment(ctx: _WriteCtx, session: _Db, assignment_id: str) -> None:
+    def delete_assignment(
+        ctx: _WriteCtx,
+        session: _Db,
+        request: Request,
+        assignment_id: str,
+    ) -> None:
         with tenant_agnostic():
             row = _assignment(session, assignment_id)
             workspace_id = row.workspace_id
             session.delete(row)
             _flush_or_conflict(session, "assignment_constraint_violation")
-            _publish_assignment_changed(ctx, workspace_id)
+            _publish_assignment_changed(ctx, request, workspace_id)
             _commit_or_conflict(session, "assignment_constraint_violation")
 
     @router.get(

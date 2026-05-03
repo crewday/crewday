@@ -11,6 +11,7 @@ from app.events.registry import (
 )
 from app.events.types import (
     ChatMessageSent,
+    DeploymentAdminSSEEvent,
     ExpenseApproved,
     ExpenseCancelled,
     ExpenseCreated,
@@ -66,6 +67,7 @@ from app.events.types import (
 
 __all__ = [
     "ChatMessageSent",
+    "DeploymentAdminSSEEvent",
     "Event",
     "EventAlreadyRegistered",
     "EventBus",

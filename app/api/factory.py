@@ -108,6 +108,7 @@ from app.api.middleware import (
     SecurityHeadersMiddleware,
 )
 from app.api.preferences import build_preferences_router
+from app.api.transport.admin_sse import router as admin_sse_router
 from app.api.transport.correlation_id import CorrelationIdMiddleware
 from app.api.transport.sse import router as sse_router
 from app.api.v1 import (
@@ -979,6 +980,7 @@ def _mount_context_routers(app: FastAPI, *, settings: Settings) -> None:
     app.include_router(sse_router, prefix="/w/{slug}")
 
     # Deployment-scoped admin tree (bare host).
+    app.include_router(admin_sse_router, prefix="/admin")
     app.include_router(admin_router, prefix="/admin/api/v1")
     app.include_router(build_chat_gateway_router(settings=settings), prefix="")
 

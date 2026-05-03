@@ -33,6 +33,7 @@ from app.api.admin.admins import (
     ERROR_MISSING_TARGET,
     ERROR_USER_NOT_FOUND,
 )
+from app.api.transport import admin_sse
 from app.auth.session import SESSION_COOKIE_NAME
 from app.config import Settings
 from app.tenancy import tenant_agnostic
@@ -115,7 +116,14 @@ class TestGrantAdmin:
         client: TestClient,
         session_factory: sessionmaker[Session],
         settings: Settings,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
+        published: list[dict[str, object]] = []
+        monkeypatch.setattr(
+            admin_sse.default_admin_fanout,
+            "publish",
+            lambda **kwargs: published.append(kwargs),
+        )
         with session_factory() as s:
             target = seed_user(s, email="target@example.com", display_name="T")
             s.commit()
@@ -141,6 +149,12 @@ class TestGrantAdmin:
                 select(AuditLog).where(AuditLog.action == "admin.granted")
             ).all()
             assert len(audits) == 1
+        assert [event["kind"] for event in published] == [
+            "admin.audit.appended",
+            "admin.admins.updated",
+        ]
+        assert published[1]["payload"]["action"] == "grant"
+        assert published[1]["payload"]["user_id"] == target
 
     def test_grant_by_email_canonicalises_lookup(
         self,
@@ -253,6 +267,7 @@ class TestRevokeAdmin:
         client: TestClient,
         session_factory: sessionmaker[Session],
         settings: Settings,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """cd-x1xh: ``POST /admins/{id}/revoke`` is soft-retire, not hard-delete.
 
@@ -263,6 +278,12 @@ class TestRevokeAdmin:
         survives via the preserved row plus the ``admin.revoked``
         audit_log entry.
         """
+        published: list[dict[str, object]] = []
+        monkeypatch.setattr(
+            admin_sse.default_admin_fanout,
+            "publish",
+            lambda **kwargs: published.append(kwargs),
+        )
         with session_factory() as s:
             ada = seed_user(s, email="ada@example.com", display_name="Ada")
             grace = seed_user(s, email="grace@example.com", display_name="Grace")
@@ -285,6 +306,12 @@ class TestRevokeAdmin:
                 select(AuditLog).where(AuditLog.action == "admin.revoked")
             ).all()
             assert len(audits) == 1
+        assert [event["kind"] for event in published] == [
+            "admin.audit.appended",
+            "admin.admins.updated",
+        ]
+        assert published[1]["payload"]["action"] == "revoke"
+        assert published[1]["payload"]["grant_id"] == grace_grant
 
     def test_revoke_unknown_id_404s(
         self,
@@ -377,7 +404,14 @@ class TestGroups:
         client: TestClient,
         session_factory: sessionmaker[Session],
         settings: Settings,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
+        published: list[dict[str, object]] = []
+        monkeypatch.setattr(
+            admin_sse.default_admin_fanout,
+            "publish",
+            lambda **kwargs: published.append(kwargs),
+        )
         with session_factory() as s:
             target = seed_user(s, email="t@example.com", display_name="T")
             s.commit()
@@ -395,6 +429,12 @@ class TestGroups:
             ).all()
         assert len(audits) == 1
         assert audits[0].actor_was_owner_member is True
+        assert [event["kind"] for event in published] == [
+            "admin.audit.appended",
+            "admin.admins.updated",
+        ]
+        assert published[1]["payload"]["action"] == "owner_add"
+        assert published[1]["payload"]["user_id"] == target
 
     def test_owner_add_is_idempotent_without_extra_audit(
         self,
@@ -428,7 +468,14 @@ class TestGroups:
         client: TestClient,
         session_factory: sessionmaker[Session],
         settings: Settings,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
+        published: list[dict[str, object]] = []
+        monkeypatch.setattr(
+            admin_sse.default_admin_fanout,
+            "publish",
+            lambda **kwargs: published.append(kwargs),
+        )
         caller, cookie = _admin_cookie(session_factory, settings)
         with session_factory() as s:
             target = seed_user(s, email="t@example.com", display_name="T")
@@ -440,6 +487,12 @@ class TestGroups:
         )
         assert resp.status_code == 200, resp.text
         assert target not in {row["user_id"] for row in resp.json()["members"]}
+        assert [event["kind"] for event in published] == [
+            "admin.audit.appended",
+            "admin.admins.updated",
+        ]
+        assert published[1]["payload"]["action"] == "owner_revoke"
+        assert published[1]["payload"]["user_id"] == target
 
     def test_last_owner_revoke_returns_typed_422(
         self,

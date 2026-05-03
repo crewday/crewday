@@ -24,6 +24,7 @@ from typing import Any, Final, Literal
 from fastapi import Request
 from sqlalchemy.orm import Session
 
+from app.api.transport import admin_sse
 from app.audit import write_deployment_audit
 from app.authz.deployment_owners import is_deployment_owner
 from app.tenancy import DeploymentContext
@@ -103,4 +104,14 @@ def audit_admin(
         entity_id=entity_id,
         action=action,
         diff=diff,
+    )
+    admin_sse.publish_admin_event(
+        kind="admin.audit.appended",
+        ctx=ctx,
+        request=request,
+        payload={
+            "entity_kind": entity_kind,
+            "entity_id": entity_id,
+            "action": action,
+        },
     )

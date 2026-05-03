@@ -56,6 +56,7 @@ from app.api.admin._workspace_state import (
 )
 from app.api.admin.deps import current_deployment_admin_principal
 from app.api.deps import db_session
+from app.api.transport import admin_sse
 from app.tenancy import DeploymentContext, tenant_agnostic
 
 __all__ = [
@@ -457,6 +458,15 @@ def build_admin_workspaces_router() -> APIRouter:
                 },
             )
             session.flush()
+        admin_sse.publish_admin_event(
+            kind="admin.workspace.trusted",
+            ctx=ctx,
+            request=request,
+            payload={
+                "workspace_id": workspace.id,
+                "verification_state": "trusted",
+            },
+        )
         return WorkspaceTrustResponse(id=workspace.id, verification_state="trusted")
 
     @router.post(
@@ -509,6 +519,15 @@ def build_admin_workspaces_router() -> APIRouter:
                 diff={"archived_at": moment.astimezone(UTC).isoformat()},
             )
             session.flush()
+        admin_sse.publish_admin_event(
+            kind="admin.workspace.archived",
+            ctx=ctx,
+            request=request,
+            payload={
+                "workspace_id": workspace.id,
+                "archived_at": moment.astimezone(UTC).isoformat(),
+            },
+        )
         formatted = format_archived_at(workspace)
         # ``set_archived_at`` always lands a parseable value, so
         # ``format_archived_at`` returns a non-null string here;

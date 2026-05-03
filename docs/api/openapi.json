@@ -34506,6 +34506,70 @@
         }
       }
     },
+    "/admin/events": {
+      "get": {
+        "operationId": "transport.admin_events",
+        "parameters": [
+          {
+            "in": "cookie",
+            "name": "__Host-crewday_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "  Host-Crewday Session"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "crewday_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Crewday Session"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Deployment-admin Server-Sent Events stream",
+        "tags": [
+          "transport",
+          "admin"
+        ]
+      }
+    },
     "/api/v1/auth/email/revert": {
       "post": {
         "description": "Verify the revert magic link and restore ``users.email``.\n\nNo session is required \u2014 the spec pins this as a non-auth\nprimitive consumed against the **old** address by virtue of\nthe token's mailbox-controlled delivery. Bearer tokens are\nalso refused: the spec treats this as session-or-token-free\n(\"the revert link is the only flow that consumes a magic\nlink against the old address after the swap\"), so a token\non the request is at best a bug.",

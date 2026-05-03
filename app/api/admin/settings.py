@@ -65,6 +65,7 @@ from app.api.admin._audit import audit_admin
 from app.api.admin._owners import ensure_deployment_owner
 from app.api.admin.deps import current_deployment_admin_principal
 from app.api.deps import db_session
+from app.api.transport import admin_sse
 from app.capabilities import Capabilities, DeploymentSettings
 from app.config import Settings
 from app.tenancy import DeploymentContext, tenant_agnostic
@@ -707,6 +708,12 @@ def build_admin_settings_router() -> APIRouter:
             )
             session.flush()
         _refresh_capabilities(request, session)
+        admin_sse.publish_admin_event(
+            kind="admin.settings.updated",
+            ctx=ctx,
+            request=request,
+            payload={"key": key},
+        )
         return DeploymentSettingResponse(
             key=key,
             value=_resolve_value(definition, row),

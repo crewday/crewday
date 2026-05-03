@@ -33,7 +33,7 @@ from __future__ import annotations
 import re
 from datetime import datetime, timedelta
 from decimal import Decimal
-from typing import ClassVar, Final, Literal
+from typing import Any, ClassVar, Final, Literal
 
 from pydantic import BaseModel, field_validator, model_validator
 
@@ -59,6 +59,7 @@ __all__ = [
     "ChatChannelBindingVerified",
     "ChatMessageReceived",
     "ChatMessageSent",
+    "DeploymentAdminSSEEvent",
     "ExpenseApproved",
     "ExpenseCancelled",
     "ExpenseCreated",
@@ -1615,6 +1616,25 @@ class QuoteDecided(Event):
     @classmethod
     def _decided_at_is_utc(cls, value: datetime) -> datetime:
         return _require_aware_utc(value)
+
+
+@register
+class DeploymentAdminSSEEvent(Event):
+    """Relay envelope for deployment-scoped ``/admin/events`` frames.
+
+    The base :class:`Event` shape is workspace-scoped because most bus
+    consumers are workspace SSE subscribers. Deployment admin SSE still
+    rides the same bus/relay for cross-worker delivery, so this event
+    uses a sentinel ``workspace_id`` and carries the actual public admin
+    SSE kind in ``admin_kind``.
+    """
+
+    name: ClassVar[str] = "admin.deployment_sse"
+    allowed_roles: ClassVar[tuple[EventRole, ...]] = ("manager",)
+
+    admin_kind: str
+    payload: dict[str, Any]
+    user_scope: str | None = None
 
 
 @register

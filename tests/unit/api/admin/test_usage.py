@@ -23,6 +23,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from app.adapters.db.audit.models import AuditLog
 from app.adapters.db.llm.models import LlmUsage
 from app.adapters.db.workspace.models import Workspace
+from app.api.transport import admin_sse
 from app.auth.session import SESSION_COOKIE_NAME
 from app.config import Settings
 from app.tenancy import tenant_agnostic
@@ -709,7 +710,14 @@ class TestUpdateCap:
         client: TestClient,
         session_factory: sessionmaker[Session],
         settings: Settings,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
+        published: list[dict[str, object]] = []
+        monkeypatch.setattr(
+            admin_sse.default_admin_fanout,
+            "publish",
+            lambda **kwargs: published.append(kwargs),
+        )
         with session_factory() as s:
             ws = seed_workspace(s, slug="cap-ws", quota_json={})
             s.commit()
@@ -730,6 +738,12 @@ class TestUpdateCap:
                 select(AuditLog).where(AuditLog.action == "usage.cap_updated")
             ).all()
             assert len(audits) == 1
+        assert [event["kind"] for event in published] == [
+            "admin.audit.appended",
+            "admin.usage.updated",
+        ]
+        assert published[1]["payload"]["workspace_id"] == ws
+        assert published[1]["payload"]["cap_cents_30d"] == 1500
 
     def test_idempotent_no_extra_audit(
         self,

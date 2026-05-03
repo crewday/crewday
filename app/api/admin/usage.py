@@ -56,6 +56,7 @@ from app.api.admin._usage_helpers import (
 from app.api.admin._workspace_state import load_workspace
 from app.api.admin.deps import current_deployment_admin_principal
 from app.api.deps import db_session
+from app.api.transport import admin_sse
 from app.tenancy import DeploymentContext, tenant_agnostic
 
 __all__ = [
@@ -678,6 +679,15 @@ def build_admin_usage_router() -> APIRouter:
                 },
             )
             session.flush()
+        admin_sse.publish_admin_event(
+            kind="admin.usage.updated",
+            ctx=ctx,
+            request=request,
+            payload={
+                "workspace_id": workspace.id,
+                "cap_cents_30d": payload.cap_cents_30d,
+            },
+        )
         return UsageCapResponse(
             workspace_id=workspace.id, cap_cents_30d=payload.cap_cents_30d
         )
