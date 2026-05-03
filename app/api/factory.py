@@ -140,6 +140,7 @@ from app.api.v1.auth import signup as signup_module
 from app.api.v1.auth import tokens as tokens_module
 from app.api.v1.dashboard import build_dashboard_router
 from app.api.v1.employees import build_employees_router
+from app.api.v1.history import build_history_router
 from app.api.v1.llm import build_workspace_llm_router
 from app.api.v1.me_schedule import build_me_schedule_router
 from app.api.v1.permission_groups import build_permission_groups_router
@@ -833,6 +834,15 @@ def _mount_auth_routers(
     app.include_router(build_me_schedule_router(), prefix=scoped_prefix)
     app.include_router(build_scheduler_router(), prefix=scoped_prefix)
     app.include_router(build_dashboard_router(), prefix=scoped_prefix)
+    # Workspace-scoped worker history aggregator (cd-wnsr). Surfaces
+    # ``GET /history?tab=tasks|chats|expenses|leaves`` per §12
+    # "Self-service shortcuts" — sibling of ``/me/schedule`` and
+    # ``/dashboard``. The single bulk envelope (Option A) carries all
+    # four arrays so the SPA can switch tabs client-side without a
+    # refetch; see ``app/api/v1/history.py`` for the shape rationale.
+    # Self-only by construction (keys on ``ctx.actor_id``); does not
+    # accept a ``user_id`` query param.
+    app.include_router(build_history_router(), prefix=scoped_prefix)
     # Workspace-scoped employees roster (cd-g6nf, cd-jtgo) — flat
     # ``Employee[]`` projection consumed by the SPA's manager pages.
     # See ``app/api/v1/employees.py`` for the join shape and the

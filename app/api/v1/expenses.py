@@ -178,7 +178,7 @@ from app.tenancy import WorkspaceContext
 from app.util.clock import SystemClock
 from app.util.ulid import new_ulid
 
-__all__ = ["router"]
+__all__ = ["ExpenseClaimPayload", "make_seam_pair", "router"]
 
 
 router = APIRouter(tags=["expenses"])

@@ -1669,6 +1669,51 @@ POST   /me/availability_overrides         # body: {date, available, starts_local
                                           #   UI does not need to re-derive it. 409
                                           #   `override_exists` when an override
                                           #   already covers `(caller, date)`.
+GET    /history?tab=tasks|chats|expenses|leaves   # self-only "everything wrapped up"
+                                          #   feed for §14 worker history page.
+                                          #   Sibling of /me/schedule: keys on
+                                          #   ctx.actor_id, ignores any user_id
+                                          #   query (managers use the per-resource
+                                          #   surfaces — /tasks?assignee_user_id=…,
+                                          #   /expenses?user_id=…, /employees/{id}/
+                                          #   leaves — for cross-user inspection).
+                                          #   Returns the SPA's HistoryPayload
+                                          #   verbatim — a single object carrying
+                                          #   {tab, tasks[], expenses[], leaves[],
+                                          #   chats[]}. This is intentionally NOT
+                                          #   the standard {data, next_cursor,
+                                          #   has_more} envelope: the four-array
+                                          #   fan-out doesn't fit a single cursor
+                                          #   page, and the SPA already consumes
+                                          #   this exact shape from the mock.
+                                          #   Each array is bounded to 50 rows
+                                          #   newest-first (hard truncation past
+                                          #   that — history is a "recent activity"
+                                          #   surface, not an audit log; cursor
+                                          #   migration is a tracked follow-up).
+                                          #   Filters mirror the mock at
+                                          #   mocks/app/main.py:3539-3562:
+                                          #     tasks    — Occurrence rows assigned
+                                          #                to caller, state in
+                                          #                {completed, skipped}.
+                                          #     expenses — ExpenseClaim rows whose
+                                          #                work_engagement belongs
+                                          #                to caller, state in
+                                          #                {approved, reimbursed,
+                                          #                rejected}.
+                                          #     leaves   — Leave rows for caller,
+                                          #                status='approved' AND
+                                          #                ends_at < today (UTC).
+                                          #     chats    — archived agent chats;
+                                          #                surface not yet built,
+                                          #                returns []. Tracked as
+                                          #                a follow-up Beads task.
+                                          #   Every array is populated regardless
+                                          #   of `tab`; the param echoes back so
+                                          #   the SPA can switch tabs client-side
+                                          #   without a refetch. Unknown `tab`
+                                          #   values surface as 422 (FastAPI
+                                          #   Pydantic Literal validation).
 ```
 
 ### Tasks / templates / schedules
