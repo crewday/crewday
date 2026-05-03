@@ -656,7 +656,7 @@ def build_signup_router(
         operation_id="signup.start",
         summary="Start a self-serve signup; 404 if signup is disabled",
     )
-    def post_start(
+    async def post_start(
         body: SignupStartBody,
         request: Request,
     ) -> SignupStartResponse:
@@ -714,7 +714,7 @@ def build_signup_router(
             signup_abuse.check_rate(
                 throttle, ip_hash=ip_hash, email_hash=email_hash, now=now
             )
-            signup_abuse.check_captcha(
+            await signup_abuse.check_captcha(
                 body.captcha_token, capabilities=capabilities, settings=cfg
             )
             if signup_abuse.is_disposable(body.email):

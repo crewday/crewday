@@ -42,6 +42,7 @@ from app.auth._throttle import (
 )
 from app.capabilities import Capabilities, DeploymentSettings, Features
 from app.config import Settings
+from app.net.fetch_guard import FetchGuardBlocked, FetchGuardTimeout
 from app.tenancy import InvalidSlug
 
 _PINNED = datetime(2026, 4, 20, 12, 0, 0, tzinfo=UTC)
@@ -297,51 +298,51 @@ class TestIsDisposable:
 
 
 class TestCheckCaptchaTestMode:
-    def test_test_pass_token_succeeds(
+    async def test_test_pass_token_succeeds(
         self,
         caps_captcha_required: Capabilities,
         settings_test_mode: Settings,
     ) -> None:
         # No secret configured → offline test mode; "test-pass" passes.
-        signup_abuse.check_captcha(
+        await signup_abuse.check_captcha(
             "test-pass",
             capabilities=caps_captcha_required,
             settings=settings_test_mode,
         )
 
-    def test_test_fail_token_rejected(
+    async def test_test_fail_token_rejected(
         self,
         caps_captcha_required: Capabilities,
         settings_test_mode: Settings,
     ) -> None:
         with pytest.raises(signup_abuse.CaptchaFailed) as excinfo:
-            signup_abuse.check_captcha(
+            await signup_abuse.check_captcha(
                 "test-fail",
                 capabilities=caps_captcha_required,
                 settings=settings_test_mode,
             )
         assert excinfo.value.reason == "captcha_rejected"
 
-    def test_bogus_token_in_test_mode_flags_misconfig(
+    async def test_bogus_token_in_test_mode_flags_misconfig(
         self,
         caps_captcha_required: Capabilities,
         settings_test_mode: Settings,
     ) -> None:
         with pytest.raises(signup_abuse.CaptchaFailed) as excinfo:
-            signup_abuse.check_captcha(
+            await signup_abuse.check_captcha(
                 "looks-like-a-real-token",
                 capabilities=caps_captcha_required,
                 settings=settings_test_mode,
             )
         assert excinfo.value.reason == "captcha_verifier_unconfigured"
 
-    def test_empty_token_required(
+    async def test_empty_token_required(
         self,
         caps_captcha_required: Capabilities,
         settings_test_mode: Settings,
     ) -> None:
         with pytest.raises(signup_abuse.CaptchaFailed) as excinfo:
-            signup_abuse.check_captcha(
+            await signup_abuse.check_captcha(
                 None,
                 capabilities=caps_captcha_required,
                 settings=settings_test_mode,
@@ -350,24 +351,24 @@ class TestCheckCaptchaTestMode:
 
 
 class TestCheckCaptchaDisabled:
-    def test_pass_through_when_optional(
+    async def test_pass_through_when_optional(
         self,
         caps_captcha_optional: Capabilities,
         settings_test_mode: Settings,
     ) -> None:
         # captcha_required=False → no token needed, no verifier call.
-        signup_abuse.check_captcha(
+        await signup_abuse.check_captcha(
             None,
             capabilities=caps_captcha_optional,
             settings=settings_test_mode,
         )
-        signup_abuse.check_captcha(
+        await signup_abuse.check_captcha(
             "anything",
             capabilities=caps_captcha_optional,
             settings=settings_test_mode,
         )
 
-    def test_disabled_never_calls_turnstile(
+    async def test_disabled_never_calls_turnstile(
         self,
         caps_captcha_optional: Capabilities,
         settings_real_turnstile: Settings,
@@ -376,12 +377,12 @@ class TestCheckCaptchaDisabled:
         """Even with a real secret wired, captcha_required=False skips the HTTP call."""
         called = {"count": 0}
 
-        def _boom(*_args: Any, **_kwargs: Any) -> Any:
+        async def _boom(*_args: Any, **_kwargs: Any) -> Any:
             called["count"] += 1
             raise AssertionError("Turnstile should not be invoked when disabled")
 
-        monkeypatch.setattr(httpx, "post", _boom)
-        signup_abuse.check_captcha(
+        monkeypatch.setattr(signup_abuse, "safe_fetch", _boom)
+        await signup_abuse.check_captcha(
             "any-token",
             capabilities=caps_captcha_optional,
             settings=settings_real_turnstile,
@@ -390,59 +391,110 @@ class TestCheckCaptchaDisabled:
 
 
 class TestCheckCaptchaRealMode:
-    def test_real_mode_success(
+    async def test_real_mode_success(
         self,
         caps_captcha_required: Capabilities,
         settings_real_turnstile: Settings,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """Stub ``httpx.post`` to return ``{"success": true}``."""
+        """Stub :func:`safe_fetch` to return ``{"success": true}``."""
 
-        def _fake_post(url: str, **kwargs: Any) -> httpx.Response:
+        async def _fake_fetch(url: str, **kwargs: Any) -> httpx.Response:
             assert "turnstile" in url
             return httpx.Response(200, json={"success": True})
 
-        monkeypatch.setattr(httpx, "post", _fake_post)
-        signup_abuse.check_captcha(
+        monkeypatch.setattr(signup_abuse, "safe_fetch", _fake_fetch)
+        await signup_abuse.check_captcha(
             "real-looking-token",
             capabilities=caps_captcha_required,
             settings=settings_real_turnstile,
         )
 
-    def test_real_mode_rejection(
+    async def test_real_mode_rejection(
         self,
         caps_captcha_required: Capabilities,
         settings_real_turnstile: Settings,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        def _fake_post(url: str, **kwargs: Any) -> httpx.Response:
+        async def _fake_fetch(url: str, **kwargs: Any) -> httpx.Response:
             del url, kwargs
             return httpx.Response(
                 200, json={"success": False, "error-codes": ["invalid-input-response"]}
             )
 
-        monkeypatch.setattr(httpx, "post", _fake_post)
+        monkeypatch.setattr(signup_abuse, "safe_fetch", _fake_fetch)
         with pytest.raises(signup_abuse.CaptchaFailed) as excinfo:
-            signup_abuse.check_captcha(
+            await signup_abuse.check_captcha(
                 "real-looking-token",
                 capabilities=caps_captcha_required,
                 settings=settings_real_turnstile,
             )
         assert excinfo.value.reason == "captcha_rejected"
 
-    def test_real_mode_network_error(
+    async def test_real_mode_network_error(
         self,
         caps_captcha_required: Capabilities,
         settings_real_turnstile: Settings,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        def _fake_post(url: str, **kwargs: Any) -> httpx.Response:
+        async def _fake_fetch(url: str, **kwargs: Any) -> httpx.Response:
             del url, kwargs
-            raise httpx.ConnectError("boom")
+            raise FetchGuardTimeout("boom")
 
-        monkeypatch.setattr(httpx, "post", _fake_post)
+        monkeypatch.setattr(signup_abuse, "safe_fetch", _fake_fetch)
         with pytest.raises(signup_abuse.CaptchaFailed) as excinfo:
-            signup_abuse.check_captcha(
+            await signup_abuse.check_captcha(
+                "real-looking-token",
+                capabilities=caps_captcha_required,
+                settings=settings_real_turnstile,
+            )
+        assert excinfo.value.reason == "captcha_verifier_unreachable"
+
+    async def test_real_mode_blocked_by_guard(
+        self,
+        caps_captcha_required: Capabilities,
+        settings_real_turnstile: Settings,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """:class:`FetchGuardBlocked` (e.g. DNS error) maps to ``unreachable``."""
+
+        async def _fake_fetch(url: str, **kwargs: Any) -> httpx.Response:
+            del url, kwargs
+            raise FetchGuardBlocked("dns down", reason="dns_error")
+
+        monkeypatch.setattr(signup_abuse, "safe_fetch", _fake_fetch)
+        with pytest.raises(signup_abuse.CaptchaFailed) as excinfo:
+            await signup_abuse.check_captcha(
+                "real-looking-token",
+                capabilities=caps_captcha_required,
+                settings=settings_real_turnstile,
+            )
+        assert excinfo.value.reason == "captcha_verifier_unreachable"
+
+    async def test_real_mode_raw_httpx_transport_error(
+        self,
+        caps_captcha_required: Capabilities,
+        settings_real_turnstile: Settings,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Raw :class:`httpx.HTTPError` from :func:`safe_fetch` maps to ``unreachable``.
+
+        :func:`app.net.fetch_guard.safe_fetch` only translates
+        :class:`httpx.TimeoutException` into its own vocabulary —
+        other transport-level failures (TCP reset, TLS handshake,
+        malformed response, proxy failure) propagate as raw httpx
+        exceptions. The captcha helper has to swallow them as a
+        ``captcha_verifier_unreachable`` so a Cloudflare blip does
+        not surface as a 500 from ``POST /signup/start``.
+        """
+
+        async def _fake_fetch(url: str, **kwargs: Any) -> httpx.Response:
+            del url, kwargs
+            raise httpx.ConnectError("tcp reset")
+
+        monkeypatch.setattr(signup_abuse, "safe_fetch", _fake_fetch)
+        with pytest.raises(signup_abuse.CaptchaFailed) as excinfo:
+            await signup_abuse.check_captcha(
                 "real-looking-token",
                 capabilities=caps_captcha_required,
                 settings=settings_real_turnstile,

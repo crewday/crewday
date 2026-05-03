@@ -49,6 +49,7 @@ from functools import lru_cache
 from importlib.resources import files as _pkg_files
 from pathlib import Path
 from typing import Final
+from urllib.parse import urlencode
 
 import httpx
 
@@ -63,6 +64,12 @@ from app.auth._throttle import SignupRateLimited, Throttle
 from app.auth.signup import SlugHomoglyphError, SlugReserved
 from app.capabilities import Capabilities
 from app.config import Settings
+from app.net.fetch_guard import (
+    FetchGuardBlocked,
+    FetchGuardSizeLimit,
+    FetchGuardTimeout,
+    safe_fetch,
+)
 from app.tenancy import (
     InvalidSlug,
     is_homoglyph_collision,
@@ -295,27 +302,54 @@ def is_disposable(email: str, *, path: Path | None = None) -> bool:
 # ---------------------------------------------------------------------------
 
 
-def _verify_turnstile(token: str, *, secret: str) -> None:
+async def _verify_turnstile(token: str, *, secret: str) -> None:
     """Verify ``token`` against Cloudflare Turnstile; raise on failure.
 
-    Thin wrapper around :func:`httpx.post` — the endpoint returns
-    a JSON body with ``{"success": bool, "error-codes": [...]}``.
-    Any non-success response, network error, timeout, or malformed
-    JSON raises :class:`CaptchaFailed` with a ``reason`` symbol that
-    audit can pin down without leaking the raw Turnstile error-code
-    to the client.
+    Goes through :func:`app.net.fetch_guard.safe_fetch` so the SSRF
+    guard, size cap, and timeout enforcement land on the same audit
+    point as every other server-side fetch (spec §15 "SSRF"). The
+    Turnstile URL is pinned (not user-supplied), so this call is not
+    exposed to a hostile DNS — but routing it through the guard keeps
+    one fetch policy across the codebase.
+
+    The endpoint returns a JSON body with
+    ``{"success": bool, "error-codes": [...]}``. Any non-success
+    response, fetch-guard rejection, timeout, or malformed JSON
+    raises :class:`CaptchaFailed` with a ``reason`` symbol that audit
+    can pin down without leaking the raw Turnstile error-code to the
+    client.
 
     The short per-call timeout (:data:`_TURNSTILE_TIMEOUT_SECONDS`)
     means a Turnstile outage fails fast rather than holding signup
     requests open until the client gives up.
     """
     try:
-        resp = httpx.post(
+        resp = await safe_fetch(
             _TURNSTILE_VERIFY_URL,
-            data={"secret": secret, "response": token},
-            timeout=_TURNSTILE_TIMEOUT_SECONDS,
+            method="POST",
+            content=urlencode({"secret": secret, "response": token}),
+            headers={"content-type": "application/x-www-form-urlencoded"},
+            timeout_seconds=_TURNSTILE_TIMEOUT_SECONDS,
         )
+    except FetchGuardTimeout:
+        raise CaptchaFailed(reason="captcha_verifier_unreachable") from None
+    except FetchGuardSizeLimit:
+        raise CaptchaFailed(reason="captcha_verifier_malformed") from None
+    except FetchGuardBlocked:
+        # SSRF gate rejected the request before any byte left — bad
+        # scheme, DNS error, etc. The URL is pinned so a block here
+        # signals an environment problem (DNS down, broken egress);
+        # treat it the same as a network failure.
+        raise CaptchaFailed(reason="captcha_verifier_unreachable") from None
     except httpx.HTTPError:
+        # Safety net: :func:`safe_fetch` only translates
+        # :class:`httpx.TimeoutException` into its own vocabulary —
+        # other transport-level failures (TCP reset, TLS handshake
+        # error, malformed HTTP response, proxy failure) propagate as
+        # raw httpx exceptions. Catch the whole ``HTTPError`` family
+        # so a Cloudflare blip is a 422 ``captcha_failed`` (with a
+        # ``captcha_verifier_unreachable`` audit reason) rather than a
+        # 500 from the signup endpoint.
         raise CaptchaFailed(reason="captcha_verifier_unreachable") from None
 
     if resp.status_code != 200:
@@ -335,7 +369,7 @@ def _verify_turnstile(token: str, *, secret: str) -> None:
         raise CaptchaFailed(reason="captcha_rejected")
 
 
-def check_captcha(
+async def check_captcha(
     token: str | None,
     *,
     capabilities: Capabilities,
@@ -381,7 +415,7 @@ def check_captcha(
         # "unreachable" symbol so the audit row flags the misconfig.
         raise CaptchaFailed(reason="captcha_verifier_unconfigured")
 
-    _verify_turnstile(token, secret=secret.get_secret_value())
+    await _verify_turnstile(token, secret=secret.get_secret_value())
 
 
 # ---------------------------------------------------------------------------
