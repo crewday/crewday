@@ -42,6 +42,7 @@ from app.api.deps import current_workspace_context, db_session
 from app.api.v1.user_availability_overrides import (
     build_user_availability_overrides_router,
 )
+from app.events import UserAvailabilityOverrideUpserted, bus
 from app.tenancy import WorkspaceContext, registry
 from app.tenancy.context import ActorGrantRole
 from app.tenancy.orm_filter import install_tenant_filter
@@ -606,3 +607,253 @@ class TestEndToEnd:
         )
         assert resubmit.status_code == 409, resubmit.text
         assert resubmit.json()["detail"]["error"] == "override_exists"
+
+
+class TestUpsertedEvent:
+    """:class:`UserAvailabilityOverrideUpserted` fan-out (cd-93wp).
+
+    Mirror of :class:`TestUpsertedEvent` in
+    :mod:`tests.integration.identity.test_user_leaves_api`. Confirms
+    create / approve / reject / delete each publish an event with the
+    expected ``state`` so the worker schedule + override list refresh
+    on every state edge the umbrella ``approval.decided`` event misses.
+    """
+
+    def test_worker_create_emits_pending_state(
+        self, api_factory: sessionmaker[Session]
+    ) -> None:
+        """Worker self-create publishes ``state="pending"`` (approval_required)."""
+        ws_id, ws_slug, _owner_id = _seed_workspace_with_owner(
+            api_factory, slug="uao-evt-1"
+        )
+        worker_id = _seed_worker(
+            api_factory, ws_id=ws_id, email="uao-evt-1-w@example.com"
+        )
+        _seed_weekly(
+            api_factory,
+            workspace_id=ws_id,
+            user_id=worker_id,
+            weekday=0,
+            starts_local=time(9, 0),
+            ends_local=time(17, 0),
+        )
+        ctx = _ctx(
+            workspace_id=ws_id,
+            workspace_slug=ws_slug,
+            actor_id=worker_id,
+            grant_role="worker",
+            actor_was_owner_member=False,
+        )
+
+        bus._reset_for_tests()
+        captured: list[UserAvailabilityOverrideUpserted] = []
+
+        @bus.subscribe(UserAvailabilityOverrideUpserted)
+        def _on_upsert(event: UserAvailabilityOverrideUpserted) -> None:
+            captured.append(event)
+
+        try:
+            client = TestClient(
+                _build_app(api_factory, ctx), raise_server_exceptions=False
+            )
+            resp = client.post(
+                "/user_availability_overrides",
+                json={
+                    "date": "2026-05-04",
+                    "available": False,
+                    "reason": "Doctor",
+                },
+            )
+            assert resp.status_code == 201, resp.text
+            override_id = resp.json()["id"]
+        finally:
+            bus._reset_for_tests()
+
+        assert len(captured) == 1
+        evt = captured[0]
+        assert evt.override_id == override_id
+        assert evt.user_id == worker_id
+        assert evt.state == "pending"
+
+    def test_worker_widening_emits_approved_state(
+        self, api_factory: sessionmaker[Session]
+    ) -> None:
+        """Widening own hours self-approves; event carries ``state="approved"``."""
+        ws_id, ws_slug, _owner_id = _seed_workspace_with_owner(
+            api_factory, slug="uao-evt-2"
+        )
+        worker_id = _seed_worker(
+            api_factory, ws_id=ws_id, email="uao-evt-2-w@example.com"
+        )
+        _seed_weekly(
+            api_factory,
+            workspace_id=ws_id,
+            user_id=worker_id,
+            weekday=0,
+            starts_local=time(9, 0),
+            ends_local=time(17, 0),
+        )
+        ctx = _ctx(
+            workspace_id=ws_id,
+            workspace_slug=ws_slug,
+            actor_id=worker_id,
+            grant_role="worker",
+            actor_was_owner_member=False,
+        )
+
+        bus._reset_for_tests()
+        captured: list[UserAvailabilityOverrideUpserted] = []
+
+        @bus.subscribe(UserAvailabilityOverrideUpserted)
+        def _on_upsert(event: UserAvailabilityOverrideUpserted) -> None:
+            captured.append(event)
+
+        try:
+            client = TestClient(
+                _build_app(api_factory, ctx), raise_server_exceptions=False
+            )
+            resp = client.post(
+                "/user_availability_overrides",
+                json={
+                    "date": "2026-05-04",
+                    "available": True,
+                    "starts_local": "09:00:00",
+                    "ends_local": "19:00:00",
+                },
+            )
+            assert resp.status_code == 201, resp.text
+        finally:
+            bus._reset_for_tests()
+
+        assert len(captured) == 1
+        assert captured[0].state == "approved"
+        assert captured[0].user_id == worker_id
+
+    def test_approve_then_reject_emit_decided_states(
+        self, api_factory: sessionmaker[Session]
+    ) -> None:
+        """``approve`` publishes ``"approved"``; ``reject`` publishes ``"rejected"``."""
+        ws_id, ws_slug, owner_id = _seed_workspace_with_owner(
+            api_factory, slug="uao-evt-3"
+        )
+        worker_id = _seed_worker(
+            api_factory, ws_id=ws_id, email="uao-evt-3-w@example.com"
+        )
+        _seed_weekly(
+            api_factory,
+            workspace_id=ws_id,
+            user_id=worker_id,
+            weekday=0,
+            starts_local=time(9, 0),
+            ends_local=time(17, 0),
+        )
+        _seed_weekly(
+            api_factory,
+            workspace_id=ws_id,
+            user_id=worker_id,
+            weekday=1,
+            starts_local=time(9, 0),
+            ends_local=time(17, 0),
+        )
+        worker_ctx_obj = _ctx(
+            workspace_id=ws_id,
+            workspace_slug=ws_slug,
+            actor_id=worker_id,
+            grant_role="worker",
+            actor_was_owner_member=False,
+        )
+        worker_client = TestClient(
+            _build_app(api_factory, worker_ctx_obj),
+            raise_server_exceptions=False,
+        )
+        # Two pending narrowings on consecutive weekdays.
+        ov_a = worker_client.post(
+            "/user_availability_overrides",
+            json={"date": "2026-05-04", "available": False, "reason": "A"},
+        ).json()
+        ov_b = worker_client.post(
+            "/user_availability_overrides",
+            json={"date": "2026-05-05", "available": False, "reason": "B"},
+        ).json()
+
+        owner_ctx_obj = _ctx(
+            workspace_id=ws_id,
+            workspace_slug=ws_slug,
+            actor_id=owner_id,
+            grant_role="manager",
+            actor_was_owner_member=True,
+        )
+        owner_client = TestClient(
+            _build_app(api_factory, owner_ctx_obj),
+            raise_server_exceptions=False,
+        )
+
+        bus._reset_for_tests()
+        captured: list[UserAvailabilityOverrideUpserted] = []
+
+        @bus.subscribe(UserAvailabilityOverrideUpserted)
+        def _on_upsert(event: UserAvailabilityOverrideUpserted) -> None:
+            captured.append(event)
+
+        try:
+            ap = owner_client.post(f"/user_availability_overrides/{ov_a['id']}/approve")
+            assert ap.status_code == 200, ap.text
+            rj = owner_client.post(
+                f"/user_availability_overrides/{ov_b['id']}/reject",
+                json={"reason_md": "no coverage"},
+            )
+            assert rj.status_code == 200, rj.text
+        finally:
+            bus._reset_for_tests()
+
+        states = {e.override_id: e.state for e in captured}
+        assert states[ov_a["id"]] == "approved"
+        assert states[ov_b["id"]] == "rejected"
+
+    def test_delete_emits_cancelled_state(
+        self, api_factory: sessionmaker[Session]
+    ) -> None:
+        """``DELETE`` publishes ``state="cancelled"``."""
+        ws_id, ws_slug, _owner_id = _seed_workspace_with_owner(
+            api_factory, slug="uao-evt-4"
+        )
+        worker_id = _seed_worker(
+            api_factory, ws_id=ws_id, email="uao-evt-4-w@example.com"
+        )
+        _seed_weekly(
+            api_factory,
+            workspace_id=ws_id,
+            user_id=worker_id,
+            weekday=0,
+            starts_local=time(9, 0),
+            ends_local=time(17, 0),
+        )
+        ctx = _ctx(
+            workspace_id=ws_id,
+            workspace_slug=ws_slug,
+            actor_id=worker_id,
+            grant_role="worker",
+            actor_was_owner_member=False,
+        )
+        client = TestClient(_build_app(api_factory, ctx), raise_server_exceptions=False)
+        ov = client.post(
+            "/user_availability_overrides",
+            json={"date": "2026-05-04", "available": False, "reason": "X"},
+        ).json()
+
+        bus._reset_for_tests()
+        captured: list[UserAvailabilityOverrideUpserted] = []
+
+        @bus.subscribe(UserAvailabilityOverrideUpserted)
+        def _on_upsert(event: UserAvailabilityOverrideUpserted) -> None:
+            captured.append(event)
+
+        try:
+            r = client.delete(f"/user_availability_overrides/{ov['id']}")
+            assert r.status_code == 204, r.text
+        finally:
+            bus._reset_for_tests()
+
+        assert len(captured) == 1
+        assert captured[0].override_id == ov["id"]
+        assert captured[0].state == "cancelled"

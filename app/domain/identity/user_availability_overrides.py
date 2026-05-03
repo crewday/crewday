@@ -128,6 +128,7 @@ from app.domain.identity.availability_ports import (
     UserAvailabilityOverrideRow,
     UserWeeklyAvailabilityRow,
 )
+from app.events import UserAvailabilityOverrideUpserted, bus
 from app.tenancy import WorkspaceContext
 from app.util.clock import Clock, SystemClock
 from app.util.ulid import new_ulid
@@ -408,6 +409,44 @@ def _view_to_diff_dict(view: UserAvailabilityOverrideView) -> dict[str, Any]:
         ),
         "approved_by": view.approved_by,
     }
+
+
+# ``user_availability_override.upserted`` payload state — closed enum
+# mirroring the :class:`~app.events.types.UserAvailabilityOverrideUpserted`
+# ``state`` Literal. Like sibling :mod:`app.domain.identity.user_leaves`,
+# the row schema doesn't carry an explicit ``status`` column (state is
+# derived from ``approved_at`` + ``deleted_at``); each write call site
+# picks the state it just transitioned to and threads it into
+# :func:`_publish_upserted`.
+_UpsertedState = Literal["pending", "approved", "rejected", "cancelled"]
+
+
+def _publish_upserted(
+    ctx: WorkspaceContext,
+    *,
+    override_id: str,
+    user_id: str,
+    state: _UpsertedState,
+    occurred_at: datetime,
+) -> None:
+    """Publish :class:`UserAvailabilityOverrideUpserted` post-write (cd-93wp).
+
+    Audit-then-publish: callers must invoke this AFTER
+    :func:`write_audit` so a publish failure can never leave the
+    audit row missing. Mirrors the ordering on
+    :func:`app.domain.expenses.claims.create_claim`.
+    """
+    bus.publish(
+        UserAvailabilityOverrideUpserted(
+            workspace_id=ctx.workspace_id,
+            actor_id=ctx.actor_id,
+            correlation_id=ctx.audit_correlation_id,
+            occurred_at=occurred_at,
+            override_id=override_id,
+            user_id=user_id,
+            state=state,
+        )
+    )
 
 
 def _load_row(
@@ -750,6 +789,13 @@ def create_override(
         diff={"after": _view_to_diff_dict(view), "auto_approved": auto_approve},
         clock=resolved_clock,
     )
+    _publish_upserted(
+        ctx,
+        override_id=view.id,
+        user_id=view.user_id,
+        state="approved" if auto_approve else "pending",
+        occurred_at=now,
+    )
     return view
 
 
@@ -904,6 +950,16 @@ def update_override(
         },
         clock=resolved_clock,
     )
+    # ``update_override`` only fires on pending rows (state-machine
+    # guard above rejects approved); the row stays pending so this
+    # is a field rewrite, not a state transition.
+    _publish_upserted(
+        ctx,
+        override_id=after.id,
+        user_id=after.user_id,
+        state="pending",
+        occurred_at=now,
+    )
     return after
 
 
@@ -966,6 +1022,13 @@ def approve_override(
             "after": _view_to_diff_dict(after),
         },
         clock=resolved_clock,
+    )
+    _publish_upserted(
+        ctx,
+        override_id=after.id,
+        user_id=after.user_id,
+        state="approved",
+        occurred_at=now,
     )
     return after
 
@@ -1046,6 +1109,13 @@ def reject_override(
         },
         clock=resolved_clock,
     )
+    _publish_upserted(
+        ctx,
+        override_id=after.id,
+        user_id=after.user_id,
+        state="rejected",
+        occurred_at=now,
+    )
     return after
 
 
@@ -1102,5 +1172,12 @@ def delete_override(
             "after": _view_to_diff_dict(after),
         },
         clock=resolved_clock,
+    )
+    _publish_upserted(
+        ctx,
+        override_id=after.id,
+        user_id=after.user_id,
+        state="cancelled",
+        occurred_at=now,
     )
     return after

@@ -47,6 +47,7 @@ from app.adapters.db.base import Base
 from app.adapters.db.session import UnitOfWorkImpl, make_engine
 from app.api.deps import current_workspace_context, db_session
 from app.api.v1.user_leaves import build_user_leaves_router
+from app.events import UserLeaveUpserted, bus
 from app.tenancy import WorkspaceContext, registry
 from app.tenancy.context import ActorGrantRole
 from app.tenancy.orm_filter import install_tenant_filter
@@ -497,3 +498,225 @@ class TestEndToEnd:
         page3 = client.get(f"/user_leaves?cursor={page2['next_cursor']}&limit=2").json()
         assert page3["has_more"] is False
         assert len(page3["data"]) == 1
+
+
+class TestUpsertedEvent:
+    """:class:`UserLeaveUpserted` fan-out (cd-93wp).
+
+    The event covers the two cases ``approval.decided`` misses: a
+    worker self-creates a pending row (or self-deletes one), and a
+    manager edits a previously-decided row. Each test boots a fresh
+    bus (``bus._reset_for_tests``), wires a subscriber, and asserts
+    on the captured payload.
+    """
+
+    def test_worker_create_emits_pending_state(
+        self, api_factory: sessionmaker[Session]
+    ) -> None:
+        """Worker self-create publishes ``state="pending"``."""
+        ws_id, ws_slug, _owner_id = _seed_workspace_with_owner(
+            api_factory, slug="ul-evt-1"
+        )
+        worker_id = _seed_worker(
+            api_factory, ws_id=ws_id, email="ul-evt-1-w@example.com"
+        )
+        worker_ctx_obj = _ctx(
+            workspace_id=ws_id,
+            workspace_slug=ws_slug,
+            actor_id=worker_id,
+            grant_role="worker",
+            actor_was_owner_member=False,
+        )
+
+        bus._reset_for_tests()
+        captured: list[UserLeaveUpserted] = []
+
+        @bus.subscribe(UserLeaveUpserted)
+        def _on_upsert(event: UserLeaveUpserted) -> None:
+            captured.append(event)
+
+        try:
+            client = TestClient(
+                _build_app(api_factory, worker_ctx_obj),
+                raise_server_exceptions=False,
+            )
+            resp = client.post(
+                "/user_leaves",
+                json={
+                    "starts_on": "2026-10-01",
+                    "ends_on": "2026-10-02",
+                    "category": "personal",
+                },
+            )
+            assert resp.status_code == 201, resp.text
+            leave_id = resp.json()["id"]
+        finally:
+            bus._reset_for_tests()
+
+        assert len(captured) == 1
+        evt = captured[0]
+        assert evt.leave_id == leave_id
+        assert evt.user_id == worker_id
+        assert evt.state == "pending"
+
+    def test_owner_self_create_emits_approved_state(
+        self, api_factory: sessionmaker[Session]
+    ) -> None:
+        """Owner self-create auto-approves; event carries ``state="approved"``."""
+        ws_id, ws_slug, owner_id = _seed_workspace_with_owner(
+            api_factory, slug="ul-evt-2"
+        )
+        ctx = _ctx(
+            workspace_id=ws_id,
+            workspace_slug=ws_slug,
+            actor_id=owner_id,
+            grant_role="manager",
+            actor_was_owner_member=True,
+        )
+
+        bus._reset_for_tests()
+        captured: list[UserLeaveUpserted] = []
+
+        @bus.subscribe(UserLeaveUpserted)
+        def _on_upsert(event: UserLeaveUpserted) -> None:
+            captured.append(event)
+
+        try:
+            client = TestClient(
+                _build_app(api_factory, ctx), raise_server_exceptions=False
+            )
+            resp = client.post(
+                "/user_leaves",
+                json={
+                    "starts_on": "2026-11-01",
+                    "ends_on": "2026-11-02",
+                    "category": "vacation",
+                },
+            )
+            assert resp.status_code == 201, resp.text
+        finally:
+            bus._reset_for_tests()
+
+        assert len(captured) == 1
+        assert captured[0].state == "approved"
+        assert captured[0].user_id == owner_id
+
+    def test_approve_then_reject_emit_decided_states(
+        self, api_factory: sessionmaker[Session]
+    ) -> None:
+        """``approve`` publishes ``"approved"``; ``reject`` publishes ``"rejected"``."""
+        ws_id, ws_slug, owner_id = _seed_workspace_with_owner(
+            api_factory, slug="ul-evt-3"
+        )
+        worker_id = _seed_worker(
+            api_factory, ws_id=ws_id, email="ul-evt-3-w@example.com"
+        )
+        worker_ctx_obj = _ctx(
+            workspace_id=ws_id,
+            workspace_slug=ws_slug,
+            actor_id=worker_id,
+            grant_role="worker",
+            actor_was_owner_member=False,
+        )
+        worker_client = TestClient(
+            _build_app(api_factory, worker_ctx_obj),
+            raise_server_exceptions=False,
+        )
+        # Two pending leaves so we can approve one + reject the other.
+        leave_a = worker_client.post(
+            "/user_leaves",
+            json={
+                "starts_on": "2027-01-01",
+                "ends_on": "2027-01-02",
+                "category": "personal",
+            },
+        ).json()
+        leave_b = worker_client.post(
+            "/user_leaves",
+            json={
+                "starts_on": "2027-02-01",
+                "ends_on": "2027-02-02",
+                "category": "personal",
+            },
+        ).json()
+
+        owner_ctx_obj = _ctx(
+            workspace_id=ws_id,
+            workspace_slug=ws_slug,
+            actor_id=owner_id,
+            grant_role="manager",
+            actor_was_owner_member=True,
+        )
+        owner_client = TestClient(
+            _build_app(api_factory, owner_ctx_obj),
+            raise_server_exceptions=False,
+        )
+
+        bus._reset_for_tests()
+        captured: list[UserLeaveUpserted] = []
+
+        @bus.subscribe(UserLeaveUpserted)
+        def _on_upsert(event: UserLeaveUpserted) -> None:
+            captured.append(event)
+
+        try:
+            ap = owner_client.post(f"/user_leaves/{leave_a['id']}/approve")
+            assert ap.status_code == 200, ap.text
+            rj = owner_client.post(
+                f"/user_leaves/{leave_b['id']}/reject",
+                json={"reason_md": "no coverage"},
+            )
+            assert rj.status_code == 200, rj.text
+        finally:
+            bus._reset_for_tests()
+
+        states = {e.leave_id: e.state for e in captured}
+        assert states[leave_a["id"]] == "approved"
+        assert states[leave_b["id"]] == "rejected"
+
+    def test_delete_emits_cancelled_state(
+        self, api_factory: sessionmaker[Session]
+    ) -> None:
+        """``DELETE`` publishes ``state="cancelled"``."""
+        ws_id, ws_slug, _owner_id = _seed_workspace_with_owner(
+            api_factory, slug="ul-evt-4"
+        )
+        worker_id = _seed_worker(
+            api_factory, ws_id=ws_id, email="ul-evt-4-w@example.com"
+        )
+        worker_ctx_obj = _ctx(
+            workspace_id=ws_id,
+            workspace_slug=ws_slug,
+            actor_id=worker_id,
+            grant_role="worker",
+            actor_was_owner_member=False,
+        )
+        client = TestClient(
+            _build_app(api_factory, worker_ctx_obj),
+            raise_server_exceptions=False,
+        )
+        leave = client.post(
+            "/user_leaves",
+            json={
+                "starts_on": "2027-03-01",
+                "ends_on": "2027-03-02",
+                "category": "personal",
+            },
+        ).json()
+
+        bus._reset_for_tests()
+        captured: list[UserLeaveUpserted] = []
+
+        @bus.subscribe(UserLeaveUpserted)
+        def _on_upsert(event: UserLeaveUpserted) -> None:
+            captured.append(event)
+
+        try:
+            r = client.delete(f"/user_leaves/{leave['id']}")
+            assert r.status_code == 204, r.text
+        finally:
+            bus._reset_for_tests()
+
+        assert len(captured) == 1
+        assert captured[0].leave_id == leave["id"]
+        assert captured[0].state == "cancelled"

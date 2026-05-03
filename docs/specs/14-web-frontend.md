@@ -729,7 +729,18 @@ the platform must guarantee*.
   `['schedules']` because a deleted template prunes
   previously-derived future occurrences. Payload is FK-only
   (`{template_id}`); subscribers re-fetch via REST under the
-  per-row authz path. No polling.
+  per-row authz path. The `user_leave.upserted` /
+  `user_availability_override.upserted` pair (cd-93wp) is
+  workspace-narrowed to `(manager, worker)` and covers the two cases
+  the umbrella `approval.decided` event misses: (a) a worker
+  self-creates a pending leave / override row, and (b) a manager edits
+  a previously-approved row. `user_leave.upserted` invalidates
+  `['my-schedule']` + `['leaves']`;
+  `user_availability_override.upserted` invalidates `['my-schedule']`
+  + `['me','availability_overrides']`. Payload is FK-only
+  (`{leave_id|override_id, user_id, state}` where `state` is one of
+  `pending` / `approved` / `rejected` / `cancelled`); subscribers
+  re-fetch via REST under the per-row authz path. No polling.
 - **Route-split bundles.** Worker and owner/manager entry points are
   separate. Shared routes (see route contract above) land in both
   bundles. Only manager-only operational surfaces (`/dashboard`,

@@ -101,6 +101,11 @@ export type EventKind =
   | "approval.resolved"
   // Leave decisions (§09).
   | "leave.decided"
+  // User leave + availability override write fan-out (§14, cd-93wp).
+  // Cover the worker self-create + manager edit cases the umbrella
+  // `approval.decided` event misses.
+  | "user_leave.upserted"
+  | "user_availability_override.upserted"
   // Expenses (§09).
   | "expense.created"
   | "expense.submitted"
@@ -760,6 +765,21 @@ export const INVALIDATIONS: Record<EventKind, InvalidationHandler> = {
     invalidate(qc, qk.dashboard());
     invalidate(qc, qk.history("leaves"));
     invalidate(qc, qk.mySchedulePrefix());
+  },
+
+  "user_leave.upserted": (_event, qc) => {
+    // Worker self-create or manager edit of an already-decided leave row;
+    // the umbrella `approval.decided` event misses both branches. Refresh
+    // the worker schedule + the leaves list (cd-93wp).
+    invalidate(qc, qk.mySchedulePrefix());
+    invalidate(qc, qk.leaves());
+  },
+
+  "user_availability_override.upserted": (_event, qc) => {
+    // Same fan-out as `user_leave.upserted` for availability overrides;
+    // override list lives under `qk.meOverrides()` (cd-93wp).
+    invalidate(qc, qk.mySchedulePrefix());
+    invalidate(qc, qk.meOverrides());
   },
 
   "expense.created": (_event, qc) => {

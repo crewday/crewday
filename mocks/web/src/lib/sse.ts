@@ -87,6 +87,8 @@ export function startEventStream(client: QueryClient): () => void {
     "task_template.upserted",
     "task_template.deleted",
     "approval.decided",
+    "user_leave.upserted",
+    "user_availability_override.upserted",
     "expense.approved",
     "expense.rejected",
     "expense.reimbursed",
@@ -207,6 +209,22 @@ export function dispatch(client: QueryClient, evt: TypedEvent): void {
     case "approval.decided":
       client.invalidateQueries({ queryKey: qk.approvals() });
       client.invalidateQueries({ queryKey: qk.dashboard() });
+      return;
+    case "user_leave.upserted":
+      // §14 cd-93wp — worker self-create or manager edit of a
+      // previously-decided leave row. `approval.decided` misses both
+      // branches; refresh the worker schedule + the leaves list.
+      // Schedule keys are `["my-schedule", from, to]`, so invalidate by
+      // root prefix to catch every mounted window.
+      client.invalidateQueries({ queryKey: ["my-schedule"] });
+      client.invalidateQueries({ queryKey: qk.leaves() });
+      return;
+    case "user_availability_override.upserted":
+      // §14 cd-93wp — same fan-out story as user_leave.upserted but
+      // for availability overrides; the override list lives under
+      // `qk.meOverrides()`.
+      client.invalidateQueries({ queryKey: ["my-schedule"] });
+      client.invalidateQueries({ queryKey: qk.meOverrides() });
       return;
     case "expense.approved":
     case "expense.rejected":

@@ -685,6 +685,18 @@ _INVALIDATIONS: Final[dict[str, tuple[tuple[str, ...], ...]]] = {
     # previously-derived occurrences from the worker schedule view.
     "task_template.upserted": (("task_templates",),),
     "task_template.deleted": (("task_templates",), ("schedules",)),
+    # cd-93wp: every write to ``user_leave`` / ``user_availability_override``
+    # flips the worker's ``/schedule`` cell tone (sand "pending" → moss
+    # "approved" / rust "rejected") and refreshes the leaves +
+    # me/availability_overrides lists. Mirrors the umbrella
+    # ``approval.decided`` handler so the SPA picks up the same
+    # invalidations on self-create + manager-edit edges that don't go
+    # through the approval bus.
+    "user_leave.upserted": (("my-schedule",), ("leaves",)),
+    "user_availability_override.upserted": (
+        ("my-schedule",),
+        ("me", "availability_overrides"),
+    ),
     "stay.upcoming": (("stays",),),
     "property.closure.created": (
         ("stays",),

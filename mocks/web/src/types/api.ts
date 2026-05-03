@@ -1582,6 +1582,29 @@ export type SseEvent =
   | { event: "task_template.upserted"; data: { template_id: string } }
   | { event: "task_template.deleted"; data: { template_id: string } }
   | { event: "approval.decided"; data: { id: string; decision: "approve" | "reject" } }
+  // §14 cd-93wp — worker self-create or manager edit of a leave /
+  // availability override row. `approval.decided` only covers manager
+  // decisions on a freshly-submitted approval, so the SPA needs these
+  // direct events to refresh `/schedule` and the leaves / overrides
+  // lists when (a) a worker self-creates a pending row or (b) a manager
+  // edits a previously-approved row. FK-only payload; subscribers
+  // re-fetch via REST under the per-row authz path.
+  | {
+      event: "user_leave.upserted";
+      data: {
+        leave_id: string;
+        user_id: string;
+        state: "pending" | "approved" | "rejected" | "cancelled";
+      };
+    }
+  | {
+      event: "user_availability_override.upserted";
+      data: {
+        override_id: string;
+        user_id: string;
+        state: "pending" | "approved" | "rejected" | "cancelled";
+      };
+    }
   | { event: "expense.approved"; data: { id: string; status: ExpenseStatus } }
   | { event: "expense.rejected"; data: { id: string; status: ExpenseStatus } }
   | { event: "expense.reimbursed"; data: { id: string; status: ExpenseStatus } }

@@ -122,6 +122,8 @@ __all__ = [
     "TaskUnassigned",
     "TaskUpdated",
     "UserAgentSettingsChanged",
+    "UserAvailabilityOverrideUpserted",
+    "UserLeaveUpserted",
     "VendorInvoiceChanged",
     "VendorInvoicePaid",
     "WorkOrderCompleted",
@@ -2100,3 +2102,93 @@ class TaskTemplateDeleted(Event):
     allowed_roles: ClassVar[tuple[EventRole, ...]] = ("manager", "worker")
 
     template_id: str
+
+
+@register
+class UserLeaveUpserted(Event):
+    """A ``user_leave`` row was created or its mutable fields rewritten (cd-93wp).
+
+    Fired by every write path on
+    :mod:`app.domain.identity.user_leaves`: :func:`create_leave`,
+    :func:`update_leave`, :func:`approve_leave`, :func:`reject_leave`,
+    and :func:`delete_leave`. A single ``upserted`` event covers
+    every state edge because the SPA fan-out is identical: the
+    worker's schedule + leaves caches drop, and the manager queue
+    refreshes. Mirrors the :class:`TaskTemplateUpserted` create-vs-
+    update conflation pattern.
+
+    Why "upserted" instead of piggy-backing on ``approval.decided``:
+    the §11 approval bus only fires on manager decisions, missing
+    two cases the worker's ``/schedule`` view cares about — a worker
+    self-creates a pending leave (no approval emit until a manager
+    rules) and a manager edits a previously-approved leave without
+    bouncing through the approval queue. ``user_leave.upserted``
+    fires on every write path so both surfaces (worker schedule +
+    manager queue) refresh deterministically. Duplicate invalidation
+    on the approval edge is fine — the SPA's
+    :func:`queryClient.invalidateQueries` is idempotent.
+
+    **Role scope.** Workspace-narrowed to ``("manager", "worker")``,
+    matching the sibling :class:`TaskTemplateUpserted`. Workers
+    observe the row to refresh their own schedule + leaves list;
+    managers observe it to refresh the queue. Clients and guests
+    have no business in the leave pipeline (medical / personal
+    narrative on the row, manager rationale on the audit trail).
+
+    **Payload posture.** Foreign-key identifier + the worker the
+    leave belongs to + the resolved row state only — no
+    ``note_md`` / category / dates on the wire. Subscribers needing
+    the rendered row pull ``GET /user_leaves/{id}`` under the
+    per-row authz path. ``state`` is one of ``pending`` /
+    ``approved`` / ``rejected`` / ``cancelled``: ``approved``
+    when ``approved_at`` is non-null and the row is live;
+    ``cancelled`` when the row is soft-deleted via
+    :func:`delete_leave` (worker withdraws); ``rejected`` when the
+    row is soft-deleted via :func:`reject_leave` (manager rejects);
+    ``pending`` otherwise. The SPA switches on ``state`` to flip
+    the schedule cell tone without a follow-up REST round-trip.
+    """
+
+    name: ClassVar[str] = "user_leave.upserted"
+    allowed_roles: ClassVar[tuple[EventRole, ...]] = ("manager", "worker")
+
+    leave_id: str
+    user_id: str
+    state: Literal["pending", "approved", "rejected", "cancelled"]
+
+
+@register
+class UserAvailabilityOverrideUpserted(Event):
+    """A ``user_availability_override`` row was created or rewritten (cd-93wp).
+
+    Fired by every write path on
+    :mod:`app.domain.identity.user_availability_overrides`:
+    :func:`create_override`, :func:`update_override`,
+    :func:`approve_override`, :func:`reject_override`, and
+    :func:`delete_override`. A single ``upserted`` event covers
+    every state edge — see :class:`UserLeaveUpserted` for the
+    conflation rationale and the umbrella-vs-discrete reasoning.
+
+    **Role scope.** Workspace-narrowed to ``("manager", "worker")``,
+    matching :class:`UserLeaveUpserted`. Workers observe the row
+    to refresh their own schedule + ``me/availability_overrides``
+    list; managers observe it to refresh the override queue.
+
+    **Payload posture.** Foreign-key identifier + the worker the
+    override belongs to + the resolved row state only — no
+    ``reason`` / hours on the wire. Subscribers needing the
+    rendered row pull ``GET /user_availability_overrides/{id}``
+    under the per-row authz path. ``state`` is one of ``pending`` /
+    ``approved`` / ``rejected`` / ``cancelled`` with the same
+    derivation rule as :class:`UserLeaveUpserted` (the
+    availability-override service uses ``rejected`` for soft-deletes
+    via :func:`reject_override` and ``cancelled`` for soft-deletes
+    via :func:`delete_override`).
+    """
+
+    name: ClassVar[str] = "user_availability_override.upserted"
+    allowed_roles: ClassVar[tuple[EventRole, ...]] = ("manager", "worker")
+
+    override_id: str
+    user_id: str
+    state: Literal["pending", "approved", "rejected", "cancelled"]

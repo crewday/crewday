@@ -104,6 +104,8 @@ describe("INVALIDATIONS — coverage", () => {
     "approval.decided",
     "approval.resolved",
     "leave.decided",
+    "user_leave.upserted",
+    "user_availability_override.upserted",
     "expense.created",
     "expense.submitted",
     "expense.cancelled",
@@ -493,6 +495,46 @@ describe("INVALIDATIONS — per-kind behaviour", () => {
     );
     const called = spy.mock.calls.map((c) => c[0]?.queryKey);
     expect(called).toEqual(expect.arrayContaining([["w", "acme", "employee"]]));
+  });
+
+  it("user_leave.upserted invalidates my-schedule + leaves (cd-93wp)", () => {
+    // §14 — worker self-create or manager edit of a previously-decided
+    // leave row publishes `user_leave.upserted`. The umbrella
+    // `approval.decided` event misses both branches, so the worker
+    // schedule + the leaves list need a direct fan-out.
+    const qc = makeClient();
+    const spy = vi.spyOn(qc, "invalidateQueries");
+    INVALIDATIONS["user_leave.upserted"](
+      makeEvent("user_leave.upserted", {
+        leave_id: "lv_1",
+        user_id: "u1",
+        state: "pending",
+      }),
+      qc,
+    );
+    const called = spy.mock.calls.map((c) => c[0]?.queryKey);
+    expect(called).toEqual(
+      expect.arrayContaining([qk.mySchedulePrefix(), qk.leaves()]),
+    );
+  });
+
+  it("user_availability_override.upserted invalidates my-schedule + me overrides (cd-93wp)", () => {
+    // §14 — same fan-out story as `user_leave.upserted`, but the
+    // override list lives under `qk.meOverrides()`.
+    const qc = makeClient();
+    const spy = vi.spyOn(qc, "invalidateQueries");
+    INVALIDATIONS["user_availability_override.upserted"](
+      makeEvent("user_availability_override.upserted", {
+        override_id: "ov_1",
+        user_id: "u1",
+        state: "approved",
+      }),
+      qc,
+    );
+    const called = spy.mock.calls.map((c) => c[0]?.queryKey);
+    expect(called).toEqual(
+      expect.arrayContaining([qk.mySchedulePrefix(), qk.meOverrides()]),
+    );
   });
 
   it("task.updated invalidates the per-row detail key by task_id", () => {
