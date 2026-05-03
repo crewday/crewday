@@ -96,6 +96,48 @@ describe("qk — admin keys", () => {
     expect(qk.adminAgentDocs()).toEqual(["admin", "agent_docs"]);
     expect(qk.adminAgentDoc("slug-x")).toEqual(["admin", "agent_docs", "slug-x"]);
   });
+
+  it("adminAudit() returns the bare prefix when no filter is supplied or the filter is empty", () => {
+    expect(qk.adminAudit()).toEqual(["admin", "audit"]);
+    expect(qk.adminAudit({})).toEqual(["admin", "audit"]);
+    expect(qk.adminAudit({ actor_id: "" })).toEqual(["admin", "audit"]);
+  });
+
+  it("adminAudit() appends the filter object so each combination caches independently", () => {
+    expect(qk.adminAudit({ actor_id: "u-elodie" })).toEqual([
+      "admin",
+      "audit",
+      { actor_id: "u-elodie" },
+    ]);
+    expect(qk.adminAudit({ action: "x", since: "2026-05-03T00:00:00Z" })).toEqual([
+      "admin",
+      "audit",
+      { action: "x", since: "2026-05-03T00:00:00Z" },
+    ]);
+  });
+
+  it("adminAudit() filtered variants invalidate when the bare prefix is invalidated (SSE path)", async () => {
+    const qc = new QueryClient();
+    const bare = qk.adminAudit();
+    const filteredA = qk.adminAudit({ action: "deployment.budget.updated" });
+    const filteredB = qk.adminAudit({
+      action: "deployment.budget.adjusted",
+      actor_id: "agent-admin",
+    });
+    qc.setQueryData(bare, { marker: "bare" });
+    qc.setQueryData(filteredA, { marker: "a" });
+    qc.setQueryData(filteredB, { marker: "b" });
+
+    // The SSE handler for `admin.audit.appended` calls
+    // `invalidate(qc, qk.adminAudit())` — i.e. the bare prefix. Every
+    // filtered variant must drop too, otherwise a tab with an active
+    // filter would silently miss appended rows until a manual refetch.
+    await qc.invalidateQueries({ queryKey: qk.adminAudit() });
+
+    expect(qc.getQueryState(bare)?.isInvalidated).toBe(true);
+    expect(qc.getQueryState(filteredA)?.isInvalidated).toBe(true);
+    expect(qc.getQueryState(filteredB)?.isInvalidated).toBe(true);
+  });
 });
 
 describe("qk — every key is a first-class readonly tuple", () => {

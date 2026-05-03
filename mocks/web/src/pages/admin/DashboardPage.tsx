@@ -5,10 +5,11 @@ import { qk } from "@/lib/queryKeys";
 import { formatMoney } from "@/lib/money";
 import DeskPage from "@/components/DeskPage";
 import { Chip, Loading, ProgressBar, StatCard } from "@/components/common";
+import { displayAuditRow } from "@/pages/admin/auditRows";
 import type {
+  AdminAuditListResponse,
   AdminUsageSummary,
   AdminWorkspaceRow,
-  AuditEntry,
 } from "@/types/api";
 
 export default function AdminDashboardPage() {
@@ -22,7 +23,7 @@ export default function AdminDashboardPage() {
   });
   const auditQ = useQuery({
     queryKey: qk.adminAudit(),
-    queryFn: () => fetchJson<AuditEntry[]>("/admin/api/v1/audit"),
+    queryFn: () => fetchJson<AdminAuditListResponse>("/admin/api/v1/audit"),
   });
 
   const sub =
@@ -37,7 +38,7 @@ export default function AdminDashboardPage() {
 
   const sum = summaryQ.data;
   const workspaces = workspacesQ.data;
-  const audit = auditQ.data.slice(0, 6);
+  const audit = auditQ.data.data.slice(0, 6).map(displayAuditRow);
 
   const active = workspaces.filter((w) => !w.archived_at);
   const paused = active.filter((w) => w.paused);

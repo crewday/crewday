@@ -4497,10 +4497,101 @@ def api_admin_admins_revoke(daid: str, request: Request) -> Response:
 
 @app.get("/admin/api/v1/audit")
 def api_admin_audit(request: Request) -> Response:
+    """Return the deployment-scope audit feed.
+
+    Mirrors the production envelope from
+    :class:`app.api.admin.audit.AuditListResponse` so the SPA can
+    consume both surfaces interchangeably (§14 "App / Mock
+    Ownership"). Honours the same query params the real router
+    accepts (`actor_id`, `action`, `entity_kind`, `entity_id`,
+    `since`, `until`) — applied as straight equality / inclusive
+    timestamp clamps over the in-memory rows.
+    """
     guard = _require_deployment_admin(request)
     if guard is not None:
         return guard
-    return ok(md.DEPLOYMENT_AUDIT)
+    actor_id = request.query_params.get("actor_id") or None
+    action = request.query_params.get("action") or None
+    entity_kind = request.query_params.get("entity_kind") or None
+    entity_id = request.query_params.get("entity_id") or None
+    since_raw = request.query_params.get("since") or None
+    until_raw = request.query_params.get("until") or None
+    since_dt: datetime | None = _parse_audit_iso(since_raw)
+    until_dt: datetime | None = _parse_audit_iso(until_raw)
+
+    rows: list[md.AuditEntry] = []
+    for row in md.DEPLOYMENT_AUDIT:
+        if actor_id and row.actor_id != actor_id:
+            continue
+        if action and row.action != action:
+            continue
+        if entity_kind:
+            row_entity_kind, _, _ = row.target.partition(":")
+            if row_entity_kind != entity_kind:
+                continue
+        if entity_id:
+            _, _, row_entity_id = row.target.partition(":")
+            if row_entity_id != entity_id:
+                continue
+        if since_dt is not None and row.at < since_dt:
+            continue
+        if until_dt is not None and row.at > until_dt:
+            continue
+        rows.append(row)
+
+    data = [_project_audit_row(row) for row in rows]
+    return ok({"data": data, "next_cursor": None, "has_more": False})
+
+
+def _parse_audit_iso(value: str | None) -> datetime | None:
+    """Best-effort ISO-8601 parse for mock audit query params.
+
+    Mirrors :func:`app.api.admin.audit._parse_iso` semantics: empty
+    collapses to ``None``; trailing ``Z`` is rewritten to ``+00:00``;
+    naive datetimes are pinned to UTC. Bad input returns ``None``
+    so the mock never 422s a smoke-test path.
+    """
+    if not value:
+        return None
+    candidate = value
+    if candidate.endswith("Z"):
+        candidate = candidate[:-1] + "+00:00"
+    try:
+        parsed = datetime.fromisoformat(candidate)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed
+
+
+def _project_audit_row(row: md.AuditEntry) -> dict[str, object]:
+    """Project a mock ``AuditEntry`` into the production envelope shape.
+
+    The mock dataclass carries display strings (``actor`` name,
+    ``target`` already in ``kind:id`` form, etc.); the production
+    wire shape is ID-only with ``entity_kind`` / ``entity_id`` split
+    out. Splitting on the first ``:`` keeps the mock data files
+    untouched.
+    """
+    entity_kind, _, entity_id = row.target.partition(":")
+    if not entity_id:
+        # Pre-existing rows that don't carry a `kind:` prefix collapse
+        # to a synthetic kind so the wire shape stays well-formed.
+        entity_kind, entity_id = "deployment", row.target
+    return {
+        "id": "audit-" + row.at.isoformat(),
+        "actor_id": row.actor_id or row.actor,
+        "actor_kind": row.actor_kind,
+        "actor_grant_role": row.actor_grant_role or "admin",
+        "actor_was_owner_member": bool(row.actor_was_owner_member),
+        "entity_kind": entity_kind,
+        "entity_id": entity_id,
+        "action": row.action,
+        "diff": {},
+        "correlation_id": "mock",
+        "created_at": row.at.isoformat(),
+    }
 
 
 # ── Admin-side embedded chat agent (§11 "Admin-side agent") ──────────

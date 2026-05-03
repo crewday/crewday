@@ -738,6 +738,31 @@ export interface AuditEntry {
   agent_label: string | null;
 }
 
+// Wire shape for ``GET /admin/api/v1/audit`` — the deployment-scope
+// audit feed exposes ``audit_log`` rows directly (raw IDs only; the
+// SPA looks up display names lazily). Mirrors
+// :class:`app.api.admin.audit.AuditEntryResponse`.
+export interface AdminAuditEntry {
+  id: string;
+  actor_id: string;
+  actor_kind: "user" | "agent" | "system";
+  actor_grant_role: string;
+  actor_was_owner_member: boolean;
+  entity_kind: string;
+  entity_id: string;
+  action: string;
+  diff: unknown;
+  correlation_id: string;
+  created_at: string;
+}
+
+// §12 cursor envelope for the deployment-audit list.
+export interface AdminAuditListResponse {
+  data: AdminAuditEntry[];
+  next_cursor: string | null;
+  has_more: boolean;
+}
+
 // ── Permission model (§02, §05) ───────────────────────────────────
 
 export type ScopeKind = "workspace" | "property" | "organization" | "deployment";

@@ -2,6 +2,29 @@
 // Every query reads through this; SSE invalidations reference the
 // same roots so a missing key is a typo rather than a silent miss.
 
+// Filter shape for the deployment-audit page (§14 `/admin/audit`).
+// ``actor_kind`` is applied client-side over the loaded page (the
+// backend does not yet accept it as a query param — see
+// `app.api.admin.audit.list_audit`); the rest map 1-for-1 onto the
+// server's `?actor_id=&action=&since=&until=`.
+export interface AdminAuditFilter {
+  actor_kind?: "user" | "agent" | "system";
+  actor_id?: string;
+  action?: string;
+  since?: string;
+  until?: string;
+}
+
+function hasAdminAuditFilter(filter: AdminAuditFilter): boolean {
+  return Boolean(
+    filter.actor_kind ||
+      filter.actor_id ||
+      filter.action ||
+      filter.since ||
+      filter.until,
+  );
+}
+
 export const qk = {
   me: () => ["me"] as const,
   properties: () => ["properties"] as const,
@@ -122,7 +145,16 @@ export const qk = {
   adminSignups: () => ["admin", "signups"] as const,
   adminSettings: () => ["admin", "settings"] as const,
   adminAdmins: () => ["admin", "admins"] as const,
-  adminAudit: () => ["admin", "audit"] as const,
+  // §14 `/admin/audit`. The bare call returns the prefix tuple so the
+  // dashboard's "recent audit" slot and the SSE invalidator
+  // (`admin.audit.appended`) keep matching every filtered variant —
+  // TanStack Query invalidates by prefix by default. Filtered lookups
+  // append the filter object as the third tuple slot so each filter
+  // combination caches independently.
+  adminAudit: (filter?: AdminAuditFilter) =>
+    filter && hasAdminAuditFilter(filter)
+      ? (["admin", "audit", filter] as const)
+      : (["admin", "audit"] as const),
   adminAgentLog: () => ["admin", "agent", "log"] as const,
   adminAgentActions: () => ["admin", "agent", "actions"] as const,
   // §11 — Agent knowledge tools.

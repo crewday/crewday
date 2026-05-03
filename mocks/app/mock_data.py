@@ -5394,6 +5394,32 @@ DEPLOYMENT_AUDIT: list[AuditEntry] = [
         actor_action_key="role_grants.create",
         actor_id="u-elodie",
     ),
+    # Non-user actors so the §14 audit page's actor_kind chip group
+    # has rows to filter against. The agent row mirrors what the
+    # admin-side agent emits when it touches the deployment surface
+    # without a human in the loop; the system row is the kind of
+    # housekeeping the worker tier writes (e.g. retention, key
+    # rotation) under no actor at all.
+    AuditEntry(
+        datetime(2026, 4, 18, 6, 30, 0),
+        "agent", "admin-agent", "deployment.budget.adjusted",
+        "ws-04", "api",
+        "Auto-adjusted Villa Mer cap from $2 to $5 (manager approval, gated action a-mock-budget)",
+        actor_grant_role="admin",
+        actor_was_owner_member=False,
+        actor_action_key="deployment.budget.edit",
+        actor_id="agent-admin",
+    ),
+    AuditEntry(
+        datetime(2026, 4, 12, 3, 0, 0),
+        "system", "retention-rotator", "deployment.audit.retention_swept",
+        "audit_log", "worker",
+        "Pruned 412 audit_log rows older than 13 months",
+        actor_grant_role=None,
+        actor_was_owner_member=None,
+        actor_action_key=None,
+        actor_id="system",
+    ),
 ]
 
 
