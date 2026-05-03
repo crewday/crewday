@@ -39,9 +39,13 @@ from sqlalchemy.orm import Session
 
 from app.adapters.db.audit.models import AuditLog
 from app.adapters.db.messaging.models import (
+    EmailDelivery,
     EmailOptOut,
     Notification,
     PushToken,
+)
+from app.adapters.db.messaging.repositories import (
+    SqlAlchemyEmailDeliveryRepository,
 )
 from app.domain.messaging.notifications import (
     NotificationKind,
@@ -367,3 +371,76 @@ class TestFanoutEndToEnd:
         ).scalar_one()
         assert push_row.action == "messaging.notification.skipped"
         assert push_row.diff["reason"] == "no_active_push_tokens"
+
+
+# ---------------------------------------------------------------------------
+# email_delivery ledger end-to-end (cd-8kg7)
+# ---------------------------------------------------------------------------
+
+
+class TestEmailDeliveryLedger:
+    """End-to-end check: a successful notify() persists exactly one
+    ``email_delivery`` row with the spec'd snapshot fields, and the
+    bounce-webhook lookup helper resolves it by ``provider_message_id``.
+    """
+
+    def test_notify_persists_email_delivery_row(
+        self,
+        db_session: Session,
+        fanout_env: tuple[WorkspaceContext, str, FrozenClock],
+    ) -> None:
+        ctx, recipient_id, clock = fanout_env
+        deliveries = SqlAlchemyEmailDeliveryRepository(db_session)
+        mailer = InMemoryMailer()
+        service = NotificationService(
+            session=db_session,
+            ctx=ctx,
+            mailer=mailer,
+            clock=clock,
+            bus=EventBus(),
+            email_deliveries=deliveries,
+        )
+        notification_id = service.notify(
+            recipient_user_id=recipient_id,
+            kind=NotificationKind.TASK_ASSIGNED,
+            payload={"task_title": "Turnover villa 3"},
+        )
+        db_session.commit()
+
+        rows = (
+            db_session.execute(
+                select(EmailDelivery).where(
+                    EmailDelivery.workspace_id == ctx.workspace_id,
+                    EmailDelivery.to_person_id == recipient_id,
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert len(rows) == 1
+        row = rows[0]
+        assert row.template_key == "task_assigned"
+        assert row.delivery_state == "sent"
+        assert row.provider_message_id == "msg-1"
+        assert row.sent_at is not None
+        assert row.first_error is None
+        assert row.retry_count == 0
+        assert row.context_snapshot_json["task_title"] == "Turnover villa 3"
+        # ``to_email_at_send`` is the address as it was at notify time.
+        assert row.to_email_at_send.endswith("@example.com")
+        # The audit ledger still landed for the notification dispatch.
+        assert (
+            db_session.execute(
+                select(Notification).where(Notification.id == notification_id)
+            ).scalar_one()
+            is not None
+        )
+
+        # Webhook-lookup path is unblocked: the future bounce handler
+        # will join on ``provider_message_id`` through this seam.
+        found = deliveries.find_by_provider_message_id(
+            workspace_id=ctx.workspace_id,
+            provider_message_id="msg-1",
+        )
+        assert found is not None
+        assert found.id == row.id

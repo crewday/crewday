@@ -51,6 +51,8 @@ __all__ = [
     "ChatLinkChallengeRow",
     "ChatMessageRepository",
     "ChatMessageRow",
+    "EmailDeliveryRepository",
+    "EmailDeliveryRow",
     "PushDeliveryRepository",
     "PushDeliveryRow",
     "PushTokenRepository",
@@ -191,6 +193,34 @@ class PushTokenRow:
     user_agent: str | None
     created_at: datetime
     last_used_at: datetime | None
+
+
+@dataclass(frozen=True, slots=True)
+class EmailDeliveryRow:
+    """Immutable projection of an ``email_delivery`` row.
+
+    Carries the columns the §10 ledger consumers need: the snapshot
+    fields (``to_person_id``, ``to_email_at_send``, ``template_key``,
+    ``context_snapshot_json``), the dispatch-state machine
+    (``delivery_state``, ``provider_message_id``, ``sent_at``,
+    ``first_error``, ``retry_count``), and ``inbound_linkage`` for the
+    bounce-reply correlator that may key on a custom VERP token rather
+    than the provider message id.
+    """
+
+    id: str
+    workspace_id: str
+    to_person_id: str
+    to_email_at_send: str
+    template_key: str
+    context_snapshot_json: dict[str, object]
+    sent_at: datetime | None
+    provider_message_id: str | None
+    delivery_state: str
+    first_error: str | None
+    retry_count: int
+    inbound_linkage: str | None
+    created_at: datetime
 
 
 # ---------------------------------------------------------------------------
@@ -775,5 +805,114 @@ class PushDeliveryRepository(Protocol):
 
         Idempotent — a missing token (deleted between claim and
         success) is a no-op.
+        """
+        ...
+
+
+class EmailDeliveryRepository(Protocol):
+    """Read + write seam for the ``email_delivery`` per-send ledger (cd-8kg7).
+
+    :class:`~app.domain.messaging.notifications.NotificationService`
+    drives the row through three transitions:
+
+    * :meth:`insert_queued` — one row per email at fanout time, before
+      ``mailer.send``. Persisted with ``delivery_state='queued'`` so a
+      worker that scans queued/failed rows (out-of-scope follow-up)
+      can re-attempt deliveries the SMTP I/O dropped on the floor.
+    * :meth:`mark_sent` — on a successful ``mailer.send`` return the
+      provider-issued message id is stamped and the row flips to
+      ``delivery_state='sent'``. Bounce / delivered webhooks join on
+      ``provider_message_id`` to advance to ``bounced`` / ``delivered``.
+    * :meth:`mark_failed` — on
+      :class:`~app.adapters.mail.ports.MailDeliveryError` the row
+      captures the first error, bumps ``retry_count``, and flips to
+      ``delivery_state='failed'``. The future retry worker re-walks
+      these rows; this seam intentionally does not loop here so the
+      service stays a single, predictable insert + update sequence.
+
+    Tenancy: every method pins ``workspace_id`` so the ORM tenant
+    filter sees a scoped predicate even when the caller is the
+    cross-tenant bounce-webhook handler. The webhook lookup helper
+    (:meth:`find_by_provider_message_id`) takes a ``workspace_id``
+    argument explicitly because the bounce payload always carries the
+    workspace context resolved from the inbound webhook router.
+
+    The repo carries an open ``Session`` and never commits or flushes
+    outside what the underlying statements require — the caller's UoW
+    owns the transaction boundary (§01 "Key runtime invariants" #3).
+    """
+
+    @property
+    def session(self) -> Session:
+        """Return the underlying SQLAlchemy session for audit seams."""
+        ...
+
+    def insert_queued(
+        self,
+        *,
+        delivery_id: str,
+        workspace_id: str,
+        to_person_id: str,
+        to_email_at_send: str,
+        template_key: str,
+        context_snapshot_json: dict[str, object],
+        created_at: datetime,
+    ) -> EmailDeliveryRow:
+        """Insert a fresh ``email_delivery`` row in ``delivery_state='queued'``.
+
+        Flushes so the caller can reference the row id in a follow-up
+        :meth:`mark_sent` / :meth:`mark_failed` within the same UoW
+        and so the bounce-webhook lookup sees the row even if the
+        outer transaction has not yet committed (the §10 worker reads
+        through the same session pool).
+        """
+        ...
+
+    def mark_sent(
+        self,
+        *,
+        delivery_id: str,
+        provider_message_id: str,
+        sent_at: datetime,
+    ) -> EmailDeliveryRow:
+        """Stamp the row as ``delivery_state='sent'``.
+
+        Records ``provider_message_id`` (the bounce-webhook join key)
+        and ``sent_at``. Other state-machine fields are left alone —
+        a future provider webhook advances ``sent → delivered`` or
+        ``sent → bounced``.
+        """
+        ...
+
+    def mark_failed(
+        self,
+        *,
+        delivery_id: str,
+        error_text: str,
+        now: datetime,
+    ) -> EmailDeliveryRow:
+        """Stamp the row as ``delivery_state='failed'``.
+
+        Captures ``error_text`` into ``first_error`` only when the
+        column is NULL — §10 says "Stored on first failure and not
+        overwritten on subsequent retries so support can answer 'what
+        went wrong initially?'". Bumps ``retry_count`` so the future
+        retry worker's back-off has a counter to drive.
+        """
+        ...
+
+    def find_by_provider_message_id(
+        self,
+        *,
+        workspace_id: str,
+        provider_message_id: str,
+    ) -> EmailDeliveryRow | None:
+        """Look up a row by the ESP-issued message id for bounce/delivered webhooks.
+
+        Returns ``None`` when no row matches — the inbound webhook
+        handler treats that as "we never sent this id, drop the
+        event". The composite
+        ``ix_email_delivery_workspace_provider_msgid`` index keeps
+        the lookup cheap even at v1's modest volume.
         """
         ...

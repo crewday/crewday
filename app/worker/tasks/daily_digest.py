@@ -29,6 +29,9 @@ from app.adapters.db.authz.models import (
 from app.adapters.db.identity.models import User
 from app.adapters.db.llm.models import ApprovalRequest
 from app.adapters.db.messaging.models import DigestRecord
+from app.adapters.db.messaging.repositories import (
+    SqlAlchemyEmailDeliveryRepository,
+)
 from app.adapters.db.payroll.models import PayPeriod
 from app.adapters.db.places.models import Property, PropertyWorkspace
 from app.adapters.db.tasks.models import Occurrence, TaskApproval
@@ -156,6 +159,10 @@ def send_daily_digest(
             mailer=mailer,
             clock=resolved_clock,
             bus=bus if bus is not None else default_event_bus,
+            # Populate the §10 ``email_delivery`` ledger so the
+            # bounce-reply correlator and the future retry worker
+            # have a row to join on (cd-8kg7).
+            email_deliveries=SqlAlchemyEmailDeliveryRepository(session),
         )
         for recipient in recipients:
             recipients_considered += 1

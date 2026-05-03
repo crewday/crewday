@@ -36,6 +36,7 @@ from app.adapters.db.messaging.models import (
     ChatGatewayBinding,
     ChatLinkChallenge,
     ChatMessage,
+    EmailDelivery,
     NotificationPushQueue,
     PushToken,
 )
@@ -50,6 +51,8 @@ from app.domain.messaging.ports import (
     ChatLinkChallengeRow,
     ChatMessageRepository,
     ChatMessageRow,
+    EmailDeliveryRepository,
+    EmailDeliveryRow,
     PushDeliveryRepository,
     PushDeliveryRow,
     PushTokenRepository,
@@ -62,6 +65,7 @@ __all__ = [
     "SqlAlchemyChatChannelRepository",
     "SqlAlchemyChatGatewayRepository",
     "SqlAlchemyChatMessageRepository",
+    "SqlAlchemyEmailDeliveryRepository",
     "SqlAlchemyPushDeliveryRepository",
     "SqlAlchemyPushTokenRepository",
 ]
@@ -1132,3 +1136,126 @@ class SqlAlchemyPushDeliveryRepository(PushDeliveryRepository):
                     NotificationPushQueue.id == delivery_id
                 )
             ).one()
+
+
+def _to_email_delivery_row(row: EmailDelivery) -> EmailDeliveryRow:
+    """Project an :class:`EmailDelivery` ORM row into the seam value object."""
+    return EmailDeliveryRow(
+        id=row.id,
+        workspace_id=row.workspace_id,
+        to_person_id=row.to_person_id,
+        to_email_at_send=row.to_email_at_send,
+        template_key=row.template_key,
+        context_snapshot_json=dict(row.context_snapshot_json),
+        sent_at=_as_utc(row.sent_at) if row.sent_at is not None else None,
+        provider_message_id=row.provider_message_id,
+        delivery_state=row.delivery_state,
+        first_error=row.first_error,
+        retry_count=row.retry_count,
+        inbound_linkage=row.inbound_linkage,
+        created_at=_as_utc(row.created_at),
+    )
+
+
+class SqlAlchemyEmailDeliveryRepository(EmailDeliveryRepository):
+    """SA-backed concretion of :class:`EmailDeliveryRepository` (cd-8kg7).
+
+    Wraps an open :class:`~sqlalchemy.orm.Session`. The transitions
+    are deliberately small, single-row UPDATEs by primary key so the
+    caller's UoW gets predictable SQL: one INSERT (queued) plus at
+    most one UPDATE (sent or failed) per dispatched email. The future
+    retry worker walks ``queued`` / ``failed`` rows on its own seam
+    rather than threading a loop through this class.
+    """
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    @property
+    def session(self) -> Session:
+        return self._session
+
+    def insert_queued(
+        self,
+        *,
+        delivery_id: str,
+        workspace_id: str,
+        to_person_id: str,
+        to_email_at_send: str,
+        template_key: str,
+        context_snapshot_json: dict[str, object],
+        created_at: datetime,
+    ) -> EmailDeliveryRow:
+        row = EmailDelivery(
+            id=delivery_id,
+            workspace_id=workspace_id,
+            to_person_id=to_person_id,
+            to_email_at_send=to_email_at_send,
+            template_key=template_key,
+            context_snapshot_json=dict(context_snapshot_json),
+            sent_at=None,
+            provider_message_id=None,
+            delivery_state="queued",
+            first_error=None,
+            retry_count=0,
+            inbound_linkage=None,
+            created_at=created_at,
+        )
+        self._session.add(row)
+        # Flush so the row id is realised + the workspace FK is
+        # validated before the (potentially blocking) ``mailer.send``
+        # I/O. A FK / CHECK violation surfaces here, not after a
+        # half-completed SMTP round trip.
+        self._session.flush()
+        return _to_email_delivery_row(row)
+
+    def mark_sent(
+        self,
+        *,
+        delivery_id: str,
+        provider_message_id: str,
+        sent_at: datetime,
+    ) -> EmailDeliveryRow:
+        row = self._load(delivery_id)
+        row.delivery_state = "sent"
+        row.provider_message_id = provider_message_id
+        row.sent_at = sent_at
+        self._session.flush()
+        return _to_email_delivery_row(row)
+
+    def mark_failed(
+        self,
+        *,
+        delivery_id: str,
+        error_text: str,
+        now: datetime,
+    ) -> EmailDeliveryRow:
+        row = self._load(delivery_id)
+        row.delivery_state = "failed"
+        # §10: ``first_error`` snapshots the first adapter failure and
+        # is never overwritten on subsequent retries so support can
+        # answer "what went wrong initially?".
+        if row.first_error is None:
+            row.first_error = error_text
+        row.retry_count = row.retry_count + 1
+        self._session.flush()
+        return _to_email_delivery_row(row)
+
+    def find_by_provider_message_id(
+        self,
+        *,
+        workspace_id: str,
+        provider_message_id: str,
+    ) -> EmailDeliveryRow | None:
+        row = self._session.scalars(
+            select(EmailDelivery).where(
+                EmailDelivery.workspace_id == workspace_id,
+                EmailDelivery.provider_message_id == provider_message_id,
+            )
+        ).one_or_none()
+        return _to_email_delivery_row(row) if row is not None else None
+
+    def _load(self, delivery_id: str) -> EmailDelivery:
+        return self._session.scalars(
+            select(EmailDelivery).where(EmailDelivery.id == delivery_id)
+        ).one()

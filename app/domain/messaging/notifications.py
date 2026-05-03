@@ -112,8 +112,9 @@ from app.adapters.db.messaging.models import (
     Notification,
     PushToken,
 )
-from app.adapters.mail.ports import Mailer
+from app.adapters.mail.ports import MailDeliveryError, Mailer
 from app.audit import write_audit
+from app.domain.messaging.ports import EmailDeliveryRepository
 from app.events import NotificationCreated
 from app.events.bus import EventBus
 from app.events.bus import bus as default_event_bus
@@ -433,6 +434,14 @@ class NotificationService:
       project lands.
     * ``templates`` — :class:`TemplateLoader` implementation.
       Defaults to :meth:`Jinja2TemplateLoader.default`.
+    * ``email_deliveries`` —
+      :class:`~app.domain.messaging.ports.EmailDeliveryRepository`
+      that persists one ``email_delivery`` row per outbound mail
+      (``queued`` before the send, ``sent`` / ``failed`` after).
+      Optional; when ``None`` the email branch behaves as before
+      cd-8kg7 (no ledger row written). Production callers SHOULD
+      wire an instance so bounce / delivered webhooks have a row to
+      join on.
 
     The envelope-from address is **not** a per-service override: the
     :class:`~app.adapters.mail.ports.Mailer` protocol owns the
@@ -455,6 +464,17 @@ class NotificationService:
     bus: EventBus = field(default_factory=lambda: default_event_bus)
     push_enqueue: PushEnqueue | None = None
     templates: TemplateLoader | None = None
+    # Optional :class:`EmailDeliveryRepository`. When wired (cd-8kg7)
+    # the service writes one ``email_delivery`` row per ``mailer.send``
+    # — ``queued`` before the I/O, ``sent`` (with provider message id)
+    # or ``failed`` (with the adapter error) after. Left optional so
+    # callers in flight (mock UI, sibling tests not yet on the new
+    # seam) keep working; production wiring SHOULD pass an instance
+    # so the §10 ledger is populated. When ``None`` the email branch
+    # behaves exactly as it did before cd-8kg7 — fanout still happens,
+    # the inbox + audit ledgers still land, but no ``email_delivery``
+    # row is written.
+    email_deliveries: EmailDeliveryRepository | None = None
 
     # ---- Public entry point -----------------------------------------
 
@@ -611,16 +631,63 @@ class NotificationService:
                 diff={"reason": "no_email_on_file"},
             )
         else:
-            self.mailer.send(
-                to=(recipient.email,),
-                subject=subject,
-                body_text=body_md,
-                reply_to=None,
-                headers={
-                    "X-CrewDay-Notification-Id": notification_id,
-                    "X-CrewDay-Notification-Kind": kind.value,
-                },
-            )
+            # §10 "Delivery tracking": persist a ``queued`` ledger row
+            # BEFORE handing off to the mailer so the row exists even
+            # if the SMTP I/O hangs or the process dies mid-send. The
+            # future retry worker walks ``queued`` / ``failed`` rows;
+            # without the pre-send insert that worker has nothing to
+            # pick up. The opt-out branch above bails out before this
+            # block per the spec ("opted-out emails never reach the
+            # mailer, so no email_delivery row").
+            delivery_id: str | None = None
+            if self.email_deliveries is not None:
+                delivery_id = new_ulid()
+                self.email_deliveries.insert_queued(
+                    delivery_id=delivery_id,
+                    workspace_id=self.ctx.workspace_id,
+                    to_person_id=recipient.id,
+                    to_email_at_send=recipient.email,
+                    # Per cd-xpiz / cd-km8ng the ledger key IS the
+                    # NotificationKind enum value, NOT the .j2 file
+                    # name — the column lines up with
+                    # ``EmailOptOut.category`` for cross-table joins.
+                    template_key=kind.value,
+                    # Snapshot the renderer context at queue time so a
+                    # later replay reads the exact subject + body the
+                    # recipient saw, even if the underlying entity
+                    # evolves afterwards. ``payload`` carries the same
+                    # PII posture as the audit log — the redaction
+                    # boundary lives one layer up at the caller.
+                    context_snapshot_json=dict(payload),
+                    created_at=now,
+                )
+            try:
+                provider_message_id = self.mailer.send(
+                    to=(recipient.email,),
+                    subject=subject,
+                    body_text=body_md,
+                    reply_to=None,
+                    headers={
+                        "X-CrewDay-Notification-Id": notification_id,
+                        "X-CrewDay-Notification-Kind": kind.value,
+                    },
+                )
+            except MailDeliveryError as exc:
+                if self.email_deliveries is not None and delivery_id is not None:
+                    self.email_deliveries.mark_failed(
+                        delivery_id=delivery_id,
+                        error_text=str(exc),
+                        now=self.clock.now(),
+                    )
+                # Preserve the existing error contract: the mailer
+                # error propagates to the caller's UoW.
+                raise
+            if self.email_deliveries is not None and delivery_id is not None:
+                self.email_deliveries.mark_sent(
+                    delivery_id=delivery_id,
+                    provider_message_id=provider_message_id,
+                    sent_at=self.clock.now(),
+                )
             self._audit(
                 entity_id=notification_id,
                 channel=_CHANNEL_EMAIL,

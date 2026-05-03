@@ -42,12 +42,17 @@ from app.adapters.db.audit.models import AuditLog
 from app.adapters.db.base import Base
 from app.adapters.db.identity.models import User, canonicalise_email
 from app.adapters.db.messaging.models import (
+    EmailDelivery,
     EmailOptOut,
     Notification,
     PushToken,
 )
+from app.adapters.db.messaging.repositories import (
+    SqlAlchemyEmailDeliveryRepository,
+)
 from app.adapters.db.session import make_engine
 from app.adapters.db.workspace.models import Workspace
+from app.adapters.mail.ports import MailDeliveryError
 from app.domain.messaging.notifications import (
     TEMPLATE_ROOT,
     Jinja2TemplateLoader,
@@ -1036,3 +1041,270 @@ class TestEdgeCases:
 
         assert len(captured_isolated) == 1
         assert captured_default == []
+
+
+# ---------------------------------------------------------------------------
+# email_delivery ledger (cd-8kg7)
+# ---------------------------------------------------------------------------
+
+
+class _RaisingMailer:
+    """Mailer fake whose :meth:`send` always raises :class:`MailDeliveryError`."""
+
+    def __init__(self, *, message: str = "smtp 421 service unavailable") -> None:
+        self._message = message
+        self.send_calls = 0
+
+    def send(
+        self,
+        *,
+        to: object,
+        subject: str,
+        body_text: str,
+        body_html: str | None = None,
+        headers: object = None,
+        reply_to: str | None = None,
+    ) -> str:
+        self.send_calls += 1
+        raise MailDeliveryError(self._message)
+
+
+class TestEmailDeliveryLedger:
+    """:class:`EmailDeliveryRepository` writes one row per outbound mail."""
+
+    def test_happy_path_inserts_queued_then_marks_sent(
+        self,
+        session: Session,
+        base_env: tuple[WorkspaceContext, str, FrozenClock],
+    ) -> None:
+        ctx, recipient_id, clock = base_env
+        deliveries = SqlAlchemyEmailDeliveryRepository(session)
+        mailer = InMemoryMailer()
+
+        service = NotificationService(
+            session=session,
+            ctx=ctx,
+            mailer=mailer,
+            clock=clock,
+            bus=bus,
+            email_deliveries=deliveries,
+        )
+        service.notify(
+            recipient_user_id=recipient_id,
+            kind=NotificationKind.TASK_ASSIGNED,
+            payload={"task_title": "Clean room 3"},
+        )
+        session.flush()
+
+        rows = session.execute(select(EmailDelivery)).scalars().all()
+        assert len(rows) == 1
+        row = rows[0]
+        assert row.workspace_id == ctx.workspace_id
+        assert row.to_person_id == recipient_id
+        # Snapshot semantics: the address as it was at send time.
+        assert row.to_email_at_send == "recipient@example.com"
+        # cd-xpiz / cd-km8ng decision: the ledger key IS the
+        # NotificationKind enum value, NOT the .j2 file name.
+        assert row.template_key == "task_assigned"
+        # Caller's payload frozen verbatim into the snapshot column.
+        assert row.context_snapshot_json == {"task_title": "Clean room 3"}
+        # Provider-issued message id (the InMemoryMailer returns
+        # ``msg-1`` for the first send) lands on success.
+        assert row.provider_message_id == "msg-1"
+        # State machine walked queued → sent.
+        assert row.delivery_state == "sent"
+        assert row.sent_at is not None
+        assert row.first_error is None
+        assert row.retry_count == 0
+        # The mailer was invoked exactly once.
+        assert len(mailer.sent) == 1
+
+    def test_mail_delivery_error_marks_failed_and_propagates(
+        self,
+        session: Session,
+        base_env: tuple[WorkspaceContext, str, FrozenClock],
+    ) -> None:
+        ctx, recipient_id, clock = base_env
+        deliveries = SqlAlchemyEmailDeliveryRepository(session)
+        mailer = _RaisingMailer(message="smtp 550 mailbox unavailable")
+
+        service = NotificationService(
+            session=session,
+            ctx=ctx,
+            mailer=mailer,
+            clock=clock,
+            bus=bus,
+            email_deliveries=deliveries,
+        )
+        with pytest.raises(MailDeliveryError) as excinfo:
+            service.notify(
+                recipient_user_id=recipient_id,
+                kind=NotificationKind.TASK_ASSIGNED,
+                payload={"task_title": "X"},
+            )
+        # Existing error contract preserved: the adapter error
+        # propagates verbatim to the caller.
+        assert "550" in str(excinfo.value)
+
+        # The ledger row landed (queued + then flipped to failed).
+        session.flush()
+        rows = session.execute(select(EmailDelivery)).scalars().all()
+        assert len(rows) == 1
+        row = rows[0]
+        assert row.delivery_state == "failed"
+        assert row.first_error is not None and "550" in row.first_error
+        assert row.retry_count == 1
+        # ``provider_message_id`` and ``sent_at`` stay NULL on the
+        # failed branch (the send never succeeded).
+        assert row.provider_message_id is None
+        assert row.sent_at is None
+        assert mailer.send_calls == 1
+
+    def test_email_opt_out_does_not_insert_row(
+        self,
+        session: Session,
+        base_env: tuple[WorkspaceContext, str, FrozenClock],
+    ) -> None:
+        """Opted-out emails never reach the mailer, so no ledger row."""
+        ctx, recipient_id, clock = base_env
+        _add_email_opt_out(
+            session,
+            workspace_id=ctx.workspace_id,
+            user_id=recipient_id,
+            category="task_assigned",
+        )
+        session.commit()
+
+        deliveries = SqlAlchemyEmailDeliveryRepository(session)
+        mailer = InMemoryMailer()
+        service = NotificationService(
+            session=session,
+            ctx=ctx,
+            mailer=mailer,
+            clock=clock,
+            bus=bus,
+            email_deliveries=deliveries,
+        )
+        service.notify(
+            recipient_user_id=recipient_id,
+            kind=NotificationKind.TASK_ASSIGNED,
+            payload={"task_title": "X"},
+        )
+        session.flush()
+
+        # Mailer untouched and ledger empty — opt-out is a hard gate
+        # that bypasses the entire send + record path.
+        assert mailer.sent == []
+        rows = session.execute(select(EmailDelivery)).scalars().all()
+        assert rows == []
+
+    def test_no_repo_keeps_email_branch_unchanged(
+        self,
+        session: Session,
+        base_env: tuple[WorkspaceContext, str, FrozenClock],
+    ) -> None:
+        """Backwards compat: callers that don't pass a repo see the
+        prior behaviour — mailer fired, no ledger row written."""
+        ctx, recipient_id, clock = base_env
+        mailer = InMemoryMailer()
+        service = NotificationService(
+            session=session,
+            ctx=ctx,
+            mailer=mailer,
+            clock=clock,
+            bus=bus,
+            # email_deliveries omitted on purpose.
+        )
+        service.notify(
+            recipient_user_id=recipient_id,
+            kind=NotificationKind.TASK_ASSIGNED,
+            payload={"task_title": "X"},
+        )
+        session.flush()
+
+        assert len(mailer.sent) == 1
+        assert session.execute(select(EmailDelivery)).scalars().all() == []
+
+    def test_repository_lookup_by_provider_message_id(
+        self,
+        session: Session,
+        base_env: tuple[WorkspaceContext, str, FrozenClock],
+    ) -> None:
+        """The bounce-webhook handler can locate the row via
+        :meth:`EmailDeliveryRepository.find_by_provider_message_id`.
+
+        Out-of-scope task wires the actual webhook router; this guard
+        proves the column is queryable end-to-end through the seam
+        the future handler will use.
+        """
+        ctx, recipient_id, clock = base_env
+        deliveries = SqlAlchemyEmailDeliveryRepository(session)
+        service = NotificationService(
+            session=session,
+            ctx=ctx,
+            mailer=InMemoryMailer(),
+            clock=clock,
+            bus=bus,
+            email_deliveries=deliveries,
+        )
+        service.notify(
+            recipient_user_id=recipient_id,
+            kind=NotificationKind.TASK_ASSIGNED,
+            payload={"task_title": "X"},
+        )
+        session.flush()
+
+        # The InMemoryMailer's first send returns ``msg-1``.
+        found = deliveries.find_by_provider_message_id(
+            workspace_id=ctx.workspace_id,
+            provider_message_id="msg-1",
+        )
+        assert found is not None
+        assert found.to_person_id == recipient_id
+        assert found.delivery_state == "sent"
+
+        # An unknown id resolves to None — webhook-side drop-on-miss.
+        missing = deliveries.find_by_provider_message_id(
+            workspace_id=ctx.workspace_id,
+            provider_message_id="does-not-exist",
+        )
+        assert missing is None
+
+    def test_mark_failed_does_not_overwrite_first_error(
+        self,
+        session: Session,
+        base_env: tuple[WorkspaceContext, str, FrozenClock],
+    ) -> None:
+        """§10: ``first_error`` is set on first failure and never
+        overwritten on subsequent retries — direct repository check."""
+        ctx, recipient_id, _clock = base_env
+        deliveries = SqlAlchemyEmailDeliveryRepository(session)
+
+        delivery_id = new_ulid()
+        deliveries.insert_queued(
+            delivery_id=delivery_id,
+            workspace_id=ctx.workspace_id,
+            to_person_id=recipient_id,
+            to_email_at_send="r@example.com",
+            template_key="task_assigned",
+            context_snapshot_json={"k": "v"},
+            created_at=_PINNED,
+        )
+        deliveries.mark_failed(
+            delivery_id=delivery_id,
+            error_text="first error",
+            now=_PINNED,
+        )
+        deliveries.mark_failed(
+            delivery_id=delivery_id,
+            error_text="second error",
+            now=_PINNED,
+        )
+        session.flush()
+        row = session.execute(
+            select(EmailDelivery).where(EmailDelivery.id == delivery_id)
+        ).scalar_one()
+        assert row.first_error == "first error"
+        # ``retry_count`` is incremented on every call.
+        assert row.retry_count == 2
+        assert row.delivery_state == "failed"
