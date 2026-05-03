@@ -25,6 +25,7 @@ from app.domain.llm.router import CapabilityUnassignedError
 from app.tenancy import WorkspaceContext
 from app.tenancy.current import reset_current, set_current
 from app.util.clock import FrozenClock
+from app.util.redact import ConsentSet
 from app.util.ulid import new_ulid
 from tests.domain.llm.conftest import (
     build_context,
@@ -53,10 +54,17 @@ class StubLLM:
         prompt: str,
         max_tokens: int = 1024,
         temperature: float = 0.0,
+        consents: ConsentSet | None = None,
     ) -> LLMResponse:
         raise NotImplementedError
 
-    def ocr(self, *, model_id: str, image_bytes: bytes) -> str:
+    def ocr(
+        self,
+        *,
+        model_id: str,
+        image_bytes: bytes,
+        consents: ConsentSet | None = None,
+    ) -> str:
         self.calls.append(("ocr", model_id))
         return "Vendor: Monoprix\nTotal: 34.12 EUR\n2026-04-15"
 
@@ -67,6 +75,7 @@ class StubLLM:
         messages: Sequence[ChatMessage],
         max_tokens: int = 1024,
         temperature: float = 0.0,
+        consents: ConsentSet | None = None,
     ) -> LLMResponse:
         self.calls.append(("chat", model_id))
         payload = self.payloads_by_model.get(model_id, self.payload)
@@ -85,6 +94,7 @@ class StubLLM:
         messages: Sequence[ChatMessage],
         max_tokens: int = 1024,
         temperature: float = 0.0,
+        consents: ConsentSet | None = None,
     ) -> Iterator[str]:
         raise NotImplementedError
 

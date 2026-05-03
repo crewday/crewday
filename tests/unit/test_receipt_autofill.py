@@ -80,6 +80,7 @@ from app.domain.expenses.autofill import (
 from app.domain.expenses.claims import ExpenseClaimCreate
 from app.tenancy.context import ActorGrantRole, WorkspaceContext
 from app.util.clock import FrozenClock
+from app.util.redact import ConsentSet
 from app.util.ulid import new_ulid
 from tests._fakes.storage import InMemoryStorage
 
@@ -268,6 +269,7 @@ class StubLLMClient:
         prompt: str,
         max_tokens: int = 1024,
         temperature: float = 0.0,
+        consents: ConsentSet | None = None,
     ) -> LLMResponse:
         raise NotImplementedError
 
@@ -278,6 +280,7 @@ class StubLLMClient:
         messages: Sequence[ChatMessage],
         max_tokens: int = 1024,
         temperature: float = 0.0,
+        consents: ConsentSet | None = None,
     ) -> LLMResponse:
         self.calls.append(("chat", model_id))
         if self._chat_error is not None:
@@ -299,7 +302,13 @@ class StubLLMClient:
             finish_reason="stop",
         )
 
-    def ocr(self, *, model_id: str, image_bytes: bytes) -> str:
+    def ocr(
+        self,
+        *,
+        model_id: str,
+        image_bytes: bytes,
+        consents: ConsentSet | None = None,
+    ) -> str:
         self.calls.append(("ocr", model_id))
         if self._ocr_error is not None:
             raise self._ocr_error
@@ -312,6 +321,7 @@ class StubLLMClient:
         messages: Sequence[ChatMessage],
         max_tokens: int = 1024,
         temperature: float = 0.0,
+        consents: ConsentSet | None = None,
     ) -> Iterator[str]:
         raise LLMCapabilityMissing("stream_chat")
 

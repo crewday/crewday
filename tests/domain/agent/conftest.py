@@ -44,6 +44,7 @@ from app.tenancy import WorkspaceContext, registry, tenant_agnostic
 from app.tenancy.current import reset_current, set_current
 from app.tenancy.orm_filter import install_tenant_filter
 from app.util.clock import FrozenClock
+from app.util.redact import ConsentSet
 from app.util.ulid import new_ulid
 
 # Re-export integration-layer fixtures so the shared engine /
@@ -339,6 +340,7 @@ class ScriptedLLMClient:
         prompt: str,
         max_tokens: int = 1024,
         temperature: float = 0.0,
+        consents: ConsentSet | None = None,
     ) -> LLMResponse:
         raise NotImplementedError("ScriptedLLMClient only supports chat()")
 
@@ -350,6 +352,7 @@ class ScriptedLLMClient:
         max_tokens: int = 1024,
         temperature: float = 0.0,
         tools: Sequence[Tool] | None = None,
+        consents: ConsentSet | None = None,
     ) -> LLMResponse:
         self.chat_calls += 1
         self.last_messages = list(messages)
@@ -362,7 +365,13 @@ class ScriptedLLMClient:
             )
         return self.replies.pop(0)
 
-    def ocr(self, *, model_id: str, image_bytes: bytes) -> str:
+    def ocr(
+        self,
+        *,
+        model_id: str,
+        image_bytes: bytes,
+        consents: ConsentSet | None = None,
+    ) -> str:
         raise NotImplementedError("ScriptedLLMClient does not support ocr")
 
     def stream_chat(
@@ -373,6 +382,7 @@ class ScriptedLLMClient:
         max_tokens: int = 1024,
         temperature: float = 0.0,
         tools: Sequence[Tool] | None = None,
+        consents: ConsentSet | None = None,
     ) -> Iterator[str]:
         raise NotImplementedError("ScriptedLLMClient does not support stream_chat")
 

@@ -111,9 +111,11 @@ from app.domain.expenses.ports import (
     ExpenseClaimRow,
     ExpensesRepository,
 )
+from app.domain.llm.consent import load_consent_set
 from app.tenancy import WorkspaceContext
 from app.util.clock import Clock, SystemClock
 from app.util.currency import ISO_4217_ALLOWLIST
+from app.util.redact import ConsentSet
 from app.util.ulid import new_ulid
 
 __all__ = [
@@ -453,6 +455,7 @@ def extract_from_bytes(
     llm: LLMClient,
     settings: Settings | None = None,
     clock: Clock | None = None,
+    consents: ConsentSet | None = None,
 ) -> ExtractionMetrics:
     """Run a receipt blob through the LLM and return the validated payload.
 
@@ -497,7 +500,9 @@ def extract_from_bytes(
 
     started = resolved_clock.now()
     try:
-        ocr_text = llm.ocr(model_id=model_id, image_bytes=image_bytes)
+        ocr_text = llm.ocr(
+            model_id=model_id, image_bytes=image_bytes, consents=consents
+        )
         chat_response = llm.chat(
             model_id=model_id,
             messages=[
@@ -506,6 +511,7 @@ def extract_from_bytes(
                     "content": f"{_OCR_TO_JSON_PROMPT}\n\n{ocr_text}",
                 }
             ],
+            consents=consents,
         )
     except TimeoutError as exc:
         raise ExtractionTimeout(str(exc)) from exc
@@ -881,6 +887,7 @@ def run_extraction(
             llm=llm,
             settings=resolved_settings,
             clock=resolved_clock,
+            consents=load_consent_set(repo.session, ctx.workspace_id),
         )
     except ExtractionTimeout as exc:
         _write_audit_failure(

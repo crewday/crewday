@@ -1826,6 +1826,7 @@ def _build_stub_llm(
     import json as _json
 
     from app.adapters.llm.ports import LLMCapabilityMissing, LLMResponse, LLMUsage
+    from app.util.redact import ConsentSet
 
     class _StubLLM:
         def complete(  # pragma: no cover
@@ -1835,6 +1836,7 @@ def _build_stub_llm(
             prompt: str,
             max_tokens: int = 1024,
             temperature: float = 0.0,
+            consents: ConsentSet | None = None,
         ) -> LLMResponse:
             raise NotImplementedError
 
@@ -1845,6 +1847,7 @@ def _build_stub_llm(
             messages: Any,
             max_tokens: int = 1024,
             temperature: float = 0.0,
+            consents: ConsentSet | None = None,
         ) -> LLMResponse:
             if chat_error is not None:
                 raise chat_error
@@ -1864,7 +1867,13 @@ def _build_stub_llm(
                 finish_reason="stop",
             )
 
-        def ocr(self, *, model_id: str, image_bytes: bytes) -> str:
+        def ocr(
+            self,
+            *,
+            model_id: str,
+            image_bytes: bytes,
+            consents: ConsentSet | None = None,
+        ) -> str:
             return "Vendor: Stub\nTotal: 27.50 EUR\n2026-04-17"
 
         def stream_chat(  # pragma: no cover
@@ -1874,6 +1883,7 @@ def _build_stub_llm(
             messages: Any,
             max_tokens: int = 1024,
             temperature: float = 0.0,
+            consents: ConsentSet | None = None,
         ) -> Any:
             raise LLMCapabilityMissing("stream_chat")
 

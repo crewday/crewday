@@ -11,6 +11,13 @@ protocol; adapters that do not implement a capability raise
 :class:`LLMCapabilityMissing` with the capability name. Callers either
 feature-detect beforehand (by asking the router) or handle the
 exception.
+
+The ``consents`` keyword on every method is the workspace-scoped
+:class:`~app.util.redact.ConsentSet` that lets specific PII fields
+pass through the §15 redaction seam. ``None`` (the default) means
+"redact everything" — see :meth:`ConsentSet.none`. Adapters without
+upstream calls (the in-process fake) accept the argument as a no-op
+so the seam stays uniform across providers.
 """
 
 from __future__ import annotations
@@ -18,6 +25,8 @@ from __future__ import annotations
 from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Literal, Protocol, TypedDict
+
+from app.util.redact import ConsentSet
 
 __all__ = [
     "ChatMessage",
@@ -128,6 +137,7 @@ class LLMClient(Protocol):
         prompt: str,
         max_tokens: int = 1024,
         temperature: float = 0.0,
+        consents: ConsentSet | None = None,
     ) -> LLMResponse:
         """Single-shot text completion."""
         ...
@@ -140,6 +150,7 @@ class LLMClient(Protocol):
         max_tokens: int = 1024,
         temperature: float = 0.0,
         tools: Sequence[Tool] | None = None,
+        consents: ConsentSet | None = None,
     ) -> LLMResponse:
         """Multi-turn chat completion.
 
@@ -151,7 +162,13 @@ class LLMClient(Protocol):
         """
         ...
 
-    def ocr(self, *, model_id: str, image_bytes: bytes) -> str:
+    def ocr(
+        self,
+        *,
+        model_id: str,
+        image_bytes: bytes,
+        consents: ConsentSet | None = None,
+    ) -> str:
         """Extract text from an image.
 
         Optional capability; adapters without vision raise
@@ -167,6 +184,7 @@ class LLMClient(Protocol):
         max_tokens: int = 1024,
         temperature: float = 0.0,
         tools: Sequence[Tool] | None = None,
+        consents: ConsentSet | None = None,
     ) -> Iterator[str]:
         """Stream chat tokens as they arrive.
 

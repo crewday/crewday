@@ -173,6 +173,7 @@ from app.domain.expenses.autofill import (
     extract_from_bytes,
 )
 from app.domain.expenses.ports import ExpensesRepository
+from app.domain.llm.consent import load_consent_set
 from app.tenancy import WorkspaceContext
 from app.util.clock import SystemClock
 from app.util.ulid import new_ulid
@@ -1421,7 +1422,12 @@ async def scan_expense_receipt_route(
     repo, _checker = make_seam_pair(session, ctx)
 
     try:
-        metrics = extract_from_bytes(image_bytes, llm=llm, settings=settings)
+        metrics = extract_from_bytes(
+            image_bytes,
+            llm=llm,
+            settings=settings,
+            consents=load_consent_set(session, ctx.workspace_id),
+        )
     except ExtractionParseError as exc:
         # Chat call may have landed before the parse failed — record
         # the spent tokens so /admin/usage stays honest. The burnt

@@ -37,6 +37,7 @@ from app.domain.expenses.ports import (
 )
 from app.tenancy.context import WorkspaceContext
 from app.util.clock import FrozenClock
+from app.util.redact import ConsentSet
 from app.util.ulid import new_ulid
 from tests._fakes.storage import InMemoryStorage
 
@@ -56,6 +57,17 @@ class _FakeAuditSession(Session):
 
     def add(self, instance: object, _warn: bool = True) -> None:
         self.added.append(instance)
+
+    def execute(self, *_args: Any, **_kwargs: Any) -> Any:
+        # ``run_extraction`` calls ``load_consent_set(repo.session, ...)``
+        # which executes a SELECT against ``agent_preference``. The seam
+        # test never seeds that row; mimic the production "no row"
+        # branch so the loader returns ``ConsentSet.none()``.
+        class _NoneResult:
+            def scalar_one_or_none(self) -> None:
+                return None
+
+        return _NoneResult()
 
 
 @dataclass
@@ -322,6 +334,7 @@ class _StubLLMClient:
         prompt: str,
         max_tokens: int = 1024,
         temperature: float = 0.0,
+        consents: ConsentSet | None = None,
     ) -> LLMResponse:
         raise NotImplementedError
 
@@ -332,6 +345,7 @@ class _StubLLMClient:
         messages: Sequence[ChatMessage],
         max_tokens: int = 1024,
         temperature: float = 0.0,
+        consents: ConsentSet | None = None,
     ) -> LLMResponse:
         self.calls.append(("chat", model_id))
         if self._chat_error is not None:
@@ -347,7 +361,13 @@ class _StubLLMClient:
             finish_reason="stop",
         )
 
-    def ocr(self, *, model_id: str, image_bytes: bytes) -> str:
+    def ocr(
+        self,
+        *,
+        model_id: str,
+        image_bytes: bytes,
+        consents: ConsentSet | None = None,
+    ) -> str:
         self.calls.append(("ocr", model_id))
         return "Vendor: Bistro 42\nTotal: 27.50 EUR\n2026-04-17"
 
@@ -358,6 +378,7 @@ class _StubLLMClient:
         messages: Sequence[ChatMessage],
         max_tokens: int = 1024,
         temperature: float = 0.0,
+        consents: ConsentSet | None = None,
     ) -> Iterator[str]:
         raise LLMCapabilityMissing("stream_chat")
 

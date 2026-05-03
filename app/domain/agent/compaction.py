@@ -20,6 +20,7 @@ from app.domain.llm.budget import (
     default_pricing_table,
     estimate_cost_cents,
 )
+from app.domain.llm.consent import load_consent_set
 from app.domain.llm.router import ModelPick, resolve_primary
 from app.domain.llm.usage_recorder import AgentAttribution, record
 from app.services.llm import get_active_prompt
@@ -376,6 +377,7 @@ def _call_compactor(
         temperature=model_pick.temperature
         if model_pick.temperature is not None
         else 0.0,
+        consents=load_consent_set(session, ctx.workspace_id),
     )
     elapsed_ms = int((clock.now() - started).total_seconds() * 1000)
     cost_cents = estimate_cost_cents(

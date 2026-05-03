@@ -39,6 +39,7 @@ from app.adapters.mail.ports import Mailer
 from app.adapters.storage.ports import Blob, BlobNotFound, Storage
 from app.util.clock import Clock as UtilClock
 from app.util.clock import FrozenClock
+from app.util.redact import ConsentSet
 
 # ---------------------------------------------------------------------------
 # DbSession / UnitOfWork
@@ -338,6 +339,7 @@ class _EchoLLMClient:
         prompt: str,
         max_tokens: int = 1024,
         temperature: float = 0.0,
+        consents: ConsentSet | None = None,
     ) -> LLMResponse:
         return LLMResponse(
             text=prompt,
@@ -358,6 +360,7 @@ class _EchoLLMClient:
         max_tokens: int = 1024,
         temperature: float = 0.0,
         tools: Sequence[Tool] | None = None,
+        consents: ConsentSet | None = None,
     ) -> LLMResponse:
         last = messages[-1]["content"] if messages else ""
         return LLMResponse(
@@ -371,7 +374,13 @@ class _EchoLLMClient:
             finish_reason="stop",
         )
 
-    def ocr(self, *, model_id: str, image_bytes: bytes) -> str:
+    def ocr(
+        self,
+        *,
+        model_id: str,
+        image_bytes: bytes,
+        consents: ConsentSet | None = None,
+    ) -> str:
         raise LLMCapabilityMissing("ocr")
 
     def stream_chat(
@@ -382,6 +391,7 @@ class _EchoLLMClient:
         max_tokens: int = 1024,
         temperature: float = 0.0,
         tools: Sequence[Tool] | None = None,
+        consents: ConsentSet | None = None,
     ) -> Iterator[str]:
         last = messages[-1]["content"] if messages else ""
         yield from last.split()

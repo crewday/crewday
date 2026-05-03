@@ -1161,6 +1161,25 @@ A redaction layer sits between the domain and the `LLMClient`:
 - Household can turn on **strict** mode, which adds a small local
   classifier step (deferred to a plug-in; not in v1 critical path).
 
+**Workspace consent toggle.** The default posture is "redact
+everything" — every PII shape leaves the seam scrubbed. A workspace
+owner may opt specific field names back in via the workspace-scope
+`agent_preference.upstream_pii_consent` JSON column, a list of
+tokens drawn from the closed set
+`legal_name | email | phone | address`. The loader
+(`app.domain.llm.consent.load_consent_set`) re-validates each stored
+token against that allow-list before threading the resulting
+`ConsentSet` into every `OpenRouterClient` call (chat / complete /
+ocr / stream_chat); unknown tokens are silently dropped, so a typo
+or stale value cannot widen what flows upstream. Consent only
+bypasses the sensitive-key rule for the named field — the free-text
+regex scrub still runs on the value, and hard-drop secret patterns
+(IBAN, PAN, Bearer tokens, Wi-Fi passwords) are never released.
+Property- and user-scope rows of `agent_preference` carry the
+column for schema uniformity but are ignored by the loader; consent
+is a workspace-wide operator decision per §15
+"LLM data handling".
+
 Every `llm_call` row stores the **redacted** payload sent and the
 response received. Original values are never stored on `llm_call`.
 

@@ -41,6 +41,7 @@ from app.adapters.llm.ports import (
     Tool,
     ToolCall,
 )
+from app.util.redact import ConsentSet
 
 __all__ = [
     "EchoLLMClient",
@@ -133,7 +134,9 @@ class FakeLLMClient:
         prompt: str,
         max_tokens: int = 1024,
         temperature: float = 0.0,
+        consents: ConsentSet | None = None,
     ) -> LLMResponse:
+        del consents  # in-process fake never reaches an upstream provider
         return LLMResponse(
             text=prompt,
             usage=LLMUsage(
@@ -153,7 +156,9 @@ class FakeLLMClient:
         max_tokens: int = 1024,
         temperature: float = 0.0,
         tools: Sequence[Tool] | None = None,
+        consents: ConsentSet | None = None,
     ) -> LLMResponse:
+        del consents  # in-process fake never reaches an upstream provider
         last = messages[-1]["content"] if messages else ""
         text = json.dumps(self._ocr_payload) if _OCR_PROMPT_MARKER in last else last
         return LLMResponse(
@@ -168,7 +173,14 @@ class FakeLLMClient:
             tool_calls=self._tool_calls,
         )
 
-    def ocr(self, *, model_id: str, image_bytes: bytes) -> str:
+    def ocr(
+        self,
+        *,
+        model_id: str,
+        image_bytes: bytes,
+        consents: ConsentSet | None = None,
+    ) -> str:
+        del consents  # in-process fake never reaches an upstream provider
         return self._ocr_text
 
     def stream_chat(
@@ -179,7 +191,9 @@ class FakeLLMClient:
         max_tokens: int = 1024,
         temperature: float = 0.0,
         tools: Sequence[Tool] | None = None,
+        consents: ConsentSet | None = None,
     ) -> Iterator[str]:
+        del consents  # in-process fake never reaches an upstream provider
         last = messages[-1]["content"] if messages else ""
         yield from last.split()
 
@@ -199,5 +213,12 @@ class EchoLLMClient(FakeLLMClient):
     integration test).
     """
 
-    def ocr(self, *, model_id: str, image_bytes: bytes) -> str:
+    def ocr(
+        self,
+        *,
+        model_id: str,
+        image_bytes: bytes,
+        consents: ConsentSet | None = None,
+    ) -> str:
+        del consents  # in-process fake never reaches an upstream provider
         raise LLMCapabilityMissing("ocr")

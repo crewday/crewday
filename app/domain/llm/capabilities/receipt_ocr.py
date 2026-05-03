@@ -27,6 +27,7 @@ from app.domain.llm.budget import (
     default_pricing_table,
     estimate_cost_cents,
 )
+from app.domain.llm.consent import load_consent_set
 from app.domain.llm.router import CapabilityUnassignedError, ModelPick, resolve_model
 from app.domain.llm.usage_recorder import AgentAttribution, record
 from app.tenancy import WorkspaceContext
@@ -146,6 +147,9 @@ def extract(ctx: ReceiptOcrContext, image_bytes: bytes) -> ReceiptDraft:
         )
 
     correlation_id = new_ulid(clock=clock)
+    # Workspace consent doesn't change inside the fallback retry loop; load
+    # once and reuse so the latency timer below covers the LLM call only.
+    consents = load_consent_set(ctx.session, ctx.workspace_ctx.workspace_id)
     last_parse_error: ReceiptParseError | None = None
     for attempt, model_pick in enumerate(model_chain):
         _check_budget(ctx, model_pick=model_pick, pricing=pricing, clock=clock)
@@ -154,6 +158,7 @@ def extract(ctx: ReceiptOcrContext, image_bytes: bytes) -> ReceiptDraft:
         ocr_text = ctx.llm.ocr(
             model_id=model_pick.api_model_id,
             image_bytes=image_bytes,
+            consents=consents,
         )
         response = ctx.llm.chat(
             model_id=model_pick.api_model_id,
@@ -162,6 +167,7 @@ def extract(ctx: ReceiptOcrContext, image_bytes: bytes) -> ReceiptDraft:
             temperature=(
                 model_pick.temperature if model_pick.temperature is not None else 0.0
             ),
+            consents=consents,
         )
         latency_ms = max(0, int((clock.now() - started).total_seconds() * 1000))
         _record_usage(

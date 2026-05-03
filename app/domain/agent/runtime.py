@@ -146,6 +146,7 @@ from app.domain.llm.budget import (
     default_pricing_table,
     estimate_cost_cents,
 )
+from app.domain.llm.consent import load_consent_set
 from app.domain.llm.router import (
     CapabilityUnassignedError,
     ModelPick,
@@ -1273,6 +1274,7 @@ def _call_llm(
         temperature=model_pick.temperature
         if model_pick.temperature is not None
         else 0.0,
+        consents=load_consent_set(session, ctx.workspace_id),
     )
     elapsed_ms = int((clock.now() - started).total_seconds() * 1000)
     cost_cents = estimate_cost_cents(

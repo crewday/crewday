@@ -912,6 +912,20 @@ class AgentPreference(Base):
     default_approval_mode: Mapped[str] = mapped_column(
         String, nullable=False, default="auto", server_default="auto"
     )
+    # §11 redaction layer opt-in tokens. Empty list (the default)
+    # means "redact everything" — the safe posture for callers that
+    # have not opted any field in. Token allow-list lives on
+    # :data:`app.util.redact.CONSENT_TOKENS`; the loader
+    # (:func:`app.domain.llm.consent.load_consent_set`) ignores
+    # unknown tokens so a future spec addition stays additive.
+    # Workspace-scope rows are the only scope that carries a
+    # meaningful consent set today; the column lives on every
+    # ``agent_preference`` row anyway so the schema stays uniform
+    # across scope_kind values (``workspace`` / ``property`` /
+    # ``user``) without an extra polymorphic split.
+    upstream_pii_consent: Mapped[list[str]] = mapped_column(
+        JSON, nullable=False, default=list, server_default="[]"
+    )
     updated_by_user_id: Mapped[str | None] = mapped_column(
         String,
         ForeignKey("user.id", ondelete="SET NULL"),

@@ -35,6 +35,7 @@ from app.domain.llm.usage_recorder import AgentAttribution
 from app.tenancy import WorkspaceContext, registry, tenant_agnostic
 from app.tenancy.current import reset_current, set_current
 from app.util.clock import FrozenClock
+from app.util.redact import ConsentSet
 from app.util.ulid import new_ulid
 from tests.domain.llm.conftest import (
     seed_assignment,
@@ -56,10 +57,17 @@ class StubLLM:
         prompt: str,
         max_tokens: int = 1024,
         temperature: float = 0.0,
+        consents: ConsentSet | None = None,
     ) -> LLMResponse:
         raise NotImplementedError
 
-    def ocr(self, *, model_id: str, image_bytes: bytes) -> str:
+    def ocr(
+        self,
+        *,
+        model_id: str,
+        image_bytes: bytes,
+        consents: ConsentSet | None = None,
+    ) -> str:
         raise NotImplementedError
 
     def chat(
@@ -69,6 +77,7 @@ class StubLLM:
         messages: Sequence[ChatMessage],
         max_tokens: int = 1024,
         temperature: float = 0.0,
+        consents: ConsentSet | None = None,
     ) -> LLMResponse:
         self.calls.append(("chat", model_id))
         text = (
@@ -88,6 +97,7 @@ class StubLLM:
         messages: Sequence[ChatMessage],
         max_tokens: int = 1024,
         temperature: float = 0.0,
+        consents: ConsentSet | None = None,
     ) -> Iterator[str]:
         raise NotImplementedError
 

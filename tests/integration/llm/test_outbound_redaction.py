@@ -7,10 +7,16 @@ never opens a real socket; we capture the request and assert the
 body the provider would have received is already PII-free.
 
 Consent (``scope="llm"`` with a non-empty :class:`ConsentSet`) is
-exercised here because the consent loader (workspace-scoped
-``agent_preferences.upstream_pii_consent``) does not exist yet — the
-only way to prove the plumbing passes a consent set through the
-adapter is to hand one in at the call site.
+exercised at two seams:
+
+* **Adapter seam** — the call site hands a :class:`ConsentSet` directly
+  to the adapter. Pins the OpenRouter wire format and the redactor
+  contract.
+* **Workspace seam** (cd-ddy0) — the workspace-scoped consent column
+  ``agent_preference.upstream_pii_consent`` is loaded by
+  :func:`app.domain.llm.consent.load_consent_set` and threaded into the
+  adapter. Pins the end-to-end loader → redactor flow against a real
+  DB row.
 
 See ``docs/specs/11-llm-and-agents.md`` §"Redaction layer",
 ``docs/specs/15-security-privacy.md`` §"Logging and redaction".
@@ -24,12 +30,21 @@ from datetime import UTC, datetime
 from typing import cast
 
 import httpx
+import pytest
 from pydantic import SecretStr
+from sqlalchemy.orm import Session
 
+from app.adapters.db.llm.models import AgentPreference
+from app.adapters.db.workspace.models import Workspace
 from app.adapters.llm.openrouter import OpenRouterClient
 from app.adapters.llm.ports import ChatMessage
+from app.domain.llm.consent import load_consent_set
+from app.tenancy import tenant_agnostic
 from app.util.clock import FrozenClock
 from app.util.redact import ConsentSet
+from app.util.ulid import new_ulid
+
+pytestmark = pytest.mark.integration
 
 _API_KEY = SecretStr("sk-or-test-0000")
 _MODEL = "google/gemma-3-27b-it"
@@ -264,3 +279,142 @@ class TestOcrRedaction:
         expected_payload = base64.b64encode(image_bytes).decode("ascii")
         assert url == f"data:image/jpeg;base64,{expected_payload}"
         assert "<redacted:credential>" not in url
+
+
+# ---------------------------------------------------------------------------
+# Workspace-scoped consent loader (cd-ddy0)
+# ---------------------------------------------------------------------------
+#
+# These tests stand in front of the same MockTransport seam, but the
+# :class:`ConsentSet` that reaches the adapter comes from
+# :func:`load_consent_set` reading the ``agent_preference`` row instead
+# of being constructed inline. Together with the unit suite at
+# ``tests/unit/llm/test_consent_loader.py``, they pin both halves of the
+# §11 redaction layer's workspace seam: the loader's projection (unit)
+# and the loader → adapter wiring (here).
+
+
+_NOW = datetime(2026, 5, 3, 9, 0, 0, tzinfo=UTC)
+
+
+def _seed_workspace_with_consent(
+    db_session: Session,
+    *,
+    upstream_pii_consent: list[str],
+) -> str:
+    """Seed a workspace + workspace-scope ``agent_preference`` row.
+
+    ``upstream_pii_consent`` lands as the row's column body; the loader
+    reads it back and projects through the
+    :data:`app.util.redact.CONSENT_TOKENS` allow-list.
+    """
+    workspace_id = new_ulid()
+    with tenant_agnostic():
+        db_session.add(
+            Workspace(
+                id=workspace_id,
+                slug=f"ws-{workspace_id[-6:].lower()}",
+                name="ws",
+                plan="free",
+                quota_json={},
+                verification_state="unverified",
+                created_at=_NOW,
+            )
+        )
+        db_session.flush()
+        db_session.add(
+            AgentPreference(
+                id=new_ulid(),
+                workspace_id=workspace_id,
+                scope_kind="workspace",
+                scope_id=workspace_id,
+                body_md="",
+                token_count=0,
+                blocked_actions=[],
+                default_approval_mode="auto",
+                upstream_pii_consent=upstream_pii_consent,
+                updated_by_user_id=None,
+                created_at=_NOW,
+                updated_at=_NOW,
+                archived_at=None,
+            )
+        )
+        db_session.flush()
+    return workspace_id
+
+
+class TestWorkspaceConsentLoader:
+    def test_legal_name_consent_preserves_value_on_outbound(
+        self, db_session: Session
+    ) -> None:
+        """The workspace toggle for ``legal_name`` flows end-to-end."""
+        workspace_id = _seed_workspace_with_consent(
+            db_session, upstream_pii_consent=["legal_name"]
+        )
+        consents = load_consent_set(db_session, workspace_id)
+
+        handler = _RecordingHandler()
+        client = _make_client(handler)
+        messages: list[ChatMessage] = [
+            {"role": "user", "content": "Remember Jean Dupont."},
+        ]
+        client.chat(model_id=_MODEL, messages=messages, consents=consents)
+
+        body = _body(handler.requests[0])
+        wire_msgs = cast(list[dict[str, object]], body["messages"])
+        content = cast(str, wire_msgs[0]["content"])
+        assert "Jean Dupont" in content
+
+    def test_empty_consent_scrubs_email_baseline(self, db_session: Session) -> None:
+        """Workspace with empty consent matches the cd-a469 baseline.
+
+        The free-text regex pass still scrubs every PII shape; consent
+        opt-in is the only mechanism that lets a value through.
+        """
+        workspace_id = _seed_workspace_with_consent(db_session, upstream_pii_consent=[])
+        consents = load_consent_set(db_session, workspace_id)
+
+        handler = _RecordingHandler()
+        client = _make_client(handler)
+        messages: list[ChatMessage] = [
+            {"role": "user", "content": "email me at jean@example.com"},
+        ]
+        client.chat(model_id=_MODEL, messages=messages, consents=consents)
+
+        body = _body(handler.requests[0])
+        wire_msgs = cast(list[dict[str, object]], body["messages"])
+        content = cast(str, wire_msgs[0]["content"])
+        assert "jean@example.com" not in content
+        assert "<redacted:email>" in content
+
+    def test_multiple_consents_load_through_loader(self, db_session: Session) -> None:
+        """All allow-listed tokens reach the redactor as one set."""
+        workspace_id = _seed_workspace_with_consent(
+            db_session,
+            upstream_pii_consent=["legal_name", "email", "phone", "address"],
+        )
+        consents = load_consent_set(db_session, workspace_id)
+
+        # The loader is the seam under test; the adapter only proves the
+        # consent set arrived. Membership assertions keep the test
+        # decoupled from the redactor's free-text behaviour (already
+        # covered by ``tests/unit/util/test_redact.py``).
+        assert consents.allows("legal_name")
+        assert consents.allows("email")
+        assert consents.allows("phone")
+        assert consents.allows("address")
+
+        handler = _RecordingHandler()
+        client = _make_client(handler)
+        client.chat(
+            model_id=_MODEL,
+            messages=[{"role": "user", "content": "Marie Dupont"}],
+            consents=consents,
+        )
+        body = _body(handler.requests[0])
+        wire_msgs = cast(list[dict[str, object]], body["messages"])
+        content = cast(str, wire_msgs[0]["content"])
+        # ``legal_name`` consent lets a free-form name through the
+        # adapter — the cd-a469 baseline asserted on a non-PII string;
+        # we extend that here against a name shape.
+        assert "Marie Dupont" in content

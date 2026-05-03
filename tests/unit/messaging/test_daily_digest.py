@@ -24,6 +24,7 @@ from app.adapters.llm.ports import LLMUsage as PortUsage
 from app.domain.llm.router import ModelPick
 from app.tenancy.context import WorkspaceContext
 from app.util.clock import Clock, FrozenClock
+from app.util.redact import ConsentSet
 from app.util.ulid import new_ulid
 from app.worker.tasks.daily_digest import send_daily_digest
 from tests._fakes.mailer import InMemoryMailer
@@ -166,6 +167,7 @@ class _DigestLLM:
         messages: Sequence[ChatMessage],
         max_tokens: int = 1024,
         temperature: float = 0.0,
+        consents: ConsentSet | None = None,
     ) -> LLMResponse:
         self.prompts.append(messages[-1]["content"])
         return LLMResponse(
@@ -182,10 +184,17 @@ class _DigestLLM:
         prompt: str,
         max_tokens: int = 1024,
         temperature: float = 0.0,
+        consents: ConsentSet | None = None,
     ) -> LLMResponse:
         raise AssertionError("daily digest should use chat")
 
-    def ocr(self, *, model_id: str, image_bytes: bytes) -> str:
+    def ocr(
+        self,
+        *,
+        model_id: str,
+        image_bytes: bytes,
+        consents: ConsentSet | None = None,
+    ) -> str:
         raise AssertionError("daily digest should not OCR")
 
     def stream_chat(
@@ -195,6 +204,7 @@ class _DigestLLM:
         messages: Sequence[ChatMessage],
         max_tokens: int = 1024,
         temperature: float = 0.0,
+        consents: ConsentSet | None = None,
     ) -> Iterator[str]:
         raise AssertionError("daily digest should not stream")
 

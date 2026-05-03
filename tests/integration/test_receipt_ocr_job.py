@@ -50,6 +50,7 @@ from app.domain.expenses import claims as _claims_module
 from app.domain.expenses.claims import ExpenseClaimCreate
 from app.tenancy import WorkspaceContext, tenant_agnostic
 from app.util.clock import FrozenClock
+from app.util.redact import ConsentSet
 from app.util.ulid import new_ulid
 from app.worker.tasks.receipt_ocr import run_receipt_ocr
 from tests._fakes.storage import InMemoryStorage
@@ -155,6 +156,7 @@ class StubLLMClient:
         prompt: str,
         max_tokens: int = 1024,
         temperature: float = 0.0,
+        consents: ConsentSet | None = None,
     ) -> LLMResponse:
         raise NotImplementedError
 
@@ -165,6 +167,7 @@ class StubLLMClient:
         messages: Sequence[ChatMessage],
         max_tokens: int = 1024,
         temperature: float = 0.0,
+        consents: ConsentSet | None = None,
     ) -> LLMResponse:
         return LLMResponse(
             text=json.dumps(self._next_payload()),
@@ -177,7 +180,13 @@ class StubLLMClient:
             finish_reason="stop",
         )
 
-    def ocr(self, *, model_id: str, image_bytes: bytes) -> str:
+    def ocr(
+        self,
+        *,
+        model_id: str,
+        image_bytes: bytes,
+        consents: ConsentSet | None = None,
+    ) -> str:
         return "Vendor: Stub\nTotal: 27.50 EUR\n2026-04-17"
 
     def stream_chat(  # pragma: no cover
@@ -187,6 +196,7 @@ class StubLLMClient:
         messages: Sequence[ChatMessage],
         max_tokens: int = 1024,
         temperature: float = 0.0,
+        consents: ConsentSet | None = None,
     ) -> Iterator[str]:
         raise LLMCapabilityMissing("stream_chat")
 
