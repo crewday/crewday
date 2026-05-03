@@ -22,7 +22,7 @@ restriction), and therefore cannot mint the matching header. The
 browser refuses to send the cookie on cross-site requests at all,
 even if the attacker guesses the right URL shape.
 
-**Skip paths.** Reuses :data:`app.tenancy.middleware.SKIP_PATHS` and
+**Skip paths.** Reuses :data:`app.http.skip_paths.SKIP_PATHS` and
 its child-segment match so the bare-host ops probes
 (``/healthz``, ``/readyz``, ``/version``), auth entry points
 (``/auth/magic``, ``/auth/passkey``, ``/signup``, ``/login``,
@@ -53,7 +53,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
-from app.tenancy.middleware import SKIP_PATHS
+from app.http.skip_paths import is_skip_path as _is_skip_path
 
 __all__ = [
     "CSRF_COOKIE_NAME",
@@ -105,22 +105,6 @@ def mint_csrf_token() -> str:
     token-shape contract in one place.
     """
     return secrets.token_urlsafe(CSRF_TOKEN_BYTES)
-
-
-def _is_skip_path(path: str) -> bool:
-    """Return ``True`` if ``path`` should bypass the CSRF check.
-
-    Mirrors the tenancy middleware's skip rule (exact match or
-    ``/prefix/...`` child segment). We deliberately re-derive the
-    check here instead of importing the private tenancy helper so the
-    two middlewares stay decoupled — a future change to one set
-    shouldn't silently widen or narrow the other. If the two lists
-    diverge in intent, split this constant out of
-    :mod:`app.tenancy.middleware` and let both import from there.
-    """
-    if path in SKIP_PATHS:
-        return True
-    return any(path.startswith(f"{prefix}/") for prefix in SKIP_PATHS)
 
 
 def _has_bearer_auth(request: Request) -> bool:
@@ -186,8 +170,7 @@ class CSRFMiddleware(BaseHTTPMiddleware):
     Responsibilities:
 
     1. **Skip paths** — bare-host ops / auth / static routes are
-       passed through unchanged (the SKIP_PATHS union with the
-       tenancy middleware's own list, see :func:`_is_skip_path`).
+       passed through unchanged (see :func:`app.http.skip_paths.is_skip_path`).
     2. **Idempotent methods** — ``GET``/``HEAD``/``OPTIONS`` skip the
        cookie-vs-header check but still re-mint the cookie on the
        response so the client always has a fresh value.

@@ -45,6 +45,8 @@ from app.auth.session import SESSION_COOKIE_NAME
 from app.auth.session import issue as issue_session
 from app.auth.tokens import mint as mint_token
 from app.config import Settings, get_settings
+from app.http.skip_paths import SKIP_PATHS as SHARED_SKIP_PATHS
+from app.http.skip_paths import is_skip_path
 from app.tenancy.context import WorkspaceContext
 from app.tenancy.current import _current_ctx, get_current
 from app.tenancy.middleware import (
@@ -457,6 +459,9 @@ class TestSlugRejection:
 class TestSkipPaths:
     """Bare-host routes never enter resolver code."""
 
+    def test_tenancy_reexports_shared_skip_paths(self) -> None:
+        assert SKIP_PATHS is SHARED_SKIP_PATHS
+
     def test_healthz_is_skip_path(self) -> None:
         with _client() as client:
             response = client.get("/healthz")
@@ -512,6 +517,22 @@ class TestSkipPaths:
         assert "/auth/magic" in SKIP_PATHS
         assert "/auth/passkey" in SKIP_PATHS
         assert "/me/email/verify" in SKIP_PATHS
+
+    @pytest.mark.parametrize(
+        ("path", "expected"),
+        (
+            ("/healthz", True),
+            ("/static/app.css", True),
+            ("/docs/swagger.json", True),
+            ("/signup-flow", False),
+            ("/theme/settings", False),
+            ("/w/villa-sud/api/v1/ping", False),
+        ),
+    )
+    def test_shared_skip_path_matcher_uses_exact_or_child_segment(
+        self, path: str, expected: bool
+    ) -> None:
+        assert is_skip_path(path) is expected
 
     def test_auth_passkey_child_is_skip_path(self) -> None:
         app = _build_app()
