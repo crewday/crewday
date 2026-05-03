@@ -263,6 +263,17 @@ class _FakeRepo(MembershipRepository):
                 deleted_at=None,
             )
 
+    # -- audit reader (cd-9vi3) ------------------------------------------
+
+    def get_latest_archive_role_ids(
+        self, *, workspace_id: str, user_id: str
+    ) -> list[str] | None:
+        # The fake doesn't model the audit log; tests that drive the
+        # reinstate path against this seam don't exercise the
+        # archive-scope lookup. Returning ``None`` keeps the legacy
+        # full-sweep contract for any caller that does.
+        return None
+
 
 class TestSeedPendingWorkEngagementSeam:
     """Drive :func:`seed_pending_work_engagement` against a fake repo.

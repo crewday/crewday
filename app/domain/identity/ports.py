@@ -662,8 +662,48 @@ class MembershipRepository(Protocol):
 
         ``active_only=True`` narrows to ``deleted_at IS NULL`` — the
         archive sweep target. ``active_only=False`` returns the full
-        history so the reinstate path can clear the tombstone on every
-        row the archive touched (cd-9vi3 narrowing tracked separately).
+        history so the reinstate path can intersect the tombstoned rows
+        with the archive-time scope from
+        :meth:`get_latest_archive_role_ids` (cd-9vi3).
+        """
+        ...
+
+    # -- audit reader (cd-9vi3) ------------------------------------------
+
+    def get_latest_archive_role_ids(
+        self, *, workspace_id: str, user_id: str
+    ) -> list[str] | None:
+        """Return the role-id scope for the current archive cycle.
+
+        Walks ``audit_log`` rows matching ``(workspace_id,
+        entity_kind='user', entity_id=user_id)`` newest-first and
+        unions every ``employee.archived`` row's
+        ``diff['archived_user_work_role_ids']`` payload up to (but not
+        including) the most recent ``employee.reinstated`` row. The
+        union covers the **current** archive cycle — an idempotent
+        re-archive of an already-archived user writes an empty list
+        (because no rows were active to archive), so picking only the
+        latest row would lose the original scope; unioning across the
+        cycle preserves it.
+
+        Used by the reinstate paths to scope the sweep to exactly the
+        rows the paired archive(s) touched (§05 "Archive / reinstate"
+        — per-row reinstatement).
+
+        Returns ``None`` when no ``employee.archived`` row exists in
+        the current cycle — historical archives written before cd-3x4
+        added the ``archived_user_work_role_ids`` payload, or fresh
+        installs where no archive ever ran. The caller falls back to
+        the legacy "every tombstoned row" sweep in that case and
+        stamps a ``reinstate_scope = "fallback_full_sweep"`` flag on
+        its audit row so the fallback is grep-able.
+
+        The implementation lives on this repo (rather than a separate
+        ``AuditReader`` Protocol) because the service already threads
+        :class:`MembershipRepository` through every reinstate path; a
+        single-method seam pinned here keeps the call-site count down.
+        Promote to a dedicated audit-reader Protocol if a second domain
+        ever needs to read its own audit trail.
         """
         ...
 

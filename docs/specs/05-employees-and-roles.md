@@ -182,20 +182,42 @@ user_work_role, a work_engagement, or the whole user. Reinstating
 a whole user issues them a fresh magic link (since their prior
 passkeys are gone) and fires `user.reinstated`.
 
+Reinstatement is **per-row**: only the `user_work_role` rows that
+the paired archive actually tombstoned come back. A role an operator
+manually ended *before* the archive (its own `user_work_role` archive
+under scope #1, or a direct soft-delete) is outside the archive's
+scope and stays archived through the reinstate. Each
+`employee.archived` audit row carries the exact id list under
+`archived_user_work_role_ids`; the reinstate path unions every such
+list across the **current archive cycle** (every `employee.archived`
+audit row newer than the most recent `employee.reinstated`) and
+intersects the union with the rows still tombstoned at reinstate
+time. Cycle-union shape matters because an idempotent re-archive of
+an already-archived user writes an empty list (no live rows to
+sweep) — picking only the latest row would lose the original cycle
+scope. Historical archives that lack the payload (pre-cd-3x4) or
+cycles with no `employee.archived` row at all fall back to the
+legacy "every tombstoned row" sweep and the `employee.reinstated`
+audit row tags the path via `reinstate_scope = "fallback_full_sweep"`
+(vs. `"scoped_to_archive"` for the standard path).
+
 The HTTP surface is `POST /users/{user_id}/reinstate` with a
 `?scope=` query parameter (§12 "Users"):
 
 - `?scope=workspace` (default) — workspace-local reinstate. Clears
   `archived_on` on the user's `work_engagement` for the caller's
-  workspace and the matching `user_work_role` rows. Authority gate:
+  workspace and the `user_work_role` rows the matching
+  `employee.archived` audit row recorded. Authority gate:
   `users.archive` (default-allow owners + managers).
 - `?scope=deployment` — deployment-wide reinstate. Clears
-  `users.archived_at` AND reinstates every `work_engagement` +
-  `user_work_role` the user holds across every workspace.
-  Authority gate: membership in `owners@deployment`. Workspace
-  owners / managers who are not also deployment owners receive 403
-  `forbidden`. Issuing the fresh magic link is a separate
-  operator step via `POST /users/{user_id}/magic_link`.
+  `users.archived_at` AND reinstates every `work_engagement` plus
+  the archive-scoped `user_work_role` rows the user holds across
+  every workspace (the per-workspace `employee.archived` audit
+  rows bound the sweep the same way the workspace-local path
+  does). Authority gate: membership in `owners@deployment`.
+  Workspace owners / managers who are not also deployment owners
+  receive 403 `forbidden`. Issuing the fresh magic link is a
+  separate operator step via `POST /users/{user_id}/magic_link`.
 
 The words "end", "terminate", "off-board", "rehire", "soft-off" are
 **not** used in the schema, API, or UI. When writing new code or

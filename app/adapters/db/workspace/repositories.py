@@ -26,6 +26,7 @@ from datetime import date, datetime
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
+from app.adapters.db.audit.models import AuditLog
 from app.adapters.db.workspace.models import (
     UserWorkRole,
     UserWorkspace,
@@ -308,3 +309,86 @@ class SqlAlchemyMembershipRepository(MembershipRepository):
             .values(deleted_at=None, ended_on=None)
             .execution_options(synchronize_session="fetch")
         )
+
+    # -- audit reader (cd-9vi3) ------------------------------------------
+
+    def get_latest_archive_role_ids(
+        self, *, workspace_id: str, user_id: str
+    ) -> list[str] | None:
+        """Return the role-id scope for the *current* archive cycle.
+
+        See :meth:`MembershipRepository.get_latest_archive_role_ids` for
+        the contract. Implementation walks ``employee.archived`` and
+        ``employee.reinstated`` audit rows newest-first under
+        :func:`tenant_agnostic` (the deployment-wide reinstate path
+        drives this per-workspace and the ORM tenant filter would
+        otherwise narrow to the caller's workspace; the
+        ``workspace_id`` predicate is still pinned in the WHERE clause
+        as defence-in-depth).
+
+        The "current cycle" is every ``employee.archived`` row newer
+        than the most recent ``employee.reinstated`` (or the full
+        archive history if no reinstate ever ran). The role-id scope
+        is the **union** of every ``archived_user_work_role_ids``
+        payload in that window — an idempotent re-archive of an
+        already-archived user writes an empty list, so picking only
+        the most recent row would lose the original scope. Union
+        across the cycle preserves it.
+
+        Returns ``None`` when no ``employee.archived`` rows exist in
+        the current cycle (fresh install, or every archive in the
+        cycle predates cd-3x4 and lacks the payload). The caller
+        falls back to the legacy "every tombstoned row" sweep.
+        """
+        stmt = (
+            select(AuditLog)
+            .where(
+                AuditLog.workspace_id == workspace_id,
+                AuditLog.entity_kind == "user",
+                AuditLog.entity_id == user_id,
+                AuditLog.action.in_(("employee.archived", "employee.reinstated")),
+            )
+            .order_by(AuditLog.created_at.desc(), AuditLog.id.desc())
+        )
+        # justification: deployment-level reinstate (cd-pb8p) drives
+        # this per-workspace and the ORM tenant filter would narrow to
+        # the caller's workspace; pin workspace_id explicitly above.
+        with tenant_agnostic():  # justification: cross-workspace audit lookup.
+            rows = list(self._session.scalars(stmt).all())
+
+        # Walk newest-first; stop at the first ``employee.reinstated``
+        # because it ended the prior cycle. Union every
+        # ``archived_user_work_role_ids`` payload above that boundary.
+        seen: set[str] = set()
+        ordered: list[str] = []
+        any_archived = False
+        for row in rows:
+            if row.action == "employee.reinstated":
+                break
+            if row.action != "employee.archived":
+                continue
+            any_archived = True
+            diff = row.diff
+            if not isinstance(diff, dict):
+                # Historical archives (or a future schema drift) that
+                # lack a dict diff are skipped — they contribute no
+                # scope. The fallback kicks in when no row contributed.
+                continue
+            ids = diff.get("archived_user_work_role_ids")
+            if not isinstance(ids, list):
+                continue
+            for item in ids:
+                # Defensive cast — the JSON column gives back ``Any``
+                # and we only want strings on the wire. A non-string
+                # slips through silently rather than poisoning the IN
+                # list.
+                if isinstance(item, str) and item not in seen:
+                    seen.add(item)
+                    ordered.append(item)
+
+        if not any_archived:
+            # No ``employee.archived`` row in the current cycle —
+            # fresh install or pre-cd-3x4 history with no archives
+            # since the last reinstate. Caller falls back.
+            return None
+        return ordered

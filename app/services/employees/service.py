@@ -75,13 +75,22 @@ spec §05 calls for one but the issuance lives in the dedicated
 ``POST /users/{id}/magic_link`` route; an operator workflow chains
 the two calls.
 
-**Reinstate sweep overreach (follow-up — cd-9vi3).** v1
-:func:`reinstate_employee` clears ``deleted_at`` on every archived
-:class:`UserWorkRole` in the (user, workspace) pair rather than
-only the rows the paired archive marked. A role ended manually
-before the archive will come back on reinstate. Accepted for MVP
-scope; tightening the sweep to the archive-time window is tracked
-as cd-9vi3.
+**Reinstate sweep is archive-scoped (cd-9vi3).**
+:func:`reinstate_employee` and :func:`reinstate_user_deployment` only
+clear ``deleted_at`` on the :class:`UserWorkRole` rows the paired
+``employee.archived`` audit row(s) recorded under
+``archived_user_work_role_ids``. The scope is the *union* across
+every ``employee.archived`` row in the current archive cycle (newer
+than the most recent ``employee.reinstated``) so an idempotent
+re-archive — which writes an empty list because no live rows
+remained — does not erase the prior cycle's scope. A role an
+operator ended manually before the archive stays archived through
+the reinstate, matching the per-row reinstatement spec (§05). The
+lookup falls back to a full sweep over every tombstoned row when no
+matching audit row exists in the cycle (historical archives written
+before cd-3x4 added the diff payload, fresh installs); the audit
+row tags the chosen path via ``reinstate_scope = "scoped_to_archive"``
+or ``"fallback_full_sweep"`` so the fallback is grep-able.
 
 See ``docs/specs/05-employees-and-roles.md`` §"User (as worker)",
 §"Work engagement", §"Archive / reinstate",
@@ -570,22 +579,30 @@ def reinstate_employee(
     """Reverse archive for a user in the caller's workspace.
 
     §05 "Archive / reinstate" — reinstates the user's most recent
-    :class:`WorkEngagement` (clearing ``archived_on``) AND every
-    archived :class:`UserWorkRole` in this workspace (clearing
-    ``deleted_at`` / ``ended_on``). Does NOT clear
-    ``users.archived_at`` — that is the deployment-level
-    :func:`reinstate_user_deployment`'s job.
+    :class:`WorkEngagement` (clearing ``archived_on``) AND the
+    archived :class:`UserWorkRole` rows the paired
+    ``employee.archived`` audit row recorded (per-row reinstatement,
+    cd-9vi3). Does NOT clear ``users.archived_at`` — that is the
+    deployment-level :func:`reinstate_user_deployment`'s job.
 
     Idempotent. A repeated call on an already-active user writes an
-    audit row with ``changed_rows = 0`` so the trail is linear.
+    audit row with ``reinstated_user_work_role_ids = []`` so the
+    trail is linear.
 
-    **Reinstate sweep overreach (cd-9vi3).** The sweep clears
-    ``deleted_at`` on *every* archived :class:`UserWorkRole` for the
-    (user, workspace) pair — not only the rows the corresponding
-    archive touched. Spec §05 describes per-row reinstatement; if an
-    operator had manually ended a single role before the archive,
-    this path brings it back. Accepted for the MVP scope; tightening
-    the sweep is tracked as cd-9vi3.
+    **Sweep scope (cd-9vi3).** The role sweep is bounded by the
+    union of every ``archived_user_work_role_ids`` payload across the
+    current archive cycle (every ``employee.archived`` audit row
+    newer than the most recent ``employee.reinstated``). Only those
+    rows come back, even if other ``user_work_role`` rows in the same
+    (user, workspace) pair carry a ``deleted_at`` from a manual end
+    before the archive. The cycle-union shape matters for idempotent
+    re-archive: a no-op archive writes an empty payload, but the
+    union still carries the scope from the original archive in the
+    same cycle. When no ``employee.archived`` row exists in the
+    cycle (historical archives, fresh installs), the path falls back
+    to the legacy full sweep over every tombstoned row and tags the
+    audit diff with ``reinstate_scope = "fallback_full_sweep"``; the
+    scoped path tags ``reinstate_scope = "scoped_to_archive"``.
 
     Returns the refreshed employee view.
     """
@@ -609,12 +626,9 @@ def reinstate_employee(
             updated_at=now,
         )
 
-    all_roles = repo.list_user_work_roles(
-        workspace_id=ctx.workspace_id, user_id=user_id, active_only=False
+    reinstated_role_ids, reinstate_scope = _resolve_reinstate_role_ids(
+        repo, workspace_id=ctx.workspace_id, user_id=user_id
     )
-    reinstated_role_ids: list[str] = [
-        r.id for r in all_roles if r.deleted_at is not None
-    ]
     repo.reinstate_user_work_roles(
         workspace_id=ctx.workspace_id,
         role_ids=reinstated_role_ids,
@@ -632,6 +646,7 @@ def reinstate_employee(
             "engagement_id": engagement.id if engagement is not None else None,
             "engagement_was_archived": engagement_was_archived,
             "reinstated_user_work_role_ids": reinstated_role_ids,
+            "reinstate_scope": reinstate_scope,
         },
         clock=resolved_clock,
     )
@@ -718,6 +733,7 @@ def reinstate_user_deployment(
 
     cleared_engagement_ids: dict[str, list[str]] = {}
     reinstated_role_ids: dict[str, list[str]] = {}
+    reinstate_scopes: dict[str, str] = {}
     # Deployment-level reinstate (cd-pb8p) writes engagement +
     # user_work_role rows in EVERY workspace the user belongs to.
     # justification: cross-workspace mutation; deployment-owner gate above.
@@ -736,15 +752,15 @@ def reinstate_user_deployment(
                 engagement_ids.append(engagement.id)
             cleared_engagement_ids[workspace_id] = engagement_ids
 
-            all_roles = repo.list_user_work_roles(
-                workspace_id=workspace_id, user_id=user_id, active_only=False
+            ws_role_ids, ws_scope = _resolve_reinstate_role_ids(
+                repo, workspace_id=workspace_id, user_id=user_id
             )
-            ws_role_ids = [r.id for r in all_roles if r.deleted_at is not None]
             repo.reinstate_user_work_roles(
                 workspace_id=workspace_id,
                 role_ids=ws_role_ids,
             )
             reinstated_role_ids[workspace_id] = ws_role_ids
+            reinstate_scopes[workspace_id] = ws_scope
 
     # Identity-row clear — ``user`` is tenant-agnostic and the ORM
     # tenant filter does not apply, so a bare attribute write is
@@ -791,6 +807,7 @@ def reinstate_user_deployment(
                 "workspace_id": workspace_id,
                 "cleared_engagement_ids": cleared_engagement_ids[workspace_id],
                 "reinstated_user_work_role_ids": reinstated_role_ids[workspace_id],
+                "reinstate_scope": reinstate_scopes[workspace_id],
                 "deployment_scope": True,
             },
             clock=resolved_clock,
@@ -822,6 +839,59 @@ def _require_archive(
         raise RuntimeError(
             f"authz catalog misconfigured for 'users.archive': {exc!s}"
         ) from exc
+
+
+def _resolve_reinstate_role_ids(
+    repo: MembershipRepository,
+    *,
+    workspace_id: str,
+    user_id: str,
+) -> tuple[list[str], str]:
+    """Return ``(role_ids, reinstate_scope)`` for the reinstate sweep.
+
+    Reads the archive-time scope off the current archive cycle's
+    ``employee.archived`` audit row(s) via
+    :meth:`MembershipRepository.get_latest_archive_role_ids` (union
+    across every cycle row, newer than the most recent
+    ``employee.reinstated``) and intersects it with the currently
+    tombstoned rows in this (user, workspace) pair. The intersection
+    guards against rows that were already reinstated by a previous
+    call, archived a second time, or hard-deleted between the two
+    operations — the sweep only touches rows that are both
+    archive-scoped *and* still archived now.
+
+    Falls back to the legacy "every tombstoned row" sweep when no
+    ``employee.archived`` audit row exists in the current cycle
+    (pre-cd-3x4 archives, fresh installs). The returned
+    ``reinstate_scope`` literal is stamped into the caller's audit
+    ``diff`` so dashboards can grep for the fallback path:
+    ``"scoped_to_archive"`` for the audit-scoped sweep,
+    ``"fallback_full_sweep"`` for the legacy fan-out.
+    """
+    all_roles = repo.list_user_work_roles(
+        workspace_id=workspace_id, user_id=user_id, active_only=False
+    )
+    archived_now_ordered: list[str] = [
+        r.id for r in all_roles if r.deleted_at is not None
+    ]
+    archived_now: set[str] = set(archived_now_ordered)
+
+    archive_scope = repo.get_latest_archive_role_ids(
+        workspace_id=workspace_id, user_id=user_id
+    )
+    if archive_scope is None:
+        # No matching ``employee.archived`` audit row — historical
+        # archive predates cd-3x4 or no archive ever ran. Fall back to
+        # the legacy full sweep so an operator who hits reinstate on a
+        # legacy state still sees the rows come back. Order matches the
+        # repo's natural iteration so the diff is stable across runs.
+        return archived_now_ordered, "fallback_full_sweep"
+
+    # Preserve the audit-row order so the resulting list is
+    # deterministic and trivially diffable against the paired
+    # ``employee.archived`` audit row.
+    intersection = [rid for rid in archive_scope if rid in archived_now]
+    return intersection, "scoped_to_archive"
 
 
 # ---------------------------------------------------------------------------
