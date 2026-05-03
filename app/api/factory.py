@@ -450,7 +450,7 @@ def _wire_services(
     writes can enable or rotate SMTP without rebuilding the app. Missing
     SMTP config fails at the Mailer port when a route actually sends.
     Capabilities is probed without a DB session; the mutable subset is
-    refreshed on the first readyz probe that actually opens a UoW.
+    refreshed on app startup via :func:`_refresh_capabilities_for_lifespan`.
     """
     throttle = Throttle()
     capabilities = probe_capabilities(settings)
@@ -1426,6 +1426,30 @@ def _seed_agent_docs_for_lifespan() -> None:
         seed_agent_docs(session)
 
 
+def _refresh_capabilities_for_lifespan(app: FastAPI) -> None:
+    """Re-read mutable settings from ``deployment_setting`` rows at boot.
+
+    :func:`_wire_services` constructs :class:`Capabilities` without a
+    DB session (the engine isn't ready yet), so the mutable subset
+    holds dataclass defaults. Without this refresh the admin-mutated
+    rows (``captcha_required``, ``signup_enabled``, …) are invisible
+    until the next admin PUT triggers
+    :meth:`Capabilities.refresh_settings`. The original module
+    comment claimed the readyz probe did this; it does not.
+    """
+    from sqlalchemy.orm import Session
+
+    from app.adapters.db.session import make_uow
+
+    capabilities: Capabilities | None = getattr(app.state, "capabilities", None)
+    if capabilities is None:
+        return
+    with make_uow() as session:
+        if not isinstance(session, Session):
+            raise TypeError("capabilities refresh requires a SQLAlchemy Session")
+        capabilities.refresh_settings(session)
+
+
 def _register_stays_subscriptions() -> None:
     """Wire stay-bundle + turnover subscribers onto the process bus.
 
@@ -1544,6 +1568,7 @@ def _build_worker_lifespan(
         from app.worker import stop as scheduler_stop
 
         _seed_agent_docs_for_lifespan()
+        _refresh_capabilities_for_lifespan(app)
 
         # Cross-worker SSE relay (cd-nusy). The default bus runs in
         # in-process mode otherwise, which silently strands events
