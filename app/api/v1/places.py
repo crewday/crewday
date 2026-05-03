@@ -91,12 +91,12 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.adapters.db.authz.models import RoleGrant
 from app.adapters.db.places.models import Area, Property, PropertyWorkspace
 from app.adapters.db.workspace.models import Workspace
 from app.api.deps import current_workspace_context, db_session
 from app.authz import PermissionDenied, require
 from app.authz.dep import Permission
+from app.authz.places_visibility import visible_property_ids_for_user
 from app.domain.places import (
     area_service,
     closure_service,
@@ -827,53 +827,19 @@ def _project_property(
 def _visible_property_ids_for_worker(
     session: Session,
     ctx: WorkspaceContext,
-    *,
-    workspace_property_ids: list[str],
 ) -> set[str]:
     """Return the set of property ids the current worker may scope.view.
 
-    Mirrors the :class:`RoleGrant`-driven fan-out used by
-    ``app/api/v1/employees.py::_load_property_ids_by_user``: the
-    actor's grants on this workspace are walked once; a workspace-wide
-    grant (``scope_property_id IS NULL``) widens to every live
-    property, and each property-pinned grant narrows to its single
-    target. Properties the actor does not appear on collapse out of
-    the result silently.
-
-    ``workspace_property_ids`` is the list of live property ids in the
-    workspace (passed in by the caller so the heavy
-    :class:`PropertyWorkspace` x :class:`Property` join only runs
-    once per request). Property-pinned grants are gated through this
-    list so a grant pointing at a retired or sibling-workspace
-    property never leaks into the worker's view.
-
-    The query is a single ``SELECT scope_property_id FROM role_grant
-    WHERE workspace_id = ? AND user_id = ?`` — bounded by the user's
-    grant fan-out (typically one to a handful of rows) so an in-memory
-    walk is cheap. The same logic lives in ``employees.py``; cd-yjw5
-    leaves the duplication intentional and files the DRY follow-up
-    as cd-atvn (hoist into ``app/authz/places_visibility.py`` once
-    both call sites can move in lockstep).
+    Thin wrapper around
+    :func:`app.authz.places_visibility.visible_property_ids_for_user`
+    that pins the call to the active actor + workspace context. The
+    shared helper (cd-atvn) owns the role_grant fan-out shape and the
+    ``PropertyWorkspace x Property`` join — the worker narrowed
+    branch and the manager roster now consume the same projection.
     """
-    live = set(workspace_property_ids)
-    if not live:
-        return set()
-
-    grants_stmt = select(RoleGrant.scope_property_id).where(
-        RoleGrant.workspace_id == ctx.workspace_id,
-        RoleGrant.user_id == ctx.actor_id,
-        # cd-x1xh: live grants only — soft-retired grants must not
-        # widen the caller's visible-property fan-out.
-        RoleGrant.revoked_at.is_(None),
+    return visible_property_ids_for_user(
+        session, workspace_id=ctx.workspace_id, user_id=ctx.actor_id
     )
-    visible: set[str] = set()
-    for (scope_property_id,) in session.execute(grants_stmt).all():
-        if scope_property_id is None:
-            # Workspace-wide grant fans out across every live property.
-            return set(live)
-        if scope_property_id in live:
-            visible.add(scope_property_id)
-    return visible
 
 
 def _can_read_full_roster(
@@ -1025,11 +991,7 @@ def build_properties_router() -> APIRouter:
         if full_access:
             visible_rows = rows
         else:
-            visible_ids = _visible_property_ids_for_worker(
-                session,
-                ctx,
-                workspace_property_ids=[r.id for r in rows],
-            )
+            visible_ids = _visible_property_ids_for_worker(session, ctx)
             if not visible_ids:
                 return []
             visible_rows = [r for r in rows if r.id in visible_ids]

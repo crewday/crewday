@@ -71,9 +71,7 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.adapters.db.authz.models import RoleGrant
 from app.adapters.db.identity.models import User
-from app.adapters.db.places.models import Property, PropertyWorkspace
 from app.adapters.db.workspace.models import (
     UserWorkRole,
     UserWorkspace,
@@ -85,6 +83,7 @@ from app.api.deps import current_workspace_context, db_session
 from app.api.v1._problem_json import IDENTITY_PROBLEM_RESPONSES
 from app.api.v1.settings import EntitySettingsPayload, build_entity_settings_payload
 from app.authz.dep import Permission
+from app.authz.places_visibility import visible_property_ids_by_user
 from app.services.leave import LeavePermissionDenied, LeaveView, list_for_user
 from app.tenancy import WorkspaceContext, tenant_agnostic
 
@@ -364,70 +363,16 @@ def _load_property_ids_by_user(
 ) -> dict[str, list[str]]:
     """Return ``{user_id: [property_id, ...]}`` derived from role grants.
 
-    Property scoping flows through :class:`RoleGrant.scope_property_id`:
-    a worker grant pinned to one property narrows them to that
-    property; a workspace-scoped grant (``scope_property_id IS NULL``)
-    fans out across every property the workspace owns or shares.
-
-    The fan-out for workspace-scoped grants is computed from
-    :class:`PropertyWorkspace` joined with :class:`Property` — the
-    join enforces ``Property.deleted_at IS NULL`` so retired
-    properties never reach the SPA. Property-pinned grants are
-    additionally gated through the same live-id set so a grant
-    pointing at a retired property collapses to an empty list, not
-    a dangling id.
+    Thin wrapper around :func:`app.authz.places_visibility.visible_property_ids_by_user`
+    that pins the caller to the active workspace context. The shared
+    helper owns the role_grant fan-out shape (cd-atvn) — keep this
+    indirection so the dashboard's :func:`_employees` aggregate can
+    keep importing the familiar private name without learning the
+    new authz module.
     """
-    if not user_ids:
-        return {}
-
-    grants_stmt = select(RoleGrant.user_id, RoleGrant.scope_property_id).where(
-        RoleGrant.workspace_id == ctx.workspace_id,
-        RoleGrant.user_id.in_(user_ids),
-        # cd-x1xh: live grants only — a soft-retired grant must
-        # not widen a user's property visibility on the roster.
-        RoleGrant.revoked_at.is_(None),
+    return visible_property_ids_by_user(
+        session, workspace_id=ctx.workspace_id, user_ids=user_ids
     )
-    grants_by_user: dict[str, list[str | None]] = defaultdict(list)
-    for user_id, scope_property_id in session.execute(grants_stmt).all():
-        grants_by_user[user_id].append(scope_property_id)
-
-    if not grants_by_user:
-        return {}
-
-    # Precompute the workspace's **live** property ids — used both for
-    # the workspace-scoped grant fan-out and as a soft-delete filter
-    # for property-pinned grants. Joining :class:`Property` lets us
-    # exclude rows that have been retired (``deleted_at IS NOT NULL``)
-    # without surfacing their ids on the roster — a soft-deleted
-    # property has no live identity for the SPA to render.
-    live_property_ids: set[str] = set(
-        session.scalars(
-            select(PropertyWorkspace.property_id)
-            .join(Property, Property.id == PropertyWorkspace.property_id)
-            .where(
-                PropertyWorkspace.workspace_id == ctx.workspace_id,
-                Property.deleted_at.is_(None),
-            )
-        ).all()
-    )
-
-    out: dict[str, list[str]] = {}
-    for user_id, scope_property_ids in grants_by_user.items():
-        bucket: set[str] = set()
-        has_workspace_grant = any(p is None for p in scope_property_ids)
-        if has_workspace_grant:
-            bucket.update(live_property_ids)
-        for pid in scope_property_ids:
-            # Property-pinned grants land on a single property; gate
-            # them through ``live_property_ids`` so a grant referencing
-            # a retired property never leaks into the roster. A grant
-            # whose target was retired and whose user has no other
-            # property grant ends up with an empty ``properties`` list,
-            # which is the correct visible state.
-            if pid is not None and pid in live_property_ids:
-                bucket.add(pid)
-        out[user_id] = sorted(bucket)
-    return out
 
 
 def _project_employee(
