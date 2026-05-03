@@ -118416,7 +118416,7 @@
         }
       ],
       "post": {
-        "description": "Reverse archive. Idempotent. See \u00a705 \"Archive / reinstate\".",
+        "description": "Reverse archive. Idempotent. See \u00a705 \"Archive / reinstate\".\n\n``?scope=workspace`` (default) reinstates the user's engagement\n+ ``user_work_role`` rows inside the caller's workspace only.\nAuthority gate is ``users.archive`` (default-allow owners +\nmanagers).\n\n``?scope=deployment`` is the cross-workspace reinstate path\n(cd-pb8p). It clears ``users.archived_at`` AND reinstates every\nengagement + ``user_work_role`` the user holds across every\nworkspace. Authority gate is membership in\n``owners@deployment`` \u2014 workspace owners / managers who are\nnot also deployment owners receive 403 ``forbidden``.\n\nError mapping (matches the sibling ``/archive`` route):\n\n* 404 ``employee_not_found`` \u2014 for ``scope=workspace`` when the\n  user is not a member of the caller's workspace; for\n  ``scope=deployment`` when the user row is missing.\n* 403 ``forbidden`` \u2014 caller lacks the required authority for\n  the requested scope.",
         "operationId": "post_reinstate_w__slug__api_v1_users__user_id__reinstate_post",
         "parameters": [
           {
@@ -118425,6 +118425,20 @@
             "required": true,
             "schema": {
               "title": "User Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "scope",
+            "required": false,
+            "schema": {
+              "default": "workspace",
+              "enum": [
+                "deployment",
+                "workspace"
+              ],
+              "title": "Scope",
               "type": "string"
             }
           }
@@ -118849,7 +118863,7 @@
             }
           }
         },
-        "summary": "Reinstate a user's engagement + work roles in this workspace",
+        "summary": "Reinstate a user's engagement + work roles",
         "tags": [
           "identity",
           "users"

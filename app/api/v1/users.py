@@ -21,9 +21,19 @@ Today's v1 surface:
   :class:`WorkEngagement` in this workspace PLUS every active
   :class:`UserWorkRole` they hold here. Idempotent.
 * ``POST /users/{user_id}/reinstate`` — reverse archive. Idempotent.
-  v1 implementation is workspace-local; the cross-workspace
-  reinstate path that clears ``users.archived_at`` is tracked as a
-  follow-up.
+  Accepts a ``?scope=`` query parameter:
+
+  * ``workspace`` (default) — workspace-local reinstate; clears the
+    engagement's ``archived_on`` and the matching ``user_work_role``
+    rows in the caller's workspace. Authority gate
+    ``users.archive`` (default-allow owners + managers).
+  * ``deployment`` — deployment-wide reinstate (cd-pb8p). Clears
+    ``users.archived_at`` AND reinstates every engagement +
+    ``user_work_role`` the user holds across every workspace.
+    Authority gate is membership in ``owners@deployment``
+    (:func:`app.authz.deployment_owners.is_deployment_owner`); a
+    workspace owner / manager who lacks deployment-owner status
+    receives 403 ``permission_denied``.
 * ``DELETE /users/{user_id}/grants`` — removes every role_grant +
   permission_group_member + user_workspace row for ``user_id`` in
   the caller's workspace, plus revokes all sessions scoped there.
@@ -52,7 +62,7 @@ See ``docs/specs/12-rest-api.md`` §"Users",
 from __future__ import annotations
 
 import logging
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field, model_validator
@@ -87,6 +97,7 @@ from app.services.employees import (
     archive_employee,
     get_employee,
     reinstate_employee,
+    reinstate_user_deployment,
     update_profile,
 )
 from app.tenancy import WorkspaceContext, tenant_agnostic
@@ -876,18 +887,42 @@ def build_users_router(
     @router.post(
         "/{user_id}/reinstate",
         response_model=EmployeeProfileResponse,
-        summary="Reinstate a user's engagement + work roles in this workspace",
+        summary="Reinstate a user's engagement + work roles",
     )
     def post_reinstate(
         user_id: str,
         ctx: _Ctx,
         session: _Db,
+        scope: Literal["workspace", "deployment"] = "workspace",
     ) -> EmployeeProfileResponse:
-        """Reverse archive. Idempotent. See §05 "Archive / reinstate"."""
+        """Reverse archive. Idempotent. See §05 "Archive / reinstate".
+
+        ``?scope=workspace`` (default) reinstates the user's engagement
+        + ``user_work_role`` rows inside the caller's workspace only.
+        Authority gate is ``users.archive`` (default-allow owners +
+        managers).
+
+        ``?scope=deployment`` is the cross-workspace reinstate path
+        (cd-pb8p). It clears ``users.archived_at`` AND reinstates every
+        engagement + ``user_work_role`` the user holds across every
+        workspace. Authority gate is membership in
+        ``owners@deployment`` — workspace owners / managers who are
+        not also deployment owners receive 403 ``forbidden``.
+
+        Error mapping (matches the sibling ``/archive`` route):
+
+        * 404 ``employee_not_found`` — for ``scope=workspace`` when the
+          user is not a member of the caller's workspace; for
+          ``scope=deployment`` when the user row is missing.
+        * 403 ``forbidden`` — caller lacks the required authority for
+          the requested scope.
+        """
+        repo = SqlAlchemyMembershipRepository(session)
         try:
-            view = reinstate_employee(
-                SqlAlchemyMembershipRepository(session), ctx, user_id=user_id
-            )
+            if scope == "deployment":
+                view = reinstate_user_deployment(repo, ctx, user_id=user_id)
+            else:
+                view = reinstate_employee(repo, ctx, user_id=user_id)
         except EmployeeNotFound as exc:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,

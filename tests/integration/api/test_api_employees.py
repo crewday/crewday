@@ -367,6 +367,68 @@ class TestArchiveReinstate:
         assert r.status_code == 404, r.text
         assert r.json()["detail"]["error"] == "employee_not_found"
 
+    def test_deployment_scope_clears_users_archived_at(
+        self,
+        client: TestClient,
+        seeded: tuple[WorkspaceContext, str],
+        session_factory: sessionmaker[Session],
+    ) -> None:
+        """``?scope=deployment`` clears ``users.archived_at`` (cd-pb8p).
+
+        The workspace-local archive does NOT touch ``users.archived_at``;
+        we stamp it manually to simulate the deployment-level archive
+        path before driving the deployment-scope reinstate. The caller
+        must be a deployment owner — we add the row directly because
+        the integration suite has no deployment-admin route yet.
+        """
+        from app.authz.deployment_owners import add_deployment_owner
+
+        ctx, target_id = seeded
+
+        # Workspace-local archive lands the engagement archival markers.
+        archive = client.post(f"/api/v1/users/{target_id}/archive")
+        assert archive.status_code == 200, archive.text
+
+        # Stamp ``users.archived_at`` + register the caller as a
+        # deployment owner before exercising the deployment scope.
+        with session_factory() as s, tenant_agnostic():
+            user = s.get(User, target_id)
+            assert user is not None
+            user.archived_at = _PINNED
+            add_deployment_owner(
+                s, user_id=ctx.actor_id, added_by_user_id=None, now=_PINNED
+            )
+            s.commit()
+
+        r = client.post(f"/api/v1/users/{target_id}/reinstate?scope=deployment")
+        assert r.status_code == 200, r.text
+
+        with session_factory() as s, tenant_agnostic():
+            user = s.get(User, target_id)
+            assert user is not None
+            assert user.archived_at is None
+            rows = list(
+                s.scalars(
+                    select(WorkEngagement).where(
+                        WorkEngagement.user_id == target_id,
+                        WorkEngagement.workspace_id == ctx.workspace_id,
+                    )
+                ).all()
+            )
+            assert len(rows) == 1
+            assert rows[0].archived_on is None
+
+    def test_deployment_scope_without_deployment_owner_is_403(
+        self,
+        client: TestClient,
+        seeded: tuple[WorkspaceContext, str],
+    ) -> None:
+        """A workspace owner who is not a deployment owner gets 403."""
+        _, target_id = seeded
+        r = client.post(f"/api/v1/users/{target_id}/reinstate?scope=deployment")
+        assert r.status_code == 403, r.text
+        assert r.json()["detail"]["error"] == "forbidden"
+
 
 class TestGetUser:
     """Read projection exposed for the employee detail page."""

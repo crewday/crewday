@@ -64,6 +64,7 @@ from app.adapters.db.workspace.models import (
 )
 from app.adapters.db.workspace.repositories import SqlAlchemyMembershipRepository
 from app.authz import PermissionDenied
+from app.authz.deployment_owners import add_deployment_owner
 from app.services.employees.service import (
     EmployeeNotFound,
     EmployeeProfileUpdate,
@@ -71,6 +72,7 @@ from app.services.employees.service import (
     archive_employee,
     get_employee,
     reinstate_employee,
+    reinstate_user_deployment,
     seed_pending_work_engagement,
     update_profile,
 )
@@ -619,6 +621,169 @@ class TestReinstateEmployee:
         diff = audit[0].diff
         assert diff["engagement_was_archived"] is False
         assert diff["reinstated_user_work_role_ids"] == []
+
+
+class TestReinstateUserDeployment:
+    """``reinstate_user_deployment`` clears the identity row + every workspace.
+
+    cd-pb8p — the deployment-wide reinstate path is gated on
+    ``owners@deployment`` and clears ``users.archived_at`` AND every
+    archived ``work_engagement`` + ``user_work_role`` the user holds
+    across every workspace.
+    """
+
+    def test_clears_archived_at_and_every_workspace(
+        self, session_employees: Session, clock: FrozenClock
+    ) -> None:
+        session = session_employees
+        ws_a = _bootstrap_workspace(session, slug="ws-da")
+        ws_b = _bootstrap_workspace(session, slug="ws-db")
+        owner = _bootstrap_user(
+            session, email="owner@example.com", display_name="Owner"
+        )
+        target = _bootstrap_user(
+            session, email="target@example.com", display_name="Target"
+        )
+        # Owner is a member of ws_a so the caller's workspace is well-defined.
+        ctx = _owner_ctx(session, user=owner, ws=ws_a, clock=clock)
+        _attach(session, user_id=target.id, workspace_id=ws_a.id)
+        _attach(session, user_id=target.id, workspace_id=ws_b.id)
+
+        # Seed an archived engagement + archived role in BOTH workspaces.
+        eng_a = _seed_engagement(
+            session, user=target, ws=ws_a, archived_on=_PINNED.date()
+        )
+        eng_b = _seed_engagement(
+            session, user=target, ws=ws_b, archived_on=_PINNED.date()
+        )
+        role_a = _seed_work_role(session, ws=ws_a, key="maid")
+        role_b = _seed_work_role(session, ws=ws_b, key="cook")
+        uwr_a = _seed_user_work_role(session, user=target, ws=ws_a, work_role=role_a)
+        uwr_b = _seed_user_work_role(session, user=target, ws=ws_b, work_role=role_b)
+        # Mark both ``user_work_role`` rows as archived so the reinstate
+        # path has something to clear.
+        uwr_a.deleted_at = _PINNED
+        uwr_a.ended_on = _PINNED.date()
+        uwr_b.deleted_at = _PINNED
+        uwr_b.ended_on = _PINNED.date()
+        target.archived_at = _PINNED
+        session.flush()
+
+        # Make the owner a deployment owner so the authority gate passes.
+        add_deployment_owner(
+            session, user_id=owner.id, added_by_user_id=None, now=_PINNED
+        )
+
+        view = reinstate_user_deployment(
+            _repo(session), ctx, user_id=target.id, clock=clock
+        )
+
+        session.refresh(target)
+        session.refresh(eng_a)
+        session.refresh(eng_b)
+        session.refresh(uwr_a)
+        session.refresh(uwr_b)
+        assert target.archived_at is None
+        assert eng_a.archived_on is None
+        assert eng_b.archived_on is None
+        assert uwr_a.deleted_at is None
+        assert uwr_a.ended_on is None
+        assert uwr_b.deleted_at is None
+        assert uwr_b.ended_on is None
+        # The view is projected against the caller's workspace (ws_a).
+        assert view.id == target.id
+        assert view.engagement_archived_on is None
+
+        audit = _audit_rows(session, entity_id=target.id)
+        actions = [r.action for r in audit]
+        # One ``user.reinstated`` plus one ``employee.reinstated`` per
+        # affected workspace.
+        assert actions.count("user.reinstated") == 1
+        assert actions.count("employee.reinstated") == 2
+        user_row = next(r for r in audit if r.action == "user.reinstated")
+        diff = user_row.diff
+        assert diff["user_was_archived"] is True
+        assert sorted(diff["workspace_ids"]) == sorted([ws_a.id, ws_b.id])
+        assert sorted(diff["cleared_engagement_ids"][ws_a.id]) == [eng_a.id]
+        assert sorted(diff["cleared_engagement_ids"][ws_b.id]) == [eng_b.id]
+        assert uwr_a.id in diff["reinstated_user_work_role_ids"][ws_a.id]
+        assert uwr_b.id in diff["reinstated_user_work_role_ids"][ws_b.id]
+
+    def test_non_deployment_owner_is_denied(
+        self, session_employees: Session, clock: FrozenClock
+    ) -> None:
+        session = session_employees
+        ws = _bootstrap_workspace(session, slug="ws-ndep")
+        owner = _bootstrap_user(
+            session, email="owner@example.com", display_name="Owner"
+        )
+        target = _bootstrap_user(
+            session, email="target@example.com", display_name="Target"
+        )
+        # Owner is a workspace owner but NOT a deployment owner.
+        ctx = _owner_ctx(session, user=owner, ws=ws, clock=clock)
+        _attach(session, user_id=target.id, workspace_id=ws.id)
+        _seed_engagement(session, user=target, ws=ws, archived_on=_PINNED.date())
+
+        with pytest.raises(PermissionDenied):
+            reinstate_user_deployment(
+                _repo(session), ctx, user_id=target.id, clock=clock
+            )
+
+    def test_unknown_user_is_404(
+        self, session_employees: Session, clock: FrozenClock
+    ) -> None:
+        session = session_employees
+        ws = _bootstrap_workspace(session, slug="ws-d404")
+        owner = _bootstrap_user(
+            session, email="owner@example.com", display_name="Owner"
+        )
+        ctx = _owner_ctx(session, user=owner, ws=ws, clock=clock)
+        add_deployment_owner(
+            session, user_id=owner.id, added_by_user_id=None, now=_PINNED
+        )
+
+        with pytest.raises(EmployeeNotFound):
+            reinstate_user_deployment(
+                _repo(session), ctx, user_id="01H_DOES_NOT_EXIST_____", clock=clock
+            )
+
+    def test_idempotent_on_active_user(
+        self, session_employees: Session, clock: FrozenClock
+    ) -> None:
+        """Re-running on a user already active is a no-op for the row state.
+
+        Still writes the ``user.reinstated`` audit row so the trail is
+        linear; per-workspace ``employee.reinstated`` rows fire for every
+        workspace the user has any engagement in (even if no archive
+        markers were set), matching the workspace-local
+        :func:`reinstate_employee` shape.
+        """
+        session = session_employees
+        ws = _bootstrap_workspace(session, slug="ws-didem")
+        owner = _bootstrap_user(
+            session, email="owner@example.com", display_name="Owner"
+        )
+        target = _bootstrap_user(
+            session, email="target@example.com", display_name="Target"
+        )
+        ctx = _owner_ctx(session, user=owner, ws=ws, clock=clock)
+        _attach(session, user_id=target.id, workspace_id=ws.id)
+        _seed_engagement(session, user=target, ws=ws)
+        add_deployment_owner(
+            session, user_id=owner.id, added_by_user_id=None, now=_PINNED
+        )
+
+        reinstate_user_deployment(_repo(session), ctx, user_id=target.id, clock=clock)
+        session.refresh(target)
+        assert target.archived_at is None
+
+        audit = _audit_rows(session, entity_id=target.id)
+        actions = [r.action for r in audit]
+        assert actions.count("user.reinstated") == 1
+        assert actions.count("employee.reinstated") == 1
+        user_row = next(r for r in audit if r.action == "user.reinstated")
+        assert user_row.diff["user_was_archived"] is False
 
 
 class TestSeedPendingWorkEngagement:

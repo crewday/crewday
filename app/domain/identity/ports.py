@@ -594,6 +594,21 @@ class MembershipRepository(Protocol):
         """
         ...
 
+    def list_engagements_for_user_all_workspaces(
+        self, *, user_id: str
+    ) -> Sequence[WorkEngagementRow]:
+        """Return every engagement (active OR archived) for ``user_id``.
+
+        Cross-workspace scan used by the deployment-level reinstate
+        path (§05 "Archive / reinstate" scope #3). Runs under
+        :func:`app.tenancy.tenant_agnostic` — the ORM tenant filter is
+        workspace-scoped and would otherwise narrow the result to the
+        caller's workspace. Caller is the only place this seam is
+        consumed (cd-pb8p) and is responsible for the deployment-owner
+        capability check.
+        """
+        ...
+
     # -- work_engagement writes ------------------------------------------
 
     def insert_work_engagement(

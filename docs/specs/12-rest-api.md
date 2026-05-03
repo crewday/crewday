@@ -1360,7 +1360,29 @@ POST   /users/invite              # body: {email, grants[], work_engagement?, us
 GET    /users/{id}
 PATCH  /users/{id}
 POST   /users/{id}/archive
-POST   /users/{id}/reinstate
+POST   /users/{id}/reinstate       # ?scope=workspace|deployment (default workspace).
+                                   # `workspace` clears the engagement's `archived_on`
+                                   # and the matching `user_work_role` rows in the
+                                   # caller's workspace; authority gate
+                                   # `users.archive` (default-allow owners + managers).
+                                   # `deployment` (cd-pb8p) is the cross-workspace
+                                   # path: clears `users.archived_at` AND reinstates
+                                   # every `work_engagement` + `user_work_role` the
+                                   # user holds across every workspace. Authority
+                                   # gate is membership in `owners@deployment`; a
+                                   # workspace owner / manager who is not also a
+                                   # deployment owner receives 403 `forbidden`.
+                                   # 404 `employee_not_found` when the user is not a
+                                   # member of the caller's workspace (workspace
+                                   # scope) or when the user row is missing
+                                   # (deployment scope). Audit fan-out: workspace
+                                   # scope writes one `employee.reinstated` row;
+                                   # deployment scope writes one `user.reinstated`
+                                   # row at the caller's workspace plus one
+                                   # `employee.reinstated` row per affected
+                                   # workspace. The deployment-scope reinstate does
+                                   # NOT mint a fresh magic link — operators chain
+                                   # `POST /users/{id}/magic_link`.
 POST   /users/{id}/magic_link      # cd-y5z3 — owner / manager re-mails a
                                    # `recover_passkey` magic link to {id}.
                                    # Body: {email_to_use?: str | null} (omit / null

@@ -22,11 +22,17 @@ Owns four operations on a user *as seen inside a single workspace*:
   same workspace. Idempotent — re-archiving a row that is already
   archived is a no-op that still writes an audit entry so the trail
   remains linear.
-* :func:`reinstate_employee` — reverse archive. Clears the
-  engagement's ``archived_on`` and the matching user-work-role
-  ``deleted_at`` rows. Idempotent. **Does NOT clear**
-  ``users.archived_at`` in v1 — cross-workspace reinstate is deferred
-  to a follow-up. The default behaviour is workspace-local.
+* :func:`reinstate_employee` — reverse archive scoped to the caller's
+  workspace. Clears the engagement's ``archived_on`` and the matching
+  user-work-role ``deleted_at`` rows. Idempotent. Does NOT clear
+  ``users.archived_at`` — that is the deployment-level reinstate's
+  job.
+* :func:`reinstate_user_deployment` — deployment-wide reinstate
+  (cd-pb8p). Clears ``users.archived_at`` AND reinstates every
+  ``work_engagement`` the user holds across every workspace, plus
+  the matching ``user_work_role`` rows. Authority gate is membership
+  in ``owners@deployment``; non-deployment-owners get
+  :class:`~app.authz.PermissionDenied` (router maps to 403).
 * :func:`seed_pending_work_engagement` — re-export of the accept-time
   seeder lifted into :mod:`app.domain.identity.work_engagements` so
   :mod:`app.domain.identity.membership` can call it without crossing
@@ -53,17 +59,21 @@ redaction seam as the rest of :mod:`app.audit` so a profile update
 that lands an email value in a diff cannot survive into on-disk
 logs.
 
-**Cross-workspace reinstate (deferred — cd-pb8p).** §05 "Archive /
-reinstate" describes a deployment-wide reinstate that also clears
-``users.archived_at``. The ORM :class:`User` model does not carry
-an ``archived_at`` column yet (Phase 1 ships without it) and the
-cross-workspace active-engagement scan needs a deployment-level
-owner check that does not exist in the action catalog. The v1
-implementation here handles the workspace-local path only; the
-cross-workspace branch is tracked as **cd-pb8p** (filed alongside
-cd-dv2). Until that lands, :func:`reinstate_employee` performs a
-workspace-local reinstate only — it never touches the identity-
-level ``users`` row.
+**Cross-workspace reinstate (cd-pb8p).** §05 "Archive / reinstate"
+describes a deployment-wide reinstate that also clears
+``users.archived_at``. The workspace-local :func:`reinstate_employee`
+reverses an archive inside ONE workspace and never touches the
+identity-level ``users`` row; the deployment-level
+:func:`reinstate_user_deployment` clears ``users.archived_at`` AND
+reinstates every engagement the user holds across every workspace.
+The two surfaces are exposed by ``POST /users/{id}/reinstate`` via
+the ``?scope=workspace`` (default) and ``?scope=deployment`` query
+parameter. The deployment path requires the caller to belong to the
+``owners@deployment`` set (:func:`app.authz.deployment_owners.is_deployment_owner`).
+A fresh magic link for the reinstated user is **not** minted here —
+spec §05 calls for one but the issuance lives in the dedicated
+``POST /users/{id}/magic_link`` route; an operator workflow chains
+the two calls.
 
 **Reinstate sweep overreach (follow-up — cd-9vi3).** v1
 :func:`reinstate_employee` clears ``deleted_at`` on every archived
@@ -99,6 +109,7 @@ from app.authz import (
     UnknownActionKey,
     require,
 )
+from app.authz.deployment_owners import is_deployment_owner
 from app.domain.identity.ports import (
     MembershipRepository,
     UserWorkspaceRow,
@@ -124,6 +135,7 @@ __all__ = [
     "get_employee",
     "iter_active_engagements",
     "reinstate_employee",
+    "reinstate_user_deployment",
     "seed_pending_work_engagement",
     "update_profile",
 ]
@@ -271,6 +283,9 @@ def _load_user(session: Session, *, user_id: str) -> User:
     seam); a follow-up task can route this through a sibling
     identity-side port if needed.
     """
+    # ``users`` is identity-scoped (no workspace_id column); caller
+    # verifies workspace membership via :func:`_assert_membership` first.
+    # justification: identity-scoped table with no workspace pin.
     with tenant_agnostic():
         row = session.get(User, user_id)
     if row is None:
@@ -557,22 +572,20 @@ def reinstate_employee(
     §05 "Archive / reinstate" — reinstates the user's most recent
     :class:`WorkEngagement` (clearing ``archived_on``) AND every
     archived :class:`UserWorkRole` in this workspace (clearing
-    ``deleted_at`` / ``ended_on``). **Does NOT** clear
-    ``users.archived_at`` — see module docstring for the v1
-    scope note.
+    ``deleted_at`` / ``ended_on``). Does NOT clear
+    ``users.archived_at`` — that is the deployment-level
+    :func:`reinstate_user_deployment`'s job.
 
     Idempotent. A repeated call on an already-active user writes an
     audit row with ``changed_rows = 0`` so the trail is linear.
 
-    **v1 overreach (cd-pb8p):** The reinstate sweep clears
+    **Reinstate sweep overreach (cd-9vi3).** The sweep clears
     ``deleted_at`` on *every* archived :class:`UserWorkRole` for the
     (user, workspace) pair — not only the rows the corresponding
     archive touched. Spec §05 describes per-row reinstatement; if an
     operator had manually ended a single role before the archive,
-    this path brings it back. Accepted for the MVP scope: the
-    archive/reinstate pair ships as a coarse toggle for off-boarding.
-    Narrowing the sweep to the engagement's archive-time window is
-    tracked as a follow-up.
+    this path brings it back. Accepted for the MVP scope; tightening
+    the sweep is tracked as cd-9vi3.
 
     Returns the refreshed employee view.
     """
@@ -624,6 +637,165 @@ def reinstate_employee(
     )
 
     user = _load_user(repo.session, user_id=user_id)
+    refreshed_engagement = repo.get_active_engagement(
+        workspace_id=ctx.workspace_id, user_id=user_id
+    )
+    return _row_to_view(user, engagement=refreshed_engagement)
+
+
+def reinstate_user_deployment(
+    repo: MembershipRepository,
+    ctx: WorkspaceContext,
+    *,
+    user_id: str,
+    clock: Clock | None = None,
+) -> EmployeeView:
+    """Deployment-wide reinstate for ``user_id`` (cd-pb8p, §05 scope #3).
+
+    Clears ``users.archived_at`` AND reinstates every
+    :class:`WorkEngagement` the user holds across every workspace,
+    plus the matching :class:`UserWorkRole` rows. Runs in the caller's
+    UoW — the cross-workspace mutations land atomically with the
+    identity-row clear and every audit row.
+
+    Authority: caller MUST belong to the ``owners@deployment`` set
+    (:func:`app.authz.deployment_owners.is_deployment_owner`). Workspace
+    owners and managers do NOT hold this authority — the deployment-
+    wide tombstone clear is a root-tier operation. Non-deployment-
+    owners get :class:`~app.authz.PermissionDenied`; the router maps
+    it to 403 ``permission_denied``.
+
+    Raises :class:`EmployeeNotFound` when ``user_id`` does not match
+    a :class:`User` row. The probe runs under
+    :func:`tenant_agnostic` because ``users`` is identity-scoped (no
+    workspace pin); a missing row collapses to 404 the same way the
+    workspace-local path does.
+
+    Audit: writes one ``user.reinstated`` row scoped to the caller's
+    workspace (carrying the actor identity) plus one
+    ``employee.reinstated`` row per workspace where engagements were
+    cleared (mirroring the workspace-local
+    :func:`reinstate_employee` shape so existing audit consumers see
+    a consistent action vocabulary).
+
+    **Magic link (TODO).** Spec §05 calls for a fresh magic link to
+    be issued on a deployment-level reinstate (the user's prior
+    passkeys were revoked at archive time). Issuance is NOT done
+    here — it lives on the dedicated ``POST /users/{id}/magic_link``
+    surface (cd-y5z3) so the operator chains the two calls. The
+    docstring on the route documents this contract.
+
+    Returns the :class:`EmployeeView` projected against the caller's
+    workspace (matches the workspace-local reinstate's return shape).
+    """
+    resolved_clock = clock if clock is not None else SystemClock()
+    now = resolved_clock.now()
+
+    if not is_deployment_owner(repo.session, user_id=ctx.actor_id):
+        raise PermissionDenied(
+            f"caller {ctx.actor_id!r} is not a deployment owner; "
+            "cannot reinstate a user deployment-wide"
+        )
+
+    # Identity-scoped probe — ``users`` has no workspace pin and the
+    # caller may be reinstating someone with no membership in the
+    # caller's workspace, so we must NOT route through
+    # :func:`_assert_membership` here. ``_load_user`` already wraps
+    # the lookup in :func:`tenant_agnostic`.
+    user = _load_user(repo.session, user_id=user_id)
+
+    # Cross-workspace engagement scan — the SA repo wraps this in
+    # :func:`tenant_agnostic` because the ORM tenant filter would
+    # otherwise narrow the result to the caller's workspace.
+    engagements = repo.list_engagements_for_user_all_workspaces(user_id=user_id)
+
+    # Group by workspace so we can fold per-workspace audit rows. A
+    # user typically has one engagement per workspace today; the
+    # grouping is defence-in-depth in case archived siblings exist.
+    by_workspace: dict[str, list[WorkEngagementRow]] = {}
+    for row in engagements:
+        by_workspace.setdefault(row.workspace_id, []).append(row)
+
+    cleared_engagement_ids: dict[str, list[str]] = {}
+    reinstated_role_ids: dict[str, list[str]] = {}
+    # Deployment-level reinstate (cd-pb8p) writes engagement +
+    # user_work_role rows in EVERY workspace the user belongs to.
+    # justification: cross-workspace mutation; deployment-owner gate above.
+    with tenant_agnostic():
+        for workspace_id, ws_engagements in by_workspace.items():
+            engagement_ids: list[str] = []
+            for engagement in ws_engagements:
+                if engagement.archived_on is None:
+                    continue
+                repo.set_engagement_archived_on(
+                    workspace_id=workspace_id,
+                    engagement_id=engagement.id,
+                    archived_on=None,
+                    updated_at=now,
+                )
+                engagement_ids.append(engagement.id)
+            cleared_engagement_ids[workspace_id] = engagement_ids
+
+            all_roles = repo.list_user_work_roles(
+                workspace_id=workspace_id, user_id=user_id, active_only=False
+            )
+            ws_role_ids = [r.id for r in all_roles if r.deleted_at is not None]
+            repo.reinstate_user_work_roles(
+                workspace_id=workspace_id,
+                role_ids=ws_role_ids,
+            )
+            reinstated_role_ids[workspace_id] = ws_role_ids
+
+    # Identity-row clear — ``user`` is tenant-agnostic and the ORM
+    # tenant filter does not apply, so a bare attribute write is
+    # enough. The flush happens below alongside the audit writes.
+    user_was_archived = user.archived_at is not None
+    if user_was_archived:
+        user.archived_at = None
+    repo.session.flush()
+
+    # Audit fan-out: one ``user.reinstated`` row scoped to the caller's
+    # workspace (the deployment-tier action), plus one
+    # ``employee.reinstated`` row per workspace where engagements were
+    # cleared. The per-workspace rows mirror the workspace-local
+    # :func:`reinstate_employee` shape so dashboards / forensic tools
+    # see a consistent vocabulary across the two surfaces.
+    write_audit(
+        repo.session,
+        ctx,
+        entity_kind="user",
+        entity_id=user_id,
+        action="user.reinstated",
+        diff={
+            "user_id": user_id,
+            "user_was_archived": user_was_archived,
+            "workspace_ids": sorted(by_workspace.keys()),
+            "cleared_engagement_ids": {
+                ws: sorted(ids) for ws, ids in cleared_engagement_ids.items()
+            },
+            "reinstated_user_work_role_ids": {
+                ws: sorted(ids) for ws, ids in reinstated_role_ids.items()
+            },
+        },
+        clock=resolved_clock,
+    )
+    for workspace_id in sorted(by_workspace.keys()):
+        write_audit(
+            repo.session,
+            ctx,
+            entity_kind="user",
+            entity_id=user_id,
+            action="employee.reinstated",
+            diff={
+                "user_id": user_id,
+                "workspace_id": workspace_id,
+                "cleared_engagement_ids": cleared_engagement_ids[workspace_id],
+                "reinstated_user_work_role_ids": reinstated_role_ids[workspace_id],
+                "deployment_scope": True,
+            },
+            clock=resolved_clock,
+        )
+
     refreshed_engagement = repo.get_active_engagement(
         workspace_id=ctx.workspace_id, user_id=user_id
     )

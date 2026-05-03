@@ -182,6 +182,21 @@ user_work_role, a work_engagement, or the whole user. Reinstating
 a whole user issues them a fresh magic link (since their prior
 passkeys are gone) and fires `user.reinstated`.
 
+The HTTP surface is `POST /users/{user_id}/reinstate` with a
+`?scope=` query parameter (§12 "Users"):
+
+- `?scope=workspace` (default) — workspace-local reinstate. Clears
+  `archived_on` on the user's `work_engagement` for the caller's
+  workspace and the matching `user_work_role` rows. Authority gate:
+  `users.archive` (default-allow owners + managers).
+- `?scope=deployment` — deployment-wide reinstate. Clears
+  `users.archived_at` AND reinstates every `work_engagement` +
+  `user_work_role` the user holds across every workspace.
+  Authority gate: membership in `owners@deployment`. Workspace
+  owners / managers who are not also deployment owners receive 403
+  `forbidden`. Issuing the fresh magic link is a separate
+  operator step via `POST /users/{user_id}/magic_link`.
+
 The words "end", "terminate", "off-board", "rehire", "soft-off" are
 **not** used in the schema, API, or UI. When writing new code or
 docs, use archive/reinstate.

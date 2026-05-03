@@ -31,6 +31,7 @@ from app.services.employees.service import (
     get_employee,
     iter_active_engagements,
     reinstate_employee,
+    reinstate_user_deployment,
     seed_pending_work_engagement,
     update_profile,
 )
@@ -44,6 +45,7 @@ __all__ = [
     "get_employee",
     "iter_active_engagements",
     "reinstate_employee",
+    "reinstate_user_deployment",
     "seed_pending_work_engagement",
     "update_profile",
 ]

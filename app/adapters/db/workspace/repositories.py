@@ -37,6 +37,7 @@ from app.domain.identity.ports import (
     UserWorkspaceRow,
     WorkEngagementRow,
 )
+from app.tenancy import tenant_agnostic
 
 __all__ = [
     "SqlAlchemyMembershipRepository",
@@ -170,6 +171,32 @@ class SqlAlchemyMembershipRepository(MembershipRepository):
         for row in self._session.scalars(stmt).all():
             out[row.user_id] = _to_work_engagement_row(row)
         return out
+
+    def list_engagements_for_user_all_workspaces(
+        self, *, user_id: str
+    ) -> Sequence[WorkEngagementRow]:
+        """Cross-workspace engagement scan — see Protocol docstring.
+
+        Wraps the SELECT in :func:`tenant_agnostic` so the ORM tenant
+        filter does not narrow to the caller's workspace; the
+        deployment-level reinstate is the only call site (cd-pb8p) and
+        owns the deployment-owner authority check upstream.
+        """
+        stmt = (
+            select(WorkEngagement)
+            .where(WorkEngagement.user_id == user_id)
+            .order_by(
+                WorkEngagement.workspace_id.asc(),
+                WorkEngagement.created_at.asc(),
+                WorkEngagement.id.asc(),
+            )
+        )
+        # justification: deployment-level reinstate (cd-pb8p) needs every
+        # workspace's engagement; the ORM tenant filter would narrow to
+        # the caller's workspace. Authority is checked by the service.
+        with tenant_agnostic():  # justification: cross-workspace reinstate scan.
+            rows = self._session.scalars(stmt).all()
+        return [_to_work_engagement_row(r) for r in rows]
 
     # -- work_engagement writes ------------------------------------------
 
