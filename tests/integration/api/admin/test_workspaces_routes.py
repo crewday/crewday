@@ -389,6 +389,7 @@ class TestAuthGate:
             "/admin/api/v1/admins/groups",
             "/admin/api/v1/audit",
             "/admin/api/v1/audit/tail",
+            "/admin/api/v1/usage",
             "/admin/api/v1/usage/summary",
             "/admin/api/v1/usage/workspaces",
         ):

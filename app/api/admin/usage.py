@@ -2,6 +2,10 @@
 
 Mounts under ``/admin/api/v1`` (§12 "Admin surface"):
 
+* ``GET /usage`` — paginated raw :class:`LlmUsage` feed surfacing
+  the cd-wjpl telemetry columns (per-rung observability,
+  delegating-user filter — see §11 "Cost tracking — extended" /
+  §"Agent audit trail").
 * ``GET /usage/summary`` — rolling 30-day deployment-wide spend
   + per-capability breakdown.
 * ``GET /usage/workspaces`` — per-workspace cap / spent / paused
@@ -32,9 +36,9 @@ usage budget".
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import Annotated
+from typing import Annotated, Final
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -57,6 +61,8 @@ from app.tenancy import DeploymentContext, tenant_agnostic
 __all__ = [
     "UsageCapPayload",
     "UsageCapResponse",
+    "UsageListResponse",
+    "UsageRow",
     "UsageSummaryResponse",
     "UsageWorkspaceRow",
     "UsageWorkspacesResponse",
@@ -65,6 +71,26 @@ __all__ = [
 
 
 _Db = Annotated[Session, Depends(db_session)]
+
+
+# Spec §12 "Pagination": ``limit`` defaults to 50; the cd-ccu9 feed
+# caps at 200 — the per-row payload is wider than the audit feed
+# (every :class:`LlmUsage` column including the cd-wjpl telemetry
+# additions) so the higher 500 ceiling the audit / signups feeds
+# accept would push the JSON envelope past comfortable response
+# sizes for a single page. Two-hundred is the cd-ccu9 task cap.
+_DEFAULT_LIMIT: Final[int] = 50
+_MAX_LIMIT: Final[int] = 200
+
+# Wire ``status`` query param values. The underlying
+# :attr:`LlmUsage.status` column is a four-value enum (``ok`` /
+# ``error`` / ``refused`` / ``timeout``); the admin feed exposes
+# the binary success/error split the cd-ccu9 task pins so the SPA
+# does not have to know the wider enum body. ``success`` collapses
+# to ``status='ok'``; ``error`` covers the three non-ok values
+# (transport, refusal, timeout).
+_STATUS_SUCCESS: Final[str] = "success"
+_STATUS_ERROR: Final[str] = "error"
 
 
 class UsageSummaryEntry(BaseModel):
@@ -146,9 +172,201 @@ class UsageCapResponse(BaseModel):
     cap_cents_30d: int
 
 
+class UsageRow(BaseModel):
+    """Wire shape for one :class:`LlmUsage` row in the cd-ccu9 feed.
+
+    Mirrors every :class:`LlmUsage` column 1-for-1, including the
+    cd-wjpl telemetry additions (``assignment_id`` /
+    ``fallback_attempts`` / ``finish_reason`` / ``actor_user_id`` /
+    ``token_id`` / ``agent_label``) and the cd-v6dj rename
+    (``provider_model_id`` — never the legacy ``model_id``). The
+    SPA's :file:`UsagePage` consumes the raw shape so the
+    admin-side cost-tracking UX can render per-rung observability
+    without a denormalised projection.
+
+    ``created_at`` is rendered as an ISO-8601 UTC string —
+    SQLite drops tzinfo on ``DateTime(timezone=True)`` round-trips,
+    so we force UTC unconditionally (same pattern as the audit
+    feed).
+    """
+
+    id: str
+    workspace_id: str
+    capability: str
+    provider_model_id: str
+    tokens_in: int
+    tokens_out: int
+    cost_cents: int
+    latency_ms: int
+    status: str
+    correlation_id: str
+    attempt: int
+    assignment_id: str | None
+    fallback_attempts: int
+    finish_reason: str | None
+    actor_user_id: str | None
+    token_id: str | None
+    agent_label: str | None
+    created_at: str
+
+
+class UsageListResponse(BaseModel):
+    """Body of ``GET /admin/api/v1/usage``.
+
+    Standard §12 cursor envelope (matches the audit feed shape).
+    ``next_cursor`` is the :attr:`LlmUsage.id` of the last row on
+    the page, or ``None`` when fewer than ``limit`` rows remain.
+    ``has_more`` is the explicit boolean clients prefer over a
+    "next is non-null" inference.
+    """
+
+    data: list[UsageRow]
+    next_cursor: str | None
+    has_more: bool
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+def _format_created_at(moment: datetime) -> str:
+    """ISO-8601 UTC for an :class:`LlmUsage.created_at` value.
+
+    Matches :func:`app.api.admin.audit._format_created_at` —
+    SQLite drops tzinfo on ``DateTime(timezone=True)`` round-trips,
+    so we force UTC unconditionally.
+    """
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=UTC)
+    return moment.isoformat()
+
+
+def _project_usage_row(row: LlmUsage) -> UsageRow:
+    """Build the wire-shaped row from one :class:`LlmUsage` ORM row."""
+    return UsageRow(
+        id=row.id,
+        workspace_id=row.workspace_id,
+        capability=row.capability,
+        provider_model_id=row.provider_model_id,
+        tokens_in=row.tokens_in,
+        tokens_out=row.tokens_out,
+        cost_cents=row.cost_cents,
+        latency_ms=row.latency_ms,
+        status=row.status,
+        correlation_id=row.correlation_id,
+        attempt=row.attempt,
+        assignment_id=row.assignment_id,
+        fallback_attempts=row.fallback_attempts,
+        finish_reason=row.finish_reason,
+        actor_user_id=row.actor_user_id,
+        token_id=row.token_id,
+        agent_label=row.agent_label,
+        created_at=_format_created_at(row.created_at),
+    )
+
+
+def _parse_iso(value: str | None, *, label: str) -> datetime | None:
+    """Parse an ISO-8601 query value or raise a typed 422.
+
+    Mirrors :func:`app.api.admin.audit._parse_iso` so the two
+    admin feeds reject the same malformed inputs the same way.
+    Defensive against the ``Z`` suffix; empty strings collapse to
+    ``None``.
+    """
+    if value is None or value == "":
+        return None
+    candidate = value
+    if candidate.endswith("Z"):
+        candidate = candidate[:-1] + "+00:00"
+    try:
+        parsed = datetime.fromisoformat(candidate)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "error": "invalid_iso8601",
+                "message": f"{label}: expected ISO-8601 timestamp, got {value!r}",
+            },
+        ) from exc
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed
+
+
+def _query_usage_rows(
+    session: Session,
+    *,
+    workspace_id: str | None,
+    capability: str | None,
+    actor_user_id: str | None,
+    status_filter: str | None,
+    since: datetime | None,
+    cursor: str | None,
+    limit: int,
+) -> list[LlmUsage]:
+    """Run the /admin/usage SELECT with the supplied filters.
+
+    Ordered newest-first by ``(created_at, id)``. The WHERE shape is
+    intentionally tuned for the composite indexes on :class:`LlmUsage`
+    (cd-wjpl §"Cost tracking — extended"):
+
+    * ``workspace_id`` + ``actor_user_id`` rides
+      ``ix_llm_usage_workspace_actor_created`` (leading
+      ``workspace_id`` + ``actor_user_id`` + trailing
+      ``created_at``).
+    * ``workspace_id`` + ``capability`` rides
+      ``ix_llm_usage_workspace_capability_created``.
+    * ``workspace_id`` alone (or no workspace) walks
+      ``ix_llm_usage_workspace_created``.
+
+    The ``status`` / ``since`` filters layer on top of the chosen
+    composite — they prune rows after the index narrows the scan.
+    """
+    stmt = select(LlmUsage).order_by(LlmUsage.created_at.desc(), LlmUsage.id.desc())
+    if workspace_id is not None:
+        stmt = stmt.where(LlmUsage.workspace_id == workspace_id)
+    if capability is not None:
+        stmt = stmt.where(LlmUsage.capability == capability)
+    if actor_user_id is not None:
+        stmt = stmt.where(LlmUsage.actor_user_id == actor_user_id)
+    if status_filter == _STATUS_SUCCESS:
+        # ``ok`` is the canonical success value in the four-value
+        # :data:`_LLM_USAGE_STATUS_VALUES` enum.
+        stmt = stmt.where(LlmUsage.status == "ok")
+    elif status_filter == _STATUS_ERROR:
+        # ``error`` covers every non-ok status — transport-error
+        # (``error``), provider refusal (``refused``), and
+        # provider-deadline (``timeout``). The admin feed exposes
+        # the binary success/error split per cd-ccu9; the SPA's
+        # detail row can render the underlying ``status`` column
+        # for callers who need the finer breakdown.
+        stmt = stmt.where(LlmUsage.status != "ok")
+    if since is not None:
+        stmt = stmt.where(LlmUsage.created_at >= since)
+    if cursor is not None:
+        # ``cursor`` is the id of the last row served on the
+        # previous page; we walk strictly older. Same shape as
+        # :func:`app.api.admin.audit._query_rows` — pin the cursor
+        # by id, then narrow to (created_at, id) tuples strictly
+        # less than the cursor row's. Stale cursors collapse to
+        # an empty page so the client treats them as exhausted.
+        with tenant_agnostic():
+            cursor_row = session.get(LlmUsage, cursor)
+        if cursor_row is None:
+            return []
+        stmt = stmt.where(
+            (LlmUsage.created_at < cursor_row.created_at)
+            | (
+                (LlmUsage.created_at == cursor_row.created_at)
+                & (LlmUsage.id < cursor_row.id)
+            )
+        )
+    # Fetch one extra row to learn whether there's a next page
+    # without a second COUNT query.
+    stmt = stmt.limit(limit + 1)
+    with tenant_agnostic():
+        return list(session.scalars(stmt).all())
 
 
 def _percent(spent: int, cap: int) -> int:
@@ -213,6 +431,80 @@ def _not_found() -> HTTPException:
 def build_admin_usage_router() -> APIRouter:
     """Return the router carrying the usage-aggregates admin routes."""
     router = APIRouter(tags=["admin"])
+
+    @router.get(
+        "/usage",
+        response_model=UsageListResponse,
+        operation_id="admin.usage.list",
+        summary="Page through raw LLM usage rows with cd-wjpl telemetry",
+        openapi_extra={
+            "x-cli": {
+                "group": "admin",
+                "verb": "usage-list",
+                "summary": "Page through raw LLM usage rows",
+                "mutates": False,
+            },
+        },
+    )
+    def list_usage(
+        _ctx: Annotated[DeploymentContext, Depends(current_deployment_admin_principal)],
+        session: _Db,
+        workspace_id: Annotated[str | None, Query(max_length=64)] = None,
+        capability: Annotated[str | None, Query(max_length=128)] = None,
+        actor_user_id: Annotated[str | None, Query(max_length=64)] = None,
+        status_filter: Annotated[
+            str | None,
+            Query(
+                alias="status",
+                # ``status`` is a binary success / error projection on
+                # top of the four-value :class:`LlmUsage.status` enum;
+                # the SPA's filter UX surfaces only the two values
+                # so the spec-aligned wire shape stays narrow.
+                pattern=f"^({_STATUS_SUCCESS}|{_STATUS_ERROR})$",
+            ),
+        ] = None,
+        since: Annotated[str | None, Query(max_length=64)] = None,
+        cursor: Annotated[str | None, Query(max_length=64)] = None,
+        limit: Annotated[int, Query(ge=1, le=_MAX_LIMIT)] = _DEFAULT_LIMIT,
+    ) -> UsageListResponse:
+        """Return a paginated :class:`LlmUsage` page for the admin feed.
+
+        The cd-ccu9 endpoint surfaces every column on
+        :class:`LlmUsage` including the cd-wjpl telemetry additions
+        (per-rung observability, delegating-user filter — see §11
+        "Cost tracking — extended" / §"Agent audit trail").
+
+        The optional ``workspace_id`` query param scopes to one
+        workspace so a deployment admin can drill into a tenant;
+        absent, the feed is deployment-wide. ``capability``,
+        ``actor_user_id``, and ``status`` filters are direct
+        column-equality predicates; ``since`` clamps
+        ``created_at >= since`` for window-bounded queries.
+
+        Filters compose with the composite indexes on
+        :class:`LlmUsage`: ``actor_user_id`` rides
+        ``ix_llm_usage_workspace_actor_created``, ``capability``
+        rides ``ix_llm_usage_workspace_capability_created``, and
+        the unfiltered feed walks ``ix_llm_usage_workspace_created``.
+        """
+        rows = _query_usage_rows(
+            session,
+            workspace_id=workspace_id,
+            capability=capability,
+            actor_user_id=actor_user_id,
+            status_filter=status_filter,
+            since=_parse_iso(since, label="since"),
+            cursor=cursor,
+            limit=limit,
+        )
+        has_more = len(rows) > limit
+        page = rows[:limit]
+        next_cursor = page[-1].id if has_more and page else None
+        return UsageListResponse(
+            data=[_project_usage_row(row) for row in page],
+            next_cursor=next_cursor,
+            has_more=has_more,
+        )
 
     @router.get(
         "/usage/summary",
