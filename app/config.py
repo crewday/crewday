@@ -201,6 +201,22 @@ class Settings(BaseSettings):
     hsts_enabled: bool = False
     worker: Literal["internal", "external"] = "internal"
     storage_backend: Literal["localfs", "s3"] = "localfs"
+    # Cross-worker SSE event relay (cd-nusy). The in-process bus only
+    # reaches subscribers in the publishing worker; under
+    # ``uvicorn --workers N`` an event published on worker A never
+    # reaches an SSE client connected to worker B without a relay.
+    #
+    # * ``auto`` (default): Postgres → ``LISTEN/NOTIFY`` relay,
+    #   SQLite → no-op (single-worker dev only).
+    # * ``in_process``: force the no-op relay even on Postgres. Used
+    #   in tests + an operator escape hatch for a single-worker PG
+    #   deploy that wants to skip the dedicated LISTEN connection.
+    # * ``postgres``: force the LISTEN/NOTIFY relay; refuses to start
+    #   if the active dialect is anything other than PostgreSQL.
+    #
+    # See ``docs/specs/16-deployment-operations.md`` §"Multi-worker
+    # behaviour" and :mod:`app.events.relay`.
+    events_relay: Literal["auto", "in_process", "postgres"] = "auto"
     # Deployment profile selector for the SPA-serving seam (cd-q1be).
     # ``prod`` serves the built ``app/web/dist/`` via :class:`StaticFiles`
     # + SPA catch-all — the shape every self-hosted / SaaS box runs.

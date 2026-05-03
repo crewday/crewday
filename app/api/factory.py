@@ -1522,11 +1522,38 @@ def _build_worker_lifespan(
         # apscheduler cost off the hot path for the rare caller
         # (tests, static analysis) that imports ``create_app`` just
         # for its signature without ever building the app.
+        from app.adapters.db.session import make_engine
+        from app.events.bus import bus as default_event_bus
+        from app.events.relay import build_relay
         from app.worker import create_scheduler, register_jobs
         from app.worker import start as scheduler_start
         from app.worker import stop as scheduler_stop
 
         _seed_agent_docs_for_lifespan()
+
+        # Cross-worker SSE relay (cd-nusy). The default bus runs in
+        # in-process mode otherwise, which silently strands events
+        # under ``uvicorn --workers N``. ``build_relay`` chooses the
+        # backend based on the active dialect (Postgres → LISTEN/
+        # NOTIFY, SQLite → no-op) unless the operator forced a
+        # specific mode via ``CREWDAY_EVENTS_RELAY``.
+        #
+        # Stash on ``app.state`` BEFORE wiring the singleton or
+        # awaiting ``start`` so the shutdown ``finally`` block always
+        # has the references it needs to drain — a future backend
+        # whose ``start`` raises (current implementations don't) must
+        # not leave the singleton bus holding a dangling relay or
+        # leak the engine pool.
+        relay_engine = make_engine()
+        relay = build_relay(
+            engine=relay_engine,
+            bus=default_event_bus,
+            mode=cfg.events_relay,
+        )
+        app.state.events_relay = relay
+        app.state.events_relay_engine = relay_engine
+        default_event_bus.set_relay(relay)
+        await relay.start()
 
         if cfg.worker == "internal":
             scheduler = create_scheduler()
@@ -1557,6 +1584,20 @@ def _build_worker_lifespan(
                 # as a follow-up if the need actually surfaces).
                 scheduler_stop(scheduler, wait=False)
                 app.state.scheduler = None
+            # Stop the relay before disposing its engine so the
+            # listener task can drain its psycopg connection on the
+            # right loop. Distinct names from the startup variables
+            # keep mypy from collapsing them into the broader
+            # ``Any | None`` shape ``getattr`` returns.
+            relay_to_stop = getattr(app.state, "events_relay", None)
+            if relay_to_stop is not None:
+                await relay_to_stop.stop()
+                default_event_bus.set_relay(None)
+                app.state.events_relay = None
+            engine_to_dispose = getattr(app.state, "events_relay_engine", None)
+            if engine_to_dispose is not None:
+                engine_to_dispose.dispose()
+                app.state.events_relay_engine = None
 
     return _lifespan
 

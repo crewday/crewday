@@ -1229,6 +1229,21 @@ per-workspace `/w/<slug>/events` stream — see §11 "Model
 assignment" subsection "SSE: `llm.assignment.changed`" for its
 `allowed_roles`, payload, and the router-cache + LlmPage consumers.
 
+**Cross-worker fan-out.** The in-process bus delivers events to
+subscribers on the publishing worker. Under a multi-worker deploy
+(`uvicorn --workers N` or horizontally scaled replicas) every event
+is also mirrored to sibling workers through the `app.events.relay`
+seam: on Postgres a single `pg_notify` on the `crewday_events`
+channel carries the typed event envelope, and each worker's LISTEN
+task republishes it through its own bus's local fan-out path so the
+SSE transport on every worker observes it. The relay is
+fire-and-forget (a NOTIFY failure logs and drops without rolling
+back the publisher's UoW) and self-skips by `worker_id` so the
+originator never re-delivers. SQLite deploys are single-worker by
+definition and use the no-op relay. The `CREWDAY_EVENTS_RELAY` env
+var (`auto` / `in_process` / `postgres`) overrides the auto
+selection — see §16 "Multi-worker behaviour".
+
 **Demo mode.** Every admin route 404s under
 `CREWDAY_DEMO_MODE=1` (§24). The demo has no operator seat and no
 deployment audit worth exposing.

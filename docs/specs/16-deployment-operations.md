@@ -472,6 +472,25 @@ layer by RLS (§15). Payments are **not** in scope for v1
 - The **app** container is `crewday-server serve`; a **worker**
   container runs `crewday-server worker` as a separate replica so
   signup throttling, SSE fan-out, and LLM calls do not contend.
+- **Multi-worker behaviour.** Recipe D scales the `app` container
+  horizontally (`uvicorn --workers N` or multiple replicas behind
+  Caddy). Cross-worker SSE invalidation depends on Postgres
+  `LISTEN/NOTIFY` — see `app/events/relay.py`. Each worker
+  registers a long-lived `LISTEN crewday_events` connection at
+  lifespan startup; every locally published event is mirrored
+  through `pg_notify` so SSE subscribers connected to a sibling
+  worker observe it. The relay self-skips by `worker_id` (no
+  double-fire on the originator) and is fire-and-forget (a NOTIFY
+  failure logs and drops without rolling back the publisher's UoW
+  — the SPA recovers on the next reconnect). Override with
+  `CREWDAY_EVENTS_RELAY=auto|in_process|postgres`; `auto` (the
+  default) picks Postgres LISTEN/NOTIFY when the dialect is
+  Postgres and the no-op relay on SQLite. SQLite deploys are
+  single-worker by definition (file-locking) and never need the
+  relay. The relay holds one persistent `psycopg` LISTEN
+  connection per worker, plus a small short-lived send pool for
+  `pg_notify` (separate from the request engine pool); size
+  Postgres `max_connections` for `--workers N` accordingly.
 - **Postgres 15+ recommended** for the threat profile (untrusted
   tenants) because it activates `features.rls` (§01) as defence-
   in-depth. The app runs equally on SQLite; the choice is about
@@ -669,6 +688,7 @@ provisioned per visitor, not per operator.
 | `CREWDAY_ROOT_KEY`        | -                              | required                 |
 | `CREWDAY_STORAGE_BACKEND` | `localfs`                      | or `s3`                  |
 | `CREWDAY_WORKER`          | `internal`                     | or `external`            |
+| `CREWDAY_EVENTS_RELAY`      | `auto`                         | Cross-worker SSE event relay (cd-nusy). `auto` picks Postgres `LISTEN/NOTIFY` on PG and a no-op on SQLite. `in_process` forces the no-op (single-worker escape hatch). `postgres` forces the LISTEN/NOTIFY relay (refuses to start without a PG dialect). See "Multi-worker behaviour" above. |
 | `CREWDAY_SESSION_OWNER_TTL_DAYS`| 7                         | session lifetime (days) for users with a `manager` surface grant or `owners`-group membership; see §03 |
 | `CREWDAY_SESSION_USER_TTL_DAYS` | 30                        | session lifetime (days) for everyone else; see §03 |
 | `CREWDAY_ALLOW_PUBLIC_BIND`| 0                              | required for any bind that isn't loopback or on a trusted interface; compose recipes set it explicitly |
