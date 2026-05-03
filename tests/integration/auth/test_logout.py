@@ -34,12 +34,12 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from pydantic import SecretStr
-from sqlalchemy import Engine, delete, select
+from sqlalchemy import Engine, delete, or_, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.adapters.db.audit.models import AuditLog
-from app.adapters.db.identity.models import ApiToken, User
 from app.adapters.db.identity.models import Session as SessionRow
+from app.adapters.db.identity.models import User
 from app.api.deps import db_session as db_session_dep
 from app.api.v1.auth import logout as logout_module
 from app.api.v1.auth import me as me_module
@@ -47,6 +47,7 @@ from app.auth import session as auth_session
 from app.auth.session import SESSION_COOKIE_NAME, issue
 from app.config import Settings
 from tests.factories.identity import bootstrap_user
+from tests.integration.auth._cleanup import delete_api_tokens_for_scope
 
 pytestmark = pytest.mark.integration
 
@@ -127,16 +128,6 @@ def client(
     ) as c:
         yield c
 
-    # Sweep committed AuditLog rows so sibling integration tests see a
-    # clean audit table. SessionRow / ApiToken / User are owned by the
-    # ``seed_user`` fixture which scopes its cleanup to the user_id it
-    # created — broad deletes here would trip FK constraints from
-    # unrelated tables (passkey_credential, role_grant, break_glass_code,
-    # ...) that other tests on the same xdist worker may have populated.
-    with session_factory() as s:
-        s.execute(delete(AuditLog))
-        s.commit()
-
 
 @pytest.fixture
 def seed_user(session_factory: sessionmaker[Session]) -> Iterator[str]:
@@ -153,7 +144,12 @@ def seed_user(session_factory: sessionmaker[Session]) -> Iterator[str]:
     yield user_id
     with session_factory() as s:
         s.execute(delete(SessionRow).where(SessionRow.user_id == user_id))
-        s.execute(delete(ApiToken).where(ApiToken.user_id == user_id))
+        delete_api_tokens_for_scope(s, user_ids=(user_id,))
+        s.execute(
+            delete(AuditLog).where(
+                or_(AuditLog.actor_id == user_id, AuditLog.entity_id == user_id)
+            )
+        )
         s.execute(delete(User).where(User.id == user_id))
         s.commit()
 

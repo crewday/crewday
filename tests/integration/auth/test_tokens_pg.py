@@ -46,6 +46,7 @@ from tests.factories.identity import (
     bootstrap_workspace,
     build_workspace_context,
 )
+from tests.integration.auth._cleanup import delete_api_tokens_for_scope
 
 pytestmark = pytest.mark.integration
 
@@ -112,10 +113,7 @@ def seeded_ctx(
     # workspace-scoped and need the tenant filter bypassed).
     with session_factory() as s:
         with tenant_agnostic():
-            for tok in s.scalars(
-                select(ApiToken).where(ApiToken.workspace_id == ws_id)
-            ).all():
-                s.delete(tok)
+            delete_api_tokens_for_scope(s, workspace_ids=(ws_id,), user_ids=(user_id,))
             for audit in s.scalars(
                 select(AuditLog).where(AuditLog.workspace_id == ws_id)
             ).all():

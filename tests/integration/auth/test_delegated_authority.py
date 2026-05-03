@@ -49,6 +49,7 @@ from app.tenancy.middleware import WorkspaceContextMiddleware
 from app.tenancy.orm_filter import install_tenant_filter
 from app.util.ulid import new_ulid
 from tests.factories.identity import bootstrap_user, bootstrap_workspace
+from tests.integration.auth._cleanup import delete_api_tokens_for_scope
 
 pytestmark = pytest.mark.integration
 
@@ -112,29 +113,23 @@ def _scoped_sweep(
     actively using on the shared engine. ``api_token`` is deleted
     BEFORE ``user`` so the ``ck_api_token_kind_shape`` CHECK cannot
     trip on the FK ``ON DELETE SET NULL`` cascade (which would null
-    ``delegate_for_user_id`` on a row whose ``kind`` requires it).
+    ``delegate_for_user_id`` / ``subject_user_id`` on a row whose
+    ``kind`` requires it).
     """
     from app.adapters.db.audit.models import AuditLog
     from app.adapters.db.authz.models import (
         PermissionGroup,
         PermissionGroupMember,
     )
-    from app.adapters.db.identity.models import ApiToken, User
+    from app.adapters.db.identity.models import User
     from app.adapters.db.workspace.models import UserWorkspace, Workspace
 
     with session_factory() as s, tenant_agnostic():
-        # api_token rows pinned to this workspace OR delegating-for /
-        # owned-by these users. The FK ``user_id`` always names the
-        # creating user; ``delegate_for_user_id`` may also point at one
-        # of them. Sweep both predicates so a row never gets orphaned.
-        for tok in s.scalars(
-            select(ApiToken).where(ApiToken.workspace_id == workspace_id)
-        ).all():
-            s.delete(tok)
-        for tok in s.scalars(
-            select(ApiToken).where(ApiToken.delegate_for_user_id.in_(user_ids))
-        ).all():
-            s.delete(tok)
+        delete_api_tokens_for_scope(
+            s,
+            workspace_ids=(workspace_id,),
+            user_ids=user_ids,
+        )
         # Workspace-scoped governance / membership.
         for model in (
             RoleGrant,

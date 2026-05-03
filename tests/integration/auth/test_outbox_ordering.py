@@ -36,7 +36,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from pydantic import SecretStr
-from sqlalchemy import Engine, select
+from sqlalchemy import Engine, delete, or_, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.adapters.db import session as session_module
@@ -72,11 +72,14 @@ from app.auth.session import SESSION_COOKIE_NAME, issue
 from app.capabilities import Capabilities, DeploymentSettings, Features
 from app.config import Settings
 from app.tenancy import WorkspaceContext
+from tests.integration.auth._cleanup import delete_api_tokens_for_scope
 
 pytestmark = pytest.mark.integration
 
 _PINNED = datetime(2026, 4, 25, 12, 0, 0, tzinfo=UTC)
 _BASE_URL = "https://crew.day"
+_SEED_EMAILS = ("owner@example.com", "target@example.com")
+_SEED_SLUGS = ("ws-outbox",)
 
 
 # ---------------------------------------------------------------------------
@@ -197,26 +200,64 @@ def factory(engine: Engine) -> Iterator[sessionmaker[Session]]:
                 SignupAttempt as _SA,
             )
 
-            for model in (
-                _ECP,
-                _MLN,
-                _SA,
-                _PK,
-                _Sess,
-                Invite,
-                AuditLog,
-                PermissionGroupMember,
-                RoleGrant,
-                PermissionGroup,
-            ):
-                for row in s.scalars(select(model)).all():
-                    s.delete(row)
-            for ws_link in s.scalars(select(UserWorkspace)).all():
-                s.delete(ws_link)
-            for u in s.scalars(select(User)).all():
-                s.delete(u)
-            for w in s.scalars(select(Workspace)).all():
-                s.delete(w)
+            user_ids = tuple(
+                s.scalars(select(User.id).where(User.email_lower.in_(_SEED_EMAILS)))
+            )
+            workspace_ids = tuple(
+                s.scalars(select(Workspace.id).where(Workspace.slug.in_(_SEED_SLUGS)))
+            )
+            delete_api_tokens_for_scope(
+                s, workspace_ids=workspace_ids, user_ids=user_ids
+            )
+            s.execute(delete(_ECP).where(_ECP.user_id.in_(user_ids)))
+            s.execute(delete(_MLN).where(_MLN.subject_id.in_(user_ids)))
+            s.execute(
+                delete(_SA).where(
+                    or_(
+                        _SA.email_lower.in_(("newuser@example.com",)),
+                        _SA.desired_slug.in_(("villa-9slq",)),
+                    )
+                )
+            )
+            s.execute(delete(_PK).where(_PK.user_id.in_(user_ids)))
+            s.execute(delete(_Sess).where(_Sess.user_id.in_(user_ids)))
+            s.execute(delete(Invite).where(Invite.workspace_id.in_(workspace_ids)))
+            s.execute(
+                delete(AuditLog).where(
+                    or_(
+                        AuditLog.workspace_id.in_(workspace_ids),
+                        AuditLog.actor_id.in_(user_ids),
+                    )
+                )
+            )
+            s.execute(
+                delete(PermissionGroupMember).where(
+                    PermissionGroupMember.workspace_id.in_(workspace_ids)
+                )
+            )
+            s.execute(
+                delete(RoleGrant).where(
+                    or_(
+                        RoleGrant.workspace_id.in_(workspace_ids),
+                        RoleGrant.user_id.in_(user_ids),
+                    )
+                )
+            )
+            s.execute(
+                delete(PermissionGroup).where(
+                    PermissionGroup.workspace_id.in_(workspace_ids)
+                )
+            )
+            s.execute(
+                delete(UserWorkspace).where(
+                    or_(
+                        UserWorkspace.workspace_id.in_(workspace_ids),
+                        UserWorkspace.user_id.in_(user_ids),
+                    )
+                )
+            )
+            s.execute(delete(User).where(User.id.in_(user_ids)))
+            s.execute(delete(Workspace).where(Workspace.id.in_(workspace_ids)))
             s.commit()
 
 

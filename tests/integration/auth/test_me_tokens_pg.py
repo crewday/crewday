@@ -45,6 +45,7 @@ from app.auth.session import SESSION_COOKIE_NAME, issue
 from app.config import Settings
 from app.tenancy import tenant_agnostic
 from tests.factories.identity import bootstrap_user
+from tests.integration.auth._cleanup import delete_api_tokens_for_scope
 
 pytestmark = pytest.mark.integration
 
@@ -100,8 +101,7 @@ def seed_user(session_factory: sessionmaker[Session]) -> Iterator[str]:
             diff = audit_row.diff
             if isinstance(diff, dict) and diff.get("user_id") == user_id:
                 s.delete(audit_row)
-        for tok in s.scalars(select(ApiToken).where(ApiToken.user_id == user_id)).all():
-            s.delete(tok)
+        delete_api_tokens_for_scope(s, user_ids=(user_id,))
         for sess in s.scalars(
             select(SessionRow).where(SessionRow.user_id == user_id)
         ).all():

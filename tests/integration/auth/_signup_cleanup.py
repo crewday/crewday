@@ -16,7 +16,6 @@ from app.adapters.db.authz.models import (
     RoleGrant,
 )
 from app.adapters.db.identity.models import (
-    ApiToken,
     MagicLinkNonce,
     PasskeyCredential,
     SignupAttempt,
@@ -28,6 +27,7 @@ from app.adapters.db.identity.models import (
 )
 from app.adapters.db.llm.models import BudgetLedger
 from app.adapters.db.workspace.models import UserWorkspace, Workspace
+from tests.integration.auth._cleanup import delete_api_tokens_for_scope
 
 
 def delete_signup_rows(
@@ -103,12 +103,7 @@ def delete_signup_rows(
             AuthSession.user_id.in_(user_ids) if user_ids else None,
             AuthSession.workspace_id.in_(workspace_ids) if workspace_ids else None,
         )
-        _delete_where(
-            s,
-            ApiToken,
-            ApiToken.user_id.in_(user_ids) if user_ids else None,
-            ApiToken.workspace_id.in_(workspace_ids) if workspace_ids else None,
-        )
+        delete_api_tokens_for_scope(s, workspace_ids=workspace_ids, user_ids=user_ids)
         _delete_where(
             s,
             WebAuthnChallenge,

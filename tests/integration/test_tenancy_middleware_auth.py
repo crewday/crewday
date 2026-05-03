@@ -32,14 +32,24 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from pydantic import SecretStr
-from sqlalchemy import Engine
+from sqlalchemy import Engine, delete, or_, select
 from sqlalchemy.orm import Session, sessionmaker
 
 import app.adapters.db.session as _session_mod
+from app.adapters.db.audit.models import AuditLog
+from app.adapters.db.authz.models import (
+    PermissionGroup,
+    PermissionGroupMember,
+    RoleGrant,
+)
+from app.adapters.db.identity.models import Session as SessionRow
+from app.adapters.db.identity.models import User
+from app.adapters.db.workspace.models import UserWorkspace, Workspace
 from app.auth.session import SESSION_COOKIE_NAME
 from app.auth.session import issue as issue_session
 from app.auth.tokens import mint as mint_token
 from app.config import Settings
+from app.tenancy import tenant_agnostic
 from app.tenancy.context import WorkspaceContext
 from app.tenancy.current import get_current
 from app.tenancy.middleware import (
@@ -49,11 +59,40 @@ from app.tenancy.middleware import (
 from app.tenancy.orm_filter import install_tenant_filter
 from app.util.ulid import new_ulid
 from tests.factories.identity import bootstrap_user, bootstrap_workspace
+from tests.integration.auth._cleanup import delete_api_tokens_for_scope
 
 pytestmark = pytest.mark.integration
 
 
 _PINNED = datetime(2026, 4, 19, 12, 0, 0, tzinfo=UTC)
+_TENANCY_TEST_EMAILS = (
+    "owner-int-session@example.com",
+    "tok-int-token@example.com",
+    "owner-ct-bodies@example.com",
+    "outsider-ct-bodies@example.com",
+    "owner-ct-timing@example.com",
+    "outsider-ct-timing@example.com",
+    "del-archived@example.com",
+    "pat-archived@example.com",
+    "scoped-archived@example.com",
+    "sess-archived@example.com",
+    "sess-reinstated@example.com",
+    "del-inactive@example.com",
+    "pat-inactive@example.com",
+)
+_TENANCY_TEST_SLUGS = (
+    "int-owner",
+    "int-token",
+    "real-ct-ws",
+    "timing-ws",
+    "int-del-arch",
+    "int-pat-arch",
+    "int-scoped-arch",
+    "int-sess-arch",
+    "int-sess-rs",
+    "int-del-inactive",
+    "int-pat-inactive",
+)
 
 
 @pytest.fixture
@@ -73,6 +112,68 @@ def session_factory(engine: Engine) -> sessionmaker[Session]:
     factory = sessionmaker(bind=engine, expire_on_commit=False, class_=Session)
     install_tenant_filter(factory)
     return factory
+
+
+@pytest.fixture(autouse=True)
+def sweep_tenancy_auth_rows(
+    session_factory: sessionmaker[Session],
+) -> Iterator[None]:
+    yield
+    with session_factory() as s, tenant_agnostic():
+        user_ids = tuple(
+            s.scalars(select(User.id).where(User.email_lower.in_(_TENANCY_TEST_EMAILS)))
+        )
+        workspace_ids = tuple(
+            s.scalars(
+                select(Workspace.id).where(Workspace.slug.in_(_TENANCY_TEST_SLUGS))
+            )
+        )
+        delete_api_tokens_for_scope(s, workspace_ids=workspace_ids, user_ids=user_ids)
+        s.execute(
+            delete(SessionRow).where(
+                or_(
+                    SessionRow.user_id.in_(user_ids),
+                    SessionRow.workspace_id.in_(workspace_ids),
+                )
+            )
+        )
+        s.execute(
+            delete(AuditLog).where(
+                or_(
+                    AuditLog.workspace_id.in_(workspace_ids),
+                    AuditLog.actor_id.in_(user_ids),
+                )
+            )
+        )
+        s.execute(
+            delete(PermissionGroupMember).where(
+                PermissionGroupMember.workspace_id.in_(workspace_ids)
+            )
+        )
+        s.execute(
+            delete(RoleGrant).where(
+                or_(
+                    RoleGrant.workspace_id.in_(workspace_ids),
+                    RoleGrant.user_id.in_(user_ids),
+                )
+            )
+        )
+        s.execute(
+            delete(PermissionGroup).where(
+                PermissionGroup.workspace_id.in_(workspace_ids)
+            )
+        )
+        s.execute(
+            delete(UserWorkspace).where(
+                or_(
+                    UserWorkspace.workspace_id.in_(workspace_ids),
+                    UserWorkspace.user_id.in_(user_ids),
+                )
+            )
+        )
+        s.execute(delete(Workspace).where(Workspace.id.in_(workspace_ids)))
+        s.execute(delete(User).where(User.id.in_(user_ids)))
+        s.commit()
 
 
 @pytest.fixture

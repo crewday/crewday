@@ -39,7 +39,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from pydantic import SecretStr
-from sqlalchemy import Engine, delete, select
+from sqlalchemy import Engine, delete, or_, select
 from sqlalchemy.orm import Session, sessionmaker
 from webauthn.helpers import bytes_to_base64url
 from webauthn.helpers.structs import (
@@ -48,7 +48,6 @@ from webauthn.helpers.structs import (
 
 from app.adapters.db.audit.models import AuditLog
 from app.adapters.db.identity.models import (
-    ApiToken,
     PasskeyCredential,
     User,
     WebAuthnChallenge,
@@ -62,10 +61,14 @@ from app.auth.webauthn import RelyingParty, VerifiedAuthentication
 from app.config import Settings
 from app.util.ulid import new_ulid
 from tests.factories.identity import bootstrap_user
+from tests.integration.auth._cleanup import delete_api_tokens_for_scope
 
 pytestmark = pytest.mark.integration
 
 _PINNED = datetime(2026, 4, 20, 12, 0, 0, tzinfo=UTC)
+_seeded_user_ids: set[str] = set()
+_seeded_challenge_ids: set[str] = set()
+_seeded_audit_entity_ids: set[str] = set()
 
 
 # ---------------------------------------------------------------------------
@@ -136,6 +139,9 @@ def client(
     app.include_router(router, prefix="/api/v1")
 
     factory = sessionmaker(bind=engine, expire_on_commit=False, class_=Session)
+    _seeded_user_ids.clear()
+    _seeded_challenge_ids.clear()
+    _seeded_audit_entity_ids.clear()
 
     def _session() -> Iterator[Session]:
         s = factory()
@@ -164,13 +170,36 @@ def client(
     # Clean up committed rows so sibling integration tests see a clean
     # table. Strictly scoped: only the families this flow touches.
     with factory() as s:
-        s.execute(delete(PasskeyCredential))
-        s.execute(delete(SessionRow))
-        s.execute(delete(ApiToken))
-        s.execute(delete(WebAuthnChallenge))
-        s.execute(delete(AuditLog))
-        s.execute(delete(User))
+        user_ids = tuple(_seeded_user_ids)
+        challenge_ids = tuple(_seeded_challenge_ids)
+        audit_entity_ids = tuple((*challenge_ids, *_seeded_audit_entity_ids))
+        s.execute(
+            delete(PasskeyCredential).where(PasskeyCredential.user_id.in_(user_ids))
+        )
+        s.execute(delete(SessionRow).where(SessionRow.user_id.in_(user_ids)))
+        delete_api_tokens_for_scope(s, user_ids=user_ids)
+        s.execute(
+            delete(WebAuthnChallenge).where(
+                or_(
+                    WebAuthnChallenge.user_id.in_(user_ids),
+                    WebAuthnChallenge.id.in_(challenge_ids),
+                )
+            )
+        )
+        s.execute(
+            delete(AuditLog).where(
+                or_(
+                    AuditLog.actor_id.in_(user_ids),
+                    AuditLog.entity_id.in_(user_ids),
+                    AuditLog.entity_id.in_(audit_entity_ids),
+                )
+            )
+        )
+        s.execute(delete(User).where(User.id.in_(user_ids)))
         s.commit()
+    _seeded_user_ids.clear()
+    _seeded_challenge_ids.clear()
+    _seeded_audit_entity_ids.clear()
 
 
 def _verified(new_sign_count: int) -> VerifiedAuthentication:
@@ -217,7 +246,16 @@ def _seed_credential(engine: Engine, sign_count: int = 1) -> tuple[str, bytes]:
             )
         )
         s.commit()
+        _seeded_user_ids.add(user.id)
+        _seeded_audit_entity_ids.add(bytes_to_base64url(credential_id))
         return user.id, credential_id
+
+
+def _start_login(client: TestClient) -> tuple[Any, str]:
+    response = client.post("/api/v1/auth/passkey/login/start")
+    challenge_id = response.json()["challenge_id"]
+    _seeded_challenge_ids.add(challenge_id)
+    return response, challenge_id
 
 
 # ---------------------------------------------------------------------------
@@ -236,9 +274,8 @@ class TestLoginFullFlowIntegration:
     ) -> None:
         user_id, credential_id = _seed_credential(engine, sign_count=1)
 
-        start = client.post("/api/v1/auth/passkey/login/start")
+        start, challenge_id = _start_login(client)
         assert start.status_code == 200, start.text
-        challenge_id = start.json()["challenge_id"]
 
         # Stub the WebAuthn verifier — the rest is real.
         monkeypatch.setattr(
@@ -298,8 +335,7 @@ class TestLoginFullFlowIntegration:
     ) -> None:
         user_id, credential_id = _seed_credential(engine, sign_count=10)
 
-        start = client.post("/api/v1/auth/passkey/login/start")
-        challenge_id = start.json()["challenge_id"]
+        _start, challenge_id = _start_login(client)
 
         # Authenticator returns a lower counter → clone.
         monkeypatch.setattr(
@@ -381,7 +417,7 @@ class TestLoginFullFlowIntegration:
         user_id, credential_id = _seed_credential(engine, sign_count=10)
 
         # First attempt — clone detected, credential hard-deleted.
-        start1 = client.post("/api/v1/auth/passkey/login/start")
+        _start1, challenge_id1 = _start_login(client)
         monkeypatch.setattr(
             passkey_module,
             "verify_authentication",
@@ -390,7 +426,7 @@ class TestLoginFullFlowIntegration:
         first = client.post(
             "/api/v1/auth/passkey/login/finish",
             json={
-                "challenge_id": start1.json()["challenge_id"],
+                "challenge_id": challenge_id1,
                 "credential": _raw_assertion(credential_id),
             },
         )
@@ -402,7 +438,7 @@ class TestLoginFullFlowIntegration:
         # Second attempt — credential is gone, so domain raises
         # InvalidLoginAttempt (unknown credential) rather than
         # CloneDetected. Same 401 wire shape either way.
-        start2 = client.post("/api/v1/auth/passkey/login/start")
+        _start2, challenge_id2 = _start_login(client)
         monkeypatch.setattr(
             passkey_module,
             "verify_authentication",
@@ -411,7 +447,7 @@ class TestLoginFullFlowIntegration:
         second = client.post(
             "/api/v1/auth/passkey/login/finish",
             json={
-                "challenge_id": start2.json()["challenge_id"],
+                "challenge_id": challenge_id2,
                 "credential": _raw_assertion(credential_id),
             },
         )
@@ -453,9 +489,9 @@ class TestLoginFullFlowIntegration:
             )
             user_id = user.id
             s.commit()
+            _seeded_user_ids.add(user_id)
 
-        start = client.post("/api/v1/auth/passkey/login/start")
-        challenge_id = start.json()["challenge_id"]
+        _start, challenge_id = _start_login(client)
 
         monkeypatch.setattr(
             passkey_module,

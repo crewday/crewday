@@ -41,7 +41,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from pydantic import SecretStr
-from sqlalchemy import Engine, delete, select
+from sqlalchemy import Engine, delete, or_, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.adapters.db.assets.models import AssetType
@@ -51,8 +51,8 @@ from app.adapters.db.authz.models import (
     PermissionGroupMember,
     RoleGrant,
 )
-from app.adapters.db.identity.models import ApiToken, User
 from app.adapters.db.identity.models import Session as SessionRow
+from app.adapters.db.identity.models import User
 from app.adapters.db.workspace.models import UserWorkspace, Workspace
 from app.api.deps import db_session as db_session_dep
 from app.api.v1.auth import me as me_module
@@ -62,6 +62,7 @@ from app.config import Settings
 from app.tenancy import tenant_agnostic
 from app.util.ulid import new_ulid
 from tests.factories.identity import bootstrap_user, bootstrap_workspace
+from tests.integration.auth._cleanup import delete_api_tokens_for_scope
 
 pytestmark = pytest.mark.integration
 
@@ -71,6 +72,20 @@ pytestmark = pytest.mark.integration
 # §15 fingerprint gate and the 200 path never lands.
 _TEST_UA: str = "pytest-auth-me"
 _TEST_ACCEPT_LANGUAGE: str = "en"
+_SEED_EMAILS: tuple[str, ...] = (
+    "happy@example.com",
+    "defaults@example.com",
+    "admin@example.com",
+    "expired@example.com",
+    "revoked@example.com",
+)
+_SEED_SLUGS: tuple[str, ...] = (
+    "ws-happy",
+    "ws-defaults",
+    "ws-admin",
+    "ws-expired",
+    "ws-revoked",
+)
 
 
 # ---------------------------------------------------------------------------
@@ -112,25 +127,25 @@ def client(
     """
     monkeypatch.setattr("app.auth.session.get_settings", lambda: settings)
 
-    # Pre-sweep ``AuditLog`` so a sibling test's residual rows can't
-    # bleed into assertions that count session audit events. The User
-    # rows this test seeds carry deterministic emails (``happy@…`` etc.)
-    # so a stale row from another suite that left ``email_lower`` behind
-    # would trip the UNIQUE constraint inside ``bootstrap_user`` — sweep
-    # those by email here as a narrow defensive cleanup. We deliberately
-    # do NOT broad-sweep ``Workspace`` / ``User`` pre-test because that
-    # would risk tripping FK RESTRICT against unrelated suites' rows on
-    # PG; the post-sweep below handles broad cleanup with a SQLite-only
-    # FK toggle.
-    _SEED_EMAILS: tuple[str, ...] = (
-        "happy@example.com",
-        "defaults@example.com",
-        "admin@example.com",
-        "expired@example.com",
-        "revoked@example.com",
-    )
+    # Pre-sweep this module's deterministic seeds so failed prior runs
+    # cannot trip unique constraints or audit-count assertions.
     with session_factory() as s:
-        s.execute(delete(AuditLog))
+        seeded_user_ids = tuple(
+            s.scalars(select(User.id).where(User.email_lower.in_(_SEED_EMAILS)))
+        )
+        seeded_ws_ids = tuple(
+            s.scalars(select(Workspace.id).where(Workspace.slug.in_(_SEED_SLUGS)))
+        )
+        s.execute(
+            delete(AuditLog).where(
+                or_(
+                    AuditLog.workspace_id.in_(seeded_ws_ids),
+                    AuditLog.actor_id.in_(seeded_user_ids),
+                    AuditLog.entity_id.in_((*seeded_user_ids, *seeded_ws_ids)),
+                )
+            )
+        )
+        delete_api_tokens_for_scope(s, user_ids=seeded_user_ids)
         s.execute(delete(User).where(User.email_lower.in_(_SEED_EMAILS)))
         s.commit()
 
@@ -161,83 +176,67 @@ def client(
         yield c
 
     # Sweep committed rows so sibling integration tests see clean tables.
-    # SQLite path uses ``PRAGMA foreign_keys = OFF`` so the broad cleanup
-    # can run even if a sibling test on the same xdist worker has
-    # populated workspace-child tables we don't enumerate here. Mirrors
-    # :mod:`tests.integration.auth.test_recovery_full_flow`.
-    #
-    # Postgres has no equivalent per-connection FK toggle. Running the
-    # broad ``DELETE FROM workspace`` on PG would trip a RESTRICT FK
-    # whenever a sibling left workspace-child rows behind, so the PG
-    # branch scopes deletes to rows owned by ``_SEED_EMAILS`` users +
-    # the workspaces seeded by ``_seed_owner_workspace`` (slugs prefixed
-    # with ``ws-``). AuditLog is broad-swept on both backends so a
-    # session-emitted audit row can't leak across runs.
-    _SEED_SLUGS: tuple[str, ...] = (
-        "ws-happy",
-        "ws-defaults",
-        "ws-admin",
-        "ws-expired",
-        "ws-revoked",
-    )
+    # Keep the predicates tied to this module's deterministic seed emails
+    # and slugs; the integration engine is shared across tests.
     with engine.connect() as conn:
-        if conn.dialect.name == "sqlite":
-            conn.exec_driver_sql("PRAGMA foreign_keys = OFF")
-            try:
-                for table_model in (
-                    SessionRow,
-                    ApiToken,
-                    PermissionGroupMember,
-                    PermissionGroup,
-                    RoleGrant,
-                    UserWorkspace,
-                    AssetType,
-                    Workspace,
-                    User,
-                    AuditLog,
-                ):
-                    conn.execute(delete(table_model))
-                conn.commit()
-            finally:
-                conn.exec_driver_sql("PRAGMA foreign_keys = ON")
-        else:
-            seeded_user_ids = list(
-                conn.execute(
-                    select(User.id).where(User.email_lower.in_(_SEED_EMAILS))
-                ).scalars()
-            )
-            seeded_ws_ids = list(
-                conn.execute(
-                    select(Workspace.id).where(Workspace.slug.in_(_SEED_SLUGS))
-                ).scalars()
-            )
-            conn.execute(
-                delete(SessionRow).where(SessionRow.user_id.in_(seeded_user_ids))
-            )
-            conn.execute(delete(ApiToken).where(ApiToken.user_id.in_(seeded_user_ids)))
-            conn.execute(
-                delete(PermissionGroupMember).where(
-                    PermissionGroupMember.workspace_id.in_(seeded_ws_ids)
+        seeded_user_ids = list(
+            conn.execute(select(User.id).where(User.email_lower.in_(_SEED_EMAILS)))
+            .scalars()
+            .all()
+        )
+        seeded_ws_ids = list(
+            conn.execute(select(Workspace.id).where(Workspace.slug.in_(_SEED_SLUGS)))
+            .scalars()
+            .all()
+        )
+        conn.execute(delete(SessionRow).where(SessionRow.user_id.in_(seeded_user_ids)))
+        delete_api_tokens_for_scope(
+            conn,
+            workspace_ids=seeded_ws_ids,
+            user_ids=seeded_user_ids,
+        )
+        conn.execute(
+            delete(PermissionGroupMember).where(
+                or_(
+                    PermissionGroupMember.workspace_id.in_(seeded_ws_ids),
+                    PermissionGroupMember.user_id.in_(seeded_user_ids),
                 )
             )
-            conn.execute(
-                delete(PermissionGroup).where(
-                    PermissionGroup.workspace_id.in_(seeded_ws_ids)
+        )
+        conn.execute(
+            delete(RoleGrant).where(
+                or_(
+                    RoleGrant.workspace_id.in_(seeded_ws_ids),
+                    RoleGrant.user_id.in_(seeded_user_ids),
                 )
             )
-            conn.execute(
-                delete(RoleGrant).where(RoleGrant.user_id.in_(seeded_user_ids))
+        )
+        conn.execute(
+            delete(PermissionGroup).where(
+                PermissionGroup.workspace_id.in_(seeded_ws_ids)
             )
-            conn.execute(
-                delete(UserWorkspace).where(UserWorkspace.user_id.in_(seeded_user_ids))
+        )
+        conn.execute(
+            delete(UserWorkspace).where(
+                or_(
+                    UserWorkspace.workspace_id.in_(seeded_ws_ids),
+                    UserWorkspace.user_id.in_(seeded_user_ids),
+                )
             )
-            conn.execute(
-                delete(AssetType).where(AssetType.workspace_id.in_(seeded_ws_ids))
+        )
+        conn.execute(delete(AssetType).where(AssetType.workspace_id.in_(seeded_ws_ids)))
+        conn.execute(
+            delete(AuditLog).where(
+                or_(
+                    AuditLog.workspace_id.in_(seeded_ws_ids),
+                    AuditLog.actor_id.in_(seeded_user_ids),
+                    AuditLog.entity_id.in_((*seeded_user_ids, *seeded_ws_ids)),
+                )
             )
-            conn.execute(delete(Workspace).where(Workspace.slug.in_(_SEED_SLUGS)))
-            conn.execute(delete(User).where(User.email_lower.in_(_SEED_EMAILS)))
-            conn.execute(delete(AuditLog))
-            conn.commit()
+        )
+        conn.execute(delete(Workspace).where(Workspace.id.in_(seeded_ws_ids)))
+        conn.execute(delete(User).where(User.id.in_(seeded_user_ids)))
+        conn.commit()
 
 
 # ---------------------------------------------------------------------------
