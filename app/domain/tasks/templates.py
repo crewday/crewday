@@ -848,6 +848,10 @@ def read_many(
     return [_row_to_view(row) for row in rows]
 
 
+def _escape_like_pattern(value: str) -> str:
+    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
 def list_templates(
     session: Session,
     ctx: WorkspaceContext,
@@ -887,11 +891,11 @@ def list_templates(
         # stay inline because extracting the helper would force an
         # ``Any``-typed wrapper at the domain layer (SQLAlchemy's
         # ``func.lower`` column signature is untyped at that seam).
-        needle = f"%{q.strip().lower()}%"
+        needle = f"%{_escape_like_pattern(q.strip().lower())}%"
         stmt = stmt.where(
             or_(
-                func.lower(TaskTemplate.name).like(needle),
-                func.lower(TaskTemplate.description_md).like(needle),
+                func.lower(TaskTemplate.name).like(needle, escape="\\"),
+                func.lower(TaskTemplate.description_md).like(needle, escape="\\"),
             )
         )
     stmt = stmt.order_by(TaskTemplate.created_at.asc(), TaskTemplate.id.asc())

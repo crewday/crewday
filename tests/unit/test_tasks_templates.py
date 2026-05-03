@@ -1033,6 +1033,63 @@ class TestList:
         rows = list_templates(session, ctx, q="KITCHEN")
         assert len(rows) == 1
 
+    def test_q_escapes_underscore_wildcard(self, session: Session) -> None:
+        ws = _bootstrap_workspace(session, slug="list-q-underscore")
+        ctx = _ctx(ws, slug="list-q-underscore")
+        create(
+            session,
+            ctx,
+            body=_minimal_body(name="Kitchen_deep clean", description_md="blurb"),
+            clock=FrozenClock(_PINNED),
+        )
+        create(
+            session,
+            ctx,
+            body=_minimal_body(name="KitchenXdeep clean", description_md="blurb"),
+            clock=FrozenClock(_PINNED),
+        )
+
+        rows = list_templates(session, ctx, q="kitchen_deep")
+        assert [r.name for r in rows] == ["Kitchen_deep clean"]
+
+    def test_q_escapes_percent_wildcard(self, session: Session) -> None:
+        ws = _bootstrap_workspace(session, slug="list-q-percent")
+        ctx = _ctx(ws, slug="list-q-percent")
+        create(
+            session,
+            ctx,
+            body=_minimal_body(name="100% linen check", description_md="blurb"),
+            clock=FrozenClock(_PINNED),
+        )
+        create(
+            session,
+            ctx,
+            body=_minimal_body(name="100 percent linen check", description_md="blurb"),
+            clock=FrozenClock(_PINNED),
+        )
+
+        rows = list_templates(session, ctx, q="100%")
+        assert [r.name for r in rows] == ["100% linen check"]
+
+    def test_q_escapes_backslash_escape_character(self, session: Session) -> None:
+        ws = _bootstrap_workspace(session, slug="list-q-backslash")
+        ctx = _ctx(ws, slug="list-q-backslash")
+        create(
+            session,
+            ctx,
+            body=_minimal_body(name="Route A\\B reset", description_md="blurb"),
+            clock=FrozenClock(_PINNED),
+        )
+        create(
+            session,
+            ctx,
+            body=_minimal_body(name="Route AB reset", description_md="blurb"),
+            clock=FrozenClock(_PINNED),
+        )
+
+        rows = list_templates(session, ctx, q="a\\b")
+        assert [r.name for r in rows] == ["Route A\\B reset"]
+
     def test_q_whitespace_only_does_not_filter(self, session: Session) -> None:
         """An all-whitespace ``q`` returns every row (noop filter)."""
         ws = _bootstrap_workspace(session, slug="list-q-ws")
