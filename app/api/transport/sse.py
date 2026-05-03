@@ -680,6 +680,11 @@ _INVALIDATIONS: Final[dict[str, tuple[tuple[str, ...], ...]]] = {
     "task.occurrence.started": (("tasks",), ("shifts",), ("my-schedule",)),
     "task.occurrence.completed": (("tasks",), ("shifts",), ("my-schedule",)),
     "task.overdue": (("tasks",),),
+    # cd-wyq5: template rewrites invalidate the catalog list. Deletes
+    # additionally drop ``schedules`` because a deleted template prunes
+    # previously-derived occurrences from the worker schedule view.
+    "task_template.upserted": (("task_templates",),),
+    "task_template.deleted": (("task_templates",), ("schedules",)),
     "stay.upcoming": (("stays",),),
     "property.closure.created": (
         ("stays",),

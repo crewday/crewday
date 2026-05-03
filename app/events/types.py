@@ -117,6 +117,8 @@ __all__ = [
     "TaskReassigned",
     "TaskRejected",
     "TaskSkipped",
+    "TaskTemplateDeleted",
+    "TaskTemplateUpserted",
     "TaskUnassigned",
     "TaskUpdated",
     "UserAgentSettingsChanged",
@@ -2040,3 +2042,61 @@ class InviteExpired(Event):
     allowed_roles: ClassVar[tuple[EventRole, ...]] = ("manager",)
 
     invite_id: str
+
+
+@register
+class TaskTemplateUpserted(Event):
+    """A task template row was created or its mutable fields rewritten (cd-wyq5).
+
+    Fired by :func:`app.domain.tasks.templates.create` and
+    :func:`app.domain.tasks.templates.update` after the audit row lands.
+    A single ``upserted`` event covers both write paths because the SPA
+    fan-out is identical: the manager template catalog refetches, and
+    the worker schedule view drops its derived caches because future
+    occurrences inherit fields from the template (title, expected role,
+    duration, etc.). Mirrors the :class:`PermissionGroupUpserted`
+    create-vs-update conflation pattern.
+
+    **Role scope.** Workspace-narrowed to ``("manager", "worker")``.
+    Managers maintain the catalog; workers see template-derived
+    occurrences in their schedules and need cache invalidation when a
+    template's expected role / duration / cadence shifts. Clients and
+    guests have no business in the template pipeline (cadence rules,
+    role mappings, internal naming).
+
+    **Payload posture.** Foreign-key identifier only — no template
+    title / description / RRULE on the wire. Subscribers that need the
+    rendered row pull ``GET /task_templates/{id}`` under the per-row
+    authz path.
+    """
+
+    name: ClassVar[str] = "task_template.upserted"
+    allowed_roles: ClassVar[tuple[EventRole, ...]] = ("manager", "worker")
+
+    template_id: str
+
+
+@register
+class TaskTemplateDeleted(Event):
+    """A task template row was hard-deleted (cd-wyq5).
+
+    Fired by :func:`app.domain.tasks.templates.delete` after the
+    in-use guard passes and the audit row lands. Refused deletions
+    (template still referenced by a live schedule) raise before this
+    event runs, so subscribers only ever see the success branch.
+
+    **Role scope.** Workspace-narrowed to ``("manager", "worker")``,
+    matching :class:`TaskTemplateUpserted` — workers must drop derived
+    schedule caches because the template that backs their future
+    occurrences just disappeared. Clients and guests stay out.
+
+    **Payload posture.** Foreign-key identifier only. The SPA's
+    template catalog drops the row from the list; the worker schedule
+    view re-fetches because the deletion can prune previously-derived
+    occurrences.
+    """
+
+    name: ClassVar[str] = "task_template.deleted"
+    allowed_roles: ClassVar[tuple[EventRole, ...]] = ("manager", "worker")
+
+    template_id: str

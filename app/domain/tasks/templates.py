@@ -68,6 +68,7 @@ from sqlalchemy.orm import Session
 
 from app.adapters.db.tasks.models import Schedule, TaskTemplate
 from app.audit import write_audit
+from app.events import TaskTemplateDeleted, TaskTemplateUpserted, bus
 from app.tenancy import WorkspaceContext
 from app.util.clock import Clock, SystemClock
 from app.util.ulid import new_ulid
@@ -940,6 +941,18 @@ def create(
         diff={"after": _view_to_diff_dict(view)},
         clock=clock,
     )
+    # Audit-then-publish: a failed publish must not lose the audit row
+    # (cd-wyq5). ``upserted`` covers create + update — see
+    # :class:`TaskTemplateUpserted` for the conflation rationale.
+    bus.publish(
+        TaskTemplateUpserted(
+            workspace_id=ctx.workspace_id,
+            actor_id=ctx.actor_id,
+            correlation_id=ctx.audit_correlation_id,
+            occurred_at=now,
+            template_id=row.id,
+        )
+    )
     return view
 
 
@@ -975,6 +988,17 @@ def update(
             "after": _view_to_diff_dict(after),
         },
         clock=clock,
+    )
+    # Audit-then-publish (cd-wyq5). Same ``upserted`` event as
+    # :func:`create` — the SPA fan-out is identical for both.
+    bus.publish(
+        TaskTemplateUpserted(
+            workspace_id=ctx.workspace_id,
+            actor_id=ctx.actor_id,
+            correlation_id=ctx.audit_correlation_id,
+            occurred_at=now,
+            template_id=row.id,
+        )
     )
     return after
 
@@ -1028,6 +1052,18 @@ def delete(
             "after": _view_to_diff_dict(after),
         },
         clock=clock,
+    )
+    # Audit-then-publish (cd-wyq5). Only reaches here on the success
+    # branch — the in-use guard above raises before the audit + publish
+    # so refused deletions never fan out a delete event.
+    bus.publish(
+        TaskTemplateDeleted(
+            workspace_id=ctx.workspace_id,
+            actor_id=ctx.actor_id,
+            correlation_id=ctx.audit_correlation_id,
+            occurred_at=now,
+            template_id=row.id,
+        )
     )
     return after
 

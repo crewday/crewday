@@ -30,3 +30,30 @@ describe("mocks SSE dispatcher — llm.assignment.changed", () => {
     expect(called).toEqual(expect.arrayContaining([qk.adminLlmGraph()]));
   });
 });
+
+describe("mocks SSE dispatcher — task_template lifecycle (cd-wyq5)", () => {
+  it("upserted invalidates the template catalog only", () => {
+    const qc = makeClient();
+    const spy = vi.spyOn(qc, "invalidateQueries");
+    dispatch(qc, {
+      type: "task_template.upserted",
+      data: JSON.stringify({ template_id: "tpl_1" }),
+    });
+    const called = spy.mock.calls.map((c) => c[0]?.queryKey);
+    expect(called).toEqual(expect.arrayContaining([qk.taskTemplates()]));
+    expect(called).not.toEqual(expect.arrayContaining([qk.schedules()]));
+  });
+
+  it("deleted invalidates templates AND schedules", () => {
+    const qc = makeClient();
+    const spy = vi.spyOn(qc, "invalidateQueries");
+    dispatch(qc, {
+      type: "task_template.deleted",
+      data: JSON.stringify({ template_id: "tpl_1" }),
+    });
+    const called = spy.mock.calls.map((c) => c[0]?.queryKey);
+    expect(called).toEqual(
+      expect.arrayContaining([qk.taskTemplates(), qk.schedules()]),
+    );
+  });
+});

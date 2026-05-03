@@ -721,7 +721,15 @@ the platform must guarantee*.
   handles their own cache). The remaining `expense.*` decisions
   (`approved` / `rejected` / `reimbursed`) are workspace-narrowed to
   `(manager, worker)` so both the worker and the manager queue
-  refresh on the same edge. No polling.
+  refresh on the same edge. The `task_template.upserted` /
+  `task_template.deleted` pair (cd-wyq5) is workspace-narrowed to
+  `(manager, worker)` so the manager template catalog and the
+  worker schedule refresh on every template lifecycle edge:
+  `upserted` invalidates `['task_templates']`; `deleted` also drops
+  `['schedules']` because a deleted template prunes
+  previously-derived future occurrences. Payload is FK-only
+  (`{template_id}`); subscribers re-fetch via REST under the
+  per-row authz path. No polling.
 - **Route-split bundles.** Worker and owner/manager entry points are
   separate. Shared routes (see route contract above) land in both
   bundles. Only manager-only operational surfaces (`/dashboard`,

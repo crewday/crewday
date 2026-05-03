@@ -84,6 +84,8 @@ export function startEventStream(client: QueryClient): () => void {
     "task.updated",
     "task.completed",
     "task.skipped",
+    "task_template.upserted",
+    "task_template.deleted",
     "approval.decided",
     "expense.approved",
     "expense.rejected",
@@ -190,6 +192,18 @@ export function dispatch(client: QueryClient, evt: TypedEvent): void {
       client.invalidateQueries({ queryKey: qk.dashboard() });
       return;
     }
+    case "task_template.upserted":
+      // cd-wyq5 — drop the catalog list so the manager template
+      // surface refetches.
+      client.invalidateQueries({ queryKey: qk.taskTemplates() });
+      return;
+    case "task_template.deleted":
+      // cd-wyq5 — catalog list AND schedules: a deleted template
+      // prunes previously-derived future occurrences from the worker
+      // schedule view.
+      client.invalidateQueries({ queryKey: qk.taskTemplates() });
+      client.invalidateQueries({ queryKey: qk.schedules() });
+      return;
     case "approval.decided":
       client.invalidateQueries({ queryKey: qk.approvals() });
       client.invalidateQueries({ queryKey: qk.dashboard() });

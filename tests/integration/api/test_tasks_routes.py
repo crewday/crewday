@@ -50,6 +50,7 @@ from app.adapters.storage.ports import MimeSniffer
 from app.api.deps import current_workspace_context, get_mime_sniffer, get_storage
 from app.api.deps import db_session as _db_session_dep
 from app.api.v1.tasks import router as tasks_router
+from app.events import TaskTemplateDeleted, TaskTemplateUpserted, bus
 from app.tenancy import WorkspaceContext, tenant_agnostic
 from app.util.ulid import new_ulid
 from tests._fakes.storage import InMemoryStorage
@@ -382,6 +383,125 @@ class TestTemplates:
             # Not necessarily the end of the list — other tests may have
             # added templates. Just verify cursor advanced.
             assert body["data"][0]["id"] != ids[0] or ids[0] not in ids[1:]
+
+    def test_create_emits_task_template_upserted_event(
+        self,
+        session_factory: sessionmaker[Session],
+        seeded: dict[str, Any],
+    ) -> None:
+        """``POST /tasks/task_templates`` publishes
+        :class:`TaskTemplateUpserted` (cd-wyq5).
+
+        Drives the SPA's ``['task_templates']`` cache invalidation so a
+        template added in one tab surfaces in every connected
+        manager/worker tab without polling. ``upserted`` covers the
+        create path; the same event also fires from PATCH.
+        """
+        bus._reset_for_tests()
+        captured: list[TaskTemplateUpserted] = []
+
+        @bus.subscribe(TaskTemplateUpserted)
+        def _on_upsert(event: TaskTemplateUpserted) -> None:
+            captured.append(event)
+
+        try:
+            with _client_for(session_factory, seeded["owner_ctx"]) as client:
+                r = client.post(
+                    "/api/v1/tasks/task_templates",
+                    json={"name": "SSE seed", "description_md": ""},
+                )
+                assert r.status_code == 201, r.text
+                tid = r.json()["id"]
+        finally:
+            bus._reset_for_tests()
+
+        assert len(captured) == 1
+        evt = captured[0]
+        assert evt.template_id == tid
+        assert evt.workspace_id == seeded["workspace_id"]
+        assert evt.actor_id == seeded["owner_ctx"].actor_id
+
+    def test_update_emits_task_template_upserted_event(
+        self,
+        session_factory: sessionmaker[Session],
+        seeded: dict[str, Any],
+    ) -> None:
+        """``PATCH /tasks/task_templates/{id}`` publishes
+        :class:`TaskTemplateUpserted` (cd-wyq5)."""
+        with _client_for(session_factory, seeded["owner_ctx"]) as client:
+            r = client.post(
+                "/api/v1/tasks/task_templates",
+                json={"name": "Pre-update", "description_md": ""},
+            )
+            assert r.status_code == 201, r.text
+            tid = r.json()["id"]
+
+            bus._reset_for_tests()
+            captured: list[TaskTemplateUpserted] = []
+
+            @bus.subscribe(TaskTemplateUpserted)
+            def _on_upsert(event: TaskTemplateUpserted) -> None:
+                captured.append(event)
+
+            try:
+                r = client.patch(
+                    f"/api/v1/tasks/task_templates/{tid}",
+                    json={"name": "Post-update"},
+                )
+                assert r.status_code == 200, r.text
+            finally:
+                bus._reset_for_tests()
+
+        assert len(captured) == 1
+        evt = captured[0]
+        assert evt.template_id == tid
+        assert evt.workspace_id == seeded["workspace_id"]
+        assert evt.actor_id == seeded["owner_ctx"].actor_id
+
+    def test_delete_emits_task_template_deleted_event(
+        self,
+        session_factory: sessionmaker[Session],
+        seeded: dict[str, Any],
+    ) -> None:
+        """``DELETE /tasks/task_templates/{id}`` publishes
+        :class:`TaskTemplateDeleted` (cd-wyq5).
+
+        Refused deletions (template still in use) raise before the
+        publish; only the success branch fans out.
+        """
+        with _client_for(session_factory, seeded["owner_ctx"]) as client:
+            r = client.post(
+                "/api/v1/tasks/task_templates",
+                json={"name": "To delete", "description_md": ""},
+            )
+            assert r.status_code == 201, r.text
+            tid = r.json()["id"]
+
+            bus._reset_for_tests()
+            captured_upsert: list[TaskTemplateUpserted] = []
+            captured_delete: list[TaskTemplateDeleted] = []
+
+            @bus.subscribe(TaskTemplateUpserted)
+            def _on_upsert(event: TaskTemplateUpserted) -> None:
+                captured_upsert.append(event)
+
+            @bus.subscribe(TaskTemplateDeleted)
+            def _on_delete(event: TaskTemplateDeleted) -> None:
+                captured_delete.append(event)
+
+            try:
+                r = client.delete(f"/api/v1/tasks/task_templates/{tid}")
+                assert r.status_code == 200, r.text
+            finally:
+                bus._reset_for_tests()
+
+        # Delete path must not double-fire as an upsert.
+        assert captured_upsert == []
+        assert len(captured_delete) == 1
+        evt = captured_delete[0]
+        assert evt.template_id == tid
+        assert evt.workspace_id == seeded["workspace_id"]
+        assert evt.actor_id == seeded["owner_ctx"].actor_id
 
 
 # ---------------------------------------------------------------------------

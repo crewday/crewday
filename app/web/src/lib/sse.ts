@@ -84,6 +84,9 @@ export type EventKind =
   | "task.comment_added"
   | "task.evidence_added"
   | "task.overdue"
+  // Task templates (§06, cd-wyq5).
+  | "task_template.upserted"
+  | "task_template.deleted"
   // Stays + stay task bundles (§04, §06).
   | "stay.upcoming"
   | "reservation.upserted"
@@ -617,6 +620,23 @@ export const INVALIDATIONS: Record<EventKind, InvalidationHandler> = {
     // §14 worker schedule — overdue chips read with a rust accent in
     // the cell; refresh so the colour matches the new status.
     invalidate(qc, qk.mySchedulePrefix());
+  },
+
+  // cd-wyq5: task template upserted — drop the catalog list so the
+  // manager template surface refetches. Schedules are not invalidated
+  // on upsert; mutating template fields does not move existing
+  // occurrences.
+  "task_template.upserted": (_event, qc) => {
+    invalidate(qc, qk.taskTemplates());
+  },
+
+  // cd-wyq5: task template deleted — drop the catalog list AND the
+  // worker schedule cache. A deleted template prunes previously-
+  // derived future occurrences, so the worker's schedule view has to
+  // refetch its loaded windows.
+  "task_template.deleted": (_event, qc) => {
+    invalidate(qc, qk.taskTemplates());
+    invalidate(qc, qk.schedules());
   },
 
   "stay.upcoming": (_event, qc) => {

@@ -91,6 +91,8 @@ describe("INVALIDATIONS — coverage", () => {
     "task.comment_added",
     "task.evidence_added",
     "task.overdue",
+    "task_template.upserted",
+    "task_template.deleted",
     "stay.upcoming",
     "reservation.upserted",
     "property.closure.created",
@@ -238,6 +240,37 @@ describe("INVALIDATIONS — per-kind behaviour", () => {
         qk.dashboard(),
         qk.mySchedulePrefix(),
       ]),
+    );
+  });
+
+  it("task_template.upserted invalidates the template catalog only", () => {
+    // §06 cd-wyq5 — upserts only refresh `['task_templates']`. They
+    // do NOT drop schedules: mutating a template's mutable fields
+    // does not move existing occurrences.
+    const qc = makeClient();
+    const spy = vi.spyOn(qc, "invalidateQueries");
+    INVALIDATIONS["task_template.upserted"](
+      makeEvent("task_template.upserted", { template_id: "tpl_1" }),
+      qc,
+    );
+    const called = spy.mock.calls.map((c) => c[0]?.queryKey);
+    expect(called).toEqual(expect.arrayContaining([qk.taskTemplates()]));
+    // Schedule prefix must NOT be invalidated on upsert.
+    expect(called).not.toEqual(expect.arrayContaining([qk.schedules()]));
+  });
+
+  it("task_template.deleted invalidates templates AND schedules", () => {
+    // §06 cd-wyq5 — deleting a template prunes previously-derived
+    // future occurrences, so the worker schedule cache has to drop.
+    const qc = makeClient();
+    const spy = vi.spyOn(qc, "invalidateQueries");
+    INVALIDATIONS["task_template.deleted"](
+      makeEvent("task_template.deleted", { template_id: "tpl_1" }),
+      qc,
+    );
+    const called = spy.mock.calls.map((c) => c[0]?.queryKey);
+    expect(called).toEqual(
+      expect.arrayContaining([qk.taskTemplates(), qk.schedules()]),
     );
   });
 

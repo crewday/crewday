@@ -1576,6 +1576,11 @@ export type SseEvent =
   | { event: "task.updated"; data: { task_id: string; changed_fields: string[] } }
   | { event: "task.completed"; data: { task_id: string; completed_by: string } }
   | { event: "task.skipped"; data: { task_id: string; reason: string } }
+  // §06 cd-wyq5 — task template lifecycle. Manager + worker workspace
+  // narrowing on the backend; FK-only payload. Subscribers re-fetch
+  // the rendered template via REST under the per-row authz path.
+  | { event: "task_template.upserted"; data: { template_id: string } }
+  | { event: "task_template.deleted"; data: { template_id: string } }
   | { event: "approval.decided"; data: { id: string; decision: "approve" | "reject" } }
   | { event: "expense.approved"; data: { id: string; status: ExpenseStatus } }
   | { event: "expense.rejected"; data: { id: string; status: ExpenseStatus } }
