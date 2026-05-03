@@ -95,6 +95,7 @@ _NOTIFICATION_KIND_VALUES: tuple[str, ...] = (
     "agent_message",
     "daily_digest",
     "privacy_export_ready",
+    "webhook_auto_paused",
 )
 
 # Allowed ``digest_record.kind`` values. Matches the §10 "Daily digests"

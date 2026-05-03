@@ -36,10 +36,11 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from pydantic import SecretStr
-from sqlalchemy import Engine, delete
+from sqlalchemy import Engine, delete, select
 from sqlalchemy.orm import Session, sessionmaker
 
 import app.adapters.db.session as _session_mod
+from app.adapters.db.audit.models import AuditLog
 from app.adapters.db.integrations.models import (
     WebhookDelivery,
     WebhookSubscription,
@@ -47,6 +48,7 @@ from app.adapters.db.integrations.models import (
 from app.adapters.db.integrations.repositories import (
     SqlAlchemyWebhookRepository,
 )
+from app.adapters.db.messaging.models import Notification
 from app.adapters.db.secrets.models import SecretEnvelope
 from app.adapters.db.secrets.repositories import (
     SqlAlchemySecretEnvelopeRepository,
@@ -60,11 +62,13 @@ from app.domain.integrations.webhooks import (
     DELIVERY_SUCCEEDED,
     create_subscription,
 )
+from app.tenancy import tenant_agnostic
 from app.tenancy.context import WorkspaceContext
 from app.tenancy.orm_filter import install_tenant_filter
 from app.util.clock import FrozenClock
 from app.util.ulid import new_ulid
 from app.worker.tasks.webhook_dispatch import dispatch_due_webhooks
+from tests.factories.identity import bootstrap_user, bootstrap_workspace
 
 pytestmark = pytest.mark.integration
 
@@ -143,6 +147,30 @@ def _bootstrap_workspace(engine: Engine) -> str:
         )
         session.commit()
     return ws_id
+
+
+def _bootstrap_workspace_with_manager(engine: Engine) -> tuple[str, str]:
+    factory = sessionmaker(bind=engine, expire_on_commit=False, class_=Session)
+    manager_id: str
+    workspace_id: str
+    with factory() as session:
+        manager = bootstrap_user(
+            session,
+            email=f"webhook-manager-{new_ulid().lower()}@example.com",
+            display_name="Webhook Manager",
+            clock=FrozenClock(_PINNED),
+        )
+        workspace = bootstrap_workspace(
+            session,
+            slug=f"webhook-health-{new_ulid()[-6:].lower()}",
+            name="Webhook health fixture",
+            owner_user_id=manager.id,
+            clock=FrozenClock(_PINNED),
+        )
+        manager_id = manager.id
+        workspace_id = workspace.id
+        session.commit()
+    return workspace_id, manager_id
 
 
 def _ctx(ws_id: str) -> WorkspaceContext:
@@ -246,6 +274,81 @@ class TestSkipWhenRootKeyMissing:
             if getattr(r, "event", "") == "webhook.dispatch.skipped_no_root_key"
         ]
         assert len(skipped) == 1
+
+
+# ---------------------------------------------------------------------------
+# Health auto-pause
+# ---------------------------------------------------------------------------
+
+
+class TestHealthAutoPause:
+    def test_tick_pauses_all_failure_window_and_notifies_manager(
+        self,
+        engine: Engine,
+        real_make_uow: None,
+        clean_webhook_tables: None,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setenv("CREWDAY_ROOT_KEY", "x" * 32)
+        get_settings.cache_clear()
+
+        ws_id, manager_id = _bootstrap_workspace_with_manager(engine)
+        sub_id = _seed_subscription(engine, ws_id, url="http://127.0.0.1:1/never")
+        factory = sessionmaker(bind=engine, expire_on_commit=False, class_=Session)
+        install_tenant_filter(factory)
+        attempted_at = _PINNED - timedelta(hours=1)
+        with factory() as session:
+            for status_code in (500, 503, None):
+                session.add(
+                    WebhookDelivery(
+                        id=new_ulid(),
+                        workspace_id=ws_id,
+                        subscription_id=sub_id,
+                        event="task.completed",
+                        payload_json={"event": "task.completed", "data": {}},
+                        status=DELIVERY_PENDING,
+                        attempt=1,
+                        next_attempt_at=_PINNED + timedelta(hours=1),
+                        last_status_code=status_code,
+                        last_error=(
+                            "network" if status_code is None else f"http_{status_code}"
+                        ),
+                        last_attempted_at=attempted_at,
+                        succeeded_at=None,
+                        dead_lettered_at=None,
+                        replayed_from_id=None,
+                        created_at=attempted_at,
+                    )
+                )
+            session.commit()
+
+        report = dispatch_due_webhooks(clock=FrozenClock(_PINNED))
+
+        assert report.auto_paused == 1
+        assert report.processed_count == 0
+        with factory() as session, tenant_agnostic():
+            sub = session.get(WebhookSubscription, sub_id)
+            audit = session.scalars(
+                select(AuditLog)
+                .where(AuditLog.entity_kind == "webhook_subscription")
+                .where(AuditLog.entity_id == sub_id)
+                .where(AuditLog.action == "auto_paused")
+            ).one()
+            notification = session.scalars(
+                select(Notification)
+                .where(Notification.workspace_id == ws_id)
+                .where(Notification.recipient_user_id == manager_id)
+                .where(Notification.kind == "webhook_auto_paused")
+            ).one()
+        assert sub is not None
+        assert sub.active is False
+        assert sub.paused_reason == "auto_unhealthy"
+        assert sub.paused_at == _PINNED
+        assert audit.actor_kind == "system"
+        assert audit.workspace_id == ws_id
+        assert audit.diff["thresholds"]["webhook_health_window_h"] == 24
+        assert audit.diff["thresholds"]["webhook_health_min_deliveries"] == 3
+        assert notification.payload_json["subscription_id"] == sub_id
 
 
 # ---------------------------------------------------------------------------

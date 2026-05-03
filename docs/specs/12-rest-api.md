@@ -2377,6 +2377,7 @@ POST   /issues/{id}/convert_to_task
 
 POST   /webhooks
 GET    /webhooks
+GET    /webhooks/{id}
 POST   /webhooks/{id}/disable
 POST   /webhooks/{id}/enable
 POST   /webhooks/{id}/replay

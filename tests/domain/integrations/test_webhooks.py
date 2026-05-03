@@ -21,20 +21,25 @@ import pytest
 from app.adapters.storage.ports import EnvelopeOwner
 from app.domain.integrations.ports import (
     WebhookDeliveryRow,
+    WebhookHealthCandidate,
     WebhookSubscriptionRow,
 )
 from app.domain.integrations.webhooks import (
     DELIVERY_DEAD_LETTERED,
     DELIVERY_PENDING,
     DELIVERY_SUCCEEDED,
+    PAUSED_REASON_AUTO_UNHEALTHY,
     RETRY_SCHEDULE_SECONDS,
     SIGNATURE_HEADER,
     SUBSCRIPTION_SECRET_PURPOSE,
+    WebhookHealthThresholds,
     create_subscription,
     delete_subscription,
     deliver,
+    enable_subscription,
     enqueue,
     list_subscriptions,
+    pause_unhealthy_subscriptions,
     replay_delivery,
     rotate_subscription_secret,
     sign,
@@ -87,6 +92,8 @@ class _InMemoryWebhookRepo:
             secret_last_4=secret_last_4,
             events=tuple(events),
             active=active,
+            paused_reason=None,
+            paused_at=None,
             created_at=created_at,
             updated_at=created_at,
         )
@@ -116,6 +123,58 @@ class _InMemoryWebhookRepo:
             secret_last_4=existing.secret_last_4,
             events=new_events,
             active=active if active is not None else existing.active,
+            paused_reason=None if active is True else existing.paused_reason,
+            paused_at=None if active is True else existing.paused_at,
+            created_at=existing.created_at,
+            updated_at=updated_at,
+        )
+        self.subscriptions[sub_id] = new_row
+        return new_row
+
+    def pause_subscription(
+        self,
+        *,
+        sub_id: str,
+        paused_reason: str,
+        paused_at: datetime,
+        updated_at: datetime,
+    ) -> WebhookSubscriptionRow:
+        existing = self.subscriptions[sub_id]
+        new_row = WebhookSubscriptionRow(
+            id=existing.id,
+            workspace_id=existing.workspace_id,
+            name=existing.name,
+            url=existing.url,
+            secret_blob=existing.secret_blob,
+            secret_last_4=existing.secret_last_4,
+            events=existing.events,
+            active=False,
+            paused_reason=paused_reason,
+            paused_at=paused_at,
+            created_at=existing.created_at,
+            updated_at=updated_at,
+        )
+        self.subscriptions[sub_id] = new_row
+        return new_row
+
+    def enable_subscription(
+        self,
+        *,
+        sub_id: str,
+        updated_at: datetime,
+    ) -> WebhookSubscriptionRow:
+        existing = self.subscriptions[sub_id]
+        new_row = WebhookSubscriptionRow(
+            id=existing.id,
+            workspace_id=existing.workspace_id,
+            name=existing.name,
+            url=existing.url,
+            secret_blob=existing.secret_blob,
+            secret_last_4=existing.secret_last_4,
+            events=existing.events,
+            active=True,
+            paused_reason=None,
+            paused_at=None,
             created_at=existing.created_at,
             updated_at=updated_at,
         )
@@ -140,6 +199,8 @@ class _InMemoryWebhookRepo:
             secret_last_4=secret_last_4,
             events=existing.events,
             active=existing.active,
+            paused_reason=existing.paused_reason,
+            paused_at=existing.paused_at,
             created_at=existing.created_at,
             updated_at=updated_at,
         )
@@ -170,6 +231,39 @@ class _InMemoryWebhookRepo:
             rows = [r for r in rows if r.active]
         rows.sort(key=lambda r: r.created_at, reverse=True)
         return tuple(rows)
+
+    def list_unhealthy_subscription_candidates(
+        self,
+        *,
+        window_start: datetime,
+        min_deliveries: int,
+    ) -> tuple[WebhookHealthCandidate, ...]:
+        candidates: list[WebhookHealthCandidate] = []
+        for subscription in self.subscriptions.values():
+            if not subscription.active:
+                continue
+            attempts = [
+                delivery
+                for delivery in self.deliveries.values()
+                if delivery.subscription_id == subscription.id
+                and delivery.last_attempted_at is not None
+                and delivery.last_attempted_at >= window_start
+            ]
+            if len(attempts) < min_deliveries:
+                continue
+            if any(
+                delivery.last_status_code is not None
+                and 200 <= delivery.last_status_code < 300
+                for delivery in attempts
+            ):
+                continue
+            candidates.append(
+                WebhookHealthCandidate(
+                    subscription=subscription,
+                    delivery_count=len(attempts),
+                )
+            )
+        return tuple(candidates)
 
     def insert_delivery(
         self,
@@ -513,6 +607,44 @@ class TestSubscriptionCrud:
         )
         assert repo.subscriptions == {}
 
+    def test_update_active_true_clears_auto_pause_metadata(self) -> None:
+        repo = _InMemoryWebhookRepo()
+        envelope = FakeEnvelope()
+        clock = FrozenClock(_PINNED)
+        session = _SessionStub()
+        view = create_subscription(
+            session,  # type: ignore[arg-type]
+            _ctx(),
+            repo=repo,
+            envelope=envelope,
+            name="Hermes",
+            url="https://hermes.example.com/hook",
+            events=["task.completed"],
+            clock=clock,
+        )
+        repo.pause_subscription(
+            sub_id=view.id,
+            paused_reason=PAUSED_REASON_AUTO_UNHEALTHY,
+            paused_at=_PINNED,
+            updated_at=_PINNED,
+        )
+        session.added.clear()
+        clock.advance(timedelta(seconds=1))
+
+        updated = update_subscription(
+            session,  # type: ignore[arg-type]
+            _ctx(),
+            repo=repo,
+            sub_id=view.id,
+            active=True,
+            clock=clock,
+        )
+
+        assert updated.active is True
+        assert updated.paused_reason is None
+        assert updated.paused_at is None
+        assert len(session.added) == 1
+
     def test_rotate_secret_returns_plaintext_once_and_audits(self) -> None:
         repo = _InMemoryWebhookRepo()
         envelope = FakeEnvelope()
@@ -588,6 +720,162 @@ class TestSubscriptionCrud:
                 sub_id=view.id,
                 name="hijacked",
             )
+
+
+# ---------------------------------------------------------------------------
+# Subscription health auto-pause
+# ---------------------------------------------------------------------------
+
+
+def _record_attempt(
+    repo: _InMemoryWebhookRepo,
+    *,
+    subscription_id: str,
+    workspace_id: str,
+    status_code: int | None,
+    attempted_at: datetime,
+) -> None:
+    delivery_id = new_ulid()
+    repo.insert_delivery(
+        delivery_id=delivery_id,
+        workspace_id=workspace_id,
+        subscription_id=subscription_id,
+        event="task.completed",
+        payload_json={"event": "task.completed", "data": {}},
+        status=DELIVERY_PENDING,
+        attempt=0,
+        next_attempt_at=attempted_at,
+        replayed_from_id=None,
+        created_at=attempted_at,
+    )
+    repo.update_delivery_attempt(
+        delivery_id=delivery_id,
+        status=DELIVERY_PENDING,
+        attempt=1,
+        next_attempt_at=attempted_at + timedelta(minutes=5),
+        last_status_code=status_code,
+        last_error="network" if status_code is None else f"http_{status_code}",
+        last_attempted_at=attempted_at,
+    )
+
+
+class TestSubscriptionHealthAutoPause:
+    def test_all_recent_failures_pause_audit_notify_and_stop_enqueue(self) -> None:
+        repo = _InMemoryWebhookRepo()
+        session = _SessionStub()
+        clock = FrozenClock(_PINNED)
+        sub = _seed_subscription(repo)
+        session.added.clear()
+
+        for status_code in (500, 503, None):
+            _record_attempt(
+                repo,
+                subscription_id=sub.id,
+                workspace_id=sub.workspace_id,
+                status_code=status_code,
+                attempted_at=_PINNED - timedelta(hours=1),
+            )
+
+        notifications: list[tuple[str, int, WebhookHealthThresholds]] = []
+        paused = pause_unhealthy_subscriptions(
+            session,  # type: ignore[arg-type]
+            repo=repo,
+            thresholds=WebhookHealthThresholds(window_h=24, min_deliveries=3),
+            notify_managers=lambda row, count, thresholds: notifications.append(
+                (row.id, count, thresholds)
+            ),
+            clock=clock,
+        )
+
+        assert len(paused) == 1
+        assert paused[0].id == sub.id
+        assert paused[0].active is False
+        assert paused[0].paused_reason == PAUSED_REASON_AUTO_UNHEALTHY
+        assert paused[0].paused_at == _PINNED
+        assert repo.subscriptions[sub.id].active is False
+        assert notifications == [
+            (sub.id, 3, WebhookHealthThresholds(window_h=24, min_deliveries=3))
+        ]
+
+        audit_row = session.added[0]
+        assert audit_row.entity_kind == "webhook_subscription"
+        assert audit_row.action == "auto_paused"
+        assert audit_row.actor_kind == "system"
+        assert audit_row.workspace_id == sub.workspace_id
+        assert audit_row.diff["thresholds"] == {
+            "webhook_health_window_h": 24,
+            "webhook_health_min_deliveries": 3,
+            "observed_deliveries": 3,
+            "required_successes": 0,
+        }
+
+        assert (
+            enqueue(
+                repo=repo,
+                workspace_id=sub.workspace_id,
+                event="task.completed",
+                data={"task_id": "T1"},
+                clock=clock,
+            )
+            == ()
+        )
+
+    def test_any_success_in_window_keeps_subscription_active(self) -> None:
+        repo = _InMemoryWebhookRepo()
+        session = _SessionStub()
+        clock = FrozenClock(_PINNED)
+        sub = _seed_subscription(repo)
+        for status_code in (500, 204, 503):
+            _record_attempt(
+                repo,
+                subscription_id=sub.id,
+                workspace_id=sub.workspace_id,
+                status_code=status_code,
+                attempted_at=_PINNED - timedelta(hours=1),
+            )
+
+        paused = pause_unhealthy_subscriptions(
+            session,  # type: ignore[arg-type]
+            repo=repo,
+            thresholds=WebhookHealthThresholds(window_h=24, min_deliveries=3),
+            clock=clock,
+        )
+
+        assert paused == ()
+        assert repo.subscriptions[sub.id].active is True
+        assert session.added == []
+
+    def test_enable_clears_pause_state_and_reopens_enqueue(self) -> None:
+        repo = _InMemoryWebhookRepo()
+        session = _SessionStub()
+        clock = FrozenClock(_PINNED)
+        sub = _seed_subscription(repo)
+        repo.pause_subscription(
+            sub_id=sub.id,
+            paused_reason=PAUSED_REASON_AUTO_UNHEALTHY,
+            paused_at=_PINNED,
+            updated_at=_PINNED,
+        )
+
+        enabled = enable_subscription(
+            session,  # type: ignore[arg-type]
+            _ctx(),
+            repo=repo,
+            sub_id=sub.id,
+            clock=clock,
+        )
+
+        assert enabled.active is True
+        assert enabled.paused_reason is None
+        assert enabled.paused_at is None
+        delivery_ids = enqueue(
+            repo=repo,
+            workspace_id=sub.workspace_id,
+            event="task.completed",
+            data={"task_id": "T1"},
+            clock=clock,
+        )
+        assert len(delivery_ids) == 1
 
 
 # ---------------------------------------------------------------------------

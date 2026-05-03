@@ -237,6 +237,13 @@ class Settings(BaseSettings):
     # maps one-to-one onto the stdlib names; ``DEBUG`` is deliberately
     # available as an ops lever without a code change.
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
+    # Outbound webhook receiver-health heuristic (§10 "Retries").
+    # A subscription with at least ``webhook_health_min_deliveries``
+    # attempts in the trailing ``webhook_health_window_h`` hours and
+    # zero 2xx responses is auto-paused before the dispatcher enqueues
+    # more work for that receiver.
+    webhook_health_window_h: int = Field(default=24, ge=1)
+    webhook_health_min_deliveries: int = Field(default=3, ge=1)
     # Additional CORS origins allowed past the v1 "same-origin only"
     # default. Empty in every production deployment; dev work behind a
     # Vite proxy on a different port / host populates this with the

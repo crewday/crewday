@@ -30,6 +30,7 @@ from typing import Any, Protocol
 
 __all__ = [
     "WebhookDeliveryRow",
+    "WebhookHealthCandidate",
     "WebhookRepository",
     "WebhookSubscriptionRow",
 ]
@@ -57,8 +58,18 @@ class WebhookSubscriptionRow:
     secret_last_4: str
     events: tuple[str, ...]
     active: bool
+    paused_reason: str | None
+    paused_at: datetime | None
     created_at: datetime
     updated_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class WebhookHealthCandidate:
+    """Active subscription whose recent delivery window is fully failing."""
+
+    subscription: WebhookSubscriptionRow
+    delivery_count: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -124,6 +135,26 @@ class WebhookRepository(Protocol):
         """
         ...
 
+    def pause_subscription(
+        self,
+        *,
+        sub_id: str,
+        paused_reason: str,
+        paused_at: datetime,
+        updated_at: datetime,
+    ) -> WebhookSubscriptionRow:
+        """Mark a subscription inactive with pause metadata. Flushes."""
+        ...
+
+    def enable_subscription(
+        self,
+        *,
+        sub_id: str,
+        updated_at: datetime,
+    ) -> WebhookSubscriptionRow:
+        """Mark a subscription active and clear pause metadata. Flushes."""
+        ...
+
     def rotate_subscription_secret(
         self,
         *,
@@ -150,6 +181,15 @@ class WebhookRepository(Protocol):
         active_only: bool = False,
     ) -> tuple[WebhookSubscriptionRow, ...]:
         """List every subscription in the workspace (newest first)."""
+        ...
+
+    def list_unhealthy_subscription_candidates(
+        self,
+        *,
+        window_start: datetime,
+        min_deliveries: int,
+    ) -> tuple[WebhookHealthCandidate, ...]:
+        """Return active subscriptions whose recent attempts are all non-2xx."""
         ...
 
     # ---- Delivery mutations --------------------------------------

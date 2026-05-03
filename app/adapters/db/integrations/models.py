@@ -92,6 +92,10 @@ class WebhookSubscription(Base):
 
     ``active`` is the soft-disable flag; the dispatcher refuses to
     enqueue a delivery for an inactive row.
+
+    ``paused_reason`` / ``paused_at`` are populated when the health
+    worker disables the subscription automatically. Manual disables
+    leave them NULL.
     """
 
     __tablename__ = "webhook_subscription"
@@ -116,10 +120,16 @@ class WebhookSubscription(Base):
     # ...). Empty = invalid; service refuses.
     events_json: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
     active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    paused_reason: Mapped[str | None] = mapped_column(String, nullable=True)
+    paused_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), nullable=True)
     created_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
 
     __table_args__ = (
+        CheckConstraint(
+            "paused_reason IS NULL OR paused_reason IN ('auto_unhealthy')",
+            name="paused_reason",
+        ),
         # Tenant-filter hot path — every read is workspace-scoped.
         Index("ix_webhook_subscription_workspace", "workspace_id"),
         # /webhooks listing pinpoints the active rows for the

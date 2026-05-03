@@ -63,7 +63,7 @@ import hmac
 import json
 import logging
 import secrets
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any, Final
@@ -76,6 +76,7 @@ from app.audit import write_audit
 from app.config import get_settings
 from app.domain.integrations.ports import (
     WebhookDeliveryRow,
+    WebhookHealthCandidate,
     WebhookRepository,
     WebhookSubscriptionRow,
 )
@@ -90,16 +91,20 @@ __all__ = [
     "DELIVERY_PENDING",
     "DELIVERY_SUCCEEDED",
     "DELIVERY_SUPPRESSED_DEMO",
+    "PAUSED_REASON_AUTO_UNHEALTHY",
     "RETRY_SCHEDULE_SECONDS",
     "SIGNATURE_HEADER",
     "SUBSCRIPTION_SECRET_PURPOSE",
     "DeliveryReport",
     "SubscriptionView",
+    "WebhookHealthThresholds",
     "create_subscription",
     "delete_subscription",
     "deliver",
+    "enable_subscription",
     "enqueue",
     "list_subscriptions",
+    "pause_unhealthy_subscriptions",
     "replay_delivery",
     "rotate_subscription_secret",
     "sign",
@@ -142,6 +147,8 @@ DELIVERY_IN_FLIGHT: Final[str] = "in_flight"
 DELIVERY_SUCCEEDED: Final[str] = "succeeded"
 DELIVERY_DEAD_LETTERED: Final[str] = "dead_lettered"
 DELIVERY_SUPPRESSED_DEMO: Final[str] = "suppressed_demo"
+
+PAUSED_REASON_AUTO_UNHEALTHY: Final[str] = "auto_unhealthy"
 
 # §10 catalog: minimum length the random secret. 32 bytes of urandom
 # rendered hex = 64 hex chars. The receiver shop expects "long enough
@@ -297,8 +304,23 @@ class SubscriptionView:
     plaintext_secret: str | None
     events: tuple[str, ...]
     active: bool
+    paused_reason: str | None
+    paused_at: datetime | None
     created_at: datetime
     updated_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class WebhookHealthThresholds:
+    """Deployment knobs for auto-pausing unhealthy subscriptions."""
+
+    window_h: int = 24
+    min_deliveries: int = 3
+
+
+WebhookAutoPauseNotifier = Callable[
+    [WebhookSubscriptionRow, int, WebhookHealthThresholds], None
+]
 
 
 def _generate_secret() -> str:
@@ -483,6 +505,15 @@ def update_subscription(
         }
     if active is not None and active != existing.active:
         diff["active"] = {"before": existing.active, "after": active}
+    if active is True and existing.paused_reason is not None:
+        diff["paused_reason"] = {
+            "before": existing.paused_reason,
+            "after": None,
+        }
+        diff["paused_at"] = {
+            "before": _audit_dt(existing.paused_at),
+            "after": None,
+        }
 
     row = repo.update_subscription(
         sub_id=sub_id,
@@ -502,6 +533,49 @@ def update_subscription(
             diff=diff,
             clock=resolved_clock,
         )
+    return _to_view(row, plaintext_secret=None)
+
+
+def enable_subscription(
+    session: Session,
+    ctx: WorkspaceContext,
+    *,
+    repo: WebhookRepository,
+    sub_id: str,
+    clock: Clock | None = None,
+) -> SubscriptionView:
+    """Re-enable a subscription and clear any queue pause metadata.
+
+    This does not replay deliveries dropped while the subscription
+    was inactive; callers must use the replay surface for that.
+    """
+    resolved_clock = clock if clock is not None else SystemClock()
+    now = resolved_clock.now()
+
+    existing = repo.get_subscription(sub_id=sub_id)
+    if existing is None or existing.workspace_id != ctx.workspace_id:
+        raise LookupError(f"webhook_subscription {sub_id!r} not found")
+
+    row = repo.enable_subscription(sub_id=sub_id, updated_at=now)
+    write_audit(
+        session,
+        ctx,
+        entity_kind="webhook_subscription",
+        entity_id=row.id,
+        action="enabled",
+        diff={
+            "active": {"before": existing.active, "after": row.active},
+            "paused_reason": {
+                "before": existing.paused_reason,
+                "after": row.paused_reason,
+            },
+            "paused_at": {
+                "before": _audit_dt(existing.paused_at),
+                "after": _audit_dt(row.paused_at),
+            },
+        },
+        clock=resolved_clock,
+    )
     return _to_view(row, plaintext_secret=None)
 
 
@@ -594,6 +668,63 @@ def rotate_subscription_secret(
         clock=resolved_clock,
     )
     return _to_view(row, plaintext_secret=plaintext)
+
+
+# ---------------------------------------------------------------------------
+# Health auto-pause
+# ---------------------------------------------------------------------------
+
+
+def pause_unhealthy_subscriptions(
+    session: Session,
+    *,
+    repo: WebhookRepository,
+    thresholds: WebhookHealthThresholds | None = None,
+    notify_managers: WebhookAutoPauseNotifier | None = None,
+    clock: Clock | None = None,
+) -> tuple[SubscriptionView, ...]:
+    """Pause subscriptions whose configured health window is all failures.
+
+    The repository returns only active subscriptions with at least
+    ``min_deliveries`` attempts since ``now - window_h`` and zero 2xx
+    responses. Each paused row gets a system-actor audit entry. The
+    optional notifier is called after the pause/audit writes so the
+    worker can use the normal notification service without coupling
+    this domain layer to recipient discovery.
+    """
+    resolved_clock = clock if clock is not None else SystemClock()
+    resolved_thresholds = thresholds or WebhookHealthThresholds()
+    if resolved_thresholds.window_h <= 0:
+        raise ValueError("webhook health window must be positive")
+    if resolved_thresholds.min_deliveries <= 0:
+        raise ValueError("webhook health minimum deliveries must be positive")
+
+    now = resolved_clock.now()
+    window_start = now - timedelta(hours=resolved_thresholds.window_h)
+    candidates = repo.list_unhealthy_subscription_candidates(
+        window_start=window_start,
+        min_deliveries=resolved_thresholds.min_deliveries,
+    )
+
+    paused: list[SubscriptionView] = []
+    for candidate in candidates:
+        row = repo.pause_subscription(
+            sub_id=candidate.subscription.id,
+            paused_reason=PAUSED_REASON_AUTO_UNHEALTHY,
+            paused_at=now,
+            updated_at=now,
+        )
+        _audit_auto_pause(
+            session,
+            candidate=candidate,
+            paused=row,
+            thresholds=resolved_thresholds,
+            clock=resolved_clock,
+        )
+        if notify_managers is not None:
+            notify_managers(row, candidate.delivery_count, resolved_thresholds)
+        paused.append(_to_view(row, plaintext_secret=None))
+    return tuple(paused)
 
 
 # ---------------------------------------------------------------------------
@@ -1071,16 +1202,7 @@ def _audit_dead_letter(
     irrelevant; pinning the same canonical ``'manager'`` lets the
     grep-one-shape posture extend to grant-role filters too.
     """
-    ctx = WorkspaceContext(
-        workspace_id=workspace_id,
-        workspace_slug="",
-        actor_id=_SYSTEM_ACTOR_ZERO_ULID,
-        actor_kind="system",
-        actor_grant_role="manager",
-        actor_was_owner_member=False,
-        audit_correlation_id=_SYSTEM_ACTOR_ZERO_ULID,
-        principal_kind="system",
-    )
+    ctx = _system_audit_ctx(workspace_id=workspace_id)
     write_audit(
         session,
         ctx,
@@ -1098,6 +1220,64 @@ def _audit_dead_letter(
         },
         clock=clock,
     )
+
+
+def _audit_auto_pause(
+    session: Session,
+    *,
+    candidate: WebhookHealthCandidate,
+    paused: WebhookSubscriptionRow,
+    thresholds: WebhookHealthThresholds,
+    clock: Clock,
+) -> None:
+    ctx = _system_audit_ctx(workspace_id=paused.workspace_id)
+    write_audit(
+        session,
+        ctx,
+        entity_kind="webhook_subscription",
+        entity_id=paused.id,
+        action="auto_paused",
+        diff={
+            "active": {"before": candidate.subscription.active, "after": paused.active},
+            "paused_reason": {
+                "before": candidate.subscription.paused_reason,
+                "after": paused.paused_reason,
+            },
+            "paused_at": {
+                "before": _audit_dt(candidate.subscription.paused_at),
+                "after": _audit_dt(paused.paused_at),
+            },
+            "thresholds": {
+                "webhook_health_window_h": thresholds.window_h,
+                "webhook_health_min_deliveries": thresholds.min_deliveries,
+                "observed_deliveries": candidate.delivery_count,
+                "required_successes": 0,
+            },
+        },
+        clock=clock,
+    )
+
+
+def _system_audit_ctx(*, workspace_id: str) -> WorkspaceContext:
+    return WorkspaceContext(
+        workspace_id=workspace_id,
+        workspace_slug="",
+        actor_id=_SYSTEM_ACTOR_ZERO_ULID,
+        actor_kind="system",
+        actor_grant_role="manager",
+        actor_was_owner_member=False,
+        audit_correlation_id=_SYSTEM_ACTOR_ZERO_ULID,
+        principal_kind="system",
+    )
+
+
+def _audit_dt(value: datetime | None) -> str | None:
+    if value is None:
+        return None
+    iso = value.astimezone(UTC).isoformat(timespec="seconds")
+    if iso.endswith("+00:00"):
+        return iso[:-6] + "Z"
+    return iso
 
 
 # ---------------------------------------------------------------------------
@@ -1145,6 +1325,8 @@ def _to_view(
         plaintext_secret=plaintext_secret,
         events=row.events,
         active=row.active,
+        paused_reason=row.paused_reason,
+        paused_at=row.paused_at,
         created_at=row.created_at,
         updated_at=row.updated_at,
     )

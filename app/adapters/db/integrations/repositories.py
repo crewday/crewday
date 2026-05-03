@@ -26,7 +26,7 @@ from collections.abc import Sequence
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session
 
 from app.adapters.db.integrations.models import (
@@ -35,6 +35,7 @@ from app.adapters.db.integrations.models import (
 )
 from app.domain.integrations.ports import (
     WebhookDeliveryRow,
+    WebhookHealthCandidate,
     WebhookRepository,
     WebhookSubscriptionRow,
 )
@@ -76,6 +77,8 @@ def _sub_to_row(row: WebhookSubscription) -> WebhookSubscriptionRow:
         secret_last_4=row.secret_last_4,
         events=tuple(row.events_json),
         active=bool(row.active),
+        paused_reason=row.paused_reason,
+        paused_at=_attach_utc(row.paused_at),
         created_at=created_at,
         updated_at=updated_at,
     )
@@ -134,6 +137,8 @@ class SqlAlchemyWebhookRepository(WebhookRepository):
             secret_last_4=secret_last_4,
             events_json=list(events),
             active=active,
+            paused_reason=None,
+            paused_at=None,
             created_at=created_at,
             updated_at=created_at,
         )
@@ -162,6 +167,44 @@ class SqlAlchemyWebhookRepository(WebhookRepository):
             row.events_json = list(events)
         if active is not None:
             row.active = active
+            if active:
+                row.paused_reason = None
+                row.paused_at = None
+        row.updated_at = updated_at
+        self._session.flush()
+        return _sub_to_row(row)
+
+    def pause_subscription(
+        self,
+        *,
+        sub_id: str,
+        paused_reason: str,
+        paused_at: datetime,
+        updated_at: datetime,
+    ) -> WebhookSubscriptionRow:
+        with tenant_agnostic():
+            row = self._session.get(WebhookSubscription, sub_id)
+            if row is None:
+                raise LookupError(f"webhook_subscription {sub_id!r} not found")
+            row.active = False
+            row.paused_reason = paused_reason
+            row.paused_at = paused_at
+            row.updated_at = updated_at
+            self._session.flush()
+        return _sub_to_row(row)
+
+    def enable_subscription(
+        self,
+        *,
+        sub_id: str,
+        updated_at: datetime,
+    ) -> WebhookSubscriptionRow:
+        row = self._session.get(WebhookSubscription, sub_id)
+        if row is None:
+            raise LookupError(f"webhook_subscription {sub_id!r} not found")
+        row.active = True
+        row.paused_reason = None
+        row.paused_at = None
         row.updated_at = updated_at
         self._session.flush()
         return _sub_to_row(row)
@@ -216,6 +259,50 @@ class SqlAlchemyWebhookRepository(WebhookRepository):
         stmt = stmt.order_by(WebhookSubscription.created_at.desc())
         rows = list(self._session.scalars(stmt))
         return tuple(_sub_to_row(r) for r in rows)
+
+    def list_unhealthy_subscription_candidates(
+        self,
+        *,
+        window_start: datetime,
+        min_deliveries: int,
+    ) -> tuple[WebhookHealthCandidate, ...]:
+        success_count = func.sum(
+            case(
+                (
+                    (WebhookDelivery.last_status_code >= 200)
+                    & (WebhookDelivery.last_status_code < 300),
+                    1,
+                ),
+                else_=0,
+            )
+        )
+        delivery_count = func.count(WebhookDelivery.id)
+        health = (
+            select(
+                WebhookDelivery.subscription_id.label("subscription_id"),
+                delivery_count.label("delivery_count"),
+            )
+            .where(WebhookDelivery.last_attempted_at >= window_start)
+            .group_by(WebhookDelivery.subscription_id)
+            .having(delivery_count >= min_deliveries)
+            .having(success_count == 0)
+            .subquery()
+        )
+        stmt = (
+            select(WebhookSubscription, health.c.delivery_count)
+            .join(health, health.c.subscription_id == WebhookSubscription.id)
+            .where(WebhookSubscription.active.is_(True))
+            .order_by(WebhookSubscription.created_at.asc())
+        )
+        with tenant_agnostic():
+            rows = list(self._session.execute(stmt).all())
+        return tuple(
+            WebhookHealthCandidate(
+                subscription=_sub_to_row(row[0]),
+                delivery_count=int(row.delivery_count),
+            )
+            for row in rows
+        )
 
     # ---- Delivery mutations --------------------------------------
 

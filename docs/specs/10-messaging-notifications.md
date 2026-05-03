@@ -568,13 +568,16 @@ follow-up.
   opens. After the 6th attempt the row dead-letters with audit; the
   full delivery window is ~31 h.
 - A subscription whose last 24 h of deliveries are all non-2xx is
-  marked `unhealthy` and **paused** (no new deliveries enqueued). The
-  manager is notified. A manager or a token with
-  `messaging:write` can call `POST /webhooks/{id}/enable` to resume;
-  enabling re-opens the queue but does not replay the dropped
-  deliveries (use `/replay` for that). The cd-q885 dispatcher does
-  not yet implement the auto-pause heuristic; it lands as a
-  follow-up.
+  marked `unhealthy` and **paused** (no new deliveries enqueued) once
+  at least 3 deliveries exist in that window. The deployment knobs are
+  `webhook_health_window_h` (default `24`) and
+  `webhook_health_min_deliveries` (default `3`). The manager is
+  notified and one `audit.webhook_subscription.auto_paused` row lands
+  with the system actor, workspace id, pause reason, and threshold
+  values. A manager or a token with `messaging:write` can call
+  `POST /webhooks/{id}/enable` to resume; enabling re-opens the queue
+  and clears `paused_reason` / `paused_at` but does not replay the
+  dropped deliveries (use `/replay` for that).
 
 ### Delivery log retention
 

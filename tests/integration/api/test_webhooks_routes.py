@@ -10,7 +10,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
-from app.adapters.db.integrations.models import WebhookDelivery
+from app.adapters.db.integrations.models import WebhookDelivery, WebhookSubscription
 from app.api.deps import current_workspace_context, db_session
 from app.api.v1 import webhooks as webhook_api
 from app.api.v1.webhooks import get_envelope
@@ -101,6 +101,8 @@ def test_owner_crud_and_list_latest_delivery(db_session: Session) -> None:
     webhook_id = created_body["id"]
     assert created_body["secret"] == "0123456789abcdef"
     assert created_body["secret_last_4"] == "cdef"
+    assert created_body["paused_reason"] is None
+    assert created_body["paused_at"] is None
     assert created_body["last_delivery_at"] is None
     assert created_body["last_delivery_status"] is None
 
@@ -154,6 +156,8 @@ def test_owner_crud_and_list_latest_delivery(db_session: Session) -> None:
             "url": "https://hooks.example.test/crewday",
             "events": ["task.completed", "approval.pending"],
             "active": True,
+            "paused_reason": None,
+            "paused_at": None,
             "last_delivery_at": "2026-04-29T12:00:00Z",
             "last_delivery_status": 202,
             "secret_last_4": "cdef",
@@ -247,6 +251,72 @@ def test_test_delivery_and_rotate_secret(db_session: Session) -> None:
     assert listed.status_code == 200
     assert listed.json()[0]["secret"] is None
     assert listed.json()[0]["secret_last_4"] == rotated_body["secret_last_4"]
+
+
+def test_read_and_enable_clear_auto_pause_state(db_session: Session) -> None:
+    owner_ctx, _worker_ctx = _seed_workspace(db_session)
+    client = _client(db_session, owner_ctx)
+    created = client.post(
+        "/webhooks",
+        json={
+            "name": "Hermes",
+            "url": "https://hooks.example.test/crewday",
+            "events": ["task.completed"],
+            "secret": "0123456789abcdef",
+        },
+    )
+    webhook_id = created.json()["id"]
+    row = db_session.get(WebhookSubscription, webhook_id)
+    assert row is not None
+    row.active = False
+    row.paused_reason = "auto_unhealthy"
+    row.paused_at = _NOW
+    db_session.flush()
+
+    read = client.get(f"/webhooks/{webhook_id}")
+
+    assert read.status_code == 200
+    read_body = read.json()
+    assert read_body["active"] is False
+    assert read_body["paused_reason"] == "auto_unhealthy"
+    assert read_body["paused_at"] == "2026-04-29T12:00:00Z"
+
+    enabled = client.post(f"/webhooks/{webhook_id}/enable")
+
+    assert enabled.status_code == 200
+    enabled_body = enabled.json()
+    assert enabled_body["active"] is True
+    assert enabled_body["paused_reason"] is None
+    assert enabled_body["paused_at"] is None
+
+
+def test_patch_active_true_also_clears_auto_pause_state(db_session: Session) -> None:
+    owner_ctx, _worker_ctx = _seed_workspace(db_session)
+    client = _client(db_session, owner_ctx)
+    created = client.post(
+        "/webhooks",
+        json={
+            "name": "Hermes",
+            "url": "https://hooks.example.test/crewday",
+            "events": ["task.completed"],
+            "secret": "0123456789abcdef",
+        },
+    )
+    webhook_id = created.json()["id"]
+    row = db_session.get(WebhookSubscription, webhook_id)
+    assert row is not None
+    row.active = False
+    row.paused_reason = "auto_unhealthy"
+    row.paused_at = _NOW
+    db_session.flush()
+
+    patched = client.patch(f"/webhooks/{webhook_id}", json={"active": True})
+
+    assert patched.status_code == 200
+    body = patched.json()
+    assert body["active"] is True
+    assert body["paused_reason"] is None
+    assert body["paused_at"] is None
 
 
 def test_worker_without_settings_permission_is_rejected(db_session: Session) -> None:

@@ -67,6 +67,8 @@ export interface Webhook {
   url: string;
   events: string[];
   active: boolean;
+  paused_reason: string | null;
+  paused_at: string | null;
   secret_last_4: string;
   last_delivery_status: string | number | null;
   last_delivery_at: string | null;

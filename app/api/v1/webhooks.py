@@ -29,6 +29,7 @@ from app.domain.integrations.webhooks import (
     SubscriptionView,
     create_subscription,
     delete_subscription,
+    enable_subscription,
     enqueue,
     list_subscriptions,
     rotate_subscription_secret,
@@ -94,6 +95,8 @@ class WebhookResponse(BaseModel):
     url: str
     events: list[str]
     active: bool
+    paused_reason: str | None
+    paused_at: datetime | None
     last_delivery_at: datetime | None
     last_delivery_status: int | None
     secret_last_4: str
@@ -221,6 +224,8 @@ def _to_response(
         url=view.url,
         events=list(view.events),
         active=view.active,
+        paused_reason=view.paused_reason,
+        paused_at=view.paused_at,
         last_delivery_at=summary.last_delivery_at if summary is not None else None,
         last_delivery_status=(
             summary.last_delivery_status if summary is not None else None
@@ -272,6 +277,40 @@ def list_route(ctx: _Ctx, session: _Db) -> list[WebhookResponse]:
         subscription_ids=[view.id for view in views],
     )
     return [_to_response(view, summary=summaries.get(view.id)) for view in views]
+
+
+@router.get(
+    "/{webhook_id}",
+    response_model=WebhookResponse,
+    operation_id="webhooks.read",
+    summary="Read an outbound webhook subscription",
+    dependencies=[_SettingsGate],
+    openapi_extra={
+        "x-cli": {
+            "group": "webhooks",
+            "verb": "read",
+            "summary": "Read an outbound webhook subscription",
+            "mutates": False,
+        },
+    },
+)
+def read_route(webhook_id: str, ctx: _Ctx, session: _Db) -> WebhookResponse:
+    view = next(
+        (
+            subscription
+            for subscription in list_subscriptions(ctx, repo=_repo(session))
+            if subscription.id == webhook_id
+        ),
+        None,
+    )
+    if view is None:
+        raise _error(LookupError(webhook_id))
+    summaries = _delivery_summaries(
+        session,
+        workspace_id=ctx.workspace_id,
+        subscription_ids=[view.id],
+    )
+    return _to_response(view, summary=summaries.get(view.id))
 
 
 @router.get(
@@ -391,6 +430,40 @@ def rotate_secret_route(
             sub_id=webhook_id,
         )
     except (LookupError, ValueError) as exc:
+        raise _error(exc) from exc
+    _publish_webhooks_changed(ctx)
+    summaries = _delivery_summaries(
+        session,
+        workspace_id=ctx.workspace_id,
+        subscription_ids=[view.id],
+    )
+    return _to_response(view, summary=summaries.get(view.id))
+
+
+@router.post(
+    "/{webhook_id}/enable",
+    response_model=WebhookResponse,
+    operation_id="webhooks.enable",
+    summary="Enable an outbound webhook subscription",
+    dependencies=[_SettingsGate],
+    openapi_extra={
+        "x-cli": {
+            "group": "webhooks",
+            "verb": "enable",
+            "summary": "Enable an outbound webhook subscription",
+            "mutates": True,
+        },
+    },
+)
+def enable_route(webhook_id: str, ctx: _Ctx, session: _Db) -> WebhookResponse:
+    try:
+        view = enable_subscription(
+            session,
+            ctx,
+            repo=_repo(session),
+            sub_id=webhook_id,
+        )
+    except LookupError as exc:
         raise _error(exc) from exc
     _publish_webhooks_changed(ctx)
     summaries = _delivery_summaries(
