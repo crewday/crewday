@@ -72,6 +72,23 @@ class Property:
     owner_user_id: str | None = None  # §22 — nullable FK to users.id
 
 
+@dataclass
+class Unit:
+    id: str
+    property_id: str
+    name: str
+    ordinal: int
+    default_checkin_time: time | None = None
+    default_checkout_time: time | None = None
+    max_guests: int | None = None
+    welcome_overrides_json: dict[str, Any] = field(default_factory=dict)
+    settings_override_json: dict[str, Any] = field(default_factory=dict)
+    notes_md: str | None = None
+    created_at: datetime = field(default_factory=lambda: datetime(2026, 1, 1, 9, 0))
+    updated_at: datetime = field(default_factory=lambda: datetime(2026, 1, 1, 9, 0))
+    deleted_at: datetime | None = None
+
+
 # ── v1 identity model (§02, §03, §05) ────────────────────────────────
 
 
@@ -1351,6 +1368,58 @@ PROPERTIES: list[Property] = [
              areas=["Living room", "Kitchen", "Bedroom", "Terrace"],
              client_org_id=None,
              owner_user_id="u-vincent"),
+]
+
+UNITS: list[Unit] = [
+    Unit(
+        "u-villa-main", "p-villa-sud", "Main house", 0,
+        default_checkin_time=time(16, 0),
+        default_checkout_time=time(10, 0),
+        max_guests=8,
+        welcome_overrides_json={
+            "access": {"lockbox": "Main gate lockbox"},
+            "local_tips_md": "Use the garden path for pool access.",
+        },
+    ),
+    Unit(
+        "u-villa-studio", "p-villa-sud", "Garden studio", 1,
+        default_checkin_time=time(15, 0),
+        default_checkout_time=time(10, 30),
+        max_guests=2,
+        welcome_overrides_json={
+            "wifi": {"ssid": "VillaSud-Studio"},
+        },
+    ),
+    Unit(
+        "u-apt-3b-default", "p-apt-3b", "Apt 3B", 0,
+        default_checkin_time=time(15, 0),
+        default_checkout_time=time(11, 0),
+        max_guests=4,
+    ),
+    Unit(
+        "u-chalet-default", "p-chalet", "Chalet Cœur", 0,
+        default_checkin_time=time(17, 0),
+        default_checkout_time=time(10, 0),
+        max_guests=10,
+    ),
+    Unit(
+        "u-lac-main", "p-villa-lac", "Main villa", 0,
+        default_checkin_time=time(16, 0),
+        default_checkout_time=time(10, 0),
+        max_guests=6,
+    ),
+    Unit(
+        "u-lac-boathouse", "p-villa-lac", "Boathouse suite", 1,
+        default_checkin_time=time(16, 0),
+        default_checkout_time=time(10, 0),
+        max_guests=2,
+    ),
+    Unit(
+        "u-seaside-default", "p-seaside", "Seaside Apt", 0,
+        default_checkin_time=time(15, 0),
+        default_checkout_time=time(11, 0),
+        max_guests=4,
+    ),
 ]
 
 # v1: `work_role` (the workspace-defined job bundle). The shorter
@@ -4524,6 +4593,17 @@ def property_by_id(pid: str) -> Property:
     if hit is None:
         raise HTTPException(status_code=404, detail=f"property_not_found:{pid}")
     return hit
+
+
+def units_for_property(pid: str, include_deleted: bool = False) -> list[Unit]:
+    rows = [u for u in UNITS if u.property_id == pid]
+    if not include_deleted:
+        rows = [u for u in rows if u.deleted_at is None]
+    return sorted(rows, key=lambda u: (u.ordinal, u.name.lower()))
+
+
+def unit_by_id(uid: str) -> Unit | None:
+    return next((u for u in UNITS if u.id == uid), None)
 
 
 def employee_by_id(eid: str) -> Employee:

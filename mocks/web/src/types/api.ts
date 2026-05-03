@@ -28,6 +28,22 @@ export interface Property {
   owner_user_id: string | null;
 }
 
+export interface Unit {
+  id: string;
+  property_id: string;
+  name: string;
+  ordinal: number;
+  default_checkin_time: string | null;
+  default_checkout_time: string | null;
+  max_guests: number | null;
+  welcome_overrides_json: Record<string, unknown>;
+  settings_override_json: Record<string, unknown>;
+  notes_md: string | null;
+  created_at: string;
+  updated_at: string;
+  deleted_at: string | null;
+}
+
 // §02 — `property_workspace` junction. A property can belong to many
 // workspaces; `membership_role` says how the workspace relates to it.
 export type MembershipRole =

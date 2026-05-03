@@ -146,6 +146,59 @@ def ok(payload: Any, status_code: int = 200) -> JSONResponse:
     return JSONResponse(_encode(payload), status_code=status_code)
 
 
+def _mock_now() -> datetime:
+    return datetime.now(timezone.utc).replace(microsecond=0, tzinfo=None)
+
+
+def _parse_unit_time(value: object) -> time | None:
+    if value in (None, ""):
+        return None
+    if not isinstance(value, str):
+        raise ValueError("invalid_time")
+    parsed = time.fromisoformat(value)
+    return parsed.replace(second=0, microsecond=0)
+
+
+def _parse_positive_int(value: object, field_name: str) -> int | None:
+    if value in (None, ""):
+        return None
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(field_name) from exc
+    if parsed < 1:
+        raise ValueError(field_name)
+    return parsed
+
+
+def _parse_ordinal(value: object, fallback: int) -> int:
+    if value in (None, ""):
+        return fallback
+    try:
+        return int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("ordinal") from exc
+
+
+def _append_mock_audit(action: str, target: str, reason: str | None = None) -> None:
+    md.AUDIT.insert(
+        0,
+        md.AuditEntry(
+            _mock_now(),
+            "user",
+            "Élodie Bernard",
+            action,
+            target,
+            "web",
+            reason,
+            actor_grant_role="manager",
+            actor_was_owner_member=True,
+            actor_action_key="properties.edit",
+            actor_id="u-elodie",
+        ),
+    )
+
+
 # ── SSE hub ───────────────────────────────────────────────────────────
 
 class _EventHub:
@@ -696,6 +749,118 @@ def api_property(pid: str, request: Request) -> Response:
         "owner_user": md.user_by_id(prop.owner_user_id) if prop.owner_user_id else None,
         "active_workspace_id": current_workspace_id(request),
     })
+
+
+@app.get("/api/v1/properties/{pid}/units")
+def api_property_units(pid: str) -> Response:
+    md.property_by_id(pid)
+    return ok(md.units_for_property(pid))
+
+
+@app.post("/api/v1/properties/{pid}/units")
+async def api_property_unit_create(pid: str, body: dict[str, Any] = Body(...)) -> Response:
+    md.property_by_id(pid)
+    name = str(body.get("name") or "").strip()
+    if not name:
+        return JSONResponse({"detail": "name_required"}, status_code=422)
+    if any(u.name.lower() == name.lower() for u in md.units_for_property(pid)):
+        return JSONResponse({"detail": "unit_name_exists"}, status_code=409)
+    try:
+        ordinal = _parse_ordinal(body.get("ordinal"), len(md.units_for_property(pid)))
+        max_guests = _parse_positive_int(body.get("max_guests"), "max_guests")
+        default_checkin = _parse_unit_time(body.get("default_checkin_time"))
+        default_checkout = _parse_unit_time(body.get("default_checkout_time"))
+    except ValueError as exc:
+        return JSONResponse({"detail": f"invalid_{exc}"}, status_code=422)
+    now = _mock_now()
+    unit = md.Unit(
+        id=f"u-mock-{len(md.UNITS) + 1}",
+        property_id=pid,
+        name=name,
+        ordinal=ordinal,
+        default_checkin_time=default_checkin,
+        default_checkout_time=default_checkout,
+        max_guests=max_guests,
+        welcome_overrides_json=(
+            body.get("welcome_overrides_json")
+            if isinstance(body.get("welcome_overrides_json"), dict)
+            else {}
+        ),
+        created_at=now,
+        updated_at=now,
+    )
+    md.UNITS.append(unit)
+    _append_mock_audit("unit.create", unit.id, f"{name} on {pid}")
+    hub.publish("unit.changed", {"property_id": pid, "unit_id": unit.id})
+    return ok(unit, status_code=201)
+
+
+@app.get("/api/v1/units/{uid}")
+def api_unit(uid: str) -> Response:
+    unit = md.unit_by_id(uid)
+    if unit is None:
+        return JSONResponse({"detail": "not found"}, status_code=404)
+    return ok(unit)
+
+
+@app.patch("/api/v1/units/{uid}")
+async def api_unit_update(uid: str, body: dict[str, Any] = Body(...)) -> Response:
+    unit = md.unit_by_id(uid)
+    if unit is None:
+        return JSONResponse({"detail": "not found"}, status_code=404)
+    name = str(body.get("name", unit.name) or "").strip()
+    if not name:
+        return JSONResponse({"detail": "name_required"}, status_code=422)
+    siblings = [u for u in md.units_for_property(unit.property_id) if u.id != uid]
+    if unit.deleted_at is None and any(u.name.lower() == name.lower() for u in siblings):
+        return JSONResponse({"detail": "unit_name_exists"}, status_code=409)
+    try:
+        ordinal = _parse_ordinal(body.get("ordinal"), unit.ordinal)
+        max_guests = (
+            _parse_positive_int(body["max_guests"], "max_guests")
+            if "max_guests" in body
+            else unit.max_guests
+        )
+        default_checkin = (
+            _parse_unit_time(body["default_checkin_time"])
+            if "default_checkin_time" in body
+            else unit.default_checkin_time
+        )
+        default_checkout = (
+            _parse_unit_time(body["default_checkout_time"])
+            if "default_checkout_time" in body
+            else unit.default_checkout_time
+        )
+    except ValueError as exc:
+        return JSONResponse({"detail": f"invalid_{exc}"}, status_code=422)
+    unit.name = name
+    unit.ordinal = ordinal
+    unit.max_guests = max_guests
+    unit.default_checkin_time = default_checkin
+    unit.default_checkout_time = default_checkout
+    if isinstance(body.get("welcome_overrides_json"), dict):
+        unit.welcome_overrides_json = body["welcome_overrides_json"]
+    unit.updated_at = _mock_now()
+    _append_mock_audit("unit.update", unit.id, f"{name} on {unit.property_id}")
+    hub.publish("unit.changed", {"property_id": unit.property_id, "unit_id": unit.id})
+    return ok(unit)
+
+
+@app.delete("/api/v1/units/{uid}")
+async def api_unit_delete(uid: str) -> Response:
+    unit = md.unit_by_id(uid)
+    if unit is None:
+        return JSONResponse({"detail": "not found"}, status_code=404)
+    if unit.deleted_at is not None:
+        return ok(unit)
+    live_units = md.units_for_property(unit.property_id)
+    if len(live_units) <= 1:
+        return JSONResponse({"detail": "cannot_delete_last_live_unit"}, status_code=409)
+    unit.deleted_at = _mock_now()
+    unit.updated_at = unit.deleted_at
+    _append_mock_audit("unit.delete", unit.id, f"{unit.name} on {unit.property_id}")
+    hub.publish("unit.changed", {"property_id": unit.property_id, "unit_id": unit.id})
+    return ok(unit)
 
 
 @app.get("/api/v1/employees")

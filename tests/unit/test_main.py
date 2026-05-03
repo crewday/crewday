@@ -27,6 +27,7 @@ See ``docs/specs/01-architecture.md`` §"High-level picture",
 from __future__ import annotations
 
 import importlib.util
+import json
 import logging
 import re
 import sys
@@ -43,6 +44,7 @@ from pydantic import SecretStr
 
 import app.main as main_module
 from app.api.middleware.rate_limit import RATE_LIMIT_REMAINING_HEADER
+from app.auth.csrf import CSRF_COOKIE_NAME, CSRF_HEADER_NAME
 from app.config import Settings
 from app.main import DemoModeRefused, PublicBindRefused, create_app
 from app.tenancy.middleware import CORRELATION_ID_HEADER
@@ -772,6 +774,34 @@ class TestDevProfileViteProxy:
         assert resp.status_code == 200
         assert captured["path"] == "/src/main.tsx"
         assert captured["query"] == "t=123&v=abc"
+
+    def test_dev_profile_proxies_mutating_mocks_paths(self) -> None:
+        """Loopback `/mocks/api` writes must reach the mocks Vite proxy."""
+        captured: dict[str, str] = {}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            captured["method"] = request.method
+            captured["path"] = request.url.path
+            captured["body"] = request.content.decode()
+            return httpx.Response(201, json={"ok": True})
+
+        client = _client(self._dev_app_with_mock(handler))
+        client.get("/")
+        csrf = client.cookies.get(CSRF_COOKIE_NAME)
+        assert csrf
+        client.cookies.set(CSRF_COOKIE_NAME, csrf)
+
+        resp = client.post(
+            "/mocks/api/v1/properties/p-villa-lac/units",
+            headers={CSRF_HEADER_NAME: csrf},
+            json={"name": "Guest cottage"},
+        )
+
+        assert resp.status_code == 201
+        assert resp.json() == {"ok": True}
+        assert captured["method"] == "POST"
+        assert captured["path"] == "/mocks/api/v1/properties/p-villa-lac/units"
+        assert json.loads(captured["body"]) == {"name": "Guest cottage"}
 
     def test_dev_profile_api_paths_not_proxied(self) -> None:
         """``/api/*`` must still 404 JSON — not reach Vite."""

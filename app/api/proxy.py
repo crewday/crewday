@@ -527,7 +527,12 @@ def register_vite_proxy(app: FastAPI, *, vite_dev_url: str) -> None:
             ):
                 await websocket.close(code=CloseCode.INTERNAL_ERROR)
 
-    @app.get("/{full_path:path}", include_in_schema=False, response_model=None)
+    @app.api_route(
+        "/{full_path:path}",
+        methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"],
+        include_in_schema=False,
+        response_model=None,
+    )
     async def vite_proxy(full_path: str, request: Request) -> Response:
         """Stream the Vite dev server's response back to the caller.
 
@@ -557,9 +562,11 @@ def register_vite_proxy(app: FastAPI, *, vite_dev_url: str) -> None:
         upstream_base: str = request.app.state.vite_dev_url
 
         try:
-            upstream = await client.get(
+            upstream = await client.request(
+                request.method,
                 upstream_path,
                 headers=_filter_request_headers(dict(request.headers)),
+                content=await request.body(),
             )
         except httpx.RequestError as exc:
             _log.warning(

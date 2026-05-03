@@ -29,6 +29,7 @@ export const qk = {
   me: () => ["me"] as const,
   properties: () => ["properties"] as const,
   property: (pid: string) => ["property", pid] as const,
+  propertyUnits: (pid: string) => ["property", pid, "units"] as const,
   propertyClosures: (pid: string) => ["property", pid, "closures"] as const,
   employees: () => ["employees"] as const,
   employee: (eid: string) => ["employee", eid] as const,

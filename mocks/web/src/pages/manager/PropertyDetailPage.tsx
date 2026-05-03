@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useParams } from "react-router-dom";
+import { Link, useParams } from "react-router-dom";
 import { fetchJson } from "@/lib/api";
 import { qk } from "@/lib/queryKeys";
 import DeskPage from "@/components/DeskPage";
@@ -24,6 +24,7 @@ import type {
   Stay,
   Task,
   TaskStatus,
+  Unit,
   User,
   Workspace,
 } from "@/types/api";
@@ -356,17 +357,309 @@ function SharingPanel({
   );
 }
 
-type Tab = "overview" | "assets" | "sharing" | "settings";
+type UnitFormState = {
+  name: string;
+  ordinal: string;
+  default_checkin_time: string;
+  default_checkout_time: string;
+  max_guests: string;
+};
+
+type UnitDialog =
+  | { kind: "add" }
+  | { kind: "edit"; unit: Unit }
+  | { kind: "delete"; unit: Unit }
+  | null;
+
+function unitFormFrom(unit: Unit | null, nextOrdinal: number): UnitFormState {
+  return {
+    name: unit?.name ?? "",
+    ordinal: String(unit?.ordinal ?? nextOrdinal),
+    default_checkin_time: unit?.default_checkin_time ?? "16:00",
+    default_checkout_time: unit?.default_checkout_time ?? "10:00",
+    max_guests: unit?.max_guests ? String(unit.max_guests) : "",
+  };
+}
+
+function unitPayload(form: UnitFormState) {
+  return {
+    name: form.name.trim(),
+    ordinal: Number(form.ordinal),
+    default_checkin_time: form.default_checkin_time || null,
+    default_checkout_time: form.default_checkout_time || null,
+    max_guests: form.max_guests ? Number(form.max_guests) : null,
+  };
+}
+
+function displayTime(value: string | null): string {
+  return value ?? "Inherited";
+}
+
+function displayGuests(value: number | null): string {
+  return value === null ? "No limit" : String(value);
+}
+
+function UnitsPanel({ propertyId, units }: { propertyId: string; units: Unit[] }) {
+  const queryClient = useQueryClient();
+  const dialogRef = useRef<HTMLDialogElement | null>(null);
+  const orderedUnits = [...units].sort((a, b) => {
+    if (a.ordinal !== b.ordinal) return a.ordinal - b.ordinal;
+    return a.name.localeCompare(b.name);
+  });
+  const [dialog, setDialog] = useState<UnitDialog>(null);
+  const [form, setForm] = useState<UnitFormState>(() =>
+    unitFormFrom(null, orderedUnits.length),
+  );
+
+  useEffect(() => {
+    const el = dialogRef.current;
+    if (!el) return;
+    if (dialog && !el.open) el.showModal();
+    if (!dialog && el.open) el.close();
+  }, [dialog]);
+
+  const closeDialog = () => setDialog(null);
+  const openAdd = () => {
+    setForm(unitFormFrom(null, orderedUnits.length));
+    setDialog({ kind: "add" });
+  };
+  const openEdit = (unit: Unit) => {
+    setForm(unitFormFrom(unit, orderedUnits.length));
+    setDialog({ kind: "edit", unit });
+  };
+
+  const invalidateUnits = () => {
+    void queryClient.invalidateQueries({ queryKey: qk.propertyUnits(propertyId) });
+    void queryClient.invalidateQueries({ queryKey: qk.property(propertyId) });
+    void queryClient.invalidateQueries({ queryKey: qk.audit() });
+  };
+
+  const saveMu = useMutation({
+    mutationFn: (vars: { kind: "add" | "edit"; unitId?: string; form: UnitFormState }) => {
+      const body = unitPayload(vars.form);
+      if (vars.kind === "add") {
+        return fetchJson<Unit>("/api/v1/properties/" + propertyId + "/units", {
+          method: "POST",
+          body,
+        });
+      }
+      return fetchJson<Unit>("/api/v1/units/" + vars.unitId, {
+        method: "PATCH",
+        body,
+      });
+    },
+    onSuccess: () => {
+      invalidateUnits();
+      closeDialog();
+    },
+  });
+
+  const deleteMu = useMutation({
+    mutationFn: (unitId: string) =>
+      fetchJson<Unit>("/api/v1/units/" + unitId, { method: "DELETE" }),
+    onSuccess: () => {
+      invalidateUnits();
+      closeDialog();
+    },
+  });
+
+  const canDelete = orderedUnits.length > 1;
+  const busy = saveMu.isPending || deleteMu.isPending;
+  const mutationError = saveMu.error ?? deleteMu.error;
+
+  return (
+    <div className="panel property-units">
+      <header className="panel__head">
+        <div className="panel__head-stack">
+          <h2>Units</h2>
+          <p className="panel__sub">
+            Bookable spaces within this property. Stays, iCal feeds and guest defaults attach here.
+          </p>
+        </div>
+        <button type="button" className="btn btn--moss btn--sm" onClick={openAdd}>
+          Add unit
+        </button>
+      </header>
+
+      <table className="table property-units__table">
+        <thead>
+          <tr>
+            <th>Unit</th>
+            <th>Order</th>
+            <th>Default stay window</th>
+            <th>Max guests</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {orderedUnits.map((unit) => (
+            <tr key={unit.id}>
+              <td>
+                <Link className="link property-units__name" to={"/property/" + propertyId + "/units/" + unit.id}>
+                  {unit.name}
+                </Link>
+                {Object.keys(unit.welcome_overrides_json).length > 0 && (
+                  <span className="table__sub"> Welcome overrides</span>
+                )}
+              </td>
+              <td className="table__mono">{unit.ordinal}</td>
+              <td className="table__mono">
+                {displayTime(unit.default_checkin_time)} / {displayTime(unit.default_checkout_time)}
+              </td>
+              <td>{displayGuests(unit.max_guests)}</td>
+              <td>
+                <div className="property-units__actions">
+                  <button
+                    type="button"
+                    className="btn btn--ghost btn--sm"
+                    onClick={() => openEdit(unit)}
+                  >
+                    Edit
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn--ghost btn--sm"
+                    onClick={() => setDialog({ kind: "delete", unit })}
+                  >
+                    Delete
+                  </button>
+                </div>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+
+      <dialog className="modal" ref={dialogRef} onClose={closeDialog}>
+        {dialog?.kind === "delete" ? (
+          <div className="modal__body">
+            <h3 className="modal__title">Delete {dialog.unit.name}?</h3>
+            <p className="modal__sub">
+              This soft-deletes the unit and removes it from active unit pickers. Existing history keeps
+              its unit reference.
+            </p>
+            {!canDelete && (
+              <p className="unit-delete-warning">
+                Cannot delete the last live unit. Every property must keep at least one live unit.
+              </p>
+            )}
+            {mutationError && <p className="unit-modal__error">{mutationError.message}</p>}
+            <div className="modal__actions">
+              <button type="button" className="btn btn--ghost" onClick={closeDialog}>
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn btn--rust"
+                disabled={!canDelete || busy}
+                onClick={() => deleteMu.mutate(dialog.unit.id)}
+              >
+                Delete unit
+              </button>
+            </div>
+          </div>
+        ) : dialog ? (
+          <form
+            className="modal__body unit-modal"
+            onSubmit={(e) => {
+              e.preventDefault();
+              saveMu.mutate({
+                kind: dialog.kind,
+                unitId: dialog.kind === "edit" ? dialog.unit.id : undefined,
+                form,
+              });
+            }}
+          >
+            <h3 className="modal__title">
+              {dialog.kind === "add" ? "Add unit" : "Edit unit"}
+            </h3>
+            <div className="unit-modal__grid">
+              <label className="field">
+                <span>Name</span>
+                <input
+                  required
+                  value={form.name}
+                  onChange={(e) => setForm({ ...form, name: e.target.value })}
+                />
+              </label>
+              <label className="field">
+                <span>Order</span>
+                <input
+                  required
+                  type="number"
+                  min="0"
+                  step="1"
+                  value={form.ordinal}
+                  onChange={(e) => setForm({ ...form, ordinal: e.target.value })}
+                />
+              </label>
+              <label className="field">
+                <span>Default check-in</span>
+                <input
+                  required
+                  type="time"
+                  value={form.default_checkin_time}
+                  onChange={(e) => setForm({ ...form, default_checkin_time: e.target.value })}
+                />
+              </label>
+              <label className="field">
+                <span>Default check-out</span>
+                <input
+                  required
+                  type="time"
+                  value={form.default_checkout_time}
+                  onChange={(e) => setForm({ ...form, default_checkout_time: e.target.value })}
+                />
+              </label>
+              <label className="field">
+                <span>Max guests</span>
+                <input
+                  type="number"
+                  min="1"
+                  step="1"
+                  value={form.max_guests}
+                  onChange={(e) => setForm({ ...form, max_guests: e.target.value })}
+                />
+              </label>
+            </div>
+            {mutationError && <p className="unit-modal__error">{mutationError.message}</p>}
+            <div className="modal__actions">
+              <button type="button" className="btn btn--ghost" onClick={closeDialog}>
+                Cancel
+              </button>
+              <button type="submit" className="btn btn--moss" disabled={busy}>
+                {dialog.kind === "add" ? "Add unit" : "Save changes"}
+              </button>
+            </div>
+          </form>
+        ) : null}
+      </dialog>
+    </div>
+  );
+}
+
+type Tab = "overview" | "units" | "assets" | "sharing" | "settings";
 
 export default function PropertyDetailPage() {
   const { pid = "" } = useParams<{ pid: string }>();
   const [activeTab, setActiveTab] = useState<Tab>("overview");
+  const [unitsRevealed, setUnitsRevealed] = useState(false);
   const { workspaceId } = useWorkspace();
+
+  useEffect(() => {
+    setActiveTab("overview");
+    setUnitsRevealed(false);
+  }, [pid]);
 
   const meQ = useQuery({ queryKey: qk.me(), queryFn: () => fetchJson<Me>("/api/v1/me") });
   const detailQ = useQuery({
     queryKey: qk.property(pid),
     queryFn: () => fetchJson<PropertyDetail>("/api/v1/properties/" + pid),
+    enabled: pid !== "",
+  });
+  const unitsQ = useQuery({
+    queryKey: qk.propertyUnits(pid),
+    queryFn: () => fetchJson<Unit[]>("/api/v1/properties/" + pid + "/units"),
     enabled: pid !== "",
   });
   const empsQ = useQuery({
@@ -385,22 +678,37 @@ export default function PropertyDetailPage() {
   });
   void workspaceId;  // forces re-render on switch via React state subscription
 
-  if (detailQ.isPending || empsQ.isPending) {
+  if (detailQ.isPending || unitsQ.isPending || empsQ.isPending) {
     return <DeskPage title="Property"><Loading /></DeskPage>;
   }
-  if (!detailQ.data || !empsQ.data) {
+  if (!detailQ.data || !unitsQ.data || !empsQ.data) {
     return <DeskPage title="Property">Failed to load.</DeskPage>;
   }
 
   const { property, property_tasks, stays, assets, asset_documents: _asset_documents } = detailQ.data;
   void _asset_documents;
   const empsById = new Map(empsQ.data.map((e) => [e.id, e]));
+  const units = unitsQ.data;
+  const showUnitsTab = units.length > 1 || unitsRevealed;
+  const openUnits = () => {
+    setUnitsRevealed(true);
+    setActiveTab("units");
+  };
 
   return (
     <DeskPage
       title={property.name}
       sub={property.city + " · " + property.timezone}
-      actions={<button className="btn btn--moss">Edit property</button>}
+      actions={
+        <div className="property-actions">
+          {!showUnitsTab && (
+            <button type="button" className="btn btn--ghost btn--sm" onClick={openUnits}>
+              Manage units
+            </button>
+          )}
+          <button type="button" className="btn btn--moss">Edit property</button>
+        </div>
+      }
       overflow={[{ label: "New task", onSelect: () => undefined }]}
     >
       <nav className="tabs tabs--h">
@@ -412,6 +720,14 @@ export default function PropertyDetailPage() {
         </a>
         <a className="tab-link">Areas</a>
         <a className="tab-link">Stays</a>
+        {showUnitsTab && (
+          <a
+            className={"tab-link" + (activeTab === "units" ? " tab-link--active" : "")}
+            onClick={openUnits}
+          >
+            Units
+          </a>
+        )}
         <a
           className={"tab-link" + (activeTab === "assets" ? " tab-link--active" : "")}
           onClick={() => setActiveTab("assets")}
@@ -503,6 +819,10 @@ export default function PropertyDetailPage() {
             <p>Failed to load settings.</p>
           )}
         </>
+      )}
+
+      {activeTab === "units" && showUnitsTab && (
+        <UnitsPanel propertyId={property.id} units={units} />
       )}
 
       {activeTab === "assets" && (
