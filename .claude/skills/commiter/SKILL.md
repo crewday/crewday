@@ -48,7 +48,11 @@ metadata exports are current.
 
 ### 3. Stage Explicit Paths
 
-Prefer explicit paths and include `.beads/` whenever Beads changed:
+Prefer explicit paths. **Always stage the entire `.beads/` directory
+when it shows as modified, even if the caller restricted you to a
+narrow set of paths.** A pre-commit hook re-exports `.beads/` on every
+commit, so leaving it unstaged conflicts with the hook and leaves the
+worktree dirty after the commit lands. It is always safe to include.
 
 ```bash
 git add <paths> .beads
