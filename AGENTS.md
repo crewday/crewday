@@ -114,6 +114,18 @@ replace several tool calls per check:
   ./scripts/agent-curl.sh dev GET  /w/dev/api/v1/employees
   ./scripts/agent-curl.sh dev POST /w/dev/api/v1/tasks '{"title":"smoke"}'
   ```
+- `./scripts/agent-code-health.py` — lizard-backed digest of the worst
+  per-function offenders by cyclomatic complexity, function length, and
+  parameter count, plus token-based duplicate code blocks. Defaults
+  scan `app/` + `app/web/src/`; pass paths to narrow. Not a gate
+  (always exits 0 on success) — used to find batches of refactor
+  targets. Override thresholds via `CCN_THRESHOLD` / `NLOC_THRESHOLD`
+  / `PARAM_THRESHOLD`.
+  ```bash
+  ./scripts/agent-code-health.py                   # default scan
+  ./scripts/agent-code-health.py app/domain/tasks  # specific subtree
+  ./scripts/agent-code-health.py --no-dup --top 20
+  ```
 
 Reach for the primitives below when you need the raw cookie (Playwright,
 multi-step scripts) or the wrappers misbehave.
@@ -352,7 +364,11 @@ Plain text to the user; CLI handles styling.
 
 ## Application-specific notes
 
-- **Python 3.14+** for all server code.
+- **Python 3.14+** for all server code. Note that 3.14 accepts
+  `except ValueError, IndexError:` as a multi-class `except` clause
+  (no parens). It is **valid syntax** here — do not "fix" it back to
+  the parenthesized form. Agents have repeatedly mis-corrected this;
+  if you see it in the codebase, leave it alone.
 - **SQLite default; Postgres 15+ supported** — CI runs both. Use
   portable SQL or SQLAlchemy idioms.
 - **React frontend.** Mocks (and the upcoming production frontend)

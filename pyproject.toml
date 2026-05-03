@@ -213,6 +213,12 @@ dev = [
     # without them, and the codegen module is in scope for the strict
     # gate (``mypy cli/crewday/_codegen.py``).
     "types-PyYAML",
+    # Cyclomatic complexity, function-length, parameter-count, and
+    # token-based duplicate detection. Drives
+    # ``scripts/agent-code-health.py`` so agents can find concrete
+    # refactor targets without standing up a service. Multi-language
+    # (Python + TS), no config file, no daemon.
+    "lizard",
 ]
 
 [tool.ruff]
