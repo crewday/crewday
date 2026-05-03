@@ -93,7 +93,15 @@ from app.domain.identity.permission_groups import (
     update_group,
     write_member_remove_rejected_audit,
 )
+from app.events import (
+    PermissionGroupDeleted,
+    PermissionGroupMemberAdded,
+    PermissionGroupMemberRemoved,
+    PermissionGroupUpserted,
+)
+from app.events.bus import bus as default_event_bus
 from app.tenancy import WorkspaceContext
+from app.util.clock import SystemClock
 
 __all__ = [
     "AddMemberRequest",
@@ -273,6 +281,47 @@ def _http_for_last_owner_grant_protected(
     return HTTPException(
         status_code=409,
         detail={"error": "last_owner_grant_protected", "message": str(exc)},
+    )
+
+
+def _publish_group_event(
+    ctx: WorkspaceContext,
+    event_type: type[PermissionGroupUpserted] | type[PermissionGroupDeleted],
+    group_id: str,
+) -> None:
+    """Fan a permission-group catalog change out to SSE subscribers.
+
+    Mirrors the instructions-router publish shape — a single helper so
+    the create / update / delete handlers stay terse and the SystemClock
+    + correlation_id wiring is consistent across event kinds.
+    """
+    default_event_bus.publish(
+        event_type(
+            workspace_id=ctx.workspace_id,
+            actor_id=ctx.actor_id,
+            correlation_id=ctx.audit_correlation_id,
+            occurred_at=SystemClock().now(),
+            group_id=group_id,
+        )
+    )
+
+
+def _publish_member_event(
+    ctx: WorkspaceContext,
+    event_type: type[PermissionGroupMemberAdded] | type[PermissionGroupMemberRemoved],
+    group_id: str,
+    user_id: str,
+) -> None:
+    """Fan a roster mutation out to SSE subscribers."""
+    default_event_bus.publish(
+        event_type(
+            workspace_id=ctx.workspace_id,
+            actor_id=ctx.actor_id,
+            correlation_id=ctx.audit_correlation_id,
+            occurred_at=SystemClock().now(),
+            group_id=group_id,
+            user_id=user_id,
+        )
     )
 
 
@@ -457,6 +506,7 @@ def build_permission_groups_router() -> APIRouter:
             raise _http_for_unknown_capability(exc) from exc
         except PermissionGroupSlugTaken as exc:
             raise _http_for_slug_taken(exc) from exc
+        _publish_group_event(ctx, PermissionGroupUpserted, ref.id)
         return _ref_to_response(ref)
 
     @api.get(
@@ -531,6 +581,7 @@ def build_permission_groups_router() -> APIRouter:
             raise _http_for_system_protected(exc) from exc
         except UnknownCapability as exc:
             raise _http_for_unknown_capability(exc) from exc
+        _publish_group_event(ctx, PermissionGroupUpserted, ref.id)
         return _ref_to_response(ref)
 
     @api.delete(
@@ -562,6 +613,7 @@ def build_permission_groups_router() -> APIRouter:
             raise _http_for_not_found() from exc
         except SystemGroupProtected as exc:
             raise _http_for_system_protected(exc) from exc
+        _publish_group_event(ctx, PermissionGroupDeleted, group_id)
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 
     @api.get(
@@ -653,6 +705,7 @@ def build_permission_groups_router() -> APIRouter:
             )
         except PermissionGroupNotFound as exc:
             raise _http_for_not_found() from exc
+        _publish_member_event(ctx, PermissionGroupMemberAdded, group_id, ref.user_id)
         return _member_to_response(ref)
 
     @api.delete(
@@ -736,6 +789,7 @@ def build_permission_groups_router() -> APIRouter:
             if isinstance(exc, WouldOrphanOwnersGroup):
                 raise _http_for_would_orphan_owners_group(exc) from exc
             raise _http_for_last_owner_grant_protected(exc) from exc
+        _publish_member_event(ctx, PermissionGroupMemberRemoved, group_id, user_id)
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 
     return api

@@ -159,12 +159,23 @@ export const qk = {
     [...ws(), "property_workspace_invite", tokenOrId] as const,
   permissionGroups: (scopeKind?: string, scopeId?: string) =>
     [...ws(), "permission_groups", scopeKind ?? "all", scopeId ?? "all"] as const,
+  // SSE invalidation prefix — matches every `permission_groups(...)`
+  // page across the active workspace, regardless of scope filter.
+  permissionGroupsPrefix: () => [...ws(), "permission_groups"] as const,
   permissionGroupMembers: (gid: string) => [...ws(), "permission_group_members", gid] as const,
+  // SSE invalidation prefix — matches every per-group roster cache.
+  permissionGroupMembersPrefix: () => [...ws(), "permission_group_members"] as const,
   permissionRules: (scopeKind?: string, scopeId?: string) =>
     [...ws(), "permission_rules", scopeKind ?? "all", scopeId ?? "all"] as const,
+  permissionRulesPrefix: () => [...ws(), "permission_rules"] as const,
   actionCatalog: () => [...ws(), "action_catalog"] as const,
   permissionResolved: (userId: string, actionKey: string, scopeKind: string, scopeId: string) =>
     [...ws(), "permissions", "resolved", userId, actionKey, scopeKind, scopeId] as const,
+  // SSE invalidation prefix — drops every cached resolver verdict for
+  // the active workspace. A rule, role-grant, or group-membership
+  // change can flip any verdict, so narrow-key invalidation would
+  // miss inheritance ripples.
+  permissionResolvedPrefix: () => [...ws(), "permissions", "resolved"] as const,
   chatChannels: () => [...ws(), "chat", "channels"] as const,
   chatChannelProviders: () => [...ws(), "chat", "channels", "providers"] as const,
   agentPrefs: (scope: "workspace" | "property" | "me", id?: string) =>

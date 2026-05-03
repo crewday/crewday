@@ -164,6 +164,18 @@ export type EventKind =
   // `llm_capability_inheritance`; the SPA drops the admin LLM graph
   // cache so a second tab sees the chain update without a reload.
   | "llm.assignment.changed"
+  // §02 / §05 permission domain — manager-scoped on the backend
+  // (`allowed_roles=("manager",)` on the event subclasses). Drives the
+  // Permissions page caches: group catalog, per-group rosters, rule
+  // list, action-resolved verdicts.
+  | "permission_group.upserted"
+  | "permission_group.deleted"
+  | "permission_group_member.added"
+  | "permission_group_member.removed"
+  | "permission_rule.upserted"
+  | "permission_rule.deleted"
+  | "role_grant.created"
+  | "role_grant.revoked"
   // Catch-all workspace invalidation — e.g. owner flips a workspace
   // setting that reshapes policy. Drops every cached query under
   // the active workspace.
@@ -354,6 +366,24 @@ interface InstructionPayload {
   id?: string;
 }
 
+interface PermissionGroupPayload {
+  group_id: string;
+}
+
+interface PermissionGroupMemberPayload {
+  group_id: string;
+  user_id: string;
+}
+
+interface PermissionRulePayload {
+  rule_id: string;
+}
+
+interface RoleGrantPayload {
+  grant_id: string;
+  user_id: string;
+}
+
 function invalidate(qc: QueryClient, queryKey: readonly unknown[]): void {
   // `refetchType: "active"` keeps idle queries cheap (§14 "SSE-driven
   // invalidation"). Explicit here so the intent is visible at every
@@ -399,6 +429,47 @@ function invalidateInstruction(event: SseEvent, qc: QueryClient): void {
     invalidate(qc, qk.instruction(instructionId));
     invalidate(qc, qk.instructionVersions(instructionId));
   }
+}
+
+function invalidatePermissionGroup(event: SseEvent, qc: QueryClient): void {
+  const payload = event.data as unknown as PermissionGroupPayload;
+  // Catalog list — every scope/filter combo lives under the prefix.
+  invalidate(qc, qk.permissionGroupsPrefix());
+  if (payload.group_id) {
+    invalidate(qc, qk.permissionGroupMembers(payload.group_id));
+  }
+  // §02 step 5 default-allow walk reads group capabilities + system
+  // group membership — drop every resolver verdict cached under the
+  // active workspace.
+  invalidate(qc, qk.permissionResolvedPrefix());
+}
+
+function invalidatePermissionGroupMember(event: SseEvent, qc: QueryClient): void {
+  const payload = event.data as unknown as PermissionGroupMemberPayload;
+  invalidate(qc, qk.permissionGroupsPrefix());
+  invalidate(qc, qk.permissionGroupMembers(payload.group_id));
+  // Membership feeds resolution for every action whose default_allow
+  // tuple references the affected group.
+  invalidate(qc, qk.permissionResolvedPrefix());
+}
+
+function invalidatePermissionRule(event: SseEvent, qc: QueryClient): void {
+  const payload = event.data as unknown as PermissionRulePayload;
+  void payload;
+  invalidate(qc, qk.permissionRulesPrefix());
+  // §02 step 3+4 — rule walk lives upstream of every resolver verdict.
+  invalidate(qc, qk.permissionResolvedPrefix());
+}
+
+function invalidateRoleGrant(event: SseEvent, qc: QueryClient): void {
+  const payload = event.data as unknown as RoleGrantPayload;
+  void payload;
+  // Owners-group derived membership shifts when a `manager` grant is
+  // minted or revoked; the catalog reflects who's in `owners@<ws>`.
+  invalidate(qc, qk.permissionGroupsPrefix());
+  // Role grants seed the §02 step 5 default-allow walk — drop every
+  // resolver verdict.
+  invalidate(qc, qk.permissionResolvedPrefix());
 }
 
 export const INVALIDATIONS: Record<EventKind, InvalidationHandler> = {
@@ -916,6 +987,18 @@ export const INVALIDATIONS: Record<EventKind, InvalidationHandler> = {
     // would miss inheritance ripples).
     invalidate(qc, qk.adminLlmGraph());
   },
+
+  "permission_group.upserted": invalidatePermissionGroup,
+  "permission_group.deleted": invalidatePermissionGroup,
+
+  "permission_group_member.added": invalidatePermissionGroupMember,
+  "permission_group_member.removed": invalidatePermissionGroupMember,
+
+  "permission_rule.upserted": invalidatePermissionRule,
+  "permission_rule.deleted": invalidatePermissionRule,
+
+  "role_grant.created": invalidateRoleGrant,
+  "role_grant.revoked": invalidateRoleGrant,
 
   "workspace.changed": (_event, qc) => {
     // Big-hammer: a workspace-level setting reshaped policy. Every

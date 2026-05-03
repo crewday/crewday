@@ -276,7 +276,12 @@ def build_permission_rules_router() -> APIRouter:
 
         Returns 503 ``permission_rule_table_unavailable`` until the
         backing table ships. The handler signature is final so the
-        cd-dzp follow-up only swaps the body.
+        cd-dzp follow-up only swaps the body — and at that point the
+        success branch should publish
+        :class:`app.events.PermissionRuleUpserted` (already registered
+        on the event bus, mirrored in the SPA SSE dispatchers) so a
+        second tab on the Permissions page invalidates the rule list +
+        permission-resolved cache without a manual reload.
         """
         _ = (body, ctx, session)
         raise _http_for_table_unavailable()
@@ -305,7 +310,10 @@ def build_permission_rules_router() -> APIRouter:
         """Revoke a rule.
 
         Returns 503 ``permission_rule_table_unavailable`` until the
-        backing table ships.
+        backing table ships. The cd-dzp follow-up should publish
+        :class:`app.events.PermissionRuleDeleted` on the success branch
+        so the Permissions page in a sibling tab drops the rule list +
+        permission-resolved cache without a manual reload.
         """
         _ = (rule_id, ctx, session)
         raise _http_for_table_unavailable()

@@ -32,6 +32,10 @@ from app.api.v1.role_grants import (
     build_role_grants_router,
     build_users_role_grants_router,
 )
+from app.events import RoleGrantCreated, RoleGrantRevoked
+from app.events import (
+    bus as default_event_bus,
+)
 from app.tenancy import WorkspaceContext
 from app.util.ulid import new_ulid
 from tests.factories.identity import bootstrap_user
@@ -702,6 +706,145 @@ class TestList:
         resp = client.get(f"/users/{ctx.actor_id}/role_grants?cursor=!!!not-base64!!!")
         assert resp.status_code == 422
         assert resp.json()["type"].endswith("/invalid_cursor")
+
+
+# ---------------------------------------------------------------------------
+# SSE event publishing — bus round-trip (cd-twyto)
+# ---------------------------------------------------------------------------
+
+
+class TestSseEvents:
+    """Pin POST + DELETE to the matching ``app.events`` publish.
+
+    The §05 Permissions page in a sibling tab refreshes its group
+    catalogue (owners-derived membership) + resolver verdict via the
+    SSE events emitted here; the SPA dispatcher round-trip is covered
+    by ``mocks/web/src/lib/sse.ts`` + ``app/web/src/lib/sse.ts``.
+    """
+
+    def test_create_and_revoke_publish_grant_events(
+        self,
+        owner_ctx: tuple[WorkspaceContext, sessionmaker[Session], str],
+    ) -> None:
+        ctx, factory, ws_id = owner_ctx
+        with factory() as s:
+            target = bootstrap_user(s, email="grantee@example.com", display_name="G")
+            s.add(
+                UserWorkspace(
+                    user_id=target.id,
+                    workspace_id=ws_id,
+                    source="workspace_grant",
+                    added_at=datetime.now(tz=UTC),
+                )
+            )
+            s.commit()
+            target_id = target.id
+        client = _client(ctx, factory)
+        captured: list[RoleGrantCreated | RoleGrantRevoked] = []
+        default_event_bus.subscribe(RoleGrantCreated)(captured.append)
+        default_event_bus.subscribe(RoleGrantRevoked)(captured.append)
+
+        try:
+            created = client.post(
+                "/role_grants",
+                json={"user_id": target_id, "grant_role": "worker"},
+            ).json()
+            grant_id = created["id"]
+            client.delete(f"/role_grants/{grant_id}")
+        finally:
+            default_event_bus._reset_for_tests()
+
+        assert [type(event).name for event in captured] == [
+            "role_grant.created",
+            "role_grant.revoked",
+        ]
+        assert [event.workspace_id for event in captured] == [ws_id, ws_id]
+        assert [event.grant_id for event in captured] == [grant_id, grant_id]
+        assert [event.user_id for event in captured] == [target_id, target_id]
+
+    def test_patch_rescope_publishes_grant_created_event(
+        self,
+        owner_ctx: tuple[WorkspaceContext, sessionmaker[Session], str],
+    ) -> None:
+        """PATCH-rescope fires ``role_grant.created`` (mirrors group upsert).
+
+        Without the publish a sibling tab on /permissions would keep
+        a stale resolver verdict after a manager grant was narrowed
+        to a single property. The SPA dispatcher reuses the ``created``
+        handler — see the ``RoleGrantCreated`` docstring + the
+        ``role_grant.created`` cases in ``mocks/web/src/lib/sse.ts``
+        and ``app/web/src/lib/sse.ts``.
+        """
+        ctx, factory, ws_id = owner_ctx
+        prop_id = _seed_property_in_workspace(factory, workspace_id=ws_id)
+        with factory() as s:
+            target = bootstrap_user(
+                s, email="patch-target@example.com", display_name="PT"
+            )
+            row = RoleGrant(
+                id=new_ulid(),
+                workspace_id=ws_id,
+                user_id=target.id,
+                grant_role="worker",
+                scope_property_id=None,
+                created_at=datetime.now(tz=UTC),
+                created_by_user_id=None,
+            )
+            s.add(row)
+            s.commit()
+            grant_id = row.id
+            target_id = target.id
+        client = _client(ctx, factory)
+        captured: list[RoleGrantCreated] = []
+        default_event_bus.subscribe(RoleGrantCreated)(captured.append)
+
+        try:
+            resp = client.patch(
+                f"/role_grants/{grant_id}",
+                json={"scope_property_id": prop_id},
+            )
+        finally:
+            default_event_bus._reset_for_tests()
+
+        assert resp.status_code == 200, resp.text
+        assert [type(event).name for event in captured] == ["role_grant.created"]
+        assert captured[0].workspace_id == ws_id
+        assert captured[0].grant_id == grant_id
+        assert captured[0].user_id == target_id
+
+    def test_empty_patch_does_not_publish(
+        self,
+        owner_ctx: tuple[WorkspaceContext, sessionmaker[Session], str],
+    ) -> None:
+        """Empty-body PATCH is a no-op read; no event must fire."""
+        ctx, factory, ws_id = owner_ctx
+        with factory() as s:
+            target = bootstrap_user(
+                s, email="patch-noop@example.com", display_name="PN"
+            )
+            row = RoleGrant(
+                id=new_ulid(),
+                workspace_id=ws_id,
+                user_id=target.id,
+                grant_role="worker",
+                scope_property_id=None,
+                created_at=datetime.now(tz=UTC),
+                created_by_user_id=None,
+            )
+            s.add(row)
+            s.commit()
+            grant_id = row.id
+        client = _client(ctx, factory)
+        captured: list[RoleGrantCreated] = []
+        default_event_bus.subscribe(RoleGrantCreated)(captured.append)
+
+        try:
+            resp = client.patch(f"/role_grants/{grant_id}", json={})
+        finally:
+            default_event_bus._reset_for_tests()
+
+        assert resp.status_code == 200
+        assert captured == []
 
 
 # ---------------------------------------------------------------------------

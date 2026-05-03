@@ -77,7 +77,10 @@ from app.domain.identity.role_grants import (
     list_grants,
     revoke,
 )
+from app.events import RoleGrantCreated, RoleGrantRevoked
+from app.events.bus import bus as default_event_bus
 from app.tenancy import WorkspaceContext
+from app.util.clock import SystemClock
 
 __all__ = [
     "RoleGrantCreateRequest",
@@ -266,6 +269,31 @@ def _http_for_last_owner(exc: LastOwnerGrantProtected) -> HTTPException:
 # ---------------------------------------------------------------------------
 
 
+def _publish_role_grant_event(
+    ctx: WorkspaceContext,
+    event_type: type[RoleGrantCreated] | type[RoleGrantRevoked],
+    *,
+    grant_id: str,
+    user_id: str,
+) -> None:
+    """Fan a role-grant lifecycle change out to SSE subscribers.
+
+    Mirrors the instructions-router publish shape — the SystemClock +
+    correlation_id wiring stays consistent across event kinds, and the
+    helper keeps the create / delete handlers terse.
+    """
+    default_event_bus.publish(
+        event_type(
+            workspace_id=ctx.workspace_id,
+            actor_id=ctx.actor_id,
+            correlation_id=ctx.audit_correlation_id,
+            occurred_at=SystemClock().now(),
+            grant_id=grant_id,
+            user_id=user_id,
+        )
+    )
+
+
 _ScopePropertyFilter = Annotated[
     str | None,
     Query(
@@ -359,6 +387,9 @@ def build_role_grants_router() -> APIRouter:
             raise _http_for_cross_workspace(exc) from exc
         except RoleGrantUserNotFound as exc:
             raise _http_for_user_not_found(exc) from exc
+        _publish_role_grant_event(
+            ctx, RoleGrantCreated, grant_id=ref.id, user_id=ref.user_id
+        )
         return _ref_to_response(ref)
 
     @api.patch(
@@ -470,6 +501,16 @@ def build_role_grants_router() -> APIRouter:
                 "after": {"scope_property_id": new_scope},
             },
         )
+        # PATCH-rescope fires the same ``role_grant.created`` SSE
+        # frame the create path uses (see ``RoleGrantCreated`` —
+        # one ``created`` event covers create + rescope). Without
+        # this publish a sibling tab on /permissions would keep
+        # stale resolver verdicts after a manager grant was
+        # narrowed to a single property, until the React Query TTL
+        # expired.
+        _publish_role_grant_event(
+            ctx, RoleGrantCreated, grant_id=row.id, user_id=row.user_id
+        )
         return _ref_to_response(_row_to_ref(row))
 
     @api.delete(
@@ -510,12 +551,34 @@ def build_role_grants_router() -> APIRouter:
         operator to mint a replacement ``manager`` grant on another
         owners-group member first.
         """
+        # Capture the live row's ``user_id`` before the revoke so the
+        # SSE envelope carries the affected user even though the domain
+        # ``revoke`` returns ``None`` and the row is soft-retired
+        # afterwards. The same workspace-scoped + ``revoked_at IS NULL``
+        # filter the domain layer applies on its own read keeps the
+        # tenant pin honest. ``one_or_none`` lets the missing-row branch
+        # fall through to the domain ``revoke`` so the 404 envelope
+        # wording stays in one place.
+        existing = session.scalars(
+            select(RoleGrant).where(
+                RoleGrant.id == grant_id,
+                RoleGrant.workspace_id == ctx.workspace_id,
+                RoleGrant.revoked_at.is_(None),
+            )
+        ).one_or_none()
         try:
             revoke(SqlAlchemyRoleGrantRepository(session), ctx, grant_id=grant_id)
         except RoleGrantNotFound as exc:
             raise _http_for_not_found() from exc
         except LastOwnerGrantProtected as exc:
             raise _http_for_last_owner(exc) from exc
+        if existing is not None:
+            _publish_role_grant_event(
+                ctx,
+                RoleGrantRevoked,
+                grant_id=grant_id,
+                user_id=existing.user_id,
+            )
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 
     return api

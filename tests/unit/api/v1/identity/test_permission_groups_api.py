@@ -27,6 +27,15 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app.adapters.db.authz.models import PermissionGroup, PermissionGroupMember
 from app.api.v1.permission_groups import build_permission_groups_router
+from app.events import (
+    PermissionGroupDeleted,
+    PermissionGroupMemberAdded,
+    PermissionGroupMemberRemoved,
+    PermissionGroupUpserted,
+)
+from app.events import (
+    bus as default_event_bus,
+)
 from app.tenancy import WorkspaceContext
 from app.util.ulid import new_ulid
 from tests.factories.identity import bootstrap_user
@@ -543,6 +552,91 @@ class TestMembers:
             json={"user_id": ctx.actor_id},
         )
         assert resp.status_code == 403
+
+
+# ---------------------------------------------------------------------------
+# SSE event publishing — bus round-trip (cd-twyto)
+# ---------------------------------------------------------------------------
+
+
+class TestSseEvents:
+    """Pin each mutation to the matching ``app.events`` publish.
+
+    The §02 / §05 Permissions page in a sibling tab refreshes its
+    group list / per-group roster / resolver verdict via the SSE
+    events emitted here; the SPA dispatcher round-trip is covered by
+    ``mocks/web/src/lib/sse.ts`` + ``app/web/src/lib/sse.ts``.
+    """
+
+    def test_create_update_delete_publish_group_events(
+        self,
+        owner_ctx: tuple[WorkspaceContext, sessionmaker[Session], str],
+    ) -> None:
+        ctx, factory, _ = owner_ctx
+        client = _client(ctx, factory)
+        captured: list[PermissionGroupUpserted | PermissionGroupDeleted] = []
+        default_event_bus.subscribe(PermissionGroupUpserted)(captured.append)
+        default_event_bus.subscribe(PermissionGroupDeleted)(captured.append)
+
+        try:
+            created = client.post(
+                "/permission_groups",
+                json={"slug": "alerts", "name": "Alerts"},
+            ).json()
+            group_id = created["id"]
+            client.patch(
+                f"/permission_groups/{group_id}",
+                json={"name": "Alerts (renamed)"},
+            )
+            client.delete(f"/permission_groups/{group_id}")
+        finally:
+            default_event_bus._reset_for_tests()
+
+        assert [type(event).name for event in captured] == [
+            "permission_group.upserted",
+            "permission_group.upserted",
+            "permission_group.deleted",
+        ]
+        assert [event.workspace_id for event in captured] == [ctx.workspace_id] * 3
+        assert [event.group_id for event in captured] == [group_id] * 3
+
+    def test_member_add_remove_publish_member_events(
+        self,
+        owner_ctx: tuple[WorkspaceContext, sessionmaker[Session], str],
+    ) -> None:
+        ctx, factory, ws_id = owner_ctx
+        client = _client(ctx, factory)
+        created = client.post(
+            "/permission_groups",
+            json={"slug": "team", "name": "Team"},
+        ).json()
+        group_id = created["id"]
+        target = _seed_user_in_workspace(
+            factory,
+            email="member@example.com",
+            display_name="Member",
+            workspace_id=ws_id,
+        )
+        captured: list[PermissionGroupMemberAdded | PermissionGroupMemberRemoved] = []
+        default_event_bus.subscribe(PermissionGroupMemberAdded)(captured.append)
+        default_event_bus.subscribe(PermissionGroupMemberRemoved)(captured.append)
+
+        try:
+            client.post(
+                f"/permission_groups/{group_id}/members",
+                json={"user_id": target},
+            )
+            client.delete(f"/permission_groups/{group_id}/members/{target}")
+        finally:
+            default_event_bus._reset_for_tests()
+
+        assert [type(event).name for event in captured] == [
+            "permission_group_member.added",
+            "permission_group_member.removed",
+        ]
+        assert [event.workspace_id for event in captured] == [ctx.workspace_id] * 2
+        assert [event.group_id for event in captured] == [group_id] * 2
+        assert [event.user_id for event in captured] == [target] * 2
 
 
 # ---------------------------------------------------------------------------

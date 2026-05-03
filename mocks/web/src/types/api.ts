@@ -1573,7 +1573,29 @@ export type SseEvent =
   // Fires whenever an admin mutates `model_assignment` or
   // `llm_capability_inheritance`; the SPA drops the admin LLM graph
   // cache so a second tab sees the chain update without a reload.
-  | { event: "llm.assignment.changed"; data: { workspace_id: string } };
+  | { event: "llm.assignment.changed"; data: { workspace_id: string } }
+  // §02 / §05 permission domain. Every event is manager-scoped on the
+  // backend (see `app/events/types.py`) — only the Permissions page
+  // (owners + managers) renders these caches, so workers / clients /
+  // guests never receive the frame. Payloads carry FK ids only; the
+  // SPA re-fetches via REST under the normal per-row authz path.
+  | { event: "permission_group.upserted"; data: { group_id: string } }
+  | { event: "permission_group.deleted"; data: { group_id: string } }
+  | {
+      event: "permission_group_member.added";
+      data: { group_id: string; user_id: string };
+    }
+  | {
+      event: "permission_group_member.removed";
+      data: { group_id: string; user_id: string };
+    }
+  | { event: "permission_rule.upserted"; data: { rule_id: string } }
+  | { event: "permission_rule.deleted"; data: { rule_id: string } }
+  | { event: "role_grant.created"; data: { grant_id: string; user_id: string } }
+  | {
+      event: "role_grant.revoked";
+      data: { grant_id: string; user_id: string };
+    };
 
 // §06 — per-property recurring rota (Schedule ruleset).
 export interface ScheduleRuleset {

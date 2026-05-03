@@ -78,6 +78,12 @@ __all__ = [
     "PayPeriodPaid",
     "PayrollExportReady",
     "PayslipComputed",
+    "PermissionGroupDeleted",
+    "PermissionGroupMemberAdded",
+    "PermissionGroupMemberRemoved",
+    "PermissionGroupUpserted",
+    "PermissionRuleDeleted",
+    "PermissionRuleUpserted",
     "PropertyClosureCreated",
     "PropertyClosureReason",
     "PropertyClosureUpdated",
@@ -85,6 +91,8 @@ __all__ = [
     "QuoteDecided",
     "ReservationChangeKind",
     "ReservationUpserted",
+    "RoleGrantCreated",
+    "RoleGrantRevoked",
     "ShiftChanged",
     "ShiftChangedAction",
     "ShiftEnded",
@@ -254,6 +262,152 @@ class InstructionPublished(_InstructionEvent):
     """A future publishing workflow made an instruction visible."""
 
     name: ClassVar[str] = "instruction.published"
+
+
+# Permission domain (§02 "v1 authority split", §05 "Action catalog").
+# Every event in this family is narrowed to ``manager`` because the
+# /permissions surfaces (groups, members, rules, role grants) are
+# governance-sensitive and only rendered to owners + managers in the
+# SPA. Workers / clients / guests have no cache to invalidate here, and
+# permission membership rosters can leak who-may-do-what across the
+# workspace if fanned out broadly.
+
+
+class _PermissionGroupEvent(Event):
+    """Permission-group catalog change visible to manager surfaces."""
+
+    allowed_roles: ClassVar[tuple[EventRole, ...]] = ("manager",)
+
+    group_id: str
+
+
+@register
+class PermissionGroupUpserted(_PermissionGroupEvent):
+    """A permission group row was created or its capabilities/name updated.
+
+    Single ``upserted`` event covers both the create path
+    (:func:`app.api.v1.permission_groups.create`) and the update path
+    (:func:`app.api.v1.permission_groups.update`). The SPA fan-out is
+    identical for both — the catalog list refetches, the per-row read
+    refetches if mounted, and the cached permission resolution drops
+    because group capabilities feed §02 step 5 default-allow checks.
+    """
+
+    name: ClassVar[str] = "permission_group.upserted"
+
+
+@register
+class PermissionGroupDeleted(_PermissionGroupEvent):
+    """A user-defined permission group was hard-deleted."""
+
+    name: ClassVar[str] = "permission_group.deleted"
+
+
+class _PermissionGroupMemberEvent(Event):
+    """Permission-group membership change visible to manager surfaces."""
+
+    allowed_roles: ClassVar[tuple[EventRole, ...]] = ("manager",)
+
+    group_id: str
+    user_id: str
+
+
+@register
+class PermissionGroupMemberAdded(_PermissionGroupMemberEvent):
+    """A user was added to a permission group's roster.
+
+    Fires for both fresh inserts and idempotent re-adds — the
+    membership write path is idempotent at the domain layer
+    (:func:`app.domain.identity.permission_groups.add_member`); the
+    event mirrors that contract.
+    """
+
+    name: ClassVar[str] = "permission_group_member.added"
+
+
+@register
+class PermissionGroupMemberRemoved(_PermissionGroupMemberEvent):
+    """A user was removed from a permission group's roster.
+
+    Refused removals (last-owner-grant protection,
+    would-orphan-owners-group) write a forensic audit row but do **not**
+    publish this event — the row stays intact, so SSE subscribers
+    have nothing to invalidate.
+    """
+
+    name: ClassVar[str] = "permission_group_member.removed"
+
+
+class _PermissionRuleEvent(Event):
+    """Permission-rule catalog change visible to manager surfaces."""
+
+    allowed_roles: ClassVar[tuple[EventRole, ...]] = ("manager",)
+
+    rule_id: str
+
+
+@register
+class PermissionRuleUpserted(_PermissionRuleEvent):
+    """A permission rule was created (or, in v2, updated in place).
+
+    v1 ships an empty ``permission_rule`` table — the
+    :class:`~app.api.v1.permission_rules` write paths return 503
+    until the cd-dzp follow-up lands the schema. The event class is
+    declared now so that follow-up only swaps the publish call body,
+    not the wire shape downstream subscribers see.
+    """
+
+    name: ClassVar[str] = "permission_rule.upserted"
+
+
+@register
+class PermissionRuleDeleted(_PermissionRuleEvent):
+    """A permission rule was revoked / hard-deleted.
+
+    Same v1 reality as :class:`PermissionRuleUpserted` — the API
+    surface raises 503 today. The event class is in place so the
+    cd-dzp follow-up can publish without a wire change.
+    """
+
+    name: ClassVar[str] = "permission_rule.deleted"
+
+
+class _RoleGrantEvent(Event):
+    """Role-grant lifecycle event visible to manager surfaces."""
+
+    allowed_roles: ClassVar[tuple[EventRole, ...]] = ("manager",)
+
+    grant_id: str
+    user_id: str
+
+
+@register
+class RoleGrantCreated(_RoleGrantEvent):
+    """A ``role_grants`` row was minted or rescoped.
+
+    Fired by :func:`app.api.v1.role_grants.create` after the domain
+    layer accepted the §05 owner-authority rule, and by
+    :func:`app.api.v1.role_grants.update` on a successful rescope —
+    a single ``created`` event covers both the fresh-mint path and
+    the in-place rescope, mirroring how
+    :class:`PermissionGroupUpserted` conflates create + update. The
+    SPA fan-out is identical for both: the resolver verdict cache
+    drops because a rescope can flip §02 step 5 default-allow walks
+    just as a fresh grant can.
+    """
+
+    name: ClassVar[str] = "role_grant.created"
+
+
+@register
+class RoleGrantRevoked(_RoleGrantEvent):
+    """A ``role_grants`` row was soft-retired (cd-x1xh).
+
+    The row stays in the table for audit; the SPA stops surfacing it
+    because the live-grant read paths filter on ``revoked_at IS NULL``.
+    """
+
+    name: ClassVar[str] = "role_grant.revoked"
 
 
 @register

@@ -90240,7 +90240,7 @@
         }
       ],
       "post": {
-        "description": "Insert a new rule.\n\nReturns 503 ``permission_rule_table_unavailable`` until the\nbacking table ships. The handler signature is final so the\ncd-dzp follow-up only swaps the body.",
+        "description": "Insert a new rule.\n\nReturns 503 ``permission_rule_table_unavailable`` until the\nbacking table ships. The handler signature is final so the\ncd-dzp follow-up only swaps the body \u2014 and at that point the\nsuccess branch should publish\n:class:`app.events.PermissionRuleUpserted` (already registered\non the event bus, mirrored in the SPA SSE dispatchers) so a\nsecond tab on the Permissions page invalidates the rule list +\npermission-resolved cache without a manual reload.",
         "operationId": "permission_rules.create",
         "requestBody": {
           "content": {
@@ -90727,7 +90727,7 @@
     },
     "/w/{slug}/api/v1/permission_rules/{rule_id}": {
       "delete": {
-        "description": "Revoke a rule.\n\nReturns 503 ``permission_rule_table_unavailable`` until the\nbacking table ships.",
+        "description": "Revoke a rule.\n\nReturns 503 ``permission_rule_table_unavailable`` until the\nbacking table ships. The cd-dzp follow-up should publish\n:class:`app.events.PermissionRuleDeleted` on the success branch\nso the Permissions page in a sibling tab drops the rule list +\npermission-resolved cache without a manual reload.",
         "operationId": "permission_rules.revoke",
         "parameters": [
           {

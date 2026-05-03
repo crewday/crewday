@@ -99,6 +99,14 @@ export function startEventStream(client: QueryClient): () => void {
     "booking.cancelled",
     "booking.reassigned",
     "llm.assignment.changed",
+    "permission_group.upserted",
+    "permission_group.deleted",
+    "permission_group_member.added",
+    "permission_group_member.removed",
+    "permission_rule.upserted",
+    "permission_rule.deleted",
+    "role_grant.created",
+    "role_grant.revoked",
   ];
   for (const ev of events) {
     es.addEventListener(ev, handler as EventListener);
@@ -230,6 +238,47 @@ export function dispatch(client: QueryClient, evt: TypedEvent): void {
       // does not name the affected capability, so narrowing here
       // would miss inheritance ripples).
       client.invalidateQueries({ queryKey: qk.adminLlmGraph() });
+      return;
+    case "permission_group.upserted":
+    case "permission_group.deleted":
+    case "permission_group_member.added":
+    case "permission_group_member.removed": {
+      // §02 / §05 permissions catalog + roster. The Permissions page
+      // reads `qk.permissionGroups(...)` for the group list,
+      // `qk.permissionGroupMembers(gid)` for the per-group roster,
+      // and `qk.permissionResolved(...)` for the live resolver verdict
+      // (group membership feeds the §02 step 5 default-allow walk).
+      // The payload carries FK ids only — re-fetch via REST under the
+      // per-row authz path.
+      const payload = data as { group_id?: string };
+      client.invalidateQueries({ queryKey: ["permission_groups"] });
+      if (payload.group_id) {
+        client.invalidateQueries({
+          queryKey: qk.permissionGroupMembers(payload.group_id),
+        });
+      } else {
+        client.invalidateQueries({ queryKey: ["permission_group_members"] });
+      }
+      // Resolution depends on group capabilities + membership — drop
+      // the entire `permissions/resolved/...` family rather than a
+      // per-tuple key.
+      client.invalidateQueries({ queryKey: ["permissions", "resolved"] });
+      return;
+    }
+    case "permission_rule.upserted":
+    case "permission_rule.deleted":
+      // §02 step 3+4 — rule writes can flip the resolver verdict.
+      client.invalidateQueries({ queryKey: ["permission_rules"] });
+      client.invalidateQueries({ queryKey: ["permissions", "resolved"] });
+      return;
+    case "role_grant.created":
+    case "role_grant.revoked":
+      // §05 — role grants seed the §02 step 5 default-allow walk and
+      // the owners-group derived membership; both feed the resolver,
+      // and the Permissions page surfaces the affected user's grants
+      // via the same group catalog.
+      client.invalidateQueries({ queryKey: ["permission_groups"] });
+      client.invalidateQueries({ queryKey: ["permissions", "resolved"] });
       return;
   }
 }
