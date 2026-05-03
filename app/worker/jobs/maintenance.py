@@ -10,6 +10,8 @@ from app.util.clock import Clock
 
 _log = logging.getLogger("app.worker.scheduler")
 
+IDEMPOTENCY_SWEEP_BATCH_SIZE = 10_000
+
 
 def _heartbeat_only_body() -> None:
     """No-op job body — the heartbeat upsert runs after it returns.
@@ -278,7 +280,10 @@ def _make_idempotency_sweep_body(clock: Clock) -> Callable[[], None]:
     def _body() -> None:
         from app.api.middleware.idempotency import prune_expired_idempotency_keys
 
-        deleted = prune_expired_idempotency_keys(now=clock.now())
+        deleted = prune_expired_idempotency_keys(
+            now=clock.now(),
+            batch_size=IDEMPOTENCY_SWEEP_BATCH_SIZE,
+        )
         _log.info(
             "idempotency sweep completed",
             extra={"event": "idempotency.sweep", "deleted": deleted},

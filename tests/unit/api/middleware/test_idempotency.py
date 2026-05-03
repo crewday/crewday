@@ -28,6 +28,7 @@ from starlette.responses import JSONResponse, Response
 from starlette.routing import Route
 
 import app.adapters.db.session as _session_mod
+import app.api.middleware.idempotency as idempotency_mod
 from app.adapters.db.base import Base
 from app.adapters.db.ops.models import IdempotencyKey
 from app.adapters.db.session import make_engine
@@ -842,6 +843,162 @@ class TestPruneExpired:
 
         with memory_factory() as session:
             assert session.query(IdempotencyKey).count() == 0
+
+    def test_prune_with_batch_size_leaves_external_transaction_to_caller(
+        self,
+        redirect_default_engine: None,
+        memory_factory: sessionmaker[Session],
+    ) -> None:
+        """Batched caller-owned session path does not commit on behalf of caller."""
+        now = datetime(2026, 4, 20, 12, 0, 0, tzinfo=UTC)
+        expired_at = now - timedelta(hours=IDEMPOTENCY_TTL_HOURS + 1)
+        with memory_factory() as session:
+            for index in range(2):
+                session.add(
+                    IdempotencyKey(
+                        id=new_ulid(),
+                        token_id=f"t-external-batch-{index}",
+                        key=f"k-external-batch-{index}",
+                        status=200,
+                        body_hash="x",
+                        body=b"{}",
+                        headers={},
+                        created_at=expired_at,
+                    )
+                )
+            session.commit()
+
+            deleted = prune_expired_idempotency_keys(
+                db_session=session,
+                now=now,
+                batch_size=1,
+            )
+            assert deleted == 2
+
+            session.rollback()
+
+        with memory_factory() as session:
+            assert session.query(IdempotencyKey).count() == 2
+
+    def test_prune_batch_size_none_uses_single_unbounded_delete(
+        self,
+        redirect_default_engine: None,
+        memory_factory: sessionmaker[Session],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """``batch_size=None`` preserves the historical one-DELETE sweep."""
+        now = datetime(2026, 4, 20, 12, 0, 0, tzinfo=UTC)
+        expired_at = now - timedelta(hours=IDEMPOTENCY_TTL_HOURS + 1)
+        with memory_factory() as session:
+            for index in range(25):
+                session.add(
+                    IdempotencyKey(
+                        id=new_ulid(),
+                        token_id=f"t-unbounded-{index}",
+                        key=f"k-unbounded-{index}",
+                        status=200,
+                        body_hash="x",
+                        body=b"{}",
+                        headers={},
+                        created_at=expired_at + timedelta(seconds=index),
+                    )
+                )
+            session.commit()
+
+        original_unbounded = idempotency_mod._delete_expired_idempotency_keys
+        unbounded_calls = 0
+        batch_calls = 0
+
+        def spy_unbounded(db_session: Session, cutoff: datetime) -> int:
+            nonlocal unbounded_calls
+            unbounded_calls += 1
+            return original_unbounded(db_session, cutoff)
+
+        def spy_batch(
+            db_session: Session,
+            cutoff: datetime,
+            *,
+            batch_size: int,
+        ) -> int:
+            nonlocal batch_calls
+            batch_calls += 1
+            _ = db_session, cutoff, batch_size
+            pytest.fail("batch helper should not run when batch_size=None")
+
+        monkeypatch.setattr(
+            idempotency_mod,
+            "_delete_expired_idempotency_keys",
+            spy_unbounded,
+        )
+        monkeypatch.setattr(
+            idempotency_mod,
+            "_delete_expired_idempotency_key_batch",
+            spy_batch,
+        )
+
+        deleted = prune_expired_idempotency_keys(now=now, batch_size=None)
+        assert deleted == 25
+        assert unbounded_calls == 1
+        assert batch_calls == 0
+
+        with memory_factory() as session:
+            assert session.query(IdempotencyKey).count() == 0
+
+    def test_prune_with_batch_size_deletes_until_empty(
+        self,
+        redirect_default_engine: None,
+        memory_factory: sessionmaker[Session],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Batched sweep aggregates rows across batches and stops on zero."""
+        now = datetime(2026, 4, 20, 12, 0, 0, tzinfo=UTC)
+        expired_at = now - timedelta(hours=IDEMPOTENCY_TTL_HOURS + 1)
+        with memory_factory() as session:
+            for index in range(25):
+                session.add(
+                    IdempotencyKey(
+                        id=new_ulid(),
+                        token_id=f"t-batched-{index}",
+                        key=f"k-batched-{index}",
+                        status=200,
+                        body_hash="x",
+                        body=b"{}",
+                        headers={},
+                        created_at=expired_at + timedelta(seconds=index),
+                    )
+                )
+            session.commit()
+
+        original_batch = idempotency_mod._delete_expired_idempotency_key_batch
+        round_counts: list[int] = []
+
+        def spy_batch(
+            db_session: Session,
+            cutoff: datetime,
+            *,
+            batch_size: int,
+        ) -> int:
+            deleted = original_batch(db_session, cutoff, batch_size=batch_size)
+            round_counts.append(deleted)
+            return deleted
+
+        monkeypatch.setattr(
+            idempotency_mod,
+            "_delete_expired_idempotency_key_batch",
+            spy_batch,
+        )
+
+        deleted = prune_expired_idempotency_keys(now=now, batch_size=10)
+        assert deleted == 25
+        assert round_counts == [10, 10, 5, 0]
+
+        with memory_factory() as session:
+            assert session.query(IdempotencyKey).count() == 0
+
+    @pytest.mark.parametrize("batch_size", [0, -1])
+    def test_prune_rejects_non_positive_batch_size(self, batch_size: int) -> None:
+        with pytest.raises(ValueError, match="batch_size"):
+            prune_expired_idempotency_keys(batch_size=batch_size)
 
 
 # ---------------------------------------------------------------------------

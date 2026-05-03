@@ -622,6 +622,7 @@ def prune_expired_idempotency_keys(
     db_session: DbSession | None = None,
     now: datetime | None = None,
     ttl: timedelta | None = None,
+    batch_size: int | None = None,
 ) -> int:
     """Delete every :class:`IdempotencyKey` row older than the TTL.
 
@@ -632,31 +633,87 @@ def prune_expired_idempotency_keys(
     instead. The function opens its own UoW when ``db_session`` is
     ``None`` so it is safe to call from outside a request.
 
+    ``batch_size=None`` preserves the historical single-DELETE path;
+    a positive batch size deletes oldest expired rows in repeated
+    batches until no expired row remains.
+
     Returns the number of rows deleted for logging / metric purposes.
 
     justification: idempotency_key is a deployment-wide table; the
     sweeper deliberately bypasses the tenancy filter.
     """
+    if batch_size is not None and batch_size <= 0:
+        raise ValueError("batch_size must be greater than 0")
+
     cutoff_now = now if now is not None else datetime.now(UTC)
     cutoff_ttl = ttl if ttl is not None else timedelta(hours=IDEMPOTENCY_TTL_HOURS)
     cutoff = cutoff_now - cutoff_ttl
 
     if db_session is not None:
-        return _prune_in_session(db_session, cutoff)
+        return _prune_in_session(db_session, cutoff, batch_size=batch_size)
 
     with make_uow() as owned_session:
         assert isinstance(owned_session, DbSession)
-        deleted = _prune_in_session(owned_session, cutoff)
+        deleted = _prune_in_session(owned_session, cutoff, batch_size=batch_size)
         owned_session.commit()
         return deleted
 
 
-def _prune_in_session(db_session: DbSession, cutoff: datetime) -> int:
+def _prune_in_session(
+    db_session: DbSession,
+    cutoff: datetime,
+    *,
+    batch_size: int | None,
+) -> int:
     """Core DELETE — split so callers can drive the UoW themselves."""
+    if batch_size is None:
+        return _delete_expired_idempotency_keys(db_session, cutoff)
+
+    deleted_total = 0
+    while True:
+        deleted = _delete_expired_idempotency_key_batch(
+            db_session, cutoff, batch_size=batch_size
+        )
+        if deleted == 0:
+            return deleted_total
+        deleted_total += deleted
+
+
+def _delete_expired_idempotency_keys(
+    db_session: DbSession,
+    cutoff: datetime,
+) -> int:
+    """Issue the unbounded TTL DELETE used by the historical sweep path."""
     with tenant_agnostic():
         result = db_session.execute(
             delete(IdempotencyKey).where(IdempotencyKey.created_at < cutoff)
         )
+    return _deleted_rowcount(result)
+
+
+def _delete_expired_idempotency_key_batch(
+    db_session: DbSession,
+    cutoff: datetime,
+    *,
+    batch_size: int,
+) -> int:
+    """Delete one oldest-first expired batch and return its row count."""
+    expired_ids = (
+        select(IdempotencyKey.id)
+        .where(IdempotencyKey.created_at < cutoff)
+        .order_by(IdempotencyKey.created_at.asc())
+        .limit(batch_size)
+    )
+    with tenant_agnostic():
+        result = db_session.execute(
+            delete(IdempotencyKey)
+            .where(IdempotencyKey.id.in_(expired_ids))
+            .execution_options(synchronize_session=False)
+        )
+    return _deleted_rowcount(result)
+
+
+def _deleted_rowcount(result: object) -> int:
     # ``Session.execute`` returns ``Result[Any]`` in the public
     # type stubs; bulk-DML paths actually return a CursorResult with
     # a concrete ``rowcount``. The narrow cast here is precise, not

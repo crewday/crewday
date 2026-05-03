@@ -199,6 +199,35 @@ class TestRegisterJobs:
         assert job.max_instances == 1
         assert job.coalesce is True
 
+    def test_sweep_body_passes_production_batch_size(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Scheduler adapter opts the production sweep into batching."""
+        frozen = FrozenClock(datetime(2026, 4, 24, 3, 0, tzinfo=UTC))
+        seen: list[tuple[datetime | None, int | None]] = []
+
+        def fake_prune(
+            *,
+            db_session: object | None = None,
+            now: datetime | None = None,
+            ttl: timedelta | None = None,
+            batch_size: int | None = None,
+        ) -> int:
+            _ = db_session, ttl
+            seen.append((now, batch_size))
+            return 7
+
+        monkeypatch.setattr(
+            "app.api.middleware.idempotency.prune_expired_idempotency_keys",
+            fake_prune,
+        )
+
+        body = make_idempotency_sweep_body(frozen)
+        body()
+
+        assert seen == [(frozen.now(), 10_000)]
+
 
 # ---------------------------------------------------------------------------
 # End-to-end: seeded row → job body → deletion + heartbeat + log
