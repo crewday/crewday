@@ -130,11 +130,19 @@ replace several tool calls per check:
   scan `app/` + `app/web/src/`; pass paths to narrow. Not a gate
   (always exits 0 on success) — used to find batches of refactor
   targets. Override thresholds via `CCN_THRESHOLD` / `NLOC_THRESHOLD`
-  / `PARAM_THRESHOLD`.
+  / `PARAM_THRESHOLD`. Use `--json-out <path>` for the complete
+  machine-readable report; follow-up refactor tasks should prove zero
+  unsuppressed findings in their target area by checking
+  `.summary.<category>.unsuppressed == 0` for the relevant categories.
+  Suppressions are inline `code-health: ignore[ccn] <reason>` comments
+  inside the target function or `code-health: ignore[duplicate] <reason>`
+  inside a duplicate block; the reason is required and remains visible
+  in JSON output.
   ```bash
   ./scripts/agent-code-health.py                   # default scan
   ./scripts/agent-code-health.py app/domain/tasks  # specific subtree
   ./scripts/agent-code-health.py --no-dup --top 20
+  ./scripts/agent-code-health.py --json-out /tmp/code-health.json
   ```
 
 Reach for the primitives below when you need the raw cookie (Playwright,
