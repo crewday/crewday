@@ -207,6 +207,8 @@ export const qk = {
   chatChannelProviders: () => [...ws(), "chat", "channels", "providers"] as const,
   agentPrefs: (scope: "workspace" | "property" | "me", id?: string) =>
     [...ws(), "agent_preferences", scope, id ?? ""] as const,
+  agentUpstreamPiiConsent: () =>
+    [...ws(), "agent_preferences", "workspace", "upstream_pii_consent"] as const,
   workspaceUsage: () => [...ws(), "workspace", "usage"] as const,
   // §14 — /admin shell. The admin surface is deployment-scope, not
   // workspace-scope (§14 "Admin shell"), so admin keys live outside

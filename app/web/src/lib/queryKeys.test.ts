@@ -177,6 +177,13 @@ describe("qk — every key is a first-class readonly tuple", () => {
     // entry and a "property" entry never collide when the caller
     // forgets the id.
     expect(qk.agentPrefs("workspace")).toEqual(["w", "acme", "agent_preferences", "workspace", ""]);
+    expect(qk.agentUpstreamPiiConsent()).toEqual([
+      "w",
+      "acme",
+      "agent_preferences",
+      "workspace",
+      "upstream_pii_consent",
+    ]);
     expect(qk.agentPrefs("property", "p1")).toEqual([
       "w",
       "acme",

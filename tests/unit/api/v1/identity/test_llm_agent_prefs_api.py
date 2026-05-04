@@ -8,9 +8,11 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
-from app.adapters.db.llm.models import BudgetLedger
+from app.adapters.db.audit.models import AuditLog
+from app.adapters.db.llm.models import AgentPreference, BudgetLedger
 from app.api.v1 import llm as llm_module
 from app.api.v1.llm import build_workspace_llm_router
 from app.api.v1.llm import router as llm_router
@@ -37,6 +39,8 @@ def test_visible_llm_routes_have_cli_and_agent_annotations() -> None:
     visible_routes = {
         ("GET", "/agent_preferences/workspace"),
         ("PUT", "/agent_preferences/workspace"),
+        ("GET", "/agent_preferences/workspace/upstream_pii_consent"),
+        ("PUT", "/agent_preferences/workspace/upstream_pii_consent"),
         ("GET", "/agent_preferences/me"),
         ("PUT", "/agent_preferences/me"),
         ("GET", "/me/agent_approval_mode"),
@@ -48,6 +52,7 @@ def test_visible_llm_routes_have_cli_and_agent_annotations() -> None:
 
     mutating_routes = {
         ("PUT", "/agent_preferences/workspace"),
+        ("PUT", "/agent_preferences/workspace/upstream_pii_consent"),
         ("PUT", "/agent_preferences/me"),
         ("PUT", "/me/agent_approval_mode"),
     }
@@ -69,6 +74,8 @@ def test_flat_llm_routes_have_cli_and_agent_annotations() -> None:
     visible_routes = {
         ("GET", "/agent_preferences/workspace"),
         ("PUT", "/agent_preferences/workspace"),
+        ("GET", "/agent_preferences/workspace/upstream_pii_consent"),
+        ("PUT", "/agent_preferences/workspace/upstream_pii_consent"),
         ("GET", "/agent_preferences/me"),
         ("PUT", "/agent_preferences/me"),
         ("GET", "/me/agent_approval_mode"),
@@ -80,6 +87,7 @@ def test_flat_llm_routes_have_cli_and_agent_annotations() -> None:
 
     mutating_routes = {
         ("PUT", "/agent_preferences/workspace"),
+        ("PUT", "/agent_preferences/workspace/upstream_pii_consent"),
         ("PUT", "/agent_preferences/me"),
         ("PUT", "/me/agent_approval_mode"),
     }
@@ -146,6 +154,189 @@ def test_workspace_agent_preferences_round_trip_via_spec_path(
     readback = client.get("/agent_preferences/workspace")
     assert readback.status_code == 200
     assert readback.json() == body
+
+
+def test_workspace_upstream_pii_consent_default_empty(
+    owner_ctx: tuple[WorkspaceContext, sessionmaker[Session], str],
+) -> None:
+    ctx, factory, _workspace_id = owner_ctx
+    client = _client(ctx, factory)
+
+    response = client.get("/agent_preferences/workspace/upstream_pii_consent")
+
+    assert response.status_code == 200, response.text
+    assert response.json() == {
+        "upstream_pii_consent": [],
+        "available_tokens": ["legal_name", "email", "phone", "address"],
+    }
+
+
+def test_workspace_upstream_pii_consent_writes_valid_tokens_and_creates_row(
+    owner_ctx: tuple[WorkspaceContext, sessionmaker[Session], str],
+) -> None:
+    ctx, factory, workspace_id = owner_ctx
+    client = _client(ctx, factory)
+
+    response = client.put(
+        "/agent_preferences/workspace/upstream_pii_consent",
+        json={"upstream_pii_consent": ["email", "legal_name"]},
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["upstream_pii_consent"] == ["legal_name", "email"]
+    with factory() as session:
+        row = session.scalar(
+            select(AgentPreference).where(
+                AgentPreference.workspace_id == workspace_id,
+                AgentPreference.scope_kind == "workspace",
+                AgentPreference.scope_id == workspace_id,
+            )
+        )
+        assert row is not None
+        assert row.upstream_pii_consent == ["legal_name", "email"]
+
+
+def test_workspace_upstream_pii_consent_rejects_invalid_token(
+    owner_ctx: tuple[WorkspaceContext, sessionmaker[Session], str],
+) -> None:
+    ctx, factory, _workspace_id = owner_ctx
+    client = _client(ctx, factory)
+
+    response = client.put(
+        "/agent_preferences/workspace/upstream_pii_consent",
+        json={"upstream_pii_consent": ["email", "ssn"]},
+    )
+
+    assert response.status_code == 422
+
+
+def test_workspace_upstream_pii_consent_rejects_missing_token_list(
+    owner_ctx: tuple[WorkspaceContext, sessionmaker[Session], str],
+) -> None:
+    ctx, factory, workspace_id = owner_ctx
+    client = _client(ctx, factory)
+    seeded = client.put(
+        "/agent_preferences/workspace/upstream_pii_consent",
+        json={"upstream_pii_consent": ["email"]},
+    )
+    assert seeded.status_code == 200, seeded.text
+
+    response = client.put(
+        "/agent_preferences/workspace/upstream_pii_consent",
+        json={},
+    )
+
+    assert response.status_code == 422
+    with factory() as session:
+        row = session.scalar(
+            select(AgentPreference).where(
+                AgentPreference.workspace_id == workspace_id,
+                AgentPreference.scope_kind == "workspace",
+                AgentPreference.scope_id == workspace_id,
+            )
+        )
+        assert row is not None
+        assert row.upstream_pii_consent == ["email"]
+        audits = session.scalars(
+            select(AuditLog)
+            .where(AuditLog.workspace_id == workspace_id)
+            .where(AuditLog.action == "agent_preference.upstream_pii_consent.updated")
+        ).all()
+    assert len(audits) == 1
+
+
+def test_workspace_upstream_pii_consent_audits_only_effective_changes(
+    owner_ctx: tuple[WorkspaceContext, sessionmaker[Session], str],
+) -> None:
+    ctx, factory, workspace_id = owner_ctx
+    client = _client(ctx, factory)
+
+    first = client.put(
+        "/agent_preferences/workspace/upstream_pii_consent",
+        json={"upstream_pii_consent": ["phone"]},
+    )
+    second = client.put(
+        "/agent_preferences/workspace/upstream_pii_consent",
+        json={"upstream_pii_consent": ["phone"]},
+    )
+
+    assert first.status_code == 200, first.text
+    assert second.status_code == 200, second.text
+    with factory() as session:
+        rows = session.scalars(
+            select(AuditLog)
+            .where(AuditLog.workspace_id == workspace_id)
+            .where(AuditLog.action == "agent_preference.upstream_pii_consent.updated")
+        ).all()
+    assert len(rows) == 1
+    assert rows[0].entity_kind == "agent_preference"
+    assert rows[0].diff == {
+        "before": {"upstream_pii_consent": []},
+        "after": {"upstream_pii_consent": ["phone"]},
+    }
+
+
+def test_workspace_upstream_pii_consent_empty_noop_creates_no_audit(
+    owner_ctx: tuple[WorkspaceContext, sessionmaker[Session], str],
+) -> None:
+    ctx, factory, workspace_id = owner_ctx
+    client = _client(ctx, factory)
+
+    response = client.put(
+        "/agent_preferences/workspace/upstream_pii_consent",
+        json={"upstream_pii_consent": []},
+    )
+
+    assert response.status_code == 200, response.text
+    with factory() as session:
+        pref = session.scalar(
+            select(AgentPreference).where(
+                AgentPreference.workspace_id == workspace_id,
+                AgentPreference.scope_kind == "workspace",
+                AgentPreference.scope_id == workspace_id,
+            )
+        )
+        assert pref is not None
+        assert pref.upstream_pii_consent == []
+        audits = session.scalars(
+            select(AuditLog).where(
+                AuditLog.action == "agent_preference.upstream_pii_consent.updated"
+            )
+        ).all()
+    assert audits == []
+
+
+def test_workspace_upstream_pii_consent_denies_worker(
+    worker_ctx: tuple[WorkspaceContext, sessionmaker[Session], str, str],
+) -> None:
+    ctx, factory, _workspace_id, _worker_id = worker_ctx
+    client = _client(ctx, factory)
+
+    read = client.get("/agent_preferences/workspace/upstream_pii_consent")
+    write = client.put(
+        "/agent_preferences/workspace/upstream_pii_consent",
+        json={"upstream_pii_consent": ["email"]},
+    )
+
+    assert read.status_code == 403
+    assert write.status_code == 403
+
+
+def test_workspace_upstream_pii_consent_denies_manager_who_is_not_owner(
+    owner_ctx: tuple[WorkspaceContext, sessionmaker[Session], str],
+) -> None:
+    ctx, factory, _workspace_id = owner_ctx
+    non_owner_manager = replace(ctx, actor_was_owner_member=False)
+    client = _client(non_owner_manager, factory)
+
+    read = client.get("/agent_preferences/workspace/upstream_pii_consent")
+    write = client.put(
+        "/agent_preferences/workspace/upstream_pii_consent",
+        json={"upstream_pii_consent": ["email"]},
+    )
+
+    assert read.status_code == 403
+    assert write.status_code == 403
 
 
 def test_self_agent_preferences_round_trip_via_api(

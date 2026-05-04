@@ -18,6 +18,7 @@ from app.adapters.db.workspace.models import Workspace
 from app.audit import write_audit
 from app.tenancy import WorkspaceContext, tenant_agnostic
 from app.util.clock import Clock, SystemClock
+from app.util.redact import CONSENT_TOKENS
 from app.util.ulid import new_ulid
 
 __all__ = [
@@ -32,14 +33,25 @@ __all__ = [
     "default_approval_mode_for_workspace",
     "is_action_blocked",
     "read_preference",
+    "read_workspace_upstream_pii_consent",
     "resolve_preferences",
     "save_preference",
+    "save_workspace_upstream_pii_consent",
 ]
 
 ScopeKind = Literal["workspace", "property", "user"]
 ApprovalMode = Literal["bypass", "auto", "strict"]
+ConsentToken = Literal["legal_name", "email", "phone", "address"]
 
 APPROVAL_MODES: tuple[ApprovalMode, ...] = ("bypass", "auto", "strict")
+CONSENT_TOKEN_ORDER: tuple[ConsentToken, ...] = (
+    "legal_name",
+    "email",
+    "phone",
+    "address",
+)
+if frozenset(CONSENT_TOKEN_ORDER) != CONSENT_TOKENS:  # pragma: no cover
+    raise RuntimeError("CONSENT_TOKEN_ORDER must match app.util.redact.CONSENT_TOKENS")
 PREFERENCE_HARD_TOKEN_CAP = 16_000
 INJECTION_TOKEN_CAP = 8_000
 AGENT_PREFERENCES_EMPTY_HEADER = "## Agent preferences\n(none)"
@@ -170,6 +182,82 @@ def save_preference(
     return row
 
 
+def read_workspace_upstream_pii_consent(
+    session: Session,
+    ctx: WorkspaceContext,
+) -> tuple[ConsentToken, ...]:
+    """Return the workspace's effective upstream PII consent tokens."""
+    row = read_preference(
+        session,
+        ctx,
+        scope_kind="workspace",
+        scope_id=ctx.workspace_id,
+    )
+    if row is None:
+        return ()
+    return _normalise_consent(row.upstream_pii_consent)
+
+
+def save_workspace_upstream_pii_consent(
+    session: Session,
+    ctx: WorkspaceContext,
+    *,
+    tokens: Sequence[str],
+    actor_user_id: str,
+    clock: Clock | None = None,
+) -> tuple[AgentPreference, bool]:
+    """Upsert workspace upstream PII consent and audit effective changes."""
+    eff_clock = clock if clock is not None else SystemClock()
+    now = eff_clock.now()
+    next_tokens = _normalise_consent(tokens)
+    row = read_preference(
+        session,
+        ctx,
+        scope_kind="workspace",
+        scope_id=ctx.workspace_id,
+    )
+    before = _normalise_consent(row.upstream_pii_consent) if row is not None else ()
+    changed = before != next_tokens
+
+    if row is None:
+        row = AgentPreference(
+            id=new_ulid(clock=eff_clock),
+            workspace_id=ctx.workspace_id,
+            scope_kind="workspace",
+            scope_id=ctx.workspace_id,
+            body_md="",
+            token_count=0,
+            blocked_actions=[],
+            default_approval_mode="auto",
+            upstream_pii_consent=list(next_tokens),
+            updated_by_user_id=actor_user_id,
+            created_at=now,
+            updated_at=now,
+            archived_at=None,
+        )
+        session.add(row)
+    elif changed or tuple(row.upstream_pii_consent) != next_tokens:
+        row.upstream_pii_consent = list(next_tokens)
+        row.updated_by_user_id = actor_user_id
+        row.updated_at = now
+
+    session.flush()
+    if changed:
+        write_audit(
+            session,
+            ctx,
+            entity_kind="agent_preference",
+            entity_id=row.id,
+            action="agent_preference.upstream_pii_consent.updated",
+            diff={
+                "before": {"upstream_pii_consent": list(before)},
+                "after": {"upstream_pii_consent": list(next_tokens)},
+            },
+            clock=eff_clock,
+        )
+    return row, changed
+
+
 def resolve_preferences(
     session: Session,
     ctx: WorkspaceContext,
@@ -289,6 +377,11 @@ def _normalise_blocked_actions(values: Sequence[str]) -> tuple[str, ...]:
         seen.add(value)
         normalised.append(value)
     return tuple(normalised)
+
+
+def _normalise_consent(values: Sequence[str]) -> tuple[ConsentToken, ...]:
+    raw = frozenset(value for value in values if value in CONSENT_TOKENS)
+    return tuple(token for token in CONSENT_TOKEN_ORDER if token in raw)
 
 
 def _coerce_approval_mode(value: str) -> ApprovalMode:

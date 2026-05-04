@@ -1,9 +1,10 @@
 import { useState } from "react";
 import DeskPage from "@/components/DeskPage";
 import GroupsTab from "./permissions/GroupsTab";
+import PrivacyTab from "./permissions/PrivacyTab";
 import RulesTab from "./permissions/RulesTab";
 
-type Tab = "groups" | "rules";
+type Tab = "groups" | "rules" | "privacy";
 
 export default function PermissionsPage() {
   const [tab, setTab] = useState<Tab>("groups");
@@ -30,10 +31,16 @@ export default function PermissionsPage() {
           >
             Rules
           </button>
+          <button
+            className={`btn btn--ghost ${tab === "privacy" ? "btn--active" : ""}`}
+            onClick={() => setTab("privacy")}
+          >
+            Privacy
+          </button>
         </div>
       }
     >
-      {tab === "groups" ? <GroupsTab /> : <RulesTab />}
+      {tab === "groups" ? <GroupsTab /> : tab === "rules" ? <RulesTab /> : <PrivacyTab />}
     </DeskPage>
   );
 }

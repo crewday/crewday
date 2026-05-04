@@ -1180,6 +1180,22 @@ column for schema uniformity but are ignored by the loader; consent
 is a workspace-wide operator decision per §15
 "LLM data handling".
 
+The shipped owner-manager surface lives under Manager →
+Permissions → Privacy. It renders one checkbox per allow-listed
+token and shows an explicit empty state when no tokens are selected:
+all legal names, email addresses, phone numbers, and addresses are
+redacted before upstream model calls. The SPA reads and writes
+`GET /api/v1/agent_preferences/workspace/upstream_pii_consent` and
+`PUT /api/v1/agent_preferences/workspace/upstream_pii_consent`
+with body `{ "upstream_pii_consent": [...] }`. The API is
+owner-manager gated, creates the workspace-scope `agent_preference`
+row if absent, rejects any token outside
+`app.util.redact.CONSENT_TOKENS` with request validation, and writes
+one `audit_log` row (`action =
+agent_preference.upstream_pii_consent.updated`) only when the
+effective consent set changes. Re-sending the current set, including
+the default empty set, is a no-op for audit purposes.
+
 Every `llm_call` row stores the **redacted** payload sent and the
 response received. Original values are never stored on `llm_call`.
 

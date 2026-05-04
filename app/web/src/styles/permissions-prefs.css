@@ -28,6 +28,12 @@
 }
 .permissions__resolver-fields .field { min-width: 220px; }
 .permissions__resolver-result { margin-top: 10px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.permissions__privacy { max-width: 760px; }
+.permissions__privacy-choices {
+  display: grid; gap: 8px;
+  margin: 12px 0 0;
+  padding: 0; border: 0;
+}
 .btn--active { background: var(--moss-wash); border-color: var(--moss); }
 
 /* §11 — Agent approval mode picker (profile / settings). */
@@ -285,4 +291,3 @@
   display: flex; gap: 12px;
 }
 .me-chat-channels__times .me-chat-channels__field { flex: 1 1 0; }
-

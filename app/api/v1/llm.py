@@ -23,15 +23,19 @@ from app.audit import write_audit
 from app.authz.dep import Permission
 from app.domain.agent.preferences import (
     APPROVAL_MODES,
+    CONSENT_TOKEN_ORDER,
     INJECTION_TOKEN_CAP,
     PREFERENCE_HARD_TOKEN_CAP,
+    ConsentToken,
     PreferenceContainsSecret,
     PreferenceTooLarge,
     PreferenceUpdate,
     read_preference,
+    read_workspace_upstream_pii_consent,
     save_preference,
+    save_workspace_upstream_pii_consent,
 )
-from app.domain.errors import NotFound
+from app.domain.errors import Forbidden, NotFound
 from app.domain.errors import Validation as DomainValidation
 from app.events.bus import bus as default_event_bus
 from app.events.types import UserAgentSettingsChanged, WorkspaceChanged
@@ -91,6 +95,23 @@ class WorkspaceUsageRead(BaseModel):
     window_label: str
 
 
+class WorkspaceUpstreamPiiConsentRead(BaseModel):
+    """Workspace upstream PII consent response."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    upstream_pii_consent: list[ConsentToken]
+    available_tokens: list[ConsentToken]
+
+
+class WorkspaceUpstreamPiiConsentUpdate(BaseModel):
+    """Workspace upstream PII consent update payload."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    upstream_pii_consent: list[ConsentToken]
+
+
 class WorkspaceAgentPreferenceUpdate(BaseModel):
     """Workspace preference update payload."""
 
@@ -130,6 +151,28 @@ _WORKSPACE_PREFS_PUT_OPENAPI = {
         "group": "agent-prefs",
         "verb": "set-workspace",
         "summary": "Update workspace agent preferences",
+        "mutates": True,
+    },
+}
+_WORKSPACE_PII_CONSENT_GET_OPENAPI = {
+    "x-cli": {
+        "group": "agent-prefs",
+        "verb": "show-upstream-pii-consent",
+        "summary": "Read workspace upstream PII consent",
+        "mutates": False,
+    },
+}
+_WORKSPACE_PII_CONSENT_PUT_OPENAPI = {
+    "x-agent-confirm": {
+        "summary": "Update upstream PII consent?",
+        "risk": "high",
+        "fields_to_show": ["upstream_pii_consent"],
+        "verb": "Update upstream PII consent",
+    },
+    "x-cli": {
+        "group": "agent-prefs",
+        "verb": "set-upstream-pii-consent",
+        "summary": "Update workspace upstream PII consent",
         "mutates": True,
     },
 }
@@ -273,6 +316,20 @@ def _usage_response(row: BudgetLedger | None) -> WorkspaceUsageRead:
     )
 
 
+def _consent_response(
+    tokens: tuple[ConsentToken, ...],
+) -> WorkspaceUpstreamPiiConsentRead:
+    return WorkspaceUpstreamPiiConsentRead(
+        upstream_pii_consent=list(tokens),
+        available_tokens=list(CONSENT_TOKEN_ORDER),
+    )
+
+
+def _require_owner_manager(ctx: _Ctx) -> None:
+    if ctx.actor_grant_role != "manager" or not ctx.actor_was_owner_member:
+        raise Forbidden(extra={"error": "permission_denied"})
+
+
 @router.get(
     "/agent_preferences/workspace",
     response_model=AgentPreferenceRead,
@@ -378,6 +435,49 @@ def put_workspace_agent_prefs(
         raise _save_error(exc) from exc
     _publish_workspace_changed(ctx, changed_keys=("agent_preferences.workspace",))
     return _to_response(row)
+
+
+@router.get(
+    "/agent_preferences/workspace/upstream_pii_consent",
+    response_model=WorkspaceUpstreamPiiConsentRead,
+    operation_id="llm.agent_preferences.workspace.upstream_pii_consent.get",
+    summary="Read workspace upstream PII consent",
+    dependencies=[Depends(_require_owner_manager)],
+    openapi_extra=_WORKSPACE_PII_CONSENT_GET_OPENAPI,
+)
+def get_workspace_upstream_pii_consent(
+    ctx: _Ctx,
+    session: _Db,
+) -> WorkspaceUpstreamPiiConsentRead:
+    return _consent_response(read_workspace_upstream_pii_consent(session, ctx))
+
+
+@router.put(
+    "/agent_preferences/workspace/upstream_pii_consent",
+    response_model=WorkspaceUpstreamPiiConsentRead,
+    operation_id="llm.agent_preferences.workspace.upstream_pii_consent.put",
+    summary="Update workspace upstream PII consent",
+    dependencies=[Depends(_require_owner_manager)],
+    openapi_extra=_WORKSPACE_PII_CONSENT_PUT_OPENAPI,
+)
+def put_workspace_upstream_pii_consent(
+    payload: WorkspaceUpstreamPiiConsentUpdate,
+    ctx: _Ctx,
+    session: _Db,
+) -> WorkspaceUpstreamPiiConsentRead:
+    tokens = tuple(payload.upstream_pii_consent)
+    _row, changed = save_workspace_upstream_pii_consent(
+        session,
+        ctx,
+        tokens=tokens,
+        actor_user_id=ctx.actor_id,
+    )
+    if changed:
+        _publish_workspace_changed(
+            ctx,
+            changed_keys=("agent_preferences.workspace.upstream_pii_consent",),
+        )
+    return _consent_response(read_workspace_upstream_pii_consent(session, ctx))
 
 
 @router.get(
@@ -586,6 +686,26 @@ def build_workspace_llm_router() -> APIRouter:
         dependencies=[
             Depends(Permission("agent_prefs.edit_workspace", scope_kind="workspace"))
         ],
+    )
+    flat.add_api_route(
+        "/agent_preferences/workspace/upstream_pii_consent",
+        get_workspace_upstream_pii_consent,
+        methods=["GET"],
+        response_model=WorkspaceUpstreamPiiConsentRead,
+        operation_id="workspace.llm.agent_preferences.workspace.upstream_pii_consent.get",
+        summary="Read workspace upstream PII consent",
+        openapi_extra=_WORKSPACE_PII_CONSENT_GET_OPENAPI,
+        dependencies=[Depends(_require_owner_manager)],
+    )
+    flat.add_api_route(
+        "/agent_preferences/workspace/upstream_pii_consent",
+        put_workspace_upstream_pii_consent,
+        methods=["PUT"],
+        response_model=WorkspaceUpstreamPiiConsentRead,
+        operation_id="workspace.llm.agent_preferences.workspace.upstream_pii_consent.put",
+        summary="Update workspace upstream PII consent",
+        openapi_extra=_WORKSPACE_PII_CONSENT_PUT_OPENAPI,
+        dependencies=[Depends(_require_owner_manager)],
     )
     flat.add_api_route(
         "/agent_preferences/me",
