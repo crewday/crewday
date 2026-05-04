@@ -55,9 +55,12 @@ in a sibling column so a parameter bump can re-hash on next use
 without a big-bang migration.
 
 **Caps** (§03 "Guardrails", task spec): 5 active tokens per user per
-workspace. Creating a 6th raises :class:`TooManyTokens`, mapped to
-HTTP 422 ``too_many_tokens``. The count is computed inside the mint
-transaction so two concurrent creates cannot both land a 6th row.
+workspace and 50 active scoped + delegated tokens per workspace.
+Creating a 6th for the same user raises :class:`TooManyTokens`, mapped
+to HTTP 422 ``too_many_tokens``. Creating a 51st workspace-scoped token
+raises :class:`TooManyWorkspaceTokens`, mapped to HTTP 422
+``too_many_workspace_tokens``. Counts are computed inside the mint
+transaction so concurrent creates cannot both slip past a cap.
 
 **``last_used_at`` debouncing.** Per-request updates are the single
 biggest source of write amplification for tokens — every API call
@@ -133,6 +136,7 @@ __all__ = [
     "TokenSummary",
     "TooManyPersonalTokens",
     "TooManyTokens",
+    "TooManyWorkspaceTokens",
     "VerifiedToken",
     "list_audit",
     "list_personal_tokens",
@@ -180,11 +184,14 @@ _PREFIX_CHARS: Final[int] = 8
 # Per-user per-workspace active-token cap. Matches the 5-passkey cap
 # (§03 "Additional passkeys") — one mental model for the end user,
 # same "revoke one to add one" UX shape. Note: this is the per-user
-# cap, not the §03 workspace-wide 50-token cap, which is a separate
-# guardrail (tracked for follow-up under cd-c91 if needed). Applies
-# to ``scoped`` + ``delegated`` tokens on the same workspace;
-# ``personal`` tokens carry their own per-subject 5-token cap below.
+# cap, not the §03 workspace-wide 50-token cap. Applies to ``scoped``
+# + ``delegated`` tokens on the same workspace; ``personal`` tokens
+# carry their own per-subject 5-token cap below.
 _MAX_ACTIVE_TOKENS_PER_USER: Final[int] = 5
+
+# Per-workspace cap for live scoped + delegated tokens (§03
+# "Guardrails"). PATs are identity-scoped and excluded.
+_MAX_ACTIVE_TOKENS_PER_WORKSPACE: Final[int] = 50
 
 # Per-subject personal-access-token cap (§03 "Personal access tokens"
 # guardrails). Separate from the workspace-scoped cap above because
@@ -422,6 +429,16 @@ class TooManyTokens(ValueError):
     """
 
 
+class TooManyWorkspaceTokens(ValueError):
+    """Workspace already holds live scoped/delegated tokens up to the cap.
+
+    422-equivalent — the HTTP layer maps to
+    ``too_many_workspace_tokens`` so the UI can tell a manager to
+    revoke workspace tokens before minting another. Applies across all
+    users in the workspace and excludes personal access tokens.
+    """
+
+
 class TooManyPersonalTokens(ValueError):
     """User already holds :data:`_MAX_PERSONAL_TOKENS_PER_USER` live PATs.
 
@@ -642,10 +659,10 @@ def _parse(token: str) -> tuple[str, str]:
     return parts[0], parts[1]
 
 
-def _count_active_workspace(
+def _count_active_workspace_for_user(
     session: Session, *, user_id: str, workspace_id: str, now: datetime
 ) -> int:
-    """Return the number of live ``scoped`` + ``delegated`` tokens on a workspace.
+    """Return the number of live workspace tokens for ``user_id``.
 
     Runs under :func:`tenant_agnostic` because ``api_token`` isn't a
     workspace-scoped table in the ORM filter sense (see
@@ -691,6 +708,24 @@ def _count_active_workspace(
         return session.scalar(stmt) or 0
 
 
+def _count_active_workspace_total(
+    session: Session, *, workspace_id: str, now: datetime
+) -> int:
+    """Return the number of live scoped + delegated tokens in ``workspace_id``."""
+    with tenant_agnostic():
+        stmt = (
+            select(func.count())
+            .select_from(ApiToken)
+            .where(
+                ApiToken.workspace_id == workspace_id,
+                ApiToken.revoked_at.is_(None),
+                ApiToken.kind != "personal",
+            )
+        )
+        stmt = stmt.where((ApiToken.expires_at.is_(None)) | (ApiToken.expires_at > now))
+        return session.scalar(stmt) or 0
+
+
 def _count_active_personal(
     session: Session, *, subject_user_id: str, now: datetime
 ) -> int:
@@ -698,7 +733,7 @@ def _count_active_personal(
 
     Per-subject cap (§03 "Personal access tokens" guardrails): 5
     PATs per user, separate from the workspace-scoped cap. "Live"
-    follows the same rule as :func:`_count_active_workspace`
+    follows the same rule as :func:`_count_active_workspace_for_user`
     (``revoked_at IS NULL`` and unexpired).
     """
     with tenant_agnostic():
@@ -903,8 +938,11 @@ def mint(
       violated (missing / extra fields, ``me:*`` vs workspace scope
       mixing, empty scope set on PAT, non-empty scope set on delegated).
     * :class:`TooManyTokens` — scoped / delegated cap of 5 live tokens
-      per user per workspace tripped. Count is workspace-scoped so PAT
-      holders can still mint workspace tokens.
+      per user per workspace tripped. Checked before the workspace cap
+      so the existing per-user error vocabulary is preserved.
+    * :class:`TooManyWorkspaceTokens` — workspace-wide cap of 50 live
+      scoped + delegated tokens tripped. PAT holders can still mint
+      workspace tokens because PATs do not count here.
     * :class:`TooManyPersonalTokens` — per-user PAT cap of 5 tripped.
     * :class:`TokenMintFailed` — structural failure (argon2 refused,
       RNG refused). Rare enough to bubble as 500.
@@ -948,7 +986,7 @@ def mint(
         # above; mypy needs the explicit narrowing so the attribute
         # access below type-checks.
         assert ctx is not None
-        active = _count_active_workspace(
+        active = _count_active_workspace_for_user(
             session,
             user_id=user_id,
             workspace_id=ctx.workspace_id,
@@ -958,6 +996,16 @@ def mint(
             raise TooManyTokens(
                 f"user {user_id!r} already has {active} active workspace tokens "
                 f"(max {_MAX_ACTIVE_TOKENS_PER_USER})"
+            )
+        active_workspace = _count_active_workspace_total(
+            session,
+            workspace_id=ctx.workspace_id,
+            now=resolved_now,
+        )
+        if active_workspace >= _MAX_ACTIVE_TOKENS_PER_WORKSPACE:
+            raise TooManyWorkspaceTokens(
+                f"workspace {ctx.workspace_id!r} already has {active_workspace} "
+                f"active workspace tokens (max {_MAX_ACTIVE_TOKENS_PER_WORKSPACE})"
             )
     else:
         assert subject_user_id is not None
@@ -1121,7 +1169,7 @@ def list_tokens(
     :class:`TokenSummary` docstring for why.
     """
     # justification: api_token is identity-scoped; reuse of the
-    # tenant-agnostic gate mirrors ``_count_active_workspace``.
+    # tenant-agnostic gate mirrors ``_count_active_workspace_for_user``.
     with tenant_agnostic():
         stmt = select(ApiToken).where(
             ApiToken.workspace_id == ctx.workspace_id,

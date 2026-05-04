@@ -41,6 +41,7 @@ from app.api.deps import db_session as _db_session_dep
 from app.api.v1.auth.tokens import build_tokens_router
 from app.auth.tokens import verify as verify_token
 from app.tenancy import PrincipalKind, WorkspaceContext, tenant_agnostic
+from app.util.ulid import new_ulid
 from tests.factories.identity import (
     bootstrap_user,
     bootstrap_workspace,
@@ -54,6 +55,46 @@ pytestmark = pytest.mark.integration
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
+
+_PINNED = datetime(2026, 4, 20, 12, 0, 0, tzinfo=UTC)
+
+
+def _seed_workspace_cap_rows(
+    session: Session, *, workspace_id: str, tag: str
+) -> list[str]:
+    user_ids: list[str] = []
+    with tenant_agnostic():
+        for user_index in range(10):
+            user = bootstrap_user(
+                session,
+                email=f"ws-cap-{tag}-{user_index}@example.com",
+                display_name=f"Workspace Cap {user_index}",
+            )
+            user_ids.append(user.id)
+            for token_index in range(5):
+                token_id = new_ulid()
+                kind = "delegated" if token_index == 4 else "scoped"
+                session.add(
+                    ApiToken(
+                        id=token_id,
+                        user_id=user.id,
+                        workspace_id=workspace_id,
+                        kind=kind,
+                        delegate_for_user_id=user.id if kind == "delegated" else None,
+                        subject_user_id=None,
+                        label=f"ws-cap-{user_index}-{token_index}",
+                        scope_json={},
+                        prefix=token_id[:8],
+                        hash=f"seed-hash-{token_id}",
+                        expires_at=_PINNED + timedelta(days=90),
+                        last_used_at=None,
+                        revoked_at=None,
+                        created_at=_PINNED,
+                    )
+                )
+        session.flush()
+    return user_ids
 
 
 @pytest.fixture
@@ -317,6 +358,38 @@ class TestTokensHttpFlow:
         )
         assert r.status_code == 422
         assert r.json()["error"] == "too_many_tokens"
+
+    def test_workspace_cap_maps_to_422_too_many_workspace_tokens(
+        self,
+        client: TestClient,
+        session_factory: sessionmaker[Session],
+        seeded_ctx: WorkspaceContext,
+    ) -> None:
+        tag = seeded_ctx.workspace_id[-8:].lower()
+        with session_factory() as s:
+            seeded_user_ids = _seed_workspace_cap_rows(
+                s, workspace_id=seeded_ctx.workspace_id, tag=tag
+            )
+            s.commit()
+        try:
+            r = client.post(
+                "/api/v1/auth/tokens",
+                json={"label": "workspace-cap", "scopes": {}, "expires_at_days": 30},
+            )
+            assert r.status_code == 422
+            assert r.json()["error"] == "too_many_workspace_tokens"
+        finally:
+            with session_factory() as s:
+                with tenant_agnostic():
+                    for token in s.scalars(
+                        select(ApiToken).where(ApiToken.user_id.in_(seeded_user_ids))
+                    ).all():
+                        s.delete(token)
+                    for user_id in seeded_user_ids:
+                        row = s.get(User, user_id)
+                        if row is not None:
+                            s.delete(row)
+                s.commit()
 
 
 # ---------------------------------------------------------------------------

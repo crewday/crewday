@@ -65,6 +65,8 @@ Error shapes:
   personal ``token_id``.
 * 422 ``too_many_tokens`` — 6th scoped/delegated mint for the user
   on this workspace.
+* 422 ``too_many_workspace_tokens`` — 51st live scoped/delegated mint
+  on this workspace.
 * 422 ``delegated_requires_empty_scopes`` — delegated mint with a
   non-empty ``scopes`` body.
 * 422 ``delegated_requires_session`` — delegated mint attempted by
@@ -112,6 +114,7 @@ from app.auth.tokens import (
     TokenShapeError,
     TokenSummary,
     TooManyTokens,
+    TooManyWorkspaceTokens,
     list_audit,
     list_tokens,
     mint,
@@ -412,6 +415,11 @@ def build_tokens_router() -> APIRouter:
             raise HTTPException(
                 status_code=422,
                 detail={"error": "too_many_tokens", "message": str(exc)},
+            ) from exc
+        except TooManyWorkspaceTokens as exc:
+            raise HTTPException(
+                status_code=422,
+                detail={"error": "too_many_workspace_tokens", "message": str(exc)},
             ) from exc
         except TokenShapeError as exc:
             # Shape errors map to the spec's error codes:

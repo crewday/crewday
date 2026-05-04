@@ -36,8 +36,8 @@ from app.adapters.db.base import Base
 from app.adapters.db.identity.models import ApiToken
 from app.adapters.db.session import make_engine
 from app.adapters.db.workspace.models import Workspace
+from app.auth.audit import AGNOSTIC_WORKSPACE_ID
 from app.auth.tokens import (
-    _AGNOSTIC_WORKSPACE_ID,
     DelegatingUserArchived,
     DelegatingUserInactive,
     InvalidToken,
@@ -45,11 +45,13 @@ from app.auth.tokens import (
     SubjectUserArchived,
     SubjectUserInactive,
     TokenExpired,
+    TokenKind,
     TokenKindInvalid,
     TokenRevoked,
     TokenShapeError,
     TooManyPersonalTokens,
     TooManyTokens,
+    TooManyWorkspaceTokens,
     list_audit,
     list_personal_tokens,
     list_tokens,
@@ -165,6 +167,54 @@ def _seed_role_grant(
         )
         session.flush()
     return grant_id
+
+
+def _ctx_for_actor(workspace: Workspace, actor_id: str) -> WorkspaceContext:
+    return WorkspaceContext(
+        workspace_id=workspace.id,
+        workspace_slug=workspace.slug,
+        actor_id=actor_id,
+        actor_kind="user",
+        actor_grant_role="manager",
+        actor_was_owner_member=True,
+        audit_correlation_id=new_ulid(),
+    )
+
+
+def _seed_api_token(
+    session: Session,
+    *,
+    user_id: str,
+    workspace_id: str | None,
+    kind: TokenKind = "scoped",
+    expires_at: datetime | None = _PINNED + timedelta(days=90),
+    revoked_at: datetime | None = None,
+    delegate_for_user_id: str | None = None,
+    subject_user_id: str | None = None,
+) -> str:
+    token_id = new_ulid()
+    scope_json = {"me.tasks:read": True} if kind == "personal" else {}
+    with tenant_agnostic():
+        session.add(
+            ApiToken(
+                id=token_id,
+                user_id=user_id,
+                workspace_id=workspace_id,
+                kind=kind,
+                delegate_for_user_id=delegate_for_user_id,
+                subject_user_id=subject_user_id,
+                label=f"seed-{token_id}",
+                scope_json=scope_json,
+                prefix=token_id[:8],
+                hash=f"seed-hash-{token_id}",
+                expires_at=expires_at,
+                last_used_at=None,
+                revoked_at=revoked_at,
+                created_at=_PINNED,
+            )
+        )
+        session.flush()
+    return token_id
 
 
 @pytest.fixture
@@ -321,6 +371,125 @@ class TestMint:
                 ctx,
                 user_id=ctx.actor_id,
                 label="6th",
+                scopes={},
+                expires_at=_PINNED + timedelta(days=90),
+                now=_PINNED,
+            )
+
+    def test_too_many_workspace_tokens_raises_on_51st_mint(
+        self, db_session: Session, workspace: Workspace
+    ) -> None:
+        """A 51st live scoped/delegated token in one workspace raises."""
+        for user_index in range(10):
+            seeded_user = bootstrap_user(
+                db_session,
+                email=f"tok-cap-{user_index}@example.com",
+                display_name=f"Token Cap {user_index}",
+            )
+            seeded_ctx = _ctx_for_actor(workspace, seeded_user.id)
+            for token_index in range(5):
+                kind: TokenKind = "delegated" if token_index == 4 else "scoped"
+                mint(
+                    db_session,
+                    seeded_ctx,
+                    user_id=seeded_user.id,
+                    label=f"u{user_index}-t{token_index}",
+                    scopes={},
+                    expires_at=_PINNED + timedelta(days=90),
+                    kind=kind,
+                    delegate_for_user_id=seeded_user.id
+                    if kind == "delegated"
+                    else None,
+                    now=_PINNED,
+                )
+
+        overflow_user = bootstrap_user(
+            db_session,
+            email="tok-cap-overflow@example.com",
+            display_name="Token Cap Overflow",
+        )
+        overflow_ctx = _ctx_for_actor(workspace, overflow_user.id)
+        with pytest.raises(TooManyWorkspaceTokens):
+            mint(
+                db_session,
+                overflow_ctx,
+                user_id=overflow_user.id,
+                label="51st",
+                scopes={},
+                expires_at=_PINNED + timedelta(days=90),
+                now=_PINNED,
+            )
+
+    def test_personal_tokens_do_not_count_against_workspace_total(
+        self, db_session: Session, workspace: Workspace
+    ) -> None:
+        """Fifty live PATs do not trip the workspace-wide scoped/delegated cap."""
+        for user_index in range(10):
+            seeded_user = bootstrap_user(
+                db_session,
+                email=f"tok-pat-ws-cap-{user_index}@example.com",
+                display_name=f"Token PAT Workspace Cap {user_index}",
+            )
+            for _ in range(5):
+                _seed_api_token(
+                    db_session,
+                    user_id=seeded_user.id,
+                    workspace_id=None,
+                    kind="personal",
+                    subject_user_id=seeded_user.id,
+                )
+
+        scoped_user = bootstrap_user(
+            db_session,
+            email="tok-pat-ws-cap-scoped@example.com",
+            display_name="Token PAT Workspace Cap Scoped",
+        )
+        scoped_ctx = _ctx_for_actor(workspace, scoped_user.id)
+        mint(
+            db_session,
+            scoped_ctx,
+            user_id=scoped_user.id,
+            label="first-workspace-token",
+            scopes={},
+            expires_at=_PINNED + timedelta(days=90),
+            now=_PINNED,
+        )
+
+    def test_per_user_cap_takes_precedence_over_workspace_cap(
+        self, db_session: Session, workspace: Workspace
+    ) -> None:
+        """At a full workspace, a user's own 6th token keeps the old error."""
+        capped_user_id: str | None = None
+        capped_ctx: WorkspaceContext | None = None
+        for user_index in range(10):
+            seeded_user = bootstrap_user(
+                db_session,
+                email=f"tok-precedence-{user_index}@example.com",
+                display_name=f"Token Precedence {user_index}",
+            )
+            seeded_ctx = _ctx_for_actor(workspace, seeded_user.id)
+            if user_index == 0:
+                capped_user_id = seeded_user.id
+                capped_ctx = seeded_ctx
+            for token_index in range(5):
+                mint(
+                    db_session,
+                    seeded_ctx,
+                    user_id=seeded_user.id,
+                    label=f"u{user_index}-t{token_index}",
+                    scopes={},
+                    expires_at=_PINNED + timedelta(days=90),
+                    now=_PINNED,
+                )
+
+        assert capped_user_id is not None
+        assert capped_ctx is not None
+        with pytest.raises(TooManyTokens):
+            mint(
+                db_session,
+                capped_ctx,
+                user_id=capped_user_id,
+                label="still-user-cap",
                 scopes={},
                 expires_at=_PINNED + timedelta(days=90),
                 now=_PINNED,
@@ -1621,7 +1790,7 @@ class TestPatAuditSeam:
         assert len(audits) == 1
         row = audits[0]
         assert row.entity_kind == "api_token"
-        assert row.workspace_id == _AGNOSTIC_WORKSPACE_ID
+        assert row.workspace_id == AGNOSTIC_WORKSPACE_ID
         # The real subject user lands on the row itself so the
         # ``/me`` audit view can filter ``actor_id = <user>`` without
         # a JSON scan into ``diff``.
@@ -1669,7 +1838,7 @@ class TestPatAuditSeam:
         assert len(audits) == 1
         row = audits[0]
         assert row.entity_kind == "api_token"
-        assert row.workspace_id == _AGNOSTIC_WORKSPACE_ID
+        assert row.workspace_id == AGNOSTIC_WORKSPACE_ID
         assert row.actor_id == user_id
         assert row.actor_kind == "user"
         assert isinstance(row.diff, dict)
@@ -1791,7 +1960,7 @@ class TestPatAuditSeam:
         row = audits[0]
         # Real workspace, not the agnostic sentinel.
         assert row.workspace_id == ctx.workspace_id
-        assert row.workspace_id != _AGNOSTIC_WORKSPACE_ID
+        assert row.workspace_id != AGNOSTIC_WORKSPACE_ID
         assert row.actor_id == ctx.actor_id
 
     def test_prefix_survives_pii_redactor(self) -> None:

@@ -820,10 +820,11 @@ Key properties:
   require empty).
 - A PAT can only be created by a **passkey session** — no
   transitive creation from another token.
-- Default TTL: **90 days**. The workspace cap ("never" with noisy
-  warning, see Guardrails) applies to PATs too, but the user can
-  always override their own PAT to a shorter expiry — never a
-  longer one than the workspace ceiling.
+- Default TTL: **90 days**. A workspace-level expiry ceiling can still
+  limit PAT lifetime, but the scoped/delegated workspace-count cap in
+  Guardrails does not count PATs. The user can always override their
+  own PAT to a shorter expiry — never a longer one than the workspace
+  ceiling.
 - Every user may create a PAT regardless of `grant_role`; the
   right to do so is an identity-scoped self-service verb anchored
   on the authenticated `users` row (§05 "Identity-scoped
@@ -981,6 +982,11 @@ subject narrowing is enforced at the row level regardless of which
   account — archiving the user effectively revokes all their delegated
   tokens. Archiving the user likewise cascades to their personal
   access tokens.
+- **User cap: 5 live scoped + delegated tokens per user per
+  workspace.** Creating the 6th returns 422 `error = "too_many_tokens"`
+  asking the user to revoke one. This cap is checked before the
+  workspace-wide cap so existing clients keep the per-user error when
+  both limits are true.
 - **Workspace cap: 50 live scoped + delegated tokens per workspace.**
   Creating the 51st returns 422 `error = "too_many_workspace_tokens"`
   asking the user to revoke one. Personal access tokens do not count
