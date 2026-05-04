@@ -10,6 +10,9 @@ from app.events.registry import (
     registered_events,
 )
 from app.events.types import (
+    ApiTokenCreated,
+    ApiTokenRevoked,
+    ApiTokenRotated,
     ChatMessageSent,
     DeploymentAdminSSEEvent,
     ExpenseApproved,
@@ -66,6 +69,9 @@ from app.events.types import (
 )
 
 __all__ = [
+    "ApiTokenCreated",
+    "ApiTokenRevoked",
+    "ApiTokenRotated",
     "ChatMessageSent",
     "DeploymentAdminSSEEvent",
     "Event",

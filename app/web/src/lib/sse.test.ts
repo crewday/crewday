@@ -165,6 +165,9 @@ describe("INVALIDATIONS — coverage", () => {
     "permission_rule.deleted",
     "role_grant.created",
     "role_grant.revoked",
+    "api_token.created",
+    "api_token.revoked",
+    "api_token.rotated",
     "workspace.changed",
   ];
 
@@ -1203,6 +1206,42 @@ describe("INVALIDATIONS — per-kind behaviour", () => {
       for (const call of spy.mock.calls) {
         expect(call[0]?.refetchType).toBe("active");
       }
+    }
+  });
+
+  it("api_token.created invalidates the token list", () => {
+    const qc = makeClient();
+    const spy = vi.spyOn(qc, "invalidateQueries");
+    INVALIDATIONS["api_token.created"](
+      makeEvent("api_token.created", { id: "tok_1", kind: "scoped" }),
+      qc,
+    );
+    const called = spy.mock.calls.map((c) => c[0]?.queryKey);
+    expect(called).toEqual(expect.arrayContaining([qk.apiTokens()]));
+  });
+
+  it("api_token.{revoked,rotated} invalidates the token list and per-token audit", () => {
+    for (const kind of ["api_token.revoked", "api_token.rotated"] as const) {
+      const qc = makeClient();
+      const spy = vi.spyOn(qc, "invalidateQueries");
+      INVALIDATIONS[kind](makeEvent(kind, { id: "tok_1" }), qc);
+      const called = spy.mock.calls.map((c) => c[0]?.queryKey);
+      expect(called).toEqual(
+        expect.arrayContaining([qk.apiTokens(), qk.apiTokenAudit("tok_1")]),
+      );
+    }
+  });
+
+  it("api_token.{revoked,rotated} skips audit invalidation without a token id", () => {
+    for (const kind of ["api_token.revoked", "api_token.rotated"] as const) {
+      const qc = makeClient();
+      const spy = vi.spyOn(qc, "invalidateQueries");
+      INVALIDATIONS[kind](makeEvent(kind), qc);
+      const called = spy.mock.calls.map((c) => c[0]?.queryKey);
+      expect(called).toEqual(expect.arrayContaining([qk.apiTokens()]));
+      expect(called).not.toEqual(
+        expect.arrayContaining([qk.apiTokenAudit("tok_1")]),
+      );
     }
   });
 });

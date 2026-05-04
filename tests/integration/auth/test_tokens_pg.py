@@ -40,6 +40,8 @@ from app.api.deps import current_workspace_context
 from app.api.deps import db_session as _db_session_dep
 from app.api.v1.auth.tokens import build_tokens_router
 from app.auth.tokens import verify as verify_token
+from app.events.bus import bus as default_event_bus
+from app.events.types import ApiTokenCreated, ApiTokenRevoked, ApiTokenRotated
 from app.tenancy import PrincipalKind, WorkspaceContext, tenant_agnostic
 from app.util.ulid import new_ulid
 from tests.factories.identity import (
@@ -50,6 +52,8 @@ from tests.factories.identity import (
 from tests.integration.auth._cleanup import delete_api_tokens_for_scope
 
 pytestmark = pytest.mark.integration
+
+type ApiTokenLifecycleEvent = ApiTokenCreated | ApiTokenRevoked | ApiTokenRotated
 
 
 # ---------------------------------------------------------------------------
@@ -228,6 +232,20 @@ def client(
 
     with TestClient(app) as c:
         yield c
+
+
+@pytest.fixture
+def captured_api_token_events() -> Iterator[list[ApiTokenLifecycleEvent]]:
+    """Capture token lifecycle events emitted by the production router."""
+    events: list[ApiTokenLifecycleEvent] = []
+    default_event_bus._reset_for_tests()
+    default_event_bus.subscribe(ApiTokenCreated)(events.append)
+    default_event_bus.subscribe(ApiTokenRevoked)(events.append)
+    default_event_bus.subscribe(ApiTokenRotated)(events.append)
+    try:
+        yield events
+    finally:
+        default_event_bus._reset_for_tests()
 
 
 # ---------------------------------------------------------------------------
@@ -915,6 +933,52 @@ class TestPostRevokeAlias:
             ]
         assert "api_token.revoked" in actions
         assert "api_token.revoked_noop" in actions
+
+    def test_mint_revoke_rotate_publish_sse_lifecycle_events(
+        self,
+        client: TestClient,
+        captured_api_token_events: list[ApiTokenLifecycleEvent],
+    ) -> None:
+        mint_r = client.post(
+            "/api/v1/auth/tokens",
+            json={"label": "publish-mint", "scopes": {}, "expires_at_days": 7},
+        )
+        assert mint_r.status_code == 201, mint_r.text
+        minted_id = mint_r.json()["key_id"]
+
+        revoke_r = client.delete(f"/api/v1/auth/tokens/{minted_id}")
+        assert revoke_r.status_code == 204, revoke_r.text
+
+        second_revoke_r = client.delete(f"/api/v1/auth/tokens/{minted_id}")
+        assert second_revoke_r.status_code == 204, second_revoke_r.text
+
+        rotate_seed_r = client.post(
+            "/api/v1/auth/tokens",
+            json={"label": "publish-rotate", "scopes": {}, "expires_at_days": 7},
+        )
+        assert rotate_seed_r.status_code == 201, rotate_seed_r.text
+        rotated_id = rotate_seed_r.json()["key_id"]
+
+        rotate_r = client.post(f"/api/v1/auth/tokens/{rotated_id}/rotate")
+        assert rotate_r.status_code == 200, rotate_r.text
+
+        failed_rotate_r = client.post(f"/api/v1/auth/tokens/{minted_id}/rotate")
+        assert failed_rotate_r.status_code == 404, failed_rotate_r.text
+
+        assert [
+            (type(event).name, event.id) for event in captured_api_token_events
+        ] == [
+            ("api_token.created", minted_id),
+            ("api_token.revoked", minted_id),
+            ("api_token.created", rotated_id),
+            ("api_token.rotated", rotated_id),
+        ]
+        assert all(event.workspace_id for event in captured_api_token_events)
+        assert [
+            event.kind
+            for event in captured_api_token_events
+            if isinstance(event, ApiTokenCreated)
+        ] == ["scoped", "scoped"]
 
 
 # ---------------------------------------------------------------------------

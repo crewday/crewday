@@ -1664,7 +1664,10 @@ export type SseEvent =
   | {
       event: "role_grant.revoked";
       data: { grant_id: string; user_id: string };
-    };
+    }
+  | { event: "api_token.created"; data: { id: string; kind: "scoped" | "delegated" | "personal" } }
+  | { event: "api_token.revoked"; data: { id: string } }
+  | { event: "api_token.rotated"; data: { id: string } };
 
 // §06 — per-property recurring rota (Schedule ruleset).
 export interface ScheduleRuleset {

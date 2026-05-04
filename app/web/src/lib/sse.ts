@@ -184,6 +184,10 @@ export type EventKind =
   | "permission_rule.deleted"
   | "role_grant.created"
   | "role_grant.revoked"
+  // API token lifecycle (§03, manager token desk).
+  | "api_token.created"
+  | "api_token.revoked"
+  | "api_token.rotated"
   // Catch-all workspace invalidation — e.g. owner flips a workspace
   // setting that reshapes policy. Drops every cached query under
   // the active workspace.
@@ -392,6 +396,10 @@ interface RoleGrantPayload {
   user_id: string;
 }
 
+interface ApiTokenPayload {
+  id?: string;
+}
+
 function invalidate(qc: QueryClient, queryKey: readonly unknown[]): void {
   // `refetchType: "active"` keeps idle queries cheap (§14 "SSE-driven
   // invalidation"). Explicit here so the intent is visible at every
@@ -478,6 +486,18 @@ function invalidateRoleGrant(event: SseEvent, qc: QueryClient): void {
   // Role grants seed the §02 step 5 default-allow walk — drop every
   // resolver verdict.
   invalidate(qc, qk.permissionResolvedPrefix());
+}
+
+function invalidateApiTokenList(_event: SseEvent, qc: QueryClient): void {
+  invalidate(qc, qk.apiTokens());
+}
+
+function invalidateApiTokenWithAudit(event: SseEvent, qc: QueryClient): void {
+  const payload = event.data as unknown as ApiTokenPayload;
+  invalidate(qc, qk.apiTokens());
+  if (payload.id) {
+    invalidate(qc, qk.apiTokenAudit(payload.id));
+  }
 }
 
 export const INVALIDATIONS: Record<EventKind, InvalidationHandler> = {
@@ -1039,6 +1059,10 @@ export const INVALIDATIONS: Record<EventKind, InvalidationHandler> = {
 
   "role_grant.created": invalidateRoleGrant,
   "role_grant.revoked": invalidateRoleGrant,
+
+  "api_token.created": invalidateApiTokenList,
+  "api_token.revoked": invalidateApiTokenWithAudit,
+  "api_token.rotated": invalidateApiTokenWithAudit,
 
   "workspace.changed": (_event, qc) => {
     // Big-hammer: a workspace-level setting reshaped policy. Every

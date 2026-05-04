@@ -111,6 +111,9 @@ export function startEventStream(client: QueryClient): () => void {
     "permission_rule.deleted",
     "role_grant.created",
     "role_grant.revoked",
+    "api_token.created",
+    "api_token.revoked",
+    "api_token.rotated",
   ];
   for (const ev of events) {
     es.addEventListener(ev, handler as EventListener);
@@ -312,5 +315,17 @@ export function dispatch(client: QueryClient, evt: TypedEvent): void {
       client.invalidateQueries({ queryKey: ["permission_groups"] });
       client.invalidateQueries({ queryKey: ["permissions", "resolved"] });
       return;
+    case "api_token.created":
+      client.invalidateQueries({ queryKey: qk.apiTokens() });
+      return;
+    case "api_token.revoked":
+    case "api_token.rotated": {
+      const payload = data as { id?: string };
+      client.invalidateQueries({ queryKey: qk.apiTokens() });
+      if (payload.id) {
+        client.invalidateQueries({ queryKey: qk.apiTokenAudit(payload.id) });
+      }
+      return;
+    }
   }
 }

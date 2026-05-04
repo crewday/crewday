@@ -57,3 +57,47 @@ describe("mocks SSE dispatcher — task_template lifecycle (cd-wyq5)", () => {
     );
   });
 });
+
+describe("mocks SSE dispatcher — API token lifecycle", () => {
+  it("created invalidates the token list", () => {
+    const qc = makeClient();
+    const spy = vi.spyOn(qc, "invalidateQueries");
+    dispatch(qc, {
+      type: "api_token.created",
+      data: JSON.stringify({ id: "tok_1", kind: "scoped" }),
+    });
+    const called = spy.mock.calls.map((c) => c[0]?.queryKey);
+    expect(called).toEqual(expect.arrayContaining([qk.apiTokens()]));
+  });
+
+  it("revoked and rotated invalidate the token list and per-token audit", () => {
+    for (const type of ["api_token.revoked", "api_token.rotated"] as const) {
+      const qc = makeClient();
+      const spy = vi.spyOn(qc, "invalidateQueries");
+      dispatch(qc, {
+        type,
+        data: JSON.stringify({ id: "tok_1" }),
+      });
+      const called = spy.mock.calls.map((c) => c[0]?.queryKey);
+      expect(called).toEqual(
+        expect.arrayContaining([qk.apiTokens(), qk.apiTokenAudit("tok_1")]),
+      );
+    }
+  });
+
+  it("revoked and rotated skip audit invalidation without a token id", () => {
+    for (const type of ["api_token.revoked", "api_token.rotated"] as const) {
+      const qc = makeClient();
+      const spy = vi.spyOn(qc, "invalidateQueries");
+      dispatch(qc, {
+        type,
+        data: JSON.stringify({}),
+      });
+      const called = spy.mock.calls.map((c) => c[0]?.queryKey);
+      expect(called).toEqual(expect.arrayContaining([qk.apiTokens()]));
+      expect(called).not.toEqual(
+        expect.arrayContaining([qk.apiTokenAudit("tok_1")]),
+      );
+    }
+  });
+});

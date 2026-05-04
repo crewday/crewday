@@ -96,6 +96,7 @@ from fastapi import APIRouter, Depends, HTTPException, Response, status
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
+from app.adapters.db.identity.models import ApiToken
 from app.api.deps import current_workspace_context, db_session
 from app.api.pagination import (
     DEFAULT_LIMIT,
@@ -122,7 +123,9 @@ from app.auth.tokens import (
     rotate,
 )
 from app.authz.dep import Permission
-from app.tenancy import WorkspaceContext
+from app.events.bus import bus as default_event_bus
+from app.events.types import ApiTokenCreated, ApiTokenRevoked, ApiTokenRotated
+from app.tenancy import WorkspaceContext, tenant_agnostic
 from app.util.clock import SystemClock
 
 __all__ = [
@@ -300,6 +303,43 @@ def _summary_to_response(summary: TokenSummary) -> TokenSummaryResponse:
     )
 
 
+def _publish_api_token_event(
+    ctx: WorkspaceContext,
+    event_type: type[ApiTokenCreated] | type[ApiTokenRevoked] | type[ApiTokenRotated],
+    token_id: str,
+    *,
+    kind: TokenKind | None = None,
+) -> None:
+    payload = {
+        "workspace_id": ctx.workspace_id,
+        "actor_id": ctx.actor_id,
+        "correlation_id": ctx.audit_correlation_id,
+        "occurred_at": SystemClock().now(),
+        "id": token_id,
+    }
+    if event_type is ApiTokenCreated:
+        if kind is None:
+            raise ValueError("api_token.created requires token kind")
+        default_event_bus.publish(ApiTokenCreated(kind=kind, **payload))
+        return
+    default_event_bus.publish(event_type(**payload))
+
+
+def _is_live_workspace_token(
+    session: Session,
+    ctx: WorkspaceContext,
+    token_id: str,
+) -> bool:
+    with tenant_agnostic():
+        row = session.get(ApiToken, token_id)
+    return (
+        row is not None
+        and row.kind != "personal"
+        and row.workspace_id == ctx.workspace_id
+        and row.revoked_at is None
+    )
+
+
 def build_tokens_router() -> APIRouter:
     """Return a fresh :class:`APIRouter` wired for workspace-scoped token ops.
 
@@ -438,6 +478,12 @@ def build_tokens_router() -> APIRouter:
                 status_code=422,
                 detail={"error": code, "message": str(exc)},
             ) from exc
+        _publish_api_token_event(
+            ctx,
+            ApiTokenCreated,
+            result.key_id,
+            kind=result.kind,
+        )
         return MintTokenResponse(
             token=result.token,
             key_id=result.key_id,
@@ -526,6 +572,7 @@ def build_tokens_router() -> APIRouter:
         ``revoked_noop`` audit row but returns 204 so the UI's
         "are you sure" → Revoke loop doesn't fail on a double-click.
         """
+        should_publish = _is_live_workspace_token(session, ctx, token_id)
         try:
             revoke(session, ctx, token_id=token_id)
         except InvalidToken as exc:
@@ -536,6 +583,8 @@ def build_tokens_router() -> APIRouter:
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail={"error": "token_not_found"},
             ) from exc
+        if should_publish:
+            _publish_api_token_event(ctx, ApiTokenRevoked, token_id)
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 
     @api.post(
@@ -569,6 +618,7 @@ def build_tokens_router() -> APIRouter:
         POST shape. Same idempotent contract, same 404 collapse on
         unknown / cross-workspace / personal token ids.
         """
+        should_publish = _is_live_workspace_token(session, ctx, token_id)
         try:
             revoke(session, ctx, token_id=token_id)
         except InvalidToken as exc:
@@ -576,6 +626,8 @@ def build_tokens_router() -> APIRouter:
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail={"error": "token_not_found"},
             ) from exc
+        if should_publish:
+            _publish_api_token_event(ctx, ApiTokenRevoked, token_id)
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 
     @api.post(
@@ -616,6 +668,7 @@ def build_tokens_router() -> APIRouter:
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail={"error": "token_not_found"},
             ) from exc
+        _publish_api_token_event(ctx, ApiTokenRotated, token_id)
         return MintTokenResponse(
             token=result.token,
             key_id=result.key_id,

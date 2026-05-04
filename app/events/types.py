@@ -47,6 +47,9 @@ __all__ = [
     "AgentTurnOutcome",
     "AgentTurnScope",
     "AgentTurnStarted",
+    "ApiTokenCreated",
+    "ApiTokenRevoked",
+    "ApiTokenRotated",
     "ApprovalDecided",
     "ApprovalDecision",
     "AssetActionPerformed",
@@ -415,6 +418,37 @@ class RoleGrantRevoked(_RoleGrantEvent):
     """
 
     name: ClassVar[str] = "role_grant.revoked"
+
+
+class _ApiTokenEvent(Event):
+    """API-token lifecycle event visible to manager token surfaces."""
+
+    allowed_roles: ClassVar[tuple[EventRole, ...]] = ("manager",)
+
+    id: str
+
+
+@register
+class ApiTokenCreated(_ApiTokenEvent):
+    """A workspace API token was minted."""
+
+    name: ClassVar[str] = "api_token.created"
+
+    kind: Literal["scoped", "delegated", "personal"]
+
+
+@register
+class ApiTokenRevoked(_ApiTokenEvent):
+    """A workspace API token was revoked."""
+
+    name: ClassVar[str] = "api_token.revoked"
+
+
+@register
+class ApiTokenRotated(_ApiTokenEvent):
+    """A workspace API token's secret was rotated in place."""
+
+    name: ClassVar[str] = "api_token.rotated"
 
 
 @register
