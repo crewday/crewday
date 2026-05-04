@@ -186,6 +186,50 @@ fi
 echo "schemathesis: seeded workspace=${SLUG} owner=${EMAIL} (Bearer + session cookie ready)" >&2
 export CREWDAY_SCHEMATHESIS_SESSION_COOKIE="__Host-crewday_session=${SESSION}; crewday_csrf=schemathesis"
 
+# Admin path resources. The admin tag has several useful routes whose
+# path parameters point at deployment resources instead of the workspace
+# slug. Without these IDs, Schemathesis generates random ``{id}`` /
+# agent-doc ``{slug}`` values and mostly exercises the missing-resource
+# 404 branch. ``tests/contract/hooks.py`` reads these variables and pins
+# those operation-specific path parameters to live rows.
+#
+# ``admin.admins.revoke`` is a destructive one-shot route: the seeded
+# grant is live for the first positive example, then correctly 404s once
+# revoked. The focused admin tag smoke therefore runs with
+# ``SCHEMATHESIS_MAX_EXAMPLES=1`` when validating this route's success
+# path; higher example counts need a per-example grant refresh hook.
+ADMIN_CONTRACT_ENV=$(${PYTHON_BIN} -m scripts._schemathesis_seed \
+    --email "${EMAIL}" \
+    --workspace "${SLUG}" \
+    --output admin-contract-env)
+
+if [[ -z "${ADMIN_CONTRACT_ENV}" ]]; then
+    echo "schemathesis: failed to seed admin path resources" >&2
+    exit 1
+fi
+
+while IFS='=' read -r key value; do
+    case "${key}" in
+        CREWDAY_SCHEMATHESIS_ADMIN_WORKSPACE_ID)
+            export CREWDAY_SCHEMATHESIS_ADMIN_WORKSPACE_ID="${value}"
+            ;;
+        CREWDAY_SCHEMATHESIS_ADMIN_REVOKE_GRANT_ID)
+            export CREWDAY_SCHEMATHESIS_ADMIN_REVOKE_GRANT_ID="${value}"
+            ;;
+        CREWDAY_SCHEMATHESIS_ADMIN_AGENT_DOC_SLUG)
+            export CREWDAY_SCHEMATHESIS_ADMIN_AGENT_DOC_SLUG="${value}"
+            ;;
+    esac
+done <<< "${ADMIN_CONTRACT_ENV}"
+
+if [[ -z "${CREWDAY_SCHEMATHESIS_ADMIN_WORKSPACE_ID:-}" ]] \
+    || [[ -z "${CREWDAY_SCHEMATHESIS_ADMIN_REVOKE_GRANT_ID:-}" ]] \
+    || [[ -z "${CREWDAY_SCHEMATHESIS_ADMIN_AGENT_DOC_SLUG:-}" ]]; then
+    echo "schemathesis: admin seed did not export every path resource" >&2
+    exit 1
+fi
+echo "schemathesis: seeded admin path resources workspace_id=${CREWDAY_SCHEMATHESIS_ADMIN_WORKSPACE_ID} agent_doc=${CREWDAY_SCHEMATHESIS_ADMIN_AGENT_DOC_SLUG} revoke_grant=${CREWDAY_SCHEMATHESIS_ADMIN_REVOKE_GRANT_ID}" >&2
+
 # ---------------------------------------------------------------------------
 # Run schemathesis
 # ---------------------------------------------------------------------------
@@ -670,6 +714,13 @@ INCLUDE_ARGS=(
     --exclude-operation-id 'admin.audit.list'
     --exclude-operation-id 'admin.audit.tail'
     --exclude-operation-id 'admin.usage.list'
+    # ``admin.chat.test_inbound`` remains included so the admin tag
+    # covers its configured and unconfigured deployment branches. The
+    # run can warn that generated payloads mostly hit validation because
+    # the request model trims ``external_contact`` / ``body_md`` and
+    # rejects whitespace-only strings; OpenAPI advertises ``minLength``
+    # but cannot express the post-trim non-empty invariant. Focused chat
+    # gateway route tests cover that validator.
     # ----------------------------------------------------------------
     # LLM tag (cd-e5sit). The workspace operations below carry the
     # shared problem+json response envelope and were confirmed clean by

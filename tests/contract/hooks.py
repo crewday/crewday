@@ -63,6 +63,15 @@ _SESSION_COOKIE_ENV: Final[str] = "CREWDAY_SCHEMATHESIS_SESSION_COOKIE"
 _BASE_EMAIL: Final[str] = os.environ.get(
     "CREWDAY_SCHEMATHESIS_EMAIL", "schemathesis@dev.local"
 )
+_ADMIN_WORKSPACE_ID: Final[str | None] = os.environ.get(
+    "CREWDAY_SCHEMATHESIS_ADMIN_WORKSPACE_ID"
+)
+_ADMIN_REVOKE_GRANT_ID: Final[str | None] = os.environ.get(
+    "CREWDAY_SCHEMATHESIS_ADMIN_REVOKE_GRANT_ID"
+)
+_ADMIN_AGENT_DOC_SLUG: Final[str | None] = os.environ.get(
+    "CREWDAY_SCHEMATHESIS_ADMIN_AGENT_DOC_SLUG"
+)
 _LOGOUT_EMAIL_ENV: Final[str] = "CREWDAY_SCHEMATHESIS_LOGOUT_EMAIL"
 _SESSION_COOKIE_NAME: Final[str] = "__Host-crewday_session"
 _CSRF_COOKIE: Final[str] = "crewday_csrf=schemathesis"
@@ -167,11 +176,13 @@ def _is_public_path(path: str) -> bool:
 # ---------------------------------------------------------------------------
 
 
-def _operation_id(ctx: schemathesis.HookContext, case: Case) -> str | None:
+def _operation_id(
+    ctx: schemathesis.HookContext, case: Case | None = None
+) -> str | None:
     """Return the OpenAPI operationId for ``case`` when available."""
     for operation in (
         getattr(ctx, "operation", None),
-        getattr(case, "operation", None),
+        getattr(case, "operation", None) if case is not None else None,
     ):
         raw_def = getattr(operation, "definition", None)
         raw: dict[str, Any] | None = (
@@ -370,11 +381,45 @@ def _response_declares_header(case: Case, status_code: int, header_name: str) ->
 # ---------------------------------------------------------------------------
 
 
+def _admin_path_parameter_overrides(operation_id: str | None) -> dict[str, str]:
+    if operation_id == "admin.agent_docs.show" and _ADMIN_AGENT_DOC_SLUG:
+        return {"slug": _ADMIN_AGENT_DOC_SLUG}
+    if operation_id == "admin.admins.revoke" and _ADMIN_REVOKE_GRANT_ID:
+        return {"id": _ADMIN_REVOKE_GRANT_ID}
+    if (
+        operation_id
+        in {
+            "admin.workspaces.get",
+            "admin.workspaces.trust",
+            "admin.workspaces.archive",
+            "admin.usage.workspaces.cap",
+        }
+        and _ADMIN_WORKSPACE_ID
+    ):
+        return {"id": _ADMIN_WORKSPACE_ID}
+    return {}
+
+
+def _constrain_path_parameters(
+    operation_id: str | None,
+    path_parameters: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    if path_parameters is None:
+        return None
+
+    overrides = _admin_path_parameter_overrides(operation_id)
+    if overrides:
+        return {**path_parameters, **overrides}
+    if "slug" in path_parameters:
+        return {**path_parameters, "slug": _WORKSPACE_SLUG}
+    return path_parameters
+
+
 @schemathesis.hook("map_path_parameters")
 def constrain_workspace_slug(
     ctx: schemathesis.HookContext, path_parameters: dict[str, Any] | None
 ) -> dict[str, Any] | None:
-    """Pin the ``{slug}`` path parameter to the seeded workspace slug.
+    """Pin generated path parameters to seeded contract resources.
 
     Workspace-scoped routes live under ``/w/{slug}/api/v1/...``;
     schemathesis would otherwise generate random unicode slugs that
@@ -384,21 +429,17 @@ def constrain_workspace_slug(
     the gate exercises the real handlers rather than the tenancy 404
     branch on every request.
 
-    Other path params (``{id}``, ``{user_id}``, etc.) are left to
-    schemathesis — those are tested for "does the handler 404 cleanly
-    on a missing resource", which is a separate (also valuable)
-    contract.
+    Admin routes that address seeded resources by ``{id}`` or a
+    deployment-doc ``{slug}`` are pinned per operation so the admin tag
+    reaches success handlers instead of mostly sampling missing-resource
+    404s.
 
     ``path_parameters`` is ``None`` for operations that declare no
     path parameters (e.g. ``auth.me.get``); the hook short-circuits
     in that case rather than tripping a ``TypeError`` in the
     membership test.
     """
-    if path_parameters is None:
-        return None
-    if "slug" in path_parameters:
-        path_parameters["slug"] = _WORKSPACE_SLUG
-    return path_parameters
+    return _constrain_path_parameters(_operation_id(ctx), path_parameters)
 
 
 @schemathesis.hook("before_generate_path_parameters")
@@ -412,8 +453,10 @@ def constrain_generated_workspace_slug(
         # through this seam; only dict-shaped containers carry the
         # ``slug`` placeholder, so ignore everything else and let the
         # downstream strategy keep the original.
-        if isinstance(path_parameters, dict) and "slug" in path_parameters:
-            return {**path_parameters, "slug": _WORKSPACE_SLUG}
+        if isinstance(path_parameters, dict):
+            rewritten = _constrain_path_parameters(_operation_id(ctx), path_parameters)
+            if rewritten is not None:
+                return rewritten
         return path_parameters
 
     return strategy.map(rewrite)
@@ -443,8 +486,12 @@ def constrain_case_workspace_slug(ctx: schemathesis.HookContext, case: Case) -> 
     405 / handler 200, not a tenancy 404.
     """
     path_parameters = getattr(case, "path_parameters", None)
-    if isinstance(path_parameters, dict) and "slug" in path_parameters:
-        path_parameters["slug"] = _WORKSPACE_SLUG
+    if isinstance(path_parameters, dict):
+        rewritten = _constrain_path_parameters(
+            _operation_id(ctx, case), path_parameters
+        )
+        if rewritten is not None:
+            case.path_parameters = rewritten
     return case
 
 

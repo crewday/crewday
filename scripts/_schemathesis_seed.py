@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import os
 import sys
+from dataclasses import dataclass
 from typing import Final, Literal
 
 import click
@@ -40,20 +41,30 @@ from sqlalchemy.orm import Session as SqlaSession
 
 from app.adapters.db.authz.models import DeploymentOwner, RoleGrant
 from app.adapters.db.identity.models import User, canonicalise_email
+from app.adapters.db.llm.models import AgentDoc
 from app.adapters.db.session import make_uow
 from app.adapters.db.workspace.models import Workspace
 from app.auth.tokens import mint as mint_token
 from app.config import get_settings
+from app.services.agent.system_docs import seed_agent_docs
 from app.tenancy import WorkspaceContext, tenant_agnostic
 from app.util.clock import SystemClock
 from app.util.ulid import new_ulid
 from scripts.dev_login import mint_session
 
-OutputFormat = Literal["token", "bearer", "session", "cookie"]
+OutputFormat = Literal["token", "bearer", "session", "cookie", "admin-contract-env"]
 _SESSION_COOKIE_NAME: Final[str] = "__Host-crewday_session"
+_ADMIN_REVOKE_EMAIL: Final[str] = "schemathesis-admin-revoke@dev.local"
 
 
 _DEV_AUTH_ENV_VAR: Final[str] = "CREWDAY_DEV_AUTH"
+
+
+@dataclass(frozen=True, slots=True)
+class AdminContractPathResources:
+    workspace_id: str
+    admin_revoke_grant_id: str
+    agent_doc_slug: str
 
 
 def _ensure_deployment_admin(
@@ -93,6 +104,106 @@ def _ensure_deployment_admin(
                 )
             )
         session.flush()
+
+
+def _resolve_or_create_user(
+    session: SqlaSession,
+    *,
+    email: str,
+    display_name: str,
+) -> User:
+    email_lower = canonicalise_email(email)
+    with tenant_agnostic():
+        existing = session.scalar(select(User).where(User.email_lower == email_lower))
+        if existing is not None:
+            return existing
+        now = SystemClock().now()
+        user = User(
+            id=new_ulid(),
+            email=email,
+            email_lower=email_lower,
+            display_name=display_name,
+            locale=None,
+            timezone=None,
+            created_at=now,
+        )
+        session.add(user)
+        session.flush()
+        return user
+
+
+def _ensure_revokable_admin_grant(
+    session: SqlaSession,
+    *,
+    actor_user_id: str,
+) -> str:
+    target = _resolve_or_create_user(
+        session,
+        email=_ADMIN_REVOKE_EMAIL,
+        display_name="Schemathesis Admin Revoke Target",
+    )
+    with tenant_agnostic():
+        existing_grant = session.scalar(
+            select(RoleGrant)
+            .where(RoleGrant.scope_kind == "deployment")
+            .where(RoleGrant.user_id == target.id)
+            .where(RoleGrant.grant_role == "manager")
+            .where(RoleGrant.revoked_at.is_(None))
+            .limit(1)
+        )
+        if existing_grant is not None:
+            return existing_grant.id
+
+        grant = RoleGrant(
+            id=new_ulid(),
+            workspace_id=None,
+            user_id=target.id,
+            grant_role="manager",
+            scope_kind="deployment",
+            created_at=SystemClock().now(),
+            created_by_user_id=actor_user_id,
+        )
+        session.add(grant)
+        session.flush()
+        return grant.id
+
+
+def seed_admin_contract_path_resources(
+    session: SqlaSession,
+    *,
+    actor_user_id: str,
+    workspace_id: str,
+) -> AdminContractPathResources:
+    """Seed live path resources for the admin Schemathesis tag."""
+    seed_agent_docs(session)
+    with tenant_agnostic():
+        agent_doc_slug = session.scalar(
+            select(AgentDoc.slug)
+            .where(AgentDoc.is_active.is_(True))
+            .order_by(AgentDoc.slug.asc())
+            .limit(1)
+        )
+    if agent_doc_slug is None:
+        raise RuntimeError("no active agent docs available for schemathesis seed")
+    return AdminContractPathResources(
+        workspace_id=workspace_id,
+        admin_revoke_grant_id=_ensure_revokable_admin_grant(
+            session,
+            actor_user_id=actor_user_id,
+        ),
+        agent_doc_slug=agent_doc_slug,
+    )
+
+
+def _format_admin_contract_env(resources: AdminContractPathResources) -> str:
+    return "\n".join(
+        (
+            f"CREWDAY_SCHEMATHESIS_ADMIN_WORKSPACE_ID={resources.workspace_id}",
+            "CREWDAY_SCHEMATHESIS_ADMIN_REVOKE_GRANT_ID="
+            f"{resources.admin_revoke_grant_id}",
+            f"CREWDAY_SCHEMATHESIS_ADMIN_AGENT_DOC_SLUG={resources.agent_doc_slug}",
+        )
+    )
 
 
 def _check_gates() -> None:
@@ -148,12 +259,13 @@ def mint_seed_session_cookie_value(*, email: str, workspace_slug: str) -> str:
 @click.option("--label", default="schemathesis", help="Token audit label.")
 @click.option(
     "--output",
-    type=click.Choice(["token", "bearer", "session", "cookie"]),
+    type=click.Choice(["token", "bearer", "session", "cookie", "admin-contract-env"]),
     default="token",
     help="Output format. 'token' prints the API-token plaintext only; "
     "'bearer' prefixes with 'Authorization: Bearer '. 'session' prints the "
     "session cookie value only; 'cookie' prints the full "
-    "'__Host-crewday_session=<value>' pair.",
+    "'__Host-crewday_session=<value>' pair; 'admin-contract-env' prints "
+    "KEY=value lines consumed by the Schemathesis hooks.",
 )
 def main(email: str, workspace_slug: str, label: str, output: OutputFormat) -> None:
     """CLI entry point — gate, seed, mint, print plaintext."""
@@ -193,6 +305,15 @@ def main(email: str, workspace_slug: str, label: str, output: OutputFormat) -> N
                 select(Workspace).where(Workspace.slug == workspace_slug)
             ).one()
             _ensure_deployment_admin(uow, user_id=user.id)
+
+        if output == "admin-contract-env":
+            resources = seed_admin_contract_path_resources(
+                uow,
+                actor_user_id=user.id,
+                workspace_id=workspace.id,
+            )
+            sys.stdout.write(_format_admin_contract_env(resources))
+            return
 
         # 3. Mint a workspace-scoped token. ``scopes`` is left empty
         #    on purpose — empty-scope workspace tokens are the v1

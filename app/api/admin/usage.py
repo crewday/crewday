@@ -39,7 +39,7 @@ from datetime import UTC, datetime
 from typing import Annotated, Final
 
 from fastapi import APIRouter, Depends, Query, Request, status
-from pydantic import BaseModel
+from pydantic import BaseModel, StrictInt
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -160,7 +160,7 @@ class UsageCapPayload(BaseModel):
     the workspace, mirroring :func:`app.domain.plans.tight_cap_cents`.
     """
 
-    cap_cents_30d: int
+    cap_cents_30d: StrictInt
 
 
 class UsageCapResponse(BaseModel):

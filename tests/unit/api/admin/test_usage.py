@@ -742,8 +742,10 @@ class TestUpdateCap:
             "admin.audit.appended",
             "admin.usage.updated",
         ]
-        assert published[1]["payload"]["workspace_id"] == ws
-        assert published[1]["payload"]["cap_cents_30d"] == 1500
+        payload = published[1]["payload"]
+        assert isinstance(payload, dict)
+        assert payload["workspace_id"] == ws
+        assert payload["cap_cents_30d"] == 1500
 
     def test_idempotent_no_extra_audit(
         self,
@@ -788,6 +790,24 @@ class TestUpdateCap:
         )
         assert resp.status_code == 422
         assert resp.json().get("error") == "invalid_cap"
+
+    def test_boolean_cap_returns_validation_422(
+        self,
+        client: TestClient,
+        session_factory: sessionmaker[Session],
+        settings: Settings,
+    ) -> None:
+        with session_factory() as s:
+            ws = seed_workspace(s, slug="cap-ws")
+            s.commit()
+        client.cookies.set(
+            SESSION_COOKIE_NAME, _admin_cookie(session_factory, settings)
+        )
+        resp = client.put(
+            f"/admin/api/v1/usage/workspaces/{ws}/cap",
+            json={"cap_cents_30d": False},
+        )
+        assert resp.status_code == 422
 
     def test_unknown_workspace_404s(
         self,

@@ -397,6 +397,44 @@ class TestPublicPathAllowlist:
             "asset_id": "asset_123",
         }
 
+    def test_admin_path_parameters_are_pinned_to_seeded_resources(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from tests.contract import hooks
+
+        monkeypatch.setattr(hooks, "_ADMIN_WORKSPACE_ID", "ws_seed")
+        monkeypatch.setattr(hooks, "_ADMIN_REVOKE_GRANT_ID", "grant_seed")
+        monkeypatch.setattr(hooks, "_ADMIN_AGENT_DOC_SLUG", "doc_seed")
+
+        assert hooks._constrain_path_parameters(
+            "admin.workspaces.get",
+            {"id": "random"},
+        ) == {"id": "ws_seed"}
+        assert hooks._constrain_path_parameters(
+            "admin.admins.revoke",
+            {"id": "random"},
+        ) == {"id": "grant_seed"}
+        assert hooks._constrain_path_parameters(
+            "admin.agent_docs.show",
+            {"slug": "random"},
+        ) == {"slug": "doc_seed"}
+
+    def test_workspace_slug_pin_does_not_override_admin_doc_slug(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from tests.contract import hooks
+
+        monkeypatch.setattr(hooks, "_ADMIN_AGENT_DOC_SLUG", "doc_seed")
+
+        assert hooks._constrain_path_parameters(
+            "admin.agent_docs.show",
+            {"slug": "random"},
+        ) == {"slug": "doc_seed"}
+        assert hooks._constrain_path_parameters(
+            "me.profile.scoped.get",
+            {"slug": "random"},
+        ) == {"slug": "schemathesis"}
+
 
 @pytest.mark.skipif(
     not _schemathesis_available(), reason="schemathesis is not installed"
