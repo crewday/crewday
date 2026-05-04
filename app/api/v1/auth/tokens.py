@@ -90,7 +90,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, Response, status
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -104,6 +104,7 @@ from app.api.pagination import (
     paginate,
 )
 from app.api.v1._problem_json import IDENTITY_PROBLEM_RESPONSES
+from app.api.v1.auth.errors import auth_not_found
 from app.auth.tokens import (
     DELEGATED_DEFAULT_TTL_DAYS,
     SCOPED_DEFAULT_TTL_DAYS,
@@ -121,6 +122,7 @@ from app.auth.tokens import (
     rotate,
 )
 from app.authz.dep import Permission
+from app.domain.errors import Validation as DomainValidation
 from app.events.bus import bus as default_event_bus
 from app.events.types import ApiTokenCreated, ApiTokenRevoked, ApiTokenRotated
 from app.tenancy import WorkspaceContext, tenant_agnostic
@@ -427,15 +429,12 @@ def build_tokens_router() -> APIRouter:
         # the rest of the mint-shape error taxonomy so the SPA's form
         # error rendering keys off a stable ``error`` code.
         if kind == "delegated" and ctx.principal_kind != "session":
-            raise HTTPException(
-                status_code=422,
-                detail={
-                    "error": "delegated_requires_session",
-                    "message": (
-                        "delegated tokens can only be minted from a "
-                        "passkey session — no transitive delegation"
-                    ),
-                },
+            raise DomainValidation(
+                (
+                    "delegated tokens can only be minted from a "
+                    "passkey session — no transitive delegation"
+                ),
+                extra={"error": "delegated_requires_session"},
             )
 
         try:
@@ -451,16 +450,14 @@ def build_tokens_router() -> APIRouter:
                 now=now,
             )
         except TooManyTokens as exc:
-            # Starlette renamed the 422 constant in a recent release;
-            # use the literal so the router works across minor versions.
-            raise HTTPException(
-                status_code=422,
-                detail={"error": "too_many_tokens", "message": str(exc)},
+            raise DomainValidation(
+                str(exc),
+                extra={"error": "too_many_tokens"},
             ) from exc
         except TooManyWorkspaceTokens as exc:
-            raise HTTPException(
-                status_code=422,
-                detail={"error": "too_many_workspace_tokens", "message": str(exc)},
+            raise DomainValidation(
+                str(exc),
+                extra={"error": "too_many_workspace_tokens"},
             ) from exc
         except TokenShapeError as exc:
             # Shape errors map to the spec's error codes:
@@ -475,10 +472,7 @@ def build_tokens_router() -> APIRouter:
                 code = "me_scope_conflict"
             else:
                 code = "invalid_token_shape"
-            raise HTTPException(
-                status_code=422,
-                detail={"error": code, "message": str(exc)},
-            ) from exc
+            raise DomainValidation(str(exc), extra={"error": code}) from exc
         _publish_api_token_event(
             ctx,
             ApiTokenCreated,
@@ -580,10 +574,7 @@ def build_tokens_router() -> APIRouter:
             # §03 management-context error: 404 rather than 401,
             # because the caller is authenticated + authorised; they
             # just named a token that doesn't live on this workspace.
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail={"error": "token_not_found"},
-            ) from exc
+            raise auth_not_found("token_not_found") from exc
         if should_publish:
             _publish_api_token_event(ctx, ApiTokenRevoked, token_id)
         return Response(status_code=status.HTTP_204_NO_CONTENT)
@@ -621,10 +612,7 @@ def build_tokens_router() -> APIRouter:
         try:
             revoke(session, ctx, token_id=token_id)
         except InvalidToken as exc:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail={"error": "token_not_found"},
-            ) from exc
+            raise auth_not_found("token_not_found") from exc
         if should_publish:
             _publish_api_token_event(ctx, ApiTokenRevoked, token_id)
         return Response(status_code=status.HTTP_204_NO_CONTENT)
@@ -663,10 +651,7 @@ def build_tokens_router() -> APIRouter:
         try:
             result = rotate(session, ctx, token_id=token_id)
         except InvalidToken as exc:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail={"error": "token_not_found"},
-            ) from exc
+            raise auth_not_found("token_not_found") from exc
         _publish_api_token_event(ctx, ApiTokenRotated, token_id)
         return MintTokenResponse(
             token=result.token,

@@ -72,13 +72,14 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Cookie, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Cookie, Depends, Response, status
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.adapters.db.identity.models import ApiToken
 from app.api.deps import db_session
 from app.api.v1._problem_json import IDENTITY_PROBLEM_RESPONSES
+from app.api.v1.auth.errors import auth_not_found, auth_unauthorized
 from app.audit import write_audit
 from app.auth import session as auth_session
 from app.auth.audit import agnostic_audit_ctx
@@ -99,6 +100,7 @@ from app.auth.tokens import (
     revoke_personal,
     rotate_personal,
 )
+from app.domain.errors import Validation as DomainValidation
 from app.tenancy import tenant_agnostic
 from app.util.clock import SystemClock
 
@@ -210,17 +212,11 @@ def _resolve_session_user(
     """
     cookie_value = cookie_primary or cookie_dev
     if not cookie_value:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail={"error": "session_required"},
-        )
+        raise auth_unauthorized("session_required")
     try:
         return auth_session.validate(session, cookie_value=cookie_value)
     except (auth_session.SessionInvalid, auth_session.SessionExpired) as exc:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail={"error": "session_invalid"},
-        ) from exc
+        raise auth_unauthorized("session_invalid") from exc
 
 
 def _resolve_expires_at(body: MintPersonalTokenBody, now: datetime) -> datetime:
@@ -282,10 +278,7 @@ def _revoke_personal_for_user(
     try:
         revoke_personal(session, token_id=token_id, subject_user_id=user_id)
     except InvalidToken as exc:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={"error": "token_not_found"},
-        ) from exc
+        raise auth_not_found("token_not_found") from exc
 
     if not already_revoked:
         write_audit(
@@ -368,12 +361,9 @@ def build_me_tokens_router() -> APIRouter:
         )
 
         if not body.scopes:
-            raise HTTPException(
-                status_code=422,
-                detail={
-                    "error": "scopes_required",
-                    "message": "personal access tokens require at least one me:* scope",
-                },
+            raise DomainValidation(
+                "personal access tokens require at least one me:* scope",
+                extra={"error": "scopes_required"},
             )
         # Router-level scope validation ahead of the service layer so
         # the error code matches §03's taxonomy exactly. A scope key
@@ -382,15 +372,9 @@ def build_me_tokens_router() -> APIRouter:
         # surface with its own copy.
         for key in body.scopes:
             if not key.startswith(PERSONAL_SCOPE_PREFIX):
-                raise HTTPException(
-                    status_code=422,
-                    detail={
-                        "error": "me_scope_conflict",
-                        "message": (
-                            f"personal access tokens accept only me:* scopes "
-                            f"— got {key!r}"
-                        ),
-                    },
+                raise DomainValidation(
+                    (f"personal access tokens accept only me:* scopes — got {key!r}"),
+                    extra={"error": "me_scope_conflict"},
                 )
 
         now = SystemClock().now()
@@ -409,12 +393,9 @@ def build_me_tokens_router() -> APIRouter:
                 now=now,
             )
         except TooManyPersonalTokens as exc:
-            raise HTTPException(
-                status_code=422,
-                detail={
-                    "error": "too_many_personal_tokens",
-                    "message": str(exc),
-                },
+            raise DomainValidation(
+                str(exc),
+                extra={"error": "too_many_personal_tokens"},
             ) from exc
         except TokenShapeError as exc:
             # Belt-and-braces: the router's own scope-family gate
@@ -422,12 +403,9 @@ def build_me_tokens_router() -> APIRouter:
             # layer re-checks and a mismatch here means the router's
             # pre-check missed an invariant. Collapse to a generic
             # 422 so the caller still gets a typed error.
-            raise HTTPException(
-                status_code=422,
-                detail={
-                    "error": "invalid_token_shape",
-                    "message": str(exc),
-                },
+            raise DomainValidation(
+                str(exc),
+                extra={"error": "invalid_token_shape"},
             ) from exc
 
         # Identity-surface audit row for the bare-host
@@ -615,10 +593,7 @@ def build_me_tokens_router() -> APIRouter:
                 subject_user_id=user_id,
             )
         except InvalidToken as exc:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail={"error": "token_not_found"},
-            ) from exc
+            raise auth_not_found("token_not_found") from exc
         write_audit(
             session,
             agnostic_audit_ctx(),

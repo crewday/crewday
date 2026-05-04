@@ -58,7 +58,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Cookie, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Cookie, Depends, Response, status
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
@@ -67,9 +67,12 @@ from app.adapters.db.identity.repositories import (
 )
 from app.api.deps import db_session
 from app.api.v1._problem_json import IDENTITY_PROBLEM_RESPONSES
+from app.api.v1.auth.errors import auth_conflict, auth_not_found, auth_unauthorized
 from app.auth import session as auth_session
 from app.auth.session_cookie import DEV_SESSION_COOKIE_NAME
 from app.config import get_settings
+from app.domain.errors import NotImplementedFeature
+from app.domain.errors import Validation as DomainValidation
 from app.domain.identity.push_tokens import (
     InvalidPlatform,
     PushTokenNotFound,
@@ -173,17 +176,11 @@ def _resolve_session_user(
     """
     cookie_value = cookie_primary or cookie_dev
     if not cookie_value:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail={"error": "session_required"},
-        )
+        raise auth_unauthorized("session_required")
     try:
         return auth_session.validate(session, cookie_value=cookie_value)
     except (auth_session.SessionInvalid, auth_session.SessionExpired) as exc:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail={"error": "session_invalid"},
-        ) from exc
+        raise auth_unauthorized("session_invalid") from exc
 
 
 def _view_to_response(view: UserPushTokenView) -> PushTokenResponse:
@@ -272,14 +269,9 @@ def build_me_push_tokens_router() -> APIRouter:
         # ``DELETE`` deliberately bypass the gate so a sign-out can
         # still prune a stale row.
         if not get_settings().native_push_enabled:
-            raise HTTPException(
-                status_code=status.HTTP_501_NOT_IMPLEMENTED,
-                detail={
-                    "error": "push_unavailable",
-                    "message": (
-                        "native push delivery is not enabled on this deployment"
-                    ),
-                },
+            raise NotImplementedFeature(
+                "native push delivery is not enabled on this deployment",
+                extra={"error": "push_unavailable"},
             )
         repo = SqlAlchemyUserPushTokenRepository(session)
         try:
@@ -296,23 +288,17 @@ def build_me_push_tokens_router() -> APIRouter:
             # platform at 422; this branch fires only when a future
             # caller widens the DTO without keeping the domain
             # whitelist in lockstep.
-            raise HTTPException(
-                status_code=422,
-                detail={
-                    "error": "invalid_platform",
-                    "message": str(exc),
-                },
+            raise DomainValidation(
+                str(exc),
+                extra={"error": "invalid_platform"},
             ) from exc
         except TokenClaimed as exc:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail={
-                    "error": "token_claimed",
-                    "message": (
-                        "this device handle is already registered for "
-                        "another user; the previous owner must sign out first"
-                    ),
-                },
+            raise auth_conflict(
+                "token_claimed",
+                (
+                    "this device handle is already registered for "
+                    "another user; the previous owner must sign out first"
+                ),
             ) from exc
         return _view_to_response(view)
 
@@ -393,10 +379,7 @@ def build_me_push_tokens_router() -> APIRouter:
                 token=body.token,
             )
         except PushTokenNotFound as exc:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail={"error": "push_token_not_found"},
-            ) from exc
+            raise auth_not_found("push_token_not_found") from exc
         return _view_to_response(view)
 
     @router.delete(
