@@ -6,7 +6,7 @@ from datetime import datetime
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, status
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
 from sqlalchemy.orm import Session
 
 from app.adapters.db.messaging.repositories import SqlAlchemyChatChannelRepository
@@ -42,6 +42,16 @@ __all__ = [
 _Ctx = Annotated[WorkspaceContext, Depends(current_workspace_context)]
 _Db = Annotated[Session, Depends(db_session)]
 
+_CHAT_CHANNEL_PATCH_SCHEMA_EXTRA: dict[str, JsonValue] = {
+    "anyOf": [
+        {"required": ["title"]},
+        {
+            "required": ["archived"],
+            "properties": {"archived": {"const": True}},
+        },
+    ]
+}
+
 
 class ChatChannelResponse(BaseModel):
     id: str
@@ -75,13 +85,13 @@ class ChatChannelListResponse(BaseModel):
     has_more: bool = False
 
 
-class ChatChannelCreateRequest(BaseModel):
+class AppChatChannelCreateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    kind: Literal["staff", "manager", "chat_gateway"]
+    kind: Literal["staff", "manager"]
     title: str | None = Field(default=None, max_length=MAX_TITLE_LEN)
-    source: Literal["app", "whatsapp", "sms", "email"] | None = None
-    external_ref: str | None = Field(default=None, min_length=1, max_length=256)
+    source: Literal["app"] | None = None
+    external_ref: None = None
 
     def to_domain(self) -> ChatChannelCreate:
         return ChatChannelCreate(
@@ -92,11 +102,39 @@ class ChatChannelCreateRequest(BaseModel):
         )
 
 
-class ChatChannelPatchRequest(BaseModel):
+class GatewayChatChannelCreateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    kind: Literal["chat_gateway"]
     title: str | None = Field(default=None, max_length=MAX_TITLE_LEN)
-    archived: bool | None = None
+    source: Literal["whatsapp", "sms", "email"] | None = None
+    external_ref: str = Field(min_length=1, max_length=256, pattern=r"\S")
+
+    def to_domain(self) -> ChatChannelCreate:
+        return ChatChannelCreate(
+            kind=self.kind,
+            title=self.title,
+            source=self.source,
+            external_ref=self.external_ref,
+        )
+
+
+ChatChannelCreateRequest = Annotated[
+    AppChatChannelCreateRequest | GatewayChatChannelCreateRequest,
+    Field(discriminator="kind"),
+]
+
+
+class ChatChannelPatchRequest(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+        json_schema_extra=_CHAT_CHANNEL_PATCH_SCHEMA_EXTRA,
+    )
+
+    title: str | None = Field(default=None, max_length=MAX_TITLE_LEN)
+    archived: bool | None = Field(
+        default=None, json_schema_extra={"enum": [True, None]}
+    )
 
     @model_validator(mode="after")
     def _has_mutation(self) -> ChatChannelPatchRequest:

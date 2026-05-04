@@ -7,7 +7,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Request, status
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, JsonValue
 from sqlalchemy.orm import Session
 
 from app.adapters.db.messaging.repositories import (
@@ -60,6 +60,32 @@ _BlobHash = Annotated[
     ),
 ]
 
+_CHAT_MESSAGE_SEND_SCHEMA_EXTRA: dict[str, JsonValue] = {
+    "anyOf": [
+        {
+            "required": ["body_md"],
+            "properties": {
+                "body_md": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 20_000,
+                    "pattern": r"\S",
+                }
+            },
+        },
+        {
+            "required": ["attachments"],
+            "properties": {
+                "attachments": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 10,
+                }
+            },
+        },
+    ]
+}
+
 
 class ChatMessageAttachmentResponse(BaseModel):
     blob_hash: str
@@ -99,7 +125,10 @@ class ChatMessageListResponse(BaseModel):
 
 
 class ChatMessageSendRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(
+        extra="forbid",
+        json_schema_extra=_CHAT_MESSAGE_SEND_SCHEMA_EXTRA,
+    )
 
     body_md: str = Field(default="", max_length=20_000)
     attachments: list[_BlobHash] = Field(default_factory=list, max_length=10)

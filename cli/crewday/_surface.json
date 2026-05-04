@@ -2269,7 +2269,7 @@
     }
   },
   {
-    "body_schema_ref": "#/components/schemas/ChatChannelCreateRequest",
+    "body_schema_ref": null,
     "group": "chat",
     "http": {
       "method": "POST",

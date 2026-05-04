@@ -894,18 +894,15 @@ INCLUDE_ARGS=(
     # 422 as ``invalid_cursor`` or fail the before-cursor parser.
     --exclude-operation-id 'messaging.chat_channels.list'
     --exclude-operation-id 'messaging.chat_messages.list'
-    # ``messaging.chat_channels.create`` accepts ``external_ref`` only
-    # for external-source channels, and in-app channels may not set it.
-    # The source/kind/external_ref relationship is a cross-field
-    # invariant that JSON Schema does not encode for this DTO.
-    --exclude-operation-id 'messaging.chat_channels.create'
-    # ``messaging.chat_channels.update`` supports archive but not
-    # unarchive through PATCH; random ``archived: false`` bodies
-    # correctly 422 at the domain boundary.
+    # ``messaging.chat_channels.update`` requires a seeded live
+    # ``channel_id`` path parameter. Random schema-valid ids correctly
+    # 404 before the archive/rename handler can exercise the success
+    # branch; focused route tests cover missing-resource behavior.
     --exclude-operation-id 'messaging.chat_channels.update'
-    # ``messaging.chat_messages.send`` requires either non-empty
-    # ``body_md`` or at least one attachment. The OpenAPI schema cannot
-    # express the body-or-attachment cross-field invariant.
+    # ``messaging.chat_messages.send`` also requires a seeded live
+    # ``channel_id`` path parameter. Attachment sends additionally need
+    # pre-seeded blob hashes + storage, so contract coverage waits on a
+    # messaging path-resource seed instead of accepting random ids.
     --exclude-operation-id 'messaging.chat_messages.send'
     # ``messaging.register_push_subscription`` requires an HTTPS endpoint
     # under an allowed push-service host. Random strings correctly 422

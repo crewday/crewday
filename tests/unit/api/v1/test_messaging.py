@@ -42,6 +42,11 @@ def test_messaging_router_declares_notifications_and_push_management_routes() ->
         "messaging.push_tokens.delete",
         "messaging.register_push_subscription",
         "messaging.unregister_push_subscription",
+        "messaging.chat_channels.list",
+        "messaging.chat_channels.create",
+        "messaging.chat_channels.update",
+        "messaging.chat_messages.list",
+        "messaging.chat_messages.send",
     }.issubset(operations)
 
 
@@ -68,6 +73,70 @@ def test_messaging_router_documents_problem_json_validation_errors() -> None:
             }
         }
     }
+
+
+def test_chat_openapi_documents_request_body_invariants() -> None:
+    app = FastAPI()
+    app.include_router(build_messaging_router())
+    openapi = app.openapi()
+    schemas = openapi["components"]["schemas"]
+
+    channel_create = openapi["paths"]["/chat/channels"]["post"]["requestBody"][
+        "content"
+    ]["application/json"]["schema"]
+    assert channel_create["discriminator"] == {
+        "propertyName": "kind",
+        "mapping": {
+            "staff": "#/components/schemas/AppChatChannelCreateRequest",
+            "manager": "#/components/schemas/AppChatChannelCreateRequest",
+            "chat_gateway": "#/components/schemas/GatewayChatChannelCreateRequest",
+        },
+    }
+    assert channel_create["oneOf"] == [
+        {"$ref": "#/components/schemas/AppChatChannelCreateRequest"},
+        {"$ref": "#/components/schemas/GatewayChatChannelCreateRequest"},
+    ]
+    assert schemas["AppChatChannelCreateRequest"]["properties"]["external_ref"] == {
+        "type": "null",
+        "title": "External Ref",
+    }
+    assert (
+        schemas["GatewayChatChannelCreateRequest"]["properties"]["external_ref"][
+            "pattern"
+        ]
+        == r"\S"
+    )
+
+    channel_patch = schemas["ChatChannelPatchRequest"]
+    assert channel_patch["properties"]["archived"]["enum"] == [True, None]
+    assert {"required": ["title"]} in channel_patch["anyOf"]
+    assert {
+        "required": ["archived"],
+        "properties": {"archived": {"const": True}},
+    } in channel_patch["anyOf"]
+
+    message_send = schemas["ChatMessageSendRequest"]
+    assert {
+        "required": ["body_md"],
+        "properties": {
+            "body_md": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 20_000,
+                "pattern": r"\S",
+            }
+        },
+    } in message_send["anyOf"]
+    assert {
+        "required": ["attachments"],
+        "properties": {
+            "attachments": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 10,
+            }
+        },
+    } in message_send["anyOf"]
 
 
 def test_notifications_list_rejects_duplicate_cursor_query_params() -> None:

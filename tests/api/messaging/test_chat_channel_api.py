@@ -331,14 +331,14 @@ class TestChatChannelApi:
             json={"kind": "staff", "title": "Staff", "external_ref": "wa-1"},
         )
         assert resp.status_code == 422
-        assert resp.json()["error"] == "chat_channel_invalid"
+        assert "detail" in resp.json()
 
         gateway = client.post(
             "/chat/channels",
             json={"kind": "chat_gateway", "source": "whatsapp"},
         )
         assert gateway.status_code == 422
-        assert gateway.json()["error"] == "chat_channel_invalid"
+        assert "detail" in gateway.json()
 
     def test_patch_hidden_or_missing_channel_maps_to_404(
         self,
