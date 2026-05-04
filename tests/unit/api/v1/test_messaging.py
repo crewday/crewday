@@ -40,6 +40,7 @@ def test_messaging_router_declares_notifications_and_push_management_routes() ->
         "messaging.notifications.get",
         "messaging.notifications.update",
         "messaging.notifications.mark_read",
+        "messaging.get_vapid_public_key",
         "messaging.push_tokens.list",
         "messaging.push_tokens.register_native_unavailable",
         "messaging.push_tokens.delete",
@@ -101,6 +102,20 @@ def test_native_push_registration_documents_and_returns_problem_json_501() -> No
     assert resp.status_code == 501
     assert resp.headers["content-type"].startswith("application/problem+json")
     assert resp.json()["error"] == "push_unavailable"
+
+
+def test_vapid_public_key_documents_problem_json_503() -> None:
+    app = FastAPI()
+    app.include_router(build_messaging_router())
+    responses = app.openapi()["paths"]["/notifications/push/vapid-key"]["get"][
+        "responses"
+    ]
+
+    assert responses["503"]["description"] == (
+        "Workspace VAPID public key is not configured"
+    )
+    assert "application/problem+json" in responses["503"]["content"]
+    assert "application/json" not in responses["503"]["content"]
 
 
 def test_chat_openapi_documents_request_body_invariants() -> None:

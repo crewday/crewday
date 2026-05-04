@@ -555,6 +555,12 @@ def build_messaging_router(
     @r.get(
         "/notifications/push/vapid-key",
         response_model=VapidKeyPayload,
+        responses={
+            status.HTTP_503_SERVICE_UNAVAILABLE: {
+                "description": "Workspace VAPID public key is not configured",
+                "content": PROBLEM_JSON_CONTENT,
+            }
+        },
         operation_id="messaging.get_vapid_public_key",
         summary="Get the web-push VAPID public key for the workspace",
     )

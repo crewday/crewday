@@ -884,9 +884,8 @@ INCLUDE_ARGS=(
     # runtime behaviour.
     #
     # The exclusions below are residual runtime invariants that require
-    # seeded chat ids, signed cursor hints, a configured VAPID key, or
-    # JSON Schema constraints that OpenAPI cannot express for arbitrary
-    # generated data.
+    # seeded chat ids, signed cursor hints, or JSON Schema constraints
+    # that OpenAPI cannot express for arbitrary generated data.
     # ----------------------------------------------------------------
     --include-tag messaging
     # ``messaging.chat_channels.list`` / ``messaging.chat_messages.list``
@@ -910,10 +909,6 @@ INCLUDE_ARGS=(
     # Native FCM/APNS registration is a reserved v1 surface and always
     # returns 501 ``push_unavailable`` after request validation.
     --exclude-operation-id 'messaging.push_tokens.register_native_unavailable'
-    # ``messaging.get_vapid_public_key`` depends on deployment VAPID
-    # configuration; the dev schemathesis seed intentionally does not
-    # provision one, so the route correctly returns 503.
-    --exclude-operation-id 'messaging.get_vapid_public_key'
 )
 
 # Checks excluded for the asset gate — kept here (rather than at

@@ -46,6 +46,7 @@ from app.adapters.db.session import make_uow
 from app.adapters.db.workspace.models import Workspace
 from app.auth.tokens import mint as mint_token
 from app.config import get_settings
+from app.domain.messaging.push_tokens import SETTINGS_KEY_VAPID_PUBLIC
 from app.services.agent.system_docs import seed_agent_docs
 from app.tenancy import WorkspaceContext, tenant_agnostic
 from app.util.clock import SystemClock
@@ -55,6 +56,7 @@ from scripts.dev_login import mint_session
 OutputFormat = Literal["token", "bearer", "session", "cookie", "admin-contract-env"]
 _SESSION_COOKIE_NAME: Final[str] = "__Host-crewday_session"
 _ADMIN_REVOKE_EMAIL: Final[str] = "schemathesis-admin-revoke@dev.local"
+_CONTRACT_VAPID_PUBLIC_KEY: Final[str] = "schemathesis-vapid-public-key"
 
 
 _DEV_AUTH_ENV_VAR: Final[str] = "CREWDAY_DEV_AUTH"
@@ -166,6 +168,15 @@ def _ensure_revokable_admin_grant(
         session.add(grant)
         session.flush()
         return grant.id
+
+
+def _ensure_contract_vapid_public_key(workspace: Workspace) -> None:
+    """Seed the public VAPID key expected by messaging contract runs."""
+    settings = dict(workspace.settings_json or {})
+    if settings.get(SETTINGS_KEY_VAPID_PUBLIC):
+        return
+    settings[SETTINGS_KEY_VAPID_PUBLIC] = _CONTRACT_VAPID_PUBLIC_KEY
+    workspace.settings_json = settings
 
 
 def seed_admin_contract_path_resources(
@@ -305,6 +316,7 @@ def main(email: str, workspace_slug: str, label: str, output: OutputFormat) -> N
                 select(Workspace).where(Workspace.slug == workspace_slug)
             ).one()
             _ensure_deployment_admin(uow, user_id=user.id)
+            _ensure_contract_vapid_public_key(workspace)
 
         if output == "admin-contract-env":
             resources = seed_admin_contract_path_resources(
