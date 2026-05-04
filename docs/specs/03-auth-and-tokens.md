@@ -336,14 +336,24 @@ they take effect; grants never attach silently.
   recovery" as the break-glass. A credential id that belongs to
   another user is indistinguishable from an unknown id and both
   collapse to `404 passkey_not_found` so the credential-id space is
-  not an enumeration oracle; admin-initiated revocation rides on
-  §"Owner-initiated worker passkey reset" instead.
+  not an enumeration oracle.
+- Workspace owners may revoke a single passkey for another member via
+  `DELETE /w/{slug}/api/v1/admin/users/{user_id}/passkeys/{credential_id}`.
+  This is narrower than the reset flow below: it deletes exactly one
+  credential and does not mint a recovery magic link. The target must
+  be a member of the caller's current workspace, and the caller must
+  be an `owners` group member on every workspace the target belongs
+  to. Malformed, unknown, and wrong-user credential ids all collapse
+  to `404 passkey_not_found`; revoking the target's last remaining
+  passkey is refused with `422 last_credential`.
 - Every successful revoke invalidates **every active session** for
   that user — including the caller's own session — in the same UoW
   as the delete, via the `invalidate_for_user` seam described in §15
   "Shared-origin XSS containment". The invalidation row carries
-  `cause = "passkey_revoked"` (catalogued in §15 "Session-
-  invalidation causes"). Registering a new passkey is also a
+  `cause = "passkey_revoked"` for self-service and
+  `cause = "passkey_admin_revoked"` for owner-initiated single
+  revocation (catalogued in §15 "Session-invalidation causes").
+  Registering a new passkey is also a
   credential-population change and invalidates every session for
   the user with `cause = "passkey_registered"` — the router seam
   doesn't know the caller's own session PK, so the SPA re-auths
@@ -490,6 +500,12 @@ Concretely:
 - A compromised owner account therefore cannot unilaterally
   impersonate a worker: the enrolment still requires the
   worker's mailbox.
+- If the worker still has at least one usable passkey and only a
+  specific lost device should be removed, owners use the narrower
+  single-credential revoke endpoint documented in "Additional
+  passkeys" instead. That endpoint refuses the target's last
+  remaining passkey; this reset flow remains the intentional
+  full-recovery path.
 
 Error codes:
 

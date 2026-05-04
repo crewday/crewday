@@ -120,6 +120,7 @@ __all__ = [
     "PasskeyNotFound",
     "RegistrationOptions",
     "TooManyPasskeys",
+    "admin_revoke_passkey",
     "burn_challenge_on_failure",
     "login_finish",
     "login_start",
@@ -912,6 +913,69 @@ def revoke_passkey(
     2. ``audit.session.invalidated`` with cause ``"passkey_revoked"``
        — emitted by :func:`app.auth.session.invalidate_for_user`.
     """
+    return _revoke_passkey_credential(
+        ctx,
+        session,
+        user_id=user_id,
+        credential_id=credential_id,
+        audit_action="passkey.revoked",
+        audit_diff={"user_id": user_id},
+        invalidation_cause="passkey_revoked",
+        clock=clock,
+        now=now,
+    )
+
+
+def admin_revoke_passkey(
+    ctx: WorkspaceContext,
+    session: Session,
+    *,
+    target_user_id: str,
+    credential_id: bytes,
+    clock: Clock | None = None,
+    now: datetime | None = None,
+) -> str:
+    """Delete one passkey credential for another user as a workspace owner.
+
+    Authorization is intentionally not embedded here: the HTTP router
+    first proves the target is a member of the caller's current
+    workspace and that the actor is an ``owners`` member on every
+    workspace the target belongs to. This domain seam owns only the
+    credential mutation, audit, and session invalidation.
+
+    Mirrors :func:`revoke_passkey` for privacy and lockout semantics:
+    unknown / wrong-user credential ids collapse to
+    :class:`PasskeyNotFound`, and the target's last remaining passkey
+    raises :class:`LastPasskeyCredential`.
+    """
+    return _revoke_passkey_credential(
+        ctx,
+        session,
+        user_id=target_user_id,
+        credential_id=credential_id,
+        audit_action="passkey.admin_revoked",
+        audit_diff={
+            "target_user_id": target_user_id,
+            "by_actor_id": ctx.actor_id,
+        },
+        invalidation_cause="passkey_admin_revoked",
+        clock=clock,
+        now=now,
+    )
+
+
+def _revoke_passkey_credential(
+    ctx: WorkspaceContext,
+    session: Session,
+    *,
+    user_id: str,
+    credential_id: bytes,
+    audit_action: str,
+    audit_diff: dict[str, object],
+    invalidation_cause: str,
+    clock: Clock | None,
+    now: datetime | None,
+) -> str:
     resolved_now = now if now is not None else _now(clock)
 
     # justification: passkey_credential is identity-scoped; no tenant
@@ -946,9 +1010,9 @@ def revoke_passkey(
         ctx,
         entity_kind="passkey_credential",
         entity_id=credential_id_b64,
-        action="passkey.revoked",
+        action=audit_action,
         diff={
-            "user_id": user_id,
+            **audit_diff,
             "transports": row.transports,
             "backup_eligible": row.backup_eligible,
             "label": row.label,
@@ -963,15 +1027,12 @@ def revoke_passkey(
 
     # §15 "Shared-origin XSS containment" / cd-geqp: a revocation is a
     # credential-population change. Invalidate every active session for
-    # this user. The caller's own session is invalidated with the rest
-    # — a user revoking their only-other-device's passkey needs to
-    # re-auth to confirm intent, and the SPA surfaces that as a clean
-    # re-login. Forensic rows survive (invalidation is non-destructive,
+    # this user. Forensic rows survive (invalidation is non-destructive,
     # see :func:`app.auth.session.invalidate_for_user`).
     session_module.invalidate_for_user(
         session,
         user_id=user_id,
-        cause="passkey_revoked",
+        cause=invalidation_cause,
         now=resolved_now,
         clock=clock,
     )
