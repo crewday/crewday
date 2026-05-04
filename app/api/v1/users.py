@@ -4,6 +4,10 @@ Mounted inside the ``/w/<slug>/api/v1`` tree by the app factory.
 Every route requires an active :class:`~app.tenancy.WorkspaceContext`.
 Today's v1 surface:
 
+* ``GET /users`` — workspace-scoped, cursor-paginated user index with
+  ``{data, next_cursor, has_more}``; manager-only
+  (``employees.read``). Returns slim identity rows
+  ``{id, display_name, email}`` for SPA permission joins.
 * ``POST /users/invite`` — spec §03 "Additional users (invite →
   click-to-accept)". Inserts a pending ``invite`` row, mails the
   ``grant_invite`` magic link. A pending ``work_engagement`` row is
@@ -75,6 +79,13 @@ from app.adapters.db.workspace.models import UserWorkspace, Workspace
 from app.adapters.db.workspace.repositories import SqlAlchemyMembershipRepository
 from app.adapters.mail.ports import Mailer
 from app.api.deps import current_workspace_context, db_session
+from app.api.pagination import (
+    DEFAULT_LIMIT,
+    LimitQuery,
+    PageCursorQuery,
+    decode_cursor,
+    paginate,
+)
 from app.api.v1._problem_json import IDENTITY_PROBLEM_RESPONSES
 from app.audit import write_audit
 from app.auth import magic_link as magic_link_module
@@ -121,6 +132,8 @@ __all__ = [
     "MagicLinkReissueRequest",
     "MagicLinkReissueResponse",
     "ResetPasskeyResponse",
+    "UserIndexResponse",
+    "UserListResponse",
     "build_users_router",
 ]
 
@@ -261,6 +274,22 @@ class InviteResponse(BaseModel):
     user_created: bool
 
 
+class UserIndexResponse(BaseModel):
+    """One row in the workspace-scoped ``GET /users`` index."""
+
+    id: str
+    display_name: str
+    email: str
+
+
+class UserListResponse(BaseModel):
+    """Standard §12 collection envelope for ``GET /users``."""
+
+    data: list[UserIndexResponse]
+    next_cursor: str | None = None
+    has_more: bool = False
+
+
 class RemoveMemberResponse(BaseModel):
     """Response body for ``DELETE /users/{user_id}/grants``.
 
@@ -383,6 +412,44 @@ def _view_to_response(view: EmployeeView) -> EmployeeProfileResponse:
             else None
         ),
         created_at=view.created_at.isoformat(),
+    )
+
+
+def _user_to_index_response(user: User) -> UserIndexResponse:
+    """Project a global identity row into the workspace user index."""
+    return UserIndexResponse(
+        id=user.id,
+        display_name=user.display_name,
+        email=user.email,
+    )
+
+
+def _list_workspace_user_rows(
+    session: Session,
+    ctx: WorkspaceContext,
+    *,
+    cursor: str | None,
+    limit: int,
+) -> UserListResponse:
+    """Return workspace members as a cursor-paginated identity index."""
+    after_id = decode_cursor(cursor)
+    stmt = (
+        select(User)
+        .join(UserWorkspace, UserWorkspace.user_id == User.id)
+        .where(UserWorkspace.workspace_id == ctx.workspace_id)
+        .order_by(User.id.asc())
+        .limit(limit + 1)
+    )
+    if after_id is not None:
+        stmt = stmt.where(User.id > after_id)
+
+    with tenant_agnostic():
+        rows = list(session.scalars(stmt).all())
+    page = paginate(rows, limit=limit, key_getter=lambda row: row.id)
+    return UserListResponse(
+        data=[_user_to_index_response(user) for user in page.items],
+        next_cursor=page.next_cursor,
+        has_more=page.has_more,
     )
 
 
@@ -702,6 +769,36 @@ def build_users_router(
     )
     cfg = settings if settings is not None else get_settings()
     resolved_base_url = base_url if base_url is not None else cfg.public_url
+    read_gate = Depends(Permission("employees.read", scope_kind="workspace"))
+
+    @router.get(
+        "",
+        response_model=UserListResponse,
+        operation_id="users.list",
+        summary="List users in the caller's workspace",
+        dependencies=[read_gate],
+        openapi_extra={
+            "x-cli": {
+                "group": "users",
+                "verb": "list",
+                "summary": "List workspace users",
+                "mutates": False,
+            },
+        },
+    )
+    def list_users(
+        ctx: _Ctx,
+        session: _Db,
+        cursor: PageCursorQuery = None,
+        limit: LimitQuery = DEFAULT_LIMIT,
+    ) -> UserListResponse:
+        """Return a slim identity index for workspace-scoped UI joins."""
+        return _list_workspace_user_rows(
+            session,
+            ctx,
+            cursor=cursor,
+            limit=limit,
+        )
 
     @router.post(
         "/invite",

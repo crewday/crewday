@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
-import { fetchJson, ApiError } from "@/lib/api";
+import { fetchJson } from "@/lib/api";
+import type { ListEnvelope } from "@/lib/listResponse";
 import { qk } from "@/lib/queryKeys";
 import type { User } from "@/types/api";
 
@@ -22,26 +23,29 @@ export function useWorkspaces() {
   });
 }
 
-/**
- * Workspace user index keyed by user id. v1 has no `/api/v1/users`
- * listing yet — the index degrades to an empty map so the page renders
- * without a user roster. Drop the 404 catch once cd-8y5aa lands the
- * listing endpoint.
- */
+export type UserIndexRow = Pick<User, "id" | "display_name" | "email">;
+
+async function fetchUsersIndexRows(): Promise<UserIndexRow[]> {
+  const rows: UserIndexRow[] = [];
+  let cursor: string | null = null;
+  for (;;) {
+    const path: string =
+      cursor === null
+        ? "/api/v1/users?limit=500"
+        : `/api/v1/users?limit=500&cursor=${encodeURIComponent(cursor)}`;
+    const page: ListEnvelope<UserIndexRow> = await fetchJson(path);
+    rows.push(...page.data);
+    if (!page.has_more || page.next_cursor === null) return rows;
+    cursor = page.next_cursor;
+  }
+}
+
+/** Workspace user index keyed by user id. */
 export function useUsersIndex() {
   return useQuery({
     queryKey: qk.users(),
-    queryFn: async () => {
-      try {
-        return await fetchJson<User[]>("/api/v1/users");
-      } catch (err) {
-        if (err instanceof ApiError && err.status === 404) {
-          return [] as User[];
-        }
-        throw err;
-      }
-    },
-    select: (rows) =>
-      Object.fromEntries(rows.map((u) => [u.id, u])) as Record<string, User>,
+    queryFn: fetchUsersIndexRows,
+    select: (page) =>
+      Object.fromEntries(page.map((u) => [u.id, u])) as Record<string, UserIndexRow>,
   });
 }

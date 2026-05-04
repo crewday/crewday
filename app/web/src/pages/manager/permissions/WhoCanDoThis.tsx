@@ -6,20 +6,17 @@ import { Chip, Loading } from "@/components/common";
 import type {
   ActionCatalogEntry,
   ResolvedPermission,
-  User,
 } from "@/types/api";
+import type { UserIndexRow } from "./lib/usePermissionIndexes";
 
-// Live "who can do this?" preview — calls the resolver. Resolves
-// nothing when no user index is loaded (v1 has no `/api/v1/users`
-// listing endpoint yet — cd-8y5aa); the surface degrades to a hint
-// instead of crashing.
+// Live "who can do this?" preview — calls the resolver.
 export default function WhoCanDoThis({
   users,
   actions,
   scopeKind,
   scopeId,
 }: {
-  users: User[];
+  users: UserIndexRow[];
   actions: ActionCatalogEntry[];
   scopeKind: "workspace" | "property" | "organization";
   scopeId: string;
@@ -43,9 +40,7 @@ export default function WhoCanDoThis({
       <div className="permissions__resolver">
         <h4>Who can do this?</h4>
         <p className="muted">
-          No user index available — the workspace user listing endpoint
-          isn't shipped yet. The resolver still answers per-user via the
-          API; this preview returns once the listing lands.
+          No users found for this workspace.
         </p>
       </div>
     );
