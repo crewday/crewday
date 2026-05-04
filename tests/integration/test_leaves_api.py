@@ -35,6 +35,7 @@ from __future__ import annotations
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import pytest
 from fastapi import FastAPI
@@ -125,7 +126,13 @@ def _bootstrap_workspace(s: Session, *, slug: str) -> str:
     return workspace_id
 
 
-def _bootstrap_user(s: Session, *, email: str, display_name: str) -> str:
+def _bootstrap_user(
+    s: Session,
+    *,
+    email: str,
+    display_name: str,
+    timezone: str | None = None,
+) -> str:
     user_id = new_ulid()
     s.add(
         User(
@@ -133,6 +140,7 @@ def _bootstrap_user(s: Session, *, email: str, display_name: str) -> str:
             email=email,
             email_lower=canonicalise_email(email),
             display_name=display_name,
+            timezone=timezone,
             created_at=_PINNED,
         )
     )
@@ -308,6 +316,37 @@ class TestCreateMyLeave:
         )
         assert actions == ["leave.created"]
 
+    def test_create_snaps_to_worker_timezone(
+        self,
+        factory: sessionmaker[Session],
+    ) -> None:
+        with factory() as s:
+            ws_id = _bootstrap_workspace(s, slug="api-snap-nz")
+            user_id = _bootstrap_user(
+                s,
+                email="snap-nz@example.com",
+                display_name="NZ",
+                timezone="Pacific/Auckland",
+            )
+            _grant(s, workspace_id=ws_id, user_id=user_id, grant_role="worker")
+            s.commit()
+
+        ctx = _ctx(workspace_id=ws_id, actor_id=user_id, grant_role="worker")
+        client = TestClient(_build_app(factory, ctx), raise_server_exceptions=False)
+        zone = ZoneInfo("Pacific/Auckland")
+        resp = client.post(
+            "/me/leaves",
+            json=_leave_body(
+                starts_at=datetime(2026, 4, 12, 12, 0, tzinfo=zone),
+                ends_at=datetime(2026, 4, 13, 12, 0, tzinfo=zone),
+            ),
+        )
+
+        assert resp.status_code == 201, resp.text
+        body = resp.json()
+        assert body["starts_at"] == "2026-04-11T12:00:00Z"
+        assert body["ends_at"] == "2026-04-12T12:00:00Z"
+
     def test_create_with_bad_window_422(
         self,
         worker_client: tuple[TestClient, WorkspaceContext, str],
@@ -317,6 +356,16 @@ class TestCreateMyLeave:
             "/me/leaves",
             json=_leave_body(starts_at=_FUTURE_END, ends_at=_FUTURE),
         )
+        assert resp.status_code == 422, resp.text
+
+    def test_create_with_naive_datetime_422(
+        self,
+        worker_client: tuple[TestClient, WorkspaceContext, str],
+    ) -> None:
+        client, *_ = worker_client
+        body = _leave_body()
+        body["starts_at"] = "2026-04-26T12:00:00"
+        resp = client.post("/me/leaves", json=body)
         assert resp.status_code == 422, resp.text
 
     def test_create_with_bad_kind_422(
@@ -463,9 +512,7 @@ class TestUpdateMyLeave:
         )
         assert resp.status_code == 200, resp.text
         body = resp.json()
-        assert body["starts_at"].startswith(
-            (_FUTURE + timedelta(days=1)).isoformat()[:16]
-        )
+        assert body["starts_at"] == "2026-04-27T00:00:00Z"
 
     def test_update_bad_window_422(
         self,
@@ -478,6 +525,21 @@ class TestUpdateMyLeave:
             json={
                 "starts_at": _FUTURE_END.isoformat(),
                 "ends_at": _FUTURE.isoformat(),
+            },
+        )
+        assert resp.status_code == 422, resp.text
+
+    def test_update_naive_datetime_422(
+        self,
+        worker_client: tuple[TestClient, WorkspaceContext, str],
+    ) -> None:
+        client, *_ = worker_client
+        created = client.post("/me/leaves", json=_leave_body()).json()
+        resp = client.patch(
+            f"/me/leaves/{created['id']}",
+            json={
+                "starts_at": "2026-04-27T12:00:00",
+                "ends_at": _FUTURE_END.isoformat(),
             },
         )
         assert resp.status_code == 422, resp.text

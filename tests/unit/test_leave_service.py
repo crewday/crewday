@@ -31,6 +31,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
+from zoneinfo import ZoneInfo
 
 import pytest
 from pydantic import ValidationError
@@ -67,6 +68,8 @@ from app.util.ulid import new_ulid
 _PINNED = datetime(2026, 4, 19, 12, 0, 0, tzinfo=UTC)
 _FUTURE = _PINNED + timedelta(days=7)
 _FUTURE_END = _FUTURE + timedelta(days=2)
+_FUTURE_DAY = datetime(2026, 4, 26, tzinfo=UTC)
+_FUTURE_END_DAY = datetime(2026, 4, 28, tzinfo=UTC)
 
 
 # ---------------------------------------------------------------------------
@@ -112,7 +115,9 @@ def session(engine: Engine) -> Iterator[Session]:
         yield s
 
 
-def _bootstrap_workspace(s: Session, *, slug: str) -> str:
+def _bootstrap_workspace(
+    s: Session, *, slug: str, default_timezone: str = "UTC"
+) -> str:
     workspace_id = new_ulid()
     s.add(
         Workspace(
@@ -121,6 +126,7 @@ def _bootstrap_workspace(s: Session, *, slug: str) -> str:
             name=f"Workspace {slug}",
             plan="free",
             quota_json={},
+            default_timezone=default_timezone,
             created_at=_PINNED,
         )
     )
@@ -128,7 +134,13 @@ def _bootstrap_workspace(s: Session, *, slug: str) -> str:
     return workspace_id
 
 
-def _bootstrap_user(s: Session, *, email: str, display_name: str) -> str:
+def _bootstrap_user(
+    s: Session,
+    *,
+    email: str,
+    display_name: str,
+    timezone: str | None = None,
+) -> str:
     user_id = new_ulid()
     s.add(
         User(
@@ -136,6 +148,7 @@ def _bootstrap_user(s: Session, *, email: str, display_name: str) -> str:
             email=email,
             email_lower=canonicalise_email(email),
             display_name=display_name,
+            timezone=timezone,
             created_at=_PINNED,
         )
     )
@@ -299,6 +312,14 @@ class TestLeaveCreateDto:
                 ends_at=_FUTURE,
             )
 
+    def test_rejects_naive_datetime(self) -> None:
+        with pytest.raises(ValidationError, match="timezone-aware"):
+            LeaveCreate(
+                kind="vacation",
+                starts_at=datetime(2026, 4, 26),
+                ends_at=_FUTURE_END,
+            )
+
     def test_rejects_negative_window(self) -> None:
         with pytest.raises(ValidationError):
             LeaveCreate(
@@ -329,6 +350,10 @@ class TestLeaveUpdateDatesDto:
     def test_rejects_zero_length_window(self) -> None:
         with pytest.raises(ValidationError):
             LeaveUpdateDates(starts_at=_FUTURE, ends_at=_FUTURE)
+
+    def test_rejects_naive_datetime(self) -> None:
+        with pytest.raises(ValidationError, match="timezone-aware"):
+            LeaveUpdateDates(starts_at=_FUTURE, ends_at=datetime(2026, 4, 28))
 
 
 # ---------------------------------------------------------------------------
@@ -364,9 +389,102 @@ class TestCreateLeave:
         assert view.user_id == user_id
         assert view.status == "pending"
         assert view.kind == "vacation"
-        assert view.starts_at == _FUTURE
-        assert view.ends_at == _FUTURE_END
+        assert view.starts_at == _FUTURE_DAY
+        assert view.ends_at == _FUTURE_END_DAY
         assert view.decided_by is None
+
+    def test_create_snaps_window_to_worker_local_days(
+        self,
+        session: Session,
+    ) -> None:
+        ws_id = _bootstrap_workspace(session, slug="snap-nz")
+        worker_id = _bootstrap_user(
+            session,
+            email="nz@example.com",
+            display_name="NZ",
+            timezone="Pacific/Auckland",
+        )
+        _grant(session, workspace_id=ws_id, user_id=worker_id, grant_role="worker")
+        session.commit()
+
+        ctx = _ctx(workspace_id=ws_id, actor_id=worker_id, grant_role="worker")
+        zone = ZoneInfo("Pacific/Auckland")
+        view = create_leave(
+            session,
+            ctx,
+            body=_create_body(
+                starts_at=datetime(2026, 4, 12, 12, 0, tzinfo=zone),
+                ends_at=datetime(2026, 4, 13, 12, 0, tzinfo=zone),
+            ),
+            clock=FrozenClock(_PINNED),
+        )
+
+        assert view.starts_at == datetime(2026, 4, 11, 12, 0, tzinfo=UTC)
+        assert view.ends_at == datetime(2026, 4, 12, 12, 0, tzinfo=UTC)
+
+    def test_invalid_worker_timezone_uses_workspace_default(
+        self,
+        session: Session,
+    ) -> None:
+        ws_id = _bootstrap_workspace(
+            session,
+            slug="snap-workspace-default",
+            default_timezone="Pacific/Auckland",
+        )
+        worker_id = _bootstrap_user(
+            session,
+            email="bad-tz@example.com",
+            display_name="Bad TZ",
+            timezone="No/Such_Zone",
+        )
+        _grant(session, workspace_id=ws_id, user_id=worker_id, grant_role="worker")
+        session.commit()
+
+        ctx = _ctx(workspace_id=ws_id, actor_id=worker_id, grant_role="worker")
+        view = create_leave(
+            session,
+            ctx,
+            body=_create_body(
+                starts_at=datetime(2026, 4, 12, 18, 30, tzinfo=UTC),
+                ends_at=datetime(2026, 4, 13, 18, 30, tzinfo=UTC),
+            ),
+            clock=FrozenClock(_PINNED),
+        )
+
+        assert view.starts_at == datetime(2026, 4, 12, 12, 0, tzinfo=UTC)
+        assert view.ends_at == datetime(2026, 4, 13, 12, 0, tzinfo=UTC)
+
+    def test_invalid_worker_and_workspace_timezones_use_utc(
+        self,
+        session: Session,
+    ) -> None:
+        ws_id = _bootstrap_workspace(
+            session,
+            slug="snap-utc-fallback",
+            default_timezone="/No/Such_Zone",
+        )
+        worker_id = _bootstrap_user(
+            session,
+            email="all-bad-tz@example.com",
+            display_name="All Bad TZ",
+            timezone="No/Such_Zone",
+        )
+        _grant(session, workspace_id=ws_id, user_id=worker_id, grant_role="worker")
+        session.commit()
+
+        ctx = _ctx(workspace_id=ws_id, actor_id=worker_id, grant_role="worker")
+        view = create_leave(
+            session,
+            ctx,
+            body=_create_body(
+                starts_at=datetime(2026, 4, 12, 18, 30, tzinfo=UTC),
+                ends_at=datetime(2026, 4, 13, 18, 30, tzinfo=UTC),
+            ),
+            clock=FrozenClock(_PINNED),
+        )
+
+        assert view.starts_at == datetime(2026, 4, 12, tzinfo=UTC)
+        assert view.ends_at == datetime(2026, 4, 13, tzinfo=UTC)
 
     def test_manager_creates_leave_for_worker(
         self,
@@ -633,9 +751,41 @@ class TestUpdateDates:
             body=LeaveUpdateDates(starts_at=new_start, ends_at=new_end),
             clock=clock,
         )
-        assert edited.starts_at == new_start
-        assert edited.ends_at == new_end
+        assert edited.starts_at == datetime(2026, 4, 27, tzinfo=UTC)
+        assert edited.ends_at == datetime(2026, 4, 29, tzinfo=UTC)
         assert edited.status == "pending"
+
+    def test_update_snaps_dst_boundary_to_worker_local_days(
+        self,
+        session: Session,
+    ) -> None:
+        ws_id = _bootstrap_workspace(session, slug="snap-dst")
+        worker_id = _bootstrap_user(
+            session,
+            email="ny@example.com",
+            display_name="NY",
+            timezone="America/New_York",
+        )
+        _grant(session, workspace_id=ws_id, user_id=worker_id, grant_role="worker")
+        session.commit()
+
+        ctx = _ctx(workspace_id=ws_id, actor_id=worker_id, grant_role="worker")
+        clock = FrozenClock(_PINNED)
+        created = create_leave(session, ctx, body=_create_body(), clock=clock)
+        zone = ZoneInfo("America/New_York")
+        edited = update_dates(
+            session,
+            ctx,
+            leave_id=created.id,
+            body=LeaveUpdateDates(
+                starts_at=datetime(2026, 3, 8, 12, 0, tzinfo=zone),
+                ends_at=datetime(2026, 3, 9, 12, 0, tzinfo=zone),
+            ),
+            clock=clock,
+        )
+
+        assert edited.starts_at == datetime(2026, 3, 8, 5, 0, tzinfo=UTC)
+        assert edited.ends_at == datetime(2026, 3, 9, 4, 0, tzinfo=UTC)
 
     def test_update_approved_rejected(
         self,
@@ -721,7 +871,7 @@ class TestUpdateDates:
             ),
             clock=clock,
         )
-        assert edited.starts_at == _FUTURE + timedelta(days=5)
+        assert edited.starts_at == datetime(2026, 5, 1, tzinfo=UTC)
 
     def test_peer_worker_cannot_update(
         self,

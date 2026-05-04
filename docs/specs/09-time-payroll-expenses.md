@@ -387,6 +387,22 @@ through the amend pipeline above; non-time fields (`notes_md`,
 exposes amend as a dialog from the booking detail; the API endpoint
 is shared.
 
+### Leave
+
+Leave requests are whole-local-day absences. API bodies use
+`starts_at` / `ends_at` UTC-aware datetimes for compatibility with
+the time service, but the write path snaps both edges to midnight in
+the worker's local timezone before storing UTC. The worker profile
+timezone is authoritative; if it is absent or invalid, the workspace
+default timezone is used, then UTC as the final fallback.
+
+The stored interval remains `[starts_at, ends_at)`: `starts_at` is
+the UTC instant for the first local midnight included in the leave,
+and `ends_at` is the UTC instant for the first local midnight after
+the leave. Daylight-saving changes and international date line
+offsets can therefore produce UTC durations other than exact
+multiples of 24 hours while still representing whole local days.
+
 ### Labour-law compliance
 
 The booking row plus `actual_minutes` (when amended) **is** a

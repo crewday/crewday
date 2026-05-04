@@ -48,16 +48,11 @@ writer's redaction seam so PII can't survive into on-disk logs).
   workspace's leave queue -> ``leaves.view_others`` (managers +
   owners by default).
 
-**Timezone snap deferred.** The Beads description references a
-``p0.util`` tz-snap helper that would align ``starts_at`` /
-``ends_at`` to whole days in the worker's local timezone. That
-utility does not exist in this tree (it would live under
-:mod:`app.util.time_zone` alongside the geofence / rota helpers if
-and when we land it). The v1 shape accepts any UTC-aware datetime
-and persists it verbatim; the UI is free to choose the granularity.
-A follow-up Beads task will file this once the tz-snap helper lands;
-until then the explicit ``UTC-aware datetime`` type on every field
-is the boundary contract.
+**Timezone snap.** Whole-day leave requests snap ``starts_at`` /
+``ends_at`` to local midnight boundaries before persistence. The
+timezone resolves from the target worker's profile, falling back to
+the workspace default and then UTC when either value is absent or
+invalid. The row stores the resulting instants as aware UTC datetimes.
 
 **Manager decisions.** The cd-8pi slice adds advisory conflict
 detection plus the immutable approve / reject transition. Conflicts
@@ -76,11 +71,13 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Literal
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
+from app.adapters.db.identity.models import User
 from app.adapters.db.tasks.models import Occurrence
 from app.adapters.db.time.models import (
     _LEAVE_KIND_VALUES,
@@ -88,6 +85,7 @@ from app.adapters.db.time.models import (
     Leave,
     Shift,
 )
+from app.adapters.db.workspace.models import Workspace
 from app.audit import write_audit
 from app.authz import (
     InvalidScope,
@@ -100,6 +98,7 @@ from app.events.bus import bus as default_event_bus
 from app.events.types import LeaveDecided
 from app.tenancy import WorkspaceContext
 from app.util.clock import Clock, SystemClock
+from app.util.time_zone import snap_to_day
 from app.util.ulid import new_ulid
 
 __all__ = [
@@ -207,6 +206,12 @@ _MAX_REASON_LEN = 20_000
 _MAX_ID_LEN = 40
 
 
+def _require_aware_datetime(value: datetime) -> datetime:
+    if value.tzinfo is None or value.utcoffset() is None:
+        raise ValueError("datetime must be timezone-aware")
+    return value
+
+
 class LeaveCreate(BaseModel):
     """Request body for ``POST /me/leaves`` (and the workspace-level POST).
 
@@ -227,6 +232,11 @@ class LeaveCreate(BaseModel):
     starts_at: datetime
     ends_at: datetime
     reason_md: str | None = Field(default=None, max_length=_MAX_REASON_LEN)
+
+    @field_validator("starts_at", "ends_at")
+    @classmethod
+    def _reject_naive_datetime(cls, value: datetime) -> datetime:
+        return _require_aware_datetime(value)
 
     @model_validator(mode="after")
     def _reject_nonpositive_window(self) -> LeaveCreate:
@@ -263,6 +273,11 @@ class LeaveUpdateDates(BaseModel):
 
     starts_at: datetime
     ends_at: datetime
+
+    @field_validator("starts_at", "ends_at")
+    @classmethod
+    def _reject_naive_datetime(cls, value: datetime) -> datetime:
+        return _require_aware_datetime(value)
 
     @model_validator(mode="after")
     def _reject_nonpositive_window(self) -> LeaveUpdateDates:
@@ -336,6 +351,36 @@ def _ensure_utc(value: datetime) -> datetime:
     if value.tzinfo is None:
         return value.replace(tzinfo=UTC)
     return value
+
+
+def _leave_timezone(
+    session: Session, ctx: WorkspaceContext, *, user_id: str
+) -> ZoneInfo:
+    """Resolve the local timezone for a whole-day leave window."""
+    user_timezone = session.scalar(select(User.timezone).where(User.id == user_id))
+    workspace_timezone = session.scalar(
+        select(Workspace.default_timezone).where(Workspace.id == ctx.workspace_id)
+    )
+    for timezone_name in (user_timezone, workspace_timezone, "UTC"):
+        if timezone_name is None:
+            continue
+        try:
+            return ZoneInfo(timezone_name)
+        except ValueError, ZoneInfoNotFoundError:
+            continue
+    return ZoneInfo("UTC")
+
+
+def _snap_window_to_local_days(
+    session: Session,
+    ctx: WorkspaceContext,
+    *,
+    user_id: str,
+    starts_at: datetime,
+    ends_at: datetime,
+) -> tuple[datetime, datetime]:
+    zone = _leave_timezone(session, ctx, user_id=user_id)
+    return snap_to_day(starts_at, zone), snap_to_day(ends_at, zone)
 
 
 def _narrow_kind(value: str) -> LeaveKind:
@@ -719,10 +764,18 @@ def create_leave(
     # DTO (direct ``LeaveCreate.model_construct``, a subclass with
     # different validators) would otherwise land a zero-or-negative
     # window in the DB CHECK's error surface.
-    if body.ends_at <= body.starts_at:
+    starts_at, ends_at = _snap_window_to_local_days(
+        session,
+        ctx,
+        user_id=target_user_id,
+        starts_at=body.starts_at,
+        ends_at=body.ends_at,
+    )
+
+    if ends_at <= starts_at:
         raise LeaveBoundaryInvalid(
-            f"ends_at {body.ends_at.isoformat()!r} is not strictly after "
-            f"starts_at {body.starts_at.isoformat()!r}"
+            f"ends_at {ends_at.isoformat()!r} is not strictly after "
+            f"starts_at {starts_at.isoformat()!r}"
         )
 
     row = Leave(
@@ -730,8 +783,8 @@ def create_leave(
         workspace_id=ctx.workspace_id,
         user_id=target_user_id,
         kind=body.kind,
-        starts_at=body.starts_at,
-        ends_at=body.ends_at,
+        starts_at=starts_at,
+        ends_at=ends_at,
         status="pending",
         reason_md=body.reason_md,
         decided_by=None,
@@ -791,15 +844,23 @@ def update_dates(
         )
 
     # Defence-in-depth; the DTO enforces the invariant.
-    if body.ends_at <= body.starts_at:
+    starts_at, ends_at = _snap_window_to_local_days(
+        session,
+        ctx,
+        user_id=row.user_id,
+        starts_at=body.starts_at,
+        ends_at=body.ends_at,
+    )
+
+    if ends_at <= starts_at:
         raise LeaveBoundaryInvalid(
-            f"ends_at {body.ends_at.isoformat()!r} is not strictly after "
-            f"starts_at {body.starts_at.isoformat()!r}"
+            f"ends_at {ends_at.isoformat()!r} is not strictly after "
+            f"starts_at {starts_at.isoformat()!r}"
         )
 
     before = _row_to_view(row)
-    row.starts_at = body.starts_at
-    row.ends_at = body.ends_at
+    row.starts_at = starts_at
+    row.ends_at = ends_at
     session.flush()
     after = _row_to_view(row)
 
