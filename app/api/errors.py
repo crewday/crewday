@@ -52,9 +52,11 @@ from starlette.responses import JSONResponse
 from app.domain.errors import (
     CANONICAL_TYPE_BASE,
     ApprovalRequired,
+    BadRequest,
     Conflict,
     DomainError,
     Forbidden,
+    Gone,
     IdempotencyConflict,
     InvalidCursor,
     NotFound,
@@ -95,6 +97,7 @@ CORRELATION_HEADERS: Final[tuple[str, ...]] = ("X-Correlation-Id", "X-Request-Id
 # agnostic. The keys are class objects, not names, so a typo surfaces
 # at import time rather than at first 500.
 _DOMAIN_STATUS_MAP: Final[dict[type[DomainError], int]] = {
+    BadRequest: 400,
     Validation: 422,
     InvalidCursor: 422,
     WouldOrphanOwnersGroup: 422,
@@ -103,6 +106,7 @@ _DOMAIN_STATUS_MAP: Final[dict[type[DomainError], int]] = {
     IdempotencyConflict: 409,
     Unauthorized: 401,
     Forbidden: 403,
+    Gone: 410,
     RateLimited: 429,
     ServiceUnavailable: 503,
     UpstreamUnavailable: 502,

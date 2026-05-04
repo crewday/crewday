@@ -6,7 +6,12 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from app.api.errors import CONTENT_TYPE_PROBLEM_JSON, add_exception_handlers
-from app.api.v1.auth.errors import auth_conflict, auth_rate_limited
+from app.api.v1.auth.errors import (
+    auth_bad_request,
+    auth_conflict,
+    auth_gone,
+    auth_rate_limited,
+)
 from app.domain.errors import CANONICAL_TYPE_BASE
 
 
@@ -38,6 +43,38 @@ def test_auth_conflict_preserves_legacy_error_extension() -> None:
         "status": 409,
         "instance": "/boom",
         "error": "already_consumed",
+    }
+
+
+def test_auth_bad_request_preserves_legacy_error_extension() -> None:
+    client = _client_raising(auth_bad_request("invalid_token"))
+
+    response = client.get("/boom")
+
+    assert response.status_code == 400
+    assert response.headers["content-type"].startswith(CONTENT_TYPE_PROBLEM_JSON)
+    assert response.json() == {
+        "type": _type_uri("validation"),
+        "title": "Bad request",
+        "status": 400,
+        "instance": "/boom",
+        "error": "invalid_token",
+    }
+
+
+def test_auth_gone_preserves_legacy_error_extension() -> None:
+    client = _client_raising(auth_gone("expired"))
+
+    response = client.get("/boom")
+
+    assert response.status_code == 410
+    assert response.headers["content-type"].startswith(CONTENT_TYPE_PROBLEM_JSON)
+    assert response.json() == {
+        "type": _type_uri("gone"),
+        "title": "Gone",
+        "status": 410,
+        "instance": "/boom",
+        "error": "expired",
     }
 
 

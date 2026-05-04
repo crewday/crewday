@@ -4,20 +4,36 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 
-from app.domain.errors import Conflict, Forbidden, NotFound, RateLimited, Unauthorized
+from app.domain.errors import (
+    BadRequest,
+    Conflict,
+    Forbidden,
+    Gone,
+    NotFound,
+    RateLimited,
+    Unauthorized,
+)
 
 __all__ = [
+    "AuthBadRequest",
     "AuthConflict",
     "AuthForbidden",
+    "AuthGone",
     "AuthNotFound",
     "AuthRateLimited",
     "AuthUnauthorized",
+    "auth_bad_request",
     "auth_conflict",
     "auth_forbidden",
+    "auth_gone",
     "auth_not_found",
     "auth_rate_limited",
     "auth_unauthorized",
 ]
+
+
+class AuthBadRequest(BadRequest):
+    """Auth-router 400 carrying the legacy ``error`` extension."""
 
 
 class AuthUnauthorized(Unauthorized):
@@ -26,6 +42,10 @@ class AuthUnauthorized(Unauthorized):
 
 class AuthForbidden(Forbidden):
     """Auth-router 403 carrying the legacy ``error`` extension."""
+
+
+class AuthGone(Gone):
+    """Auth-router 410 carrying the legacy ``error`` extension."""
 
 
 class AuthNotFound(NotFound):
@@ -49,6 +69,15 @@ def _with_error(
     return merged
 
 
+def auth_bad_request(
+    symbol: str,
+    detail: str | None = None,
+    *,
+    extra: Mapping[str, object] | None = None,
+) -> AuthBadRequest:
+    return AuthBadRequest(detail, extra=_with_error(symbol, extra))
+
+
 def auth_unauthorized(
     symbol: str,
     detail: str | None = None,
@@ -65,6 +94,15 @@ def auth_forbidden(
     extra: Mapping[str, object] | None = None,
 ) -> AuthForbidden:
     return AuthForbidden(detail, extra=_with_error(symbol, extra))
+
+
+def auth_gone(
+    symbol: str,
+    detail: str | None = None,
+    *,
+    extra: Mapping[str, object] | None = None,
+) -> AuthGone:
+    return AuthGone(detail, extra=_with_error(symbol, extra))
 
 
 def auth_not_found(

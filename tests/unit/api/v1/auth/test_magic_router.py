@@ -66,7 +66,11 @@ from app.adapters.db import audit, identity  # noqa: F401  # register tables
 from app.adapters.db.base import Base
 from app.adapters.db.session import make_engine
 from app.api.deps import db_session as db_session_dep
-from app.api.errors import CONTENT_TYPE_PROBLEM_JSON, add_exception_handlers
+from app.api.errors import (
+    CANONICAL_TYPE_BASE,
+    CONTENT_TYPE_PROBLEM_JSON,
+    add_exception_handlers,
+)
 from app.api.v1.auth import magic as magic_module
 from app.api.v1.auth.magic import MagicConsumeBody, build_magic_router
 from app.auth.magic_link import (
@@ -85,6 +89,25 @@ from app.config import Settings
 from tests._fakes.mailer import InMemoryMailer
 
 _BASE_URL: str = "https://crew.day"
+
+
+def _assert_problem(
+    response: Any,
+    *,
+    status: int,
+    type_name: str,
+    title: str,
+    error: str,
+) -> dict[str, Any]:
+    assert response.status_code == status
+    assert response.headers["content-type"].startswith(CONTENT_TYPE_PROBLEM_JSON)
+    body = response.json()
+    assert body["type"] == f"{CANONICAL_TYPE_BASE}{type_name}"
+    assert body["title"] == title
+    assert body["status"] == status
+    assert body["instance"] == response.request.url.path
+    assert body["error"] == error
+    return body
 
 
 # ---------------------------------------------------------------------------
@@ -449,12 +472,13 @@ class TestMagicRequestRoute:
             "/api/v1/auth/magic/request",
             json={"email": "spammer@example.com", "purpose": _PURPOSE},
         )
-        assert response.status_code == 429
-        assert response.headers["content-type"].startswith(CONTENT_TYPE_PROBLEM_JSON)
-        body = response.json()
-        assert body["title"] == "Rate limited"
-        assert body["status"] == 429
-        assert body["error"] == "rate_limited"
+        _assert_problem(
+            response,
+            status=429,
+            type_name="rate_limited",
+            title="Rate limited",
+            error="rate_limited",
+        )
 
     def test_invalid_purpose_returns_422_at_validation(
         self,
@@ -567,8 +591,13 @@ class TestMagicConsumeRoute:
             "/api/v1/auth/magic/consume",
             json={"token": "x" * 50, "purpose": _PURPOSE},
         )
-        assert response.status_code == 400
-        assert response.json()["error"] == "invalid_token"
+        _assert_problem(
+            response,
+            status=400,
+            type_name="validation",
+            title="Bad request",
+            error="invalid_token",
+        )
         assert len(throttle.failures) == 1
         # Rejected audit lands on a fresh UoW (§15 "Audit always
         # written… including misses").
@@ -596,8 +625,13 @@ class TestMagicConsumeRoute:
             "/api/v1/auth/magic/consume",
             json={"token": "x" * 50, "purpose": _PURPOSE},
         )
-        assert response.status_code == 400
-        assert response.json()["error"] == "purpose_mismatch"
+        _assert_problem(
+            response,
+            status=400,
+            type_name="validation",
+            title="Bad request",
+            error="purpose_mismatch",
+        )
         assert len(throttle.failures) == 1
         # §15: cross-purpose replays must surface in the audit trail —
         # the symbol is what makes this a security log instead of an
@@ -617,8 +651,13 @@ class TestMagicConsumeRoute:
             "/api/v1/auth/magic/consume",
             json={"token": "x" * 50, "purpose": _PURPOSE},
         )
-        assert response.status_code == 410
-        assert response.json()["error"] == "expired"
+        _assert_problem(
+            response,
+            status=410,
+            type_name="gone",
+            title="Gone",
+            error="expired",
+        )
         assert len(throttle.failures) == 1
         assert len(audit_recorder.calls) == 1
         assert audit_recorder.calls[0]["reason"] == "expired"
@@ -635,12 +674,13 @@ class TestMagicConsumeRoute:
             "/api/v1/auth/magic/consume",
             json={"token": "x" * 50, "purpose": _PURPOSE},
         )
-        assert response.status_code == 409
-        assert response.headers["content-type"].startswith(CONTENT_TYPE_PROBLEM_JSON)
-        body = response.json()
-        assert body["title"] == "Conflict"
-        assert body["status"] == 409
-        assert body["error"] == "already_consumed"
+        _assert_problem(
+            response,
+            status=409,
+            type_name="conflict",
+            title="Conflict",
+            error="already_consumed",
+        )
         assert len(throttle.failures) == 1
         assert len(audit_recorder.calls) == 1
         assert audit_recorder.calls[0]["reason"] == "already_consumed"
@@ -673,12 +713,13 @@ class TestMagicConsumeRoute:
             "/api/v1/auth/magic/consume",
             json={"token": "x" * 50, "purpose": _PURPOSE},
         )
-        assert response.status_code == 429
-        assert response.headers["content-type"].startswith(CONTENT_TYPE_PROBLEM_JSON)
-        body = response.json()
-        assert body["title"] == "Rate limited"
-        assert body["status"] == 429
-        assert body["error"] == "consume_locked_out"
+        _assert_problem(
+            response,
+            status=429,
+            type_name="rate_limited",
+            title="Rate limited",
+            error="consume_locked_out",
+        )
         # The crucial assertion: lockout does NOT advance the
         # fail-counter. A locked-out caller's retries must not extend
         # their own lockout window.
@@ -718,12 +759,13 @@ class TestMagicConsumeRoute:
             "/api/v1/auth/magic/consume",
             json={"token": "x" * 50, "purpose": _PURPOSE},
         )
-        assert response.status_code == 429
-        assert response.headers["content-type"].startswith(CONTENT_TYPE_PROBLEM_JSON)
-        body = response.json()
-        assert body["title"] == "Rate limited"
-        assert body["status"] == 429
-        assert body["error"] == "rate_limited"
+        _assert_problem(
+            response,
+            status=429,
+            type_name="rate_limited",
+            title="Rate limited",
+            error="rate_limited",
+        )
         assert len(throttle.failures) == 1
         assert len(audit_recorder.calls) == 1
         assert audit_recorder.calls[0]["reason"] == "rate_limited"

@@ -37,9 +37,11 @@ from app.api.errors import (
 )
 from app.domain.errors import (
     ApprovalRequired,
+    BadRequest,
     Conflict,
     DomainError,
     Forbidden,
+    Gone,
     IdempotencyConflict,
     NotFound,
     RateLimited,
@@ -86,6 +88,7 @@ class TestDomainErrorMapping:
     @pytest.mark.parametrize(
         ("exc_cls", "expected_status", "expected_type", "expected_title"),
         [
+            (BadRequest, 400, "validation", "Bad request"),
             (Validation, 422, "validation", "Validation error"),
             (NotFound, 404, "not_found", "Not found"),
             (Conflict, 409, "conflict", "Conflict"),
@@ -97,6 +100,7 @@ class TestDomainErrorMapping:
             ),
             (Unauthorized, 401, "unauthorized", "Unauthorized"),
             (Forbidden, 403, "forbidden", "Forbidden"),
+            (Gone, 410, "gone", "Gone"),
             (RateLimited, 429, "rate_limited", "Rate limited"),
             (
                 UpstreamUnavailable,
@@ -348,6 +352,7 @@ class TestHTTPExceptionEnvelope:
             (403, "forbidden"),
             (404, "not_found"),
             (409, "conflict"),
+            (410, "gone"),
             (429, "rate_limited"),
             (502, "upstream_unavailable"),
         ],

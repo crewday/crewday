@@ -37,7 +37,7 @@ import logging
 from datetime import datetime
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, Request, status
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -45,7 +45,12 @@ from app.adapters.db.session import make_uow
 from app.adapters.mail.ports import Mailer
 from app.api.deps import db_session
 from app.api.v1._problem_json import IDENTITY_PROBLEM_RESPONSES
-from app.api.v1.auth.errors import auth_conflict, auth_rate_limited
+from app.api.v1.auth.errors import (
+    auth_bad_request,
+    auth_conflict,
+    auth_gone,
+    auth_rate_limited,
+)
 from app.auth.magic_link import (
     AlreadyConsumed,
     ConsumeLockout,
@@ -164,7 +169,7 @@ _DomainError = (
 )
 
 
-def _http_for(exc: Exception) -> HTTPException | DomainError:
+def _http_for(exc: Exception) -> DomainError:
     """Map a typed magic-link domain error to an HTTP-layer exception.
 
     The rendered problem+json envelope carries ``{"error": <symbol>}``
@@ -177,22 +182,13 @@ def _http_for(exc: Exception) -> HTTPException | DomainError:
     if isinstance(exc, ConsumeLockout):
         return auth_rate_limited("consume_locked_out")
     if isinstance(exc, TokenExpired):
-        return HTTPException(
-            status_code=status.HTTP_410_GONE,
-            detail={"error": "expired"},
-        )
+        return auth_gone("expired")
     if isinstance(exc, AlreadyConsumed):
         return auth_conflict("already_consumed")
     if isinstance(exc, PurposeMismatch):
-        return HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail={"error": "purpose_mismatch"},
-        )
+        return auth_bad_request("purpose_mismatch")
     # InvalidToken — fallback.
-    return HTTPException(
-        status_code=status.HTTP_400_BAD_REQUEST,
-        detail={"error": "invalid_token"},
-    )
+    return auth_bad_request("invalid_token")
 
 
 # ---------------------------------------------------------------------------

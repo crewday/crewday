@@ -6,11 +6,13 @@ RFC 7807 ``problem+json`` envelope with the canonical ``type`` URIs
 listed in ``docs/specs/12-rest-api.md`` §"Errors":
 
 * :class:`Validation` → ``validation``
+* :class:`BadRequest` → ``validation``
 * :class:`InvalidCursor` → ``invalid_cursor``
 * :class:`NotFound` → ``not_found``
 * :class:`Conflict` → ``conflict``
 * :class:`Unauthorized` → ``unauthorized``
 * :class:`Forbidden` → ``forbidden``
+* :class:`Gone` → ``gone``
 * :class:`RateLimited` → ``rate_limited``
 * :class:`ServiceUnavailable` → ``service_unavailable``
 * :class:`UpstreamUnavailable` → ``upstream_unavailable``
@@ -52,9 +54,11 @@ from typing import ClassVar, Final
 
 __all__ = [
     "ApprovalRequired",
+    "BadRequest",
     "Conflict",
     "DomainError",
     "Forbidden",
+    "Gone",
     "IdempotencyConflict",
     "InvalidCursor",
     "NotFound",
@@ -131,6 +135,13 @@ class Validation(DomainError):
     """
 
     title: ClassVar[str] = "Validation error"
+    type_name: ClassVar[str] = "validation"
+
+
+class BadRequest(DomainError):
+    """Request is malformed outside DTO validation. HTTP 400."""
+
+    title: ClassVar[str] = "Bad request"
     type_name: ClassVar[str] = "validation"
 
 
@@ -217,6 +228,13 @@ class Forbidden(DomainError):
 
     title: ClassVar[str] = "Forbidden"
     type_name: ClassVar[str] = "forbidden"
+
+
+class Gone(DomainError):
+    """Resource or token is no longer available. HTTP 410."""
+
+    title: ClassVar[str] = "Gone"
+    type_name: ClassVar[str] = "gone"
 
 
 class RateLimited(DomainError):
