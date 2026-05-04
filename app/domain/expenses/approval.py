@@ -286,11 +286,12 @@ class RejectBody(BaseModel):
     """Request body for :func:`reject_claim`.
 
     The single ``reason_md`` field carries the manager's rejection
-    narrative. Required and non-empty: an empty rejection note hides
-    the *why* from the worker, who then has nothing actionable to
-    fix. Pydantic's ``min_length=1`` enforces the non-empty guard at
-    the DTO layer (422-equivalent on the HTTP boundary), matching
-    the spec's "Reject without reason rejected with 422" acceptance.
+    narrative. Required and non-empty: an empty, whitespace-only, or
+    C0 separator-only rejection note hides the *why* from the worker,
+    who then has nothing actionable to fix. Pydantic's ``min_length``
+    and ``pattern`` guards enforce that at the DTO layer
+    (422-equivalent on the HTTP boundary), matching the spec's
+    "Reject without reason rejected with 422" acceptance.
 
     The rendered reason is PII — a manager may name a vendor,
     reference a personal-spend categorisation, or quote a receipt
@@ -301,7 +302,15 @@ class RejectBody(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    reason_md: str = Field(min_length=1, max_length=_MAX_REASON_LEN)
+    reason_md: str = Field(
+        min_length=1,
+        max_length=_MAX_REASON_LEN,
+        pattern=r"[^\s\x1c-\x1f]",
+        description=(
+            "Manager-visible rejection reason. Must contain at least one character "
+            "that is not whitespace or a C0 separator."
+        ),
+    )
 
 
 class ReimburseBody(BaseModel):
@@ -322,7 +331,13 @@ class ReimburseBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     via: ReimburseVia
-    paid_at: datetime | None = None
+    paid_at: datetime | None = Field(
+        default=None,
+        description=(
+            "UTC-aware reimbursement timestamp. Optional; when supplied, "
+            "runtime validation rejects values more than 60 seconds in the future."
+        ),
+    )
 
     @field_validator("paid_at")
     @classmethod

@@ -435,6 +435,58 @@ class TestPublicPathAllowlist:
             {"slug": "random"},
         ) == {"slug": "schemathesis"}
 
+    def test_reimburse_paid_at_generation_clamps_future_values(self) -> None:
+        from datetime import UTC, datetime, timedelta
+        from types import SimpleNamespace
+
+        from tests.contract.hooks import constrain_expense_reimburse_paid_at
+
+        ctx = SimpleNamespace(
+            operation=SimpleNamespace(
+                definition=SimpleNamespace(
+                    raw={"operationId": "reimburse_expense_claim"}
+                )
+            )
+        )
+        future = {
+            "via": "bank",
+            "paid_at": (datetime.now(UTC) + timedelta(days=1)).isoformat(),
+        }
+
+        strategy = constrain_expense_reimburse_paid_at(
+            cast(Any, ctx),
+            st.just(future),
+        )
+
+        body = find(strategy, lambda _: True)
+        assert body["via"] == "bank"
+        assert datetime.fromisoformat(body["paid_at"]) <= datetime.now(UTC) + timedelta(
+            seconds=60
+        )
+
+    def test_reimburse_paid_at_generation_filter_is_operation_specific(self) -> None:
+        from datetime import UTC, datetime, timedelta
+        from types import SimpleNamespace
+
+        from tests.contract.hooks import constrain_expense_reimburse_paid_at
+
+        ctx = SimpleNamespace(
+            operation=SimpleNamespace(
+                definition=SimpleNamespace(raw={"operationId": "reject_expense_claim"})
+            )
+        )
+        future = {
+            "via": "bank",
+            "paid_at": (datetime.now(UTC) + timedelta(days=1)).isoformat(),
+        }
+
+        strategy = constrain_expense_reimburse_paid_at(
+            cast(Any, ctx),
+            st.just(future),
+        )
+
+        assert find(strategy, lambda _: True) == future
+
 
 @pytest.mark.skipif(
     not _schemathesis_available(), reason="schemathesis is not installed"

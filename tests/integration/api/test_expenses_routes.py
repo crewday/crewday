@@ -1092,20 +1092,20 @@ class TestManagerFlow:
             assert r.status_code == 409, r.text
             assert r.json()["detail"]["error"] == "claim_not_approvable"
 
-    def test_reject_empty_reason_is_422(
+    @pytest.mark.parametrize("reason_md", ["", "   ", "\u001f"])
+    def test_reject_blank_reason_is_422(
         self,
         session_factory: sessionmaker[Session],
         storage: InMemoryStorage,
         seeded: dict[str, Any],
+        reason_md: str,
     ) -> None:
         cid = self._seed_submitted(session_factory, storage, seeded)
         with _client_for(session_factory, seeded["manager_ctx"], storage) as client:
             r = client.post(
                 f"/api/v1/expenses/{cid}/reject",
-                json={"reason_md": ""},
+                json={"reason_md": reason_md},
             )
-            # FastAPI's RequestValidationError on the DTO ``min_length=1``
-            # surfaces as 422 with the standard ``detail[]`` envelope.
             assert r.status_code == 422, r.text
 
     def test_reject_happy_path(
@@ -1150,6 +1150,25 @@ class TestManagerFlow:
             )
             assert r.status_code == 409, r.text
             assert r.json()["detail"]["error"] == "claim_not_reimbursable"
+
+    def test_reimburse_future_paid_at_is_422(
+        self,
+        session_factory: sessionmaker[Session],
+        storage: InMemoryStorage,
+        seeded: dict[str, Any],
+    ) -> None:
+        cid = self._seed_submitted(session_factory, storage, seeded)
+        future_paid_at = datetime.now(UTC) + timedelta(days=1)
+        with _client_for(session_factory, seeded["manager_ctx"], storage) as client:
+            approve = client.post(f"/api/v1/expenses/{cid}/approve")
+            assert approve.status_code == 200, approve.text
+
+            r = client.post(
+                f"/api/v1/expenses/{cid}/reimburse",
+                json={"via": "bank", "paid_at": future_paid_at.isoformat()},
+            )
+            assert r.status_code == 422, r.text
+            assert r.json()["detail"]["error"] == "paid_at_in_future"
 
 
 # ---------------------------------------------------------------------------

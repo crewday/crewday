@@ -1167,9 +1167,9 @@ def reject_expense_claim_route(
 ) -> ExpenseClaimPayload:
     """Drive the claim from ``submitted`` to ``rejected``.
 
-    Empty / whitespace-only ``reason_md`` is rejected with 422 by
-    the DTO's ``min_length=1`` rule; the service-level guard fires
-    for Python callers bypassing the DTO.
+    Empty, whitespace-only, or C0 separator-only ``reason_md`` is
+    rejected with 422 by the DTO's length + pattern rules; the
+    service-level guard fires for Python callers bypassing the DTO.
     """
     repo, checker = make_seam_pair(session, ctx)
     try:

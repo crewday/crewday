@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import os
 import re
+from datetime import UTC, datetime, timedelta
 from itertools import count
 from typing import Any, Final
 
@@ -45,6 +46,7 @@ __all__ = [
     "check_etag_round_trip",
     "check_idempotency_round_trip",
     "constrain_case_workspace_slug",
+    "constrain_expense_reimburse_paid_at",
     "constrain_generated_workspace_slug",
     "constrain_workspace_slug",
     "refresh_session_cookie_for_call",
@@ -76,6 +78,7 @@ _LOGOUT_EMAIL_ENV: Final[str] = "CREWDAY_SCHEMATHESIS_LOGOUT_EMAIL"
 _SESSION_COOKIE_NAME: Final[str] = "__Host-crewday_session"
 _CSRF_COOKIE: Final[str] = "crewday_csrf=schemathesis"
 _LOGOUT_SESSION_COUNTER = count(1)
+_EXPENSE_REIMBURSE_PAID_AT_SKEW: Final[timedelta] = timedelta(seconds=60)
 
 
 # ---------------------------------------------------------------------------
@@ -460,6 +463,43 @@ def constrain_generated_workspace_slug(
         return path_parameters
 
     return strategy.map(rewrite)
+
+
+def _parse_datetime(value: str) -> datetime | None:
+    """Parse an OpenAPI date-time string when possible."""
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        return None
+    return parsed.astimezone(UTC)
+
+
+def _clamp_reimburse_body_paid_at(body: Any) -> Any:
+    """Rewrite dynamic future ``paid_at`` values OpenAPI cannot express."""
+    if not isinstance(body, dict):
+        return body
+    paid_at = body.get("paid_at")
+    if not isinstance(paid_at, str):
+        return body
+    parsed = _parse_datetime(paid_at)
+    if parsed is None:
+        return body
+    now = datetime.now(UTC)
+    if parsed <= now + _EXPENSE_REIMBURSE_PAID_AT_SKEW:
+        return body
+    return {**body, "paid_at": now.isoformat()}
+
+
+@schemathesis.hook("before_generate_body")
+def constrain_expense_reimburse_paid_at(
+    ctx: schemathesis.HookContext, strategy: Any
+) -> Any:
+    """Constrain dynamic future ``paid_at`` values OpenAPI cannot express."""
+    if _operation_id(ctx) == "reimburse_expense_claim":
+        return strategy.map(_clamp_reimburse_body_paid_at)
+    return strategy
 
 
 @schemathesis.hook("map_case")
