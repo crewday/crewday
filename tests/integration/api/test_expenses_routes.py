@@ -1217,7 +1217,7 @@ class TestPendingQueue:
             assert draft_id not in ids
 
 
-class TestPendingReimbursement:
+class TestPending_Reimbursement:
     """Integration coverage for ``GET /expenses/pending_reimbursement``.
 
     The endpoint backs the SPA's "Owed to you" panel
@@ -1280,7 +1280,7 @@ class TestPendingReimbursement:
         """``user_id=me`` resolves to ``ctx.actor_id`` and sums the
         caller's approved-but-not-reimbursed claims by currency."""
         # Two approved claims for the worker — one EUR, one USD.
-        TestPendingReimbursement._seed_approved_claim(
+        TestPending_Reimbursement._seed_approved_claim(
             session_factory,
             storage,
             seeded,
@@ -1290,7 +1290,7 @@ class TestPendingReimbursement:
             total_amount_cents=1500,
             vendor="Worker EUR",
         )
-        TestPendingReimbursement._seed_approved_claim(
+        TestPending_Reimbursement._seed_approved_claim(
             session_factory,
             storage,
             seeded,
@@ -1301,7 +1301,7 @@ class TestPendingReimbursement:
             vendor="Worker USD",
         )
         # Peer's approved claim must NOT show up under the worker.
-        TestPendingReimbursement._seed_approved_claim(
+        TestPending_Reimbursement._seed_approved_claim(
             session_factory,
             storage,
             seeded,
@@ -1339,7 +1339,7 @@ class TestPendingReimbursement:
     ) -> None:
         """A reimbursed claim drops out of the pool the moment the
         manager marks it paid (§09 §"Amount owed")."""
-        cid_paid = TestPendingReimbursement._seed_approved_claim(
+        cid_paid = TestPending_Reimbursement._seed_approved_claim(
             session_factory,
             storage,
             seeded,
@@ -1349,7 +1349,7 @@ class TestPendingReimbursement:
             total_amount_cents=2000,
             vendor="Already paid",
         )
-        cid_pending = TestPendingReimbursement._seed_approved_claim(
+        cid_pending = TestPending_Reimbursement._seed_approved_claim(
             session_factory,
             storage,
             seeded,
@@ -1391,7 +1391,7 @@ class TestPendingReimbursement:
     ) -> None:
         """Drafts, submitted, and rejected claims must NOT contribute."""
         # Approved claim — should land in the pool.
-        TestPendingReimbursement._seed_approved_claim(
+        TestPending_Reimbursement._seed_approved_claim(
             session_factory,
             storage,
             seeded,
@@ -1457,14 +1457,14 @@ class TestPendingReimbursement:
         ]
         assert [c["vendor"] for c in body["claims"]] == ["Approved"]
 
-    def test_user_id_uuid_requires_approve_permission(
+    def test_explicit_user_id_requires_approve_permission(
         self,
         session_factory: sessionmaker[Session],
         storage: InMemoryStorage,
         seeded: dict[str, Any],
     ) -> None:
         """A worker probing another user's pool by id surfaces 403."""
-        TestPendingReimbursement._seed_approved_claim(
+        TestPending_Reimbursement._seed_approved_claim(
             session_factory,
             storage,
             seeded,
@@ -1498,6 +1498,45 @@ class TestPendingReimbursement:
             {"currency": "EUR", "amount_cents": 500},
         ]
 
+    def test_repeated_user_id_query_rejected(
+        self,
+        session_factory: sessionmaker[Session],
+        storage: InMemoryStorage,
+        seeded: dict[str, Any],
+    ) -> None:
+        """Repeated scalar ``user_id`` params fail instead of taking the last."""
+        with _client_for(session_factory, seeded["manager_ctx"], storage) as client:
+            r = client.get(
+                "/api/v1/expenses/pending_reimbursement"
+                "?user_id=not-a-user-id&user_id=me",
+            )
+        assert r.status_code == 422, r.text
+        assert r.json()["detail"]["error"] == "validation"
+
+    @pytest.mark.parametrize(
+        "user_id",
+        [
+            "not-a-user-id",
+            "01ARZ3NDEKTSV4RRFFQ69G5FAV-too-long",
+            "01arz3ndektsv4rrffq69g5fav",
+            "\x1f",
+        ],
+    )
+    def test_invalid_user_id_shape_rejected(
+        self,
+        session_factory: sessionmaker[Session],
+        storage: InMemoryStorage,
+        seeded: dict[str, Any],
+        user_id: str,
+    ) -> None:
+        """Malformed ``user_id`` query values fail boundary validation."""
+        with _client_for(session_factory, seeded["manager_ctx"], storage) as client:
+            r = client.get(
+                "/api/v1/expenses/pending_reimbursement",
+                params={"user_id": user_id},
+            )
+        assert r.status_code == 422, r.text
+
     def test_workspace_aggregate_includes_by_user(
         self,
         session_factory: sessionmaker[Session],
@@ -1506,7 +1545,7 @@ class TestPendingReimbursement:
     ) -> None:
         """No ``user_id`` param → workspace aggregate with breakdown."""
         # Worker: 1500 EUR + 2500 USD.
-        TestPendingReimbursement._seed_approved_claim(
+        TestPending_Reimbursement._seed_approved_claim(
             session_factory,
             storage,
             seeded,
@@ -1516,7 +1555,7 @@ class TestPendingReimbursement:
             total_amount_cents=1500,
             vendor="Worker EUR",
         )
-        TestPendingReimbursement._seed_approved_claim(
+        TestPending_Reimbursement._seed_approved_claim(
             session_factory,
             storage,
             seeded,
@@ -1527,7 +1566,7 @@ class TestPendingReimbursement:
             vendor="Worker USD",
         )
         # Peer: 700 EUR.
-        TestPendingReimbursement._seed_approved_claim(
+        TestPending_Reimbursement._seed_approved_claim(
             session_factory,
             storage,
             seeded,
@@ -1585,7 +1624,7 @@ class TestPendingReimbursement:
         seeded: dict[str, Any],
     ) -> None:
         """A foreign-workspace probe never sees the home workspace's pool."""
-        TestPendingReimbursement._seed_approved_claim(
+        TestPending_Reimbursement._seed_approved_claim(
             session_factory,
             storage,
             seeded,
@@ -1642,20 +1681,20 @@ class TestPendingReimbursement:
             "by_user": None,
         }
 
-    def test_me_alias_matches_explicit_self_uuid(
+    def test_me_alias_matches_explicit_self_user_id(
         self,
         session_factory: sessionmaker[Session],
         storage: InMemoryStorage,
         seeded: dict[str, Any],
     ) -> None:
-        """``?user_id=me`` and ``?user_id=<own uuid>`` must behave identically.
+        """``?user_id=me`` and ``?user_id=<own user id>`` must behave identically.
 
         Both paths echo ``user_id == ctx.actor_id`` on the wire and
         skip the manager-cap gate; the OwedToYou panel sends ``me``,
         but a future caller who already knows its own id (an agent,
         say) MUST get the same response without ``expenses.approve``.
         """
-        TestPendingReimbursement._seed_approved_claim(
+        TestPending_Reimbursement._seed_approved_claim(
             session_factory,
             storage,
             seeded,
@@ -1671,14 +1710,14 @@ class TestPendingReimbursement:
                 "/api/v1/expenses/pending_reimbursement",
                 params={"user_id": "me"},
             )
-            r_uuid = client.get(
+            r_user_id = client.get(
                 "/api/v1/expenses/pending_reimbursement",
                 params={"user_id": seeded["worker_id"]},
             )
         assert r_me.status_code == 200, r_me.text
-        assert r_uuid.status_code == 200, r_uuid.text
+        assert r_user_id.status_code == 200, r_user_id.text
         # Identical wire bodies — `me` is just an alias for the actor id.
-        assert r_me.json() == r_uuid.json()
+        assert r_me.json() == r_user_id.json()
         assert r_me.json()["user_id"] == seeded["worker_id"]
 
 

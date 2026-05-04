@@ -45,7 +45,7 @@ Surface (spec §12 "Time, payroll, expenses"):
 * ``GET  /pending``      — manager queue, cursor-paginated.
 * ``GET  /pending_reimbursement`` — approved-but-not-reimbursed totals
   (§09 §"Amount owed to the employee"). ``?user_id=me`` resolves to
-  the caller; ``?user_id=<uuid>`` or no param requires
+  the caller; ``?user_id=<user id>`` or no param requires
   ``expenses.approve``. The no-param form populates a per-user
   ``by_user`` breakdown for the manager Pay page; the per-user form
   leaves it ``null``.
@@ -105,6 +105,7 @@ from fastapi import (
     status,
 )
 from pydantic import BaseModel, ConfigDict, Field
+from pydantic.json_schema import SkipJsonSchema
 from sqlalchemy.orm import Session
 
 from app.adapters.db.expenses.repositories import (
@@ -184,6 +185,32 @@ __all__ = ["ExpenseClaimPayload", "make_seam_pair", "router"]
 
 
 router = APIRouter(tags=["expenses"], responses=IDENTITY_PROBLEM_RESPONSES)
+
+_PENDING_REIMBURSEMENT_USER_ID_PATTERN = r"^(me|[0-9A-HJKMNP-TV-Z]{26})$"
+type _PendingReimbursementUserIdQuery = Annotated[
+    str,
+    Query(
+        max_length=26,
+        pattern=_PENDING_REIMBURSEMENT_USER_ID_PATTERN,
+        description=(
+            "Filter target. ``me`` resolves to the caller (no "
+            "capability required). A different user id requires "
+            "``expenses.approve``. Omit the param entirely to get "
+            "the workspace-wide aggregate (also gated on "
+            "``expenses.approve``); the response then carries a "
+            "``by_user`` breakdown."
+        ),
+    ),
+]
+
+
+def _reject_duplicate_pending_reimbursement_user_id(request: Request) -> None:
+    if len(request.query_params.getlist("user_id")) > 1:
+        raise _http(
+            422,
+            "validation",
+            message="user_id may be provided at most once",
+        )
 
 
 def _optional_llm(request: Request) -> LLMClient | None:
@@ -760,20 +787,8 @@ def list_pending_expense_claims_route(
 def get_pending_reimbursement_route(
     ctx: _Ctx,
     session: _Db,
-    user_id: Annotated[
-        str | None,
-        Query(
-            max_length=64,
-            description=(
-                "Filter target. ``me`` resolves to the caller (no "
-                "capability required). A different user id requires "
-                "``expenses.approve``. Omit the param entirely to get "
-                "the workspace-wide aggregate (also gated on "
-                "``expenses.approve``); the response then carries a "
-                "``by_user`` breakdown."
-            ),
-        ),
-    ] = None,
+    request: Request,
+    user_id: _PendingReimbursementUserIdQuery | SkipJsonSchema[None] = None,
 ) -> PendingReimbursementResponse:
     """Return approved-but-not-yet-reimbursed totals (§09 "Amount owed").
 
@@ -788,10 +803,11 @@ def get_pending_reimbursement_route(
     Authorisation:
 
     * ``user_id=me`` — every worker may read their own pool.
-    * ``user_id=<uuid>`` and ``user_id`` omitted — both gated on
+    * ``user_id=<user id>`` and ``user_id`` omitted — both gated on
       ``expenses.approve`` (the manager queue capability). A worker
       probe surfaces a 403 ``claim_permission_denied`` envelope.
     """
+    _reject_duplicate_pending_reimbursement_user_id(request)
     resolved_user_id = ctx.actor_id if user_id == "me" else user_id
     repo, checker = make_seam_pair(session, ctx)
     try:
