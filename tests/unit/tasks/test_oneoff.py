@@ -1569,12 +1569,15 @@ class TestReadTask:
 
     @pytest.mark.parametrize(
         "state",
-        # ``overdue`` is accepted by the view's Literal, but the DB
-        # CHECK constraint on ``occurrence.state`` does not yet carry
-        # it (the widening migration is tracked alongside cd-7am7).
-        # Excluded here so the FK / CHECK layer doesn't reject the
-        # force-set in the test fixture.
-        ["scheduled", "pending", "in_progress", "completed", "skipped", "cancelled"],
+        [
+            "scheduled",
+            "pending",
+            "in_progress",
+            "completed",
+            "skipped",
+            "cancelled",
+            "overdue",
+        ],
     )
     def test_every_state_round_trips(
         self,
