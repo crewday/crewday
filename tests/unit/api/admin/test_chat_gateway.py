@@ -334,11 +334,26 @@ class TestChatGatewayTemplatesOverridesHealth:
             assert message.body_md == "Need help with check-in"
             assert message.dispatched_to_agent_at is not None
 
+    def test_test_inbound_openapi_documents_trimmed_required_text(
+        self,
+        client: TestClient,
+    ) -> None:
+        schema = client.get("/openapi.json").json()
+
+        request_schema = schema["components"]["schemas"]["AdminChatTestInboundRequest"]
+        assert (
+            request_schema["properties"]["external_contact"]["pattern"]
+            == r"[^\s\x00-\x20]"
+        )
+        assert request_schema["properties"]["body_md"]["pattern"] == r"[^\s\x00-\x20]"
+
     @pytest.mark.parametrize(
         "payload",
         [
             {"external_contact": "   ", "body_md": "Need help"},
             {"external_contact": "+15551230000", "body_md": "   "},
+            {"external_contact": "\x01", "body_md": "Need help"},
+            {"external_contact": "+15551230000", "body_md": "\x01"},
         ],
     )
     def test_test_inbound_rejects_blank_direct_payload(

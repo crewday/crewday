@@ -791,6 +791,34 @@ class TestUpdateCap:
         assert resp.status_code == 422
         assert resp.json().get("error") == "invalid_cap"
 
+    def test_cap_openapi_documents_non_negative_integer(
+        self,
+        client: TestClient,
+    ) -> None:
+        schema = client.get("/openapi.json").json()
+
+        payload_schema = schema["components"]["schemas"]["UsageCapPayload"]
+        assert payload_schema["properties"]["cap_cents_30d"]["minimum"] == 0
+
+    def test_integral_json_number_cap_matches_openapi_integer(
+        self,
+        client: TestClient,
+        session_factory: sessionmaker[Session],
+        settings: Settings,
+    ) -> None:
+        with session_factory() as s:
+            ws = seed_workspace(s, slug="cap-ws")
+            s.commit()
+        client.cookies.set(
+            SESSION_COOKIE_NAME, _admin_cookie(session_factory, settings)
+        )
+        resp = client.put(
+            f"/admin/api/v1/usage/workspaces/{ws}/cap",
+            json={"cap_cents_30d": 1500.0},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["cap_cents_30d"] == 1500
+
     def test_boolean_cap_returns_validation_422(
         self,
         client: TestClient,
@@ -806,6 +834,42 @@ class TestUpdateCap:
         resp = client.put(
             f"/admin/api/v1/usage/workspaces/{ws}/cap",
             json={"cap_cents_30d": False},
+        )
+        assert resp.status_code == 422
+
+    def test_numeric_string_cap_returns_validation_422(
+        self,
+        client: TestClient,
+        session_factory: sessionmaker[Session],
+        settings: Settings,
+    ) -> None:
+        with session_factory() as s:
+            ws = seed_workspace(s, slug="cap-ws")
+            s.commit()
+        client.cookies.set(
+            SESSION_COOKIE_NAME, _admin_cookie(session_factory, settings)
+        )
+        resp = client.put(
+            f"/admin/api/v1/usage/workspaces/{ws}/cap",
+            json={"cap_cents_30d": "1500"},
+        )
+        assert resp.status_code == 422
+
+    def test_fractional_json_number_cap_returns_validation_422(
+        self,
+        client: TestClient,
+        session_factory: sessionmaker[Session],
+        settings: Settings,
+    ) -> None:
+        with session_factory() as s:
+            ws = seed_workspace(s, slug="cap-ws")
+            s.commit()
+        client.cookies.set(
+            SESSION_COOKIE_NAME, _admin_cookie(session_factory, settings)
+        )
+        resp = client.put(
+            f"/admin/api/v1/usage/workspaces/{ws}/cap",
+            json={"cap_cents_30d": 1500.25},
         )
         assert resp.status_code == 422
 

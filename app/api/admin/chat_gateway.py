@@ -46,6 +46,7 @@ _TemplateStatus = Literal["approved", "pending", "rejected", "paused"]
 _MAX_TEST_INBOUND_CONTACT = 160
 _MAX_TEST_INBOUND_BODY = 8_000
 _MAX_TEST_INBOUND_LANGUAGE = 35
+_CONTAINS_VISIBLE_TEXT = r"[^\s\x00-\x20]"
 
 
 class AdminChatProviderCredential(BaseModel):
@@ -127,11 +128,13 @@ class AdminChatTestInboundRequest(BaseModel):
         default="+15551234567",
         min_length=1,
         max_length=_MAX_TEST_INBOUND_CONTACT,
+        pattern=_CONTAINS_VISIBLE_TEXT,
     )
     body_md: str = Field(
         default="Admin chat-gateway test inbound",
         min_length=1,
         max_length=_MAX_TEST_INBOUND_BODY,
+        pattern=_CONTAINS_VISIBLE_TEXT,
     )
     language_hint: str | None = Field(
         default=None,

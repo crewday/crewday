@@ -195,9 +195,10 @@ export CREWDAY_SCHEMATHESIS_SESSION_COOKIE="__Host-crewday_session=${SESSION}; c
 #
 # ``admin.admins.revoke`` is a destructive one-shot route: the seeded
 # grant is live for the first positive example, then correctly 404s once
-# revoked. The focused admin tag smoke therefore runs with
-# ``SCHEMATHESIS_MAX_EXAMPLES=1`` when validating this route's success
-# path; higher example counts need a per-example grant refresh hook.
+# revoked. Even with ``SCHEMATHESIS_MAX_EXAMPLES=1``, later coverage /
+# stateful calls can reuse the same id and trigger Schemathesis' "Missing
+# test data" warning. Removing that warning needs a per-call grant refresh
+# hook; focused admin route tests cover the 404 branch meanwhile.
 ADMIN_CONTRACT_ENV=$(${PYTHON_BIN} -m scripts._schemathesis_seed \
     --email "${EMAIL}" \
     --workspace "${SLUG}" \
@@ -715,12 +716,14 @@ INCLUDE_ARGS=(
     --exclude-operation-id 'admin.audit.tail'
     --exclude-operation-id 'admin.usage.list'
     # ``admin.chat.test_inbound`` remains included so the admin tag
-    # covers its configured and unconfigured deployment branches. The
-    # run can warn that generated payloads mostly hit validation because
-    # the request model trims ``external_contact`` / ``body_md`` and
-    # rejects whitespace-only strings; OpenAPI advertises ``minLength``
-    # but cannot express the post-trim non-empty invariant. Focused chat
-    # gateway route tests cover that validator.
+    # covers its configured and unconfigured deployment branches. Its
+    # request schema declares the post-trim non-empty invariant for
+    # ``external_contact`` / ``body_md`` as a non-whitespace,
+    # non-C0-control pattern so generated positive examples reach the
+    # dispatcher path instead of validation. Schemathesis 4.15 still
+    # reports ``validation_mismatch`` for this operation in ``--mode
+    # all`` because coverage cases deliberately send invalid/missing
+    # body variants; focused route tests cover those 422 validators.
     # ----------------------------------------------------------------
     # LLM tag (cd-e5sit). The workspace operations below carry the
     # shared problem+json response envelope and were confirmed clean by

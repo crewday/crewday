@@ -39,7 +39,7 @@ from datetime import UTC, datetime
 from typing import Annotated, Final
 
 from fastapi import APIRouter, Depends, Query, Request, status
-from pydantic import BaseModel, StrictInt
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -160,7 +160,18 @@ class UsageCapPayload(BaseModel):
     the workspace, mirroring :func:`app.domain.plans.tight_cap_cents`.
     """
 
-    cap_cents_30d: StrictInt
+    cap_cents_30d: int = Field(json_schema_extra={"minimum": 0})
+
+    @field_validator("cap_cents_30d", mode="before")
+    @classmethod
+    def _reject_bool_cap(cls, value: object) -> object:
+        if isinstance(value, bool):
+            raise ValueError("cap_cents_30d must be an integer")
+        if isinstance(value, int):
+            return value
+        if isinstance(value, float) and value.is_integer():
+            return int(value)
+        raise ValueError("cap_cents_30d must be an integer")
 
 
 class UsageCapResponse(BaseModel):
