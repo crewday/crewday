@@ -75,7 +75,7 @@ def _make_user_workspace_refresh_body(clock: Clock) -> Callable[[], None]:
             report = reconcile_user_workspace(session, now=now)
 
         _log.info(
-            "worker.identity.user_workspace.tick.summary",
+            "user workspace identity reconciliation tick summary",
             extra={
                 "event": "worker.identity.user_workspace.tick.summary",
                 "rows_inserted": report.rows_inserted,

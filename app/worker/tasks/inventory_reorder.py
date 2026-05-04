@@ -79,7 +79,7 @@ def check_reorder_points_for_all_workspaces(
                 except Exception as exc:
                     failed += 1
                     _log.warning(
-                        "worker.inventory_reorder.workspace.failed",
+                        "inventory reorder failed for workspace",
                         extra={
                             "event": "worker.inventory_reorder.workspace.failed",
                             "workspace_id": row.id,
@@ -95,7 +95,7 @@ def check_reorder_points_for_all_workspaces(
             created += report.tasks_created
             emitted += report.events_emitted
             _log.info(
-                "worker.inventory_reorder.workspace.tick",
+                "inventory reorder ran for workspace",
                 extra={
                     "event": "worker.inventory_reorder.workspace.tick",
                     "workspace_id": row.id,

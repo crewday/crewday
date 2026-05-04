@@ -1609,7 +1609,7 @@ def attach_receipt(
             # the right shape here precisely because we do not want
             # an unexpected runner crash to corrupt the attach UoW.
             _log.warning(
-                "expense.claim.receipt_attached: extraction runner failed",
+                "receipt extraction runner failed after attachment",
                 extra={
                     "event": "expense.autofill.runner_failed",
                     "claim_id": claim_id,

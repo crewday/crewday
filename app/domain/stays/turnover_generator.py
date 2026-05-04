@@ -405,7 +405,7 @@ def handle_reservation_upserted(
         # not an error — the audit row for the delete already
         # captured the change.
         _log.info(
-            "stays.turnover_generator.reservation_missing",
+            "turnover generation skipped missing reservation",
             extra={
                 "event": "stays.turnover_generator.reservation_missing",
                 "reservation_id": event.reservation_id,
@@ -518,7 +518,7 @@ def register_subscriptions(
         bound = session_provider(event)
         if bound is None:
             _log.info(
-                "stays.turnover_generator.no_session_for_event",
+                "turnover generation skipped event without session",
                 extra={
                     "event": "stays.turnover_generator.no_session_for_event",
                     "reservation_id": event.reservation_id,

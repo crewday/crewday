@@ -46,7 +46,7 @@ def _make_agent_compaction_body(clock: Clock) -> Callable[[], None]:
 
         if llm is None:
             _log.warning(
-                "worker.agent.compaction.skipped_no_llm",
+                "agent compaction skipped: LLM unavailable",
                 extra={"event": "worker.agent.compaction.skipped_no_llm"},
             )
             return
@@ -79,7 +79,7 @@ def _make_agent_compaction_body(clock: Clock) -> Callable[[], None]:
                     except Exception as exc:
                         workspaces_failed += 1
                         _log.warning(
-                            "worker.agent.compaction.workspace_failed",
+                            "agent compaction failed for workspace",
                             extra={
                                 "event": "worker.agent.compaction.workspace_failed",
                                 "workspace_id": row.id,
@@ -93,7 +93,7 @@ def _make_agent_compaction_body(clock: Clock) -> Callable[[], None]:
                 summaries_written += len(results)
                 if results:
                     _log.info(
-                        "worker.agent.compaction.workspace_tick",
+                        "agent compaction ran for workspace",
                         extra={
                             "event": "worker.agent.compaction.workspace_tick",
                             "workspace_id": row.id,
@@ -103,7 +103,7 @@ def _make_agent_compaction_body(clock: Clock) -> Callable[[], None]:
                     )
 
         _log.info(
-            "worker.agent.compaction.tick.summary",
+            "agent compaction tick summary",
             extra={
                 "event": "worker.agent.compaction.tick.summary",
                 "workspaces_attempted": workspaces_attempted,

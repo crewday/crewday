@@ -1361,8 +1361,9 @@ def _resolve_tool_call(response: LLMResponse) -> ToolCall | None:
             # carve-out for parallel dispatch lifts this branch.
             dropped_names = [c.name for c in native_calls[1:]]
             _log.warning(
-                "agent.runtime.native_tool_calls_dropped_extras",
+                "agent runtime dropped extra native tool calls",
                 extra={
+                    "event": "agent.runtime.native_tool_calls_dropped_extras",
                     "count": len(native_calls),
                     "dispatched": native_calls[0].name,
                     "dropped": dropped_names,
@@ -1413,8 +1414,11 @@ def _parse_tool_call(text: str) -> ToolCall | None:
         # as a reply, and an operator reading the chat sees both
         # blocks instead of a phantom dispatch of one.
         _log.debug(
-            "agent.runtime.tool_call_multiple",
-            extra={"matches": len(matches)},
+            "agent runtime ignored multiple tool calls",
+            extra={
+                "event": "agent.runtime.tool_call_multiple",
+                "matches": len(matches),
+            },
         )
         return None
     match = matches[0]
@@ -1431,8 +1435,11 @@ def _parse_tool_call(text: str) -> ToolCall | None:
         parsed = json.loads(raw_input)
     except json.JSONDecodeError:
         _log.debug(
-            "agent.runtime.tool_call_unparseable",
-            extra={"raw_input_len": len(raw_input)},
+            "agent runtime ignored unparseable tool call",
+            extra={
+                "event": "agent.runtime.tool_call_unparseable",
+                "raw_input_len": len(raw_input),
+            },
         )
         return None
     if not isinstance(parsed, dict):

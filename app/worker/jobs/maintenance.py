@@ -223,7 +223,7 @@ def _make_inventory_reorder_body(clock: Clock) -> Callable[[], None]:
 
         report = check_reorder_points_for_all_workspaces(clock=clock)
         _log.info(
-            "worker.inventory_reorder.tick.summary",
+            "inventory reorder tick summary",
             extra={
                 "event": "worker.inventory_reorder.tick.summary",
                 "total_workspaces": report.total_workspaces,
@@ -245,7 +245,7 @@ def _make_retention_rotation_body(clock: Clock) -> Callable[[], None]:
 
         results = run_retention_rotation(data_dir=get_settings().data_dir, clock=clock)
         _log.info(
-            "worker.retention.tick",
+            "retention rotation tick summary",
             extra={
                 "event": "worker.retention.tick",
                 "tables": [result.table for result in results],

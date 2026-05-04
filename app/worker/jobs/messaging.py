@@ -67,7 +67,7 @@ def _make_daily_digest_fanout_body(clock: Clock) -> Callable[[], None]:
             smtp_config = smtp_source.config()
         except SmtpConfigError as exc:
             _log.warning(
-                "worker.daily_digest.skipped_no_smtp",
+                "daily digest skipped: SMTP config unavailable",
                 extra={
                     "event": "worker.daily_digest.skipped_no_smtp",
                     "reason": str(exc),
@@ -76,7 +76,7 @@ def _make_daily_digest_fanout_body(clock: Clock) -> Callable[[], None]:
             return
         if smtp_config.host is None or smtp_config.from_addr is None:
             _log.warning(
-                "worker.daily_digest.skipped_no_smtp",
+                "daily digest skipped: SMTP not configured",
                 extra={"event": "worker.daily_digest.skipped_no_smtp"},
             )
             return
@@ -130,7 +130,7 @@ def _make_daily_digest_fanout_body(clock: Clock) -> Callable[[], None]:
                 except Exception as exc:
                     total_workspaces_failed += 1
                     _log.warning(
-                        "worker.daily_digest.workspace.failed",
+                        "daily digest failed for workspace",
                         extra={
                             "event": "worker.daily_digest.workspace.failed",
                             "workspace_id": workspace_id,
@@ -149,7 +149,7 @@ def _make_daily_digest_fanout_body(clock: Clock) -> Callable[[], None]:
                 total_template_rendered += report.template_rendered
 
                 _log.info(
-                    "worker.daily_digest.workspace.tick",
+                    "daily digest ran for workspace",
                     extra={
                         "event": "worker.daily_digest.workspace.tick",
                         "workspace_id": workspace_id,
@@ -165,7 +165,7 @@ def _make_daily_digest_fanout_body(clock: Clock) -> Callable[[], None]:
                 )
 
         _log.info(
-            "worker.daily_digest.tick.summary",
+            "daily digest tick summary",
             extra={
                 "event": "worker.daily_digest.tick.summary",
                 "total_workspaces": total_workspaces,

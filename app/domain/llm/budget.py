@@ -439,8 +439,9 @@ def estimate_cost_cents(
         # ``:free`` models?" question). A WARNING per call would
         # drown the operator inbox on a deliberately-free deployment.
         _log.debug(
-            "llm.pricing.free_tier",
+            "LLM pricing used free-tier model",
             extra={
+                "event": "llm.pricing.free_tier",
                 "api_model_id": api_model_id,
                 "workspace_id": workspace_id,
             },
@@ -462,8 +463,9 @@ def estimate_cost_cents(
                 _UNKNOWN_MODEL_DEDUP.add(dedup_key)
         if seen:
             _log.debug(
-                "llm.pricing.unknown_model",
+                "LLM pricing skipped unknown model",
                 extra={
+                    "event": "llm.pricing.unknown_model",
                     "api_model_id": api_model_id,
                     "workspace_id": workspace_id,
                     "deduped": True,
@@ -471,8 +473,9 @@ def estimate_cost_cents(
             )
         else:
             _log.warning(
-                "llm.pricing.unknown_model",
+                "LLM pricing skipped unknown model",
                 extra={
+                    "event": "llm.pricing.unknown_model",
                     "api_model_id": api_model_id,
                     "workspace_id": workspace_id,
                 },
@@ -752,8 +755,9 @@ def check_budget(
         # the operator surface can flag the workspace for a manual
         # seed step.
         _log.warning(
-            "llm.budget.ledger_missing",
+            "LLM budget ledger missing",
             extra={
+                "event": "llm.budget.ledger_missing",
                 "workspace_id": ctx.workspace_id,
                 "capability": capability,
             },
@@ -967,8 +971,9 @@ def record_usage(
         # reaches this branch has bypassed :func:`check_budget` — log
         # at DEBUG so the path is traceable without alerting.
         _log.debug(
-            "llm.usage.refused_skipped",
+            "LLM usage record skipped for refusal",
             extra={
+                "event": "llm.usage.refused_skipped",
                 "workspace_id": ctx.workspace_id,
                 "capability": usage.capability,
                 "correlation_id": usage.correlation_id,
@@ -1025,8 +1030,9 @@ def record_usage(
         # their ledger bump stands, and our caller should observe
         # "already recorded".
         _log.debug(
-            "llm.usage.duplicate_ignored",
+            "LLM usage duplicate ignored",
             extra={
+                "event": "llm.usage.duplicate_ignored",
                 "workspace_id": ctx.workspace_id,
                 "capability": usage.capability,
                 "correlation_id": usage.correlation_id,
@@ -1048,8 +1054,9 @@ def record_usage(
         # the refusal path, so a non-zero usage row without a ledger
         # is the signal.
         _log.warning(
-            "llm.budget.ledger_missing_on_record",
+            "LLM budget ledger missing while recording usage",
             extra={
+                "event": "llm.budget.ledger_missing_on_record",
                 "workspace_id": ctx.workspace_id,
                 "capability": usage.capability,
                 "cost_cents": usage.cost_cents,
@@ -1100,8 +1107,9 @@ def warm_start_aggregate(
     ledger = _load_ledger_row(session, workspace_id=ctx.workspace_id)
     if ledger is None:
         _log.warning(
-            "llm.budget.ledger_missing_on_warm_start",
+            "LLM budget ledger missing during warm start",
             extra={
+                "event": "llm.budget.ledger_missing_on_warm_start",
                 "workspace_id": ctx.workspace_id,
                 "computed_cents": total,
             },
@@ -1151,8 +1159,9 @@ def refresh_aggregate(
     ledger = _load_ledger_row(session, workspace_id=ctx.workspace_id)
     if ledger is None:
         _log.warning(
-            "llm.budget.ledger_missing_on_refresh",
+            "LLM budget ledger missing during refresh",
             extra={
+                "event": "llm.budget.ledger_missing_on_refresh",
                 "workspace_id": ctx.workspace_id,
                 "computed_cents": total,
             },

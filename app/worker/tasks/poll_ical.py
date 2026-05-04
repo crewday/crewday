@@ -1006,7 +1006,7 @@ def _poll_one_feed(
         feed.last_error = "rate_limited"
         session.flush()
         _log.info(
-            "worker.poll_ical.rate_limited",
+            "iCal feed polling rate limited",
             extra={
                 "event": "worker.poll_ical.rate_limited",
                 "feed_id": feed.id,
@@ -1069,7 +1069,7 @@ def _poll_one_feed(
     session.flush()
 
     _log.info(
-        "worker.poll_ical.feed.tick",
+        "iCal feed polling tick summary",
         extra={
             "event": "worker.poll_ical.feed.tick",
             "feed_id": feed.id,

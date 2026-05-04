@@ -46,7 +46,7 @@ def _make_demo_gc_body(settings: Settings, clock: Clock) -> Callable[[], None]:
     def _body() -> None:
         report = purge_expired_demo_workspaces(settings=settings, clock=clock)
         _log.info(
-            "demo.gc.tick",
+            "demo garbage collection tick summary",
             extra={
                 "event": "demo.gc.tick",
                 "purged": report.purged,
@@ -89,7 +89,7 @@ def _make_demo_usage_rollup_body(clock: Clock) -> Callable[[], None]:
                     except Exception as exc:
                         failures += 1
                         _log.warning(
-                            "demo.usage_rollup.workspace_failed",
+                            "demo usage rollup failed for workspace",
                             extra={
                                 "event": "demo.usage_rollup.workspace_failed",
                                 "workspace_id": row.id,
@@ -99,7 +99,7 @@ def _make_demo_usage_rollup_body(clock: Clock) -> Callable[[], None]:
                 finally:
                     reset_current(token)
         _log.info(
-            "demo.usage_rollup.tick",
+            "demo usage rollup tick summary",
             extra={
                 "event": "demo.usage_rollup.tick",
                 "workspaces": attempted,

@@ -88,7 +88,7 @@ def _make_poll_ical_fanout_body(clock: Clock) -> Callable[[], None]:
             # this body return cleanly), and let the next tick retry
             # once the operator wires ``CREWDAY_ROOT_KEY``.
             _log.warning(
-                "worker.poll_ical.skipped_no_root_key",
+                "iCal polling skipped: root key unavailable",
                 extra={"event": "worker.poll_ical.skipped_no_root_key"},
             )
             return
@@ -186,7 +186,7 @@ def _make_poll_ical_fanout_body(clock: Clock) -> Callable[[], None]:
                     except Exception as exc:
                         total_workspaces_failed += 1
                         _log.warning(
-                            "worker.poll_ical.workspace.failed",
+                            "iCal polling failed for workspace",
                             extra={
                                 "event": "worker.poll_ical.workspace.failed",
                                 "workspace_id": workspace_id,
@@ -210,7 +210,7 @@ def _make_poll_ical_fanout_body(clock: Clock) -> Callable[[], None]:
                 total_closures_created += report.closures_created
 
                 _log.info(
-                    "worker.poll_ical.workspace.tick",
+                    "iCal polling ran for workspace",
                     extra={
                         "event": "worker.poll_ical.workspace.tick",
                         "workspace_id": workspace_id,
@@ -229,7 +229,7 @@ def _make_poll_ical_fanout_body(clock: Clock) -> Callable[[], None]:
                 )
 
         _log.info(
-            "worker.poll_ical.tick.summary",
+            "iCal polling tick summary",
             extra={
                 "event": "worker.poll_ical.tick.summary",
                 "total_workspaces": total_workspaces,

@@ -7,13 +7,16 @@ threading / asyncio isolation.
 
 from __future__ import annotations
 
+import ast
 import asyncio
 import io
 import json
 import logging
+import re
 import threading
 from collections.abc import Generator
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 
 import pytest
 from pydantic import SecretStr
@@ -298,6 +301,8 @@ class TestRedactionValues:
             "ops.readyz.degraded",
             "idempotency.sweep.tick",
             "chat_gateway.sweep.tick",
+            "worker.daily_digest.skipped_no_smtp",
+            "worker.agent.compaction.tick.summary",
         ],
     )
     def test_event_marker_in_extra_event_key_survives(
@@ -313,6 +318,47 @@ class TestRedactionValues:
         configured_logger.info("tick", extra={"event": marker})
         line = _lines(stream)[0]
         assert line["event"] == marker
+
+    def test_logger_messages_do_not_start_with_long_dotted_event_markers(
+        self,
+    ) -> None:
+        repo_root = Path(__file__).parents[2]
+        log_methods = {
+            "debug",
+            "info",
+            "warning",
+            "error",
+            "exception",
+            "critical",
+        }
+        dotted_marker = re.compile(
+            r"(?P<marker>[A-Za-z0-9_]+(?:\.[A-Za-z0-9_]+){2,})(?:$|[:\s])"
+        )
+        offenders: list[str] = []
+
+        for path in sorted((repo_root / "app").rglob("*.py")):
+            tree = ast.parse(path.read_text(), filename=str(path))
+            for node in ast.walk(tree):
+                if (
+                    isinstance(node, ast.Call)
+                    and isinstance(node.func, ast.Attribute)
+                    and node.func.attr in log_methods
+                    and node.args
+                ):
+                    msg = node.args[0]
+                    if not (
+                        isinstance(msg, ast.Constant) and isinstance(msg.value, str)
+                    ):
+                        continue
+                    match = dotted_marker.match(msg.value)
+                    if match is None:
+                        continue
+                    marker = match.group("marker")
+                    if any(len(segment) >= 10 for segment in marker.split(".")):
+                        rel_path = path.relative_to(repo_root)
+                        offenders.append(f"{rel_path}:{node.lineno}: {msg.value}")
+
+        assert offenders == []
 
     def test_64_char_hex_in_message(
         self, configured_logger: logging.Logger, stream: io.StringIO

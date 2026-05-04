@@ -179,7 +179,7 @@ def _make_generator_fanout_body(clock: Clock) -> Callable[[], None]:
                         # at hourly cadence.
                         total_workspaces_failed += 1
                         _log.warning(
-                            "worker.generator.workspace.failed",
+                            "task generator failed for workspace",
                             extra={
                                 "event": "worker.generator.workspace.failed",
                                 "workspace_id": workspace_id,
@@ -197,7 +197,7 @@ def _make_generator_fanout_body(clock: Clock) -> Callable[[], None]:
                 total_skipped_for_closure += report.skipped_for_closure
 
                 _log.info(
-                    "worker.generator.workspace.tick",
+                    "task generator ran for workspace",
                     extra={
                         "event": "worker.generator.workspace.tick",
                         "workspace_id": workspace_id,
@@ -210,7 +210,7 @@ def _make_generator_fanout_body(clock: Clock) -> Callable[[], None]:
                 )
 
         _log.info(
-            "worker.generator.tick.summary",
+            "task generator tick summary",
             extra={
                 "event": "worker.generator.tick.summary",
                 "total_workspaces": total_workspaces,
@@ -308,7 +308,7 @@ def _make_overdue_fanout_body(clock: Clock) -> Callable[[], None]:
                     except Exception as exc:
                         total_workspaces_failed += 1
                         _log.warning(
-                            "worker.overdue.workspace.failed",
+                            "overdue detector failed for workspace",
                             extra={
                                 "event": "worker.overdue.workspace.failed",
                                 "workspace_id": workspace_id,
@@ -324,7 +324,7 @@ def _make_overdue_fanout_body(clock: Clock) -> Callable[[], None]:
                 total_skipped_manual_transition += report.skipped_manual_transition
 
                 _log.info(
-                    "worker.overdue.workspace.tick",
+                    "overdue detector ran for workspace",
                     extra={
                         "event": "worker.overdue.workspace.tick",
                         "workspace_id": workspace_id,
@@ -336,7 +336,7 @@ def _make_overdue_fanout_body(clock: Clock) -> Callable[[], None]:
                 )
 
         _log.info(
-            "worker.overdue.tick.summary",
+            "overdue detector tick summary",
             extra={
                 "event": "worker.overdue.tick.summary",
                 "total_workspaces": total_workspaces,

@@ -209,7 +209,7 @@ def _make_llm_budget_refresh_body(clock: Clock) -> Callable[[], None]:
                         # the root cause needs deeper plumbing).
                         failures += 1
                         _log.warning(
-                            "llm.budget.refresh.workspace_failed",
+                            "LLM budget refresh failed for workspace",
                             extra={
                                 "event": "llm.budget.refresh.workspace_failed",
                                 "workspace_id": workspace_id,
@@ -226,7 +226,7 @@ def _make_llm_budget_refresh_body(clock: Clock) -> Callable[[], None]:
                     # fan-out trace stays complete without paging
                     # on a fleet of healthy tenants.
                     _log.debug(
-                        "llm.budget.refresh.no_ledger",
+                        "LLM budget refresh skipped missing ledger",
                         extra={
                             "event": "llm.budget.refresh.no_ledger",
                             "workspace_id": workspace_id,
@@ -237,7 +237,7 @@ def _make_llm_budget_refresh_body(clock: Clock) -> Callable[[], None]:
                 total_cents += result
 
         _log.info(
-            "llm.budget.refresh.tick",
+            "LLM budget refresh tick summary",
             extra={
                 "event": "llm.budget.refresh.tick",
                 "workspaces": workspaces_attempted,

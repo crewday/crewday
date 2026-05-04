@@ -426,7 +426,7 @@ class LLMClient:
                 last_error = exc
                 last_was_refusal = False
                 _log.info(
-                    "llm.client.retryable_error",
+                    "LLM client retrying after provider error",
                     extra={
                         "event": "llm.client.retryable_error",
                         "capability": capability,
@@ -494,7 +494,7 @@ class LLMClient:
                 )
                 last_was_refusal = True
                 _log.info(
-                    "llm.client.content_refusal",
+                    "LLM client retrying after content refusal",
                     extra={
                         "event": "llm.client.content_refusal",
                         "capability": capability,

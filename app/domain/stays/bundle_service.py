@@ -276,7 +276,7 @@ def register_subscriptions(
         bound = session_provider(event)
         if bound is None:
             _log.info(
-                "stays.bundle_service.no_session_for_event",
+                "stays bundle service skipped event without session",
                 extra={
                     "event": "stays.bundle_service.no_session_for_event",
                     "reservation_id": event.reservation_id,
