@@ -90,8 +90,9 @@ set -eu
 chown -R 10001:10001 /data
 
 # Alembic reads ``CREWDAY_DATABASE_URL`` via ``app.config.get_settings``
-# (see migrations/env.py) — no extra flags needed.
-su -s /bin/sh crewday -c 'cd /app && alembic upgrade head'
+# (see migrations/env.py). The wrapper serializes concurrent boot-time
+# migrations across the app and worker entrypoints.
+su -s /bin/sh crewday -c 'cd /app && python -m app.deploy.migrate'
 
 exec su -s /bin/sh crewday -c 'exec uvicorn app.main:create_app --factory --host 0.0.0.0 --port 8000 --reload --reload-dir /app/app'
 ENTRYPOINT

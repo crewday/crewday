@@ -34,7 +34,7 @@ PY
 case "$cmd" in
   serve)
     ensure_root_key
-    alembic upgrade head
+    python -m app.deploy.migrate
     exec python -m uvicorn app.main:create_app --factory \
       --host "${CREWDAY_BIND_HOST:-0.0.0.0}" \
       --port "${CREWDAY_BIND_PORT:-8000}" \
@@ -42,7 +42,7 @@ case "$cmd" in
     ;;
   worker)
     ensure_root_key
-    alembic upgrade head
+    python -m app.deploy.migrate
     exec python -m app.worker "$@"
     ;;
   admin)
