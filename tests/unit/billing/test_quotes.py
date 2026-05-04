@@ -34,6 +34,27 @@ from tests._fakes.mailer import InMemoryMailer
 
 _PINNED = datetime(2026, 4, 29, 12, 0, 0, tzinfo=UTC)
 _SIGNING_KEY = b"quote-test-signing-key-32-bytes!!"
+_LINES_JSON = {
+    "schema_version": 1,
+    "lines": [
+        {
+            "kind": "labor",
+            "description": "Diagnosis and repair",
+            "quantity": 3,
+            "unit": "hour",
+            "unit_price_cents": 6000,
+            "total_cents": 18000,
+        },
+        {
+            "kind": "material",
+            "description": "Replacement seal",
+            "quantity": 1,
+            "unit": "unit",
+            "unit_price_cents": 2400,
+            "total_cents": 2400,
+        },
+    ],
+}
 
 
 def _load_all_models() -> None:
@@ -223,6 +244,72 @@ def test_sent_quote_cannot_be_updated_and_can_be_superseded(
         original = repo.get(workspace_id=ctx.workspace_id, quote_id=quote_id)
         assert original is not None
         assert original.status == "expired"
+        assert original.superseded_by_quote_id == clone.id
+
+
+def test_quote_lines_recompute_totals_and_reject_client_mismatch(
+    factory: sessionmaker[Session],
+) -> None:
+    for s, ctx in _seeded_session(factory):
+        repo = SqlAlchemyQuoteRepository(s)
+        service = _service(ctx)
+
+        quote = service.create(
+            repo,
+            QuoteCreate(
+                organization_id=s.info["org_id"],
+                property_id=s.info["property_id"],
+                title="Pool repair quote",
+                lines_json=_LINES_JSON,
+                subtotal_cents=20400,
+                tax_cents=100,
+                total_cents=20500,
+            ),
+        )
+
+        assert quote.subtotal_cents == 20400
+        assert quote.tax_cents == 100
+        assert quote.total_cents == 20500
+        assert quote.lines_json == _LINES_JSON
+
+        bad_lines = {
+            **_LINES_JSON,
+            "lines": [{**_LINES_JSON["lines"][0], "total_cents": 17000}],
+        }
+        with pytest.raises(QuoteInvalid, match="total_cents does not match"):
+            service.create(
+                repo,
+                QuoteCreate(
+                    organization_id=s.info["org_id"],
+                    property_id=s.info["property_id"],
+                    title="Bad quote",
+                    lines_json=bad_lines,
+                    total_cents=18000,
+                ),
+            )
+
+        with pytest.raises(QuoteInvalid, match="total_cents does not match"):
+            service.update(
+                repo,
+                quote.id,
+                QuotePatch(fields={"lines_json": _LINES_JSON, "total_cents": 20401}),
+            )
+
+        non_finite_lines = {
+            **_LINES_JSON,
+            "lines": [{**_LINES_JSON["lines"][0], "quantity": "NaN"}],
+        }
+        with pytest.raises(QuoteInvalid, match="quantity must be a finite number"):
+            service.create(
+                repo,
+                QuoteCreate(
+                    organization_id=s.info["org_id"],
+                    property_id=s.info["property_id"],
+                    title="Bad quote",
+                    lines_json=non_finite_lines,
+                    total_cents=18000,
+                ),
+            )
 
 
 def test_quote_token_rejects_expired_and_tampered(
@@ -367,9 +454,13 @@ def test_public_get_validates_token_workspace(
                 property_id=row.property_id,
                 title=row.title,
                 body_md=row.body_md,
+                lines_json=row.lines_json,
+                subtotal_cents=row.subtotal_cents,
+                tax_cents=row.tax_cents,
                 total_cents=row.total_cents,
                 currency=row.currency,
                 status=row.status,
+                superseded_by_quote_id=row.superseded_by_quote_id,
                 sent_at=row.sent_at,
                 decided_at=row.decided_at,
             ),

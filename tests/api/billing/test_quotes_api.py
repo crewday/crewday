@@ -31,6 +31,27 @@ from app.util.ulid import new_ulid
 from tests._fakes.mailer import InMemoryMailer
 
 _PINNED = datetime(2026, 4, 29, 12, 0, 0, tzinfo=UTC)
+_LINES_JSON = {
+    "schema_version": 1,
+    "lines": [
+        {
+            "kind": "labor",
+            "description": "Diagnosis and repair",
+            "quantity": 3,
+            "unit": "hour",
+            "unit_price_cents": 6000,
+            "total_cents": 18000,
+        },
+        {
+            "kind": "travel",
+            "description": "Call-out fee",
+            "quantity": 1,
+            "unit": "unit",
+            "unit_price_cents": 3500,
+            "total_cents": 3500,
+        },
+    ],
+}
 
 
 def _load_all_models() -> None:
@@ -254,11 +275,20 @@ def test_quote_create_send_lock_and_public_accept_without_session(
             "property_id": property_id,
             "title": "Pool repair quote",
             "body_md": "Parts and labour.",
-            "total_cents": 12500,
+            "lines_json": _LINES_JSON,
+            "subtotal_cents": 21500,
+            "tax_cents": 500,
+            "total_cents": 22000,
         },
     )
     assert created.status_code == 201
-    quote_id = created.json()["id"]
+    created_body = created.json()
+    quote_id = created_body["id"]
+    assert created_body["lines_json"] == _LINES_JSON
+    assert created_body["subtotal_cents"] == 21500
+    assert created_body["tax_cents"] == 500
+    assert created_body["total_cents"] == 22000
+    assert created_body["superseded_by_quote_id"] is None
 
     sent = authed.post(f"/billing/quotes/{quote_id}/send", json={})
     assert sent.status_code == 200
@@ -278,6 +308,79 @@ def test_quote_create_send_lock_and_public_accept_without_session(
     accepted = public.post(f"/q/{quote_id}/accept", params={"token": token})
     assert accepted.status_code == 200
     assert accepted.json()["status"] == "accepted"
+
+
+def test_quote_api_rejects_line_total_mismatch_and_exposes_supersession(
+    factory: sessionmaker[Session],
+    mailer: InMemoryMailer,
+) -> None:
+    with factory() as s:
+        workspace_id, manager_id, org_id, property_id = _bootstrap(s)
+        s.commit()
+    authed = TestClient(
+        _authed_app(factory, _ctx(workspace_id, manager_id), mailer),
+        raise_server_exceptions=False,
+    )
+    mismatch = {
+        **_LINES_JSON,
+        "lines": [{**_LINES_JSON["lines"][0], "total_cents": 17999}],
+    }
+    rejected = authed.post(
+        "/billing/quotes",
+        json={
+            "organization_id": org_id,
+            "property_id": property_id,
+            "title": "Bad quote",
+            "lines_json": mismatch,
+            "total_cents": 18000,
+        },
+    )
+    assert rejected.status_code == 422
+    assert rejected.json()["detail"]["error"] == "quote_invalid"
+
+    non_finite = {
+        **_LINES_JSON,
+        "lines": [{**_LINES_JSON["lines"][0], "quantity": "NaN"}],
+    }
+    rejected_non_finite = authed.post(
+        "/billing/quotes",
+        json={
+            "organization_id": org_id,
+            "property_id": property_id,
+            "title": "Bad quote",
+            "lines_json": non_finite,
+            "total_cents": 18000,
+        },
+    )
+    assert rejected_non_finite.status_code == 422
+    assert rejected_non_finite.json()["detail"]["error"] == "quote_invalid"
+
+    created = authed.post(
+        "/billing/quotes",
+        json={
+            "organization_id": org_id,
+            "property_id": property_id,
+            "title": "Pool repair quote",
+            "total_cents": 12500,
+        },
+    )
+    assert created.status_code == 201
+    quote_id = created.json()["id"]
+    authed.post(f"/billing/quotes/{quote_id}/send", json={})
+
+    clone = authed.post(
+        f"/billing/quotes/{quote_id}/supersede",
+        json={"lines_json": _LINES_JSON, "subtotal_cents": 21500, "total_cents": 21500},
+    )
+    assert clone.status_code == 201
+    clone_body = clone.json()
+    assert clone_body["status"] == "draft"
+    assert clone_body["lines_json"] == _LINES_JSON
+
+    original = authed.get(f"/billing/quotes/{quote_id}")
+    assert original.status_code == 200
+    assert original.json()["status"] == "expired"
+    assert original.json()["superseded_by_quote_id"] == clone_body["id"]
 
 
 def test_public_quote_rejects_tampered_token(factory: sessionmaker[Session]) -> None:

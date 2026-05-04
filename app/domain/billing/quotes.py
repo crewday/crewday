@@ -9,8 +9,9 @@ import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from decimal import Decimal, InvalidOperation
 from html import escape
-from typing import Literal, Protocol
+from typing import Literal, Protocol, TypedDict
 
 from jinja2 import Template
 from sqlalchemy.orm import Session
@@ -28,6 +29,9 @@ __all__ = [
     "QuoteCreate",
     "QuoteDecision",
     "QuoteInvalid",
+    "QuoteLine",
+    "QuoteLinesJson",
+    "QuoteMoney",
     "QuoteNotFound",
     "QuotePatch",
     "QuoteRepository",
@@ -38,10 +42,41 @@ __all__ = [
 ]
 
 _MUTABLE_FIELDS = frozenset(
-    {"organization_id", "property_id", "title", "body_md", "total_cents", "currency"}
+    {
+        "organization_id",
+        "property_id",
+        "title",
+        "body_md",
+        "lines_json",
+        "subtotal_cents",
+        "tax_cents",
+        "total_cents",
+        "currency",
+    }
 )
 _TOKEN_TTL = timedelta(days=30)
 _TOKEN_VERSION = 1
+
+
+class QuoteLine(TypedDict):
+    kind: str
+    description: str
+    quantity: int | float | str
+    unit: str
+    unit_price_cents: int
+    total_cents: int
+
+
+class QuoteLinesJson(TypedDict):
+    schema_version: int
+    lines: list[QuoteLine]
+
+
+class QuoteMoney(TypedDict):
+    lines_json: QuoteLinesJson
+    subtotal_cents: int
+    tax_cents: int
+    total_cents: int
 
 
 class QuoteInvalid(ValueError):
@@ -64,9 +99,13 @@ class QuoteRow:
     property_id: str
     title: str
     body_md: str
+    lines_json: QuoteLinesJson
+    subtotal_cents: int
+    tax_cents: int
     total_cents: int
     currency: str
     status: str
+    superseded_by_quote_id: str | None
     sent_at: datetime | None
     decided_at: datetime | None
 
@@ -79,9 +118,13 @@ class QuoteView:
     property_id: str
     title: str
     body_md: str
+    lines_json: QuoteLinesJson
+    subtotal_cents: int
+    tax_cents: int
     total_cents: int
     currency: str
     status: str
+    superseded_by_quote_id: str | None
     sent_at: datetime | None
     decided_at: datetime | None
 
@@ -92,6 +135,9 @@ class QuoteCreate:
     property_id: str
     title: str
     body_md: str = ""
+    lines_json: Mapping[str, object] | None = None
+    subtotal_cents: int | None = None
+    tax_cents: int = 0
     total_cents: int = 0
     currency: str | None = None
 
@@ -125,9 +171,13 @@ class QuoteRepository(Protocol):
         property_id: str,
         title: str,
         body_md: str,
+        lines_json: QuoteLinesJson,
+        subtotal_cents: int,
+        tax_cents: int,
         total_cents: int,
         currency: str,
         status: str,
+        superseded_by_quote_id: str | None = None,
     ) -> QuoteRow: ...
 
     def get(
@@ -174,6 +224,14 @@ class QuoteService:
 
     def create(self, repo: QuoteRepository, body: QuoteCreate) -> QuoteView:
         currency = self._currency_or_workspace_default(repo, body.currency)
+        title = _clean_required(body.title, field="title")
+        money = _normalize_money(
+            lines_json=body.lines_json,
+            subtotal_cents=body.subtotal_cents,
+            tax_cents=body.tax_cents,
+            total_cents=body.total_cents,
+            fallback_title=title,
+        )
         row = repo.insert(
             quote_id=new_ulid(),
             workspace_id=self._ctx.workspace_id,
@@ -181,9 +239,12 @@ class QuoteService:
                 body.organization_id, field="organization_id"
             ),
             property_id=_clean_required(body.property_id, field="property_id"),
-            title=_clean_required(body.title, field="title"),
+            title=title,
             body_md=_clean_optional(body.body_md) or "",
-            total_cents=_clean_total(body.total_cents),
+            lines_json=money["lines_json"],
+            subtotal_cents=money["subtotal_cents"],
+            tax_cents=money["tax_cents"],
+            total_cents=money["total_cents"],
             currency=currency,
             status="draft",
         )
@@ -231,7 +292,7 @@ class QuoteService:
         current = self._get(repo, quote_id, for_update=True)
         if current.status != "draft":
             raise QuoteInvalid("sent quotes are locked; supersede instead")
-        fields = self._normalize_patch(repo, patch)
+        fields = self._normalize_patch(repo, patch, base=current)
         changed = {
             key: value
             for key, value in fields.items()
@@ -320,10 +381,20 @@ class QuoteService:
         self, repo: QuoteRepository, quote_id: str, patch: QuotePatch | None = None
     ) -> QuoteView:
         current = self._get(repo, quote_id, for_update=True)
-        fields = self._normalize_patch(repo, patch or QuotePatch(fields={}))
-        total_cents = fields.get("total_cents", current.total_cents)
-        if not isinstance(total_cents, int):
-            raise QuoteInvalid("total_cents must be an integer")
+        fields = self._normalize_patch(
+            repo, patch or QuotePatch(fields={}), base=current
+        )
+        clone_lines = _as_lines_json(fields.get("lines_json", current.lines_json))
+        clone_subtotal = _required_int(
+            fields.get("subtotal_cents", current.subtotal_cents),
+            field="subtotal_cents",
+        )
+        clone_tax = _required_int(
+            fields.get("tax_cents", current.tax_cents), field="tax_cents"
+        )
+        clone_total = _required_int(
+            fields.get("total_cents", current.total_cents), field="total_cents"
+        )
         clone = repo.insert(
             quote_id=new_ulid(),
             workspace_id=self._ctx.workspace_id,
@@ -331,14 +402,17 @@ class QuoteService:
             property_id=str(fields.get("property_id", current.property_id)),
             title=str(fields.get("title", current.title)),
             body_md=str(fields.get("body_md", current.body_md)),
-            total_cents=total_cents,
+            lines_json=clone_lines,
+            subtotal_cents=clone_subtotal,
+            tax_cents=clone_tax,
+            total_cents=clone_total,
             currency=str(fields.get("currency", current.currency)),
             status="draft",
         )
         repo.update_fields(
             workspace_id=self._ctx.workspace_id,
             quote_id=current.id,
-            fields={"status": "expired"},
+            fields={"status": "expired", "superseded_by_quote_id": clone.id},
         )
         view = _to_view(clone)
         write_audit(
@@ -533,12 +607,14 @@ class QuoteService:
         return row
 
     def _normalize_patch(
-        self, repo: QuoteRepository, patch: QuotePatch
+        self, repo: QuoteRepository, patch: QuotePatch, *, base: QuoteRow | None = None
     ) -> dict[str, object]:
+        del repo
         unknown = sorted(set(patch.fields) - _MUTABLE_FIELDS)
         if unknown:
             raise QuoteInvalid(f"unknown quote fields: {', '.join(unknown)}")
         fields: dict[str, object] = {}
+        money_input: dict[str, object | None] = {}
         for key, value in patch.fields.items():
             if key in {"organization_id", "property_id", "title"}:
                 if not isinstance(value, str):
@@ -548,14 +624,46 @@ class QuoteService:
                 if value is not None and not isinstance(value, str):
                     raise QuoteInvalid("body_md must be a string or null")
                 fields[key] = _clean_optional(value) or ""
-            elif key == "total_cents":
-                if not isinstance(value, int):
-                    raise QuoteInvalid("total_cents must be an integer")
-                fields[key] = _clean_total(value)
+            elif key in {"lines_json", "subtotal_cents", "tax_cents", "total_cents"}:
+                money_input[key] = value
             elif key == "currency":
                 if not isinstance(value, str):
                     raise QuoteInvalid("currency must be a string")
                 fields[key] = _validate_currency(value)
+        if money_input:
+            fallback_title = str(fields.get("title", base.title if base else "Quote"))
+            patch_replaces_total_only = (
+                "total_cents" in money_input
+                and "lines_json" not in money_input
+                and "subtotal_cents" not in money_input
+            )
+            lines_value = (
+                None
+                if patch_replaces_total_only
+                else money_input.get(
+                    "lines_json", base.lines_json if base is not None else None
+                )
+            )
+            money = _normalize_money(
+                lines_json=lines_value,
+                subtotal_cents=_optional_int(
+                    money_input.get(
+                        "subtotal_cents",
+                        base.subtotal_cents if base is not None else None,
+                    ),
+                    field="subtotal_cents",
+                ),
+                tax_cents=_required_int(
+                    money_input.get("tax_cents", base.tax_cents if base else 0),
+                    field="tax_cents",
+                ),
+                total_cents=_required_int(
+                    money_input.get("total_cents", base.total_cents if base else 0),
+                    field="total_cents",
+                ),
+                fallback_title=fallback_title,
+            )
+            fields.update(money)
         return fields
 
     def _currency_or_workspace_default(
@@ -574,6 +682,167 @@ class QuoteService:
         if self._signing_key is None:
             raise QuoteInvalid("quote signing key is not configured")
         return self._signing_key
+
+
+def _required_int(value: object, *, field: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise QuoteInvalid(f"{field} must be an integer")
+    return value
+
+
+def _optional_int(value: object | None, *, field: str) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise QuoteInvalid(f"{field} must be an integer")
+    return value
+
+
+def _normalize_money(
+    *,
+    lines_json: object | None,
+    subtotal_cents: int | None,
+    tax_cents: int,
+    total_cents: int,
+    fallback_title: str,
+) -> QuoteMoney:
+    clean_tax = _clean_nonnegative_int(tax_cents, field="tax_cents")
+    if lines_json is None:
+        clean_total = _clean_nonnegative_int(total_cents, field="total_cents")
+        clean_subtotal = clean_total - clean_tax
+        if clean_subtotal < 0:
+            raise QuoteInvalid("tax_cents cannot exceed total_cents")
+        if subtotal_cents is not None and subtotal_cents != clean_subtotal:
+            raise QuoteInvalid("subtotal_cents does not match total_cents - tax_cents")
+        payload = _single_line_payload(
+            title=fallback_title,
+            subtotal_cents=clean_subtotal,
+        )
+    else:
+        payload, clean_subtotal = _normalize_lines_json(lines_json)
+        if subtotal_cents is not None and subtotal_cents != clean_subtotal:
+            raise QuoteInvalid("subtotal_cents does not match quote lines")
+        expected_total = clean_subtotal + clean_tax
+        if total_cents != expected_total:
+            raise QuoteInvalid("total_cents does not match quote lines and tax_cents")
+        clean_total = expected_total
+    return {
+        "lines_json": payload,
+        "subtotal_cents": clean_subtotal,
+        "tax_cents": clean_tax,
+        "total_cents": clean_total,
+    }
+
+
+def _normalize_lines_json(value: object) -> tuple[QuoteLinesJson, int]:
+    if not isinstance(value, Mapping):
+        raise QuoteInvalid("lines_json must be an object")
+    if value.get("schema_version") != 1:
+        raise QuoteInvalid("lines_json.schema_version must be 1")
+    lines = value.get("lines")
+    if not isinstance(lines, Sequence) or isinstance(lines, (str, bytes)):
+        raise QuoteInvalid("lines_json.lines must be a list")
+    if not lines:
+        raise QuoteInvalid("lines_json.lines must include at least one line")
+    clean_lines: list[QuoteLine] = []
+    subtotal = 0
+    for index, raw_line in enumerate(lines):
+        line = _normalize_line(raw_line, index=index)
+        clean_lines.append(line)
+        subtotal += line["total_cents"]
+    return {"schema_version": 1, "lines": clean_lines}, subtotal
+
+
+def _normalize_line(value: object, *, index: int) -> QuoteLine:
+    if not isinstance(value, Mapping):
+        raise QuoteInvalid(f"lines_json.lines[{index}] must be an object")
+    kind = _clean_line_string(value.get("kind"), field=f"lines[{index}].kind")
+    description = _clean_line_string(
+        value.get("description"), field=f"lines[{index}].description"
+    )
+    unit = _clean_line_string(value.get("unit"), field=f"lines[{index}].unit")
+    unit_price_cents = _clean_nonnegative_int(
+        value.get("unit_price_cents"), field=f"lines[{index}].unit_price_cents"
+    )
+    quantity = _clean_quantity(value.get("quantity"), field=f"lines[{index}].quantity")
+    total_cents = _clean_nonnegative_int(
+        value.get("total_cents"), field=f"lines[{index}].total_cents"
+    )
+    computed_total = _line_total_cents(quantity, unit_price_cents)
+    if total_cents != computed_total:
+        raise QuoteInvalid(
+            f"lines[{index}].total_cents does not match quantity * unit_price_cents"
+        )
+    return {
+        "kind": kind,
+        "description": description,
+        "quantity": _json_quantity(quantity),
+        "unit": unit,
+        "unit_price_cents": unit_price_cents,
+        "total_cents": computed_total,
+    }
+
+
+def _clean_line_string(value: object, *, field: str) -> str:
+    if not isinstance(value, str):
+        raise QuoteInvalid(f"{field} must be a string")
+    return _clean_required(value, field=field)
+
+
+def _clean_quantity(value: object, *, field: str) -> Decimal:
+    if isinstance(value, bool) or value is None:
+        raise QuoteInvalid(f"{field} must be a positive number")
+    try:
+        quantity = Decimal(str(value))
+    except (InvalidOperation, ValueError) as exc:
+        raise QuoteInvalid(f"{field} must be a positive number") from exc
+    if not quantity.is_finite():
+        raise QuoteInvalid(f"{field} must be a finite number")
+    if quantity <= 0:
+        raise QuoteInvalid(f"{field} must be positive")
+    return quantity
+
+
+def _line_total_cents(quantity: Decimal, unit_price_cents: int) -> int:
+    total = quantity * Decimal(unit_price_cents)
+    if total != total.to_integral_value():
+        raise QuoteInvalid("line total must resolve to whole cents")
+    return int(total)
+
+
+def _json_quantity(quantity: Decimal) -> int | float | str:
+    if quantity == quantity.to_integral_value():
+        return int(quantity)
+    return format(quantity.normalize(), "f")
+
+
+def _single_line_payload(*, title: str, subtotal_cents: int) -> QuoteLinesJson:
+    return {
+        "schema_version": 1,
+        "lines": [
+            {
+                "kind": "other",
+                "description": title,
+                "quantity": 1,
+                "unit": "unit",
+                "unit_price_cents": subtotal_cents,
+                "total_cents": subtotal_cents,
+            }
+        ],
+    }
+
+
+def _clean_nonnegative_int(value: object, *, field: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise QuoteInvalid(f"{field} must be an integer")
+    if value < 0:
+        raise QuoteInvalid(f"{field} must be non-negative")
+    return value
+
+
+def _as_lines_json(value: object) -> QuoteLinesJson:
+    payload, _subtotal = _normalize_lines_json(value)
+    return payload
 
 
 def _render_send_message(row: QuoteRow, *, url: str) -> dict[str, str]:
@@ -641,12 +910,6 @@ def _clean_optional(value: str | None) -> str | None:
     return clean or None
 
 
-def _clean_total(value: int) -> int:
-    if value < 0:
-        raise QuoteInvalid("total_cents must be non-negative")
-    return value
-
-
 def _to_view(row: QuoteRow) -> QuoteView:
     return QuoteView(
         id=row.id,
@@ -655,9 +918,13 @@ def _to_view(row: QuoteRow) -> QuoteView:
         property_id=row.property_id,
         title=row.title,
         body_md=row.body_md,
+        lines_json=row.lines_json,
+        subtotal_cents=row.subtotal_cents,
+        tax_cents=row.tax_cents,
         total_cents=row.total_cents,
         currency=row.currency,
         status=row.status,
+        superseded_by_quote_id=row.superseded_by_quote_id,
         sent_at=row.sent_at,
         decided_at=row.decided_at,
     )
@@ -670,9 +937,13 @@ def _audit_shape(view: QuoteView) -> dict[str, object]:
         "organization_id": view.organization_id,
         "property_id": view.property_id,
         "title": view.title,
+        "lines_json": view.lines_json,
+        "subtotal_cents": view.subtotal_cents,
+        "tax_cents": view.tax_cents,
         "total_cents": view.total_cents,
         "currency": view.currency,
         "status": view.status,
+        "superseded_by_quote_id": view.superseded_by_quote_id,
         "sent_at": view.sent_at.isoformat() if view.sent_at is not None else None,
         "decided_at": (
             view.decided_at.isoformat() if view.decided_at is not None else None

@@ -37,7 +37,13 @@ from app.domain.billing.organizations import (
     OrganizationRepository,
     OrganizationRow,
 )
-from app.domain.billing.quotes import QuoteInvalid, QuoteRepository, QuoteRow
+from app.domain.billing.quotes import (
+    QuoteInvalid,
+    QuoteLine,
+    QuoteLinesJson,
+    QuoteRepository,
+    QuoteRow,
+)
 from app.domain.billing.rate_cards import (
     RateCardInvalid,
     RateCardOrganizationRow,
@@ -536,12 +542,44 @@ def _to_quote_row(row: Quote) -> QuoteRow:
         property_id=row.property_id,
         title=row.title,
         body_md=row.body_md,
+        lines_json=_quote_lines_json(row.lines_json),
+        subtotal_cents=row.subtotal_cents,
+        tax_cents=row.tax_cents,
         total_cents=row.total_cents,
         currency=row.currency,
         status=row.status,
+        superseded_by_quote_id=row.superseded_by_quote_id,
         sent_at=_as_utc_optional(row.sent_at),
         decided_at=_as_utc_optional(row.decided_at),
     )
+
+
+def _quote_lines_json(value: Mapping[str, object]) -> QuoteLinesJson:
+    schema_version = value.get("schema_version")
+    lines = value.get("lines")
+    if schema_version != 1 or not isinstance(lines, list):
+        raise ValueError("quote.lines_json must be a v1 line payload")
+    clean_lines: list[QuoteLine] = []
+    for raw_line in lines:
+        if not isinstance(raw_line, Mapping):
+            raise ValueError("quote.lines_json lines must be objects")
+        clean_lines.append(
+            QuoteLine(
+                kind=str(raw_line["kind"]),
+                description=str(raw_line["description"]),
+                quantity=_quote_line_quantity(raw_line["quantity"]),
+                unit=str(raw_line["unit"]),
+                unit_price_cents=int(raw_line["unit_price_cents"]),
+                total_cents=int(raw_line["total_cents"]),
+            )
+        )
+    return {"schema_version": 1, "lines": clean_lines}
+
+
+def _quote_line_quantity(value: object) -> int | float | str:
+    if isinstance(value, int | float | str):
+        return value
+    return str(value)
 
 
 def _to_rate_card_organization_row(row: Organization) -> RateCardOrganizationRow:
@@ -1028,9 +1066,13 @@ class SqlAlchemyQuoteRepository(QuoteRepository):
         property_id: str,
         title: str,
         body_md: str,
+        lines_json: QuoteLinesJson,
+        subtotal_cents: int,
+        tax_cents: int,
         total_cents: int,
         currency: str,
         status: str,
+        superseded_by_quote_id: str | None = None,
     ) -> QuoteRow:
         row = Quote(
             id=quote_id,
@@ -1039,9 +1081,13 @@ class SqlAlchemyQuoteRepository(QuoteRepository):
             property_id=property_id,
             title=title,
             body_md=body_md,
+            lines_json=lines_json,
+            subtotal_cents=subtotal_cents,
+            tax_cents=tax_cents,
             total_cents=total_cents,
             currency=currency,
             status=status,
+            superseded_by_quote_id=superseded_by_quote_id,
         )
         try:
             with self._session.begin_nested():

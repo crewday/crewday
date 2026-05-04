@@ -294,9 +294,17 @@ class Quote(Base):
     property_id: Mapped[str] = mapped_column(String, nullable=False)
     title: Mapped[str] = mapped_column(String, nullable=False)
     body_md: Mapped[str] = mapped_column(String, nullable=False, default="")
+    lines_json: Mapped[dict[str, Any]] = mapped_column(
+        JSON, nullable=False, default=dict
+    )
+    subtotal_cents: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    tax_cents: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
     total_cents: Mapped[int] = mapped_column(BigInteger, nullable=False)
     currency: Mapped[str] = mapped_column(String, nullable=False)
     status: Mapped[str] = mapped_column(String, nullable=False)
+    superseded_by_quote_id: Mapped[str | None] = mapped_column(
+        String, ForeignKey("quote.id", ondelete="SET NULL"), nullable=True
+    )
     sent_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), nullable=True)
     decided_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), nullable=True)
 
@@ -306,6 +314,8 @@ class Quote(Base):
             name="status",
         ),
         CheckConstraint("LENGTH(currency) = 3", name="currency_length"),
+        CheckConstraint("subtotal_cents >= 0", name="subtotal_cents_nonneg"),
+        CheckConstraint("tax_cents >= 0", name="tax_cents_nonneg"),
         CheckConstraint("total_cents >= 0", name="total_cents_nonneg"),
         ForeignKeyConstraint(
             ["organization_id", "workspace_id"],

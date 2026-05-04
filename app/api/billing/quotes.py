@@ -43,6 +43,24 @@ _Db = Annotated[Session, Depends(db_session)]
 _Settings = Annotated[Settings, Depends(get_settings)]
 
 
+class QuoteLinePayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    kind: str = Field(min_length=1, max_length=64)
+    description: str = Field(min_length=1, max_length=500)
+    quantity: int | float | str
+    unit: str = Field(min_length=1, max_length=64)
+    unit_price_cents: int = Field(ge=0)
+    total_cents: int = Field(ge=0)
+
+
+class QuoteLinesPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal[1]
+    lines: list[QuoteLinePayload] = Field(min_length=1)
+
+
 class QuoteResponse(BaseModel):
     id: str
     workspace_id: str
@@ -50,9 +68,13 @@ class QuoteResponse(BaseModel):
     property_id: str
     title: str
     body_md: str
+    lines_json: QuoteLinesPayload
+    subtotal_cents: int
+    tax_cents: int
     total_cents: int
     currency: str
     status: str
+    superseded_by_quote_id: str | None
     sent_at: datetime | None
     decided_at: datetime | None
 
@@ -65,9 +87,13 @@ class QuoteResponse(BaseModel):
             property_id=view.property_id,
             title=view.title,
             body_md=view.body_md,
+            lines_json=QuoteLinesPayload.model_validate(view.lines_json),
+            subtotal_cents=view.subtotal_cents,
+            tax_cents=view.tax_cents,
             total_cents=view.total_cents,
             currency=view.currency,
             status=view.status,
+            superseded_by_quote_id=view.superseded_by_quote_id,
             sent_at=view.sent_at,
             decided_at=view.decided_at,
         )
@@ -84,6 +110,9 @@ class QuoteCreateRequest(BaseModel):
     property_id: str = Field(min_length=1, max_length=64)
     title: str = Field(min_length=1, max_length=200)
     body_md: str = ""
+    lines_json: QuoteLinesPayload | None = None
+    subtotal_cents: int | None = Field(default=None, ge=0)
+    tax_cents: int = Field(default=0, ge=0)
     total_cents: int = Field(ge=0)
     currency: str | None = Field(default=None, min_length=3, max_length=3)
 
@@ -93,6 +122,13 @@ class QuoteCreateRequest(BaseModel):
             property_id=self.property_id,
             title=self.title,
             body_md=self.body_md,
+            lines_json=(
+                self.lines_json.model_dump(mode="json")
+                if self.lines_json is not None
+                else None
+            ),
+            subtotal_cents=self.subtotal_cents,
+            tax_cents=self.tax_cents,
             total_cents=self.total_cents,
             currency=self.currency,
         )
@@ -105,6 +141,9 @@ class QuotePatchRequest(BaseModel):
     property_id: str | None = Field(default=None, min_length=1, max_length=64)
     title: str | None = Field(default=None, min_length=1, max_length=200)
     body_md: str | None = None
+    lines_json: QuoteLinesPayload | None = None
+    subtotal_cents: int | None = Field(default=None, ge=0)
+    tax_cents: int | None = Field(default=None, ge=0)
     total_cents: int | None = Field(default=None, ge=0)
     currency: str | None = Field(default=None, min_length=3, max_length=3)
 
@@ -117,7 +156,11 @@ class QuotePatchRequest(BaseModel):
     def to_domain(self) -> QuotePatch:
         fields: dict[str, object | None] = {}
         for field in self.model_fields_set:
-            fields[field] = getattr(self, field)
+            value = getattr(self, field)
+            if isinstance(value, QuoteLinesPayload):
+                fields[field] = value.model_dump(mode="json")
+            else:
+                fields[field] = value
         return QuotePatch(fields=fields)
 
 
