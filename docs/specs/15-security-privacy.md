@@ -166,8 +166,13 @@ submit).
 
 ### Secret envelope
 
-A per-workspace AES-256-GCM key, itself encrypted by the host's
-**root key** (`CREWDAY_ROOT_KEY`, 32 bytes base64). The root key is:
+Secrets are encrypted with AES-256-GCM under 32-byte subkeys derived
+from the host **root key** (`CREWDAY_ROOT_KEY`, 32 bytes base64).
+`app/adapters/storage/envelope.py` derives each subkey with
+HKDF-Expand, using a namespaced envelope `purpose` as the `info`
+label; the design stores no intermediate AES key. The §02
+`secret_envelope` row shape defines the persisted columns. The root key
+is:
 
 - **Single-container:** read from env on start-up, never written to
   disk.
