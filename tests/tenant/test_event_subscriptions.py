@@ -33,7 +33,7 @@ from __future__ import annotations
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
-from typing import Literal, get_args, get_origin
+from typing import ClassVar, Literal, get_args, get_origin
 
 import pytest
 
@@ -108,9 +108,10 @@ def _sentinel_value_for(field_name: str, annotation: object) -> object:
     (``mentioned_user_ids`` on
     :class:`~app.events.types.TaskCommentAdded`), one
     ``tuple[str, ...]`` field (``changed_fields`` on
-    :class:`~app.events.types.TaskUpdated`), and a small set of
-    free-text strings guarded by a publish-time validator (``reason``
-    on :class:`~app.events.types.TaskUnassigned` /
+    :class:`~app.events.types.TaskUpdated`), dict payload envelopes
+    (``payload`` on :class:`~app.events.types.DeploymentAdminSSEEvent`),
+    and a small set of free-text strings guarded by a publish-time
+    validator (``reason`` on :class:`~app.events.types.TaskUnassigned` /
     :class:`~app.events.types.TaskSkipped` /
     :class:`~app.events.types.TaskCancelled`).
 
@@ -138,8 +139,9 @@ def _sentinel_value_for(field_name: str, annotation: object) -> object:
       a member that satisfies the constraint;
     * a new collection / nested model needs its own branch — the
       ULID fallback won't satisfy ``list[...]`` / ``tuple[...]`` /
-      submodel parsers (witness: the ``mentioned_user_ids`` and
-      ``changed_fields`` branches below).
+      ``dict[...]`` / submodel parsers (witness: the
+      ``mentioned_user_ids`` / ``changed_fields`` / ``payload``
+      branches below).
 
     Each branch carries the publishing event class in its comment so
     the next coder can verify the chosen sentinel matches the
@@ -233,6 +235,8 @@ def _sentinel_value_for(field_name: str, annotation: object) -> object:
         return ()
     if get_origin(annotation) is tuple:
         return ()
+    if annotation is dict or get_origin(annotation) is dict:
+        return {}
     # Default: a ULID-shaped string — satisfies every ``*_id`` field
     # in the registry today (``task_id``, ``shift_id``, ``user_id``,
     # ``stay_id``, ``expense_id``, ``assigned_to``, ``completed_by``,
@@ -290,6 +294,32 @@ def isolated_bus() -> Iterator[EventBus]:
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
+
+
+class TestEventPayloadBuilder:
+    """Focused regression checks for the generic event payload builder."""
+
+    @pytest.mark.parametrize("annotation", [dict, dict[str, object]])
+    def test_sentinel_value_for_dict_annotations(self, annotation: object) -> None:
+        assert _sentinel_value_for("payload", annotation) == {}
+
+    def test_build_event_handles_future_dict_payload_fields(
+        self,
+        tenant_a: TenantSeed,
+    ) -> None:
+        class FutureDictPayloadEvent(Event):
+            name: ClassVar[str] = "test.future_dict_payload"
+
+            payload: dict[str, object]
+
+        event = _build_event(
+            FutureDictPayloadEvent,
+            workspace_id=tenant_a.workspace_id,
+            actor_id=tenant_a.owner_user_id,
+        )
+
+        assert isinstance(event, FutureDictPayloadEvent)
+        assert event.payload == {}
 
 
 class TestEventCrossDelivery:
