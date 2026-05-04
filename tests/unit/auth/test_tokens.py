@@ -33,7 +33,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from app.adapters.db.audit.models import AuditLog
 from app.adapters.db.authz.models import RoleGrant
 from app.adapters.db.base import Base
-from app.adapters.db.identity.models import ApiToken
+from app.adapters.db.identity.models import ApiToken, ApiTokenRequestLog
 from app.adapters.db.session import make_engine
 from app.adapters.db.workspace.models import Workspace
 from app.auth.audit import AGNOSTIC_WORKSPACE_ID
@@ -56,9 +56,11 @@ from app.auth.tokens import (
     list_personal_tokens,
     list_tokens,
     mint,
+    record_request_audit,
     revoke,
     revoke_personal,
     rotate,
+    truncate_ip_prefix,
     verify,
 )
 from app.tenancy import WorkspaceContext, tenant_agnostic
@@ -1153,6 +1155,73 @@ class TestListAudit:
         assert "api_token.rotated" in actions
         assert actions[-1] == "api_token.minted"
 
+    def test_interleaves_request_rows_with_lifecycle_rows(
+        self, db_session: Session, ctx: WorkspaceContext
+    ) -> None:
+        original = mint(
+            db_session,
+            ctx,
+            user_id=ctx.actor_id,
+            label="audit-request",
+            scopes={},
+            expires_at=_PINNED + timedelta(days=90),
+            now=_PINNED,
+        )
+        minted_audit = db_session.scalars(
+            select(AuditLog)
+            .where(AuditLog.action == "api_token.minted")
+            .where(AuditLog.entity_id == original.key_id)
+        ).one()
+        minted_audit.created_at = _PINNED
+        record_request_audit(
+            db_session,
+            token_id=original.key_id,
+            method="get",
+            path="/w/ws-tokens/api/v1/tasks",
+            status=200,
+            ip_prefix=truncate_ip_prefix("203.0.113.42"),
+            user_agent="agent/1.0",
+            correlation_id="req-a",
+            at=_PINNED + timedelta(minutes=30),
+        )
+        rotate(
+            db_session, ctx, token_id=original.key_id, now=_PINNED + timedelta(hours=1)
+        )
+        rotated_audit = db_session.scalars(
+            select(AuditLog)
+            .where(AuditLog.action == "api_token.rotated")
+            .where(AuditLog.entity_id == original.key_id)
+        ).one()
+        rotated_audit.created_at = _PINNED + timedelta(hours=1)
+        record_request_audit(
+            db_session,
+            token_id=original.key_id,
+            method="POST",
+            path="/w/ws-tokens/api/v1/tasks/" + ("x" * 300),
+            status=201,
+            ip_prefix=truncate_ip_prefix("2001:db8:abcd:12:3456::1"),
+            user_agent=None,
+            correlation_id="req-b",
+            at=_PINNED + timedelta(hours=2),
+        )
+
+        entries = list_audit(db_session, ctx, token_id=original.key_id)
+
+        assert [e.action for e in entries[:4]] == [
+            "api_token.request",
+            "api_token.rotated",
+            "api_token.request",
+            "api_token.minted",
+        ]
+        request = entries[0]
+        assert request.method == "POST"
+        assert request.path is not None
+        assert len(request.path) == 256
+        assert request.status == 201
+        assert request.ip_prefix == "2001:db8:abcd:12::/64"
+        assert request.user_agent is None
+        assert request.correlation_id == "req-b"
+
     def test_cross_workspace_returns_empty(
         self,
         db_session: Session,
@@ -1166,6 +1235,17 @@ class TestListAudit:
             scopes={},
             expires_at=_PINNED + timedelta(days=90),
             now=_PINNED,
+        )
+        record_request_audit(
+            db_session,
+            token_id=original.key_id,
+            method="GET",
+            path="/w/ws-tokens/api/v1/tasks",
+            status=200,
+            ip_prefix=truncate_ip_prefix("203.0.113.42"),
+            user_agent="agent/1.0",
+            correlation_id="req-cross",
+            at=_PINNED + timedelta(minutes=1),
         )
         other_id = new_ulid()
         with tenant_agnostic():
@@ -1195,6 +1275,77 @@ class TestListAudit:
         self, db_session: Session, ctx: WorkspaceContext
     ) -> None:
         assert list_audit(db_session, ctx, token_id="01HWA00000000000000000NOPE") == []
+
+
+class TestRequestAudit:
+    """Per-request audit helpers minimise PII before persistence."""
+
+    def test_ip_prefix_truncates_ipv4_and_ipv6(self) -> None:
+        assert truncate_ip_prefix("203.0.113.42") == "203.0.113.0/24"
+        assert truncate_ip_prefix("2001:db8:abcd:12:3456::1") == (
+            "2001:db8:abcd:12::/64"
+        )
+        assert truncate_ip_prefix("not-an-ip") is None
+
+    def test_record_request_audit_persists_normalised_row(
+        self, db_session: Session, ctx: WorkspaceContext
+    ) -> None:
+        original = mint(
+            db_session,
+            ctx,
+            user_id=ctx.actor_id,
+            label="request-row",
+            scopes={},
+            expires_at=_PINNED + timedelta(days=90),
+            now=_PINNED,
+        )
+
+        record_request_audit(
+            db_session,
+            token_id=original.key_id,
+            method="patch-with-extra-text",
+            path="/w/ws-tokens/api/v1/" + ("a" * 300),
+            status=418,
+            ip_prefix=truncate_ip_prefix("203.0.113.42"),
+            user_agent="agent/2.0",
+            correlation_id="req-normalised",
+            at=_PINNED + timedelta(minutes=5),
+        )
+        row = db_session.scalars(select(ApiTokenRequestLog)).one()
+        assert row.token_id == original.key_id
+        assert row.method == "PATCH-WITH-EXTRA"
+        assert len(row.path) == 256
+        assert row.status == 418
+        assert row.ip_prefix == "203.0.113.0/24"
+        assert row.user_agent == "agent/2.0"
+        assert row.correlation_id == "req-normalised"
+
+    def test_record_request_audit_truncates_user_agent(
+        self, db_session: Session, ctx: WorkspaceContext
+    ) -> None:
+        original = mint(
+            db_session,
+            ctx,
+            user_id=ctx.actor_id,
+            label="request-row-ua",
+            scopes={},
+            expires_at=_PINNED + timedelta(days=90),
+            now=_PINNED,
+        )
+
+        record_request_audit(
+            db_session,
+            token_id=original.key_id,
+            method="GET",
+            path="/w/ws-tokens/api/v1/tasks",
+            status=200,
+            ip_prefix=None,
+            user_agent="a" * 600,
+            correlation_id="req-long-ua",
+            at=_PINNED + timedelta(minutes=5),
+        )
+        row = db_session.scalars(select(ApiTokenRequestLog)).one()
+        assert row.user_agent == "a" * 512
 
 
 # ---------------------------------------------------------------------------

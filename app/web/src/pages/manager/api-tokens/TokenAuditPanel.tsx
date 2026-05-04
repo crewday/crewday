@@ -10,6 +10,33 @@ interface TokenAuditPanelProps {
   onClose: () => void;
 }
 
+function statusClass(status: number): string {
+  return status >= 400
+    ? "tokens-audit__status tokens-audit__status--fail"
+    : "tokens-audit__status tokens-audit__status--ok";
+}
+
+function renderAction(a: ApiTokenAuditEntry) {
+  if (a.method && a.path) {
+    return (
+      <div className="tokens-audit__request">
+        <div className="tokens-audit__request-main">
+          <span className="tokens-audit__method">{a.method}</span>
+          <span className="tokens-audit__request-path">{a.path}</span>
+        </div>
+        <div className="tokens-audit__request-meta">
+          {a.status !== null ? (
+            <span className={statusClass(a.status)}>{a.status}</span>
+          ) : null}
+          {a.ip_prefix ? <span className="tokens-audit__ip">{a.ip_prefix}</span> : null}
+          {a.user_agent ? <span className="tokens-audit__ua">{a.user_agent}</span> : null}
+        </div>
+      </div>
+    );
+  }
+  return <span className="tokens-audit__method">{a.action}</span>;
+}
+
 export default function TokenAuditPanel({ tokenId, onClose }: TokenAuditPanelProps) {
   const auditQ = useQuery({
     queryKey: qk.apiTokenAudit(tokenId),
@@ -37,9 +64,6 @@ export default function TokenAuditPanel({ tokenId, onClose }: TokenAuditPanelPro
         <p className="tokens-audit__empty">No audit events recorded yet.</p>
       ) : (
         <table className="tokens-audit__table">
-          {/* §03 v1 surface: lifecycle events (mint / rotate / revoke /
-              revoked_noop) only. A sibling per-request log lands later
-              once the api_token_request_log table ships. */}
           <thead>
             <tr>
               <th>When</th>
@@ -50,12 +74,10 @@ export default function TokenAuditPanel({ tokenId, onClose }: TokenAuditPanelPro
           </thead>
           <tbody>
             {(auditQ.data ?? []).map((a) => (
-              <tr key={a.correlation_id + a.at}>
+              <tr key={a.correlation_id + a.at + a.action + (a.path ?? "")}>
                 <td className="tokens-audit__when">{fmtDateTime(a.at)}</td>
-                <td>
-                  <span className="tokens-audit__method">{a.action}</span>
-                </td>
-                <td className="tokens-audit__path">{a.actor_id}</td>
+                <td>{renderAction(a)}</td>
+                <td className="tokens-audit__actor">{a.actor_id}</td>
                 <td className="tokens-audit__cid">{a.correlation_id}</td>
               </tr>
             ))}

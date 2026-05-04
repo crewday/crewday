@@ -924,14 +924,12 @@ POST   /w/<slug>/api/v1/auth/tokens/{token_id}/rotate   # §03 "Revocation and r
                                                  #   404 {"error": "token_not_found"} — unknown / cross-workspace
                                                  #     / personal / revoked / expired token id (collapsed to one
                                                  #     opaque shape so the API does not leak which mode fired).
-GET    /w/<slug>/api/v1/auth/tokens/{token_id}/audit    # per-token lifecycle timeline, newest first.
-                                                 # Surfaces `api_token.minted` / `rotated` / `revoked` /
-                                                 # `revoked_noop` events for one key_id on the caller's workspace.
-                                                 # The richer per-request log (method / path / IP / user_agent)
-                                                 # belongs to a sibling `api_token_request_log` table tracked under
-                                                 # cd-ocdg7; the v1 surface returns the lifecycle trail so the
-                                                 # /tokens SPA has *some* timeline today rather than none.
-                                                 #   200 OK with `[{at, action, actor_id, correlation_id}, ...]`.
+GET    /w/<slug>/api/v1/auth/tokens/{token_id}/audit    # per-token timeline, newest first.
+                                                 # Interleaves `api_token.minted` / `rotated` / `revoked` /
+                                                 # `revoked_noop` lifecycle events with per-request rows from
+                                                 # `api_token_request_log`.
+                                                 #   200 OK with `[{at, action, actor_id, correlation_id, method?,
+                                                 #     path?, status?, ip_prefix?, user_agent?}, ...]`.
                                                  #   401 {"error": "not_authenticated"}.
                                                  #   403 {"error": "permission_denied"}.
                                                  #   200 [] for unknown / cross-workspace token ids — the seam

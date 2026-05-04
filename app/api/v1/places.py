@@ -258,7 +258,7 @@ class PropertyWriteRequest(BaseModel):
                             "type": "string",
                             "minLength": 1,
                             "maxLength": 500,
-                        }
+                        },
                     },
                     "required": ["name", "timezone", "address"],
                 },
@@ -281,7 +281,7 @@ class PropertyWriteRequest(BaseModel):
                         "address_json": {
                             "type": "object",
                             "minProperties": 1,
-                        }
+                        },
                     },
                     "required": ["name", "timezone", "address_json"],
                 },
@@ -560,8 +560,8 @@ class ShareCreateRequest(BaseModel):
         },
     )
 
-    workspace_id: str = Field(default=None, max_length=64)
-    workspace_slug: str = Field(default=None, max_length=80)
+    workspace_id: str | None = Field(default=None, max_length=64)
+    workspace_slug: str | None = Field(default=None, max_length=80)
     membership_role: membership_service.MembershipRole = "managed_workspace"
     share_guest_identity: bool = False
 

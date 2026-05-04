@@ -948,18 +948,15 @@ subject narrowing is enforced at the row level regardless of which
   fallback columns are cleared on the next verify path that observes
   the expiry.
 - A **per-token audit log view** is available in the UI (inline on
-  `/tokens` for workspace tokens; inline on `/me` for PATs). The
-  long-term shape is "every request with its method, path, response
-  status, IP prefix (truncated to `/24` for IPv4, `/64` for IPv6 per
-  §15 PII-minimisation), `user_agent`, `audit_correlation_id` link,
-  and timestamp." **v1 ships the lifecycle trail only** —
-  `api_token.minted` / `rotated` / `revoked` / `revoked_noop` events
-  projected from `audit_log`. The richer per-request rows require a
-  sibling `api_token_request_log` table tracked under cd-ocdg7; until
-  that lands, the UI surfaces lifecycle events so the manager has
-  *some* trail today rather than none. The list page shows
-  `last_used_at` and (once the sibling table ships) the last-used IP
-  prefix so managers can spot dormant tokens.
+  `/tokens` for workspace tokens; inline on `/me` for PATs): every
+  request with its method, path, response status, IP prefix (truncated
+  to `/24` for IPv4, `/64` for IPv6 per §15 PII-minimisation),
+  `user_agent`, `audit_correlation_id` link, and timestamp,
+  interleaved newest-first with `api_token.minted` / `rotated` /
+  `revoked` / `revoked_noop` lifecycle events projected from
+  `audit_log`. The list page shows `last_used_at`, and the audit
+  rows carry the IP prefixes managers use to spot stale or unexpected
+  callers.
 
 ### Observability fields on `api_token`
 

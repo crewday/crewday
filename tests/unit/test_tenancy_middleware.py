@@ -29,7 +29,8 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from pydantic import SecretStr
-from sqlalchemy import Engine
+from sqlalchemy import Engine, select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
@@ -39,6 +40,7 @@ import app.adapters.db.session as _session_mod
 from app.adapters.db.authz.bootstrap import seed_owners_system_group
 from app.adapters.db.authz.models import RoleGrant
 from app.adapters.db.base import Base
+from app.adapters.db.identity.models import ApiTokenRequestLog
 from app.adapters.db.session import make_engine
 from app.adapters.db.workspace.models import UserWorkspace, Workspace
 from app.auth.session import SESSION_COOKIE_NAME
@@ -1074,6 +1076,9 @@ class TestRealResolverHTTP:
         assert body["actor_was_owner_member"] is True
         assert body["actor_grant_role"] == "manager"
 
+        with memory_factory() as db:
+            assert list(db.scalars(select(ApiTokenRequestLog)).all()) == []
+
     def test_bearer_token_resolves_workspace(
         self,
         real_settings: Settings,
@@ -1119,6 +1124,112 @@ class TestRealResolverHTTP:
         assert body["actor_id"] == user_id
         assert body["actor_kind"] == "user"
 
+        with memory_factory() as db:
+            rows = list(db.scalars(select(ApiTokenRequestLog)).all())
+        assert len(rows) == 1
+        assert rows[0].token_id == minted.key_id
+        assert rows[0].method == "GET"
+        assert rows[0].path == "/w/token-path/api/v1/ping"
+        assert rows[0].status == 200
+        assert rows[0].user_agent == "testclient"
+        assert rows[0].correlation_id == response.headers[CORRELATION_ID_HEADER]
+
+    def test_bearer_request_audit_failure_does_not_mask_response(
+        self,
+        real_settings: Settings,
+        memory_factory: sessionmaker[Session],
+        real_make_uow: None,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        with memory_factory() as db:
+            ws, user_id = _seed_workspace_and_member(
+                db, slug="token-audit-fails", owner_email="alice@example.com"
+            )
+            ctx = WorkspaceContext(
+                workspace_id=ws.id,
+                workspace_slug=ws.slug,
+                actor_id=user_id,
+                actor_kind="user",
+                actor_grant_role="manager",
+                actor_was_owner_member=True,
+                audit_correlation_id=new_ulid(),
+            )
+            minted = mint_token(
+                db,
+                ctx,
+                user_id=user_id,
+                label="bearer-audit-fails",
+                scopes={"tasks.read": True},
+                expires_at=None,
+                now=datetime.now(UTC),
+            )
+            db.commit()
+
+        def fail_request_audit(*args: object, **kwargs: object) -> None:
+            raise SQLAlchemyError("request audit unavailable")
+
+        monkeypatch.setattr(
+            "app.tenancy.middleware.record_request_audit",
+            fail_request_audit,
+        )
+
+        app = _build_app()
+        with _client(app) as client:
+            response = client.get(
+                "/w/token-audit-fails/api/v1/ping",
+                headers={"Authorization": f"Bearer {minted.token}"},
+            )
+        assert response.status_code == 200
+        assert response.json()["bound"] is True
+
+        with memory_factory() as db:
+            assert list(db.scalars(select(ApiTokenRequestLog)).all()) == []
+
+    def test_bearer_handler_exception_records_500_request_log(
+        self,
+        real_settings: Settings,
+        memory_factory: sessionmaker[Session],
+        real_make_uow: None,
+    ) -> None:
+        with memory_factory() as db:
+            ws, user_id = _seed_workspace_and_member(
+                db, slug="token-boom", owner_email="alice@example.com"
+            )
+            ctx = WorkspaceContext(
+                workspace_id=ws.id,
+                workspace_slug=ws.slug,
+                actor_id=user_id,
+                actor_kind="user",
+                actor_grant_role="manager",
+                actor_was_owner_member=True,
+                audit_correlation_id=new_ulid(),
+            )
+            minted = mint_token(
+                db,
+                ctx,
+                user_id=user_id,
+                label="bearer-boom",
+                scopes={"tasks.read": True},
+                expires_at=None,
+                now=datetime.now(UTC),
+            )
+            db.commit()
+
+        app = _build_app()
+        with _client(app) as client:
+            response = client.get(
+                "/w/token-boom/api/v1/boom",
+                headers={"Authorization": f"Bearer {minted.token}"},
+            )
+        assert response.status_code == 500
+
+        with memory_factory() as db:
+            rows = list(db.scalars(select(ApiTokenRequestLog)).all())
+        assert len(rows) == 1
+        assert rows[0].token_id == minted.key_id
+        assert rows[0].path == "/w/token-boom/api/v1/boom"
+        assert rows[0].status == 500
+
     def test_bearer_wrong_workspace_returns_404(
         self,
         real_settings: Settings,
@@ -1161,6 +1272,13 @@ class TestRealResolverHTTP:
             )
         assert response.status_code == 404
         _assert_canonical_not_found(response, instance=f"/w/{ws_b.slug}/api/v1/ping")
+
+        with memory_factory() as db:
+            rows = list(db.scalars(select(ApiTokenRequestLog)).all())
+        assert len(rows) == 1
+        assert rows[0].token_id == minted.key_id
+        assert rows[0].path == f"/w/{ws_b.slug}/api/v1/ping"
+        assert rows[0].status == 404
 
     def test_no_auth_returns_404_not_401(
         self,

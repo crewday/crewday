@@ -27,6 +27,7 @@ from __future__ import annotations
 
 from app.adapters.db.identity.models import (
     ApiToken,
+    ApiTokenRequestLog,
     BreakGlassCode,
     Invite,
     MagicLinkNonce,
@@ -61,6 +62,7 @@ register("break_glass_code")
 
 __all__ = [
     "ApiToken",
+    "ApiTokenRequestLog",
     "BreakGlassCode",
     "Invite",
     "MagicLinkNonce",

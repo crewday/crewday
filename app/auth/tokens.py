@@ -95,6 +95,7 @@ See ``docs/specs/03-auth-and-tokens.md`` §"API tokens" and
 from __future__ import annotations
 
 import base64
+import ipaddress
 import secrets
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -108,7 +109,7 @@ from sqlalchemy.orm import Session
 
 from app.adapters.db.audit.models import AuditLog
 from app.adapters.db.authz.repositories import SqlAlchemyRoleGrantRepository
-from app.adapters.db.identity.models import ApiToken, User
+from app.adapters.db.identity.models import ApiToken, ApiTokenRequestLog, User
 from app.audit import write_audit
 from app.auth.audit import AGNOSTIC_WORKSPACE_ID as _AGNOSTIC_WORKSPACE_ID
 from app.tenancy import WorkspaceContext, tenant_agnostic
@@ -142,9 +143,11 @@ __all__ = [
     "list_personal_tokens",
     "list_tokens",
     "mint",
+    "record_request_audit",
     "revoke",
     "revoke_personal",
     "rotate",
+    "truncate_ip_prefix",
     "verify",
 ]
 
@@ -223,6 +226,8 @@ PERSONAL_SCOPE_PREFIX: Final[str] = "me."
 # index on every request; the debounce drops the write rate to
 # ≤1/min per token — the exact ceiling §03 pins.
 _LAST_USED_DEBOUNCE: Final[timedelta] = timedelta(minutes=1)
+_REQUEST_PATH_MAX_CHARS: Final[int] = 256
+_REQUEST_USER_AGENT_MAX_CHARS: Final[int] = 512
 
 
 # Rotation keeps the old hash usable long enough for already-running
@@ -321,31 +326,28 @@ class TokenAuditEntry:
     """One audit-log entry projected for the per-token UI.
 
     §03 "Revocation and rotation" / "per-token audit log view": the
-    /tokens page shows a per-token history. v1 surfaces the
-    workspace-scoped ``audit_log`` rows whose
-    ``entity_kind == 'api_token'`` and ``entity_id == <key_id>`` — so
-    the trail covers ``api_token.minted`` / ``rotated`` / ``revoked``
-    / ``revoked_noop`` events.
-
-    The richer per-request shape the spec describes ("every request
-    with its method, path, response status, IP prefix, user_agent")
-    requires a sibling ``api_token_request_log`` table that does not
-    yet ship; the v1 projection carries the lifecycle events the
-    audit_log already records and leaves the per-request log as a
-    follow-up (cd-ocdg7) so the manager surface has *some* trail
-    today rather than none.
+    /tokens page shows a per-token history. Lifecycle events come
+    from workspace-scoped ``audit_log`` rows whose
+    ``entity_kind == 'api_token'`` and ``entity_id == <key_id>``;
+    per-request rows come from ``api_token_request_log`` and carry
+    the method, path, response status, IP prefix, and user_agent.
 
     Columns mirror the wire shape the SPA reads: ``at`` is the
     event timestamp, ``action`` is the audit symbol
-    (``api_token.minted`` etc.), ``actor_id`` is the workspace user
-    who performed the action, and ``correlation_id`` joins this
-    event to other rows in the same request.
+    (``api_token.minted`` / ``api_token.request`` etc.), ``actor_id``
+    is the workspace user tied to the event, and ``correlation_id``
+    joins this event to other rows in the same request.
     """
 
     at: datetime
     action: str
     actor_id: str
     correlation_id: str
+    method: str | None = None
+    path: str | None = None
+    status: int | None = None
+    ip_prefix: str | None = None
+    user_agent: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -1237,6 +1239,64 @@ def list_personal_tokens(
 
 
 # ---------------------------------------------------------------------------
+# Public surface — per-request audit writes
+# ---------------------------------------------------------------------------
+
+
+def truncate_ip_prefix(value: str | None) -> str | None:
+    """Return the §15-minimised IP prefix for ``value``.
+
+    IPv4 addresses are stored as their ``/24`` network and IPv6
+    addresses as their ``/64`` network. Invalid or absent source-IP
+    signals collapse to ``None`` so the audit row records the request
+    without persisting a misleading raw string.
+    """
+    if value is None or not value:
+        return None
+    try:
+        ip = ipaddress.ip_address(value)
+    except ValueError:
+        return None
+    prefix = 24 if ip.version == 4 else 64
+    return str(ipaddress.ip_network(f"{ip}/{prefix}", strict=False))
+
+
+def record_request_audit(
+    session: Session,
+    *,
+    token_id: str,
+    method: str,
+    path: str,
+    status: int,
+    ip_prefix: str | None,
+    user_agent: str | None,
+    correlation_id: str,
+    at: datetime | None = None,
+    clock: Clock | None = None,
+) -> None:
+    """Queue one per-request audit row for a verified Bearer token."""
+    resolved_clock = clock or SystemClock()
+    row_at = at or resolved_clock.now()
+    session.add(
+        ApiTokenRequestLog(
+            id=new_ulid(),
+            token_id=token_id,
+            method=method.upper()[:16],
+            path=path[:_REQUEST_PATH_MAX_CHARS],
+            status=status,
+            ip_prefix=ip_prefix,
+            user_agent=(
+                user_agent[:_REQUEST_USER_AGENT_MAX_CHARS]
+                if user_agent is not None
+                else None
+            ),
+            correlation_id=correlation_id,
+            at=row_at,
+        )
+    )
+
+
+# ---------------------------------------------------------------------------
 # Public surface — audit log projection
 # ---------------------------------------------------------------------------
 
@@ -1251,14 +1311,8 @@ def list_audit(
     """Return the per-token audit timeline (newest first).
 
     §03 "Revocation and rotation": the /tokens page surfaces a
-    per-token audit log so a manager can see the lifecycle events
-    against a single key_id. Today this is the lifecycle trail —
-    mint / rotate / revoke / revoked_noop — projected from
-    ``audit_log``. The richer per-request log (method / path / IP
-    / user_agent) is reserved for a sibling table and is not yet
-    implemented (cd-ocdg7); this surface stays stable when that
-    follow-up lands by appending entries rather than reshaping
-    the row.
+    per-token audit log so a manager can see lifecycle events and
+    request rows against a single key_id.
 
     Refuses cross-workspace lookups by joining on
     ``ctx.workspace_id`` — a manager on workspace A cannot read
@@ -1269,7 +1323,7 @@ def list_audit(
     list here is unambiguously "no events yet".
     """
     with tenant_agnostic():
-        stmt = (
+        lifecycle_stmt = (
             select(AuditLog)
             .where(
                 AuditLog.entity_kind == "api_token",
@@ -1279,16 +1333,43 @@ def list_audit(
             .order_by(AuditLog.created_at.desc())
             .limit(limit)
         )
-        rows = list(session.scalars(stmt).all())
-    return [
+        lifecycle_rows = list(session.scalars(lifecycle_stmt).all())
+        request_stmt = (
+            select(ApiTokenRequestLog, ApiToken.user_id)
+            .join(ApiToken, ApiToken.id == ApiTokenRequestLog.token_id)
+            .where(
+                ApiTokenRequestLog.token_id == token_id,
+                ApiToken.workspace_id == ctx.workspace_id,
+            )
+            .order_by(ApiTokenRequestLog.at.desc())
+            .limit(limit)
+        )
+        request_rows = list(session.execute(request_stmt).all())
+    entries = [
         TokenAuditEntry(
             at=row.created_at,
             action=row.action,
             actor_id=row.actor_id,
             correlation_id=row.correlation_id,
         )
-        for row in rows
+        for row in lifecycle_rows
     ]
+    entries.extend(
+        TokenAuditEntry(
+            at=row.at,
+            action="api_token.request",
+            actor_id=actor_id,
+            correlation_id=row.correlation_id,
+            method=row.method,
+            path=row.path,
+            status=row.status,
+            ip_prefix=row.ip_prefix,
+            user_agent=row.user_agent,
+        )
+        for row, actor_id in request_rows
+    )
+    entries.sort(key=lambda entry: entry.at, reverse=True)
+    return entries[:limit]
 
 
 # ---------------------------------------------------------------------------

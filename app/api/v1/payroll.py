@@ -43,13 +43,14 @@ See ``docs/specs/09-time-payroll-expenses.md`` §"Pay rules",
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from datetime import datetime
 from decimal import Decimal
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Path, Query, Response, status
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, JsonValue
 from sqlalchemy.orm import Session
 
 from app.adapters.db.payroll.repositories import (
@@ -158,7 +159,16 @@ _Storage = Annotated[Storage, Depends(get_storage)]
 
 
 _MAX_ID_LEN = 64
-_CURRENCY_SCHEMA_EXTRA = {"enum": sorted(ISO_4217_ALLOWLIST)}
+
+
+def _json_enum(values: Iterable[str]) -> list[JsonValue]:
+    enum_values: list[JsonValue] = []
+    enum_values.extend(values)
+    return enum_values
+
+
+_CURRENCY_ENUM = _json_enum(sorted(ISO_4217_ALLOWLIST))
+_CURRENCY_SCHEMA_EXTRA: dict[str, JsonValue] = {"enum": _CURRENCY_ENUM}
 
 
 # ---------------------------------------------------------------------------

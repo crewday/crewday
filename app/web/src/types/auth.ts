@@ -138,9 +138,8 @@ export interface ApiTokenListResponse {
   has_more: boolean;
 }
 
-// §03 per-token audit timeline — lifecycle events only on v1
-// (`api_token.minted` / `rotated` / `revoked` / `revoked_noop`).
-// A sibling per-request log lands later as a follow-up.
+// §03 per-token audit timeline. Lifecycle rows leave the request
+// fields null; per-request rows populate them from api_token_request_log.
 export interface ApiTokenAuditEntry {
   at: string;
   /** Domain action key (e.g. `api_token.minted`). */
@@ -148,6 +147,11 @@ export interface ApiTokenAuditEntry {
   /** ULID of the user / system actor who performed the action. */
   actor_id: string;
   correlation_id: string;
+  method: string | null;
+  path: string | null;
+  status: number | null;
+  ip_prefix: string | null;
+  user_agent: string | null;
 }
 
 // ── Invites (§03 "Additional users") ──────────────────────────────

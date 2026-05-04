@@ -56,6 +56,7 @@ from dataclasses import dataclass, field
 from typing import Literal
 
 from sqlalchemy import select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session as DbSession
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
@@ -86,6 +87,8 @@ from app.auth.tokens import (
     SubjectUserInactive,
     TokenExpired,
     TokenRevoked,
+    record_request_audit,
+    truncate_ip_prefix,
 )
 from app.auth.tokens import (
     verify as verify_token,
@@ -98,6 +101,7 @@ from app.http.skip_paths import is_skip_path as _is_skip_path
 from app.tenancy.context import ActorGrantRole, PrincipalKind, WorkspaceContext
 from app.tenancy.current import reset_current, set_current, tenant_agnostic
 from app.tenancy.slug import InvalidSlug, validate_slug
+from app.util.forwarded import parse_trusted_proxies, resolve_source_ip
 from app.util.ulid import new_ulid
 
 __all__ = [
@@ -766,6 +770,52 @@ def _log_tenancy_event(
     )
 
 
+def _source_ip(request: Request, settings: Settings) -> str | None:
+    """Return the trusted-proxy-aware source IP for request audit."""
+    peer = request.client.host if request.client is not None else None
+    forwarded_values = request.headers.getlist("X-Forwarded-For")
+    forwarded_for = ", ".join(forwarded_values) if forwarded_values else None
+    trusted_proxies = parse_trusted_proxies(
+        list(getattr(settings, "trusted_proxies", []))
+    )
+    return resolve_source_ip(peer, forwarded_for, trusted_proxies)
+
+
+def _record_token_request(
+    request: Request,
+    *,
+    actor: ActorIdentity | None,
+    settings: Settings,
+    response: Response,
+    correlation_id: str,
+) -> None:
+    """Persist a per-request audit row for resolved Bearer-token callers."""
+    if actor is None or actor.token_id is None:
+        return
+    try:
+        with make_uow() as db_session:
+            assert isinstance(db_session, DbSession)
+            record_request_audit(
+                db_session,
+                token_id=actor.token_id,
+                method=request.method,
+                path=request.url.path,
+                status=response.status_code,
+                ip_prefix=truncate_ip_prefix(_source_ip(request, settings)),
+                user_agent=request.headers.get("user-agent"),
+                correlation_id=correlation_id,
+            )
+    except SQLAlchemyError:
+        _log.exception(
+            "api token request audit write failed",
+            extra={
+                "event": "api_token_request_audit.write_failed",
+                "token_id": actor.token_id,
+                "correlation_id": correlation_id,
+            },
+        )
+
+
 # ---------------------------------------------------------------------------
 # Middleware
 # ---------------------------------------------------------------------------
@@ -969,9 +1019,30 @@ class WorkspaceContextMiddleware(BaseHTTPMiddleware):
                     None,
                 )
                 if workspace_rejection is not_found_response:
+                    _record_token_request(
+                        request,
+                        actor=actor,
+                        settings=settings,
+                        response=not_found_response,
+                        correlation_id=correlation_id,
+                    )
                     return not_found_response
                 downstream.headers[CORRELATION_ID_HEADER] = correlation_id
+                _record_token_request(
+                    request,
+                    actor=actor,
+                    settings=settings,
+                    response=downstream,
+                    correlation_id=correlation_id,
+                )
                 return downstream
+            _record_token_request(
+                request,
+                actor=actor,
+                settings=settings,
+                response=not_found_response,
+                correlation_id=correlation_id,
+            )
             return not_found_response
 
         _log_tenancy_event(
@@ -999,13 +1070,30 @@ class WorkspaceContextMiddleware(BaseHTTPMiddleware):
 
         token = set_current(ctx)
         try:
-            response = await call_next(request)
+            try:
+                response = await call_next(request)
+            except Exception:
+                _record_token_request(
+                    request,
+                    actor=actor,
+                    settings=settings,
+                    response=Response(status_code=500),
+                    correlation_id=correlation_id,
+                )
+                raise
         finally:
             # Always restore — even if the downstream handler raised —
             # so the ContextVar does not leak into the next request
             # served by the same worker task.
             reset_current(token)
         response.headers[CORRELATION_ID_HEADER] = correlation_id
+        _record_token_request(
+            request,
+            actor=actor,
+            settings=settings,
+            response=response,
+            correlation_id=correlation_id,
+        )
         return response
 
     def _resolve_context(

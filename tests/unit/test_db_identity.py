@@ -21,6 +21,7 @@ from sqlalchemy import CheckConstraint, Index, String
 
 from app.adapters.db.identity.models import (
     ApiToken,
+    ApiTokenRequestLog,
     PasskeyCredential,
     Session,
     User,
@@ -250,6 +251,39 @@ class TestApiTokenModel:
         names = [i.name for i in indexes]
         assert "ix_api_token_user" in names
         assert "ix_api_token_workspace" in names
+
+
+class TestApiTokenRequestLogModel:
+    """The ``ApiTokenRequestLog`` mapped class matches cd-ocdg7."""
+
+    def test_minimal_construction(self) -> None:
+        row = ApiTokenRequestLog(
+            id="01HWA00000000000000000LOGA",
+            token_id="01HWA00000000000000000TOKA",
+            method="GET",
+            path="/w/ws/api/v1/tasks",
+            status=200,
+            ip_prefix="203.0.113.0/24",
+            user_agent="agent/1.0",
+            correlation_id="01HWA00000000000000000CIDA",
+            at=_PINNED,
+        )
+        assert row.token_id == "01HWA00000000000000000TOKA"
+        assert row.method == "GET"
+        assert row.path == "/w/ws/api/v1/tasks"
+        assert row.status == 200
+        assert row.ip_prefix == "203.0.113.0/24"
+        assert row.user_agent == "agent/1.0"
+        assert row.correlation_id == "01HWA00000000000000000CIDA"
+        assert row.at == _PINNED
+
+    def test_tablename_and_index(self) -> None:
+        assert ApiTokenRequestLog.__tablename__ == "api_token_request_log"
+        assert isinstance(ApiTokenRequestLog.__table__.c.user_agent.type, String)
+        assert ApiTokenRequestLog.__table__.c.user_agent.type.length == 512
+        indexes = [i for i in ApiTokenRequestLog.__table_args__ if isinstance(i, Index)]
+        names = [i.name for i in indexes]
+        assert "ix_api_token_request_log_token_at" in names
 
 
 class TestWebAuthnChallengeModel:

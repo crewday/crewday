@@ -56,6 +56,7 @@ from app.adapters.db.workspace import models as _workspace_models  # noqa: F401
 
 __all__ = [
     "ApiToken",
+    "ApiTokenRequestLog",
     "BreakGlassCode",
     "EmailChangePending",
     "Invite",
@@ -373,6 +374,28 @@ class ApiToken(Base):
         Index("ix_api_token_user", "user_id"),
         Index("ix_api_token_workspace", "workspace_id"),
     )
+
+
+class ApiTokenRequestLog(Base):
+    """Per-request audit row for Bearer-presented API token traffic."""
+
+    __tablename__ = "api_token_request_log"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    token_id: Mapped[str] = mapped_column(
+        String,
+        ForeignKey("api_token.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    method: Mapped[str] = mapped_column(String(16), nullable=False)
+    path: Mapped[str] = mapped_column(String(256), nullable=False)
+    status: Mapped[int] = mapped_column(Integer, nullable=False)
+    ip_prefix: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    user_agent: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    correlation_id: Mapped[str] = mapped_column(String, nullable=False)
+    at: Mapped[datetime] = mapped_column(UtcDateTime(), nullable=False)
+
+    __table_args__ = (Index("ix_api_token_request_log_token_at", "token_id", "at"),)
 
 
 class WebAuthnChallenge(Base):

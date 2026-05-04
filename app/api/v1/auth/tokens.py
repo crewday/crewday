@@ -51,10 +51,9 @@ Routes:
   cross-workspace ids collapse to 404.
 * ``GET /auth/tokens/{token_id}/audit`` → list of
   :class:`TokenAuditEntryResponse` — the per-token lifecycle trail
-  (mint / rotate / revoke / revoked_noop), newest first. The
-  per-request log surface (method / path / IP / user_agent)
-  belongs to a sibling ``api_token_request_log`` table tracked
-  under cd-ocdg7.
+  (mint / rotate / revoke / revoked_noop) interleaved newest-first
+  with per-request rows (method / path / status / IP prefix /
+  user_agent) from ``api_token_request_log``.
 
 Error shapes:
 
@@ -245,17 +244,20 @@ class TokenListResponse(BaseModel):
 class TokenAuditEntryResponse(BaseModel):
     """Response element for ``GET /auth/tokens/{token_id}/audit``.
 
-    Mirrors :class:`app.auth.tokens.TokenAuditEntry`. The v1 surface
-    is the lifecycle trail (``api_token.minted`` /
-    ``api_token.rotated`` / ``api_token.revoked`` /
-    ``api_token.revoked_noop``); a future per-request log will
-    extend this shape rather than replace it.
+    Mirrors :class:`app.auth.tokens.TokenAuditEntry`. Lifecycle rows
+    keep the request-specific fields NULL; per-request rows populate
+    them from ``api_token_request_log``.
     """
 
     at: datetime
     action: str
     actor_id: str
     correlation_id: str
+    method: str | None = None
+    path: str | None = None
+    status: int | None = None
+    ip_prefix: str | None = None
+    user_agent: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -696,15 +698,11 @@ def build_tokens_router() -> APIRouter:
         ctx: _Ctx,
         session: _Db,
     ) -> list[TokenAuditEntryResponse]:
-        """Return the workspace audit_log rows tied to ``token_id``.
+        """Return workspace token lifecycle + request audit rows.
 
         The list scope is the caller's workspace — a manager on
         workspace A cannot read another workspace's token audit
-        rows. v1 surfaces the lifecycle events
-        (``api_token.minted`` / ``rotated`` / ``revoked`` /
-        ``revoked_noop``); a sibling per-request log lands as a
-        follow-up so the manager has *some* trail today rather
-        than none.
+        rows.
         """
         entries = list_audit(session, ctx, token_id=token_id)
         return [
@@ -713,6 +711,11 @@ def build_tokens_router() -> APIRouter:
                 action=e.action,
                 actor_id=e.actor_id,
                 correlation_id=e.correlation_id,
+                method=e.method,
+                path=e.path,
+                status=e.status,
+                ip_prefix=e.ip_prefix,
+                user_agent=e.user_agent,
             )
             for e in entries
         ]

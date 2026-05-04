@@ -109,12 +109,12 @@ See ``docs/specs/02-domain-model.md`` §"expense_claim" /
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, JsonValue, field_validator
 
 from app.adapters.storage.ports import Storage
 from app.audit import write_audit
@@ -182,7 +182,15 @@ ExpenseCategory = Literal[
 ]
 ReceiptKind = Literal["receipt", "invoice", "other"]
 
-_CURRENCY_SCHEMA_EXTRA = {"enum": sorted(ISO_4217_ALLOWLIST)}
+
+def _json_enum(values: Iterable[str]) -> list[JsonValue]:
+    enum_values: list[JsonValue] = []
+    enum_values.extend(values)
+    return enum_values
+
+
+_CURRENCY_ENUM = _json_enum(sorted(ISO_4217_ALLOWLIST))
+_CURRENCY_SCHEMA_EXTRA: dict[str, JsonValue] = {"enum": _CURRENCY_ENUM}
 
 
 # Local mirrors of the adapter-side ``_STATE_VALUES`` /
