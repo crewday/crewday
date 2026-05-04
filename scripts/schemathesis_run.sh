@@ -573,6 +573,7 @@ INCLUDE_ARGS=(
     # path above because ``/admin/events`` is an open event stream, not
     # a finite JSON response.
     #
+    --include-tag admin
     # ``admin.admins.grant`` / ``admin.admins.groups.owners.add`` —
     # request bodies intentionally enforce exactly one target selector:
     # either ``user_id`` or ``email``. The OpenAPI schema advertises the
@@ -605,15 +606,14 @@ INCLUDE_ARGS=(
     --exclude-operation-id 'admin.audit.tail'
     --exclude-operation-id 'admin.usage.list'
     # ----------------------------------------------------------------
-    # LLM tag (cd-e5sit). ``--include-tag llm`` spans both the
-    # workspace LLM preference/usage surface and the bare-host admin
-    # model-configuration tree. The workspace operations below carry
-    # the shared problem+json response envelope and were confirmed
-    # clean by isolating them against the runner with
-    # ``--include-operation-id``. The admin operations stay under the
-    # admin-tag contract task (cd-k8m2b) because their bare-host staff
-    # auth + seeded provider/model graph needs one coordinated audit
-    # instead of being duplicated in the LLM workspace sweep.
+    # LLM tag (cd-e5sit). The workspace operations below carry the
+    # shared problem+json response envelope and were confirmed clean by
+    # isolating them against the runner with ``--include-operation-id``.
+    # The admin LLM operations share the ``admin`` tag but require a
+    # seeded provider/model/assignment graph for meaningful positive
+    # examples. They stay excluded from both the workspace LLM sweep and
+    # the admin-tag sweep until that seed exists; focused admin LLM route
+    # tests cover the runtime invariants meanwhile.
     # ----------------------------------------------------------------
     --include-operation-id 'workspace.llm.agent_preferences.workspace.get'
     --include-operation-id 'workspace.llm.agent_preferences.workspace.put'
@@ -755,6 +755,50 @@ INCLUDE_ARGS=(
     # coercion, while Schemathesis' negative-data phase models them as
     # arrays and expects rejection.
     --exclude-operation-id 'scheduler.calendar.get'
+    # ----------------------------------------------------------------
+    # Messaging tag (cd-pix4c). ``--include-tag messaging`` selects
+    # notifications, web-push token management, and chat channels /
+    # messages. The notifications + push-token read/delete/unsubscribe
+    # surface now declares the shared problem+json response envelope,
+    # and ``messaging.notifications.list`` rejects duplicate scalar
+    # cursor query params explicitly so negative-data generation matches
+    # runtime behaviour.
+    #
+    # The exclusions below are residual runtime invariants that require
+    # seeded chat ids, signed cursor hints, a configured VAPID key, or
+    # JSON Schema constraints that OpenAPI cannot express for arbitrary
+    # generated data.
+    # ----------------------------------------------------------------
+    --include-tag messaging
+    # ``messaging.chat_channels.list`` / ``messaging.chat_messages.list``
+    # use opaque signed cursors. Random schema-valid strings correctly
+    # 422 as ``invalid_cursor`` or fail the before-cursor parser.
+    --exclude-operation-id 'messaging.chat_channels.list'
+    --exclude-operation-id 'messaging.chat_messages.list'
+    # ``messaging.chat_channels.create`` accepts ``external_ref`` only
+    # for external-source channels, and in-app channels may not set it.
+    # The source/kind/external_ref relationship is a cross-field
+    # invariant that JSON Schema does not encode for this DTO.
+    --exclude-operation-id 'messaging.chat_channels.create'
+    # ``messaging.chat_channels.update`` supports archive but not
+    # unarchive through PATCH; random ``archived: false`` bodies
+    # correctly 422 at the domain boundary.
+    --exclude-operation-id 'messaging.chat_channels.update'
+    # ``messaging.chat_messages.send`` requires either non-empty
+    # ``body_md`` or at least one attachment. The OpenAPI schema cannot
+    # express the body-or-attachment cross-field invariant.
+    --exclude-operation-id 'messaging.chat_messages.send'
+    # ``messaging.register_push_subscription`` requires an HTTPS endpoint
+    # under an allowed push-service host. Random strings correctly 422
+    # before the success branch.
+    --exclude-operation-id 'messaging.register_push_subscription'
+    # Native FCM/APNS registration is a reserved v1 surface and always
+    # returns 501 ``push_unavailable`` after request validation.
+    --exclude-operation-id 'messaging.push_tokens.register_native_unavailable'
+    # ``messaging.get_vapid_public_key`` depends on deployment VAPID
+    # configuration; the dev schemathesis seed intentionally does not
+    # provision one, so the route correctly returns 503.
+    --exclude-operation-id 'messaging.get_vapid_public_key'
 )
 
 # Checks excluded for the asset gate — kept here (rather than at
