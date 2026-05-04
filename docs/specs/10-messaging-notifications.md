@@ -448,6 +448,11 @@ An agent or external system subscribes to events.
 }
 ```
 
+Subscription URL validation rejects blank URLs and non-HTTP(S)
+schemes. It intentionally does not apply the shared SSRF fetch guard:
+manager-configured internal destinations are trusted-role behavior per
+§15 "SSRF", not an external attacker path.
+
 ### Event catalog (v1)
 
 ```

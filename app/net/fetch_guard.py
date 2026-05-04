@@ -1,11 +1,11 @@
 """SSRF-guarded HTTP fetch helper.
 
-Canonical implementation of the §15 "SSRF" contract
-(``docs/specs/15-security-privacy.md`` lines 487-512). Any server-side
-fetch whose URL is operator- or user-supplied — iCal feeds (§04),
-outbound webhooks (§10), Turnstile verification (cd-6qi3), future
-LLM-tool fetches (§11) — must run through this module so a single
-audit point owns the rules.
+Canonical implementation of the guarded portion of the §15 "SSRF"
+contract. Server-side fetches whose URL is operator- or user-supplied
+and not explicitly carved out — iCal feeds (§04), Turnstile
+verification (cd-6qi3), future LLM-tool fetches (§11) — run through
+this module so a single audit point owns the rules. Outbound webhooks
+(§10) are intentionally outside this mandatory guard per §15.
 
 The module exposes two surfaces:
 
@@ -109,7 +109,7 @@ __all__ = [
 PUBLIC_FETCH_SCHEMES: Final[frozenset[str]] = frozenset({"http", "https"})
 
 #: Default streaming-body cap. 1 MiB is small enough to bound a
-#: single-call cost, large enough for typical webhook / verification
+#: single-call cost, large enough for typical feed / verification
 #: payloads. Callers override this only *downward* in production —
 #: every feature has its own per-call budget on top.
 DEFAULT_MAX_BODY_BYTES: Final[int] = 1 * 1024 * 1024

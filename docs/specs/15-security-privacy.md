@@ -500,8 +500,8 @@ are single-scope (one blob, one guest token) and are logged
 ## SSRF
 
 Any server-side fetch whose URL is operator- or user-supplied
-(iCal feeds §04, outbound webhooks §10, future LLM-tool
-fetches §11) MUST run through the shared fetch-guard module
+(iCal feeds §04, future LLM-tool fetches §11) MUST run
+through the shared fetch-guard module
 `app/net/fetch_guard.py`, which enforces:
 
 - `https://` scheme only; all other schemes rejected.
@@ -512,20 +512,27 @@ fetches §11) MUST run through the shared fetch-guard module
   subsequent re-resolution.
 - Certificate validation mandatory; self-signed only when the
   caller opts in via the per-feature workspace / property setting
-  (`ical.allow_self_signed` for §04, future webhook setting for
-  §10). The opt-in is per-feed (W/P scope) so one workspace can
-  trust a self-signed endpoint without weakening every other
-  workspace's TLS posture; catalog default `false`.
+  (`ical.allow_self_signed` for §04). The opt-in is per-feed
+  (W/P scope) so one workspace can trust a self-signed endpoint
+  without weakening every other workspace's TLS posture; catalog
+  default `false`.
 - Redirect policy: same-origin only (scheme+host+port); cross-
   origin redirects abort.
 - Hard limits: per-call body cap, connect + read timeouts,
   per-feature monthly budgets. Callers override the defaults only
   upward to stricter values.
 
-Per-feature sections (§04 "SSRF guard", §10 "Webhooks
-(outbound)") specify the exact limits and error surface for
-their fetches; they inherit these defaults from the guard
-module.
+Outbound webhooks (§10) are the deliberate exception: managers can
+already read and exfiltrate workspace data, so a manager-configured
+webhook URL that reaches an internal service is in scope for that
+trusted role rather than modeled as an external attacker path. The
+subscription layer therefore rejects only obviously invalid
+non-HTTP(S) URLs; deployments that need enterprise-style egress
+controls should enforce them at the network boundary.
+
+Per-feature sections specify the exact limits and error surface
+for their outbound network calls; only guarded fetches inherit the
+defaults from the guard module.
 
 ## Logging and redaction
 

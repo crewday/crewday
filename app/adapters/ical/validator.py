@@ -123,8 +123,8 @@ _CODE_MALFORMED = "ical_url_malformed"
 # -----------------------------------------------------------------------------
 #
 # The §04 / §15 "SSRF guard" host-validation rules live in
-# :mod:`app.net.fetch_guard` so every server-side fetcher (iCal,
-# webhooks, Turnstile, future LLM tools) inherits the same blocklist.
+# :mod:`app.net.fetch_guard` so guarded server-side fetchers (iCal,
+# Turnstile, future LLM tools) inherit the same blocklist.
 # The validator keeps these names as public re-exports so legacy
 # callers (and tests) that import ``is_public_ip`` /
 # ``resolve_public_address`` from this module keep working — the
