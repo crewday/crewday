@@ -110,6 +110,7 @@ in lockstep by a coherence test
 | `agent_message`                 | agent reaching a human out-of-band (per "Agent-message delivery" fallback chain) | the targeted user | yes (fallback chain bottoms out here) |
 | `daily_digest`                  | the per-recipient daily digest (covers both the owner/manager digest and the worker digest; the worker decides which body to render based on the recipient's grants) | each user with a grant in the workspace | opt-out |
 | `privacy_export_ready`          | the §15 privacy access-export bundle the user requested via `POST /api/v1/me/export` is ready to download | the requesting user | yes |
+| `webhook_auto_paused`           | a webhook subscription was auto-paused after its health window failed | owners and managers | opt-out |
 
 Opt-outs are per-person, per-category, via a signed unsubscribe link
 in the footer of each email. Required kinds (security-relevant or
