@@ -4,10 +4,12 @@ Cross-Site Request Forgery defence for the authenticated SPA surface.
 Per §03 "Sessions" and §15 "Cookies":
 
 * Every response sets a ``crewday_csrf`` cookie carrying a fresh
-  random token (``Secure; SameSite=Strict; Path=/``; **not**
-  ``HttpOnly`` — the browser's JS client must be able to read it to
-  populate the matching header; **no** ``__Host-`` prefix because the
-  CSRF token carries no authority by itself).
+  random token (``Secure; SameSite=Strict; Path=/`` in production;
+  **not** ``HttpOnly`` — the browser's JS client must be able to read
+  it to populate the matching header; **no** ``__Host-`` prefix because
+  the CSRF token carries no authority by itself). Dev-profile plain-HTTP
+  loopback drops ``Secure`` so real browser jars can round-trip the
+  cookie against ``127.0.0.1`` / ``localhost``.
 * Every non-idempotent request (non ``GET``/``HEAD``/``OPTIONS``) must
   echo the cookie's current value as the ``X-CSRF`` header. The
   middleware compares cookie vs header; a mismatch short-circuits to
@@ -45,6 +47,7 @@ auth shape, so they are not vulnerable to browser cookie CSRF.
 
 from __future__ import annotations
 
+import ipaddress
 import secrets
 from collections.abc import Awaitable, Callable
 from typing import Final
@@ -52,7 +55,9 @@ from typing import Final
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
+from starlette.types import ASGIApp
 
+from app.config import Settings, get_settings
 from app.http.skip_paths import is_skip_path as _is_skip_path
 
 __all__ = [
@@ -146,17 +151,45 @@ def _csrf_mismatch_response() -> JSONResponse:
     )
 
 
-def _build_csrf_cookie(value: str) -> str:
+def _build_csrf_cookie(value: str, *, secure: bool = True) -> str:
     """Return the ``Set-Cookie`` header value for the CSRF cookie.
 
-    ``Secure; SameSite=Strict; Path=/``, no ``HttpOnly`` (JS must
-    read the cookie to populate the matching header), no ``Domain``
-    (defensive — we don't want subdomain surfaces sharing the token),
-    no ``Max-Age`` / ``Expires`` (session cookie lifetime — browsers
-    clear it on tab close, and the middleware re-mints on every
-    response anyway).
+    Production shape is ``Secure; SameSite=Strict; Path=/``. Dev-profile
+    plain-HTTP loopback may pass ``secure=False``; every other attribute
+    stays fixed: no ``HttpOnly`` (JS must read the cookie to populate the
+    matching header), no ``Domain`` (defensive — we don't want subdomain
+    surfaces sharing the token), no ``Max-Age`` / ``Expires`` (session
+    cookie lifetime — browsers clear it on tab close, and the middleware
+    re-mints on every response anyway).
     """
-    return f"{CSRF_COOKIE_NAME}={value}; Secure; SameSite=Strict; Path=/"
+    attrs = [f"{CSRF_COOKIE_NAME}={value}"]
+    if secure:
+        attrs.append("Secure")
+    attrs.extend(["SameSite=Strict", "Path=/"])
+    return "; ".join(attrs)
+
+
+def _is_loopback_host(host: str | None) -> bool:
+    if host is None:
+        return False
+
+    normalized = host.removeprefix("[").removesuffix("]").rstrip(".").lower()
+    if normalized == "localhost":
+        return True
+
+    try:
+        return ipaddress.ip_address(normalized).is_loopback
+    except ValueError:
+        return False
+
+
+def _csrf_cookie_secure_for_request(request: Request, settings: Settings) -> bool:
+    """Return whether this response's CSRF cookie must carry ``Secure``."""
+    if settings.profile != "dev":
+        return True
+    if request.url.scheme != "http":
+        return True
+    return not _is_loopback_host(request.url.hostname)
 
 
 # ---------------------------------------------------------------------------
@@ -189,6 +222,10 @@ class CSRFMiddleware(BaseHTTPMiddleware):
     orthogonal to tenancy.
     """
 
+    def __init__(self, app: ASGIApp, *, settings: Settings | None = None) -> None:
+        super().__init__(app)
+        self._settings = settings if settings is not None else get_settings()
+
     async def dispatch(
         self,
         request: Request,
@@ -197,13 +234,17 @@ class CSRFMiddleware(BaseHTTPMiddleware):
         path = request.url.path
         skip = _is_skip_path(path) or _has_bearer_auth(request)
         method = request.method.upper()
+        secure_cookie = _csrf_cookie_secure_for_request(request, self._settings)
 
         if not skip and method not in IDEMPOTENT_METHODS and not verify_csrf(request):
             # Refresh the cookie on the rejection response too, so a
             # legitimate caller whose cookie raced the page load gets
             # a matching token in time for their retry.
             resp = _csrf_mismatch_response()
-            resp.headers.append("Set-Cookie", _build_csrf_cookie(mint_csrf_token()))
+            resp.headers.append(
+                "Set-Cookie",
+                _build_csrf_cookie(mint_csrf_token(), secure=secure_cookie),
+            )
             return resp
 
         response = await call_next(request)
@@ -212,5 +253,8 @@ class CSRFMiddleware(BaseHTTPMiddleware):
         # paths — a user who lands on ``/login`` (a skip path) must
         # still receive the token so the subsequent authenticated POST
         # can be verified.
-        response.headers.append("Set-Cookie", _build_csrf_cookie(mint_csrf_token()))
+        response.headers.append(
+            "Set-Cookie",
+            _build_csrf_cookie(mint_csrf_token(), secure=secure_cookie),
+        )
         return response

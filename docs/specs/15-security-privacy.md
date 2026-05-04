@@ -160,7 +160,13 @@ Session cookie `__Host-crewday_session`:
 - Value opaque (192-bit random) → DB lookup.
 
 CSRF cookie `crewday_csrf` + `X-CSRF` header on non-GET (double-
-submit).
+submit):
+- Production flags: `Secure; SameSite=Strict; Path=/`; no `HttpOnly`
+  because the SPA must echo the value in `X-CSRF`.
+- Dev-profile plain-HTTP loopback (`127.0.0.1`, `localhost`, `::1`)
+  may omit `Secure` so real browser cookie jars can send the cookie
+  back to the loopback app. Dev non-loopback and all production hosts
+  keep `Secure`.
 
 ## Secrets management
 

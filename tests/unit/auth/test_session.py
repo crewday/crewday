@@ -35,11 +35,13 @@ from fastapi.testclient import TestClient
 from pydantic import SecretStr
 from sqlalchemy import Engine, select
 from sqlalchemy.orm import Session, sessionmaker
+from starlette.requests import Request
 
 from app.adapters.db.audit.models import AuditLog
 from app.adapters.db.base import Base
 from app.adapters.db.identity.models import Session as SessionRow
 from app.adapters.db.session import make_engine
+from app.auth import csrf as csrf_module
 from app.auth._hashing import hash_with_pepper
 from app.auth.csrf import (
     CSRF_COOKIE_NAME,
@@ -1285,10 +1287,17 @@ class TestBuildSessionCookie:
 # ---------------------------------------------------------------------------
 
 
-def _make_csrf_app() -> FastAPI:
+def _csrf_settings(profile: str) -> Settings:
+    return Settings.model_construct(profile=profile)
+
+
+def _make_csrf_app(*, settings: Settings | None = None) -> FastAPI:
     """Return a FastAPI app with a single GET + POST route under CSRF."""
     app = FastAPI()
-    app.add_middleware(CSRFMiddleware)
+    app.add_middleware(
+        CSRFMiddleware,
+        settings=settings if settings is not None else _csrf_settings("prod"),
+    )
 
     @app.get("/scoped/ok")
     def _get() -> dict[str, str]:
@@ -1299,6 +1308,26 @@ def _make_csrf_app() -> FastAPI:
         return {"ok": "post"}
 
     return app
+
+
+def _csrf_cookie_attrs(header: str) -> set[str]:
+    return set(header.split("; ")[1:])
+
+
+def _csrf_request(*, scheme: str, host: str) -> Request:
+    return Request(
+        {
+            "type": "http",
+            "method": "GET",
+            "scheme": scheme,
+            "path": "/scoped/ok",
+            "raw_path": b"/scoped/ok",
+            "query_string": b"",
+            "headers": [(b"host", host.encode("ascii"))],
+            "server": (host.removeprefix("[").removesuffix("]"), 80),
+            "client": ("testclient", 50000),
+        }
+    )
 
 
 class TestCSRFMiddleware:
@@ -1360,7 +1389,7 @@ class TestCSRFMiddleware:
     def test_skip_path_bypasses_check(self) -> None:
         """``/healthz`` and other SKIP_PATHS never require CSRF pairs."""
         app = FastAPI()
-        app.add_middleware(CSRFMiddleware)
+        app.add_middleware(CSRFMiddleware, settings=_csrf_settings("prod"))
 
         @app.post("/healthz")
         def _healthz() -> dict[str, str]:
@@ -1379,3 +1408,76 @@ class TestCSRFMiddleware:
         # Fresh random each response — the probability of collision is
         # ~2^-192 per pair.
         assert t1 != t2
+
+    @pytest.mark.parametrize(
+        ("profile", "origin_url", "secure_expected"),
+        [
+            ("prod", "https://testserver", True),
+            ("prod", "http://127.0.0.1", True),
+            ("dev", "https://127.0.0.1", True),
+            ("dev", "http://dev.crew.day", True),
+            ("dev", "http://127.0.0.1", False),
+            ("dev", "http://127.0.0.1:8100", False),
+            ("dev", "http://localhost", False),
+        ],
+    )
+    def test_cookie_secure_flag_tracks_profile_scheme_and_host(
+        self,
+        profile: str,
+        origin_url: str,
+        *,
+        secure_expected: bool,
+    ) -> None:
+        client = TestClient(
+            _make_csrf_app(settings=_csrf_settings(profile)),
+            base_url=origin_url,
+        )
+        r = client.get("/scoped/ok")
+        attrs = _csrf_cookie_attrs(r.headers["set-cookie"])
+
+        assert ("Secure" in attrs) is secure_expected
+        assert "SameSite=Strict" in attrs
+        assert "Path=/" in attrs
+        assert "HttpOnly" not in attrs
+
+    def test_secure_policy_accepts_ipv6_loopback_hosts(self) -> None:
+        settings = _csrf_settings("dev")
+
+        assert not csrf_module._csrf_cookie_secure_for_request(
+            _csrf_request(scheme="http", host="[::1]"),
+            settings,
+        )
+        assert not csrf_module._csrf_cookie_secure_for_request(
+            _csrf_request(scheme="http", host="[::1]:8100"),
+            settings,
+        )
+        assert csrf_module._csrf_cookie_secure_for_request(
+            _csrf_request(scheme="https", host="[::1]"),
+            settings,
+        )
+
+    @pytest.mark.parametrize(
+        ("origin_url", "secure_expected"),
+        [
+            ("http://127.0.0.1", False),
+            ("http://dev.crew.day", True),
+        ],
+    )
+    def test_rejection_cookie_uses_same_secure_flag_decision(
+        self,
+        origin_url: str,
+        *,
+        secure_expected: bool,
+    ) -> None:
+        client = TestClient(
+            _make_csrf_app(settings=_csrf_settings("dev")),
+            base_url=origin_url,
+        )
+        r = client.post("/scoped/write")
+        attrs = _csrf_cookie_attrs(r.headers["set-cookie"])
+
+        assert r.status_code == 403
+        assert r.json() == {"detail": "csrf_mismatch"}
+        assert ("Secure" in attrs) is secure_expected
+        assert "SameSite=Strict" in attrs
+        assert "Path=/" in attrs

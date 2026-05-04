@@ -1778,7 +1778,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # and a mis-set wildcard here would be a privacy regression.
     # Dev work behind a separate Vite origin can populate
     # ``CREWDAY_CORS_ALLOW_ORIGINS`` with an explicit list.
-    app.add_middleware(CSRFMiddleware)
+    app.add_middleware(CSRFMiddleware, settings=cfg)
     app.add_middleware(IdempotencyMiddleware)
     app.add_middleware(AgentApprovalMiddleware)
     app.add_middleware(RateLimitMiddleware, settings=cfg)

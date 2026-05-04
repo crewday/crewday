@@ -654,8 +654,12 @@ auth dep edge alongside the change_request / verify routes.
   their next login. Refreshed on each request after half its
   lifetime has elapsed.
 - CSRF: Authenticated SPA requests carry a double-submit token
-  (`crewday_csrf` cookie + `X-CSRF` header) for every non-GET. Same
-  origin is enforced by `SameSite=Lax` for initial navigation.
+  (`crewday_csrf` cookie + `X-CSRF` header) for every non-GET. The
+  CSRF cookie is JS-readable and uses `Secure; SameSite=Strict; Path=/`
+  with no `HttpOnly`. The only exception is dev profile on plain-HTTP
+  loopback (`127.0.0.1`, `localhost`, `::1`), where `Secure` is omitted
+  so browser cookie jars can round-trip the token; production and
+  non-loopback hosts keep `Secure`.
 - **Archive gate.** If the session-owning user has
   `users.archived_at IS NOT NULL`, every subsequent request returns
   `401` with `error = "subject_user_archived"` — the same wire code

@@ -100,7 +100,7 @@ def _build_app(
     dict between requests simulates time advancing.
     """
     app = FastAPI()
-    app.add_middleware(CSRFMiddleware)
+    app.add_middleware(CSRFMiddleware, settings=settings)
 
     def _session() -> Iterator[Session]:
         s = session_factory()

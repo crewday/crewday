@@ -637,6 +637,27 @@ class TestMiddlewareWiring:
             "WorkspaceContextMiddleware"
         )
 
+    def test_csrf_middleware_uses_factory_settings_for_dev_loopback(self) -> None:
+        cfg = _settings(profile="dev")
+        client = TestClient(
+            create_app(settings=cfg),
+            base_url="http://127.0.0.1:8100",
+            raise_server_exceptions=False,
+        )
+
+        resp = client.get("/healthz")
+        csrf_header = next(
+            header
+            for header in resp.headers.get_list("set-cookie")
+            if header.startswith(f"{CSRF_COOKIE_NAME}=")
+        )
+        attrs = set(csrf_header.split("; ")[1:])
+
+        assert resp.status_code == 200
+        assert "Secure" not in attrs
+        assert "SameSite=Strict" in attrs
+        assert "Path=/" in attrs
+
 
 # ---------------------------------------------------------------------------
 # Worker mode
