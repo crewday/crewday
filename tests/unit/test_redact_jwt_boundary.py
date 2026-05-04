@@ -151,6 +151,42 @@ class TestDottedEventNamesPreserved:
 
 
 # ---------------------------------------------------------------------------
+# Lowercase hostnames survive
+# ---------------------------------------------------------------------------
+
+
+class TestLowercaseHostnamesPreserved:
+    @pytest.mark.parametrize(
+        "host",
+        [
+            "fcm.googleapis.com",
+            "whatever.googleusercontent.com",
+            "push.service-worker.dev",
+            "api.eu-west-1.amazonaws.com",
+        ],
+    )
+    def test_hostname_not_redacted_as_jwt(self, host: str) -> None:
+        assert scrub_string(host) == host
+        assert redact(f"endpoint={host} status=410", scope="log") == (
+            f"endpoint={host} status=410"
+        )
+        assert redact(f"https://{host}/v1/send", scope="log") == (
+            f"https://{host}/v1/send"
+        )
+
+    def test_hostname_in_mappings_survives_without_key_special_case(self) -> None:
+        host = "fcm.googleapis.com"
+
+        out = redact(
+            {"endpoint_host": host, "provider_url": f"https://{host}/v1/send"},
+            scope="log",
+        )
+        assert isinstance(out, dict)
+        assert out["endpoint_host"] == host
+        assert out["provider_url"] == f"https://{host}/v1/send"
+
+
+# ---------------------------------------------------------------------------
 # Per-segment length boundary
 # ---------------------------------------------------------------------------
 

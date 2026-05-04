@@ -46,6 +46,7 @@ from urllib.parse import urlparse
 from fastapi import (
     APIRouter,
     Depends,
+    HTTPException,
     Path,
     Query,
     Request,
@@ -66,7 +67,6 @@ from app.audit import write_audit
 from app.domain.errors import (
     Internal,
     NotFound,
-    NotImplementedFeature,
     ServiceUnavailable,
     Validation,
 )
@@ -631,7 +631,10 @@ def build_messaging_router(
     ) -> None:
         del body
         del ctx
-        raise NotImplementedFeature(extra={"error": "push_unavailable"})
+        raise HTTPException(
+            status_code=status.HTTP_501_NOT_IMPLEMENTED,
+            detail={"error": "push_unavailable"},
+        )
 
     @r.delete(
         "/notifications/push/tokens/{token_id}",

@@ -359,17 +359,10 @@ _BEARER_RE: Final[re.Pattern[str]] = re.compile(r"Bearer\s+[A-Za-z0-9._\-]+")
 # * Signature — HS256 yields 256 bits = 43 base64url chars; RS256 /
 #   ES256 are longer.
 #
-# Match candidates pass through :func:`_looks_like_hostname` before
-# being scrubbed: the alternation alone fires on dotted DNS hostnames
-# whose middle label happens to be ≥10 chars (``fcm.googleapis.com``,
-# ``whatever.googleusercontent.com``), which over-redacts vendor
-# hostnames in audit diffs. The post-match carve-out rejects strings
-# whose every dot-separated segment is a valid RFC 1035 LDH label
-# AND whose final segment looks like a TLD (2-8 lowercase letters).
-# Real JWT segments use base64url and almost always contain
-# uppercase letters, digits, or ``_`` — none of which appear in DNS
-# labels — so the carve-out leaves real tokens untouched. See
-# ``cd-g9ce0`` for the messaging-audit regression.
+# cd-5n934: keep lowercase FQDNs like ``fcm.googleapis.com`` out of
+# JWT redaction. The trade-off is conservative: only lowercase LDH
+# hostnames with short TLDs are spared; mixed-case JWT-like candidates
+# still redact.
 _JWT_RE: Final[re.Pattern[str]] = re.compile(
     r"\b[\w-]{10,}\.[\w-]+\.[\w-]+\b"
     r"|\b[\w-]+\.[\w-]{10,}\.[\w-]+\b"
