@@ -44,7 +44,7 @@ interface TaskContainer {
   kind: "booking" | "rota";
   startMin: number;
   endMin: number;
-  propertyId: string;
+  propertyId: string | null;
   tint: string;
   tintSolid: string;
 }

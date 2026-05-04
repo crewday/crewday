@@ -37,18 +37,21 @@ export const PALETTE_SOLID = [
   "#925E39", // earth
 ];
 
-export function propertyColor(pid: string, data: MySchedulePayload): string {
+export function propertyColor(pid: string | null, data: MySchedulePayload): string {
+  if (pid === null) return "var(--moss-soft)";
   const idx = data.properties.findIndex((p) => p.id === pid);
   if (idx < 0) return "var(--moss-soft)";
   return PALETTE[idx % PALETTE.length] ?? PALETTE[0]!;
 }
 
-export function propertySolid(pid: string, data: MySchedulePayload): string {
+export function propertySolid(pid: string | null, data: MySchedulePayload): string {
+  if (pid === null) return "var(--moss)";
   const idx = data.properties.findIndex((p) => p.id === pid);
   if (idx < 0) return "var(--moss)";
   return PALETTE_SOLID[idx % PALETTE_SOLID.length] ?? PALETTE_SOLID[0]!;
 }
 
-export function propertyName(pid: string, data: MySchedulePayload): string {
+export function propertyName(pid: string | null, data: MySchedulePayload): string {
+  if (pid === null) return "Unassigned";
   return data.properties.find((p) => p.id === pid)?.name ?? "—";
 }

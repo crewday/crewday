@@ -15,7 +15,7 @@ export type BookingKind = "work" | "travel";
 export interface Booking {
   id: string;
   employee_id: string;
-  property_id: string;
+  property_id: string | null;
   scheduled_start: string;
   scheduled_end: string;
   status: BookingStatus;
