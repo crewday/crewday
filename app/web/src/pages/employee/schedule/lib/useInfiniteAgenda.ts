@@ -75,7 +75,7 @@ export function useInfiniteAgenda(
       const fromIso = pageParam;
       const toIso = isoDate(addDays(parseIsoDate(pageParam), 6));
       return fetchJson<MySchedulePayload>(
-        `/api/v1/me/schedule?from_=${fromIso}&to=${toIso}`,
+        `/api/v1/me/schedule?from=${fromIso}&to=${toIso}`,
       );
     },
     getNextPageParam: (_last, _all, lastParam) =>
