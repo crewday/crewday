@@ -37,7 +37,7 @@ from app.adapters.db.places.models import Property, PropertyWorkspace
 from app.adapters.db.tasks.models import Occurrence, TaskApproval
 from app.adapters.db.workspace.models import Workspace
 from app.adapters.llm.ports import LLMClient
-from app.adapters.mail.ports import Mailer
+from app.adapters.mail.ports import MailDeliveryError, Mailer
 from app.domain.llm.budget import (
     PricingTable,
     default_pricing_table,
@@ -224,25 +224,28 @@ def send_daily_digest(
                 body_md = _fallback_body(snapshot, prose=llm_prose)
                 llm_rendered += 1
 
-            service.notify(
-                recipient_user_id=recipient.user_id,
-                kind=NotificationKind.DAILY_DIGEST,
-                payload={
-                    "subject": subject,
-                    "body_md": body_md,
-                    "local_day": snapshot.local_day.isoformat(),
-                    "timezone": snapshot.timezone,
-                    "scheduled_count": snapshot.scheduled_count,
-                    "overdue_count": snapshot.overdue_count,
-                    "pending_task_approval_count": (
-                        snapshot.pending_task_approval_count
-                    ),
-                    "pending_agent_approval_count": (
-                        snapshot.pending_agent_approval_count
-                    ),
-                    "pay_period_state": snapshot.pay_period_state,
-                },
-            )
+            try:
+                service.notify(
+                    recipient_user_id=recipient.user_id,
+                    kind=NotificationKind.DAILY_DIGEST,
+                    payload={
+                        "subject": subject,
+                        "body_md": body_md,
+                        "local_day": snapshot.local_day.isoformat(),
+                        "timezone": snapshot.timezone,
+                        "scheduled_count": snapshot.scheduled_count,
+                        "overdue_count": snapshot.overdue_count,
+                        "pending_task_approval_count": (
+                            snapshot.pending_task_approval_count
+                        ),
+                        "pending_agent_approval_count": (
+                            snapshot.pending_agent_approval_count
+                        ),
+                        "pay_period_state": snapshot.pay_period_state,
+                    },
+                )
+            except MailDeliveryError:
+                continue
             digest_record.body_md = body_md
             digest_record.sent_at = resolved_clock.now()
             session.flush()
