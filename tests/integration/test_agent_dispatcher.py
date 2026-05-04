@@ -19,18 +19,19 @@ can't observe (real Pydantic validation, tenant filter, audit row).
 from __future__ import annotations
 
 from collections.abc import Iterator
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
 from fastapi import FastAPI
+from fastapi.testclient import TestClient
 from sqlalchemy import Engine, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.adapters.db.audit.models import AuditLog
 from app.adapters.db.authz.models import RoleGrant
-from app.adapters.db.identity.models import User
+from app.adapters.db.identity.models import ApiToken, User
 from app.adapters.db.llm.models import (
     BudgetLedger,
     LlmAssignment,
@@ -44,8 +45,11 @@ from app.adapters.db.tasks.models import Occurrence
 from app.adapters.db.workspace.models import Workspace
 from app.adapters.llm.ports import LLMResponse, LLMUsage
 from app.agent.dispatcher import make_default_dispatcher
+from app.agent.tokens import DelegatedTokenFactory
 from app.api.deps import current_workspace_context
 from app.api.deps import db_session as _db_session_dep
+from app.api.deps import get_llm as _get_llm_dep
+from app.api.v1.agent import build_agent_router, get_agent_token_factory
 from app.api.v1.tasks import router as tasks_router
 from app.auth import tokens as tokens_module
 from app.domain.agent.runtime import (
@@ -335,6 +339,39 @@ def _build_app(session: Session, ctx: WorkspaceContext) -> FastAPI:
     return app
 
 
+def _build_agent_app(
+    session: Session,
+    ctx: WorkspaceContext,
+    *,
+    llm: _ScriptedLLM,
+    clock: FrozenClock,
+    bus: EventBus,
+) -> FastAPI:
+    app = FastAPI()
+    app.include_router(tasks_router, prefix="/w/{slug}/api/v1")
+    app.include_router(
+        build_agent_router(clock=clock, event_bus=bus), prefix="/w/{slug}/api/v1"
+    )
+
+    def _session() -> Iterator[Session]:
+        yield session
+
+    def _ctx() -> WorkspaceContext:
+        return ctx
+
+    def _llm() -> _ScriptedLLM:
+        return llm
+
+    def _token_factory() -> DelegatedTokenFactory:
+        return DelegatedTokenFactory(session=session, clock=clock)
+
+    app.dependency_overrides[_db_session_dep] = _session
+    app.dependency_overrides[current_workspace_context] = _ctx
+    app.dependency_overrides[_get_llm_dep] = _llm
+    app.dependency_overrides[get_agent_token_factory] = _token_factory
+    return app
+
+
 # ---------------------------------------------------------------------------
 # 1) Read endpoint round-trip — list_tasks
 # ---------------------------------------------------------------------------
@@ -474,11 +511,13 @@ class _ScriptedLLM:
     """Minimal scripted client; pops one reply per call."""
 
     replies: list[LLMResponse]
+    messages: list[list[dict[str, Any]]] = field(default_factory=list)
 
     def complete(self, **_: Any) -> LLMResponse:
         raise NotImplementedError
 
-    def chat(self, **_: Any) -> LLMResponse:
+    def chat(self, **kwargs: Any) -> LLMResponse:
+        self.messages.append(list(kwargs["messages"]))
         return self.replies.pop(0)
 
     def ocr(self, **_: Any) -> str:
@@ -609,3 +648,93 @@ def test_manager_creates_task_end_to_end_via_dispatcher(
     assert diff["agent_label"] == "manager-chat-agent"
     assert diff["status_code"] == 201
     assert isinstance(diff["token_id"], str) and diff["token_id"]
+
+
+def test_agent_message_endpoint_dispatches_live_tool_and_audits(
+    db_session: Session,
+) -> None:
+    workspace, user = _seed_workspace_and_user(db_session)
+    ctx = WorkspaceContext(
+        workspace_id=workspace.id,
+        workspace_slug=workspace.slug,
+        actor_id=user.id,
+        actor_kind="user",
+        actor_grant_role="manager",
+        actor_was_owner_member=True,
+        audit_correlation_id=new_ulid(),
+    )
+    set_current(ctx)
+    _seed_llm_assignment(db_session, workspace_id=workspace.id)
+    _seed_budget_ledger(db_session, workspace_id=workspace.id)
+    property_id = _seed_property(db_session, workspace_id=workspace.id)
+    bus = EventBus()
+    clock = FrozenClock(_PINNED)
+
+    tool_call_text = (
+        '<tool_call name="create_task" input=\''
+        '{"title":"Restock towels",'
+        f'"property_id":"{property_id}",'
+        '"scheduled_for_local":"2026-04-27T09:00"}\'/>'
+    )
+    llm = _ScriptedLLM(
+        replies=[
+            LLMResponse(
+                text=tool_call_text,
+                usage=LLMUsage(prompt_tokens=20, completion_tokens=15, total_tokens=35),
+                model_id="fake/dispatcher-model",
+                finish_reason="tool_calls",
+            ),
+            LLMResponse(
+                text="Created the task.",
+                usage=LLMUsage(prompt_tokens=22, completion_tokens=5, total_tokens=27),
+                model_id="fake/dispatcher-model",
+                finish_reason="stop",
+            ),
+        ]
+    )
+    app = _build_agent_app(db_session, ctx, llm=llm, clock=clock, bus=bus)
+    client = TestClient(app, raise_server_exceptions=False)
+
+    response = client.post(
+        f"/w/{workspace.slug}/api/v1/agent/manager/message",
+        json={"body": "Please create a task to restock towels."},
+    )
+
+    assert response.status_code == 201, response.text
+    assert response.json()["kind"] == "user"
+    assert response.json()["body"] == "Please create a task to restock towels."
+    assert llm.replies == []
+    assert llm.messages
+    first_prompt_text = [
+        message["content"] for message in llm.messages[0] if message["role"] == "user"
+    ]
+    assert first_prompt_text.count("Please create a task to restock towels.") == 1
+
+    rows = list(
+        db_session.scalars(
+            select(Occurrence).where(Occurrence.title == "Restock towels")
+        ).all()
+    )
+    assert len(rows) == 1
+    assert rows[0].workspace_id == workspace.id
+
+    audit_rows = list(
+        db_session.scalars(
+            select(AuditLog).where(AuditLog.action == "agent.tool.create_task")
+        ).all()
+    )
+    assert len(audit_rows) == 1
+    audit = audit_rows[0]
+    assert audit.actor_id == user.id
+    assert audit.actor_kind == "user"
+    diff = audit.diff
+    assert isinstance(diff, dict)
+    assert diff["agent_label"] == "manager-chat-agent"
+    assert diff["status_code"] == 201
+    assert isinstance(diff["token_id"], str) and diff["token_id"]
+
+    with tenant_agnostic():
+        token_row = db_session.get(ApiToken, diff["token_id"])
+    assert token_row is not None
+    assert token_row.kind == "delegated"
+    assert token_row.revoked_at == _PINNED

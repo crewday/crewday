@@ -5,7 +5,7 @@ from __future__ import annotations
 import importlib
 import pkgutil
 from collections.abc import Iterator
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Literal
 
 import pytest
@@ -17,12 +17,22 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app.adapters.db.base import Base
 from app.adapters.db.identity.models import User, canonicalise_email
+from app.adapters.db.llm.models import (
+    BudgetLedger,
+    LlmAssignment,
+    LlmModel,
+    LlmProvider,
+    LlmProviderModel,
+)
 from app.adapters.db.session import UnitOfWorkImpl, make_engine
 from app.adapters.db.workspace.models import UserWorkspace, Workspace
+from app.adapters.llm.ports import LLMResponse, LLMUsage
 from app.api.deps import current_workspace_context, db_session
+from app.api.deps import get_llm as get_llm_dep
 from app.api.factory import create_app
-from app.api.v1.agent import build_agent_router
+from app.api.v1.agent import build_agent_router, get_agent_token_factory
 from app.config import Settings
+from app.domain.agent.runtime import DelegatedToken
 from app.events.bus import EventBus
 from app.events.types import AgentMessageAppended, ChatMessageSent
 from app.tenancy import WorkspaceContext
@@ -99,8 +109,84 @@ def _bootstrap(
                 added_at=_PINNED,
             )
         )
+        _seed_llm_assignment(
+            s, workspace_id=workspace_id, capability=f"chat.{role_to_scope(role)}"
+        )
+        s.add(
+            BudgetLedger(
+                id=new_ulid(),
+                workspace_id=workspace_id,
+                period_start=_PINNED - timedelta(days=30),
+                period_end=_PINNED + timedelta(seconds=1),
+                spent_cents=0,
+                cap_cents=10_000,
+                updated_at=_PINNED,
+            )
+        )
         s.commit()
     return workspace_id, user_id
+
+
+def role_to_scope(role: Literal["manager", "worker"]) -> Literal["manager", "employee"]:
+    return "manager" if role == "manager" else "employee"
+
+
+def _seed_llm_assignment(
+    session: Session, *, workspace_id: str, capability: str
+) -> None:
+    provider = LlmProvider(
+        id=new_ulid(),
+        name=f"unit-provider-{capability}",
+        provider_type="fake",
+        timeout_s=60,
+        requests_per_minute=60,
+        priority=0,
+        is_enabled=True,
+        created_at=_PINNED,
+        updated_at=_PINNED,
+    )
+    model = LlmModel(
+        id=new_ulid(),
+        canonical_name=f"fake/{capability}",
+        display_name=f"fake/{capability}",
+        vendor="other",
+        capabilities=["chat"],
+        is_active=True,
+        price_source="",
+        created_at=_PINNED,
+        updated_at=_PINNED,
+    )
+    session.add_all([provider, model])
+    session.flush()
+    provider_model = LlmProviderModel(
+        id=new_ulid(),
+        provider_id=provider.id,
+        model_id=model.id,
+        api_model_id=f"fake/{capability}",
+        supports_system_prompt=True,
+        supports_temperature=True,
+        is_enabled=True,
+        created_at=_PINNED,
+        updated_at=_PINNED,
+    )
+    session.add(provider_model)
+    session.flush()
+    session.add(
+        LlmAssignment(
+            id=new_ulid(),
+            workspace_id=workspace_id,
+            capability=capability,
+            model_id=provider_model.id,
+            provider="fake",
+            priority=0,
+            enabled=True,
+            max_tokens=None,
+            temperature=None,
+            extra_api_params={},
+            required_capabilities=[],
+            created_at=_PINNED,
+        )
+    )
 
 
 def _ctx(
@@ -141,9 +227,44 @@ def _client(
             assert isinstance(s, Session)
             yield s
 
+    def _override_llm() -> _ReplyLLM:
+        return _ReplyLLM()
+
+    def _override_token_factory() -> _UnitTokenFactory:
+        return _UnitTokenFactory()
+
     app.dependency_overrides[current_workspace_context] = _override_ctx
     app.dependency_overrides[db_session] = _override_db
+    app.dependency_overrides[get_llm_dep] = _override_llm
+    app.dependency_overrides[get_agent_token_factory] = _override_token_factory
     return TestClient(app, raise_server_exceptions=False)
+
+
+class _ReplyLLM:
+    def complete(self, **kwargs):  # type: ignore[no-untyped-def]
+        raise NotImplementedError
+
+    def chat(self, **kwargs):  # type: ignore[no-untyped-def]
+        return LLMResponse(
+            text="I can help.",
+            usage=LLMUsage(prompt_tokens=1, completion_tokens=1, total_tokens=2),
+            model_id="fake/unit",
+            finish_reason="stop",
+        )
+
+    def ocr(self, **kwargs):  # type: ignore[no-untyped-def]
+        raise NotImplementedError
+
+    def stream_chat(self, **kwargs):  # type: ignore[no-untyped-def]
+        raise NotImplementedError
+
+
+class _UnitTokenFactory:
+    def mint_for(self, *args, **kwargs):  # type: ignore[no-untyped-def]
+        return DelegatedToken(plaintext="mip_FAKEKEY_FAKESECRET", token_id="tok_unit")
+
+    def revoke_minted(self, ctx: WorkspaceContext) -> None:
+        del ctx
 
 
 def _settings() -> Settings:
@@ -212,12 +333,14 @@ def test_agent_message_endpoint_mounts_and_returns_agent_message_json(
         "body": "Can you help?",
         "channel_kind": None,
     }
-    assert len(appended) == 1
+    assert len(appended) == 2
     assert appended[0].workspace_id == workspace_id
     assert appended[0].actor_user_id == user_id
     assert appended[0].scope == scope
     assert appended[0].message.kind == "user"
     assert appended[0].message.body == "Can you help?"
+    assert appended[1].message.kind == "agent"
+    assert appended[1].message.body == "I can help."
     assert broadcast == []
 
 
@@ -251,11 +374,13 @@ def test_agent_log_endpoint_mounts_and_returns_agent_message_list(
 
     listed = client.get(f"/w/agent-test/api/v1/agent/{scope}/log")
     assert listed.status_code == 200
-    assert listed.json() == [
-        {
-            "at": "2026-04-29T12:00:00Z",
-            "kind": "user",
-            "body": "Show my next shift",
-            "channel_kind": None,
-        }
-    ]
+    messages = listed.json()
+    assert len(messages) == 2
+    assert {
+        (message["kind"], message["body"], message["channel_kind"])
+        for message in messages
+    } == {
+        ("user", "Show my next shift", None),
+        ("agent", "I can help.", None),
+    }
+    assert {message["at"] for message in messages} == {"2026-04-29T12:00:00Z"}

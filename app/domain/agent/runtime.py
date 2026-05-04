@@ -514,6 +514,7 @@ def run_turn(
     max_iterations: int = DEFAULT_MAX_ITERATIONS,
     wall_clock_timeout_s: int = DEFAULT_WALL_CLOCK_TIMEOUT_S,
     history_cap: int = DEFAULT_HISTORY_CAP,
+    include_user_message: bool = True,
 ) -> TurnOutcome:
     """Run one agent turn end-to-end.
 
@@ -556,6 +557,10 @@ def run_turn(
     * ``max_iterations`` / ``wall_clock_timeout_s`` /
       ``history_cap`` — caps with §11-pinned defaults; tests dial
       them down for the timeout / iteration-cap branches.
+    * ``include_user_message`` — append ``user_message`` as the
+      trailing user turn. HTTP chat endpoints pass ``False`` after
+      flushing the user row because recent history already includes
+      that message.
 
     Never raises on the §11 expected failure modes (capability
     unassigned, budget exceeded, iteration cap, wall-clock cap) —
@@ -714,6 +719,7 @@ def run_turn(
         history_cap=history_cap,
         preferences=preferences,
         system_prompt=system_prompt,
+        include_user_message=include_user_message,
     )
 
     tool_calls_made = 0
@@ -1078,6 +1084,7 @@ def _assemble_history(
     history_cap: int,
     preferences: PreferenceBundle,
     system_prompt: str,
+    include_user_message: bool = True,
 ) -> list[LlmChatMessage]:
     """Build the ``[system, …history, user]`` sequence the LLM sees.
 
@@ -1085,11 +1092,11 @@ def _assemble_history(
     capability, followed by resolved agent preferences. History: the
     live compaction summary, then the last N uncompacted
     :class:`ChatMessage` rows on the thread (oldest first), capped
-    at :data:`DEFAULT_HISTORY_CAP`. The newly-arrived user message
-    lands as the trailing ``user`` turn.
+    at :data:`DEFAULT_HISTORY_CAP`.
 
-    A scheduled trigger has no thread → no history rows; the LLM
-    sees only the system prompt + the synthetic user message.
+    ``include_user_message`` is disabled by chat endpoints that
+    persist the user row before calling the runtime; in that case
+    recent history already carries the fresh turn.
     """
     messages: list[LlmChatMessage] = [
         {
@@ -1099,7 +1106,8 @@ def _assemble_history(
     ]
     if thread_id is not None:
         messages.extend(_load_recent_history(session, thread_id, history_cap))
-    messages.append({"role": "user", "content": user_message})
+    if include_user_message:
+        messages.append({"role": "user", "content": user_message})
     return messages
 
 

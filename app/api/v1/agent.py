@@ -9,18 +9,23 @@ chat-log seam. The deeper LLM turn runner is wired separately in
 
 from __future__ import annotations
 
+import logging
 from datetime import UTC, datetime
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.adapters.db.identity.models import User
 from app.adapters.db.messaging.models import ChatChannel, ChatMessage
-from app.api.deps import current_workspace_context, db_session
+from app.adapters.llm.ports import LLMClient
+from app.agent.dispatcher import make_default_dispatcher
+from app.agent.tokens import DelegatedTokenFactory
+from app.api.deps import current_workspace_context, db_session, get_llm
 from app.audit import write_audit
+from app.domain.agent.runtime import run_turn
 from app.events.bus import EventBus
 from app.events.bus import bus as default_event_bus
 from app.events.types import AgentMessageAppended, AgentMessagePayload
@@ -28,10 +33,13 @@ from app.tenancy import WorkspaceContext
 from app.util.clock import Clock, SystemClock
 from app.util.ulid import new_ulid
 
+_log = logging.getLogger(__name__)
+
 __all__ = [
     "AgentLogMessage",
     "AgentMessageRequest",
     "build_agent_router",
+    "get_agent_token_factory",
     "router",
 ]
 
@@ -40,10 +48,19 @@ ChannelKind = Literal["staff", "manager"]
 
 _Ctx = Annotated[WorkspaceContext, Depends(current_workspace_context)]
 _Db = Annotated[Session, Depends(db_session)]
+_Llm = Annotated[LLMClient, Depends(get_llm)]
 
 _SCOPE_CHANNEL_KIND: dict[AgentScope, ChannelKind] = {
     "employee": "staff",
     "manager": "manager",
+}
+_SCOPE_AGENT_LABEL: dict[AgentScope, str] = {
+    "employee": "worker-chat-agent",
+    "manager": "manager-chat-agent",
+}
+_SCOPE_CAPABILITY: dict[AgentScope, str] = {
+    "employee": "chat.employee",
+    "manager": "chat.manager",
 }
 
 
@@ -70,6 +87,14 @@ class AgentLogMessage(BaseModel):
     kind: Literal["agent", "user", "action"]
     body: str
     channel_kind: None = None
+
+
+def get_agent_token_factory() -> DelegatedTokenFactory:
+    """Return the delegated-token factory used by agent turns."""
+    return DelegatedTokenFactory()
+
+
+_TokenFactory = Annotated[DelegatedTokenFactory, Depends(get_agent_token_factory)]
 
 
 def build_agent_router(
@@ -123,10 +148,13 @@ def build_agent_router(
         },
     )
     def post_message(
+        request: Request,
         scope: AgentScope,
         body: AgentMessageRequest,
         ctx: _Ctx,
         session: _Db,
+        llm_client: _Llm,
+        token_factory: _TokenFactory,
     ) -> AgentLogMessage:
         _require_scope_access(scope, ctx)
         channel = _get_or_create_agent_channel(
@@ -182,6 +210,39 @@ def build_agent_router(
                 ),
             )
         )
+        try:
+            run_turn(
+                ctx,
+                session=session,
+                scope=scope,
+                thread_id=channel.id,
+                user_message=row.body_md,
+                trigger="event",
+                llm_client=llm_client,
+                tool_dispatcher=make_default_dispatcher(
+                    request.app,
+                    ctx.workspace_slug,
+                    always_gated_tools=frozenset(),
+                ),
+                token_factory=token_factory,
+                agent_label=_SCOPE_AGENT_LABEL[scope],
+                capability=_SCOPE_CAPABILITY[scope],
+                event_bus=bus,
+                clock=eff_clock,
+                include_user_message=False,
+            )
+        finally:
+            try:
+                token_factory.revoke_minted(ctx)
+            except Exception:
+                _log.exception(
+                    "agent.delegated_token_revoke_failed",
+                    extra={
+                        "workspace_id": ctx.workspace_id,
+                        "actor_id": ctx.actor_id,
+                        "scope": scope,
+                    },
+                )
         return payload
 
     return r
