@@ -45,6 +45,7 @@ from app.adapters.db.session import make_uow
 from app.adapters.mail.ports import Mailer
 from app.api.deps import db_session
 from app.api.v1._problem_json import IDENTITY_PROBLEM_RESPONSES
+from app.api.v1.auth.errors import auth_conflict, auth_rate_limited
 from app.auth.magic_link import (
     AlreadyConsumed,
     ConsumeLockout,
@@ -61,6 +62,7 @@ from app.auth.magic_link import (
     write_rejected_audit,
 )
 from app.config import Settings, get_settings
+from app.domain.errors import DomainError
 
 __all__ = [
     "MagicConsumeBody",
@@ -162,34 +164,25 @@ _DomainError = (
 )
 
 
-def _http_for(exc: Exception) -> HTTPException:
-    """Map a typed magic-link domain error to an :class:`HTTPException`.
+def _http_for(exc: Exception) -> HTTPException | DomainError:
+    """Map a typed magic-link domain error to an HTTP-layer exception.
 
-    The envelope is ``{"error": <symbol>}`` to match the spec's
-    error vocabulary (§03). The caller has already narrowed via
-    ``except _DomainError`` so the mapping is total; a stray
-    :class:`Exception` propagates as a real 500.
+    The rendered problem+json envelope carries ``{"error": <symbol>}``
+    to match the spec's error vocabulary (§03). The caller has already
+    narrowed via ``except _DomainError`` so the mapping is total; a
+    stray :class:`Exception` propagates as a real 500.
     """
     if isinstance(exc, RateLimited):
-        return HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail={"error": "rate_limited"},
-        )
+        return auth_rate_limited("rate_limited")
     if isinstance(exc, ConsumeLockout):
-        return HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail={"error": "consume_locked_out"},
-        )
+        return auth_rate_limited("consume_locked_out")
     if isinstance(exc, TokenExpired):
         return HTTPException(
             status_code=status.HTTP_410_GONE,
             detail={"error": "expired"},
         )
     if isinstance(exc, AlreadyConsumed):
-        return HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail={"error": "already_consumed"},
-        )
+        return auth_conflict("already_consumed")
     if isinstance(exc, PurposeMismatch):
         return HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
