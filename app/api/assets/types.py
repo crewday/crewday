@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Annotated, Any, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from fastapi import APIRouter, Depends, Query, Response, status
 from pydantic import (
     BaseModel,
     ConfigDict,
@@ -42,6 +42,7 @@ from app.domain.assets.types import (
     list_types,
     update_type,
 )
+from app.domain.errors import Conflict, DomainError, Forbidden, Internal, NotFound
 from app.tenancy import WorkspaceContext
 
 __all__ = [
@@ -276,26 +277,22 @@ class AssetTypeListResponse(BaseModel):
     has_more: bool = False
 
 
-def _http_for_type_error(exc: Exception) -> HTTPException:
+def _http_for_type_error(exc: Exception) -> DomainError:
     if isinstance(exc, AssetTypeNotFound):
-        return HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={"error": "asset_type_not_found"},
-        )
+        return NotFound(extra={"error": "asset_type_not_found"})
     if isinstance(exc, AssetTypeReadOnly):
-        return HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail={"error": "asset_type_read_only", "message": str(exc)},
+        message = str(exc)
+        return Forbidden(
+            message,
+            extra={"error": "asset_type_read_only", "message": message},
         )
     if isinstance(exc, AssetTypeKeyConflict):
-        return HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail={"error": "asset_type_key_conflict", "message": str(exc)},
+        message = str(exc)
+        return Conflict(
+            message,
+            extra={"error": "asset_type_key_conflict", "message": message},
         )
-    return HTTPException(
-        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        detail={"error": "internal"},
-    )
+    return Internal(extra={"error": "internal"})
 
 
 def _list_type_response(

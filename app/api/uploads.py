@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable, Container
 from typing import Final
 
-from fastapi import HTTPException, UploadFile
+from fastapi import UploadFile
 
 from app.adapters.storage.ports import MimeSniffer
 
@@ -21,9 +21,9 @@ __all__ = [
 
 DEFAULT_UPLOAD_CHUNK_SIZE: Final[int] = 64 * 1024
 
-_TooLargeFactory = Callable[[], HTTPException]
-_MissingContentTypeFactory = Callable[[], HTTPException]
-_RejectedContentTypeFactory = Callable[[str | None], HTTPException]
+_TooLargeFactory = Callable[[], Exception]
+_MissingContentTypeFactory = Callable[[], Exception]
+_RejectedContentTypeFactory = Callable[[str | None], Exception]
 _MimeFallback = Callable[[bytes, str], str | None]
 
 

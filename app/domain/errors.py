@@ -14,6 +14,8 @@ listed in ``docs/specs/12-rest-api.md`` §"Errors":
 * :class:`Forbidden` → ``forbidden``
 * :class:`Gone` → ``gone``
 * :class:`RateLimited` → ``rate_limited``
+* :class:`PayloadTooLarge` → ``payload_too_large``
+* :class:`UnsupportedMediaType` → ``unsupported_media_type``
 * :class:`ServiceUnavailable` → ``service_unavailable``
 * :class:`UpstreamUnavailable` → ``upstream_unavailable``
 * :class:`Internal` → ``internal``
@@ -64,9 +66,11 @@ __all__ = [
     "Internal",
     "InvalidCursor",
     "NotFound",
+    "PayloadTooLarge",
     "RateLimited",
     "ServiceUnavailable",
     "Unauthorized",
+    "UnsupportedMediaType",
     "UpstreamUnavailable",
     "Validation",
 ]
@@ -250,6 +254,20 @@ class RateLimited(DomainError):
 
     title: ClassVar[str] = "Rate limited"
     type_name: ClassVar[str] = "rate_limited"
+
+
+class PayloadTooLarge(DomainError):
+    """Request body or upload exceeds the configured cap. HTTP 413."""
+
+    title: ClassVar[str] = "Payload too large"
+    type_name: ClassVar[str] = "payload_too_large"
+
+
+class UnsupportedMediaType(DomainError):
+    """Uploaded or declared content type is not accepted. HTTP 415."""
+
+    title: ClassVar[str] = "Unsupported media type"
+    type_name: ClassVar[str] = "unsupported_media_type"
 
 
 class ServiceUnavailable(DomainError):

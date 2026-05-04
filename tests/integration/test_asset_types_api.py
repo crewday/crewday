@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from httpx import Response
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -15,9 +16,18 @@ from app.adapters.db.assets.models import Asset, AssetType
 from app.adapters.db.audit.models import AuditLog
 from app.adapters.db.places.models import Property
 from app.api.deps import current_workspace_context, db_session
+from app.api.errors import CONTENT_TYPE_PROBLEM_JSON, add_exception_handlers
 from app.api.v1.assets import router as assets_router
 from app.tenancy import WorkspaceContext
 from tests.factories.identity import bootstrap_user, bootstrap_workspace
+
+
+def _assert_problem_error(response: Response, *, error: str) -> dict[str, object]:
+    assert response.headers["content-type"].startswith(CONTENT_TYPE_PROBLEM_JSON)
+    body = response.json()
+    assert isinstance(body, dict)
+    assert body["error"] == error
+    return body
 
 
 def _ctx(workspace_id: str, actor_id: str, *, slug: str) -> WorkspaceContext:
@@ -35,6 +45,7 @@ def _ctx(workspace_id: str, actor_id: str, *, slug: str) -> WorkspaceContext:
 def _client(session: Session, ctx: WorkspaceContext) -> TestClient:
     app = FastAPI()
     app.include_router(assets_router, prefix="/assets")
+    add_exception_handlers(app)
 
     def override_ctx() -> WorkspaceContext:
         return ctx
@@ -210,6 +221,7 @@ def test_delete_archives_type_when_asset_references_it(db_session: Session) -> N
 
     hidden = client.get(f"/assets/asset_types/{type_id}")
     assert hidden.status_code == 404
+    _assert_problem_error(hidden, error="asset_type_not_found")
 
     archived = client.get(
         "/assets/asset_types",
@@ -245,4 +257,7 @@ def test_manage_type_endpoints_require_capability(db_session: Session) -> None:
         },
     )
     assert denied.status_code == 403
-    assert denied.json()["detail"]["action_key"] == "assets.manage_types"
+    assert (
+        _assert_problem_error(denied, error="permission_denied")["action_key"]
+        == "assets.manage_types"
+    )

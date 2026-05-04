@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from httpx import Response
 from pytest import MonkeyPatch
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -16,6 +17,7 @@ from app.adapters.db.audit.models import AuditLog
 from app.adapters.db.places.models import Area, Property, PropertyWorkspace
 from app.api.assets import assets as assets_api
 from app.api.deps import current_workspace_context, db_session
+from app.api.errors import CONTENT_TYPE_PROBLEM_JSON, add_exception_handlers
 from app.api.v1.assets import asset_types_alias_router, assets_alias_router
 from app.api.v1.assets import router as assets_router
 from app.api.v1.assets import scan_router as asset_scan_router
@@ -23,6 +25,14 @@ from app.tenancy import WorkspaceContext
 from tests.factories.identity import bootstrap_user, bootstrap_workspace
 
 _NOW = datetime(2026, 4, 29, 12, 0, 0, tzinfo=UTC)
+
+
+def _assert_problem_error(response: Response, *, error: str) -> dict[str, object]:
+    assert response.headers["content-type"].startswith(CONTENT_TYPE_PROBLEM_JSON)
+    body = response.json()
+    assert isinstance(body, dict)
+    assert body["error"] == error
+    return body
 
 
 def _ctx(workspace_id: str, actor_id: str, *, slug: str) -> WorkspaceContext:
@@ -41,6 +51,7 @@ def _client(session: Session, ctx: WorkspaceContext) -> TestClient:
     app = FastAPI()
     app.include_router(assets_router, prefix="/assets")
     app.include_router(asset_scan_router, prefix="/asset")
+    add_exception_handlers(app)
 
     def override_ctx() -> WorkspaceContext:
         return ctx
@@ -59,6 +70,7 @@ def _workspace_prefixed_client(session: Session, ctx: WorkspaceContext) -> TestC
     app.include_router(asset_scan_router, prefix="/w/{slug}/api/v1/asset")
     app.include_router(assets_alias_router, prefix="/w/{slug}/api/v1")
     app.include_router(asset_types_alias_router, prefix="/w/{slug}/api/v1")
+    add_exception_handlers(app)
 
     def override_ctx() -> WorkspaceContext:
         return ctx
@@ -235,6 +247,7 @@ def test_assets_crud_move_regenerate_scan_and_png(db_session: Session) -> None:
 
     old_scan = client.get(f"/assets/scan/{old_token}")
     assert old_scan.status_code == 404
+    _assert_problem_error(old_scan, error="asset_not_found")
     new_scan = client.get(f"/asset/scan/{new_token}")
     assert new_scan.status_code == 200
     assert new_scan.json()["id"] == asset["id"]
@@ -248,6 +261,7 @@ def test_assets_crud_move_regenerate_scan_and_png(db_session: Session) -> None:
     assert deleted.status_code == 204
     hidden = client.get(f"/assets/{asset['id']}")
     assert hidden.status_code == 404
+    _assert_problem_error(hidden, error="asset_not_found")
     restored = client.put(f"/assets/{asset['id']}/restore")
     assert restored.status_code == 200
     assert restored.json()["deleted_at"] is None

@@ -27,7 +27,6 @@ from fastapi import (
     Depends,
     File,
     Form,
-    HTTPException,
     Path,
     Query,
     Response,
@@ -76,6 +75,7 @@ from app.domain.assets.extraction import (
     get_extraction_page,
     retry_extraction,
 )
+from app.domain.errors import DomainError, UnsupportedMediaType, Validation
 from app.tenancy import WorkspaceContext, tenant_agnostic
 
 __all__ = [
@@ -403,19 +403,15 @@ def build_asset_documents_subrouter() -> APIRouter:
         file: Annotated[UploadFile | None, File()] = None,
     ) -> AssetDocumentResponse:
         if file is None:
-            raise HTTPException(
-                status_code=422,
-                detail={"error": "asset_document_file_required"},
-            )
+            raise Validation(extra={"error": "asset_document_file_required"})
         try:
             declared_type = require_upload_content_type(
                 file,
-                missing=lambda: HTTPException(
-                    status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
-                    detail={"error": "asset_document_content_type_missing"},
+                missing=lambda: UnsupportedMediaType(
+                    extra={"error": "asset_document_content_type_missing"}
                 ),
             )
-        except HTTPException:
+        except DomainError:
             await file.close()
             raise
         try:

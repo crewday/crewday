@@ -1,6 +1,6 @@
 """Shared helpers for the asset HTTP routers.
 
-Type aliases, error-response shapes, exception → ``HTTPException``
+Type aliases, error-response shapes, exception → domain-error
 mappers, MIME-sniff constants, and a couple of cross-module utilities
 used by every focused asset router (``assets``, ``actions``,
 ``documents``, ``scan``).
@@ -11,7 +11,7 @@ from __future__ import annotations
 from typing import Annotated, Any
 from urllib.parse import quote
 
-from fastapi import Depends, HTTPException, Request, UploadFile, status
+from fastapi import Depends, Request, UploadFile
 from sqlalchemy.orm import Session
 
 from app.adapters.storage.ports import MimeSniffer, Storage
@@ -43,6 +43,18 @@ from app.domain.assets.documents import (
     AssetDocumentValidationError,
 )
 from app.domain.assets.extraction import ExtractionRetryNotAllowed
+from app.domain.errors import (
+    Conflict,
+    DomainError,
+    Forbidden,
+    Gone,
+    Internal,
+    NotFound,
+    PayloadTooLarge,
+    ServiceUnavailable,
+    UnsupportedMediaType,
+    Validation,
+)
 from app.tenancy import WorkspaceContext
 
 __all__ = [
@@ -71,8 +83,8 @@ MimeSnifferDep = Annotated[MimeSniffer, Depends(get_mime_sniffer)]
 
 
 # RFC 7807 problem+json envelope schema. Every asset route emits 4xx
-# errors via :mod:`app.api.errors` (the FastAPI exception handler
-# rewrites ``HTTPException`` into ``application/problem+json``); the
+# errors via :mod:`app.api.errors` (the FastAPI exception handlers
+# rewrite domain errors into ``application/problem+json``); the
 # default FastAPI 422 schema documents ``application/json`` +
 # ``HTTPValidationError`` which is a lie on this codebase. Declaring
 # the envelope on each route lets the schemathesis contract gate
@@ -134,21 +146,16 @@ ASSET_DOCUMENT_ALLOWED_MIME = {
 }
 
 
-def http_for_asset_error(exc: Exception) -> HTTPException:
+def http_for_asset_error(exc: Exception) -> DomainError:
     if isinstance(exc, AssetNotFound):
-        return HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={"error": "asset_not_found"},
-        )
+        return NotFound(extra={"error": "asset_not_found"})
     if isinstance(exc, AssetScanArchived):
-        return HTTPException(
-            status_code=status.HTTP_410_GONE,
-            detail={"error": "asset_archived"},
-        )
+        return Gone(extra={"error": "asset_archived"})
     if isinstance(exc, AssetTypeUnavailable):
-        return HTTPException(
-            status_code=422,
-            detail={"error": "asset_type_unavailable", "message": str(exc)},
+        message = str(exc)
+        return Validation(
+            message,
+            extra={"error": "asset_type_unavailable", "message": message},
         )
     if isinstance(exc, AssetPlacementInvalid):
         # Property / area lookup miss: surface as 404 (parent resource
@@ -157,59 +164,35 @@ def http_for_asset_error(exc: Exception) -> HTTPException:
         # documented "missing parent" branch instead of treating the
         # rejection as a schema-validation failure (schemathesis pins
         # 422 for schema-validation only).
-        return HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={"error": "asset_placement_invalid", "message": str(exc)},
+        message = str(exc)
+        return NotFound(
+            message,
+            extra={"error": "asset_placement_invalid", "message": message},
         )
     if isinstance(exc, AssetValidationError):
-        return HTTPException(
-            status_code=422,
-            detail={"error": exc.error, "field": exc.field},
-        )
+        return Validation(extra={"error": exc.error, "field": exc.field})
     if isinstance(exc, AssetQrTokenExhausted):
-        return HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail={"error": "qr_token_exhausted"},
-        )
-    return HTTPException(
-        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        detail={"error": "internal"},
-    )
+        return ServiceUnavailable(extra={"error": "qr_token_exhausted"})
+    return Internal(extra={"error": "internal"})
 
 
-def http_for_action_error(exc: Exception) -> HTTPException:
+def http_for_action_error(exc: Exception) -> DomainError:
     if isinstance(exc, AssetNotFound | AssetActionNotFound):
-        return HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={"error": "asset_action_not_found"},
-        )
+        return NotFound(extra={"error": "asset_action_not_found"})
     if isinstance(exc, AssetActionAccessDenied):
-        return HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail={"error": "permission_denied", "action_key": "assets.record_action"},
+        return Forbidden(
+            extra={"error": "permission_denied", "action_key": "assets.record_action"}
         )
     if isinstance(exc, AssetActionValidationError):
-        return HTTPException(
-            status_code=422,
-            detail={"error": exc.error, "field": exc.field},
-        )
-    return HTTPException(
-        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        detail={"error": "internal"},
-    )
+        return Validation(extra={"error": exc.error, "field": exc.field})
+    return Internal(extra={"error": "internal"})
 
 
-def http_for_document_error(exc: Exception) -> HTTPException:
+def http_for_document_error(exc: Exception) -> DomainError:
     if isinstance(exc, AssetNotFound | AssetDocumentNotFound):
-        return HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={"error": "asset_document_not_found"},
-        )
+        return NotFound(extra={"error": "asset_document_not_found"})
     if isinstance(exc, AssetDocumentValidationError):
-        return HTTPException(
-            status_code=422,
-            detail={"error": exc.error, "field": exc.field},
-        )
+        return Validation(extra={"error": exc.error, "field": exc.field})
     if isinstance(exc, ExtractionRetryNotAllowed):
         # Retry endpoint hit on a row that is not in ``failed`` (the
         # only retry-eligible state). 409 matches the §21 contract
@@ -217,26 +200,21 @@ def http_for_document_error(exc: Exception) -> HTTPException:
         # ``error=asset_document_extraction_not_retryable``"). The
         # ``message`` key flows into the envelope's ``detail``; the
         # ``error`` key carries the structured symbol.
-        return HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail={
+        message = str(exc)
+        return Conflict(
+            message,
+            extra={
                 "error": "asset_document_extraction_not_retryable",
-                "message": str(exc),
+                "message": message,
             },
         )
-    return HTTPException(
-        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        detail={"error": "internal"},
-    )
+    return Internal(extra={"error": "internal"})
 
 
 def storage_from_request(request: Request) -> Storage:
     storage: Storage | None = getattr(request.app.state, "storage", None)
     if storage is None:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail={"error": "storage_unavailable"},
-        )
+        raise ServiceUnavailable(extra={"error": "storage_unavailable"})
     return storage
 
 
@@ -252,9 +230,9 @@ async def read_document_capped(upload: UploadFile) -> bytes:
     return await read_upload_capped(
         upload,
         max_bytes=MAX_ASSET_DOCUMENT_BYTES,
-        too_large=lambda: HTTPException(
-            status_code=status.HTTP_413_CONTENT_TOO_LARGE,
-            detail={
+        too_large=lambda: PayloadTooLarge(
+            f"upload exceeds the {MAX_ASSET_DOCUMENT_BYTES}-byte cap",
+            extra={
                 "error": "asset_document_too_large",
                 "message": f"upload exceeds the {MAX_ASSET_DOCUMENT_BYTES}-byte cap",
             },
@@ -282,9 +260,8 @@ def sniff_document_mime(
         payload,
         declared_type=declared_type,
         allowed=ASSET_DOCUMENT_ALLOWED_MIME,
-        rejected=lambda sniffed: HTTPException(
-            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
-            detail={
+        rejected=lambda sniffed: UnsupportedMediaType(
+            extra={
                 "error": "asset_document_content_type_rejected",
                 "content_type": sniffed,
                 "declared_type": declared_type,

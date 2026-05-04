@@ -7,11 +7,13 @@ from datetime import UTC, datetime
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from httpx import Response
 from sqlalchemy.orm import Session
 
 from app.adapters.db.authz.models import RoleGrant
 from app.adapters.db.places.models import Property, PropertyWorkspace
 from app.api.deps import current_workspace_context, db_session, get_storage
+from app.api.errors import CONTENT_TYPE_PROBLEM_JSON, add_exception_handlers
 from app.api.v1.assets import router as assets_router
 from app.domain.assets.assets import create_asset
 from app.tenancy.context import ActorGrantRole, WorkspaceContext
@@ -21,6 +23,14 @@ from tests._fakes.storage import InMemoryStorage
 from tests.factories.identity import bootstrap_user, bootstrap_workspace
 
 _NOW = datetime(2026, 4, 29, 12, 0, 0, tzinfo=UTC)
+
+
+def _assert_problem_error(response: Response, *, error: str) -> dict[str, object]:
+    assert response.headers["content-type"].startswith(CONTENT_TYPE_PROBLEM_JSON)
+    body = response.json()
+    assert isinstance(body, dict)
+    assert body["error"] == error
+    return body
 
 
 def _ctx(
@@ -49,6 +59,7 @@ def _client(
 ) -> TestClient:
     app = FastAPI()
     app.include_router(assets_router, prefix="/assets")
+    add_exception_handlers(app)
     resolved_storage = storage if storage is not None else InMemoryStorage()
 
     def override_ctx() -> WorkspaceContext:
@@ -181,4 +192,7 @@ def test_worker_records_action_only_on_assigned_property(
     assert allowed.status_code == 201
     assert allowed.json()["meter_reading"] == "42.2500"
     assert denied.status_code == 403
-    assert denied.json()["detail"]["action_key"] == "assets.record_action"
+    assert (
+        _assert_problem_error(denied, error="permission_denied")["action_key"]
+        == "assets.record_action"
+    )

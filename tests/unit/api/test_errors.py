@@ -44,8 +44,10 @@ from app.domain.errors import (
     Gone,
     IdempotencyConflict,
     NotFound,
+    PayloadTooLarge,
     RateLimited,
     Unauthorized,
+    UnsupportedMediaType,
     UpstreamUnavailable,
     Validation,
 )
@@ -102,6 +104,18 @@ class TestDomainErrorMapping:
             (Forbidden, 403, "forbidden", "Forbidden"),
             (Gone, 410, "gone", "Gone"),
             (RateLimited, 429, "rate_limited", "Rate limited"),
+            (
+                PayloadTooLarge,
+                413,
+                "payload_too_large",
+                "Payload too large",
+            ),
+            (
+                UnsupportedMediaType,
+                415,
+                "unsupported_media_type",
+                "Unsupported media type",
+            ),
             (
                 UpstreamUnavailable,
                 502,

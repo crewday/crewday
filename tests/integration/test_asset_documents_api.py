@@ -9,6 +9,7 @@ from datetime import UTC, datetime
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from httpx import Response
 from sqlalchemy.orm import Session
 
 import app.api.assets._shared as asset_shared
@@ -20,6 +21,7 @@ from app.api.deps import (
     get_mime_sniffer,
     get_storage,
 )
+from app.api.errors import CONTENT_TYPE_PROBLEM_JSON, add_exception_handlers
 from app.api.v1.assets import documents_router
 from app.api.v1.assets import router as assets_router
 from app.domain.assets.assets import create_asset
@@ -38,6 +40,14 @@ class _StaticMimeSniffer:
 
     def sniff(self, payload: bytes, *, hint: str | None = None) -> str | None:
         return self.content_type
+
+
+def _assert_problem_error(response: Response, *, error: str) -> dict[str, object]:
+    assert response.headers["content-type"].startswith(CONTENT_TYPE_PROBLEM_JSON)
+    body = response.json()
+    assert isinstance(body, dict)
+    assert body["error"] == error
+    return body
 
 
 def _ctx(
@@ -69,6 +79,7 @@ def _client(
     app = FastAPI()
     app.include_router(assets_router, prefix="/assets")
     app.include_router(documents_router)
+    add_exception_handlers(app)
 
     def override_ctx() -> WorkspaceContext:
         return ctx
@@ -233,9 +244,9 @@ def test_workspace_documents_list_and_extraction_routes(
         "more_pages": False,
     }
     assert retry_pending.status_code == 409
-    assert (
-        retry_pending.json()["detail"]["error"]
-        == "asset_document_extraction_not_retryable"
+    _assert_problem_error(
+        retry_pending,
+        error="asset_document_extraction_not_retryable",
     )
 
 
@@ -267,7 +278,8 @@ def test_document_upload_rejects_oversized_body(
     )
 
     assert response.status_code == 413
-    assert response.json()["detail"]["error"] == "asset_document_too_large"
+    body = _assert_problem_error(response, error="asset_document_too_large")
+    assert body["message"] == body["detail"]
 
 
 def test_document_upload_rejects_invalid_category_before_storing_blob(
@@ -293,7 +305,8 @@ def test_document_upload_rejects_invalid_category_before_storing_blob(
     )
 
     assert response.status_code == 422
-    assert response.json()["detail"] == {"error": "invalid", "field": "category"}
+    body = _assert_problem_error(response, error="invalid")
+    assert body["field"] == "category"
     assert not storage.exists(hashlib.sha256(payload).hexdigest())
 
 
@@ -344,7 +357,10 @@ def test_worker_cannot_delete_document(db_session: Session) -> None:
     denied = worker_client.delete(f"/assets/documents/{document_id}")
 
     assert denied.status_code == 403
-    assert denied.json()["detail"]["action_key"] == "assets.manage_documents"
+    assert (
+        _assert_problem_error(denied, error="permission_denied")["action_key"]
+        == "assets.manage_documents"
+    )
 
     list_denied = worker_client.get("/documents")
     get_denied = worker_client.get(f"/documents/{document_id}")
@@ -353,15 +369,32 @@ def test_worker_cannot_delete_document(db_session: Session) -> None:
     retry_denied = worker_client.post(f"/documents/{document_id}/extraction/retry")
 
     assert list_denied.status_code == 403
-    assert list_denied.json()["detail"]["action_key"] == "assets.manage_documents"
+    assert (
+        _assert_problem_error(list_denied, error="permission_denied")["action_key"]
+        == "assets.manage_documents"
+    )
     assert get_denied.status_code == 403
-    assert get_denied.json()["detail"]["action_key"] == "assets.manage_documents"
+    assert (
+        _assert_problem_error(get_denied, error="permission_denied")["action_key"]
+        == "assets.manage_documents"
+    )
     assert extraction_denied.status_code == 403
-    assert extraction_denied.json()["detail"]["action_key"] == "assets.manage_documents"
+    assert (
+        _assert_problem_error(extraction_denied, error="permission_denied")[
+            "action_key"
+        ]
+        == "assets.manage_documents"
+    )
     assert page_denied.status_code == 403
-    assert page_denied.json()["detail"]["action_key"] == "assets.manage_documents"
+    assert (
+        _assert_problem_error(page_denied, error="permission_denied")["action_key"]
+        == "assets.manage_documents"
+    )
     assert retry_denied.status_code == 403
-    assert retry_denied.json()["detail"]["action_key"] == "assets.manage_documents"
+    assert (
+        _assert_problem_error(retry_denied, error="permission_denied")["action_key"]
+        == "assets.manage_documents"
+    )
 
 
 def test_extraction_retry_happy_path_resets_failed_row(
