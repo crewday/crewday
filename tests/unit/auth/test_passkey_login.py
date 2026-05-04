@@ -58,6 +58,11 @@ from app.adapters.db.identity.models import Session as SessionRow
 from app.adapters.db.session import UnitOfWorkImpl, make_engine
 from app.adapters.db.workspace.models import Workspace
 from app.api.deps import db_session as db_session_dep
+from app.api.errors import (
+    CANONICAL_TYPE_BASE,
+    CONTENT_TYPE_PROBLEM_JSON,
+    add_exception_handlers,
+)
 from app.api.v1.auth.passkey import build_login_router
 from app.auth import passkey as passkey_module
 from app.auth._throttle import PasskeyLoginLockout, Throttle
@@ -80,6 +85,25 @@ from app.util.ulid import new_ulid
 from tests.factories.identity import bootstrap_user
 
 _PINNED = datetime(2026, 4, 20, 12, 0, 0, tzinfo=UTC)
+
+
+def _assert_problem(
+    response: Any,
+    *,
+    status_code: int,
+    type_name: str,
+    title: str,
+    error: str,
+) -> dict[str, Any]:
+    assert response.status_code == status_code
+    assert response.headers["content-type"].startswith(CONTENT_TYPE_PROBLEM_JSON)
+    body = response.json()
+    assert body["type"] == f"{CANONICAL_TYPE_BASE}{type_name}"
+    assert body["title"] == title
+    assert body["status"] == status_code
+    assert body["instance"] == response.request.url.path
+    assert body["error"] == error
+    return body
 
 
 # ---------------------------------------------------------------------------
@@ -825,6 +849,7 @@ def login_app(
     router = build_login_router(throttle=throttle, settings=settings)
     app = FastAPI()
     app.include_router(router, prefix="/api/v1")
+    add_exception_handlers(app)
 
     def _session() -> Iterator[Session]:
         uow = UnitOfWorkImpl(session_factory=factory)
@@ -908,8 +933,13 @@ class TestLoginRouter:
                 "credential": _raw_assertion(b"\xde" * 32),
             },
         )
-        assert resp.status_code == 401
-        assert resp.json()["detail"]["error"] == "invalid_credential"
+        _assert_problem(
+            resp,
+            status_code=401,
+            type_name="unauthorized",
+            title="Unauthorized",
+            error="invalid_credential",
+        )
 
     def test_finish_clone_returns_401(
         self,
@@ -945,9 +975,14 @@ class TestLoginRouter:
                 "credential": _raw_assertion(credential_id),
             },
         )
-        assert resp.status_code == 401
         # SAME envelope as unknown credential — no fingerprint leak.
-        assert resp.json()["detail"]["error"] == "invalid_credential"
+        _assert_problem(
+            resp,
+            status_code=401,
+            type_name="unauthorized",
+            title="Unauthorized",
+            error="invalid_credential",
+        )
 
     def test_finish_rate_limited_returns_429(
         self,
@@ -1009,8 +1044,14 @@ class TestLoginRouter:
                 "credential": _raw_assertion(credential_id),
             },
         )
-        assert resp.status_code == 429
-        assert resp.json()["detail"]["error"] == "rate_limited"
+        _assert_problem(
+            resp,
+            status_code=429,
+            type_name="rate_limited",
+            title="Rate limited",
+            error="rate_limited",
+        )
+        assert "Retry-After" not in resp.headers
 
 
 # ---------------------------------------------------------------------------

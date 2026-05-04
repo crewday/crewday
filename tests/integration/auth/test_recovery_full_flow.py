@@ -64,6 +64,7 @@ from app.adapters.db.identity.models import (
 from app.adapters.db.session import FilteredSession
 from app.adapters.db.workspace.models import UserWorkspace, Workspace
 from app.api.deps import db_session as _db_session_dep
+from app.api.errors import add_exception_handlers
 from app.api.v1.auth.recovery import build_recovery_router
 from app.auth import _throttle as throttle_module
 from app.auth import passkey
@@ -196,6 +197,7 @@ def client(
         settings=settings,
     )
     app.include_router(router, prefix="/api/v1")
+    add_exception_handlers(app)
 
     factory = sessionmaker(bind=engine, expire_on_commit=False, class_=Session)
 
@@ -540,7 +542,7 @@ class TestRecoveryFinishReplay:
             },
         )
         assert replay.status_code == 404
-        assert replay.json()["detail"]["error"] == "recovery_session_not_found"
+        assert replay.json()["error"] == "recovery_session_not_found"
 
 
 class TestRecoveryRateLimit:
@@ -570,10 +572,10 @@ class TestRecoveryRateLimit:
             json={"email": "rate@example.com"},
         )
         assert r.status_code == 429
-        body = r.json()["detail"]
+        body = r.json()
         assert body["error"] == "rate_limited"
         assert body["retry_after_seconds"] >= 1
-        assert "Retry-After" in r.headers
+        assert r.headers["Retry-After"] == str(body["retry_after_seconds"])
 
 
 class TestRecoveryInvalidToken:
@@ -585,7 +587,7 @@ class TestRecoveryInvalidToken:
     ) -> None:
         r = client.get("/api/v1/recover/passkey/verify?token=not-a-real-token")
         assert r.status_code == 400
-        assert r.json()["detail"]["error"] == "invalid_token"
+        assert r.json()["error"] == "invalid_token"
 
 
 # ---------------------------------------------------------------------------

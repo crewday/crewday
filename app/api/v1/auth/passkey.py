@@ -51,7 +51,7 @@ from __future__ import annotations
 import logging
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi import APIRouter, Depends, Request, Response, status
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -61,6 +61,13 @@ from app.adapters.db.identity.models import PasskeyCredential
 from app.adapters.db.session import make_uow
 from app.api.deps import current_workspace_context, db_session
 from app.api.v1._problem_json import IDENTITY_PROBLEM_RESPONSES
+from app.api.v1.auth.errors import (
+    auth_bad_request,
+    auth_conflict,
+    auth_not_found,
+    auth_rate_limited,
+    auth_unauthorized,
+)
 from app.audit import write_audit
 from app.auth._hashing import hash_with_pepper
 from app.auth._throttle import PasskeyLoginLockout, Throttle
@@ -92,6 +99,8 @@ from app.auth.session import (
 )
 from app.auth.webauthn import base64url_to_bytes
 from app.config import Settings, get_settings
+from app.domain.errors import DomainError
+from app.domain.errors import Validation as DomainValidation
 from app.tenancy import WorkspaceContext, tenant_agnostic
 from app.util.clock import SystemClock
 
@@ -150,7 +159,7 @@ class RegisterFinishResponse(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-# Tuple of domain error types the routers map to :class:`HTTPException`.
+# Tuple of domain error types the routers map to auth problem-json errors.
 # Anything else propagates unchanged — a stray ``RuntimeError`` is a
 # real 500 and the operator needs to see the traceback.
 _DomainError = (
@@ -163,53 +172,36 @@ _DomainError = (
 )
 
 
-def _http_for(exc: Exception) -> HTTPException:
-    """Return the :class:`HTTPException` mapping for a known domain error.
+def _http_for(exc: Exception) -> DomainError:
+    """Return the auth problem-json mapping for a known domain error.
 
     ``exc`` is one of :data:`_DomainError`; the caller has already
     narrowed with ``except (...) as exc`` so the mapping is total.
-    The envelope is a thin ``{"error": <symbol>}`` for v1; the full
-    RFC 7807 problem+json shape lands with cd-waq3. Keeping the
-    envelope private to this helper means swapping shapes later is a
-    single diff.
+    The envelope carries the legacy ``{"error": <symbol>}`` extension
+    through the shared auth helpers.
     """
     if isinstance(exc, TooManyPasskeys):
         # Starlette renamed the constant from *_ENTITY to *_CONTENT in
         # a recent release; use the literal 422 so the router works
         # across minor versions without a conditional import.
-        return HTTPException(
-            status_code=422,
-            detail={"error": "too_many_passkeys"},
-        )
+        return DomainValidation(extra={"error": "too_many_passkeys"})
     if isinstance(exc, ChallengeNotFound):
         # AC #5 — a replayed finish raises ChallengeNotFound (the row
         # was deleted atomically with the credential insert); a
         # genuinely unknown id is indistinguishable for privacy and
         # maps to the same 409. The HTTP body does NOT reveal which.
-        return HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail={"error": "challenge_consumed_or_unknown"},
-        )
+        return auth_conflict("challenge_consumed_or_unknown")
     if isinstance(exc, ChallengeExpired):
-        return HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail={"error": "challenge_expired"},
-        )
+        return auth_bad_request("challenge_expired")
     if isinstance(exc, InvalidRegistration | ChallengeSubjectMismatch):
         # AC #2 — mismatched challenge / origin / rp_id → 400.
         # ChallengeSubjectMismatch collapses into the same shape so
         # the client can't fingerprint internal subject routing.
-        return HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail={"error": "invalid_registration"},
-        )
+        return auth_bad_request("invalid_registration")
     # Fallback: a LookupError that isn't a ChallengeNotFound — user
     # load miss on the authenticated flow. Map to 401 so the router
     # doesn't reveal whether the ULID exists.
-    return HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail={"error": "not_authenticated"},
-    )
+    return auth_unauthorized("not_authenticated")
 
 
 # ---------------------------------------------------------------------------
@@ -322,15 +314,13 @@ def post_register_finish(
     status_code=status.HTTP_204_NO_CONTENT,
     operation_id="auth.passkey.revoke",
     summary="Revoke one of the authenticated user's passkeys",
-    # 404 ``passkey_not_found`` and 422 ``last_credential`` are emitted
-    # via ``HTTPException(detail={"error": <symbol>})`` and rewritten
-    # by :mod:`app.api.errors` into the RFC 7807 ``application/problem
-    # +json`` envelope (spec §12 "Errors"). The ``error`` key flows
-    # through as a top-level extension. Both branches collapse on a
-    # single key so the credential-id space stays opaque to enumeration
-    # (§03 "Additional passkeys"). The router-level
-    # :data:`IDENTITY_PROBLEM_RESPONSES` already documents the envelope
-    # shape for both status codes; no per-route override needed.
+    # 404 ``passkey_not_found`` and 422 ``last_credential`` flow through
+    # the shared problem-json seam with the legacy ``error`` extension.
+    # Both branches collapse on a single key so the credential-id space
+    # stays opaque to enumeration (§03 "Additional passkeys"). The
+    # router-level :data:`IDENTITY_PROBLEM_RESPONSES` already documents
+    # the envelope shape for both status codes; no per-route override
+    # needed.
     openapi_extra={
         # Unlike the register ceremonies, the CLI surface for
         # ``passkey-revoke`` is meaningful — an operator listing
@@ -379,10 +369,7 @@ def delete_passkey(
         # match any credential anyway, and surfacing "invalid
         # base64url" would let an attacker distinguish "well-formed id
         # for another user" from "syntactically invalid id".
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={"error": "passkey_not_found"},
-        ) from exc
+        raise auth_not_found("passkey_not_found") from exc
 
     try:
         revoke_passkey(
@@ -392,15 +379,9 @@ def delete_passkey(
             credential_id=credential_id_bytes,
         )
     except PasskeyNotFound as exc:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={"error": "passkey_not_found"},
-        ) from exc
+        raise auth_not_found("passkey_not_found") from exc
     except LastPasskeyCredential as exc:
-        raise HTTPException(
-            status_code=422,
-            detail={"error": "last_credential"},
-        ) from exc
+        raise DomainValidation(extra={"error": "last_credential"}) from exc
 
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
@@ -666,7 +647,7 @@ def _write_login_audit_fresh_uow(
 
     Failures of the audit UoW are logged and swallowed: this helper
     runs inside an ``except`` clause about to re-raise the mapped
-    :class:`HTTPException`, and an audit failure here would shadow
+    auth problem-json error, and an audit failure here would shadow
     the client's intended status code with a 500. The catch is
     deliberately broad (``Exception``) so any transient DB / config
     hiccup still logs-and-drops; :class:`BaseException` propagates
@@ -899,10 +880,7 @@ def build_login_router(
                     "scope": exc.scope,
                 },
             )
-            raise HTTPException(
-                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                detail={"error": "rate_limited"},
-            ) from exc
+            raise auth_rate_limited("rate_limited") from exc
         except CloneDetected as exc:
             # Clone detection is the rare case that warrants a session
             # invalidation, two audit rows (cloned_detected +
@@ -966,10 +944,7 @@ def build_login_router(
                 credential_id_b64=exc.credential_id_b64,
                 reason="clone_detected",
             )
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail={"error": "invalid_credential"},
-            ) from exc
+            raise auth_unauthorized("invalid_credential") from exc
         except (
             InvalidLoginAttempt,
             ChallengeNotFound,
@@ -1001,10 +976,7 @@ def build_login_router(
             # the other three burn the row so a leaked id can't be
             # replayed until TTL. Idempotent.
             burn_challenge_on_failure(body.challenge_id)
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail={"error": "invalid_credential"},
-            ) from exc
+            raise auth_unauthorized("invalid_credential") from exc
 
         # Success — reset the throttle counters so a previous bad
         # attempt doesn't count against the user's next login, then

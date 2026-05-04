@@ -54,6 +54,7 @@ from app.adapters.db.identity.models import (
 )
 from app.adapters.db.identity.models import Session as SessionRow
 from app.api.deps import db_session as db_session_dep
+from app.api.errors import add_exception_handlers
 from app.api.v1.auth.passkey import build_login_router
 from app.auth import passkey as passkey_module
 from app.auth._throttle import Throttle
@@ -137,6 +138,7 @@ def client(
     router = build_login_router(throttle=throttle, settings=settings)
     app = FastAPI()
     app.include_router(router, prefix="/api/v1")
+    add_exception_handlers(app)
 
     factory = sessionmaker(bind=engine, expire_on_commit=False, class_=Session)
     _seeded_user_ids.clear()
@@ -352,7 +354,7 @@ class TestLoginFullFlowIntegration:
         )
         assert resp.status_code == 401
         # SAME envelope as unknown-credential — no fingerprint leak.
-        assert resp.json()["detail"]["error"] == "invalid_credential"
+        assert resp.json()["error"] == "invalid_credential"
         # No Set-Cookie header on refusal.
         assert "set-cookie" not in {k.lower() for k in resp.headers}
 
@@ -452,7 +454,7 @@ class TestLoginFullFlowIntegration:
             },
         )
         assert second.status_code == 401
-        assert second.json()["detail"]["error"] == "invalid_credential"
+        assert second.json()["error"] == "invalid_credential"
 
         with factory() as s:
             # Exactly one cloned_detected audit row across both attempts
@@ -506,7 +508,7 @@ class TestLoginFullFlowIntegration:
             },
         )
         assert resp.status_code == 401
-        assert resp.json()["detail"]["error"] == "invalid_credential"
+        assert resp.json()["error"] == "invalid_credential"
 
         with factory() as s:
             assert (

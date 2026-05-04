@@ -38,7 +38,7 @@ from __future__ import annotations
 import logging
 from typing import Annotated, Any
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
+from fastapi import APIRouter, BackgroundTasks, Depends, Request, status
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -47,6 +47,13 @@ from app.adapters.db.session import make_uow
 from app.adapters.mail.ports import Mailer
 from app.api.deps import db_session
 from app.api.v1._problem_json import IDENTITY_PROBLEM_RESPONSES
+from app.api.v1.auth.errors import (
+    auth_bad_request,
+    auth_conflict,
+    auth_gone,
+    auth_not_found,
+    auth_rate_limited,
+)
 from app.audit import write_audit
 from app.auth import passkey, recovery
 from app.auth._hashing import hash_with_pepper
@@ -63,6 +70,8 @@ from app.auth.magic_link import (
     TokenExpired,
 )
 from app.config import Settings, get_settings
+from app.domain.errors import DomainError
+from app.domain.errors import Validation as DomainValidation
 from app.util.clock import SystemClock
 
 __all__ = [
@@ -201,42 +210,23 @@ _FinishDomainError = (
 )
 
 
-def _http_for_verify(exc: Exception) -> HTTPException:
-    """Map a verify-path domain error to an :class:`HTTPException`."""
+def _http_for_verify(exc: Exception) -> DomainError:
+    """Map a verify-path domain error to an auth problem-json error."""
     if isinstance(exc, RecoveryRateLimited):
-        return HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail={
-                "error": "rate_limited",
-                "retry_after_seconds": exc.retry_after_seconds,
-            },
-            headers={"Retry-After": str(exc.retry_after_seconds)},
+        return auth_rate_limited(
+            "rate_limited",
+            retry_after_seconds=exc.retry_after_seconds,
         )
     if isinstance(exc, RateLimited):
-        return HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail={"error": "rate_limited"},
-        )
+        return auth_rate_limited("rate_limited")
     if isinstance(exc, ConsumeLockout):
-        return HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail={"error": "consume_locked_out"},
-        )
+        return auth_rate_limited("consume_locked_out")
     if isinstance(exc, TokenExpired):
-        return HTTPException(
-            status_code=status.HTTP_410_GONE,
-            detail={"error": "expired"},
-        )
+        return auth_gone("expired")
     if isinstance(exc, AlreadyConsumed):
-        return HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail={"error": "already_consumed"},
-        )
+        return auth_conflict("already_consumed")
     if isinstance(exc, PurposeMismatch):
-        return HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail={"error": "purpose_mismatch"},
-        )
+        return auth_bad_request("purpose_mismatch")
     if isinstance(
         exc,
         recovery.RecoverySessionNotFound | recovery.RecoverySessionExpired,
@@ -244,52 +234,31 @@ def _http_for_verify(exc: Exception) -> HTTPException:
         # Collapse the two into one 404 for privacy; the spec §15
         # discusses not leaking whether a recovery session ever
         # existed vs expired.
-        return HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={"error": "recovery_session_not_found"},
-        )
+        return auth_not_found("recovery_session_not_found")
     # InvalidToken — fallback for the verify family.
-    return HTTPException(
-        status_code=status.HTTP_400_BAD_REQUEST,
-        detail={"error": "invalid_token"},
-    )
+    return auth_bad_request("invalid_token")
 
 
-def _http_for_finish(exc: Exception) -> HTTPException:
-    """Map a finish-path domain error to an :class:`HTTPException`."""
+def _http_for_finish(exc: Exception) -> DomainError:
+    """Map a finish-path domain error to an auth problem-json error."""
     if isinstance(
         exc,
         recovery.RecoverySessionNotFound | recovery.RecoverySessionExpired,
     ):
-        return HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={"error": "recovery_session_not_found"},
-        )
+        return auth_not_found("recovery_session_not_found")
     if isinstance(exc, passkey.ChallengeNotFound):
         # ChallengeNotFound covers both a never-existed id and a
         # replayed finish (the row is deleted atomically with the
         # credential insert), so the two shapes share the 409 envelope.
-        return HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail={"error": "challenge_consumed_or_unknown"},
-        )
+        return auth_conflict("challenge_consumed_or_unknown")
     if isinstance(exc, passkey.ChallengeExpired):
-        return HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail={"error": "challenge_expired"},
-        )
+        return auth_bad_request("challenge_expired")
     if isinstance(exc, passkey.InvalidRegistration | passkey.ChallengeSubjectMismatch):
-        return HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail={"error": "invalid_registration"},
-        )
+        return auth_bad_request("invalid_registration")
     # TooManyPasskeys — impossible after a full revoke, but map it
     # for completeness so a future change that tweaks the revoke
     # step still produces a typed 422 rather than a 500.
-    return HTTPException(
-        status_code=422,
-        detail={"error": "too_many_passkeys"},
-    )
+    return DomainValidation(extra={"error": "too_many_passkeys"})
 
 
 # ---------------------------------------------------------------------------
@@ -315,7 +284,7 @@ def _audit_recovery_refusal(
 
     Failures of the audit UoW are logged and swallowed: this helper
     runs inside an ``except RecoveryRateLimited`` clause about to
-    re-raise the mapped :class:`HTTPException`, and a raised audit
+    re-raise the mapped auth problem-json error, and a raised audit
     failure here would shadow the 429 the client expects with a
     500. The catch is deliberately broad (``Exception``) so any
     transient DB / config hiccup still logs-and-drops.
@@ -450,13 +419,9 @@ def build_recovery_router(
                 scope=exc.scope,
                 retry_after_seconds=exc.retry_after_seconds,
             )
-            raise HTTPException(
-                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                detail={
-                    "error": "rate_limited",
-                    "retry_after_seconds": exc.retry_after_seconds,
-                },
-                headers={"Retry-After": str(exc.retry_after_seconds)},
+            raise auth_rate_limited(
+                "rate_limited",
+                retry_after_seconds=exc.retry_after_seconds,
             ) from exc
         except RateLimited as exc:
             # Magic-link's own throttle trip; no dedicated refusal audit
@@ -464,10 +429,7 @@ def build_recovery_router(
             # carries its own shape (the rate-limit fires after the
             # throttle check there; the recover-start limit has
             # already passed or we wouldn't reach this call).
-            raise HTTPException(
-                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                detail={"error": "rate_limited"},
-            ) from exc
+            raise auth_rate_limited("rate_limited") from exc
         # ``with`` exited cleanly → UoW committed → recovery audit +
         # magic-link nonce are durable on disk. Only now do we schedule
         # queued SMTP sends (cd-9slq). Running delivery as response
@@ -544,10 +506,7 @@ def build_recovery_router(
             recovery.RecoverySessionNotFound,
             recovery.RecoverySessionExpired,
         ) as exc:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail={"error": "recovery_session_not_found"},
-            ) from exc
+            raise auth_not_found("recovery_session_not_found") from exc
 
         try:
             opts = passkey.register_start_recovery(
@@ -558,10 +517,7 @@ def build_recovery_router(
             # Unreachable in practice (register_start_recovery skips the
             # cap), but kept for symmetry with the signup router's
             # mapping table.
-            raise HTTPException(
-                status_code=422,
-                detail={"error": "too_many_passkeys"},
-            ) from exc
+            raise DomainValidation(extra={"error": "too_many_passkeys"}) from exc
         return RecoveryPasskeyStartResponse(
             challenge_id=opts.challenge_id,
             options=opts.options,

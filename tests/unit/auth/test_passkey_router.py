@@ -33,6 +33,11 @@ from app.adapters.db.identity.models import PasskeyCredential, WebAuthnChallenge
 from app.adapters.db.session import UnitOfWorkImpl, make_engine
 from app.adapters.db.workspace.models import Workspace
 from app.api.deps import current_workspace_context, db_session
+from app.api.errors import (
+    CANONICAL_TYPE_BASE,
+    CONTENT_TYPE_PROBLEM_JSON,
+    add_exception_handlers,
+)
 from app.api.v1.auth.passkey import router
 from app.auth import passkey as passkey_module
 from app.auth.webauthn import RelyingParty, VerifiedRegistration
@@ -42,6 +47,25 @@ from app.util.ulid import new_ulid
 from tests.factories.identity import bootstrap_user
 
 _PINNED = datetime(2026, 4, 19, 12, 0, 0, tzinfo=UTC)
+
+
+def _assert_problem(
+    response: Any,
+    *,
+    status_code: int,
+    type_name: str,
+    title: str,
+    error: str,
+) -> dict[str, Any]:
+    assert response.status_code == status_code
+    assert response.headers["content-type"].startswith(CONTENT_TYPE_PROBLEM_JSON)
+    body = response.json()
+    assert body["type"] == f"{CANONICAL_TYPE_BASE}{type_name}"
+    assert body["title"] == title
+    assert body["status"] == status_code
+    assert body["instance"] == response.request.url.path
+    assert body["error"] == error
+    return body
 
 
 @pytest.fixture
@@ -123,6 +147,7 @@ def app_with_overrides(
 
     app = FastAPI()
     app.include_router(router, prefix="/api/v1")
+    add_exception_handlers(app)
 
     def _override_ctx() -> WorkspaceContext:
         return ctx
@@ -230,8 +255,13 @@ class TestRegisterRouter:
             "/api/v1/auth/passkey/register/finish",
             json={"challenge_id": challenge_id, "credential": _raw()},
         )
-        assert replay.status_code == 409
-        assert replay.json()["detail"]["error"] == "challenge_consumed_or_unknown"
+        _assert_problem(
+            replay,
+            status_code=409,
+            type_name="conflict",
+            title="Conflict",
+            error="challenge_consumed_or_unknown",
+        )
 
     def test_too_many_passkeys_returns_422(
         self,
@@ -257,8 +287,13 @@ class TestRegisterRouter:
 
         client = TestClient(app_with_overrides)
         resp = client.post("/api/v1/auth/passkey/register/start")
-        assert resp.status_code == 422
-        assert resp.json()["detail"]["error"] == "too_many_passkeys"
+        _assert_problem(
+            resp,
+            status_code=422,
+            type_name="validation",
+            title="Validation error",
+            error="too_many_passkeys",
+        )
 
     def test_invalid_registration_returns_400(
         self,
@@ -279,8 +314,13 @@ class TestRegisterRouter:
             "/api/v1/auth/passkey/register/finish",
             json={"challenge_id": challenge_id, "credential": _raw()},
         )
-        assert resp.status_code == 400
-        assert resp.json()["detail"]["error"] == "invalid_registration"
+        _assert_problem(
+            resp,
+            status_code=400,
+            type_name="validation",
+            title="Bad request",
+            error="invalid_registration",
+        )
 
 
 class TestDeletePasskeyRouter:
@@ -350,8 +390,13 @@ class TestDeletePasskeyRouter:
         resp = client.delete(
             f"/api/v1/auth/passkey/{bytes_to_base64url(b'\xff' * 32)}",
         )
-        assert resp.status_code == 404
-        assert resp.json()["detail"]["error"] == "passkey_not_found"
+        _assert_problem(
+            resp,
+            status_code=404,
+            type_name="not_found",
+            title="Not found",
+            error="passkey_not_found",
+        )
 
     def test_credential_owned_by_another_user_returns_404(
         self,
@@ -380,8 +425,13 @@ class TestDeletePasskeyRouter:
         resp = client.delete(
             f"/api/v1/auth/passkey/{bytes_to_base64url(cid)}",
         )
-        assert resp.status_code == 404
-        assert resp.json()["detail"]["error"] == "passkey_not_found"
+        _assert_problem(
+            resp,
+            status_code=404,
+            type_name="not_found",
+            title="Not found",
+            error="passkey_not_found",
+        )
         # The stranger's credential survives — no cross-user blast.
         with factory() as s:
             assert s.get(PasskeyCredential, cid) is not None
@@ -404,8 +454,13 @@ class TestDeletePasskeyRouter:
         """
         client = TestClient(app_with_overrides)
         resp = client.delete("/api/v1/auth/passkey/A")
-        assert resp.status_code == 404
-        assert resp.json()["detail"]["error"] == "passkey_not_found"
+        _assert_problem(
+            resp,
+            status_code=404,
+            type_name="not_found",
+            title="Not found",
+            error="passkey_not_found",
+        )
 
     def test_last_credential_returns_422(
         self,
@@ -424,8 +479,13 @@ class TestDeletePasskeyRouter:
         resp = client.delete(
             f"/api/v1/auth/passkey/{bytes_to_base64url(cid)}",
         )
-        assert resp.status_code == 422
-        assert resp.json()["detail"]["error"] == "last_credential"
+        _assert_problem(
+            resp,
+            status_code=422,
+            type_name="validation",
+            title="Validation error",
+            error="last_credential",
+        )
         # Row stayed — a 422 is refused, not partially-committed.
         with factory() as s:
             assert s.get(PasskeyCredential, cid) is not None
@@ -545,8 +605,13 @@ class TestRegisterFinishChallengeSingleUse:
             "/api/v1/auth/passkey/register/finish",
             json={"challenge_id": challenge_id, "credential": _raw()},
         )
-        assert resp.status_code == 400
-        assert resp.json()["detail"]["error"] == "invalid_registration"
+        _assert_problem(
+            resp,
+            status_code=400,
+            type_name="validation",
+            title="Bad request",
+            error="invalid_registration",
+        )
         # cd-qx1f acceptance: challenge row is gone even though the
         # caller's UoW rolled back.
         with factory() as s:
@@ -588,8 +653,13 @@ class TestRegisterFinishChallengeSingleUse:
             "/api/v1/auth/passkey/register/finish",
             json={"challenge_id": stale_id, "credential": _raw()},
         )
-        assert resp.status_code == 400
-        assert resp.json()["detail"]["error"] == "challenge_expired"
+        _assert_problem(
+            resp,
+            status_code=400,
+            type_name="validation",
+            title="Bad request",
+            error="challenge_expired",
+        )
         with factory() as s:
             assert s.get(WebAuthnChallenge, stale_id) is None
 
@@ -632,8 +702,13 @@ class TestRegisterFinishChallengeSingleUse:
             "/api/v1/auth/passkey/register/finish",
             json={"challenge_id": signup_challenge_id, "credential": _raw()},
         )
-        assert resp.status_code == 400
-        assert resp.json()["detail"]["error"] == "invalid_registration"
+        _assert_problem(
+            resp,
+            status_code=400,
+            type_name="validation",
+            title="Bad request",
+            error="invalid_registration",
+        )
         with factory() as s:
             assert s.get(WebAuthnChallenge, signup_challenge_id) is None
 
@@ -677,8 +752,13 @@ class TestRegisterFinishChallengeSingleUse:
             "/api/v1/auth/passkey/register/finish",
             json={"challenge_id": challenge_id, "credential": _raw()},
         )
-        assert resp.status_code == 422
-        assert resp.json()["detail"]["error"] == "too_many_passkeys"
+        _assert_problem(
+            resp,
+            status_code=422,
+            type_name="validation",
+            title="Validation error",
+            error="too_many_passkeys",
+        )
         with factory() as s:
             assert s.get(WebAuthnChallenge, challenge_id) is None
 
@@ -699,8 +779,13 @@ class TestRegisterFinishChallengeSingleUse:
             "/api/v1/auth/passkey/register/finish",
             json={"challenge_id": fake_id, "credential": _raw()},
         )
-        assert resp.status_code == 409
-        assert resp.json()["detail"]["error"] == "challenge_consumed_or_unknown"
+        _assert_problem(
+            resp,
+            status_code=409,
+            type_name="conflict",
+            title="Conflict",
+            error="challenge_consumed_or_unknown",
+        )
         # Still no row — the idempotent delete didn't insert or crash.
         with factory() as s:
             assert s.get(WebAuthnChallenge, fake_id) is None
