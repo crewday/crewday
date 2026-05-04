@@ -46,6 +46,7 @@ from __future__ import annotations
 import json
 import os
 import urllib.error
+import urllib.parse
 import urllib.request
 from collections.abc import Callable, Iterator
 from pathlib import Path
@@ -138,7 +139,47 @@ def dev_stack_ready(base_url: str) -> str:
             "run `docker compose -f mocks/docker-compose.yml "
             "-f mocks/docker-compose.e2e.yml up -d --build`"
         )
+    _assert_webauthn_rp_id_matches_origin(base_url)
     return base_url
+
+
+def _assert_webauthn_rp_id_matches_origin(base_url: str) -> None:
+    """Fail early when e2e runs against a non-e2e WebAuthn config."""
+    parsed = urllib.parse.urlparse(base_url)
+    host = parsed.hostname or ""
+    if not host:
+        pytest.fail(f"CREWDAY_E2E_BASE_URL has no hostname: {base_url!r}")
+
+    url = f"{base_url}/api/v1/auth/passkey/login/start"
+    request = urllib.request.Request(
+        url,
+        data=b"{}",
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=5) as resp:
+            payload = json.loads(resp.read().decode("utf-8"))
+    except (TimeoutError, urllib.error.URLError, ConnectionError) as exc:
+        pytest.skip(
+            f"dev stack WebAuthn preflight failed at {url} ({exc!r}); "
+            "run `docker compose -f mocks/docker-compose.yml "
+            "-f mocks/docker-compose.e2e.yml up -d --build`"
+        )
+    rp_id = payload.get("options", {}).get("rpId")
+    if not isinstance(rp_id, str) or not rp_id:
+        pytest.fail(f"dev stack WebAuthn preflight returned no rpId: {payload!r}")
+    if rp_id == host or host.endswith(f".{rp_id}"):
+        return
+    pytest.fail(
+        f"WebAuthn rp_id {rp_id!r} does not match e2e origin host {host!r}. "
+        "The e2e suite must run with the loopback override: "
+        "`docker compose -f mocks/docker-compose.yml "
+        "-f mocks/docker-compose.e2e.yml up -d --build`. "
+        f"When {ENV_BASE_URL}=http://localhost:8100, the stack must advertise "
+        "CREWDAY_PUBLIC_URL=http://localhost:8100 and "
+        "CREWDAY_WEBAUTHN_RP_ID=localhost."
+    )
 
 
 @pytest.fixture

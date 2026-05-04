@@ -559,9 +559,9 @@ def enroll_owner(
     6. Land on ``/today`` (or the role-appropriate home).
 
     **RP-ID prerequisite.** The dev stack must serve a ``rp_id`` that
-    matches the host portion of ``base_url``. The default compose
-    config ships with ``rp_id=localhost`` and the loopback default
-    ``base_url`` is ``http://localhost:8100``. Running without the e2e
+    matches the host portion of ``base_url``. The e2e compose
+    override ships with ``rp_id=localhost`` and the loopback default
+    ``base_url`` is ``http://localhost:8100``. Running without that
     override raises :class:`RPIDMismatch` immediately so the test
     failure points at config drift rather than a black-box WebAuthn
     error.
@@ -579,8 +579,11 @@ def enroll_owner(
             f"WebAuthn rp_id {rp_id!r} does not match origin host "
             f"{host!r}; the browser will refuse "
             "navigator.credentials.create() against this combination. "
-            "Align CREWDAY_WEBAUTHN_RP_ID with the e2e origin (or run "
-            "the suite against the matching host)."
+            "Run `docker compose -f mocks/docker-compose.yml "
+            "-f mocks/docker-compose.e2e.yml up -d --build` so "
+            "CREWDAY_PUBLIC_URL=http://localhost:8100 and "
+            "CREWDAY_WEBAUTHN_RP_ID=localhost when the e2e base URL is "
+            "http://localhost:8100."
         )
 
     page.goto(f"{base_url.rstrip('/')}/login")
