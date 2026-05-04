@@ -2,8 +2,9 @@
 
 The deterministic :class:`~app.adapters.llm.ports.LLMClient` fake now
 lives under :mod:`app.adapters.llm.fake` so the FastAPI factory can
-import it when ``CREWDAY_LLM_PROVIDER=fake`` (e.g. the Playwright e2e
-stack — see ``mocks/docker-compose.e2e.yml``). Tests historically
+import it when ``CREWDAY_LLM_PROVIDER=fake`` (e.g. the dev / Playwright
+stack — see ``mocks/docker-compose.yml`` and
+``mocks/docker-compose.e2e.yml``). Tests historically
 imported :class:`EchoLLMClient` from ``tests._fakes.llm``; this shim
 preserves that import path so existing fixtures keep working.
 

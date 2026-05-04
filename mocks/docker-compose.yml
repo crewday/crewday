@@ -117,6 +117,14 @@ services:
       CREWDAY_SMTP_USE_TLS: "0"
       # Dev-stack only; see scripts/dev-login.sh (cd-w1ia).
       CREWDAY_DEV_AUTH: "1"
+      # DEV / E2E ONLY — DO NOT enable in production (cd-tblly).
+      # The loopback dev stack is also the e2e target for GA journeys,
+      # so receipt scanning must use the deterministic in-process fake
+      # instead of requiring an OpenRouter key or DB-backed model config.
+      # The e2e override repeats these values so the fake seam remains
+      # visible next to the WebAuthn localhost overrides.
+      CREWDAY_LLM_PROVIDER: "fake"
+      CREWDAY_LLM_OCR_MODEL: "fake-ocr"
     expose:
       - "8000"
     ports:

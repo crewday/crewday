@@ -1,8 +1,8 @@
 """Unit coverage for :mod:`app.adapters.llm.fake` (cd-tblly).
 
 The deterministic fake is now production-importable so the FastAPI
-factory can wire it under ``CREWDAY_LLM_PROVIDER=fake`` (the e2e
-Playwright stack — ``mocks/docker-compose.e2e.yml``). These tests
+factory can wire it under ``CREWDAY_LLM_PROVIDER=fake`` (the dev /
+Playwright stacks). These tests
 exercise the two seams the e2e journey relies on:
 
 * ``chat`` returns the canned high-confidence OCR autofill JSON when

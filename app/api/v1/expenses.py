@@ -997,9 +997,9 @@ def _build_attach_runner(
 
     Both knobs must be set for the runner to fire:
 
-    * ``llm`` — a usable :class:`LLMClient` (the factory wires
-      :class:`OpenRouterClient` only when
-      ``settings.openrouter_api_key`` is present).
+    * ``llm`` — a usable :class:`LLMClient` (the factory wires the
+      fake provider directly in dev / e2e, or OpenRouter when a key
+      source is available).
     * ``settings.llm_ocr_model`` — the deployment-level capability
       gate. ``None`` disables autofill.
 

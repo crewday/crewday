@@ -3,7 +3,7 @@
 Production-importable fake used by:
 
 * the FastAPI factory when ``CREWDAY_LLM_PROVIDER=fake`` (e.g. the
-  ``mocks/docker-compose.e2e.yml`` Playwright stack), and
+  dev / Playwright stacks), and
 * unit tests, via the :class:`EchoLLMClient` re-export under
   :mod:`tests._fakes.llm`.
 
@@ -209,7 +209,7 @@ class EchoLLMClient(FakeLLMClient):
     to the capability-missing semantics.
 
     Use :class:`FakeLLMClient` for any caller that wants the OCR
-    capability lit up (the e2e Playwright stack, the receipt-autofill
+    capability lit up (the dev / Playwright stacks, the receipt-autofill
     integration test).
     """
 

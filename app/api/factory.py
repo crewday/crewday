@@ -502,10 +502,11 @@ def _build_llm(settings: Settings) -> LLMClient | None:
     Provider dispatch is keyed on :attr:`Settings.llm_provider`:
 
     * ``"fake"`` — swap in the in-process
-      :class:`~app.adapters.llm.fake.FakeLLMClient` so e2e / dev stacks
+      :class:`~app.adapters.llm.fake.FakeLLMClient` so dev / e2e stacks
       exercise the LLM seam without an upstream key. Gated to dev/e2e
-      via ``mocks/docker-compose.e2e.yml`` (§16 "Environment
-      variables", §11 "Provider types"). Never enabled in production.
+      via ``mocks/docker-compose.yml`` and repeated in the e2e override
+      (§16 "Environment variables", §11 "Provider types"). Never
+      enabled in production.
     * ``"openrouter"`` (or ``None``, the legacy default) —
       :class:`OpenRouterClient` when an env key is present or a root
       key can decrypt the DB-backed deployment setting. The DB source
@@ -513,11 +514,10 @@ def _build_llm(settings: Settings) -> LLMClient | None:
       without rebuilding the app.
 
     The OCR-autofill capability layers an additional gate on
-    :attr:`Settings.llm_ocr_model` — both the API key AND a model id
-    must be present for ``POST /expenses/scan`` to actually run
-    the LLM. The two gates compose so a deployment can disable the
-    capability by clearing either side without booting a half-wired
-    state machine.
+    :attr:`Settings.llm_ocr_model` — both a usable LLM client and a
+    model id must be present for ``POST /expenses/scan`` to run. That
+    keeps the fake provider keyless while still letting production
+    disable the capability by clearing either side.
     """
     if settings.llm_provider == "fake":
         _log.info(
