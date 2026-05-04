@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import importlib
 import json
 import os
 import pathlib
@@ -768,7 +769,7 @@ rotate_session_secret = cli_override("admin", "rotate-session-secret", covers=[]
 def _load_app_job_state() -> Any:
     """Lazy import so non-host invocations don't pay the app-package cost."""
     try:
-        from app.worker import job_state as job_state_mod
+        job_state_mod = importlib.import_module("app.worker.job_state")
     except Exception as exc:
         raise ConfigError(
             "admin worker commands must run on the server host with app "

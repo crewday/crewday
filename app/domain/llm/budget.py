@@ -442,7 +442,7 @@ def estimate_cost_cents(
         # ``:free`` models?" question). A WARNING per call would
         # drown the operator inbox on a deliberately-free deployment.
         _log.debug(
-            "LLM pricing used free-tier model",
+            "llm.pricing.free_tier",
             extra={
                 "event": "llm.pricing.free_tier",
                 "api_model_id": api_model_id,
@@ -466,7 +466,7 @@ def estimate_cost_cents(
                 _UNKNOWN_MODEL_DEDUP.add(dedup_key)
         if seen:
             _log.debug(
-                "LLM pricing skipped unknown model",
+                "llm.pricing.unknown_model",
                 extra={
                     "event": "llm.pricing.unknown_model",
                     "api_model_id": api_model_id,
@@ -476,7 +476,7 @@ def estimate_cost_cents(
             )
         else:
             _log.warning(
-                "LLM pricing skipped unknown model",
+                "llm.pricing.unknown_model",
                 extra={
                     "event": "llm.pricing.unknown_model",
                     "api_model_id": api_model_id,
@@ -799,7 +799,7 @@ def check_budget(
         # the operator surface can flag the workspace for a manual
         # seed step.
         _log.warning(
-            "LLM budget ledger missing",
+            "llm.budget.ledger_missing",
             extra={
                 "event": "llm.budget.ledger_missing",
                 "workspace_id": ctx.workspace_id,

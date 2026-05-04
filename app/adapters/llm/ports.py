@@ -34,6 +34,10 @@ __all__ = [
     "LLMClient",
     "LLMResponse",
     "LLMUsage",
+    "LlmContentRefused",
+    "LlmProviderError",
+    "LlmRateLimited",
+    "LlmTransportError",
     "Tool",
     "ToolCall",
 ]
@@ -50,6 +54,34 @@ class LLMCapabilityMissing(Exception):
     def __init__(self, capability: str) -> None:
         super().__init__(f"LLM capability not supported by this client: {capability}")
         self.capability = capability
+
+
+class LlmRateLimited(RuntimeError):
+    """Raised after the retry budget is exhausted on provider rate limits."""
+
+
+class LlmTransportError(RuntimeError):
+    """Raised for transport-level provider failures."""
+
+
+class LlmProviderError(RuntimeError):
+    """Raised when the provider rejects a request as non-retryable."""
+
+
+class LlmContentRefused(RuntimeError):
+    """Raised when every rung in a chain refused on content grounds."""
+
+    __slots__ = ("correlation_id", "fallback_attempts")
+
+    def __init__(
+        self,
+        *args: object,
+        fallback_attempts: int = 0,
+        correlation_id: str = "",
+    ) -> None:
+        super().__init__(*args)
+        self.fallback_attempts = fallback_attempts
+        self.correlation_id = correlation_id
 
 
 class ChatMessage(TypedDict):

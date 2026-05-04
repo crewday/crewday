@@ -31,7 +31,7 @@ Walk semantics follow §11 "Retryable errors" verbatim:
 * :class:`~app.domain.llm.budget.BudgetExceeded` short-circuits the
   whole walk **before** any rung dispatches (§11 "Workspace usage
   budget"); the call never leaves the client and no row is written.
-* :class:`~app.adapters.llm.openrouter.LlmProviderError` (non-retryable
+* :class:`~app.adapters.llm.ports.LlmProviderError` (non-retryable
   ``4xx``) is terminal — that rung records a ``status="error"`` row
   and the exception re-raises, bypassing the rest of the chain.
 * Chain exhaustion re-raises the last provider error and writes a
@@ -55,15 +55,13 @@ from datetime import datetime
 
 from sqlalchemy.orm import Session
 
-from app.adapters.llm.openrouter import (
+from app.adapters.llm.ports import (
+    ChatMessage,
     LlmContentRefused,
     LlmProviderError,
     LlmRateLimited,
-    LlmTransportError,
-)
-from app.adapters.llm.ports import (
-    ChatMessage,
     LLMResponse,
+    LlmTransportError,
     LLMUsage,
     Tool,
     ToolCall,

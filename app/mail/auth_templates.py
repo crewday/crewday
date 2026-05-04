@@ -14,8 +14,8 @@ On-disk convention (matches §10 "Email template system"):
 Locale-aware variants (``<name>.<locale>.<channel>.j2``) are not in
 use today for auth flows but are supported by
 :class:`~app.domain.messaging.notifications.Jinja2TemplateLoader`; if
-a future revision ships localised auth copy, the same loader resolves
-the fallback chain.
+a future revision ships localised auth copy, this renderer can grow the
+same fallback chain.
 
 Autoescape is **disabled** here. The auth bodies are plain-text only
 (magic-link URLs, masked email addresses) and HTML escaping would
@@ -47,8 +47,6 @@ from typing import Any, Final
 from jinja2 import Environment, FileSystemLoader, StrictUndefined
 from jinja2 import TemplateNotFound as _JinjaTemplateNotFound
 
-from app.domain.messaging.notifications import TEMPLATE_ROOT
-
 __all__ = [
     "AUTH_TEMPLATE_ROOT",
     "AuthTemplateNotFound",
@@ -59,7 +57,9 @@ __all__ = [
 
 # Absolute path to the auth template subdirectory. Exposed so tests
 # can assert the on-disk layout without reimplementing the join.
-AUTH_TEMPLATE_ROOT: Path = TEMPLATE_ROOT / "auth"
+AUTH_TEMPLATE_ROOT: Path = (
+    Path(__file__).resolve().parents[1] / "domain/messaging/templates/auth"
+)
 
 
 class AuthTemplateNotFound(LookupError):

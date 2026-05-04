@@ -26,15 +26,27 @@ asset-event hook so a single transaction emits one ordered batch).
 from __future__ import annotations
 
 import weakref
-from collections.abc import Iterable, Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Final
 
-from sqlalchemy import select
+from sqlalchemy import (
+    JSON,
+    Boolean,
+    Column,
+    DateTime,
+    Integer,
+    MetaData,
+    String,
+    Table,
+    insert,
+    select,
+    update,
+)
+from sqlalchemy.engine import RowMapping
 from sqlalchemy.orm import Session
 
-from app.adapters.db.assets.models import AssetDocument, FileExtraction
 from app.audit import write_audit
 from app.domain.assets.documents import AssetDocumentNotFound
 from app.events.bus import EventBus
@@ -54,6 +66,7 @@ __all__ = [
     "DocumentExtractionPageView",
     "DocumentExtractionView",
     "ExtractionRetryNotAllowed",
+    "FileExtractionRecord",
     "enqueue_extraction",
     "get_extraction",
     "get_extraction_page",
@@ -105,10 +118,55 @@ class DocumentExtractionView:
     attempts: int
 
 
+@dataclass(frozen=True, slots=True)
+class FileExtractionRecord:
+    """Domain-owned projection of a ``file_extraction`` row."""
+
+    id: str
+    workspace_id: str
+    extraction_status: str
+    extractor: str | None
+    body_text: str | None
+    pages_json: list[dict[str, int]] | None
+    token_count: int | None
+    has_secret_marker: bool
+    attempts: int
+    last_error: str | None
+    extracted_at: datetime | None
+    created_at: datetime
+    updated_at: datetime
+
+
 # Body-preview cap shared with §21 "Public surface": ``GET /extraction``
 # returns at most this many leading characters. The full ``body_text``
 # stays on the row for ``GET /extraction/pages/{n}`` to slice.
 _BODY_PREVIEW_CHARS: Final[int] = 4000
+
+_METADATA = MetaData()
+_FILE_EXTRACTION = Table(
+    "file_extraction",
+    _METADATA,
+    Column("id", String),
+    Column("workspace_id", String),
+    Column("extraction_status", String),
+    Column("extractor", String),
+    Column("body_text", String),
+    Column("pages_json", JSON),
+    Column("token_count", Integer),
+    Column("has_secret_marker", Boolean),
+    Column("attempts", Integer),
+    Column("last_error", String),
+    Column("extracted_at", DateTime(timezone=True)),
+    Column("created_at", DateTime(timezone=True)),
+    Column("updated_at", DateTime(timezone=True)),
+)
+_ASSET_DOCUMENT = Table(
+    "asset_document",
+    _METADATA,
+    Column("id", String),
+    Column("workspace_id", String),
+    Column("asset_id", String),
+)
 
 
 # ---------------------------------------------------------------------------
@@ -165,7 +223,7 @@ def enqueue_extraction(
     document_id: str,
     *,
     clock: Clock | None = None,
-) -> FileExtraction:
+) -> FileExtractionRecord:
     """Mint a ``pending`` ``file_extraction`` row for a fresh document.
 
     Called inline from :func:`app.domain.assets.documents.attach_document`
@@ -176,23 +234,24 @@ def enqueue_extraction(
     """
     resolved_clock = clock if clock is not None else SystemClock()
     now = resolved_clock.now()
-    row = FileExtraction(
-        id=document_id,
-        workspace_id=ctx.workspace_id,
-        extraction_status="pending",
-        extractor=None,
-        body_text=None,
-        pages_json=None,
-        token_count=None,
-        has_secret_marker=False,
-        attempts=0,
-        last_error=None,
-        extracted_at=None,
-        created_at=now,
-        updated_at=now,
-    )
-    session.add(row)
+    values = {
+        "id": document_id,
+        "workspace_id": ctx.workspace_id,
+        "extraction_status": "pending",
+        "extractor": None,
+        "body_text": None,
+        "pages_json": None,
+        "token_count": None,
+        "has_secret_marker": False,
+        "attempts": 0,
+        "last_error": None,
+        "extracted_at": None,
+        "created_at": now,
+        "updated_at": now,
+    }
+    session.execute(insert(_FILE_EXTRACTION).values(values))
     session.flush()
+    row = _record_from_mapping(values)
     write_audit(
         session,
         ctx,
@@ -211,7 +270,7 @@ def start_extraction(
     document_id: str,
     *,
     clock: Clock | None = None,
-) -> FileExtraction:
+) -> FileExtractionRecord:
     """Flip a ``pending`` row to ``extracting`` and bump ``attempts``.
 
     Called from the worker tick once it has decided to process the row.
@@ -230,20 +289,23 @@ def start_extraction(
             f"cannot start extraction from status={row.extraction_status!r}"
         )
     resolved_clock = clock if clock is not None else SystemClock()
-    row.extraction_status = "extracting"
-    row.attempts = row.attempts + 1
-    row.updated_at = resolved_clock.now()
-    session.flush()
+    values = {
+        "extraction_status": "extracting",
+        "attempts": row.attempts + 1,
+        "updated_at": resolved_clock.now(),
+    }
+    _update_extraction_row(session, ctx, document_id, values)
+    updated = _load_extraction_row(session, ctx, document_id)
     write_audit(
         session,
         ctx,
         entity_kind="file_extraction",
         entity_id=document_id,
         action="file_extraction.extracting",
-        diff={"after": {"status": "extracting", "attempts": row.attempts}},
+        diff={"after": {"status": "extracting", "attempts": updated.attempts}},
         clock=resolved_clock,
     )
-    return row
+    return updated
 
 
 def record_extraction_success(
@@ -259,22 +321,28 @@ def record_extraction_success(
     asset_id: str | None,
     clock: Clock | None = None,
     event_bus: EventBus | None = None,
-) -> FileExtraction:
+) -> FileExtractionRecord:
     """Persist a successful extraction and fire ``asset_document.extracted``."""
-    row = _load_extraction_row(session, ctx, document_id)
     resolved_clock = clock if clock is not None else SystemClock()
     resolved_bus = event_bus if event_bus is not None else default_event_bus
     now = resolved_clock.now()
-    row.extraction_status = "succeeded"
-    row.extractor = extractor
-    row.body_text = body_text
-    row.pages_json = list(pages_json)
-    row.token_count = token_count
-    row.has_secret_marker = has_secret_marker
-    row.last_error = None
-    row.extracted_at = now
-    row.updated_at = now
-    session.flush()
+    _update_extraction_row(
+        session,
+        ctx,
+        document_id,
+        {
+            "extraction_status": "succeeded",
+            "extractor": extractor,
+            "body_text": body_text,
+            "pages_json": list(pages_json),
+            "token_count": token_count,
+            "has_secret_marker": has_secret_marker,
+            "last_error": None,
+            "extracted_at": now,
+            "updated_at": now,
+        },
+    )
+    row = _load_extraction_row(session, ctx, document_id)
     write_audit(
         session,
         ctx,
@@ -318,7 +386,7 @@ def record_extraction_failure(
     asset_id: str | None,
     clock: Clock | None = None,
     event_bus: EventBus | None = None,
-) -> FileExtraction:
+) -> FileExtractionRecord:
     """Mark a tick as failed.
 
     Re-arms the row to ``pending`` (the worker picks it up on the
@@ -333,17 +401,20 @@ def record_extraction_failure(
     resolved_clock = clock if clock is not None else SystemClock()
     resolved_bus = event_bus if event_bus is not None else default_event_bus
     now = resolved_clock.now()
-    row.last_error = error
-    if row.attempts >= MAX_EXTRACTION_ATTEMPTS:
-        row.extraction_status = "failed"
-    else:
-        # Reset to ``pending`` so the next worker tick picks it up; the
-        # ``attempts`` counter already moved on this run. Leaving the
-        # row in ``extracting`` would require the worker to know about
-        # in-flight reuse, which it explicitly does not.
-        row.extraction_status = "pending"
-    row.updated_at = now
-    session.flush()
+    # Reset to ``pending`` while under the cap so the next worker tick
+    # picks it up; the ``attempts`` counter already moved on this run.
+    next_status = "failed" if row.attempts >= MAX_EXTRACTION_ATTEMPTS else "pending"
+    _update_extraction_row(
+        session,
+        ctx,
+        document_id,
+        {
+            "extraction_status": next_status,
+            "last_error": error,
+            "updated_at": now,
+        },
+    )
+    row = _load_extraction_row(session, ctx, document_id)
     write_audit(
         session,
         ctx,
@@ -386,20 +457,26 @@ def record_extraction_unsupported(
     asset_id: str | None,
     clock: Clock | None = None,
     event_bus: EventBus | None = None,
-) -> FileExtraction:
+) -> FileExtractionRecord:
     """Terminal-flip ``unsupported`` (MIME outside the rung table).
 
     No ``last_error`` text and ``attempts`` is not incremented further
     on entry — this is a content-shape signal, not a runtime failure.
     """
-    row = _load_extraction_row(session, ctx, document_id)
     resolved_clock = clock if clock is not None else SystemClock()
     resolved_bus = event_bus if event_bus is not None else default_event_bus
     now = resolved_clock.now()
-    row.extraction_status = "unsupported"
-    row.last_error = None
-    row.updated_at = now
-    session.flush()
+    _update_extraction_row(
+        session,
+        ctx,
+        document_id,
+        {
+            "extraction_status": "unsupported",
+            "last_error": None,
+            "updated_at": now,
+        },
+    )
+    row = _load_extraction_row(session, ctx, document_id)
     write_audit(
         session,
         ctx,
@@ -437,22 +514,28 @@ def record_extraction_empty(
     asset_id: str | None,
     clock: Clock | None = None,
     event_bus: EventBus | None = None,
-) -> FileExtraction:
+) -> FileExtractionRecord:
     """Terminal-flip ``empty`` (rung returned no readable text)."""
-    row = _load_extraction_row(session, ctx, document_id)
     resolved_clock = clock if clock is not None else SystemClock()
     resolved_bus = event_bus if event_bus is not None else default_event_bus
     now = resolved_clock.now()
-    row.extraction_status = "empty"
-    row.extractor = extractor
-    row.body_text = ""
-    row.pages_json = []
-    row.token_count = 0
-    row.has_secret_marker = False
-    row.last_error = None
-    row.extracted_at = now
-    row.updated_at = now
-    session.flush()
+    _update_extraction_row(
+        session,
+        ctx,
+        document_id,
+        {
+            "extraction_status": "empty",
+            "extractor": extractor,
+            "body_text": "",
+            "pages_json": [],
+            "token_count": 0,
+            "has_secret_marker": False,
+            "last_error": None,
+            "extracted_at": now,
+            "updated_at": now,
+        },
+    )
+    row = _load_extraction_row(session, ctx, document_id)
     write_audit(
         session,
         ctx,
@@ -486,7 +569,7 @@ def retry_extraction(
     *,
     clock: Clock | None = None,
     event_bus: EventBus | None = None,
-) -> FileExtraction:
+) -> FileExtractionRecord:
     """Re-arm a ``failed`` row back to ``pending``.
 
     Spec §21: "the manager asserts we should try again from scratch",
@@ -503,11 +586,18 @@ def retry_extraction(
     resolved_clock = clock if clock is not None else SystemClock()
     resolved_bus = event_bus if event_bus is not None else default_event_bus
     now = resolved_clock.now()
-    row.extraction_status = "pending"
-    row.attempts = 0
-    row.last_error = None
-    row.updated_at = now
-    session.flush()
+    _update_extraction_row(
+        session,
+        ctx,
+        document_id,
+        {
+            "extraction_status": "pending",
+            "attempts": 0,
+            "last_error": None,
+            "updated_at": now,
+        },
+    )
+    row = _load_extraction_row(session, ctx, document_id)
     write_audit(
         session,
         ctx,
@@ -588,7 +678,7 @@ def list_pending_extractions(
     session: Session,
     *,
     limit: int = 50,
-) -> list[FileExtraction]:
+) -> list[FileExtractionRecord]:
     """Return up to ``limit`` rows in ``status='pending'`` across the deployment.
 
     Cross-tenant by design — the worker tick is deployment-scope (see
@@ -597,14 +687,14 @@ def list_pending_extractions(
     :class:`WorkspaceContext` before mutating.
     """
     stmt = (
-        select(FileExtraction)
-        .where(FileExtraction.extraction_status == "pending")
-        .order_by(FileExtraction.created_at.asc(), FileExtraction.id.asc())
+        select(_FILE_EXTRACTION)
+        .where(_FILE_EXTRACTION.c.extraction_status == "pending")
+        .order_by(_FILE_EXTRACTION.c.created_at.asc(), _FILE_EXTRACTION.c.id.asc())
         .limit(limit)
     )
     with tenant_agnostic():
-        rows: Iterable[FileExtraction] = session.scalars(stmt).all()
-    return list(rows)
+        rows = session.execute(stmt).mappings().all()
+    return [_record_from_mapping(row) for row in rows]
 
 
 # ---------------------------------------------------------------------------
@@ -616,17 +706,39 @@ def _load_extraction_row(
     session: Session,
     ctx: WorkspaceContext,
     document_id: str,
-) -> FileExtraction:
+) -> FileExtractionRecord:
     with tenant_agnostic():
-        row = session.scalars(
-            select(FileExtraction).where(
-                FileExtraction.workspace_id == ctx.workspace_id,
-                FileExtraction.id == document_id,
+        row = (
+            session.execute(
+                select(_FILE_EXTRACTION).where(
+                    _FILE_EXTRACTION.c.workspace_id == ctx.workspace_id,
+                    _FILE_EXTRACTION.c.id == document_id,
+                )
             )
-        ).one_or_none()
+            .mappings()
+            .one_or_none()
+        )
     if row is None:
         raise AssetDocumentNotFound(document_id)
-    return row
+    return _record_from_mapping(row)
+
+
+def _update_extraction_row(
+    session: Session,
+    ctx: WorkspaceContext,
+    document_id: str,
+    values: Mapping[str, object],
+) -> None:
+    with tenant_agnostic():
+        session.execute(
+            update(_FILE_EXTRACTION)
+            .where(
+                _FILE_EXTRACTION.c.workspace_id == ctx.workspace_id,
+                _FILE_EXTRACTION.c.id == document_id,
+            )
+            .values(dict(values))
+        )
+    session.flush()
 
 
 def _document_asset_id(
@@ -635,16 +747,20 @@ def _document_asset_id(
     document_id: str,
 ) -> str | None:
     with tenant_agnostic():
-        row = session.scalars(
-            select(AssetDocument).where(
-                AssetDocument.workspace_id == ctx.workspace_id,
-                AssetDocument.id == document_id,
+        row = (
+            session.execute(
+                select(_ASSET_DOCUMENT.c.asset_id).where(
+                    _ASSET_DOCUMENT.c.workspace_id == ctx.workspace_id,
+                    _ASSET_DOCUMENT.c.id == document_id,
+                )
             )
-        ).one_or_none()
-    return row.asset_id if row is not None else None
+            .mappings()
+            .one_or_none()
+        )
+    return str(row["asset_id"]) if row is not None and row["asset_id"] else None
 
 
-def _row_to_view(row: FileExtraction) -> DocumentExtractionView:
+def _row_to_view(row: FileExtractionRecord) -> DocumentExtractionView:
     body_text = row.body_text or ""
     return DocumentExtractionView(
         document_id=row.id,
@@ -661,3 +777,62 @@ def _row_to_view(row: FileExtraction) -> DocumentExtractionView:
         ),
         attempts=row.attempts,
     )
+
+
+def _record_from_mapping(
+    row: Mapping[str, object] | RowMapping,
+) -> FileExtractionRecord:
+    pages = row["pages_json"]
+    if pages is None:
+        pages_json = None
+    elif isinstance(pages, list):
+        pages_json = [_page_from_mapping(page) for page in pages]
+    else:
+        raise RuntimeError(f"unexpected pages_json type: {type(pages).__name__}")
+    return FileExtractionRecord(
+        id=str(row["id"]),
+        workspace_id=str(row["workspace_id"]),
+        extraction_status=str(row["extraction_status"]),
+        extractor=str(row["extractor"]) if row["extractor"] is not None else None,
+        body_text=str(row["body_text"]) if row["body_text"] is not None else None,
+        pages_json=pages_json,
+        token_count=_expect_optional_int(row["token_count"], "token_count"),
+        has_secret_marker=bool(row["has_secret_marker"]),
+        attempts=_expect_int(row["attempts"], "attempts"),
+        last_error=str(row["last_error"]) if row["last_error"] is not None else None,
+        extracted_at=_expect_optional_datetime(row["extracted_at"], "extracted_at"),
+        created_at=_expect_datetime(row["created_at"], "created_at"),
+        updated_at=_expect_datetime(row["updated_at"], "updated_at"),
+    )
+
+
+def _expect_datetime(value: object, field: str) -> datetime:
+    if isinstance(value, datetime):
+        return _as_utc(value)
+    raise RuntimeError(f"file_extraction.{field} is not a datetime")
+
+
+def _expect_optional_datetime(value: object, field: str) -> datetime | None:
+    if value is None:
+        return None
+    return _expect_datetime(value, field)
+
+
+def _page_from_mapping(value: object) -> dict[str, int]:
+    if not isinstance(value, Mapping):
+        raise RuntimeError("file_extraction.pages_json entry is not an object")
+    return {
+        str(key): _expect_int(item, f"pages_json.{key}") for key, item in value.items()
+    }
+
+
+def _expect_int(value: object, field: str) -> int:
+    if isinstance(value, int):
+        return value
+    raise RuntimeError(f"file_extraction.{field} is not an int")
+
+
+def _expect_optional_int(value: object, field: str) -> int | None:
+    if value is None:
+        return None
+    return _expect_int(value, field)

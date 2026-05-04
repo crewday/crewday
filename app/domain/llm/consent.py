@@ -36,16 +36,23 @@ See ``docs/specs/11-llm-and-agents.md`` §"Redaction / PII" and
 
 from __future__ import annotations
 
-from sqlalchemy import select
+from sqlalchemy import JSON, Column, MetaData, String, Table, select
 from sqlalchemy.orm import Session
 
-from app.adapters.db.llm.models import AgentPreference
 from app.util.redact import CONSENT_TOKENS, ConsentSet
 
 __all__ = ["load_consent_set"]
 
 
 _WORKSPACE_SCOPE: str = "workspace"
+_AGENT_PREFERENCE = Table(
+    "agent_preference",
+    MetaData(),
+    Column("workspace_id", String),
+    Column("scope_kind", String),
+    Column("scope_id", String),
+    Column("upstream_pii_consent", JSON),
+)
 
 
 def load_consent_set(session: Session, workspace_id: str) -> ConsentSet:
@@ -67,10 +74,10 @@ def load_consent_set(session: Session, workspace_id: str) -> ConsentSet:
     ``consents`` kwarg already accepts ``None`` as the
     redact-everything default.
     """
-    stmt = select(AgentPreference.upstream_pii_consent).where(
-        AgentPreference.workspace_id == workspace_id,
-        AgentPreference.scope_kind == _WORKSPACE_SCOPE,
-        AgentPreference.scope_id == workspace_id,
+    stmt = select(_AGENT_PREFERENCE.c.upstream_pii_consent).where(
+        _AGENT_PREFERENCE.c.workspace_id == workspace_id,
+        _AGENT_PREFERENCE.c.scope_kind == _WORKSPACE_SCOPE,
+        _AGENT_PREFERENCE.c.scope_id == workspace_id,
     )
     raw = session.execute(stmt).scalar_one_or_none()
     if not raw:

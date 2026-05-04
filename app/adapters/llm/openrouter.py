@@ -8,7 +8,7 @@ the rest of the adapter surface doesn't need; the worker that actually
 runs LLM calls is a thread-pool executor (§10 worker loop), and a
 sync client is the natural fit.
 
-Error taxonomy (adapter-local, not in the port):
+Error taxonomy (shared through the LLM port):
 
 * :class:`LlmRateLimited` — the provider returned ``429`` on every
   attempt in the retry budget. Domain code can surface this to the
@@ -70,7 +70,17 @@ from app.adapters.db.capabilities.models import DeploymentSetting
 from app.adapters.db.ports import UnitOfWork
 from app.adapters.db.secrets.repositories import SqlAlchemySecretEnvelopeRepository
 from app.adapters.db.session import make_uow
-from app.adapters.llm.ports import ChatMessage, LLMResponse, LLMUsage, Tool, ToolCall
+from app.adapters.llm.ports import (
+    ChatMessage,
+    LlmContentRefused,
+    LlmProviderError,
+    LlmRateLimited,
+    LLMResponse,
+    LlmTransportError,
+    LLMUsage,
+    Tool,
+    ToolCall,
+)
 from app.adapters.storage.envelope import Aes256GcmEnvelope
 from app.adapters.storage.ports import EnvelopeDecryptError
 from app.tenancy import tenant_agnostic
@@ -198,56 +208,6 @@ class _ChatCompletion(TypedDict, total=False):
 # ---------------------------------------------------------------------------
 # Errors
 # ---------------------------------------------------------------------------
-
-
-class LlmRateLimited(RuntimeError):
-    """Raised after the retry budget is exhausted on ``429`` responses."""
-
-
-class LlmTransportError(RuntimeError):
-    """Raised for transport-level failures (5xx after retries, timeouts)."""
-
-
-class LlmProviderError(RuntimeError):
-    """Raised when the provider rejects the request with a non-retryable ``4xx``."""
-
-
-class LlmContentRefused(RuntimeError):
-    """Raised when every rung in the chain refused on content grounds.
-
-    Distinct from :class:`LlmTransportError` so callers that want to
-    react to "model refused this request" (surface a friendlier
-    message, fall back to a non-LLM path, …) can discriminate on type
-    rather than parsing the message. Inside a single rung a
-    ``finish_reason`` of ``safety`` / ``content_filter`` is treated as
-    retryable per §11 "Retryable errors" and advances the chain; this
-    exception only surfaces once the whole chain has been exhausted on
-    refusals.
-
-    The chain-exhausted-refusal surface (raised by
-    :class:`app.domain.llm.client.LLMClient`) carries the same
-    ``fallback_attempts`` / ``correlation_id`` attributes that
-    :class:`app.domain.llm.client.LLMChainExhausted` exposes so the
-    API layer can fill the ``X-LLM-Fallback-Attempts`` /
-    ``X-Correlation-Id-Echo`` response headers on the failure path
-    regardless of which subtype it caught (§11 "Failure modes" — same
-    echo contract as the success path). Both attributes default to
-    safe sentinels (``0`` / ``""``) so the bare exception remains
-    backwards-compatible with adapter-layer raisers that don't have a
-    chain context.
-    """
-
-    __slots__ = ("correlation_id", "fallback_attempts")
-
-    def __init__(
-        self,
-        *args: object,
-        fallback_attempts: int = 0,
-        correlation_id: str = "",
-    ) -> None:
-        super().__init__(*args)
-        self.fallback_attempts = fallback_attempts
-        self.correlation_id = correlation_id
 
 
 class StaticOpenRouterConfigSource:
