@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, model_validator
@@ -22,6 +22,7 @@ from app.adapters.db.assets.models import Asset, AssetType
 from app.audit import write_audit
 from app.tenancy import WorkspaceContext, tenant_agnostic
 from app.util.clock import Clock, SystemClock
+from app.util.clock import aware_utc as _as_utc
 from app.util.ulid import new_ulid
 
 __all__ = [
@@ -593,9 +594,3 @@ def _row_to_view(row: AssetType) -> AssetTypeView:
         deleted_at=_as_utc(row.deleted_at) if row.deleted_at is not None else None,
         is_system=row.workspace_id is None,
     )
-
-
-def _as_utc(value: datetime) -> datetime:
-    if value.tzinfo is None:
-        return value.replace(tzinfo=UTC)
-    return value.astimezone(UTC)

@@ -3,10 +3,30 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta, timezone
+from typing import cast
 
 import pytest
 
-from app.util.clock import Clock, FrozenClock, SystemClock
+from app.util.clock import Clock, FrozenClock, SystemClock, aware_utc
+
+
+class TestAwareUtc:
+    def test_treats_naive_datetime_as_utc(self) -> None:
+        value = datetime(2026, 4, 19, 12, 0)
+        assert aware_utc(value) == datetime(2026, 4, 19, 12, 0, tzinfo=UTC)
+
+    def test_preserves_utc_aware_instant(self) -> None:
+        value = datetime(2026, 4, 19, 12, 0, tzinfo=UTC)
+        assert aware_utc(value) == value
+
+    def test_converts_non_utc_aware_datetime(self) -> None:
+        eastern = timezone(-timedelta(hours=4))
+        value = datetime(2026, 4, 19, 8, 0, tzinfo=eastern)
+        assert aware_utc(value) == datetime(2026, 4, 19, 12, 0, tzinfo=UTC)
+
+    def test_rejects_invalid_input(self) -> None:
+        with pytest.raises(TypeError, match="requires a datetime"):
+            aware_utc(cast(datetime, "2026-04-19T12:00:00Z"))
 
 
 class TestSystemClock:

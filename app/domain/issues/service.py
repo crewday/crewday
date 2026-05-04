@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Literal, cast
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -20,6 +20,7 @@ from app.events.bus import bus as default_event_bus
 from app.events.types import IssueReported
 from app.tenancy import WorkspaceContext, tenant_agnostic
 from app.util.clock import Clock, SystemClock
+from app.util.clock import aware_utc as _as_utc
 from app.util.ulid import new_ulid
 
 __all__ = [
@@ -411,12 +412,6 @@ def _clean_text(value: str | None) -> str | None:
         return None
     cleaned = value.strip()
     return cleaned or None
-
-
-def _as_utc(value: datetime) -> datetime:
-    if value.tzinfo is None:
-        return value.replace(tzinfo=UTC)
-    return value.astimezone(UTC)
 
 
 def _audit_dict(row: IssueReport) -> dict[str, object | None]:

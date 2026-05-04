@@ -5,7 +5,7 @@ from __future__ import annotations
 import weakref
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from datetime import UTC, date, datetime
+from datetime import date, datetime
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -21,6 +21,7 @@ from app.events.registry import Event
 from app.events.types import AssetChanged
 from app.tenancy import WorkspaceContext, tenant_agnostic
 from app.util.clock import Clock, SystemClock
+from app.util.clock import aware_utc as _as_utc
 from app.util.tokens import short_token
 from app.util.ulid import new_ulid
 
@@ -806,12 +807,6 @@ def _clear_pending_events(session: Session) -> None:
     if session.in_nested_transaction():
         return
     _PENDING_EVENTS.pop(session, None)
-
-
-def _as_utc(value: datetime) -> datetime:
-    if value.tzinfo is None:
-        return value.replace(tzinfo=UTC)
-    return value.astimezone(UTC)
 
 
 def _row_to_view(row: Asset) -> AssetView:

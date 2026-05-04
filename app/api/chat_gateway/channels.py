@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, Request, status
@@ -35,6 +35,7 @@ from app.domain.messaging.channel_bindings import (
 )
 from app.domain.messaging.ports import ChatChannelBindingRow
 from app.tenancy import WorkspaceContext, tenant_agnostic
+from app.util.clock import aware_utc as _as_utc
 
 __all__ = ["build_chat_channel_bindings_router"]
 
@@ -318,12 +319,6 @@ def _last_webhook_by_provider(
         for provider, last_at in rows
         if isinstance(provider, str) and isinstance(last_at, datetime)
     }
-
-
-def _as_utc(value: datetime) -> datetime:
-    if value.tzinfo is None:
-        return value.replace(tzinfo=UTC)
-    return value.astimezone(UTC)
 
 
 def _channel_kind(value: str) -> _ChannelKind:

@@ -91,6 +91,7 @@ from app.events.types import (
 )
 from app.tenancy import WorkspaceContext
 from app.util.clock import Clock, SystemClock
+from app.util.clock import aware_utc as _ensure_utc
 from app.util.ulid import new_ulid
 
 __all__ = [
@@ -1779,19 +1780,6 @@ def _error_result(feed_id: str, code: str) -> PolledFeedResult:
         reservations_cancelled=0,
         closures_created=0,
     )
-
-
-def _ensure_utc(value: datetime) -> datetime:
-    """Narrow a round-tripped ``DateTime(timezone=True)`` to aware UTC.
-
-    SQLite strips tzinfo off ``DateTime(timezone=True)`` columns on
-    read; PostgreSQL preserves it. The column is always written as
-    aware UTC, so a naive read is a UTC value that has lost its
-    zone. Mirror of the helper in :mod:`app.worker.tasks.overdue`.
-    """
-    if value.tzinfo is None:
-        return value.replace(tzinfo=UTC)
-    return value.astimezone(UTC)
 
 
 def _write_poll_tick_audit(

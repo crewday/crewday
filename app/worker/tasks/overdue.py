@@ -75,6 +75,7 @@ from app.events.bus import bus as default_event_bus
 from app.events.types import TaskOverdue
 from app.tenancy import WorkspaceContext
 from app.util.clock import Clock, SystemClock
+from app.util.clock import aware_utc as _ensure_utc
 
 __all__ = [
     "DEFAULT_OVERDUE_GRACE_MINUTES",
@@ -486,25 +487,3 @@ def _write_overdue_tick_audit(
         },
         clock=clock,
     )
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
-def _ensure_utc(value: datetime) -> datetime:
-    """Narrow a round-tripped ``DateTime(timezone=True)`` to aware UTC.
-
-    SQLite strips tzinfo off ``DateTime(timezone=True)`` columns on
-    read; PostgreSQL preserves it. The column is always written as
-    aware UTC, so a naive read is a UTC value that has lost its
-    zone. The :class:`TaskOverdue` event validator and the slipped-
-    minutes arithmetic both require an aware datetime; coerce here
-    before either consumes the value.
-    """
-    from datetime import UTC
-
-    if value.tzinfo is None:
-        return value.replace(tzinfo=UTC)
-    return value.astimezone(UTC)

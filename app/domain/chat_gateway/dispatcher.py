@@ -14,7 +14,7 @@ import threading
 import weakref
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Literal
 
 from sqlalchemy import select
@@ -26,6 +26,7 @@ from app.events.bus import EventBus
 from app.events.types import ChatMessageReceived
 from app.tenancy import WorkspaceContext, tenant_agnostic
 from app.util.clock import Clock, SystemClock
+from app.util.clock import aware_utc as _as_utc
 from app.util.ulid import new_ulid
 
 __all__ = [
@@ -270,12 +271,6 @@ def _audit_failure(
         via="worker",
         clock=clock,
     )
-
-
-def _as_utc(value: datetime) -> datetime:
-    if value.tzinfo is None:
-        return value.replace(tzinfo=UTC)
-    return value.astimezone(UTC)
 
 
 def _language_hint(binding: ChatGatewayBinding) -> str | None:

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from datetime import UTC, date, datetime
+from datetime import date, datetime
 from decimal import Decimal
 
 from sqlalchemy import and_, false, func, or_, select, update
@@ -67,6 +67,7 @@ from app.domain.billing.work_orders import (
     WorkOrderShiftRow,
 )
 from app.tenancy import tenant_agnostic
+from app.util.clock import aware_utc as _as_utc
 
 __all__ = [
     "SqlAlchemyClientPortalRepository",
@@ -76,12 +77,6 @@ __all__ = [
     "SqlAlchemyVendorInvoiceRepository",
     "SqlAlchemyWorkOrderRepository",
 ]
-
-
-def _as_utc(value: datetime) -> datetime:
-    if value.tzinfo is None:
-        return value.replace(tzinfo=UTC)
-    return value.astimezone(UTC)
 
 
 def _as_utc_optional(value: datetime | None) -> datetime | None:

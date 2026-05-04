@@ -12,7 +12,7 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from typing import Protocol, runtime_checkable
 
-__all__ = ["Clock", "FrozenClock", "SystemClock"]
+__all__ = ["Clock", "FrozenClock", "SystemClock", "aware_utc"]
 
 
 @runtime_checkable
@@ -59,6 +59,19 @@ class FrozenClock:
         self._now = _to_aware_utc(at)
 
 
+def aware_utc(value: datetime) -> datetime:
+    """Return ``value`` as an aware UTC datetime.
+
+    Naive datetimes are treated as UTC. Aware datetimes in any zone are
+    converted to UTC.
+    """
+    if not isinstance(value, datetime):
+        raise TypeError("aware_utc() requires a datetime")
+    if value.tzinfo is None or value.tzinfo.utcoffset(value) is None:
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
+
+
 def _to_aware_utc(value: datetime) -> datetime:
     """Return ``value`` as an aware UTC datetime.
 
@@ -70,4 +83,4 @@ def _to_aware_utc(value: datetime) -> datetime:
             "FrozenClock requires an aware datetime; got naive input. "
             "Pass datetime(..., tzinfo=timezone.utc) or similar."
         )
-    return value.astimezone(UTC)
+    return aware_utc(value)

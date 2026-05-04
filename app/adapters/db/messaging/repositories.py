@@ -23,7 +23,7 @@ owns the transaction boundary (§01 "Key runtime invariants" #3).
 from __future__ import annotations
 
 from collections.abc import Sequence
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 
 from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.orm import Session
@@ -59,6 +59,7 @@ from app.domain.messaging.ports import (
     PushTokenRow,
 )
 from app.tenancy import tenant_agnostic
+from app.util.clock import aware_utc as _as_utc
 
 _EMAIL_DELIVERY_PROVIDER_STATE_RANK: dict[str, int] = {
     "queued": 0,
@@ -111,12 +112,6 @@ def _to_channel_row(row: ChatChannel) -> ChatChannelRow:
         created_at=_as_utc(row.created_at),
         archived_at=_as_utc(row.archived_at) if row.archived_at is not None else None,
     )
-
-
-def _as_utc(value: datetime) -> datetime:
-    if value.tzinfo is None:
-        return value.replace(tzinfo=UTC)
-    return value.astimezone(UTC)
 
 
 def _to_message_row(row: ChatMessage) -> ChatMessageRow:
