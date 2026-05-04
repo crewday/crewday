@@ -15,7 +15,6 @@ from app.adapters.db.authz.models import RoleGrant
 from app.adapters.storage.ports import Storage
 from app.audit import write_audit
 from app.domain.assets.assets import (
-    _as_utc,
     _load_asset,
     _pending_event,
     _PendingAssetEvent,
@@ -26,6 +25,7 @@ from app.events.bus import bus as default_event_bus
 from app.events.types import AssetActionPerformed
 from app.tenancy import WorkspaceContext, tenant_agnostic
 from app.util.clock import Clock, SystemClock
+from app.util.clock import aware_utc as _as_utc
 from app.util.ulid import new_ulid
 
 __all__ = [

@@ -36,7 +36,6 @@ from sqlalchemy.orm import Session
 
 from app.adapters.db.assets.models import AssetDocument, FileExtraction
 from app.audit import write_audit
-from app.domain.assets.assets import _as_utc
 from app.domain.assets.documents import AssetDocumentNotFound
 from app.events.bus import EventBus
 from app.events.bus import bus as default_event_bus
@@ -48,6 +47,7 @@ from app.events.types import (
 )
 from app.tenancy import WorkspaceContext, tenant_agnostic
 from app.util.clock import Clock, SystemClock
+from app.util.clock import aware_utc as _as_utc
 
 __all__ = [
     "MAX_EXTRACTION_ATTEMPTS",
