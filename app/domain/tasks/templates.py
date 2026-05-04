@@ -25,8 +25,9 @@ Public surface:
 
 **Transaction boundary.** The service never calls
 ``session.commit()``; the caller's Unit-of-Work owns transaction
-boundaries (§01 "Key runtime invariants" #3). Every mutation
-writes one :mod:`app.audit` row in the same transaction.
+boundaries (§01 "Key runtime invariants" #3). Mutations that
+change the audit-visible template payload write one
+:mod:`app.audit` row in the same transaction.
 
 **Scope-consistency rules.**
 
@@ -981,20 +982,24 @@ def update(
     session.flush()
     after = _row_to_view(row)
 
-    write_audit(
-        session,
-        ctx,
-        entity_kind="task_template",
-        entity_id=row.id,
-        action="update",
-        diff={
-            "before": _view_to_diff_dict(before),
-            "after": _view_to_diff_dict(after),
-        },
-        clock=clock,
-    )
-    # Audit-then-publish (cd-wyq5). Same ``upserted`` event as
-    # :func:`create` — the SPA fan-out is identical for both.
+    before_dict = _view_to_diff_dict(before)
+    after_dict = _view_to_diff_dict(after)
+    if before_dict != after_dict:
+        write_audit(
+            session,
+            ctx,
+            entity_kind="task_template",
+            entity_id=row.id,
+            action="update",
+            diff={
+                "before": before_dict,
+                "after": after_dict,
+            },
+            clock=clock,
+        )
+    # Publish after any needed audit write (cd-wyq5). Same
+    # ``upserted`` event as :func:`create` — the SPA fan-out is
+    # identical for both.
     bus.publish(
         TaskTemplateUpserted(
             workspace_id=ctx.workspace_id,

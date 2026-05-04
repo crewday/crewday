@@ -1160,7 +1160,7 @@ class TestList:
 
 
 class TestUpdate:
-    """:func:`update` replaces the mutable body, writes an audit with diff."""
+    """:func:`update` replaces the mutable body and audits real changes."""
 
     def test_happy_path(self, session: Session) -> None:
         ws = _bootstrap_workspace(session, slug="upd-happy")
@@ -1229,6 +1229,57 @@ class TestUpdate:
         assert isinstance(update_row.diff, dict)
         assert update_row.diff["before"]["name"] != update_row.diff["after"]["name"]
         assert update_row.diff["after"]["name"] == "Renamed"
+
+    def test_noop_update_skips_audit(self, session: Session) -> None:
+        ws = _bootstrap_workspace(session, slug="upd-audit-noop")
+        ctx = _ctx(ws, slug="upd-audit-noop")
+        view = create(session, ctx, body=_minimal_body(), clock=FrozenClock(_PINNED))
+
+        update(
+            session,
+            ctx,
+            template_id=view.id,
+            body=_minimal_update(),
+            clock=FrozenClock(datetime(2026, 4, 20, 12, 0, 0, tzinfo=UTC)),
+        )
+
+        audits = session.scalars(
+            select(AuditLog)
+            .where(AuditLog.entity_id == view.id)
+            .order_by(AuditLog.created_at.asc(), AuditLog.id.asc())
+        ).all()
+        assert [audit.action for audit in audits] == ["create"]
+
+    def test_nested_payload_change_writes_audit(self, session: Session) -> None:
+        ws = _bootstrap_workspace(session, slug="upd-audit-nested")
+        ctx = _ctx(ws, slug="upd-audit-nested")
+        view = create(
+            session,
+            ctx,
+            body=_minimal_body(inventory_consumption_json={"linen-kit": 1}),
+            clock=FrozenClock(_PINNED),
+        )
+
+        update(
+            session,
+            ctx,
+            template_id=view.id,
+            body=_minimal_update(inventory_consumption_json={"linen-kit": 2}),
+            clock=FrozenClock(datetime(2026, 4, 20, 12, 0, 0, tzinfo=UTC)),
+        )
+
+        audits = session.scalars(
+            select(AuditLog)
+            .where(AuditLog.entity_id == view.id)
+            .order_by(AuditLog.created_at.asc(), AuditLog.id.asc())
+        ).all()
+        update_row = next(a for a in audits if a.action == "update")
+        assert update_row.diff["before"]["inventory_consumption_json"] == {
+            "linen-kit": 1
+        }
+        assert update_row.diff["after"]["inventory_consumption_json"] == {
+            "linen-kit": 2
+        }
 
     def test_update_validates_scope(self) -> None:
         """Update runs the same scope-consistency rules as create.
