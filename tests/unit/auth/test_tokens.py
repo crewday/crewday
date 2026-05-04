@@ -878,6 +878,7 @@ class TestRotate:
         with tenant_agnostic():
             row = db_session.get(ApiToken, original.key_id)
             assert row is not None
+            old_hash = row.hash
             row.last_used_at = _PINNED + timedelta(hours=1)
             db_session.flush()
 
@@ -896,6 +897,68 @@ class TestRotate:
         assert row.expires_at is not None
         assert row.last_used_at is None
         assert row.prefix == rotated.prefix
+        assert row.hash != old_hash
+        assert row.previous_hash == old_hash
+        assert row.previous_hash_expires_at is not None
+        assert _as_utc(row.previous_hash_expires_at) == rotate_time + timedelta(hours=1)
+
+    def test_old_secret_verifies_during_overlap(
+        self, db_session: Session, ctx: WorkspaceContext
+    ) -> None:
+        original = mint(
+            db_session,
+            ctx,
+            user_id=ctx.actor_id,
+            label="overlap",
+            scopes={"tasks:read": True},
+            expires_at=_PINNED + timedelta(days=90),
+            now=_PINNED,
+        )
+        rotate_time = _PINNED + timedelta(hours=2)
+        rotated = rotate(db_session, ctx, token_id=original.key_id, now=rotate_time)
+
+        old_verified = verify(
+            db_session,
+            token=original.token,
+            now=rotate_time + timedelta(minutes=30),
+        )
+        new_verified = verify(
+            db_session,
+            token=rotated.token,
+            now=rotate_time + timedelta(minutes=31),
+        )
+
+        assert old_verified.key_id == original.key_id
+        assert old_verified.scopes == {"tasks:read": True}
+        assert new_verified.key_id == original.key_id
+
+    def test_old_secret_rejected_after_overlap_and_fallback_cleared(
+        self, db_session: Session, ctx: WorkspaceContext
+    ) -> None:
+        original = mint(
+            db_session,
+            ctx,
+            user_id=ctx.actor_id,
+            label="overlap-expiry",
+            scopes={},
+            expires_at=_PINNED + timedelta(days=90),
+            now=_PINNED,
+        )
+        rotate_time = _PINNED + timedelta(hours=2)
+        rotate(db_session, ctx, token_id=original.key_id, now=rotate_time)
+
+        with pytest.raises(InvalidToken):
+            verify(
+                db_session,
+                token=original.token,
+                now=rotate_time + timedelta(hours=1),
+            )
+
+        with tenant_agnostic():
+            row = db_session.get(ApiToken, original.key_id)
+        assert row is not None
+        assert row.previous_hash is None
+        assert row.previous_hash_expires_at is None
 
     def test_writes_rotated_audit_with_old_and_new_prefix(
         self, db_session: Session, ctx: WorkspaceContext

@@ -1015,18 +1015,16 @@ class TestRotateHttp:
         assert rotated["prefix"] != original["prefix"]
         assert rotated["expires_at"] == original["expires_at"]
 
-        # The OLD plaintext stops working immediately; the NEW one
-        # verifies cleanly. cd-8i9tr explicitly chose hard-cutover
-        # semantics in v1 (the spec's 1h overlap requires a sibling
-        # ``previous_hash`` column tracked as a follow-up).
-        from app.auth.tokens import InvalidToken
+        # The OLD plaintext remains valid during the 1h overlap; the
+        # NEW one verifies cleanly against the primary hash.
         from app.auth.tokens import verify as verify_token
 
         with session_factory() as s:
             verified = verify_token(s, token=rotated["token"])
             assert verified.key_id == key_id
-        with session_factory() as s, pytest.raises(InvalidToken):
-            verify_token(s, token=original["token"])
+        with session_factory() as s:
+            verified = verify_token(s, token=original["token"])
+            assert verified.key_id == key_id
 
     def test_rotate_unknown_is_404(self, client: TestClient) -> None:
         r = client.post("/api/v1/auth/tokens/01HWA00000000000000000NOPE/rotate")

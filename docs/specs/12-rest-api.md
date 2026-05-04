@@ -823,7 +823,7 @@ DELETE /api/v1/me/tokens/{id}                    # revoke — flips `revoked_at`
 # TBD — not yet implemented (v1 ships only mint / list / revoke above):
 #   POST   /api/v1/me/tokens/{id}/revoke   # POST alias of DELETE — tracked under cd-a23fn.
 #   POST   /api/v1/me/tokens/{id}/rotate   # rotate the secret in place — tracked under cd-a23fn
-#                                          # (depends on cd-oa8iz for the 1h overlap window).
+#                                          # using the same 1h previous-hash overlap as workspace tokens.
 #   GET    /api/v1/me/tokens/{id}/audit    # per-token timeline — tracked under cd-a23fn
 #                                          # (lifecycle events; cd-ocdg7 adds per-request rows).
 
@@ -916,9 +916,8 @@ POST   /w/<slug>/api/v1/auth/tokens/{token_id}/revoke   # POST alias of the DELE
 POST   /w/<slug>/api/v1/auth/tokens/{token_id}/rotate   # §03 "Revocation and rotation": rotate the secret in place,
                                                  # leaving `key_id`, `label`, `scopes`, `expires_at` untouched.
                                                  # Returns the new plaintext exactly once, same shape as POST /tokens
-                                                 # (`{token, key_id, prefix, expires_at, kind}`). Old secret stops
-                                                 # working immediately — the spec's 1h overlap requires a sibling
-                                                 # `previous_hash` column tracked under cd-oa8iz; v1 is hard-cutover.
+                                                 # (`{token, key_id, prefix, expires_at, kind}`). The old secret
+                                                 # remains valid for the 1h `previous_hash` overlap window.
                                                  #   200 OK with the mint-shape response.
                                                  #   401 {"error": "not_authenticated"}.
                                                  #   403 {"error": "permission_denied"}.

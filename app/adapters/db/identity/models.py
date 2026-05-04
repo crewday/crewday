@@ -3,8 +3,8 @@
 v1 slice — sufficient for magic-link + passkey + session + token
 flows (cd-4zz, cd-8m4, cd-c91, cd-cyq, cd-i1qe). The richer §02 / §03
 surface (``full_legal_name``, ``phone_e164``, ``emergency_contact``,
-``agent_approval_mode``, observability fields, rotation-pair hashes,
-etc.) lands via follow-ups without breaking this migration's public
+``agent_approval_mode``, observability fields, etc.) lands via follow-ups
+without breaking this migration's public
 write contract. cd-i1qe added the ``kind`` / ``delegate_for_user_id``
 / ``subject_user_id`` columns on ``api_token`` so the §03
 "Delegated" / "Personal access" surfaces can mint alongside the
@@ -343,6 +343,10 @@ class ApiToken(Base):
     )
     prefix: Mapped[str] = mapped_column(String, nullable=False)
     hash: Mapped[str] = mapped_column(String, nullable=False, unique=True)
+    previous_hash: Mapped[str | None] = mapped_column(String, nullable=True)
+    previous_hash_expires_at: Mapped[datetime | None] = mapped_column(
+        UtcDateTime(), nullable=True
+    )
     expires_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), nullable=True)
     last_used_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), nullable=True)
     revoked_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), nullable=True)

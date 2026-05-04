@@ -941,13 +941,12 @@ subject narrowing is enforced at the row level regardless of which
   — a manager cannot revoke a worker's PAT directly from `/tokens`.
   Revocation takes effect within 5 seconds (token cache TTL).
 - Tokens can be rotated in place via `POST /tokens/{id}/rotate`. The
-  long-term shape is "the old secret hash is kept alongside the new
-  for a configurable overlap (default 1h), so long-running agents can
-  reload without downtime." **v1 ships hard-cutover** — rotating
-  invalidates the old secret immediately because the schema does not
-  yet carry a sibling `previous_hash` column. The 1h hash-pair overlap
-  is tracked under cd-oa8iz; until that lands, agents must reload
-  before the rotated row is hit by their next request.
+  old secret hash is kept alongside the new for a 1-hour overlap, so
+  long-running agents can reload without downtime. During that window,
+  either plaintext verifies against the same `api_token.id`; after
+  `previous_hash_expires_at`, the old plaintext is rejected and the
+  fallback columns are cleared on the next verify path that observes
+  the expiry.
 - A **per-token audit log view** is available in the UI (inline on
   `/tokens` for workspace tokens; inline on `/me` for PATs). The
   long-term shape is "every request with its method, path, response

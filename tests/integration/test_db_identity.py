@@ -191,6 +191,8 @@ class TestMigrationShape:
             "scope_json",
             "prefix",
             "hash",
+            "previous_hash",
+            "previous_hash_expires_at",
             "expires_at",
             "last_used_at",
             "revoked_at",
@@ -202,6 +204,8 @@ class TestMigrationShape:
         assert cols["kind"]["nullable"] is False
         assert cols["delegate_for_user_id"]["nullable"] is True
         assert cols["subject_user_id"]["nullable"] is True
+        assert cols["previous_hash"]["nullable"] is True
+        assert cols["previous_hash_expires_at"]["nullable"] is True
 
     def test_api_token_hash_unique(self, engine: Engine) -> None:
         unique_cols: list[list[str]] = [

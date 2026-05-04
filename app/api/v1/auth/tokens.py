@@ -46,10 +46,9 @@ Routes:
 * ``POST /auth/tokens/{token_id}/rotate`` → ``200 {token, key_id,
   prefix, expires_at, kind}``. §03 "Revocation and rotation":
   rotates the secret in place, leaving ``key_id`` / ``label`` /
-  ``scopes`` / ``expires_at`` untouched. Old secret stops working
-  immediately; the spec's "1h overlap" feature requires a sibling
-  ``previous_hash`` column tracked under cd-oa8iz. PAT / revoked /
-  expired / cross-workspace ids collapse to 404.
+  ``scopes`` / ``expires_at`` untouched. The old secret remains valid
+  for the 1h ``previous_hash`` overlap. PAT / revoked / expired /
+  cross-workspace ids collapse to 404.
 * ``GET /auth/tokens/{token_id}/audit`` → list of
   :class:`TokenAuditEntryResponse` — the per-token lifecycle trail
   (mint / rotate / revoke / revoked_noop), newest first. The

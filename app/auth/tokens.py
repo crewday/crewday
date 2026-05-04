@@ -225,6 +225,12 @@ PERSONAL_SCOPE_PREFIX: Final[str] = "me."
 _LAST_USED_DEBOUNCE: Final[timedelta] = timedelta(minutes=1)
 
 
+# Rotation keeps the old hash usable long enough for already-running
+# agents to reload the new plaintext. Workspace-level configuration is
+# tracked separately; cd-oa8iz pins the default overlap to one hour.
+_ROTATION_OVERLAP: Final[timedelta] = timedelta(hours=1)
+
+
 # Sentinel workspace id for tenant-agnostic (identity-scope) audit
 # rows — PAT mint / revoke have no workspace to borrow. Re-exported
 # from :mod:`app.auth.audit` (cd-rqhy consolidated the six byte-
@@ -787,6 +793,23 @@ def _maybe_bump_last_used(row: ApiToken, *, now: datetime) -> bool:
         row.last_used_at = now
         return True
     return False
+
+
+def _previous_hash_is_live(row: ApiToken, *, now: datetime) -> bool:
+    if row.previous_hash is None or row.previous_hash_expires_at is None:
+        return False
+    expires_at = _normalise_expires_at(row.previous_hash_expires_at, now)
+    return expires_at > now
+
+
+def _clear_expired_previous_hash(row: ApiToken, *, now: datetime) -> bool:
+    if row.previous_hash is None and row.previous_hash_expires_at is None:
+        return False
+    if _previous_hash_is_live(row, now=now):
+        return False
+    row.previous_hash = None
+    row.previous_hash_expires_at = None
+    return True
 
 
 def _narrow_kind(value: str) -> TokenKind:
@@ -1373,12 +1396,9 @@ def rotate(
     Generates a fresh secret + argon2id hash and writes them onto the
     existing row, leaving ``id`` (the public ``key_id``), ``label``,
     ``scopes``, ``expires_at``, and the kind discriminators untouched.
-    The old secret stops working immediately — the spec's "1h overlap"
-    feature (§03 "Revocation and rotation": "the old secret hash is
-    kept alongside the new for a configurable overlap (default 1h)")
-    requires a sibling ``previous_hash`` column that v1 doesn't ship;
-    that follow-up is tracked under cd-oa8iz. Until that lands, rotate
-    is hard-cutover; agents must reload immediately.
+    The old hash is retained in ``previous_hash`` for one hour so
+    already-running agents can reload the new plaintext without an
+    immediate auth outage.
 
     **Personal access tokens are refused here.** §03 "Revocation":
     PATs are revocable / rotatable only by their subject. A workspace
@@ -1435,6 +1455,8 @@ def rotate(
         raise TokenMintFailed(f"argon2id hash failed: {exc}") from exc
 
     with tenant_agnostic():
+        row.previous_hash = row.hash
+        row.previous_hash_expires_at = resolved_now + _ROTATION_OVERLAP
         row.hash = new_hash
         row.prefix = new_prefix
         # Reset ``last_used_at`` so the /tokens page's "stale token"
@@ -1584,8 +1606,9 @@ def verify(
     2. Look up by ``id = key_id``. Missing → :class:`InvalidToken`.
     3. ``revoked_at is not None`` → :class:`TokenRevoked`.
     4. ``expires_at <= now`` (when set) → :class:`TokenExpired`.
-    5. Verify the secret with argon2id. Mismatch →
-       :class:`InvalidToken` — wrapping argon2's
+    5. Verify the secret with argon2id. Mismatch tries
+       ``previous_hash`` only while ``previous_hash_expires_at > now``;
+       otherwise mismatch → :class:`InvalidToken` — wrapping argon2's
        :class:`VerifyMismatchError` so the caller sees the domain
        vocabulary only.
     6. **Delegating / subject liveness** (cd-et6y + cd-ljvs, §03
@@ -1658,13 +1681,27 @@ def verify(
         if expires_at <= resolved_now:
             raise TokenExpired(f"token {key_id!r} expired at {expires_at}")
 
+    previous_hash_cleared = _clear_expired_previous_hash(row, now=resolved_now)
     try:
         _HASHER.verify(row.hash, secret)
     except VerifyMismatchError as exc:
-        # Collapse into the opaque "not a real token" shape so
-        # metrics / HTTP cannot tell a mangled secret apart from
-        # an unknown ``key_id`` at the wire.
-        raise InvalidToken(f"token {key_id!r} secret did not verify") from exc
+        previous_hash_matches = False
+        previous_hash = row.previous_hash
+        if previous_hash is not None and _previous_hash_is_live(row, now=resolved_now):
+            try:
+                _HASHER.verify(previous_hash, secret)
+            except VerifyMismatchError:
+                pass
+            else:
+                previous_hash_matches = True
+        if not previous_hash_matches:
+            if previous_hash_cleared:
+                with tenant_agnostic():
+                    session.flush()
+            # Collapse into the opaque "not a real token" shape so
+            # metrics / HTTP cannot tell a mangled secret apart from
+            # an unknown ``key_id`` at the wire.
+            raise InvalidToken(f"token {key_id!r} secret did not verify") from exc
 
     # Liveness gate (cd-et6y + cd-ljvs). Run AFTER the secret check
     # so a probe with a random secret still collapses to
@@ -1726,7 +1763,7 @@ def verify(
     # — the /tokens UI reads ``last_used_at`` directly from the row
     # and the audit trail already captures the high-value events
     # (mint + revoke).
-    if _maybe_bump_last_used(row, now=resolved_now):
+    if _maybe_bump_last_used(row, now=resolved_now) or previous_hash_cleared:
         with tenant_agnostic():
             session.flush()
 
