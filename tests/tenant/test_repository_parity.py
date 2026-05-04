@@ -392,6 +392,7 @@ COVERED_METHODS: frozenset[str] = frozenset(
         "app.domain.identity.work_engagements.get_work_engagement",
         "app.domain.identity.work_engagements.list_work_engagements",
         "app.domain.identity.work_engagements.reinstate_work_engagement",
+        "app.domain.identity.work_engagements.seed_pending_work_engagement",
         "app.domain.identity.work_engagements.update_work_engagement",
         "app.domain.identity.work_roles.create_work_role",
         "app.domain.identity.work_roles.get_work_role",
@@ -452,6 +453,10 @@ COVERED_METHODS: frozenset[str] = frozenset(
         # is content-addressed and tenant-agnostic by design (the
         # ``workspace_id`` lands on the Evidence row, not on the blob).
         "app.domain.tasks.completion.add_file_evidence",
+        # cd-u6vr: checklist evidence follows the same task-scoped
+        # path as ad-hoc evidence, then filters the checklist item by
+        # ``workspace_id`` and parent task id before mutating it.
+        "app.domain.tasks.completion.attach_checklist_evidence",
         # time context
         "app.domain.time.shifts.open_shift",
         "app.domain.time.shifts.close_shift",
@@ -582,6 +587,7 @@ COVERED_METHODS: frozenset[str] = frozenset(
         # mutating rows.
         "app.domain.integrations.webhooks.create_subscription",
         "app.domain.integrations.webhooks.delete_subscription",
+        "app.domain.integrations.webhooks.enable_subscription",
         "app.domain.integrations.webhooks.list_subscriptions",
         "app.domain.integrations.webhooks.replay_delivery",
         "app.domain.integrations.webhooks.update_subscription",
@@ -655,6 +661,18 @@ COVERED_METHODS: frozenset[str] = frozenset(
         "app.domain.assets.documents.delete_document",
         "app.domain.assets.documents.list_documents",
         "app.domain.assets.documents.list_workspace_documents",
+        # cd-mo9e: extraction state transitions load
+        # ``file_extraction`` rows by ``workspace_id`` + document id;
+        # enqueue stamps ``ctx.workspace_id`` on the new row.
+        "app.domain.assets.extraction.enqueue_extraction",
+        "app.domain.assets.extraction.get_extraction",
+        "app.domain.assets.extraction.get_extraction_page",
+        "app.domain.assets.extraction.record_extraction_empty",
+        "app.domain.assets.extraction.record_extraction_failure",
+        "app.domain.assets.extraction.record_extraction_success",
+        "app.domain.assets.extraction.record_extraction_unsupported",
+        "app.domain.assets.extraction.retry_extraction",
+        "app.domain.assets.extraction.start_extraction",
         "app.domain.assets.types.create_type",
         "app.domain.assets.types.delete_type",
         "app.domain.assets.types.get_type",
