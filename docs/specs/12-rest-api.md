@@ -820,12 +820,24 @@ POST   /api/v1/me/tokens                         # create a PAT (plaintext shown
 DELETE /api/v1/me/tokens/{id}                    # revoke — flips `revoked_at`. Idempotent.
                                                  #   204 No Content on success.
                                                  #   404 {"error": "token_not_found"} for unknown / cross-subject ids.
-# TBD — not yet implemented (v1 ships only mint / list / revoke above):
-#   POST   /api/v1/me/tokens/{id}/revoke   # POST alias of DELETE — tracked under cd-a23fn.
-#   POST   /api/v1/me/tokens/{id}/rotate   # rotate the secret in place — tracked under cd-a23fn
-#                                          # using the same 1h previous-hash overlap as workspace tokens.
-#   GET    /api/v1/me/tokens/{id}/audit    # per-token timeline — tracked under cd-a23fn
-#                                          # (lifecycle events; cd-ocdg7 adds per-request rows).
+POST   /api/v1/me/tokens/{id}/revoke             # POST alias of DELETE. Same idempotent
+                                                 # contract and same 404 for unknown / cross-subject ids.
+POST   /api/v1/me/tokens/{id}/rotate             # rotate the secret in place, leaving key_id,
+                                                 # label, scopes, and expires_at untouched. Returns the
+                                                 # new plaintext exactly once, same shape as POST /me/tokens.
+                                                 # The old secret remains valid for the 1h previous-hash
+                                                 # overlap window used by workspace tokens.
+                                                 #   200 OK with the mint-shape response.
+                                                 #   404 {"error": "token_not_found"} for unknown /
+                                                 #     cross-subject / workspace / revoked / expired ids.
+GET    /api/v1/me/tokens/{id}/audit              # caller-owned PAT timeline, newest first.
+                                                 # Interleaves `api_token.minted` / `rotated` /
+                                                 # `revoked` lifecycle rows with per-request rows from
+                                                 # `api_token_request_log`.
+                                                 #   200 OK with `[{at, action, actor_id,
+                                                 #     correlation_id, method?, path?, status?,
+                                                 #     ip_prefix?, user_agent?}, ...]`.
+                                                 #   Unknown, non-PAT, or cross-subject ids return [].
 
 # Device push tokens for the future native app (§02 `user_push_token`,
 # §10 "Agent-message delivery", §14 "Native wrapper readiness"). Identity-

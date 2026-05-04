@@ -142,14 +142,14 @@ describe("PersonalTokensPanel", () => {
     }
   });
 
-  it("revokes a PAT via DELETE /api/v1/me/tokens/{id}", async () => {
+  it("revokes a PAT via POST /api/v1/me/tokens/{id}/revoke", async () => {
     const env = installFetchRoutes(
       {
         "/api/v1/me/tokens": [
           { body: [token()] },
           { body: [{ ...(token() as object), revoked_at: "2026-04-15T08:00:00Z" }] },
         ],
-        "/api/v1/me/tokens/tok_01": [{ status: 204, body: null }],
+        "/api/v1/me/tokens/tok_01/revoke": [{ status: 204, body: null }],
       },
       { match: "endsWith" },
     );
@@ -160,13 +160,13 @@ describe("PersonalTokensPanel", () => {
       fireEvent.click(screen.getByRole("button", { name: /Revoke/ }));
 
       await waitFor(() => {
-        const del = env.calls.find(
+        const revoke = env.calls.find(
           (c) =>
-            c.url.endsWith("/api/v1/me/tokens/tok_01") &&
-            c.init.method === "DELETE",
+            c.url.endsWith("/api/v1/me/tokens/tok_01/revoke") &&
+            c.init.method === "POST",
         );
-        expect(del).toBeDefined();
-        expect(del?.url).not.toContain("/w/dev/");
+        expect(revoke).toBeDefined();
+        expect(revoke?.url).not.toContain("/w/dev/");
       });
     } finally {
       env.restore();

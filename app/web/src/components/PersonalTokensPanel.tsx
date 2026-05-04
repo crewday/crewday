@@ -45,11 +45,8 @@ export default function PersonalTokensPanel() {
   });
 
   const revokeM = useMutation({
-    // §03 ``/me/tokens`` ships only the canonical DELETE verb today;
-    // the POST /revoke alias + rotate + audit timeline that mirror the
-    // workspace surface are tracked under cd-a23fn.
     mutationFn: (id: string) =>
-      fetchJson<void>(`/api/v1/me/tokens/${id}`, { method: "DELETE" }),
+      fetchJson<void>(`/api/v1/me/tokens/${id}/revoke`, { method: "POST" }),
     onSuccess: () => qc.invalidateQueries({ queryKey: qk.meApiTokens() }),
   });
 

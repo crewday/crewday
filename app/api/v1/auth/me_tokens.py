@@ -1,4 +1,4 @@
-"""Personal-access-token HTTP router — mint / list / revoke.
+"""Personal-access-token HTTP router — mint / list / revoke / rotate / audit.
 
 Mounted at bare host ``/api/v1/me/tokens`` (tenant-agnostic — PATs
 live outside any workspace, §03 "Personal access tokens"). Every
@@ -21,34 +21,43 @@ Routes:
   projections. Returns every PAT owned by the session user
   (active + revoked), matching the workspace /tokens page's
   revocation history convention.
-* ``DELETE /me/tokens/{token_id}`` → 204. Revokes the row iff it
+* ``DELETE /me/tokens/{token_id}`` and
+  ``POST /me/tokens/{token_id}/revoke`` → 204. Revoke the row iff it
   belongs to the session user AND is a PAT; unknown / foreign /
   workspace-token ids all collapse to 404 ``token_not_found`` per
   §03 ("we don't leak whose tokens exist").
+* ``POST /me/tokens/{token_id}/rotate`` →
+  ``200 {token, key_id, prefix, expires_at, kind='personal'}``.
+  Rotates the secret in place and keeps the old hash valid for the
+  one-hour overlap used by workspace tokens.
+* ``GET /me/tokens/{token_id}/audit`` → list of
+  :class:`TokenAuditEntryResponse` rows for caller-owned PATs only.
+  Unknown / foreign ids return an empty list.
 
 Error shapes:
 
 * 401 ``session_required`` — no session cookie.
 * 401 ``session_invalid`` — cookie is unknown, expired, or fingerprint
   gate fired.
-* 404 ``token_not_found`` — revoke targets an id that isn't a live
-  PAT for the caller.
+* 404 ``token_not_found`` — revoke / rotate targets an id that isn't
+  a live PAT for the caller.
 * 422 ``too_many_personal_tokens`` — 6th PAT attempted for the user.
 * 422 ``scopes_required`` — body carried no scopes.
 * 422 ``me_scope_conflict`` — body carried a scope outside ``me:*``.
 
-**Audit rows**: every state-changing call writes an
-``identity.token.minted`` / ``identity.token.revoked`` row through the
-shared :func:`app.auth.audit.agnostic_audit_ctx` sentinel — same
-zero-ULID workspace + ``actor_kind="system"`` shape every other
-bare-host identity surface uses. The acting user's id rides in the
-``diff`` payload alongside the cd-6vq5 ``before_hash`` /
-``after_hash`` slots (token's ``key_id`` carried in whichever slot
-represents the live state). This row coexists with the
-``api_token.minted`` / ``api_token.revoked`` row that
-:mod:`app.auth.tokens` writes on the workspace-side audit seam: the
-``api_token.*`` action tracks the token entity's lifecycle, the
-``identity.token.*`` action tracks the bare-host identity event.
+**Audit rows**: mint / revoke / rotate write ``identity.token.*`` rows
+through the shared
+:func:`app.auth.audit.agnostic_audit_ctx` sentinel — same zero-ULID
+workspace + ``actor_kind="system"`` shape every other bare-host
+identity surface uses. The acting user's id rides in the ``diff``
+payload alongside the cd-6vq5 ``before_hash`` / ``after_hash`` slots
+(token's ``key_id`` carried in whichever slot represents the live
+state, or both slots for in-place rotation). These rows coexist with
+the ``api_token.minted`` / ``api_token.revoked`` /
+``api_token.rotated`` rows that
+:mod:`app.auth.tokens` writes on the PAT audit seam: the
+``api_token.*`` actions track the token entity's lifecycle, the
+``identity.token.*`` actions track the bare-host identity event.
 Revoke is state-gated — an already-revoked / unknown / foreign /
 wrong-kind id collapses to 404 *and* skips the identity row, matching
 the avatar router's "no audit on no-op" convention.
@@ -79,13 +88,16 @@ from app.auth.tokens import (
     PERSONAL_SCOPE_PREFIX,
     InvalidToken,
     MintedToken,
+    TokenAuditEntry,
     TokenKind,
     TokenShapeError,
     TokenSummary,
     TooManyPersonalTokens,
+    list_personal_audit,
     list_personal_tokens,
     mint,
     revoke_personal,
+    rotate_personal,
 )
 from app.tenancy import tenant_agnostic
 from app.util.clock import SystemClock
@@ -93,6 +105,7 @@ from app.util.clock import SystemClock
 __all__ = [
     "MintPersonalTokenBody",
     "MintPersonalTokenResponse",
+    "TokenAuditEntryResponse",
     "TokenSummaryResponse",
     "build_me_tokens_router",
 ]
@@ -160,6 +173,20 @@ class TokenSummaryResponse(BaseModel):
     kind: TokenKind
 
 
+class TokenAuditEntryResponse(BaseModel):
+    """Response element for ``GET /api/v1/me/tokens/{token_id}/audit``."""
+
+    at: datetime
+    action: str
+    actor_id: str
+    correlation_id: str
+    method: str | None = None
+    path: str | None = None
+    status: int | None = None
+    ip_prefix: str | None = None
+    user_agent: str | None = None
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -219,6 +246,63 @@ def _summary_to_response(summary: TokenSummary) -> TokenSummaryResponse:
         created_at=summary.created_at,
         kind=summary.kind,
     )
+
+
+def _audit_entry_to_response(entry: TokenAuditEntry) -> TokenAuditEntryResponse:
+    """Translate the domain audit projection to the wire shape."""
+    return TokenAuditEntryResponse(
+        at=entry.at,
+        action=entry.action,
+        actor_id=entry.actor_id,
+        correlation_id=entry.correlation_id,
+        method=entry.method,
+        path=entry.path,
+        status=entry.status,
+        ip_prefix=entry.ip_prefix,
+        user_agent=entry.user_agent,
+    )
+
+
+def _revoke_personal_for_user(
+    session: Session,
+    *,
+    token_id: str,
+    user_id: str,
+) -> Response:
+    """Revoke ``token_id`` for ``user_id`` and write the identity audit row."""
+    with tenant_agnostic():
+        prior_row = session.get(ApiToken, token_id)
+    already_revoked = (
+        prior_row is None
+        or prior_row.kind != "personal"
+        or prior_row.subject_user_id != user_id
+        or prior_row.revoked_at is not None
+    )
+
+    try:
+        revoke_personal(session, token_id=token_id, subject_user_id=user_id)
+    except InvalidToken as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"error": "token_not_found"},
+        ) from exc
+
+    if not already_revoked:
+        write_audit(
+            session,
+            agnostic_audit_ctx(),
+            entity_kind="api_token",
+            entity_id=token_id,
+            action="identity.token.revoked",
+            diff={
+                "user_id": user_id,
+                "before_hash": token_id,
+                "after_hash": None,
+                "kind": "personal",
+            },
+        )
+
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 # ---------------------------------------------------------------------------
@@ -456,52 +540,144 @@ def build_me_tokens_router() -> APIRouter:
             cookie_primary=session_cookie_primary,
             cookie_dev=session_cookie_dev,
         )
+        return _revoke_personal_for_user(session, token_id=token_id, user_id=user_id)
 
-        # Probe for the row's prior revoked_at so the identity-surface
-        # audit row is state-gated — an already-revoked PAT carries no
-        # information ("a buggy client clicked twice"), and the avatar
-        # router uses the same gate for ``identity.avatar.cleared``.
-        # ``api_token`` is identity-scoped; the ORM tenant filter has
-        # nothing to apply.
-        with tenant_agnostic():
-            prior_row = session.get(ApiToken, token_id)
-        already_revoked = (
-            prior_row is None
-            or prior_row.kind != "personal"
-            or prior_row.subject_user_id != user_id
-            or prior_row.revoked_at is not None
+    @router.post(
+        "/{token_id}/revoke",
+        status_code=status.HTTP_204_NO_CONTENT,
+        operation_id="auth.me.tokens.revoke_post",
+        summary="Revoke a personal access token via POST — alias of DELETE",
+        openapi_extra={
+            "x-cli": {
+                "group": "me-tokens",
+                "verb": "revoke",
+                "summary": "Revoke one of your personal access tokens (POST alias)",
+                "mutates": True,
+            },
+        },
+    )
+    def post_revoke_me_token(
+        token_id: str,
+        session: _Db,
+        session_cookie_primary: Annotated[
+            str | None,
+            Cookie(alias=auth_session.SESSION_COOKIE_NAME),
+        ] = None,
+        session_cookie_dev: Annotated[
+            str | None,
+            Cookie(alias=DEV_SESSION_COOKIE_NAME),
+        ] = None,
+    ) -> Response:
+        """POST alias for :func:`delete_me_token`."""
+        user_id = _resolve_session_user(
+            session,
+            cookie_primary=session_cookie_primary,
+            cookie_dev=session_cookie_dev,
         )
+        return _revoke_personal_for_user(session, token_id=token_id, user_id=user_id)
 
+    @router.post(
+        "/{token_id}/rotate",
+        response_model=MintPersonalTokenResponse,
+        operation_id="auth.me.tokens.rotate",
+        summary="Rotate a personal access token's secret in place",
+        openapi_extra={
+            "x-cli": {
+                "group": "me-tokens",
+                "verb": "rotate",
+                "summary": "Rotate one of your personal access tokens",
+                "mutates": True,
+            },
+        },
+    )
+    def post_rotate_me_token(
+        token_id: str,
+        session: _Db,
+        session_cookie_primary: Annotated[
+            str | None,
+            Cookie(alias=auth_session.SESSION_COOKIE_NAME),
+        ] = None,
+        session_cookie_dev: Annotated[
+            str | None,
+            Cookie(alias=DEV_SESSION_COOKIE_NAME),
+        ] = None,
+    ) -> MintPersonalTokenResponse:
+        """Rotate a PAT owned by the session user and return new plaintext."""
+        user_id = _resolve_session_user(
+            session,
+            cookie_primary=session_cookie_primary,
+            cookie_dev=session_cookie_dev,
+        )
         try:
-            revoke_personal(session, token_id=token_id, subject_user_id=user_id)
+            result = rotate_personal(
+                session,
+                token_id=token_id,
+                subject_user_id=user_id,
+            )
         except InvalidToken as exc:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail={"error": "token_not_found"},
             ) from exc
+        write_audit(
+            session,
+            agnostic_audit_ctx(),
+            entity_kind="api_token",
+            entity_id=token_id,
+            action="identity.token.rotated",
+            diff={
+                "user_id": user_id,
+                "before_hash": token_id,
+                "after_hash": token_id,
+                "prefix": result.prefix,
+                "kind": result.kind,
+            },
+        )
+        return MintPersonalTokenResponse(
+            token=result.token,
+            key_id=result.key_id,
+            prefix=result.prefix,
+            expires_at=result.expires_at,
+            kind=result.kind,
+        )
 
-        # Identity-surface audit row. Mirrors the mint side: the
-        # ``api_token.revoked`` row written by ``revoke_personal``
-        # tracks the entity lifecycle; this row tracks the
-        # bare-host identity event with the acting user in the
-        # diff. Skipped when the revoke was an idempotent no-op
-        # (already-revoked / unknown / foreign / wrong-kind), per
-        # the avatar router's state-gate convention.
-        if not already_revoked:
-            write_audit(
-                session,
-                agnostic_audit_ctx(),
-                entity_kind="api_token",
-                entity_id=token_id,
-                action="identity.token.revoked",
-                diff={
-                    "user_id": user_id,
-                    "before_hash": token_id,
-                    "after_hash": None,
-                    "kind": "personal",
-                },
-            )
-
-        return Response(status_code=status.HTTP_204_NO_CONTENT)
+    @router.get(
+        "/{token_id}/audit",
+        response_model=list[TokenAuditEntryResponse],
+        operation_id="auth.me.tokens.audit",
+        summary="Per-personal-token audit timeline — newest first",
+        openapi_extra={
+            "x-cli": {
+                "group": "me-tokens",
+                "verb": "audit",
+                "summary": "Show one of your personal access token audit timelines",
+                "mutates": False,
+            },
+        },
+    )
+    def get_me_token_audit(
+        token_id: str,
+        session: _Db,
+        session_cookie_primary: Annotated[
+            str | None,
+            Cookie(alias=auth_session.SESSION_COOKIE_NAME),
+        ] = None,
+        session_cookie_dev: Annotated[
+            str | None,
+            Cookie(alias=DEV_SESSION_COOKIE_NAME),
+        ] = None,
+    ) -> list[TokenAuditEntryResponse]:
+        """Return lifecycle + per-request audit rows for a caller-owned PAT."""
+        user_id = _resolve_session_user(
+            session,
+            cookie_primary=session_cookie_primary,
+            cookie_dev=session_cookie_dev,
+        )
+        entries = list_personal_audit(
+            session,
+            token_id=token_id,
+            subject_user_id=user_id,
+        )
+        return [_audit_entry_to_response(entry) for entry in entries]
 
     return router

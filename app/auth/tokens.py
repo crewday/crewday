@@ -140,6 +140,7 @@ __all__ = [
     "TooManyWorkspaceTokens",
     "VerifiedToken",
     "list_audit",
+    "list_personal_audit",
     "list_personal_tokens",
     "list_tokens",
     "mint",
@@ -147,6 +148,7 @@ __all__ = [
     "revoke",
     "revoke_personal",
     "rotate",
+    "rotate_personal",
     "truncate_ip_prefix",
     "verify",
 ]
@@ -1238,6 +1240,82 @@ def list_personal_tokens(
     return [_project(row) for row in rows]
 
 
+def list_personal_audit(
+    session: Session,
+    *,
+    token_id: str,
+    subject_user_id: str,
+    limit: int = 200,
+) -> list[TokenAuditEntry]:
+    """Return a PAT audit timeline for ``subject_user_id`` only.
+
+    Mirrors :func:`list_audit` for identity-scoped PATs. Unknown,
+    non-personal, and cross-subject ids return an empty list so the
+    read never discloses whether another user's token exists.
+    """
+    with tenant_agnostic():
+        token_exists = session.scalar(
+            select(func.count())
+            .select_from(ApiToken)
+            .where(
+                ApiToken.id == token_id,
+                ApiToken.kind == "personal",
+                ApiToken.subject_user_id == subject_user_id,
+            )
+        )
+        if not token_exists:
+            return []
+        lifecycle_stmt = (
+            select(AuditLog)
+            .where(
+                AuditLog.entity_kind == "api_token",
+                AuditLog.entity_id == token_id,
+                AuditLog.workspace_id == _AGNOSTIC_WORKSPACE_ID,
+                AuditLog.actor_id == subject_user_id,
+            )
+            .order_by(AuditLog.created_at.desc())
+            .limit(limit)
+        )
+        lifecycle_rows = list(session.scalars(lifecycle_stmt).all())
+        request_stmt = (
+            select(ApiTokenRequestLog, ApiToken.subject_user_id)
+            .join(ApiToken, ApiToken.id == ApiTokenRequestLog.token_id)
+            .where(
+                ApiTokenRequestLog.token_id == token_id,
+                ApiToken.kind == "personal",
+                ApiToken.subject_user_id == subject_user_id,
+            )
+            .order_by(ApiTokenRequestLog.at.desc())
+            .limit(limit)
+        )
+        request_rows = list(session.execute(request_stmt).all())
+    entries = [
+        TokenAuditEntry(
+            at=row.created_at,
+            action=row.action,
+            actor_id=row.actor_id,
+            correlation_id=row.correlation_id,
+        )
+        for row in lifecycle_rows
+    ]
+    entries.extend(
+        TokenAuditEntry(
+            at=row.at,
+            action="api_token.request",
+            actor_id=actor_id or subject_user_id,
+            correlation_id=row.correlation_id,
+            method=row.method,
+            path=row.path,
+            status=row.status,
+            ip_prefix=row.ip_prefix,
+            user_agent=row.user_agent,
+        )
+        for row, actor_id in request_rows
+    )
+    entries.sort(key=lambda entry: entry.at, reverse=True)
+    return entries[:limit]
+
+
 # ---------------------------------------------------------------------------
 # Public surface — per-request audit writes
 # ---------------------------------------------------------------------------
@@ -1578,6 +1656,84 @@ def rotate(
         prefix=new_prefix,
         expires_at=expires_at_out,
         kind=kind,
+    )
+
+
+def rotate_personal(
+    session: Session,
+    *,
+    token_id: str,
+    subject_user_id: str,
+    now: datetime | None = None,
+    clock: Clock | None = None,
+) -> MintedToken:
+    """Rotate a PAT owned by ``subject_user_id``.
+
+    Unknown, workspace-scoped, cross-subject, revoked, and expired ids
+    collapse to :class:`InvalidToken` so the HTTP surface does not leak
+    another user's PAT existence. The old secret remains valid for the
+    same one-hour previous-hash overlap as workspace tokens.
+    """
+    resolved_now = now if now is not None else _now(clock)
+
+    with tenant_agnostic():
+        row = session.get(ApiToken, token_id)
+
+    if (
+        row is None
+        or row.kind != "personal"
+        or row.subject_user_id != subject_user_id
+        or row.revoked_at is not None
+    ):
+        raise InvalidToken(f"personal token {token_id!r} not found for this user")
+    if row.expires_at is not None:
+        expires_at = _normalise_expires_at(row.expires_at, resolved_now)
+        if expires_at <= resolved_now:
+            raise InvalidToken(f"personal token {token_id!r} not found for this user")
+
+    old_prefix = row.prefix
+    secret = _generate_secret()
+    new_prefix = secret[:_PREFIX_CHARS]
+
+    try:
+        new_hash = _HASHER.hash(secret)
+    except Argon2Error as exc:
+        raise TokenMintFailed(f"argon2id hash failed: {exc}") from exc
+
+    with tenant_agnostic():
+        row.previous_hash = row.hash
+        row.previous_hash_expires_at = resolved_now + _ROTATION_OVERLAP
+        row.hash = new_hash
+        row.prefix = new_prefix
+        row.last_used_at = None
+        session.flush()
+
+    write_audit(
+        session,
+        _pat_audit_ctx(subject_user_id=subject_user_id),
+        entity_kind="api_token",
+        entity_id=token_id,
+        action="api_token.rotated",
+        diff={
+            "token_id": token_id,
+            "subject_user_id": subject_user_id,
+            "old_prefix": old_prefix,
+            "new_prefix": new_prefix,
+            "at": resolved_now.isoformat(),
+            "kind": "personal",
+        },
+        clock=clock,
+    )
+
+    expires_at_out: datetime | None = None
+    if row.expires_at is not None:
+        expires_at_out = _normalise_expires_at(row.expires_at, resolved_now)
+    return MintedToken(
+        token=f"{_TOKEN_PREFIX}{row.id}_{secret}",
+        key_id=row.id,
+        prefix=new_prefix,
+        expires_at=expires_at_out,
+        kind="personal",
     )
 
 

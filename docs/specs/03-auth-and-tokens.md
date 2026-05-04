@@ -1189,9 +1189,10 @@ Canonical action catalogue:
 | `api_token.minted`                  | `app.auth.tokens.mint`           | Token row inserted (workspace + PAT)      |
 | `api_token.revoked`                 | `app.auth.tokens`                | Token row revoked (workspace + PAT)       |
 | `api_token.revoked_noop`            | `app.auth.tokens`                | Workspace token already revoked           |
-| `api_token.rotated`                 | `app.auth.tokens`                | Workspace token rotated                   |
+| `api_token.rotated`                 | `app.auth.tokens`                | Token row rotated (workspace + PAT)       |
 | `identity.token.minted`             | `app.api.v1.auth.me_tokens`      | PAT minted via `/me/tokens`               |
 | `identity.token.revoked`            | `app.api.v1.auth.me_tokens`      | PAT revoked via `/me/tokens`              |
+| `identity.token.rotated`            | `app.api.v1.auth.me_tokens`      | PAT rotated via `/me/tokens`              |
 | `identity.avatar.updated`           | `app.api.v1.auth.me_avatar`      | Avatar uploaded / replaced                |
 | `identity.avatar.cleared`           | `app.api.v1.auth.me_avatar`      | Avatar cleared (state-gated)              |
 | `email.change_requested`            | `app.domain.identity.email_change`| `/me/email/change_request` accepted      |
@@ -1204,13 +1205,13 @@ the row with the count, cause, and acting user in the diff. No
 separate `identity.session.cleared` action is needed; one row per
 logout call carries the N invalidated sessions in the diff.
 
-`/me/tokens` mint and revoke each write **two** audit rows: the
-existing `api_token.*` row from `app.auth.tokens` (entity-lifecycle
-view, real subject user as the actor) and the new `identity.token.*`
-row from this router (identity-surface view, system actor with the
-acting user in the diff). Both share the token's `key_id` as
-`entity_id` so investigators can join the two views without a JSON
-scan.
+`/me/tokens` mint, revoke, and rotate each write **two** audit rows:
+the existing `api_token.*` row from `app.auth.tokens`
+(entity-lifecycle view, real subject user as the actor) and the new
+`identity.token.*` row from this router (identity-surface view,
+system actor with the acting user in the diff). Both share the
+token's `key_id` as `entity_id` so investigators can join the two
+views without a JSON scan.
 
 `identity.avatar.cleared`, `identity.token.revoked`, and
 `identity.session.cleared` (if a future surface adds one) are

@@ -53,6 +53,7 @@ from app.auth.tokens import (
     TooManyTokens,
     TooManyWorkspaceTokens,
     list_audit,
+    list_personal_audit,
     list_personal_tokens,
     list_tokens,
     mint,
@@ -60,6 +61,7 @@ from app.auth.tokens import (
     revoke,
     revoke_personal,
     rotate,
+    rotate_personal,
     truncate_ip_prefix,
     verify,
 )
@@ -1831,6 +1833,191 @@ class TestListPersonal:
         summaries = list_tokens(db_session, ctx)
         key_ids = {s.key_id for s in summaries}
         assert key_ids == {scoped.key_id}
+
+
+class TestRotatePersonal:
+    """``rotate_personal`` is subject-scoped and keeps the overlap window."""
+
+    def test_rotates_own_pat_and_keeps_old_plaintext_temporarily(
+        self,
+        db_session: Session,
+        workspace: Workspace,
+        user: object,
+    ) -> None:
+        user_id = user.id  # type: ignore[attr-defined]
+        _seed_role_grant(db_session, workspace_id=workspace.id, user_id=user_id)
+        original = mint(
+            db_session,
+            None,
+            user_id=user_id,
+            label="pat-rotate",
+            scopes={"me.tasks:read": True},
+            expires_at=_PINNED + timedelta(days=90),
+            kind="personal",
+            subject_user_id=user_id,
+            now=_PINNED,
+        )
+
+        rotated = rotate_personal(
+            db_session,
+            token_id=original.key_id,
+            subject_user_id=user_id,
+            now=_PINNED + timedelta(minutes=5),
+        )
+
+        assert rotated.key_id == original.key_id
+        assert rotated.kind == "personal"
+        assert rotated.token != original.token
+        assert rotated.prefix != original.prefix
+        assert (
+            verify(
+                db_session, token=rotated.token, now=_PINNED + timedelta(minutes=6)
+            ).key_id
+            == original.key_id
+        )
+        assert (
+            verify(
+                db_session, token=original.token, now=_PINNED + timedelta(minutes=6)
+            ).key_id
+            == original.key_id
+        )
+
+    def test_refuses_another_users_pat(
+        self,
+        db_session: Session,
+        user: object,
+    ) -> None:
+        user_id = user.id  # type: ignore[attr-defined]
+        result = mint(
+            db_session,
+            None,
+            user_id=user_id,
+            label="a-pat",
+            scopes={"me.tasks:read": True},
+            expires_at=_PINNED + timedelta(days=90),
+            kind="personal",
+            subject_user_id=user_id,
+            now=_PINNED,
+        )
+        with pytest.raises(InvalidToken):
+            rotate_personal(
+                db_session,
+                token_id=result.key_id,
+                subject_user_id=new_ulid(),
+                now=_PINNED,
+            )
+
+    def test_refuses_workspace_token(
+        self,
+        db_session: Session,
+        ctx: WorkspaceContext,
+    ) -> None:
+        result = mint(
+            db_session,
+            ctx,
+            user_id=ctx.actor_id,
+            label="scoped",
+            scopes={},
+            expires_at=_PINNED + timedelta(days=90),
+            now=_PINNED,
+        )
+        with pytest.raises(InvalidToken):
+            rotate_personal(
+                db_session,
+                token_id=result.key_id,
+                subject_user_id=ctx.actor_id,
+                now=_PINNED,
+            )
+
+
+class TestListPersonalAudit:
+    """``list_personal_audit`` returns lifecycle and request rows for one PAT."""
+
+    def test_interleaves_personal_lifecycle_and_request_rows(
+        self,
+        db_session: Session,
+        user: object,
+    ) -> None:
+        user_id = user.id  # type: ignore[attr-defined]
+        original = mint(
+            db_session,
+            None,
+            user_id=user_id,
+            label="pat-audit",
+            scopes={"me.tasks:read": True},
+            expires_at=_PINNED + timedelta(days=90),
+            kind="personal",
+            subject_user_id=user_id,
+            now=_PINNED,
+        )
+        minted_audit = db_session.scalars(
+            select(AuditLog)
+            .where(AuditLog.action == "api_token.minted")
+            .where(AuditLog.entity_id == original.key_id)
+        ).one()
+        minted_audit.created_at = _PINNED
+        record_request_audit(
+            db_session,
+            token_id=original.key_id,
+            method="GET",
+            path="/api/v1/me/profile",
+            status=200,
+            ip_prefix=truncate_ip_prefix("203.0.113.42"),
+            user_agent="pat-client/1.0",
+            correlation_id="pat-req",
+            at=_PINNED + timedelta(minutes=10),
+        )
+        rotate_personal(
+            db_session,
+            token_id=original.key_id,
+            subject_user_id=user_id,
+            now=_PINNED + timedelta(minutes=20),
+        )
+
+        entries = list_personal_audit(
+            db_session,
+            token_id=original.key_id,
+            subject_user_id=user_id,
+        )
+
+        assert [e.action for e in entries[:3]] == [
+            "api_token.rotated",
+            "api_token.request",
+            "api_token.minted",
+        ]
+        request = entries[1]
+        assert request.actor_id == user_id
+        assert request.method == "GET"
+        assert request.path == "/api/v1/me/profile"
+        assert request.status == 200
+        assert request.ip_prefix == "203.0.113.0/24"
+        assert request.user_agent == "pat-client/1.0"
+
+    def test_other_subject_gets_empty_timeline(
+        self,
+        db_session: Session,
+        user: object,
+    ) -> None:
+        user_id = user.id  # type: ignore[attr-defined]
+        result = mint(
+            db_session,
+            None,
+            user_id=user_id,
+            label="foreign-pat",
+            scopes={"me.tasks:read": True},
+            expires_at=_PINNED + timedelta(days=90),
+            kind="personal",
+            subject_user_id=user_id,
+            now=_PINNED,
+        )
+        assert (
+            list_personal_audit(
+                db_session,
+                token_id=result.key_id,
+                subject_user_id=new_ulid(),
+            )
+            == []
+        )
 
 
 class TestRevokePersonal:
