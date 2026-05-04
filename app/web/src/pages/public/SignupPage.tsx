@@ -26,16 +26,6 @@
 // public-list-able through other channels), so we keep slug
 // errors inline.
 //
-// Captcha (Turnstile): there is no Turnstile widget in the SPA
-// today — `import.meta.env.VITE_TURNSTILE_SITE_KEY` is unset in
-// every shipped build. We skip widget rendering for v1 and let
-// the backend's `captcha_required` 422 fall through to the
-// inline error path. cd-q16s-followup tracks wiring the real
-// widget; until then deployments that flip `captcha_required` on
-// will see this path's "captcha required" copy. No hidden
-// `captcha_token` is sent — the backend rejects unset tokens
-// with the same 422.
-
 import {
   useCallback,
   useEffect,
@@ -80,10 +70,35 @@ type FormState =
   | { kind: "slug_error"; error: SlugError }
   | { kind: "error"; message: string };
 
+interface TurnstileApi {
+  render: (container: HTMLElement, options: TurnstileRenderOptions) => string;
+  reset: (widgetId?: string) => void;
+  remove?: (widgetId: string) => void;
+}
+
+interface TurnstileRenderOptions {
+  sitekey: string;
+  callback: (token: string) => void;
+  "expired-callback": () => void;
+  "error-callback": () => void;
+}
+
+declare global {
+  interface Window {
+    turnstile?: TurnstileApi;
+  }
+}
+
+const TURNSTILE_SCRIPT_ID = "crewday-turnstile-script";
+const TURNSTILE_SCRIPT_SRC = "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit";
+
 export default function SignupPage(): ReactElement {
   const [email, setEmail] = useState("");
   const [slug, setSlug] = useState("");
   const [form, setForm] = useState<FormState>({ kind: "idle" });
+  const [captchaToken, setCaptchaToken] = useState<string | null>(null);
+  const [captchaResetSignal, setCaptchaResetSignal] = useState(0);
+  const captchaSiteKey = turnstileSiteKey();
   // Concurrency guard. Same shape as RecoverPage / LoginPage —
   // `disabled={pending}` only kicks in after React commits, so a
   // synchronous burst (Enter held down, Playwright double-submit) can
@@ -110,7 +125,11 @@ export default function SignupPage(): ReactElement {
       inflightRef.current = false;
     },
     onError: (err) => {
-      setForm(stateForError(err));
+      if (captchaSiteKey && isCaptchaError(err)) {
+        setCaptchaToken(null);
+        setCaptchaResetSignal((value) => value + 1);
+      }
+      setForm(stateForError(err, Boolean(captchaSiteKey)));
       inflightRef.current = false;
     },
   });
@@ -124,10 +143,23 @@ export default function SignupPage(): ReactElement {
       const trimmedSlug = slug.trim().toLowerCase();
       if (!trimmedEmail || !trimmedSlug) return;
       inflightRef.current = true;
-      mutation.mutate({ email: trimmedEmail, desired_slug: trimmedSlug });
+      mutation.mutate({
+        email: trimmedEmail,
+        desired_slug: trimmedSlug,
+        ...(captchaToken ? { captcha_token: captchaToken } : {}),
+      });
     },
-    [email, slug, mutation],
+    [email, slug, captchaSiteKey, captchaToken, mutation],
   );
+
+  const onCaptchaToken = useCallback((token: string) => {
+    setCaptchaToken(token);
+    setForm((current) => (current.kind === "error" ? { kind: "idle" } : current));
+  }, []);
+
+  const onCaptchaStale = useCallback(() => {
+    setCaptchaToken(null);
+  }, []);
 
   const acceptSuggestion = useCallback(
     (suggestion: string) => {
@@ -211,6 +243,15 @@ export default function SignupPage(): ReactElement {
 
         {form.kind === "slug_error" && (
           <SlugErrorNotice error={form.error} onAccept={acceptSuggestion} />
+        )}
+
+        {captchaSiteKey && (
+          <TurnstileWidget
+            siteKey={captchaSiteKey}
+            resetSignal={captchaResetSignal}
+            onToken={onCaptchaToken}
+            onStale={onCaptchaStale}
+          />
         )}
 
         <button
@@ -333,6 +374,75 @@ function SlugErrorNotice({
   );
 }
 
+function TurnstileWidget({
+  siteKey,
+  resetSignal,
+  onToken,
+  onStale,
+}: {
+  siteKey: string;
+  resetSignal: number;
+  onToken: (token: string) => void;
+  onStale: () => void;
+}): ReactElement {
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const widgetIdRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const renderWidget = () => {
+      if (cancelled || widgetIdRef.current || !containerRef.current || !window.turnstile) {
+        return;
+      }
+      widgetIdRef.current = window.turnstile.render(containerRef.current, {
+        sitekey: siteKey,
+        callback: onToken,
+        "expired-callback": onStale,
+        "error-callback": onStale,
+      });
+    };
+
+    if (window.turnstile) {
+      renderWidget();
+    } else {
+      const script = ensureTurnstileScript();
+      script.addEventListener("load", renderWidget);
+      return () => {
+        cancelled = true;
+        script.removeEventListener("load", renderWidget);
+      };
+    }
+
+    return () => {
+      cancelled = true;
+    };
+  }, [siteKey, onToken, onStale]);
+
+  useEffect(() => {
+    if (resetSignal > 0 && widgetIdRef.current) {
+      window.turnstile?.reset(widgetIdRef.current);
+    }
+  }, [resetSignal]);
+
+  useEffect(
+    () => () => {
+      if (widgetIdRef.current) {
+        window.turnstile?.remove?.(widgetIdRef.current);
+      }
+    },
+    [],
+  );
+
+  return (
+    <div
+      className="signup-captcha"
+      ref={containerRef}
+      data-testid="signup-turnstile"
+    />
+  );
+}
+
 // ── Internals ─────────────────────────────────────────────────────
 
 function messageForSlugError(error: SlugError): string {
@@ -357,6 +467,23 @@ interface ErrorDetail {
   colliding_slug?: string;
 }
 
+function turnstileSiteKey(): string {
+  const key = import.meta.env.VITE_TURNSTILE_SITE_KEY;
+  return typeof key === "string" ? key.trim() : "";
+}
+
+function ensureTurnstileScript(): HTMLScriptElement {
+  const existing = document.getElementById(TURNSTILE_SCRIPT_ID);
+  if (existing instanceof HTMLScriptElement) return existing;
+  const script = document.createElement("script");
+  script.id = TURNSTILE_SCRIPT_ID;
+  script.src = TURNSTILE_SCRIPT_SRC;
+  script.async = true;
+  script.defer = true;
+  document.head.append(script);
+  return script;
+}
+
 function readDetail(err: ApiError): ErrorDetail | null {
   // Detail can ride either as the RFC 7807 body or under `body.detail`
   // (FastAPI wraps `HTTPException(detail={...})` that way). The signup
@@ -372,7 +499,13 @@ function readDetail(err: ApiError): ErrorDetail | null {
   return null;
 }
 
-function stateForError(err: unknown): FormState {
+function isCaptchaError(err: unknown): boolean {
+  if (!(err instanceof ApiError) || err.status !== 422) return false;
+  const detail = readDetail(err);
+  return detail?.error === "captcha_required" || detail?.error === "captcha_failed";
+}
+
+function stateForError(err: unknown, captchaEnabled = false): FormState {
   if (err instanceof ApiError) {
     if (err.status === 404) {
       // §03: disabled deployments 404 the entire `/signup/*` surface.
@@ -399,9 +532,10 @@ function stateForError(err: unknown): FormState {
       if (detail?.error === "captcha_required" || detail?.error === "captcha_failed") {
         return {
           kind: "error",
-          message:
-            "This deployment requires a CAPTCHA, which isn't yet available in the signup form. "
-            + "Ask your operator to disable the CAPTCHA gate or contact them for an invite.",
+          message: captchaEnabled
+            ? "The CAPTCHA check didn't complete. Try it again."
+            : "This deployment requires a CAPTCHA, which isn't available in this build. "
+              + "Ask your operator to configure the CAPTCHA widget or contact them for an invite.",
         };
       }
       if (detail?.error === "disposable_email") {

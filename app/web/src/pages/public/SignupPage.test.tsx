@@ -15,7 +15,8 @@
 //   3. Slug 409 (`slug_taken`) with one-click suggestion adoption.
 //   4. Slug 409 (`slug_reserved` / `slug_homoglyph_collision` /
 //      `slug_in_grace_period`) — distinct copy per kind.
-//   5. 422 captcha_required — the friendly CAPTCHA copy lands.
+//   5. Turnstile — env-gated widget renders, threads captcha_token,
+//      and resets after 422 captcha errors.
 //   6. 429 rate-limit — danger notice; form stays visible.
 //   7. 500 generic — fallback copy; form stays visible.
 //   8. Concurrency guard — synchronous double-submit coalesces.
@@ -92,8 +93,33 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   __resetApiProvidersForTests();
+  vi.unstubAllEnvs();
   vi.unstubAllGlobals();
 });
+
+interface CaptchaOptions {
+  sitekey: string;
+  callback: (token: string) => void;
+  "expired-callback": () => void;
+  "error-callback": () => void;
+}
+
+function installTurnstile(): {
+  render: ReturnType<typeof vi.fn>;
+  reset: ReturnType<typeof vi.fn>;
+  remove: ReturnType<typeof vi.fn>;
+  renders: CaptchaOptions[];
+} {
+  const renders: CaptchaOptions[] = [];
+  const render = vi.fn((_container: HTMLElement, options: CaptchaOptions) => {
+    renders.push(options);
+    return "turnstile-widget-1";
+  });
+  const reset = vi.fn();
+  const remove = vi.fn();
+  vi.stubGlobal("turnstile", { render, reset, remove });
+  return { render, reset, remove, renders };
+}
 
 // ── Tests ─────────────────────────────────────────────────────────
 
@@ -267,7 +293,7 @@ describe("<SignupPage> — slug 409 variants", () => {
 });
 
 describe("<SignupPage> — 422 captcha_required", () => {
-  it("surfaces the friendly CAPTCHA copy and keeps the form visible", async () => {
+  it("surfaces the friendly fallback copy when no widget site key is configured", async () => {
     const { restore } = installFetch({
       "/api/v1/signup/start": [
         { status: 422, body: { detail: { error: "captcha_required" } } },
@@ -293,6 +319,84 @@ describe("<SignupPage> — 422 captcha_required", () => {
       restore();
     }
   });
+});
+
+describe("<SignupPage> — Turnstile", () => {
+  it("renders the widget when configured and sends captcha_token", async () => {
+    vi.stubEnv("VITE_TURNSTILE_SITE_KEY", "site-key-123");
+    const turnstile = installTurnstile();
+    const { calls, restore } = installFetch({
+      "/api/v1/signup/start": [{ status: 202, body: { status: "accepted" } }],
+    });
+
+    try {
+      render(<Harness />);
+      expect(screen.getByTestId("signup-turnstile")).toBeInTheDocument();
+      expect(turnstile.render).toHaveBeenCalledTimes(1);
+      expect(turnstile.renders[0]!.sitekey).toBe("site-key-123");
+
+      await act(async () => {
+        turnstile.renders[0]!.callback("captcha-token-1");
+      });
+      const email = screen.getByTestId("signup-email") as HTMLInputElement;
+      fireEvent.change(email, { target: { value: "maria@example.com" } });
+      fireEvent.change(screen.getByTestId("signup-slug"), {
+        target: { value: "villa" },
+      });
+      await act(async () => {
+        fireEvent.submit(email.closest("form")!);
+        await new Promise((r) => setTimeout(r, 0));
+      });
+      await flush();
+
+      expect(calls).toHaveLength(1);
+      const sent = JSON.parse(calls[0]!.init.body as string) as Record<string, unknown>;
+      expect(sent).toEqual({
+        email: "maria@example.com",
+        desired_slug: "villa",
+        captcha_token: "captcha-token-1",
+      });
+    } finally {
+      restore();
+    }
+  });
+
+  it.each(["captcha_required", "captcha_failed"])(
+    "resets the widget and re-prompts after %s",
+    async (error) => {
+      vi.stubEnv("VITE_TURNSTILE_SITE_KEY", "site-key-123");
+      const turnstile = installTurnstile();
+      const { restore } = installFetch({
+        "/api/v1/signup/start": [
+          { status: 422, body: { detail: { error } } },
+        ],
+      });
+
+      try {
+        render(<Harness />);
+        await act(async () => {
+          turnstile.renders[0]!.callback("captcha-token-1");
+        });
+        const email = screen.getByTestId("signup-email") as HTMLInputElement;
+        fireEvent.change(email, { target: { value: "maria@example.com" } });
+        fireEvent.change(screen.getByTestId("signup-slug"), {
+          target: { value: "villa" },
+        });
+        await act(async () => {
+          fireEvent.submit(email.closest("form")!);
+          await new Promise((r) => setTimeout(r, 0));
+        });
+        await flush();
+
+        expect(turnstile.reset).toHaveBeenCalledWith("turnstile-widget-1");
+        const notice = screen.getByTestId("signup-error");
+        expect(notice.textContent).toMatch(/CAPTCHA check/i);
+        expect(screen.getByTestId("signup-turnstile")).toBeInTheDocument();
+      } finally {
+        restore();
+      }
+    },
+  );
 });
 
 describe("<SignupPage> — 429 rate-limit", () => {
