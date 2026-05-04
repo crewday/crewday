@@ -313,3 +313,70 @@ class TestUsageListRoute:
             assert len(ws_resp.json()["data"]) == 1
         finally:
             _wipe(session_factory)
+
+
+class TestUsageCapRoute:
+    def test_cap_update_accepts_schema_integer_and_rejects_fractional_number(
+        self,
+        client: TestClient,
+        session_factory: sessionmaker[Session],
+        pinned_settings: Settings,
+    ) -> None:
+        try:
+            user_id = _seed_admin(
+                session_factory,
+                email="cap-admin@example.com",
+                display_name="Cap Admin",
+            )
+            ws = _seed_workspace(session_factory, slug="usage-cap-prod")
+            cookie = _issue_session(
+                session_factory, user_id=user_id, settings=pinned_settings
+            )
+            client.cookies.set(SESSION_COOKIE_NAME, cookie)
+
+            ok_resp = client.put(
+                f"/admin/api/v1/usage/workspaces/{ws}/cap",
+                json={"cap_cents_30d": 750},
+            )
+            assert ok_resp.status_code == 200, ok_resp.text
+            assert ok_resp.json() == {"workspace_id": ws, "cap_cents_30d": 750}
+
+            integer_float_resp = client.put(
+                f"/admin/api/v1/usage/workspaces/{ws}/cap",
+                json={"cap_cents_30d": 751.0},
+            )
+            assert integer_float_resp.status_code == 200, integer_float_resp.text
+            assert integer_float_resp.json() == {
+                "workspace_id": ws,
+                "cap_cents_30d": 751,
+            }
+
+            fractional_resp = client.put(
+                f"/admin/api/v1/usage/workspaces/{ws}/cap",
+                json={"cap_cents_30d": 751.5},
+            )
+            assert fractional_resp.status_code == 422, fractional_resp.text
+            negative_resp = client.put(
+                f"/admin/api/v1/usage/workspaces/{ws}/cap",
+                json={"cap_cents_30d": -1},
+            )
+            assert negative_resp.status_code == 422, negative_resp.text
+            assert negative_resp.json().get("error") == "invalid_cap"
+
+            with session_factory() as s, tenant_agnostic():
+                workspace = s.get(Workspace, ws)
+                assert workspace is not None
+                assert workspace.quota_json == {"llm_budget_cents_30d": 751}
+        finally:
+            _wipe(session_factory)
+
+    def test_cap_update_openapi_declares_non_negative_integer(
+        self,
+        client: TestClient,
+    ) -> None:
+        schema_resp = client.get("/api/openapi.json")
+        assert schema_resp.status_code == 200
+        body_schema = schema_resp.json()["components"]["schemas"]["UsageCapPayload"]
+        cap_schema = body_schema["properties"]["cap_cents_30d"]
+        assert cap_schema["type"] == "integer"
+        assert cap_schema["minimum"] == 0

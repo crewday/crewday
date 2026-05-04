@@ -646,8 +646,9 @@ def build_admin_usage_router() -> APIRouter:
         """Stamp a new cap into ``workspace.quota_json``.
 
         Idempotent: writing the same cap returns the same
-        envelope. Negative values 422 ``invalid_cap`` (caught by
-        the pydantic validator on :class:`UsageCapPayload`).
+        envelope. Negative values 422 ``invalid_cap``; non-integral
+        values are rejected by :class:`UsageCapPayload` before the
+        handler mutates state.
 
         The route does **not** clear the
         :class:`BudgetLedger` row — the next post-flight write
