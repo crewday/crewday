@@ -62,6 +62,7 @@ from app.adapters.db.identity.models import (
     canonicalise_email,
 )
 from app.api.deps import db_session as db_session_dep
+from app.api.errors import add_exception_handlers
 from app.api.v1.auth import invite as invite_module
 from app.auth import magic_link, passkey
 from app.auth._throttle import Throttle
@@ -138,6 +139,7 @@ def client(
         invite_module.build_invite_router(throttle=throttle, settings=settings),
         prefix="/api/v1",
     )
+    add_exception_handlers(app)
 
     def _session() -> Iterator[Session]:
         s = session_factory()
@@ -520,7 +522,7 @@ class TestInvitePasskeyStateGuards:
             json={"invite_id": new_ulid()},
         )
         assert r.status_code == 404, r.text
-        assert r.json()["detail"]["error"] == "invite_not_found"
+        assert r.json()["error"] == "invite_not_found"
 
     def test_skipping_accept_returns_401(
         self,
@@ -556,7 +558,7 @@ class TestInvitePasskeyStateGuards:
             json={"invite_id": invite_id},
         )
         assert r.status_code == 401, r.text
-        assert r.json()["detail"]["error"] == "passkey_session_required"
+        assert r.json()["error"] == "passkey_session_required"
 
     def test_passkey_already_registered_returns_409(
         self,
@@ -588,7 +590,7 @@ class TestInvitePasskeyStateGuards:
             json={"invite_id": invite_id},
         )
         assert r.status_code == 409, r.text
-        assert r.json()["detail"]["error"] == "passkey_already_registered"
+        assert r.json()["error"] == "passkey_already_registered"
 
     def test_expired_invite_returns_410(
         self,
@@ -624,7 +626,7 @@ class TestInvitePasskeyStateGuards:
             json={"invite_id": invite_id},
         )
         assert r.status_code == 410, r.text
-        assert r.json()["detail"]["error"] == "expired"
+        assert r.json()["error"] == "expired"
 
     def test_finish_replay_after_success_rejects_with_409(
         self,
@@ -675,7 +677,7 @@ class TestInvitePasskeyStateGuards:
             },
         )
         assert replay.status_code == 409, replay.text
-        assert replay.json()["detail"]["error"] == "already_accepted"
+        assert replay.json()["error"] == "already_accepted"
 
 
 # ---------------------------------------------------------------------------
@@ -728,7 +730,7 @@ class TestInvitePasskeyChallengeHygiene:
             },
         )
         assert first.status_code == 400, first.text
-        assert first.json()["detail"]["error"] == "invalid_registration"
+        assert first.json()["error"] == "invalid_registration"
 
         # Replay with the same challenge — the row is gone, so the
         # retry collapses onto challenge_consumed_or_unknown rather
@@ -742,4 +744,4 @@ class TestInvitePasskeyChallengeHygiene:
             },
         )
         assert retry.status_code == 409, retry.text
-        assert retry.json()["detail"]["error"] == "challenge_consumed_or_unknown"
+        assert retry.json()["error"] == "challenge_consumed_or_unknown"

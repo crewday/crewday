@@ -59,17 +59,27 @@ import logging
 from datetime import datetime
 from typing import Annotated, Any, Final
 
-from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Cookie, Depends, Request
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.api.deps import db_session
 from app.api.v1._problem_json import IDENTITY_PROBLEM_RESPONSES
+from app.api.v1.auth.errors import (
+    auth_bad_request,
+    auth_conflict,
+    auth_gone,
+    auth_not_found,
+    auth_rate_limited,
+    auth_unauthorized,
+)
 from app.auth import passkey as passkey_service
 from app.auth import session as auth_session
 from app.auth._throttle import ConsumeLockout, RateLimited, Throttle
 from app.auth.magic_link_port import MagicLinkAdapter
 from app.config import Settings, get_settings
+from app.domain.errors import DomainError
+from app.domain.errors import Validation as DomainValidation
 from app.domain.identity import membership
 from app.tenancy import WorkspaceContext
 
@@ -268,77 +278,41 @@ _PasskeyDomainError = (
 )
 
 
-def _http_for_token(exc: Exception) -> HTTPException:
+def _http_for_token(exc: Exception) -> DomainError:
     """Map a magic-link domain error onto an HTTP response."""
     if isinstance(exc, membership.TokenExpired):
-        return HTTPException(
-            status_code=status.HTTP_410_GONE,
-            detail={"error": "expired"},
-        )
+        return auth_gone("expired")
     if isinstance(exc, membership.AlreadyConsumed):
-        return HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail={"error": "already_consumed"},
-        )
+        return auth_conflict("already_consumed")
     if isinstance(exc, membership.PurposeMismatch):
-        return HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail={"error": "purpose_mismatch"},
-        )
+        return auth_bad_request("purpose_mismatch")
     if isinstance(exc, ConsumeLockout):
-        return HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail={"error": "consume_locked_out"},
-        )
+        return auth_rate_limited("consume_locked_out")
     if isinstance(exc, RateLimited):
-        return HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail={"error": "rate_limited"},
-        )
+        return auth_rate_limited("rate_limited")
     # InvalidToken — default fallback.
-    return HTTPException(
-        status_code=status.HTTP_400_BAD_REQUEST,
-        detail={"error": "invalid_token"},
-    )
+    return auth_bad_request("invalid_token")
 
 
-def _http_for_invite(exc: Exception) -> HTTPException:
+def _http_for_invite(exc: Exception) -> DomainError:
     """Map a :mod:`membership` domain error onto an HTTP response."""
     if isinstance(exc, membership.InviteNotFound):
-        return HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={"error": "invite_not_found"},
-        )
+        return auth_not_found("invite_not_found")
     if isinstance(exc, membership.InviteExpired):
-        return HTTPException(
-            status_code=status.HTTP_410_GONE,
-            detail={"error": "expired"},
-        )
+        return auth_gone("expired")
     if isinstance(exc, membership.InviteAlreadyAccepted):
-        return HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail={"error": "already_accepted"},
-        )
+        return auth_conflict("already_accepted")
     if isinstance(exc, membership.InvitePasskeyAlreadyRegistered):
-        return HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail={"error": "passkey_already_registered"},
-        )
+        return auth_conflict("passkey_already_registered")
     if isinstance(exc, membership.InviteStateInvalid):
-        return HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail={"error": "invalid_state"},
-        )
+        return auth_conflict("invalid_state")
     # PasskeySessionRequired is handled inline on /accept so the SPA
     # can render the ``needs_sign_in`` hint; mapping it here is the
     # fallback for the /confirm route.
-    return HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail={"error": "passkey_session_required"},
-    )
+    return auth_unauthorized("passkey_session_required")
 
 
-def _http_for_invite_passkey(exc: Exception) -> HTTPException:
+def _http_for_invite_passkey(exc: Exception) -> DomainError:
     """Map a passkey-domain error onto an HTTP response for invite routes.
 
     Mirrors :func:`app.api.v1.auth.signup._http_for_complete`'s passkey
@@ -349,28 +323,16 @@ def _http_for_invite_passkey(exc: Exception) -> HTTPException:
         # ChallengeNotFound covers both a never-existed id and a
         # replayed finish (the row is deleted atomically with the
         # credential insert), so the two shapes share the 409 envelope.
-        return HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail={"error": "challenge_consumed_or_unknown"},
-        )
+        return auth_conflict("challenge_consumed_or_unknown")
     if isinstance(exc, passkey_service.ChallengeExpired):
-        return HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail={"error": "challenge_expired"},
-        )
+        return auth_bad_request("challenge_expired")
     if isinstance(
         exc,
         passkey_service.InvalidRegistration | passkey_service.ChallengeSubjectMismatch,
     ):
-        return HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail={"error": "invalid_registration"},
-        )
+        return auth_bad_request("invalid_registration")
     # TooManyPasskeys — concurrent enrolment race; map for completeness.
-    return HTTPException(
-        status_code=422,
-        detail={"error": "too_many_passkeys"},
-    )
+    return DomainValidation(extra={"error": "too_many_passkeys"})
 
 
 def _client_ip(request: Request) -> str:
@@ -474,10 +436,7 @@ def build_invite_router(
             # this point (the ``magic_link`` service burnt the
             # nonce on its consume step), so a second ``/accept``
             # with the same token would 409.
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail={"error": "passkey_session_required"},
-            ) from exc
+            raise auth_unauthorized("passkey_session_required") from exc
         except _TokenDomainError as exc:
             raise _http_for_token(exc) from exc
         except _InviteDomainError as exc:
@@ -524,10 +483,7 @@ def build_invite_router(
             accept_language=request.headers.get("accept-language", ""),
         )
         if active_user_id is None:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail={"error": "passkey_session_required"},
-            )
+            raise auth_unauthorized("passkey_session_required")
         # Build a ctx for the audit row — the acting user is the
         # invitee who just signed in. The workspace id is pinned by
         # the invite row; we fill ``workspace_slug`` after the
@@ -539,10 +495,7 @@ def build_invite_router(
         with tenant_agnostic():
             invite_row = session.get(Invite, invite_id)
         if invite_row is None:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail={"error": "invite_not_found"},
-            )
+            raise auth_not_found("invite_not_found")
         ctx = WorkspaceContext(
             workspace_id=invite_row.workspace_id,
             workspace_slug="",
@@ -689,7 +642,7 @@ def build_invite_router(
 _INVITES_NOT_FOUND_DETAIL: Final[dict[str, str]] = {"error": "invite_not_found"}
 
 
-def _http_for_invites_token(exc: Exception) -> HTTPException:
+def _http_for_invites_token(exc: Exception) -> DomainError:
     """Map magic-link errors onto 404 ``invite_not_found`` for the plural surface.
 
     On the plural ``/invites/{token}`` surface every token-validity
@@ -703,22 +656,13 @@ def _http_for_invites_token(exc: Exception) -> HTTPException:
     and the SPA needs to render a "try later" hint.
     """
     if isinstance(exc, ConsumeLockout):
-        return HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail={"error": "consume_locked_out"},
-        )
+        return auth_rate_limited("consume_locked_out")
     if isinstance(exc, RateLimited):
-        return HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail={"error": "rate_limited"},
-        )
-    return HTTPException(
-        status_code=status.HTTP_404_NOT_FOUND,
-        detail=dict(_INVITES_NOT_FOUND_DETAIL),
-    )
+        return auth_rate_limited("rate_limited")
+    return auth_not_found(_INVITES_NOT_FOUND_DETAIL["error"])
 
 
-def _http_for_invites_invite(exc: Exception) -> HTTPException:
+def _http_for_invites_invite(exc: Exception) -> DomainError:
     """Map :mod:`membership` errors onto 404 for the plural surface.
 
     Same existence-leak guard as :func:`_http_for_invites_token`:
@@ -732,14 +676,8 @@ def _http_for_invites_invite(exc: Exception) -> HTTPException:
     works against the plural endpoint too.
     """
     if isinstance(exc, membership.PasskeySessionRequired):
-        return HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail={"error": "passkey_session_required"},
-        )
-    return HTTPException(
-        status_code=status.HTTP_404_NOT_FOUND,
-        detail=dict(_INVITES_NOT_FOUND_DETAIL),
-    )
+        return auth_unauthorized("passkey_session_required")
+    return auth_not_found(_INVITES_NOT_FOUND_DETAIL["error"])
 
 
 def build_invites_router(
@@ -850,10 +788,7 @@ def build_invites_router(
         except membership.PasskeySessionRequired as exc:
             # Same shape as the legacy router — see post_accept on
             # build_invite_router for the rationale.
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail={"error": "passkey_session_required"},
-            ) from exc
+            raise auth_unauthorized("passkey_session_required") from exc
         except _TokenDomainError as exc:
             raise _http_for_invites_token(exc) from exc
         except _InviteDomainError as exc:
