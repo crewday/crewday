@@ -38,15 +38,17 @@ Postfix, or Resend via SMTP bridge.
 
 ### Template system
 
-Jinja2 templates under `app/domain/messaging/templates/`. Notification
-kinds (task assigned, daily digest, agent message, ...) live at the
-top level as `<kind>.<channel>.j2` files (channels: `subject`,
-`body_md`, `push`). Auth-flow templates (magic link, invite, recovery,
-passkey reset, email change) live under the `auth/` subdirectory as
-`auth/<name>.<channel>.j2` (channels: `subject`, `body_text` — auth
-emails are plain-text only in v1). MJML for HTML notification bodies
-is a future addition; v1 ships subject + Markdown body for
-notifications and subject + plain text for auth flows.
+Jinja2 notification templates live under
+`app/domain/messaging/templates/`. Notification kinds (task assigned,
+daily digest, agent message, ...) live at the top level as
+`<kind>.<channel>.j2` files (channels: `subject`, `body_md`, `push`).
+Auth-flow templates (magic link, invite, recovery, passkey reset,
+email change) live separately under `app/mail/templates/auth/` as
+`<name>.<channel>.j2` (channels: `subject`, `body_text` — auth
+emails are plain-text only in v1) so identity/auth flows do not depend
+on the messaging domain package. MJML for HTML notification bodies is
+a future addition; v1 ships subject + Markdown body for notifications
+and subject + plain text for auth flows.
 
 The notification rendering helper is
 `app.domain.messaging.notifications.Jinja2TemplateLoader` (autoescape
@@ -126,8 +128,8 @@ body, autoescape off) and dispatch directly through the configured
 the SSE event, and are never opt-outable — losing one of these would
 lock the user out.
 
-Templates live under `app/domain/messaging/templates/auth/` as
-`auth/<name>.<channel>.j2` files (channels: `subject`, `body_text`).
+Templates live under `app/mail/templates/auth/` as
+`<name>.<channel>.j2` files (channels: `subject`, `body_text`).
 The set today:
 
 | template name           | description                                                | recipient                       |

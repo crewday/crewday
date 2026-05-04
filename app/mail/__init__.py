@@ -8,8 +8,8 @@ and are rendered by
 
 Auth-flow templates (magic link, invite, recovery, passkey reset,
 email change) live under
-:mod:`app.domain.messaging.templates` ``auth/`` subdirectory and are
-rendered by :func:`app.mail.auth_templates.render_auth_email`.
+:mod:`app.mail.templates` ``auth/`` subdirectory and are rendered by
+:func:`app.mail.auth_templates.render_auth_email`.
 
 See ``docs/specs/10-messaging-notifications.md`` §"Email template
 system" and ``docs/specs/03-auth-and-tokens.md``.

@@ -8,7 +8,7 @@
 //      the SPA owns the verify step.
 //   2. `/auth/magic/:token` — generic magic-link URL the mailer
 //      defaults to. The signup mailer
-//      (`app/domain/messaging/templates/auth/magic_link.*.j2`) uses
+//      (`app/mail/templates/auth/magic_link.*.j2`) uses
 //      this shape today, so we accept it here and treat the path
 //      param as the token.
 //

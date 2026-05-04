@@ -286,7 +286,7 @@ def _extract_magic_url(body_text: str) -> str:
     """Return the first ``…/auth/magic/<token>`` URL in a plain-text body.
 
     The magic-link template
-    (``app/domain/messaging/templates/auth/magic_link.body_text.j2``)
+    (``app/mail/templates/auth/magic_link.body_text.j2``)
     drops the URL on its own line; we walk the body, strip whitespace,
     and pick the first line that *both* starts with ``http`` and
     contains ``/auth/magic/``. Belt-and-braces against a future

@@ -1,21 +1,19 @@
 """Auth-flow email rendering — Jinja2 file-resident templates.
 
-Auth templates live alongside the notification templates under
-:mod:`app.domain.messaging.templates` (subdirectory ``auth/``); this
-module is the thin rendering helper the auth and identity layers call.
+Auth templates live under :mod:`app.mail.templates` (subdirectory
+``auth/``); this module is the thin rendering helper the auth and
+identity layers call.
 
 On-disk convention (matches §10 "Email template system"):
 
-* ``app/domain/messaging/templates/auth/<name>.subject.j2`` — subject
-  line.
-* ``app/domain/messaging/templates/auth/<name>.body_text.j2`` —
+* ``app/mail/templates/auth/<name>.subject.j2`` — subject line.
+* ``app/mail/templates/auth/<name>.body_text.j2`` —
   plaintext body.
 
 Locale-aware variants (``<name>.<locale>.<channel>.j2``) are not in
-use today for auth flows but are supported by
-:class:`~app.domain.messaging.notifications.Jinja2TemplateLoader`; if
-a future revision ships localised auth copy, this renderer can grow the
-same fallback chain.
+use today for auth flows. If a future revision ships localised auth
+copy, this renderer can grow the same fallback chain as notification
+templates without importing the messaging domain.
 
 Autoescape is **disabled** here. The auth bodies are plain-text only
 (magic-link URLs, masked email addresses) and HTML escaping would
@@ -57,9 +55,7 @@ __all__ = [
 
 # Absolute path to the auth template subdirectory. Exposed so tests
 # can assert the on-disk layout without reimplementing the join.
-AUTH_TEMPLATE_ROOT: Path = (
-    Path(__file__).resolve().parents[1] / "domain/messaging/templates/auth"
-)
+AUTH_TEMPLATE_ROOT: Path = Path(__file__).resolve().parent / "templates/auth"
 
 
 class AuthTemplateNotFound(LookupError):

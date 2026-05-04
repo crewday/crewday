@@ -1230,7 +1230,7 @@ deliberately do **not** hash-self-seed:
 
 - **Email templates** (§10 "Template system") — filesystem-resident
   Jinja2 under `app/domain/messaging/templates/` (notifications) and
-  `app/domain/messaging/templates/auth/` (auth flows), compiled at
+  `app/mail/templates/auth/` (auth flows), compiled at
   build time. Operators change email copy by editing the template
   file, not through an admin UI. The locale-fallback resolver in §10
   is filesystem-based.

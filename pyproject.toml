@@ -52,8 +52,9 @@ dependencies = [
     "cryptography>=42",
     # Jinja2 for §10 email + push template rendering. The notification
     # service (cd-y1ge) loads ``<kind>.<channel>.j2`` files from
-    # :mod:`app.domain.messaging.templates`; every email and push
-    # payload is a rendered template. Pinning Jinja2 directly (not via
+    # :mod:`app.domain.messaging.templates`; auth direct-mail flows
+    # load sibling templates from :mod:`app.mail.templates`. Pinning
+    # Jinja2 directly (not via
     # a transitive dep) makes the dependency explicit and survives a
     # future dev-tool shake-up that might drop Flask / locust.
     "jinja2>=3.1",

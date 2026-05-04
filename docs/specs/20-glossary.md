@@ -603,7 +603,7 @@ fix the offender.
     above.
   - **Email template** (§10 "Template system"). Filesystem-resident
     Jinja2 under `app/domain/messaging/templates/` (notifications) and
-    `app/domain/messaging/templates/auth/` (auth flows). Edited in
+    `app/mail/templates/auth/` (auth flows). Edited in
     code, not hash-self-seeded.
   - **WhatsApp template** (§23 "Session window"). Meta-approved
     content registered at the provider. Source of truth lives at

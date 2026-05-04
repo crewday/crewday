@@ -123,7 +123,7 @@ export default function App() {
           <Route path="/signup/verify" element={<SignupVerifyPage />} />
           <Route path="/signup/enroll" element={<SignupEnrollPage />} />
           {/* Generic magic-link URL emitted by the default mailer
-              template (`app/domain/messaging/templates/auth/magic_link.*.j2`).
+              template (`app/mail/templates/auth/magic_link.*.j2`).
               The mailer
               uses this shape for ALL purposes that go through the
               shared template — signup_verify, email_change_confirm,

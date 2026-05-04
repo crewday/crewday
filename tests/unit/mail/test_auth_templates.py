@@ -21,6 +21,8 @@ def test_template_root_exists() -> None:
     """The on-disk template directory ships with the package."""
     assert AUTH_TEMPLATE_ROOT.exists()
     assert AUTH_TEMPLATE_ROOT.is_dir()
+    assert AUTH_TEMPLATE_ROOT.parts[-3:] == ("mail", "templates", "auth")
+    assert "messaging" not in AUTH_TEMPLATE_ROOT.parts
 
 
 def test_magic_link_renders_subject_and_body() -> None:
