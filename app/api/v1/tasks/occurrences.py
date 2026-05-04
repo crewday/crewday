@@ -27,7 +27,8 @@ from app.api.pagination import (
     decode_cursor,
     paginate,
 )
-from app.authz import ApprovalRequired
+from app.authz import ApprovalRequired, require
+from app.authz import PermissionDenied as AuthzPermissionDenied
 from app.authz.approval_mint import mint_and_envelope_for_http
 from app.domain.tasks.assignment import TaskNotFound as AssignTaskNotFound
 from app.domain.tasks.assignment import assign_task
@@ -89,6 +90,41 @@ _OccurrenceState = Literal[
     "cancelled",
     "overdue",
 ]
+
+
+def _require_task_action(
+    session: _Db,
+    ctx: _Ctx,
+    *,
+    task_id: str,
+    action_key: str,
+) -> None:
+    task_scope = session.execute(
+        select(Occurrence.property_id).where(
+            Occurrence.id == task_id,
+            Occurrence.workspace_id == ctx.workspace_id,
+        )
+    ).one_or_none()
+    if task_scope is None:
+        raise _task_not_found()
+
+    property_id = task_scope[0]
+    if property_id is None:
+        require(
+            session,
+            ctx,
+            action_key=action_key,
+            scope_kind="workspace",
+            scope_id=ctx.workspace_id,
+        )
+    else:
+        require(
+            session,
+            ctx,
+            action_key=action_key,
+            scope_kind="property",
+            scope_id=property_id,
+        )
 
 
 def list_tasks_route(
@@ -349,6 +385,7 @@ def assign_task_route(
     body: AssignRequest,
     ctx: _Ctx,
     session: _Db,
+    request: Request,
 ) -> AssignmentPayload:
     """Write ``assigned_user_id=body.assignee_user_id`` through the algorithm.
 
@@ -360,9 +397,19 @@ def assign_task_route(
     without a follow-up GET.
     """
     try:
+        _require_task_action(
+            session,
+            ctx,
+            task_id=task_id,
+            action_key="tasks.assign_other",
+        )
         result = assign_task(
             session, ctx, task_id, override_user_id=body.assignee_user_id
         )
+    except ApprovalRequired as exc:
+        raise mint_and_envelope_for_http(request, session, ctx, exc) from exc
+    except AuthzPermissionDenied as exc:
+        raise _http(status.HTTP_403_FORBIDDEN, "permission_denied") from exc
     except AssignTaskNotFound as exc:
         raise _task_not_found() from exc
     current_state = session.scalar(
@@ -484,10 +531,21 @@ def cancel_task_route(
     body: ReasonRequest,
     ctx: _Ctx,
     session: _Db,
+    request: Request,
 ) -> TaskStatePayload:
     """Delegate to :func:`app.domain.tasks.completion.cancel`."""
     try:
+        _require_task_action(
+            session,
+            ctx,
+            task_id=task_id,
+            action_key="tasks.skip_other",
+        )
         view = cancel_task(session, ctx, task_id, reason=body.reason_md)
+    except ApprovalRequired as exc:
+        raise mint_and_envelope_for_http(request, session, ctx, exc) from exc
+    except AuthzPermissionDenied as exc:
+        raise _http(status.HTTP_403_FORBIDDEN, "permission_denied") from exc
     except (
         CompletionTaskNotFound,
         InvalidStateTransition,

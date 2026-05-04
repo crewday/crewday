@@ -30,14 +30,15 @@ See ``docs/specs/12-rest-api.md`` §"Tasks / templates / schedules",
 from __future__ import annotations
 
 import hashlib
-from collections.abc import Iterator
+import re
+from collections.abc import Callable, Iterator
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from sqlalchemy import Engine, select
+from sqlalchemy import Engine, func, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.adapters.db.instructions.models import Instruction, InstructionVersion
@@ -69,6 +70,7 @@ pytestmark = pytest.mark.integration
 
 
 _PINNED = datetime(2026, 4, 19, 12, 0, 0, tzinfo=UTC)
+_ULID_RE = re.compile(r"^[0-9A-HJKMNP-TV-Z]{26}$")
 
 
 # ---------------------------------------------------------------------------
@@ -2551,8 +2553,10 @@ class TestApprovalRequired:
     """
 
     @pytest.fixture
-    def approval_gated_tasks_create(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Flip ``tasks.create`` to ``requires_approval=True`` for one test."""
+    def approval_gated_action(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> Callable[[str], None]:
+        """Flip one catalog action to ``requires_approval=True`` for a test."""
         from app.domain.identity._action_catalog import (
             ACTION_CATALOG as _CATALOG,
         )
@@ -2560,18 +2564,50 @@ class TestApprovalRequired:
             ActionSpec,
         )
 
-        original = _CATALOG["tasks.create"]
-        flagged = ActionSpec(
-            key=original.key,
-            valid_scope_kinds=original.valid_scope_kinds,
-            default_allow=original.default_allow,
-            root_only=original.root_only,
-            root_protected_deny=original.root_protected_deny,
-            requires_approval=True,
+        def _gate(action_key: str) -> None:
+            original = _CATALOG[action_key]
+            flagged = ActionSpec(
+                key=original.key,
+                valid_scope_kinds=original.valid_scope_kinds,
+                default_allow=original.default_allow,
+                root_only=original.root_only,
+                root_protected_deny=original.root_protected_deny,
+                requires_approval=True,
+            )
+            new_catalog = dict(_CATALOG)
+            new_catalog[original.key] = flagged
+            monkeypatch.setattr("app.authz.enforce.ACTION_CATALOG", new_catalog)
+
+        return _gate
+
+    @pytest.fixture
+    def approval_gated_tasks_create(
+        self, approval_gated_action: Callable[[str], None]
+    ) -> None:
+        approval_gated_action("tasks.create")
+
+    @staticmethod
+    def _approval_detail(resp: Any) -> dict[str, Any]:
+        assert resp.status_code == 409, resp.text
+        body = resp.json()["detail"]
+        assert body["error"] == "approval_required"
+        assert _ULID_RE.fullmatch(body["approval_request_id"])
+        assert "expires_at" in body
+        assert body["expires_at"] is None
+        return body
+
+    @staticmethod
+    def _workspace_approval_count(s: Session, workspace_id: str) -> int:
+        from app.adapters.db.llm.models import ApprovalRequest
+
+        return (
+            s.scalar(
+                select(func.count())
+                .select_from(ApprovalRequest)
+                .where(ApprovalRequest.workspace_id == workspace_id)
+            )
+            or 0
         )
-        new_catalog = dict(_CATALOG)
-        new_catalog[original.key] = flagged
-        monkeypatch.setattr("app.authz.enforce.ACTION_CATALOG", new_catalog)
 
     def test_post_tasks_returns_409_with_envelope_and_persists_row(
         self,
@@ -2591,18 +2627,15 @@ class TestApprovalRequired:
                     "property_id": seeded["property_id"],
                 },
             )
-        assert r.status_code == 409, r.text
-        body = r.json()["detail"]
-        assert body["error"] == "approval_required"
+        body = self._approval_detail(r)
         approval_id = body["approval_request_id"]
-        assert approval_id
-        assert body["expires_at"] is None
 
         # The route's UoW commits the mint — assert visible in a fresh
         # session and that no Occurrence was written.
         with session_factory() as s, tenant_agnostic():
             row = s.get(ApprovalRequest, approval_id)
             assert row is not None
+            assert self._workspace_approval_count(s, seeded["workspace_id"]) == 1
             assert row.status == "pending"
             assert row.workspace_id == seeded["workspace_id"]
             assert row.requester_actor_id == seeded["owner_id"]
@@ -2625,3 +2658,144 @@ class TestApprovalRequired:
                 ).scalars()
             )
             assert "Smoke task" not in titles
+
+    def test_assign_returns_409_with_envelope_and_persists_row(
+        self,
+        session_factory: sessionmaker[Session],
+        seeded: dict[str, Any],
+        approval_gated_action: Callable[[str], None],
+    ) -> None:
+        from app.adapters.db.audit.models import AuditLog
+        from app.adapters.db.llm.models import ApprovalRequest
+
+        approval_gated_action("tasks.assign_other")
+
+        with _client_for(session_factory, seeded["owner_ctx"]) as client:
+            r = client.post(
+                f"/api/v1/tasks/{seeded['task_id']}/assign",
+                json={"assignee_user_id": seeded["owner_id"]},
+            )
+        body = self._approval_detail(r)
+
+        with session_factory() as s, tenant_agnostic():
+            row = s.get(ApprovalRequest, body["approval_request_id"])
+            assert row is not None
+            assert self._workspace_approval_count(s, seeded["workspace_id"]) == 1
+            assert row.status == "pending"
+            assert row.workspace_id == seeded["workspace_id"]
+            assert row.requester_actor_id == seeded["owner_id"]
+            assert row.action_json["action_key"] == "tasks.assign_other"
+            assert row.action_json["scope_kind"] == "property"
+            assert row.action_json["scope_id"] == seeded["property_id"]
+            assert row.action_json["actor_id"] == seeded["owner_id"]
+            assert row.action_json["method"] == "POST"
+            assert row.action_json["path"] == (
+                f"/api/v1/tasks/{seeded['task_id']}/assign"
+            )
+            task_audit_count = s.scalar(
+                select(func.count())
+                .select_from(AuditLog)
+                .where(
+                    AuditLog.entity_id == seeded["task_id"],
+                    AuditLog.action == "task.assigned",
+                )
+            )
+            assert task_audit_count == 0
+            task = s.get(Occurrence, seeded["task_id"])
+            assert task is not None
+            assert task.assignee_user_id == seeded["worker_id"]
+
+    def test_cancel_returns_409_with_envelope_and_persists_row(
+        self,
+        session_factory: sessionmaker[Session],
+        seeded: dict[str, Any],
+        approval_gated_action: Callable[[str], None],
+    ) -> None:
+        from app.adapters.db.audit.models import AuditLog
+        from app.adapters.db.llm.models import ApprovalRequest
+
+        approval_gated_action("tasks.skip_other")
+
+        with _client_for(session_factory, seeded["owner_ctx"]) as client:
+            r = client.post(
+                f"/api/v1/tasks/{seeded['task_id']}/cancel",
+                json={"reason_md": "rained_out"},
+            )
+        body = self._approval_detail(r)
+
+        with session_factory() as s, tenant_agnostic():
+            row = s.get(ApprovalRequest, body["approval_request_id"])
+            assert row is not None
+            assert self._workspace_approval_count(s, seeded["workspace_id"]) == 1
+            assert row.status == "pending"
+            assert row.workspace_id == seeded["workspace_id"]
+            assert row.requester_actor_id == seeded["owner_id"]
+            assert row.action_json["action_key"] == "tasks.skip_other"
+            assert row.action_json["scope_kind"] == "property"
+            assert row.action_json["scope_id"] == seeded["property_id"]
+            assert row.action_json["actor_id"] == seeded["owner_id"]
+            assert row.action_json["method"] == "POST"
+            assert row.action_json["path"] == (
+                f"/api/v1/tasks/{seeded['task_id']}/cancel"
+            )
+            task_audit_count = s.scalar(
+                select(func.count())
+                .select_from(AuditLog)
+                .where(
+                    AuditLog.entity_id == seeded["task_id"],
+                    AuditLog.action == "task.cancel",
+                )
+            )
+            assert task_audit_count == 0
+            task = s.get(Occurrence, seeded["task_id"])
+            assert task is not None
+            assert task.state == "pending"
+            assert task.cancellation_reason is None
+
+    def test_assign_without_approval_preserves_authorized_success_path(
+        self,
+        session_factory: sessionmaker[Session],
+        seeded: dict[str, Any],
+    ) -> None:
+        with _client_for(session_factory, seeded["owner_ctx"]) as client:
+            r = client.post(
+                f"/api/v1/tasks/{seeded['task_id']}/assign",
+                json={"assignee_user_id": seeded["owner_id"]},
+            )
+
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["task_id"] == seeded["task_id"]
+        assert body["assigned_user_id"] == seeded["owner_id"]
+        assert body["assignment_source"] == "manual"
+        assert body["state"] == "pending"
+
+        with session_factory() as s, tenant_agnostic():
+            assert self._workspace_approval_count(s, seeded["workspace_id"]) == 0
+            task = s.get(Occurrence, seeded["task_id"])
+            assert task is not None
+            assert task.assignee_user_id == seeded["owner_id"]
+
+    def test_cancel_without_approval_preserves_authorized_success_path(
+        self,
+        session_factory: sessionmaker[Session],
+        seeded: dict[str, Any],
+    ) -> None:
+        with _client_for(session_factory, seeded["owner_ctx"]) as client:
+            r = client.post(
+                f"/api/v1/tasks/{seeded['task_id']}/cancel",
+                json={"reason_md": "rained_out"},
+            )
+
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["task_id"] == seeded["task_id"]
+        assert body["state"] == "cancelled"
+        assert body["reason"] == "rained_out"
+
+        with session_factory() as s, tenant_agnostic():
+            assert self._workspace_approval_count(s, seeded["workspace_id"]) == 0
+            task = s.get(Occurrence, seeded["task_id"])
+            assert task is not None
+            assert task.state == "cancelled"
+            assert task.cancellation_reason == "rained_out"
