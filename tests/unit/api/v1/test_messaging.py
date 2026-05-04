@@ -6,9 +6,23 @@ from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 from starlette.responses import JSONResponse
 
-from app.api.errors import _handle_domain_error
+from app.api.deps import current_workspace_context, db_session
+from app.api.errors import _handle_domain_error, add_exception_handlers
 from app.api.v1.messaging import build_messaging_router
 from app.domain.errors import DomainError
+from app.tenancy import WorkspaceContext
+
+
+def _ctx() -> WorkspaceContext:
+    return WorkspaceContext(
+        workspace_id="ws_test",
+        workspace_slug="test",
+        actor_id="user_test",
+        actor_kind="user",
+        actor_grant_role="manager",
+        actor_was_owner_member=True,
+        audit_correlation_id="corr_test",
+    )
 
 
 def test_messaging_router_declares_notifications_and_push_management_routes() -> None:
@@ -54,6 +68,23 @@ def test_messaging_router_documents_problem_json_validation_errors() -> None:
             }
         }
     }
+
+
+def test_notifications_list_rejects_duplicate_cursor_query_params() -> None:
+    app = FastAPI()
+    add_exception_handlers(app)
+    app.dependency_overrides[current_workspace_context] = _ctx
+    app.dependency_overrides[db_session] = object
+    app.include_router(build_messaging_router())
+    client = TestClient(app, raise_server_exceptions=False)
+
+    resp = client.get("/notifications?cursor=first&cursor=second")
+
+    assert resp.status_code == 422
+    assert resp.headers["content-type"].startswith("application/problem+json")
+    body = resp.json()
+    assert body["type"].endswith("/validation")
+    assert body["detail"] == "cursor may be provided at most once"
 
 
 def test_native_push_registration_requires_workspace_context() -> None:

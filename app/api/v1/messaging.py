@@ -43,7 +43,16 @@ from threading import Lock
 from typing import Annotated
 from urllib.parse import urlparse
 
-from fastapi import APIRouter, Depends, HTTPException, Path, Query, Response, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    HTTPException,
+    Path,
+    Query,
+    Request,
+    Response,
+    status,
+)
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -87,6 +96,17 @@ __all__ = [
 
 _Ctx = Annotated[WorkspaceContext, Depends(current_workspace_context)]
 _Db = Annotated[Session, Depends(db_session)]
+
+
+def _reject_duplicate_cursor_query(request: Request) -> None:
+    if len(request.query_params.getlist("cursor")) > 1:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail={
+                "error": "validation",
+                "message": "cursor may be provided at most once",
+            },
+        )
 
 
 class PushUnsubscribe(BaseModel):
@@ -431,12 +451,14 @@ def build_messaging_router(
         summary="List the caller's notifications",
     )
     def list_notifications(
+        request: Request,
         ctx: _Ctx,
         session: _Db,
         unread_only: bool = Query(default=False),
         cursor: str | None = Query(default=None),
         limit: int = Query(default=50, ge=1, le=100),
     ) -> NotificationListResponse:
+        _reject_duplicate_cursor_query(request)
         stmt = (
             select(Notification)
             .where(
