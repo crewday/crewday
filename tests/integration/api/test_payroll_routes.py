@@ -448,6 +448,65 @@ def test_payslip_reads_are_worker_scoped(
     assert [item["id"] for item in own_list.json()["data"]] == [worker_slip_id]
 
 
+def test_payslips_list_validates_pay_period_id_query(
+    session_factory: sessionmaker[Session],
+    seeded: SeededPayroll,
+) -> None:
+    with session_factory() as session, tenant_agnostic():
+        period = session.get(PayPeriod, seeded.worker_period_id)
+        assert period is not None
+        period.state = "locked"
+        worker_slip = _payslip(
+            workspace_id=seeded.workspace_id,
+            period_id=seeded.worker_period_id,
+            user_id=seeded.worker_id,
+        )
+        other_period = PayPeriod(
+            id=new_ulid(),
+            workspace_id=seeded.workspace_id,
+            starts_at=datetime(2026, 6, 1, tzinfo=UTC),
+            ends_at=datetime(2026, 7, 1, tzinfo=UTC),
+            state="locked",
+            locked_at=_NOW,
+            locked_by=seeded.manager_id,
+            created_at=_NOW,
+        )
+        other_slip = _payslip(
+            workspace_id=seeded.workspace_id,
+            period_id=other_period.id,
+            user_id=seeded.peer_id,
+            gross_cents=5000,
+        )
+        session.add_all([worker_slip, other_period, other_slip])
+        session.commit()
+        worker_slip_id = worker_slip.id
+        other_period_id = other_period.id
+        other_slip_id = other_slip.id
+
+    with _client_for(session_factory, seeded.manager_ctx) as client:
+        valid = client.get(
+            f"/api/v1/payroll/payslips?pay_period_id={seeded.worker_period_id}"
+        )
+        invalid = client.get("/api/v1/payroll/payslips?pay_period_id=not-a-ulid")
+        repeated = client.get(
+            "/api/v1/payroll/payslips"
+            f"?pay_period_id={seeded.worker_period_id}"
+            f"&pay_period_id={other_period_id}"
+        )
+        repeated_invalid = client.get(
+            "/api/v1/payroll/payslips"
+            "?pay_period_id=not-a-ulid"
+            "&pay_period_id=also-not-a-ulid"
+        )
+
+    assert valid.status_code == 200, valid.text
+    assert [item["id"] for item in valid.json()["data"]] == [worker_slip_id]
+    assert other_slip_id not in {item["id"] for item in valid.json()["data"]}
+    assert invalid.status_code in {400, 422}
+    assert repeated.status_code in {400, 422}
+    assert repeated_invalid.status_code in {400, 422}
+
+
 def test_payslip_state_routes_issue_pay_and_void(
     session_factory: sessionmaker[Session],
     seeded: SeededPayroll,

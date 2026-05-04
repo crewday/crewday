@@ -48,9 +48,10 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Path, Query, Response, status
+from fastapi import APIRouter, Depends, Path, Query, Request, Response, status
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, ConfigDict, Field, JsonValue
+from pydantic import BaseModel, ConfigDict, Field, JsonValue, StringConstraints
+from pydantic.json_schema import SkipJsonSchema
 from sqlalchemy.orm import Session
 
 from app.adapters.db.payroll.repositories import (
@@ -159,6 +160,7 @@ _Storage = Annotated[Storage, Depends(get_storage)]
 
 
 _MAX_ID_LEN = 64
+_ULID_PATTERN = r"^[0-9A-HJKMNP-TV-Z]{26}$"
 
 
 def _json_enum(values: Iterable[str]) -> list[JsonValue]:
@@ -657,6 +659,29 @@ _PayslipIdPath = Annotated[
         description="ULID of the target ``payslip`` row.",
     ),
 ]
+_PayPeriodIdQuery = Annotated[
+    Annotated[
+        str,
+        StringConstraints(
+            min_length=26,
+            max_length=26,
+            pattern=_ULID_PATTERN,
+        ),
+    ]
+    | SkipJsonSchema[None],
+    Query(description="Filter by pay period ULID."),
+]
+
+
+def _reject_duplicate_query_param(request: Request, name: str) -> None:
+    if len(request.query_params.getlist(name)) > 1:
+        raise Validation(
+            f"{name} may be provided at most once",
+            extra={
+                "error": "validation",
+                "message": f"{name} may be provided at most once",
+            },
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -1066,17 +1091,16 @@ def build_payroll_router() -> APIRouter:
         summary="List payslips visible to the caller",
     )
     def list_payslips_route(
+        request: Request,
         ctx: _Ctx,
         session: _Db,
         user_id: Annotated[
             str | None,
             Query(max_length=_MAX_ID_LEN, description="Filter by payslip user."),
         ] = None,
-        pay_period_id: Annotated[
-            str | None,
-            Query(max_length=_MAX_ID_LEN, description="Filter by pay period."),
-        ] = None,
+        pay_period_id: _PayPeriodIdQuery = None,
     ) -> PayslipListResponse:
+        _reject_duplicate_query_param(request, "pay_period_id")
         visible_user_id = user_id
         if (
             visible_user_id is None
