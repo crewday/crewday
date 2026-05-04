@@ -13,6 +13,7 @@
 #
 #     bash scripts/schemathesis_run.sh
 #     bash scripts/schemathesis_run.sh --max-examples 50
+#     SCHEMATHESIS_MAX_EXAMPLES=1 bash scripts/schemathesis_run.sh --include-tag stays
 #     SCHEMATHESIS_PORT=18234 bash scripts/schemathesis_run.sh
 #
 # Spec: ``docs/specs/17-testing-quality.md`` §"API contract".

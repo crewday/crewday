@@ -137,6 +137,13 @@ def _build_probe_router() -> APIRouter:
             },
         )
 
+    @r.get("/api/_probe/http/gone", include_in_schema=False)
+    def probe_gone() -> None:
+        raise HTTPException(
+            status_code=410,
+            detail={"error": "welcome_link_expired", "reason": "expired"},
+        )
+
     return r
 
 
@@ -319,6 +326,20 @@ class TestOtherTypeDetailFallsBackToStr:
         assert body["detail"] == "['first', 'second']"
 
 
+class TestGoneDetail:
+    """HTTP 410 maps to the canonical ``gone`` problem type."""
+
+    def test_gone_uses_canonical_type(self, composed_client: TestClient) -> None:
+        resp = composed_client.get("/api/_probe/http/gone")
+        assert resp.status_code == 410
+        body = resp.json()
+        assert body["type"] == _type_uri("gone")
+        assert body["title"] == "Gone"
+        assert body["status"] == 410
+        assert body["error"] == "welcome_link_expired"
+        assert body["reason"] == "expired"
+
+
 # ---------------------------------------------------------------------------
 # Cross-cutting: content-type + type URI invariant on every probe
 # ---------------------------------------------------------------------------
@@ -331,6 +352,7 @@ _PROBE_PATHS: tuple[str, ...] = (
     "/api/_probe/http/none_detail",
     "/api/_probe/http/list_detail",
     "/api/_probe/http/dict_detail_reserved_keys",
+    "/api/_probe/http/gone",
 )
 
 

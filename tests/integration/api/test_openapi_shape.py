@@ -181,6 +181,28 @@ class TestOpenapiIntegration:
         assert "application/problem+json" in response["content"]
         assert "application/json" not in response["content"]
 
+    def test_stays_welcome_gone_response_matches_runtime_envelope(
+        self, pinned_settings: Settings, real_make_uow: None
+    ) -> None:
+        """Public welcome-token 410s document the problem+json error seam."""
+        resp = _client(pinned_settings).get("/api/openapi.json")
+        schema = resp.json()
+        assert "WelcomeGoneResponse" not in schema["components"]["schemas"]
+        paths = schema["paths"]
+
+        for path in ("/api/v1/stays/welcome", "/api/v1/stays/welcome/{token}"):
+            response = paths[path]["get"]["responses"]["410"]
+            assert "application/problem+json" in response["content"]
+            assert "application/json" not in response["content"]
+            problem_schema = response["content"]["application/problem+json"]["schema"]
+            assert set(problem_schema["required"]) == {
+                "type",
+                "title",
+                "status",
+                "instance",
+            }
+            assert problem_schema["additionalProperties"] is True
+
     def test_admin_contract_generation_hints_are_tight(
         self, pinned_settings: Settings, real_make_uow: None
     ) -> None:

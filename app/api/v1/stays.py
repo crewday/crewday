@@ -52,7 +52,7 @@ from app.api.pagination import (
     decode_cursor,
     paginate,
 )
-from app.api.v1._problem_json import IDENTITY_PROBLEM_RESPONSES
+from app.api.v1._problem_json import IDENTITY_PROBLEM_RESPONSES, PROBLEM_JSON_CONTENT
 from app.authz.dep import Permission
 from app.config import Settings, get_settings
 from app.domain.stays.bundle_service import (
@@ -404,9 +404,10 @@ class WelcomeResponse(BaseModel):
     guest_name: str | None
 
 
-class WelcomeGoneResponse(BaseModel):
-    error: Literal["welcome_link_expired", "welcome_link_revoked"]
-    reason: Literal["expired", "revoked"]
+_WELCOME_GONE_RESPONSE: dict[str, object] = {
+    "description": "Welcome link expired or revoked",
+    "content": PROBLEM_JSON_CONTENT,
+}
 
 
 # ---------------------------------------------------------------------------
@@ -974,7 +975,7 @@ def build_stays_public_router() -> APIRouter:
     @api.get(
         "/welcome",
         response_model=WelcomeResponse,
-        responses={410: {"model": WelcomeGoneResponse}},
+        responses={410: _WELCOME_GONE_RESPONSE},
         operation_id="stays.welcome.read_bearer",
     )
     def read_welcome_bearer(
@@ -1000,7 +1001,7 @@ def build_stays_public_router() -> APIRouter:
     @api.get(
         "/welcome/{token}",
         response_model=WelcomeResponse,
-        responses={410: {"model": WelcomeGoneResponse}},
+        responses={410: _WELCOME_GONE_RESPONSE},
         operation_id="stays.welcome.read_path_token",
     )
     def read_welcome_path_token(
