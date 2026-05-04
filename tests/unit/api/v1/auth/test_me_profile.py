@@ -7,6 +7,7 @@ from collections.abc import Iterator
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from httpx import Response
 from pydantic import SecretStr
 from sqlalchemy import Engine
 from sqlalchemy.orm import Session, sessionmaker
@@ -18,6 +19,7 @@ from app.adapters.db.billing.models import Organization
 from app.adapters.db.identity.models import Session as SessionRow
 from app.adapters.db.session import make_engine
 from app.api.deps import db_session as db_session_dep
+from app.api.errors import CONTENT_TYPE_PROBLEM_JSON, add_exception_handlers
 from app.api.v1.auth import me as me_module
 from app.auth.session import SESSION_COOKIE_NAME, hash_cookie_value, issue
 from app.config import Settings
@@ -28,6 +30,10 @@ from tests.factories.identity import bootstrap_user, bootstrap_workspace
 
 _TEST_UA = "pytest-me-profile"
 _TEST_ACCEPT_LANGUAGE = "en"
+_PROBLEM_BY_STATUS: dict[int, tuple[str, str]] = {
+    401: ("unauthorized", "Unauthorized"),
+    404: ("not_found", "Not found"),
+}
 
 
 @pytest.fixture
@@ -69,6 +75,7 @@ def client(
         me_module.build_me_profile_router(operation_id="me.profile.scoped.get"),
         prefix="/w/{slug}/api/v1",
     )
+    add_exception_handlers(app)
 
     def _session() -> Iterator[Session]:
         s = session_factory()
@@ -119,7 +126,7 @@ def _issue_cookie(
     session_factory: sessionmaker[Session],
     *,
     user_id: str,
-    workspace_id: str,
+    workspace_id: str | None,
     settings: Settings,
 ) -> str:
     with session_factory() as s:
@@ -137,11 +144,69 @@ def _issue_cookie(
         return result.cookie_value
 
 
+def _assert_problem(
+    response: Response,
+    *,
+    status_code: int,
+    error: str,
+    path: str,
+) -> dict[str, object]:
+    assert response.status_code == status_code, response.text
+    assert response.headers["content-type"].startswith(CONTENT_TYPE_PROBLEM_JSON)
+    assert "retry-after" not in response.headers
+
+    type_name, title = _PROBLEM_BY_STATUS[status_code]
+    body = response.json()
+    assert body["type"] == f"https://crewday.dev/errors/{type_name}"
+    assert body["title"] == title
+    assert body["status"] == status_code
+    assert body["instance"] == path
+    assert body["error"] == error
+    assert "detail" not in body
+    return body
+
+
 def test_no_cookie_returns_401(client: TestClient) -> None:
     response = client.get("/api/v1/me")
 
-    assert response.status_code == 401, response.text
-    assert response.json()["detail"]["error"] == "session_required"
+    _assert_problem(
+        response,
+        status_code=401,
+        error="session_required",
+        path="/api/v1/me",
+    )
+
+
+def test_bare_me_without_workspace_membership_returns_404(
+    client: TestClient,
+    session_factory: sessionmaker[Session],
+    settings: Settings,
+) -> None:
+    with session_factory() as s:
+        user = bootstrap_user(
+            s,
+            email="workspace-required@example.test",
+            display_name="Workspace Required",
+            clock=SystemClock(),
+        )
+        user_id = user.id
+        s.commit()
+    cookie = _issue_cookie(
+        session_factory,
+        user_id=user_id,
+        workspace_id=None,
+        settings=settings,
+    )
+    client.cookies.set(SESSION_COOKIE_NAME, cookie)
+
+    response = client.get("/api/v1/me")
+
+    _assert_problem(
+        response,
+        status_code=404,
+        error="workspace_required",
+        path="/api/v1/me",
+    )
 
 
 def test_bare_me_returns_shell_profile(

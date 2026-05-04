@@ -70,10 +70,8 @@ from fastapi import (
     Cookie,
     Depends,
     File,
-    HTTPException,
     Request,
     UploadFile,
-    status,
 )
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -86,10 +84,12 @@ from app.api.uploads import (
     require_allowed_upload_content_type,
 )
 from app.api.v1._problem_json import IDENTITY_PROBLEM_RESPONSES
+from app.api.v1.auth.errors import auth_bad_request, auth_unauthorized
 from app.audit import write_audit
 from app.auth import session as auth_session
 from app.auth.audit import agnostic_audit_ctx as _identity_audit_ctx
 from app.auth.session_cookie import DEV_SESSION_COOKIE_NAME
+from app.domain.errors import DomainError, PayloadTooLarge, UnsupportedMediaType
 from app.tenancy import tenant_agnostic
 
 __all__ = [
@@ -166,7 +166,7 @@ def _resolve_session_user(
     cookie_primary: str | None,
     cookie_dev: str | None,
 ) -> User:
-    """Return the authenticated :class:`User` or raise ``HTTPException``.
+    """Return the authenticated :class:`User` or raise ``DomainError``.
 
     Same shape as :func:`app.api.v1.auth.me_tokens._resolve_session_user`
     but returns the hydrated :class:`User` row instead of just the id —
@@ -176,10 +176,7 @@ def _resolve_session_user(
     """
     cookie_value = cookie_primary or cookie_dev
     if not cookie_value:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail={"error": "session_required"},
-        )
+        raise auth_unauthorized("session_required")
     ua, accept_language = _client_headers(request)
     try:
         user_id = auth_session.validate(
@@ -195,15 +192,9 @@ def _resolve_session_user(
         # can route the operator to "have a deployment owner
         # reinstate this user" instead of the generic
         # ``session_invalid``.
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail={"error": auth_session.USER_ARCHIVED_WIRE_CODE},
-        ) from exc
+        raise auth_unauthorized(auth_session.USER_ARCHIVED_WIRE_CODE) from exc
     except (auth_session.SessionInvalid, auth_session.SessionExpired) as exc:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail={"error": "session_invalid"},
-        ) from exc
+        raise auth_unauthorized("session_invalid") from exc
 
     # ``user`` is identity-scoped — no workspace filter to apply.
     with tenant_agnostic():
@@ -212,10 +203,7 @@ def _resolve_session_user(
         # Row referenced by the session was hard-deleted between
         # validate and lookup. Collapse to 401 — same shape the SPA
         # already handles on a stale session.
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail={"error": "session_invalid"},
-        )
+        raise auth_unauthorized("session_invalid")
     return user
 
 
@@ -235,24 +223,18 @@ def _read_capped(upload: UploadFile) -> bytes:
     return read_upload_file_capped(
         upload,
         max_bytes=_MAX_BYTES,
-        too_large=lambda: HTTPException(
-            status_code=status.HTTP_413_CONTENT_TOO_LARGE,
-            detail={"error": "avatar_too_large"},
-        ),
+        too_large=lambda: PayloadTooLarge(extra={"error": "avatar_too_large"}),
         chunk_size=_READ_CHUNK,
     )
 
 
-def _avatar_content_type_rejected(content_type: str | None) -> HTTPException:
-    return HTTPException(
-        status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
-        detail={
-            "error": "avatar_content_type_rejected",
-            "message": (
-                f"content_type={content_type!r} is not one of "
-                f"{sorted(_ALLOWED_CONTENT_TYPES)}"
-            ),
-        },
+def _avatar_content_type_rejected(content_type: str | None) -> DomainError:
+    return UnsupportedMediaType(
+        (
+            f"content_type={content_type!r} is not one of "
+            f"{sorted(_ALLOWED_CONTENT_TYPES)}"
+        ),
+        extra={"error": "avatar_content_type_rejected"},
     )
 
 
@@ -284,10 +266,7 @@ def _check_content_length(request: Request) -> None:
         # "avatar too large" condition.
         return
     if size > _MAX_BYTES:
-        raise HTTPException(
-            status_code=status.HTTP_413_CONTENT_TOO_LARGE,
-            detail={"error": "avatar_too_large"},
-        )
+        raise PayloadTooLarge(extra={"error": "avatar_too_large"})
 
 
 _ContentLengthGuard = Annotated[None, Depends(_check_content_length)]
@@ -376,10 +355,7 @@ def build_me_avatar_router() -> APIRouter:
             # (not 422) because the body is structurally valid
             # multipart — the problem is the *semantic* emptiness of
             # the image field.
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail={"error": "avatar_empty"},
-            )
+            raise auth_bad_request("avatar_empty")
 
         digest = hashlib.sha256(payload).hexdigest()
         storage.put(

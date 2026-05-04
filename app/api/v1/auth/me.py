@@ -32,7 +32,7 @@ import logging
 from datetime import UTC, datetime
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Cookie, Depends, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import func as sa_func
 from sqlalchemy import select
@@ -49,6 +49,7 @@ from app.adapters.db.workspace.models import UserWorkspace, Workspace
 from app.api.admin._owners import is_deployment_owner
 from app.api.deps import db_session
 from app.api.v1._problem_json import IDENTITY_PROBLEM_RESPONSES
+from app.api.v1.auth.errors import auth_not_found, auth_unauthorized
 from app.auth import session as auth_session
 from app.authz.deployment_admin import is_deployment_admin
 from app.tenancy import tenant_agnostic
@@ -227,10 +228,7 @@ def _session_cookie_value(
 ) -> str:
     cookie_value = session_cookie_primary or session_cookie_dev
     if not cookie_value:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail={"error": "session_required"},
-        )
+        raise auth_unauthorized("session_required")
     return cookie_value
 
 
@@ -255,15 +253,9 @@ def _validated_session_user(
         # tokens"). Match the bearer-token side: typed wire code so
         # the SPA can route the operator to "have a deployment owner
         # reinstate this user", not the opaque ``session_invalid``.
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail={"error": auth_session.USER_ARCHIVED_WIRE_CODE},
-        ) from exc
+        raise auth_unauthorized(auth_session.USER_ARCHIVED_WIRE_CODE) from exc
     except (auth_session.SessionInvalid, auth_session.SessionExpired) as exc:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail={"error": "session_invalid"},
-        ) from exc
+        raise auth_unauthorized("session_invalid") from exc
 
     with tenant_agnostic():
         user = session.get(User, user_id)
@@ -272,10 +264,7 @@ def _validated_session_user(
             auth_session.hash_cookie_value(cookie_value),
         )
     if user is None or session_row is None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail={"error": "session_invalid"},
-        )
+        raise auth_unauthorized("session_invalid")
     return user, session_row
 
 
@@ -412,10 +401,7 @@ def _current_workspace_id(
     workspace_ids = _workspace_ids_for_user(session, user_id=user_id)
     if workspace_ids:
         return workspace_ids[0]
-    raise HTTPException(
-        status_code=status.HTTP_404_NOT_FOUND,
-        detail={"error": "workspace_required"},
-    )
+    raise auth_not_found("workspace_required")
 
 
 def _workspace_role(session: Session, *, user_id: str, workspace_id: str) -> str:
@@ -860,10 +846,7 @@ def build_me_workspaces_router() -> APIRouter:
         """
         cookie_value = session_cookie_primary or session_cookie_dev
         if not cookie_value:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail={"error": "session_required"},
-            )
+            raise auth_unauthorized("session_required")
         ua, accept_language = _client_headers(request)
         try:
             user_id = auth_session.validate(
@@ -876,23 +859,14 @@ def build_me_workspaces_router() -> APIRouter:
             # Archive gate (cd-uceg) — see :func:`_validated_session_user`
             # for the rationale; same wire shape on the switcher route
             # so the SPA branches uniformly.
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail={"error": auth_session.USER_ARCHIVED_WIRE_CODE},
-            ) from exc
+            raise auth_unauthorized(auth_session.USER_ARCHIVED_WIRE_CODE) from exc
         except (auth_session.SessionInvalid, auth_session.SessionExpired) as exc:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail={"error": "session_invalid"},
-            ) from exc
+            raise auth_unauthorized("session_invalid") from exc
 
         with tenant_agnostic():
             user = session.get(User, user_id)
         if user is None:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail={"error": "session_invalid"},
-            )
+            raise auth_unauthorized("session_invalid")
 
         return _load_switcher_entries(session, user_id=user.id)
 

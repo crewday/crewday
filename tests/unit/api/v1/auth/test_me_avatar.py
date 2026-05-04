@@ -41,6 +41,7 @@ from collections.abc import Iterator
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from httpx import Response
 from pydantic import SecretStr
 from sqlalchemy import Engine
 from sqlalchemy.orm import Session, sessionmaker
@@ -57,6 +58,7 @@ from app.adapters.db.identity.models import User
 from app.adapters.db.session import make_engine
 from app.api.deps import db_session as db_session_dep
 from app.api.deps import get_storage
+from app.api.errors import CONTENT_TYPE_PROBLEM_JSON, add_exception_handlers
 from app.api.v1.auth import me_avatar as me_avatar_module
 from app.auth.session import SESSION_COOKIE_NAME, issue
 from app.config import Settings
@@ -69,6 +71,12 @@ from tests._fakes.storage import InMemoryStorage
 # test's convention.
 _TEST_UA: str = "pytest-me-avatar"
 _TEST_ACCEPT_LANGUAGE: str = "en"
+_PROBLEM_BY_STATUS: dict[int, tuple[str, str]] = {
+    400: ("validation", "Bad request"),
+    401: ("unauthorized", "Unauthorized"),
+    413: ("payload_too_large", "Payload too large"),
+    415: ("unsupported_media_type", "Unsupported media type"),
+}
 
 
 # ---------------------------------------------------------------------------
@@ -165,6 +173,7 @@ def client(
         me_avatar_module.build_me_avatar_router(),
         prefix="/api/v1",
     )
+    add_exception_handlers(app)
 
     def _session() -> Iterator[Session]:
         s = session_factory()
@@ -210,6 +219,32 @@ def _issue_cookie(
         )
         s.commit()
         return result.cookie_value
+
+
+def _assert_problem(
+    response: Response,
+    *,
+    status_code: int,
+    error: str,
+    path: str,
+    detail: str | None = None,
+) -> dict[str, object]:
+    assert response.status_code == status_code, response.text
+    assert response.headers["content-type"].startswith(CONTENT_TYPE_PROBLEM_JSON)
+    assert "retry-after" not in response.headers
+
+    type_name, title = _PROBLEM_BY_STATUS[status_code]
+    body = response.json()
+    assert body["type"] == f"https://crewday.dev/errors/{type_name}"
+    assert body["title"] == title
+    assert body["status"] == status_code
+    assert body["instance"] == path
+    assert body["error"] == error
+    if detail is None:
+        assert "detail" not in body
+    else:
+        assert body["detail"] == detail
+    return body
 
 
 # Tiny but real image payloads. Kept inline rather than in
@@ -326,8 +361,16 @@ class TestPostAvatarRejections:
             "/api/v1/me/avatar",
             files={"image": ("avatar.gif", b"GIF89apixels", "image/gif")},
         )
-        assert r.status_code == 415, r.text
-        assert r.json()["detail"]["error"] == "avatar_content_type_rejected"
+        _assert_problem(
+            r,
+            status_code=415,
+            error="avatar_content_type_rejected",
+            path="/api/v1/me/avatar",
+            detail=(
+                "content_type='image/gif' is not one of "
+                f"{sorted(me_avatar_module._ALLOWED_CONTENT_TYPES)}"
+            ),
+        )
 
     def test_post_avatar_content_length_too_large_is_413(
         self,
@@ -353,8 +396,12 @@ class TestPostAvatarRejections:
                 "Content-Type": "image/png",
             },
         )
-        assert r.status_code == 413, r.text
-        assert r.json()["detail"]["error"] == "avatar_too_large"
+        _assert_problem(
+            r,
+            status_code=413,
+            error="avatar_too_large",
+            path="/api/v1/me/avatar",
+        )
 
     def test_post_avatar_streamed_body_too_large_is_413(
         self,
@@ -400,8 +447,12 @@ class TestPostAvatarRejections:
                 "Content-Length": "100",
             },
         )
-        assert r.status_code == 413, r.text
-        assert r.json()["detail"]["error"] == "avatar_too_large"
+        _assert_problem(
+            r,
+            status_code=413,
+            error="avatar_too_large",
+            path="/api/v1/me/avatar",
+        )
 
     def test_post_avatar_without_session_is_401(
         self,
@@ -413,8 +464,12 @@ class TestPostAvatarRejections:
             "/api/v1/me/avatar",
             files={"image": ("avatar.png", _MIN_PNG, "image/png")},
         )
-        assert r.status_code == 401, r.text
-        assert r.json()["detail"]["error"] == "session_required"
+        _assert_problem(
+            r,
+            status_code=401,
+            error="session_required",
+            path="/api/v1/me/avatar",
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -519,8 +574,12 @@ class TestDeleteAvatar:
     ) -> None:
         client.cookies.clear()
         r = client.delete("/api/v1/me/avatar")
-        assert r.status_code == 401, r.text
-        assert r.json()["detail"]["error"] == "session_required"
+        _assert_problem(
+            r,
+            status_code=401,
+            error="session_required",
+            path="/api/v1/me/avatar",
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -615,5 +674,9 @@ class TestEmptyPayload:
             "/api/v1/me/avatar",
             files={"image": ("empty.png", io.BytesIO(b""), "image/png")},
         )
-        assert r.status_code == 400, r.text
-        assert r.json()["detail"]["error"] == "avatar_empty"
+        _assert_problem(
+            r,
+            status_code=400,
+            error="avatar_empty",
+            path="/api/v1/me/avatar",
+        )

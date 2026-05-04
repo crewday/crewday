@@ -35,6 +35,7 @@ from collections.abc import Iterator
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from httpx import Response
 from pydantic import SecretStr
 from sqlalchemy import Engine, select
 from sqlalchemy.orm import Session, sessionmaker
@@ -48,6 +49,7 @@ from app.adapters.db.session import make_engine
 from app.adapters.db.workspace.models import UserWorkspace, Workspace
 from app.api.deps import db_session as db_session_dep
 from app.api.deps import get_storage
+from app.api.errors import CONTENT_TYPE_PROBLEM_JSON, add_exception_handlers
 from app.api.v1.auth import me_export as me_export_module
 from app.auth.session import SESSION_COOKIE_NAME, issue
 from app.config import Settings
@@ -62,6 +64,12 @@ from tests._fakes.storage import InMemoryStorage
 # integration test's convention.
 _TEST_UA: str = "pytest-me-export"
 _TEST_ACCEPT_LANGUAGE: str = "en"
+_PROBLEM_BY_STATUS: dict[int, tuple[str, str]] = {
+    401: ("unauthorized", "Unauthorized"),
+    404: ("not_found", "Not found"),
+    409: ("conflict", "Conflict"),
+    429: ("rate_limited", "Rate limited"),
+}
 
 
 def _load_all_models() -> None:
@@ -218,6 +226,7 @@ def client(
         ),
         prefix="/api/v1",
     )
+    add_exception_handlers(app)
 
     def _session() -> Iterator[Session]:
         s = session_factory()
@@ -263,6 +272,28 @@ def _issue_cookie(
         )
         s.commit()
         return result.cookie_value
+
+
+def _assert_problem(
+    response: Response,
+    *,
+    status_code: int,
+    error: str,
+    path: str,
+) -> dict[str, object]:
+    assert response.status_code == status_code, response.text
+    assert response.headers["content-type"].startswith(CONTENT_TYPE_PROBLEM_JSON)
+    assert "retry-after" not in response.headers
+
+    type_name, title = _PROBLEM_BY_STATUS[status_code]
+    body = response.json()
+    assert body["type"] == f"https://crewday.dev/errors/{type_name}"
+    assert body["title"] == title
+    assert body["status"] == status_code
+    assert body["instance"] == path
+    assert body["error"] == error
+    assert "detail" not in body
+    return body
 
 
 # ---------------------------------------------------------------------------
@@ -346,8 +377,47 @@ class TestPostExportAuth:
     def test_post_without_session_is_401(self, client: TestClient) -> None:
         client.cookies.clear()
         r = client.post("/api/v1/me/export")
-        assert r.status_code == 401, r.text
-        assert r.json()["detail"]["error"] == "session_required"
+        _assert_problem(
+            r,
+            status_code=401,
+            error="session_required",
+            path="/api/v1/me/export",
+        )
+
+    def test_post_without_workspace_membership_is_409(
+        self,
+        client: TestClient,
+        session_factory: sessionmaker[Session],
+        settings: Settings,
+        mailer: InMemoryMailer,
+    ) -> None:
+        now = SystemClock().now()
+        user_id = new_ulid()
+        with session_factory() as s, tenant_agnostic():
+            s.add(
+                User(
+                    id=user_id,
+                    email=f"unaffiliated-{user_id[-6:].lower()}@example.com",
+                    email_lower=f"unaffiliated-{user_id[-6:].lower()}@example.com",
+                    display_name="Unaffiliated User",
+                    created_at=now,
+                )
+            )
+            s.commit()
+        cookie_value = _issue_cookie(
+            session_factory, user_id=user_id, settings=settings
+        )
+        client.cookies.set(SESSION_COOKIE_NAME, cookie_value)
+
+        r = client.post("/api/v1/me/export")
+
+        _assert_problem(
+            r,
+            status_code=409,
+            error="no_workspace_membership",
+            path="/api/v1/me/export",
+        )
+        assert mailer.sent == []
 
 
 # ---------------------------------------------------------------------------
@@ -379,8 +449,12 @@ class TestPostExportRateLimit:
             assert r_ok.status_code == 202, r_ok.text
 
         r = client.post("/api/v1/me/export")
-        assert r.status_code == 429, r.text
-        assert r.json()["detail"]["error"] == "rate_limited"
+        _assert_problem(
+            r,
+            status_code=429,
+            error="rate_limited",
+            path="/api/v1/me/export",
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -466,14 +540,22 @@ class TestGetExport:
         )
         client.cookies.set(SESSION_COOKIE_NAME, cookie_value)
         r = client.get(f"/api/v1/me/export/{other_export_id}")
-        assert r.status_code == 404, r.text
-        assert r.json()["detail"]["error"] == "export_not_found"
+        _assert_problem(
+            r,
+            status_code=404,
+            error="export_not_found",
+            path=f"/api/v1/me/export/{other_export_id}",
+        )
 
     def test_get_without_session_is_401(self, client: TestClient) -> None:
         client.cookies.clear()
         r = client.get("/api/v1/me/export/anything")
-        assert r.status_code == 401, r.text
-        assert r.json()["detail"]["error"] == "session_required"
+        _assert_problem(
+            r,
+            status_code=401,
+            error="session_required",
+            path="/api/v1/me/export/anything",
+        )
 
 
 # ---------------------------------------------------------------------------

@@ -33,7 +33,7 @@ from dataclasses import asdict
 from datetime import datetime, timedelta
 from typing import Annotated
 
-from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Cookie, Depends, Request, status
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -45,6 +45,7 @@ from app.adapters.mail.ports import Mailer
 from app.adapters.storage.ports import Storage
 from app.api.deps import db_session, get_storage
 from app.api.v1._problem_json import IDENTITY_PROBLEM_RESPONSES
+from app.api.v1.auth.errors import auth_conflict, auth_not_found, auth_rate_limited
 from app.api.v1.auth.me_tokens import _resolve_session_user
 from app.domain.messaging.notifications import NotificationKind, NotificationService
 from app.domain.privacy import (
@@ -193,10 +194,7 @@ def _consume_export_budget(
         window=_EXPORT_PER_USER_WINDOW,
         now=now,
     ):
-        raise HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail={"error": "rate_limited"},
-        )
+        raise auth_rate_limited("rate_limited")
 
 
 def build_me_export_router(
@@ -268,10 +266,7 @@ def build_me_export_router(
             try:
                 _select_workspace_context(session, user_id=user_id)
             except LookupError as exc:
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail={"error": "no_workspace_membership"},
-                ) from exc
+                raise auth_conflict("no_workspace_membership") from exc
         notifier = _build_export_notifier(session, mailer=mailer) if mailer else None
         # Compute the poll-URL base from the inbound request URL so a
         # non-default mount prefix (factory tests, future reverse-proxy
@@ -326,10 +321,7 @@ def build_me_export_router(
             export_id=export_id,
         )
         if result is None:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail={"error": "export_not_found"},
-            )
+            raise auth_not_found("export_not_found")
         return PrivacyExportResponse(**asdict(result))
 
     return router
