@@ -35,6 +35,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from httpx import Response
 from pydantic import SecretStr
 from sqlalchemy import Engine, select
 from sqlalchemy.orm import Session, sessionmaker
@@ -48,6 +49,7 @@ from app.adapters.db.identity.models import (
     canonicalise_email,
 )
 from app.api.deps import db_session as db_session_dep
+from app.api.errors import CONTENT_TYPE_PROBLEM_JSON, add_exception_handlers
 from app.api.v1.auth import invite as invite_module
 from app.auth import magic_link
 from app.auth._throttle import Throttle
@@ -124,6 +126,7 @@ def client(
         invite_module.build_invites_router(throttle=throttle, settings=settings),
         prefix="/api/v1",
     )
+    add_exception_handlers(app)
 
     def _session() -> Iterator[Session]:
         s = session_factory()
@@ -159,6 +162,21 @@ def client(
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+def _assert_problem_error(
+    response: Response,
+    *,
+    status_code: int,
+    symbol: str,
+) -> None:
+    assert response.status_code == status_code, response.text
+    assert response.headers["content-type"].startswith(CONTENT_TYPE_PROBLEM_JSON)
+    body = response.json()
+    assert body["status"] == status_code
+    assert body["error"] == symbol
+    assert body["instance"] == response.request.url.path
+    assert "detail" not in body
 
 
 def _seed_workspace_with_owner(
@@ -460,11 +478,7 @@ class TestIntrospectErrorsCollapseTo404:
 
     def test_bad_token_returns_404(self, client: TestClient) -> None:
         resp = client.get("/api/v1/invites/garbage.not.a.valid.token")
-        assert resp.status_code == 404
-        # The 404 envelope is wrapped by FastAPI's default exception
-        # handler when no problem+json seam is installed; the body still
-        # carries our ``invite_not_found`` symbol.
-        assert "invite_not_found" in resp.text
+        _assert_problem_error(resp, status_code=404, symbol="invite_not_found")
 
     def test_expired_token_returns_404(
         self,
@@ -487,8 +501,7 @@ class TestIntrospectErrorsCollapseTo404:
         _expire_token(session_factory, token=token)
 
         resp = client.get(f"/api/v1/invites/{token}")
-        assert resp.status_code == 404
-        assert "invite_not_found" in resp.text
+        _assert_problem_error(resp, status_code=404, symbol="invite_not_found")
 
     def test_consumed_token_returns_404(
         self,
@@ -511,8 +524,7 @@ class TestIntrospectErrorsCollapseTo404:
         _consume_token_directly(session_factory, token=token)
 
         resp = client.get(f"/api/v1/invites/{token}")
-        assert resp.status_code == 404
-        assert "invite_not_found" in resp.text
+        _assert_problem_error(resp, status_code=404, symbol="invite_not_found")
 
 
 # ---------------------------------------------------------------------------
@@ -570,10 +582,8 @@ class TestThrottleSharedWithAccept:
         peek = client.get(f"/api/v1/invites/{token}")
         accept = client.post(f"/api/v1/invites/{token}/accept")
 
-        assert peek.status_code == 429, peek.text
-        assert "consume_locked_out" in peek.text
-        assert accept.status_code == 429, accept.text
-        assert "consume_locked_out" in accept.text
+        _assert_problem_error(peek, status_code=429, symbol="consume_locked_out")
+        _assert_problem_error(accept, status_code=429, symbol="consume_locked_out")
 
 
 # ---------------------------------------------------------------------------
